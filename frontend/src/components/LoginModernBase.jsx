@@ -1,9 +1,12 @@
+
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import './LoginModernBase.css';
-
 import PasswordField from './PasswordField';
 import { persistAuthSession } from '../utils/authSession';
+
+// استفاده از متغیر محیطی VITE_API_BASE
+const API_BASE = import.meta.env.VITE_API_BASE || '';
 
 const UserIcon = () => (
   <svg className="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" focusable="false">
@@ -126,7 +129,7 @@ export default function LoginModernBase({
   };
 
   const submitCredentials = async () => {
-    const res = await fetch('/api/auth/login', {
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
@@ -157,7 +160,7 @@ export default function LoginModernBase({
       return;
     }
 
-    const res = await fetch('/api/auth/login/2fa/verify', {
+    const res = await fetch(`${API_BASE}/api/auth/login/2fa/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ challengeToken, code: verifyCode })
@@ -178,7 +181,7 @@ export default function LoginModernBase({
       return;
     }
 
-    const res = await fetch('/api/auth/forgot-password', {
+    const res = await fetch(`${API_BASE}/api/auth/forgot-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email })
@@ -199,7 +202,7 @@ export default function LoginModernBase({
     clearMessage();
 
     try {
-      const res = await fetch('/api/auth/login/2fa/resend', {
+      const res = await fetch(`${API_BASE}/api/auth/login/2fa/resend`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ challengeToken })
