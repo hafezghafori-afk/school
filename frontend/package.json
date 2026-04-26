@@ -1,0 +1,90 @@
+{
+    "name": "frontend",
+    "version": "0.1.0",
+    "private": true,
+    "dependencies": {
+        "@testing-library/dom": "^10.4.1",
+        "@testing-library/jest-dom": "^6.9.1",
+        "@testing-library/react": "^16.3.2",
+        "@testing-library/user-event": "^13.5.0",
+        "jspdf": "^4.1.0",
+        "lucide-react": "^1.7.0",
+        "react": "^19.2.4",
+        "react-dom": "^19.2.4",
+        "react-router-dom": "^7.13.0",
+        "socket.io-client": "^4.7.5",
+        "web-vitals": "^2.1.4"
+    },
+    "scripts": {
+        "start": "vite",
+        "dev": "vite",
+        "build": "vite build",
+        "preview": "vite preview",
+        "lint": "eslint \"src/**/*.{js,jsx}\" \"scripts/**/*.{js,mjs}\"",
+        "lint:fix": "npm run lint -- --fix",
+        "check:routes": "node ./scripts/smokeRoutes.mjs",
+        "test:smoke": "npm run build && npm run check:routes",
+        "test:e2e:smoke": "playwright test --config=playwright.config.mjs --project=chromium --grep \"critical routes smoke\"",
+        "test:e2e:responsive": "playwright test --config=playwright.config.mjs --project=chromium --grep \"responsive layout\"",
+        "test:e2e:login": "playwright test --config=playwright.config.mjs --project=chromium --grep \"login password visibility\"",
+        "test:e2e:login-a11y": "playwright test --config=playwright.config.mjs --project=chromium --grep \"login accessibility\"",
+        "test:e2e:schedule": "playwright test --config=playwright.config.mjs --project=chromium --grep \"schedule workflow\"",
+        "test:e2e:attendance": "playwright test --config=playwright.config.mjs --project=chromium --grep \"attendance workflow\"",
+        "test:e2e:profile": "playwright test --config=playwright.config.mjs --project=chromium --grep \"profile activity toggle workflow\"",
+        "test:e2e:profile-executive": "playwright test --config=playwright.config.mjs --project=chromium --grep \"profile executive desk workflow\"",
+        "test:e2e:student-report-toggle": "playwright test --config=playwright.config.mjs --project=chromium --grep \"student report activity timeline toggles workflow\"",
+        "test:e2e:homework": "playwright test --config=playwright.config.mjs --project=chromium --grep \"homework workflow\"",
+        "test:e2e:grades": "playwright test --config=playwright.config.mjs --project=chromium --grep \"grade workflow\"",
+        "test:e2e:chat": "playwright test --config=playwright.config.mjs --project=chromium --grep \"chat workflow\"",
+        "test:e2e:finance": "playwright test --config=playwright.config.mjs --project=chromium --workers=1 --grep \"finance workflow\"",
+        "test:e2e:admin": "playwright test --config=playwright.config.mjs --project=chromium --grep \"admin workflow\"",
+        "test:e2e:admin-dashboard-cards": "playwright test --config=playwright.config.mjs --project=chromium --grep \"admin dashboard cards data wiring\"",
+        "test:e2e:admin-alerts": "playwright test --config=playwright.config.mjs --project=chromium --grep \"admin alerts enhancements\"",
+        "test:e2e:admin-today-schedule": "playwright test --config=playwright.config.mjs --project=chromium --grep \"admin today schedule widget\"",
+        "test:e2e:access-request": "playwright test --config=playwright.config.mjs --project=chromium --grep \"access request workflow\"",
+        "test:e2e:home": "playwright test --config=playwright.config.mjs --project=chromium --grep \"home workflow\"",
+        "perf:lighthouse": "node ./scripts/lighthouseBaseline.mjs",
+        "release:verify": "npm run lint && npm run test:smoke && npm run test:e2e:smoke && npm run test:e2e:responsive && npm run test:e2e:access-request && npm run perf:lighthouse",
+        "dev:lan": "vite --host 0.0.0.0 --port 3000",
+        "preview:lan": "vite preview --host 0.0.0.0 --port 4173",
+        "test:e2e:promotions": "playwright test --config=playwright.config.mjs --project=chromium --grep \"promotion workflow\"",
+        "test:e2e:result-tables": "playwright test --config=playwright.config.mjs --project=chromium --grep \"result table workflow\"",
+        "test:e2e:reports": "playwright test --config=playwright.config.mjs --project=chromium --grep \"report workflow\"",
+        "test:e2e:government-finance": "playwright test --config=playwright.config.mjs --project=chromium --workers=1 --grep \"government finance workflow\"",
+        "test:e2e:student-finance": "playwright test --config=playwright.config.mjs --project=chromium --grep \"student finance canonical workflow\"",
+        "test:e2e:education-core": "playwright test --config=playwright.config.mjs --project=chromium --grep \"education core workflow\"",
+        "test:e2e:course-details": "playwright test --config=playwright.config.mjs --project=chromium --grep \"course details workflow\"",
+        "test:e2e:content-canonical": "playwright test --config=playwright.config.mjs --project=chromium --grep \"content canonical workflow\"",
+        "test:e2e:parent": "playwright test --config=playwright.config.mjs --project=chromium --grep \"parent dashboard workflow\"",
+        "test:e2e:exams-dashboard": "playwright test --config=playwright.config.mjs --project=chromium --grep \"exams dashboard workflow\""
+    },
+    "eslintConfig": {
+        "extends": [
+            "react-app",
+            "react-app/jest"
+        ]
+    },
+    "browserslist": {
+        "production": [
+            ">0.2%",
+            "not dead",
+            "not op_mini all"
+        ],
+        "development": [
+            "last 1 chrome version",
+            "last 1 firefox version",
+            "last 1 safari version"
+        ]
+    },
+    "devDependencies": {
+        "@playwright/test": "^1.54.2",
+        "@vitejs/plugin-react": "^4.3.1",
+        "autoprefixer": "^10.4.24",
+        "eslint": "^8.57.1",
+        "eslint-plugin-react-hooks": "^5.2.0",
+        "lighthouse": "^13.0.3",
+        "postcss": "^8.5.6",
+        "tailwindcss": "^4.1.18",
+        "vite": "^5.4.8"
+    }
+}

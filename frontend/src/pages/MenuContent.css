@@ -1,0 +1,43 @@
+.menu-page {
+  min-height: 60vh;
+  padding: 48px 18px 80px;
+  background: var(--page-bg, #f7f6f2);
+}
+
+.menu-page-hero {
+  max-width: 980px;
+  margin: 0 auto 24px;
+  text-align: center;
+}
+
+.menu-page-hero h1 {
+  font-size: clamp(28px, 3vw, 40px);
+  margin-bottom: 10px;
+}
+
+.menu-page-hero p {
+  color: var(--muted-text, #6b6b6b);
+}
+
+.menu-page-card {
+  max-width: 980px;
+  margin: 0 auto;
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 26px;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.08);
+  line-height: 1.9;
+}
+
+.menu-page-card p {
+  margin: 0 0 14px;
+}
+
+@media (max-width: 768px) {
+  .menu-page {
+    padding: 36px 12px 64px;
+  }
+  .menu-page-card {
+    padding: 20px;
+  }
+}

@@ -1,0 +1,222 @@
+{
+  "mode": "preview",
+  "session": {
+    "id": "69b3e6cbf71d7becd91a8fff",
+    "title": "سالانه - صنف دهم",
+    "code": "ANNUAL-1406-1406-T1-ب",
+    "status": "draft",
+    "heldAt": null,
+    "publishedAt": null,
+    "note": "",
+    "examType": {
+      "id": "69b30b16b82ac5d1ada03b97",
+      "title": "سالانه",
+      "code": "ANNUAL",
+      "category": "standard",
+      "evaluationMode": "score",
+      "defaultTotalMark": 100,
+      "defaultPassMark": 50,
+      "defaultConditionalMark": 40,
+      "isRankingEnabled": true,
+      "isActive": true
+    },
+    "academicYear": {
+      "id": "69b2e1c22bbab656be066230",
+      "code": "1406",
+      "title": "1406",
+      "label": "1406",
+      "status": "active",
+      "isActive": true,
+      "startDate": "",
+      "endDate": ""
+    },
+    "assessmentPeriod": {
+      "id": "69b30b17b82ac5d1ada03bf4",
+      "title": "1406 - دوره اول",
+      "code": "1406-T1",
+      "termType": "assessment_period",
+      "sequence": 1,
+      "isActive": true,
+      "startDate": "",
+      "endDate": "",
+      "academicYear": {
+        "id": "69b2e1c22bbab656be066230",
+        "code": "1406",
+        "title": "1406",
+        "label": "1406",
+        "status": "active",
+        "isActive": true,
+        "startDate": "",
+        "endDate": ""
+      }
+    },
+    "schoolClass": {
+      "id": "69b2e1c22bbab656be066248",
+      "title": "صنف دهم",
+      "code": "",
+      "gradeLevel": "ب",
+      "section": "",
+      "shift": "",
+      "room": "",
+      "status": "active",
+      "academicYear": {
+        "id": "69b2e1c22bbab656be066230",
+        "code": "1406",
+        "title": "1406",
+        "label": "1406",
+        "status": "active",
+        "isActive": true,
+        "startDate": "",
+        "endDate": ""
+      }
+    },
+    "subject": {
+      "id": "69b2e52dd0fc3e6b68e6e528",
+      "name": "ریاضی",
+      "code": "",
+      "grade": "ب",
+      "isActive": true
+    },
+    "teacherAssignment": {
+      "id": "69b2e52dd0fc3e6b68e6e52b",
+      "assignmentType": "subject",
+      "status": "active",
+      "isPrimary": false,
+      "startedAt": "2026-03-12T16:09:17.657Z",
+      "academicYear": {
+        "id": "69b2e1c22bbab656be066230",
+        "code": "1406",
+        "title": "1406",
+        "label": "1406",
+        "status": "active",
+        "isActive": true,
+        "startDate": "",
+        "endDate": ""
+      },
+      "assessmentPeriod": null,
+      "schoolClass": {
+        "id": "69b2e1c22bbab656be066248",
+        "title": "صنف دهم",
+        "code": "",
+        "gradeLevel": "ب",
+        "section": "",
+        "shift": "",
+        "room": "",
+        "status": "active",
+        "academicYear": {
+          "id": "69b2e1c22bbab656be066230",
+          "code": "1406",
+          "title": "1406",
+          "label": "1406",
+          "status": "active",
+          "isActive": true,
+          "startDate": "",
+          "endDate": ""
+        }
+      },
+      "subject": {
+        "id": "69b2e52dd0fc3e6b68e6e528",
+        "name": "ریاضی",
+        "code": "",
+        "grade": "ب",
+        "isActive": true
+      },
+      "teacher": {
+        "id": "69851300666689e06946763d",
+        "name": "marya",
+        "email": "maryaasrari1@gmail.com"
+      }
+    },
+    "defaultMark": {
+      "id": "69b3e6cbf71d7becd91a9001",
+      "totalMark": 100,
+      "passMark": 50,
+      "conditionalMark": 40,
+      "weight": 1,
+      "status": "active",
+      "note": ""
+    },
+    "rankingRule": {
+      "id": "69b30b16b82ac5d1ada03be3",
+      "name": "Default Academic Ranking",
+      "code": "DEFAULT-ACADEMIC",
+      "scope": "global",
+      "passMark": 50,
+      "conditionalMark": 40,
+      "distinctionMark": 90,
+      "isDefault": true,
+      "isActive": true,
+      "groupBoundaries": [
+        {
+          "label": "A",
+          "minPercentage": 90
+        },
+        {
+          "label": "B",
+          "minPercentage": 75
+        },
+        {
+          "label": "C",
+          "minPercentage": 60
+        },
+        {
+          "label": "D",
+          "minPercentage": 50
+        },
+        {
+          "label": "E",
+          "minPercentage": 40
+        },
+        {
+          "label": "F",
+          "minPercentage": 0
+        }
+      ]
+    }
+  },
+  "summary": {
+    "total": 3,
+    "recorded": 0,
+    "pending": 3,
+    "absent": 0,
+    "excused": 0
+  },
+  "entries": [
+    {
+      "studentMembershipId": "69b04ad1548747c6049c1ac7",
+      "studentId": "69b2e232960ea4bffbf92b37",
+      "studentUserId": "6984d758b92cc0cc145d122d",
+      "studentName": "hayat",
+      "studentEmail": "hayat@hayat.com",
+      "currentMarkStatus": "pending",
+      "currentObtainedMark": 0,
+      "totalMark": 100,
+      "currentResultStatus": "pending",
+      "note": ""
+    },
+    {
+      "studentMembershipId": "69b04ad1548747c6049c1acc",
+      "studentId": "69b2e232960ea4bffbf92b31",
+      "studentUserId": "69839cbaee541f5ee1b799f6",
+      "studentName": "احمدی",
+      "studentEmail": "ahmadi@ahmadi.com",
+      "currentMarkStatus": "pending",
+      "currentObtainedMark": 0,
+      "totalMark": 100,
+      "currentResultStatus": "pending",
+      "note": ""
+    },
+    {
+      "studentMembershipId": "69b27bdbf69c6de81f7a948e",
+      "studentId": "69b2e232960ea4bffbf92b2a",
+      "studentUserId": "69821e2a076a88764f742d51",
+      "studentName": "احمد",
+      "studentEmail": "gull@gmail.com",
+      "currentMarkStatus": "pending",
+      "currentObtainedMark": 0,
+      "totalMark": 100,
+      "currentResultStatus": "pending",
+      "note": ""
+    }
+  ]
+}

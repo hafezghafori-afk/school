@@ -1,0 +1,25 @@
+.notfound-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 40px 16px;
+  color: #f6f7fb;
+}
+
+.notfound-card {
+  width: min(520px, 92vw);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  padding: 28px 26px;
+  text-align: center;
+  box-shadow: 0 20px 40px rgba(3, 8, 20, 0.35);
+  backdrop-filter: blur(12px);
+}
+
+.notfound-link {
+  display: inline-block;
+  margin-top: 12px;
+  color: #7cc4ff;
+  text-decoration: none;
+}

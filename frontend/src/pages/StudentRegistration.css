@@ -1,0 +1,161 @@
+.student-registration-page {
+  --sr-ink: #102033;
+  --sr-muted: #64748b;
+  --sr-primary: #0f766e;
+  --sr-primary-strong: #115e59;
+  --sr-border: rgba(15, 118, 110, 0.18);
+  --sr-glass: rgba(255, 255, 255, 0.78);
+  direction: rtl;
+  max-width: 1240px;
+  min-height: 100vh;
+  position: relative;
+  isolation: isolate;
+  font-family: "Vazirmatn", "B Zar", "B Mitra", "Noto Naskh Arabic", Tahoma, sans-serif;
+  color: var(--sr-ink);
+}
+
+.student-registration-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 16% 18%, rgba(20, 184, 166, 0.18), transparent 30%),
+    radial-gradient(circle at 84% 10%, rgba(245, 158, 11, 0.16), transparent 28%),
+    linear-gradient(135deg, #eefcf8 0%, #f8fafc 45%, #edf5ff 100%);
+}
+
+.student-registration-hero {
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 30px;
+  padding: 28px;
+  overflow: hidden;
+  position: relative;
+  background:
+    linear-gradient(135deg, rgba(15, 118, 110, 0.96), rgba(22, 78, 99, 0.92)),
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.22), transparent 36%);
+  box-shadow: 0 26px 70px rgba(15, 23, 42, 0.18);
+}
+
+.student-registration-hero::after {
+  content: "";
+  position: absolute;
+  width: 180px;
+  height: 180px;
+  left: -42px;
+  bottom: -62px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.student-registration-hero h1,
+.student-registration-hero p {
+  position: relative;
+  z-index: 1;
+}
+
+.student-registration-hero h1 {
+  color: #ffffff !important;
+  letter-spacing: -0.02em;
+}
+
+.student-registration-hero p {
+  color: rgba(255, 255, 255, 0.78) !important;
+  max-width: 720px;
+  line-height: 1.9;
+}
+
+.student-registration-page button,
+.student-registration-page a {
+  font-family: inherit;
+}
+
+.student-registration-page button {
+  border-radius: 14px;
+}
+
+.student-registration-hero button {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(14px);
+}
+
+.student-registration-success,
+.student-registration-card {
+  border-radius: 24px !important;
+  border: 1px solid var(--sr-border) !important;
+  background: var(--sr-glass) !important;
+  box-shadow: 0 20px 55px rgba(15, 23, 42, 0.1);
+  backdrop-filter: blur(18px);
+}
+
+.student-registration-card h3,
+.student-registration-success h3 {
+  color: var(--sr-ink);
+}
+
+.student-registration-card svg,
+.student-registration-success svg {
+  color: var(--sr-primary);
+}
+
+.student-registration-page label {
+  color: #334155;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.student-registration-page input,
+.student-registration-page textarea,
+.student-registration-page [role="combobox"] {
+  border: 1px solid rgba(15, 118, 110, 0.22) !important;
+  border-radius: 14px !important;
+  background: rgba(255, 255, 255, 0.86) !important;
+  color: var(--sr-ink) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.student-registration-page input:focus,
+.student-registration-page textarea:focus,
+.student-registration-page [role="combobox"]:focus {
+  border-color: rgba(15, 118, 110, 0.55) !important;
+  box-shadow: 0 0 0 4px rgba(20, 184, 166, 0.16) !important;
+}
+
+.student-registration-page .text-red-500 {
+  color: #dc2626 !important;
+  font-weight: 700;
+}
+
+.student-registration-actions {
+  position: sticky;
+  bottom: 18px;
+  z-index: 10;
+  padding: 14px;
+  border: 1px solid rgba(15, 118, 110, 0.16);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.16);
+  backdrop-filter: blur(18px);
+}
+
+.student-registration-actions button:first-child {
+  background: linear-gradient(135deg, var(--sr-primary), var(--sr-primary-strong));
+  border-color: transparent;
+}
+
+@media (max-width: 760px) {
+  .student-registration-page {
+    padding: 18px !important;
+  }
+
+  .student-registration-hero {
+    border-radius: 22px;
+    padding: 22px;
+  }
+
+  .student-registration-actions {
+    position: static;
+  }
+}

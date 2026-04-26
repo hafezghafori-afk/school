@@ -1,0 +1,124 @@
+.payment-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 40px 16px;
+  color: #f6f7fb;
+}
+
+.payment-card {
+  width: min(560px, 94vw);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  padding: 28px 26px;
+  box-shadow: 0 20px 40px rgba(3, 8, 20, 0.35);
+  backdrop-filter: blur(12px);
+}
+
+.payment-card h2 {
+  margin: 0 0 6px 0;
+  font-size: 26px;
+}
+
+.payment-subtitle {
+  margin: 0 0 18px 0;
+  color: rgba(246, 247, 251, 0.75);
+}
+
+.payment-box {
+  background: rgba(12, 18, 30, 0.7);
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border-radius: 14px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.payment-box span {
+  display: block;
+  color: rgba(246, 247, 251, 0.7);
+  font-size: 13px;
+}
+
+.payment-box strong {
+  font-size: 16px;
+}
+
+.payment-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.payment-actions button {
+  width: 100%;
+}
+
+.payment-actions .secondary {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.payment-sim {
+  margin-top: 18px;
+  background: rgba(12, 18, 30, 0.7);
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.payment-sim h3 {
+  margin: 0 0 10px 0;
+  font-size: 16px;
+}
+
+.payment-sim input {
+  width: 100%;
+  background: rgba(12, 18, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+.receipt-form label {
+  display: block;
+  margin: 10px 0 6px;
+  font-size: 14px;
+  color: rgba(246, 247, 251, 0.85);
+}
+
+.receipt-form input,
+.receipt-form select,
+.receipt-form textarea {
+  width: 100%;
+  background: rgba(12, 18, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 12px 12px;
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+
+.receipt-form textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.payment-message {
+  margin-top: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.receipt-hint {
+  color: rgba(246, 247, 251, 0.7);
+  font-size: 12px;
+  margin-bottom: 8px;
+}

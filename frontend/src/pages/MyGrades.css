@@ -1,0 +1,186 @@
+.mygrades-page {
+  padding: 32px 18px;
+  display: flex;
+  justify-content: center;
+}
+
+.mygrades-page :is(a, button, input, select, textarea) {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.mygrades-page :is(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.25);
+}
+
+.mygrades-card {
+  width: min(1120px, 100%);
+  background: #fff;
+  border-radius: 18px;
+  padding: 24px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.mygrades-card h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+
+.mygrades-card p {
+  margin: 0 0 18px;
+  color: #475569;
+}
+
+.mygrades-empty {
+  padding: 18px;
+  background: #f8fafc;
+  border-radius: 12px;
+  color: #64748b;
+}
+
+.mygrades-list {
+  display: grid;
+  gap: 16px;
+}
+
+.mygrades-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+}
+
+.mygrades-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.mygrades-head strong {
+  display: block;
+  font-size: 17px;
+}
+
+.mygrades-head .meta {
+  color: #64748b;
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.mygrades-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mygrades-badges .badge {
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mygrades-badges .badge.accent {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.mygrades-badges .badge.dark {
+  background: #0f172a;
+  color: #fff;
+}
+
+.mygrades-badges .badge.warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.mygrades-breakdown {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mygrades-breakdown > div {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+  display: grid;
+  gap: 5px;
+}
+
+.mygrades-breakdown span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.mygrades-breakdown strong {
+  color: #0f172a;
+}
+
+.mygrades-total-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: #334155;
+  font-size: 13px;
+}
+
+.mygrades-item .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.mygrades-item .download,
+.mygrades-item .attachment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 10px;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mygrades-item .download {
+  background: #0f172a;
+  color: #fff;
+}
+
+.mygrades-item .attachment {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.mygrades-item .download:hover,
+.mygrades-item .attachment:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.18);
+}
+
+@media (max-width: 900px) {
+  .mygrades-breakdown {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .mygrades-breakdown {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mygrades-page :is(a, button, input, select, textarea) {
+    transition: none;
+  }
+}

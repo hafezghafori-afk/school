@@ -1,0 +1,75 @@
+.ireport-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 40px 16px;
+  color: #f6f7fb;
+}
+
+.ireport-card {
+  width: min(720px, 94vw);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  padding: 28px 26px;
+  box-shadow: 0 20px 40px rgba(3, 8, 20, 0.35);
+  backdrop-filter: blur(12px);
+}
+
+.ireport-card input {
+  width: 100%;
+  background: rgba(12, 18, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 12px 12px;
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+
+.ireport-controls {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.ireport-controls select {
+  width: 100%;
+  background: rgba(12, 18, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 12px 12px;
+  font-size: 15px;
+}
+
+.ireport-controls button {
+  width: fit-content;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: none;
+  background: #0ea5e9;
+  color: #fff;
+}
+
+.ireport-list {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.ireport-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.1);
+  color: rgba(246, 247, 251, 0.8);
+}
+
+.ireport-message {
+  margin-top: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 10px;
+  border-radius: 10px;
+}

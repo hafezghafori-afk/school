@@ -1,0 +1,143 @@
+.myhomework-page {
+  padding: 32px 18px;
+  display: flex;
+  justify-content: center;
+}
+
+.myhomework-page :is(button, select, textarea, input, a) {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.myhomework-page :is(button, select, textarea, input, a):focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.25);
+}
+
+.myhomework-card {
+  width: min(1100px, 100%);
+  background: #fff;
+  border-radius: 18px;
+  padding: 24px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.myhomework-card h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+
+.myhomework-card p {
+  margin: 0 0 18px;
+  color: #475569;
+}
+
+.myhomework-controls {
+  margin-bottom: 16px;
+}
+
+.myhomework-controls select {
+  min-width: 240px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  color: #0f172a;
+  background: #fff;
+}
+
+.myhomework-controls select:hover {
+  border-color: #bfdbfe;
+}
+
+.myhomework-controls select:focus-visible {
+  border-color: #93c5fd;
+}
+
+.myhomework-empty {
+  padding: 16px;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.myhomework-list {
+  display: grid;
+  gap: 16px;
+}
+
+.myhomework-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.myhomework-item strong {
+  display: block;
+  font-size: 16px;
+}
+
+.myhomework-item .meta {
+  display: inline-block;
+  margin-left: 10px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.myhomework-submit {
+  display: grid;
+  gap: 8px;
+}
+
+.myhomework-submit textarea,
+.myhomework-submit input[type="file"] {
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  padding: 8px 12px;
+  font-family: inherit;
+}
+
+.myhomework-submit textarea {
+  color: #0f172a;
+  background: #fff;
+}
+
+.myhomework-submit textarea:focus-visible,
+.myhomework-submit input[type="file"]:focus-visible {
+  border-color: #93c5fd;
+}
+
+.myhomework-submit button {
+  width: fit-content;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: none;
+  background: #0f172a;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.myhomework-submit button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.18);
+}
+
+.myhomework-submit button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.submission-status {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: #334155;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .myhomework-page :is(button, select, textarea, input, a) {
+    transition: none;
+  }
+}

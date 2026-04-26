@@ -1,0 +1,15 @@
+module.exports = {
+  root: true,
+  env: {
+    node: true,
+    es2022: true
+  },
+  parserOptions: {
+    ecmaVersion: 'latest',
+    sourceType: 'script'
+  },
+  rules: {
+    'no-undef': 'error',
+    'no-redeclare': 'error'
+  }
+};

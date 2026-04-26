@@ -1,0 +1,566 @@
+const fs = require('fs');
+const path = require('path');
+const PDFDocument = require('pdfkit');
+
+const FONT_PATH = path.join(__dirname, '..', '..', 'Fonts', 'B Nazanin_p30download.com.ttf');
+// This font can be enabled again once we validate a PDFKit-safe Persian font.
+const HAS_FINANCE_FONT = String(process.env.FINANCE_PDF_FONT_ENABLED || 'false').toLowerCase() === 'true'
+  && fs.existsSync(FONT_PATH);
+
+const faNumber = new Intl.NumberFormat('fa-AF-u-ca-persian');
+const faDateTime = new Intl.DateTimeFormat('fa-AF-u-ca-persian', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit'
+});
+
+function formatNumber(value) {
+  return faNumber.format(Number(value || 0));
+}
+
+function formatMoney(value, currency = 'AFN') {
+  return `${formatNumber(value)} ${currency || 'AFN'}`;
+}
+
+function formatDateTime(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  try {
+    return faDateTime.format(date);
+  } catch {
+    return date.toISOString();
+  }
+}
+
+function sanitizeLine(value = '') {
+  return String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
+}
+
+function withPdfDocument(meta = {}, build = () => {}) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: 'A4',
+      margin: 42,
+      info: {
+        Title: meta.title || 'Finance PDF',
+        Subject: meta.subject || 'Finance export',
+        Author: 'School Project',
+        Creator: 'School Project Finance Core',
+        Keywords: 'finance, statement, month-close, pdf'
+      }
+    });
+
+    if (HAS_FINANCE_FONT) {
+      doc.registerFont('finance-base', FONT_PATH);
+      doc.font('finance-base');
+    }
+
+    const chunks = [];
+    doc.on('data', (chunk) => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    build(doc);
+    doc.end();
+  });
+}
+
+function setBodyFont(doc, size = 11) {
+  if (HAS_FINANCE_FONT) {
+    doc.font('finance-base');
+  } else {
+    doc.font('Helvetica');
+  }
+  doc.fontSize(size);
+}
+
+function ensureSpace(doc, minHeight = 80) {
+  if (doc.y + minHeight <= doc.page.height - doc.page.margins.bottom) return;
+  doc.addPage();
+  setBodyFont(doc, 11);
+}
+
+function drawHeader(doc, { title = '', subtitle = '', documentNo = '', statusLabel = '' } = {}) {
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const top = doc.y;
+
+  doc.save();
+  doc.roundedRect(doc.page.margins.left, top, pageWidth, 74, 12).fill('#0f172a');
+  doc.restore();
+
+  doc.fillColor('#ffffff');
+  setBodyFont(doc, 18);
+  doc.text(sanitizeLine(title), doc.page.margins.left + 14, top + 12, {
+    width: pageWidth - 28,
+    align: 'right'
+  });
+  setBodyFont(doc, 10);
+  doc.text(sanitizeLine(subtitle), doc.page.margins.left + 14, top + 38, {
+    width: pageWidth - 28,
+    align: 'right'
+  });
+  doc.text(`Doc No: ${sanitizeLine(documentNo || '-')}`, doc.page.margins.left + 14, top + 54, {
+    width: (pageWidth / 2) - 14,
+    align: 'left'
+  });
+  doc.text(`Status: ${sanitizeLine(statusLabel || '-')}`, doc.page.margins.left + (pageWidth / 2), top + 54, {
+    width: (pageWidth / 2) - 14,
+    align: 'right'
+  });
+  doc.fillColor('#0f172a');
+  doc.y = top + 90;
+}
+
+function drawMetaLines(doc, lines = []) {
+  setBodyFont(doc, 10);
+  lines.filter(Boolean).forEach((line) => {
+    ensureSpace(doc, 18);
+    doc.fillColor('#334155').text(sanitizeLine(line), {
+      align: 'right'
+    });
+  });
+  doc.moveDown(0.4);
+}
+
+function drawSectionTitle(doc, title = '') {
+  ensureSpace(doc, 28);
+  doc.moveDown(0.4);
+  doc.fillColor('#0f172a');
+  setBodyFont(doc, 13);
+  doc.text(sanitizeLine(title), { align: 'right', underline: true });
+  doc.moveDown(0.3);
+  setBodyFont(doc, 11);
+}
+
+function drawVerificationBlock(doc, {
+  generatedByName = '',
+  verificationCode = '',
+  verificationUrl = '',
+  verificationQrBuffer = null
+} = {}) {
+  const hasVerificationCode = Boolean(sanitizeLine(verificationCode));
+  const hasVerificationUrl = Boolean(sanitizeLine(verificationUrl));
+  const hasGeneratedBy = Boolean(sanitizeLine(generatedByName));
+  const hasQr = Buffer.isBuffer(verificationQrBuffer) && verificationQrBuffer.length > 0;
+
+  if (!hasVerificationCode && !hasVerificationUrl && !hasGeneratedBy && !hasQr) {
+    return;
+  }
+
+  ensureSpace(doc, hasQr ? 120 : 74);
+  const x = doc.page.margins.left;
+  const y = doc.y;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const boxHeight = hasQr ? 100 : 64;
+
+  doc.save();
+  doc.roundedRect(x, y, width, boxHeight, 12).fill('#eff6ff');
+  doc.restore();
+
+  doc.fillColor('#0f172a');
+  setBodyFont(doc, 12);
+  doc.text('Verification', x + 14, y + 10, {
+    width: width - 28,
+    align: 'right'
+  });
+
+  const contentWidth = hasQr ? width - 118 : width - 28;
+  const contentX = x + 14;
+  let textY = y + 30;
+  setBodyFont(doc, 9.5);
+  if (hasGeneratedBy) {
+    doc.text(`Generated By: ${sanitizeLine(generatedByName)}`, contentX, textY, {
+      width: contentWidth,
+      align: 'right'
+    });
+    textY += 16;
+  }
+  if (hasVerificationCode) {
+    doc.text(`Verification Code: ${sanitizeLine(verificationCode)}`, contentX, textY, {
+      width: contentWidth,
+      align: 'right'
+    });
+    textY += 16;
+  }
+  if (hasVerificationUrl) {
+    doc.text(`Verify URL: ${sanitizeLine(verificationUrl)}`, contentX, textY, {
+      width: contentWidth,
+      align: 'right'
+    });
+  }
+
+  if (hasQr) {
+    try {
+      doc.image(verificationQrBuffer, x + width - 90, y + 16, {
+        fit: [68, 68],
+        align: 'center',
+        valign: 'center'
+      });
+    } catch {
+      // Ignore QR rendering failures so document generation remains resilient.
+    }
+  }
+
+  doc.y = y + boxHeight + 10;
+}
+
+function drawKeyValueList(doc, rows = []) {
+  rows.filter((row) => row && row.label).forEach((row) => {
+    ensureSpace(doc, 18);
+    doc.fillColor('#0f172a').text(`${sanitizeLine(row.label)}: ${sanitizeLine(row.value)}`, {
+      align: 'right'
+    });
+  });
+  doc.moveDown(0.3);
+}
+
+function drawItemList(doc, items = [], emptyText = 'No items registered.') {
+  const safeItems = Array.isArray(items) ? items.filter(Boolean) : [];
+  if (!safeItems.length) {
+    setBodyFont(doc, 10);
+    doc.fillColor('#64748b').text(sanitizeLine(emptyText), { align: 'right' });
+    doc.moveDown(0.3);
+    return;
+  }
+
+  safeItems.forEach((item) => {
+    ensureSpace(doc, 28);
+    setBodyFont(doc, 10.5);
+    doc.fillColor('#0f172a').text(`- ${sanitizeLine(item.title || item.label || item.name || '-')}`, {
+      align: 'right'
+    });
+    if (item.meta) {
+      setBodyFont(doc, 9.5);
+      doc.fillColor('#475569').text(sanitizeLine(item.meta), { align: 'right', indent: 12 });
+    }
+  });
+  doc.moveDown(0.3);
+}
+
+function buildStatementDocumentNo(prefix = 'SFP', id = '') {
+  const base = sanitizeLine(id).replace(/[^a-zA-Z0-9_-]+/g, '').slice(-8) || 'DOC';
+  const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  return `${prefix}-${base}-${datePart}`;
+}
+
+function buildMonthCloseDocumentNo(monthKey = '', id = '') {
+  const normalizedMonth = sanitizeLine(monthKey).replace(/[^0-9-]+/g, '') || 'month';
+  const tail = sanitizeLine(id).replace(/[^a-zA-Z0-9_-]+/g, '').slice(-6) || 'PACK';
+  return `MC-${normalizedMonth}-${tail.toUpperCase()}`;
+}
+
+async function buildStatementPackPdfBuffer({
+  title = 'Finance Statement Pack',
+  subtitle = 'Official finance statement export',
+  subjectName = 'Student',
+  classTitle = '-',
+  academicYearTitle = '-',
+  membershipId = '-',
+  generatedAt = null,
+  currency = 'AFN',
+  totals = {},
+  pack = null,
+  latestApprovedPayment = null,
+  latestPendingPayment = null,
+  orders = [],
+  payments = [],
+  reliefs = [],
+  documentNo = '',
+  generatedByName = '',
+  verificationCode = '',
+  verificationUrl = '',
+  verificationQrBuffer = null
+} = {}) {
+  return withPdfDocument({ title, subject: subtitle }, (doc) => {
+    drawHeader(doc, {
+      title,
+      subtitle,
+      documentNo: documentNo || buildStatementDocumentNo('SFP', membershipId),
+      statusLabel: totals.totalOutstanding > 0 ? 'Open balance' : 'Settled'
+    });
+
+    drawMetaLines(doc, [
+      `Subject: ${subjectName}`,
+      `Class: ${classTitle}`,
+      `Academic Year: ${academicYearTitle}`,
+      `Membership ID: ${membershipId}`,
+      `Generated At: ${formatDateTime(generatedAt)}`
+    ]);
+
+    drawVerificationBlock(doc, {
+      generatedByName,
+      verificationCode,
+      verificationUrl,
+      verificationQrBuffer
+    });
+
+    drawSectionTitle(doc, 'Summary');
+    drawKeyValueList(doc, [
+      { label: 'Total Orders', value: formatNumber(totals.totalOrders || 0) },
+      { label: 'Total Payments', value: formatNumber(totals.totalPayments || 0) },
+      { label: 'Total Due', value: formatMoney(totals.totalDue || 0, currency) },
+      { label: 'Total Paid', value: formatMoney(totals.totalPaid || 0, currency) },
+      { label: 'Outstanding', value: formatMoney(totals.totalOutstanding || 0, currency) },
+      { label: 'Active Reliefs', value: formatNumber(totals.totalReliefs || 0) },
+      { label: 'Fixed Relief Amount', value: formatMoney(totals.totalFixedReliefAmount || 0, currency) }
+    ]);
+
+    drawSectionTitle(doc, 'Action & Signals');
+    drawKeyValueList(doc, [
+      { label: 'Recommended Action', value: sanitizeLine(pack?.recommendedAction || 'No special action') },
+      { label: 'Signals', value: formatNumber(pack?.summary?.total || 0) },
+      { label: 'Critical Signals', value: formatNumber(pack?.summary?.critical || 0) }
+    ]);
+    drawItemList(
+      doc,
+      (Array.isArray(pack?.signals) ? pack.signals : []).slice(0, 8).map((item) => ({
+        title: item?.title || item?.anomalyType || 'Finance signal',
+        meta: [
+          item?.amountLabel || '',
+          item?.description || '',
+          formatDateTime(item?.dueDate || item?.endDate || item?.at)
+        ].filter(Boolean).join(' | ')
+      })),
+      'No active finance signals recorded.'
+    );
+
+    drawSectionTitle(doc, 'Latest Activity');
+    drawKeyValueList(doc, [
+      {
+        label: 'Latest Approved Payment',
+        value: latestApprovedPayment
+          ? `${formatMoney(latestApprovedPayment.amount || 0, currency)} | ${formatDateTime(latestApprovedPayment.paidAt)}`
+          : 'Not recorded'
+      },
+      {
+        label: 'Latest Pending Payment',
+        value: latestPendingPayment
+          ? `${formatMoney(latestPendingPayment.amount || 0, currency)} | ${sanitizeLine(latestPendingPayment.approvalStage || 'pending')}`
+          : 'Not recorded'
+      }
+    ]);
+
+    drawSectionTitle(doc, 'Open Orders');
+    drawItemList(
+      doc,
+      orders.slice(0, 10).map((item) => ({
+        title: item?.title || item?.orderNumber || 'Order',
+        meta: [
+          item?.orderType || '',
+          item?.status || '',
+          `Due ${formatDateTime(item?.dueDate)}`,
+          `Outstanding ${formatMoney(item?.outstandingAmount || 0, item?.currency || currency)}`
+        ].filter(Boolean).join(' | ')
+      })),
+      'No finance orders recorded.'
+    );
+
+    drawSectionTitle(doc, 'Payments');
+    drawItemList(
+      doc,
+      payments.slice(0, 10).map((item) => ({
+        title: item?.paymentNumber || 'Payment',
+        meta: [
+          item?.paymentMethod || '',
+          item?.status || '',
+          item?.approvalStage || '',
+          formatMoney(item?.amount || 0, item?.currency || currency),
+          formatDateTime(item?.paidAt)
+        ].filter(Boolean).join(' | ')
+      })),
+      'No payments recorded.'
+    );
+
+    drawSectionTitle(doc, 'Reliefs');
+    drawItemList(
+      doc,
+      reliefs.slice(0, 10).map((item) => ({
+        title: item?.reliefType || 'Relief',
+        meta: [
+          item?.coverageMode || '',
+          item?.coverageMode === 'percent'
+            ? `${formatNumber(item?.percentage || 0)}%`
+            : item?.coverageMode === 'full'
+              ? '100%'
+              : formatMoney(item?.amount || 0, currency),
+          item?.sponsorName || '',
+          `Ends ${formatDateTime(item?.endDate)}`
+        ].filter(Boolean).join(' | ')
+      })),
+      'No active relief registered.'
+    );
+  });
+}
+
+async function buildMonthClosePdfBuffer(item = {}, options = {}) {
+  const snapshot = item?.snapshot || {};
+  const totals = snapshot?.totals || {};
+  const readiness = snapshot?.readiness || {};
+  const anomalies = snapshot?.anomalies || {};
+  const cashflow = snapshot?.cashflow || {};
+  const classes = Array.isArray(snapshot?.classes) ? snapshot.classes : [];
+  const approvalTrail = Array.isArray(item?.approvalTrail) ? item.approvalTrail : [];
+  const history = Array.isArray(item?.history) ? item.history : [];
+  const documentNo = options?.documentNo || buildMonthCloseDocumentNo(item?.monthKey, item?._id || item?.id);
+
+  return withPdfDocument({
+    title: `Finance Month Close ${sanitizeLine(item?.monthKey || '')}`,
+    subject: 'Official management month-close package'
+  }, (doc) => {
+    drawHeader(doc, {
+      title: `Finance Month Close / ${sanitizeLine(item?.monthKey || 'Month')}`,
+      subtitle: 'Management snapshot, approvals, anomalies, and cashflow',
+      documentNo,
+      statusLabel: sanitizeLine(item?.status || 'draft')
+    });
+
+    drawMetaLines(doc, [
+      `Approval Stage: ${sanitizeLine(item?.approvalStage || 'draft')}`,
+      `Requested At: ${formatDateTime(item?.requestedAt)}`,
+      `Approved At: ${formatDateTime(item?.approvedAt)}`,
+      `Closed At: ${formatDateTime(item?.closedAt)}`,
+      `Window: ${formatDateTime(snapshot?.window?.startAt)} -> ${formatDateTime(snapshot?.window?.endAt)}`
+    ]);
+
+    drawVerificationBlock(doc, {
+      generatedByName: options?.generatedByName,
+      verificationCode: options?.verificationCode,
+      verificationUrl: options?.verificationUrl,
+      verificationQrBuffer: options?.verificationQrBuffer
+    });
+
+    drawSectionTitle(doc, 'Snapshot Totals');
+    drawKeyValueList(doc, [
+      { label: 'Orders Issued Count', value: formatNumber(totals.ordersIssuedCount || 0) },
+      { label: 'Orders Issued Amount', value: formatMoney(totals.ordersIssuedAmount || 0) },
+      { label: 'Approved Payment Count', value: formatNumber(totals.approvedPaymentCount || 0) },
+      { label: 'Approved Payment Amount', value: formatMoney(totals.approvedPaymentAmount || 0) },
+      { label: 'Pending Payment Count', value: formatNumber(totals.pendingPaymentCount || 0) },
+      { label: 'Pending Payment Amount', value: formatMoney(totals.pendingPaymentAmount || 0) },
+      { label: 'Standing Outstanding', value: formatMoney(totals.standingOutstandingAmount || 0) },
+      { label: 'Overdue Orders', value: formatNumber(totals.overdueOrders || 0) },
+      { label: 'Active Memberships', value: formatNumber(totals.activeMemberships || 0) },
+      { label: 'Active Reliefs', value: formatNumber(totals.activeReliefs || 0) }
+    ]);
+
+    drawSectionTitle(doc, 'Readiness');
+    drawKeyValueList(doc, [
+      { label: 'Ready To Approve', value: readiness?.readyToApprove === false ? 'No' : 'Yes' },
+      { label: 'Blocking Issues', value: formatNumber((readiness?.blockingIssues || []).length) },
+      { label: 'Warning Issues', value: formatNumber((readiness?.warningIssues || []).length) }
+    ]);
+    drawItemList(
+      doc,
+      (readiness?.blockingIssues || []).map((item) => ({
+        title: item?.label || item?.code || 'Blocking issue',
+        meta: [
+          item?.count != null ? `count=${formatNumber(item.count)}` : '',
+          item?.amount != null ? `amount=${formatMoney(item.amount || 0)}` : ''
+        ].filter(Boolean).join(' | ')
+      })),
+      'No blocking issues recorded.'
+    );
+    drawItemList(
+      doc,
+      (readiness?.warningIssues || []).map((item) => ({
+        title: item?.label || item?.code || 'Warning issue',
+        meta: [
+          item?.count != null ? `count=${formatNumber(item.count)}` : '',
+          item?.amount != null ? `amount=${formatMoney(item.amount || 0)}` : ''
+        ].filter(Boolean).join(' | ')
+      })),
+      'No warning issues recorded.'
+    );
+
+    drawSectionTitle(doc, 'Cashflow');
+    drawKeyValueList(doc, [
+      { label: 'Approved Total', value: formatMoney(cashflow.approvedTotal || 0) },
+      { label: 'Approved Count', value: formatNumber(cashflow.approvedCount || 0) },
+      { label: 'Pending Total', value: formatMoney(cashflow.pendingTotal || 0) },
+      { label: 'Pending Count', value: formatNumber(cashflow.pendingCount || 0) }
+    ]);
+    drawItemList(
+      doc,
+      (cashflow.items || []).slice(0, 15).map((entry) => ({
+        title: formatDateTime(entry?.date || entry?.day || entry?.paidAt),
+        meta: [
+          `approved=${formatMoney(entry?.approvedAmount || entry?.amount || 0)}`,
+          entry?.approvedCount != null ? `count=${formatNumber(entry.approvedCount)}` : ''
+        ].filter(Boolean).join(' | ')
+      })),
+      'No cashflow rows recorded for this month.'
+    );
+
+    drawSectionTitle(doc, 'Anomalies');
+    drawKeyValueList(doc, [
+      { label: 'Total Signals', value: formatNumber(anomalies?.summary?.total || 0) },
+      { label: 'Critical', value: formatNumber(anomalies?.summary?.critical || 0) },
+      { label: 'Action Required', value: formatNumber(anomalies?.summary?.actionRequired || 0) }
+    ]);
+    drawItemList(
+      doc,
+      (anomalies?.items || []).slice(0, 12).map((entry) => ({
+        title: entry?.title || entry?.anomalyType || 'Finance anomaly',
+        meta: [
+          entry?.severity || '',
+          entry?.amountLabel || '',
+          entry?.description || ''
+        ].filter(Boolean).join(' | ')
+      })),
+      'No anomaly items recorded.'
+    );
+
+    drawSectionTitle(doc, 'Class Snapshot');
+    drawItemList(
+      doc,
+      classes.slice(0, 12).map((row) => ({
+        title: row?.title || row?.classTitle || 'Class',
+        meta: [
+          `due=${formatMoney(row?.totalDue || 0)}`,
+          `paid=${formatMoney(row?.totalPaid || 0)}`,
+          `outstanding=${formatMoney(row?.totalOutstanding || 0)}`,
+          row?.activeReliefs != null ? `reliefs=${formatNumber(row.activeReliefs)}` : ''
+        ].filter(Boolean).join(' | ')
+      })),
+      'No class snapshot rows recorded.'
+    );
+
+    drawSectionTitle(doc, 'Approval Trail');
+    drawItemList(
+      doc,
+      approvalTrail.map((entry) => ({
+        title: `${sanitizeLine(entry?.level || 'review')} / ${sanitizeLine(entry?.action || '-')}`,
+        meta: [
+          entry?.by?.name || '',
+          formatDateTime(entry?.at),
+          entry?.note || entry?.reason || ''
+        ].filter(Boolean).join(' | ')
+      })),
+      'No approval trail recorded.'
+    );
+
+    drawSectionTitle(doc, 'History');
+    drawItemList(
+      doc,
+      history.map((entry) => ({
+        title: sanitizeLine(entry?.action || 'history'),
+        meta: [
+          entry?.by?.name || '',
+          formatDateTime(entry?.at),
+          entry?.note || ''
+        ].filter(Boolean).join(' | ')
+      })),
+      'No workflow history recorded.'
+    );
+  });
+}
+
+module.exports = {
+  buildStatementPackPdfBuffer,
+  buildMonthClosePdfBuffer,
+  buildStatementDocumentNo,
+  buildMonthCloseDocumentNo
+};

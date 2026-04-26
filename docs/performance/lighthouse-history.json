@@ -1,0 +1,258 @@
+[
+  {
+    "date": "2026-03-05T18:41:34.495Z",
+    "targetUrl": "http://127.0.0.1:4173/",
+    "mobile": {
+      "scores": {
+        "performance": 81,
+        "accessibility": 96,
+        "bestPractices": 96,
+        "seo": 100
+      },
+      "metrics": {
+        "firstContentfulPaint": {
+          "value": 3.56,
+          "display": "3.6 s"
+        },
+        "largestContentfulPaint": {
+          "value": 3.56,
+          "display": "3.6 s"
+        },
+        "totalBlockingTime": {
+          "value": 0,
+          "display": "0 ms"
+        },
+        "speedIndex": {
+          "value": 4.67,
+          "display": "4.7 s"
+        },
+        "cumulativeLayoutShift": {
+          "value": 0,
+          "display": "0"
+        }
+      }
+    },
+    "desktop": {
+      "scores": {
+        "performance": 73,
+        "accessibility": 95,
+        "bestPractices": 96,
+        "seo": 100
+      },
+      "metrics": {
+        "firstContentfulPaint": {
+          "value": 0.84,
+          "display": "0.8 s"
+        },
+        "largestContentfulPaint": {
+          "value": 0.84,
+          "display": "0.8 s"
+        },
+        "totalBlockingTime": {
+          "value": 0,
+          "display": "0 ms"
+        },
+        "speedIndex": {
+          "value": 1.23,
+          "display": "1.2 s"
+        },
+        "cumulativeLayoutShift": {
+          "value": 0.982,
+          "display": "0.982"
+        }
+      }
+    }
+  },
+  {
+    "date": "2026-03-05T18:43:08.689Z",
+    "targetUrl": "http://127.0.0.1:4173/",
+    "mobile": {
+      "scores": {
+        "performance": 76,
+        "accessibility": 96,
+        "bestPractices": 96,
+        "seo": 100
+      },
+      "metrics": {
+        "firstContentfulPaint": {
+          "value": 2.69,
+          "display": "2.69 s"
+        },
+        "largestContentfulPaint": {
+          "value": 2.79,
+          "display": "2.79 s"
+        },
+        "totalBlockingTime": {
+          "value": 543,
+          "display": "543 ms"
+        },
+        "speedIndex": {
+          "value": 4.26,
+          "display": "4.26 s"
+        },
+        "cumulativeLayoutShift": {
+          "value": 0,
+          "display": "0"
+        }
+      }
+    },
+    "desktop": {
+      "scores": {
+        "performance": 74,
+        "accessibility": 95,
+        "bestPractices": 96,
+        "seo": 100
+      },
+      "metrics": {
+        "firstContentfulPaint": {
+          "value": 0.74,
+          "display": "0.74 s"
+        },
+        "largestContentfulPaint": {
+          "value": 0.74,
+          "display": "0.74 s"
+        },
+        "totalBlockingTime": {
+          "value": 0,
+          "display": "0 ms"
+        },
+        "speedIndex": {
+          "value": 0.93,
+          "display": "0.93 s"
+        },
+        "cumulativeLayoutShift": {
+          "value": 0.982,
+          "display": "0.982"
+        }
+      }
+    }
+  },
+  {
+    "date": "2026-03-06T19:24:11.290Z",
+    "targetUrl": "http://127.0.0.1:4173/",
+    "mobile": {
+      "scores": {
+        "performance": 53,
+        "accessibility": 86,
+        "bestPractices": 96,
+        "seo": 100
+      },
+      "metrics": {
+        "firstContentfulPaint": {
+          "value": 4.25,
+          "display": "4.25 s"
+        },
+        "largestContentfulPaint": {
+          "value": 4.25,
+          "display": "4.25 s"
+        },
+        "totalBlockingTime": {
+          "value": 0,
+          "display": "0 ms"
+        },
+        "speedIndex": {
+          "value": 5.03,
+          "display": "5.03 s"
+        },
+        "cumulativeLayoutShift": {
+          "value": 0.52,
+          "display": "0.52"
+        }
+      }
+    },
+    "desktop": {
+      "scores": {
+        "performance": 70,
+        "accessibility": 87,
+        "bestPractices": 96,
+        "seo": 100
+      },
+      "metrics": {
+        "firstContentfulPaint": {
+          "value": 0.96,
+          "display": "0.96 s"
+        },
+        "largestContentfulPaint": {
+          "value": 1.31,
+          "display": "1.31 s"
+        },
+        "totalBlockingTime": {
+          "value": 0,
+          "display": "0 ms"
+        },
+        "speedIndex": {
+          "value": 1.28,
+          "display": "1.28 s"
+        },
+        "cumulativeLayoutShift": {
+          "value": 0.982,
+          "display": "0.982"
+        }
+      }
+    }
+  },
+  {
+    "date": "2026-03-07T18:33:02.739Z",
+    "targetUrl": "http://127.0.0.1:4173/",
+    "mobile": {
+      "scores": {
+        "performance": 78,
+        "accessibility": 86,
+        "bestPractices": 96,
+        "seo": 100
+      },
+      "metrics": {
+        "firstContentfulPaint": {
+          "value": 2.77,
+          "display": "2.77 s"
+        },
+        "largestContentfulPaint": {
+          "value": 2.89,
+          "display": "2.89 s"
+        },
+        "totalBlockingTime": {
+          "value": 489,
+          "display": "489 ms"
+        },
+        "speedIndex": {
+          "value": 3.21,
+          "display": "3.21 s"
+        },
+        "cumulativeLayoutShift": {
+          "value": 0,
+          "display": "0"
+        }
+      }
+    },
+    "desktop": {
+      "scores": {
+        "performance": 65,
+        "accessibility": 87,
+        "bestPractices": 96,
+        "seo": 100
+      },
+      "metrics": {
+        "firstContentfulPaint": {
+          "value": 1.07,
+          "display": "1.07 s"
+        },
+        "largestContentfulPaint": {
+          "value": 1.25,
+          "display": "1.25 s"
+        },
+        "totalBlockingTime": {
+          "value": 88,
+          "display": "88 ms"
+        },
+        "speedIndex": {
+          "value": 2.31,
+          "display": "2.31 s"
+        },
+        "cumulativeLayoutShift": {
+          "value": 0.982,
+          "display": "0.982"
+        }
+      }
+    }
+  }
+]

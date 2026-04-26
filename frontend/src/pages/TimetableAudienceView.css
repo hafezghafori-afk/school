@@ -1,0 +1,631 @@
+.tt-audience-page {
+  --tt-audience-ink: #14395c;
+  --tt-audience-muted: #58718b;
+  --tt-audience-line: #d7e3f0;
+  --tt-audience-panel: rgba(255, 255, 255, 0.9);
+  --tt-audience-panel-strong: rgba(255, 255, 255, 0.97);
+  --tt-audience-accent: #0f766e;
+  --tt-audience-accent-strong: #1d4f91;
+  --tt-audience-accent-soft: rgba(15, 118, 110, 0.12);
+  --tt-audience-shadow: 0 24px 60px rgba(15, 34, 56, 0.12);
+  position: relative;
+  direction: rtl;
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+}
+
+.tt-audience-page::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 320px;
+  background:
+    radial-gradient(circle at 8% 18%, rgba(29, 78, 216, 0.16), transparent 38%),
+    radial-gradient(circle at 88% 10%, rgba(15, 118, 110, 0.18), transparent 34%),
+    linear-gradient(180deg, rgba(248, 252, 255, 0.9), rgba(248, 252, 255, 0));
+  pointer-events: none;
+  z-index: 0;
+}
+
+.tt-audience-page > * {
+  position: relative;
+  z-index: 1;
+}
+
+.tt-audience-loading {
+  min-height: 72vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1rem;
+  direction: rtl;
+  background:
+    radial-gradient(circle at 12% 10%, rgba(29, 78, 216, 0.12), transparent 30%),
+    radial-gradient(circle at 88% 8%, rgba(15, 118, 110, 0.14), transparent 28%),
+    #f3f7fb;
+}
+
+.tt-audience-loading-card {
+  width: min(420px, 92vw);
+  padding: 1.5rem;
+  border-radius: 1.35rem;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(214, 227, 240, 0.9);
+  box-shadow: var(--tt-audience-shadow);
+  text-align: center;
+  color: var(--tt-audience-ink);
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+}
+
+.tt-audience-loading-card strong {
+  display: block;
+  font-size: 1.15rem;
+  margin-bottom: 0.45rem;
+  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+}
+
+.tt-audience-loading-card p {
+  margin: 0;
+  color: var(--tt-audience-muted);
+  line-height: 1.9;
+}
+
+.tt-audience-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.9fr);
+  gap: 1rem;
+  padding: 1.35rem;
+  border-radius: 1.4rem;
+  border: 1px solid rgba(214, 227, 240, 0.95);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(243, 250, 255, 0.9)),
+    rgba(255, 255, 255, 0.9);
+  box-shadow: var(--tt-audience-shadow);
+  backdrop-filter: blur(18px);
+}
+
+.tt-audience-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
+  padding: 0.36rem 0.72rem;
+  border-radius: 999px;
+  background: rgba(20, 57, 92, 0.07);
+  color: var(--tt-audience-accent-strong);
+  font-size: 0.84rem;
+  font-weight: 800;
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+}
+
+.tt-audience-hero-copy h1 {
+  margin: 0;
+  color: var(--tt-audience-ink);
+  font-size: clamp(1.7rem, 2.6vw, 2.4rem);
+  line-height: 1.2;
+  font-weight: 900;
+  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+}
+
+.tt-audience-hero-copy p {
+  margin: 0.8rem 0 0;
+  color: var(--tt-audience-muted);
+  line-height: 1.95;
+  max-width: 56rem;
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+}
+
+.tt-audience-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 1rem;
+}
+
+.tt-audience-chip {
+  border-color: rgba(143, 169, 197, 0.9) !important;
+  color: var(--tt-audience-accent-strong) !important;
+  background: rgba(255, 255, 255, 0.78) !important;
+  padding: 0.3rem 0.85rem !important;
+}
+
+.tt-audience-hero-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.9rem;
+  padding: 1rem;
+  border-radius: 1.15rem;
+  background: linear-gradient(180deg, rgba(20, 57, 92, 0.95), rgba(15, 118, 110, 0.9));
+  color: #f9fbff;
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+}
+
+.tt-audience-hero-panel-label {
+  display: block;
+  font-size: 0.8rem;
+  opacity: 0.82;
+}
+
+.tt-audience-hero-panel-value {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 1.55rem;
+  font-weight: 900;
+  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+}
+
+.tt-audience-hero-panel-note {
+  margin: 0;
+  color: rgba(248, 250, 252, 0.84);
+  line-height: 1.8;
+  font-size: 0.9rem;
+}
+
+.tt-audience-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.tt-audience-btn {
+  min-height: 2.5rem;
+  border-radius: 0.9rem !important;
+  padding-inline: 1rem !important;
+  gap: 0.4rem;
+  font-weight: 800 !important;
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif !important;
+}
+
+.tt-audience-btn.tt-audience-btn-light {
+  background: #ffffff !important;
+  color: var(--tt-audience-accent-strong) !important;
+  border-color: rgba(255, 255, 255, 0.5) !important;
+}
+
+.tt-audience-btn.tt-audience-btn-ghost {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #f9fbff !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+.tt-audience-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.tt-audience-stat-card {
+  padding: 1rem 1rem 0.95rem;
+  border-radius: 1.1rem;
+  border: 1px solid var(--tt-audience-line);
+  background: linear-gradient(180deg, var(--tt-audience-panel-strong), rgba(247, 250, 254, 0.96));
+  box-shadow: 0 14px 28px rgba(15, 34, 56, 0.08);
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+}
+
+.tt-audience-stat-card span {
+  display: block;
+}
+
+.tt-audience-stat-label {
+  color: var(--tt-audience-muted);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.tt-audience-stat-value {
+  margin-top: 0.45rem;
+  color: var(--tt-audience-ink);
+  font-size: 1.55rem;
+  font-weight: 900;
+  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+}
+
+.tt-audience-stat-note {
+  margin-top: 0.35rem;
+  color: #6f879f;
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+
+.tt-audience-filter-card,
+.tt-audience-board-card,
+.tt-audience-footer-card {
+  overflow: hidden;
+}
+
+.tt-audience-filter-content,
+.tt-audience-board-content,
+.tt-audience-footer-content {
+  padding-top: 1rem !important;
+}
+
+.tt-audience-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.tt-audience-section-head h3,
+.tt-audience-board-copy strong {
+  margin: 0;
+  color: var(--tt-audience-ink);
+  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+}
+
+.tt-audience-section-head p,
+.tt-audience-board-copy p {
+  margin: 0.25rem 0 0;
+  color: var(--tt-audience-muted);
+  line-height: 1.8;
+  font-size: 0.9rem;
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+}
+
+.tt-audience-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+  align-items: stretch;
+}
+
+.tt-audience-filter-grid.tt-audience-filter-grid-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tt-audience-field {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.9rem;
+  border: 1px solid rgba(205, 219, 237, 0.95);
+  border-radius: 1rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 249, 255, 0.94));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.tt-audience-field-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 1.6rem;
+}
+
+.tt-audience-field-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 999px;
+  background: rgba(29, 79, 145, 0.1);
+  color: var(--tt-audience-accent-strong);
+  flex-shrink: 0;
+}
+
+.tt-audience-field-icon svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.tt-audience-select-wrap {
+  position: relative;
+}
+
+.tt-audience-field label {
+  color: #355878;
+  font-size: 0.9rem;
+  font-weight: 800;
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+}
+
+.tt-audience-field select {
+  width: 100%;
+  min-height: 3.15rem;
+  padding: 0.8rem 1rem 0.8rem 2.8rem;
+  border-radius: 0.9rem;
+  border: 1px solid #cad9ea;
+  background: linear-gradient(180deg, #ffffff, #f7fbff);
+  color: var(--tt-audience-ink);
+  font-size: 0.95rem;
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  text-align: right;
+  line-height: 1.8;
+  box-shadow: 0 8px 18px rgba(15, 34, 56, 0.05);
+}
+
+.tt-audience-field select:disabled {
+  color: #8ca2ba;
+  background: linear-gradient(180deg, #f7f9fc, #eef3f8);
+  cursor: not-allowed;
+}
+
+.tt-audience-select-chevron {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 0.95rem;
+  transform: translateY(-50%);
+  color: #7690aa;
+  pointer-events: none;
+}
+
+.tt-audience-select-chevron svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.tt-audience-filter-note {
+  margin-top: 0.9rem;
+  padding: 0.85rem 1rem;
+  border-radius: 0.95rem;
+  background: rgba(19, 124, 107, 0.08);
+  color: #355878;
+  font-size: 0.88rem;
+  line-height: 1.9;
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+}
+
+.tt-audience-board-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.tt-audience-board-chip {
+  background: var(--tt-audience-accent-soft) !important;
+  color: #0f5d56 !important;
+  padding-inline: 0.75rem !important;
+}
+
+.tt-audience-empty-banner {
+  margin-bottom: 1rem;
+  padding: 1rem 1.1rem;
+  border-radius: 1rem;
+  border: 1px dashed #c3d6e9;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(245, 249, 255, 0.96));
+  color: #58718b;
+  line-height: 1.9;
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+}
+
+.tt-audience-table-wrap {
+  overflow-x: auto;
+  border-radius: 1rem;
+  border: 1px solid var(--tt-audience-line);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.tt-audience-table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+}
+
+.tt-audience-table th,
+.tt-audience-table td {
+  border-inline-start: 1px solid var(--tt-audience-line);
+  border-top: 1px solid var(--tt-audience-line);
+  vertical-align: top;
+}
+
+.tt-audience-table th:first-child,
+.tt-audience-table td:first-child {
+  border-inline-start: none;
+}
+
+.tt-audience-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, #f8fbff, #edf4fb);
+  color: #234a70;
+  font-size: 0.94rem;
+  font-weight: 900;
+  padding: 0.95rem 0.75rem;
+  text-align: center;
+  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+}
+
+.tt-audience-period-cell {
+  min-width: 136px;
+  background: linear-gradient(180deg, rgba(243, 248, 255, 0.95), rgba(236, 244, 253, 0.9));
+  padding: 0.9rem 0.75rem;
+  color: var(--tt-audience-ink);
+}
+
+.tt-audience-period-title {
+  font-size: 0.95rem;
+  font-weight: 900;
+  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+}
+
+.tt-audience-period-time {
+  margin-top: 0.3rem;
+  color: var(--tt-audience-muted);
+  font-size: 0.8rem;
+}
+
+.tt-audience-table-cell {
+  min-width: 160px;
+  padding: 0.7rem;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.tt-audience-slot-card,
+.tt-audience-slot-empty,
+.tt-audience-slot-break {
+  min-height: 92px;
+  border-radius: 0.95rem;
+}
+
+.tt-audience-slot-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.85rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(241, 248, 255, 0.96));
+  border: 1px solid rgba(168, 196, 223, 0.85);
+  box-shadow: 0 10px 22px rgba(21, 41, 69, 0.08);
+}
+
+.tt-audience-slot-subject {
+  color: var(--tt-audience-ink);
+  font-size: 0.96rem;
+  font-weight: 900;
+  line-height: 1.6;
+  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+}
+
+.tt-audience-slot-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  color: var(--tt-audience-muted);
+  font-size: 0.82rem;
+  line-height: 1.7;
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+}
+
+.tt-audience-slot-empty {
+  display: grid;
+  place-items: center;
+  padding: 0.85rem;
+  border: 1px dashed rgba(168, 196, 223, 0.95);
+  background: linear-gradient(180deg, rgba(249, 252, 255, 0.96), rgba(243, 247, 252, 0.96));
+  color: #8aa0b8;
+  font-size: 0.85rem;
+  text-align: center;
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+}
+
+.tt-audience-slot-break {
+  display: grid;
+  place-items: center;
+  padding: 0.85rem;
+  background: linear-gradient(180deg, rgba(255, 245, 220, 0.95), rgba(255, 239, 201, 0.95));
+  color: #9a5f05;
+  font-size: 0.92rem;
+  font-weight: 800;
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+}
+
+.tt-audience-mobile-days {
+  display: grid;
+  gap: 0.95rem;
+}
+
+.tt-audience-mobile-day {
+  overflow: hidden;
+  border: 1px solid var(--tt-audience-line);
+  border-radius: 1rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 250, 255, 0.96));
+}
+
+.tt-audience-mobile-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.95rem 1rem;
+  background: linear-gradient(180deg, #f8fbff, #edf4fb);
+  color: var(--tt-audience-ink);
+  font-weight: 900;
+  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+}
+
+.tt-audience-mobile-list {
+  display: grid;
+}
+
+.tt-audience-mobile-slot {
+  padding: 0.85rem 0.95rem;
+  border-top: 1px solid rgba(215, 227, 240, 0.9);
+}
+
+.tt-audience-mobile-slot:first-child {
+  border-top: none;
+}
+
+.tt-audience-mobile-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.55rem;
+  color: var(--tt-audience-muted);
+  font-size: 0.78rem;
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+}
+
+.tt-audience-footer-content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--tt-audience-muted);
+  line-height: 1.8;
+  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+}
+
+.tt-audience-footer-main {
+  color: var(--tt-audience-ink);
+  font-weight: 800;
+  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+}
+
+.tt-audience-footer-note {
+  font-size: 0.88rem;
+}
+
+@media (max-width: 1080px) {
+  .tt-audience-hero,
+  .tt-audience-stat-grid,
+  .tt-audience-filter-grid,
+  .tt-audience-filter-grid.tt-audience-filter-grid-two {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .tt-audience-page {
+    padding-inline: 0.35rem;
+  }
+
+  .tt-audience-hero,
+  .tt-audience-stat-grid,
+  .tt-audience-filter-grid,
+  .tt-audience-filter-grid.tt-audience-filter-grid-two {
+    grid-template-columns: 1fr;
+  }
+
+  .tt-audience-hero {
+    padding: 1rem;
+  }
+
+  .tt-audience-hero-copy h1 {
+    font-size: 1.52rem;
+  }
+
+  .tt-audience-hero-panel {
+    padding: 0.9rem;
+  }
+
+  .tt-audience-stat-card {
+    padding: 0.9rem;
+  }
+
+  .tt-audience-footer-content {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

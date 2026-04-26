@@ -1,0 +1,788 @@
+.daily-tt-shell {
+  --daily-tt-text: #0f2940;
+  --daily-tt-text-soft: #40617f;
+  --daily-tt-border: rgba(255, 255, 255, 0.38);
+  --daily-tt-glass: rgba(255, 255, 255, 0.22);
+  --daily-tt-glass-strong: rgba(255, 255, 255, 0.34);
+  --daily-tt-shadow: 0 28px 80px rgba(8, 20, 36, 0.16);
+  position: relative;
+  direction: rtl;
+  font-family: 'B Nazanin', 'B Mitra', Vazirmatn, Tahoma, sans-serif;
+}
+
+.daily-tt-glow {
+  position: absolute;
+  z-index: 0;
+  border-radius: 999px;
+  filter: blur(24px);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.daily-tt-glow--blue {
+  top: -24px;
+  right: 4%;
+  width: 220px;
+  height: 220px;
+  background: rgba(56, 189, 248, 0.28);
+}
+
+.daily-tt-glow--amber {
+  bottom: 10%;
+  left: 2%;
+  width: 260px;
+  height: 260px;
+  background: rgba(251, 191, 36, 0.22);
+}
+
+.daily-tt-glow--mint {
+  top: 40%;
+  left: 28%;
+  width: 180px;
+  height: 180px;
+  background: rgba(16, 185, 129, 0.16);
+}
+
+.daily-tt-board {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  border: 1px solid var(--daily-tt-border);
+  border-radius: 2rem;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.16)),
+    radial-gradient(circle at top right, rgba(96, 165, 250, 0.18), transparent 32%),
+    radial-gradient(circle at bottom left, rgba(251, 191, 36, 0.16), transparent 28%);
+  box-shadow: var(--daily-tt-shadow);
+  backdrop-filter: blur(24px) saturate(145%);
+  -webkit-backdrop-filter: blur(24px) saturate(145%);
+}
+
+.daily-tt-board-noise {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: linear-gradient(180deg, rgba(255, 255, 255, 0.6), transparent 78%);
+  pointer-events: none;
+}
+
+.daily-tt-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.95fr);
+  gap: 1rem;
+  padding: 1.5rem;
+}
+
+.daily-tt-hero-main,
+.daily-tt-subject-panel,
+.daily-tt-stat,
+.daily-tt-alert,
+.daily-tt-table-shell {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.16));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.daily-tt-hero-main {
+  border-radius: 1.5rem;
+  padding: 1.3rem 1.4rem;
+}
+
+.daily-tt-chip {
+  width: fit-content;
+  border-color: rgba(20, 73, 117, 0.2);
+  background: rgba(255, 255, 255, 0.46);
+  color: #124066;
+}
+
+.daily-tt-title {
+  margin: 0.45rem 0 0;
+  color: var(--daily-tt-text);
+  font-family: 'B Mitra', 'B Nazanin', Tahoma, sans-serif;
+  font-size: clamp(2rem, 3vw, 2.8rem);
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.daily-tt-subtitle {
+  margin: 0.55rem 0 0;
+  max-width: 64ch;
+  color: var(--daily-tt-text-soft);
+  font-size: 1.04rem;
+  line-height: 1.95;
+}
+
+.daily-tt-inline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.daily-tt-class-picker {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 0.85rem;
+  margin-top: 1.15rem;
+}
+
+.daily-tt-class-field {
+  margin: 0;
+}
+
+.daily-tt-class-summary {
+  display: flex;
+  min-height: 4.35rem;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.2rem;
+  border: 1px solid rgba(17, 65, 105, 0.12);
+  border-radius: 1.15rem;
+  background: rgba(255, 255, 255, 0.46);
+  padding: 0.9rem 1rem;
+}
+
+.daily-tt-class-summary strong {
+  color: #14395b;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.daily-tt-class-summary span {
+  color: #5e7891;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.daily-tt-inline-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2.2rem;
+  padding: 0.35rem 0.9rem;
+  border: 1px solid rgba(17, 65, 105, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.5);
+  color: #214b72;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.daily-tt-subject-panel {
+  border-radius: 1.5rem;
+  padding: 1.2rem;
+}
+
+.daily-tt-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.daily-tt-panel-title {
+  margin: 0;
+  color: var(--daily-tt-text);
+  font-size: 1.18rem;
+  font-weight: 800;
+}
+
+.daily-tt-panel-caption {
+  margin: 0.28rem 0 0;
+  color: var(--daily-tt-text-soft);
+  font-size: 0.88rem;
+  line-height: 1.8;
+}
+
+.daily-tt-panel-count {
+  display: inline-flex;
+  min-width: 2.7rem;
+  height: 2.7rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 1rem;
+  background: linear-gradient(135deg, #0f5ca8, #2fa7f4);
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 800;
+  box-shadow: 0 18px 36px rgba(15, 92, 168, 0.22);
+}
+
+.daily-tt-subject-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.daily-tt-subject-chip {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 8rem;
+  padding: 0.62rem 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 1.05rem;
+  box-shadow: 0 12px 26px rgba(16, 28, 48, 0.08);
+}
+
+.daily-tt-subject-chip strong {
+  color: #0f2940;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.daily-tt-subject-chip small {
+  color: #5a7591;
+  font-size: 0.75rem;
+}
+
+.daily-tt-subject-chip--math {
+  background: linear-gradient(180deg, rgba(219, 238, 255, 0.9), rgba(202, 229, 255, 0.72));
+}
+
+.daily-tt-subject-chip--physics {
+  background: linear-gradient(180deg, rgba(255, 229, 229, 0.9), rgba(255, 210, 210, 0.72));
+}
+
+.daily-tt-subject-chip--chemistry {
+  background: linear-gradient(180deg, rgba(224, 248, 231, 0.92), rgba(207, 239, 216, 0.72));
+}
+
+.daily-tt-subject-chip--biology {
+  background: linear-gradient(180deg, rgba(255, 244, 214, 0.94), rgba(255, 233, 181, 0.74));
+}
+
+.daily-tt-subject-chip--language,
+.daily-tt-subject-chip--default {
+  background: linear-gradient(180deg, rgba(241, 234, 255, 0.94), rgba(226, 213, 255, 0.74));
+}
+
+.daily-tt-subject-empty {
+  margin-top: 1rem;
+  border: 1px dashed rgba(28, 81, 126, 0.2);
+  border-radius: 1.1rem;
+  background: rgba(255, 255, 255, 0.42);
+  color: #4a6783;
+  padding: 1rem;
+  line-height: 1.9;
+}
+
+.daily-tt-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem;
+  padding: 0 1.5rem 1rem;
+}
+
+.daily-tt-stat {
+  min-height: 108px;
+  border-radius: 1.35rem;
+  padding: 1rem 1.1rem;
+  text-align: center;
+}
+
+.daily-tt-stat-value {
+  display: block;
+  color: #103253;
+  font-family: 'B Mitra', 'B Nazanin', Tahoma, sans-serif;
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+
+.daily-tt-stat-label {
+  display: block;
+  margin-top: 0.25rem;
+  color: #597592;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.daily-tt-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0 1.5rem 1rem;
+}
+
+.daily-tt-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.daily-tt-day {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid rgba(22, 67, 106, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.52);
+  color: #214d74;
+  cursor: pointer;
+  padding: 0.62rem 1rem;
+  font-size: 0.94rem;
+  font-weight: 700;
+  transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+.daily-tt-day:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(21, 42, 68, 0.1);
+}
+
+.daily-tt-day.is-active {
+  background: linear-gradient(135deg, #0d5ba5, #2ca4f2);
+  color: #ffffff;
+  box-shadow: 0 20px 44px rgba(13, 91, 165, 0.28);
+}
+
+.daily-tt-day-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.08rem;
+  line-height: 1.2;
+}
+
+.daily-tt-day-label {
+  white-space: nowrap;
+}
+
+.daily-tt-day-date {
+  font-size: 0.74rem;
+  font-weight: 600;
+  opacity: 0.82;
+}
+
+.daily-tt-day-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.75;
+}
+
+.daily-tt-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.daily-tt-meta-badge {
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.daily-tt-alert {
+  margin: 0 1.5rem 1rem;
+  border-radius: 1.3rem;
+  padding: 0.95rem 1.1rem;
+  color: #7a4e0b;
+  line-height: 1.9;
+}
+
+.daily-tt-table-shell {
+  margin: 0 1.5rem 1.5rem;
+  border-radius: 1.6rem;
+  padding: 0.85rem;
+}
+
+.daily-tt-table-wrap {
+  overflow-x: auto;
+}
+
+.daily-tt-table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: separate;
+  border-spacing: 0.65rem;
+}
+
+.daily-tt-heading {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 0.95rem 0.65rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.52);
+  color: #55718d;
+  font-size: 0.88rem;
+  font-weight: 700;
+  text-align: center;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.daily-tt-heading-copy {
+  display: flex;
+  min-width: 112px;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.daily-tt-heading-title {
+  color: #466886;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.daily-tt-heading-time {
+  color: #1d4b72;
+  font-size: 0.8rem;
+  font-weight: 800;
+  direction: ltr;
+}
+
+.daily-tt-heading-edit {
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(28, 90, 140, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.74);
+  color: #215072;
+  cursor: pointer;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.daily-tt-heading-edit:hover {
+  border-color: rgba(30, 104, 168, 0.26);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.daily-tt-heading--teacher {
+  min-width: 190px;
+  text-align: right;
+}
+
+.daily-tt-teacher {
+  padding: 0.95rem 0.85rem;
+  border-radius: 1.2rem;
+  background: linear-gradient(155deg, rgba(13, 39, 66, 0.88), rgba(25, 81, 125, 0.82));
+  color: #ffffff;
+  text-align: right;
+  vertical-align: middle;
+  box-shadow: 0 24px 48px rgba(12, 33, 56, 0.22);
+}
+
+.daily-tt-teacher-name {
+  display: block;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.daily-tt-teacher-day {
+  display: block;
+  margin-top: 0.25rem;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.daily-tt-slot {
+  vertical-align: top;
+}
+
+.daily-tt-cell {
+  display: flex;
+  min-height: 108px;
+  width: 100%;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.34rem;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 1.2rem;
+  padding: 0.85rem 0.8rem;
+  text-align: right;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.daily-tt-cell.is-editable {
+  cursor: pointer;
+}
+
+.daily-tt-cell.is-editable:hover {
+  transform: translateY(-3px);
+  border-color: rgba(60, 145, 255, 0.38);
+  box-shadow: 0 18px 34px rgba(18, 42, 71, 0.14);
+}
+
+.daily-tt-cell.is-readonly {
+  cursor: default;
+}
+
+.daily-tt-cell--empty {
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.daily-tt-cell--math {
+  background: linear-gradient(180deg, rgba(219, 238, 255, 0.88), rgba(203, 229, 255, 0.7));
+}
+
+.daily-tt-cell--physics {
+  background: linear-gradient(180deg, rgba(255, 229, 229, 0.9), rgba(255, 209, 209, 0.7));
+}
+
+.daily-tt-cell--chemistry {
+  background: linear-gradient(180deg, rgba(224, 248, 231, 0.9), rgba(205, 239, 215, 0.7));
+}
+
+.daily-tt-cell--biology {
+  background: linear-gradient(180deg, rgba(255, 243, 211, 0.92), rgba(255, 233, 180, 0.72));
+}
+
+.daily-tt-cell--language,
+.daily-tt-cell--default {
+  background: linear-gradient(180deg, rgba(241, 234, 255, 0.92), rgba(226, 212, 255, 0.72));
+}
+
+.daily-tt-cell-badge {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 1.6rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.15rem 0.58rem;
+  background: rgba(255, 255, 255, 0.66);
+  color: #4d6480;
+  font-size: 0.73rem;
+  font-weight: 800;
+}
+
+.daily-tt-cell-subject {
+  color: #102f4d;
+  font-size: 0.98rem;
+  font-weight: 800;
+}
+
+.daily-tt-cell-classroom {
+  color: #60788f;
+  font-size: 0.81rem;
+  font-weight: 700;
+}
+
+.daily-tt-cell-teacher {
+  color: #60788f;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.daily-tt-cell-empty {
+  color: #7c94ab;
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.8;
+}
+
+.daily-tt-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(6, 15, 26, 0.45);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.daily-tt-modal {
+  width: min(500px, 100%);
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 1.6rem;
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.56), rgba(255, 255, 255, 0.26));
+  box-shadow: 0 28px 60px rgba(7, 17, 31, 0.22);
+  padding: 1.25rem;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+.daily-tt-modal--compact {
+  width: min(440px, 100%);
+}
+
+.daily-tt-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.daily-tt-modal-title {
+  margin: 0;
+  color: var(--daily-tt-text);
+  font-size: 1.18rem;
+  font-weight: 800;
+}
+
+.daily-tt-modal-note {
+  margin: 0.3rem 0 0;
+  color: var(--daily-tt-text-soft);
+  font-size: 0.84rem;
+  line-height: 1.8;
+}
+
+.daily-tt-close {
+  width: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #6f89a2;
+  cursor: pointer;
+  font-size: 1.7rem;
+  line-height: 1;
+}
+
+.daily-tt-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.daily-tt-time-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.daily-tt-field {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.daily-tt-field span {
+  color: #254a6d;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.daily-tt-field select,
+.daily-tt-field input {
+  width: 100%;
+  border: 1px solid rgba(26, 69, 109, 0.14);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.56);
+  color: #12314f;
+  padding: 0.78rem 0.9rem;
+  font: inherit;
+  outline: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.daily-tt-field select:focus,
+.daily-tt-field input:focus {
+  border-color: rgba(38, 139, 255, 0.46);
+  box-shadow: 0 0 0 4px rgba(38, 139, 255, 0.12);
+}
+
+.daily-tt-field-error {
+  margin-top: 0.8rem;
+  border: 1px solid rgba(220, 38, 38, 0.16);
+  border-radius: 1rem;
+  background: rgba(254, 242, 242, 0.82);
+  color: #b42318;
+  padding: 0.7rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.daily-tt-assigned-teacher {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  border: 1px solid rgba(19, 102, 154, 0.12);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.54);
+  padding: 0.82rem 0.9rem;
+}
+
+.daily-tt-assigned-teacher-label {
+  color: #64829b;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.daily-tt-assigned-teacher strong {
+  color: #173d61;
+  font-size: 0.96rem;
+  font-weight: 800;
+}
+
+.daily-tt-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  margin-top: 1.2rem;
+}
+
+@media (max-width: 1040px) {
+  .daily-tt-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .daily-tt-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .daily-tt-class-picker {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .daily-tt-board {
+    border-radius: 1.5rem;
+  }
+
+  .daily-tt-hero,
+  .daily-tt-stats,
+  .daily-tt-toolbar {
+    padding-right: 1rem;
+    padding-left: 1rem;
+  }
+
+  .daily-tt-table-shell {
+    margin-right: 1rem;
+    margin-left: 1rem;
+  }
+
+  .daily-tt-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .daily-tt-meta {
+    width: 100%;
+  }
+
+  .daily-tt-meta .inline-flex,
+  .daily-tt-meta button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .daily-tt-time-grid {
+    grid-template-columns: 1fr;
+  }
+}

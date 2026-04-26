@@ -1,0 +1,195 @@
+.recordings-page {
+  padding: 24px;
+}
+
+.recordings-card {
+  max-width: 1120px;
+  margin: 0 auto;
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(35, 53, 78, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 20px 40px rgba(2, 6, 23, 0.28);
+}
+
+.recordings-card h2 {
+  margin: 0;
+  color: #ffffff;
+}
+
+.recordings-card p {
+  margin: 8px 0 14px;
+  color: rgba(245, 247, 255, 0.84);
+}
+
+.recordings-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 300px) auto;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.recordings-toolbar label {
+  color: rgba(245, 247, 255, 0.86);
+  font-size: 13px;
+}
+
+.recordings-toolbar select,
+.recordings-toolbar input,
+.recordings-form input,
+.recordings-form select,
+.recordings-form textarea {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(15, 23, 42, 0.58);
+  color: #f7fbff;
+  padding: 10px 12px;
+}
+
+.recordings-refresh {
+  width: auto;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(14, 165, 233, 0.2);
+  color: #dff5ff;
+  border: 1px solid rgba(125, 211, 252, 0.26);
+}
+
+.recordings-form {
+  margin: 10px 0 14px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(12, 18, 30, 0.55);
+}
+
+.recordings-form h3 {
+  margin: 0 0 12px;
+  color: #f4f9ff;
+}
+
+.recordings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.recordings-grid label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: rgba(244, 248, 255, 0.78);
+}
+
+.recordings-full {
+  grid-column: 1 / -1;
+}
+
+.recordings-submit {
+  width: auto;
+  margin-top: 10px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  color: #092017;
+  font-weight: 700;
+}
+
+.recordings-message,
+.recordings-empty {
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(244, 248, 255, 0.86);
+}
+
+.recordings-list {
+  display: grid;
+  gap: 10px;
+}
+
+.recordings-item {
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(12, 18, 30, 0.55);
+  padding: 12px;
+}
+
+.recordings-item h4 {
+  margin: 0;
+  color: #ffffff;
+}
+
+.recordings-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.recordings-item-head span {
+  font-size: 12px;
+  color: rgba(215, 230, 255, 0.84);
+}
+
+.recordings-item p {
+  margin: 8px 0;
+  color: rgba(235, 243, 255, 0.86);
+  line-height: 1.7;
+}
+
+.recordings-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: rgba(206, 222, 248, 0.86);
+}
+
+.recordings-actions {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.recordings-actions a,
+.recordings-actions button {
+  width: auto;
+  text-decoration: none;
+  border-radius: 10px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #f1f8ff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.recordings-actions a {
+  background: rgba(14, 165, 233, 0.18);
+  border-color: rgba(125, 211, 252, 0.24);
+}
+
+.recordings-actions button {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+@media (max-width: 900px) {
+  .recordings-page {
+    padding: 14px;
+  }
+
+  .recordings-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .recordings-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,490 @@
+.grade-manager-page {
+  padding: 32px 18px;
+  display: flex;
+  justify-content: center;
+  background:
+    radial-gradient(circle at top right, rgba(19, 120, 108, 0.12), transparent 30%),
+    linear-gradient(180deg, #f6f2e8 0%, #f8fafc 55%, #ffffff 100%);
+}
+
+.grade-manager-page :is(a, button, input, select, textarea) {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.grade-manager-page :is(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.18);
+}
+
+.grade-manager-card {
+  width: min(1440px, 100%);
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 24px;
+  padding: 24px;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+.grade-manager-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.grade-manager-hero h2 {
+  margin: 0 0 8px;
+  font-size: 26px;
+  color: #10231f;
+}
+
+.grade-manager-hero p {
+  margin: 0;
+  max-width: 820px;
+  color: #475569;
+  line-height: 1.8;
+}
+
+.grade-manager-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.grade-manager-actions button,
+.grade-sheet-toolbar button,
+.card-back button {
+  border: none;
+  border-radius: 12px;
+  padding: 10px 15px;
+  font-weight: 700;
+  cursor: pointer;
+  background: #0f172a;
+  color: #fff;
+}
+
+.grade-manager-actions button.secondary,
+.grade-sheet-toolbar button.secondary {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.grade-manager-actions button:hover:not(:disabled),
+.grade-sheet-toolbar button:hover:not(:disabled),
+.card-back button:hover:not(:disabled),
+.grade-session-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 22px rgba(15, 23, 42, 0.15);
+}
+
+.grade-manager-actions button:disabled,
+.grade-sheet-toolbar button:disabled,
+.card-back button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.grade-manager-filters,
+.grade-manager-component-config {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.grade-manager-filters {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.grade-manager-component-config {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.grade-manager-filters label,
+.grade-manager-component-config label {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  border: 1px solid #e2e8f0;
+}
+
+.grade-manager-filters span,
+.grade-manager-component-config span {
+  color: #475569;
+  font-size: 13px;
+}
+
+.grade-manager-filters :is(select, input),
+.grade-manager-component-config input,
+.grade-sheet-table :is(input, select) {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.grade-message {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  font-weight: 600;
+}
+
+.grade-message.muted {
+  background: #f8fafc;
+  color: #475569;
+}
+
+.grade-message.success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.grade-message.error {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.grade-manager-shell {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.grade-session-list,
+.grade-sheet-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  padding: 18px;
+}
+
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.section-head h3,
+.grade-sheet-head h3 {
+  margin: 0;
+  color: #10231f;
+}
+
+.section-head span,
+.grade-sheet-head p {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.grade-session-list {
+  display: grid;
+  gap: 12px;
+}
+
+.grade-session-card {
+  width: 100%;
+  border: 1px solid #dbe3ec;
+  border-radius: 16px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  color: #0f172a;
+  padding: 14px;
+  text-align: right;
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.grade-session-card:hover,
+.grade-session-card:focus-visible {
+  border-color: #94a3b8;
+  background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
+  outline: none;
+}
+
+.grade-session-card strong {
+  color: #0f172a;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.grade-session-card.active {
+  border-color: #0f766e;
+  background: linear-gradient(180deg, #f0fdfa 0%, #ecfeff 100%);
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.15);
+}
+
+.grade-session-card__head,
+.grade-session-card__meta,
+.grade-sheet-head {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.grade-session-card__meta {
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.grade-session-card__meta span {
+  color: inherit;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-pill.draft {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.status-pill.active {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.status-pill.closed {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-pill.published {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.grade-sheet-toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.grade-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.grade-sheet-official-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 18px;
+  padding: 14px;
+  border: 1px solid #d8cdb8;
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(250, 245, 235, 0.92), rgba(255, 255, 255, 0.96)),
+    #fffaf0;
+  color: #243128;
+}
+
+.grade-sheet-official-meta span {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  color: #475569;
+}
+
+.grade-sheet-official-meta strong {
+  color: #10231f;
+  white-space: nowrap;
+}
+
+.grade-summary-strip > div {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(217, 119, 6, 0.08)),
+    #fff;
+  border: 1px solid #dbe3ec;
+  display: grid;
+  gap: 4px;
+}
+
+.grade-summary-strip span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.grade-summary-strip strong {
+  color: #10231f;
+  font-size: 20px;
+}
+
+.grade-sheet-table-wrap {
+  overflow: auto;
+  border: 1px solid #dbe3ec;
+  border-radius: 18px;
+  background: #fff;
+}
+
+.grade-sheet-table {
+  width: 100%;
+  min-width: 1080px;
+  border-collapse: collapse;
+}
+
+.grade-sheet-table th,
+.grade-sheet-table td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 10px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.grade-sheet-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f8fafc;
+  z-index: 1;
+  color: #10231f;
+  font-size: 13px;
+}
+
+.grade-sheet-table thead tr:first-child th {
+  z-index: 3;
+}
+
+.grade-sheet-table thead tr:nth-child(2) th {
+  top: 42px;
+  z-index: 2;
+}
+
+.grade-sheet-table thead th.group-heading {
+  background: #eef7f3;
+  color: #0f4f46;
+  font-size: 14px;
+}
+
+.grade-sheet-table thead th small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.grade-sheet-table tbody tr:nth-child(even) td {
+  background: #fcfcfd;
+}
+
+.grade-sheet-table .student-cell {
+  text-align: right;
+}
+
+.grade-sheet-table .student-cell strong {
+  display: block;
+  color: #0f172a;
+}
+
+.grade-sheet-table .student-cell span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.grade-sheet-table .total-cell {
+  font-weight: 700;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+.grade-sheet-table .total-words-cell {
+  min-width: 120px;
+  color: #334155;
+  font-weight: 700;
+}
+
+.grade-sheet-table .note-cell {
+  min-width: 190px;
+}
+
+.grade-note-control {
+  display: grid;
+  gap: 6px;
+}
+
+.grade-note-control select {
+  background: #f8fafc;
+}
+
+.grade-sheet-table .score-input:not(:disabled) {
+  border-color: #94a3b8;
+  background: #fffdf7;
+  font-weight: 700;
+}
+
+.grade-sheet-table .score-input:not(:disabled):focus {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
+}
+
+.grade-empty {
+  padding: 16px;
+  border-radius: 14px;
+  background: #f8fafc;
+  color: #64748b;
+}
+
+@media (max-width: 1180px) {
+  .grade-manager-shell,
+  .grade-manager-filters,
+  .grade-sheet-official-meta,
+  .grade-summary-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .grade-manager-component-config {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .grade-manager-card {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .grade-manager-hero,
+  .grade-sheet-head {
+    flex-direction: column;
+  }
+
+  .grade-manager-component-config {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grade-manager-page :is(a, button, input, select, textarea) {
+    transition: none;
+  }
+}

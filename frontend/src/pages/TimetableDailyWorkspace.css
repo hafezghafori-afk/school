@@ -1,0 +1,50 @@
+.tt-daily-page {
+  position: relative;
+  min-height: calc(100vh - 5rem);
+  padding: 0.85rem 0 1.8rem;
+}
+
+.tt-daily-page-glow {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(30px);
+  pointer-events: none;
+  opacity: 0.45;
+}
+
+.tt-daily-page-glow--one {
+  top: 0;
+  right: 3%;
+  width: 260px;
+  height: 260px;
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.tt-daily-page-glow--two {
+  bottom: 8%;
+  left: 4%;
+  width: 280px;
+  height: 280px;
+  background: rgba(251, 191, 36, 0.14);
+}
+
+.tt-daily-wrap {
+  position: relative;
+  z-index: 1;
+  width: min(1360px, calc(100% - 1rem));
+  margin: 0 auto;
+}
+
+.tt-daily-loading {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 2rem;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.14));
+  box-shadow: 0 24px 60px rgba(10, 20, 34, 0.16);
+  color: #eaf4ff;
+  padding: 2rem 1.5rem;
+  text-align: center;
+  font-family: 'B Nazanin', 'B Mitra', Tahoma, sans-serif;
+  font-size: 1.2rem;
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}

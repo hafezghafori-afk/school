@@ -1,0 +1,412 @@
+.homework-page {
+  padding: 32px 18px;
+  display: flex;
+  justify-content: center;
+}
+
+.homework-page :is(a, button, input, select, textarea) {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.homework-page :is(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.25);
+}
+
+.homework-card {
+  width: min(1240px, 100%);
+  background: #fff;
+  border-radius: 18px;
+  padding: 24px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.homework-card header h2 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.homework-card header p {
+  margin: 0 0 18px;
+  color: #475569;
+}
+
+.homework-controls {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.homework-controls label,
+.homework-review-selector label {
+  font-size: 13px;
+  color: #475569;
+  font-weight: 700;
+}
+
+.homework-controls select,
+.homework-review-selector select {
+  min-width: 240px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  color: #0f172a;
+  background: #fff;
+}
+
+.homework-controls select:hover,
+.homework-review-selector select:hover {
+  border-color: #bfdbfe;
+}
+
+.homework-view-tabs {
+  display: inline-flex;
+  gap: 8px;
+  padding: 6px;
+  margin-bottom: 16px;
+  background: #eff6ff;
+  border-radius: 14px;
+}
+
+.homework-view-tabs button {
+  border: none;
+  background: transparent;
+  color: #1d4ed8;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.homework-view-tabs button.active {
+  background: #1d4ed8;
+  color: #fff;
+  box-shadow: 0 10px 18px rgba(29, 78, 216, 0.22);
+}
+
+.homework-section-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+}
+
+.homework-section-grid.review {
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+}
+
+.homework-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.homework-panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.homework-panel-header h3 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.homework-panel-header p {
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+}
+
+.homework-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.homework-form {
+  display: grid;
+  gap: 10px;
+}
+
+.homework-form input[type="text"],
+.homework-form input[type="date"],
+.homework-form input[type="number"],
+.homework-form textarea,
+.homework-form select,
+.submission-grade input {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  font-family: inherit;
+  color: #0f172a;
+  background: #fff;
+}
+
+.homework-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.homework-form-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.homework-form button,
+.submission-grade button,
+.homework-header .ghost,
+.homework-header .secondary,
+.homework-header .danger,
+.homework-panel-header .ghost,
+.homework-panel-header .secondary {
+  width: fit-content;
+  padding: 9px 14px;
+  border-radius: 10px;
+  border: none;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.homework-form button,
+.submission-grade button {
+  background: #0f172a;
+  color: #fff;
+}
+
+.homework-form .ghost,
+.homework-header .ghost,
+.homework-panel-header .ghost {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.homework-header .secondary,
+.homework-panel-header .secondary {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.homework-header .danger {
+  background: #dc2626;
+  color: #fff;
+}
+
+.homework-form button:hover:not(:disabled),
+.submission-grade button:hover:not(:disabled),
+.homework-header .ghost:hover,
+.homework-header .secondary:hover,
+.homework-header .danger:hover,
+.homework-panel-header .ghost:hover,
+.homework-panel-header .secondary:hover,
+.homework-view-tabs button:hover:not(.active) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.16);
+}
+
+.homework-list,
+.submission-list,
+.homework-review-list {
+  display: grid;
+  gap: 14px;
+}
+
+.homework-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+  background: #fff;
+}
+
+.homework-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.homework-header strong {
+  display: block;
+  font-size: 16px;
+}
+
+.homework-card-meta {
+  display: flex;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.homework-card-meta .meta {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.homework-card-meta a {
+  color: #1d4ed8;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.homework-header .actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.homework-empty,
+.submission-empty {
+  padding: 16px;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.homework-review-sidebar {
+  align-content: start;
+}
+
+.homework-review-selector {
+  display: grid;
+  gap: 6px;
+}
+
+.homework-review-list button {
+  text-align: right;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #0f172a;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+}
+
+.homework-review-list button strong {
+  font-size: 14px;
+}
+
+.homework-review-list button span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.homework-review-list button.active {
+  border-color: #60a5fa;
+  background: #eff6ff;
+  box-shadow: 0 10px 18px rgba(96, 165, 250, 0.18);
+}
+
+.homework-review-summary {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.homework-review-summary p {
+  margin: 0;
+  color: #334155;
+}
+
+.submission-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  background: #fff;
+}
+
+.submission-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #475569;
+  font-size: 13px;
+  align-items: flex-start;
+}
+
+.submission-head strong {
+  display: block;
+  color: #0f172a;
+}
+
+.submission-head span {
+  display: block;
+}
+
+.submission-body p {
+  margin: 0 0 6px;
+  color: #1e293b;
+}
+
+.submission-body a {
+  color: #1d4ed8;
+  text-decoration: none;
+}
+
+.submission-grade {
+  display: grid;
+  gap: 8px;
+}
+
+.submission-grade-header {
+  display: grid;
+  gap: 4px;
+  color: #475569;
+  font-size: 13px;
+}
+
+@media (max-width: 1040px) {
+  .homework-section-grid,
+  .homework-section-grid.review {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .homework-card {
+    padding: 18px;
+  }
+
+  .homework-header,
+  .homework-panel-header,
+  .submission-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .homework-view-tabs {
+    width: 100%;
+    display: grid;
+  }
+
+  .homework-view-tabs button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .homework-page :is(a, button, input, select, textarea) {
+    transition: none;
+  }
+}

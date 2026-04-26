@@ -1,0 +1,424 @@
+.online-registrations-page {
+  min-height: 100%;
+  padding: 28px;
+  background:
+    radial-gradient(circle at top right, rgba(20, 110, 100, 0.12), transparent 28%),
+    radial-gradient(circle at top left, rgba(180, 83, 9, 0.12), transparent 24%),
+    linear-gradient(180deg, #eef6f5 0%, #f9f5ef 100%);
+  color: #16302b;
+}
+
+.online-registrations-hero,
+.online-registrations-panel,
+.online-registration-card,
+.online-registration-modal {
+  border: 1px solid rgba(22, 48, 43, 0.08);
+  box-shadow: 0 20px 45px rgba(15, 35, 32, 0.08);
+}
+
+.online-registrations-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.9fr);
+  gap: 18px;
+  align-items: start;
+  margin-bottom: 20px;
+  padding: 24px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(12px);
+}
+
+.online-registrations-kicker {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.online-registrations-copy h1 {
+  margin: 12px 0 10px;
+  font-size: clamp(28px, 4vw, 40px);
+  line-height: 1.2;
+}
+
+.online-registrations-copy p,
+.online-registrations-panel-head p,
+.online-registration-card-head p,
+.online-registration-modal-head p,
+.online-registrations-empty p {
+  margin: 0;
+  color: rgba(22, 48, 43, 0.72);
+  line-height: 1.8;
+}
+
+.online-registrations-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.online-registrations-button {
+  border: none;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #b45309, #c46a12);
+  color: #fff;
+  padding: 11px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+}
+
+.online-registrations-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(180, 83, 9, 0.22);
+}
+
+.online-registrations-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+  transform: none;
+  box-shadow: none;
+}
+
+.online-registrations-button.ghost {
+  border: 1px solid rgba(22, 48, 43, 0.16);
+  background: rgba(255, 255, 255, 0.75);
+  color: #16302b;
+}
+
+.online-registrations-button.success {
+  background: linear-gradient(135deg, #0f766e, #0b8b7f);
+}
+
+.online-registrations-button.danger {
+  background: linear-gradient(135deg, #b91c1c, #dc2626);
+}
+
+.online-registrations-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.online-registrations-stat {
+  padding: 18px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.online-registrations-stat span,
+.online-registrations-count,
+.online-registration-card-body span,
+.online-registration-card-note span,
+.online-registration-modal-card span,
+.online-registration-modal-note span {
+  display: block;
+  font-size: 13px;
+  color: rgba(22, 48, 43, 0.66);
+}
+
+.online-registrations-stat strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.online-registrations-panel {
+  margin-bottom: 18px;
+  padding: 22px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.online-registrations-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.online-registrations-panel-head h2,
+.online-registration-modal-card h3,
+.online-registration-modal-head h2 {
+  margin: 0 0 6px;
+}
+
+.online-registrations-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.online-registrations-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.online-registrations-field input,
+.online-registrations-field select,
+.online-registrations-field textarea {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid rgba(22, 48, 43, 0.14);
+  border-radius: 16px;
+  background: rgba(247, 243, 236, 0.78);
+  color: #16302b;
+  padding: 12px 14px;
+  font-size: 14px;
+}
+
+.online-registrations-field textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.online-registrations-message,
+.online-registrations-loading,
+.online-registrations-empty {
+  padding: 18px 20px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(22, 48, 43, 0.08);
+  box-shadow: 0 18px 36px rgba(15, 35, 32, 0.06);
+}
+
+.online-registrations-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.online-registration-card {
+  padding: 18px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.86);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.online-registration-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 25px 50px rgba(15, 35, 32, 0.12);
+}
+
+.online-registration-card-head,
+.online-registration-modal-head,
+.online-registration-card-actions,
+.online-registration-modal-actions,
+.online-registration-review-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.online-registration-card-head h3 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+
+.online-registration-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.online-registration-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.online-registration-badge.good {
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+}
+
+.online-registration-badge.warn {
+  background: rgba(180, 83, 9, 0.16);
+  color: #b45309;
+}
+
+.online-registration-badge.danger {
+  background: rgba(185, 28, 28, 0.12);
+  color: #b91c1c;
+}
+
+.online-registration-badge.muted {
+  background: rgba(22, 48, 43, 0.08);
+  color: rgba(22, 48, 43, 0.76);
+}
+
+.online-registration-card-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.online-registration-card-body strong,
+.online-registration-modal-card strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.online-registration-card-note,
+.online-registration-modal-note,
+.online-registration-review-box {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(22, 48, 43, 0.08);
+}
+
+.online-registration-card-note p,
+.online-registration-modal-note p {
+  margin: 8px 0 0;
+  line-height: 1.8;
+  color: rgba(22, 48, 43, 0.84);
+}
+
+.online-registration-card-actions {
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.online-registration-card-actions.compact,
+.online-registration-review-actions {
+  margin-top: 10px;
+  justify-content: flex-start;
+}
+
+.online-registration-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 28px;
+  overflow-y: auto;
+  background: rgba(9, 18, 17, 0.46);
+  backdrop-filter: blur(6px);
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+.online-registration-modal {
+  width: min(1120px, 100%);
+  padding: 22px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.96);
+  animation: slideUpFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUpFade {
+  from { opacity: 0; transform: translateY(20px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.online-registration-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.online-registration-modal-card {
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(247, 243, 236, 0.78);
+}
+
+.online-registration-modal-card div {
+  padding: 8px 0;
+  border-bottom: 1px dashed rgba(22, 48, 43, 0.1);
+}
+
+.online-registration-modal-card div:last-child {
+  border-bottom: none;
+}
+
+.online-registration-docs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.online-registration-docs a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: rgba(15, 118, 110, 0.1);
+  color: #0f766e;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.online-registration-doc-empty {
+  color: rgba(22, 48, 43, 0.7);
+}
+
+.online-registration-modal-actions {
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1024px) {
+  .online-registrations-hero,
+  .online-registrations-filters,
+  .online-registrations-stats,
+  .online-registrations-grid,
+  .online-registration-modal-grid,
+  .online-registration-card-body {
+    grid-template-columns: 1fr;
+  }
+
+  .online-registrations-actions,
+  .online-registration-card-head,
+  .online-registration-modal-head,
+  .online-registration-card-actions,
+  .online-registration-modal-actions,
+  .online-registration-review-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .online-registrations-page {
+    padding: 18px;
+  }
+
+  .online-registrations-hero,
+  .online-registrations-panel,
+  .online-registration-card,
+  .online-registration-modal {
+    padding: 16px;
+    border-radius: 20px;
+  }
+
+  .online-registration-modal-backdrop {
+    padding: 14px;
+  }
+}

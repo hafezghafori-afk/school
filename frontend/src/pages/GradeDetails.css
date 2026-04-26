@@ -1,0 +1,150 @@
+.grade-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 40px 16px;
+  color: #f6f7fb;
+}
+
+.grade-card {
+  width: min(720px, 94vw);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  padding: 28px 26px;
+  box-shadow: 0 20px 40px rgba(3, 8, 20, 0.35);
+  backdrop-filter: blur(12px);
+}
+
+.grade-sections,
+.grade-subjects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.grade-sections span,
+.grade-subjects span {
+  background: rgba(242, 185, 12, 0.18);
+  color: #f2b90c;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.grade-search {
+  width: 100%;
+  background: rgba(12, 18, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 12px 12px;
+  font-size: 15px;
+  margin: 10px 0;
+}
+
+.grade-subject-courses {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.subject-block {
+  background: rgba(12, 18, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.subject-block ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  color: rgba(246, 247, 251, 0.8);
+}
+
+.subject-block li span {
+  margin-right: 8px;
+  color: #7cc4ff;
+  font-size: 12px;
+}
+
+.inline-media video {
+  width: 100%;
+  border-radius: 10px;
+  background: #0b1220;
+  margin-top: 8px;
+}
+
+.inline-pdf {
+  display: inline-block;
+  margin-top: 8px;
+  color: #f2b90c;
+  text-decoration: none;
+}
+
+.locked {
+  margin-top: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.locked button {
+  width: auto;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #22c55e;
+}
+
+.grade-books {
+  margin-top: 16px;
+  background: rgba(12, 18, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.grade-books ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.grade-books a {
+  color: #f2b90c;
+  text-decoration: none;
+}
+
+.grade-quiz {
+  margin-top: 16px;
+  background: rgba(12, 18, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.quiz-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.quiz-links a {
+  background: rgba(14, 165, 233, 0.18);
+  color: #7cc4ff;
+  padding: 6px 10px;
+  border-radius: 10px;
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.grade-note {
+  margin-top: 14px;
+  color: rgba(246, 247, 251, 0.8);
+}

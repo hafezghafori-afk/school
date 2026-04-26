@@ -1,0 +1,237 @@
+.dashboard-kpi-card {
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  align-items: center;
+  gap: 14px;
+}
+
+.dashboard-kpi-card__ring {
+  --progress: 0%;
+  width: 78px;
+  height: 78px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at center, rgba(11, 18, 32, 0.9) 0 58%, transparent 59% 100%),
+    conic-gradient(var(--ring-color, #38bdf8) 0 var(--progress), rgba(255, 255, 255, 0.08) var(--progress) 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.dashboard-kpi-card[data-tone="teal"] .dashboard-kpi-card__ring {
+  --ring-color: #38bdf8;
+}
+
+.dashboard-kpi-card[data-tone="mint"] .dashboard-kpi-card__ring {
+  --ring-color: #22c55e;
+}
+
+.dashboard-kpi-card[data-tone="copper"] .dashboard-kpi-card__ring {
+  --ring-color: #f59e0b;
+}
+
+.dashboard-kpi-card[data-tone="rose"] .dashboard-kpi-card__ring {
+  --ring-color: #f472b6;
+}
+
+.dashboard-kpi-card[data-tone="slate"] .dashboard-kpi-card__ring {
+  --ring-color: #94a3b8;
+}
+
+.dashboard-kpi-card__ring strong {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.dashboard-kpi-card__copy {
+  display: grid;
+  gap: 4px;
+}
+
+.dashboard-kpi-card__copy span {
+  color: rgba(246, 247, 251, 0.76);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dashboard-kpi-card__copy h3 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.3;
+}
+
+.dashboard-kpi-card__copy small {
+  color: rgba(246, 247, 251, 0.66);
+  font-size: 12px;
+}
+
+.dashboard-quick-rail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+}
+
+.dashboard-quick-link {
+  display: grid;
+  gap: 6px;
+  align-content: center;
+  min-height: 72px;
+  padding: 14px;
+  border-radius: 16px;
+  text-decoration: none;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(145deg, rgba(44, 77, 122, 0.98), rgba(25, 49, 82, 0.98));
+  box-shadow: 0 18px 34px rgba(2, 6, 23, 0.28);
+}
+
+.dashboard-quick-link[data-tone="teal"] {
+  background: linear-gradient(145deg, rgba(19, 78, 94, 0.98), rgba(15, 118, 110, 0.94));
+}
+
+.dashboard-quick-link[data-tone="copper"] {
+  background: linear-gradient(145deg, rgba(146, 64, 14, 0.98), rgba(217, 119, 6, 0.92));
+}
+
+.dashboard-quick-link[data-tone="mint"] {
+  background: linear-gradient(145deg, rgba(20, 83, 45, 0.98), rgba(22, 163, 74, 0.9));
+}
+
+.dashboard-quick-link[data-tone="slate"] {
+  background: linear-gradient(145deg, rgba(51, 65, 85, 0.98), rgba(71, 85, 105, 0.92));
+}
+
+.dashboard-quick-link strong {
+  font-size: 15px;
+}
+
+.dashboard-quick-link span {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.dashboard-task-panel,
+.dashboard-trend-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.dashboard-summary-card {
+  gap: 18px;
+}
+
+.dashboard-summary-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.dashboard-summary-card__head h3 {
+  margin: 0 0 6px;
+}
+
+.dashboard-summary-card__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.dashboard-summary-card__quick {
+  display: grid;
+  gap: 12px;
+}
+
+.dashboard-summary-card__panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.dashboard-summary-card__panels > * {
+  min-height: 100%;
+}
+
+.dashboard-summary-card__note {
+  color: rgba(246, 247, 251, 0.72);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.dashboard-task-panel__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.dashboard-task-panel__head h3 {
+  margin: 0 0 4px;
+}
+
+.dashboard-task-panel__list,
+.dashboard-trend-panel__bars {
+  display: grid;
+  gap: 10px;
+}
+
+.dashboard-task-panel__item,
+.dashboard-trend-panel__row {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.dashboard-task-panel__item > div,
+.dashboard-trend-panel__copy {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dashboard-task-panel__item strong,
+.dashboard-trend-panel__copy strong {
+  font-size: 14px;
+}
+
+.dashboard-task-panel__item span,
+.dashboard-trend-panel__copy span {
+  color: rgba(246, 247, 251, 0.72);
+  font-size: 12px;
+}
+
+.dashboard-trend-panel__track {
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(148, 163, 184, 0.14);
+}
+
+.dashboard-trend-panel__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #38bdf8, #22c55e);
+}
+
+@media (max-width: 720px) {
+  .dashboard-kpi-card {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .dashboard-summary-card__head {
+    flex-direction: column;
+  }
+
+  .dashboard-task-panel__head,
+  .dashboard-task-panel__item > div,
+  .dashboard-trend-panel__copy {
+    flex-direction: column;
+  }
+}

@@ -1,0 +1,414 @@
+.admin-content-page {
+  padding: 36px 40px 80px;
+  color: #f6f7fb;
+}
+
+.admin-content-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.admin-content-hero p {
+  color: rgba(246, 247, 251, 0.7);
+}
+
+.admin-content-form {
+  background: rgba(12, 18, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.admin-content-form label {
+  display: block;
+  font-size: 12px;
+  color: rgba(246, 247, 251, 0.7);
+  margin-bottom: 6px;
+}
+
+.admin-content-form input,
+.admin-content-form select,
+.admin-content-form textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(12, 18, 30, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.form-actions button {
+  width: auto;
+  padding: 8px 16px;
+  border-radius: 10px;
+}
+
+.form-actions .ghost {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #f6f7fb;
+}
+
+.form-switch {
+  display: flex;
+  align-items: flex-end;
+}
+
+.form-switch label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  margin: 0;
+}
+
+.form-message {
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(246, 247, 251, 0.75);
+}
+
+.admin-content-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-content-item {
+  background: rgba(12, 18, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-content-item span {
+  display: block;
+  font-size: 12px;
+  color: rgba(246, 247, 251, 0.6);
+}
+
+.admin-content-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.admin-content-actions button {
+  width: auto;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.admin-content-actions .danger {
+  background: #ef4444;
+}
+
+@media (max-width: 720px) {
+  .admin-content-page {
+    padding: 28px 20px 60px;
+  }
+}
+.form-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.form-preview img {
+  width: 120px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.admin-content-filters {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.admin-content-filters input,
+.admin-content-filters select {
+  width: auto;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(12, 18, 30, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.admin-content-item a {
+  display: inline-block;
+  margin-right: 8px;
+  color: #7cc4ff;
+  text-decoration: none;
+  font-size: 12px;
+}
+.admin-docs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.admin-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.admin-detail-card {
+  background: rgba(12, 18, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.admin-detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.admin-detail-row:last-child {
+  border-bottom: none;
+}
+
+.admin-detail-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.admin-detail-actions .ghost {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #f6f7fb;
+  text-decoration: none;
+  padding: 8px 12px;
+  border-radius: 10px;
+}
+
+.admin-detail-actions .primary {
+  background: linear-gradient(135deg, #14b8a6, #0f766e);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  color: #ffffff;
+  text-decoration: none;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-weight: 800;
+  box-shadow: 0 12px 24px rgba(20, 184, 166, 0.22);
+}
+
+.admin-enrollments-page {
+  font-family: "Vazirmatn", "B Zar", "B Mitra", "Noto Naskh Arabic", Tahoma, sans-serif;
+}
+
+.enrollment-command-center {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.35fr) minmax(220px, 1fr) minmax(220px, 0.9fr);
+  gap: 14px;
+  margin: 12px 0 18px;
+}
+
+.enrollment-command-card,
+.enrollment-mini-stats {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 18px;
+  padding: 16px;
+  color: #f8fafc;
+  text-decoration: none;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.14);
+  backdrop-filter: blur(14px);
+}
+
+.enrollment-command-card {
+  display: grid;
+  gap: 6px;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.enrollment-command-card:hover {
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.enrollment-command-card--primary {
+  background:
+    linear-gradient(135deg, rgba(20, 184, 166, 0.92), rgba(15, 118, 110, 0.84)),
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.22), transparent 42%);
+}
+
+.enrollment-command-card .eyebrow {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.enrollment-command-card strong {
+  font-size: 18px;
+}
+
+.enrollment-command-card small {
+  color: rgba(248, 250, 252, 0.76);
+  line-height: 1.8;
+}
+
+.enrollment-mini-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  align-items: stretch;
+}
+
+.enrollment-mini-stats span {
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  padding: 10px 8px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(248, 250, 252, 0.72);
+  font-size: 12px;
+}
+
+.enrollment-mini-stats b {
+  color: #ffffff;
+  font-size: 20px;
+}
+
+.admin-content-empty {
+  display: grid;
+  gap: 6px;
+  padding: 22px;
+  border-radius: 18px;
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+}
+
+.admin-content-empty span {
+  color: rgba(248, 250, 252, 0.68);
+  font-size: 13px;
+}
+
+@media (max-width: 920px) {
+  .enrollment-command-center {
+    grid-template-columns: 1fr;
+  }
+
+  .enrollment-mini-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.admin-content-actions .ghost,
+.admin-detail-actions button.ghost {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #f6f7fb;
+}
+@media print {
+  body {
+    background: white !important;
+    color: #111 !important;
+  }
+
+  .site-header,
+  .main-nav,
+  .topbar,
+  .midbar,
+  .footer,
+  .card-back,
+  .admin-detail-actions,
+  .admin-content-actions,
+  .admin-content-filters,
+  .enrollment-command-center {
+    display: none !important;
+  }
+
+  .admin-content-page,
+  .admin-detail-card {
+    box-shadow: none !important;
+    border: 1px solid #ddd !important;
+    background: #fff !important;
+    color: #111 !important;
+  }
+}
+.admin-content-item pre {
+  margin-top: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  color: rgba(246, 247, 251, 0.75);
+}
+
+.log-meta-details {
+  margin-top: 8px;
+}
+
+.log-meta-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  color: #bfdbfe;
+}
+
+.log-meta-details[open] summary {
+  margin-bottom: 8px;
+}
+
+.logs-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.logs-summary-card {
+  background: rgba(12, 18, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.logs-summary-card span {
+  display: block;
+  font-size: 12px;
+  color: rgba(246, 247, 251, 0.7);
+}
+
+.logs-summary-card strong {
+  font-size: 20px;
+  font-weight: 800;
+  color: #f8fafc;
+}

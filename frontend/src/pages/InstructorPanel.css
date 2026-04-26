@@ -1,0 +1,121 @@
+.instructor-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 40px 16px;
+  color: #f6f7fb;
+}
+
+.instructor-card {
+  width: min(860px, 96vw);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  padding: 28px 26px;
+  box-shadow: 0 20px 40px rgba(3, 8, 20, 0.35);
+  backdrop-filter: blur(12px);
+}
+
+.instructor-card label {
+  display: block;
+  margin: 10px 0 6px;
+  font-size: 14px;
+  color: rgba(246, 247, 251, 0.85);
+}
+
+.instructor-card input,
+.instructor-card select {
+  width: 100%;
+  background: rgba(12, 18, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 12px 12px;
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+
+.module-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  margin: 12px 0 18px;
+}
+
+.module-list {
+  display: grid;
+  gap: 16px;
+}
+
+.module-item {
+  background: rgba(12, 18, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.module-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.module-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.module-actions button {
+  width: auto;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.module-actions .danger {
+  background: #ef4444;
+}
+
+.lesson-form {
+  display: grid;
+  grid-template-columns: 1fr 120px 1fr 140px 120px 180px auto;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.module-item ul {
+  margin: 0;
+  padding-left: 20px;
+  color: rgba(246, 247, 251, 0.8);
+}
+
+.module-item li span {
+  color: #7cc4ff;
+  margin-right: 8px;
+  font-size: 12px;
+}
+
+.module-item li button {
+  margin-right: 10px;
+  width: auto;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: #ef4444;
+}
+
+.module-item li button:not(.danger) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.module-item li .meta {
+  color: rgba(246, 247, 251, 0.6);
+  margin-right: 8px;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .lesson-form {
+    grid-template-columns: 1fr;
+  }
+}
