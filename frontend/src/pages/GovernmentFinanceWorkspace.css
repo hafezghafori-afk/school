@@ -7,6 +7,8 @@
   --slate: #3d5a57;
   --rose: #9f1239;
   --border: rgba(21, 48, 43, 0.12);
+  --font-persian-ui: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  --font-persian-display: "B Nazanin", "B Mitra", "B Zar", Tahoma, sans-serif;
   min-height: 100vh;
   padding: 28px 18px 56px;
   color: var(--ink);
@@ -14,7 +16,8 @@
     radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 24%),
     radial-gradient(circle at 88% 14%, rgba(180, 83, 9, 0.16), transparent 22%),
     linear-gradient(180deg, #f7faf8 0%, #eef4f2 44%, #f8f5ef 100%);
-  font-family: "Segoe UI", Tahoma, sans-serif;
+  font-family: var(--font-persian-ui);
+  font-size: 1.08rem;
 }
 
 .gov-finance-shell {
@@ -99,10 +102,11 @@
 }
 
 .gov-finance-hero h1 {
+  font-family: var(--font-persian-display);
   margin: 16px 0 10px;
   font-size: clamp(2rem, 4vw, 3.5rem);
   line-height: 1.05;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
 }
 
 .gov-finance-hero p {
@@ -448,6 +452,8 @@
   padding: 11px 12px;
   background: rgba(255, 255, 255, 0.92);
   color: var(--ink);
+  font-family: var(--font-persian-ui);
+  font-size: 1rem;
 }
 
 .gov-field textarea {
@@ -1309,6 +1315,8 @@
   width: 100%;
   min-width: 760px;
   border-collapse: collapse;
+  font-family: var(--font-persian-ui);
+  font-size: 1rem;
 }
 
 .gov-table th,

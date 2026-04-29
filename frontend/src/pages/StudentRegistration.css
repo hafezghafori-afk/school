@@ -100,6 +100,81 @@
   color: var(--sr-primary);
 }
 
+.student-registration-alert {
+  margin: 0 0 24px;
+  padding: 14px 16px;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+  font-weight: 700;
+  line-height: 1.8;
+  text-align: center;
+}
+
+.student-registration-school-select {
+  display: block;
+  width: min(100%, 360px);
+  margin: 12px auto 0;
+  padding: 10px 12px;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #102033;
+  font: inherit;
+}
+
+.student-registration-school-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 0 0 24px;
+  padding: 12px 14px;
+  border: 1px solid rgba(15, 118, 110, 0.2);
+  border-radius: 8px;
+  background: #ecfdf5;
+  color: #0f3f3a;
+  line-height: 1.7;
+}
+
+.student-registration-school-context strong {
+  width: 100%;
+  text-align: center;
+}
+
+.student-registration-school-context span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 118, 110, 0.16);
+}
+
+.student-registration-submit-status {
+  margin: 0 0 22px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(14, 165, 233, 0.26);
+  background: #eff6ff;
+  color: #075985;
+  font-weight: 800;
+  line-height: 1.8;
+  text-align: center;
+}
+
+.student-registration-submit-status.error {
+  border-color: rgba(220, 38, 38, 0.34);
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.student-registration-submit-status.success {
+  border-color: rgba(22, 163, 74, 0.32);
+  background: #f0fdf4;
+  color: #166534;
+}
+
 .student-registration-page label {
   color: #334155;
   font-weight: 800;

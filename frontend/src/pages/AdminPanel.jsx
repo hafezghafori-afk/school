@@ -16,10 +16,15 @@ import {
   resolveTimetableSchoolId,
   writeDailyTimetableDraft
 } from '../utils/dailyTimetableDraft';
+import { persistActiveSchoolId, readStoredSchoolId, resolveActiveSchoolContext } from './adminWorkspaceUtils';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const schoolId = readStoredSchoolId();
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(schoolId ? { 'X-School-Id': schoolId } : {})
+  };
 };
 
 const getName = () => localStorage.getItem('userName') || 'مدیر';
@@ -671,6 +676,10 @@ export default function AdminPanel() {
   });
   const [reportActivityItems, setReportActivityItems] = useState([]);
   const [settingsQuickLinks, setSettingsQuickLinks] = useState([]);
+  const [activeSchoolContext, setActiveSchoolContext] = useState(null);
+  const [schoolOptions, setSchoolOptions] = useState([]);
+  const [schoolScopeBusy, setSchoolScopeBusy] = useState(false);
+  const [schoolScopeMessage, setSchoolScopeMessage] = useState('');
   const [stats, setStats] = useState({
     users: 0,
     courses: 0,
@@ -878,6 +887,27 @@ export default function AdminPanel() {
     [effectivePermissions]
   );
 
+  const activeSchoolId = useMemo(() => (
+    String(activeSchoolContext?.schoolId || activeSchoolContext?.school?._id || '').trim()
+  ), [activeSchoolContext?.schoolId, activeSchoolContext?.school?._id]);
+
+  const visibleSchoolOptions = useMemo(() => {
+    const rows = [
+      ...(Array.isArray(schoolOptions) ? schoolOptions : []),
+      ...(Array.isArray(activeSchoolContext?.schools) ? activeSchoolContext.schools : []),
+      activeSchoolContext?.school
+    ].filter(Boolean);
+    const map = new Map();
+    rows.forEach((school) => {
+      const id = String(school?._id || school?.id || '').trim();
+      if (!id || map.has(id)) return;
+      map.set(id, school);
+    });
+    return Array.from(map.values()).sort((left, right) => (
+      String(left?.nameDari || left?.name || '').localeCompare(String(right?.nameDari || right?.name || ''), 'fa')
+    ));
+  }, [activeSchoolContext?.school, activeSchoolContext?.schools, schoolOptions]);
+
   const searchSections = useMemo(() => (
     SEARCH_SECTION_CONFIG.map((section) => {
       const items = Array.isArray(searchResults[section.key]) ? searchResults[section.key] : [];
@@ -1024,16 +1054,17 @@ export default function AdminPanel() {
     try {
       for (let i = 0; i < selectedShiftRows.length; i++) {
         const row = selectedShiftRows[i];
-        const res = await fetch(`${API_BASE}/api/school-shifts`, {
+        const res = await fetch(`${API_BASE}/api/shifts/school/${wizardSchoolId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({
             schoolId: wizardSchoolId,
-            name: row.name.trim(),
+            name: row.code.trim() || 'morning',
+            nameDari: row.name.trim(),
+            namePashto: row.name.trim(),
             code: row.code.trim() || row.name.toLowerCase().replace(/\s+/g, '_'),
             startTime: row.startTime,
             endTime: row.endTime,
-            sortOrder: i,
             isActive: true
           })
         });
@@ -1051,7 +1082,7 @@ export default function AdminPanel() {
       } else {
         // Fallback: اگر پاسخ سرور ساختار غیرمنتظره داشت، مستقیم از API فچ کن
         try {
-          const fallbackRes = await fetch(`${API_BASE}/api/school-shifts/school/${wizardSchoolId}`, { headers: getAuthHeaders() });
+          const fallbackRes = await fetch(`${API_BASE}/api/shifts/school/${wizardSchoolId}`, { headers: getAuthHeaders() });
           const fallbackData = await fallbackRes.json();
           const fallbackShifts = (fallbackData?.data || []).filter(s => s?._id);
           setWizardCreatedShifts(fallbackShifts);
@@ -1179,6 +1210,90 @@ export default function AdminPanel() {
       return item;
     }).filter((item) => !item.permission || permissionAllows(item.permission, effectivePermissions))
   ), [canManageSchedule, effectivePermissions]);
+
+  const loadActiveSchoolContext = useCallback(async () => {
+    const context = await resolveActiveSchoolContext();
+    setActiveSchoolContext(context);
+    return context;
+  }, []);
+
+  const loadSchoolOptions = useCallback(async () => {
+    const res = await fetch(`${API_BASE}/api/afghan-schools?limit=100`, {
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    if (!res.ok || data?.success === false) {
+      throw new Error(data?.message || 'School list failed');
+    }
+    setSchoolOptions(Array.isArray(data?.data?.schools) ? data.data.schools : []);
+  }, []);
+
+  const handleActiveSchoolChange = async (eventOrSchoolId) => {
+    const nextSchoolId = String(eventOrSchoolId?.target?.value || eventOrSchoolId || '').trim();
+    if (!nextSchoolId) return;
+    setSchoolScopeBusy(true);
+    setSchoolScopeMessage('');
+    try {
+      persistActiveSchoolId(nextSchoolId);
+      await loadActiveSchoolContext();
+      setSchoolScopeMessage('مکتب فعال تغییر کرد. صفحه برای هماهنگ شدن همه بخش‌ها تازه می‌شود.');
+      window.setTimeout(() => window.location.reload(), 450);
+    } catch (error) {
+      setSchoolScopeMessage(error?.message || 'تغییر مکتب فعال ناموفق بود.');
+      setSchoolScopeBusy(false);
+    }
+  };
+
+  const handleDeleteSchool = async (school) => {
+    const schoolId = String(school?._id || school?.id || '');
+    if (!schoolId || schoolScopeBusy) return;
+    if (String(activeSchoolContext?.schoolId || '') === schoolId) {
+      setSchoolScopeMessage('اول یک مکتب دیگر را فعال کنید، بعد این مکتب را حذف نمایید.');
+      return;
+    }
+    const schoolName = school?.nameDari || school?.name || 'این مکتب';
+    const confirmed = window.confirm(`آیا مطمئن هستید که "${schoolName}" حذف شود؟ اگر این مکتب دیتا داشته باشد، سیستم اجازه حذف نمی‌دهد.`);
+    if (!confirmed) return;
+    setSchoolScopeBusy(true);
+    setSchoolScopeMessage('');
+    try {
+      const res = await fetch(`${API_BASE}/api/afghan-schools/${schoolId}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) {
+        throw new Error(data?.message || 'حذف مکتب ناموفق بود.');
+      }
+      setSchoolScopeMessage('مکتب آزمایشی حذف شد.');
+      await loadSchoolOptions();
+      await loadActiveSchoolContext();
+    } catch (error) {
+      setSchoolScopeMessage(error?.message || 'حذف مکتب ناموفق بود.');
+    } finally {
+      setSchoolScopeBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    Promise.allSettled([
+      resolveActiveSchoolContext(),
+      fetch(`${API_BASE}/api/afghan-schools?limit=100`, { headers: getAuthHeaders() }).then((res) => res.json())
+    ])
+      .then((results) => {
+        if (!mounted) return;
+        const schoolContext = results[0].status === 'fulfilled' ? results[0].value : null;
+        const schoolList = results[1].status === 'fulfilled' ? results[1].value : null;
+        setActiveSchoolContext(schoolContext || { error: true });
+        const schoolsFromList = Array.isArray(schoolList?.data?.schools) ? schoolList.data.schools : [];
+        const schoolsFromContext = Array.isArray(schoolContext?.schools) ? schoolContext.schools : [];
+        setSchoolOptions(schoolsFromList.length ? schoolsFromList : schoolsFromContext);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -3226,6 +3341,113 @@ export default function AdminPanel() {
           </div>
         </div>
       </div>
+
+      <section className={`admin-active-school-scope${activeSchoolContext?.error ? ' admin-active-school-scope--warning' : ''}`} aria-label="مکتب فعال">
+        {!activeSchoolContext && (
+          <>
+            <div>
+              <span className="admin-active-school-scope__eyebrow">مکتب فعال</span>
+              <strong>در حال دریافت معلومات مکتب...</strong>
+              <small>اگر این پیام باقی ماند، backend را یک‌بار restart کنید.</small>
+            </div>
+            <div className="admin-active-school-scope__metrics">
+              <span>وضعیت<b>در حال بررسی</b></span>
+            </div>
+          </>
+        )}
+        {activeSchoolContext?.error && (
+          <>
+            <div>
+              <span className="admin-active-school-scope__eyebrow">مکتب فعال</span>
+              <strong>معلومات مکتب فعال دریافت نشد</strong>
+              <small>احتمالاً backend هنوز با کد جدید restart نشده یا API در دسترس نیست.</small>
+            </div>
+            <div className="admin-active-school-scope__metrics">
+              <span>وضعیت<b>نیاز به بررسی</b></span>
+            </div>
+          </>
+        )}
+        {activeSchoolContext?.school && (
+          <>
+            <div>
+              <span className="admin-active-school-scope__eyebrow">مکتب فعال</span>
+              <strong>{activeSchoolContext.school.nameDari || activeSchoolContext.school.name || 'مکتب'}</strong>
+              <small>کد: {activeSchoolContext.school.schoolCode || '-'}</small>
+              {!!schoolScopeMessage && <small className="admin-active-school-scope__message">{schoolScopeMessage}</small>}
+            </div>
+            <div className="admin-active-school-scope__metrics">
+              {[
+                ['شاگردان', activeSchoolContext.scopeSummary?.students?.count],
+                ['استادان', activeSchoolContext.scopeSummary?.teachers?.count],
+                ['صنف‌ها', activeSchoolContext.scopeSummary?.classes?.count],
+                ['سال تعلیمی', activeSchoolContext.scopeSummary?.academicYears?.count],
+                ['تقسیم اوقات', activeSchoolContext.scopeSummary?.timetableEntries?.count],
+                ['شقه‌ها', activeSchoolContext.scopeSummary?.sheetTemplates?.count],
+                ['سال مالی', activeSchoolContext.scopeSummary?.financialYears?.count],
+                ['گزارش دولت', activeSchoolContext.scopeSummary?.governmentFinanceSnapshots?.count]
+              ].map(([label, value]) => (
+                <span key={label}>
+                  {label}
+                  <b>{Number(value || 0).toLocaleString('fa-AF')}</b>
+                </span>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
+
+      <section className="admin-school-switcher" aria-label="انتخاب مکتب فعال">
+        <div className="admin-school-switcher__head">
+          <div>
+            <span className="admin-active-school-scope__eyebrow">لیست مکاتب</span>
+            <h3>انتخاب و فعال‌سازی مکتب</h3>
+          </div>
+          <button type="button" className="admin-school-switcher__refresh" onClick={loadSchoolOptions} disabled={schoolScopeBusy}>
+            بازبینی لیست
+          </button>
+        </div>
+        {visibleSchoolOptions.length === 0 ? (
+          <div className="admin-school-switcher__empty">
+            هنوز مکتبی در لیست دریافت نشد. اگر مکتب ساخته‌اید، backend را restart و صفحه را تازه کنید.
+          </div>
+        ) : (
+          <div className="admin-school-switcher__grid">
+            {visibleSchoolOptions.map((school) => {
+              const schoolId = String(school?._id || school?.id || '');
+              const isActive = schoolId === activeSchoolId;
+              return (
+                <div key={schoolId} className={`admin-school-switcher__item${isActive ? ' is-active' : ''}`}>
+                  <div>
+                    <strong>{school.nameDari || school.name || 'مکتب'}</strong>
+                    <span>کد: {school.schoolCode || '-'}</span>
+                    <small>{[school.province, school.district].filter(Boolean).join('، ') || 'موقعیت ثبت نشده'}</small>
+                  </div>
+                  <div className="admin-school-switcher__actions">
+                    {isActive ? (
+                      <span className="admin-school-switcher__badge">فعال</span>
+                    ) : (
+                      <button type="button" onClick={() => handleActiveSchoolChange(schoolId)} disabled={schoolScopeBusy}>
+                        فعال‌سازی
+                      </button>
+                    )}
+                    {!isActive && (
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => handleDeleteSchool(school)}
+                        disabled={schoolScopeBusy}
+                      >
+                        حذف
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {!!schoolScopeMessage && <div className="admin-school-switcher__message">{schoolScopeMessage}</div>}
+      </section>
 
       {canViewReports && (
         <div className="admin-executive-strip">

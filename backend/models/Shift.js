@@ -27,7 +27,6 @@ const shiftSchema = new mongoose.Schema({
   code: {
     type: String,
     required: true,
-    unique: true,
     trim: true
   },
   startTime: {
@@ -61,6 +60,7 @@ const shiftSchema = new mongoose.Schema({
 
 // Indexes
 shiftSchema.index({ schoolId: 1, name: 1 }, { unique: true });
+shiftSchema.index({ schoolId: 1, code: 1 }, { unique: true });
 shiftSchema.index({ schoolId: 1, isActive: 1 });
 
 module.exports = mongoose.model('Shift', shiftSchema);

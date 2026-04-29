@@ -1,1 +1,14 @@
 https://github.com/hafezghafori-afk/school.git 
+CLIENT_URL=https://school-swart-delta.vercel.app
+VITE_API_URL=https://لینک-backend-render.onrender.com
+
+
+منگو:
+schooluser
+MgkbN7Gt8Dq2RRe
+
+mongodb+srv://<hafezghafori_db_user>:<Ov960TDIa3Z1rKEA>@cluster0.d1668vv.mongodb.net/?appName=Cluster0
+
+
+Ov960TDIa3Z1rKEA
+hafezghafori_db_user

@@ -17,14 +17,16 @@ import {
   X
 } from '../components/ui/icons';
 import { useToast } from '../components/ui/toast';
+import {
+  DEFAULT_SCHOOL_ID,
+  getAuthHeaders,
+  persistActiveSchoolId,
+  readStoredSchoolId,
+  repairDisplayText,
+  resolveActiveSchoolContext
+} from './adminWorkspaceUtils';
 import './AfghanSchoolManagement.css';
-
-const getAuthHeaders = () => {
-  const token = localStorage.getItem('token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
-};
-
-const DEFAULT_SCHOOL_ID = 'default-school-id';
+import './StudentRegistration.css';
 
 const PROVINCES = [
   { value: 'kabul', label: 'کابل' },
@@ -60,6 +62,23 @@ const PROVINCES = [
 const BLOOD_TYPES = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
 
 const trimValue = (value) => String(value || '').trim();
+const displayText = (value) => repairDisplayText(value);
+
+async function fetchStudentRegistrationJson(path, headers = {}) {
+  const response = await fetch(path, {
+    headers: {
+      ...headers,
+      'Cache-Control': 'no-cache'
+    },
+    cache: 'no-store'
+  });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok || data?.success === false) {
+    throw new Error(displayText(data?.message || data?.error || `درخواست ناموفق بود (${response.status})`));
+  }
+  return data || { success: true, data: [] };
+}
 
 const getEntityId = (value) => {
   if (!value) return '';
@@ -223,7 +242,8 @@ const createEmptyForm = (academicYearId = '') => ({
 
 const StudentRegistration = () => {
   const toast = useToast();
-  const schoolId = localStorage.getItem('schoolId') || localStorage.getItem('school_id') || localStorage.getItem('selectedSchoolId') || DEFAULT_SCHOOL_ID;
+  const [schoolId, setSchoolId] = useState(() => readStoredSchoolId() || DEFAULT_SCHOOL_ID);
+  const [activeSchoolContext, setActiveSchoolContext] = useState(null);
   const registeredBy = localStorage.getItem('userId') || '';
 
   const [formData, setFormData] = useState(() => createEmptyForm());
@@ -237,8 +257,11 @@ const StudentRegistration = () => {
   const [classes, setClasses] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [referenceLoading, setReferenceLoading] = useState(true);
   const [errors, setErrors] = useState({});
+  const [submitStatus, setSubmitStatus] = useState({ type: '', text: '' });
   const [lastRegisteredStudent, setLastRegisteredStudent] = useState(null);
+  const requiresSchoolSelection = Boolean(activeSchoolContext?.requiresSelection || !activeSchoolContext?.schoolId);
 
   const defaultAcademicYearId = useMemo(
     () => academicYears.find((item) => item.isCurrent)?._id || academicYears[0]?._id || '',
@@ -278,18 +301,26 @@ const StudentRegistration = () => {
 
   useEffect(() => {
     const loadInitialData = async () => {
+      setReferenceLoading(true);
       try {
-        const headers = getAuthHeaders();
-        const [yearsResponse, classesResponse, shiftsResponse] = await Promise.all([
-          fetch(`/api/academic-years/school/${schoolId}`, { headers }),
-          fetch(`/api/school-classes/school/${schoolId}`, { headers }),
-          fetch(`/api/shifts/school/${schoolId}`, { headers })
-        ]);
+        const schoolContext = await resolveActiveSchoolContext();
+        setActiveSchoolContext(schoolContext);
+        const effectiveSchoolId = schoolContext.schoolId || DEFAULT_SCHOOL_ID;
+        setSchoolId(effectiveSchoolId);
 
+        if (schoolContext.requiresSelection || !schoolContext.schoolId) {
+          setAcademicYears([]);
+          setClasses([]);
+          setShifts([]);
+          toast.error('اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید.');
+          return;
+        }
+
+        const headers = getAuthHeaders();
         const [yearsData, classesData, shiftsData] = await Promise.all([
-          yearsResponse.json(),
-          classesResponse.json(),
-          shiftsResponse.json()
+          fetchStudentRegistrationJson(`/api/academic-years/school/${effectiveSchoolId}`, headers),
+          fetchStudentRegistrationJson(`/api/school-classes/school/${effectiveSchoolId}`, headers),
+          fetchStudentRegistrationJson(`/api/shifts/school/${effectiveSchoolId}`, headers)
         ]);
 
         const yearItems = yearsData.success ? yearsData.data || [] : [];
@@ -307,12 +338,14 @@ const StudentRegistration = () => {
         }));
       } catch (error) {
         console.error('Failed to load student registration references:', error);
-        toast.error('خطا در دریافت اطلاعات اولیه ثبت شاگرد.');
+        toast.error(displayText(error.message || 'خطا در دریافت اطلاعات اولیه ثبت شاگرد.'));
+      } finally {
+        setReferenceLoading(false);
       }
     };
 
     loadInitialData();
-  }, [schoolId, toast]);
+  }, [toast]);
 
   const handleInputChange = (field, value) => {
     setFormData((current) => {
@@ -373,12 +406,34 @@ const StudentRegistration = () => {
     setStudentFiles((prev) => ({ ...prev, [key]: file }));
   };
 
+  const handleActiveSchoolSelect = (value) => {
+    if (!value) return;
+    persistActiveSchoolId(value);
+    setSchoolId(value);
+    setActiveSchoolContext((current) => ({
+      ...(current || {}),
+      schoolId: value,
+      requiresSelection: false
+    }));
+    window.location.reload();
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     const submitIntent = event.nativeEvent?.submitter?.value === 'assign' ? 'assign' : 'save';
+    setSubmitStatus({ type: 'info', text: 'در حال بررسی معلومات فرم...' });
+
+    if (requiresSchoolSelection) {
+      const message = 'اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید.';
+      setSubmitStatus({ type: 'error', text: message });
+      toast.error(message);
+      return;
+    }
 
     if (!validateForm()) {
-      toast.error('لطفاً همه فیلدهای الزامی را تکمیل کنید.');
+      const message = 'فرم تکمیل نیست. لطفاً فیلدهای پیام‌دار را بررسی و تکمیل کنید.';
+      setSubmitStatus({ type: 'error', text: message });
+      toast.error(message);
       return;
     }
 
@@ -393,33 +448,38 @@ const StudentRegistration = () => {
       });
 
       if (!payload.academicInfo.currentSchool) {
-        toast.error('برای ثبت شاگرد، صنف باید به یک مکتب معتبر وصل باشد.');
+        const message = 'برای ثبت شاگرد، صنف باید به یک مکتب معتبر وصل باشد.';
+        setSubmitStatus({ type: 'error', text: message });
+        toast.error(message);
         return;
       }
 
-      const formDataToSend = new FormData();
-      formDataToSend.append('payload', JSON.stringify({ ...payload, registeredBy }));
-      if (studentFiles.tazkira) formDataToSend.append('tazkira', studentFiles.tazkira);
-      if (studentFiles.fatherTazkira) formDataToSend.append('fatherTazkira', studentFiles.fatherTazkira);
-      if (studentFiles.photo) formDataToSend.append('photo', studentFiles.photo);
-      if (studentFiles.seParcha) formDataToSend.append('seParcha', studentFiles.seParcha);
-
+      setSubmitStatus({ type: 'info', text: 'در حال ارسال معلومات به سرور...' });
       const response = await fetch('/api/afghan-students', {
         method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           ...getAuthHeaders()
         },
-        body: formDataToSend
+        body: JSON.stringify({ ...payload, registeredBy })
       });
 
-      const data = await response.json();
+      const responseText = await response.text();
+      let data = null;
+      try {
+        data = responseText ? JSON.parse(responseText) : null;
+      } catch {
+        data = null;
+      }
 
-      if (!data.success) {
-        toast.error(data.message || 'ثبت شاگرد ناموفق بود.');
+      if (!response.ok || data?.success === false) {
+        const message = displayText(data?.message || data?.error || responseText || `ثبت شاگرد ناموفق بود (${response.status}).`);
+        setSubmitStatus({ type: 'error', text: message });
+        toast.error(message);
         return;
       }
 
-      const createdStudent = data.data || {};
+      const createdStudent = data.data || data.student || data.item || data._doc || {};
       const candidateRef = createdStudent._id ? `afghan:${createdStudent._id}` : '';
       const displayName = [
         createdStudent.personalInfo?.firstName || formData.firstName,
@@ -437,6 +497,7 @@ const StudentRegistration = () => {
 
       setLastRegisteredStudent(summary);
       setErrors({});
+      setSubmitStatus({ type: 'success', text: `شاگرد ${summary.displayName} با موفقیت ثبت شد.` });
       setFormData(createEmptyForm(defaultAcademicYearId));
       setStudentFiles({ tazkira: null, fatherTazkira: null, photo: null, seParcha: null });
 
@@ -449,7 +510,9 @@ const StudentRegistration = () => {
       toast.success('شاگرد با موفقیت ثبت شد. می‌توانید ثبت بعدی را ادامه دهید.');
     } catch (error) {
       console.error('Error registering student:', error);
-      toast.error('خطا در ثبت شاگرد.');
+      const message = displayText(error?.message || 'خطا در ثبت شاگرد.');
+      setSubmitStatus({ type: 'error', text: message });
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -457,9 +520,44 @@ const StudentRegistration = () => {
 
   return (
     <div className="school-management" style={{ minHeight: '100vh' }}>
-      <form className="school-form" onSubmit={handleSubmit} style={{ maxWidth: 900, margin: '40px auto', background: 'white', borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.08)', padding: 32 }}>
+      <form className="school-form" onSubmit={handleSubmit} noValidate style={{ maxWidth: 900, margin: '40px auto', background: 'white', borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.08)', padding: 32 }}>
         <h2 style={{ textAlign: 'center', color: '#2c3e50', marginBottom: 8 }}>ثبت شاگرد جدید</h2>
         <p className="form-subtitle" style={{ textAlign: 'center', color: '#666', marginBottom: 24 }}>معلومات شاگرد را وارد کنید و پس از تکمیل، ذخیره نمایید.</p>
+        {requiresSchoolSelection && (
+          <div className="student-registration-alert" role="alert">
+            اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید. ثبت شاگرد بدون مکتب واقعی در دیتابیس ذخیره نمی‌شود.
+            {Array.isArray(activeSchoolContext?.schools) && activeSchoolContext.schools.length > 0 && (
+              <select
+                className="student-registration-school-select"
+                defaultValue=""
+                onChange={(event) => handleActiveSchoolSelect(event.target.value)}
+              >
+                <option value="">انتخاب مکتب فعال</option>
+                {activeSchoolContext.schools.map((school) => (
+                  <option key={school._id || school.id} value={school._id || school.id}>
+                    {school.nameDari || school.name || school.schoolCode}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
+        {!requiresSchoolSelection && activeSchoolContext?.school && (
+          <div className="student-registration-school-context">
+            <strong>مکتب فعال: {activeSchoolContext.school.nameDari || activeSchoolContext.school.name || 'مکتب'}</strong>
+            <span>کد: {activeSchoolContext.school.schoolCode || '-'}</span>
+            <span>شاگردان: {Number(activeSchoolContext.scopeSummary?.students?.count || 0).toLocaleString('fa-AF')}</span>
+            <span>استادان: {Number(activeSchoolContext.scopeSummary?.teachers?.count || 0).toLocaleString('fa-AF')}</span>
+            <span>صنف‌ها: {Number(activeSchoolContext.scopeSummary?.classes?.count || 0).toLocaleString('fa-AF')}</span>
+            <span>شقه‌ها: {Number(activeSchoolContext.scopeSummary?.sheetTemplates?.count || 0).toLocaleString('fa-AF')}</span>
+            <span>سال مالی: {Number(activeSchoolContext.scopeSummary?.financialYears?.count || 0).toLocaleString('fa-AF')}</span>
+          </div>
+        )}
+        {!!submitStatus.text && (
+          <div className={`student-registration-submit-status ${submitStatus.type || 'info'}`} role="status">
+            {submitStatus.text}
+          </div>
+        )}
 
         {/* مشخصات شخصی */}
         <div className="form-section">
@@ -670,10 +768,10 @@ const StudentRegistration = () => {
         </div>
 
         <div style={{ display: 'flex', gap: 16, marginTop: 32, flexWrap: 'wrap', justifyContent: 'center' }}>
-          <button type="submit" value="save" className="add-btn" disabled={loading}>
+          <button type="submit" value="save" className="add-btn" disabled={loading || referenceLoading || requiresSchoolSelection}>
             {loading ? 'در حال ذخیره...' : 'ثبت شاگرد'}
           </button>
-          <button type="submit" value="assign" className="save-btn" disabled={loading}>
+          <button type="submit" value="assign" className="save-btn" disabled={loading || referenceLoading || requiresSchoolSelection}>
             {loading ? 'در حال پردازش...' : 'ثبت و تخصیص صنف'}
           </button>
           <button type="button" className="cancel-btn" onClick={() => window.history.back()}>

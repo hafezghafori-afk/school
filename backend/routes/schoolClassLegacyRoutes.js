@@ -1,13 +1,24 @@
 const express = require('express');
 const SchoolClass = require('../models/SchoolClass');
 const { requireAuth } = require('../middleware/auth');
+const { DEFAULT_SCHOOL_ID, resolveActiveSchool, requireWritableSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
 
 const router = express.Router();
 
 router.get('/school/:schoolId', requireAuth, async (req, res) => {
   try {
     const { schoolId } = req.params;
-    const filter = schoolId === 'default-school-id' ? {} : { schoolId };
+    const resolved = schoolId === DEFAULT_SCHOOL_ID
+      ? await resolveActiveSchool(req, { allowSingleFallback: true })
+      : { schoolId, requiresSelection: false };
+    if (resolved.requiresSelection) {
+      return res.json({
+        success: true,
+        data: [],
+        meta: { requiresSchoolSelection: true }
+      });
+    }
+    const filter = { schoolId: resolved.schoolId || schoolId };
     const items = await SchoolClass.find(filter)
       .populate('academicYearId', 'title status')
       .populate('shiftId', 'name nameDari namePashto')
@@ -15,7 +26,8 @@ router.get('/school/:schoolId', requireAuth, async (req, res) => {
 
     res.json({
       success: true,
-      data: items
+      data: items,
+      meta: { schoolId: resolved.schoolId || schoolId }
     });
   } catch (error) {
     res.status(500).json({
@@ -28,15 +40,19 @@ router.get('/school/:schoolId', requireAuth, async (req, res) => {
 
 router.post('/school/:schoolId', requireAuth, async (req, res) => {
   try {
-    const { schoolId } = req.params;
-    const classData = { ...req.body, schoolId };
+    const schoolContext = await requireWritableSchool(req, { ...req.body, schoolId: req.params.schoolId });
+    const classData = { ...req.body, schoolId: schoolContext.schoolId };
     const newClass = new SchoolClass(classData);
     await newClass.save();
     const populated = await SchoolClass.findById(newClass._id)
       .populate('academicYearId', 'title status')
       .populate('shiftId', 'name nameDari namePashto');
+    writeSchoolContextHeaders(res, schoolContext.schoolId);
     res.status(201).json({ success: true, data: populated });
   } catch (error) {
+    if (error.message === 'school_context_required') {
+      return res.status(error.statusCode || 400).json({ success: false, message: error.messageDari || 'اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید.' });
+    }
     if (error.code === 11000) {
       return res.status(400).json({ success: false, message: 'این صنف قبلاً ثبت شده است.' });
     }

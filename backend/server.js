@@ -128,6 +128,7 @@ const errorHandler = require('./middleware/errorHandler');
 const { getDatabaseStatus, requireDatabase } = require('./middleware/requireDatabase');
 const ChatThread = require('./models/ChatThread');
 const ChatMessage = require('./models/ChatMessage');
+require('./models/School');
 const SchoolClass = require('./models/SchoolClass');
 const TeacherAssignment = require('./models/TeacherAssignment');
 const { canAccessCourse } = require('./utils/courseAccess');

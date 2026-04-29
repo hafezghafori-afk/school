@@ -10,6 +10,7 @@ const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
 const cache = require('../utils/simpleCache');
 const { requireAuth, requireRole, requirePermission, requireAnyPermission } = require('../middleware/auth');
+const { requireWritableSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
 
 const router = express.Router();
 const auditWrite = (payload) => logActivity(payload);
@@ -206,6 +207,12 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
       createdBy: req.user?.id || 'system'
     };
 
+    const schoolContext = await requireWritableSchool(req, studentData);
+    studentData.academicInfo = {
+      ...(studentData.academicInfo || {}),
+      currentSchool: schoolContext.schoolId
+    };
+
     // Check if tazkira number already exists
     const existingStudent = await AfghanStudent.findOne({ 
       'identification.tazkiraNumber': studentData.identification.tazkiraNumber 
@@ -251,9 +258,17 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
     // Populate school info for response
     await student.populate('academicInfo.currentSchool', 'name province district');
 
-    return ok(res, student, 'Student created successfully', 201);
+    writeSchoolContextHeaders(res, schoolContext.schoolId);
+    return res.status(201).json({
+      success: true,
+      message: 'Student created successfully',
+      data: student
+    });
   } catch (error) {
     console.error('Create Student Error:', error);
+    if (error.message === 'school_context_required') {
+      return fail(res, error.messageDari || 'اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید.', error.statusCode || 400);
+    }
     if (error.code === 11000) {
       return fail(res, 'Tazkira number already exists', 400);
     }

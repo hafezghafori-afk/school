@@ -11,6 +11,7 @@ import {
   formatNumber,
   openHtmlDocument,
   postJson,
+  repairDisplayText,
   toLocaleDateTime
 } from './adminWorkspaceUtils';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
@@ -195,6 +196,15 @@ function formatMoney(value) {
 
 function toNumber(value) {
   return Number(value || 0);
+}
+
+function normalizeDisplayPayload(value) {
+  if (typeof value === 'string') return repairDisplayText(value);
+  if (Array.isArray(value)) return value.map((item) => normalizeDisplayPayload(item));
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, normalizeDisplayPayload(item)])
+  );
 }
 
 function toMonthKey(value) {
@@ -1333,7 +1343,7 @@ export default function AdminGovernmentFinance() {
     return 'بازخوانی داده';
   }, [activeTab]);
   const effectiveRefreshButtonLabel = activeTab === 'treasury'
-    ? 'Ø¨Ø§Ø²Ø®ÙˆØ§Ù†ÛŒ Ø®Ø²Ø§Ù†Ù‡ Ùˆ ØµÙ†Ø¯ÙˆÙ‚'
+    ? 'بازخوانی خزانه و صندوق'
     : refreshButtonLabel;
 
   const loadReference = async () => {
@@ -1344,7 +1354,7 @@ export default function AdminGovernmentFinance() {
         financialYears: data.financialYears || [],
         classes: data.classes || []
       };
-      setReference(nextReference);
+      setReference(normalizeDisplayPayload(nextReference));
       setSelectedAcademicYearId((current) => current || nextReference.academicYears.find((item) => item.isActive)?.id || nextReference.academicYears[0]?.id || '');
       setSelectedFinancialYearId((current) => current || nextReference.financialYears.find((item) => item.isActive)?.id || nextReference.financialYears[0]?.id || '');
     } catch (error) {
@@ -1536,7 +1546,7 @@ export default function AdminGovernmentFinance() {
 
       setPayload((current) => ({
         ...current,
-        ...nextPayload
+        ...normalizeDisplayPayload(nextPayload)
       }));
       const refreshedAt = new Date().toISOString();
       const commonTabKeys = ['dashboard', 'year', 'operations', 'treasury'];
@@ -2094,7 +2104,7 @@ export default function AdminGovernmentFinance() {
 
   const startBudgetRevision = async () => {
     if (!selectedFinancialYearId) {
-      showMessage('Ø§Ø¨ØªØ¯Ø§ ÛŒÚ© Ø³Ø§Ù„ Ù…Ø§Ù„ÛŒ Ø±Ø§ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯.', 'error');
+      showMessage('ابتدا یک سال مالی را انتخاب کنید.', 'error');
       return;
     }
     try {
@@ -2105,7 +2115,7 @@ export default function AdminGovernmentFinance() {
       showMessage('Budget revision started.');
       await loadWorkspace('year');
     } catch (error) {
-      showMessage(errorMessage(error, 'Ø¢ØºØ§Ø² Ø¨Ø§Ø²Ù†Ú¯Ø±ÛŒ Ø¨ÙˆØ¯Ø¬Ù‡ Ù†Ø§Ù…ÙˆÙÙ‚ Ø¨ÙˆØ¯.'), 'error');
+      showMessage(errorMessage(error, 'آغاز بازنگری بودجه ناموفق بود.'), 'error');
     } finally {
       setBusyAction('');
     }
@@ -2268,11 +2278,11 @@ export default function AdminGovernmentFinance() {
 
   const submitProcurementSettlement = async () => {
     if (!selectedProcurementSettlement?._id) {
-      showMessage('Ø§Ø¨ØªØ¯Ø§ ÛŒÚ© ØªØ¹Ù‡Ø¯ ØªØ§ÛŒÛŒØ¯Ø´Ø¯Ù‡ Ø±Ø§ Ø¨Ø±Ø§ÛŒ ØªØ³ÙˆÛŒÙ‡ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯.', 'error');
+      showMessage('ابتدا یک تعهد تاییدشده را برای تسویه انتخاب کنید.', 'error');
       return;
     }
     if (!procurementSettlementDraft.treasuryAccountId) {
-      showMessage('Ø¨Ø±Ø§ÛŒ ØªØ³ÙˆÛŒÙ‡ØŒ Ø­Ø³Ø§Ø¨ Ø®Ø²Ø§Ù†Ù‡ Ø§Ù†ØªØ®Ø§Ø¨ Ø´ÙˆØ¯.', 'error');
+      showMessage('برای تسویه، حساب خزانه انتخاب شود.', 'error');
       return;
     }
     try {
@@ -2294,7 +2304,7 @@ export default function AdminGovernmentFinance() {
       showMessage('تصفیه فروشنده was registered.');
       await loadWorkspace('operations');
     } catch (error) {
-      showMessage(errorMessage(error, 'Ø«Ø¨Øª ØªØ³ÙˆÛŒÙ‡ ÙØ±ÙˆØ´Ù†Ø¯Ù‡ Ù†Ø§Ù…ÙˆÙÙ‚ Ø¨ÙˆØ¯.'), 'error');
+      showMessage(errorMessage(error, 'ثبت تسویه فروشنده ناموفق بود.'), 'error');
     } finally {
       setBusyAction('');
     }
@@ -2612,7 +2622,7 @@ export default function AdminGovernmentFinance() {
 
   const deliverGovernmentArchiveDocument = async () => {
     if (!selectedGovernmentArchive?._id) {
-      showMessage('Ø§Ø¨ØªØ¯Ø§ ÛŒÚ© Ø³Ù†Ø¯ Ø¢Ø±Ø´ÛŒÙÛŒ Ø¯ÙˆÙ„ØªÛŒ Ø±Ø§ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯.', 'error');
+      showMessage('ابتدا یک سند آرشیفی دولتی را انتخاب کنید.', 'error');
       return;
     }
     const recipients = String(archiveDeliveryDraft.recipientHandles || '')
@@ -2620,7 +2630,7 @@ export default function AdminGovernmentFinance() {
       .map((item) => item.trim())
       .filter(Boolean);
     if (!archiveDeliveryDraft.includeLinkedAudience && !recipients.length) {
-      showMessage('Ø­Ø¯Ø§Ù‚Ù„ ÛŒÚ© Ú¯ÛŒØ±Ù†Ø¯Ù‡ Ø±Ø§ Ø¨Ø±Ø§ÛŒ Ø§Ø±Ø³Ø§Ù„ Ø³Ù†Ø¯ ÙˆØ§Ø±Ø¯ Ú©Ù†ÛŒØ¯.', 'error');
+      showMessage('حداقل یک گیرنده را برای ارسال سند وارد کنید.', 'error');
       return;
     }
     try {
@@ -2640,7 +2650,7 @@ export default function AdminGovernmentFinance() {
       showMessage('Government archive delivery queued successfully.');
       await loadWorkspace('archive');
     } catch (error) {
-      showMessage(errorMessage(error, 'Ø§Ø±Ø³Ø§Ù„ Ø³Ù†Ø¯ Ø¯ÙˆÙ„ØªÛŒ Ø§Ø² Ø¢Ø±Ø´ÛŒÙ Ù†Ø§Ù…ÙˆÙÙ‚ Ø¨ÙˆØ¯.'), 'error');
+      showMessage(errorMessage(error, 'ارسال سند دولتی از آرشیف ناموفق بود.'), 'error');
     } finally {
       setBusyAction('');
     }

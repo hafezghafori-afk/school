@@ -5,6 +5,7 @@ const { requireFields } = require('../middleware/validate');
 const { requireAuth } = require('../middleware/auth');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
+const { DEFAULT_SCHOOL_ID, resolveActiveSchool, requireWritableSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
 
 const auditWrite = (payload) => logActivity(payload);
 attachWriteActivityAudit(router, { targetType: 'AcademicYear', actionPrefix: 'academic_year', audit: auditWrite });
@@ -18,7 +19,19 @@ router.get('/school/:schoolId', requireAuth, async (req, res) => {
     const { schoolId } = req.params;
     const { status, page = 1, limit = 10 } = req.query;
     
-    const filter = schoolId === 'default-school-id' ? {} : { schoolId };
+    const resolved = schoolId === DEFAULT_SCHOOL_ID
+      ? await resolveActiveSchool(req, { allowSingleFallback: true })
+      : { schoolId, requiresSelection: false };
+    if (resolved.requiresSelection) {
+      return res.json({
+        success: true,
+        data: [],
+        pagination: { page: parseInt(page), limit: parseInt(limit), total: 0, pages: 0 },
+        meta: { requiresSchoolSelection: true }
+      });
+    }
+
+    const filter = { schoolId: resolved.schoolId || schoolId };
     if (status) filter.status = status;
     
     const academicYears = await AcademicYear.find(filter)
@@ -38,7 +51,8 @@ router.get('/school/:schoolId', requireAuth, async (req, res) => {
         limit: parseInt(limit),
         total,
         pages: Math.ceil(total / limit)
-      }
+      },
+      meta: { schoolId: resolved.schoolId || schoolId }
     });
   } catch (error) {
     res.status(500).json({
@@ -84,10 +98,12 @@ router.get('/:id', requireAuth, async (req, res) => {
 });
 
 // Create new academic year
-router.post('/', requireAuth, requireFields(['schoolId', 'title']), async (req, res) => {
+router.post('/', requireAuth, requireFields(['title']), async (req, res) => {
   try {
+    const schoolContext = await requireWritableSchool(req, req.body);
     const academicYearData = {
       ...req.body,
+      schoolId: schoolContext.schoolId,
       createdBy: req.user.id
     };
     
@@ -97,12 +113,19 @@ router.post('/', requireAuth, requireFields(['schoolId', 'title']), async (req, 
     const populatedAcademicYear = await AcademicYear.findById(academicYear._id)
       .populate('createdBy', 'name email');
     
+    writeSchoolContextHeaders(res, schoolContext.schoolId);
     res.status(201).json({
       success: true,
       data: populatedAcademicYear,
       message: 'Academic year created successfully'
     });
   } catch (error) {
+    if (error.message === 'school_context_required') {
+      return res.status(error.statusCode || 400).json({
+        success: false,
+        message: error.messageDari || 'اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید.'
+      });
+    }
     if (error.code === 11000) {
       return res.status(400).json({
         success: false,

@@ -7,10 +7,59 @@ const { requireFields } = require('../middleware/validate');
 const { ok, fail } = require('../utils/response');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
+const { resolveActiveSchool, listActiveSchools } = require('../services/schoolContextService');
 
 const router = express.Router();
 const auditWrite = (payload) => logActivity(payload);
 attachWriteActivityAudit(router, { targetType: 'AfghanSchool', actionPrefix: 'afghan_school', audit: auditWrite });
+
+const SCHOOL_SCOPE_SUMMARY = [
+  { key: 'students', label: 'شاگردان', collection: 'afghanstudents', field: 'academicInfo.currentSchool' },
+  { key: 'teachers', label: 'استادان', collection: 'afghanteachers', field: 'employmentInfo.currentSchool' },
+  { key: 'academicYears', label: 'سال‌های تعلیمی', collection: 'academicyears', field: 'schoolId' },
+  { key: 'terms', label: 'ترم‌ها', collection: 'academicterms', field: 'schoolId' },
+  { key: 'classes', label: 'صنف‌ها', collection: 'schoolclasses', field: 'schoolId' },
+  { key: 'shifts', label: 'نوبت‌ها', collection: 'shifts', field: 'schoolId' },
+  { key: 'subjects', label: 'مضامین', collection: 'subjects', field: 'schoolId' },
+  { key: 'teacherAssignments', label: 'تخصیص استاد', collection: 'teacherassignments', field: 'schoolId' },
+  { key: 'timetableEntries', label: 'تقسیم اوقات', collection: 'timetableentries', field: 'schoolId' },
+  { key: 'financialYears', label: 'سال مالی', collection: 'financialyears', field: 'schoolId' },
+  { key: 'treasuryAccounts', label: 'حساب‌های خزانه', collection: 'financetreasuryaccounts', field: 'schoolId' },
+  { key: 'treasuryTransactions', label: 'معاملات خزانه', collection: 'financetreasurytransactions', field: 'schoolId' },
+  { key: 'governmentFinanceSnapshots', label: 'گزارش مالی دولت', collection: 'governmentfinancesnapshots', field: 'schoolId' }
+];
+
+async function countSchoolScope(schoolId = '') {
+  if (!schoolId || !mongoose.Types.ObjectId.isValid(String(schoolId))) return {};
+  const schoolObjectId = new mongoose.Types.ObjectId(String(schoolId));
+  const db = mongoose.connection.db;
+  const summary = {};
+  for (const item of SCHOOL_SCOPE_SUMMARY) {
+    const exists = (await db.listCollections({ name: item.collection }).toArray()).length > 0;
+    summary[item.key] = {
+      label: item.label,
+      count: exists ? await db.collection(item.collection).countDocuments({ [item.field]: schoolObjectId }) : 0
+    };
+  }
+  const [academicYearIds, classIds] = await Promise.all([
+    db.collection('academicyears').distinct('_id', { schoolId: schoolObjectId }),
+    db.collection('schoolclasses').distinct('_id', { schoolId: schoolObjectId })
+  ]);
+  const sheetTemplateExists = (await db.listCollections({ name: 'sheettemplates' }).toArray()).length > 0;
+  summary.sheetTemplates = {
+    label: 'شقه‌ها',
+    count: sheetTemplateExists
+      ? await db.collection('sheettemplates').countDocuments({
+        $or: [
+          { 'scope.academicYearId': { $in: academicYearIds } },
+          { 'scope.classId': { $in: classIds } },
+          { 'scope.sectionId': { $in: classIds } }
+        ]
+      })
+      : 0
+  };
+  return summary;
+}
 
 // Helper functions
 const getProvinceStats = async (province) => {
@@ -118,6 +167,28 @@ router.get('/', async (req, res) => {
   } catch (error) {
     console.error('Get Schools Error:', error);
     return fail(res, 'Failed to retrieve schools', 500);
+  }
+});
+
+// GET /api/afghan-schools/active - Resolve active school context for the UI
+router.get('/active', async (req, res) => {
+  try {
+    const resolved = await resolveActiveSchool(req, { allowSingleFallback: true });
+    const schools = await listActiveSchools(100);
+    return res.json({
+      success: true,
+      data: {
+        school: resolved.school,
+        schoolId: resolved.schoolId,
+        source: resolved.source,
+        requiresSelection: resolved.requiresSelection,
+        schools,
+        scopeSummary: resolved.schoolId ? await countSchoolScope(resolved.schoolId) : {}
+      }
+    });
+  } catch (error) {
+    console.error('Resolve Active School Error:', error);
+    return fail(res, 'Failed to resolve active school', 500);
   }
 });
 
@@ -267,11 +338,22 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/afghan-schools/:id - Delete school
 router.delete('/:id', async (req, res) => {
   try {
-    const school = await AfghanSchool.findByIdAndDelete(req.params.id);
+    const school = await AfghanSchool.findById(req.params.id);
     if (!school) {
       return fail(res, 'School not found', 404);
     }
 
+    const summary = await countSchoolScope(req.params.id);
+    const relatedCount = Object.values(summary).reduce((sum, item) => sum + Number(item?.count || 0), 0);
+    if (relatedCount > 0 && String(req.query.force || '').toLowerCase() !== 'true') {
+      return res.status(409).json({
+        success: false,
+        message: 'این مکتب دیتا دارد و حذف مستقیم آن اجازه نیست. اول دیتا را انتقال دهید یا مکتب خالی آزمایشی را حذف کنید.',
+        data: { scopeSummary: summary, relatedCount }
+      });
+    }
+
+    await AfghanSchool.findByIdAndDelete(req.params.id);
     return ok(res, school, 'School deleted successfully');
   } catch (error) {
     console.error('Delete School Error:', error);

@@ -99,6 +99,8 @@
     "check:phase10-cutover": "node ./scripts/checkPhase10Cutover.js",
     "backfill:phase10-finance-link-scope": "node ./scripts/backfillPhase10FinanceLinkScope.js",
     "backfill:phase10-finance-link-scope:dry": "node ./scripts/backfillPhase10FinanceLinkScope.js --dry-run",
+    "school-scope:migrate": "node ./scripts/migrateSchoolScope.js --apply",
+    "school-scope:migrate:dry": "node ./scripts/migrateSchoolScope.js --dry-run",
     "check:finance-link-scope": "node ./scripts/checkFinanceLinkScope.js",
     "preview:exam-session-bootstrap": "node ./scripts/bootstrapExamSession.js",
     "bootstrap:exam-session": "node ./scripts/bootstrapExamSession.js --apply",

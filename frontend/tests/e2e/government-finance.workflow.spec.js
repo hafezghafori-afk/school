@@ -2111,7 +2111,7 @@ test.describe('government finance workflow', () => {
 
     await page.getByRole('tab', { name: 'مدیریت سال مالی' }).click();
     const yearLedger = page.locator('.gov-card', { hasText: 'دفتر سال‌های مالی' });
-    await expect(page.locator('[data-budget-summary-card="true"]')).toContainText('Expense budget');
+    await expect(page.locator('[data-budget-summary-card="true"]')).toContainText('بودجه مصارف');
     await page.locator('input[name="annualExpenseBudget"]').fill('1800');
     await page.locator('[data-budget-annual="admin"]').fill('1250');
     await page.locator('[data-budget-save="true"]').click();
