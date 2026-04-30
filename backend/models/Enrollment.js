@@ -22,6 +22,11 @@ const enrollmentSchema = new mongoose.Schema({
   registrationId: { type: String, default: '' },
   asasNumber: { type: String, default: '' },
   status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+  linkedStudentId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'AfghanStudent',
+    default: null
+  },
   linkedUserId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -41,5 +46,9 @@ const enrollmentSchema = new mongoose.Schema({
   rejectedAt: { type: Date, default: null },
   rejectionReason: { type: String, default: '' }
 }, { timestamps: true });
+
+enrollmentSchema.index({ linkedStudentId: 1 }, { sparse: true });
+enrollmentSchema.index({ linkedUserId: 1 }, { sparse: true });
+enrollmentSchema.index({ status: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Enrollment', enrollmentSchema);
