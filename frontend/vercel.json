@@ -1,5 +1,20 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "/" }
+    {
+      "source": "/api/:path*",
+      "destination": "https://school-backend-lwe3.onrender.com/api/:path*"
+    },
+    {
+      "source": "/uploads/:path*",
+      "destination": "https://school-backend-lwe3.onrender.com/uploads/:path*"
+    },
+    {
+      "source": "/socket.io/:path*",
+      "destination": "https://school-backend-lwe3.onrender.com/socket.io/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/"
+    }
   ]
 }
