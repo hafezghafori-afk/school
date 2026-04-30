@@ -5,6 +5,7 @@ const path = require('path');
 const multer = require('multer');
 const AfghanStudent = require('../models/AfghanStudent');
 const AfghanSchool = require('../models/AfghanSchool');
+const Enrollment = require('../models/Enrollment');
 const { requireFields } = require('../middleware/validate');
 const Counter = require('../models/Counter');
 const SiteSettings = require('../models/SiteSettings');
@@ -56,6 +57,49 @@ const calculateAge = (birthDate) => {
     age--;
   }
   return age;
+};
+
+const gradeLabelFromStudent = (studentData = {}) => {
+  const grade = String(studentData?.academicInfo?.currentGrade || '').trim();
+  const match = grade.match(/\d+/);
+  return match ? match[0] : grade;
+};
+
+const syncManualStudentEnrollment = async ({ student, studentData, req }) => {
+  if (!student?._id) return null;
+  const existing = await Enrollment.findOne({ linkedUserId: student._id });
+  const studentName = [
+    studentData?.personalInfo?.firstName,
+    studentData?.personalInfo?.lastName
+  ].filter(Boolean).join(' ').trim() || student.fullName || 'شاگرد جدید';
+
+  const payload = {
+    studentName,
+    fatherName: studentData?.personalInfo?.fatherName || '',
+    motherName: studentData?.familyInfo?.motherName || '',
+    gender: studentData?.personalInfo?.gender || 'male',
+    birthDate: studentData?.personalInfo?.birthDate || '',
+    grade: gradeLabelFromStudent(studentData),
+    phone: studentData?.contactInfo?.phone || studentData?.contactInfo?.mobile || studentData?.familyInfo?.fatherPhone || '',
+    email: studentData?.contactInfo?.email || '',
+    address: studentData?.contactInfo?.address || '',
+    previousSchool: studentData?.academicInfo?.previousSchool?.name || '',
+    emergencyPhone: studentData?.contactInfo?.emergencyContact?.phone || '',
+    notes: studentData?.notes?.general || 'ثبت مستقیم از صفحه ثبت شاگرد جدید',
+    registrationId: student.registrationId || studentData?.registrationId || '',
+    asasNumber: student.asasNumber || studentData?.asasNumber || '',
+    status: 'approved',
+    linkedUserId: student._id,
+    approvedBy: req.user?.id || null,
+    approvedAt: new Date()
+  };
+
+  if (existing) {
+    Object.assign(existing, payload);
+    return existing.save();
+  }
+
+  return Enrollment.create(payload);
 };
 
 const getStudentStats = async (schoolId, grade) => {
@@ -285,6 +329,8 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
     const student = new AfghanStudent(studentData);
     await student.save();
 
+    await syncManualStudentEnrollment({ student, studentData, req });
+
     // Populate school info for response
     await student.populate('academicInfo.currentSchool', 'name province district');
 
@@ -347,6 +393,19 @@ router.post('/:id/documents', requireAuth, requireRole(['admin', 'principal', 'r
       student.lastUpdatedBy = req.user?.id || student.lastUpdatedBy;
       await student.save();
 
+      await Enrollment.findOneAndUpdate(
+        { linkedUserId: student._id },
+        {
+          documents: {
+            idCardUrl: documents.find((item) => item.type === 'tazkira')?.url || '',
+            birthCertUrl: documents.find((item) => item.type === 'other')?.url || '',
+            reportCardUrl: documents.find((item) => item.type === 'transfer_certificate')?.url || '',
+            photoUrl: documents.find((item) => item.type === 'photo')?.url || ''
+          }
+        },
+        { new: true }
+      );
+
       return ok(res, { documents: student.documents }, 'Student documents uploaded successfully');
     } catch (error) {
       console.error('Upload Student Documents Error:', error);
@@ -381,6 +440,8 @@ router.put('/:id', requireAuth, requireRole(['admin', 'principal', 'registration
       return fail(res, 'Student not found', 404);
     }
 
+    await syncManualStudentEnrollment({ student, studentData: student.toObject(), req });
+
     return ok(res, student, 'Student updated successfully');
   } catch (error) {
     console.error('Update Student Error:', error);
@@ -398,6 +459,8 @@ router.delete('/:id', requireAuth, requireRole(['admin', 'principal']), requireA
     if (!student) {
       return fail(res, 'Student not found', 404);
     }
+
+    await Enrollment.findOneAndDelete({ linkedUserId: student._id });
 
     return ok(res, student, 'Student deleted successfully');
   } catch (error) {
@@ -462,6 +525,7 @@ router.post('/bulk', requireAuth, requireRole(['admin', 'principal']), requirePe
 
         const student = new AfghanStudent(studentData);
         await student.save();
+        await syncManualStudentEnrollment({ student, studentData, req });
         
         results.successful.push({
           index: i,
@@ -710,7 +774,7 @@ router.get('/performance/:schoolId', requireAuth, requireRole(['admin', 'princip
 
     // Sort top performers and needs improvement
     performanceStats.topPerformers.sort((a, b) => b.gpa - a.gpa);
-    performanceStats.needsImprovement.sort((a, b) => a.gpa - b.gpa);
+    performanceStats.needsImprovement.sort((a, b) => a.gpa - a.gpa);
 
     return ok(res, performanceStats, 'Performance statistics retrieved successfully');
   } catch (error) {
