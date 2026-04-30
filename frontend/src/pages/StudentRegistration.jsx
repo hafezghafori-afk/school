@@ -376,27 +376,6 @@ const StudentRegistration = () => {
     if (!formData.lastName.trim()) nextErrors.lastName = 'ØªØ®Ù„Øµ Ø´Ø§Ú¯Ø±Ø¯ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
     if (!formData.fatherName.trim()) nextErrors.fatherName = 'Ù†Ø§Ù… Ù¾Ø¯Ø± Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
     if (!formData.nationalId.trim()) nextErrors.nationalId = 'Ø´Ù…Ø§Ø±Ù‡ ØªØ°Ú©Ø±Ù‡ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
-    if (!formData.birthDate) nextErrors.birthDate = 'ØªØ§Ø±ÛŒØ® ØªÙˆÙ„Ø¯ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
-    if (!formData.gender) nextErrors.gender = 'Ø¬Ù†Ø³ÛŒØª Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
-    if (!formData.phone.trim()) nextErrors.phone = 'Ø´Ù…Ø§Ø±Ù‡ ØªÙ…Ø§Ø³ Ø´Ø§Ú¯Ø±Ø¯ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
-    if (!formData.address.trim()) nextErrors.address = 'Ø¢Ø¯Ø±Ø³ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
-    if (!formData.province) nextErrors.province = 'ÙˆÙ„Ø§ÛŒØª Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
-    if (!formData.academicYearId) nextErrors.academicYearId = 'Ø³Ø§Ù„ ØªØ¹Ù„ÛŒÙ…ÛŒ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
-    if (!formData.classId) nextErrors.classId = 'ØµÙ†Ù Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
-    if (!formData.shiftId) nextErrors.shiftId = 'Ù†ÙˆØ¨Øª Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
-    if (!formData.fatherPhone.trim()) nextErrors.fatherPhone = 'Ø´Ù…Ø§Ø±Ù‡ ØªÙ…Ø§Ø³ Ù¾Ø¯Ø± Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
-    if (
-      formData.classId &&
-      !getEntityId(selectedClass?.schoolId) &&
-      !getEntityId(selectedYear?.schoolId) &&
-      (!schoolId || schoolId === DEFAULT_SCHOOL_ID)
-    ) {
-      nextErrors.classId = 'ØµÙ†Ù Ø§Ù†ØªØ®Ø§Ø¨â€ŒØ´Ø¯Ù‡ Ø¨Ù‡ Ù…Ú©ØªØ¨ Ù…Ø¹ØªØ¨Ø± ÙˆØµÙ„ Ù†ÛŒØ³Øª.';
-    }
-    // Ø§Ú¯Ø± Ø´Ø§Ú¯Ø±Ø¯ ØªØ¨Ø¯ÛŒÙ„ÛŒ Ø§Ø³ØªØŒ Ø³Ù‡ Ù¾Ø§Ø±Ú†Ù‡ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø¨Ø§Ø´Ø¯
-    if ((formData.previousSchool.trim() || formData.previousGrade.trim()) && !studentFiles.seParcha) {
-      nextErrors.seParcha = 'Ø¨Ø§Ø±Ú¯Ø°Ø§Ø±ÛŒ Ø³Ù‡ Ù¾Ø§Ø±Ú†Ù‡ Ø¨Ø±Ø§ÛŒ Ø´Ø§Ú¯Ø±Ø¯Ø§Ù† ØªØ¨Ø¯ÛŒÙ„ÛŒ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
-    }
 
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
