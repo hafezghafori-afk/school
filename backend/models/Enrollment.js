@@ -10,9 +10,34 @@ const enrollmentSchema = new mongoose.Schema({
   phone: { type: String, default: '' },
   email: { type: String, default: '' },
   address: { type: String, default: '' },
+  province: { type: String, default: '' },
+  district: { type: String, default: '' },
   previousSchool: { type: String, default: '' },
   emergencyPhone: { type: String, default: '' },
   notes: { type: String, default: '' },
+  academicContext: {
+    schoolId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'AfghanSchool',
+      default: null
+    },
+    classId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'SchoolClass',
+      default: null
+    },
+    shiftId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Shift',
+      default: null
+    },
+    academicYearId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'AcademicYear',
+      default: null
+    },
+    enrollmentDate: { type: Date, default: null }
+  },
   documents: {
     idCardUrl: { type: String, default: '' },
     birthCertUrl: { type: String, default: '' },
@@ -50,5 +75,6 @@ const enrollmentSchema = new mongoose.Schema({
 enrollmentSchema.index({ linkedStudentId: 1 }, { sparse: true });
 enrollmentSchema.index({ linkedUserId: 1 }, { sparse: true });
 enrollmentSchema.index({ status: 1, createdAt: -1 });
+enrollmentSchema.index({ 'academicContext.schoolId': 1, status: 1 });
 
 module.exports = mongoose.model('Enrollment', enrollmentSchema);
