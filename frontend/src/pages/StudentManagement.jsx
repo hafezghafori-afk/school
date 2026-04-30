@@ -24,6 +24,63 @@ import {
 } from "../components/ui/icons";
 import { useToast } from "../components/ui/toast";
 import { formatAfghanDateTime } from '../utils/afghanDate';
+import { getAuthHeaders, repairDisplayText } from './adminWorkspaceUtils';
+
+const getText = (value, fallback = '') => repairDisplayText(value || fallback);
+
+const normalizeAfghanStudent = (student = {}) => {
+  const personalInfo = student.personalInfo || {};
+  const identification = student.identification || {};
+  const familyInfo = student.familyInfo || {};
+  const contactInfo = student.contactInfo || {};
+  const academicInfo = student.academicInfo || {};
+  const medicalInfo = student.medicalInfo || {};
+  const previousSchool = academicInfo.previousSchool || {};
+
+  return {
+    ...student,
+    firstName: getText(personalInfo.firstName),
+    lastName: getText(personalInfo.lastName),
+    fatherName: getText(personalInfo.fatherName),
+    grandfatherName: getText(personalInfo.grandfatherName),
+    nationalId: getText(identification.tazkiraNumber),
+    birthDate: personalInfo.birthDate ? String(personalInfo.birthDate).slice(0, 10) : '',
+    gender: personalInfo.gender || student.gender || '',
+    bloodType: medicalInfo.bloodGroup || student.bloodType || '',
+    phone: contactInfo.phone || contactInfo.mobile || '',
+    email: contactInfo.email || '',
+    address: getText(contactInfo.address),
+    city: getText(contactInfo.district),
+    province: getText(contactInfo.province),
+    classId: {
+      _id: academicInfo.currentGrade || '',
+      title: getText(academicInfo.currentSection || academicInfo.currentGrade || '---')
+    },
+    academicYearId: {
+      _id: academicInfo.academicYearId || '',
+      title: getText(academicInfo.academicYearTitle || '---')
+    },
+    shiftId: {
+      _id: academicInfo.currentShift || '',
+      name: getText(academicInfo.currentShift || '---')
+    },
+    previousSchool: getText(previousSchool.name),
+    previousGrade: getText(previousSchool.lastGrade),
+    fatherPhone: familyInfo.fatherPhone || '',
+    fatherOccupation: getText(familyInfo.fatherOccupation),
+    motherName: getText(familyInfo.motherName),
+    motherPhone: familyInfo.motherPhone || '',
+    motherOccupation: getText(familyInfo.motherOccupation),
+    medicalConditions: Array.isArray(medicalInfo.medicalConditions)
+      ? medicalInfo.medicalConditions.map((item) => getText(item.condition)).filter(Boolean).join('، ')
+      : getText(medicalInfo.medicalConditions),
+    allergies: Array.isArray(medicalInfo.allergies)
+      ? medicalInfo.allergies.map((item) => getText(item.allergen)).filter(Boolean).join('، ')
+      : getText(medicalInfo.allergies),
+    emergencyContact: getText(contactInfo.emergencyContact?.name),
+    emergencyPhone: contactInfo.emergencyContact?.phone || ''
+  };
+};
 
 const StudentManagement = () => {
   const toast = useToast();
@@ -71,11 +128,15 @@ const StudentManagement = () => {
   const fetchStudents = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/students/school/${schoolId}`);
+      const query = schoolId ? `?schoolId=${encodeURIComponent(schoolId)}` : '';
+      const response = await fetch(`/api/afghan-students${query}`, {
+        headers: getAuthHeaders()
+      });
       const data = await response.json();
       
       if (data.success) {
-        setStudents(data.data);
+        const items = Array.isArray(data.data?.students) ? data.data.students : (Array.isArray(data.data) ? data.data : []);
+        setStudents(items.map(normalizeAfghanStudent));
       } else {
         // اگر API ناموفق بود، از داده‌های نمونه استفاده کن
         const mockData = [
@@ -149,7 +210,7 @@ const StudentManagement = () => {
 
   const fetchAcademicYears = async () => {
     try {
-      const response = await fetch(`/api/academic-years/school/${schoolId}`);
+      const response = await fetch(`/api/academic-years/school/${schoolId}`, { headers: getAuthHeaders() });
       const data = await response.json();
       
       if (data.success) {
@@ -172,7 +233,7 @@ const StudentManagement = () => {
 
   const fetchClasses = async () => {
     try {
-      const response = await fetch(`/api/school-classes/school/${schoolId}`);
+      const response = await fetch(`/api/school-classes/school/${schoolId}`, { headers: getAuthHeaders() });
       const data = await response.json();
       
       if (data.success) {
@@ -197,7 +258,7 @@ const StudentManagement = () => {
 
   const fetchShifts = async () => {
     try {
-      const response = await fetch(`/api/shifts/school/${schoolId}`);
+      const response = await fetch(`/api/shifts/school/${schoolId}`, { headers: getAuthHeaders() });
       const data = await response.json();
       
       if (data.success) {
@@ -268,8 +329,9 @@ const StudentManagement = () => {
 
     setActionLoading(studentId);
     try {
-      const response = await fetch(`/api/students/${studentId}`, {
+      const response = await fetch(`/api/afghan-students/${studentId}`, {
         method: 'DELETE',
+        headers: getAuthHeaders()
       });
 
       const data = await response.json();
@@ -695,4 +757,3 @@ const StudentManagement = () => {
 };
 
 export default StudentManagement;
-

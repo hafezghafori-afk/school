@@ -1,21 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Textarea } from '../components/ui/textarea';
-import { Badge } from '../components/ui/badge';
-import {
-  AlertCircle,
-  BookOpen,
-  CheckCircle,
-  Phone,
-  Save,
-  User,
-  Users,
-  X
-} from '../components/ui/icons';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useToast } from '../components/ui/toast';
 import {
   DEFAULT_SCHOOL_ID,
@@ -29,34 +12,34 @@ import './AfghanSchoolManagement.css';
 import './StudentRegistration.css';
 
 const PROVINCES = [
-  { value: 'kabul', label: 'Ú©Ø§Ø¨Ù„' },
-  { value: 'herat', label: 'Ù‡Ø±Ø§Øª' },
-  { value: 'kandahar', label: 'Ú©Ù†Ø¯Ù‡Ø§Ø±' },
-  { value: 'balkh', label: 'Ø¨Ù„Ø®' },
-  { value: 'nangarhar', label: 'Ù†Ù†Ú¯Ø±Ù‡Ø§Ø±' },
-  { value: 'badakhshan', label: 'Ø¨Ø¯Ø®Ø´Ø§Ù†' },
-  { value: 'takhar', label: 'ØªØ®Ø§Ø±' },
-  { value: 'samangan', label: 'Ø³Ù…Ù†Ú¯Ø§Ù†' },
-  { value: 'kunduz', label: 'Ù‚Ù†Ø¯ÙˆØ²' },
-  { value: 'baghlan', label: 'Ø¨ØºÙ„Ø§Ù†' },
-  { value: 'farah', label: 'ÙØ±Ø§Ù‡' },
-  { value: 'nimroz', label: 'Ù†ÛŒÙ…Ø±ÙˆØ²' },
-  { value: 'helmand', label: 'Ù‡Ù„Ù…Ù†Ø¯' },
-  { value: 'ghor', label: 'ØºÙˆØ±' },
-  { value: 'daykundi', label: 'Ø¯Ø§ÛŒÚ©Ù†Ø¯ÛŒ' },
-  { value: 'uruzgan', label: 'Ø§Ø±Ø²Ú¯Ø§Ù†' },
-  { value: 'zabul', label: 'Ø²Ø§Ø¨Ù„' },
-  { value: 'paktika', label: 'Ù¾Ú©ØªÛŒÚ©Ø§' },
-  { value: 'khost', label: 'Ø®ÙˆØ³Øª' },
-  { value: 'paktia', label: 'Ù¾Ú©ØªÛŒØ§' },
-  { value: 'logar', label: 'Ù„ÙˆÚ¯Ø±' },
-  { value: 'parwan', label: 'Ù¾Ø±ÙˆØ§Ù†' },
-  { value: 'kapisa', label: 'Ú©Ø§Ù¾ÛŒØ³Ø§' },
-  { value: 'panjshir', label: 'Ù¾Ù†Ø¬Ø´ÛŒØ±' },
-  { value: 'badghis', label: 'Ø¨Ø§Ø¯ØºÛŒØ³' },
-  { value: 'faryab', label: 'ÙØ§Ø±ÛŒØ§Ø¨' },
-  { value: 'jowzjan', label: 'Ø¬ÙˆØ²Ø¬Ø§Ù†' },
-  { value: 'saripul', label: 'Ø³Ø±Ù¾Ù„' }
+  { value: 'kabul', label: 'کابل' },
+  { value: 'herat', label: 'هرات' },
+  { value: 'kandahar', label: 'کندهار' },
+  { value: 'balkh', label: 'بلخ' },
+  { value: 'nangarhar', label: 'ننگرهار' },
+  { value: 'badakhshan', label: 'بدخشان' },
+  { value: 'takhar', label: 'تخار' },
+  { value: 'samangan', label: 'سمنگان' },
+  { value: 'kunduz', label: 'قندوز' },
+  { value: 'baghlan', label: 'بغلان' },
+  { value: 'farah', label: 'فراه' },
+  { value: 'nimroz', label: 'نیمروز' },
+  { value: 'helmand', label: 'هلمند' },
+  { value: 'ghor', label: 'غور' },
+  { value: 'daykundi', label: 'دایکندی' },
+  { value: 'uruzgan', label: 'ارزگان' },
+  { value: 'zabul', label: 'زابل' },
+  { value: 'paktika', label: 'پکتیکا' },
+  { value: 'khost', label: 'خوست' },
+  { value: 'paktia', label: 'پکتیا' },
+  { value: 'logar', label: 'لوگر' },
+  { value: 'parwan', label: 'پروان' },
+  { value: 'kapisa', label: 'کاپیسا' },
+  { value: 'panjshir', label: 'پنجشیر' },
+  { value: 'badghis', label: 'بادغیس' },
+  { value: 'faryab', label: 'فاریاب' },
+  { value: 'jowzjan', label: 'جوزجان' },
+  { value: 'saripul', label: 'سرپل' }
 ];
 
 const BLOOD_TYPES = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
@@ -75,9 +58,37 @@ async function fetchStudentRegistrationJson(path, headers = {}) {
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
   if (!response.ok || data?.success === false) {
-    throw new Error(displayText(data?.message || data?.error || `Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ù†Ø§Ù…ÙˆÙÙ‚ Ø¨ÙˆØ¯ (${response.status})`));
+    throw new Error(displayText(data?.message || data?.error || `درخواست ناموفق بود (${response.status})`));
   }
   return data || { success: true, data: [] };
+}
+
+const hasSelectedStudentFiles = (files = {}) => Object.values(files).some(Boolean);
+
+async function uploadStudentRegistrationFiles(studentId, files = {}) {
+  if (!studentId || !hasSelectedStudentFiles(files)) return null;
+
+  const formData = new FormData();
+  Object.entries(files).forEach(([key, file]) => {
+    if (file) formData.append(key, file);
+  });
+
+  const response = await fetch(`/api/afghan-students/${studentId}/documents`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: formData
+  });
+  const text = await response.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+  if (!response.ok || data?.success === false) {
+    throw new Error(displayText(data?.message || data?.error || text || `آپلود سندها ناموفق بود (${response.status})`));
+  }
+  return data;
 }
 
 const getEntityId = (value) => {
@@ -89,8 +100,8 @@ const getEntityId = (value) => {
 const normalizeShiftCode = (rawValue = '') => {
   const value = trimValue(rawValue).toLowerCase();
   if (!value) return 'morning';
-  if (value.includes('afternoon') || value.includes('Ø¨Ø¹Ø¯') || value.includes('Ø¹ØµØ±')) return 'afternoon';
-  if (value.includes('evening') || value.includes('Ø´Ø¨')) return 'evening';
+  if (value.includes('afternoon') || value.includes('بعد') || value.includes('عصر')) return 'afternoon';
+  if (value.includes('evening') || value.includes('شب')) return 'evening';
   return 'morning';
 };
 
@@ -105,10 +116,10 @@ const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedY
   const yearSchoolId = getEntityId(selectedYear?.schoolId);
   const directSchoolId = schoolId && schoolId !== DEFAULT_SCHOOL_ID ? schoolId : '';
   const currentSchool = classSchoolId || yearSchoolId || directSchoolId;
-  const district = trimValue(formData.city) || trimValue(formData.address) || 'Ù†Ø§Ù…Ø´Ø®Øµ';
+  const district = trimValue(formData.city) || trimValue(formData.address) || 'نامشخص';
   const emergencyName = trimValue(formData.emergencyContact) || trimValue(formData.guardianName) || trimValue(formData.fatherName);
   const emergencyPhone = trimValue(formData.emergencyPhone) || trimValue(formData.guardianPhone) || trimValue(formData.fatherPhone) || trimValue(formData.phone);
-  const emergencyRelation = trimValue(formData.guardianRelation) || 'Ø³Ø±Ù¾Ø±Ø³Øª';
+  const emergencyRelation = trimValue(formData.guardianRelation) || 'سرپرست';
   const shiftCode = normalizeShiftCode(selectedClass?.shift || selectedShift?.code || selectedShift?.name || selectedShift?.title);
   const previousSchoolName = trimValue(formData.previousSchool);
   const previousGrade = trimValue(formData.previousGrade);
@@ -132,7 +143,7 @@ const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedY
     familyInfo: {
       fatherOccupation: trimValue(formData.fatherOccupation),
       fatherPhone: trimValue(formData.fatherPhone),
-      motherName: trimValue(formData.motherName) || 'Ø«Ø¨Øª Ù†Ø´Ø¯Ù‡',
+      motherName: trimValue(formData.motherName) || 'ثبت نشده',
       motherOccupation: trimValue(formData.motherOccupation),
       motherPhone: trimValue(formData.motherPhone),
       guardianName: trimValue(formData.guardianName),
@@ -180,7 +191,7 @@ const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedY
         ? [{ condition: trimValue(formData.medicalConditions), severity: 'mild' }]
         : [],
       allergies: trimValue(formData.allergies)
-        ? [{ allergen: trimValue(formData.allergies), reaction: 'Ø«Ø¨Øª Ø´Ø¯Ù‡', severity: 'mild' }]
+        ? [{ allergen: trimValue(formData.allergies), reaction: 'ثبت شده', severity: 'mild' }]
         : [],
       physicalDisabilities: {
         hasDisability: Boolean(trimValue(formData.specialNeeds)),
@@ -194,8 +205,8 @@ const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedY
     notes: {
       general: [
         trimValue(formData.notes),
-        trimValue(formData.transportation) ? `ØªØ±Ø§Ù†Ø³Ù¾ÙˆØ±Øª: ${trimValue(formData.transportation)}` : '',
-        trimValue(formData.lunchProgram) ? `Ø¨Ø±Ù†Ø§Ù…Ù‡ Ù†Ø§Ù‡Ø§Ø±: ${trimValue(formData.lunchProgram)}` : ''
+        trimValue(formData.transportation) ? `ترانسپورت: ${trimValue(formData.transportation)}` : '',
+        trimValue(formData.lunchProgram) ? `برنامه ناهار: ${trimValue(formData.lunchProgram)}` : ''
       ].filter(Boolean).join('\n')
     }
   };
@@ -253,6 +264,7 @@ const StudentRegistration = () => {
     photo: null,
     seParcha: null
   });
+  const [fileInputResetKey, setFileInputResetKey] = useState(0);
   const [academicYears, setAcademicYears] = useState([]);
   const [classes, setClasses] = useState([]);
   const [shifts, setShifts] = useState([]);
@@ -271,7 +283,7 @@ const StudentRegistration = () => {
   const classLabelById = useMemo(() => {
     const mapping = new Map();
     classes.forEach((item) => {
-      mapping.set(String(item._id), item.title || item.titleDari || item.name || item.code || 'ØµÙ†Ù Ù†Ø§Ù…Ø´Ø®Øµ');
+      mapping.set(String(item._id), item.title || item.titleDari || item.name || item.code || 'صنف نامشخص');
     });
     return mapping;
   }, [classes]);
@@ -279,7 +291,7 @@ const StudentRegistration = () => {
   const yearLabelById = useMemo(() => {
     const mapping = new Map();
     academicYears.forEach((item) => {
-      mapping.set(String(item._id), item.title || item.code || 'Ø³Ø§Ù„ ØªØ¹Ù„ÛŒÙ…ÛŒ');
+      mapping.set(String(item._id), item.title || item.code || 'سال تعلیمی');
     });
     return mapping;
   }, [academicYears]);
@@ -312,7 +324,7 @@ const StudentRegistration = () => {
           setAcademicYears([]);
           setClasses([]);
           setShifts([]);
-          toast.error('Ø§ÙˆÙ„ ÛŒÚ© Ù…Ú©ØªØ¨ ÙØ¹Ø§Ù„ Ùˆ Ù…Ø¹ØªØ¨Ø± Ø§Ù†ØªØ®Ø§Ø¨ ÛŒØ§ Ø§ÛŒØ¬Ø§Ø¯ Ú©Ù†ÛŒØ¯.');
+          toast.error('اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید.');
           return;
         }
 
@@ -338,7 +350,7 @@ const StudentRegistration = () => {
         }));
       } catch (error) {
         console.error('Failed to load student registration references:', error);
-        toast.error(displayText(error.message || 'Ø®Ø·Ø§ Ø¯Ø± Ø¯Ø±ÛŒØ§ÙØª Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ø§ÙˆÙ„ÛŒÙ‡ Ø«Ø¨Øª Ø´Ø§Ú¯Ø±Ø¯.'));
+        toast.error(displayText(error.message || 'خطا در دریافت اطلاعات اولیه ثبت شاگرد.'));
       } finally {
         setReferenceLoading(false);
       }
@@ -359,8 +371,12 @@ const StudentRegistration = () => {
       }
       return next;
     });
-    if (errors[field]) {
-      setErrors((current) => ({ ...current, [field]: '' }));
+    if (errors[field] || (field === 'classId' && (errors.shiftId || errors.academicYearId))) {
+      setErrors((current) => ({
+        ...current,
+        [field]: '',
+        ...(field === 'classId' ? { shiftId: '', academicYearId: '' } : {})
+      }));
     }
   };
 
@@ -372,10 +388,22 @@ const StudentRegistration = () => {
   const validateForm = () => {
     const nextErrors = {};
 
-    if (!formData.firstName.trim()) nextErrors.firstName = 'Ù†Ø§Ù… Ø´Ø§Ú¯Ø±Ø¯ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
-    if (!formData.lastName.trim()) nextErrors.lastName = 'ØªØ®Ù„Øµ Ø´Ø§Ú¯Ø±Ø¯ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
-    if (!formData.fatherName.trim()) nextErrors.fatherName = 'Ù†Ø§Ù… Ù¾Ø¯Ø± Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
-    if (!formData.nationalId.trim()) nextErrors.nationalId = 'Ø´Ù…Ø§Ø±Ù‡ ØªØ°Ú©Ø±Ù‡ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
+    if (!formData.firstName.trim()) nextErrors.firstName = 'نام شاگرد الزامی است.';
+    if (!formData.lastName.trim()) nextErrors.lastName = 'تخلص شاگرد الزامی است.';
+    if (!formData.fatherName.trim()) nextErrors.fatherName = 'نام پدر الزامی است.';
+    if (!formData.nationalId.trim()) nextErrors.nationalId = 'شماره تذکره الزامی است.';
+    if (!formData.birthDate) nextErrors.birthDate = 'تاریخ تولد الزامی است.';
+    if (formData.birthDate && new Date(formData.birthDate) > new Date()) {
+      nextErrors.birthDate = 'تاریخ تولد نمی‌تواند در آینده باشد.';
+    }
+    if (!formData.gender) nextErrors.gender = 'جنسیت الزامی است.';
+    if (!formData.province) nextErrors.province = 'ولایت الزامی است.';
+    if (!formData.address.trim()) nextErrors.address = 'آدرس الزامی است.';
+    if (!formData.academicYearId) nextErrors.academicYearId = 'سال تعلیمی الزامی است.';
+    if (!formData.classId) nextErrors.classId = 'صنف الزامی است.';
+    if (formData.classId && !selectedClass) nextErrors.classId = 'صنف انتخاب‌شده معتبر نیست.';
+    if (!formData.shiftId) nextErrors.shiftId = 'نوبت الزامی است.';
+    if (!formData.fatherPhone.trim()) nextErrors.fatherPhone = 'شماره تماس پدر الزامی است.';
 
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -400,17 +428,17 @@ const StudentRegistration = () => {
   const handleSubmit = async (event) => {
     event.preventDefault();
     const submitIntent = event.nativeEvent?.submitter?.value === 'assign' ? 'assign' : 'save';
-    setSubmitStatus({ type: 'info', text: 'Ø¯Ø± Ø­Ø§Ù„ Ø¨Ø±Ø±Ø³ÛŒ Ù…Ø¹Ù„ÙˆÙ…Ø§Øª ÙØ±Ù…...' });
+    setSubmitStatus({ type: 'info', text: 'در حال بررسی معلومات فرم...' });
 
     if (requiresSchoolSelection) {
-      const message = 'Ø§ÙˆÙ„ ÛŒÚ© Ù…Ú©ØªØ¨ ÙØ¹Ø§Ù„ Ùˆ Ù…Ø¹ØªØ¨Ø± Ø§Ù†ØªØ®Ø§Ø¨ ÛŒØ§ Ø§ÛŒØ¬Ø§Ø¯ Ú©Ù†ÛŒØ¯.';
+      const message = 'اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید.';
       setSubmitStatus({ type: 'error', text: message });
       toast.error(message);
       return;
     }
 
     if (!validateForm()) {
-      const message = 'ÙØ±Ù… ØªÚ©Ù…ÛŒÙ„ Ù†ÛŒØ³Øª. Ù„Ø·ÙØ§Ù‹ ÙÛŒÙ„Ø¯Ù‡Ø§ÛŒ Ù¾ÛŒØ§Ù…â€ŒØ¯Ø§Ø± Ø±Ø§ Ø¨Ø±Ø±Ø³ÛŒ Ùˆ ØªÚ©Ù…ÛŒÙ„ Ú©Ù†ÛŒØ¯.';
+      const message = 'فرم تکمیل نیست. لطفاً فیلدهای پیام‌دار را بررسی و تکمیل کنید.';
       setSubmitStatus({ type: 'error', text: message });
       toast.error(message);
       return;
@@ -427,13 +455,13 @@ const StudentRegistration = () => {
       });
 
       if (!payload.academicInfo.currentSchool) {
-        const message = 'Ø¨Ø±Ø§ÛŒ Ø«Ø¨Øª Ø´Ø§Ú¯Ø±Ø¯ØŒ ØµÙ†Ù Ø¨Ø§ÛŒØ¯ Ø¨Ù‡ ÛŒÚ© Ù…Ú©ØªØ¨ Ù…Ø¹ØªØ¨Ø± ÙˆØµÙ„ Ø¨Ø§Ø´Ø¯.';
+        const message = 'برای ثبت شاگرد، صنف باید به یک مکتب معتبر وصل باشد.';
         setSubmitStatus({ type: 'error', text: message });
         toast.error(message);
         return;
       }
 
-      setSubmitStatus({ type: 'info', text: 'Ø¯Ø± Ø­Ø§Ù„ Ø§Ø±Ø³Ø§Ù„ Ù…Ø¹Ù„ÙˆÙ…Ø§Øª Ø¨Ù‡ Ø³Ø±ÙˆØ±...' });
+      setSubmitStatus({ type: 'info', text: 'در حال ارسال معلومات به سرور...' });
       const response = await fetch('/api/afghan-students', {
         method: 'POST',
         headers: {
@@ -452,7 +480,7 @@ const StudentRegistration = () => {
       }
 
       if (!response.ok || data?.success === false) {
-        const message = displayText(data?.message || data?.error || responseText || `Ø«Ø¨Øª Ø´Ø§Ú¯Ø±Ø¯ Ù†Ø§Ù…ÙˆÙÙ‚ Ø¨ÙˆØ¯ (${response.status}).`);
+        const message = displayText(data?.message || data?.error || responseText || `ثبت شاگرد ناموفق بود (${response.status}).`);
         setSubmitStatus({ type: 'error', text: message });
         toast.error(message);
         return;
@@ -464,11 +492,22 @@ const StudentRegistration = () => {
         createdStudent.personalInfo?.firstName || formData.firstName,
         createdStudent.personalInfo?.lastName || formData.lastName
       ].filter(Boolean).join(' ');
+      let documentUploadWarning = '';
+
+      if (createdStudent._id && hasSelectedStudentFiles(studentFiles)) {
+        setSubmitStatus({ type: 'info', text: 'شاگرد ثبت شد. در حال آپلود سندها...' });
+        try {
+          await uploadStudentRegistrationFiles(createdStudent._id, studentFiles);
+        } catch (uploadError) {
+          console.error('Error uploading student documents:', uploadError);
+          documentUploadWarning = ` آپلود سندها انجام نشد: ${displayText(uploadError?.message || 'خطای نامشخص')}`;
+        }
+      }
 
       const summary = {
         id: createdStudent._id || '',
         candidateRef,
-        displayName: displayName || 'Ø´Ø§Ú¯Ø±Ø¯ Ø¬Ø¯ÛŒØ¯',
+        displayName: displayName || 'شاگرد جدید',
         nationalId: createdStudent.identification?.tazkiraNumber || formData.nationalId,
         classTitle: classLabelById.get(String(formData.classId)) || '',
         academicYearTitle: yearLabelById.get(String(formData.academicYearId)) || ''
@@ -476,20 +515,25 @@ const StudentRegistration = () => {
 
       setLastRegisteredStudent(summary);
       setErrors({});
-      setSubmitStatus({ type: 'success', text: `Ø´Ø§Ú¯Ø±Ø¯ ${summary.displayName} Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø«Ø¨Øª Ø´Ø¯.` });
+      setSubmitStatus({ type: documentUploadWarning ? 'error' : 'success', text: `شاگرد ${summary.displayName} با موفقیت ثبت شد.${documentUploadWarning}` });
       setFormData(createEmptyForm(defaultAcademicYearId));
       setStudentFiles({ tazkira: null, fatherTazkira: null, photo: null, seParcha: null });
+      setFileInputResetKey((current) => current + 1);
+
+      if (documentUploadWarning) {
+        toast.error(documentUploadWarning.trim());
+      }
 
       if (submitIntent === 'assign' && candidateRef) {
-        toast.success('Ø´Ø§Ú¯Ø±Ø¯ Ø«Ø¨Øª Ø´Ø¯. Ø¯Ø± Ø­Ø§Ù„ Ø§Ù†ØªÙ‚Ø§Ù„ Ø¨Ù‡ ØªØ®ØµÛŒØµ ØµÙ†Ù...');
+        toast.success('شاگرد ثبت شد. در حال انتقال به تخصیص صنف...');
         openEnrollmentDesk(candidateRef);
         return;
       }
 
-      toast.success('Ø´Ø§Ú¯Ø±Ø¯ Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø«Ø¨Øª Ø´Ø¯. Ù…ÛŒâ€ŒØªÙˆØ§Ù†ÛŒØ¯ Ø«Ø¨Øª Ø¨Ø¹Ø¯ÛŒ Ø±Ø§ Ø§Ø¯Ø§Ù…Ù‡ Ø¯Ù‡ÛŒØ¯.');
+      toast.success('شاگرد با موفقیت ثبت شد. می‌توانید ثبت بعدی را ادامه دهید.');
     } catch (error) {
       console.error('Error registering student:', error);
-      const message = displayText(error?.message || 'Ø®Ø·Ø§ Ø¯Ø± Ø«Ø¨Øª Ø´Ø§Ú¯Ø±Ø¯.');
+      const message = displayText(error?.message || 'خطا در ثبت شاگرد.');
       setSubmitStatus({ type: 'error', text: message });
       toast.error(message);
     } finally {
@@ -500,18 +544,18 @@ const StudentRegistration = () => {
   return (
     <div className="school-management" style={{ minHeight: '100vh' }}>
       <form className="school-form" onSubmit={handleSubmit} noValidate style={{ maxWidth: 900, margin: '40px auto', background: 'white', borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.08)', padding: 32 }}>
-        <h2 style={{ textAlign: 'center', color: '#2c3e50', marginBottom: 8 }}>Ø«Ø¨Øª Ø´Ø§Ú¯Ø±Ø¯ Ø¬Ø¯ÛŒØ¯</h2>
-        <p className="form-subtitle" style={{ textAlign: 'center', color: '#666', marginBottom: 24 }}>Ù…Ø¹Ù„ÙˆÙ…Ø§Øª Ø´Ø§Ú¯Ø±Ø¯ Ø±Ø§ ÙˆØ§Ø±Ø¯ Ú©Ù†ÛŒØ¯ Ùˆ Ù¾Ø³ Ø§Ø² ØªÚ©Ù…ÛŒÙ„ØŒ Ø°Ø®ÛŒØ±Ù‡ Ù†Ù…Ø§ÛŒÛŒØ¯.</p>
+        <h2 style={{ textAlign: 'center', color: '#2c3e50', marginBottom: 8 }}>ثبت شاگرد جدید</h2>
+        <p className="form-subtitle" style={{ textAlign: 'center', color: '#666', marginBottom: 24 }}>معلومات شاگرد را وارد کنید و پس از تکمیل، ذخیره نمایید.</p>
         {requiresSchoolSelection && (
           <div className="student-registration-alert" role="alert">
-            Ø§ÙˆÙ„ ÛŒÚ© Ù…Ú©ØªØ¨ ÙØ¹Ø§Ù„ Ùˆ Ù…Ø¹ØªØ¨Ø± Ø§Ù†ØªØ®Ø§Ø¨ ÛŒØ§ Ø§ÛŒØ¬Ø§Ø¯ Ú©Ù†ÛŒØ¯. Ø«Ø¨Øª Ø´Ø§Ú¯Ø±Ø¯ Ø¨Ø¯ÙˆÙ† Ù…Ú©ØªØ¨ ÙˆØ§Ù‚Ø¹ÛŒ Ø¯Ø± Ø¯ÛŒØªØ§Ø¨ÛŒØ³ Ø°Ø®ÛŒØ±Ù‡ Ù†Ù…ÛŒâ€ŒØ´ÙˆØ¯.
+            اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید. ثبت شاگرد بدون مکتب واقعی در دیتابیس ذخیره نمی‌شود.
             {Array.isArray(activeSchoolContext?.schools) && activeSchoolContext.schools.length > 0 && (
               <select
                 className="student-registration-school-select"
                 defaultValue=""
                 onChange={(event) => handleActiveSchoolSelect(event.target.value)}
               >
-                <option value="">Ø§Ù†ØªØ®Ø§Ø¨ Ù…Ú©ØªØ¨ ÙØ¹Ø§Ù„</option>
+                <option value="">انتخاب مکتب فعال</option>
                 {activeSchoolContext.schools.map((school) => (
                   <option key={school._id || school.id} value={school._id || school.id}>
                     {school.nameDari || school.name || school.schoolCode}
@@ -523,13 +567,13 @@ const StudentRegistration = () => {
         )}
         {!requiresSchoolSelection && activeSchoolContext?.school && (
           <div className="student-registration-school-context">
-            <strong>Ù…Ú©ØªØ¨ ÙØ¹Ø§Ù„: {activeSchoolContext.school.nameDari || activeSchoolContext.school.name || 'Ù…Ú©ØªØ¨'}</strong>
-            <span>Ú©Ø¯: {activeSchoolContext.school.schoolCode || '-'}</span>
-            <span>Ø´Ø§Ú¯Ø±Ø¯Ø§Ù†: {Number(activeSchoolContext.scopeSummary?.students?.count || 0).toLocaleString('fa-AF')}</span>
-            <span>Ø§Ø³ØªØ§Ø¯Ø§Ù†: {Number(activeSchoolContext.scopeSummary?.teachers?.count || 0).toLocaleString('fa-AF')}</span>
-            <span>ØµÙ†Ùâ€ŒÙ‡Ø§: {Number(activeSchoolContext.scopeSummary?.classes?.count || 0).toLocaleString('fa-AF')}</span>
-            <span>Ø´Ù‚Ù‡â€ŒÙ‡Ø§: {Number(activeSchoolContext.scopeSummary?.sheetTemplates?.count || 0).toLocaleString('fa-AF')}</span>
-            <span>Ø³Ø§Ù„ Ù…Ø§Ù„ÛŒ: {Number(activeSchoolContext.scopeSummary?.financialYears?.count || 0).toLocaleString('fa-AF')}</span>
+            <strong>مکتب فعال: {activeSchoolContext.school.nameDari || activeSchoolContext.school.name || 'مکتب'}</strong>
+            <span>کد: {activeSchoolContext.school.schoolCode || '-'}</span>
+            <span>شاگردان: {Number(activeSchoolContext.scopeSummary?.students?.count || 0).toLocaleString('fa-AF')}</span>
+            <span>استادان: {Number(activeSchoolContext.scopeSummary?.teachers?.count || 0).toLocaleString('fa-AF')}</span>
+            <span>صنف‌ها: {Number(activeSchoolContext.scopeSummary?.classes?.count || 0).toLocaleString('fa-AF')}</span>
+            <span>شقه‌ها: {Number(activeSchoolContext.scopeSummary?.sheetTemplates?.count || 0).toLocaleString('fa-AF')}</span>
+            <span>سال مالی: {Number(activeSchoolContext.scopeSummary?.financialYears?.count || 0).toLocaleString('fa-AF')}</span>
           </div>
         )}
         {!!submitStatus.text && (
@@ -538,209 +582,241 @@ const StudentRegistration = () => {
           </div>
         )}
 
-        {/* Ù…Ø´Ø®ØµØ§Øª Ø´Ø®ØµÛŒ */}
+        {/* مشخصات شخصی */}
         <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>Ù…Ø´Ø®ØµØ§Øª Ø´Ø®ØµÛŒ</h3>
-          {/* Ø¨Ø§Ø±Ú¯Ø°Ø§Ø±ÛŒ Ø§Ø³Ù†Ø§Ø¯ Ø´Ø§Ú¯Ø±Ø¯ - Ù‚Ø·Ø§Ø± Ø§ÙÙ‚ÛŒ */}
+          <h3 style={{ color: '#3498db', marginBottom: 12 }}>مشخصات شخصی</h3>
+          {/* بارگذاری اسناد شاگرد - قطار افقی */}
           <div style={{ display: 'flex', flexDirection: 'row', gap: 24, marginTop: 16, marginBottom: 8, justifyContent: 'center' }}>
             <div className="form-group" style={{ minWidth: 170 }}>
-              <label>ØªØ°Ú©Ø±Ù‡ Ø´Ø§Ú¯Ø±Ø¯<br /><span style={{ fontSize: 12, color: '#888' }}>(JPG, PNG, PDF)</span></label>
-              <input type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={e => handleFileChange('tazkira', e.target.files?.[0])} />
+              <label>تذکره شاگرد<br /><span style={{ fontSize: 12, color: '#888' }}>(JPG, PNG, PDF)</span></label>
+              <input key={`tazkira-${fileInputResetKey}`} type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={e => handleFileChange('tazkira', e.target.files?.[0])} />
             </div>
             <div className="form-group" style={{ minWidth: 170 }}>
-              <label>ØªØ°Ú©Ø±Ù‡ Ù¾Ø¯Ø±<br /><span style={{ fontSize: 12, color: '#888' }}>(JPG, PNG, PDF)</span></label>
-              <input type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={e => handleFileChange('fatherTazkira', e.target.files?.[0])} />
+              <label>تذکره پدر<br /><span style={{ fontSize: 12, color: '#888' }}>(JPG, PNG, PDF)</span></label>
+              <input key={`fatherTazkira-${fileInputResetKey}`} type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={e => handleFileChange('fatherTazkira', e.target.files?.[0])} />
             </div>
             <div className="form-group" style={{ minWidth: 170 }}>
-              <label>Ø¹Ú©Ø³ Ø´Ø§Ú¯Ø±Ø¯<br /><span style={{ fontSize: 12, color: '#888' }}>(JPG, PNG)</span></label>
-              <input type="file" accept=".jpg,.jpeg,.png" onChange={e => handleFileChange('photo', e.target.files?.[0])} />
+              <label>عکس شاگرد<br /><span style={{ fontSize: 12, color: '#888' }}>(JPG, PNG)</span></label>
+              <input key={`photo-${fileInputResetKey}`} type="file" accept=".jpg,.jpeg,.png" onChange={e => handleFileChange('photo', e.target.files?.[0])} />
             </div>
           </div>
           <div className="form-grid">
             <div className="form-group">
-              <label htmlFor="firstName">Ù†Ø§Ù… *</label>
+              <label htmlFor="firstName">نام *</label>
               <input id="firstName" value={formData.firstName} onChange={e => handleInputChange('firstName', e.target.value)} required className={errors.firstName ? 'border-red-500' : ''} />
               {errors.firstName && <span className="text-red-500">{errors.firstName}</span>}
             </div>
             <div className="form-group">
-              <label htmlFor="lastName">ØªØ®Ù„Øµ *</label>
+              <label htmlFor="lastName">تخلص *</label>
               <input id="lastName" value={formData.lastName} onChange={e => handleInputChange('lastName', e.target.value)} required className={errors.lastName ? 'border-red-500' : ''} />
               {errors.lastName && <span className="text-red-500">{errors.lastName}</span>}
             </div>
             <div className="form-group">
-              <label htmlFor="fatherName">Ù†Ø§Ù… Ù¾Ø¯Ø± *</label>
+              <label htmlFor="fatherName">نام پدر *</label>
               <input id="fatherName" value={formData.fatherName} onChange={e => handleInputChange('fatherName', e.target.value)} required className={errors.fatherName ? 'border-red-500' : ''} />
               {errors.fatherName && <span className="text-red-500">{errors.fatherName}</span>}
             </div>
             <div className="form-group">
-              <label htmlFor="grandfatherName">Ù†Ø§Ù… Ù¾Ø¯Ø±Ú©Ù„Ø§Ù†</label>
+              <label htmlFor="grandfatherName">نام پدرکلان</label>
               <input id="grandfatherName" value={formData.grandfatherName} onChange={e => handleInputChange('grandfatherName', e.target.value)} />
             </div>
             <div className="form-group">
-              <label htmlFor="nationalId">Ø´Ù…Ø§Ø±Ù‡ ØªØ°Ú©Ø±Ù‡ *</label>
+              <label htmlFor="nationalId">شماره تذکره *</label>
               <input id="nationalId" value={formData.nationalId} onChange={e => handleInputChange('nationalId', e.target.value)} required className={errors.nationalId ? 'border-red-500' : ''} />
               {errors.nationalId && <span className="text-red-500">{errors.nationalId}</span>}
             </div>
             <div className="form-group">
-              <label htmlFor="birthDate">ØªØ§Ø±ÛŒØ® ØªÙˆÙ„Ø¯ *</label>
+              <label htmlFor="birthDate">تاریخ تولد *</label>
               <input id="birthDate" type="date" value={formData.birthDate} onChange={e => handleInputChange('birthDate', e.target.value)} required className={errors.birthDate ? 'border-red-500' : ''} />
               {errors.birthDate && <span className="text-red-500">{errors.birthDate}</span>}
             </div>
             <div className="form-group">
-              <label htmlFor="gender">Ø¬Ù†Ø³ÛŒØª *</label>
+              <label htmlFor="gender">جنسیت *</label>
               <select id="gender" value={formData.gender} onChange={e => handleInputChange('gender', e.target.value)} required className={errors.gender ? 'border-red-500' : ''}>
-                <option value="">Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯</option>
-                <option value="male">Ø°Ú©ÙˆØ±</option>
-                <option value="female">Ø§Ù†Ø§Ø«</option>
+                <option value="">انتخاب کنید</option>
+                <option value="male">ذکور</option>
+                <option value="female">اناث</option>
               </select>
               {errors.gender && <span className="text-red-500">{errors.gender}</span>}
             </div>
             <div className="form-group">
-              <label htmlFor="bloodType">Ú¯Ø±ÙˆÙ¾ Ø®ÙˆÙ†ÛŒ</label>
+              <label htmlFor="bloodType">گروپ خونی</label>
               <select id="bloodType" value={formData.bloodType} onChange={e => handleInputChange('bloodType', e.target.value)}>
-                <option value="">Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯</option>
+                <option value="">انتخاب کنید</option>
                 {BLOOD_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
               </select>
             </div>
           </div>
         </div>
 
-        {/* Ø§Ø·Ù„Ø§Ø¹Ø§Øª ØªØ¹Ù„ÛŒÙ…ÛŒ */}
+        {/* اطلاعات تماس و آدرس */}
         <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>Ø§Ø·Ù„Ø§Ø¹Ø§Øª ØªØ¹Ù„ÛŒÙ…ÛŒ</h3>
+          <h3 style={{ color: '#3498db', marginBottom: 12 }}>اطلاعات تماس و آدرس</h3>
           <div className="form-grid">
             <div className="form-group">
-              <label htmlFor="academicYearId">Ø³Ø§Ù„ ØªØ¹Ù„ÛŒÙ…ÛŒ *</label>
+              <label htmlFor="province">ولایت *</label>
+              <select id="province" value={formData.province} onChange={e => handleInputChange('province', e.target.value)} required className={errors.province ? 'border-red-500' : ''}>
+                <option value="">انتخاب کنید</option>
+                {PROVINCES.map(province => <option key={province.value} value={province.value}>{province.label}</option>)}
+              </select>
+              {errors.province && <span className="text-red-500">{errors.province}</span>}
+            </div>
+            <div className="form-group">
+              <label htmlFor="city">ولسوالی/ناحیه</label>
+              <input id="city" value={formData.city} onChange={e => handleInputChange('city', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label htmlFor="address">آدرس کامل *</label>
+              <input id="address" value={formData.address} onChange={e => handleInputChange('address', e.target.value)} required className={errors.address ? 'border-red-500' : ''} />
+              {errors.address && <span className="text-red-500">{errors.address}</span>}
+            </div>
+            <div className="form-group">
+              <label htmlFor="phone">شماره تماس شاگرد/خانه</label>
+              <input id="phone" value={formData.phone} onChange={e => handleInputChange('phone', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label htmlFor="email">ایمیل</label>
+              <input id="email" type="email" value={formData.email} onChange={e => handleInputChange('email', e.target.value)} />
+            </div>
+          </div>
+        </div>
+
+        {/* اطلاعات تعلیمی */}
+        <div className="form-section">
+          <h3 style={{ color: '#3498db', marginBottom: 12 }}>اطلاعات تعلیمی</h3>
+          <div className="form-grid">
+            <div className="form-group">
+              <label htmlFor="academicYearId">سال تعلیمی *</label>
               <select id="academicYearId" value={formData.academicYearId} onChange={e => handleInputChange('academicYearId', e.target.value)} required className={errors.academicYearId ? 'border-red-500' : ''}>
-                <option value="">Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯</option>
+                <option value="">انتخاب کنید</option>
                 {academicYears.map(year => <option key={year._id} value={year._id}>{year.title || year.code}</option>)}
               </select>
               {errors.academicYearId && <span className="text-red-500">{errors.academicYearId}</span>}
             </div>
             <div className="form-group">
-              <label htmlFor="classId">ØµÙ†Ù *</label>
+              <label htmlFor="classId">صنف *</label>
               <select id="classId" value={formData.classId} onChange={e => handleInputChange('classId', e.target.value)} required className={errors.classId ? 'border-red-500' : ''}>
-                <option value="">Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯</option>
+                <option value="">انتخاب کنید</option>
                 {classes.map(item => <option key={item._id} value={item._id}>{classLabelById.get(String(item._id))}</option>)}
               </select>
               {errors.classId && <span className="text-red-500">{errors.classId}</span>}
             </div>
             <div className="form-group">
-              <label htmlFor="shiftId">Ù†ÙˆØ¨Øª *</label>
+              <label htmlFor="shiftId">نوبت *</label>
               <select id="shiftId" value={formData.shiftId} onChange={e => handleInputChange('shiftId', e.target.value)} required className={errors.shiftId ? 'border-red-500' : ''}>
-                <option value="">Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯</option>
-                {shifts.map(item => <option key={item._id} value={item._id}>{item.name || item.title || 'Ù†ÙˆØ¨Øª'}</option>)}
+                <option value="">انتخاب کنید</option>
+                {shifts.map(item => <option key={item._id} value={item._id}>{item.name || item.title || 'نوبت'}</option>)}
               </select>
               {errors.shiftId && <span className="text-red-500">{errors.shiftId}</span>}
             </div>
             <div className="form-group">
-              <label htmlFor="enrollmentDate">ØªØ§Ø±ÛŒØ® Ø«Ø¨Øªâ€ŒÙ†Ø§Ù…</label>
+              <label htmlFor="enrollmentDate">تاریخ ثبت‌نام</label>
               <input id="enrollmentDate" type="date" value={formData.enrollmentDate} onChange={e => handleInputChange('enrollmentDate', e.target.value)} />
             </div>
             <div className="form-group">
-              <label htmlFor="previousSchool">Ù…Ú©ØªØ¨ Ù‚Ø¨Ù„ÛŒ</label>
+              <label htmlFor="previousSchool">مکتب قبلی</label>
               <input id="previousSchool" value={formData.previousSchool} onChange={e => handleInputChange('previousSchool', e.target.value)} />
             </div>
             <div className="form-group">
-              <label htmlFor="previousGrade">ØµÙ†Ù Ù‚Ø¨Ù„ÛŒ</label>
+              <label htmlFor="previousGrade">صنف قبلی</label>
               <input id="previousGrade" value={formData.previousGrade} onChange={e => handleInputChange('previousGrade', e.target.value)} />
             </div>
-            {/* Ø³Ù‡ Ù¾Ø§Ø±Ú†Ù‡ ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ Ø´Ø§Ú¯Ø±Ø¯Ø§Ù† ØªØ¨Ø¯ÛŒÙ„ÛŒ */}
+            {/* سه پارچه فقط برای شاگردان تبدیلی */}
             {(formData.previousSchool.trim() || formData.previousGrade.trim()) && (
               <div className="form-group" style={{ minWidth: 170 }}>
-                <label>Ø³Ù‡ Ù¾Ø§Ø±Ú†Ù‡<br /><span style={{ fontSize: 12, color: '#888' }}>(ÙˆÛŒÚ˜Ù‡ Ø´Ø§Ú¯Ø±Ø¯Ø§Ù† ØªØ¨Ø¯ÛŒÙ„ÛŒ) (PDF, JPG, PNG)</span></label>
-                <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => handleFileChange('seParcha', e.target.files?.[0])} />
+                <label>سه پارچه<br /><span style={{ fontSize: 12, color: '#888' }}>(ویژه شاگردان تبدیلی) (PDF, JPG, PNG)</span></label>
+                <input key={`seParcha-${fileInputResetKey}`} type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => handleFileChange('seParcha', e.target.files?.[0])} />
                 {errors.seParcha && <span className="text-red-500">{errors.seParcha}</span>}
               </div>
             )}
           </div>
         </div>
 
-        {/* Ø®Ø§Ù†ÙˆØ§Ø¯Ù‡ Ùˆ Ø³Ø±Ù¾Ø±Ø³Øª */}
+        {/* خانواده و سرپرست */}
         <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>Ù…Ø¹Ù„ÙˆÙ…Ø§Øª Ø®Ø§Ù†ÙˆØ§Ø¯Ù‡ Ùˆ Ø³Ø±Ù¾Ø±Ø³Øª</h3>
+          <h3 style={{ color: '#3498db', marginBottom: 12 }}>معلومات خانواده و سرپرست</h3>
           <div className="form-grid">
             <div className="form-group">
-              <label htmlFor="fatherPhone">Ø´Ù…Ø§Ø±Ù‡ ØªÙ…Ø§Ø³ Ù¾Ø¯Ø± *</label>
+              <label htmlFor="fatherPhone">شماره تماس پدر *</label>
               <input id="fatherPhone" value={formData.fatherPhone} onChange={e => handleInputChange('fatherPhone', e.target.value)} required className={errors.fatherPhone ? 'border-red-500' : ''} />
               {errors.fatherPhone && <span className="text-red-500">{errors.fatherPhone}</span>}
             </div>
             <div className="form-group">
-              <label htmlFor="fatherOccupation">Ù…Ø³Ù„Ú© Ù¾Ø¯Ø±</label>
+              <label htmlFor="fatherOccupation">مسلک پدر</label>
               <input id="fatherOccupation" value={formData.fatherOccupation} onChange={e => handleInputChange('fatherOccupation', e.target.value)} />
             </div>
             <div className="form-group">
-              <label htmlFor="motherName">Ù†Ø§Ù… Ù…Ø§Ø¯Ø±</label>
+              <label htmlFor="motherName">نام مادر</label>
               <input id="motherName" value={formData.motherName} onChange={e => handleInputChange('motherName', e.target.value)} />
             </div>
             <div className="form-group">
-              <label htmlFor="motherPhone">Ø´Ù…Ø§Ø±Ù‡ ØªÙ…Ø§Ø³ Ù…Ø§Ø¯Ø±</label>
+              <label htmlFor="motherPhone">شماره تماس مادر</label>
               <input id="motherPhone" value={formData.motherPhone} onChange={e => handleInputChange('motherPhone', e.target.value)} />
             </div>
             <div className="form-group">
-              <label htmlFor="motherOccupation">Ù…Ø³Ù„Ú© Ù…Ø§Ø¯Ø±</label>
+              <label htmlFor="motherOccupation">مسلک مادر</label>
               <input id="motherOccupation" value={formData.motherOccupation} onChange={e => handleInputChange('motherOccupation', e.target.value)} />
             </div>
             <div className="form-group">
-              <label htmlFor="guardianName">Ù†Ø§Ù… Ø³Ø±Ù¾Ø±Ø³Øª</label>
+              <label htmlFor="guardianName">نام سرپرست</label>
               <input id="guardianName" value={formData.guardianName} onChange={e => handleInputChange('guardianName', e.target.value)} />
             </div>
             <div className="form-group">
-              <label htmlFor="guardianPhone">Ø´Ù…Ø§Ø±Ù‡ ØªÙ…Ø§Ø³ Ø³Ø±Ù¾Ø±Ø³Øª</label>
+              <label htmlFor="guardianPhone">شماره تماس سرپرست</label>
               <input id="guardianPhone" value={formData.guardianPhone} onChange={e => handleInputChange('guardianPhone', e.target.value)} />
             </div>
             <div className="form-group">
-              <label htmlFor="guardianRelation">Ù†Ø³Ø¨Øª Ø³Ø±Ù¾Ø±Ø³Øª</label>
+              <label htmlFor="guardianRelation">نسبت سرپرست</label>
               <input id="guardianRelation" value={formData.guardianRelation} onChange={e => handleInputChange('guardianRelation', e.target.value)} />
             </div>
           </div>
         </div>
 
-        {/* ØµØ­ÛŒ Ùˆ Ø§Ø¶Ø§ÙÛŒ */}
+        {/* صحی و اضافی */}
         <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>Ù…Ø¹Ù„ÙˆÙ…Ø§Øª ØµØ­ÛŒ Ùˆ Ø§Ø¶Ø§ÙÛŒ</h3>
+          <h3 style={{ color: '#3498db', marginBottom: 12 }}>معلومات صحی و اضافی</h3>
           <div className="form-grid">
             <div className="form-group">
-              <label htmlFor="medicalConditions">Ø­Ø§Ù„Ø§Øª ØµØ­ÛŒ Ù…Ø²Ù…Ù†</label>
+              <label htmlFor="medicalConditions">حالات صحی مزمن</label>
               <textarea id="medicalConditions" rows={3} value={formData.medicalConditions} onChange={e => handleInputChange('medicalConditions', e.target.value)} />
             </div>
             <div className="form-group">
-              <label htmlFor="allergies">Ø­Ø³Ø§Ø³ÛŒØªâ€ŒÙ‡Ø§</label>
+              <label htmlFor="allergies">حساسیت‌ها</label>
               <textarea id="allergies" rows={3} value={formData.allergies} onChange={e => handleInputChange('allergies', e.target.value)} />
             </div>
             <div className="form-group">
-              <label htmlFor="emergencyContact">Ù†Ø§Ù… Ø§Ø¶Ø·Ø±Ø§Ø±ÛŒ</label>
+              <label htmlFor="emergencyContact">نام اضطراری</label>
               <input id="emergencyContact" value={formData.emergencyContact} onChange={e => handleInputChange('emergencyContact', e.target.value)} />
             </div>
             <div className="form-group">
-              <label htmlFor="emergencyPhone">Ø´Ù…Ø§Ø±Ù‡ Ø§Ø¶Ø·Ø±Ø§Ø±ÛŒ</label>
+              <label htmlFor="emergencyPhone">شماره اضطراری</label>
               <input id="emergencyPhone" value={formData.emergencyPhone} onChange={e => handleInputChange('emergencyPhone', e.target.value)} />
             </div>
             <div className="form-group">
-              <label htmlFor="transportation">Ù†ÙˆØ¹ ØªØ±Ø§Ù†Ø³Ù¾ÙˆØ±Øª</label>
+              <label htmlFor="transportation">نوع ترانسپورت</label>
               <select id="transportation" value={formData.transportation} onChange={e => handleInputChange('transportation', e.target.value)}>
-                <option value="">Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯</option>
-                <option value="walking">Ù¾ÛŒØ§Ø¯Ù‡</option>
-                <option value="school_bus">ØªØ±Ø§Ù†Ø³Ù¾ÙˆØ±Øª Ù…Ú©ØªØ¨</option>
-                <option value="private">Ø´Ø®ØµÛŒ</option>
-                <option value="parent">Ø¨Ø§ ÙˆØ§Ù„Ø¯ÛŒÙ†</option>
+                <option value="">انتخاب کنید</option>
+                <option value="walking">پیاده</option>
+                <option value="school_bus">ترانسپورت مکتب</option>
+                <option value="private">شخصی</option>
+                <option value="parent">با والدین</option>
               </select>
             </div>
             <div className="form-group">
-              <label htmlFor="lunchProgram">Ø¨Ø±Ù†Ø§Ù…Ù‡ Ù†Ø§Ù‡Ø§Ø±</label>
+              <label htmlFor="lunchProgram">برنامه ناهار</label>
               <select id="lunchProgram" value={formData.lunchProgram} onChange={e => handleInputChange('lunchProgram', e.target.value)}>
-                <option value="">Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯</option>
-                <option value="included">Ø´Ø§Ù…Ù„ Ù†Ø§Ù‡Ø§Ø±</option>
-                <option value="excluded">Ø´Ø§Ù…Ù„ Ù†ÛŒØ³Øª</option>
-                <option value="special">Ø±Ú˜ÛŒÙ… Ø®Ø§Øµ</option>
+                <option value="">انتخاب کنید</option>
+                <option value="included">شامل ناهار</option>
+                <option value="excluded">شامل نیست</option>
+                <option value="special">رژیم خاص</option>
               </select>
             </div>
             <div className="form-group">
-              <label htmlFor="specialNeeds">Ù†ÛŒØ§Ø²Ù‡Ø§ÛŒ Ø®Ø§Øµ</label>
+              <label htmlFor="specialNeeds">نیازهای خاص</label>
               <input id="specialNeeds" value={formData.specialNeeds} onChange={e => handleInputChange('specialNeeds', e.target.value)} />
             </div>
             <div className="form-group">
-              <label htmlFor="notes">ÛŒØ§Ø¯Ø¯Ø§Ø´Øªâ€ŒÙ‡Ø§</label>
+              <label htmlFor="notes">یادداشت‌ها</label>
               <textarea id="notes" rows={4} value={formData.notes} onChange={e => handleInputChange('notes', e.target.value)} />
             </div>
           </div>
@@ -748,13 +824,13 @@ const StudentRegistration = () => {
 
         <div style={{ display: 'flex', gap: 16, marginTop: 32, flexWrap: 'wrap', justifyContent: 'center' }}>
           <button type="submit" value="save" className="add-btn" disabled={loading || referenceLoading || requiresSchoolSelection}>
-            {loading ? 'Ø¯Ø± Ø­Ø§Ù„ Ø°Ø®ÛŒØ±Ù‡...' : 'Ø«Ø¨Øª Ø´Ø§Ú¯Ø±Ø¯'}
+            {loading ? 'در حال ذخیره...' : 'ثبت شاگرد'}
           </button>
           <button type="submit" value="assign" className="save-btn" disabled={loading || referenceLoading || requiresSchoolSelection}>
-            {loading ? 'Ø¯Ø± Ø­Ø§Ù„ Ù¾Ø±Ø¯Ø§Ø²Ø´...' : 'Ø«Ø¨Øª Ùˆ ØªØ®ØµÛŒØµ ØµÙ†Ù'}
+            {loading ? 'در حال پردازش...' : 'ثبت و تخصیص صنف'}
           </button>
           <button type="button" className="cancel-btn" onClick={() => window.history.back()}>
-            Ø§Ù†ØµØ±Ø§Ù
+            انصراف
           </button>
         </div>
       </form>

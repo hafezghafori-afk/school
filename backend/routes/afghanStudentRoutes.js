@@ -1,5 +1,8 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
 const AfghanStudent = require('../models/AfghanStudent');
 const AfghanSchool = require('../models/AfghanSchool');
 const { requireFields } = require('../middleware/validate');
@@ -15,6 +18,33 @@ const { requireWritableSchool, writeSchoolContextHeaders } = require('../service
 const router = express.Router();
 const auditWrite = (payload) => logActivity(payload);
 attachWriteActivityAudit(router, { targetType: 'AfghanStudent', actionPrefix: 'afghan_student', audit: auditWrite });
+
+const studentUploadDir = path.join(__dirname, '..', 'uploads', 'afghan-students');
+if (!fs.existsSync(studentUploadDir)) {
+  fs.mkdirSync(studentUploadDir, { recursive: true });
+}
+
+const studentDocumentUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, studentUploadDir),
+    filename: (_req, file, cb) => {
+      const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '-');
+      cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}-${safeName}`);
+    }
+  }),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = new Set(['application/pdf', 'image/jpeg', 'image/png']);
+    cb(allowed.has(file.mimetype) ? null : new Error('invalid_student_document_type'), allowed.has(file.mimetype));
+  }
+});
+
+const STUDENT_DOCUMENT_META = {
+  tazkira: { type: 'tazkira', title: 'تذکره شاگرد' },
+  fatherTazkira: { type: 'other', title: 'تذکره پدر' },
+  photo: { type: 'photo', title: 'عکس شاگرد' },
+  seParcha: { type: 'transfer_certificate', title: 'سه پارچه' }
+};
 
 // Helper functions
 const calculateAge = (birthDate) => {
@@ -105,7 +135,7 @@ router.get('/dashboard', requireAuth, requireRole(['admin', 'principal', 'teache
 });
 
 // GET /api/afghan-students - Get all students with filtering
-router.get('/', requireAuth, requireRole(['admin', 'principal', 'teacher']), requirePermission('manage_content'), async (req, res) => {
+router.get('/', requireAuth, requireRole(['admin', 'principal', 'teacher', 'registration_manager']), requireAnyPermission(['manage_content', 'manage_users', 'manage_enrollments']), async (req, res) => {
   try {
     const {
       page = 1,
@@ -173,7 +203,7 @@ router.get('/', requireAuth, requireRole(['admin', 'principal', 'teacher']), req
 });
 
 // GET /api/afghan-students/:id - Get single student
-router.get('/:id', requireAuth, requireRole(['admin', 'principal', 'teacher']), requirePermission('manage_content'), async (req, res) => {
+router.get('/:id', requireAuth, requireRole(['admin', 'principal', 'teacher', 'registration_manager']), requireAnyPermission(['manage_content', 'manage_users', 'manage_enrollments']), async (req, res) => {
   try {
     const student = await AfghanStudent.findById(req.params.id)
       .populate('academicInfo.currentSchool', 'name province district schoolType')
@@ -276,8 +306,57 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
   }
 });
 
+// POST /api/afghan-students/:id/documents - Attach registration documents
+router.post('/:id/documents', requireAuth, requireRole(['admin', 'principal', 'registration_manager']), requireAnyPermission(['manage_content', 'manage_enrollments']), (req, res) => {
+  studentDocumentUpload.fields([
+    { name: 'tazkira', maxCount: 1 },
+    { name: 'fatherTazkira', maxCount: 1 },
+    { name: 'photo', maxCount: 1 },
+    { name: 'seParcha', maxCount: 1 }
+  ])(req, res, async (uploadError) => {
+    if (uploadError) {
+      const message = uploadError.message === 'invalid_student_document_type'
+        ? 'نوع فایل سند معتبر نیست. فقط PDF، JPG و PNG پذیرفته می‌شود.'
+        : 'آپلود سندهای شاگرد ناموفق بود.';
+      return fail(res, message, 400);
+    }
+
+    try {
+      const student = await AfghanStudent.findById(req.params.id);
+      if (!student) {
+        return fail(res, 'Student not found', 404);
+      }
+
+      const documents = Object.entries(req.files || {}).flatMap(([field, files]) => {
+        const meta = STUDENT_DOCUMENT_META[field];
+        if (!meta) return [];
+        return (files || []).map((file) => ({
+          type: meta.type,
+          title: meta.title,
+          url: `uploads/afghan-students/${file.filename}`,
+          uploadDate: new Date(),
+          verified: false
+        }));
+      });
+
+      if (!documents.length) {
+        return fail(res, 'هیچ سندی برای آپلود انتخاب نشده است.', 400);
+      }
+
+      student.documents.push(...documents);
+      student.lastUpdatedBy = req.user?.id || student.lastUpdatedBy;
+      await student.save();
+
+      return ok(res, { documents: student.documents }, 'Student documents uploaded successfully');
+    } catch (error) {
+      console.error('Upload Student Documents Error:', error);
+      return fail(res, 'Failed to upload student documents', 500);
+    }
+  });
+});
+
 // PUT /api/afghan-students/:id - Update student
-router.put('/:id', requireAuth, requireRole(['admin', 'principal', 'registration_manager']), requirePermission('manage_content'), async (req, res) => {
+router.put('/:id', requireAuth, requireRole(['admin', 'principal', 'registration_manager']), requireAnyPermission(['manage_content', 'manage_users', 'manage_enrollments']), async (req, res) => {
   try {
     const studentData = {
       ...req.body,
@@ -313,7 +392,7 @@ router.put('/:id', requireAuth, requireRole(['admin', 'principal', 'registration
 });
 
 // DELETE /api/afghan-students/:id - Delete student
-router.delete('/:id', requireAuth, requireRole(['admin', 'principal']), requirePermission('manage_content'), async (req, res) => {
+router.delete('/:id', requireAuth, requireRole(['admin', 'principal']), requireAnyPermission(['manage_content', 'manage_users', 'manage_enrollments']), async (req, res) => {
   try {
     const student = await AfghanStudent.findByIdAndDelete(req.params.id);
     if (!student) {
