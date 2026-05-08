@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './SchedulePage.css';
 
 import { API_BASE } from '../config/api';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import StudentTimetableView from './StudentTimetableView';
 import TeacherTimetableView from './TeacherTimetableView';
 
@@ -72,7 +73,7 @@ export default function SchedulePage() {
 
         <div className="schedule-controls">
           <label>تاریخ</label>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <AfghanDateInput value={date} onChange={setDate} />
           <div className="schedule-toggle">
             <button
               type="button"

@@ -2,18 +2,18 @@ const AFGHAN_DATE_LOCALE = 'fa-AF-u-ca-persian';
 const AFGHAN_NUMBER_LOCALE = 'fa-AF';
 const AFGHAN_SOLAR_MONTHS = ['حمل', 'ثور', 'جوزا', 'سرطان', 'اسد', 'سنبله', 'میزان', 'عقرب', 'قوس', 'جدی', 'دلو', 'حوت'];
 const IRANIAN_TO_AFGHAN_SOLAR_MONTHS = {
-  'فروردین': 'حمل',
-  'اردیبهشت': 'ثور',
-  'خرداد': 'جوزا',
-  'تیر': 'سرطان',
-  'مرداد': 'اسد',
-  'شهریور': 'سنبله',
-  'مهر': 'میزان',
-  'آبان': 'عقرب',
-  'آذر': 'قوس',
-  'دی': 'جدی',
-  'بهمن': 'دلو',
-  'اسفند': 'حوت'
+  فروردین: 'حمل',
+  اردیبهشت: 'ثور',
+  خرداد: 'جوزا',
+  تیر: 'سرطان',
+  مرداد: 'اسد',
+  شهریور: 'سنبله',
+  مهر: 'میزان',
+  آبان: 'عقرب',
+  آذر: 'قوس',
+  دی: 'جدی',
+  بهمن: 'دلو',
+  اسفند: 'حوت'
 };
 
 const MONTH_TOKEN_BOUNDARY = '[\\s\\u200c\\-_/،,:;()\\[\\]{}]+';
@@ -41,12 +41,35 @@ function normalizeAfghanSolarText(value = '') {
 
 function asDate(value) {
   if (!value) return null;
-  const date = value instanceof Date ? value : new Date(value);
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  const text = String(value || '').trim();
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (dateOnly) {
+    const date = new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function tryFormatDate(date, locale, options = {}) {
-  return normalizeAfghanSolarText(new Intl.DateTimeFormat(locale, options).format(date));
+  const formatter = new Intl.DateTimeFormat(locale, options);
+  const parts = formatter.formatToParts(date);
+  const part = (type) => normalizeAfghanSolarText(parts.find((item) => item.type === type)?.value || '');
+  const year = part('year');
+  const month = part('month');
+  const day = part('day');
+  const hour = part('hour');
+  const minute = part('minute');
+  const dayPeriod = part('dayPeriod');
+
+  if (year || month || day) {
+    const dateText = [year, month, day].filter(Boolean).join(' ');
+    const timeText = [hour, minute].filter(Boolean).join(':');
+    return normalizeAfghanSolarText([dateText, timeText, dayPeriod].filter(Boolean).join(' '));
+  }
+
+  return normalizeAfghanSolarText(formatter.format(date));
 }
 
 function formatAfghanDate(value, options = {}) {

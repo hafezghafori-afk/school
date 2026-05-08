@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import './AdminWorkspace.css';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 
 import {
   downloadBlob,
@@ -883,11 +884,11 @@ export default function AdminReports() {
                 </div>
                 <div className="admin-workspace-field">
                   <label htmlFor="report-from">از تاریخ</label>
-                  <input id="report-from" type="date" name="dateFrom" value={form.dateFrom} onChange={handleChange} />
+                  <AfghanDateInput id="report-from" name="dateFrom" value={form.dateFrom} onChange={(value) => setForm((current) => ({ ...current, dateFrom: value }))} />
                 </div>
                 <div className="admin-workspace-field">
                   <label htmlFor="report-to">تا تاریخ</label>
-                  <input id="report-to" type="date" name="dateTo" value={form.dateTo} onChange={handleChange} />
+                  <AfghanDateInput id="report-to" name="dateTo" value={form.dateTo} onChange={(value) => setForm((current) => ({ ...current, dateTo: value }))} />
                 </div>
               </div>
               <div className="admin-workspace-actions">

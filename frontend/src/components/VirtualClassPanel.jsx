@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { API_BASE } from '../config/api';
+import AfghanDateInput from './ui/AfghanDateInput';
 import { formatAfghanDateTime, toGregorianDateTimeInputValue } from '../utils/afghanDate';
 
 const providerLabels = {
@@ -426,7 +427,7 @@ export default function VirtualClassPanel({ role = 'student' }) {
 
               <label>
                 <span>زمان برگزاری</span>
-                <input type="datetime-local" value={form.scheduledAt} onChange={(event) => handleFormChange('scheduledAt', event.target.value)} required />
+                <AfghanDateInput value={form.scheduledAt} onChange={(value) => handleFormChange('scheduledAt', value)} includeTime required showGregorianEquivalent />
               </label>
 
               <label>

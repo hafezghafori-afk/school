@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './AttendanceManager.css';
 
 import { API_BASE } from '../config/api';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, formatAfghanDateTime, toGregorianDateInputValue } from '../utils/afghanDate';
 
 const STATUS_OPTIONS = [
@@ -1039,24 +1040,22 @@ export default function AttendanceManager() {
                 {view === 'entry' ? (
                   <label>
                     <span>تاریخ حضور</span>
-                    <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                    <AfghanDateInput value={date} onChange={setDate} />
                   </label>
                 ) : (
                   <>
                     <label>
                       <span>از تاریخ</span>
-                      <input
-                        type="date"
+                      <AfghanDateInput
                         value={range.from}
-                        onChange={(e) => setRange((prev) => ({ ...prev, from: e.target.value }))}
+                        onChange={(value) => setRange((prev) => ({ ...prev, from: value }))}
                       />
                     </label>
                     <label>
                       <span>تا تاریخ</span>
-                      <input
-                        type="date"
+                      <AfghanDateInput
                         value={range.to}
-                        onChange={(e) => setRange((prev) => ({ ...prev, to: e.target.value }))}
+                        onChange={(value) => setRange((prev) => ({ ...prev, to: value }))}
                       />
                     </label>
                   </>
@@ -1079,24 +1078,22 @@ export default function AttendanceManager() {
                 {view === 'entry' ? (
                   <label>
                     <span>تاریخ حضور</span>
-                    <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                    <AfghanDateInput value={date} onChange={setDate} />
                   </label>
                 ) : (
                   <>
                     <label>
                       <span>از تاریخ</span>
-                      <input
-                        type="date"
+                      <AfghanDateInput
                         value={range.from}
-                        onChange={(e) => setRange((prev) => ({ ...prev, from: e.target.value }))}
+                        onChange={(value) => setRange((prev) => ({ ...prev, from: value }))}
                       />
                     </label>
                     <label>
                       <span>تا تاریخ</span>
-                      <input
-                        type="date"
+                      <AfghanDateInput
                         value={range.to}
-                        onChange={(e) => setRange((prev) => ({ ...prev, to: e.target.value }))}
+                        onChange={(value) => setRange((prev) => ({ ...prev, to: value }))}
                       />
                     </label>
                   </>

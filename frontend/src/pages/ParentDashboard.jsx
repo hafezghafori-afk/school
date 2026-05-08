@@ -8,6 +8,7 @@ import QuickActionRail from '../components/dashboard/QuickActionRail';
 import TaskAlertPanel from '../components/dashboard/TaskAlertPanel';
 import TrendBars from '../components/dashboard/TrendBars';
 import { API_BASE } from '../config/api';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { downloadBlob, errorMessage, fetchBlob } from './adminWorkspaceUtils';
 
 const ORDER_STATUS_LABELS = {
@@ -841,11 +842,12 @@ export default function ParentDashboard() {
               <div className="parent-receipt-form__row">
                 <label className="dash-form-grid">
                   <span className="muted">تاریخ پرداخت</span>
-                  <input
-                    type="datetime-local"
+                  <AfghanDateInput
                     name="paidAt"
                     value={receiptForm.paidAt}
-                    onChange={handleReceiptFieldChange}
+                    onChange={(value) => setReceiptForm((current) => ({ ...current, paidAt: value }))}
+                    includeTime
+                    showGregorianEquivalent
                   />
                 </label>
                 <label className="dash-form-grid">

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import './AdminWorkspace.css';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 
 import {
   errorMessage,
@@ -254,7 +255,7 @@ export default function AdminPromotions() {
                 </div>
                 <div className="admin-workspace-field">
                   <label htmlFor="promotion-effective-at">تاریخ اثر</label>
-                  <input id="promotion-effective-at" type="date" name="effectiveAt" value={form.effectiveAt} onChange={handleChange} />
+                  <AfghanDateInput id="promotion-effective-at" name="effectiveAt" value={form.effectiveAt} onChange={(value) => setForm((current) => ({ ...current, effectiveAt: value }))} showGregorianEquivalent />
                 </div>
               </div>
               <div className="admin-workspace-actions">

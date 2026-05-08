@@ -6,6 +6,7 @@ const getAuthHeaders = () => {
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { API_BASE } from '../config/api';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import './AdminFinancialMemberships.css';
 
 const getDefaultForm = () => ({
@@ -533,11 +534,11 @@ export default function AdminFinancialMemberships() {
                   </div>
                   <div className="afm-form-card">
                     <label>تاریخ شروع</label>
-                    <input type="date" required value={form.startDate} onChange={e => handleFormChange('startDate', e.target.value)} />
+                    <AfghanDateInput required value={form.startDate} onChange={(value) => handleFormChange('startDate', value)} showGregorianEquivalent />
                   </div>
                   <div className="afm-form-card">
                     <label>تاریخ ختم</label>
-                    <input type="date" value={form.endDate} onChange={e => handleFormChange('endDate', e.target.value)} />
+                    <AfghanDateInput value={form.endDate} onChange={(value) => handleFormChange('endDate', value)} showGregorianEquivalent />
                   </div>
                   <div className="afm-form-card afm-form-card-notes">
                     <label>یادداشت</label>

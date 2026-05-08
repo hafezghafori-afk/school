@@ -10,6 +10,7 @@ import {
   getAuthHeaders,
   toLocaleDateTime
 } from './adminWorkspaceUtils';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
 
 const ORDER_STATUS_LABELS = {
@@ -796,10 +797,10 @@ export default function StudentFinance() {
                   </label>
                   <label className="student-finance-field">
                     <span>تاریخ پرداخت</span>
-                    <input
-                      type="date"
+                    <AfghanDateInput
                       value={paymentForm.paidAt}
-                      onChange={(event) => setPaymentForm((current) => ({ ...current, paidAt: event.target.value }))}
+                      onChange={(value) => setPaymentForm((current) => ({ ...current, paidAt: value }))}
+                      showGregorianEquivalent
                     />
                     <small>{paymentForm.paidAt ? `هجری شمسی: ${toFaDate(paymentForm.paidAt)}` : 'تاریخ پرداخت انتخاب نشده است.'}</small>
                   </label>

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import './AdminWorkspace.css';
 import { errorMessage, fetchJson, normalizeOptions, postJson } from './adminWorkspaceUtils';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
 
 const emptyClass = { id: '', title: '', code: '', gradeLevel: '', section: 'الف', academicYearId: '', shift: 'morning', room: '', status: 'active', note: '' };
@@ -1283,14 +1284,14 @@ export default function AdminEducationCore() {
           <div className="admin-workspace-form-grid">
             <div className="admin-workspace-field">
               <label>تاریخ شروع</label>
-              <input type="date" value={yearForm.startDate} onChange={(event) => setYearForm((current) => ({ ...current, startDate: event.target.value }))} />
+              <AfghanDateInput value={yearForm.startDate} onChange={(value) => setYearForm((current) => ({ ...current, startDate: value }))} showGregorianEquivalent />
               <small className="admin-workspace-subtitle">
                 {yearForm.startDate ? `هجری شمسی: ${formatFaDate(yearForm.startDate)}` : 'نمایش رسمی تاریخ به هجری شمسی بعد از انتخاب نشان داده می‌شود.'}
               </small>
             </div>
             <div className="admin-workspace-field">
               <label>تاریخ ختم</label>
-              <input type="date" value={yearForm.endDate} onChange={(event) => setYearForm((current) => ({ ...current, endDate: event.target.value }))} />
+              <AfghanDateInput value={yearForm.endDate} onChange={(value) => setYearForm((current) => ({ ...current, endDate: value }))} showGregorianEquivalent />
               <small className="admin-workspace-subtitle">
                 {yearForm.endDate ? `هجری شمسی: ${formatFaDate(yearForm.endDate)}` : 'نمایش رسمی تاریخ به هجری شمسی بعد از انتخاب نشان داده می‌شود.'}
               </small>
@@ -1423,12 +1424,12 @@ export default function AdminEducationCore() {
             </div>
             <div className="admin-workspace-field">
               <label>تاریخ شروع</label>
-              <input type="date" value={termForm.startDate} onChange={(event) => setTermForm((current) => ({ ...current, startDate: event.target.value }))} />
+              <AfghanDateInput value={termForm.startDate} onChange={(value) => setTermForm((current) => ({ ...current, startDate: value }))} showGregorianEquivalent />
               <small className="admin-workspace-subtitle">{termForm.startDate ? `هجری شمسی: ${formatFaDate(termForm.startDate)}` : 'اختیاری'}</small>
             </div>
             <div className="admin-workspace-field">
               <label>تاریخ ختم</label>
-              <input type="date" value={termForm.endDate} onChange={(event) => setTermForm((current) => ({ ...current, endDate: event.target.value }))} />
+              <AfghanDateInput value={termForm.endDate} onChange={(value) => setTermForm((current) => ({ ...current, endDate: value }))} showGregorianEquivalent />
               <small className="admin-workspace-subtitle">{termForm.endDate ? `هجری شمسی: ${formatFaDate(termForm.endDate)}` : 'اختیاری'}</small>
             </div>
             <div className="admin-workspace-field">

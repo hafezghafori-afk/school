@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import './AcademicTermsPage.css';
 
 const AcademicTermsPage = () => {
@@ -520,18 +521,18 @@ const AcademicTermsPage = () => {
               <div className="form-row">
                 <div className="form-group">
                   <label>تاریخ شروع (میلادی)</label>
-                  <input
-                    type="date"
+                  <AfghanDateInput
                     value={formData.startDate}
-                    onChange={(e) => setFormData({...formData, startDate: e.target.value})}
+                    onChange={(value) => setFormData({...formData, startDate: value})}
+                    showGregorianEquivalent
                   />
                 </div>
                 <div className="form-group">
                   <label>تاریخ پایان (میلادی)</label>
-                  <input
-                    type="date"
+                  <AfghanDateInput
                     value={formData.endDate}
-                    onChange={(e) => setFormData({...formData, endDate: e.target.value})}
+                    onChange={(value) => setFormData({...formData, endDate: value})}
+                    showGregorianEquivalent
                   />
                 </div>
               </div>

@@ -2,6 +2,7 @@ import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './AdminFinance.css';
 import { API_BASE } from '../config/api';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, formatAfghanDateTime, toGregorianDateInputValue } from '../utils/afghanDate';
 
 const getAuthHeaders = () => {
@@ -4367,7 +4368,7 @@ export default function AdminFinance() {
             </div>
             <label className="finance-inline-filter">
               <span>تاریخ گزارش</span>
-              <input type="date" value={cashierReportDate} onChange={(e) => setCashierReportDate(e.target.value)} />
+              <AfghanDateInput value={cashierReportDate} onChange={setCashierReportDate} showGregorianEquivalent />
               <small>{cashierReportDate ? `هجری شمسی: ${toFaDate(cashierReportDate)}` : 'تاریخ انتخاب نشده است.'}</small>
             </label>
             <button type="button" className="secondary" onClick={exportCashierReportCsv}>CSV</button>
@@ -4449,7 +4450,7 @@ export default function AdminFinance() {
             </div>
             <div className="finance-split-grid">
               <div className="finance-cell-stack">
-                <input type="date" value={manualForm.dueDate} onChange={(e) => setManualForm((p) => ({ ...p, dueDate: e.target.value }))} />
+                <AfghanDateInput value={manualForm.dueDate} onChange={(value) => setManualForm((p) => ({ ...p, dueDate: value }))} showGregorianEquivalent />
                 <small>{manualForm.dueDate ? `هجری شمسی: ${toFaDate(manualForm.dueDate)}` : 'سررسید انتخاب نشده است.'}</small>
               </div>
               <input value={manualForm.academicYear} onChange={(e) => setManualForm((p) => ({ ...p, academicYear: e.target.value }))} placeholder="سال آموزشی" />
@@ -4533,7 +4534,7 @@ export default function AdminFinance() {
             </select>
           </div>
           <div className="finance-split-grid">
-            <input type="date" value={paymentDeskForm.paidAt} onChange={(e) => setPaymentDeskForm((p) => ({ ...p, paidAt: e.target.value }))} />
+            <AfghanDateInput value={paymentDeskForm.paidAt} onChange={(value) => setPaymentDeskForm((p) => ({ ...p, paidAt: value }))} showGregorianEquivalent />
             <span className="finance-chip finance-chip-muted">{paymentDeskForm.paidAt ? `تاریخ پرداخت: ${toFaDate(paymentDeskForm.paidAt)}` : 'تاریخ پرداخت انتخاب نشده'}</span>
           </div>
           <div className="finance-split-grid">
@@ -4756,7 +4757,7 @@ export default function AdminFinance() {
             </div>
             <div className="finance-split-grid">
               <div className="finance-cell-stack">
-                <input type="date" value={bulkForm.dueDate} onChange={(e) => setBulkForm((p) => ({ ...p, dueDate: e.target.value }))} />
+                <AfghanDateInput value={bulkForm.dueDate} onChange={(value) => setBulkForm((p) => ({ ...p, dueDate: value }))} showGregorianEquivalent />
                 <small>{bulkForm.dueDate ? `هجری شمسی: ${toFaDate(bulkForm.dueDate)}` : 'سررسید گروهی انتخاب نشده است.'}</small>
               </div>
               <input value={bulkForm.academicYear} onChange={(e) => setBulkForm((p) => ({ ...p, academicYear: e.target.value }))} placeholder="سال آموزشی" />
@@ -4852,18 +4853,18 @@ export default function AdminFinance() {
           </div>
           <div className="finance-split-grid">
             <div className="finance-cell-stack">
-              <input
-                type="date"
+              <AfghanDateInput
                 value={feePlanForm.effectiveFrom}
-                onChange={(e) => setFeePlanForm((p) => ({ ...p, effectiveFrom: e.target.value }))}
+                onChange={(value) => setFeePlanForm((p) => ({ ...p, effectiveFrom: value }))}
+                showGregorianEquivalent
               />
               <small>{feePlanForm.effectiveFrom ? `هجری شمسی: ${toFaDate(feePlanForm.effectiveFrom)}` : 'تاریخ شروع مؤثر انتخاب نشده است.'}</small>
             </div>
             <div className="finance-cell-stack">
-              <input
-                type="date"
+              <AfghanDateInput
                 value={feePlanForm.effectiveTo}
-                onChange={(e) => setFeePlanForm((p) => ({ ...p, effectiveTo: e.target.value }))}
+                onChange={(value) => setFeePlanForm((p) => ({ ...p, effectiveTo: value }))}
+                showGregorianEquivalent
               />
               <small>{feePlanForm.effectiveTo ? `هجری شمسی: ${toFaDate(feePlanForm.effectiveTo)}` : 'تاریخ ختم مؤثر انتخاب نشده است.'}</small>
             </div>
@@ -5811,11 +5812,11 @@ export default function AdminFinance() {
                       </label>
                       <label className="finance-inline-filter">
                         <span>تعویق تا</span>
-                        <input
-                          type="date"
+                        <AfghanDateInput
                           value={anomalyWorkflowForm.snoozedUntil}
-                          onChange={(e) => setAnomalyWorkflowForm((prev) => ({ ...prev, snoozedUntil: e.target.value }))}
+                          onChange={(value) => setAnomalyWorkflowForm((prev) => ({ ...prev, snoozedUntil: value }))}
                           data-testid="anomaly-snooze-until"
+                          showGregorianEquivalent
                         />
                         <small>{anomalyWorkflowForm.snoozedUntil ? `هجری شمسی: ${toFaDate(anomalyWorkflowForm.snoozedUntil)}` : 'تاریخ تعویق انتخاب نشده است.'}</small>
                       </label>

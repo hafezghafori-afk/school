@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { useToast } from '../components/ui/toast';
 import {
   DEFAULT_SCHOOL_ID,
@@ -253,6 +254,7 @@ const createEmptyForm = (academicYearId = '') => ({
 
 const StudentRegistration = () => {
   const toast = useToast();
+  const toastRef = useRef(toast);
   const [schoolId, setSchoolId] = useState(() => readStoredSchoolId() || DEFAULT_SCHOOL_ID);
   const [activeSchoolContext, setActiveSchoolContext] = useState(null);
   const registeredBy = localStorage.getItem('userId') || '';
@@ -312,6 +314,10 @@ const StudentRegistration = () => {
   );
 
   useEffect(() => {
+    toastRef.current = toast;
+  }, [toast]);
+
+  useEffect(() => {
     const loadInitialData = async () => {
       setReferenceLoading(true);
       try {
@@ -324,7 +330,7 @@ const StudentRegistration = () => {
           setAcademicYears([]);
           setClasses([]);
           setShifts([]);
-          toast.error('اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید.');
+          toastRef.current.error('اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید.');
           return;
         }
 
@@ -350,14 +356,14 @@ const StudentRegistration = () => {
         }));
       } catch (error) {
         console.error('Failed to load student registration references:', error);
-        toast.error(displayText(error.message || 'خطا در دریافت اطلاعات اولیه ثبت شاگرد.'));
+        toastRef.current.error(displayText(error.message || 'خطا در دریافت اطلاعات اولیه ثبت شاگرد.'));
       } finally {
         setReferenceLoading(false);
       }
     };
 
     loadInitialData();
-  }, [toast]);
+  }, []);
 
   const handleInputChange = (field, value) => {
     setFormData((current) => {
@@ -433,14 +439,14 @@ const StudentRegistration = () => {
     if (requiresSchoolSelection) {
       const message = 'اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید.';
       setSubmitStatus({ type: 'error', text: message });
-      toast.error(message);
+      toastRef.current.error(message);
       return;
     }
 
     if (!validateForm()) {
       const message = 'فرم تکمیل نیست. لطفاً فیلدهای پیام‌دار را بررسی و تکمیل کنید.';
       setSubmitStatus({ type: 'error', text: message });
-      toast.error(message);
+      toastRef.current.error(message);
       return;
     }
 
@@ -457,7 +463,7 @@ const StudentRegistration = () => {
       if (!payload.academicInfo.currentSchool) {
         const message = 'برای ثبت شاگرد، صنف باید به یک مکتب معتبر وصل باشد.';
         setSubmitStatus({ type: 'error', text: message });
-        toast.error(message);
+        toastRef.current.error(message);
         return;
       }
 
@@ -482,7 +488,7 @@ const StudentRegistration = () => {
       if (!response.ok || data?.success === false) {
         const message = displayText(data?.message || data?.error || responseText || `ثبت شاگرد ناموفق بود (${response.status}).`);
         setSubmitStatus({ type: 'error', text: message });
-        toast.error(message);
+        toastRef.current.error(message);
         return;
       }
 
@@ -521,7 +527,7 @@ const StudentRegistration = () => {
       setFileInputResetKey((current) => current + 1);
 
       if (documentUploadWarning) {
-        toast.error(documentUploadWarning.trim());
+        toastRef.current.error(documentUploadWarning.trim());
       }
 
       if (submitIntent === 'assign' && candidateRef) {
@@ -535,7 +541,7 @@ const StudentRegistration = () => {
       console.error('Error registering student:', error);
       const message = displayText(error?.message || 'خطا در ثبت شاگرد.');
       setSubmitStatus({ type: 'error', text: message });
-      toast.error(message);
+      toastRef.current.error(message);
     } finally {
       setLoading(false);
     }
@@ -627,7 +633,7 @@ const StudentRegistration = () => {
             </div>
             <div className="form-group">
               <label htmlFor="birthDate">تاریخ تولد *</label>
-              <input id="birthDate" type="date" value={formData.birthDate} onChange={e => handleInputChange('birthDate', e.target.value)} required className={errors.birthDate ? 'border-red-500' : ''} />
+              <AfghanDateInput id="birthDate" value={formData.birthDate} onChange={value => handleInputChange('birthDate', value)} required inputClassName={errors.birthDate ? 'border-red-500' : ''} showGregorianEquivalent />
               {errors.birthDate && <span className="text-red-500">{errors.birthDate}</span>}
             </div>
             <div className="form-group">
@@ -711,7 +717,7 @@ const StudentRegistration = () => {
             </div>
             <div className="form-group">
               <label htmlFor="enrollmentDate">تاریخ ثبت‌نام</label>
-              <input id="enrollmentDate" type="date" value={formData.enrollmentDate} onChange={e => handleInputChange('enrollmentDate', e.target.value)} />
+              <AfghanDateInput id="enrollmentDate" value={formData.enrollmentDate} onChange={value => handleInputChange('enrollmentDate', value)} showGregorianEquivalent />
             </div>
             <div className="form-group">
               <label htmlFor="previousSchool">مکتب قبلی</label>

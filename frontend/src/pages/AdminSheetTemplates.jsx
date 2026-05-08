@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import './AdminWorkspace.css';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 
 import {
   downloadBlob,
@@ -385,12 +386,12 @@ export default function AdminSheetTemplates() {
 
               <div className="admin-workspace-field">
                 <label htmlFor="sheet-date-from">از تاریخ</label>
-                <input id="sheet-date-from" type="date" name="dateFrom" value={filters.dateFrom} onChange={updateFilter} />
+                <AfghanDateInput id="sheet-date-from" name="dateFrom" value={filters.dateFrom} onChange={(value) => setFilters((current) => ({ ...current, dateFrom: value }))} />
               </div>
 
               <div className="admin-workspace-field">
                 <label htmlFor="sheet-date-to">تا تاریخ</label>
-                <input id="sheet-date-to" type="date" name="dateTo" value={filters.dateTo} onChange={updateFilter} />
+                <AfghanDateInput id="sheet-date-to" name="dateTo" value={filters.dateTo} onChange={(value) => setFilters((current) => ({ ...current, dateTo: value }))} />
               </div>
             </div>
 

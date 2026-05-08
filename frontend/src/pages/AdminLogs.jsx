@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import './AdminContent.css';
 
 import { API_BASE } from '../config/api';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDateTime } from '../utils/afghanDate';
 
 const getAuthHeaders = () => {
@@ -271,8 +272,8 @@ export default function AdminLogs() {
               <option key={preset.key} value={preset.key}>{preset.label}</option>
             ))}
           </select>
-          <input type="date" value={filters.dateFrom} onChange={(e) => setFilters((prev) => ({ ...prev, dateFrom: e.target.value }))} />
-          <input type="date" value={filters.dateTo} onChange={(e) => setFilters((prev) => ({ ...prev, dateTo: e.target.value }))} />
+          <AfghanDateInput value={filters.dateFrom} onChange={(value) => setFilters((prev) => ({ ...prev, dateFrom: value }))} />
+          <AfghanDateInput value={filters.dateTo} onChange={(value) => setFilters((prev) => ({ ...prev, dateTo: value }))} />
           <input value={filters.ip} onChange={(e) => setFilters((prev) => ({ ...prev, ip: e.target.value }))} placeholder="IP" />
           <select value={filters.device} onChange={(e) => setFilters((prev) => ({ ...prev, device: e.target.value }))}>
             <option value="">همه دستگاه‌ها</option>

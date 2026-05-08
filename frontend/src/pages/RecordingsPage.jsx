@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './RecordingsPage.css';
 
 import { API_BASE } from '../config/api';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDateTime } from '../utils/afghanDate';
 
 const getAuthHeaders = () => {
@@ -300,10 +301,11 @@ export default function RecordingsPage() {
               </div>
               <div>
                 <label>تاریخ جلسه</label>
-                <input
-                  type="datetime-local"
+                <AfghanDateInput
                   value={form.sessionDate}
-                  onChange={(e) => handleFormChange('sessionDate', e.target.value)}
+                  onChange={(value) => handleFormChange('sessionDate', value)}
+                  includeTime
+                  showGregorianEquivalent
                 />
               </div>
               <div>

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './HomeworkManager.css';
 
 import { API_BASE } from '../config/api';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
 
 const getAuthHeaders = () => {
@@ -451,10 +452,10 @@ export default function HomeworkManager() {
                   onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
                 />
                 <div className="homework-form-row">
-                  <input
-                    type="date"
+                  <AfghanDateInput
                     value={form.dueDate}
-                    onChange={(e) => setForm((prev) => ({ ...prev, dueDate: e.target.value }))}
+                    onChange={(value) => setForm((prev) => ({ ...prev, dueDate: value }))}
+                    showGregorianEquivalent
                   />
                   <input
                     type="number"

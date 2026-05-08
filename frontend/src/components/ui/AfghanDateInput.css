@@ -1,0 +1,51 @@
+.afghan-date-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.afghan-date-input-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(84px, 1fr) minmax(110px, 1.2fr) minmax(64px, 0.7fr);
+  width: 100%;
+}
+
+.afghan-date-input-grid:has(.afghan-date-time) {
+  grid-template-columns: minmax(84px, 1fr) minmax(110px, 1.2fr) minmax(64px, 0.7fr) minmax(86px, 0.9fr);
+}
+
+.afghan-date-input {
+  direction: rtl;
+  min-width: 0;
+  text-align: right;
+  width: 100%;
+}
+
+.afghan-date-time {
+  direction: ltr;
+  text-align: center;
+}
+
+.afghan-date-equivalent {
+  color: #64748b;
+  display: flex;
+  flex-direction: column;
+  font-size: 0.82rem;
+  gap: 2px;
+  line-height: 1.5;
+}
+
+.afghan-date-equivalent small {
+  color: #475569;
+  direction: ltr;
+  text-align: right;
+}
+
+@media (max-width: 520px) {
+  .afghan-date-input-grid,
+  .afghan-date-input-grid:has(.afghan-date-time) {
+    grid-template-columns: 1fr;
+  }
+}

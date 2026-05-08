@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import './AdminPanel.css';
 import '../components/dashboard/dashboard.css';
 import NotificationBell from '../components/NotificationBell';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import KpiRingCard from '../components/dashboard/KpiRingCard';
 import QuickActionRail from '../components/dashboard/QuickActionRail';
 import TaskAlertPanel from '../components/dashboard/TaskAlertPanel';
@@ -3788,16 +3789,8 @@ export default function AdminPanel() {
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
-            <input
-              type="date"
-              value={timelineFromDate}
-              onChange={(e) => setTimelineFromDate(e.target.value)}
-            />
-            <input
-              type="date"
-              value={timelineToDate}
-              onChange={(e) => setTimelineToDate(e.target.value)}
-            />
+            <AfghanDateInput value={timelineFromDate} onChange={setTimelineFromDate} />
+            <AfghanDateInput value={timelineToDate} onChange={setTimelineToDate} />
             <button type="button" className="ghost" onClick={clearTimelineFilters}>پاک‌کردن فیلتر</button>
           </div>
           {(orderMessage || requestMessage || supportMessage) && (
@@ -4515,7 +4508,7 @@ export default function AdminPanel() {
                     </div>
                     <div className="admin-form-group">
                       <label>تاریخ تأسیس</label>
-                      <input type="date" value={createSchoolForm.establishmentDate} onChange={(e) => setCreateSchoolForm({ ...createSchoolForm, establishmentDate: e.target.value })} disabled={wizardBusy} />
+                      <AfghanDateInput value={createSchoolForm.establishmentDate} onChange={(value) => setCreateSchoolForm({ ...createSchoolForm, establishmentDate: value })} disabled={wizardBusy} showGregorianEquivalent />
                     </div>
                   </div>
                 </div>
@@ -4544,11 +4537,11 @@ export default function AdminPanel() {
                     </div>
                     <div className="admin-form-group">
                       <label>تاریخ شروع (اختیاری)</label>
-                      <input type="date" value={wizardYearForm.startDate} onChange={(e) => setWizardYearForm({ ...wizardYearForm, startDate: e.target.value })} disabled={wizardBusy} />
+                      <AfghanDateInput value={wizardYearForm.startDate} onChange={(value) => setWizardYearForm({ ...wizardYearForm, startDate: value })} disabled={wizardBusy} showGregorianEquivalent />
                     </div>
                     <div className="admin-form-group">
                       <label>تاریخ پایان (اختیاری)</label>
-                      <input type="date" value={wizardYearForm.endDate} onChange={(e) => setWizardYearForm({ ...wizardYearForm, endDate: e.target.value })} disabled={wizardBusy} />
+                      <AfghanDateInput value={wizardYearForm.endDate} onChange={(value) => setWizardYearForm({ ...wizardYearForm, endDate: value })} disabled={wizardBusy} showGregorianEquivalent />
                     </div>
                   </div>
                 </div>

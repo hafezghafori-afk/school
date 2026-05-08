@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './GradeManager.css';
 
 import { API_BASE } from '../config/api';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
 
 const COMPONENT_FIELDS = [
@@ -653,7 +654,7 @@ export default function GradeManager() {
 
           <label>
             <span>تاریخ</span>
-            <input type="date" name="heldAt" value={filters.heldAt} onChange={handleFilterChange} />
+            <AfghanDateInput name="heldAt" value={filters.heldAt} onChange={(value) => setFilters((current) => ({ ...current, heldAt: value }))} />
           </label>
 
           <label>

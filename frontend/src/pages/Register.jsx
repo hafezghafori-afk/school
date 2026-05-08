@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import './AfghanSchoolManagement.css';
 
 import { API_BASE } from '../config/api';
@@ -161,7 +162,7 @@ export default function Register() {
             <div className="form-group"><label>نام پدر</label><input type="text" value={form.fatherName} onChange={(e) => handleChange('fatherName', e.target.value)} /></div>
             <div className="form-group"><label>نام مادر</label><input type="text" value={form.motherName} onChange={(e) => handleChange('motherName', e.target.value)} /></div>
             <div className="form-group"><label>جنسیت</label><select value={form.gender} onChange={(e) => handleChange('gender', e.target.value)}><option value="male">مرد</option><option value="female">زن</option><option value="other">دیگر</option></select></div>
-            <div className="form-group"><label>تاریخ تولد</label><input type="date" value={form.birthDate} onChange={(e) => handleChange('birthDate', e.target.value)} /></div>
+            <div className="form-group"><label>تاریخ تولد</label><AfghanDateInput value={form.birthDate} onChange={(value) => handleChange('birthDate', value)} showGregorianEquivalent /></div>
             <div className="form-group"><label>پایه تحصیلی</label><input type="text" value={form.grade} onChange={(e) => handleChange('grade', e.target.value)} placeholder="مثال: پایه 7" /></div>
           </div>
         </div>

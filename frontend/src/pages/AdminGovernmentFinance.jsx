@@ -14,6 +14,7 @@ import {
   repairDisplayText,
   toLocaleDateTime
 } from './adminWorkspaceUtils';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
 
 const LEGACY_GARBLED_TABS = [
@@ -3103,7 +3104,7 @@ export default function AdminGovernmentFinance() {
                     </label>
                     <label className="gov-field">
                       <span>تاریخ تصفیه</span>
-                      <input type="date" name="settlementDate" value={procurementSettlementDraft.settlementDate} onChange={handleProcurementSettlementDraftChange} />
+                      <AfghanDateInput name="settlementDate" value={procurementSettlementDraft.settlementDate} onChange={(value) => setProcurementSettlementDraft((current) => ({ ...current, settlementDate: value }))} showGregorianEquivalent />
                       <small>{procurementSettlementDraft.settlementDate ? `هجری شمسی: ${toFaDate(procurementSettlementDraft.settlementDate)}` : 'تاریخ تسویه انتخاب نشده است.'}</small>
                     </label>
                     <label className="gov-field">
@@ -3745,12 +3746,12 @@ export default function AdminGovernmentFinance() {
                 </label>
                 <label className="gov-field">
                   <span>تاریخ شروع</span>
-                  <input type="date" name="startDate" value={financialYearDraft.startDate} onChange={handleFinancialYearDraftChange} />
+                  <AfghanDateInput name="startDate" value={financialYearDraft.startDate} onChange={(value) => setFinancialYearDraft((current) => ({ ...current, startDate: value }))} showGregorianEquivalent />
                   <small>{financialYearDraft.startDate ? `هجری شمسی: ${toFaDate(financialYearDraft.startDate)}` : 'تاریخ شروع انتخاب نشده است.'}</small>
                 </label>
                 <label className="gov-field">
                   <span>تاریخ ختم</span>
-                  <input type="date" name="endDate" value={financialYearDraft.endDate} onChange={handleFinancialYearDraftChange} />
+                  <AfghanDateInput name="endDate" value={financialYearDraft.endDate} onChange={(value) => setFinancialYearDraft((current) => ({ ...current, endDate: value }))} showGregorianEquivalent />
                   <small>{financialYearDraft.endDate ? `هجری شمسی: ${toFaDate(financialYearDraft.endDate)}` : 'تاریخ ختم انتخاب نشده است.'}</small>
                 </label>
                 <label className="gov-field">
@@ -4012,7 +4013,7 @@ export default function AdminGovernmentFinance() {
                     </label>
                     <label className="gov-field">
                       <span>تاریخ تصفیه</span>
-                      <input type="date" name="settlementDate" value={procurementSettlementDraft.settlementDate} onChange={handleProcurementSettlementDraftChange} />
+                      <AfghanDateInput name="settlementDate" value={procurementSettlementDraft.settlementDate} onChange={(value) => setProcurementSettlementDraft((current) => ({ ...current, settlementDate: value }))} showGregorianEquivalent />
                       <small>{procurementSettlementDraft.settlementDate ? `هجری شمسی: ${toFaDate(procurementSettlementDraft.settlementDate)}` : 'تاریخ تسویه انتخاب نشده است.'}</small>
                     </label>
                     <label className="gov-field">
@@ -4143,12 +4144,12 @@ export default function AdminGovernmentFinance() {
                 </label>
                 <label className="gov-field">
                   <span>تاریخ درخواست</span>
-                  <input type="date" name="requestDate" value={procurementDraft.requestDate} onChange={handleProcurementDraftChange} />
+                  <AfghanDateInput name="requestDate" value={procurementDraft.requestDate} onChange={(value) => setProcurementDraft((current) => ({ ...current, requestDate: value }))} showGregorianEquivalent />
                   <small>{procurementDraft.requestDate ? `هجری شمسی: ${toFaDate(procurementDraft.requestDate)}` : 'تاریخ درخواست انتخاب نشده است.'}</small>
                 </label>
                 <label className="gov-field">
                   <span>تاریخ تحویل مورد انتظار</span>
-                  <input type="date" name="expectedDeliveryDate" value={procurementDraft.expectedDeliveryDate} onChange={handleProcurementDraftChange} />
+                  <AfghanDateInput name="expectedDeliveryDate" value={procurementDraft.expectedDeliveryDate} onChange={(value) => setProcurementDraft((current) => ({ ...current, expectedDeliveryDate: value }))} showGregorianEquivalent />
                   <small>{procurementDraft.expectedDeliveryDate ? `هجری شمسی: ${toFaDate(procurementDraft.expectedDeliveryDate)}` : 'تاریخ تحویل انتخاب نشده است.'}</small>
                 </label>
                 <label className="gov-field">
@@ -4469,7 +4470,7 @@ export default function AdminGovernmentFinance() {
                 </label>
                 <label className="gov-field">
                   <span>تاریخ مصرف</span>
-                  <input type="date" name="expenseDate" value={expenseDraft.expenseDate} onChange={handleExpenseDraftChange} />
+                  <AfghanDateInput name="expenseDate" value={expenseDraft.expenseDate} onChange={(value) => setExpenseDraft((current) => ({ ...current, expenseDate: value }))} showGregorianEquivalent />
                   <small>{expenseDraft.expenseDate ? `هجری شمسی: ${toFaDate(expenseDraft.expenseDate)}` : 'تاریخ مصرف انتخاب نشده است.'}</small>
                 </label>
                 <label className="gov-field">
@@ -4745,7 +4746,7 @@ export default function AdminGovernmentFinance() {
                     </label>
                     <label className="gov-field">
                       <span>تاریخ</span>
-                      <input type="date" name="transactionDate" value={treasuryTransactionDraft.transactionDate} onChange={handleTreasuryTransactionDraftChange} />
+                      <AfghanDateInput name="transactionDate" value={treasuryTransactionDraft.transactionDate} onChange={(value) => setTreasuryTransactionDraft((current) => ({ ...current, transactionDate: value }))} showGregorianEquivalent />
                       <small>{treasuryTransactionDraft.transactionDate ? `هجری شمسی: ${toFaDate(treasuryTransactionDraft.transactionDate)}` : 'تاریخ حرکت انتخاب نشده است.'}</small>
                     </label>
                     <label className="gov-field">
@@ -4802,7 +4803,7 @@ export default function AdminGovernmentFinance() {
                     </label>
                     <label className="gov-field">
                       <span>تاریخ انتقال</span>
-                      <input type="date" name="transactionDate" value={treasuryTransferDraft.transactionDate} onChange={handleTreasuryTransferDraftChange} />
+                      <AfghanDateInput name="transactionDate" value={treasuryTransferDraft.transactionDate} onChange={(value) => setTreasuryTransferDraft((current) => ({ ...current, transactionDate: value }))} showGregorianEquivalent />
                       <small>{treasuryTransferDraft.transactionDate ? `هجری شمسی: ${toFaDate(treasuryTransferDraft.transactionDate)}` : 'تاریخ انتقال انتخاب نشده است.'}</small>
                     </label>
                     <label className="gov-field">
@@ -4828,7 +4829,7 @@ export default function AdminGovernmentFinance() {
                     </label>
                     <label className="gov-field">
                       <span>تاریخ تطبیق</span>
-                      <input type="date" name="reconciliationDate" value={treasuryReconciliationDraft.reconciliationDate} onChange={handleTreasuryReconciliationDraftChange} />
+                      <AfghanDateInput name="reconciliationDate" value={treasuryReconciliationDraft.reconciliationDate} onChange={(value) => setTreasuryReconciliationDraft((current) => ({ ...current, reconciliationDate: value }))} showGregorianEquivalent />
                       <small>{treasuryReconciliationDraft.reconciliationDate ? `هجری شمسی: ${toFaDate(treasuryReconciliationDraft.reconciliationDate)}` : 'تاریخ تطبیق انتخاب نشده است.'}</small>
                     </label>
                     <label className="gov-field">

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './AdminContent.css';
 
 import { API_BASE } from '../config/api';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -167,7 +168,7 @@ export default function AdminNews() {
           </div>
           <div>
             <label>تاریخ نشر</label>
-            <input type="date" value={form.publishedAt} onChange={(e) => handleChange('publishedAt', e.target.value)} />
+            <AfghanDateInput value={form.publishedAt} onChange={(value) => handleChange('publishedAt', value)} showGregorianEquivalent />
           </div>
         </div>
         <div className="form-row">

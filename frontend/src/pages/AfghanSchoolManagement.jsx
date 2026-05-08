@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import './AfghanSchoolManagement.css';
 
 const AfghanSchoolManagement = () => {
@@ -461,7 +462,7 @@ const AfghanSchoolManagement = () => {
                   
                   <div className="form-group">
                     <label>تاریخ تاسیس:</label>
-                    <input type="date" name="establishmentDate" required />
+                    <AfghanDateInput name="establishmentDate" required showGregorianEquivalent />
                   </div>
                   
                   <div className="form-group full-width">

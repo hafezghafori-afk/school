@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './MyAttendance.css';
 
 import { API_BASE } from '../config/api';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
 
 const STATUS_OPTIONS = [
@@ -207,19 +208,17 @@ export default function MyAttendance() {
 
             <label>
               <span>از تاریخ</span>
-              <input
-                type="date"
+              <AfghanDateInput
                 value={range.from}
-                onChange={(e) => setRange((prev) => ({ ...prev, from: e.target.value }))}
+                onChange={(value) => setRange((prev) => ({ ...prev, from: value }))}
               />
             </label>
 
             <label>
               <span>تا تاریخ</span>
-              <input
-                type="date"
+              <AfghanDateInput
                 value={range.to}
-                onChange={(e) => setRange((prev) => ({ ...prev, to: e.target.value }))}
+                onChange={(value) => setRange((prev) => ({ ...prev, to: value }))}
               />
             </label>
 
