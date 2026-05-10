@@ -306,7 +306,7 @@ router.get('/sessions/:sessionId/export.print', requireAuth, requireRole(['admin
   try {
     await assertSessionAccess(req, req.params.sessionId);
     const { report, template, session } = await buildSessionSheetReport(req.params.sessionId);
-    const html = await renderReportPrintHtml({ report, template });
+    const html = await renderReportPrintHtml({ report, template, req });
     const filename = `${session?.code || req.params.sessionId || 'exam-sheet'}.html`;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
@@ -322,7 +322,7 @@ router.get('/sessions/:sessionId/export.pdf', requireAuth, requireRole(['admin',
   try {
     await assertSessionAccess(req, req.params.sessionId);
     const { report, template, session } = await buildSessionSheetReport(req.params.sessionId);
-    const buffer = await buildReportPdfBuffer({ report, template });
+    const buffer = await buildReportPdfBuffer({ report, template, req });
     const filename = `${session?.code || req.params.sessionId || 'exam-sheet'}.pdf`;
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

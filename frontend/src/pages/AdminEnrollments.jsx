@@ -27,7 +27,7 @@ export default function AdminEnrollments() {
   const [status, setStatus] = useState('all');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
-  const PAGE_SIZE = 5;
+  const PAGE_SIZE = 50;
 
   const downloadExcel = async () => {
     try {
@@ -69,6 +69,10 @@ export default function AdminEnrollments() {
   useEffect(() => {
     loadItems();
   }, []);
+
+  useEffect(() => {
+    setPage(1);
+  }, [status, query]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

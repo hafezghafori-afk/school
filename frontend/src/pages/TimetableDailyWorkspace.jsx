@@ -141,20 +141,24 @@ export default function TimetableDailyWorkspace({
   useEffect(() => {
     let isMounted = true;
 
+    const extractCollectionItems = (payload = {}) => {
+      if (Array.isArray(payload?.data)) return payload.data;
+      if (Array.isArray(payload?.items)) return payload.items;
+      if (Array.isArray(payload?.classes)) return payload.classes;
+      if (Array.isArray(payload?.schoolClasses)) return payload.schoolClasses;
+      return [];
+    };
+
     const loadCollection = async (primaryPath, fallbackPath = '') => {
       try {
         const response = await fetch(primaryPath, { headers: { ...getAuthHeaders() } });
         const data = await response.json();
-        let items = Array.isArray(data?.data) ? data.data : Array.isArray(data?.items) ? data.items : [];
+        let items = extractCollectionItems(data);
 
         if (!items.length && fallbackPath && schoolId !== 'default-school-id') {
           const fallbackResponse = await fetch(fallbackPath, { headers: { ...getAuthHeaders() } });
           const fallbackData = await fallbackResponse.json();
-          items = Array.isArray(fallbackData?.data)
-            ? fallbackData.data
-            : Array.isArray(fallbackData?.items)
-              ? fallbackData.items
-              : [];
+          items = extractCollectionItems(fallbackData);
         }
 
         return items;
@@ -162,6 +166,25 @@ export default function TimetableDailyWorkspace({
         console.error(`Error loading collection from ${primaryPath}:`, error);
         return [];
       }
+    };
+
+    const loadFirstAvailableCollection = async (paths = []) => {
+      for (const path of paths.filter(Boolean)) {
+        const items = await loadCollection(path);
+        if (items.length) return items;
+      }
+
+      return [];
+    };
+
+    const loadRegisteredClasses = async () => {
+      const encodedSchoolId = encodeURIComponent(schoolId);
+      return loadFirstAvailableCollection([
+        `/api/school-classes/school/${encodedSchoolId}`,
+        schoolId !== 'default-school-id' ? '/api/school-classes/school/default-school-id' : '',
+        hasConcreteSchoolId ? `/api/education/school-classes?status=active&schoolId=${encodedSchoolId}` : '/api/education/school-classes?status=active',
+        hasConcreteSchoolId ? `/api/education/school-classes?schoolId=${encodedSchoolId}` : '/api/education/school-classes'
+      ]);
     };
 
     const loadRegisteredSubjects = async () => {
@@ -210,10 +233,7 @@ export default function TimetableDailyWorkspace({
 
       try {
         const [classItems, teacherItems, subjectItems, assignmentItems, draftItem] = await Promise.all([
-          loadCollection(
-            `/api/school-classes/school/${schoolId}`,
-            '/api/school-classes/school/default-school-id'
-          ),
+          loadRegisteredClasses(),
           loadCollection(`/api/users/school/${schoolId}?role=teacher`),
           loadRegisteredSubjects(),
           loadCollection(`/api/teacher-assignments/school/${schoolId}`),

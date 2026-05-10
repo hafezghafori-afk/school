@@ -11,6 +11,7 @@ import TrendBars from '../components/dashboard/TrendBars';
 
 import { API_BASE } from '../config/api';
 import { formatAfghanDate, formatAfghanDateTime, formatAfghanTime } from '../utils/afghanDate';
+import { formatFinanceCode } from '../utils/latinFinanceCode';
 import {
   buildAdminScheduleFromDraft,
   readDailyTimetableDraft,
@@ -278,14 +279,14 @@ const SEARCH_SECTION_CONFIG = [
     key: 'financeBills',
     title: 'بل‌های مالی',
     to: () => '/admin-finance',
-    primary: (item) => item.billNumber || 'بل مالی',
+    primary: (item) => formatFinanceCode(item.billNumber, 'بل مالی'),
     secondary: (item) => [item.student?.name, item.course?.title, item.status].filter(Boolean).join(' | ')
   },
   {
     key: 'financeReceipts',
     title: 'رسیدهای مالی',
     to: () => '/admin-finance#pending-receipts',
-    primary: (item) => item.bill?.billNumber || item.referenceNo || 'رسید مالی',
+    primary: (item) => formatFinanceCode(item.bill?.billNumber || item.referenceNo, 'رسید مالی'),
     secondary: (item) => [item.student?.name, item.course?.title, item.approvalStage || item.status].filter(Boolean).join(' | ')
   },
   {

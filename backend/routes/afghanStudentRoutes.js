@@ -9,12 +9,14 @@ const Enrollment = require('../models/Enrollment');
 const { requireFields } = require('../middleware/validate');
 const Counter = require('../models/Counter');
 const SiteSettings = require('../models/SiteSettings');
+const StudentMembership = require('../models/StudentMembership');
 const { ok, fail } = require('../utils/response');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
 const cache = require('../utils/simpleCache');
 const { requireAuth, requireRole, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const { requireWritableSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
+const { assignStudentToClass } = require('../services/studentClassAssignmentService');
 
 const router = express.Router();
 const auditWrite = (payload) => logActivity(payload);
@@ -67,7 +69,13 @@ const gradeLabelFromStudent = (studentData = {}) => {
 
 const syncManualStudentEnrollment = async ({ student, studentData, req }) => {
   if (!student?._id) return null;
-  const existing = await Enrollment.findOne({ linkedUserId: student._id });
+  const existing = await Enrollment.findOne({
+    $or: [
+      { linkedStudentId: student._id },
+      { linkedUserId: student._id },
+      ...(student.linkedUserId ? [{ linkedUserId: student.linkedUserId }] : [])
+    ]
+  });
   const studentName = [
     studentData?.personalInfo?.firstName,
     studentData?.personalInfo?.lastName
@@ -86,10 +94,18 @@ const syncManualStudentEnrollment = async ({ student, studentData, req }) => {
     previousSchool: studentData?.academicInfo?.previousSchool?.name || '',
     emergencyPhone: studentData?.contactInfo?.emergencyContact?.phone || '',
     notes: studentData?.notes?.general || 'ثبت مستقیم از صفحه ثبت شاگرد جدید',
+    academicContext: {
+      schoolId: studentData?.academicInfo?.currentSchool || null,
+      classId: studentData?.academicInfo?.classId || studentData?.academicInfo?.currentClassId || studentData?.classId || null,
+      shiftId: studentData?.academicInfo?.shiftId || studentData?.shiftId || null,
+      academicYearId: studentData?.academicInfo?.academicYearId || studentData?.academicYearId || null,
+      enrollmentDate: studentData?.academicInfo?.enrollmentDate || null
+    },
     registrationId: student.registrationId || studentData?.registrationId || '',
     asasNumber: student.asasNumber || studentData?.asasNumber || '',
     status: 'approved',
-    linkedUserId: student._id,
+    linkedStudentId: student._id,
+    linkedUserId: student.linkedUserId || null,
     approvedBy: req.user?.id || null,
     approvedAt: new Date()
   };
@@ -183,7 +199,7 @@ router.get('/', requireAuth, requireRole(['admin', 'principal', 'teacher', 'regi
   try {
     const {
       page = 1,
-      limit = 20,
+      limit = 1000,
       schoolId,
       grade,
       gender,
@@ -220,12 +236,15 @@ router.get('/', requireAuth, requireRole(['admin', 'principal', 'teacher', 'regi
       ];
     }
 
+    const normalizedLimit = Math.min(Math.max(parseInt(limit, 10) || 1000, 1), 5000);
+    const normalizedPage = Math.max(parseInt(page, 10) || 1, 1);
+
     const students = await AfghanStudent.find(query)
       .populate('academicInfo.currentSchool', 'name province district')
       .populate('createdBy', 'name email')
       .populate('lastUpdatedBy', 'name email')
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
+      .limit(normalizedLimit)
+      .skip((normalizedPage - 1) * normalizedLimit)
       .sort({ createdAt: -1 })
       .lean();
 
@@ -234,10 +253,10 @@ router.get('/', requireAuth, requireRole(['admin', 'principal', 'teacher', 'regi
     return ok(res, {
       students,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: normalizedPage,
+        limit: normalizedLimit,
         total,
-        pages: Math.ceil(total / limit)
+        pages: Math.ceil(total / normalizedLimit)
       }
     }, 'Students retrieved successfully');
   } catch (error) {
@@ -329,6 +348,12 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
     const student = new AfghanStudent(studentData);
     await student.save();
 
+    await assignStudentToClass({
+      student,
+      payload: studentData,
+      actorId: req.user?.id || null,
+      source: 'admin'
+    });
     await syncManualStudentEnrollment({ student, studentData, req });
 
     // Populate school info for response
@@ -394,7 +419,13 @@ router.post('/:id/documents', requireAuth, requireRole(['admin', 'principal', 'r
       await student.save();
 
       await Enrollment.findOneAndUpdate(
-        { linkedUserId: student._id },
+        {
+          $or: [
+            { linkedStudentId: student._id },
+            { linkedUserId: student._id },
+            ...(student.linkedUserId ? [{ linkedUserId: student.linkedUserId }] : [])
+          ]
+        },
         {
           documents: {
             idCardUrl: documents.find((item) => item.type === 'tazkira')?.url || '',
@@ -440,6 +471,12 @@ router.put('/:id', requireAuth, requireRole(['admin', 'principal', 'registration
       return fail(res, 'Student not found', 404);
     }
 
+    await assignStudentToClass({
+      student,
+      payload: studentData,
+      actorId: req.user?.id || null,
+      source: 'admin'
+    });
     await syncManualStudentEnrollment({ student, studentData: student.toObject(), req });
 
     return ok(res, student, 'Student updated successfully');
@@ -460,7 +497,29 @@ router.delete('/:id', requireAuth, requireRole(['admin', 'principal']), requireA
       return fail(res, 'Student not found', 404);
     }
 
-    await Enrollment.findOneAndDelete({ linkedUserId: student._id });
+    await Enrollment.findOneAndDelete({
+      $or: [
+        { linkedStudentId: student._id },
+        { linkedUserId: student._id },
+        ...(student.linkedUserId ? [{ linkedUserId: student.linkedUserId }] : [])
+      ]
+    });
+
+    if (student.linkedUserId) {
+      await StudentMembership.updateMany(
+        { student: student.linkedUserId, isCurrent: true },
+        {
+          $set: {
+            status: 'inactive',
+            isCurrent: false,
+            endedReason: 'student_deleted',
+            endedAt: new Date(),
+            leftAt: new Date(),
+            note: 'بسته‌شده به‌صورت خودکار پس از حذف شاگرد از مرکز آموزش'
+          }
+        }
+      );
+    }
 
     return ok(res, student, 'Student deleted successfully');
   } catch (error) {
@@ -525,6 +584,12 @@ router.post('/bulk', requireAuth, requireRole(['admin', 'principal']), requirePe
 
         const student = new AfghanStudent(studentData);
         await student.save();
+        await assignStudentToClass({
+          student,
+          payload: studentData,
+          actorId: req.user?.id || null,
+          source: 'admin'
+        });
         await syncManualStudentEnrollment({ student, studentData, req });
         
         results.successful.push({

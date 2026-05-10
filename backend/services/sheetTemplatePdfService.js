@@ -1518,13 +1518,13 @@ async function buildReportPdfBuffer({ report = {}, template = null } = {}) {
   });
 }
 
-async function buildBrowserReportPdfBuffer({ report = {}, template = null } = {}) {
+async function buildBrowserReportPdfBuffer({ report = {}, template = null, req = null } = {}) {
   let browser = null;
   try {
     const { chromium } = require('playwright');
     const { renderReportPrintHtml } = require('./sheetTemplatePrintService');
     const layout = getLayout(template);
-    const html = await renderReportPrintHtml({ report, template });
+    const html = await renderReportPrintHtml({ report, template, req });
 
     browser = await chromium.launch({
       headless: true

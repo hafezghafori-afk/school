@@ -3,6 +3,7 @@ import './StudentReport.css';
 
 import { API_BASE } from '../config/api';
 import useExpandableList from '../hooks/useExpandableList';
+import { formatFinanceCode } from '../utils/latinFinanceCode';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -602,7 +603,7 @@ export default function StudentReport() {
                     {profile.finance.bills.slice(0, 6).map((bill) => (
                       <div key={bill.id} className="student-report-table-row">
                         <div>
-                          <strong>{bill.billNumber || bill.periodLabel || 'بل مالی'}</strong>
+                          <strong>{formatFinanceCode(bill.billNumber, '') || bill.periodLabel || 'بل مالی'}</strong>
                           <span>{bill.academicYearLabel || 'سال نامشخص'}</span>
                         </div>
                         <div>{formatMoney(bill.amountDue || 0)}</div>

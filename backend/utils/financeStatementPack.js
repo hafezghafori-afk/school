@@ -1,3 +1,5 @@
+const { formatFinanceCode } = require('./latinFinanceCode');
+
 const ORDER_STATUS_LABELS = {
   new: 'جدید',
   partial: 'پرداخت قسمتی',
@@ -126,7 +128,7 @@ function buildSignalRows(items = []) {
 function buildOrderRows(items = [], currency = 'AFN') {
   return items.map((item) => `
     <tr>
-      <td>${escapeHtml(item.title || item.orderNumber || '-')}</td>
+      <td>${escapeHtml(item.title || formatFinanceCode(item.orderNumber, '-'))}</td>
       <td>${escapeHtml(pickLabel(ORDER_TYPE_LABELS, item.orderType, '-'))}</td>
       <td>${escapeHtml(pickLabel(ORDER_STATUS_LABELS, item.status, '-'))}</td>
       <td>${escapeHtml(formatDateTime(item.dueDate))}</td>
@@ -139,7 +141,7 @@ function buildOrderRows(items = [], currency = 'AFN') {
 function buildPaymentRows(items = [], currency = 'AFN') {
   return items.map((item) => `
     <tr>
-      <td>${escapeHtml(item.paymentNumber || '-')}</td>
+      <td>${escapeHtml(formatFinanceCode(item.paymentNumber, '-'))}</td>
       <td>${escapeHtml(pickLabel(PAYMENT_METHOD_LABELS, item.paymentMethod, item.paymentMethod || '-'))}</td>
       <td>${escapeHtml(pickLabel(PAYMENT_STATUS_LABELS, item.status, item.status || '-'))}</td>
       <td>${escapeHtml(pickLabel(PAYMENT_STAGE_LABELS, item.approvalStage, item.approvalStage || '-'))}</td>

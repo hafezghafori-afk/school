@@ -55,6 +55,30 @@ const users = [
   }
 ];
 
+const afghanTeachers = [
+  {
+    _id: '507f191e810c19729de86031',
+    personalInfo: {
+      firstName: 'Teacher',
+      lastName: 'Beta',
+      firstNameDari: 'استاد',
+      lastNameDari: 'بتا'
+    },
+    contactInfo: {
+      email: 'teacher.beta@example.com'
+    },
+    employmentInfo: {
+      employeeId: 'T-BETA-001',
+      subjects: [{ subjectName: 'Science' }],
+      classes: []
+    },
+    status: 'active',
+    linkedUserId: null
+  }
+];
+
+const afghanStudents = [];
+
 const courses = [
   {
     _id: IDS.course,
@@ -527,6 +551,30 @@ const createModelMock = (records = []) => ({
   },
   async aggregate() {
     return [];
+  },
+  async updateOne(filter = {}, update = {}) {
+    const index = records.findIndex((item) => matchesFilter(item, filter));
+    if (index === -1) return { matchedCount: 0, modifiedCount: 0 };
+    const set = update?.$set && typeof update.$set === 'object' ? update.$set : update;
+    records[index] = {
+      ...records[index],
+      ...clone(set)
+    };
+    return { matchedCount: 1, modifiedCount: 1 };
+  },
+  async updateMany(filter = {}, update = {}) {
+    let modifiedCount = 0;
+    const set = update?.$set && typeof update.$set === 'object' ? update.$set : update;
+    records.forEach((item, index) => {
+      if (matchesFilter(item, filter)) {
+        records[index] = {
+          ...records[index],
+          ...clone(set)
+        };
+        modifiedCount += 1;
+      }
+    });
+    return { matchedCount: modifiedCount, modifiedCount };
   }
 });
 
@@ -608,6 +656,8 @@ function loadRouters() {
 
   const mocks = {
     '../models/User': UserMock,
+    '../models/AfghanStudent': createModelMock(afghanStudents),
+    '../models/AfghanTeacher': createModelMock(afghanTeachers),
     '../models/Course': createModelMock(courses),
     '../models/Order': createModelMock(orders),
     '../models/ActivityLog': createModelMock(activityLogs),
@@ -788,6 +838,7 @@ async function run() {
       assertCase(response.data?.items?.length >= 3, `expected seeded users, received ${response.data?.items?.length || 0}`);
       assertCase(response.data?.items?.some((item) => item.orgRole === 'general_president'), 'expected general_president payload');
       assertCase(response.data?.items?.some((item) => item.role === 'instructor'), 'expected instructor payload');
+      assertCase(response.data?.items?.some((item) => item.email === 'teacher.beta@example.com' && item.orgRole === 'instructor'), 'expected active AfghanTeacher to sync into instructor users');
     });
 
     await check('route smoke: managed user creation supports finance lead and instructor roles', async () => {

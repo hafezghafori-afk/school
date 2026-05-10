@@ -223,7 +223,11 @@ async function resolveAuthorizedReportRequest(req) {
     throw new Error('report_forbidden');
   }
 
-  const baseReport = await runReport(reportKey, req.body?.filters || {});
+  const requestSchoolId = req.headers?.['x-school-id'] || req.query?.schoolId || '';
+  const baseReport = await runReport(reportKey, {
+    ...(req.body?.filters || {}),
+    ...(requestSchoolId && !req.body?.filters?.schoolId ? { schoolId: requestSchoolId } : {})
+  });
   const { report, template } = await applyTemplateToReport(req.body?.templateId || '', baseReport);
   return { definition, report, template };
 }
@@ -339,7 +343,7 @@ router.post('/export.xlsx', requireAuth, async (req, res) => {
 router.post('/export.pdf', requireAuth, async (req, res) => {
   try {
     const { definition, report, template } = await resolveAuthorizedReportRequest(req);
-    const buffer = await buildReportPdfBuffer({ report, template });
+    const buffer = await buildReportPdfBuffer({ report, template, req });
     const filename = `${definition.key}.pdf`;
     await logActivity({
       req,
@@ -367,9 +371,7 @@ router.post('/export.pdf', requireAuth, async (req, res) => {
 router.post('/export.print', requireAuth, async (req, res) => {
   try {
     const { definition, report, template } = await resolveAuthorizedReportRequest(req);
-    const html = template
-      ? await renderReportPrintHtml({ report, template })
-      : reportToPrintHtml(report);
+    const html = await renderReportPrintHtml({ report, template, req });
     const filename = `${definition.key}.html`;
     await logActivity({
       req,

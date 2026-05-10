@@ -78,7 +78,7 @@ const CLASS_REGISTRY_VISIBLE_LIMIT = 4;
 const SUBJECT_REGISTRY_VISIBLE_LIMIT = 4;
 const MAP_REGISTRY_VISIBLE_LIMIT = 4;
 const ENROLLMENT_REGISTRY_VISIBLE_LIMIT = 4;
-const ENROLLMENT_CANDIDATE_VISIBLE_LIMIT = 6;
+const ENROLLMENT_CANDIDATE_VISIBLE_LIMIT = 4;
 const ONLINE_REGISTRATION_VISIBLE_LIMIT = 4;
 
 function resolveEducationSection(value = '') {
@@ -290,6 +290,8 @@ export default function AdminEducationCore() {
   const [showAllEnrollments, setShowAllEnrollments] = useState(false);
   const [pendingEnrollmentCandidateRef, setPendingEnrollmentCandidateRef] = useState(initialNavigation.candidateRef);
   const [enrollmentMode, setEnrollmentMode] = useState('quick'); // 'quick', 'bulk', 'detailed'
+  const [activeRegistrationTask, setActiveRegistrationTask] = useState('assign');
+  const [activeEnrollmentPanel, setActiveEnrollmentPanel] = useState('');
   const [bulkSelectedIds, setBulkSelectedIds] = useState([]);
   const [bulkClassId, setBulkClassId] = useState('');
   const [inlineClasses, setInlineClasses] = useState({});
@@ -349,16 +351,13 @@ export default function AdminEducationCore() {
   ), [studentOptions, enrollForm.studentId]);
   const filteredStudentOptions = useMemo(() => {
     const needle = String(candidateSearchQuery || '').trim().toLowerCase();
-    
-    // Do not show all students by default. Only show results if a search query or filter is applied.
-    if (!needle && !candidateSourceFilter && !candidateGradeFilter) {
-      return [];
-    }
 
     return studentOptions.filter((item) => {
       const matchesQuery = !needle || [
         item.name,
+        item.fatherName,
         item.phone,
+        item.email,
         item.nationalId,
         item.uiLabel,
         item.sourceLabel,
@@ -383,17 +382,13 @@ export default function AdminEducationCore() {
   ), [enrollmentSelectOptions, showAllEnrollmentCandidates]);
   const filteredOnlineRegistrationQueue = useMemo(() => {
     const needle = String(onlineSearchQuery || '').trim().toLowerCase();
-    
-    // Do not show any online registrations by default.
-    // Only show them if the user searches for something.
-    if (!needle) {
-      return [];
-    }
 
     return onlineRegistrationQueue.filter((item) => {
       return [
         item.name,
+        item.fatherName,
         item.phone,
+        item.email,
         item.nationalId,
         item.grade,
       ]
@@ -521,6 +516,8 @@ export default function AdminEducationCore() {
 
   const pendingEnrollments = enrollments.filter((item) => item.status === 'pending').length;
   const pendingOnlineRegistrations = onlineRegistrationQueue.filter((item) => item.status === 'pending').length;
+  const approvedEnrollments = enrollments.filter((item) => item.status === 'approved').length;
+  const readyEnrollmentCandidates = enrollmentSelectOptions.length;
   const legacySyncedClasses = schoolClasses.filter((item) => item.legacyCourseId).length;
   const primaryAssignments = maps.filter((item) => item.isPrimary).length;
 
@@ -536,6 +533,92 @@ export default function AdminEducationCore() {
   const showMessage = (text, tone = 'info') => {
     setMessage(text);
     setMessageTone(tone);
+  };
+
+  const setRegistrationQueueView = (view) => {
+    setShowAllEnrollmentCandidates(false);
+    if (view === 'online') {
+      setCandidateSourceFilter('enrollment');
+      setEnrollFilter('');
+      return;
+    }
+    if (view === 'manual') {
+      setCandidateSourceFilter('afghan');
+      setEnrollFilter('');
+      return;
+    }
+    if (view === 'system') {
+      setCandidateSourceFilter('user');
+      setEnrollFilter('');
+      return;
+    }
+    if (view === 'pending') {
+      setCandidateSourceFilter('');
+      setEnrollFilter('pending');
+      return;
+    }
+    if (view === 'completed') {
+      setCandidateSourceFilter('');
+      setEnrollFilter('approved');
+      return;
+    }
+    setCandidateSourceFilter('');
+    setEnrollFilter('');
+  };
+
+  const focusRegistrationWorkspace = () => {
+    window.requestAnimationFrame(() => {
+      document.getElementById('admin-registration-panels')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
+  const openEnrollmentPanel = (panel) => {
+    const nextPanel = activeEnrollmentPanel === panel ? '' : panel;
+    setActiveEnrollmentPanel(nextPanel);
+    if (nextPanel === 'registration') {
+      setActiveRegistrationTask('assign');
+      setRegistrationQueueView('all');
+    } else if (nextPanel === 'online') {
+      setActiveRegistrationTask('online');
+      setEnrollmentMode('detailed');
+      setRegistrationQueueView('online');
+    } else if (nextPanel === 'ledger') {
+      setActiveRegistrationTask('ledger');
+      setRegistrationQueueView('all');
+    }
+    focusRegistrationWorkspace();
+  };
+
+  const openRegistrationTask = (task) => {
+    setActiveRegistrationTask(task);
+    if (task === 'assign') {
+      setActiveEnrollmentPanel('registration');
+      setEnrollmentMode('detailed');
+      setRegistrationQueueView('all');
+    } else if (task === 'online') {
+      setActiveEnrollmentPanel('online');
+      setEnrollmentMode('detailed');
+      setRegistrationQueueView('online');
+    } else if (task === 'members') {
+      setActiveEnrollmentPanel('ledger');
+      setEnrollmentMode('detailed');
+      setRegistrationQueueView('completed');
+      setShowAllEnrollments(true);
+    } else if (task === 'bulk') {
+      setActiveEnrollmentPanel('registration');
+      setEnrollmentMode('bulk');
+      setRegistrationQueueView('all');
+    } else if (task === 'manual') {
+      setActiveEnrollmentPanel('registration');
+      setEnrollmentMode('detailed');
+      setRegistrationQueueView('manual');
+    } else if (task === 'ledger') {
+      setActiveEnrollmentPanel('ledger');
+      setEnrollmentMode('quick');
+      setRegistrationQueueView('all');
+      setShowAllEnrollments(true);
+    }
+    focusRegistrationWorkspace();
   };
 
   const loadClassForEdit = (item) => {
@@ -1784,25 +1867,52 @@ export default function AdminEducationCore() {
   const renderEnrollments = () => (
     canManageMemberships ? (
       <>
-        <article className="admin-workspace-card" data-span={enrollmentMode === 'detailed' ? "8" : "6"}>
+        <article className="admin-workspace-card admin-registration-command-center" data-span="12">
+          <div className="admin-registration-command-head">
+            <div>
+              <h2>مدیریت ثبت‌نام متعلمین</h2>
+              <p>همه شاگردان، چه آنلاین ثبت‌نام شده باشند و چه توسط مدیریت، از همین صف بررسی و به صنف معرفی می‌شوند.</p>
+            </div>
+          </div>
+          <div className="admin-registration-task-grid admin-registration-main-rail" aria-label="بخش‌های ثبت‌نام متعلمین">
+            <button type="button" className={`admin-registration-task-card${activeRegistrationTask === 'assign' ? ' active' : ''}`} onClick={() => openRegistrationTask('assign')}>
+              <span>ثبت‌نام متعلمین</span>
+              <strong>معرفی سریع، دسته‌جمعی و فورم</strong>
+              <em>{readyEnrollmentCandidates.toLocaleString('fa-AF-u-ca-persian')} گزینه آماده</em>
+            </button>
+            <button type="button" className={`admin-registration-task-card${activeRegistrationTask === 'online' ? ' active' : ''}`} onClick={() => openRegistrationTask('online')}>
+              <span>صندوق ثبت‌نام آنلاین</span>
+              <strong>بررسی درخواست‌ها و تبدیل به ممبرشیپ</strong>
+              <em>{pendingOnlineRegistrations.toLocaleString('fa-AF-u-ca-persian')} در انتظار</em>
+            </button>
+            <button type="button" className={`admin-registration-task-card${activeRegistrationTask === 'ledger' || activeRegistrationTask === 'members' ? ' active' : ''}`} onClick={() => openRegistrationTask('ledger')}>
+              <span>دفتر ثبت‌نام‌ها / ممبرشیپ</span>
+              <strong>جستجو، فلتر، ویرایش و پیگیری</strong>
+              <em>{approvedEnrollments.toLocaleString('fa-AF-u-ca-persian')} تاییدشده</em>
+            </button>
+          </div>
+        </article>
+
+        <div id="admin-registration-panels" className="admin-registration-panel-stack">
+        <article id="admin-registration-workspace" className={`admin-workspace-card admin-registration-panel-card${activeEnrollmentPanel === 'registration' ? ' open' : ''}`} data-span="12">
+          <button type="button" className="admin-registration-panel-toggle" onClick={() => openEnrollmentPanel('registration')} aria-expanded={activeEnrollmentPanel === 'registration'}>
+            <span>
+              <strong>ثبت‌نام متعلمین</strong>
+              <em>معرفی سریع، معرفی دسته‌جمعی و معرفی با فورم</em>
+            </span>
+            <b>{activeEnrollmentPanel === 'registration' ? 'بستن' : 'بازکردن فورم'}</b>
+          </button>
+          {activeEnrollmentPanel === 'registration' ? (
+          <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
             <div>
               <h2 style={{ marginBottom: '0.25rem' }}>ثبت‌نام متعلمین</h2>
               <p style={{ margin: 0, color: '#000' }}>متعلم ثبت‌شده، ثبت‌نام آنلاین، یا ثبت‌نام دستی را انتخاب کنید و او را به صنف معرفی نمایید.</p>
             </div>
-            <div style={{ display: 'flex', gap: '1rem', background: 'var(--color-bg-mute)', padding: '0.5rem 1rem', borderRadius: '8px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', color: '#000' }}>
-                <input type="radio" checked={enrollmentMode === 'quick'} onChange={() => setEnrollmentMode('quick')} />
-                <strong style={{ color: '#000' }}>معرفی سریع (تکی)</strong>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', color: '#000' }}>
-                <input type="radio" checked={enrollmentMode === 'bulk'} onChange={() => setEnrollmentMode('bulk')} />
-                <strong style={{ color: '#000' }}>معرفی دسته‌جمعی</strong>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', color: '#000' }}>
-                <input type="radio" checked={enrollmentMode === 'detailed'} onChange={() => setEnrollmentMode('detailed')} />
-                <strong style={{ color: '#000' }}>معرفی با فرم</strong>
-              </label>
+            <div className="admin-registration-mode-rail" aria-label="روش معرفی متعلم">
+              <button type="button" className={enrollmentMode === 'quick' ? 'active' : ''} onClick={() => setEnrollmentMode('quick')}>معرفی سریع</button>
+              <button type="button" className={enrollmentMode === 'bulk' ? 'active' : ''} onClick={() => setEnrollmentMode('bulk')}>معرفی دسته‌جمعی</button>
+              <button type="button" className={enrollmentMode === 'detailed' ? 'active' : ''} onClick={() => setEnrollmentMode('detailed')}>معرفی با فورم</button>
             </div>
           </div>
           <div className="admin-education-enrollment-layout" style={enrollmentMode !== 'detailed' ? { gridTemplateColumns: '1fr', display: 'grid' } : {}}>
@@ -1928,7 +2038,7 @@ export default function AdminEducationCore() {
                   })}
                 </div>
               ) : (
-                <div className="admin-workspace-empty">برای این جستجو یا فلتر، متعلمی آماده‌ی معرفی به صنف پیدا نشد.</div>
+                <div className="admin-workspace-empty">هنوز متعلم آماده‌ی معرفی به صنف موجود نیست.</div>
               )}
               {enrollmentSelectOptions.length > ENROLLMENT_CANDIDATE_VISIBLE_LIMIT ? (
                 <div className="admin-education-list-footer">
@@ -1966,6 +2076,20 @@ export default function AdminEducationCore() {
               </div>
               {selectedEnrollmentCandidate ? (
                 <>
+                  <div className="admin-registration-wizard" aria-label="مراحل معرفی به صنف">
+                    <div className="admin-registration-wizard-step done">
+                      <span>۱</span>
+                      <strong>انتخاب متعلم</strong>
+                    </div>
+                    <div className={`admin-registration-wizard-step${enrollForm.classId ? ' done' : ' active'}`}>
+                      <span>۲</span>
+                      <strong>انتخاب صنف</strong>
+                    </div>
+                    <div className={`admin-registration-wizard-step${enrollForm.classId ? ' active' : ''}`}>
+                      <span>۳</span>
+                      <strong>ثبت وضعیت</strong>
+                    </div>
+                  </div>
                   <div className="admin-education-selected-candidate" data-role="selected-candidate-summary">
                     <strong>{selectedEnrollmentCandidate.name || 'متعلم انتخاب‌شده'}</strong>
                     <div className="admin-workspace-badges">
@@ -1989,6 +2113,11 @@ export default function AdminEducationCore() {
                 </>
               ) : (
                 <div className="admin-education-placeholder">
+                  <div className="admin-registration-wizard compact" aria-label="مراحل معرفی به صنف">
+                    <div className="admin-registration-wizard-step active"><span>۱</span><strong>انتخاب متعلم</strong></div>
+                    <div className="admin-registration-wizard-step"><span>۲</span><strong>انتخاب صنف</strong></div>
+                    <div className="admin-registration-wizard-step"><span>۳</span><strong>ثبت وضعیت</strong></div>
+                  </div>
                   <strong>اول متعلم را انتخاب کنید</strong>
                   <span>از پنل روبه‌رو یک متعلم یا درخواست را انتخاب کنید تا فورم معرفی به صنف فعال شود.</span>
                 </div>
@@ -1996,9 +2125,20 @@ export default function AdminEducationCore() {
             </section>
             )}
           </div>
+          </>
+          ) : null}
         </article>
 
-        <article className="admin-workspace-card" data-span="4">
+        <article className={`admin-workspace-card admin-registration-panel-card${activeEnrollmentPanel === 'online' ? ' open' : ''}`} data-span="12">
+          <button type="button" className="admin-registration-panel-toggle" onClick={() => openEnrollmentPanel('online')} aria-expanded={activeEnrollmentPanel === 'online'}>
+            <span>
+              <strong>صندوق ثبت‌نام آنلاین</strong>
+              <em>درخواست‌های آنلاین را بررسی و برای معرفی به صنف انتخاب کنید</em>
+            </span>
+            <b>{activeEnrollmentPanel === 'online' ? 'بستن' : 'بازکردن فورم'}</b>
+          </button>
+          {activeEnrollmentPanel === 'online' ? (
+          <>
           <h2>صندوق ثبت‌نام آنلاین</h2>
           <p className="admin-workspace-subtitle">درخواست‌های آنلاین را از اینجا برای معرفی به صنف داخل فرم بارگذاری کنید.</p>
           <div className="admin-education-list-toolbar">
@@ -2025,7 +2165,7 @@ export default function AdminEducationCore() {
           </div>
           <div className="admin-education-list">
             {visibleOnlineRegistrationQueue.length ? visibleOnlineRegistrationQueue.map((item) => {
-              const itemId = item.id || item._id;
+              const itemId = item.sourceRef || item.value || item.id || item._id;
               const isSelectedBulk = bulkSelectedIds.includes(itemId);
               return (
               <div key={itemId} className="admin-education-list-item">
@@ -2077,14 +2217,25 @@ export default function AdminEducationCore() {
                   )}
                 </div>
               </div>
-            )}) : <div className="admin-workspace-empty">{onlineSearchQuery ? 'برای این جستجو درخواست آنلاینی پیدا نشد.' : 'برای مشاهده درخواست‌های آنلاین جستجو کنید.'}</div>}
+            )}) : <div className="admin-workspace-empty">{onlineSearchQuery ? 'برای این جستجو درخواست آنلاینی پیدا نشد.' : 'هنوز درخواست آنلاین آماده معرفی به صنف موجود نیست.'}</div>}
           </div>
           {onlineRegistrationQueue.length > ONLINE_REGISTRATION_VISIBLE_LIMIT ? (
             <div className="admin-workspace-subtitle">{`فقط ${ONLINE_REGISTRATION_VISIBLE_LIMIT.toLocaleString('fa-AF-u-ca-persian')} درخواست اول اینجا نشان داده می‌شود.`}</div>
           ) : null}
+          </>
+          ) : null}
         </article>
 
-        <article className="admin-workspace-card" data-span="12">
+        <article className={`admin-workspace-card admin-registration-panel-card${activeEnrollmentPanel === 'ledger' ? ' open' : ''}`} data-span="12">
+          <button type="button" className="admin-registration-panel-toggle" onClick={() => openEnrollmentPanel('ledger')} aria-expanded={activeEnrollmentPanel === 'ledger'}>
+            <span>
+              <strong>دفتر ثبت‌نام‌ها / شاگردان ممبرشیپ</strong>
+              <em>شاگردان وصل‌شده به صنف، جستجو، فلتر و ویرایش</em>
+            </span>
+            <b>{activeEnrollmentPanel === 'ledger' ? 'بستن' : 'بازکردن فورم'}</b>
+          </button>
+          {activeEnrollmentPanel === 'ledger' ? (
+          <>
           <h2>دفتر ثبت‌نام‌ها</h2>
           <p className="admin-workspace-subtitle">ثبت‌نام‌ها را با جستجو، فلتر وضعیت، سال و صنف پیدا کنید و در صورت نیاز بقیه را با دکمه بیشتر ببینید.</p>
           <div className="admin-education-list-toolbar">
@@ -2153,7 +2304,10 @@ export default function AdminEducationCore() {
               </button>
             </div>
           ) : null}
+          </>
+          ) : null}
         </article>
+        </div>
       </>
     ) : (
       <article className="admin-workspace-card" data-span="12">

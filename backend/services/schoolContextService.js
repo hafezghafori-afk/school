@@ -22,6 +22,29 @@ function unique(values = []) {
   return [...new Set(values.map(normalizeId).filter(Boolean))];
 }
 
+function serializeSchoolBranding(school = null) {
+  if (!school) return null;
+  const plain = typeof school.toObject === 'function' ? school.toObject() : school;
+  const name = plain.nameDari || plain.name || '';
+  const code = plain.schoolCode || plain.ministryCode || '';
+  const address = plain.contactInfo?.address || [plain.district, plain.province].filter(Boolean).join('، ');
+  const phone = plain.contactInfo?.phone || plain.contactInfo?.mobile || plain.principal?.phone || '';
+  const email = plain.contactInfo?.email || plain.principal?.email || '';
+  return {
+    schoolId: plain._id ? String(plain._id) : '',
+    brandName: name,
+    brandSubtitle: [code ? `کد مکتب: ${code}` : '', address, phone ? `تماس: ${phone}` : ''].filter(Boolean).join(' | '),
+    footerNote: [name, code ? `کد: ${code}` : '', address].filter(Boolean).join(' | '),
+    signatureName: plain.principal?.name || '',
+    schoolName: name,
+    schoolCode: code,
+    address,
+    phone,
+    email,
+    principalName: plain.principal?.name || ''
+  };
+}
+
 function getRequestSchoolCandidates(req = {}, payload = {}) {
   return unique([
     payload.schoolId,
@@ -108,6 +131,7 @@ module.exports = {
   isPlaceholderSchoolId,
   isValidObjectId,
   normalizeId,
+  serializeSchoolBranding,
   resolveActiveSchool,
   requireWritableSchool,
   writeSchoolContextHeaders,

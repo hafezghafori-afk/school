@@ -310,6 +310,25 @@
   font-size: 14px;
 }
 
+.form-group .afghan-date-field {
+  min-width: 0;
+}
+
+.form-group .afghan-date-input {
+  height: 40px;
+}
+
+.form-group .afghan-date-equivalent {
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #f4f8fb;
+  color: #52616f;
+}
+
+.form-group .afghan-date-equivalent small {
+  color: #2563eb;
+}
+
 .form-group input:focus,
 .form-group select:focus,
 .form-group textarea:focus {

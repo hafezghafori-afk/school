@@ -555,7 +555,18 @@ const matchesFilter = (item, filter = {}) => (
     if (key === '$and') {
       return Array.isArray(expectedValue) && expectedValue.every((branch) => matchesFilter(item, branch));
     }
-    return matchCondition(item[key], expectedValue);
+    const values = String(key || '').split('.').reduce((acc, part) => {
+      const next = [];
+      acc.forEach((value) => {
+        if (Array.isArray(value)) {
+          value.forEach((entry) => next.push(entry?.[part]));
+        } else {
+          next.push(value?.[part]);
+        }
+      });
+      return next;
+    }, [item]);
+    return values.some((value) => matchCondition(value, expectedValue));
   })
 );
 
@@ -2879,6 +2890,19 @@ const FinanceFeePlanMock = {
       createFeePlanDoc(feePlans.find((item) => String(item._id) === String(id)) || null)
     ));
   },
+  findByIdAndUpdate(id, update = {}, options = {}) {
+    return new MockQuery(() => {
+      const index = feePlans.findIndex((item) => String(item._id) === String(id));
+      if (index === -1) return null;
+      const changes = clone(update?.$set || update || {});
+      feePlans[index] = {
+        ...feePlans[index],
+        ...changes,
+        updatedAt: new Date()
+      };
+      return options?.new ? createFeePlanDoc(feePlans[index]) : createFeePlanDoc({ ...feePlans[index], ...changes });
+    });
+  },
   findOne(filter = {}) {
     return new MockQuery(() => (
       createFeePlanDoc(feePlans.find((item) => matchesFilter(item, filter)) || null)
@@ -2902,6 +2926,12 @@ const FinanceFeePlanMock = {
       feePlans.push(created);
       return createFeePlanDoc(created);
     });
+  },
+  async deleteOne(filter = {}) {
+    const index = feePlans.findIndex((item) => matchesFilter(item, filter));
+    if (index === -1) return { deletedCount: 0 };
+    feePlans.splice(index, 1);
+    return { deletedCount: 1 };
   }
 };
 
@@ -2966,6 +2996,15 @@ const StudentProfileMock = {
   }
 };
 
+const AfghanStudentMock = {
+  find() {
+    return new MockQuery(() => []);
+  },
+  findOne() {
+    return new MockQuery(() => null);
+  }
+};
+
 const toCanonicalOrder = (bill) => ({
   _id: `fee-order-${bill._id}`,
   orderNumber: bill.billNumber,
@@ -2979,7 +3018,8 @@ const toCanonicalOrder = (bill) => ({
   outstandingAmount: Math.max(0, Number(bill.amountDue || 0) - Number(bill.amountPaid || 0)),
   status: bill.status,
   issuedAt: bill.issuedAt,
-  dueDate: bill.dueDate
+  dueDate: bill.dueDate,
+  lineItems: Array.isArray(bill.lineItems) ? clone(bill.lineItems) : []
 });
 
 const toCanonicalPayment = (receipt) => {
@@ -4815,6 +4855,7 @@ function loadFinanceRouter() {
     if (isFinanceRoute && request === '../models/ExpenseCategoryDefinition') return ExpenseCategoryDefinitionMock;
     if (isFinanceRoute && request === '../models/GovernmentFinanceSnapshot') return GovernmentFinanceSnapshotMock;
     if (isFinanceRoute && request === '../models/FinanceProcurementCommitment') return FinanceProcurementCommitmentMock;
+    if (isFinanceRoute && request === '../models/AfghanStudent') return AfghanStudentMock;
     if (isFinanceRoute && request === '../models/User') return UserMock;
     if (isFinanceRoute && request === '../models/StudentCore') return StudentCoreMock;
     if (isFinanceRoute && request === '../models/StudentProfile') return StudentProfileMock;
@@ -5661,6 +5702,79 @@ async function run() {
       assertCase(listResponse.status === 200, `expected 200, received ${listResponse.status}`);
       assertCase(Array.isArray(listResponse.data?.items) && listResponse.data.items.length >= 1, 'expected class-scoped fee plans');
       assertCase(listResponse.data?.items?.[0]?.academicYear?.title === '1405', 'expected academic year payload in fee plans list');
+
+      const createdPlanId = response.data?.item?._id || response.data?.item?.id;
+      const inactiveResponse = await request(server, `/api/finance/admin/fee-plans/${createdPlanId}/status`, {
+        method: 'PATCH',
+        user: financeManagerUser,
+        body: { action: 'inactive' }
+      });
+      assertCase(inactiveResponse.status === 200, `expected inactive status 200, received ${inactiveResponse.status}: ${inactiveResponse.text}`);
+      assertCase(inactiveResponse.data?.item?.lifecycleStatus === 'inactive', 'expected fee plan lifecycle to become inactive');
+      assertCase(inactiveResponse.data?.item?.isActive === false, 'expected inactive fee plan to be excluded from active use');
+
+      const archiveResponse = await request(server, `/api/finance/admin/fee-plans/${createdPlanId}/status`, {
+        method: 'PATCH',
+        user: financeManagerUser,
+        body: { action: 'archive' }
+      });
+      assertCase(archiveResponse.status === 200, `expected archive status 200, received ${archiveResponse.status}: ${archiveResponse.text}`);
+      assertCase(archiveResponse.data?.item?.lifecycleStatus === 'archived', 'expected fee plan lifecycle to become archived');
+      assertCase(Boolean(archiveResponse.data?.item?.archivedAt), 'expected archived fee plan timestamp');
+
+      const unusedResponse = await request(server, '/api/finance/admin/fee-plans', {
+        method: 'POST',
+        user: financeManagerUser,
+        body: {
+          title: 'Unused Delete Candidate',
+          classId: IDS.class1,
+          academicYearId: 'academic-year-1',
+          billingFrequency: 'term',
+          tuitionFee: 600
+        }
+      });
+      const unusedPlanId = unusedResponse.data?.item?._id || unusedResponse.data?.item?.id;
+      const deleteUnusedResponse = await request(server, `/api/finance/admin/fee-plans/${unusedPlanId}`, {
+        method: 'DELETE',
+        user: financeManagerUser
+      });
+      assertCase(deleteUnusedResponse.status === 200, `expected unused fee plan delete 200, received ${deleteUnusedResponse.status}: ${deleteUnusedResponse.text}`);
+      assertCase(deleteUnusedResponse.data?.deletedId === String(unusedPlanId), 'expected unused fee plan to be deleted');
+
+      const usedPlanId = 'fee-plan-used-delete-test';
+      feePlans.push({
+        _id: usedPlanId,
+        title: 'Used Delete Candidate',
+        course: IDS.course1,
+        classId: IDS.class1,
+        academicYearId: 'academic-year-1',
+        billingFrequency: 'term',
+        tuitionFee: 700,
+        amount: 700,
+        currency: 'AFN',
+        isActive: true,
+        lifecycleStatus: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+      bills.push({
+        _id: 'bill-used-fee-plan-delete-test',
+        billNumber: 'BILL-USED-PLAN-DELETE',
+        student: IDS.studentOne,
+        classId: IDS.class1,
+        amountDue: 700,
+        amountPaid: 0,
+        status: 'pending',
+        issuedAt: new Date(),
+        dueDate: new Date(),
+        lineItems: [{ feeType: 'tuition', sourcePlanId: usedPlanId, grossAmount: 700, netAmount: 700 }]
+      });
+      const deleteUsedResponse = await request(server, `/api/finance/admin/fee-plans/${usedPlanId}`, {
+        method: 'DELETE',
+        user: financeManagerUser
+      });
+      assertCase(deleteUsedResponse.status === 409, `expected used fee plan delete 409, received ${deleteUsedResponse.status}: ${deleteUsedResponse.text}`);
+      assertCase(Number(deleteUsedResponse.data?.linkedOrderCount || 0) >= 1, 'expected linked order count for protected fee plan');
     });
 
     await check('route smoke: admin receipts list deprecates course-only filter in favor of classId', async () => {

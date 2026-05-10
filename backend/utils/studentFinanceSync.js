@@ -3,6 +3,7 @@ const {
   normalizeFinanceLineItems,
   inferPrimaryOrderType
 } = require('./financeLineItems');
+const { formatFinanceCode } = require('./latinFinanceCode');
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -98,7 +99,7 @@ function buildFeeOrderPayloadFromBill(bill = {}) {
   const normalizedAmountDue = roundMoney(normalizedLineItems.reduce((sum, item) => sum + (Number(item?.netAmount) || 0), 0));
   const normalizedAmountPaid = roundMoney(bill.amountPaid);
   return {
-    orderNumber: normalizeText(bill.billNumber).toUpperCase(),
+    orderNumber: formatFinanceCode(normalizeText(bill.billNumber)).toUpperCase(),
     title: normalizeText(bill.periodLabel) || normalizeText(bill.billNumber),
     orderType: inferPrimaryOrderType(normalizedLineItems, 'tuition'),
     source: 'finance_bill',
@@ -172,7 +173,7 @@ function buildFeePaymentPayloadFromReceipt(receipt = {}, feeOrder = null) {
       feeOrderId: feeOrder._id,
       amount: allocationAmount,
       title: normalizeText(feeOrder.title),
-      orderNumber: normalizeText(feeOrder.orderNumber).toUpperCase()
+      orderNumber: formatFinanceCode(normalizeText(feeOrder.orderNumber)).toUpperCase()
     }] : [],
     referenceNo: normalizeText(receipt.referenceNo),
     paidAt: normalizeDate(receipt.paidAt) || new Date(),

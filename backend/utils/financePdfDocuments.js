@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
+const { formatFinanceCode } = require('./latinFinanceCode');
 
 const FONT_PATH = path.join(__dirname, '..', '..', 'Fonts', 'B Nazanin_p30download.com.ttf');
 // This font can be enabled again once we validate a PDFKit-safe Persian font.
@@ -354,7 +355,7 @@ async function buildStatementPackPdfBuffer({
     drawItemList(
       doc,
       orders.slice(0, 10).map((item) => ({
-        title: item?.title || item?.orderNumber || 'Order',
+        title: item?.title || formatFinanceCode(item?.orderNumber, '') || 'Order',
         meta: [
           item?.orderType || '',
           item?.status || '',
@@ -369,7 +370,7 @@ async function buildStatementPackPdfBuffer({
     drawItemList(
       doc,
       payments.slice(0, 10).map((item) => ({
-        title: item?.paymentNumber || 'Payment',
+        title: formatFinanceCode(item?.paymentNumber, 'Payment'),
         meta: [
           item?.paymentMethod || '',
           item?.status || '',

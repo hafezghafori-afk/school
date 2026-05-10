@@ -23,6 +23,7 @@ const FinanceBill = require('../models/FinanceBill');
 const FinanceReceipt = require('../models/FinanceReceipt');
 const { syncStudentFinanceFromFinanceBill, syncStudentFinanceFromFinanceReceipt } = require('../utils/studentFinanceSync');
 const { deriveLinkScope } = require('../utils/financeLinkScope');
+const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const { buildFeeBreakdownFromLineItems } = require('../utils/financeLineItems');
 const {
   buildFinanceReliefPayloadFromDiscount,
@@ -166,7 +167,7 @@ function formatFeeOrder(doc) {
   return {
     id: String(item._id || ''),
     sourceBillId: normalizeNullableId(item.sourceBillId),
-    orderNumber: normalizeText(item.orderNumber),
+    orderNumber: formatFinanceCode(normalizeText(item.orderNumber)),
     title: normalizeText(item.title),
     orderType: normalizeText(item.orderType),
     source: normalizeText(item.source),
@@ -233,7 +234,7 @@ function formatFeeOrderLite(doc) {
   return {
     id: String(item._id || item.id || ''),
     sourceBillId: normalizeNullableId(item.sourceBillId),
-    orderNumber: normalizeText(item.orderNumber),
+    orderNumber: formatFinanceCode(normalizeText(item.orderNumber)),
     title: normalizeText(item.title),
     orderType: normalizeText(item.orderType),
     status: normalizeText(item.status),
@@ -322,7 +323,7 @@ function formatFeePaymentAllocation(doc) {
     feeOrderId: normalizeNullableId(item.feeOrderId?._id || item.feeOrderId),
     amount: Number(item.amount || 0),
     title: normalizeText(item.title) || normalizeText(feeOrder?.title),
-    orderNumber: normalizeText(item.orderNumber) || normalizeText(feeOrder?.orderNumber),
+    orderNumber: formatFinanceCode(normalizeText(item.orderNumber) || normalizeText(feeOrder?.orderNumber)),
     feeOrder
   };
 }
@@ -341,7 +342,7 @@ function formatFeePayment(doc) {
     : [];
   return {
     id: String(item._id || ''),
-    paymentNumber: normalizeText(item.paymentNumber),
+    paymentNumber: formatFinanceCode(normalizeText(item.paymentNumber)),
     payerType: normalizeText(item.payerType) || 'student_guardian',
     receivedBy: formatActorLite(item.receivedBy),
     amount: Number(item.amount || 0),
@@ -686,7 +687,7 @@ function resolvePaymentAllocations({ openOrders = [], payload = {} } = {}) {
         feeOrderId: String(item.feeOrderId || ''),
         amount: roundMoney(item.amount),
         title: normalizeText(order?.title),
-        orderNumber: normalizeText(order?.orderNumber),
+        orderNumber: formatFinanceCode(normalizeText(order?.orderNumber)),
         dueDate: order?.dueDate || null,
         outstandingAmount: roundMoney(order?.outstandingAmount)
       };
@@ -815,8 +816,8 @@ function buildPaymentReceiptDetails(payments = [], orders = [], membership = nul
       ...item,
       receiptDetails: {
         title: order?.title || item?.paymentNumber || 'Receipt',
-        paymentNumber: item?.paymentNumber || '',
-        orderNumber: order?.orderNumber || '',
+        paymentNumber: formatFinanceCode(item?.paymentNumber || ''),
+        orderNumber: formatFinanceCode(order?.orderNumber || ''),
         orderType: order?.orderType || '',
         studentName: membership?.student?.fullName || item?.student?.fullName || '',
         classTitle: membership?.schoolClass?.title || item?.schoolClass?.title || '',
@@ -833,7 +834,7 @@ function buildPaymentReceiptDetails(payments = [], orders = [], membership = nul
         allocations: normalizedAllocations.map((allocation) => ({
           feeOrderId: allocation?.feeOrderId || '',
           title: allocation?.title || allocation?.feeOrder?.title || '',
-          orderNumber: allocation?.orderNumber || allocation?.feeOrder?.orderNumber || '',
+          orderNumber: formatFinanceCode(allocation?.orderNumber || allocation?.feeOrder?.orderNumber || ''),
           amount: Number(allocation?.amount || 0),
           outstandingAmount: Number(allocation?.feeOrder?.outstandingAmount || 0)
         })),
@@ -871,9 +872,9 @@ function formatReceiptPrintModel(item = {}, membership = null) {
   const receipt = item?.receiptDetails || {};
   return {
     paymentId: String(item?.id || ''),
-    paymentNumber: receipt.paymentNumber || item?.paymentNumber || '',
+    paymentNumber: formatFinanceCode(receipt.paymentNumber || item?.paymentNumber || ''),
     title: receipt.title || item?.paymentNumber || '',
-    orderNumber: receipt.orderNumber || '',
+    orderNumber: formatFinanceCode(receipt.orderNumber || ''),
     studentName: receipt.studentName || membership?.student?.fullName || item?.student?.fullName || '',
     classTitle: receipt.classTitle || membership?.schoolClass?.title || item?.schoolClass?.title || '',
     academicYearTitle: receipt.academicYearTitle || membership?.academicYear?.title || item?.academicYear?.title || '',
@@ -998,6 +999,10 @@ async function getDailyCashierReport(filters = {}) {
   if (normalizeText(filters.status)) query.status = normalizeText(filters.status);
   if (normalizeText(filters.paymentMethod)) query.paymentMethod = normalizeText(filters.paymentMethod);
   if (normalizeNullableId(filters.receivedBy)) query.receivedBy = normalizeNullableId(filters.receivedBy);
+  if (normalizeNullableId(filters.schoolId)) {
+    const classIds = await SchoolClass.find({ schoolId: normalizeNullableId(filters.schoolId) }).distinct('_id');
+    query.classId = { $in: classIds };
+  }
 
   const items = await FeePayment.find(query)
     .populate('studentId')
@@ -1109,16 +1114,16 @@ function buildMembershipStatement({ membership = null, summary = {}, orders = []
       pendingPaymentAmount: Number(pendingPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0).toFixed(2))
     },
     latestApprovedPayment: latestApprovedPayment ? {
-      paymentNumber: latestApprovedPayment.paymentNumber,
+      paymentNumber: formatFinanceCode(latestApprovedPayment.paymentNumber),
       amount: latestApprovedPayment.amount,
       paidAt: latestApprovedPayment.paidAt,
-      orderNumber: latestApprovedPayment.feeOrder?.orderNumber
+      orderNumber: formatFinanceCode(latestApprovedPayment.feeOrder?.orderNumber
         || latestApprovedPayment.allocations?.[0]?.orderNumber
         || latestApprovedPayment.feeOrderId
-        || ''
+        || '')
     } : null,
     latestPendingPayment: latestPendingPayment ? {
-      paymentNumber: latestPendingPayment.paymentNumber,
+      paymentNumber: formatFinanceCode(latestPendingPayment.paymentNumber),
       amount: latestPendingPayment.amount,
       paidAt: latestPendingPayment.paidAt,
       approvalStage: latestPendingPayment.approvalStage
@@ -1128,7 +1133,7 @@ function buildMembershipStatement({ membership = null, summary = {}, orders = []
       .slice(0, 6)
       .map((item) => ({
         id: item.id,
-        orderNumber: item.orderNumber,
+        orderNumber: formatFinanceCode(item.orderNumber),
         title: item.title,
         status: item.status,
         dueDate: item.dueDate,

@@ -14,6 +14,7 @@ const {
   mergeFinanceAnomalyCases,
   buildFinanceAnomalyWorkflowSummary
 } = require('../utils/financeAnomalyWorkflow');
+const { formatFinanceCode } = require('../utils/latinFinanceCode');
 
 const CURRENT_MEMBERSHIP_STATUSES = ['active', 'pending', 'suspended', 'transferred_in'];
 
@@ -158,7 +159,7 @@ function buildAgingSnapshot(orders = [], asOf = new Date()) {
 
     rows.push({
       orderId: normalizeNullableId(order?._id),
-      orderNumber: normalizeText(order?.orderNumber),
+      orderNumber: formatFinanceCode(normalizeText(order?.orderNumber)),
       studentName: normalizeText(order?.studentId?.fullName || order?.student?.name) || 'متعلم',
       classTitle: buildClassTitle(order),
       dueDate: order?.dueDate || null,

@@ -170,7 +170,10 @@ router.get('/payments/:id/receipt', requireAuth, async (req, res) => {
 
 router.get('/reports/daily-cashier', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const data = await getDailyCashierReport(req.query || {});
+    const data = await getDailyCashierReport({
+      ...(req.query || {}),
+      schoolId: req.headers?.['x-school-id'] || req.query?.schoolId || ''
+    });
     return res.json({ success: true, ...data });
   } catch (error) {
     const code = String(error?.message || '');

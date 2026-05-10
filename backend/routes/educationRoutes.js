@@ -1027,8 +1027,9 @@ router.get('/meta', ...withEducationReferenceRead, async (req, res) => {
 
 router.get('/school-classes', ...withEducationReferenceRead, async (req, res) => {
   try {
-    const { academicYearId = '', status = '', q = '' } = req.query || {};
+    const { academicYearId = '', schoolId = '', status = '', q = '' } = req.query || {};
     const filter = {};
+    if (mustObjectId(schoolId)) filter.schoolId = schoolId;
     if (mustObjectId(academicYearId)) filter.academicYearId = academicYearId;
     if (status) filter.status = normalizeText(status);
     if (q) {
@@ -2542,5 +2543,4 @@ router.delete('/student-enrollments/:id', ...withManageMemberships, async (req, 
 });
 
 module.exports = router;
-
 

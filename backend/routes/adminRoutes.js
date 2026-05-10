@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const crypto = require('crypto');
 const User = require('../models/User');
 const AfghanStudent = require('../models/AfghanStudent');
+const AfghanTeacher = require('../models/AfghanTeacher');
 const Course = require('../models/Course');
 const ActivityLog = require('../models/ActivityLog');
 const ContactMessage = require('../models/ContactMessage');
@@ -311,6 +312,23 @@ const buildStudentFallbackEmail = (student = {}, source = 'student', schoolLabel
   return `${tag}.${idPart}@${schoolLabel}.local`;
 };
 
+const getTeacherDisplayName = (teacher = {}) => {
+  const firstName = String(teacher?.personalInfo?.firstName || teacher?.personalInfo?.firstNameDari || '').trim();
+  const lastName = String(teacher?.personalInfo?.lastName || teacher?.personalInfo?.lastNameDari || '').trim();
+  const fullName = `${firstName} ${lastName}`.trim();
+  return fullName || String(teacher?.employmentInfo?.employeeId || teacher?._id || '').trim() || 'استاد';
+};
+
+const getTeacherPrimarySubject = (teacher = {}) => {
+  const subjects = Array.isArray(teacher?.employmentInfo?.subjects) ? teacher.employmentInfo.subjects : [];
+  const subject = subjects.find((item) => String(item?.subjectName || '').trim());
+  if (subject) return String(subject.subjectName || '').trim();
+
+  const classes = Array.isArray(teacher?.employmentInfo?.classes) ? teacher.employmentInfo.classes : [];
+  const classSubject = classes.find((item) => String(item?.subject || '').trim());
+  return classSubject ? String(classSubject.subject || '').trim() : '';
+};
+
 const ensureRegisteredStudentsInUserDirectory = async () => {
   const schoolLabel = await resolveSchoolMailLabel();
 
@@ -435,6 +453,69 @@ const ensureRegisteredStudentsInUserDirectory = async () => {
   }
 };
 
+const ensureRegisteredTeachersInUserDirectory = async () => {
+  const schoolLabel = await resolveSchoolMailLabel();
+  const teachers = await AfghanTeacher.find({
+    status: 'active',
+    $or: [
+      { linkedUserId: null },
+      { linkedUserId: { $exists: false } }
+    ]
+  })
+    .select('_id personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari contactInfo.email employmentInfo.employeeId employmentInfo.subjects employmentInfo.classes linkedUserId')
+    .lean();
+
+  if (!teachers.length) return;
+
+  for (const teacher of teachers) {
+    const desiredName = getTeacherDisplayName(teacher);
+    const desiredSubject = getTeacherPrimarySubject(teacher);
+    const rawEmail = normalizeStudentEmail(teacher?.contactInfo?.email || '');
+    let nextEmail = EMAIL_RX.test(rawEmail) ? rawEmail : buildStudentFallbackEmail(teacher, 'teacher', schoolLabel);
+    let targetUserId = null;
+
+    const existingByEmail = await User.findOne({ email: nextEmail }).select('_id orgRole').lean();
+    if (existingByEmail?._id) {
+      if (String(existingByEmail.orgRole || '') === 'instructor') {
+        targetUserId = existingByEmail._id;
+      } else {
+        nextEmail = buildStudentFallbackEmail(teacher, 'teacher', schoolLabel);
+      }
+    }
+
+    if (!targetUserId) {
+      const tempPassword = crypto.randomBytes(12).toString('base64url');
+      const hashedPassword = await bcrypt.hash(tempPassword, 10);
+      const createdUser = await User.create({
+        name: desiredName,
+        email: nextEmail,
+        password: hashedPassword,
+        orgRole: 'instructor',
+        role: 'instructor',
+        status: 'active',
+        subject: desiredSubject
+      });
+      targetUserId = createdUser._id;
+    } else {
+      await User.findByIdAndUpdate(targetUserId, {
+        name: desiredName,
+        subject: desiredSubject,
+        status: 'active'
+      });
+    }
+
+    await AfghanTeacher.updateOne(
+      { _id: teacher._id },
+      {
+        $set: {
+          linkedUserId: targetUserId,
+          updatedAt: new Date()
+        }
+      }
+    );
+  }
+};
+
 const resolveRequestedOrgRole = (payload = {}) => {
   const explicitOrgRole = String(payload?.orgRole || '').trim().toLowerCase();
   if (isKnownOrgRole(explicitOrgRole)) return explicitOrgRole;
@@ -465,6 +546,7 @@ const sanitizeManagedPermissions = (orgRole = 'student', permissions = []) => {
 router.get('/users', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
   try {
     await ensureRegisteredStudentsInUserDirectory();
+    await ensureRegisteredTeachersInUserDirectory();
 
     const items = await User.find({})
       .select(MANAGED_USER_SELECT)
@@ -791,6 +873,19 @@ const deactivateManagedUser = async (req, res) => {
 
       await AfghanStudent.updateMany(
         { linkedUserId: user._id, status: { $ne: 'deleted' } },
+        {
+          $set: {
+            status: 'inactive',
+            updatedAt: new Date(),
+            lastUpdatedBy: req.user?.id || null
+          }
+        }
+      );
+    }
+
+    if (userOrgRole === 'instructor') {
+      await AfghanTeacher.updateMany(
+        { linkedUserId: user._id, status: { $ne: 'terminated' } },
         {
           $set: {
             status: 'inactive',

@@ -8,6 +8,7 @@ const HomeworkSubmission = require('../models/HomeworkSubmission');
 const Schedule = require('../models/Schedule');
 const { listLinkedStudentsForGuardianUser } = require('./studentProfileService');
 const { getMembershipFinanceOverview } = require('./studentFinanceService');
+const { formatFinanceCode } = require('../utils/latinFinanceCode');
 
 function startOfDay(date = new Date()) {
   const value = new Date(date);
@@ -60,7 +61,7 @@ function formatDashboardOrder(item = {}) {
   return {
     id: String(item.id || ''),
     sourceBillId: String(item.sourceBillId || ''),
-    orderNumber: String(item.orderNumber || ''),
+    orderNumber: formatFinanceCode(item.orderNumber),
     title: String(item.title || ''),
     status,
     dueDate: item.dueDate || null,
@@ -78,7 +79,7 @@ function formatDashboardOrder(item = {}) {
 function formatDashboardPayment(item = {}) {
   return {
     id: String(item.id || ''),
-    paymentNumber: String(item.paymentNumber || ''),
+    paymentNumber: formatFinanceCode(item.paymentNumber),
     amount: Number(item.amount || 0),
     currency: String(item.currency || 'AFN'),
     paymentMethod: String(item.paymentMethod || ''),

@@ -173,6 +173,26 @@
   background: #fdfefe;
 }
 
+.admin-workspace-field .afghan-date-field {
+  min-width: 0;
+}
+
+.admin-workspace-field .afghan-date-input {
+  height: 44px;
+  border-radius: 12px;
+}
+
+.admin-workspace-field .afghan-date-equivalent {
+  padding: 7px 9px;
+  border-radius: 12px;
+  background: #eef8f6;
+  color: #48635f;
+}
+
+.admin-workspace-field .afghan-date-equivalent small {
+  color: #0f766e;
+}
+
 .admin-workspace-field textarea {
   min-height: 88px;
   resize: vertical;
@@ -684,6 +704,334 @@
   gap: 10px;
 }
 
+.admin-registration-command-center {
+  display: grid;
+  gap: 16px;
+}
+
+.admin-registration-command-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.admin-registration-command-head h2 {
+  margin: 0;
+  color: #14302e;
+}
+
+.admin-registration-command-head p {
+  margin: 6px 0 0;
+  color: #4d6762;
+}
+
+.admin-registration-command-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.admin-registration-task-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-registration-main-rail {
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid #dce9e6;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.admin-registration-task-card {
+  min-height: 126px;
+  border: 1px solid #dce9e6;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbfa 100%);
+  color: #14302e;
+  padding: 16px;
+  text-align: right;
+  display: grid;
+  align-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.admin-registration-main-rail .admin-registration-task-card {
+  border-width: 0 0 0 1px;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.admin-registration-main-rail .admin-registration-task-card:hover,
+.admin-registration-main-rail .admin-registration-task-card.active {
+  transform: none;
+}
+
+.admin-registration-main-rail .admin-registration-task-card:last-child {
+  border-left: 0;
+}
+
+.admin-registration-task-card:hover,
+.admin-registration-task-card.active {
+  transform: translateY(-1px);
+  border-color: #0f766e;
+  box-shadow: 0 16px 34px rgba(15, 118, 110, 0.12);
+}
+
+.admin-registration-task-card.active {
+  background: linear-gradient(135deg, #0f766e 0%, #155e75 100%);
+  color: #ffffff;
+}
+
+.admin-registration-task-card span {
+  color: #0f766e;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.admin-registration-task-card strong {
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.admin-registration-task-card em {
+  justify-self: start;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: #eef7f5;
+  color: #4d6762;
+  font-style: normal;
+  font-size: 0.8rem;
+}
+
+.admin-registration-task-card.active span,
+.admin-registration-task-card.active em {
+  color: #ffffff;
+}
+
+.admin-registration-task-card.active em {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.admin-registration-status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-registration-status-card {
+  border: 1px solid #dce9e6;
+  border-radius: 8px;
+  background: #f8fbfa;
+  color: #14302e;
+  padding: 14px;
+  text-align: right;
+  display: grid;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.admin-registration-status-card:hover {
+  border-color: #1f8a70;
+  background: #ffffff;
+}
+
+.admin-registration-status-card span {
+  color: #5b746f;
+  font-size: 0.9rem;
+}
+
+.admin-registration-status-card strong {
+  font-size: 1.45rem;
+}
+
+.admin-registration-flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  background: #eef6f3;
+}
+
+.admin-registration-flow-step {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #14302e;
+  padding: 10px 14px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.admin-registration-flow-step:hover {
+  border-color: #1f8a70;
+}
+
+.admin-registration-flow-step.active {
+  border-color: #0f766e;
+  background: #0f766e;
+  color: #ffffff;
+}
+
+.admin-registration-wizard {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-registration-wizard.compact {
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+.admin-registration-wizard-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  border-radius: 8px;
+  border: 1px solid #dce9e6;
+  background: #ffffff;
+  color: #5b746f;
+  padding: 8px 10px;
+}
+
+.admin-registration-wizard-step span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 999px;
+  background: #eef7f5;
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.admin-registration-wizard-step strong {
+  color: inherit;
+  font-size: 0.88rem;
+}
+
+.admin-registration-wizard-step.active {
+  border-color: #0f766e;
+  color: #14302e;
+  background: #f0fdfa;
+}
+
+.admin-registration-wizard-step.done {
+  border-color: #bbf7d0;
+  color: #166534;
+  background: #ecfdf5;
+}
+
+.admin-registration-wizard-step.done span {
+  background: #16a34a;
+  color: #ffffff;
+}
+
+.admin-registration-mode-rail {
+  display: inline-grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  overflow: hidden;
+  border: 1px solid #dce9e6;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.admin-registration-mode-rail button {
+  border: 0;
+  border-left: 1px solid #dce9e6;
+  background: #ffffff;
+  color: #14302e;
+  padding: 10px 14px;
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.admin-registration-mode-rail button:last-child {
+  border-left: 0;
+}
+
+.admin-registration-mode-rail button:hover,
+.admin-registration-mode-rail button.active {
+  background: #0f766e;
+  color: #ffffff;
+}
+
+.admin-registration-panel-stack {
+  grid-column: span 12;
+  display: grid;
+  gap: 14px;
+}
+
+.admin-registration-panel-card {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-registration-panel-toggle {
+  width: 100%;
+  border: 1px solid #dce9e6;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbfa 100%);
+  color: #14302e;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: right;
+  cursor: pointer;
+  font: inherit;
+}
+
+.admin-registration-panel-toggle:hover,
+.admin-registration-panel-card.open .admin-registration-panel-toggle {
+  border-color: #0f766e;
+  box-shadow: 0 12px 26px rgba(15, 118, 110, 0.1);
+}
+
+.admin-registration-panel-toggle span {
+  display: grid;
+  gap: 5px;
+}
+
+.admin-registration-panel-toggle strong {
+  color: #14302e;
+  font-size: 1.02rem;
+}
+
+.admin-registration-panel-toggle em {
+  color: #5b746f;
+  font-size: 0.88rem;
+  font-style: normal;
+  line-height: 1.7;
+}
+
+.admin-registration-panel-toggle b {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #eef7f5;
+  color: #0f766e;
+  padding: 7px 12px;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.admin-registration-panel-card.open .admin-registration-panel-toggle b {
+  background: #0f766e;
+  color: #ffffff;
+}
+
 .admin-education-enrollment-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
@@ -902,6 +1250,14 @@
     grid-template-columns: 1fr;
   }
 
+  .admin-registration-status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-registration-task-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .admin-education-enrollment-layout,
   .admin-education-side {
     position: static;
@@ -917,8 +1273,35 @@
   .admin-education-toggle-bar,
   .admin-education-quick-grid,
   .admin-education-chip-grid,
+  .admin-registration-task-grid,
+  .admin-registration-status-grid,
+  .admin-registration-wizard,
   .admin-education-side {
     grid-template-columns: 1fr;
+  }
+
+  .admin-registration-command-head {
+    display: grid;
+  }
+
+  .admin-registration-command-actions {
+    justify-content: flex-start;
+  }
+
+  .admin-registration-panel-toggle {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .admin-registration-main-rail {
+    grid-template-columns: repeat(3, minmax(180px, 1fr));
+    overflow-x: auto;
+  }
+
+  .admin-registration-mode-rail {
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(110px, 1fr));
+    overflow-x: auto;
   }
 
   .admin-education-candidate-card,

@@ -271,6 +271,11 @@ const afghanTeacherSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
+  linkedUserId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
   
   // یادداشت‌ها
   notes: {
@@ -324,5 +329,6 @@ afghanTeacherSchema.index({ 'contactInfo.province': 1, 'contactInfo.district': 1
 afghanTeacherSchema.index({ createdBy: 1 });
 afghanTeacherSchema.index({ status: 1, verificationStatus: 1 });
 afghanTeacherSchema.index({ 'employmentInfo.employeeId': 1 }, { unique: true });
+afghanTeacherSchema.index({ linkedUserId: 1 });
 
 module.exports = mongoose.model('AfghanTeacher', afghanTeacherSchema);

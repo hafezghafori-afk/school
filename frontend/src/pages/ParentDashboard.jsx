@@ -10,6 +10,7 @@ import TrendBars from '../components/dashboard/TrendBars';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { downloadBlob, errorMessage, fetchBlob } from './adminWorkspaceUtils';
+import { formatFinanceCode } from '../utils/latinFinanceCode';
 
 const ORDER_STATUS_LABELS = {
   new: 'جدید',
@@ -155,7 +156,7 @@ function buildParentStatementHtml({
   const pack = financeStatement?.pack || {};
   const ordersRows = (financeOrders || []).map((item) => `
     <tr>
-      <td>${escapeHtml(item.title || item.orderNumber || '-')}</td>
+      <td>${escapeHtml(item.title || formatFinanceCode(item.orderNumber, '-'))}</td>
       <td>${escapeHtml(labelFor(ORDER_STATUS_LABELS, item.status, item.status || '-'))}</td>
       <td>${escapeHtml(formatDate(item.dueDate))}</td>
       <td>${escapeHtml(formatMoney(item.amountDue || 0))}</td>
@@ -164,7 +165,7 @@ function buildParentStatementHtml({
   `).join('');
   const paymentRows = (financePayments || []).map((item) => `
     <tr>
-      <td>${escapeHtml(item.paymentNumber || '-')}</td>
+      <td>${escapeHtml(formatFinanceCode(item.paymentNumber, '-'))}</td>
       <td>${escapeHtml(labelFor(PAYMENT_METHOD_LABELS, item.paymentMethod, item.paymentMethod || '-'))}</td>
       <td>${escapeHtml(labelFor(PAYMENT_STATUS_LABELS, item.status, item.status || '-'))}</td>
       <td>${escapeHtml(formatDateTime(item.paidAt))}</td>
@@ -778,7 +779,7 @@ export default function ParentDashboard() {
           ) : financeOrders.map((item) => (
             <div key={item.id} className="dash-list-item">
               <div>
-                <strong>{item.title || item.orderNumber}</strong>
+                <strong>{item.title || formatFinanceCode(item.orderNumber, '-')}</strong>
                 <span>
                   {labelFor(ORDER_STATUS_LABELS, item.status, item.status || '-')}
                   {' | '}
@@ -811,7 +812,7 @@ export default function ParentDashboard() {
                 <select name="billId" value={receiptForm.billId} onChange={handleReceiptOrderChange}>
                   {receiptUploadOrders.map((item) => (
                     <option key={item.id} value={item.id}>
-                      {item.title || item.orderNumber} - {formatMoney(item.outstandingAmount)}
+                      {item.title || formatFinanceCode(item.orderNumber, '-')} - {formatMoney(item.outstandingAmount)}
                     </option>
                   ))}
                 </select>
@@ -881,7 +882,7 @@ export default function ParentDashboard() {
                 />
               </label>
               <div className="dash-inline-meta">
-                <span>بل انتخاب‌شده: <strong>{selectedReceiptOrder?.title || selectedReceiptOrder?.orderNumber || '—'}</strong></span>
+                <span>بل انتخاب‌شده: <strong>{selectedReceiptOrder?.title || formatFinanceCode(selectedReceiptOrder?.orderNumber, '—')}</strong></span>
                 <span>مانده فعلی: <strong>{formatMoney(selectedReceiptOrder?.outstandingAmount || 0)}</strong></span>
                 <span>سررسید: <strong>{formatDate(selectedReceiptOrder?.dueDate)}</strong></span>
               </div>
@@ -936,7 +937,7 @@ export default function ParentDashboard() {
           ) : financePayments.map((item) => (
             <div key={item.id} className="dash-list-item">
               <div>
-                <strong>{item.paymentNumber || 'پرداخت مالی'}</strong>
+                <strong>{formatFinanceCode(item.paymentNumber, 'پرداخت مالی')}</strong>
                 <span>
                   {labelFor(PAYMENT_METHOD_LABELS, item.paymentMethod, item.paymentMethod || 'پرداخت')}
                   {' | '}

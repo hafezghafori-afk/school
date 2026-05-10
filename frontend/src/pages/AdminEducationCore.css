@@ -91,6 +91,26 @@
   font: inherit;
 }
 
+.edu-core-form .afghan-date-field {
+  min-width: 0;
+}
+
+.edu-core-form .afghan-date-input {
+  height: 42px;
+  border-radius: 10px;
+}
+
+.edu-core-form .afghan-date-equivalent {
+  padding: 0.36rem 0.5rem;
+  border-radius: 10px;
+  background: rgba(8, 24, 45, 0.64);
+  color: #cfe0ff;
+}
+
+.edu-core-form .afghan-date-equivalent small {
+  color: #9cc5ff;
+}
+
 .edu-core-form textarea {
   resize: vertical;
 }

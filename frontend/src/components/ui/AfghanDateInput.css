@@ -2,25 +2,35 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  container-type: inline-size;
   width: 100%;
 }
 
 .afghan-date-input-grid {
   display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(84px, 1fr) minmax(110px, 1.2fr) minmax(64px, 0.7fr);
+  gap: 6px;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.25fr) minmax(0, 0.72fr);
   width: 100%;
 }
 
 .afghan-date-input-grid:has(.afghan-date-time) {
-  grid-template-columns: minmax(84px, 1fr) minmax(110px, 1.2fr) minmax(64px, 0.7fr) minmax(86px, 0.9fr);
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.2fr) minmax(0, 0.72fr) minmax(0, 0.92fr);
 }
 
 .afghan-date-input {
   direction: rtl;
+  font: inherit;
+  height: 42px;
   min-width: 0;
+  overflow: hidden;
+  padding-inline: 10px;
   text-align: right;
+  text-overflow: ellipsis;
   width: 100%;
+}
+
+.afghan-date-month {
+  white-space: nowrap;
 }
 
 .afghan-date-time {
@@ -30,11 +40,16 @@
 
 .afghan-date-equivalent {
   color: #64748b;
-  display: flex;
-  flex-direction: column;
+  display: grid;
   font-size: 0.82rem;
-  gap: 2px;
+  gap: 1px;
   line-height: 1.5;
+}
+
+.afghan-date-equivalent span,
+.afghan-date-equivalent small {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .afghan-date-equivalent small {
@@ -43,9 +58,27 @@
   text-align: right;
 }
 
-@media (max-width: 520px) {
+@container (max-width: 260px) {
+  .afghan-date-input-grid,
+  .afghan-date-input-grid:has(.afghan-date-time) {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  }
+
+  .afghan-date-day,
+  .afghan-date-time {
+    grid-column: span 1;
+  }
+}
+
+@container (max-width: 190px) {
   .afghan-date-input-grid,
   .afghan-date-input-grid:has(.afghan-date-time) {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .afghan-date-input {
+    height: 40px;
   }
 }

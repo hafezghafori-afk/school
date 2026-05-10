@@ -14,6 +14,7 @@ const { normalizeAdminLevel } = require('../utils/permissions');
 const { resolveAdminOrgRole } = require('../utils/userRole');
 const { roundMoney, getBillRemainingAmount } = require('../utils/financeReceiptValidation');
 const { syncStudentFinanceFromFinanceBill, syncStudentFinanceFromFinanceReceipt } = require('../utils/studentFinanceSync');
+const { formatFinanceCode } = require('../utils/latinFinanceCode');
 
 const FINANCE_FOUR_EYES_ENABLED = String(process.env.FINANCE_FOUR_EYES_ENABLED || 'true').toLowerCase() !== 'false';
 
@@ -129,7 +130,7 @@ function normalizeFeePaymentAllocations(payment = {}) {
       feeOrderId: String(item?.feeOrderId || '').trim(),
       amount: roundMoney(item?.amount),
       title: String(item?.title || '').trim(),
-      orderNumber: String(item?.orderNumber || '').trim()
+      orderNumber: formatFinanceCode(item?.orderNumber)
     }))
     .filter((item) => item.feeOrderId && item.amount > 0);
 }

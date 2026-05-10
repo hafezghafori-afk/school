@@ -54,6 +54,14 @@ const financeFeePlanSchema = new mongoose.Schema({
   dueDay: { type: Number, default: 10, min: 1, max: 28 },
   currency: { type: String, default: 'AFN' },
   isActive: { type: Boolean, default: true },
+  lifecycleStatus: {
+    type: String,
+    enum: ['active', 'inactive', 'archived'],
+    default: 'active',
+    index: true
+  },
+  archivedAt: { type: Date, default: null },
+  archivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   note: { type: String, default: '' }
 }, { timestamps: true });
 
@@ -88,8 +96,16 @@ financeFeePlanSchema.pre('validate', function syncFinanceFeePlanState() {
   this.transportDefaultFee = Math.max(0, Number(this.transportDefaultFee) || 0);
   this.otherFee = Math.max(0, Number(this.otherFee) || 0);
   this.amount = this.tuitionFee;
-  if (!this.isActive) {
+  this.lifecycleStatus = ['active', 'inactive', 'archived'].includes(this.lifecycleStatus)
+    ? this.lifecycleStatus
+    : (this.isActive === false ? 'inactive' : 'active');
+  if (this.lifecycleStatus !== 'active') {
+    this.isActive = false;
     this.isDefault = false;
+  } else {
+    this.isActive = true;
+    this.archivedAt = null;
+    this.archivedBy = null;
   }
 });
 
@@ -121,6 +137,7 @@ financeFeePlanSchema.index({
   term: 1,
   billingFrequency: 1,
   isActive: 1,
+  lifecycleStatus: 1,
   isDefault: 1,
   priority: 1,
   planType: 1

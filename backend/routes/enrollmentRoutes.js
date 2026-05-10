@@ -183,6 +183,69 @@ const drawTableRow = (doc, { label, value }, y) => { doc.fontSize(11).fillColor(
 const drawSectionTitle = (doc, title, y) => { doc.fontSize(12).fillColor('#0f172a').text(title, 60, y, { align: 'right' }); doc.moveTo(60, y + 16).lineTo(530, y + 16).strokeColor('#cbd5f5').stroke(); return y + 26; };
 const ensureSpace = (doc, y) => { if (y < 720) return y; doc.addPage(); return 80; };
 
+const studentNameFromAfghanStudent = (student = {}) => [
+  student?.personalInfo?.firstNameDari || student?.personalInfo?.firstName || '',
+  student?.personalInfo?.lastNameDari || student?.personalInfo?.lastName || ''
+].filter(Boolean).join(' ').trim() || 'شاگرد';
+
+const gradeFromAfghanStudent = (student = {}) => {
+  const grade = String(student?.academicInfo?.currentGrade || '').trim();
+  const match = grade.match(/\d+/);
+  return match ? match[0] : grade;
+};
+
+const ensureEnrollmentRowsForAfghanStudents = async () => {
+  const students = await AfghanStudent.find({ status: { $ne: 'deleted' } })
+    .select('personalInfo familyInfo contactInfo academicInfo registrationId asasNumber linkedUserId status createdAt')
+    .lean();
+
+  await Promise.all(students.map(async (student) => {
+    const existing = await Enrollment.findOne({
+      $or: [
+        { linkedStudentId: student._id },
+        { registrationId: student.registrationId || '__none__' },
+        { asasNumber: student.asasNumber || '__none__' }
+      ]
+    });
+
+    const payload = {
+      studentName: studentNameFromAfghanStudent(student),
+      fatherName: student?.personalInfo?.fatherName || '',
+      motherName: student?.familyInfo?.motherName || '',
+      gender: student?.personalInfo?.gender || 'male',
+      birthDate: student?.personalInfo?.birthDate || '',
+      grade: gradeFromAfghanStudent(student),
+      phone: student?.contactInfo?.phone || student?.contactInfo?.mobile || student?.familyInfo?.fatherPhone || '',
+      email: student?.contactInfo?.email || '',
+      address: student?.contactInfo?.address || '',
+      province: student?.contactInfo?.province || '',
+      district: student?.contactInfo?.district || '',
+      emergencyPhone: student?.contactInfo?.emergencyContact?.phone || '',
+      academicContext: {
+        schoolId: student?.academicInfo?.currentSchool || null,
+        classId: student?.academicInfo?.classId || student?.academicInfo?.currentClassId || null,
+        shiftId: student?.academicInfo?.shiftId || null,
+        academicYearId: student?.academicInfo?.academicYearId || null,
+        enrollmentDate: student?.academicInfo?.enrollmentDate || null
+      },
+      registrationId: student.registrationId || '',
+      asasNumber: student.asasNumber || '',
+      status: student.status === 'active' ? 'approved' : 'pending',
+      linkedStudentId: student._id,
+      linkedUserId: student.linkedUserId || null,
+      approvedAt: student.status === 'active' ? (student.createdAt || new Date()) : null
+    };
+
+    if (existing) {
+      Object.assign(existing, payload);
+      await existing.save();
+      return;
+    }
+
+    await Enrollment.create(payload);
+  }));
+};
+
 router.post('/', (req, res, next) => { upload.fields([{ name: 'idCard', maxCount: 1 }, { name: 'birthCert', maxCount: 1 }, { name: 'reportCard', maxCount: 1 }, { name: 'photo', maxCount: 1 }])(req, res, (err) => { if (err) return res.status(400).json({ success: false, message: err.message }); next(); }); }, async (req, res) => {
   try {
     const body = req.body || {};
@@ -203,7 +266,15 @@ router.post('/', (req, res, next) => { upload.fields([{ name: 'idCard', maxCount
   } catch (error) { res.status(500).json({ success: false, message: 'خطا در ثبت نام' }); }
 });
 
-router.get('/admin', requireAuth, requireRole(['admin']), manageEnrollmentAccess, async (req, res) => { try { const items = await Enrollment.find().sort({ createdAt: -1 }); res.json({ success: true, items }); } catch { res.status(500).json({ success: false, message: 'خطا در دریافت ثبت نام‌ها' }); } });
+router.get('/admin', requireAuth, requireRole(['admin']), manageEnrollmentAccess, async (req, res) => {
+  try {
+    await ensureEnrollmentRowsForAfghanStudents();
+    const items = await Enrollment.find().sort({ createdAt: -1 });
+    res.json({ success: true, items });
+  } catch {
+    res.status(500).json({ success: false, message: 'خطا در دریافت ثبت نام‌ها' });
+  }
+});
 router.get('/export.xlsx', requireAuth, requireRole(['admin']), requirePermission('view_reports'), async (req, res) => { try { const items = await Enrollment.find().sort({ createdAt: -1 }); const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('Enrollments'); ws.columns = [{ header: 'نام شاگرد', key: 'studentName', width: 20 }, { header: 'صنف', key: 'grade', width: 12 }, { header: 'شماره تماس', key: 'phone', width: 16 }, { header: 'ایمیل', key: 'email', width: 22 }, { header: 'وضعیت', key: 'status', width: 14 }, { header: 'تاریخ', key: 'createdAt', width: 18 }]; items.forEach(item => ws.addRow({ studentName: item.studentName, grade: item.grade || '', phone: item.phone || '', email: item.email || '', status: item.status, createdAt: item.createdAt ? new Date(item.createdAt).toLocaleDateString('fa-AF-u-ca-persian') : '' })); res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.setHeader('Content-Disposition', 'attachment; filename="enrollments.xlsx"'); await wb.xlsx.write(res); res.end(); } catch { res.status(500).json({ success: false, message: 'خطا در خروجی اکسل' }); } });
 router.get('/:id', requireAuth, requireRole(['admin']), manageEnrollmentAccess, async (req, res) => { try { const item = await Enrollment.findById(req.params.id); if (!item) return res.status(404).json({ success: false, message: 'درخواست یافت نشد' }); res.json({ success: true, item }); } catch { res.status(500).json({ success: false, message: 'خطا در دریافت درخواست' }); } });
 router.get('/:id/files', requireAuth, requireRole(['admin']), manageEnrollmentAccess, async (req, res) => { try { const item = await Enrollment.findById(req.params.id); if (!item) return res.status(404).json({ success: false, message: 'درخواست یافت نشد' }); res.json({ success: true, files: [{ label: 'تذکره', url: item.documents?.idCardUrl || '' }, { label: 'سند تولد', url: item.documents?.birthCertUrl || '' }, { label: 'کارنامه', url: item.documents?.reportCardUrl || '' }, { label: 'عکس', url: item.documents?.photoUrl || '' }].filter(f => f.url) }); } catch { res.status(500).json({ success: false, message: 'خطا در دریافت فایل‌ها' }); } });

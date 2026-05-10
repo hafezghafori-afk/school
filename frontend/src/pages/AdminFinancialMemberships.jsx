@@ -1,12 +1,18 @@
 // Helper to get auth headers from localStorage
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const schoolId = readStoredSchoolId();
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(schoolId ? { 'X-School-Id': schoolId } : {})
+  };
 };
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import { readStoredSchoolId } from './adminWorkspaceUtils';
 import './AdminFinancialMemberships.css';
 
 const getDefaultForm = () => ({
@@ -28,6 +34,37 @@ const normalizeDateInput = (value) => {
 };
 
 const PAGE_SIZE = 10;
+
+const CURRENT_MEMBERSHIP_STATUSES = new Set(['active', 'pending', 'suspended', 'transferred_in']);
+const ENDED_MEMBERSHIP_STATUSES = new Set(['inactive', 'transferred', 'transferred_out', 'graduated', 'dropped', 'expelled', 'rejected']);
+
+const isCurrentMembership = (item = {}) => (
+  item?.isCurrent !== false
+  && !item?.endDate
+  && !item?.endedAt
+  && !item?.leftAt
+  && CURRENT_MEMBERSHIP_STATUSES.has(String(item?.status || 'active').trim())
+);
+
+const getMembershipStudentName = (membership = {}, students = []) => {
+  const student = students.find((item) => String(item._id) === String(membership.studentId)) || {};
+  return membership.studentName || student.fullName || student.name || '-';
+};
+
+const getMembershipAdmissionNo = (membership = {}, students = []) => {
+  const student = students.find((item) => String(item._id) === String(membership.studentId)) || {};
+  return membership.admissionNo || student.admissionNo || '-';
+};
+
+const getMembershipClassTitle = (membership = {}, classes = []) => {
+  const item = classes.find((classItem) => String(classItem.classId || classItem.id) === String(membership.classId)) || {};
+  return membership.classTitle || item.title || '-';
+};
+
+const getMembershipAcademicYearTitle = (membership = {}, academicYears = []) => {
+  const item = academicYears.find((year) => String(year._id || year.id) === String(membership.academicYearId)) || {};
+  return membership.academicYearTitle || item.title || '-';
+};
 
 // اسکلت مدرن صفحه عضویت مالی شاگردان
 export default function AdminFinancialMemberships() {
@@ -226,7 +263,9 @@ export default function AdminFinancialMemberships() {
   const filteredMemberships = useMemo(() => {
     return memberships.filter((m) => {
       const student = students.find((s) => s._id === m.studentId) || {};
-      const matchesSearch = !filters.search || (student.fullName || student.name || '').toLowerCase().includes(filters.search.toLowerCase()) || (student.admissionNo || '').toLowerCase().includes(filters.search.toLowerCase());
+      const searchName = getMembershipStudentName(m, students);
+      const admissionNo = getMembershipAdmissionNo(m, students);
+      const matchesSearch = !filters.search || searchName.toLowerCase().includes(filters.search.toLowerCase()) || admissionNo.toLowerCase().includes(filters.search.toLowerCase());
       const matchesYear = !filters.year || m.academicYearId === filters.year;
       const matchesClass = !filters.classId || m.classId === filters.classId;
       const matchesStatus = !filters.status || m.status === filters.status;
@@ -262,6 +301,12 @@ export default function AdminFinancialMemberships() {
 
   const pageStart = filteredMemberships.length ? ((currentPage - 1) * PAGE_SIZE) + 1 : 0;
   const pageEnd = filteredMemberships.length ? Math.min(currentPage * PAGE_SIZE, filteredMemberships.length) : 0;
+  const membershipStats = useMemo(() => ({
+    current: memberships.filter(isCurrentMembership).length,
+    active: memberships.filter((item) => String(item.status || '') === 'active').length,
+    pending: memberships.filter((item) => String(item.status || '') === 'pending').length,
+    ended: memberships.filter((item) => item?.isCurrent === false || ENDED_MEMBERSHIP_STATUSES.has(String(item.status || '').trim())).length
+  }), [memberships]);
 
   return (
     <div className="admin-financial-memberships-page">
@@ -271,34 +316,33 @@ export default function AdminFinancialMemberships() {
           <h2>مدیریت عضویت‌های مالی شاگردان</h2>
           <div className="afm-subtitle">ثبت، مشاهده و مدیریت عضویت‌های فعال و غیرفعال</div>
         </div>
-        <button className="afm-btn-primary" onClick={openCreateModal}>
+        <Link className="afm-btn-primary afm-header-link" to="/admin-education?section=enrollments">
           <span className="afm-btn-icon">+</span> ثبت عضویت جدید
-        </button>
+        </Link>
       </div>
 
       {message ? <div className="afm-feedback-banner">{message}</div> : null}
+      <div className="afm-source-banner">
+        ممبرشیپ مالی اکنون از ثبت‌نام متعلمین در مرکز مدیریت آموزش ساخته می‌شود. در این صفحه فقط وضعیت مالی، یادداشت و توقف/فعال‌سازی همان عضویت کنترل می‌شود.
+      </div>
 
       {/* Summary Cards - real data */}
       <div className="afm-summary-cards">
         <div className="afm-summary-card afm-summary-active">
           <div className="afm-summary-title">عضویت فعال</div>
-          <div className="afm-summary-value">{memberships.filter(m => m.status === 'active').length}</div>
+          <div className="afm-summary-value">{membershipStats.active}</div>
         </div>
         <div className="afm-summary-card afm-summary-inactive">
           <div className="afm-summary-title">غیرفعال</div>
-          <div className="afm-summary-value">{memberships.filter(m => m.status === 'inactive').length}</div>
+          <div className="afm-summary-value">{membershipStats.ended}</div>
         </div>
         <div className="afm-summary-card afm-summary-new">
           <div className="afm-summary-title">جدید این ماه</div>
-          <div className="afm-summary-value">{memberships.filter(m => {
-            const d = m.startDate ? new Date(m.startDate) : null;
-            const now = new Date();
-            return d && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-          }).length}</div>
+          <div className="afm-summary-value">{membershipStats.pending}</div>
         </div>
         <div className="afm-summary-card afm-summary-no-membership">
           <div className="afm-summary-title">بدون عضویت</div>
-          <div className="afm-summary-value">{students.length - memberships.length}</div>
+          <div className="afm-summary-value">{membershipStats.current}</div>
         </div>
       </div>
 
@@ -373,15 +417,16 @@ export default function AdminFinancialMemberships() {
               <tr><td colSpan={9} className="muted">عضویتی یافت نشد.</td></tr>
             )}
             {paginatedMemberships.map((m) => {
-              const student = students.find((s) => s._id === m.studentId) || {};
-              const classObj = classes.find((c) => c.classId === m.classId) || {};
-              const yearObj = academicYears.find((y) => (y._id || y.id) === m.academicYearId) || {};
+              const studentName = getMembershipStudentName(m, students);
+              const admissionNo = getMembershipAdmissionNo(m, students);
+              const classTitle = getMembershipClassTitle(m, classes);
+              const academicYearTitle = getMembershipAcademicYearTitle(m, academicYears);
               return (
                 <tr key={m._id || m.id}>
-                  <td>{student.fullName || student.name || '-'}</td>
-                  <td>{student.admissionNo || '-'}</td>
-                  <td>{classObj.title || '-'}</td>
-                  <td>{yearObj.title || '-'}</td>
+                  <td>{studentName}</td>
+                  <td>{admissionNo}</td>
+                  <td>{classTitle}</td>
+                  <td>{academicYearTitle}</td>
                   <td><span className="afm-badge afm-badge-normal">{m.membershipType || 'عادی'}</span></td>
                   <td><span className={`afm-badge afm-badge-${m.status}`}>{m.status === 'active' ? 'فعال' : m.status === 'inactive' ? 'غیرفعال' : m.status === 'pending' ? 'معلق' : m.status}</span></td>
                   <td>{m.startDate ? m.startDate.slice(0, 10) : '-'}</td>
@@ -500,7 +545,7 @@ export default function AdminFinancialMemberships() {
                   </div>
                   <div className="afm-form-card">
                     <label>سال تعلیمی</label>
-                    <select required value={form.academicYearId} onChange={e => handleFormChange('academicYearId', e.target.value)}>
+                    <select required value={form.academicYearId} onChange={e => handleFormChange('academicYearId', e.target.value)} disabled>
                       <option value="">انتخاب سال</option>
                       {academicYears.map(y => (
                         <option key={y._id || y.id} value={y._id || y.id}>{y.title}</option>
@@ -509,7 +554,7 @@ export default function AdminFinancialMemberships() {
                   </div>
                   <div className="afm-form-card">
                     <label>صنف</label>
-                    <select required value={form.classId} onChange={e => handleFormChange('classId', e.target.value)}>
+                    <select required value={form.classId} onChange={e => handleFormChange('classId', e.target.value)} disabled>
                       <option value="">انتخاب صنف</option>
                       {filteredClasses.map(c => (
                         <option key={c.classId || c.id} value={c.classId || c.id}>{c.title}</option>

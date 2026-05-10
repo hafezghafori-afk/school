@@ -24,6 +24,63 @@ const TEMPLATE_TYPES = [
   { id: 'finance', title: 'شقه مالی' }
 ];
 
+const DEFAULT_COLUMNS_BY_TYPE = {
+  attendance: [
+    { key: 'date', label: 'تاریخ', width: 16, visible: true },
+    { key: 'studentName', label: 'متعلم', width: 24, visible: true },
+    { key: 'classTitle', label: 'صنف', width: 18, visible: true },
+    { key: 'academicYear', label: 'سال تعلیمی', width: 18, visible: true },
+    { key: 'status', label: 'وضعیت', width: 14, visible: true },
+    { key: 'note', label: 'ملاحظه', width: 24, visible: true }
+  ],
+  attendance_summary: [
+    { key: 'serialNo', label: 'شماره', width: 10, visible: true },
+    { key: 'studentName', label: 'متعلم', width: 24, visible: true },
+    { key: 'admissionNo', label: 'نمبر اساس', width: 16, visible: true },
+    { key: 'classTitle', label: 'صنف', width: 18, visible: true },
+    { key: 'presentDays', label: 'حاضر', width: 12, visible: true },
+    { key: 'absentDays', label: 'غایب', width: 12, visible: true },
+    { key: 'totalDays', label: 'مجموع روزها', width: 14, visible: true }
+  ],
+  subjects: [
+    { key: 'serialNo', label: 'شماره', width: 10, visible: true },
+    { key: 'subjectName', label: 'مضمون', width: 24, visible: true },
+    { key: 'teacherName', label: 'استاد', width: 22, visible: true },
+    { key: 'classTitle', label: 'صنف', width: 16, visible: true },
+    { key: 'term', label: 'ترم', width: 14, visible: true },
+    { key: 'status', label: 'وضعیت', width: 12, visible: true }
+  ],
+  exam: [
+    { key: 'number', label: 'شماره', width: 7, visible: true },
+    { key: 'studentName', label: 'نام', width: 15, visible: true },
+    { key: 'fatherName', label: 'نام پدر', width: 15, visible: true },
+    { key: 'writtenScore', label: 'تحریری', width: 9, visible: true },
+    { key: 'oralScore', label: 'تقریری', width: 9, visible: true },
+    { key: 'obtainedMark', label: 'به عدد', width: 10, visible: true },
+    { key: 'totalInWords', label: 'به حروف', width: 14, visible: true },
+    { key: 'note', label: 'ملاحظات', width: 12, visible: true }
+  ],
+  finance: [
+    { key: 'orderNumber', label: 'شماره سفارش', width: 20, visible: true },
+    { key: 'studentName', label: 'متعلم', width: 24, visible: true },
+    { key: 'classTitle', label: 'صنف', width: 18, visible: true },
+    { key: 'term', label: 'ترم', width: 16, visible: true },
+    { key: 'amountDue', label: 'مبلغ قابل پرداخت', width: 16, visible: true },
+    { key: 'amountPaid', label: 'پرداخت‌شده', width: 16, visible: true },
+    { key: 'outstandingAmount', label: 'باقی‌مانده', width: 16, visible: true },
+    { key: 'status', label: 'وضعیت', width: 14, visible: true }
+  ]
+};
+
+const DEFAULT_LAYOUT = {
+  font: 'B Zar',
+  fontSize: 12,
+  orientation: 'portrait',
+  showHeader: true,
+  showFooter: true,
+  showLogo: true
+};
+
 const EMPTY_FILTERS = {
   type: '',
   academicYearId: '',
@@ -110,6 +167,35 @@ function getSummaryEntries(preview = null) {
   return [{ label: 'تعداد ردیف‌ها', value: formatNumber(totalRows) }];
 }
 
+function getTemplateColumns(template = null) {
+  const configured = Array.isArray(template?.columns) && template.columns.length
+    ? template.columns
+    : DEFAULT_COLUMNS_BY_TYPE[template?.type] || DEFAULT_COLUMNS_BY_TYPE.attendance;
+  return configured
+    .map((column, index) => ({
+      key: String(column?.key || '').trim(),
+      label: String(column?.label || column?.key || '').trim(),
+      width: Number(column?.width || 16),
+      visible: column?.visible !== false,
+      order: Number(column?.order ?? index)
+    }))
+    .filter((column) => column.key)
+    .sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
+}
+
+function getTemplateLayout(template = null) {
+  const layout = template?.layout || {};
+  return {
+    ...DEFAULT_LAYOUT,
+    font: layout.font || layout.fontFamily || DEFAULT_LAYOUT.font,
+    fontSize: Number(layout.fontSize || DEFAULT_LAYOUT.fontSize),
+    orientation: layout.orientation || DEFAULT_LAYOUT.orientation,
+    showHeader: layout.showHeader !== false,
+    showFooter: layout.showFooter !== false,
+    showLogo: layout.showLogo !== false
+  };
+}
+
 export default function AdminSheetTemplates() {
   const [items, setItems] = useState([]);
   const [academicYears, setAcademicYears] = useState([]);
@@ -122,6 +208,8 @@ export default function AdminSheetTemplates() {
   const [message, setMessage] = useState('');
   const [messageTone, setMessageTone] = useState('info');
   const [busyAction, setBusyAction] = useState('');
+  const [draftColumns, setDraftColumns] = useState([]);
+  const [draftLayout, setDraftLayout] = useState(DEFAULT_LAYOUT);
 
   const templateTypes = useMemo(() => normalizeOptions(TEMPLATE_TYPES, ['title', 'id']), []);
   const yearOptions = useMemo(() => normalizeOptions(academicYears, ['title', 'code']), [academicYears]);
@@ -136,6 +224,11 @@ export default function AdminSheetTemplates() {
   const selectedTemplate = useMemo(() => {
     return items.find((item) => String(item.id) === String(selectedTemplateId)) || null;
   }, [items, selectedTemplateId]);
+
+  useEffect(() => {
+    setDraftColumns(getTemplateColumns(selectedTemplate));
+    setDraftLayout(getTemplateLayout(selectedTemplate));
+  }, [selectedTemplate]);
 
   const filteredExamSessionOptions = useMemo(() => {
     return examSessionOptions.filter((item) => {
@@ -270,6 +363,90 @@ export default function AdminSheetTemplates() {
     showMessage('فیلترها پاک شد.');
   };
 
+  const updateColumn = (index, patch) => {
+    setDraftColumns((current) => current.map((column, columnIndex) => (
+      columnIndex === index ? { ...column, ...patch } : column
+    )));
+  };
+
+  const moveColumn = (index, direction) => {
+    setDraftColumns((current) => {
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= current.length) return current;
+      const next = [...current];
+      const [item] = next.splice(index, 1);
+      next.splice(targetIndex, 0, item);
+      return next.map((column, order) => ({ ...column, order }));
+    });
+  };
+
+  const removeColumn = (index) => {
+    setDraftColumns((current) => current
+      .filter((_, columnIndex) => columnIndex !== index)
+      .map((column, order) => ({ ...column, order })));
+  };
+
+  const addColumn = () => {
+    setDraftColumns((current) => ([
+      ...current,
+      { key: `custom_${current.length + 1}`, label: 'ستون جدید', width: 16, visible: true, order: current.length }
+    ]));
+  };
+
+  const updateLayout = (event) => {
+    const { name, value, type, checked } = event.target;
+    setDraftLayout((current) => ({
+      ...current,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const resetTemplateDraft = () => {
+    setDraftColumns(getTemplateColumns(selectedTemplate));
+    setDraftLayout(getTemplateLayout(selectedTemplate));
+    showMessage('تنظیمات قالب به آخرین حالت ذخیره‌شده برگشت.');
+  };
+
+  const saveTemplateSettings = async () => {
+    if (!selectedTemplateId) return;
+    try {
+      setBusyAction('save-template');
+      const columns = draftColumns
+        .map((column, order) => ({
+          key: String(column.key || '').trim(),
+          label: String(column.label || '').trim(),
+          width: Number(column.width || 16),
+          visible: column.visible !== false,
+          order
+        }))
+        .filter((column) => column.key);
+      const data = await fetchJson(`/api/sheet-templates/${selectedTemplateId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          columns,
+          layout: {
+            fontFamily: draftLayout.font,
+            fontSize: Number(draftLayout.fontSize || 12),
+            orientation: draftLayout.orientation,
+            showHeader: Boolean(draftLayout.showHeader),
+            showFooter: Boolean(draftLayout.showFooter),
+            showLogo: Boolean(draftLayout.showLogo)
+          }
+        })
+      });
+      setItems((current) => current.map((item) => (
+        String(item.id) === String(selectedTemplateId) ? data.item : item
+      )));
+      setPreview(null);
+      showMessage('تنظیمات قالب ذخیره شد.');
+    } catch (error) {
+      showMessage(errorMessage(error, 'ذخیره تنظیمات قالب ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
   return (
     <main className="admin-workspace-page" dir="rtl">
       <div className="admin-workspace-shell">
@@ -395,7 +572,84 @@ export default function AdminSheetTemplates() {
               </div>
             </div>
 
+            <div className="admin-workspace-form-grid">
+              <div className="admin-workspace-field">
+                <label htmlFor="sheet-layout-font">فونت</label>
+                <select id="sheet-layout-font" name="font" value={draftLayout.font} onChange={updateLayout} disabled={!selectedTemplate}>
+                  <option value="B Zar">B Zar</option>
+                  <option value="B Mitra">B Mitra</option>
+                  <option value="Tahoma">Tahoma</option>
+                  <option value="Arial">Arial</option>
+                </select>
+              </div>
+              <div className="admin-workspace-field">
+                <label htmlFor="sheet-layout-font-size">سایز فونت</label>
+                <input id="sheet-layout-font-size" name="fontSize" type="number" min="8" max="32" value={draftLayout.fontSize} onChange={updateLayout} disabled={!selectedTemplate} />
+              </div>
+              <div className="admin-workspace-field">
+                <label htmlFor="sheet-layout-orientation">جهت صفحه</label>
+                <select id="sheet-layout-orientation" name="orientation" value={draftLayout.orientation} onChange={updateLayout} disabled={!selectedTemplate}>
+                  <option value="portrait">A4 عمودی</option>
+                  <option value="landscape">A4 افقی</option>
+                </select>
+              </div>
+              <label className="admin-workspace-field">
+                <span>هدر</span>
+                <input name="showHeader" type="checkbox" checked={Boolean(draftLayout.showHeader)} onChange={updateLayout} disabled={!selectedTemplate} />
+              </label>
+              <label className="admin-workspace-field">
+                <span>فوتر</span>
+                <input name="showFooter" type="checkbox" checked={Boolean(draftLayout.showFooter)} onChange={updateLayout} disabled={!selectedTemplate} />
+              </label>
+              <label className="admin-workspace-field">
+                <span>لوگو</span>
+                <input name="showLogo" type="checkbox" checked={Boolean(draftLayout.showLogo)} onChange={updateLayout} disabled={!selectedTemplate} />
+              </label>
+            </div>
+
+            <div className="admin-workspace-table-wrap">
+              <table className="admin-workspace-table">
+                <thead>
+                  <tr>
+                    <th>کلید</th>
+                    <th>عنوان</th>
+                    <th>عرض</th>
+                    <th>نمایش</th>
+                    <th>ترتیب</th>
+                    <th>عملیات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {draftColumns.map((column, index) => (
+                    <tr key={`${column.key}-${index}`}>
+                      <td><input value={column.key} onChange={(event) => updateColumn(index, { key: event.target.value })} disabled={!selectedTemplate} /></td>
+                      <td><input value={column.label} onChange={(event) => updateColumn(index, { label: event.target.value })} disabled={!selectedTemplate} /></td>
+                      <td><input type="number" min="4" max="80" value={column.width} onChange={(event) => updateColumn(index, { width: event.target.value })} disabled={!selectedTemplate} /></td>
+                      <td><input type="checkbox" checked={column.visible !== false} onChange={(event) => updateColumn(index, { visible: event.target.checked })} disabled={!selectedTemplate} /></td>
+                      <td>{index + 1}</td>
+                      <td>
+                        <div className="admin-workspace-actions">
+                          <button type="button" className="admin-workspace-button-ghost" onClick={() => moveColumn(index, 'up')} disabled={!selectedTemplate || index === 0}>بالا</button>
+                          <button type="button" className="admin-workspace-button-ghost" onClick={() => moveColumn(index, 'down')} disabled={!selectedTemplate || index === draftColumns.length - 1}>پایین</button>
+                          <button type="button" className="admin-workspace-button-ghost" onClick={() => removeColumn(index)} disabled={!selectedTemplate || draftColumns.length <= 1}>حذف</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
             <div className="admin-workspace-actions admin-workspace-section-actions">
+              <button type="button" className="admin-workspace-button-secondary" onClick={addColumn} disabled={!selectedTemplate}>
+                افزودن ستون
+              </button>
+              <button type="button" className="admin-workspace-button" onClick={saveTemplateSettings} disabled={busyAction === 'save-template' || !selectedTemplateId}>
+                ذخیره قالب
+              </button>
+              <button type="button" className="admin-workspace-button-ghost" onClick={resetTemplateDraft} disabled={!selectedTemplate}>
+                برگشت تنظیمات
+              </button>
               <button type="button" className="admin-workspace-button" onClick={runPreview} disabled={busyAction === 'preview' || !selectedTemplateId}>
                 پیش‌نمایش
               </button>

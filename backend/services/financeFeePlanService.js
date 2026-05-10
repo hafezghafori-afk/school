@@ -120,7 +120,10 @@ function normalizeFeePlanPayload(payload = {}, context = {}) {
     effectiveTo = effectiveFrom;
   }
   const isActive = payload.isActive !== false;
-  const isDefault = isActive ? normalizeBool(payload.isDefault, false) : false;
+  const lifecycleStatus = ['active', 'inactive', 'archived'].includes(normalizeText(payload.lifecycleStatus).toLowerCase())
+    ? normalizeText(payload.lifecycleStatus).toLowerCase()
+    : (isActive ? 'active' : 'inactive');
+  const isDefault = lifecycleStatus === 'active' ? normalizeBool(payload.isDefault, false) : false;
   const academicYearLabel = deriveAcademicYearLabel(context.academicYear, payload.academicYear);
   const schoolClassTitle = normalizeText(context.schoolClass?.title);
   const title = normalizeText(payload.title)
@@ -155,7 +158,8 @@ function normalizeFeePlanPayload(payload = {}, context = {}) {
     amount: tuitionFee,
     dueDay,
     currency,
-    isActive,
+    isActive: lifecycleStatus === 'active',
+    lifecycleStatus,
     note: normalizeText(payload.note)
   };
 }

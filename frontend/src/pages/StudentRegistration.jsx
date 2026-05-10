@@ -166,6 +166,10 @@ const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedY
     },
     academicInfo: {
       currentSchool,
+      classId: formData.classId,
+      currentClassId: formData.classId,
+      shiftId: formData.shiftId,
+      academicYearId: formData.academicYearId,
       currentGrade: gradeFromClass(selectedClass),
       currentSection: trimValue(selectedClass?.section),
       currentShift: shiftCode,

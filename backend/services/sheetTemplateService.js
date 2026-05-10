@@ -304,7 +304,8 @@ function mergePreviewFilters(template = {}, filters = {}) {
     month: normalizeText(filters.month) || normalizeText(base.month),
     dateFrom: normalizeText(filters.dateFrom) || normalizeText(base.dateFrom),
     dateTo: normalizeText(filters.dateTo) || normalizeText(base.dateTo),
-    studentId: normalizeNullableId(filters.studentId)
+    studentId: normalizeNullableId(filters.studentId),
+    schoolId: normalizeNullableId(filters.schoolId)
   };
 
   return Object.entries(merged).reduce((acc, [key, value]) => {
@@ -437,12 +438,16 @@ function buildEmptyPreparedPreview(template = {}, filters = {}, message = '') {
   };
 }
 
-async function previewSheetTemplate(templateId, filters = {}) {
+async function previewSheetTemplate(templateId, filters = {}, options = {}) {
   const template = await SheetTemplate.findById(templateId);
   if (!template) throw new Error('sheet_template_not_found');
   if (!template.isActive) throw new Error('sheet_template_inactive');
 
-  const previewFilters = mergePreviewFilters(template, filters);
+  const requestSchoolId = options?.req?.headers?.['x-school-id'] || options?.req?.query?.schoolId || '';
+  const previewFilters = mergePreviewFilters(template, {
+    ...(filters || {}),
+    ...(requestSchoolId && !filters?.schoolId ? { schoolId: requestSchoolId } : {})
+  });
   if (normalizeText(template.type) === 'exam') {
     if (!previewFilters.examId) {
       return {

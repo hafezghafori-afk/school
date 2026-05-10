@@ -456,6 +456,26 @@
   font-size: 1rem;
 }
 
+.gov-field .afghan-date-field {
+  min-width: 0;
+}
+
+.gov-field .afghan-date-input {
+  height: 44px;
+  border-radius: 14px;
+}
+
+.gov-field .afghan-date-equivalent {
+  padding: 7px 9px;
+  border-radius: 12px;
+  background: #eef8f6;
+  color: #48635f;
+}
+
+.gov-field .afghan-date-equivalent small {
+  color: var(--teal);
+}
+
 .gov-field textarea {
   min-height: 128px;
   resize: vertical;

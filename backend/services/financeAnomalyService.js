@@ -11,6 +11,7 @@ const StudentMembership = require('../models/StudentMembership');
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
 const FinanceRelief = require('../models/FinanceRelief');
+const { formatFinanceCode } = require('../utils/latinFinanceCode');
 
 function toPlain(doc) {
   if (!doc) return null;
@@ -458,7 +459,7 @@ function formatOrderLite(doc) {
   if (!item) return null;
   return {
     id: normalizeNullableId(item._id || item.id),
-    orderNumber: normalizeText(item.orderNumber),
+    orderNumber: formatFinanceCode(normalizeText(item.orderNumber)),
     title: normalizeText(item.title),
     orderType: normalizeText(item.orderType),
     lineItems: Array.isArray(item.lineItems) ? item.lineItems.map((entry) => ({
@@ -496,7 +497,7 @@ function formatPaymentLite(doc) {
   if (!item) return null;
   return {
     id: normalizeNullableId(item._id || item.id),
-    paymentNumber: normalizeText(item.paymentNumber),
+    paymentNumber: formatFinanceCode(normalizeText(item.paymentNumber)),
     amount: roundMoney(item.amount),
     currency: normalizeText(item.currency) || 'AFN',
     status: normalizeText(item.status),

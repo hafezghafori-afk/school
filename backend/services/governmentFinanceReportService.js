@@ -11,6 +11,10 @@ function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function normalizeId(value) {
+  return String(value?._id || value || '').trim();
+}
+
 async function resolveFinancialSource(filters = {}) {
   const financialYearId = normalizeText(filters.financialYearId);
   const academicYearId = normalizeText(filters.academicYearId);
@@ -107,7 +111,6 @@ async function buildQuarterlyGovernmentFinanceReport(filters = {}) {
   const expenseFilter = { status: 'approved' };
 
   if (filters.classId) {
-    paymentFilter.classId = filters.classId;
     expenseFilter.classId = filters.classId;
   }
   if (context.financialYear?._id) {
@@ -121,17 +124,11 @@ async function buildQuarterlyGovernmentFinanceReport(filters = {}) {
   Object.assign(paymentFilter, buildRangeMatch('paidAt', range));
   Object.assign(expenseFilter, buildRangeMatch('expenseDate', range));
 
-  const [paymentRows, expenseRows] = await Promise.all([
-    FeePayment.aggregate([
-      { $match: paymentFilter },
-      {
-        $group: {
-          _id: '$classId',
-          total: { $sum: '$amount' },
-          count: { $sum: 1 }
-        }
-      }
-    ]),
+  const [payments, expenseRows] = await Promise.all([
+    FeePayment.find(paymentFilter)
+      .populate('classId', 'title code gradeLevel section')
+      .populate({ path: 'feeOrderId', select: 'classId', populate: { path: 'classId', select: 'title code gradeLevel section' } })
+      .lean(),
     ExpenseEntry.aggregate([
       { $match: expenseFilter },
       {
@@ -143,6 +140,18 @@ async function buildQuarterlyGovernmentFinanceReport(filters = {}) {
       }
     ])
   ]);
+  const paymentMap = new Map();
+  payments.forEach((item) => {
+    const classRef = item.classId || item.feeOrderId?.classId || null;
+    const classId = normalizeId(classRef);
+    if (filters.classId && classId !== String(filters.classId)) return;
+    const key = classId || null;
+    const current = paymentMap.get(key) || { _id: key, total: 0, count: 0 };
+    current.total += Number(item.amount || 0);
+    current.count += 1;
+    paymentMap.set(key, current);
+  });
+  const paymentRows = [...paymentMap.values()];
 
   const classMap = await loadClassMap([
     ...paymentRows.map((item) => item._id),

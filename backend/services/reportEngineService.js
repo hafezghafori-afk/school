@@ -45,6 +45,7 @@ const TimetableConfig = require('../models/TimetableConfig');
 const EducationPlanAnnual = require('../models/EducationPlanAnnual');
 const EducationPlanWeekly = require('../models/EducationPlanWeekly');
 const PromotionTransaction = require('../models/PromotionTransaction');
+const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const {
   buildAnnualGovernmentFinanceReport,
   buildQuarterlyGovernmentFinanceReport
@@ -207,9 +208,22 @@ function normalizeFilters(input = {}) {
     studentMembershipId: normalizeNullableId(input.studentMembershipId),
     userId: normalizeNullableId(input.userId || input.studentUserId),
     teacherId: normalizeNullableId(input.teacherId || input.teacherUserId),
+    schoolId: normalizeNullableId(input.schoolId),
     dateFrom: normalizeDateKey(input.dateFrom || input.from),
     dateTo: normalizeDateKey(input.dateTo || input.to)
   };
+}
+
+async function applySchoolClassScope(filters = {}, query = {}, field = 'classId') {
+  if (!filters.schoolId) return query;
+  const classIds = await SchoolClass.find({ schoolId: filters.schoolId }).distinct('_id');
+  if (filters.classId) {
+    const allowed = classIds.some((id) => String(id) === String(filters.classId));
+    query[field] = allowed ? filters.classId : { $in: [] };
+    return query;
+  }
+  query[field] = { $in: classIds };
+  return query;
 }
 
 function buildDateRangeFilter(field, filters = {}) {
@@ -335,7 +349,7 @@ function getAcademicYearTitle(doc) {
 function getReferenceId(value) {
   const item = toPlain(value);
   const raw = item?._id || item?.id || value;
-  return normalizeText(raw);
+  return raw ? String(raw).trim() : '';
 }
 
 function normalizeAttendanceReportStatus(value = '') {
@@ -441,6 +455,10 @@ async function buildFinanceOverviewReport(filters) {
     orderFilter.classId = filters.classId;
     paymentFilter.classId = filters.classId;
   }
+  await Promise.all([
+    applySchoolClassScope(filters, orderFilter),
+    applySchoolClassScope(filters, paymentFilter)
+  ]);
   if (filters.studentMembershipId) {
     orderFilter.studentMembershipId = filters.studentMembershipId;
     paymentFilter.studentMembershipId = filters.studentMembershipId;
@@ -475,9 +493,10 @@ async function buildFinanceOverviewReport(filters) {
 
   const rows = orders.map((item, index) => ({
     serialNo: index + 1,
-    orderNumber: normalizeText(item.orderNumber),
+    orderNumber: formatFinanceCode(normalizeText(item.orderNumber)),
     title: normalizeText(item.title),
     studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId }),
+    classId: getReferenceId(item.classId),
     classTitle: getClassTitle(item.classId),
     academicYear: normalizeText(item.academicYearId?.title),
     term: normalizeText(item.assessmentPeriodId?.title),
@@ -516,6 +535,7 @@ async function buildFeeDebtorsOverviewReport(filters) {
   const orderFilter = { status: { $ne: 'void' } };
   if (filters.academicYearId) orderFilter.academicYearId = filters.academicYearId;
   if (filters.classId) orderFilter.classId = filters.classId;
+  await applySchoolClassScope(filters, orderFilter);
   if (filters.studentMembershipId) orderFilter.studentMembershipId = filters.studentMembershipId;
   if (filters.studentId) orderFilter.studentId = filters.studentId;
   if (filters.userId) orderFilter.student = filters.userId;
@@ -662,7 +682,9 @@ async function buildFeeDebtorsOverviewReport(filters) {
 
 async function buildFeeDiscountExemptionOverviewReport(filters) {
   const definition = getReportDefinition('fee_discount_exemption_overview');
-  const reliefDocs = await FinanceRelief.find(buildFinanceReliefFilter(filters, { dateField: 'createdAt' }))
+  const reliefFilter = buildFinanceReliefFilter(filters, { dateField: 'createdAt' });
+  await applySchoolClassScope(filters, reliefFilter);
+  const reliefDocs = await FinanceRelief.find(reliefFilter)
     .populate('student', 'name email')
     .populate('studentId', 'fullName admissionNo')
     .populate('studentMembershipId', 'status isCurrent')
@@ -848,14 +870,20 @@ async function buildFeeCollectionByClassReport(filters) {
     orderFilter.classId = filters.classId;
     paymentFilter.classId = filters.classId;
   }
+  await Promise.all([
+    applySchoolClassScope(filters, orderFilter),
+    applySchoolClassScope(filters, paymentFilter)
+  ]);
 
   Object.assign(orderFilter, buildDateRangeFilter('issuedAt', filters));
   Object.assign(paymentFilter, buildDateRangeFilter('paidAt', filters));
+  const reliefFilter = buildFinanceReliefFilter(filters, { activeOnly: true });
+  await applySchoolClassScope(filters, reliefFilter);
 
   const [orders, payments, reliefs] = await Promise.all([
     FeeOrder.find(orderFilter).populate('classId', 'title code gradeLevel section').sort({ issuedAt: -1, createdAt: -1 }),
     FeePayment.find(paymentFilter).populate('classId', 'title code gradeLevel section').populate({ path: 'feeOrderId', populate: { path: 'classId', select: 'title code gradeLevel section' } }).sort({ paidAt: -1, createdAt: -1 }),
-    FinanceRelief.find(buildFinanceReliefFilter(filters, { activeOnly: true }))
+    FinanceRelief.find(reliefFilter)
       .populate('classId', 'title code gradeLevel section')
       .sort({ createdAt: -1, startDate: -1 })
   ]);
@@ -864,6 +892,7 @@ async function buildFeeCollectionByClassReport(filters) {
   const ensureGroup = (classDoc) => {
     const classId = getReferenceId(classDoc) || 'unassigned';
     const existing = grouped.get(classId) || {
+      classId: classId === 'unassigned' ? '' : classId,
       classTitle: getClassTitle(classDoc) || 'بدون صنف',
       orderCount: 0,
       paymentCount: 0,
@@ -964,6 +993,7 @@ async function buildExamOutcomesReport(filters) {
   if (filters.termId) resultFilter.assessmentPeriodId = filters.termId;
   if (filters.examId) resultFilter.sessionId = filters.examId;
   if (filters.classId) resultFilter.classId = filters.classId;
+  await applySchoolClassScope(filters, resultFilter);
   if (filters.studentMembershipId) resultFilter.studentMembershipId = filters.studentMembershipId;
   if (filters.studentId) resultFilter.studentId = filters.studentId;
   if (filters.userId) resultFilter.student = filters.userId;
@@ -1067,6 +1097,7 @@ async function buildAttendanceOverviewReport(filters) {
   const attendanceFilter = {};
   if (filters.academicYearId) attendanceFilter.academicYearId = filters.academicYearId;
   if (filters.classId) attendanceFilter.classId = filters.classId;
+  await applySchoolClassScope(filters, attendanceFilter);
   if (filters.studentMembershipId) attendanceFilter.studentMembershipId = filters.studentMembershipId;
   if (filters.studentId) attendanceFilter.studentId = filters.studentId;
   if (filters.userId) attendanceFilter.student = filters.userId;
@@ -1142,6 +1173,7 @@ async function buildAttendanceSummaryOverviewReport(filters) {
   const membershipFilter = { isCurrent: true };
   if (filters.academicYearId) membershipFilter.academicYearId = filters.academicYearId;
   if (filters.classId) membershipFilter.classId = filters.classId;
+  await applySchoolClassScope(filters, membershipFilter);
   if (filters.studentMembershipId) membershipFilter._id = filters.studentMembershipId;
   if (filters.studentId) membershipFilter.studentId = filters.studentId;
   if (filters.userId) membershipFilter.student = filters.userId;
@@ -1283,6 +1315,7 @@ async function buildClassOverviewReport(filters) {
   const membershipFilter = {};
   if (filters.academicYearId) membershipFilter.academicYearId = filters.academicYearId;
   if (filters.classId) membershipFilter.classId = filters.classId;
+  await applySchoolClassScope(filters, membershipFilter);
   if (filters.studentMembershipId) membershipFilter._id = filters.studentMembershipId;
   if (filters.studentId) membershipFilter.studentId = filters.studentId;
   if (filters.userId) membershipFilter.student = filters.userId;
@@ -1348,6 +1381,7 @@ async function buildSubjectsOverviewReport(filters) {
   if (filters.academicYearId) assignmentFilter.academicYearId = filters.academicYearId;
   if (filters.termId) assignmentFilter.termId = filters.termId;
   if (filters.classId) assignmentFilter.classId = filters.classId;
+  if (filters.schoolId) assignmentFilter.schoolId = filters.schoolId;
   if (filters.teacherId) assignmentFilter.teacherUserId = filters.teacherId;
   Object.assign(assignmentFilter, buildDateRangeFilter('effectiveDate', filters));
 
@@ -1437,6 +1471,12 @@ async function buildTimetableOverviewReport(filters) {
     weeklyPlanFilter.classId = filters.classId;
     configFilter.classId = filters.classId;
   }
+  if (filters.schoolId) {
+    timetableFilter.schoolId = filters.schoolId;
+    annualPlanFilter.schoolId = filters.schoolId;
+    weeklyPlanFilter.schoolId = filters.schoolId;
+    configFilter.schoolId = filters.schoolId;
+  }
   Object.assign(timetableFilter, buildStringDateRangeFilter('occurrenceDate', filters));
   Object.assign(weeklyPlanFilter, buildStringDateRangeFilter('weekStartDate', filters));
 
@@ -1502,6 +1542,7 @@ async function buildPromotionOverviewReport(filters) {
   if (filters.academicYearId) txFilter.academicYearId = filters.academicYearId;
   if (filters.termId) txFilter.assessmentPeriodId = filters.termId;
   if (filters.classId) txFilter.classId = filters.classId;
+  await applySchoolClassScope(filters, txFilter);
   if (filters.studentMembershipId) txFilter.studentMembershipId = filters.studentMembershipId;
   if (filters.studentId) txFilter.studentId = filters.studentId;
   if (filters.userId) txFilter.student = filters.userId;
@@ -1561,6 +1602,7 @@ async function buildGovernmentFinanceQuarterlyReport(filters) {
   const definition = getReportDefinition('government_finance_quarterly');
   const payload = await buildQuarterlyGovernmentFinanceReport(filters);
   const rows = (payload.rows || []).map((item) => ({
+    classId: normalizeText(item.classId),
     classTitle: normalizeText(item.classTitle),
     totalIncome: Number(item.totalIncome || 0),
     totalExpense: Number(item.totalExpense || 0),

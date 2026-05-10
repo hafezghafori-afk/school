@@ -109,6 +109,29 @@ const BUDGET_APPROVAL_STAGE_LABELS = {
   rejected: 'بودجه رد شد'
 };
 
+const FINANCIAL_YEAR_STATUS_LABELS = {
+  planning: 'در پلان',
+  draft: 'پیش‌نویس',
+  active: 'فعال',
+  closed: 'بسته',
+  archived: 'آرشیف',
+  inactive: 'غیرفعال'
+};
+
+const REPORT_TYPE_LABELS = {
+  quarterly: 'ربع‌وار',
+  annual: 'سالانه',
+  government_finance_quarterly: 'گزارش مالی ربع‌وار',
+  government_finance_annual: 'گزارش مالی سالانه'
+};
+
+const DOCUMENT_TYPE_LABELS = {
+  government_snapshot_pack: 'بسته رسمی گزارش دولت',
+  finance_statement: 'صورت حساب مالی',
+  receipt: 'رسید',
+  report: 'گزارش'
+};
+
 const PROCUREMENT_STATUS_LABELS = {
   draft: 'پیش‌نویس',
   pending_review: 'در انتظار بررسی',
@@ -197,6 +220,32 @@ function formatMoney(value) {
 
 function toNumber(value) {
   return Number(value || 0);
+}
+
+function resolveFinancialYearStatusLabel(status) {
+  const normalized = String(status || 'planning').trim();
+  return FINANCIAL_YEAR_STATUS_LABELS[normalized] || normalized || FINANCIAL_YEAR_STATUS_LABELS.planning;
+}
+
+function resolveReportTypeLabel(reportType) {
+  const normalized = String(reportType || '').trim();
+  return REPORT_TYPE_LABELS[normalized] || normalized || '---';
+}
+
+function resolveDocumentTypeLabel(documentType) {
+  const normalized = String(documentType || '').trim();
+  return DOCUMENT_TYPE_LABELS[normalized] || normalized || '---';
+}
+
+function resolveTreasuryIssueLabel(issueType) {
+  const normalized = String(issueType || '').trim();
+  const labels = {
+    unassigned_expense: 'مصرف بدون حساب',
+    balance_variance: 'مغایرت مانده',
+    unreconciled_account: 'حساب تطبیق‌نشده',
+    missing_statement: 'صورت‌حساب ثبت نشده'
+  };
+  return labels[normalized] || normalized.replace(/_/g, ' ') || 'موضوع';
 }
 
 function normalizeDisplayPayload(value) {
@@ -658,7 +707,7 @@ function QuarterCompare({ items = [], selectedQuarter = 1 }) {
       <div className="gov-chart-head">
         <div>
           <strong>مقایسه چهار ربع</strong>
-          <span>نمای فعلی از داده‌های موجود تا زمان فعال‌شدن FinancialYear</span>
+          <span>نمای فعلی از داده‌های موجود تا زمان فعال‌شدن سال مالی</span>
         </div>
       </div>
       {!items.length ? (
@@ -1575,7 +1624,7 @@ export default function AdminGovernmentFinance() {
       ));
       prefetchedTabsRef.current.set(`${resolvedTargetTab}|${requestScopeKey}`, true);
       if (!prefetch && errors.length) {
-        showMessage('بخشی از داده‌ها بارگذاری شد، اما بعضی endpointها هنوز برای فاز بعدی آماده نشده‌اند.', 'info');
+        showMessage('بخشی از داده‌ها بارگذاری شد، اما بعضی مسیرهای خدماتی هنوز برای فاز بعدی آماده نشده‌اند.', 'info');
       } else if (!prefetch) {
         setMessage('');
       }
@@ -2049,7 +2098,7 @@ export default function AdminGovernmentFinance() {
           budgetTargets: serializeBudgetDraft(selectedYearBudgetDraft, expenseCategoryRegistry)
         })
       });
-      showMessage('Budget targets updated.');
+      showMessage('اهداف بودجه به‌روزرسانی شد.');
       await loadWorkspace('year');
     } catch (error) {
       showMessage(errorMessage(error, 'ذخیره بودجه سال مالی ناموفق بود.'), 'error');
@@ -2111,9 +2160,9 @@ export default function AdminGovernmentFinance() {
     try {
       setBusyAction(`budget-start-revision-${selectedFinancialYearId}`);
       await postJson(`/api/finance/admin/financial-years/${selectedFinancialYearId}/budget/start-revision`, {
-        note: 'Revision started from the government finance workspace.'
+        note: 'بازنگری از دفتر گزارش مالی دولت آغاز شد.'
       });
-      showMessage('Budget revision started.');
+      showMessage('بازنگری بودجه آغاز شد.');
       await loadWorkspace('year');
     } catch (error) {
       showMessage(errorMessage(error, 'آغاز بازنگری بودجه ناموفق بود.'), 'error');
@@ -2302,7 +2351,7 @@ export default function AdminGovernmentFinance() {
         note: '',
         treasuryAccountId: String(selectedProcurementSettlement?.treasuryAccountId || current.treasuryAccountId || '')
       }));
-      showMessage('تصفیه فروشنده was registered.');
+      showMessage('تسویه فروشنده ثبت شد.');
       await loadWorkspace('operations');
     } catch (error) {
       showMessage(errorMessage(error, 'ثبت تسویه فروشنده ناموفق بود.'), 'error');
@@ -2543,7 +2592,7 @@ export default function AdminGovernmentFinance() {
       showMessage(`نسخه رسمی ${reportType === 'quarterly' ? 'ربعوار' : 'سالانه'} ساخته شد.`);
       await loadWorkspace();
     } catch (error) {
-      showMessage(errorMessage(error, 'ساخت snapshot رسمی ناموفق بود.'), 'error');
+      showMessage(errorMessage(error, 'ساخت نسخه رسمی گزارش ناموفق بود.'), 'error');
     } finally {
       setBusyAction('');
     }
@@ -2603,7 +2652,7 @@ export default function AdminGovernmentFinance() {
 
   const downloadSnapshotPdf = async (snapshotId) => {
     if (!snapshotId) {
-      showMessage('ابتدا یک snapshot رسمی معتبر انتخاب کنید.', 'error');
+      showMessage('ابتدا یک نسخه رسمی معتبر انتخاب کنید.', 'error');
       return;
     }
     try {
@@ -2613,9 +2662,9 @@ export default function AdminGovernmentFinance() {
       });
       downloadBlob(blob, filename || `government-finance-${snapshotId}.pdf`);
       await loadWorkspace('archive');
-      showMessage('PDF رسمی آرشیف مالی دانلود شد.');
+      showMessage('فایل پی‌دی‌اف رسمی آرشیف مالی دانلود شد.');
     } catch (error) {
-      showMessage(errorMessage(error, 'دریافت PDF آرشیف رسمی ناموفق بود.'), 'error');
+      showMessage(errorMessage(error, 'دریافت پی‌دی‌اف آرشیف رسمی ناموفق بود.'), 'error');
     } finally {
       setBusyAction('');
     }
@@ -2641,14 +2690,14 @@ export default function AdminGovernmentFinance() {
         recipientHandles: archiveDeliveryDraft.recipientHandles,
         includeLinkedAudience: archiveDeliveryDraft.includeLinkedAudience,
         note: archiveDeliveryDraft.note,
-        subject: `${selectedGovernmentArchive.title || 'Government finance pack'}${selectedGovernmentArchive.documentNo ? ` | ${selectedGovernmentArchive.documentNo}` : ''}`
+        subject: `${selectedGovernmentArchive.title || 'بسته گزارش مالی دولت'}${selectedGovernmentArchive.documentNo ? ` | ${selectedGovernmentArchive.documentNo}` : ''}`
       });
       setArchiveDeliveryDraft((current) => ({
         ...current,
         recipientHandles: '',
         note: ''
       }));
-      showMessage('Government archive delivery queued successfully.');
+      showMessage('ارسال سند آرشیف دولتی با موفقیت در صف قرار گرفت.');
       await loadWorkspace('archive');
     } catch (error) {
       showMessage(errorMessage(error, 'ارسال سند دولتی از آرشیف ناموفق بود.'), 'error');
@@ -2887,7 +2936,7 @@ export default function AdminGovernmentFinance() {
         {showInitialLoadingSkeleton ? (
           <>
             {activeTab === 'dashboard' ? (
-              <section className="gov-kpi-grid" aria-label="Government finance loading summary">
+              <section className="gov-kpi-grid" aria-label="خلاصه در حال بارگذاری گزارش مالی دولت">
                 {Array.from({ length: 6 }).map((_, index) => (
                   <article key={`kpi-skeleton-${index}`} className="gov-kpi-card gov-kpi-card-loading" aria-hidden="true">
                     <div className="gov-skeleton-stack">
@@ -2936,7 +2985,7 @@ export default function AdminGovernmentFinance() {
               <div className="gov-card-head">
                 <div>
                   <strong>وضعیت معوقات</strong>
-                  <span>نمایش bucketهای aging فعلی</span>
+                  <span>نمایش دسته‌های سررسید فعلی</span>
                 </div>
               </div>
               <div className="gov-mini-stack">
@@ -2953,7 +3002,7 @@ export default function AdminGovernmentFinance() {
               <div className="gov-card-head">
                 <div>
                   <strong>سلامت وصول</strong>
-                  <span>از summary فعلی و workflow رسیدها</span>
+                  <span>از خلاصه فعلی و گردش کار رسیدها</span>
                 </div>
               </div>
               <div className="gov-health-panel">
@@ -3080,7 +3129,7 @@ export default function AdminGovernmentFinance() {
               <div className="gov-card-head">
                 <div>
                   <strong>تصفیه فروشنده</strong>
-                  <span>Post treasury-backed settlement against approved commitments that are ready to pay.</span>
+                  <span>تسویه مبتنی بر حساب خزانه را برای تعهدات تاییدشده و آماده پرداخت ثبت کنید.</span>
                 </div>
               </div>
               {!settlementReadyProcurementOptions.length ? (
@@ -3204,7 +3253,7 @@ export default function AdminGovernmentFinance() {
               <div className="gov-card-head">
                 <div>
                   <strong>یادداشت اجرایی</strong>
-                  <span>این گزارش از `FeePayment` و `ExpenseEntry` برای ساخت نمای رسمی ربعوار استفاده می‌کند.</span>
+                  <span>این گزارش از پرداخت فیس و ثبت مصارف برای ساخت نمای رسمی ربع‌وار استفاده می‌کند.</span>
                 </div>
               </div>
               {!payload.governmentQuarterly?.rows?.length ? (
@@ -3260,11 +3309,11 @@ export default function AdminGovernmentFinance() {
               <div className="gov-card-head">
                 <div>
                   <strong>نمونه جدول گزارش سالانه</strong>
-                  <span>پیش‌نمایش rows از موتور گزارش canonical فعلی</span>
+                  <span>پیش‌نمایش ردیف‌ها از موتور گزارش رسمی فعلی</span>
                 </div>
               </div>
               {!payload.governmentAnnual?.rows?.length ? (
-                <div className="gov-empty-state">برای سال و صنف فعلی row قابل نمایش پیدا نشد.</div>
+                <div className="gov-empty-state">برای سال و صنف فعلی ردیف قابل نمایش پیدا نشد.</div>
               ) : (
                 <div className="gov-table-wrap">
                   <table className="gov-table">
@@ -3301,7 +3350,7 @@ export default function AdminGovernmentFinance() {
               <div className="gov-card-head">
                 <div>
                   <strong>وضعیت سال مالی</strong>
-                  <span>تا تکمیل API فاز 1، سال تعلیمی فعال به عنوان مبنای نمایشی استفاده می‌شود.</span>
+                  <span>تا تکمیل خدمات فاز ۱، سال تعلیمی فعال به عنوان مبنای نمایشی استفاده می‌شود.</span>
                 </div>
               </div>
               <div className="gov-help-note">
@@ -3375,7 +3424,7 @@ export default function AdminGovernmentFinance() {
                       }}
                     >
                       <strong>{item.title || item.code || item._id}</strong>
-                      <span>{item.status || 'planning'}</span>
+                      <span>{resolveFinancialYearStatusLabel(item.status)}</span>
                       <small>{item.isActive ? 'فعال' : item.isClosed ? 'بسته' : 'غیرفعال'}</small>
                       <div className="gov-card-actions">
                         <button
@@ -3429,22 +3478,22 @@ export default function AdminGovernmentFinance() {
                 <div className="gov-governance-stat" data-tone={(budgetVsActual.summary?.expenseVariance || 0) > 0 && (budgetVsActual.summary?.annualExpenseBudget || 0) > 0 ? 'rose' : 'teal'}>
                   <span>بودجه مصارف</span>
                   <strong>{formatMoney(budgetVsActual.summary?.annualExpenseBudget || 0)}</strong>
-                  <small>Actual {formatMoney(budgetVsActual.summary?.actualExpense || 0)}</small>
+                  <small>عملکرد واقعی {formatMoney(budgetVsActual.summary?.actualExpense || 0)}</small>
                 </div>
                 <div className="gov-governance-stat" data-tone={(budgetVsActual.summary?.incomeVariance || 0) < 0 && (budgetVsActual.summary?.annualIncomeTarget || 0) > 0 ? 'copper' : 'mint'}>
                   <span>هدف درآمد</span>
                   <strong>{formatMoney(budgetVsActual.summary?.annualIncomeTarget || 0)}</strong>
-                  <small>Actual {formatMoney(budgetVsActual.summary?.actualIncome || 0)}</small>
+                  <small>عملکرد واقعی {formatMoney(budgetVsActual.summary?.actualIncome || 0)}</small>
                 </div>
                 <div className="gov-governance-stat" data-tone={(budgetVsActual.summary?.treasuryReserveVariance || 0) < 0 && (budgetVsActual.summary?.treasuryReserveTarget || 0) > 0 ? 'copper' : 'sand'}>
                   <span>هدف ذخیره</span>
                   <strong>{formatMoney(budgetVsActual.summary?.treasuryReserveTarget || 0)}</strong>
-                  <small>Balance {formatMoney(budgetVsActual.summary?.treasuryReserveBalance || 0)}</small>
+                  <small>مانده {formatMoney(budgetVsActual.summary?.treasuryReserveBalance || 0)}</small>
                 </div>
                 <div className="gov-governance-stat" data-tone={(budgetVsActual.summary?.overBudgetCategoryCount || 0) > 0 || (budgetVsActual.summary?.unbudgetedCategoryCount || 0) > 0 ? 'rose' : 'mint'}>
                   <span>فشار دسته‌بندی</span>
                   <strong>{formatNumber((budgetVsActual.summary?.overBudgetCategoryCount || 0) + (budgetVsActual.summary?.unbudgetedCategoryCount || 0))}</strong>
-                  <small>{formatNumber(budgetVsActual.summary?.watchCategoryCount || 0)} watch item(s)</small>
+                  <small>{formatNumber(budgetVsActual.summary?.watchCategoryCount || 0)} مورد نیازمند پیگیری</small>
                 </div>
               </div>
               {!budgetVsActual.alerts?.length ? (
@@ -3511,7 +3560,7 @@ export default function AdminGovernmentFinance() {
               <div className="gov-card-head">
                 <div>
                   <strong>گردش کار تایید بودجه</strong>
-                  <span>ارسال برای بررسی، تایید مرحله‌ای، و ثبت trail رسمی بودجه سال مالی.</span>
+                  <span>ارسال برای بررسی، تایید مرحله‌ای، و ثبت ردپای رسمی بودجه سال مالی.</span>
                 </div>
               </div>
               <div className="gov-governance-grid">
@@ -3533,7 +3582,7 @@ export default function AdminGovernmentFinance() {
                 <div className="gov-governance-stat" data-tone={selectedBudgetApproval.rejectReason ? 'rose' : 'sand'}>
                   <span>ردپا</span>
                   <strong>{formatNumber((selectedBudgetApproval.trail || []).length)}</strong>
-                  <small>{selectedBudgetApproval.rejectReason || 'No rejection reason'}</small>
+                  <small>{selectedBudgetApproval.rejectReason || 'دلیل رد ثبت نشده است'}</small>
                 </div>
               </div>
               <div className="gov-card-actions">
@@ -3604,7 +3653,7 @@ export default function AdminGovernmentFinance() {
                         <th>اقدام</th>
                         <th>توسط</th>
                         <th>در تاریخ</th>
-                        <th>Note</th>
+                        <th>یادداشت</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3623,7 +3672,7 @@ export default function AdminGovernmentFinance() {
                 </div>
               ) : null}
               {!selectedBudgetApproval.trail?.length ? (
-                <div className="gov-empty-state compact">هنوز trail رسمی برای بودجه این سال مالی ثبت نشده است.</div>
+                <div className="gov-empty-state compact">هنوز ردپای رسمی برای بودجه این سال مالی ثبت نشده است.</div>
               ) : (
                 <div className="gov-table-wrap">
                   <table className="gov-table">
@@ -3633,7 +3682,7 @@ export default function AdminGovernmentFinance() {
                         <th>اقدام</th>
                         <th>توسط</th>
                         <th>در تاریخ</th>
-                        <th>Note / reason</th>
+                        <th>یادداشت / دلیل</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3669,7 +3718,7 @@ export default function AdminGovernmentFinance() {
                         <th>دسته‌بندی</th>
                         <th>بودجه سالانه</th>
                         <th>بودجه ماهانه</th>
-                        <th>Threshold %</th>
+                        <th>آستانه هشدار %</th>
                         <th>واقعی</th>
                         <th>وضعیت</th>
                       </tr>
@@ -3857,7 +3906,7 @@ export default function AdminGovernmentFinance() {
             <article className="gov-card" data-span="5">
               <HorizontalBars
                 title="ترکیب دسته‌های مصرف"
-                subtitle="سهم دسته‌های رسمی در scope فعلی"
+                subtitle="سهم دسته‌های رسمی در محدوده فعلی"
                 items={expenseBreakdown}
                 accent="copper"
               />
@@ -3880,29 +3929,29 @@ export default function AdminGovernmentFinance() {
               <div className="gov-card-head">
                 <div>
                   <strong>تعهدات فروشنده</strong>
-                  <span>تعهدات خرید و وندرها با مبلغ committed، پوشش‌شده، و مانده exposure.</span>
+                  <span>تعهدات خرید و فروشندگان با مبلغ تعهدشده، مبلغ پوشش‌شده و مانده تعهد.</span>
                 </div>
               </div>
               <div className="gov-governance-grid">
                 <div className="gov-governance-stat" data-tone="teal">
                   <span>کل متعهد شده</span>
                   <strong>{formatMoney(procurementSummary.totalCommittedAmount || 0)}</strong>
-                  <small>{formatNumber(procurementSummary.totalCount || 0)} commitment(s)</small>
+                  <small>{formatNumber(procurementSummary.totalCount || 0)} تعهد</small>
                 </div>
                 <div className="gov-governance-stat" data-tone="mint">
                   <span>پوشش داده شده توسط مصرف</span>
                   <strong>{formatMoney(procurementSummary.totalApprovedExpenseAmount || 0)}</strong>
-                  <small>{formatNumber(procurementSummary.approvedCount || 0)} approved</small>
+                  <small>{formatNumber(procurementSummary.approvedCount || 0)} تاییدشده</small>
                 </div>
                 <div className="gov-governance-stat" data-tone={(procurementSummary.totalOutstandingAmount || 0) > 0 ? 'copper' : 'sand'}>
                   <span>تعهدات باقیمانده</span>
                   <strong>{formatMoney(procurementSummary.totalOutstandingAmount || 0)}</strong>
-                  <small>{formatNumber(procurementSummary.openCommitmentCount || 0)} open</small>
+                  <small>{formatNumber(procurementSummary.openCommitmentCount || 0)} باز</small>
                 </div>
                 <div className="gov-governance-stat" data-tone="rose">
                   <span>فروشندگان</span>
                   <strong>{formatNumber(procurementSummary.vendorCount || 0)}</strong>
-                  <small>{formatNumber(procurementSummary.pendingReviewCount || 0)} in review</small>
+                  <small>{formatNumber(procurementSummary.pendingReviewCount || 0)} در حال بررسی</small>
                 </div>
               </div>
               {!procurementItems.length ? (
@@ -3989,7 +4038,7 @@ export default function AdminGovernmentFinance() {
               <div className="gov-card-head">
                 <div>
                   <strong>تصفیه فروشنده</strong>
-                  <span>Post treasury-backed settlement against approved commitments that are ready to pay.</span>
+                  <span>تسویه مبتنی بر حساب خزانه را برای تعهدات تاییدشده و آماده پرداخت ثبت کنید.</span>
                 </div>
               </div>
               {!settlementReadyProcurementOptions.length ? (
@@ -4110,7 +4159,7 @@ export default function AdminGovernmentFinance() {
                   <input name="title" value={procurementDraft.title} onChange={handleProcurementDraftChange} />
                 </label>
                 <label className="gov-field">
-                  <span>Vendor</span>
+                  <span>فروشنده</span>
                   <input name="vendorName" value={procurementDraft.vendorName} onChange={handleProcurementDraftChange} />
                 </label>
                 <label className="gov-field">
@@ -4122,7 +4171,7 @@ export default function AdminGovernmentFinance() {
                   </select>
                 </label>
                 <label className="gov-field">
-                  <span>Category</span>
+                  <span>دسته</span>
                   <select name="category" value={procurementDraft.category} onChange={handleProcurementDraftChange}>
                     {expenseCategoryRegistry.map((item) => (
                       <option key={item._id || item.key} value={item.key}>{item.label || item.key}</option>
@@ -4130,7 +4179,7 @@ export default function AdminGovernmentFinance() {
                   </select>
                 </label>
                 <label className="gov-field">
-                  <span>Sub-category</span>
+                  <span>زیردسته</span>
                   <select name="subCategory" value={procurementDraft.subCategory} onChange={handleProcurementDraftChange}>
                     <option value="">بدون زیردسته</option>
                     {((expenseCategoryRegistry.find((item) => item.key === procurementDraft.category)?.subCategories || []).filter((item) => item.isActive !== false)).map((item) => (
@@ -4168,18 +4217,18 @@ export default function AdminGovernmentFinance() {
                   <input name="referenceNo" value={procurementDraft.referenceNo} onChange={handleProcurementDraftChange} />
                 </label>
                 <label className="gov-field">
-                  <span>Payment terms</span>
+                  <span>شرایط پرداخت</span>
                   <input name="paymentTerms" value={procurementDraft.paymentTerms} onChange={handleProcurementDraftChange} />
                 </label>
                 <label className="gov-field">
-                  <span>Status</span>
+                  <span>وضعیت</span>
                   <select name="status" value={procurementDraft.status} onChange={handleProcurementDraftChange}>
                     <option value="draft">پیش‌نویس</option>
                     <option value="pending_review">ارسال برای بررسی</option>
                   </select>
                 </label>
                 <label className="gov-field gov-field-full">
-                  <span>Description</span>
+                  <span>شرح</span>
                   <input name="description" value={procurementDraft.description} onChange={handleProcurementDraftChange} />
                 </label>
                 <label className="gov-field gov-field-full">
@@ -4330,7 +4379,7 @@ export default function AdminGovernmentFinance() {
                 </div>
               </div>
               {!expenseQueueRows.length ? (
-                <div className="gov-empty-state">در scope فعلی هیچ ردیف مصرفی در انتظار اقدام نیست.</div>
+                <div className="gov-empty-state">در محدوده فعلی هیچ ردیف مصرفی در انتظار اقدام نیست.</div>
               ) : (
                 <div className="gov-table-wrap">
                   <table className="gov-table">
@@ -4417,7 +4466,7 @@ export default function AdminGovernmentFinance() {
               <div className="gov-card-head">
                 <div>
                   <strong>دفتر ثبت مصارف</strong>
-                  <span>ثبت ردیف تازه و مرور آخرین ردیف‌های scope فعلی</span>
+                  <span>ثبت ردیف تازه و مرور آخرین ردیف‌های محدوده فعلی</span>
                 </div>
               </div>
               <div className="gov-form-grid">
@@ -4450,13 +4499,13 @@ export default function AdminGovernmentFinance() {
                   </select>
                 </label>
                 <label className="gov-field">
-                  <span>Vendor commitment</span>
+                  <span>تعهد فروشنده</span>
                   <select
                     name="procurementCommitmentId"
                     value={expenseDraft.procurementCommitmentId}
                     onChange={handleExpenseDraftChange}
                   >
-                    <option value="">No linked commitment</option>
+                    <option value="">بدون تعهد مرتبط</option>
                     {approvedProcurementOptions.map((item) => (
                       <option key={item._id || item.id} value={item._id || item.id}>
                         {item.title || item.vendorName || item._id} | {formatMoney(item.outstandingAmount || item.committedAmount || 0)}
@@ -5112,16 +5161,16 @@ export default function AdminGovernmentFinance() {
                     </div>
                   </div>
                   {!treasuryVarianceReport.rows?.length ? (
-                    <div className="gov-empty-state">No treasury variance issues were detected for the selected filters.</div>
+                    <div className="gov-empty-state">برای فیلترهای انتخاب‌شده هیچ مغایرت خزانه شناسایی نشد.</div>
                   ) : (
                     <div className="gov-table-wrap">
                       <table className="gov-table">
                         <thead>
                           <tr>
-                            <th>Issue</th>
+                            <th>موضوع</th>
                             <th>مرجع</th>
                             <th>مبلغ</th>
-                            <th>Severity</th>
+                            <th>شدت</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -5130,7 +5179,7 @@ export default function AdminGovernmentFinance() {
                               <td>
                                 <div className="gov-table-stack">
                                   <strong>{row.accountTitle || '---'}</strong>
-                                  <span>{String(row.issueType || '').replace(/_/g, ' ') || 'issue'}</span>
+                                  <span>{resolveTreasuryIssueLabel(row.issueType)}</span>
                                 </div>
                               </td>
                               <td>{row.referenceNo || '---'}</td>
@@ -5160,7 +5209,7 @@ export default function AdminGovernmentFinance() {
               <div className="gov-card-head">
                 <div>
                   <strong>بسته خروجی رسمی</strong>
-                  <span>اینجا snapshot رسمی ربعوار و سالانه با version واقعی آرشیف می‌شود.</span>
+                  <span>اینجا نسخه رسمی ربع‌وار و سالانه با شماره نسخه واقعی آرشیف می‌شود.</span>
                 </div>
               </div>
               <div className="gov-card-actions">
@@ -5191,8 +5240,8 @@ export default function AdminGovernmentFinance() {
                 disabled={!!busyAction || !latestSnapshot?._id}
               >
                 {latestSnapshot?._id && busyAction === `snapshot-pdf-${latestSnapshot._id}`
-                  ? 'Downloading latest PDF...'
-                  : 'Download latest PDF'}
+                  ? 'در حال دانلود آخرین پی‌دی‌اف...'
+                  : 'دانلود آخرین پی‌دی‌اف'}
               </button>
 
               <div className="gov-export-grid">
@@ -5220,40 +5269,40 @@ export default function AdminGovernmentFinance() {
               {latestSnapshotPack ? (
                 <div className="gov-governance-grid" data-snapshot-pack-summary="true">
                   <div className="gov-governance-stat" data-tone="mint">
-                    <span>Approved expense</span>
+                    <span>مصارف تاییدشده</span>
                     <strong>{formatMoney(latestSnapshotPack.expenseAnalytics?.summary?.approvedAmount || 0)}</strong>
                     <small>{formatNumber(latestSnapshotPack.expenseAnalytics?.summary?.statusCounts?.approved || 0)} ردیف</small>
                   </div>
                   <div className="gov-governance-stat" data-tone="sand">
-                    <span>Treasury balance</span>
+                    <span>مانده خزانه</span>
                     <strong>{formatMoney(latestSnapshotPack.treasuryAnalytics?.summary?.bookBalance || 0)}</strong>
-                    <small>{formatNumber(latestSnapshotPack.treasuryAnalytics?.summary?.accountCount || 0)} account(s)</small>
+                    <small>{formatNumber(latestSnapshotPack.treasuryAnalytics?.summary?.accountCount || 0)} حساب</small>
                   </div>
                   <div className="gov-governance-stat" data-tone={(latestSnapshotPack.budgetVsActual?.summary?.treasuryReserveVariance || 0) < 0 ? 'copper' : 'teal'}>
-                    <span>Reserve gap</span>
+                    <span>فاصله ذخیره</span>
                     <strong>{formatMoney(latestSnapshotPack.budgetVsActual?.summary?.treasuryReserveVariance || 0)}</strong>
-                    <small>Target {formatMoney(latestSnapshotPack.budgetVsActual?.summary?.treasuryReserveTarget || 0)}</small>
+                    <small>هدف {formatMoney(latestSnapshotPack.budgetVsActual?.summary?.treasuryReserveTarget || 0)}</small>
                   </div>
                   <div className="gov-governance-stat" data-tone={(latestSnapshotPack.budgetVsActual?.summary?.overBudgetCategoryCount || 0) > 0 ? 'rose' : 'mint'}>
-                    <span>Over-budget categories</span>
+                    <span>دسته‌های فراتر از بودجه</span>
                     <strong>{formatNumber(latestSnapshotPack.budgetVsActual?.summary?.overBudgetCategoryCount || 0)}</strong>
-                    <small>{formatNumber(latestSnapshotPack.budgetVsActual?.summary?.unbudgetedCategoryCount || 0)} unbudgeted</small>
+                    <small>{formatNumber(latestSnapshotPack.budgetVsActual?.summary?.unbudgetedCategoryCount || 0)} بدون بودجه</small>
                   </div>
                   <div className="gov-governance-stat" data-tone={(latestSnapshotPack.procurementAnalytics?.summary?.totalOutstandingAmount || 0) > 0 ? 'copper' : 'teal'}>
-                    <span>Procurement exposure</span>
+                    <span>مانده تعهدات خرید</span>
                     <strong>{formatMoney(latestSnapshotPack.procurementAnalytics?.summary?.totalOutstandingAmount || 0)}</strong>
-                    <small>{formatNumber(latestSnapshotPack.procurementAnalytics?.summary?.totalCount || 0)} commitment(s)</small>
+                    <small>{formatNumber(latestSnapshotPack.procurementAnalytics?.summary?.totalCount || 0)} تعهد</small>
                   </div>
                   <div className="gov-governance-stat" data-tone={latestSnapshotPack.budgetApproval?.stage === 'approved' ? 'mint' : latestSnapshotPack.budgetApproval?.stage === 'rejected' ? 'rose' : 'sand'}>
-                    <span>Budget approval</span>
+                    <span>تایید بودجه</span>
                     <strong>{resolveBudgetApprovalStageLabel(latestSnapshotPack.budgetApproval?.stage || 'draft')}</strong>
-                    <small>{formatNumber((latestSnapshotPack.budgetApproval?.trail || []).length)} trail event(s)</small>
+                    <small>{formatNumber((latestSnapshotPack.budgetApproval?.trail || []).length)} رویداد ردپا</small>
                   </div>
                 </div>
               ) : null}
 
               {!payload.snapshots?.length ? (
-                <div className="gov-empty-state">هنوز snapshot رسمی برای این سال مالی ساخته نشده است.</div>
+                <div className="gov-empty-state">هنوز نسخه رسمی برای این سال مالی ساخته نشده است.</div>
               ) : (
                 <div className="gov-stack-section">
                   <div className="gov-table-wrap">
@@ -5271,7 +5320,7 @@ export default function AdminGovernmentFinance() {
                       <tbody>
                         {payload.snapshots.map((item) => (
                           <tr key={item._id}>
-                            <td>{item.reportType || '---'}</td>
+                            <td>{resolveReportTypeLabel(item.reportType)}</td>
                             <td>{item.quarter || '---'}</td>
                             <td>{formatNumber(item.version || 1)}</td>
                             <td>{toLocaleDateTime(item.generatedAt)}</td>
@@ -5286,7 +5335,7 @@ export default function AdminGovernmentFinance() {
                                   onClick={() => downloadSnapshotPdf(item._id)}
                                   disabled={!!busyAction}
                                 >
-                                  {busyAction === `snapshot-pdf-${item._id}` ? '...' : 'PDF'}
+                                  {busyAction === `snapshot-pdf-${item._id}` ? '...' : 'پی‌دی‌اف'}
                                 </button>
                               </div>
                             </td>
@@ -5325,22 +5374,22 @@ export default function AdminGovernmentFinance() {
             <article className="gov-card" data-span="7" data-government-archive-card="true">
               <div className="gov-card-head">
                 <div>
-                  <strong>Government archive registry</strong>
-                  <span>Archived snapshot packs with verification and delivery state.</span>
+                  <strong>راجستر آرشیف دولتی</strong>
+                  <span>بسته‌های آرشیفی گزارش با وضعیت اعتبارسنجی و ارسال.</span>
                 </div>
               </div>
               {!governmentDocumentArchive.length ? (
-                <div className="gov-empty-state">No archived government snapshot document has been generated yet.</div>
+                <div className="gov-empty-state">هنوز هیچ سند آرشیفی دولتی برای نسخه گزارش ساخته نشده است.</div>
               ) : (
                 <div className="gov-table-wrap">
                   <table className="gov-table">
                     <thead>
                       <tr>
-                        <th>Document</th>
+                        <th>سند</th>
                         <th>نوع</th>
-                        <th>Generated</th>
-                        <th>Verification</th>
-                        <th>Delivery</th>
+                        <th>تولید شده</th>
+                        <th>اعتبارسنجی</th>
+                        <th>ارسال</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -5352,7 +5401,7 @@ export default function AdminGovernmentFinance() {
                               <span>{item.documentNo || '---'}</span>
                             </div>
                           </td>
-                          <td>{item.documentType || '---'}</td>
+                          <td>{resolveDocumentTypeLabel(item.documentType)}</td>
                           <td>{toLocaleDateTime(item.generatedAt)}</td>
                           <td>
                             <div className="gov-table-stack">
@@ -5362,7 +5411,7 @@ export default function AdminGovernmentFinance() {
                           </td>
                           <td>
                             <div className="gov-table-stack">
-                              <strong>{ARCHIVE_DELIVERY_STATUS_LABELS[String(item.lastDeliveryStatus || '').trim()] || (item.lastDeliveryStatus || 'Not sent')}</strong>
+                              <strong>{ARCHIVE_DELIVERY_STATUS_LABELS[String(item.lastDeliveryStatus || '').trim()] || (item.lastDeliveryStatus || 'ارسال نشده')}</strong>
                               <span>{item.lastDeliveredAt ? toLocaleDateTime(item.lastDeliveredAt) : '---'}</span>
                             </div>
                           </td>
@@ -5377,17 +5426,17 @@ export default function AdminGovernmentFinance() {
             <article className="gov-card" data-span="5" data-government-archive-delivery-card="true">
               <div className="gov-card-head">
                 <div>
-                  <strong>Archive delivery</strong>
-                  <span>Send the archived government finance pack through the finance delivery center.</span>
+                  <strong>ارسال آرشیف</strong>
+                  <span>بسته آرشیفی گزارش مالی دولت را از مرکز ارسال مالی بفرستید.</span>
                 </div>
               </div>
               {!selectedGovernmentArchive ? (
-                <div className="gov-empty-state">Generate or export a government snapshot PDF first to start delivery.</div>
+                <div className="gov-empty-state">برای آغاز ارسال، ابتدا پی‌دی‌اف نسخه گزارش دولتی را بسازید یا خروجی بگیرید.</div>
               ) : (
                 <>
                   <div className="gov-form-grid">
                     <label className="gov-field gov-field-full">
-                      <span>Archived document</span>
+                      <span>سند آرشیفی</span>
                       <select name="archiveId" value={archiveDeliveryDraft.archiveId} onChange={handleArchiveDeliveryDraftChange}>
                         {governmentDocumentArchive.map((item) => (
                           <option key={item._id || item.id} value={item._id || item.id}>
@@ -5397,7 +5446,7 @@ export default function AdminGovernmentFinance() {
                       </select>
                     </label>
                     <label className="gov-field">
-                      <span>Channel</span>
+                      <span>کانال</span>
                       <select name="channel" value={archiveDeliveryDraft.channel} onChange={handleArchiveDeliveryDraftChange}>
                         {Object.entries(DELIVERY_CHANNEL_LABELS).map(([key, label]) => (
                           <option key={key} value={key}>{label}</option>
@@ -5405,7 +5454,7 @@ export default function AdminGovernmentFinance() {
                       </select>
                     </label>
                     <label className="gov-field gov-field-full">
-                      <span>Recipients</span>
+                      <span>گیرندگان</span>
                       <textarea
                         name="recipientHandles"
                         value={archiveDeliveryDraft.recipientHandles}
@@ -5421,24 +5470,24 @@ export default function AdminGovernmentFinance() {
                   </div>
                   <label className="gov-toggle">
                     <input type="checkbox" name="includeLinkedAudience" checked={archiveDeliveryDraft.includeLinkedAudience} onChange={handleArchiveDeliveryDraftChange} />
-                    <span>Also notify linked audience from the archived document scope</span>
+                    <span>گیرندگان مرتبط با محدوده سند آرشیفی نیز آگاه شوند</span>
                   </label>
                   <div className="gov-mini-stack" data-government-archive-selected="true">
                     <div className="gov-mini-stat" data-tone="teal">
-                      <span>Document</span>
+                      <span>سند</span>
                       <strong>{selectedGovernmentArchive.documentNo || '---'}</strong>
                     </div>
                     <div className="gov-mini-stat" data-tone="sand">
-                      <span>Channel</span>
+                      <span>کانال</span>
                       <strong>{resolveDeliveryChannelLabel(archiveDeliveryDraft.channel)}</strong>
                     </div>
                     <div className="gov-mini-stat" data-tone={selectedGovernmentArchive.deliveryCount ? 'mint' : 'sand'}>
-                      <span>Delivery count</span>
+                      <span>تعداد ارسال</span>
                       <strong>{formatNumber(selectedGovernmentArchive.deliveryCount || 0)}</strong>
                     </div>
                     <div className="gov-mini-stat" data-tone={selectedGovernmentArchive.liveStatus?.tone || 'sand'}>
-                      <span>Live status</span>
-                      <strong>{selectedGovernmentArchive.liveStatus?.label || ARCHIVE_DELIVERY_STATUS_LABELS[String(selectedGovernmentArchive.lastDeliveryStatus || '').trim()] || 'Not sent'}</strong>
+                      <span>وضعیت زنده</span>
+                      <strong>{selectedGovernmentArchive.liveStatus?.label || ARCHIVE_DELIVERY_STATUS_LABELS[String(selectedGovernmentArchive.lastDeliveryStatus || '').trim()] || 'ارسال نشده'}</strong>
                     </div>
                   </div>
                   {selectedGovernmentArchive.deliveryLog?.length ? (
@@ -5446,11 +5495,11 @@ export default function AdminGovernmentFinance() {
                       <table className="gov-table">
                         <thead>
                           <tr>
-                            <th>Channel</th>
+                            <th>کانال</th>
                             <th>وضعیت</th>
-                            <th>Recipient</th>
-                            <th>Provider</th>
-                            <th>Sent</th>
+                            <th>گیرنده</th>
+                            <th>ارایه‌کننده</th>
+                            <th>ارسال شده</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -5458,7 +5507,7 @@ export default function AdminGovernmentFinance() {
                             <tr key={`archive-delivery-log-${index}`}>
                               <td>{resolveDeliveryChannelLabel(entry.channel)}</td>
                               <td>{ARCHIVE_DELIVERY_STATUS_LABELS[String(entry.status || '').trim()] || entry.status || '---'}</td>
-                              <td>{entry.recipient || 'Linked audience'}</td>
+                              <td>{entry.recipient || 'گیرندگان مرتبط'}</td>
                               <td>{entry.provider || '---'}</td>
                               <td>{toLocaleDateTime(entry.sentAt)}</td>
                             </tr>
@@ -5475,7 +5524,7 @@ export default function AdminGovernmentFinance() {
                       onClick={deliverGovernmentArchiveDocument}
                       disabled={!!busyAction || !selectedGovernmentArchive?._id}
                     >
-                      {busyAction === `deliver-government-archive-${selectedGovernmentArchive?._id || ''}` ? 'Queueing delivery...' : 'Send archived pack'}
+                      {busyAction === `deliver-government-archive-${selectedGovernmentArchive?._id || ''}` ? 'در حال افزودن به صف ارسال...' : 'ارسال بسته آرشیفی'}
                     </button>
                   </div>
                 </>

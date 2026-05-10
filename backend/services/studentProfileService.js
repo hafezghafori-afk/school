@@ -13,6 +13,7 @@ const Grade = require('../models/Grade');
 const Result = require('../models/Result');
 const ActivityLog = require('../models/ActivityLog');
 const { serializeUserIdentity } = require('../utils/userRole');
+const { formatFinanceCode } = require('../utils/latinFinanceCode');
 
 function toPlain(doc) {
   if (!doc) return null;
@@ -197,7 +198,7 @@ function formatBill(billDoc) {
 
   return {
     id: String(bill._id),
-    billNumber: normalizeText(bill.billNumber) || normalizeText(bill.orderNumber),
+    billNumber: formatFinanceCode(normalizeText(bill.billNumber) || normalizeText(bill.orderNumber)),
     status: normalizeText(bill.status),
     academicYearLabel: normalizeText(bill.academicYear) || normalizeText(academicYear?.label),
     term: normalizeText(bill.term),
@@ -238,7 +239,7 @@ function formatReceipt(receiptDoc) {
     billId: receipt.bill
       ? String(receipt.bill._id || receipt.bill)
       : (receipt.feeOrderId ? String(receipt.feeOrderId._id || receipt.feeOrderId) : ''),
-    billNumber: normalizeText(feeOrder?.orderNumber)
+    billNumber: formatFinanceCode(normalizeText(feeOrder?.orderNumber))
   };
 }
 

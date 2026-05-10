@@ -16,6 +16,7 @@ const ExpenseEntry = require('../models/ExpenseEntry');
 const ExpenseCategoryDefinition = require('../models/ExpenseCategoryDefinition');
 const GovernmentFinanceSnapshot = require('../models/GovernmentFinanceSnapshot');
 const FinanceProcurementCommitment = require('../models/FinanceProcurementCommitment');
+const AfghanStudent = require('../models/AfghanStudent');
 const User = require('../models/User');
 const StudentCore = require('../models/StudentCore');
 const StudentProfile = require('../models/StudentProfile');
@@ -49,6 +50,7 @@ const {
   findClassMemberships,
   resolveMembershipTransactionLink
 } = require('../utils/studentMembershipLookup');
+const { ensureStudentUser } = require('../services/studentClassAssignmentService');
 const {
   normalizeText: normalizeScopeText,
   resolveClassCourseReference,
@@ -194,7 +196,7 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     const ok = ['.jpg', '.jpeg', '.png', '.webp', '.pdf'].includes(ext);
-    if (!ok) return cb(new Error('ÙÙ‚Ø· ÙØ§ÛŒÙ„ ØªØµÙˆÛŒØ± ÛŒØ§ PDF Ù…Ø¬Ø§Ø² Ø§Ø³Øª'), false);
+    if (!ok) return cb(new Error('فقط فایل تصویر یا PDF مجاز است'), false);
     cb(null, true);
   }
 });
@@ -566,12 +568,12 @@ const actorAlreadyReviewed = (trail = [], actorId = '') => Array.isArray(trail)
 const getReceiptStageMessage = (stage = '') => {
   const normalized = normalizeReceiptStage(stage);
   if (normalized === RECEIPT_STAGES.financeLead) {
-    return 'Ø±Ø³ÛŒØ¯ Ø¨Ø±Ø§ÛŒ Ø¨Ø±Ø±Ø³ÛŒ Ø¢Ù…Ø±ÛŒØª Ù…Ø§Ù„ÛŒ Ø§Ø±Ø³Ø§Ù„ Ø´Ø¯';
+    return 'رسید برای بررسی آمریت مالی ارسال شد';
   }
   if (normalized === RECEIPT_STAGES.generalPresident) {
-    return 'Ø±Ø³ÛŒØ¯ Ø¨Ø±Ø§ÛŒ ØªØ§ÛŒÛŒØ¯ Ù†Ù‡Ø§ÛŒÛŒ Ø±ÛŒØ§Ø³Øª Ø¹Ù…ÙˆÙ…ÛŒ Ø§Ø±Ø³Ø§Ù„ Ø´Ø¯';
+    return 'رسید برای تایید نهایی ریاست عمومی ارسال شد';
   }
-  return 'Ø±Ø³ÛŒØ¯ Ø¨Ø±Ø§ÛŒ Ø¨Ø±Ø±Ø³ÛŒ Ù…Ø¯ÛŒØ± Ù…Ø§Ù„ÛŒ Ø«Ø¨Øª Ø´Ø¯';
+  return 'رسید برای بررسی مدیر مالی ثبت شد';
 };
 
 const FOLLOW_UP_LEVELS = ['finance_manager', 'finance_lead', 'general_president'];
@@ -1264,6 +1266,10 @@ const serializeFinanceFeePlan = (value = null) => {
     effectiveTo: plain.effectiveTo ? new Date(plain.effectiveTo).toISOString() : null,
     eligibilityRule: String(plain.eligibilityRule || '').trim(),
     billingFrequency: plain.billingFrequency || plain.periodType || 'term',
+    isActive: plain.isActive !== false,
+    lifecycleStatus: String(plain.lifecycleStatus || (plain.isActive === false ? 'inactive' : 'active')).trim() || 'active',
+    archivedAt: plain.archivedAt ? new Date(plain.archivedAt).toISOString() : null,
+    archivedBy: plain.archivedBy || null,
     tuitionFee: Number(plain.tuitionFee != null ? plain.tuitionFee : plain.amount) || 0,
     admissionFee: Number(plain.admissionFee || 0),
     examFee: Number(plain.examFee || 0),
@@ -1279,6 +1285,18 @@ const serializeFinanceFeePlan = (value = null) => {
       otherFee: Number(plain.otherFee || 0)
     }
   };
+};
+
+const countFeePlanLinkedOrders = (feePlanId = '') => (
+  FeeOrder.countDocuments({ 'lineItems.sourcePlanId': feePlanId })
+);
+
+const refreshSerializedFeePlan = async (feePlanId = '') => {
+  const item = await FinanceFeePlan.findById(feePlanId)
+    .populate('course', 'title category')
+    .populate('classId', 'title code gradeLevel section')
+    .populate('academicYearId', 'title code isActive isCurrent status');
+  return serializeFinanceFeePlan(item);
 };
 
 const serializeFinancialYear = (value = null) => {
@@ -2039,7 +2057,7 @@ const listFinanceClassReportItems = async (scope = {}) => {
         classId: resolvedClassId || '',
         schoolClass: resolvedClassId ? serializeSchoolClassLite(classById.get(resolvedClassId) || { _id: resolvedClassId }) : null,
         courseId: compatCourse?._id ? String(compatCourse._id) : String(row.course || ''),
-        course: compatCourse?.title || 'ØµÙ†Ù',
+        course: compatCourse?.title || 'صنف',
         bills: 0,
         due: 0,
         paid: 0,
@@ -2085,8 +2103,11 @@ const serializeExpenseCategoryDefinition = (value = null) => {
 
 router.get('/admin/reference-data', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const [students, studentCores, studentProfiles, schoolClasses, academicYears] = await Promise.all([
+    const [students, afghanStudents, studentCores, studentProfiles, schoolClasses, academicYears] = await Promise.all([
       User.find({ role: 'student' }).select('name email grade').sort({ name: 1 }).lean(),
+      AfghanStudent.find({ status: { $ne: 'deleted' } })
+        .select('personalInfo familyInfo contactInfo academicInfo registrationId asasNumber linkedUserId status')
+        .sort({ createdAt: -1 }),
       StudentCore.find({ status: { $ne: 'archived' } }).select('userId fullName admissionNo phone email').lean(),
       StudentProfile.find({}).select('studentId family contact guardians').lean(),
       SchoolClass.find({ status: { $ne: 'archived' } })
@@ -2118,28 +2139,50 @@ router.get('/admin/reference-data', requireAuth, requireRole(['admin']), require
       isCurrent: item.isCurrent === true,
       status: item.status || 'planning'
     }));
-    const enrichedStudents = students.map((item) => {
+    const userById = new Map(students.map((item) => [String(item._id), item]));
+    const afghanStudentUsers = await Promise.all(afghanStudents.map(async (student) => {
+      const user = await ensureStudentUser(student);
+      if (!user?._id) return null;
+      return {
+        user: user.toObject ? user.toObject() : user,
+        afghanStudent: student.toObject ? student.toObject() : student
+      };
+    }));
+    afghanStudentUsers.filter(Boolean).forEach(({ user }) => {
+      if (user?._id && !userById.has(String(user._id))) {
+        userById.set(String(user._id), user);
+      }
+    });
+
+    const enrichedStudents = [...userById.values()].map((item) => {
       const core = studentCoreByUserId.get(String(item._id)) || null;
       const profile = core ? studentProfileByStudentId.get(String(core._id)) || null : null;
+      const afghanStudent = afghanStudentUsers.find((entry) => String(entry?.user?._id || '') === String(item._id))?.afghanStudent || null;
       const primaryGuardian = Array.isArray(profile?.guardians)
         ? profile.guardians.find((guardian) => guardian?.isPrimary) || profile.guardians[0] || null
         : null;
+      const afghanName = [
+        afghanStudent?.personalInfo?.firstNameDari || afghanStudent?.personalInfo?.firstName || '',
+        afghanStudent?.personalInfo?.lastNameDari || afghanStudent?.personalInfo?.lastName || ''
+      ].filter(Boolean).join(' ').trim();
+      const afghanGrade = String(afghanStudent?.academicInfo?.currentGrade || '').match(/\d+/)?.[0] || '';
       return {
         _id: item._id,
         userId: item._id,
         studentId: core?._id || '',
-        name: item.name || '',
-        fullName: core?.fullName || item.name || '',
-        email: core?.email || item.email || '',
-        grade: item.grade || '',
-        admissionNo: core?.admissionNo || '',
-        phone: core?.phone || profile?.contact?.primaryPhone || '',
-        primaryPhone: profile?.contact?.primaryPhone || core?.phone || '',
+        afghanStudentId: afghanStudent?._id || '',
+        name: afghanName || item.name || '',
+        fullName: core?.fullName || afghanName || item.name || '',
+        email: core?.email || afghanStudent?.contactInfo?.email || item.email || '',
+        grade: item.grade || afghanGrade,
+        admissionNo: core?.admissionNo || afghanStudent?.asasNumber || afghanStudent?.registrationId || '',
+        phone: core?.phone || afghanStudent?.contactInfo?.phone || afghanStudent?.contactInfo?.mobile || profile?.contact?.primaryPhone || '',
+        primaryPhone: profile?.contact?.primaryPhone || core?.phone || afghanStudent?.contactInfo?.phone || afghanStudent?.contactInfo?.mobile || '',
         alternatePhone: profile?.contact?.alternatePhone || '',
         guardianName: primaryGuardian?.name || profile?.family?.guardianName || '',
         guardianRelation: primaryGuardian?.relation || profile?.family?.guardianRelation || '',
-        guardianPhone: primaryGuardian?.phone || '',
-        fatherName: profile?.family?.fatherName || ''
+        guardianPhone: primaryGuardian?.phone || afghanStudent?.familyInfo?.guardianPhone || '',
+        fatherName: profile?.family?.fatherName || afghanStudent?.personalInfo?.fatherName || ''
       };
     });
 
@@ -2159,7 +2202,7 @@ router.get('/admin/reference-data', requireAuth, requireRole(['admin']), require
       }))
     });
   } catch {
-    res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± Ø¯Ø±ÛŒØ§ÙØª Ø¯Ø§Ø¯Ù‡â€ŒÙ‡Ø§ÛŒ Ù…Ø±Ø¬Ø¹ Ù…Ø§Ù„ÛŒ' });
+    res.status(500).json({ success: false, message: 'خطا در دریافت داده‌های مرجع مالی' });
   }
 });
 
@@ -4044,7 +4087,7 @@ router.get('/admin/fee-plans', requireAuth, requireRole(['admin']), requirePermi
       .sort({ isDefault: -1, priority: 1, updatedAt: -1, createdAt: -1 });
     res.json({ success: true, items: items.map((item) => serializeFinanceFeePlan(item)) });
   } catch {
-    res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± Ø¯Ø±ÛŒØ§ÙØª Ù¾Ù„Ø§Ù†â€ŒÙ‡Ø§ÛŒ ÙÛŒØ³' });
+    res.status(500).json({ success: false, message: 'خطا در دریافت پلان‌های فیس' });
   }
 });
 
@@ -4061,7 +4104,7 @@ router.post('/admin/fee-plans', requireAuth, requireRole(['admin']), requirePerm
     }
     const courseId = scope.courseId;
     if (!scope.classId) return res.status(400).json({ success: false, message: 'Class mapping is required for fee plans.' });
-    if (!courseId) return res.status(400).json({ success: false, message: 'Ø´Ù†Ø§Ø³Ù‡ ØµÙ†Ù Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª' });
+    if (!courseId) return res.status(400).json({ success: false, message: 'شناسه صنف الزامی است' });
 
     const academicYear = await resolveAcademicYearForFeePlan({
       academicYearId: payload.academicYearId,
@@ -4133,7 +4176,110 @@ router.post('/admin/fee-plans', requireAuth, requireRole(['admin']), requirePerm
     });
 
   } catch {
-    res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± Ø°Ø®ÛŒØ±Ù‡ Ù¾Ù„Ø§Ù† ÙÛŒØ³' });
+    res.status(500).json({ success: false, message: 'خطا در ذخیره پلان فیس' });
+  }
+});
+
+router.patch('/admin/fee-plans/:id/status', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const feePlanId = String(req.params.id || '').trim();
+    const action = String(req.body?.action || req.body?.lifecycleStatus || '').trim().toLowerCase();
+    const nextStatus = action === 'archive' || action === 'archived'
+      ? 'archived'
+      : action === 'inactive' || action === 'deactivate'
+        ? 'inactive'
+        : action === 'active' || action === 'activate'
+          ? 'active'
+          : '';
+
+    if (!feePlanId || !nextStatus) {
+      return res.status(400).json({ success: false, message: 'اقدام پلان فیس معتبر نیست.' });
+    }
+
+    const existing = await FinanceFeePlan.findById(feePlanId);
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'پلان فیس یافت نشد.' });
+    }
+
+    const update = {
+      lifecycleStatus: nextStatus,
+      isActive: nextStatus === 'active',
+      isDefault: nextStatus === 'active' ? existing.isDefault === true : false,
+      archivedAt: nextStatus === 'archived' ? new Date() : null,
+      archivedBy: nextStatus === 'archived' ? (req.user?.id || null) : null
+    };
+
+    const updated = await FinanceFeePlan.findByIdAndUpdate(
+      feePlanId,
+      { $set: update },
+      { new: true, runValidators: true }
+    );
+
+    await logActivity({
+      req,
+      action: 'finance_update_fee_plan_status',
+      targetType: 'FinanceFeePlan',
+      targetId: feePlanId,
+      meta: { lifecycleStatus: nextStatus }
+    });
+
+    const linkedOrderCount = await countFeePlanLinkedOrders(feePlanId);
+    return res.json({
+      success: true,
+      item: await refreshSerializedFeePlan(updated._id),
+      linkedOrderCount,
+      message: nextStatus === 'archived'
+        ? 'پلان فیس آرشیف شد.'
+        : nextStatus === 'inactive'
+          ? 'پلان فیس غیرفعال شد.'
+          : 'پلان فیس فعال شد.'
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'تغییر وضعیت پلان فیس ناموفق بود.' });
+  }
+});
+
+router.delete('/admin/fee-plans/:id', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const feePlanId = String(req.params.id || '').trim();
+    if (!feePlanId) {
+      return res.status(400).json({ success: false, message: 'شناسه پلان فیس معتبر نیست.' });
+    }
+
+    const existing = await FinanceFeePlan.findById(feePlanId);
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'پلان فیس یافت نشد.' });
+    }
+
+    const linkedOrderCount = await countFeePlanLinkedOrders(feePlanId);
+    if (linkedOrderCount > 0) {
+      return res.status(409).json({
+        success: false,
+        linkedOrderCount,
+        message: 'این پلان قبلاً در بل‌های مالی استفاده شده است؛ برای حفظ تاریخچه مالی، آن را غیرفعال یا آرشیف کنید.'
+      });
+    }
+
+    await FinanceFeePlan.deleteOne({ _id: feePlanId });
+    await logActivity({
+      req,
+      action: 'finance_delete_fee_plan',
+      targetType: 'FinanceFeePlan',
+      targetId: feePlanId,
+      meta: {
+        title: existing.title || '',
+        planCode: existing.planCode || ''
+      }
+    });
+
+    return res.json({
+      success: true,
+      deletedId: feePlanId,
+      linkedOrderCount,
+      message: 'پلان فیس حذف شد.'
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'حذف پلان فیس ناموفق بود.' });
   }
 });
 
@@ -4268,7 +4414,7 @@ router.get('/admin/summary', requireAuth, requireRole(['admin']), requirePermiss
       topDebtors
     });
   } catch {
-    res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± Ø¯Ø±ÛŒØ§ÙØª Ø®Ù„Ø§ØµÙ‡ Ù…Ø§Ù„ÛŒ' });
+    res.status(500).json({ success: false, message: 'خطا در دریافت خلاصه مالی' });
   }
 });
 
@@ -4305,7 +4451,7 @@ router.get('/admin/bills', requireAuth, requireRole(['admin']), requirePermissio
 
     res.json({ success: true, items });
   } catch {
-    res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± Ø¯Ø±ÛŒØ§ÙØª Ø¨Ù„â€ŒÙ‡Ø§' });
+    res.status(500).json({ success: false, message: 'خطا در دریافت بل‌ها' });
   }
 });
 
@@ -4313,15 +4459,15 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
   try {
     const { studentId, classId = '', courseId: inputCourseId = '', amount, dueDate, issuedAt, periodType, periodLabel, academicYear, term, currency, note } = req.body || {};
     if (!studentId || (!classId && !inputCourseId) || !dueDate) {
-      return res.status(400).json({ success: false, message: 'Ø´Ø§Ú¯Ø±Ø¯ØŒ ØµÙ†Ù Ùˆ Ø³Ø±Ø±Ø³ÛŒØ¯ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª' });
+      return res.status(400).json({ success: false, message: 'شاگرد، صنف و سررسید الزامی است.' });
     }
     const dueDateValue = parseDateSafe(dueDate, null);
     if (!dueDateValue) {
-      return res.status(400).json({ success: false, message: 'ØªØ§Ø±ÛŒØ® Ø³Ø±Ø±Ø³ÛŒØ¯ Ù…Ø¹ØªØ¨Ø± Ù†ÛŒØ³Øª' });
+      return res.status(400).json({ success: false, message: 'تاریخ سررسید معتبر نیست.' });
     }
     const issueDateValue = parseDateSafe(issuedAt, new Date());
     if (await isMonthClosed(issueDateValue)) {
-      return res.status(400).json({ success: false, message: 'Ù…Ø§Ù‡ Ù…Ø§Ù„ÛŒ Ø¨Ø³ØªÙ‡ Ø´Ø¯Ù‡ Ø§Ø³Øª Ùˆ ØµØ¯ÙˆØ± Ø¨Ù„ Ø¬Ø¯ÛŒØ¯ Ù…Ø¬Ø§Ø² Ù†ÛŒØ³Øª' });
+      return res.status(400).json({ success: false, message: 'ماه مالی بسته شده است و صدور بل جدید مجاز نیست.' });
     }
 
     const normalizedPeriodType = normalizeBillPeriodType(periodType);
@@ -4360,7 +4506,7 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
     if (duplicateBill) {
       return res.status(409).json({
         success: false,
-        message: `Ø¨Ù„ ØªÚ©Ø±Ø§Ø±ÛŒ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† ØªØ¹Ù‡Ø¯ Ù…Ø§Ù„ÛŒ Ù‚Ø¨Ù„Ø§Ù‹ Ø¨Ø§ Ø´Ù…Ø§Ø±Ù‡ ${duplicateBill.billNumber} Ø«Ø¨Øª Ø´Ø¯Ù‡ Ø§Ø³Øª`,
+        message: `بل تکراری برای این تعهد مالی قبلاً با شماره ${duplicateBill.billNumber} ثبت شده است.`,
         duplicateBillId: duplicateBill._id
       });
     }
@@ -4414,9 +4560,9 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       req,
       studentId,
       studentCoreId: linkFields.studentId,
-      title: 'Ø¨Ù„ Ø¬Ø¯ÛŒØ¯ ØµØ§Ø¯Ø± Ø´Ø¯',
-      message: `ÛŒÚ© Ø¨Ù„ Ø¬Ø¯ÛŒØ¯ Ø¨Ø§ Ø´Ù…Ø§Ø±Ù‡ ${bill.billNumber} Ø¨Ø±Ø§ÛŒ Ø´Ù…Ø§ ØµØ§Ø¯Ø± Ø´Ø¯.`,
-      emailSubject: 'ØµØ¯ÙˆØ± Ø¨Ù„ Ø¬Ø¯ÛŒØ¯'
+      title: 'بل جدید صادر شد',
+      message: `یک بل جدید با شماره ${bill.billNumber} برای شما صادر شد.`,
+      emailSubject: 'صدور بل جدید'
     });
 
     await logActivity({
@@ -4431,9 +4577,9 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       .populate('student', 'name email grade')
       .populate('course', 'title category')
       .populate('classId', 'title code gradeLevel section');
-    res.status(201).json({ success: true, item, message: 'Ø¨Ù„ Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø§ÛŒØ¬Ø§Ø¯ Ø´Ø¯' });
+    res.status(201).json({ success: true, item, message: 'بل با موفقیت ایجاد شد.' });
   } catch {
-    res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± Ø§ÛŒØ¬Ø§Ø¯ Ø¨Ù„' });
+    res.status(500).json({ success: false, message: 'خطا در ایجاد بل' });
   }
 });
 
@@ -4461,14 +4607,14 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
     } = req.body || {};
 
     if ((!classId && !inputCourseId) || !dueDate) {
-      return res.status(400).json({ success: false, message: 'Ø´Ù†Ø§Ø³Ù‡ ØµÙ†Ù Ùˆ Ø³Ø±Ø±Ø³ÛŒØ¯ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª' });
+      return res.status(400).json({ success: false, message: 'شناسه صنف و سررسید الزامی است.' });
     }
 
     const dueDateValue = parseDateSafe(dueDate, null);
-    if (!dueDateValue) return res.status(400).json({ success: false, message: 'ØªØ§Ø±ÛŒØ® Ø³Ø±Ø±Ø³ÛŒØ¯ Ù…Ø¹ØªØ¨Ø± Ù†ÛŒØ³Øª' });
+    if (!dueDateValue) return res.status(400).json({ success: false, message: 'تاریخ سررسید معتبر نیست.' });
     const issueDateValue = parseDateSafe(issuedAt, new Date());
     if (await isMonthClosed(issueDateValue)) {
-      return res.status(400).json({ success: false, message: 'Ù…Ø§Ù‡ Ù…Ø§Ù„ÛŒ Ø¨Ø³ØªÙ‡ Ø´Ø¯Ù‡ Ø§Ø³Øª Ùˆ Ù¾ÛŒØ´â€ŒÙ†Ù…Ø§ÛŒØ´ ØµØ¯ÙˆØ± Ù…Ø¬Ø§Ø² Ù†ÛŒØ³Øª' });
+      return res.status(400).json({ success: false, message: 'ماه مالی بسته شده است و پیش‌نمایش صدور مجاز نیست.' });
     }
 
     const normalizedPeriodType = normalizeBillPeriodType(periodType);
@@ -4541,7 +4687,7 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
       }
     });
   } catch {
-    return res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± Ù¾ÛŒØ´â€ŒÙ†Ù…Ø§ÛŒØ´ ØµØ¯ÙˆØ± Ø¨Ù„â€ŒÙ‡Ø§' });
+    return res.status(500).json({ success: false, message: 'خطا در پیش‌نمایش صدور بل‌ها' });
   }
 });
 
@@ -4568,13 +4714,13 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       onlyDebtors
     } = req.body || {};
     if ((!classId && !inputCourseId) || !dueDate) {
-      return res.status(400).json({ success: false, message: 'Ø´Ù†Ø§Ø³Ù‡ ØµÙ†Ù Ùˆ Ø³Ø±Ø±Ø³ÛŒØ¯ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª' });
+      return res.status(400).json({ success: false, message: 'شناسه صنف و سررسید الزامی است.' });
     }
     const dueDateValue = parseDateSafe(dueDate, null);
-    if (!dueDateValue) return res.status(400).json({ success: false, message: 'ØªØ§Ø±ÛŒØ® Ø³Ø±Ø±Ø³ÛŒØ¯ Ù…Ø¹ØªØ¨Ø± Ù†ÛŒØ³Øª' });
+    if (!dueDateValue) return res.status(400).json({ success: false, message: 'تاریخ سررسید معتبر نیست.' });
     const issueDateValue = parseDateSafe(issuedAt, new Date());
     if (await isMonthClosed(issueDateValue)) {
-      return res.status(400).json({ success: false, message: 'Ù…Ø§Ù‡ Ù…Ø§Ù„ÛŒ Ø¨Ø³ØªÙ‡ Ø´Ø¯Ù‡ Ø§Ø³Øª Ùˆ ØµØ¯ÙˆØ± Ú¯Ø±ÙˆÙ‡ÛŒ Ù…Ø¬Ø§Ø² Ù†ÛŒØ³Øª' });
+      return res.status(400).json({ success: false, message: 'ماه مالی بسته شده است و صدور گروهی مجاز نیست.' });
     }
 
     const normalizedPeriodType = normalizeBillPeriodType(periodType);
@@ -4610,7 +4756,7 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
     });
 
     if (!preview.items.length) {
-      return res.status(400).json({ success: false, message: 'Ù‡ÛŒÚ† Ù…ØªØ¹Ù„Ù… billable Ø¨Ø±Ø§ÛŒ ØªÙˆÙ„ÛŒØ¯ Ø¨Ù„ ÛŒØ§ÙØª Ù†Ø´Ø¯' });
+      return res.status(400).json({ success: false, message: 'هیچ متعلم قابل بل‌دهی برای تولید بل یافت نشد.' });
     }
 
     let created = 0;
@@ -4666,9 +4812,9 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
         req,
         studentId: candidate.student,
         studentCoreId: candidate.studentId,
-        title: 'Ø¨Ù„ Ø¬Ø¯ÛŒØ¯ ØµÙ†Ù ØµØ§Ø¯Ø± Ø´Ø¯',
-        message: `Ø¨Ù„ Ø¬Ø¯ÛŒØ¯ Ø´Ù…Ø§ Ø¨Ø±Ø§ÛŒ ØµÙ†Ù ØµØ§Ø¯Ø± Ø´Ø¯. Ø´Ù…Ø§Ø±Ù‡ Ø¨Ù„: ${bill.billNumber}`,
-        emailSubject: 'ØµØ¯ÙˆØ± Ø¨Ù„ Ø¬Ø¯ÛŒØ¯'
+        title: 'بل جدید صنف صادر شد',
+        message: `بل جدید شما برای صنف صادر شد. شماره بل: ${bill.billNumber}`,
+        emailSubject: 'صدور بل جدید'
       });
     }
 
@@ -4688,28 +4834,28 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
 
     res.json({
       success: true,
-      message: `ØµØ¯ÙˆØ± Ú¯Ø±ÙˆÙ‡ÛŒ Ø§Ù†Ø¬Ø§Ù… Ø´Ø¯: ${created} Ø¨Ù„ Ø§ÛŒØ¬Ø§Ø¯ Ø´Ø¯ØŒ ${skipped} Ù…ÙˆØ±Ø¯ Ø±Ø¯/ØªÚ©Ø±Ø§Ø±ÛŒ Ø¨ÙˆØ¯.`,
+      message: `صدور گروهی انجام شد: ${created} بل ایجاد شد، ${skipped} مورد رد یا تکراری بود.`,
       created,
       skipped,
       feePlan: preview.feePlan
     });
   } catch {
-    res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± ØµØ¯ÙˆØ± Ú¯Ø±ÙˆÙ‡ÛŒ Ø¨Ù„â€ŒÙ‡Ø§' });
+    res.status(500).json({ success: false, message: 'خطا در صدور گروهی بل‌ها' });
   }
 });
 
 router.put('/admin/bills/:id', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const item = await FinanceBill.findById(req.params.id);
-    if (!item) return res.status(404).json({ success: false, message: 'Ø¨Ù„ ÛŒØ§ÙØª Ù†Ø´Ø¯' });
-    if (item.status === 'void') return res.status(400).json({ success: false, message: 'Ø¨Ù„ Ø¨Ø§Ø·Ù„ Ù‚Ø§Ø¨Ù„ ÙˆÛŒØ±Ø§ÛŒØ´ Ù†ÛŒØ³Øª' });
+    if (!item) return res.status(404).json({ success: false, message: 'بل یافت نشد.' });
+    if (item.status === 'void') return res.status(400).json({ success: false, message: 'بل باطل قابل ویرایش نیست.' });
     if (await isMonthClosed(item.issuedAt)) {
-      return res.status(400).json({ success: false, message: 'Ù…Ø§Ù‡ Ù…Ø§Ù„ÛŒ Ø¨Ø³ØªÙ‡ Ø´Ø¯Ù‡ Ø§Ø³Øª Ùˆ ÙˆÛŒØ±Ø§ÛŒØ´ Ø¨Ù„ Ù…Ø¬Ø§Ø² Ù†ÛŒØ³Øª' });
+      return res.status(400).json({ success: false, message: 'ماه مالی بسته شده است و ویرایش بل مجاز نیست.' });
     }
 
     const reason = String(req.body?.reason || '').trim();
     if (req.body?.amountOriginal !== undefined && !reason) {
-      return res.status(400).json({ success: false, message: 'Ø¨Ø±Ø§ÛŒ ØªØºÛŒÛŒØ± Ù…Ø¨Ù„ØºØŒ Ø«Ø¨Øª Ø¯Ù„ÛŒÙ„ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª' });
+      return res.status(400).json({ success: false, message: 'برای تغییر مبلغ، ثبت دلیل الزامی است.' });
     }
 
     if (req.body?.amountOriginal !== undefined) item.amountOriginal = roundMoney(req.body.amountOriginal);
@@ -4733,7 +4879,7 @@ router.put('/admin/bills/:id', requireAuth, requireRole(['admin']), requirePermi
     if (duplicateBill) {
       return res.status(409).json({
         success: false,
-        message: `Ø¨Ø±ÙˆØ²Ø±Ø³Ø§Ù†ÛŒ Ù…ÙˆØ¬Ø¨ ØªÚ©Ø±Ø§Ø± Ø¨Ù„ ${duplicateBill.billNumber} Ù…ÛŒâ€ŒØ´ÙˆØ¯`,
+        message: `بروزرسانی موجب تکرار بل ${duplicateBill.billNumber} می‌شود.`,
         duplicateBillId: duplicateBill._id
       });
     }
@@ -4753,9 +4899,9 @@ router.put('/admin/bills/:id', requireAuth, requireRole(['admin']), requirePermi
     const full = await FinanceBill.findById(item._id)
       .populate('student', 'name email grade')
       .populate('course', 'title category');
-    res.json({ success: true, item: full, message: 'Ø¨Ù„ Ø¨Ø±ÙˆØ²Ø±Ø³Ø§Ù†ÛŒ Ø´Ø¯' });
+    res.json({ success: true, item: full, message: 'بل بروزرسانی شد.' });
   } catch {
-    res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± ÙˆÛŒØ±Ø§ÛŒØ´ Ø¨Ù„' });
+    res.status(500).json({ success: false, message: 'خطا در ویرایش بل' });
   }
 });
 
@@ -4820,7 +4966,7 @@ router.get('/admin/receipts', requireAuth, requireRole(['admin']), requirePermis
 
     res.json({ success: true, items });
   } catch {
-    res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± Ø¯Ø±ÛŒØ§ÙØª Ø±Ø³ÛŒØ¯Ù‡Ø§' });
+    res.status(500).json({ success: false, message: 'خطا در دریافت رسیدها' });
   }
 });
 
@@ -5735,7 +5881,7 @@ router.post('/admin/receipts/:id/reject', requireAuth, requireRole(['admin']), r
 router.get('/student/me', requireAuth, async (req, res) => {
   try {
     if (req.user.role !== 'student') {
-      return res.status(403).json({ success: false, message: 'ÙÙ‚Ø· Ø´Ø§Ú¯Ø±Ø¯ Ø¨Ù‡ Ø§ÛŒÙ† Ø¨Ø®Ø´ Ø¯Ø³ØªØ±Ø³ÛŒ Ø¯Ø§Ø±Ø¯' });
+      return res.status(403).json({ success: false, message: 'فقط شاگرد به این بخش دسترسی دارد' });
     }
     setLegacyScopeHeaders(res, '/api/student-finance/me/overviews');
     return res.status(410).json({
@@ -5745,7 +5891,7 @@ router.get('/student/me', requireAuth, async (req, res) => {
       replacementEndpoint: '/api/student-finance/me/overviews'
     });
   } catch {
-    res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± Ø¯Ø±ÛŒØ§ÙØª ÙˆØ¶Ø¹ÛŒØª Ù…Ø§Ù„ÛŒ Ø´Ø§Ú¯Ø±Ø¯' });
+    res.status(500).json({ success: false, message: 'خطا در دریافت وضعیت مالی شاگرد' });
   }
 });
 
@@ -5757,11 +5903,11 @@ router.post('/student/receipts', requireAuth, (req, res, next) => {
 }, async (req, res) => {
   try {
     if (req.user.role !== 'student') {
-      return res.status(403).json({ success: false, message: 'ÙÙ‚Ø· Ø´Ø§Ú¯Ø±Ø¯ Ù…ÛŒâ€ŒØªÙˆØ§Ù†Ø¯ Ø±Ø³ÛŒØ¯ Ø«Ø¨Øª Ú©Ù†Ø¯' });
+      return res.status(403).json({ success: false, message: 'فقط شاگرد می‌تواند رسید ثبت کند' });
     }
     const bill = await loadReceiptSubmissionBill(req);
     if (String(bill.student) !== String(req.user.id)) {
-      return res.status(403).json({ success: false, message: 'Ø§ÛŒÙ† Ø¨Ù„ Ù…Ø±Ø¨ÙˆØ· Ø¨Ù‡ Ø­Ø³Ø§Ø¨ Ø´Ù…Ø§ Ù†ÛŒØ³Øª' });
+      return res.status(403).json({ success: false, message: 'این بل مربوط به حساب شما نیست' });
     }
     const draft = await parseReceiptSubmissionDraft(req);
     await ensureReceiptSubmissionAvailability({
@@ -5782,11 +5928,11 @@ router.post('/student/receipts', requireAuth, (req, res, next) => {
       actorType: 'student'
     });
 
-    res.status(201).json({ success: true, receipt, message: 'Ø±Ø³ÛŒØ¯ Ø«Ø¨Øª Ø´Ø¯ Ùˆ Ø¯Ø± Ø§Ù†ØªØ¸Ø§Ø± ØªØ§ÛŒÛŒØ¯ Ø§Ø³Øª' });
+    res.status(201).json({ success: true, receipt, message: 'رسید ثبت شد و در انتظار تایید است' });
   } catch (error) {
     res.status(error?.status || 500).json({
       success: false,
-      message: error?.message || 'Ø®Ø·Ø§ Ø¯Ø± Ø«Ø¨Øª Ø±Ø³ÛŒØ¯',
+      message: error?.message || 'خطا در ثبت رسید',
       ...(error?.availableAmount != null ? { availableAmount: error.availableAmount } : {}),
       ...(error?.pendingReceiptId ? { pendingReceiptId: error.pendingReceiptId } : {}),
       ...(error?.duplicateReceiptId ? { duplicateReceiptId: error.duplicateReceiptId } : {})
@@ -5996,7 +6142,7 @@ router.get('/admin/reports/aging', requireAuth, requireRole(['admin']), requireP
 
     res.json({ success: true, buckets, totalRemaining, rows: rows.slice(0, 300), reliefSummary });
   } catch {
-    res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± Ú¯Ø²Ø§Ø±Ø´ Ù…Ø¹ÙˆÙ‚Ø§Øª' });
+    res.status(500).json({ success: false, message: 'خطا در گزارش معوقات' });
   }
 });
 
@@ -6014,43 +6160,52 @@ router.get('/admin/reports/cashflow', requireAuth, requireRole(['admin']), requi
     const end = new Date(to);
     end.setHours(23, 59, 59, 999);
 
-    const approvedMatch = { status: 'approved', paidAt: { $gte: from, $lte: end } };
-    const pendingMatch = { status: 'pending', paidAt: { $gte: from, $lte: end } };
+    const paymentMatch = { status: { $in: ['approved', 'pending'] }, paidAt: { $gte: from, $lte: end } };
     const reliefMatch = { status: 'active', createdAt: { $gte: from, $lte: end } };
     if (scope.classId) {
-      approvedMatch.classId = scope.classId;
-      pendingMatch.classId = scope.classId;
       reliefMatch.classId = scope.classId;
     }
 
-    const [rows, pendingRows, reliefRows] = await Promise.all([
-      FeePayment.aggregate([
-        { $match: approvedMatch },
-        {
-          $group: {
-            _id: { y: { $year: '$paidAt' }, m: { $month: '$paidAt' }, d: { $dayOfMonth: '$paidAt' } },
-            total: { $sum: '$amount' },
-            count: { $sum: 1 }
-          }
-        },
-        { $sort: { '_id.y': 1, '_id.m': 1, '_id.d': 1 } }
-      ]),
-      FeePayment.aggregate([
-        { $match: pendingMatch },
-        { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } }
-      ]),
+    const [payments, reliefRows] = await Promise.all([
+      FeePayment.find(paymentMatch)
+        .populate('classId', 'title code gradeLevel section')
+        .populate({ path: 'feeOrderId', select: 'classId', populate: { path: 'classId', select: 'title code gradeLevel section' } })
+        .lean(),
       FinanceRelief.aggregate([
         { $match: reliefMatch },
         { $group: { _id: '$coverageMode', total: { $sum: '$amount' }, count: { $sum: 1 } } }
       ])
     ]);
 
-    const items = rows.map((row) => ({
-      date: `${row._id.y}-${String(row._id.m).padStart(2, '0')}-${String(row._id.d).padStart(2, '0')}`,
-      total: row.total,
-      count: row.count
-    }));
+    const toPaymentClassId = (item) => String(item?.classId?._id || item?.classId || item?.feeOrderId?.classId?._id || item?.feeOrderId?.classId || '').trim();
+    const toCashflowDateKey = (value) => {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '';
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    };
+    const buildDailyRows = (statuses = []) => {
+      const allowedStatuses = new Set(statuses);
+      const dayMap = new Map();
+      payments.forEach((item) => {
+        if (!allowedStatuses.has(String(item?.status || ''))) return;
+        const classRef = toPaymentClassId(item);
+        if (scope.classId && classRef !== String(scope.classId)) return;
+        const dateKey = toCashflowDateKey(item?.paidAt);
+        if (!dateKey) return;
+        const current = dayMap.get(dateKey) || { date: dateKey, total: 0, count: 0 };
+        current.total += Number(item?.amount || 0);
+        current.count += 1;
+        dayMap.set(dateKey, current);
+      });
+      return [...dayMap.values()].sort((left, right) => String(left.date).localeCompare(String(right.date)));
+    };
+
+    const items = buildDailyRows(['approved']);
+    const pendingItems = buildDailyRows(['pending']);
+    const registeredItems = buildDailyRows(['approved', 'pending']);
     const total = items.reduce((sum, item) => sum + item.total, 0);
+    const pendingTotal = pendingItems.reduce((sum, item) => sum + item.total, 0);
+    const pendingCount = pendingItems.reduce((sum, item) => sum + item.count, 0);
     const reliefSummary = {
       activeCount: 0,
       fixedAmount: 0,
@@ -6072,12 +6227,14 @@ router.get('/admin/reports/cashflow', requireAuth, requireRole(['admin']), requi
       to: end,
       total,
       items,
-      pendingTotal: Number(pendingRows[0]?.total || 0),
-      pendingCount: Number(pendingRows[0]?.count || 0),
+      pendingItems,
+      registeredItems,
+      pendingTotal,
+      pendingCount,
       reliefSummary
     });
   } catch {
-    res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± Ú¯Ø²Ø§Ø±Ø´ Ø¬Ø±ÛŒØ§Ù† Ù†Ù‚Ø¯ÛŒ' });
+    res.status(500).json({ success: false, message: 'خطا در گزارش جریان نقدی' });
   }
 });
 
@@ -6145,7 +6302,7 @@ router.get('/admin/reports/discounts', requireAuth, requireRole(['admin']), requ
     const items = Array.from(grouped.values()).sort((left, right) => right.total - left.total);
     res.json({ success: true, items, summary: report?.summary || null });
   } catch {
-    res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± Ú¯Ø²Ø§Ø±Ø´ ØªØ®ÙÛŒÙâ€ŒÙ‡Ø§' });
+    res.status(500).json({ success: false, message: 'خطا در گزارش تخفیف‌ها' });
   }
 });
 
@@ -6611,7 +6768,7 @@ router.get('/admin/reports/export.csv', requireAuth, requireRole(['admin']), req
     res.setHeader('Content-Disposition', 'attachment; filename=\"finance-report.csv\"');
     res.status(200).send(`\uFEFF${csv}`);
   } catch {
-    res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± Ø®Ø±ÙˆØ¬ÛŒ CSV' });
+    res.status(500).json({ success: false, message: 'خطا در خروجی CSV' });
   }
 });
 
@@ -6625,7 +6782,7 @@ router.get('/admin/month-close', requireAuth, requireRole(['admin']), requirePer
       .limit(36);
     res.json({ success: true, items: items.map((item) => serializeFinanceMonthClose(item, actorLevel)) });
   } catch {
-    res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± Ø¯Ø±ÛŒØ§ÙØª Ù…Ø§Ù‡â€ŒÙ‡Ø§ÛŒ Ø¨Ø³ØªÙ‡ Ø´Ø¯Ù‡' });
+    res.status(500).json({ success: false, message: 'خطا در دریافت ماه‌های بسته شده' });
   }
 });
 
@@ -6649,7 +6806,7 @@ router.post('/admin/month-close', requireAuth, requireRole(['admin']), requirePe
     const actorLevel = await resolveAdminActorLevel(req.user.id);
     const monthKey = String(req.body?.monthKey || '').trim();
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthKey)) {
-      return res.status(400).json({ success: false, message: 'ÙØ±Ù…Øª Ù…Ø§Ù‡ Ø¨Ø§ÛŒØ¯ YYYY-MM Ø¨Ø§Ø´Ø¯' });
+      return res.status(400).json({ success: false, message: 'فرمت ماه باید YYYY-MM باشد' });
     }
     const requestNote = String(req.body?.note || '').trim();
     const { startAt, endAt } = toMonthDateRange(monthKey);
@@ -6712,7 +6869,7 @@ router.post('/admin/month-close', requireAuth, requireRole(['admin']), requirePe
     }
     const exists = await FinanceMonthClose.findOne({ monthKey });
     if (exists && exists.status === 'closed') {
-      return res.status(400).json({ success: false, message: 'Ø§ÛŒÙ† Ù…Ø§Ù‡ Ù‚Ø¨Ù„Ø§ Ø¨Ø³ØªÙ‡ Ø´Ø¯Ù‡ Ø§Ø³Øª' });
+      return res.status(400).json({ success: false, message: 'این ماه قبلاً بسته شده است' });
     }
     if (exists && exists.status === 'pending_review') {
       return res.status(409).json({ success: false, message: 'این ماه مالی قبلاً برای بررسی ثبت شده و هنوز در جریان تایید است.' });
@@ -6819,7 +6976,7 @@ router.post('/admin/month-close', requireAuth, requireRole(['admin']), requirePe
     const code = String(error?.message || '');
     res.status(code === 'finance_month_key_invalid' ? 400 : 500).json({
       success: false,
-      message: code === 'finance_month_key_invalid' ? 'فرمت ماه مالی معتبر نیست.' : 'Ø®Ø·Ø§ Ø¯Ø± Ø¨Ø³ØªÙ† Ù…Ø§Ù‡ Ù…Ø§Ù„ÛŒ'
+      message: code === 'finance_month_key_invalid' ? 'فرمت ماه مالی معتبر نیست.' : 'خطا در بستن ماه مالی'
     });
   }
 });
@@ -7983,7 +8140,7 @@ router.post('/admin/reminders/run', requireAuth, requireRole(['admin']), require
       message: `یادآوری مالی برای ${Number(result?.notified || 0).toLocaleString('fa-AF-u-ca-persian')} مورد اجرا شد`
     });
   } catch {
-    res.status(500).json({ success: false, message: 'Ø®Ø·Ø§ Ø¯Ø± Ø§Ø¬Ø±Ø§ÛŒ ÛŒØ§Ø¯Ø¢ÙˆØ±ÛŒ Ù…Ø§Ù„ÛŒ' });
+    res.status(500).json({ success: false, message: 'خطا در اجرای یادآوری مالی' });
   }
 });
 
@@ -7992,22 +8149,33 @@ router.get('/admin/student-memberships', requireAuth, requireRole(['admin']), re
   try {
     const memberships = await StudentMembership.find({ endedReason: { $ne: 'deleted_by_admin' } })
       .populate('student', 'name email')
+      .populate('studentId', 'fullName name admissionNo studentCode fatherName primaryPhone')
       .populate('classId', 'title')
       .populate('academicYearId', 'title')
       .sort({ createdAt: -1, updatedAt: -1 })
       .lean();
 
-    const items = memberships.map((item) => ({
-      ...item,
-      studentId: item?.student?._id || item?.studentId || null,
-      studentCoreId: item?.studentId || null,
-      classId: item?.classId?._id || item?.classId || null,
-      academicYearId: item?.academicYearId?._id || item?.academicYearId || item?.academicYear || null,
-      membershipType: item?.membershipType || 'normal',
-      startDate: item?.enrolledAt || item?.joinedAt || null,
-      endDate: item?.endedAt || item?.leftAt || null,
-      notes: item?.note || ''
-    }));
+    const items = memberships.map((item) => {
+      const studentCore = item?.studentId && typeof item.studentId === 'object' ? item.studentId : null;
+      return {
+        ...item,
+        studentId: item?.student?._id || null,
+        studentCoreId: studentCore?._id || item?.studentId || null,
+        studentName: item?.student?.name || studentCore?.fullName || studentCore?.name || '',
+        studentEmail: item?.student?.email || '',
+        admissionNo: studentCore?.admissionNo || studentCore?.studentCode || '',
+        fatherName: studentCore?.fatherName || '',
+        primaryPhone: studentCore?.primaryPhone || '',
+        classId: item?.classId?._id || item?.classId || null,
+        classTitle: item?.classId?.title || '',
+        academicYearId: item?.academicYearId?._id || item?.academicYearId || item?.academicYear || null,
+        academicYearTitle: item?.academicYearId?.title || '',
+        membershipType: item?.membershipType || 'normal',
+        startDate: item?.enrolledAt || item?.joinedAt || null,
+        endDate: item?.endedAt || item?.leftAt || null,
+        notes: item?.note || ''
+      };
+    });
 
     res.json({ success: true, items });
   } catch (err) {
@@ -8017,6 +8185,11 @@ router.get('/admin/student-memberships', requireAuth, requireRole(['admin']), re
 
 router.post('/admin/student-memberships', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
+    return res.status(409).json({
+      success: false,
+      message: 'ایجاد ممبرشیپ از بخش مالی غیرفعال شد. عضویت اصلی شاگرد را از مرکز مدیریت آموزش / ثبت‌نام متعلمین بسازید؛ مالی فقط وضعیت همان عضویت را کنترل می‌کند.'
+    });
+
     const rawStudentId = String(req.body?.studentId || '').trim();
     const classId = String(req.body?.classId || '').trim();
     const courseId = String(req.body?.courseId || '').trim();
@@ -8131,9 +8304,9 @@ router.put('/admin/student-memberships/:id', requireAuth, requireRole(['admin'])
       return res.status(404).json({ success: false, message: 'عضویت موردنظر پیدا نشد.' });
     }
 
-    const classId = String(req.body?.classId || membership.classId || '').trim();
-    const courseId = String(req.body?.courseId || membership.course || '').trim();
-    const academicYearId = String(req.body?.academicYearId || membership.academicYearId || membership.academicYear || '').trim();
+    const classId = String(membership.classId || '').trim();
+    const courseId = String(membership.course || '').trim();
+    const academicYearId = String(membership.academicYearId || membership.academicYear || '').trim();
     const status = String(req.body?.status || membership.status || 'active').trim() || 'active';
     const startDate = req.body?.startDate ? new Date(req.body.startDate) : (membership.enrolledAt || membership.joinedAt || null);
     const endDate = req.body?.endDate ? new Date(req.body.endDate) : null;

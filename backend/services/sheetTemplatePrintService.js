@@ -3,6 +3,7 @@ const path = require('path');
 const mongoose = require('mongoose');
 
 const SiteSettings = require('../models/SiteSettings');
+const { resolveActiveSchool, serializeSchoolBranding } = require('./schoolContextService');
 
 const PROJECT_ROOT = path.join(__dirname, '..', '..');
 const FONTS_DIR = path.join(PROJECT_ROOT, 'Fonts');
@@ -360,9 +361,217 @@ function buildFormalNote(type = '', report = {}) {
   return '';
 }
 
-function renderExamSheetPrintHtml({ report = {}, title = '', subtitle = '', metadata = [], signatures = [], formalNote = '', footerText = '', logoUrl = '' } = {}) {
+function buildOfficialReportCss(layout = {}) {
+  const orientation = layout.orientation === 'landscape' ? 'landscape' : 'portrait';
+  const fontFamily = normalizeText(layout.fontFamily) || "'B Zar'";
+  const fontSize = Math.max(10, Math.min(16, Number(layout.fontSize) || 12));
+  return `
+      @page { size: A4 ${orientation}; margin: 25.4mm; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: ${escapeHtml(fontFamily)}, 'B Zar', 'B Mitra', Tahoma, Arial, sans-serif;
+        font-size: ${fontSize}pt;
+        color: #111;
+        background: #fff;
+        direction: rtl;
+      }
+      .sheet-page,
+      .exam-sheet-page {
+        width: 100%;
+        max-width: none;
+        margin: 0 auto;
+        padding: 0;
+        background: #fff;
+      }
+      .official-report-header {
+        display: grid;
+        grid-template-columns: 96px 1fr 96px;
+        align-items: start;
+        gap: 14px;
+        margin-bottom: 14px;
+        color: #111;
+        page-break-inside: avoid;
+      }
+      .sheet-header,
+      .sheet-footer,
+      .exam-sheet-header,
+      .exam-sheet-footer { display: none !important; }
+      .official-report-logo {
+        width: 82px;
+        height: 82px;
+        object-fit: contain;
+        justify-self: center;
+        border: 1px solid #b8b8b8;
+        padding: 4px;
+        background: #fff;
+      }
+      .official-report-logo--empty {
+        display: grid;
+        place-items: center;
+        color: #444;
+        font-size: 10pt;
+        line-height: 1.5;
+        text-align: center;
+      }
+      .official-report-center {
+        text-align: center;
+        line-height: 1.7;
+        min-width: 0;
+      }
+      .official-report-center .line { font-size: 12pt; font-weight: 700; }
+      .official-report-center .school { margin-top: 2px; font-size: 12pt; font-weight: 700; }
+      .official-report-center h1 { margin: 6px 0 0; font-size: 14pt; font-weight: 700; }
+      .sheet-title {
+        margin: 10px 0 12px;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: #fff;
+        color: #111;
+        text-align: center;
+      }
+      .sheet-title h2 { margin: 0; font-size: 14pt; font-weight: 700; }
+      .sheet-meta,
+      .sheet-summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 8px;
+        margin: 10px 0;
+      }
+      .sheet-meta-item,
+      .sheet-summary-item {
+        border: 1px solid #333;
+        border-radius: 0;
+        background: #fff;
+        padding: 6px 8px;
+      }
+      .sheet-meta-item strong,
+      .sheet-summary-item strong {
+        display: block;
+        margin-bottom: 3px;
+        color: #111;
+        font-size: 10pt;
+      }
+      .sheet-summary-item span { font-size: 12pt; font-weight: 700; }
+      .sheet-filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 8px 0;
+      }
+      .sheet-filters span {
+        border: 1px solid #333;
+        border-radius: 0;
+        background: #fff;
+        color: #111;
+        padding: 3px 8px;
+        font-size: 10pt;
+      }
+      .sheet-table,
+      .exam-sheet-table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        background: #fff;
+        border: 1px solid #111;
+      }
+      .sheet-table th,
+      .sheet-table td,
+      .exam-sheet-table th,
+      .exam-sheet-table td {
+        border: 1px solid #111;
+        padding: 5px 4px;
+        text-align: center;
+        vertical-align: middle;
+        word-break: break-word;
+        color: #111;
+        background: #fff;
+      }
+      .sheet-table th,
+      .exam-sheet-table th { font-weight: 700; background: #fff; }
+      .sheet-signatures,
+      .exam-sheet-signatures {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(180px, 1fr));
+        gap: 28px;
+        margin-top: 24px;
+        page-break-inside: avoid;
+      }
+      .sheet-signature,
+      .exam-sheet-signatures .sig {
+        min-height: 72px;
+        border-top: 1px solid #111;
+        padding-top: 8px;
+        text-align: center;
+      }
+      .official-report-footer {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        margin-top: 18px;
+        padding-top: 8px;
+        border-top: 1px solid #111;
+        color: #111;
+        font-size: 10pt;
+        page-break-inside: avoid;
+      }
+      .official-report-footer div { min-width: 0; overflow-wrap: anywhere; }
+      @media print {
+        body { background: #fff; }
+        .sheet-page,
+        .exam-sheet-page { padding: 0; background: #fff; }
+      }
+  `;
+}
+
+function buildOfficialLogoMarkup(src = '', label = 'لوگو') {
+  return src
+    ? `<img class="official-report-logo" src="${escapeHtml(src)}" alt="${escapeHtml(label)}" />`
+    : `<div class="official-report-logo official-report-logo--empty">${escapeHtml(label)}</div>`;
+}
+
+function buildOfficialHeaderHtml({ title = '', siteSettings = null, logoUrl = '' } = {}) {
+  const brandName = normalizeText(siteSettings?.brandName || siteSettings?.schoolName || '');
+  const directorateLine = normalizeText(siteSettings?.educationDirectorate || siteSettings?.directorateName || '');
+  const districtLine = normalizeText(siteSettings?.educationZone || siteSettings?.district || '');
+  const schoolLine = brandName || normalizeText(siteSettings?.name) || '';
+  const ministryLogo = normalizeText(siteSettings?.ministryLogoUrl || siteSettings?.governmentLogoUrl || '');
+  const schoolLogo = normalizeText(logoUrl || siteSettings?.logoUrl || '');
+  return `
+        <section class="official-report-header">
+          ${buildOfficialLogoMarkup(ministryLogo, 'لوگو وزارت')}
+          <div class="official-report-center">
+            <div class="line">امارت اسلامی افغانستان</div>
+            <div class="line">وزارت معارف</div>
+            <div class="line">${escapeHtml(directorateLine || 'ریاست معارف شهر کابل')}</div>
+            <div class="line">${escapeHtml(districtLine || 'آمریت معارف حوزه (     ) تعلیمی')}</div>
+            ${schoolLine ? `<div class="school">${escapeHtml(schoolLine)}</div>` : ''}
+            ${title ? `<h1>${escapeHtml(title)}</h1>` : ''}
+          </div>
+          ${buildOfficialLogoMarkup(schoolLogo, 'لوگو مکتب')}
+        </section>
+  `;
+}
+
+function buildOfficialFooterHtml(siteSettings = null, footerText = '') {
+  const phone = normalizeText(siteSettings?.phone || siteSettings?.contactPhone || '');
+  const email = normalizeText(siteSettings?.email || siteSettings?.contactEmail || '');
+  const address = normalizeText(siteSettings?.address || siteSettings?.location || '');
+  const note = normalizeText(footerText);
+  return `
+        <footer class="official-report-footer">
+          <div><strong>شماره تماس مکتب:</strong> ${escapeHtml(phone)}</div>
+          <div><strong>ایمیل مکتب:</strong> ${escapeHtml(email)}</div>
+          <div><strong>آدرس مکتب:</strong> ${escapeHtml(address || note)}</div>
+        </footer>
+  `;
+}
+
+function renderExamSheetPrintHtml({ report = {}, title = '', subtitle = '', metadata = [], signatures = [], formalNote = '', footerText = '', logoUrl = '', siteSettings = null } = {}) {
   const rows = Array.isArray(report?.rows) ? report.rows : [];
   const infoMap = new Map(metadata);
+  const officialSettings = { ...(siteSettings || {}), brandName: normalizeText(siteSettings?.brandName) || subtitle };
   const schoolLine = escapeHtml(subtitle || 'لیسه خصوصی مدیر');
   const logoMarkup = logoUrl ? `<img class="exam-sheet-logo" src="${escapeHtml(logoUrl)}" alt="School Logo" />` : '<div class="exam-sheet-logo exam-sheet-logo--empty"></div>';
   return `<!doctype html>
@@ -395,10 +604,12 @@ function renderExamSheetPrintHtml({ report = {}, title = '', subtitle = '', meta
       .exam-sheet-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-top: 28px; font-size: 14px; }
       .exam-sheet-signatures .sig { text-align: center; padding-top: 22px; }
       .exam-sheet-footer { margin-top: 16px; text-align: center; font-size: 11px; color: #6b7280; }
+      ${buildOfficialReportCss({ orientation: 'portrait', fontFamily: "'B Zar'", fontSize: 12 })}
     </style>
   </head>
   <body>
     <main class="exam-sheet-page">
+      ${buildOfficialHeaderHtml({ title: title || 'شقه امتحان ماهوار', siteSettings: officialSettings, logoUrl })}
       <section class="exam-sheet-header">
         ${logoMarkup}
         <div class="exam-sheet-center">
@@ -487,25 +698,36 @@ function renderExamSheetPrintHtml({ report = {}, title = '', subtitle = '', meta
         `).join('')}
       </section>
 
+      ${buildOfficialFooterHtml(officialSettings, footerText)}
       ${footerText ? `<footer class="exam-sheet-footer">${escapeHtml(footerText)}</footer>` : ''}
     </main>
   </body>
 </html>`;
 }
 
-async function loadSiteSettings() {
-  if (mongoose.connection.readyState !== 1) return null;
+async function loadSiteSettings(req = null) {
+  let schoolBranding = null;
+  if (req) {
+    try {
+      const resolved = await resolveActiveSchool(req, { allowSingleFallback: true });
+      schoolBranding = serializeSchoolBranding(resolved.school);
+    } catch {
+      schoolBranding = null;
+    }
+  }
+  if (mongoose.connection.readyState !== 1) return schoolBranding || null;
   try {
-    return await SiteSettings.findOne({}).sort({ updatedAt: -1 }).lean();
+    const settings = await SiteSettings.findOne({}).sort({ updatedAt: -1 }).lean();
+    return schoolBranding ? { ...(settings || {}), ...schoolBranding } : settings;
   } catch {
-    return null;
+    return schoolBranding || null;
   }
 }
 
-async function renderReportPrintHtml({ report = {}, template = null } = {}) {
+async function renderReportPrintHtml({ report = {}, template = null, req = null } = {}) {
   const layout = getLayout(template);
   const type = inferSheetType(template, report);
-  const siteSettings = await loadSiteSettings();
+  const siteSettings = await loadSiteSettings(req);
   const metadata = buildMetadata(type, template, report, siteSettings).filter(([, value]) => normalizeText(value));
   const summaryItems = shouldRenderSummary(type) ? buildSummaryItems(report) : '';
   const filterBadges = shouldRenderSummary(type) ? buildFilterBadges(report) : '';
@@ -666,10 +888,12 @@ async function renderReportPrintHtml({ report = {}, template = null } = {}) {
         body { background: #fff; }
         .sheet-page { padding: 0; background: #fff; }
       }
+      ${buildOfficialReportCss(layout)}
     </style>
   </head>
   <body>
     <main class="sheet-page">
+      ${layout.showHeader ? buildOfficialHeaderHtml({ siteSettings, logoUrl }) : ''}
       ${layout.showHeader ? `
         <section class="sheet-header">
           ${logoUrl ? `<img class="sheet-logo" src="${escapeHtml(logoUrl)}" alt="School Logo" />` : '<div class="sheet-logo"></div>'}
@@ -717,6 +941,7 @@ async function renderReportPrintHtml({ report = {}, template = null } = {}) {
         `).join('')}
       </section>
 
+      ${layout.showFooter ? buildOfficialFooterHtml(siteSettings, footerText || `Generated at ${formatDateValue(report?.generatedAt)}`) : ''}
       ${layout.showFooter ? `
         <footer class="sheet-footer">
           ${escapeHtml(footerText || `Generated at ${formatDateValue(report?.generatedAt)}`)}
@@ -727,10 +952,10 @@ async function renderReportPrintHtml({ report = {}, template = null } = {}) {
 </html>`;
 }
 
-async function renderReportPrintHtml({ report = {}, template = null } = {}) {
+async function renderReportPrintHtml({ report = {}, template = null, req = null } = {}) {
   const layout = getLayout(template);
   const type = inferSheetType(template, report);
-  const siteSettings = await loadSiteSettings();
+  const siteSettings = await loadSiteSettings(req);
   const metadata = buildMetadata(type, template, report, siteSettings).filter(([, value]) => normalizeText(value));
   const summaryItems = shouldRenderSummary(type) ? buildSummaryItems(report) : '';
   const filterBadges = shouldRenderSummary(type) ? buildFilterBadges(report) : '';
@@ -750,7 +975,8 @@ async function renderReportPrintHtml({ report = {}, template = null } = {}) {
       signatures,
       formalNote,
       footerText,
-      logoUrl
+      logoUrl,
+      siteSettings
     });
   }
 
@@ -904,10 +1130,12 @@ async function renderReportPrintHtml({ report = {}, template = null } = {}) {
         body { background: #fff; }
         .sheet-page { padding: 0; background: #fff; }
       }
+      ${buildOfficialReportCss(layout)}
     </style>
   </head>
   <body>
     <main class="sheet-page">
+      ${layout.showHeader ? buildOfficialHeaderHtml({ siteSettings, logoUrl }) : ''}
       ${layout.showHeader ? `
         <section class="sheet-header">
           ${logoUrl ? `<img class="sheet-logo" src="${escapeHtml(logoUrl)}" alt="School Logo" />` : '<div class="sheet-logo"></div>'}
@@ -955,6 +1183,7 @@ async function renderReportPrintHtml({ report = {}, template = null } = {}) {
         `).join('')}
       </section>
 
+      ${layout.showFooter ? buildOfficialFooterHtml(siteSettings, footerText || `Generated at ${formatDateValue(report?.generatedAt)}`) : ''}
       ${layout.showFooter ? `
         <footer class="sheet-footer">
           ${escapeHtml(footerText || `Generated at ${formatDateValue(report?.generatedAt)}`)}

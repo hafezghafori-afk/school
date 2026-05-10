@@ -12,6 +12,7 @@ import {
 } from './adminWorkspaceUtils';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
+import { formatFinanceCode } from '../utils/latinFinanceCode';
 
 const ORDER_STATUS_LABELS = {
   new: 'جدید',
@@ -142,7 +143,7 @@ function buildStudentStatementHtml({
   `).join('');
   const ordersRows = (orders || []).map((item) => `
     <tr>
-      <td>${escapeHtml(item.title || item.orderNumber || '-')}</td>
+      <td>${escapeHtml(item.title || formatFinanceCode(item.orderNumber, '-'))}</td>
       <td>${escapeHtml(pickLabel(ORDER_TYPE_LABELS, item.orderType, item.orderType || '-'))}</td>
       <td>${escapeHtml(pickLabel(ORDER_STATUS_LABELS, item.status, item.status || '-'))}</td>
       <td>${escapeHtml(toLocaleDateTime(item.dueDate))}</td>
@@ -152,7 +153,7 @@ function buildStudentStatementHtml({
   `).join('');
   const paymentRows = (payments || []).map((item) => `
     <tr>
-      <td>${escapeHtml(item.paymentNumber || '-')}</td>
+      <td>${escapeHtml(formatFinanceCode(item.paymentNumber, '-'))}</td>
       <td>${escapeHtml(pickLabel(PAYMENT_STATUS_LABELS, item.status, item.status || '-'))}</td>
       <td>${escapeHtml(pickLabel(PAYMENT_STAGE_LABELS, item.approvalStage, item.approvalStage || '-'))}</td>
       <td>${escapeHtml(toLocaleDateTime(item.paidAt))}</td>
@@ -651,7 +652,7 @@ export default function StudentFinance() {
                 </strong>
                 <small>
                   {latestApprovedPayment
-                    ? `${latestApprovedPayment.orderNumber || 'بدون شماره'} • ${toLocaleDateTime(latestApprovedPayment.paidAt)}`
+                    ? `${formatFinanceCode(latestApprovedPayment.orderNumber, 'بدون شماره')} • ${toLocaleDateTime(latestApprovedPayment.paidAt)}`
                     : 'هنوز پرداخت تاییدشده‌ای ثبت نشده است.'}
                 </small>
               </article>
@@ -718,8 +719,8 @@ export default function StudentFinance() {
                     {orders.map((item) => (
                       <tr key={item.id}>
                         <td>
-                          <strong>{item.title || item.orderNumber || '-'}</strong>
-                          <small>{item.periodLabel || item.orderNumber || '-'}</small>
+                          <strong>{item.title || formatFinanceCode(item.orderNumber, '-')}</strong>
+                          <small>{item.periodLabel || formatFinanceCode(item.orderNumber, '-')}</small>
                           {Array.isArray(item.installments) && item.installments.length ? <small>{item.installments.length} قسط ثبت شده</small> : null}
                         </td>
                         <td>{pickLabel(ORDER_TYPE_LABELS, item.orderType, item.orderType || '-')}</td>
@@ -766,7 +767,7 @@ export default function StudentFinance() {
                   >
                     {payableOrders.map((item) => (
                       <option key={item.id} value={item.id}>
-                        {(item.title || item.orderNumber || 'بدهی')} - {formatCurrency(item.outstandingAmount, item.currency)}
+                        {(item.title || formatFinanceCode(item.orderNumber, '') || 'بدهی')} - {formatCurrency(item.outstandingAmount, item.currency)}
                       </option>
                     ))}
                   </select>
@@ -878,7 +879,7 @@ export default function StudentFinance() {
                     <div className="student-finance-timeline-head">
                       <div>
                         <strong>{formatCurrency(item.amount, item.currency)}</strong>
-                        <span>{item.paymentNumber || item.referenceNo || 'بدون شماره'}</span>
+                        <span>{formatFinanceCode(item.paymentNumber || item.referenceNo, 'بدون شماره')}</span>
                       </div>
                       <div className="student-finance-pill-row">
                         <span className={`student-finance-pill ${statusClass(item.status)}`}>
@@ -893,7 +894,7 @@ export default function StudentFinance() {
                       <span>تاریخ: {toLocaleDateTime(item.paidAt)}</span>
                       <span>روش: {item.paymentMethod || '-'}</span>
                       <span>ساحه: {pickLabel(LINK_SCOPE_LABELS, item.linkScope, item.linkScope || '-')}</span>
-                      <span>سفارش: {item.feeOrder?.title || item.feeOrder?.orderNumber || '-'}</span>
+                      <span>سفارش: {item.feeOrder?.title || formatFinanceCode(item.feeOrder?.orderNumber, '-')}</span>
                       {item.receiptDetails?.remainingBeforePayment != null ? (
                         <span>مانده قبل از پرداخت: {formatCurrency(item.receiptDetails.remainingBeforePayment, item.receiptDetails.currency)}</span>
                       ) : null}

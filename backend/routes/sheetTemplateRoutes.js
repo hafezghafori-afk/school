@@ -225,7 +225,7 @@ router.delete('/:templateId', ...writeAccess, async (req, res) => {
 
 router.post('/:templateId/preview', ...readAccess, async (req, res) => {
   try {
-    const item = await previewSheetTemplate(req.params.templateId, req.body?.filters || {});
+    const item = await previewSheetTemplate(req.params.templateId, req.body?.filters || {}, { req });
     return res.json({ success: true, ...item });
   } catch (error) {
     const code = String(error?.message || '');
@@ -235,7 +235,7 @@ router.post('/:templateId/preview', ...readAccess, async (req, res) => {
 
 router.post('/:templateId/export.csv', ...readAccess, async (req, res) => {
   try {
-    const item = await previewSheetTemplate(req.params.templateId, req.body?.filters || {});
+    const item = await previewSheetTemplate(req.params.templateId, req.body?.filters || {}, { req });
     const csv = reportToCsv(item.preview || {});
     const filename = `${item.template?.code || item.template?.id || 'sheet-template'}.csv`;
 
@@ -264,7 +264,7 @@ router.post('/:templateId/export.csv', ...readAccess, async (req, res) => {
 
 router.post('/:templateId/export.xlsx', ...readAccess, async (req, res) => {
   try {
-    const item = await previewSheetTemplate(req.params.templateId, req.body?.filters || {});
+    const item = await previewSheetTemplate(req.params.templateId, req.body?.filters || {}, { req });
     const buffer = await reportToXlsxBuffer(item.preview || {});
     const filename = `${item.template?.code || item.template?.id || 'sheet-template'}.xlsx`;
 
@@ -293,8 +293,8 @@ router.post('/:templateId/export.xlsx', ...readAccess, async (req, res) => {
 
 router.post('/:templateId/export.pdf', ...readAccess, async (req, res) => {
   try {
-    const item = await previewSheetTemplate(req.params.templateId, req.body?.filters || {});
-    const buffer = await buildReportPdfBuffer({ report: item.preview || {}, template: item.template || null });
+    const item = await previewSheetTemplate(req.params.templateId, req.body?.filters || {}, { req });
+    const buffer = await buildReportPdfBuffer({ report: item.preview || {}, template: item.template || null, req });
     const filename = `${item.template?.code || item.template?.id || 'sheet-template'}.pdf`;
 
     await logActivity({
@@ -322,10 +322,8 @@ router.post('/:templateId/export.pdf', ...readAccess, async (req, res) => {
 
 router.post('/:templateId/export.print', ...readAccess, async (req, res) => {
   try {
-    const item = await previewSheetTemplate(req.params.templateId, req.body?.filters || {});
-    const html = item.template
-      ? await renderReportPrintHtml({ report: item.preview || {}, template: item.template || null })
-      : reportToPrintHtml(item.preview || {});
+    const item = await previewSheetTemplate(req.params.templateId, req.body?.filters || {}, { req });
+    const html = await renderReportPrintHtml({ report: item.preview || {}, template: item.template || null, req });
     const filename = `${item.template?.code || item.template?.id || 'sheet-template'}.html`;
 
     await logActivity({
