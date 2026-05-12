@@ -1,0 +1,222 @@
+.demo-page {
+  width: min(100%, 1180px);
+  margin: 0 auto;
+  padding: 32px 16px 64px;
+  color: #e5edf7;
+}
+
+.demo-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  gap: 18px;
+  align-items: stretch;
+  margin-bottom: 22px;
+}
+
+.demo-hero-copy,
+.demo-hero-card,
+.demo-card,
+.demo-note,
+.demo-error {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: linear-gradient(155deg, rgba(15, 23, 42, 0.92), rgba(8, 13, 26, 0.96));
+  box-shadow: 0 18px 44px rgba(2, 6, 23, 0.38);
+  border-radius: 24px;
+}
+
+.demo-hero-copy {
+  padding: clamp(22px, 4vw, 42px);
+  position: relative;
+  overflow: hidden;
+}
+
+.demo-hero-copy::after {
+  content: '';
+  position: absolute;
+  width: 260px;
+  height: 260px;
+  left: -80px;
+  top: -80px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(34, 197, 94, 0.22), transparent 68%);
+  pointer-events: none;
+}
+
+.demo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 13px;
+  border-radius: 999px;
+  color: #dbeafe;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(125, 211, 252, 0.3);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.demo-badge::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 16px rgba(34, 197, 94, 0.9);
+}
+
+.demo-hero h1 {
+  margin: 16px 0 0;
+  color: #f8fafc;
+  font-size: clamp(30px, 4.5vw, 52px);
+  line-height: 1.22;
+}
+
+.demo-hero p,
+.demo-card p,
+.demo-note p {
+  color: rgba(226, 232, 240, 0.82);
+  line-height: 1.95;
+}
+
+.demo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.demo-link,
+.demo-card button {
+  border: 0;
+  border-radius: 14px;
+  padding: 12px 16px;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.demo-link,
+.demo-card button {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  color: #f8fafc;
+  box-shadow: 0 12px 24px rgba(22, 163, 74, 0.25);
+}
+
+.demo-link.ghost {
+  background: rgba(15, 23, 42, 0.68);
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  box-shadow: none;
+  color: #e2e8f0;
+}
+
+.demo-link:hover,
+.demo-card button:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+
+.demo-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.demo-hero-card {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.18), transparent 38%),
+    linear-gradient(155deg, rgba(15, 23, 42, 0.94), rgba(8, 13, 26, 0.98));
+}
+
+.demo-hero-card strong {
+  color: #f2b90c;
+  font-size: 15px;
+}
+
+.demo-hero-card span {
+  margin: 10px 0;
+  color: #f8fafc;
+  font-size: clamp(24px, 3vw, 34px);
+  font-weight: 900;
+}
+
+.demo-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.demo-card {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  min-height: 280px;
+}
+
+.demo-icon {
+  width: 48px;
+  height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  background: rgba(37, 99, 235, 0.18);
+  color: #93c5fd;
+  border: 1px solid rgba(147, 197, 253, 0.22);
+  font-size: 20px;
+}
+
+.demo-card h2 {
+  color: #f8fafc;
+  font-size: 21px;
+  margin: 14px 0 0;
+}
+
+.demo-card p {
+  flex: 1;
+  margin-bottom: 18px;
+}
+
+.demo-error {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.38);
+  background: rgba(127, 29, 29, 0.3);
+}
+
+.demo-note {
+  margin-top: 18px;
+  padding: 20px;
+}
+
+.demo-note h3 {
+  color: #f8fafc;
+  margin: 0 0 8px;
+}
+
+@media (max-width: 1040px) {
+  .demo-hero,
+  .demo-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .demo-page {
+    padding: 18px 12px 44px;
+  }
+
+  .demo-hero,
+  .demo-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .demo-actions .demo-link,
+  .demo-card button {
+    width: 100%;
+    text-align: center;
+  }
+}
