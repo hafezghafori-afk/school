@@ -64,7 +64,6 @@ const SCHEDULE_WIDGET_FILTER_OPTIONS = [
   { value: 'draft', label: 'فقط پیش‌نویس' }
 ];
 const SCHEDULE_AUTO_REFRESH_MS = 60000;
-const HERO_INLINE_ACTION_LIMIT = 4;
 const ADMIN_SCHEDULE_ROUTE = '/timetable/editor';
 const ADMIN_SCHEDULE_VIEW_ROUTE = '/timetable/viewer';
 
@@ -198,6 +197,7 @@ const PERMISSION_ORDER = [
   'manage_memberships',
   'manage_finance',
   'manage_content',
+  'manage_platform_requests',
   'view_reports',
   'view_schedule',
   'manage_schedule',
@@ -340,9 +340,9 @@ const SEARCH_SECTION_CONFIG = [
   },
   {
     key: 'contacts',
-    title: 'پیام‌ها',
-    to: () => '/admin-contact',
-    primary: (item) => item.name || item.email || 'پیام پشتیبانی',
+    title: 'مرکز ارتباطات سیما',
+    to: () => '/admin-communications',
+    primary: (item) => item.name || item.email || 'پیام ارتباطی',
     secondary: (item) => [item.status, toDate(item.createdAt)].filter(Boolean).join(' | ')
   },
   {
@@ -383,7 +383,7 @@ const ALERT_LINKS = {
   schedule_conflicts: ADMIN_SCHEDULE_ROUTE,
   profile: '#profile-requests',
   access: '/admin-users#access-requests',
-  contacts: '/admin-contact'
+  contacts: '/admin-communications'
 };
 
 const ALERT_DOMAIN_OPTIONS = [
@@ -429,9 +429,19 @@ const QUICK_LINK_ITEMS = [
   { to: '/admin-logs', label: 'لاگ‌ها', permission: 'view_reports' },
   { to: '/admin-news', label: 'اخبار', permission: 'manage_content' },
   { to: '/admin-gallery', label: 'گالری', permission: 'manage_content' },
-  { to: '/admin-contact', label: 'پیام‌ها', permission: 'manage_content' },
+  { to: '/admin-communications', label: 'مرکز ارتباطات سیما', permission: 'manage_platform_requests' },
   { to: ADMIN_SCHEDULE_VIEW_ROUTE, label: 'تقسیم اوقات', permission: 'view_schedule' }
 ];
+
+const PRIMARY_ADMIN_LINKS = new Set([
+  '/admin-finance',
+  '/admin-education',
+  '/admin-users',
+  ADMIN_SCHEDULE_ROUTE,
+  ADMIN_SCHEDULE_VIEW_ROUTE,
+  '/admin-communications',
+  '/admin-reports'
+]);
 const ALLOWED_QUICK_LINK_PERMISSIONS = new Set([
   'manage_users',
   'manage_enrollments',
@@ -496,15 +506,10 @@ const normalizeScheduleIssueFilter = (value = '') => {
 };
 
 const ACTION_STRIP_ITEMS = [
-  { href: '/admin-enrollments', label: 'تایید ثبت‌نام‌های آنلاین و صدور شماره اساس', tone: 'primary', permission: 'manage_enrollments' },
-  { href: '/admin-settings?menu=auth', label: 'تنظیمات شماره شناسایی', tone: 'info', permission: 'manage_users' },
   { href: '/admin-finance#pending-receipts', label: 'تایید رسیدهای مالی', tone: 'teal', permission: 'manage_finance' },
-  { href: '/admin-education?section=enrollments', label: 'مدیریت ممبرشیپ آموزشی', tone: 'success', permission: 'manage_memberships' },
-  { href: '/admin-education', label: 'مدیریت سال تعلیمی و صنف', tone: 'success', permission: 'manage_content' },
   { href: '#profile-requests', label: 'تایید تغییر مشخصات', tone: 'warning', permission: 'manage_users' },
   { href: '/admin-users#access-requests', label: 'درخواست‌های دسترسی', tone: 'warning', permission: 'manage_users' },
-  { href: '/admin-notifications', label: 'مرکز اعلان‌های مالی', tone: 'info', permission: 'manage_finance' },
-  { href: '/admin-education', label: 'مدیریت صنوف', tone: 'success', permission: 'manage_content' }
+  { href: '/admin-communications', label: 'پیام‌ها و دموهای جدید', tone: 'info', permission: 'manage_platform_requests' }
 ];
 
 const VIRTUAL_ITEMS = [
@@ -767,6 +772,7 @@ export default function AdminPanel() {
   const canManageEnrollments = permissionAllows('manage_enrollments', effectivePermissions);
   const canManageMemberships = permissionAllows('manage_memberships', effectivePermissions);
   const canViewSchedule = permissionAllows('view_schedule', effectivePermissions);
+  const canManagePlatformRequests = permissionAllows('manage_platform_requests', effectivePermissions);
   const apiHealthCheckedLabel = useMemo(() => {
     return formatAfghanTime(apiHealth.checkedAt, { hour: '2-digit', minute: '2-digit' });
   }, [apiHealth.checkedAt]);
@@ -842,51 +848,37 @@ export default function AdminPanel() {
     if (!value) return '';
     return value.startsWith('http') ? value : `${API_BASE}/${value.replace(/^\/+/, '')}`;
   }, [user?.avatarUrl]);
-  const heroActions = useMemo(() => ([
-    canManageUsers ? { key: 'users', to: '/admin-users', label: 'مدیریت کاربران' } : null,
-    canManageEnrollments ? { key: 'enrollments', to: '/admin-enrollments', label: 'ثبت‌نام‌ها' } : null,
-    canManageMemberships ? { key: 'academic-memberships', to: '/admin-education?section=enrollments', label: 'ممبرشیپ آموزشی' } : null,
-    canViewSchedule ? { key: 'schedule', to: canManageSchedule ? ADMIN_SCHEDULE_ROUTE : ADMIN_SCHEDULE_VIEW_ROUTE, label: canManageSchedule ? 'مدیریت تقسیم اوقات' : 'مشاهده تقسیم اوقات' } : null,
-    canManageFinance ? { key: 'membership', to: '/admin-financial-memberships', label: 'عضویت‌ها' } : null,
-    canManageContent ? {
-      key: 'create-school',
-      label: 'ایجاد مکتب جدید',
-      onClick: () => setCreateSchoolOpen(true),
-      title: 'ایجاد یک مکتب جدید و دریافت شناسه برای شروع'
-    } : null,
-    canManageFinance ? { key: 'finance', to: '/admin-finance', label: 'مرکز مالی' } : null,
-    canManageContent ? { key: 'education', to: '/admin-education', label: 'مرکز مدیریت آموزش' } : null,
-    canManageFinance ? { key: 'gov-finance', to: '/admin-government-finance', label: 'فرماندهی مالی دولت' } : null,
-    canManageContent ? { key: 'settings', to: '/admin-settings', label: 'تنظیمات سایت' } : null,
-    canManageContent ? { key: 'exams', to: '/admin-exams-dashboard', label: 'داشبورد امتحانات' } : null,
-    canViewReports ? { key: 'reports', to: '/admin-reports', label: 'گزارش‌ها' } : null
-  ].filter(Boolean)), [canManageUsers, canManageEnrollments, canManageMemberships, canViewSchedule, canManageSchedule, canManageFinance, canManageContent, canViewReports]);
-  const heroPrimaryActions = useMemo(
-    () => heroActions.slice(0, HERO_INLINE_ACTION_LIMIT),
-    [heroActions]
-  );
-  const heroSecondaryActions = useMemo(
-    () => heroActions.slice(HERO_INLINE_ACTION_LIMIT),
-    [heroActions]
-  );
-
   const quickLinkItems = useMemo(() => {
     const fromSettings = normalizeQuickLinkItems(settingsQuickLinks);
     return fromSettings.length ? fromSettings : QUICK_LINK_ITEMS;
   }, [settingsQuickLinks]);
 
   const visibleQuickLinks = useMemo(
-    () => quickLinkItems.filter((item) => isQuickLinkActiveForUser(item, effectivePermissions)),
+    () => {
+      const baseLinks = quickLinkItems.filter((item) => {
+        if (!isQuickLinkActiveForUser(item, effectivePermissions)) return false;
+        return !PRIMARY_ADMIN_LINKS.has(String(item?.to || '').trim());
+      });
+      const actionLinks = ACTION_STRIP_ITEMS
+        .filter((item) => permissionAllows(item.permission, effectivePermissions))
+        .map((item) => ({
+          to: item.href,
+          label: item.label,
+          permission: item.permission
+        }));
+      const seen = new Set();
+      return [...baseLinks, ...actionLinks].filter((item) => {
+        const key = String(item?.to || '').trim();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    },
     [quickLinkItems, effectivePermissions]
   );
   const hasSheetTemplatesQuickLink = useMemo(
     () => visibleQuickLinks.some((item) => String(item?.to || '').trim() === '/admin-sheet-templates'),
     [visibleQuickLinks]
-  );
-
-  const visibleActionItems = useMemo(
-    () => ACTION_STRIP_ITEMS.filter((item) => permissionAllows(item.permission, effectivePermissions)),
-    [effectivePermissions]
   );
 
   const activeSchoolId = useMemo(() => (
@@ -3105,6 +3097,16 @@ export default function AdminPanel() {
     ...(canManageFinance ? [{ to: '/admin-government-finance', label: 'مالی دولت', caption: 'گزارش و آرشیف رسمی', tone: 'teal' }] : []),
     ...(canManageContent ? [{ to: '/admin-education', label: 'مرکز آموزش', caption: 'سال تعلیمی، صنف و مضمون', tone: 'mint' }] : []),
     ...(canManageContent ? [{ to: '/admin-exams-dashboard', label: 'داشبورد امتحانات', caption: 'جلسه‌ها و نتیجه‌ها', tone: 'slate' }] : []),
+    ...(canManagePlatformRequests ? [{ to: '/admin-communications', label: 'مرکز ارتباطات سیما', caption: 'دمو، تماس، پیشنهاد و شکایت', tone: 'teal' }] : []),
+    ...(canViewReports ? [{ to: '/admin-reports', label: 'گزارش‌ها', caption: 'خروجی و تحلیل', tone: 'teal' }] : [])
+  ];
+
+  const focusedExecutiveQuickActions = [
+    ...(canManageFinance ? [{ to: '/admin-finance', label: 'مرکز مالی', caption: 'پرداخت، رسید و صندوق', tone: 'copper' }] : []),
+    ...(canManageContent ? [{ to: '/admin-education', label: 'مرکز آموزش', caption: 'سال تعلیمی، صنف و مضمون', tone: 'mint' }] : []),
+    ...(canManageUsers ? [{ to: '/admin-users', label: 'کاربران', caption: 'حساب‌ها، نقش‌ها و دسترسی', tone: 'slate' }] : []),
+    ...(canViewSchedule ? [{ to: canManageSchedule ? ADMIN_SCHEDULE_ROUTE : ADMIN_SCHEDULE_VIEW_ROUTE, label: 'تقسیم اوقات', caption: canManageSchedule ? 'ویرایش و نشر برنامه' : 'مشاهده برنامه رسمی', tone: 'slate' }] : []),
+    ...(canManagePlatformRequests ? [{ to: '/admin-communications', label: 'مرکز ارتباطات سیما', caption: 'دمو، تماس، پیشنهاد و شکایت', tone: 'teal' }] : []),
     ...(canViewReports ? [{ to: '/admin-reports', label: 'گزارش‌ها', caption: 'خروجی و تحلیل', tone: 'teal' }] : [])
   ];
 
@@ -3208,6 +3210,16 @@ export default function AdminPanel() {
           </div>
           <div className="admin-hero-actions">
           <div className="admin-topbar-tools">
+            {canManageContent && (
+              <button
+                type="button"
+                className="admin-btn admin-create-school-top"
+                onClick={() => setCreateSchoolOpen(true)}
+                title="ایجاد یک مکتب جدید و دریافت شناسه برای شروع"
+              >
+                ایجاد مکتب جدید
+              </button>
+            )}
             {canViewReports && (
               <div className={`admin-dropdown admin-search-tool ${searchToolOpen ? 'open' : ''}`} ref={searchToolRef}>
                 <button
@@ -3290,40 +3302,9 @@ export default function AdminPanel() {
               </button>
               <div className="admin-dropdown-menu admin-account-menu">
                 <Link to="/profile">پروفایل من</Link>
-                <Link to="/profile#password">تنظیمات حساب</Link>
-                <Link to="/admin-notifications">اعلان‌ها</Link>
-                {canViewReports && <Link to="/admin-reports">گزارش‌ها</Link>}
                 <button type="button" onClick={logout}>خروج</button>
               </div>
             </div>
-          </div>
-          <div className="admin-main-actions admin-main-actions--modern">
-            {heroPrimaryActions.map((item) => (
-              item.to ? (
-                <Link key={item.key} className="admin-btn" to={item.to}>{item.label}</Link>
-              ) : (
-                <button key={item.key} type="button" className="admin-btn" onClick={item.onClick} title={item.title || item.label}>
-                  {item.label}
-                </button>
-              )
-            ))}
-            {!!heroSecondaryActions.length && (
-              <div className="admin-dropdown admin-actions-more">
-                <button type="button" className="admin-btn admin-btn--more">
-                  بیشتر
-                  <span className="admin-account-caret" aria-hidden="true">▾</span>
-                </button>
-                <div className="admin-dropdown-menu admin-actions-menu">
-                  {heroSecondaryActions.map((item) => (
-                    item.to ? (
-                      <Link key={item.key} to={item.to}>{item.label}</Link>
-                    ) : (
-                      <button key={item.key} type="button" onClick={item.onClick}>{item.label}</button>
-                    )
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
           <div className="admin-main-actions admin-main-actions--legacy" hidden aria-hidden="true">
             {canManageUsers && <Link className="admin-btn" to="/admin-users">مدیریت کاربران</Link>}
@@ -3506,7 +3487,7 @@ export default function AdminPanel() {
           </div>
 
           <div className="admin-executive-strip__quick">
-            <QuickActionRail actions={executiveQuickActions} />
+            <QuickActionRail actions={focusedExecutiveQuickActions} />
           </div>
 
           <div className="admin-executive-strip__panels">
@@ -3623,17 +3604,10 @@ export default function AdminPanel() {
         </div>
       </div>
 
-      {(!!visibleActionItems.length || canViewReports) && (
+      {canViewReports && (
         <div className="admin-action-strip">
-          {visibleActionItems.map((item) => (
-            <a key={item.href} className={`admin-chip ${item.tone}`} href={item.href}>{item.label}</a>
-          ))}
-          {canViewReports && (
-            <>
-              <button type="button" className="admin-chip slate" onClick={printAccessMatrixReport}>چاپ ماتریس دسترسی</button>
-              <button type="button" className="admin-chip info" onClick={exportAccessMatrixCsv}>خروجی CSV دسترسی</button>
-            </>
-          )}
+          <button type="button" className="admin-chip slate" onClick={printAccessMatrixReport}>چاپ ماتریس دسترسی</button>
+          <button type="button" className="admin-chip info" onClick={exportAccessMatrixCsv}>خروجی CSV دسترسی</button>
         </div>
       )}
       {canViewReports && (
@@ -3889,7 +3863,7 @@ export default function AdminPanel() {
                             >
                               {busy[`contact:${item.id}`] ? '...' : 'خوانده شد'}
                             </button>
-                            <Link className="admin-inbox-link" to="/admin-contact">باز کردن پیام‌ها</Link>
+                            <Link className="admin-inbox-link" to="/admin-communications">باز کردن مرکز ارتباطات</Link>
                           </>
                         )}
                       </div>
@@ -3953,7 +3927,7 @@ export default function AdminPanel() {
           <div className="admin-activity-head">
             <h3>دسترسی سریع مدیریت</h3>
           </div>
-          {!!visibleQuickLinks.length ? (
+          {(!!visibleQuickLinks.length || (canManageContent && !hasSheetTemplatesQuickLink)) ? (
             <div className="admin-quick admin-quick-compact">
               {visibleQuickLinks.map((item) => (
                 <Link key={item.to} to={item.to}>{item.label}</Link>

@@ -499,6 +499,27 @@
   box-shadow: 0 10px 20px rgba(2, 8, 20, 0.35);
 }
 
+.admin-create-school-top {
+  min-height: 44px;
+  padding: 9px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(45, 212, 191, 0.32);
+  background: linear-gradient(145deg, #0f766e, #0d9488);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  box-shadow: 0 12px 24px rgba(15, 118, 110, 0.22);
+}
+
+.admin-create-school-top:hover {
+  transform: translateY(-1px);
+  background: linear-gradient(145deg, #0d9488, #14b8a6);
+  box-shadow: 0 16px 28px rgba(20, 184, 166, 0.28);
+}
+
 .admin-search-tool-menu {
   width: min(720px, 92vw);
   max-height: min(70vh, 620px);

@@ -6,7 +6,7 @@ import { API_BASE } from '../config/api';
 
 export default function Contact() {
   const { settings } = useSiteSettings();
-  const [form, setForm] = useState({ name: '', phone: '', email: '', message: '' });
+  const [form, setForm] = useState({ name: '', phone: '', email: '', type: 'contact', message: '' });
   const [status, setStatus] = useState('');
   const [sending, setSending] = useState(false);
 
@@ -34,7 +34,7 @@ export default function Contact() {
         return;
       }
       setStatus('پیام شما ثبت شد.');
-      setForm({ name: '', phone: '', email: '', message: '' });
+      setForm({ name: '', phone: '', email: '', type: 'contact', message: '' });
     } catch {
       setStatus('خطا در ارسال پیام.');
     } finally {
@@ -92,6 +92,14 @@ export default function Contact() {
               value={form.email}
               onChange={(e) => handleChange('email', e.target.value)}
             />
+            <select
+              value={form.type}
+              onChange={(e) => handleChange('type', e.target.value)}
+            >
+              <option value="contact">پیام تماس</option>
+              <option value="suggestion">پیشنهاد</option>
+              <option value="complaint">انتقاد / شکایت</option>
+            </select>
             <textarea
               rows="4"
               placeholder="متن پیام"
@@ -108,7 +116,7 @@ export default function Contact() {
 
       <div className="contact-support" id="support">
         <h3>پشتیبانی</h3>
-        <p>ساعات کاری: {settings?.hoursText || 'شنبه تا پنج‌شنبه 08:00 - 17:00'}</p>
+        <p>خدمات راه‌اندازی: {settings?.hoursText || 'دمو، تنظیم، آموزش و پشتیبانی'}</p>
         <p>برای راهنمایی بیشتر می‌توانید با تیم پشتیبانی تماس بگیرید.</p>
       </div>
     </section>

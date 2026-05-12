@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import useSiteSettings from '../hooks/useSiteSettings';
+import { normalizeBrandName, normalizeBrandSubtitle } from '../utils/brand';
 import './AdminEnrollmentPrint.css';
 
 import { API_BASE } from '../config/api';
@@ -54,6 +55,8 @@ export default function AdminEnrollmentPrint() {
   const logoUrl = settings?.logoUrl
     ? (settings.logoUrl.startsWith('http') ? settings.logoUrl : `${API_BASE}/${settings.logoUrl}`)
     : '';
+  const brandName = normalizeBrandName(settings?.brandName);
+  const brandSubtitle = normalizeBrandSubtitle(settings?.brandSubtitle);
 
   return (
     <section className="admin-print-page">
@@ -62,17 +65,17 @@ export default function AdminEnrollmentPrint() {
           {logoUrl ? (
             <img src={logoUrl} alt="logo" />
           ) : (
-            <div className="print-logo-fallback">E</div>
+            <div className="print-logo-fallback">س</div>
           )}
           <div>
-            <strong>{settings?.brandName || 'مدرسه ایمان'}</strong>
-            <span>{settings?.brandSubtitle || 'Academy Pro'}</span>
+            <strong>{brandName}</strong>
+            <span>{brandSubtitle}</span>
           </div>
         </div>
         <div className="print-contact">
-          <span>{settings?.contactLabel || 'تماس'}</span>
+          <span>{settings?.contactLabel || 'مشوره فروش'}</span>
           <strong>{settings?.contactPhone || '0700000000'}</strong>
-          <span>{settings?.hoursText || 'شنبه تا پنج‌شنبه 08:00 - 17:00'}</span>
+          <span>{settings?.hoursText || 'دمو، تنظیم، آموزش و پشتیبانی'}</span>
         </div>
       </header>
 

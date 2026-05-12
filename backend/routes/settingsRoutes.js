@@ -212,12 +212,12 @@ const normalizeVirtualMenuItems = (settings) => {
 };
 
 const defaultSettings = () => ({
-  brandName: 'مدرسه ایمان',
-  brandSubtitle: 'Academy Pro',
+  brandName: 'سیما',
+  brandSubtitle: 'سیستم مدیریت هوشمند مکاتیب افغانستان',
   logoUrl: '',
-  hoursLabel: 'ساعات کاری',
-  hoursText: 'شنبه تا پنج‌شنبه 08:00 - 17:00',
-  contactLabel: 'تماس با ما',
+  hoursLabel: 'راه‌اندازی سیستم',
+  hoursText: 'دمو، تنظیم، آموزش و پشتیبانی',
+  contactLabel: 'مشوره فروش',
   contactPhone: '0702855557',
   contactEmail: 'imanschool.official@gmail.com',
   contactAddress: 'ناحیه 5 کابل افغانستان',
@@ -229,23 +229,66 @@ const defaultSettings = () => ({
   footerShowLinks: true,
   footerShowContact: true,
   footerShowCopyright: true,
-  footerHoursTitle: 'ساعات کاری',
-  footerSocialTitle: 'شبکه‌های اجتماعی',
-  footerLinksTitle: 'لینک‌های مفید',
-  footerContactTitle: 'ارتباط با ما',
+  footerHoursTitle: 'خدمات راه‌اندازی',
+  footerSocialTitle: 'شبکه‌های ارتباطی',
+  footerLinksTitle: 'لینک‌های محصول',
+  footerContactTitle: 'تماس برای خرید و دمو',
   footerContactText: '',
   footerNote: '',
   footerCopyright: '',
+  platformInboxEmails: {
+    official: '',
+    personal: '',
+    sendDemo: true,
+    sendContact: true,
+    sendSuggestion: true,
+    sendComplaint: true
+  },
 
-  homeHeroBadge: 'مدرسه ایمان | سیستم مدیریت یادگیری هوشمند',
-  homeHeroTitle: 'مسیر یادگیری حرفه‌ای را بسازید',
-  homeHeroHighlight: 'نظم، نظم، نتیجه',
-  homeHeroText: 'دوره‌های ساختارمند، جزوه‌های دقیق و مسیر پیشرفت روشن برای هر صنف.',
-  homeHeroPrimaryLabel: 'مشاهده صنف‌ها',
-  homeHeroPrimaryHref: '/courses',
-  homeHeroSecondaryLabel: 'ثبت نام رایگان',
-  homeHeroSecondaryHref: '/register',
-  homeHeroTags: ['صنف 1 تا 12', 'ویدیو + جزوه', 'آزمون و پیشرفت'],
+  homeHeroBadge: 'سیما | سیستم مدیریت هوشمند مکاتیب افغانستان',
+  homeHeroTitle: 'سیما؛ سیستم مدیریت هوشمند مکاتیب افغانستان',
+  homeHeroHighlight: 'مدیریت کامل مکتب در یک سیستم',
+  homeHeroText: 'مدیریت شاگردان، استادان، حاضری، فیس، امتحانات، تقسیم اوقات و گزارش‌ها در یک سیستم ساده و منظم.',
+  homeHeroPrimaryLabel: 'درخواست دمو',
+  homeHeroPrimaryHref: '/demo-request',
+  homeHeroSecondaryLabel: 'ورود به سیستم',
+  homeHeroSecondaryHref: '/login',
+  homeHeroTags: ['مدیریت شاگردان', 'فیس و حاضری', 'امتحانات و گزارش‌ها'],
+  salesQuickCards: [
+    { title: 'برای مدیریت مکتب', text: 'کنترول صنف‌ها، استادان، شاگردان، گزارش‌ها و تنظیمات عمومی.', value: 'fa-school' },
+    { title: 'برای بخش مالی', text: 'ثبت فیس، رسید پرداخت، تخفیف، باقیات و گزارش مالی.', value: 'fa-receipt' },
+    { title: 'برای آموزش', text: 'حاضری، امتحانات، نمرات، کارخانگی و تقسیم اوقات.', value: 'fa-graduation-cap' }
+  ],
+  salesModules: [
+    { title: 'مدیریت شاگردان', text: 'ثبت معلومات شخصی، صنف، سال تعلیمی، اسناد و وضعیت شاگرد.', value: 'fa-user-graduate' },
+    { title: 'مدیریت مالی', text: 'فیس ماهانه، داخله، تخفیف، پرداخت، رسید و باقیات.', value: 'fa-wallet' },
+    { title: 'مدیریت امتحانات', text: 'ثبت نمرات، جدول نتایج، کارنامه PDF و گزارش صنفی.', value: 'fa-clipboard-check' },
+    { title: 'حاضری', text: 'حاضری روزانه شاگردان، استادان و کارمندان.', value: 'fa-calendar-check' },
+    { title: 'تقسیم اوقات', text: 'تنظیم روز، ساعت، مضمون، صنف و استاد در یک برنامه منظم.', value: 'fa-calendar-days' },
+    { title: 'گزارش‌ها', text: 'گزارش مالی، آموزشی، حاضری و وضعیت عمومی مکتب.', value: 'fa-chart-line' }
+  ],
+  salesAudience: [
+    'مکاتب خصوصی',
+    'مکاتب دخترانه و پسرانه',
+    'آموزشگاه‌ها',
+    'مراکز کورس‌های آموزشی',
+    'اداره‌هایی که ثبت شاگرد، فیس و گزارشات را دیجیتال می‌کنند'
+  ],
+  salesTrustTitle: 'ساخته‌شده برای نیازهای واقعی مکاتب افغانستان',
+  salesTrustText: 'ساختار صنف‌ها، سال تعلیمی، فیس، حاضری، امتحانات و گزارش‌ها مطابق کار روزانه مکتب تنظیم می‌شود و برای هر مکتب قابل تغییر است.',
+  salesTrustPoints: ['راه‌اندازی مرحله‌به‌مرحله', 'دسترسی جداگانه برای نقش‌ها', 'گزارش‌های قابل پیگیری'],
+  salesDashboardCards: [
+    { title: 'پنل مدیریت', text: 'شاگردان و استادان | صنف‌ها و سال تعلیمی | گزارش عمومی' },
+    { title: 'پنل مالی', text: 'فیس و پرداخت‌ها | رسید و تخفیف | باقیات و گزارش مالی' },
+    { title: 'پنل استاد', text: 'حاضری روزانه | نمره‌دهی | کارخانگی و مضمون' },
+    { title: 'پنل شاگرد و والدین', text: 'نمرات و کارنامه | حاضری | برنامه درسی و اطلاعیه‌ها' }
+  ],
+  salesFaqs: [
+    { title: 'آیا این سیستم برای هر مکتب قابل تنظیم است؟', text: 'بلی، ساختار صنف‌ها، سال تعلیمی، فیس، امتحانات، نقش‌ها و گزارش‌ها مطابق نیاز هر مکتب تنظیم می‌شود.' },
+    { title: 'برای شروع استفاده از سیستم چه نیاز است؟', text: 'ابتدا معلومات پایه مکتب، صنف‌ها، استادان، شاگردان و تنظیمات مالی وارد می‌شود؛ بعد سیستم برای کاربران فعال می‌گردد.' },
+    { title: 'آیا بخش مالی و رسید پرداخت دارد؟', text: 'بلی، ثبت فیس، تخفیف، پرداخت، باقیات، رسید و گزارش مالی در ساختار سیستم پیش‌بینی شده است.' },
+    { title: 'آیا شاگردان و استادان پنل جداگانه دارند؟', text: 'بلی، هر نقش با دسترسی مناسب خود وارد سیستم می‌شود و فقط بخش‌های مربوط به خودش را می‌بیند.' }
+  ],
   homeSlides: [
     {
       badge: 'ثبت نام و شروع سریع',
@@ -279,15 +322,15 @@ const defaultSettings = () => ({
     }
   ],
   homeStats: [
-    { value: '12', text: 'صنف فعال' },
-    { value: '+80', text: 'مضمون آموزشی' },
-    { value: '24/7', text: 'دسترسی به محتوا' },
-    { value: '+8K', text: 'دانش‌آموز' }
+    { value: '6+', text: 'ماژول اصلی مدیریتی' },
+    { value: '100%', text: 'قابل تنظیم برای هر مکتب' },
+    { value: '24/7', text: 'دسترسی به گزارش‌ها' },
+    { value: '4', text: 'پنل مدیریت، مالی، استاد و شاگرد' }
   ],
   homeFeatures: [
-    { title: 'مسیر یادگیری واضح', text: 'هر درس هدف دارد و هر صنف مسیر مشخص.' },
-    { title: 'محتوای چند رسانه‌ای', text: 'ویدیو، PDF و آزمون برای یادگیری کامل.' },
-    { title: 'گزارش پیشرفت', text: 'عملکرد دانش‌آموزان به صورت دقیق قابل پیگیری است.' }
+    { title: 'مدیریت شاگردان', text: 'ثبت معلومات، صنف، اسناد و وضعیت شاگردان.' },
+    { title: 'مدیریت مالی و فیس', text: 'رسید پرداخت، تخفیف، باقیات و گزارش مالی.' },
+    { title: 'حاضری و امتحانات', text: 'حاضری روزانه، نمرات، کارنامه و گزارش صنفی.' }
   ],
   homeNews: [
     { title: 'برنامه آزمون‌های میان‌دوره', text: 'تقویم آزمون‌ها به تفکیک صنف‌ها در پنل دانش‌آموزان منتشر شد.', href: '/news' },
@@ -299,10 +342,10 @@ const defaultSettings = () => ({
     { text: 'ثبت نام و پرداخت را انجام دهید' },
     { text: 'یادگیری و آزمون را آغاز کنید' }
   ],
-  homeCtaTitle: 'برای آینده آماده اید؟',
-  homeCtaText: 'امروز ثبت نام کنید و یادگیری حرفه‌ای را شروع نمایید.',
-  homeCtaLabel: 'شروع رایگان',
-  homeCtaHref: '/register',
+  homeCtaTitle: 'می‌خواهید سیستم را برای مکتب خود فعال کنید؟',
+  homeCtaText: 'برای دریافت دمو، قیمت و راه‌اندازی با ما تماس بگیرید.',
+  homeCtaLabel: 'درخواست دمو',
+  homeCtaHref: '/demo-request',
 
   signatureUrl: '',
   signatureName: 'مدیر مکتب',
@@ -398,7 +441,7 @@ const defaultSettings = () => ({
     { title: 'لاگ‌ها', href: '/admin-logs', permission: 'view_reports', enabled: true },
     { title: 'اخبار', href: '/admin-news', permission: 'manage_content', enabled: true },
     { title: 'گالری', href: '/admin-gallery', permission: 'manage_content', enabled: true },
-    { title: 'پیام‌ها', href: '/admin-contact', permission: 'manage_content', enabled: true },
+    { title: 'مرکز ارتباطات سیما', href: '/admin-communications', permission: 'manage_platform_requests', enabled: true },
     { title: 'داده‌های آموزشی', href: '/admin-education', permission: 'manage_content', enabled: true },
     { title: 'ثبت‌نام‌ها', href: '/admin-enrollments', permission: 'manage_enrollments', enabled: true },
     { title: 'ممبرشیپ آموزشی', href: '/admin-education?section=enrollments', permission: 'manage_memberships', enabled: true },
@@ -434,6 +477,81 @@ const ensureSettings = async () => {
   } else {
     const defaults = defaultSettings();
     let shouldSave = false;
+    const brandName = String(settings.brandName || '').trim();
+    const brandSubtitle = String(settings.brandSubtitle || '').trim();
+    const heroBadge = String(settings.homeHeroBadge || '').trim();
+    const legacyBrandNames = ['مدرسه ایمان', 'سیستم مدیریت هوشمند مکتب'];
+    const legacyBrandSubtitles = ['Academy Pro', 'نرم‌افزار مدیریت مکاتب افغانستان'];
+
+    if (!brandName || legacyBrandNames.includes(brandName)) {
+      settings.brandName = defaults.brandName;
+      shouldSave = true;
+    }
+
+    if (!brandSubtitle || legacyBrandSubtitles.includes(brandSubtitle)) {
+      settings.brandSubtitle = defaults.brandSubtitle;
+      shouldSave = true;
+    }
+
+    if (!heroBadge || heroBadge.includes('مدرسه ایمان') || heroBadge.includes('Academy Pro')) {
+      settings.homeHeroBadge = defaults.homeHeroBadge;
+      shouldSave = true;
+    }
+
+    if (['ساعات کاری', ''].includes(String(settings.hoursLabel || '').trim())) {
+      settings.hoursLabel = defaults.hoursLabel;
+      shouldSave = true;
+    }
+
+    if (['شنبه تا پنج‌شنبه 08:00 - 17:00', ''].includes(String(settings.hoursText || '').trim())) {
+      settings.hoursText = defaults.hoursText;
+      shouldSave = true;
+    }
+
+    if (['تماس با ما', ''].includes(String(settings.contactLabel || '').trim())) {
+      settings.contactLabel = defaults.contactLabel;
+      shouldSave = true;
+    }
+
+    if (['مسیر یادگیری حرفه‌ای را بسازید', ''].includes(String(settings.homeHeroTitle || '').trim())) {
+      settings.homeHeroTitle = defaults.homeHeroTitle;
+      shouldSave = true;
+    }
+
+    if (['نظم، نظم، نتیجه', ''].includes(String(settings.homeHeroHighlight || '').trim())) {
+      settings.homeHeroHighlight = defaults.homeHeroHighlight;
+      shouldSave = true;
+    }
+
+    if (String(settings.homeHeroText || '').includes('دوره‌های ساختارمند')) {
+      settings.homeHeroText = defaults.homeHeroText;
+      shouldSave = true;
+    }
+
+    if (['مشاهده صنف‌ها', ''].includes(String(settings.homeHeroPrimaryLabel || '').trim())) {
+      settings.homeHeroPrimaryLabel = defaults.homeHeroPrimaryLabel;
+      settings.homeHeroPrimaryHref = defaults.homeHeroPrimaryHref;
+      shouldSave = true;
+    }
+
+    if (String(settings.homeHeroPrimaryHref || '').trim() === '/contact') {
+      settings.homeHeroPrimaryHref = defaults.homeHeroPrimaryHref;
+      shouldSave = true;
+    }
+
+    if (['ثبت نام رایگان', ''].includes(String(settings.homeHeroSecondaryLabel || '').trim())) {
+      settings.homeHeroSecondaryLabel = defaults.homeHeroSecondaryLabel;
+      settings.homeHeroSecondaryHref = defaults.homeHeroSecondaryHref;
+      shouldSave = true;
+    }
+
+    if (['/register', '/contact', ''].includes(String(settings.homeCtaHref || '').trim())) {
+      settings.homeCtaTitle = defaults.homeCtaTitle;
+      settings.homeCtaText = defaults.homeCtaText;
+      settings.homeCtaLabel = defaults.homeCtaLabel;
+      settings.homeCtaHref = defaults.homeCtaHref;
+      shouldSave = true;
+    }
 
     if (typeof settings.footerShowHours !== 'boolean') {
       settings.footerShowHours = defaults.footerShowHours;
@@ -495,8 +613,51 @@ const ensureSettings = async () => {
       shouldSave = true;
     }
 
+    if (!settings.platformInboxEmails || typeof settings.platformInboxEmails !== 'object') {
+      settings.platformInboxEmails = defaults.platformInboxEmails;
+      shouldSave = true;
+    } else {
+      const currentInbox = settings.platformInboxEmails;
+      ['official', 'personal'].forEach((key) => {
+        if (typeof currentInbox[key] !== 'string') {
+          currentInbox[key] = defaults.platformInboxEmails[key];
+          shouldSave = true;
+        }
+      });
+      ['sendDemo', 'sendContact', 'sendSuggestion', 'sendComplaint'].forEach((key) => {
+        if (typeof currentInbox[key] !== 'boolean') {
+          currentInbox[key] = defaults.platformInboxEmails[key];
+          shouldSave = true;
+        }
+      });
+    }
+
     if (!Array.isArray(settings.homeSlides) || !settings.homeSlides.length) {
       settings.homeSlides = defaults.homeSlides;
+      shouldSave = true;
+    }
+
+    [
+      'salesQuickCards',
+      'salesModules',
+      'salesAudience',
+      'salesTrustPoints',
+      'salesDashboardCards',
+      'salesFaqs'
+    ].forEach((key) => {
+      if (!Array.isArray(settings[key]) || !settings[key].length) {
+        settings[key] = defaults[key];
+        shouldSave = true;
+      }
+    });
+
+    if (typeof settings.salesTrustTitle !== 'string' || !settings.salesTrustTitle.trim()) {
+      settings.salesTrustTitle = defaults.salesTrustTitle;
+      shouldSave = true;
+    }
+
+    if (typeof settings.salesTrustText !== 'string' || !settings.salesTrustText.trim()) {
+      settings.salesTrustText = defaults.salesTrustText;
       shouldSave = true;
     }
 
@@ -542,16 +703,16 @@ router.get('/login-page', async (req, res) => {
     
     // Return only login page specific settings
     const loginSettings = {
-      brandName: settings.brandName || 'مدرسه ایمان',
-      brandSubtitle: settings.brandSubtitle || 'Academy Pro',
+      brandName: settings.brandName || 'سیما',
+      brandSubtitle: settings.brandSubtitle || 'سیستم مدیریت هوشمند مکاتیب افغانستان',
       logoUrl: settings.logoUrl || '',
-      loginPageTitle: settings.homeHeroTitle || 'مسیر یادگیری حرفه‌ای را بسازید',
-      loginPageSubtitle: settings.homeHeroHighlight || 'نظم، نظم، نتیجه',
-      loginPageText: settings.homeHeroText || 'دوره‌های ساختارمند، جزوه‌های دقیق و مسیر پیشرفت روشن برای هر صنف.',
-      primaryLabel: settings.homeHeroPrimaryLabel || 'مشاهده صنف‌ها',
-      primaryHref: settings.homeHeroPrimaryHref || '/courses',
-      secondaryLabel: settings.homeHeroSecondaryLabel || 'ثبت نام رایگان',
-      secondaryHref: settings.homeHeroSecondaryHref || '/register',
+      loginPageTitle: settings.homeHeroTitle || 'سیما؛ سیستم مدیریت هوشمند مکاتیب افغانستان',
+      loginPageSubtitle: settings.homeHeroHighlight || 'مدیریت کامل مکتب در یک سیستم',
+      loginPageText: settings.homeHeroText || 'مدیریت شاگردان، استادان، حاضری، فیس، امتحانات، تقسیم اوقات و گزارش‌ها در یک سیستم ساده و منظم.',
+      primaryLabel: settings.homeHeroPrimaryLabel || 'درخواست دمو',
+      primaryHref: settings.homeHeroPrimaryHref || '/demo-request',
+      secondaryLabel: settings.homeHeroSecondaryLabel || 'ورود به سیستم',
+      secondaryHref: settings.homeHeroSecondaryHref || '/login',
       languages: settings.languages || ['فارسی', 'English'],
       footerShowCopyright: settings.footerShowCopyright,
       footerCopyright: settings.footerCopyright,

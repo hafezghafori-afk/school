@@ -8,6 +8,7 @@ const ROLE_DEFAULT_PERMISSIONS = Object.freeze({
     'view_reports',
     'view_schedule',
     'manage_schedule',
+    'manage_platform_requests',
     'access_school_manager',
     'access_head_teacher'
   ],

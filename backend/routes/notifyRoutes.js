@@ -24,7 +24,7 @@ ${reason ? `\u062f\u0644\u06cc\u0644: ${reason}` : ''}`;
       <h3>\u0648\u0636\u0639\u06cc\u062a \u0633\u0641\u0627\u0631\u0634 \u0634\u0645\u0627</h3>
       <p>\u0633\u0641\u0627\u0631\u0634 <strong>${orderId}</strong> \u0628\u0647 \u0648\u0636\u0639\u06cc\u062a <strong>${status}</strong> \u062a\u063a\u06cc\u06cc\u0631 \u06a9\u0631\u062f.</p>
       ${reason ? `<p>\u062f\u0644\u06cc\u0644: ${reason}</p>` : ''}
-      <p>\u0628\u0627 \u0627\u062d\u062a\u0631\u0627\u0645\u060c Academy Pro</p>
+      <p>\u0628\u0627 \u0627\u062d\u062a\u0631\u0627\u0645\u060c \u0633\u06cc\u0645\u0627</p>
     </div>
   `;
 

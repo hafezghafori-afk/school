@@ -24,6 +24,42 @@ const normalizeFollowUpStatus = (value = '', fallback = 'new') => {
   return FOLLOW_UP_STATUSES.includes(fallback) ? fallback : 'new';
 };
 
+const REQUEST_TYPES = ['contact', 'demo', 'suggestion', 'complaint'];
+const TYPE_LABELS = {
+  contact: 'پیام تماس',
+  demo: 'درخواست دمو',
+  suggestion: 'پیشنهاد',
+  complaint: 'انتقاد / شکایت'
+};
+
+const normalizeRequestType = (value = '') => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return REQUEST_TYPES.includes(normalized) ? normalized : 'contact';
+};
+
+const shouldNotifyType = (settings, type) => {
+  const inbox = settings?.platformInboxEmails || {};
+  const map = {
+    demo: 'sendDemo',
+    contact: 'sendContact',
+    suggestion: 'sendSuggestion',
+    complaint: 'sendComplaint'
+  };
+  const key = map[type] || 'sendContact';
+  return inbox[key] !== false;
+};
+
+const getInboxRecipients = (settings, type) => {
+  if (!shouldNotifyType(settings, type)) return [];
+  const inbox = settings?.platformInboxEmails || {};
+  return Array.from(new Set([
+    inbox.official,
+    inbox.personal,
+    settings?.contactEmail,
+    process.env.CONTACT_EMAIL
+  ].map((item) => String(item || '').trim()).filter(Boolean)));
+};
+
 const findAdminsByLevel = async (level = '', excludeUserId = '') => {
   const normalizedLevel = normalizeFollowUpLevel(level);
   const admins = await User.find({ role: 'admin' }).select('_id role orgRole adminLevel');
@@ -36,15 +72,30 @@ const findAdminsByLevel = async (level = '', excludeUserId = '') => {
 
 router.post('/', async (req, res) => {
   try {
-    const { name, phone, email, message } = req.body || {};
+    const { name, phone, email, message, type, demoDetails } = req.body || {};
     if (!message) {
       return res.status(400).json({ success: false, message: 'متن پیام الزامی است' });
     }
+    const normalizedType = normalizeRequestType(type);
+    const cleanDemoDetails = normalizedType === 'demo' ? {
+      schoolName: String(demoDetails?.schoolName || '').trim(),
+      responsibleName: String(demoDetails?.responsibleName || name || '').trim(),
+      province: String(demoDetails?.province || '').trim(),
+      city: String(demoDetails?.city || '').trim(),
+      studentCount: String(demoDetails?.studentCount || '').trim(),
+      centerType: String(demoDetails?.centerType || '').trim(),
+      neededModules: Array.isArray(demoDetails?.neededModules)
+        ? demoDetails.neededModules.map((item) => String(item || '').trim()).filter(Boolean)
+        : []
+    } : undefined;
+
     const item = await ContactMessage.create({
       name: name || '',
       phone: phone || '',
       email: email || '',
-      message: message || ''
+      message: message || '',
+      type: normalizedType,
+      ...(cleanDemoDetails ? { demoDetails: cleanDemoDetails } : {})
     });
 
     try {
@@ -60,17 +111,32 @@ router.post('/', async (req, res) => {
         const text = 'پیام شما با موفقیت ثبت شد. تیم پشتیبانی به زودی پاسخ می‌دهد.';
         await sendMail({ to: email, subject, text, html: `<p>${text}</p>` });
       }
+      const inboxRecipients = getInboxRecipients(settings, normalizedType);
+      if (inboxRecipients.length) {
+        const demoText = cleanDemoDetails
+          ? `\nنام مکتب: ${cleanDemoDetails.schoolName || '-'}\nمسئول: ${cleanDemoDetails.responsibleName || '-'}\nولایت/شهر: ${cleanDemoDetails.province || '-'} / ${cleanDemoDetails.city || '-'}\nتعداد شاگردان: ${cleanDemoDetails.studentCount || '-'}\nنوع مرکز: ${cleanDemoDetails.centerType || '-'}\nبخش‌های مورد نیاز: ${(cleanDemoDetails.neededModules || []).join(', ') || '-'}`
+          : '';
+        const subject = `${TYPE_LABELS[normalizedType] || 'پیام'} جدید از ${cleanDemoDetails?.schoolName || name || 'بدون نام'}`;
+        const text = `نوع: ${TYPE_LABELS[normalizedType] || normalizedType}\nنام: ${name || '-'}\nایمیل: ${email || '-'}\nشماره: ${phone || '-'}${demoText}\nپیام: ${message}`;
+        await sendMail({ to: inboxRecipients.join(','), subject, text, html: `<p>${text.replace(/\n/g, '<br/>')}</p>` });
+      }
     } catch {
       // ignore email errors
     }
 
-    res.json({ success: true, item, message: 'پیام شما ثبت شد' });
+    res.json({
+      success: true,
+      item,
+      message: normalizedType === 'demo'
+        ? 'درخواست شما ثبت شد. تیم سیما برای معرفی سیستم، قیمت و راه‌اندازی با شما تماس می‌گیرد.'
+        : 'پیام شما ثبت شد'
+    });
   } catch {
     res.status(500).json({ success: false, message: 'خطا در ثبت پیام' });
   }
 });
 
-router.get('/admin', requireAuth, requireRole(['admin']), requirePermission('manage_content'), async (req, res) => {
+router.get('/admin', requireAuth, requireRole(['admin']), requirePermission('manage_platform_requests'), async (req, res) => {
   try {
     const items = await ContactMessage.find()
       .populate('followUp.updatedBy', 'name orgRole adminLevel')
@@ -82,7 +148,7 @@ router.get('/admin', requireAuth, requireRole(['admin']), requirePermission('man
   }
 });
 
-router.put('/:id/read', requireAuth, requireRole(['admin']), requirePermission('manage_content'), async (req, res) => {
+router.put('/:id/read', requireAuth, requireRole(['admin']), requirePermission('manage_platform_requests'), async (req, res) => {
   try {
     const item = await ContactMessage.findByIdAndUpdate(req.params.id, { status: 'read' }, { new: true });
     if (!item) return res.status(404).json({ success: false, message: 'پیام یافت نشد' });
@@ -92,7 +158,7 @@ router.put('/:id/read', requireAuth, requireRole(['admin']), requirePermission('
   }
 });
 
-router.put('/:id/follow-up', requireAuth, requireRole(['admin']), requirePermission('manage_content'), async (req, res) => {
+router.put('/:id/follow-up', requireAuth, requireRole(['admin']), requirePermission('manage_platform_requests'), async (req, res) => {
   try {
     const item = await ContactMessage.findById(req.params.id);
     if (!item) return res.status(404).json({ success: false, message: 'پیام یافت نشد' });
@@ -150,7 +216,7 @@ router.put('/:id/follow-up', requireAuth, requireRole(['admin']), requirePermiss
   }
 });
 
-router.delete('/:id', requireAuth, requireRole(['admin']), requirePermission('manage_content'), async (req, res) => {
+router.delete('/:id', requireAuth, requireRole(['admin']), requirePermission('manage_platform_requests'), async (req, res) => {
   try {
     const item = await ContactMessage.findByIdAndDelete(req.params.id);
     if (!item) return res.status(404).json({ success: false, message: 'پیام یافت نشد' });

@@ -39,12 +39,12 @@ const homeSlideSchema = new mongoose.Schema({
 }, { _id: false });
 
 const siteSettingsSchema = new mongoose.Schema({
-  brandName: { type: String, default: 'مدرسه ایمان' },
-  brandSubtitle: { type: String, default: 'Academy Pro' },
+  brandName: { type: String, default: 'سیما' },
+  brandSubtitle: { type: String, default: 'سیستم مدیریت هوشمند مکاتیب افغانستان' },
   logoUrl: { type: String, default: '' },
-  hoursLabel: { type: String, default: 'ساعات کاری' },
-  hoursText: { type: String, default: 'شنبه تا پنج‌شنبه 08:00 - 17:00' },
-  contactLabel: { type: String, default: 'تماس با ما' },
+  hoursLabel: { type: String, default: 'راه‌اندازی سیستم' },
+  hoursText: { type: String, default: 'دمو، تنظیم، آموزش و پشتیبانی' },
+  contactLabel: { type: String, default: 'مشوره فروش' },
   contactPhone: { type: String, default: '0702855557' },
   contactEmail: { type: String, default: 'imanschool.official@gmail.com' },
   contactAddress: { type: String, default: 'ناحیه 5 کابل افغانستان' },
@@ -56,23 +56,66 @@ const siteSettingsSchema = new mongoose.Schema({
   footerShowLinks: { type: Boolean, default: true },
   footerShowContact: { type: Boolean, default: true },
   footerShowCopyright: { type: Boolean, default: true },
-  footerHoursTitle: { type: String, default: 'ساعات کاری' },
-  footerSocialTitle: { type: String, default: 'شبکه‌های اجتماعی' },
-  footerLinksTitle: { type: String, default: 'لینک‌های مفید' },
-  footerContactTitle: { type: String, default: 'ارتباط با ما' },
+  footerHoursTitle: { type: String, default: 'خدمات راه‌اندازی' },
+  footerSocialTitle: { type: String, default: 'شبکه‌های ارتباطی' },
+  footerLinksTitle: { type: String, default: 'لینک‌های محصول' },
+  footerContactTitle: { type: String, default: 'تماس برای خرید و دمو' },
   footerContactText: { type: String, default: '' },
   footerNote: { type: String, default: '' },
   footerCopyright: { type: String, default: '' },
+  platformInboxEmails: {
+    official: { type: String, default: '' },
+    personal: { type: String, default: '' },
+    sendDemo: { type: Boolean, default: true },
+    sendContact: { type: Boolean, default: true },
+    sendSuggestion: { type: Boolean, default: true },
+    sendComplaint: { type: Boolean, default: true }
+  },
 
-  homeHeroBadge: { type: String, default: 'مدرسه ایمان | سیستم مدیریت یادگیری هوشمند' },
-  homeHeroTitle: { type: String, default: 'مسیر یادگیری حرفه‌ای را بسازید' },
-  homeHeroHighlight: { type: String, default: 'نظم، نظم، نتیجه' },
-  homeHeroText: { type: String, default: 'دوره‌های ساختارمند، جزوه‌های دقیق و مسیر پیشرفت روشن برای هر صنف.' },
-  homeHeroPrimaryLabel: { type: String, default: 'مشاهده صنف‌ها' },
-  homeHeroPrimaryHref: { type: String, default: '/courses' },
-  homeHeroSecondaryLabel: { type: String, default: 'ثبت نام رایگان' },
-  homeHeroSecondaryHref: { type: String, default: '/register' },
-  homeHeroTags: { type: [String], default: ['صنف 1 تا 12', 'ویدیو + جزوه', 'آزمون و پیشرفت'] },
+  homeHeroBadge: { type: String, default: 'سیما | سیستم مدیریت هوشمند مکاتیب افغانستان' },
+  homeHeroTitle: { type: String, default: 'سیما؛ سیستم مدیریت هوشمند مکاتیب افغانستان' },
+  homeHeroHighlight: { type: String, default: 'مدیریت کامل مکتب در یک سیستم' },
+  homeHeroText: { type: String, default: 'مدیریت شاگردان، استادان، حاضری، فیس، امتحانات، تقسیم اوقات و گزارش‌ها در یک سیستم ساده و منظم.' },
+  homeHeroPrimaryLabel: { type: String, default: 'درخواست دمو' },
+  homeHeroPrimaryHref: { type: String, default: '/demo-request' },
+  homeHeroSecondaryLabel: { type: String, default: 'ورود به سیستم' },
+  homeHeroSecondaryHref: { type: String, default: '/login' },
+  homeHeroTags: { type: [String], default: ['مدیریت شاگردان', 'فیس و حاضری', 'امتحانات و گزارش‌ها'] },
+  salesQuickCards: { type: [listSchema], default: [
+    { title: 'برای مدیریت مکتب', text: 'کنترول صنف‌ها، استادان، شاگردان، گزارش‌ها و تنظیمات عمومی.', value: 'fa-school' },
+    { title: 'برای بخش مالی', text: 'ثبت فیس، رسید پرداخت، تخفیف، باقیات و گزارش مالی.', value: 'fa-receipt' },
+    { title: 'برای آموزش', text: 'حاضری، امتحانات، نمرات، کارخانگی و تقسیم اوقات.', value: 'fa-graduation-cap' }
+  ] },
+  salesModules: { type: [listSchema], default: [
+    { title: 'مدیریت شاگردان', text: 'ثبت معلومات شخصی، صنف، سال تعلیمی، اسناد و وضعیت شاگرد.', value: 'fa-user-graduate' },
+    { title: 'مدیریت مالی', text: 'فیس ماهانه، داخله، تخفیف، پرداخت، رسید و باقیات.', value: 'fa-wallet' },
+    { title: 'مدیریت امتحانات', text: 'ثبت نمرات، جدول نتایج، کارنامه PDF و گزارش صنفی.', value: 'fa-clipboard-check' },
+    { title: 'حاضری', text: 'حاضری روزانه شاگردان، استادان و کارمندان.', value: 'fa-calendar-check' },
+    { title: 'تقسیم اوقات', text: 'تنظیم روز، ساعت، مضمون، صنف و استاد در یک برنامه منظم.', value: 'fa-calendar-days' },
+    { title: 'گزارش‌ها', text: 'گزارش مالی، آموزشی، حاضری و وضعیت عمومی مکتب.', value: 'fa-chart-line' }
+  ] },
+  salesAudience: { type: [String], default: [
+    'مکاتب خصوصی',
+    'مکاتب دخترانه و پسرانه',
+    'آموزشگاه‌ها',
+    'مراکز کورس‌های آموزشی',
+    'اداره‌هایی که ثبت شاگرد، فیس و گزارشات را دیجیتال می‌کنند'
+  ] },
+  salesTrustTitle: { type: String, default: 'ساخته‌شده برای نیازهای واقعی مکاتب افغانستان' },
+  salesTrustText: { type: String, default: 'ساختار صنف‌ها، سال تعلیمی، فیس، حاضری، امتحانات و گزارش‌ها مطابق کار روزانه مکتب تنظیم می‌شود و برای هر مکتب قابل تغییر است.' },
+  salesTrustPoints: { type: [String], default: ['راه‌اندازی مرحله‌به‌مرحله', 'دسترسی جداگانه برای نقش‌ها', 'گزارش‌های قابل پیگیری'] },
+  salesDashboardCards: { type: [listSchema], default: [
+    { title: 'پنل مدیریت', text: 'شاگردان و استادان | صنف‌ها و سال تعلیمی | گزارش عمومی' },
+    { title: 'پنل مالی', text: 'فیس و پرداخت‌ها | رسید و تخفیف | باقیات و گزارش مالی' },
+    { title: 'پنل استاد', text: 'حاضری روزانه | نمره‌دهی | کارخانگی و مضمون' },
+    { title: 'پنل شاگرد و والدین', text: 'نمرات و کارنامه | حاضری | برنامه درسی و اطلاعیه‌ها' }
+  ] },
+  salesFaqs: { type: [listSchema], default: [
+    { title: 'آیا این سیستم برای هر مکتب قابل تنظیم است؟', text: 'بلی، ساختار صنف‌ها، سال تعلیمی، فیس، امتحانات، نقش‌ها و گزارش‌ها مطابق نیاز هر مکتب تنظیم می‌شود.' },
+    { title: 'برای شروع استفاده از سیستم چه نیاز است؟', text: 'ابتدا معلومات پایه مکتب، صنف‌ها، استادان، شاگردان و تنظیمات مالی وارد می‌شود؛ بعد سیستم برای کاربران فعال می‌گردد.' },
+    { title: 'آیا بخش مالی و رسید پرداخت دارد؟', text: 'بلی، ثبت فیس، تخفیف، پرداخت، باقیات، رسید و گزارش مالی در ساختار سیستم پیش‌بینی شده است.' },
+    { title: 'آیا شاگردان و استادان پنل جداگانه دارند؟', text: 'بلی، هر نقش با دسترسی مناسب خود وارد سیستم می‌شود و فقط بخش‌های مربوط به خودش را می‌بیند.' }
+  ] },
   homeSlides: { type: [homeSlideSchema], default: [
     {
       badge: 'ثبت نام و شروع سریع',
@@ -106,15 +149,15 @@ const siteSettingsSchema = new mongoose.Schema({
     }
   ] },
   homeStats: { type: [listSchema], default: [
-    { value: '12', text: 'صنف فعال' },
-    { value: '+80', text: 'مضمون آموزشی' },
-    { value: '24/7', text: 'دسترسی به محتوا' },
-    { value: '+8K', text: 'دانش‌آموز' }
+    { value: '6+', text: 'ماژول اصلی مدیریتی' },
+    { value: '100%', text: 'قابل تنظیم برای هر مکتب' },
+    { value: '24/7', text: 'دسترسی به گزارش‌ها' },
+    { value: '4', text: 'پنل مدیریت، مالی، استاد و شاگرد' }
   ] },
   homeFeatures: { type: [listSchema], default: [
-    { title: 'مسیر یادگیری واضح', text: 'هر درس هدف دارد و هر صنف مسیر مشخص.' },
-    { title: 'محتوای چند رسانه‌ای', text: 'ویدیو، PDF و آزمون برای یادگیری کامل.' },
-    { title: 'گزارش پیشرفت', text: 'عملکرد دانش‌آموزان به صورت دقیق قابل پیگیری است.' }
+    { title: 'مدیریت شاگردان', text: 'ثبت معلومات، صنف، اسناد و وضعیت شاگردان.' },
+    { title: 'مدیریت مالی و فیس', text: 'رسید پرداخت، تخفیف، باقیات و گزارش مالی.' },
+    { title: 'حاضری و امتحانات', text: 'حاضری روزانه، نمرات، کارنامه و گزارش صنفی.' }
   ] },
   homeNews: { type: [listSchema], default: [
     { title: 'برنامه آزمون‌های میان‌دوره', text: 'تقویم آزمون‌ها به تفکیک صنف‌ها در پنل دانش‌آموزان منتشر شد.', href: '/news' },
@@ -129,7 +172,7 @@ const siteSettingsSchema = new mongoose.Schema({
   homeCtaTitle: { type: String, default: 'برای آینده آماده اید؟' },
   homeCtaText: { type: String, default: 'امروز ثبت نام کنید و یادگیری حرفه‌ای را شروع نمایید.' },
   homeCtaLabel: { type: String, default: 'شروع رایگان' },
-  homeCtaHref: { type: String, default: '/register' },
+  homeCtaHref: { type: String, default: '/demo-request' },
 
   studentIdFormats: {
     registrationIdFormat: { type: String, default: 'REG-{YYYY}-{SEQ}' },

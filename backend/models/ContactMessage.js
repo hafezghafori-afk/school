@@ -5,6 +5,16 @@ const contactMessageSchema = new mongoose.Schema({
   phone: { type: String, default: '' },
   email: { type: String, default: '' },
   message: { type: String, required: true },
+  type: { type: String, enum: ['contact', 'demo', 'suggestion', 'complaint'], default: 'contact' },
+  demoDetails: {
+    schoolName: { type: String, default: '' },
+    responsibleName: { type: String, default: '' },
+    province: { type: String, default: '' },
+    city: { type: String, default: '' },
+    studentCount: { type: String, default: '' },
+    centerType: { type: String, default: '' },
+    neededModules: { type: [String], default: [] }
+  },
   status: { type: String, enum: ['new', 'read'], default: 'new' },
   followUp: {
     assignedLevel: {

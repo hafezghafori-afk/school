@@ -9,6 +9,7 @@ import { ToastProvider } from './components/ui/toast';
 import useSiteSettings from './hooks/useSiteSettings';
 import { API_BASE, API_ORIGIN } from './config/api';
 import { formatAfghanDate, formatAfghanDateTime, formatAfghanTime } from './utils/afghanDate';
+import { normalizeBrandName, normalizeBrandSubtitle } from './utils/brand';
 
 const Register = lazy(() => import('./pages/Register'));
 const Login = lazy(() => import('./pages/LoginNew'));
@@ -56,6 +57,7 @@ const FAQ = lazy(() => import('./pages/FAQ'));
 const Terms = lazy(() => import('./pages/Terms'));
 const About = lazy(() => import('./pages/About'));
 const Contact = lazy(() => import('./pages/Contact'));
+const DemoRequest = lazy(() => import('./pages/DemoRequest'));
 const AdminNews = lazy(() => import('./pages/AdminNews'));
 const AdminGallery = lazy(() => import('./pages/AdminGallery'));
 const AdminContact = lazy(() => import('./pages/AdminContact'));
@@ -117,6 +119,7 @@ const routePrefetchers = {
   login: () => import('./pages/Login'),
   faq: () => import('./pages/FAQ'),
   contact: () => import('./pages/Contact'),
+  demoRequest: () => import('./pages/DemoRequest'),
   about: () => import('./pages/About'),
   terms: () => import('./pages/Terms'),
   adminSettings: () => import('./pages/AdminSettings'),
@@ -178,6 +181,7 @@ const routePrefetchersByPath = {
   '/admin-login': routePrefetchers.login,
   '/faq': routePrefetchers.faq,
   '/contact': routePrefetchers.contact,
+  '/demo-request': routePrefetchers.demoRequest,
   '/about': routePrefetchers.about,
   '/terms': routePrefetchers.terms,
   '/admin-settings': routePrefetchers.adminSettings,
@@ -247,7 +251,7 @@ const API_HEALTH_POLL_MS = 30 * 1000;
 const MENU_NEWS_SEEN_AT_STORAGE_KEY = 'school_menu_seen_news_at_v1';
 const MENU_CHAT_SEEN_AT_STORAGE_KEY = 'school_menu_seen_chat_at_v1';
 const MENU_ACTIVITY_POLL_MS = 60 * 1000;
-const MEGA_MENU_CLOSE_DELAY_MS = 180;
+const MEGA_MENU_CLOSE_DELAY_MS = 520;
 const MEGA_MENU_BLUEPRINTS = {
   home: {
     tone: 'home',
@@ -370,6 +374,39 @@ const QUICK_LINKS = [
   { title: 'ورود عمومی', href: '/login', icon: 'fa-right-to-bracket', group: 'ورود / ثبت‌نام' }
 ];
 
+const SALES_PUBLIC_MENU = [
+  {
+    title: 'خانه',
+    href: '/',
+    icon: 'fa-house',
+    enabled: true
+  },
+  {
+    title: 'امکانات سیستم',
+    href: '/#modules',
+    icon: 'fa-layer-group',
+    enabled: true
+  },
+  {
+    title: 'برای مکاتب',
+    href: '/#schools',
+    icon: 'fa-school',
+    enabled: true
+  },
+  {
+    title: 'درباره سیستم',
+    href: '/about',
+    icon: 'fa-circle-info',
+    enabled: true
+  },
+  {
+    title: 'تماس و دمو',
+    href: '/demo-request',
+    icon: 'fa-headset',
+    enabled: true
+  }
+];
+
 const getTokenClaims = () => {
   const token = localStorage.getItem('token');
   if (!token || !token.includes('.')) return {};
@@ -413,14 +450,14 @@ const getStoredEffectivePermissions = () => {
     const raw = localStorage.getItem('effectivePermissions');
     if (!raw) {
       if (isGeneralPresident) {
-        return ['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_finance', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_school_manager', 'access_head_teacher'];
+        return ['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_finance', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'manage_platform_requests', 'access_school_manager', 'access_head_teacher'];
       }
       return [];
     }
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
       if (isGeneralPresident) {
-        return ['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_finance', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_school_manager', 'access_head_teacher'];
+        return ['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_finance', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'manage_platform_requests', 'access_school_manager', 'access_head_teacher'];
       }
       return [];
     }
@@ -434,6 +471,7 @@ const getStoredEffectivePermissions = () => {
         'view_reports',
         'view_schedule',
         'manage_schedule',
+        'manage_platform_requests',
         'access_school_manager',
         'access_head_teacher',
         ...parsed
@@ -442,7 +480,7 @@ const getStoredEffectivePermissions = () => {
     return parsed;
   } catch {
     if (isGeneralPresident) {
-      return ['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_finance', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_school_manager', 'access_head_teacher'];
+      return ['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_finance', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'manage_platform_requests', 'access_school_manager', 'access_head_teacher'];
     }
     return [];
   }
@@ -919,11 +957,15 @@ function AppShell() {
   const galleryPoolLoadedRef = useRef(false);
   const remoteQueryCacheRef = useRef(new Map());
   const searchBoxRef = useRef(null);
+  const profileMenuRef = useRef(null);
   const searchResultRefs = useRef([]);
   const megaCloseTimerRef = useRef(null);
   const lastScrollYRef = useRef(0);
   const prefetchedRoutesRef = useRef(new Set());
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const { settings } = useSiteSettings();
+  const displayBrandName = normalizeBrandName(settings?.brandName);
+  const displayBrandSubtitle = normalizeBrandSubtitle(settings?.brandSubtitle);
   const menuBlueprintLibrary = useMemo(
     () => buildMenuBlueprintLibrary(settings?.menuBlueprints),
     [settings?.menuBlueprints]
@@ -982,7 +1024,11 @@ function AppShell() {
     return formatAfghanTime(apiHealth.checkedAt, { hour: '2-digit', minute: '2-digit' });
   }, [apiHealth.checkedAt]);
 
-  const menuItems = (settings?.mainMenu || []).filter((item) => item && item.enabled !== false);
+  const useSalesMenu = !isDashboardArea;
+  const menuItems = (useSalesMenu
+    ? SALES_PUBLIC_MENU
+    : (settings?.mainMenu || [])
+  ).filter((item) => item && item.enabled !== false);
   const hasLoginMenu = menuItems.some((item) => isLoginMenuItem(item));
   const hasRegisterMenu = menuItems.some((item) => isRegisterMenuItem(item));
   const visibleMenuItems = (() => {
@@ -1327,6 +1373,17 @@ function AppShell() {
       setOpenMegaDropdownKey((prev) => (itemKey && prev !== itemKey ? prev : ''));
       megaCloseTimerRef.current = null;
     }, MEGA_MENU_CLOSE_DELAY_MS);
+  };
+
+  const toggleMegaDropdown = (event, itemKey, panelConfig) => {
+    event.preventDefault();
+    event.stopPropagation();
+    clearMegaCloseTimer();
+    if (openMegaDropdownKey === itemKey) {
+      setOpenMegaDropdownKey('');
+      return;
+    }
+    openMegaDropdown(itemKey, event.currentTarget.closest?.('.nav-mega'), panelConfig);
   };
 
   const handleMegaLinkKeyDown = (event, itemKey) => {
@@ -2030,6 +2087,19 @@ function AppShell() {
   }, [path]);
 
   useEffect(() => {
+    if (!location.hash) return undefined;
+    const targetId = location.hash.slice(1);
+    if (!targetId) return undefined;
+    const timerId = window.setTimeout(() => {
+      const target = document.getElementById(targetId);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 80);
+    return () => window.clearTimeout(timerId);
+  }, [location.hash, path]);
+
+  useEffect(() => {
     if (!mobileNavOpen) {
       setOpenMobileGroups({});
     }
@@ -2062,6 +2132,27 @@ function AppShell() {
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
   }, []);
+
+  useEffect(() => {
+    if (!profileMenuOpen) return undefined;
+    const handlePointerDown = (event) => {
+      if (profileMenuRef.current?.contains(event.target)) return;
+      setProfileMenuOpen(false);
+    };
+    const handleEsc = (event) => {
+      if (event.key === 'Escape') setProfileMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleEsc);
+    };
+  }, [profileMenuOpen]);
+
+  useEffect(() => {
+    setProfileMenuOpen(false);
+  }, [path]);
 
   const loginRoleOptions = [
     {
@@ -2110,8 +2201,16 @@ function AppShell() {
   );
 
   const profileMenu = authed ? (
-    <div className="nav-dropdown nav-profile" tabIndex="0">
-      <span className="nav-link nav-profile-trigger">
+    <div className={`nav-dropdown nav-profile ${profileMenuOpen ? 'open' : ''}`} ref={profileMenuRef}>
+      <button
+        type="button"
+        className="nav-link nav-link-button nav-profile-trigger"
+        onClick={(event) => {
+          event.preventDefault();
+          setProfileMenuOpen((open) => !open);
+        }}
+        aria-expanded={profileMenuOpen}
+      >
         {userAvatarSrc ? (
           <img className="nav-avatar-img" src={userAvatarSrc} alt="avatar" loading="lazy" decoding="async" />
         ) : (
@@ -2119,7 +2218,7 @@ function AppShell() {
         )}
         <span className="nav-name">{userName}</span>
         <i className="fa fa-angle-down" aria-hidden="true" />
-      </span>
+      </button>
       <div className="nav-menu nav-menu-right nav-menu-profile-card">
         <div className="nav-menu-profile-head">
           {userAvatarSrc ? (
@@ -2138,27 +2237,30 @@ function AppShell() {
 
         <div className="nav-menu-group">
           <div className="nav-menu-group-label">{'حساب کاربری'}</div>
-          <Link to="/dashboard" {...getPrefetchHandlers('/dashboard')}>{'داشبورد'}</Link>
-          <Link to="/profile" {...getPrefetchHandlers('/profile')}>{'پروفایل'}</Link>
-        </div>
-
-        <div className="nav-menu-group">
-          <div className="nav-menu-group-label">{'تنظیمات'}</div>
-          {role === 'admin' && <Link to="/admin-settings" {...getPrefetchHandlers('/admin-settings')}>{'مدیریت منوها'}</Link>}
           <button
+            type="button"
             className="nav-menu-btn"
             onClick={() => {
-              window.location.href = '/profile#password';
-              window.dispatchEvent(new Event('hashchange'));
+              setProfileMenuOpen(false);
+              navigate('/profile');
             }}
           >
-            {'تغییر رمز عبور'}
+            {'پروفایل'}
           </button>
         </div>
 
         <div className="nav-menu-group">
           <div className="nav-menu-group-label">{'اقدام'}</div>
-          <button className="nav-menu-btn danger" onClick={logout}>{'خروج از سیستم'}</button>
+          <button
+            type="button"
+            className="nav-menu-btn danger"
+            onClick={() => {
+              setProfileMenuOpen(false);
+              logout();
+            }}
+          >
+            {'خروج از سیستم'}
+          </button>
         </div>
       </div>
     </div>
@@ -2270,15 +2372,22 @@ function AppShell() {
             e.currentTarget.blur();
           }}
         >
-          <span className="nav-link">
+          <button
+            type="button"
+            className="nav-link nav-link-button"
+            onClick={(e) => toggleMegaDropdown(e, itemKey, megaPanelConfig)}
+            aria-expanded={openMegaDropdownKey === itemKey}
+          >
             {item.icon && <i className={`fa ${item.icon}`} aria-hidden="true" />}
             <span className="nav-link-text">{item.title}</span>
             {renderMenuUnreadIndicator(item.href)}
             <i className="fa fa-angle-down" aria-hidden="true" />
-          </span>
+          </button>
           <div
             className={`nav-menu nav-menu-mega mega-size-${megaPanelConfig.size}`}
             data-preview-key={previewTargetKey}
+            onMouseEnter={clearMegaCloseTimer}
+            onMouseLeave={() => scheduleMegaDropdownClose(itemKey)}
             style={{
               '--mega-panel-width': `${megaPanelConfig.width}px`,
               '--mega-panel-min-width': `${megaPanelConfig.minWidth}px`,
@@ -2478,8 +2587,8 @@ function AppShell() {
     );
   };
 
-  const showMobileRegisterShortcut = !authed && !hasRegisterMenu;
-  const showMobileLoginShortcut = !authed && !hasLoginMenu;
+  const showMobileRegisterShortcut = !authed;
+  const showMobileLoginShortcut = false;
   const showMobileAccountShortcuts = authed;
   const showMobileDrawerCta = showMobileRegisterShortcut || showMobileLoginShortcut || showMobileAccountShortcuts;
   const adminRoute = (permission, element, deniedMessage) => (
@@ -2504,54 +2613,55 @@ function AppShell() {
       <header className={`site-header ${headerHidden ? 'is-hidden' : ''}`}>
         <div className="topbar">
           <div className="topbar-lang">
-            <button className="lang-btn active">{settings?.languages?.[0] || 'فارسی'}</button>
-            <button className="lang-btn">{settings?.languages?.[1] || 'English'}</button>
+            <button className="lang-btn active">دمو و مشوره رایگان</button>
+            <button className="lang-btn">قابل تنظیم برای هر مکتب</button>
           </div>
 
-          <div className="topbar-search" ref={searchBoxRef}>
-            <input
-              type="text"
-              value={searchQuery}
-              placeholder={settings?.topSearchPlaceholder || 'جستجو در صنف‌ها، مضامین و دوره‌ها...'}
-              onFocus={() => setSearchOpen(true)}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setSearchOpen(true);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  setSearchOpen(false);
-                  setSearchActiveIndex(-1);
-                  return;
-                }
-                if (e.key === 'ArrowDown') {
-                  if (!activeQuickSearchResults.length) return;
-                  e.preventDefault();
+          {authed ? (
+            <div className="topbar-search" ref={searchBoxRef}>
+              <input
+                type="text"
+                value={searchQuery}
+                placeholder={settings?.topSearchPlaceholder || 'جستجو در شاگردان، فیس، حاضری، امتحانات...'}
+                onFocus={() => setSearchOpen(true)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
                   setSearchOpen(true);
-                  setSearchActiveIndex((prev) => (prev + 1) % activeQuickSearchResults.length);
-                  return;
-                }
-                if (e.key === 'ArrowUp') {
-                  if (!activeQuickSearchResults.length) return;
-                  e.preventDefault();
-                  setSearchOpen(true);
-                  setSearchActiveIndex((prev) => (prev <= 0 ? activeQuickSearchResults.length - 1 : prev - 1));
-                  return;
-                }
-                const targetItem = activeQuickSearchResults[searchActiveIndex] || activeQuickSearchResults[0];
-                if (e.key === 'Enter' && targetItem?.href) {
-                  e.preventDefault();
-                  rememberRecentSearch(targetItem);
-                  navigate(targetItem.href);
-                  setSearchOpen(false);
-                  setSearchQuery('');
-                  setSearchActiveIndex(-1);
-                }
-              }}
-            />
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setSearchOpen(false);
+                    setSearchActiveIndex(-1);
+                    return;
+                  }
+                  if (e.key === 'ArrowDown') {
+                    if (!activeQuickSearchResults.length) return;
+                    e.preventDefault();
+                    setSearchOpen(true);
+                    setSearchActiveIndex((prev) => (prev + 1) % activeQuickSearchResults.length);
+                    return;
+                  }
+                  if (e.key === 'ArrowUp') {
+                    if (!activeQuickSearchResults.length) return;
+                    e.preventDefault();
+                    setSearchOpen(true);
+                    setSearchActiveIndex((prev) => (prev <= 0 ? activeQuickSearchResults.length - 1 : prev - 1));
+                    return;
+                  }
+                  const targetItem = activeQuickSearchResults[searchActiveIndex] || activeQuickSearchResults[0];
+                  if (e.key === 'Enter' && targetItem?.href) {
+                    e.preventDefault();
+                    rememberRecentSearch(targetItem);
+                    navigate(targetItem.href);
+                    setSearchOpen(false);
+                    setSearchQuery('');
+                    setSearchActiveIndex(-1);
+                  }
+                }}
+              />
 
-            {searchOpen && (
-              <div className="topbar-search-panel">
+              {searchOpen && (
+                <div className="topbar-search-panel">
                 {!!displayQuickSearchSections.length && displayQuickSearchSections.map((section) => (
                   <div key={section.key} className="quick-search-section">
                     <div className={`quick-search-section-title ${section.clearable ? 'with-action' : ''}`}>
@@ -2658,9 +2768,15 @@ function AppShell() {
                     <span>نتیجه‌ای پیدا نشد.</span>
                   </div>
                 )}
-              </div>
-            )}
-          </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="topbar-sales-note" aria-label="تعهد راه‌اندازی">
+              <span>معرفی، دمو و قیمت‌گذاری برای مکاتب</span>
+              <strong>شروع سریع با تنظیمات اختصاصی هر مکتب</strong>
+            </div>
+          )}
         </div>
 
         <div className="midbar">
@@ -2677,19 +2793,19 @@ function AppShell() {
                 fetchPriority="high"
               />
             ) : (
-              <span className="brand-mark">E</span>
+              <span className="brand-mark">س</span>
             )}
             <div>
-              <strong>{settings?.brandName || 'مدرسه ایمان'}</strong>
-              <span>{settings?.brandSubtitle || 'Academy Pro'}</span>
+              <strong>{displayBrandName}</strong>
+              <span>{displayBrandSubtitle}</span>
             </div>
           </div>
           <div className="midbar-hours">
-            <span>{settings?.hoursLabel || 'ساعات کاری'}</span>
-            <strong>{settings?.hoursText || 'شنبه تا پنج‌شنبه 08:00 - 17:00'}</strong>
+            <span>راه‌اندازی سیستم</span>
+            <strong>دمو، تنظیم، آموزش و پشتیبانی</strong>
           </div>
           <div className="midbar-contact">
-            <span>{settings?.contactLabel || 'تماس با ما'}</span>
+            <span>مشوره فروش</span>
             <strong>{settings?.contactPhone || '0702855557'}</strong>
           </div>
         </div>
@@ -2705,12 +2821,15 @@ function AppShell() {
                   {!authed && (
                     <>
                       {!hasRegisterMenu && (
-                        <Link to="/register" className="nav-action-btn cta" {...getPrefetchHandlers('/register')}>
-                          <i className="fa fa-user-plus" aria-hidden="true" />
-                          <span>ثبت‌نام آنلاین</span>
+                        <Link to="/demo-request" className="nav-action-btn cta" {...getPrefetchHandlers('/demo-request')}>
+                          <i className="fa fa-headset" aria-hidden="true" />
+                          <span>درخواست دمو</span>
                         </Link>
                       )}
-                      {!hasLoginMenu && loginDropdown}
+                      <Link to="/login" className="nav-action-btn ghost" {...getPrefetchHandlers('/login')}>
+                        <i className="fa fa-right-to-bracket" aria-hidden="true" />
+                        <span>ورود به سیستم</span>
+                      </Link>
                     </>
                   )}
                   {authed && (
@@ -2735,16 +2854,15 @@ function AppShell() {
                   <span />
                 </button>
                 <div className="mobile-nav-title">
-                  <strong>{settings?.brandName || 'مدرسه ایمان'}</strong>
-                  <span>منوی سایت</span>
+                  <strong>{displayBrandName}</strong>
+                  <span>معرفی محصول</span>
                 </div>
                 <div className="mobile-nav-shortcuts">
                   {!authed ? (
-                    !hasLoginMenu ? (
+                    <>
+                      <Link to="/demo-request" className="mobile-shortcut-btn" {...getPrefetchHandlers('/demo-request')}>دمو</Link>
                       <Link to="/login" className="mobile-shortcut-btn" {...getPrefetchHandlers('/login')}>ورود</Link>
-                    ) : (!hasRegisterMenu ? (
-                      <Link to="/register" className="mobile-shortcut-btn" {...getPrefetchHandlers('/register')}>ثبت‌نام</Link>
-                    ) : null)
+                    </>
                   ) : (
                     <Link to="/dashboard" className="mobile-shortcut-btn" {...getPrefetchHandlers('/dashboard')}>داشبورد</Link>
                   )}
@@ -2773,8 +2891,8 @@ function AppShell() {
             >
               <div className="mobile-drawer-head">
                 <div>
-                  <strong>{settings?.brandName || 'مدرسه ایمان'}</strong>
-                  <span>دسترسی سریع به بخش‌های سایت</span>
+                  <strong>{displayBrandName}</strong>
+                  <span>دسترسی سریع به معرفی محصول</span>
                 </div>
                 <button type="button" className="mobile-drawer-close" onClick={closeMobileNav}>×</button>
               </div>
@@ -2784,10 +2902,7 @@ function AppShell() {
                   {showMobileDrawerCta && (
                     <div className="mobile-drawer-cta">
                       {showMobileRegisterShortcut && (
-                        <Link to="/register" {...getPrefetchHandlers('/register')}>ثبت‌نام آنلاین</Link>
-                      )}
-                      {showMobileLoginShortcut && (
-                        <Link to="/login" {...getPrefetchHandlers('/login')}>ورود به سیستم</Link>
+                        <Link to="/demo-request" {...getPrefetchHandlers('/demo-request')}>درخواست دمو</Link>
                       )}
                       {authed && (
                         <>
@@ -2799,27 +2914,26 @@ function AppShell() {
                   )}
 
                   <div className="mobile-drawer-shortcuts-grid">
-                    <Link to="/courses" className="mobile-mini-link" {...getPrefetchHandlers('/courses')}>
-                      <i className="fa fa-graduation-cap" aria-hidden="true" />
-                      <span>{'صنف‌ها'}</span>
+                    <Link to="/#modules" className="mobile-mini-link" {...getPrefetchHandlers('/')}>
+                      <i className="fa fa-layer-group" aria-hidden="true" />
+                      <span>{'ماژول‌ها'}</span>
                     </Link>
-                    <Link to="/news" className="mobile-mini-link" {...getPrefetchHandlers('/news')}>
-                      <i className="fa fa-newspaper" aria-hidden="true" />
-                      <span>{'اخبار'}</span>
-                      {renderMenuUnreadIndicator('/news', { compact: true })}
+                    <Link to="/#modules" className="mobile-mini-link" {...getPrefetchHandlers('/')}>
+                      <i className="fa fa-wallet" aria-hidden="true" />
+                      <span>{'مالی'}</span>
                     </Link>
-                    <Link to="/gallery" className="mobile-mini-link" {...getPrefetchHandlers('/gallery')}>
-                      <i className="fa fa-images" aria-hidden="true" />
-                      <span>{'گالری'}</span>
+                    <Link to="/contact" className="mobile-mini-link" {...getPrefetchHandlers('/contact')}>
+                      <i className="fa fa-headset" aria-hidden="true" />
+                      <span>{'مشوره'}</span>
                     </Link>
                     <Link
-                      to={authed ? '/dashboard' : '/contact'}
+                      to={authed ? '/dashboard' : '/demo-request'}
                       className="mobile-mini-link"
-                      onMouseEnter={() => prefetchRouteByHref(authed ? '/dashboard' : '/contact')}
-                      onFocus={() => prefetchRouteByHref(authed ? '/dashboard' : '/contact')}
+                      onMouseEnter={() => prefetchRouteByHref(authed ? '/dashboard' : '/demo-request')}
+                      onFocus={() => prefetchRouteByHref(authed ? '/dashboard' : '/demo-request')}
                     >
                       <i className={`fa ${authed ? 'fa-table-cells-large' : 'fa-phone'}`} aria-hidden="true" />
-                      <span>{authed ? 'داشبورد' : 'تماس'}</span>
+                      <span>{authed ? 'داشبورد' : 'دمو'}</span>
                     </Link>
                   </div>
                 </div>
@@ -2868,9 +2982,9 @@ function AppShell() {
                     <span>{'دسترسی سریع / پشتیبانی'}</span>
                   </div>
                   <div className="mobile-drawer-help-links">
-                    <Link to="/faq" {...getPrefetchHandlers('/faq')}>راهنما</Link>
-                    <Link to="/contact" {...getPrefetchHandlers('/contact')}>تماس با ما</Link>
-                    <Link to="/news" {...getPrefetchHandlers('/news')}>اعلانات {renderMenuUnreadIndicator('/news')}</Link>
+                    <Link to="/#modules" {...getPrefetchHandlers('/')}>ماژول‌ها</Link>
+                    <Link to="/demo-request" {...getPrefetchHandlers('/demo-request')}>درخواست دمو</Link>
+                    <Link to="/demo-request" {...getPrefetchHandlers('/demo-request')}>مشوره و دمو</Link>
                   </div>
                 </section>
               </div>
@@ -2970,7 +3084,11 @@ function AppShell() {
             />
             <Route
               path="/admin-contact"
-              element={adminRoute('manage_content', <AdminContact />, 'دسترسی مدیریت پیام‌ها برای این حساب فعال نیست.')}
+              element={adminRoute('manage_platform_requests', <AdminContact />, 'دسترسی مرکز ارتباطات سیما برای این حساب فعال نیست.')}
+            />
+            <Route
+              path="/admin-communications"
+              element={adminRoute('manage_platform_requests', <AdminContact />, 'دسترسی مرکز ارتباطات سیما برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-enrollments"
@@ -3106,6 +3224,7 @@ function AppShell() {
             <Route path="/terms" element={<Terms />} />
             <Route path="/about" element={<About />} />
             <Route path="/contact" element={<Contact />} />
+            <Route path="/demo-request" element={<DemoRequest />} />
             <Route path="/student-registration" element={adminRoute(['manage_enrollments', 'manage_users'], <StudentRegistration />, 'دسترسی ثبت دانش‌آموز برای این حساب فعال نیست.')} />
             <Route path="/online-registrations" element={adminRoute(['manage_enrollments', 'manage_users'], <OnlineRegistrations />, 'دسترسی مدیریت ثبت‌نام‌های آنلاین برای این حساب فعال نیست.')} />
             <Route path="/student-management" element={adminRoute('manage_users', <StudentManagement />, 'دسترسی مدیریت دانش‌آموزان برای این حساب فعال نیست.')} />

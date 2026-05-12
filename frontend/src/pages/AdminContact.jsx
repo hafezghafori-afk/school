@@ -8,11 +8,19 @@ const getAuthHeaders = () => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
+const TYPE_LABELS = {
+  demo: 'درخواست دمو',
+  contact: 'پیام تماس',
+  suggestion: 'پیشنهاد',
+  complaint: 'انتقاد / شکایت'
+};
+
 export default function AdminContact() {
   const [items, setItems] = useState([]);
   const [message, setMessage] = useState('');
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('all');
+  const [type, setType] = useState('all');
 
   const loadItems = async () => {
     try {
@@ -39,11 +47,13 @@ export default function AdminContact() {
     const q = query.trim().toLowerCase();
     return items.filter(item => {
       if (status !== 'all' && item.status !== status) return false;
+      if (type !== 'all' && (item.type || 'contact') !== type) return false;
       if (!q) return true;
-      const blob = `${item.name || ''} ${item.email || ''} ${item.phone || ''} ${item.message || ''}`.toLowerCase();
+      const demo = item.demoDetails || {};
+      const blob = `${item.name || ''} ${item.email || ''} ${item.phone || ''} ${item.message || ''} ${demo.schoolName || ''} ${demo.province || ''} ${demo.city || ''}`.toLowerCase();
       return blob.includes(q);
     });
-  }, [items, query, status]);
+  }, [items, query, status, type]);
 
   const markRead = async (id) => {
     try {
@@ -77,8 +87,8 @@ export default function AdminContact() {
       </div>
       <div className="admin-content-hero">
         <div>
-          <h2>پیام‌های تماس</h2>
-          <p>مدیریت پیام‌های ثبت‌شده توسط کاربران.</p>
+          <h2>مرکز ارتباطات سیما</h2>
+          <p>مدیریت درخواست‌های دمو، پیام‌های تماس، پیشنهادات و انتقادات ثبت‌شده.</p>
         </div>
       </div>
 
@@ -94,6 +104,13 @@ export default function AdminContact() {
           <option value="new">خوانده‌نشده</option>
           <option value="read">خوانده‌شده</option>
         </select>
+        <select value={type} onChange={(e) => setType(e.target.value)}>
+          <option value="all">همه نوع‌ها</option>
+          <option value="demo">درخواست‌های دمو</option>
+          <option value="contact">پیام‌های تماس</option>
+          <option value="suggestion">پیشنهادات</option>
+          <option value="complaint">انتقادات / شکایات</option>
+        </select>
       </div>
 
       {message && <div className="form-message">{message}</div>}
@@ -103,8 +120,19 @@ export default function AdminContact() {
           <div key={item._id} className="admin-content-item">
             <div>
               <strong>{item.name || 'بدون نام'}</strong>
+              <span>{TYPE_LABELS[item.type || 'contact'] || 'پیام تماس'}</span>
               <span>{item.email || 'بدون ایمیل'}</span>
               <span>{item.phone || 'بدون شماره'}</span>
+              {(item.type || 'contact') === 'demo' && item.demoDetails && (
+                <div className="admin-content-meta">
+                  <span>مکتب: {item.demoDetails.schoolName || '---'}</span>
+                  <span>مسئول: {item.demoDetails.responsibleName || item.name || '---'}</span>
+                  <span>ولایت/شهر: {item.demoDetails.province || '---'} / {item.demoDetails.city || '---'}</span>
+                  <span>تعداد شاگردان: {item.demoDetails.studentCount || '---'}</span>
+                  <span>نوع مرکز: {item.demoDetails.centerType || '---'}</span>
+                  <span>بخش‌ها: {(item.demoDetails.neededModules || []).join('، ') || '---'}</span>
+                </div>
+              )}
               <p>{item.message}</p>
             </div>
             <div className="admin-content-actions">

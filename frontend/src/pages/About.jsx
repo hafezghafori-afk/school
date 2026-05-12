@@ -1,5 +1,6 @@
 import React from 'react';
 import useSiteSettings from '../hooks/useSiteSettings';
+import { normalizeBrandName } from '../utils/brand';
 import './About.css';
 
 const stats = [
@@ -24,7 +25,7 @@ const timeline = [
 
 export default function About() {
   const { settings } = useSiteSettings();
-  const brand = settings?.brandName || 'مدرسه ایمان';
+  const brand = normalizeBrandName(settings?.brandName);
 
   return (
     <section className="about-page">

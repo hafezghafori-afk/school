@@ -8,6 +8,7 @@ const GENERAL_PRESIDENT_PERMISSIONS = [
   'view_reports',
   'view_schedule',
   'manage_schedule',
+  'manage_platform_requests',
   'access_school_manager',
   'access_head_teacher'
 ];
