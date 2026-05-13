@@ -58,6 +58,7 @@ const Terms = lazy(() => import('./pages/Terms'));
 const About = lazy(() => import('./pages/About'));
 const Contact = lazy(() => import('./pages/Contact'));
 const DemoRequest = lazy(() => import('./pages/DemoRequest'));
+const Demo = lazy(() => import('./pages/Demo'));
 const AdminNews = lazy(() => import('./pages/AdminNews'));
 const AdminGallery = lazy(() => import('./pages/AdminGallery'));
 const AdminContact = lazy(() => import('./pages/AdminContact'));
@@ -120,6 +121,7 @@ const routePrefetchers = {
   faq: () => import('./pages/FAQ'),
   contact: () => import('./pages/Contact'),
   demoRequest: () => import('./pages/DemoRequest'),
+  demo: () => import('./pages/Demo'),
   about: () => import('./pages/About'),
   terms: () => import('./pages/Terms'),
   adminSettings: () => import('./pages/AdminSettings'),
@@ -182,6 +184,7 @@ const routePrefetchersByPath = {
   '/faq': routePrefetchers.faq,
   '/contact': routePrefetchers.contact,
   '/demo-request': routePrefetchers.demoRequest,
+  '/demo': routePrefetchers.demo,
   '/about': routePrefetchers.about,
   '/terms': routePrefetchers.terms,
   '/admin-settings': routePrefetchers.adminSettings,
@@ -3225,6 +3228,7 @@ function AppShell() {
             <Route path="/about" element={<About />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/demo-request" element={<DemoRequest />} />
+            <Route path="/demo" element={<Demo />} />
             <Route path="/student-registration" element={adminRoute(['manage_enrollments', 'manage_users'], <StudentRegistration />, 'دسترسی ثبت دانش‌آموز برای این حساب فعال نیست.')} />
             <Route path="/online-registrations" element={adminRoute(['manage_enrollments', 'manage_users'], <OnlineRegistrations />, 'دسترسی مدیریت ثبت‌نام‌های آنلاین برای این حساب فعال نیست.')} />
             <Route path="/student-management" element={adminRoute('manage_users', <StudentManagement />, 'دسترسی مدیریت دانش‌آموزان برای این حساب فعال نیست.')} />
