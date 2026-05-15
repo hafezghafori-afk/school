@@ -131,6 +131,14 @@ const normalizeShiftCode = (rawValue = '') => {
   return 'morning';
 };
 
+const getShiftLabel = (shift = {}) => {
+  const rawValue = trimValue(shift.code || shift.name || shift.title);
+  const value = rawValue.toLowerCase();
+  if (value.includes('afternoon') || value.includes('evening') || value.includes('بعد') || value.includes('عصر') || value.includes('شب')) return 'بعد از ظهر';
+  if (value.includes('morning') || value.includes('day') || value.includes('صبح') || value.includes('روز')) return 'روزانه';
+  return displayText(rawValue || 'نوبت');
+};
+
 const gradeFromClass = (schoolClass = {}) => {
   const numericGrade = Number(schoolClass?.gradeLevel || String(schoolClass?.code || '').match(/\d+/)?.[0] || 1);
   const boundedGrade = Number.isFinite(numericGrade) ? Math.min(12, Math.max(1, numericGrade)) : 1;
@@ -740,7 +748,7 @@ const StudentRegistration = () => {
               <label htmlFor="shiftId">نوبت *</label>
               <select id="shiftId" value={formData.shiftId} onChange={e => handleInputChange('shiftId', e.target.value)} required className={errors.shiftId ? 'border-red-500' : ''}>
                 <option value="">انتخاب کنید</option>
-                {shifts.map(item => <option key={item._id} value={item._id}>{item.name || item.title || 'نوبت'}</option>)}
+                {shifts.map(item => <option key={item._id} value={item._id}>{getShiftLabel(item)}</option>)}
               </select>
               {errors.shiftId && <span className="text-red-500">{errors.shiftId}</span>}
             </div>
