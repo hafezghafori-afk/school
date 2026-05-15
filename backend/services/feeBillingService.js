@@ -191,6 +191,49 @@ function buildFeePlanFilter({
   return filter;
 }
 
+async function resolveFeePlanForBilling({
+  feePlanId = '',
+  courseId = '',
+  classId = '',
+  academicYearId = '',
+  academicYear = '',
+  term = '',
+  billingFrequency = ''
+} = {}) {
+  if (feePlanId) return FinanceFeePlan.findById(feePlanId);
+
+  const sort = { isDefault: -1, priority: 1, updatedAt: -1, createdAt: -1 };
+  const exactFilter = buildFeePlanFilter({
+    courseId,
+    classId,
+    academicYearId,
+    academicYear,
+    term,
+    billingFrequency
+  });
+
+  const exact = await FinanceFeePlan.findOne(exactFilter).sort(sort);
+  if (exact) return exact;
+
+  const relaxedAttempts = [
+    buildFeePlanFilter({ courseId, classId, academicYearId, academicYear, billingFrequency }),
+    buildFeePlanFilter({ courseId, classId, academicYearId, academicYear }),
+    buildFeePlanFilter({ classId, academicYearId, academicYear, billingFrequency }),
+    buildFeePlanFilter({ classId, academicYearId, academicYear })
+  ];
+
+  const seen = new Set();
+  for (const filter of relaxedAttempts) {
+    const key = JSON.stringify(filter);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const plan = await FinanceFeePlan.findOne(filter).sort(sort);
+    if (plan) return plan;
+  }
+
+  return null;
+}
+
 async function buildGroupedBillCandidates({
   courseId = '',
   classId = '',
@@ -257,16 +300,15 @@ async function buildGroupedBillCandidates({
   const billingFrequency = normalizeBillingFrequency(periodType === 'monthly' ? 'monthly' : 'term');
 
   const [feePlan, financeReliefs, discounts, exemptions, openBills] = await Promise.all([
-    feePlanId
-      ? FinanceFeePlan.findById(feePlanId)
-      : FinanceFeePlan.findOne(buildFeePlanFilter({
-        courseId,
-        classId,
-        academicYearId: effectiveAcademicYearId,
-        academicYear,
-        term,
-        billingFrequency
-      })).sort({ isDefault: -1, priority: 1, updatedAt: -1, createdAt: -1 }),
+    resolveFeePlanForBilling({
+      feePlanId,
+      courseId,
+      classId,
+      academicYearId: effectiveAcademicYearId,
+      academicYear,
+      term,
+      billingFrequency
+    }),
     FinanceRelief.find({
       studentMembershipId: { $in: membershipIds },
       status: 'active'
