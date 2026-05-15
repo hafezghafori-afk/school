@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { deriveLinkScope } = require('../utils/financeLinkScope');
+const { applySchoolOwnership } = require('../utils/schoolOwnership');
 
 const approvalTrailEntrySchema = new mongoose.Schema({
   level: { type: String, enum: ['finance_manager', 'finance_lead', 'general_president'], required: true },
@@ -42,6 +43,7 @@ const feePaymentSchema = new mongoose.Schema({
   studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentCore', default: null, index: true },
   studentMembershipId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentMembership', default: null, index: true },
   linkScope: { type: String, enum: ['membership', 'student'], default: 'membership', index: true },
+  schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'AfghanSchool', default: null, index: true },
   classId: { type: mongoose.Schema.Types.ObjectId, ref: 'SchoolClass', default: null, index: true },
   academicYearId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicYear', default: null, index: true },
   payerType: {
@@ -96,7 +98,7 @@ const feePaymentSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-feePaymentSchema.pre('validate', function syncFeePaymentState() {
+feePaymentSchema.pre('validate', async function syncFeePaymentState() {
   if (typeof this.paymentNumber === 'string') this.paymentNumber = this.paymentNumber.trim().toUpperCase();
   if (typeof this.currency === 'string') this.currency = this.currency.trim().toUpperCase() || 'AFN';
   if (typeof this.referenceNo === 'string') this.referenceNo = this.referenceNo.trim();
@@ -144,9 +146,11 @@ feePaymentSchema.pre('validate', function syncFeePaymentState() {
     studentMembershipId: this.studentMembershipId,
     classId: this.classId
   });
+  await applySchoolOwnership(this);
 });
 
 feePaymentSchema.index({ sourceReceiptId: 1 }, { unique: true, sparse: true });
+feePaymentSchema.index({ schoolId: 1, status: 1, paidAt: -1 });
 feePaymentSchema.index({ feeOrderId: 1, status: 1, paidAt: -1 });
 feePaymentSchema.index({ studentMembershipId: 1, status: 1, paidAt: -1 });
 feePaymentSchema.index({ linkScope: 1, status: 1, paidAt: -1 });

@@ -4,10 +4,12 @@ const AfghanSchool = require('../models/AfghanSchool');
 const AfghanStudent = require('../models/AfghanStudent');
 const AfghanTeacher = require('../models/AfghanTeacher');
 const { requireFields } = require('../middleware/validate');
+const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
 const { ok, fail } = require('../utils/response');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
 const { resolveActiveSchool, listActiveSchools } = require('../services/schoolContextService');
+const { resolveSchoolOwnership } = require('../utils/schoolOwnership');
 
 const router = express.Router();
 const auditWrite = (payload) => logActivity(payload);
@@ -24,6 +26,13 @@ const SCHOOL_SCOPE_SUMMARY = [
   { key: 'teacherAssignments', label: 'تخصیص استاد', collection: 'teacherassignments', field: 'schoolId' },
   { key: 'timetableEntries', label: 'تقسیم اوقات', collection: 'timetableentries', field: 'schoolId' },
   { key: 'financialYears', label: 'سال مالی', collection: 'financialyears', field: 'schoolId' },
+  { key: 'studentMemberships', label: 'عضویت‌های شاگردان', collection: 'studentmemberships', field: 'schoolId' },
+  { key: 'feePlans', label: 'پلان‌های فیس', collection: 'financefeeplans', field: 'schoolId' },
+  { key: 'financeBills', label: 'بل‌ها', collection: 'financebills', field: 'schoolId' },
+  { key: 'feeOrders', label: 'تعهدات/سفارش‌های فیس', collection: 'feeorders', field: 'schoolId' },
+  { key: 'feePayments', label: 'پرداخت‌ها', collection: 'feepayments', field: 'schoolId' },
+  { key: 'financeReceipts', label: 'رسیدها', collection: 'financereceipts', field: 'schoolId' },
+  { key: 'financeReliefs', label: 'تخفیف‌ها و معافیت‌ها', collection: 'financereliefs', field: 'schoolId' },
   { key: 'treasuryAccounts', label: 'حساب‌های خزانه', collection: 'financetreasuryaccounts', field: 'schoolId' },
   { key: 'treasuryTransactions', label: 'معاملات خزانه', collection: 'financetreasurytransactions', field: 'schoolId' },
   { key: 'governmentFinanceSnapshots', label: 'گزارش مالی دولت', collection: 'governmentfinancesnapshots', field: 'schoolId' }
@@ -59,6 +68,93 @@ async function countSchoolScope(schoolId = '') {
       : 0
   };
   return summary;
+}
+
+const OWNERSHIP_AUDIT_COLLECTIONS = [
+  { key: 'academicYears', label: 'سال‌های تعلیمی', collection: 'academicyears', field: 'schoolId' },
+  { key: 'classes', label: 'صنف‌ها', collection: 'schoolclasses', field: 'schoolId' },
+  { key: 'subjects', label: 'مضامین', collection: 'subjects', field: 'schoolId' },
+  { key: 'students', label: 'شاگردان', collection: 'afghanstudents', field: 'academicInfo.currentSchool' },
+  { key: 'studentMemberships', label: 'عضویت‌های شاگردان', collection: 'studentmemberships', field: 'schoolId' },
+  { key: 'feePlans', label: 'پلان‌های فیس', collection: 'financefeeplans', field: 'schoolId' },
+  { key: 'financeBills', label: 'بل‌ها', collection: 'financebills', field: 'schoolId' },
+  { key: 'feeOrders', label: 'تعهدات/سفارش‌های فیس', collection: 'feeorders', field: 'schoolId' },
+  { key: 'feePayments', label: 'پرداخت‌ها', collection: 'feepayments', field: 'schoolId' },
+  { key: 'financeReceipts', label: 'رسیدها', collection: 'financereceipts', field: 'schoolId' },
+  { key: 'discounts', label: 'تخفیف‌ها', collection: 'discounts', field: 'schoolId' },
+  { key: 'feeExemptions', label: 'معافیت‌ها', collection: 'feeexemptions', field: 'schoolId' },
+  { key: 'financeReliefs', label: 'تسهیلات مالی', collection: 'financereliefs', field: 'schoolId' }
+];
+
+const OWNERSHIP_MODEL_NAMES = {
+  studentmemberships: 'StudentMembership',
+  financefeeplans: 'FinanceFeePlan',
+  financebills: 'FinanceBill',
+  feeorders: 'FeeOrder',
+  feepayments: 'FeePayment',
+  financereceipts: 'FinanceReceipt',
+  discounts: 'Discount',
+  feeexemptions: 'FeeExemption',
+  financereliefs: 'FinanceRelief'
+};
+
+const missingOwnerFilter = (field) => ({
+  $or: [
+    { [field]: { $exists: false } },
+    { [field]: null },
+    { [field]: '' }
+  ]
+});
+
+async function buildOwnershipAudit() {
+  const db = mongoose.connection.db;
+  const schools = await listActiveSchools(100);
+  const schoolIds = schools.map((school) => new mongoose.Types.ObjectId(String(school._id)));
+  const rows = [];
+
+  for (const item of OWNERSHIP_AUDIT_COLLECTIONS) {
+    const exists = (await db.listCollections({ name: item.collection }).toArray()).length > 0;
+    if (!exists) {
+      rows.push({ ...item, total: 0, assigned: 0, missing: 0, unknownSchool: 0 });
+      continue;
+    }
+    const collection = db.collection(item.collection);
+    const [total, assigned, missing, unknownSchool] = await Promise.all([
+      collection.countDocuments(),
+      collection.countDocuments({ [item.field]: { $exists: true, $nin: [null, ''] } }),
+      collection.countDocuments(missingOwnerFilter(item.field)),
+      collection.countDocuments({
+        [item.field]: { $exists: true, $nin: [null, '', ...schoolIds] }
+      })
+    ]);
+    rows.push({ ...item, total, assigned, missing, unknownSchool });
+  }
+
+  return {
+    schools: schools.map((school) => ({
+      id: String(school._id),
+      name: school.nameDari || school.name || 'مکتب',
+      code: school.schoolCode || ''
+    })),
+    rows,
+    hasIssues: rows.some((row) => row.missing > 0 || row.unknownSchool > 0)
+  };
+}
+
+async function backfillOwnershipCollection(collectionName = '', limit = 500) {
+  const modelName = OWNERSHIP_MODEL_NAMES[collectionName];
+  if (!modelName) return { scanned: 0, updated: 0 };
+  const Model = mongoose.model(modelName);
+  const docs = await Model.find(missingOwnerFilter('schoolId')).limit(limit);
+  let updated = 0;
+  for (const doc of docs) {
+    const schoolId = await resolveSchoolOwnership(doc);
+    if (!schoolId) continue;
+    doc.schoolId = schoolId;
+    await doc.save();
+    updated += 1;
+  }
+  return { scanned: docs.length, updated };
 }
 
 // Helper functions
@@ -189,6 +285,32 @@ router.get('/active', async (req, res) => {
   } catch (error) {
     console.error('Resolve Active School Error:', error);
     return fail(res, 'Failed to resolve active school', 500);
+  }
+});
+
+// GET /api/afghan-schools/ownership-audit - Show which records have clear school ownership
+router.get('/ownership-audit', requireAuth, requireRole(['admin']), requirePermission('view_reports'), async (req, res) => {
+  try {
+    return res.json({ success: true, data: await buildOwnershipAudit() });
+  } catch (error) {
+    console.error('Ownership Audit Error:', error);
+    return fail(res, 'Failed to build ownership audit', 500);
+  }
+});
+
+// POST /api/afghan-schools/ownership-backfill - Fill schoolId for existing finance records when it can be inferred
+router.post('/ownership-backfill', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const limit = Math.min(2000, Math.max(1, Number(req.body?.limit || 500)));
+    const collections = Object.keys(OWNERSHIP_MODEL_NAMES);
+    const results = {};
+    for (const collection of collections) {
+      results[collection] = await backfillOwnershipCollection(collection, limit);
+    }
+    return res.json({ success: true, data: { results, audit: await buildOwnershipAudit() } });
+  } catch (error) {
+    console.error('Ownership Backfill Error:', error);
+    return fail(res, 'Failed to backfill ownership', 500);
   }
 });
 

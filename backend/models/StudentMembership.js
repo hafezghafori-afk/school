@@ -1,4 +1,5 @@
 ﻿const mongoose = require('mongoose');
+const { applySchoolOwnership } = require('../utils/schoolOwnership');
 
 const CURRENT_STATUSES = new Set(['active', 'pending', 'suspended', 'transferred_in']);
 const ENDED_STATUSES = new Set([
@@ -28,6 +29,12 @@ const membershipSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Course',
     required: true,
+    index: true
+  },
+  schoolId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'AfghanSchool',
+    default: null,
     index: true
   },
   classId: {
@@ -122,7 +129,7 @@ const membershipSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-membershipSchema.pre('validate', function syncMembershipLifecycle() {
+membershipSchema.pre('validate', async function syncMembershipLifecycle() {
   if (!this.enrolledAt) {
     this.enrolledAt = this.joinedAt || new Date();
   }
@@ -186,6 +193,7 @@ membershipSchema.pre('validate', function syncMembershipLifecycle() {
   if (!ENDED_STATUSES.has(this.status)) {
     this.endedReason = '';
   }
+  await applySchoolOwnership(this);
 });
 
 membershipSchema.index(
@@ -197,6 +205,7 @@ membershipSchema.index(
 );
 membershipSchema.index({ course: 1, status: 1, isCurrent: 1 });
 membershipSchema.index({ student: 1, academicYear: 1, status: 1, isCurrent: 1 });
+membershipSchema.index({ schoolId: 1, academicYearId: 1, classId: 1, status: 1, isCurrent: 1 });
 membershipSchema.index({ studentId: 1, academicYearId: 1, classId: 1, status: 1, isCurrent: 1 });
 membershipSchema.index({ classId: 1, academicYearId: 1, status: 1, isCurrent: 1 });
 

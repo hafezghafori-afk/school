@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import './AdminWorkspace.css';
-import { errorMessage, fetchJson, normalizeOptions, postJson } from './adminWorkspaceUtils';
+import { errorMessage, fetchJson, normalizeOptions, postJson, resolveActiveSchoolContext } from './adminWorkspaceUtils';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
 
@@ -257,6 +257,7 @@ export default function AdminEducationCore() {
   const [instructors, setInstructors] = useState([]);
   const [students, setStudents] = useState([]);
   const [onlineRegistrationQueue, setOnlineRegistrationQueue] = useState([]);
+  const [activeSchoolContext, setActiveSchoolContext] = useState(null);
   const [enrollFilter, setEnrollFilter] = useState('');
   const [yearSearchInput, setYearSearchInput] = useState('');
   const [yearSearchQuery, setYearSearchQuery] = useState('');
@@ -779,6 +780,12 @@ export default function AdminEducationCore() {
       setTermsLoading(false);
     }
   };
+
+  useEffect(() => {
+    resolveActiveSchoolContext()
+      .then((context) => setActiveSchoolContext(context))
+      .catch(() => setActiveSchoolContext(null));
+  }, []);
 
   useEffect(() => {
     loadAll();
@@ -2398,6 +2405,8 @@ export default function AdminEducationCore() {
             هر دکمه فقط همان بخش مربوط را باز می‌کند تا صفحه سبک‌تر، واضح‌تر و عملیاتی‌تر بماند.
           </p>
           <div className="admin-workspace-meta">
+            <span>مکتب فعال: {activeSchoolContext?.school?.nameDari || activeSchoolContext?.school?.name || 'نامشخص'}</span>
+            <span>کد مکتب: {activeSchoolContext?.school?.schoolCode || '-'}</span>
             <span>سال فعال: {activeYear?.title || 'ندارد'}</span>
             <span>صنف‌های همگام‌شده: {legacySyncedClasses.toLocaleString('fa-AF-u-ca-persian')}</span>
             <span>تقسیم‌های اصلی: {primaryAssignments.toLocaleString('fa-AF-u-ca-persian')}</span>

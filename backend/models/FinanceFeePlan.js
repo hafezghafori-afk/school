@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { applySchoolOwnership } = require('../utils/schoolOwnership');
 
 const FINANCE_PLAN_TYPES = ['standard', 'charity', 'sibling', 'scholarship', 'special', 'semi_annual'];
 
@@ -37,6 +38,7 @@ const financeFeePlanSchema = new mongoose.Schema({
   grade: { type: String, default: '' },
   subject: { type: String, default: '' },
   course: { type: mongoose.Schema.Types.ObjectId, ref: 'Course', required: true, index: true },
+  schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'AfghanSchool', default: null, index: true },
   classId: { type: mongoose.Schema.Types.ObjectId, ref: 'SchoolClass', default: null, index: true },
   billingFrequency: {
     type: String,
@@ -65,7 +67,7 @@ const financeFeePlanSchema = new mongoose.Schema({
   note: { type: String, default: '' }
 }, { timestamps: true });
 
-financeFeePlanSchema.pre('validate', function syncFinanceFeePlanState() {
+financeFeePlanSchema.pre('validate', async function syncFinanceFeePlanState() {
   if (typeof this.title === 'string') this.title = this.title.trim();
   if (typeof this.eligibilityRule === 'string') this.eligibilityRule = this.eligibilityRule.trim();
   if (typeof this.academicYear === 'string') this.academicYear = this.academicYear.trim();
@@ -107,9 +109,11 @@ financeFeePlanSchema.pre('validate', function syncFinanceFeePlanState() {
     this.archivedAt = null;
     this.archivedBy = null;
   }
+  await applySchoolOwnership(this);
 });
 
 financeFeePlanSchema.index({
+  schoolId: 1,
   course: 1,
   academicYearId: 1,
   term: 1,
@@ -118,6 +122,7 @@ financeFeePlanSchema.index({
 }, { unique: true });
 
 financeFeePlanSchema.index({
+  schoolId: 1,
   classId: 1,
   academicYearId: 1,
   term: 1,
@@ -132,6 +137,7 @@ financeFeePlanSchema.index({
 });
 
 financeFeePlanSchema.index({
+  schoolId: 1,
   classId: 1,
   academicYearId: 1,
   term: 1,

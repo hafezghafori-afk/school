@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { deriveLinkScope } = require('../utils/financeLinkScope');
+const { applySchoolOwnership } = require('../utils/schoolOwnership');
 
 const financeReceiptSchema = new mongoose.Schema({
   bill: { type: mongoose.Schema.Types.ObjectId, ref: 'FinanceBill', required: true, index: true },
@@ -8,6 +9,7 @@ const financeReceiptSchema = new mongoose.Schema({
   studentMembershipId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentMembership', default: null },
   linkScope: { type: String, enum: ['membership', 'student'], default: 'membership', index: true },
   course: { type: mongoose.Schema.Types.ObjectId, ref: 'Course', required: true, index: true },
+  schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'AfghanSchool', default: null, index: true },
   classId: { type: mongoose.Schema.Types.ObjectId, ref: 'SchoolClass', default: null, index: true },
   academicYearId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicYear', default: null, index: true },
   amount: { type: Number, default: 0, min: 0 },
@@ -69,7 +71,7 @@ const financeReceiptSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-financeReceiptSchema.pre('validate', function syncFinanceReceiptState() {
+financeReceiptSchema.pre('validate', async function syncFinanceReceiptState() {
   if (typeof this.referenceNo === 'string') this.referenceNo = this.referenceNo.trim();
   if (typeof this.fileUrl === 'string') this.fileUrl = this.fileUrl.trim();
   if (typeof this.note === 'string') this.note = this.note.trim();
@@ -81,9 +83,11 @@ financeReceiptSchema.pre('validate', function syncFinanceReceiptState() {
     studentMembershipId: this.studentMembershipId,
     classId: this.classId
   });
+  await applySchoolOwnership(this);
 });
 
 financeReceiptSchema.index({ bill: 1, studentMembershipId: 1 });
+financeReceiptSchema.index({ schoolId: 1, status: 1, paidAt: -1 });
 financeReceiptSchema.index({ studentMembershipId: 1, status: 1, paidAt: -1 });
 financeReceiptSchema.index({ linkScope: 1, status: 1, paidAt: -1 });
 financeReceiptSchema.index({ createdAt: -1, status: 1 });

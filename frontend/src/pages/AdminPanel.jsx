@@ -685,6 +685,7 @@ export default function AdminPanel() {
   const [settingsQuickLinks, setSettingsQuickLinks] = useState([]);
   const [activeSchoolContext, setActiveSchoolContext] = useState(null);
   const [schoolOptions, setSchoolOptions] = useState([]);
+  const [ownershipAudit, setOwnershipAudit] = useState(null);
   const [schoolScopeBusy, setSchoolScopeBusy] = useState(false);
   const [schoolScopeMessage, setSchoolScopeMessage] = useState('');
   const [stats, setStats] = useState({
@@ -901,6 +902,10 @@ export default function AdminPanel() {
       String(left?.nameDari || left?.name || '').localeCompare(String(right?.nameDari || right?.name || ''), 'fa')
     ));
   }, [activeSchoolContext?.school, activeSchoolContext?.schools, schoolOptions]);
+
+  const ownershipIssueCount = useMemo(() => (
+    (ownershipAudit?.rows || []).reduce((sum, row) => sum + Number(row?.missing || 0) + Number(row?.unknownSchool || 0), 0)
+  ), [ownershipAudit]);
 
   const searchSections = useMemo(() => (
     SEARCH_SECTION_CONFIG.map((section) => {
@@ -1222,6 +1227,18 @@ export default function AdminPanel() {
     setSchoolOptions(Array.isArray(data?.data?.schools) ? data.data.schools : []);
   }, []);
 
+  const loadOwnershipAudit = useCallback(async () => {
+    const res = await fetch(`${API_BASE}/api/afghan-schools/ownership-audit`, {
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    if (!res.ok || data?.success === false) {
+      throw new Error(data?.message || 'Ownership audit failed');
+    }
+    setOwnershipAudit(data?.data || null);
+    return data?.data || null;
+  }, []);
+
   const handleActiveSchoolChange = async (eventOrSchoolId) => {
     const nextSchoolId = String(eventOrSchoolId?.target?.value || eventOrSchoolId || '').trim();
     if (!nextSchoolId) return;
@@ -1262,6 +1279,7 @@ export default function AdminPanel() {
       setSchoolScopeMessage('مکتب آزمایشی حذف شد.');
       await loadSchoolOptions();
       await loadActiveSchoolContext();
+      await loadOwnershipAudit().catch(() => null);
     } catch (error) {
       setSchoolScopeMessage(error?.message || 'حذف مکتب ناموفق بود.');
     } finally {
@@ -1273,13 +1291,16 @@ export default function AdminPanel() {
     let mounted = true;
     Promise.allSettled([
       resolveActiveSchoolContext(),
-      fetch(`${API_BASE}/api/afghan-schools?limit=100`, { headers: getAuthHeaders() }).then((res) => res.json())
+      fetch(`${API_BASE}/api/afghan-schools?limit=100`, { headers: getAuthHeaders() }).then((res) => res.json()),
+      fetch(`${API_BASE}/api/afghan-schools/ownership-audit`, { headers: getAuthHeaders() }).then((res) => res.json())
     ])
       .then((results) => {
         if (!mounted) return;
         const schoolContext = results[0].status === 'fulfilled' ? results[0].value : null;
         const schoolList = results[1].status === 'fulfilled' ? results[1].value : null;
+        const auditResult = results[2].status === 'fulfilled' ? results[2].value : null;
         setActiveSchoolContext(schoolContext || { error: true });
+        setOwnershipAudit(auditResult?.success === false ? null : auditResult?.data || null);
         const schoolsFromList = Array.isArray(schoolList?.data?.schools) ? schoolList.data.schools : [];
         const schoolsFromContext = Array.isArray(schoolContext?.schools) ? schoolContext.schools : [];
         setSchoolOptions(schoolsFromList.length ? schoolsFromList : schoolsFromContext);
@@ -3367,6 +3388,8 @@ export default function AdminPanel() {
                 ['تقسیم اوقات', activeSchoolContext.scopeSummary?.timetableEntries?.count],
                 ['شقه‌ها', activeSchoolContext.scopeSummary?.sheetTemplates?.count],
                 ['سال مالی', activeSchoolContext.scopeSummary?.financialYears?.count],
+                ['بل‌ها', activeSchoolContext.scopeSummary?.financeBills?.count],
+                ['پرداخت‌ها', activeSchoolContext.scopeSummary?.feePayments?.count],
                 ['گزارش دولت', activeSchoolContext.scopeSummary?.governmentFinanceSnapshots?.count]
               ].map(([label, value]) => (
                 <span key={label}>
@@ -3374,10 +3397,33 @@ export default function AdminPanel() {
                   <b>{Number(value || 0).toLocaleString('fa-AF')}</b>
                 </span>
               ))}
+              <span className={ownershipIssueCount ? 'admin-active-school-scope__issue' : ''}>
+                مالکیت مبهم
+                <b>{Number(ownershipIssueCount || 0).toLocaleString('fa-AF')}</b>
+              </span>
             </div>
           </>
         )}
       </section>
+
+      {ownershipAudit && (
+        <section className="admin-ownership-audit" aria-label="بررسی مالکیت دیتا">
+          <div>
+            <span className="admin-active-school-scope__eyebrow">بررسی مالکیت دیتا</span>
+            <strong>{ownershipIssueCount ? 'رکوردهای مبهم وجود دارد' : 'همه بخش‌های کلیدی مکتب مشخص دارند'}</strong>
+            <small>برای سیستم چندمکتبه، هر شاگرد، صنف، پلان فیس، بل و پرداخت باید به یک مکتب روشن وصل باشد.</small>
+          </div>
+          <div className="admin-ownership-audit__grid">
+            {(ownershipAudit.rows || []).slice(0, 8).map((row) => (
+              <span key={row.key} className={(row.missing || row.unknownSchool) ? 'has-issue' : ''}>
+                {row.label}
+                <b>{Number(row.assigned || 0).toLocaleString('fa-AF')}</b>
+                {(row.missing || row.unknownSchool) ? <small>{Number((row.missing || 0) + (row.unknownSchool || 0)).toLocaleString('fa-AF')} مبهم</small> : null}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="admin-school-switcher" aria-label="انتخاب مکتب فعال">
         <div className="admin-school-switcher__head">

@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { deriveLinkScope } = require('../utils/financeLinkScope');
+const { applySchoolOwnership } = require('../utils/schoolOwnership');
 const { formatAfghanMonthYearLabel, replaceIranianSolarMonthNames } = require('../utils/afghanDate');
 const {
   BREAKDOWN_KEYS,
@@ -48,6 +49,7 @@ const financeBillSchema = new mongoose.Schema({
   studentMembershipId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentMembership', default: null },
   linkScope: { type: String, enum: ['membership', 'student'], default: 'membership', index: true },
   course: { type: mongoose.Schema.Types.ObjectId, ref: 'Course', required: true, index: true },
+  schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'AfghanSchool', default: null, index: true },
   classId: { type: mongoose.Schema.Types.ObjectId, ref: 'SchoolClass', default: null, index: true },
   academicYearId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicYear', default: null, index: true },
   academicYear: { type: String, default: '' },
@@ -89,7 +91,7 @@ const financeBillSchema = new mongoose.Schema({
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { timestamps: true });
 
-financeBillSchema.pre('validate', function syncFinanceBillState() {
+financeBillSchema.pre('validate', async function syncFinanceBillState() {
   if (typeof this.billNumber === 'string') this.billNumber = this.billNumber.trim().toUpperCase();
   if (typeof this.academicYear === 'string') this.academicYear = this.academicYear.trim();
   if (typeof this.term === 'string') this.term = this.term.trim();
@@ -120,8 +122,10 @@ financeBillSchema.pre('validate', function syncFinanceBillState() {
   if (this.periodType === 'monthly' && this.dueDate) {
     this.periodLabel = formatAfghanMonthYearLabel(this.dueDate);
   }
+  await applySchoolOwnership(this);
 });
 
+financeBillSchema.index({ schoolId: 1, status: 1, dueDate: 1 });
 financeBillSchema.index({ student: 1, course: 1, academicYear: 1, term: 1 });
 financeBillSchema.index({ studentMembershipId: 1, status: 1, dueDate: 1 });
 financeBillSchema.index({ studentId: 1, academicYearId: 1, status: 1 });

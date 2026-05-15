@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { deriveLinkScope } = require('../utils/financeLinkScope');
+const { applySchoolOwnership } = require('../utils/schoolOwnership');
 const { formatAfghanMonthYearLabel, replaceIranianSolarMonthNames } = require('../utils/afghanDate');
 const {
   LINE_ITEM_TYPES,
@@ -62,6 +63,7 @@ const feeOrderSchema = new mongoose.Schema({
   studentMembershipId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentMembership', default: null, index: true },
   linkScope: { type: String, enum: ['membership', 'student'], default: 'membership', index: true },
   course: { type: mongoose.Schema.Types.ObjectId, ref: 'Course', default: null, index: true },
+  schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'AfghanSchool', default: null, index: true },
   classId: { type: mongoose.Schema.Types.ObjectId, ref: 'SchoolClass', default: null, index: true },
   academicYearId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicYear', default: null, index: true },
   assessmentPeriodId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicTerm', default: null, index: true },
@@ -87,7 +89,7 @@ const feeOrderSchema = new mongoose.Schema({
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { timestamps: true });
 
-feeOrderSchema.pre('validate', function syncFeeOrderState() {
+feeOrderSchema.pre('validate', async function syncFeeOrderState() {
   if (typeof this.orderNumber === 'string') this.orderNumber = this.orderNumber.trim().toUpperCase();
   if (typeof this.title === 'string') this.title = this.title.trim();
   if (typeof this.periodLabel === 'string') this.periodLabel = replaceIranianSolarMonthNames(this.periodLabel.trim());
@@ -119,6 +121,7 @@ feeOrderSchema.pre('validate', function syncFeeOrderState() {
   if (this.periodType === 'monthly' && this.dueDate) {
     this.periodLabel = formatAfghanMonthYearLabel(this.dueDate);
   }
+  await applySchoolOwnership(this);
   if (this.status !== 'void') {
     if (this.outstandingAmount <= 0) {
       this.status = 'paid';
@@ -137,6 +140,7 @@ feeOrderSchema.pre('validate', function syncFeeOrderState() {
 });
 
 feeOrderSchema.index({ sourceBillId: 1 }, { unique: true, sparse: true });
+feeOrderSchema.index({ schoolId: 1, status: 1, dueDate: 1 });
 feeOrderSchema.index({ studentMembershipId: 1, status: 1, dueDate: 1 });
 feeOrderSchema.index({ studentId: 1, academicYearId: 1, status: 1 });
 feeOrderSchema.index({ classId: 1, academicYearId: 1, status: 1 });

@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { deriveLinkScope } = require('../utils/financeLinkScope');
+const { applySchoolOwnership } = require('../utils/schoolOwnership');
 
 const feeExemptionSchema = new mongoose.Schema({
   studentMembershipId: {
@@ -23,6 +24,12 @@ const feeExemptionSchema = new mongoose.Schema({
   student: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
+    default: null,
+    index: true
+  },
+  schoolId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'AfghanSchool',
     default: null,
     index: true
   },
@@ -100,7 +107,7 @@ const feeExemptionSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-feeExemptionSchema.pre('validate', function syncFeeExemptionState() {
+feeExemptionSchema.pre('validate', async function syncFeeExemptionState() {
   if (typeof this.reason === 'string') this.reason = this.reason.trim();
   if (typeof this.note === 'string') this.note = this.note.trim();
   if (typeof this.cancelReason === 'string') this.cancelReason = this.cancelReason.trim();
@@ -125,9 +132,11 @@ feeExemptionSchema.pre('validate', function syncFeeExemptionState() {
     this.cancelReason = '';
     this.cancelledBy = null;
   }
+  await applySchoolOwnership(this);
 });
 
 feeExemptionSchema.index({ studentMembershipId: 1, status: 1, scope: 1 });
+feeExemptionSchema.index({ schoolId: 1, status: 1, scope: 1 });
 feeExemptionSchema.index({ classId: 1, academicYearId: 1, status: 1 });
 feeExemptionSchema.index({ linkScope: 1, status: 1, scope: 1 });
 

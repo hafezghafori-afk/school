@@ -4503,6 +4503,23 @@ export default function AdminFinance() {
         </div>
       </div>
 
+      {activeSchoolContext?.school ? (
+        <div className="finance-card finance-school-scope-card">
+          <div>
+            <span className="finance-eyebrow">مکتب فعال</span>
+            <strong>{activeSchoolContext.school.nameDari || activeSchoolContext.school.name || 'مکتب'}</strong>
+            <p className="muted">تمام پلان‌های فیس، بل‌ها، پرداخت‌ها و گزارش‌ها باید مربوط همین مکتب باشند.</p>
+          </div>
+          <div className="finance-chip-group">
+            <span className="finance-chip">کد: {activeSchoolContext.school.schoolCode || '-'}</span>
+            <span className="finance-chip finance-chip-muted">سال تعلیمی: {fmt(activeSchoolContext.scopeSummary?.academicYears?.count || 0)}</span>
+            <span className="finance-chip finance-chip-muted">صنف‌ها: {fmt(activeSchoolContext.scopeSummary?.classes?.count || 0)}</span>
+            <span className="finance-chip finance-chip-emerald">بل‌ها: {fmt(activeSchoolContext.scopeSummary?.financeBills?.count || 0)}</span>
+            <span className="finance-chip finance-chip-sky">پرداخت‌ها: {fmt(activeSchoolContext.scopeSummary?.feePayments?.count || 0)}</span>
+          </div>
+        </div>
+      ) : null}
+
       <div className="finance-card finance-global-search-card">
         <div className="finance-card-head">
           <div>

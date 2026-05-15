@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { deriveLinkScope } = require('../utils/financeLinkScope');
+const { applySchoolOwnership } = require('../utils/schoolOwnership');
 const {
   RELIEF_TYPES,
   RELIEF_SCOPES,
@@ -26,6 +27,7 @@ const financeReliefSchema = new mongoose.Schema({
   linkScope: { type: String, enum: ['membership', 'student'], default: 'membership', index: true },
   studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentCore', default: null, index: true },
   student: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+  schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'AfghanSchool', default: null, index: true },
   classId: { type: mongoose.Schema.Types.ObjectId, ref: 'SchoolClass', default: null, index: true },
   academicYearId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicYear', default: null, index: true },
   reliefType: { type: String, enum: RELIEF_TYPES, default: 'manual', index: true },
@@ -48,7 +50,7 @@ const financeReliefSchema = new mongoose.Schema({
   sourceUpdatedAt: { type: Date, default: null }
 }, { timestamps: true });
 
-financeReliefSchema.pre('validate', function syncFinanceReliefState() {
+financeReliefSchema.pre('validate', async function syncFinanceReliefState() {
   if (typeof this.sourceKey === 'string') this.sourceKey = this.sourceKey.trim();
   if (typeof this.sponsorName === 'string') this.sponsorName = this.sponsorName.trim();
   if (typeof this.reason === 'string') this.reason = this.reason.trim();
@@ -92,9 +94,11 @@ financeReliefSchema.pre('validate', function syncFinanceReliefState() {
     this.endDate = this.startDate;
   }
   if (this.sourceUpdatedAt && Number.isNaN(new Date(this.sourceUpdatedAt).getTime())) this.sourceUpdatedAt = null;
+  await applySchoolOwnership(this);
 });
 
 financeReliefSchema.index({ sourceKey: 1 }, { unique: true, sparse: true });
+financeReliefSchema.index({ schoolId: 1, status: 1, reliefType: 1 });
 financeReliefSchema.index({ studentMembershipId: 1, status: 1, reliefType: 1, scope: 1 });
 financeReliefSchema.index({ classId: 1, academicYearId: 1, status: 1, reliefType: 1 });
 financeReliefSchema.index({ linkScope: 1, status: 1, reliefType: 1 });
