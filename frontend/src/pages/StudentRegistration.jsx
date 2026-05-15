@@ -98,6 +98,31 @@ const getEntityId = (value) => {
   return trimValue(value);
 };
 
+const getAcademicYearLabel = (year = {}) => {
+  const title = trimValue(year.title || year.name || year.code) || displayText('Ø³Ø§Ù„ ØªØ¹Ù„ÛŒÙ…ÛŒ');
+  const code = trimValue(year.code);
+  const parts = [title];
+  if (code && code !== title) parts.push(`(${code})`);
+  if (year.isCurrent) parts.push(displayText('Ø¬Ø§Ø±ÛŒ'));
+  return parts.join(' ');
+};
+
+const sortAcademicYears = (items = []) => [...items].sort((first, second) => {
+  const firstCurrent = first?.isCurrent ? 1 : 0;
+  const secondCurrent = second?.isCurrent ? 1 : 0;
+  if (firstCurrent !== secondCurrent) return secondCurrent - firstCurrent;
+
+  const firstActive = first?.isActive || first?.status === 'active' ? 1 : 0;
+  const secondActive = second?.isActive || second?.status === 'active' ? 1 : 0;
+  if (firstActive !== secondActive) return secondActive - firstActive;
+
+  const firstSequence = Number(first?.sequence || 0);
+  const secondSequence = Number(second?.sequence || 0);
+  if (firstSequence !== secondSequence) return secondSequence - firstSequence;
+
+  return String(second?.createdAt || '').localeCompare(String(first?.createdAt || ''));
+});
+
 const normalizeShiftCode = (rawValue = '') => {
   const value = trimValue(rawValue).toLowerCase();
   if (!value) return 'morning';
@@ -297,7 +322,7 @@ const StudentRegistration = () => {
   const yearLabelById = useMemo(() => {
     const mapping = new Map();
     academicYears.forEach((item) => {
-      mapping.set(String(item._id), item.title || item.code || 'سال تعلیمی');
+      mapping.set(String(item._id), getAcademicYearLabel(item));
     });
     return mapping;
   }, [academicYears]);
@@ -340,14 +365,13 @@ const StudentRegistration = () => {
 
         const headers = getAuthHeaders();
         const [yearsData, classesData, shiftsData] = await Promise.all([
-          fetchStudentRegistrationJson(`/api/academic-years/school/${effectiveSchoolId}`, headers),
+          fetchStudentRegistrationJson(`/api/academic-years/school/${effectiveSchoolId}?limit=100`, headers),
           fetchStudentRegistrationJson(`/api/school-classes/school/${effectiveSchoolId}`, headers),
           fetchStudentRegistrationJson(`/api/shifts/school/${effectiveSchoolId}`, headers)
         ]);
 
         const yearItems = yearsData.success ? yearsData.data || [] : [];
-        const activeYears = yearItems.filter((item) => item.status === 'active');
-        const visibleYears = activeYears.length ? activeYears : yearItems;
+        const visibleYears = sortAcademicYears(yearItems);
 
         setAcademicYears(visibleYears);
         setClasses(classesData.success ? classesData.data || [] : []);
@@ -377,7 +401,8 @@ const StudentRegistration = () => {
         const classShiftId = getEntityId(classItem?.shiftId);
         const classAcademicYearId = getEntityId(classItem?.academicYearId);
         if (classShiftId) next.shiftId = classShiftId;
-        if (classAcademicYearId) next.academicYearId = classAcademicYearId;
+        const classYearExists = academicYears.some((year) => String(year._id) === String(classAcademicYearId));
+        if (!next.academicYearId && classAcademicYearId && classYearExists) next.academicYearId = classAcademicYearId;
       }
       return next;
     });
@@ -699,7 +724,7 @@ const StudentRegistration = () => {
               <label htmlFor="academicYearId">سال تعلیمی *</label>
               <select id="academicYearId" value={formData.academicYearId} onChange={e => handleInputChange('academicYearId', e.target.value)} required className={errors.academicYearId ? 'border-red-500' : ''}>
                 <option value="">انتخاب کنید</option>
-                {academicYears.map(year => <option key={year._id} value={year._id}>{year.title || year.code}</option>)}
+                {academicYears.map(year => <option key={year._id} value={year._id}>{getAcademicYearLabel(year)}</option>)}
               </select>
               {errors.academicYearId && <span className="text-red-500">{errors.academicYearId}</span>}
             </div>

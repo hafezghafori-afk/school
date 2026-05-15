@@ -17,7 +17,7 @@ const isValidObjectId = (value = '') => /^[a-f\d]{24}$/i.test(normalizeId(value)
 router.get('/school/:schoolId', requireAuth, async (req, res) => {
   try {
     const { schoolId } = req.params;
-    const { status, page = 1, limit = 10 } = req.query;
+    const { status, page = 1, limit = 100 } = req.query;
     
     const resolved = schoolId === DEFAULT_SCHOOL_ID
       ? await resolveActiveSchool(req, { allowSingleFallback: true })
@@ -37,7 +37,7 @@ router.get('/school/:schoolId', requireAuth, async (req, res) => {
     const academicYears = await AcademicYear.find(filter)
       .populate('createdBy', 'name email')
       .populate('updatedBy', 'name email')
-      .sort({ sequence: -1, createdAt: -1 })
+      .sort({ isCurrent: -1, isActive: -1, sequence: -1, createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
     
