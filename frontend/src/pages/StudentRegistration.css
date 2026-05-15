@@ -144,6 +144,11 @@
   text-align: center;
 }
 
+.student-registration-school-switcher {
+  margin: 0;
+  border-color: rgba(15, 118, 110, 0.28);
+}
+
 .student-registration-school-context span {
   padding: 4px 8px;
   border-radius: 999px;

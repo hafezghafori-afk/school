@@ -611,10 +611,24 @@ const StudentRegistration = () => {
         {!requiresSchoolSelection && activeSchoolContext?.school && (
           <div className="student-registration-school-context">
             <strong>مکتب فعال: {activeSchoolContext.school.nameDari || activeSchoolContext.school.name || 'مکتب'}</strong>
+            {Array.isArray(activeSchoolContext?.schools) && activeSchoolContext.schools.length > 1 && (
+              <select
+                className="student-registration-school-select student-registration-school-switcher"
+                value={schoolId}
+                onChange={(event) => handleActiveSchoolSelect(event.target.value)}
+              >
+                {activeSchoolContext.schools.map((school) => (
+                  <option key={school._id || school.id} value={school._id || school.id}>
+                    {school.nameDari || school.name || school.schoolCode}
+                  </option>
+                ))}
+              </select>
+            )}
             <span>کد: {activeSchoolContext.school.schoolCode || '-'}</span>
             <span>شاگردان: {Number(activeSchoolContext.scopeSummary?.students?.count || 0).toLocaleString('fa-AF')}</span>
             <span>استادان: {Number(activeSchoolContext.scopeSummary?.teachers?.count || 0).toLocaleString('fa-AF')}</span>
             <span>صنف‌ها: {Number(activeSchoolContext.scopeSummary?.classes?.count || 0).toLocaleString('fa-AF')}</span>
+            <span>سال تعلیمی: {Number(activeSchoolContext.scopeSummary?.academicYears?.count || academicYears.length || 0).toLocaleString('fa-AF')}</span>
             <span>شقه‌ها: {Number(activeSchoolContext.scopeSummary?.sheetTemplates?.count || 0).toLocaleString('fa-AF')}</span>
             <span>سال مالی: {Number(activeSchoolContext.scopeSummary?.financialYears?.count || 0).toLocaleString('fa-AF')}</span>
           </div>
@@ -734,6 +748,9 @@ const StudentRegistration = () => {
                 <option value="">انتخاب کنید</option>
                 {academicYears.map(year => <option key={year._id} value={year._id}>{getAcademicYearLabel(year)}</option>)}
               </select>
+              {!referenceLoading && !academicYears.length && !requiresSchoolSelection && (
+                <span className="text-red-500">برای مکتب فعال سال تعلیمی تعریف نشده است. اول سال تعلیمی این مکتب را بسازید.</span>
+              )}
               {errors.academicYearId && <span className="text-red-500">{errors.academicYearId}</span>}
             </div>
             <div className="form-group">
