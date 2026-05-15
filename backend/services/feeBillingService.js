@@ -3,7 +3,7 @@ const FinanceFeePlan = require('../models/FinanceFeePlan');
 const Discount = require('../models/Discount');
 const FeeExemption = require('../models/FeeExemption');
 const FinanceRelief = require('../models/FinanceRelief');
-const { listCourseMemberships } = require('../utils/studentMembershipLookup');
+const { findClassMemberships, listCourseMemberships } = require('../utils/studentMembershipLookup');
 const {
   getFeePlanPrimaryAmount,
   normalizeBillingFrequency,
@@ -217,11 +217,25 @@ async function buildGroupedBillCandidates({
     includeOther
   });
 
-  const memberships = await listCourseMemberships({
+  let memberships = await listCourseMemberships({
     courseId,
     academicYearId,
     academicYear
   });
+
+  if (!memberships.length && classId) {
+    memberships = await findClassMemberships({
+      classId,
+      academicYearId,
+      academicYear
+    });
+  }
+
+  if (!memberships.length && classId && (academicYearId || academicYear)) {
+    memberships = await findClassMemberships({
+      classId
+    });
+  }
 
   if (!memberships.length) {
     return {
@@ -233,7 +247,13 @@ async function buildGroupedBillCandidates({
   }
 
   const membershipIds = memberships.map((item) => item._id);
-  const effectiveAcademicYearId = academicYearId || memberships[0]?.academicYearId || null;
+  const firstMembershipAcademicYearId = memberships[0]?.academicYearId || memberships[0]?.academicYear || null;
+  const hasRequestedAcademicYearMembership = !academicYearId || memberships.some((item) => (
+    String(item?.academicYearId || item?.academicYear || '') === String(academicYearId || '')
+  ));
+  const effectiveAcademicYearId = hasRequestedAcademicYearMembership
+    ? (academicYearId || firstMembershipAcademicYearId)
+    : firstMembershipAcademicYearId;
   const billingFrequency = normalizeBillingFrequency(periodType === 'monthly' ? 'monthly' : 'term');
 
   const [feePlan, financeReliefs, discounts, exemptions, openBills] = await Promise.all([

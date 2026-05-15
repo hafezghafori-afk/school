@@ -1404,6 +1404,20 @@ export default function AdminFinance() {
     () => buildFinanceMembershipStudentOptions(studentMemberships),
     [studentMemberships]
   );
+  const bulkAcademicYearsByClass = useMemo(() => {
+    const grouped = new Map();
+    (Array.isArray(studentMemberships) ? studentMemberships : [])
+      .filter(isCurrentFinanceMembership)
+      .forEach((item) => {
+        const classId = toFinanceOptionId(item?.classId);
+        const academicYearId = toFinanceOptionId(item?.academicYearId || item?.academicYear);
+        if (!classId || !academicYearId) return;
+        if (!grouped.has(classId)) grouped.set(classId, []);
+        const years = grouped.get(classId);
+        if (!years.includes(academicYearId)) years.push(academicYearId);
+      });
+    return grouped;
+  }, [studentMemberships]);
   const paymentDeskMembershipStudent = useMemo(
     () => financeMembershipStudents.find((item) => String(item?._id || '') === String(paymentDeskForm.studentId || '')) || null,
     [financeMembershipStudents, paymentDeskForm.studentId]
@@ -1744,6 +1758,71 @@ export default function AdminFinance() {
       classId: membershipStudent?.classId || prev.classId,
       academicYear: membershipStudent?.academicYearTitle || prev.academicYear
     }));
+  };
+
+  const resolveBulkAcademicYearId = (classId = '', requestedYearId = '') => {
+    const normalizedClassId = String(classId || '').trim();
+    const normalizedYearId = String(requestedYearId || '').trim();
+    const classYears = bulkAcademicYearsByClass.get(normalizedClassId) || [];
+    if (normalizedYearId && (!classYears.length || classYears.includes(normalizedYearId))) return normalizedYearId;
+    return classYears[0] || normalizedYearId || currentAcademicYearId || '';
+  };
+
+  const applyBulkClassSelection = (classId = '') => {
+    const normalizedClassId = String(classId || '').trim();
+    setBulkForm((prev) => ({
+      ...prev,
+      classId: normalizedClassId,
+      academicYearId: resolveBulkAcademicYearId(normalizedClassId, prev.academicYearId)
+    }));
+    setBillingPreview(null);
+  };
+
+  const buildBulkBillPayload = () => {
+    const classId = String(bulkForm.classId || '').trim();
+    return {
+      ...bulkForm,
+      classId,
+      academicYearId: resolveBulkAcademicYearId(classId, bulkForm.academicYearId),
+      amount: String(bulkForm.amount || '').trim(),
+      dueDate: String(bulkForm.dueDate || '').trim()
+    };
+  };
+
+  const getBulkPreviewEmptyMessage = (data = {}) => {
+    const excluded = Array.isArray(data?.excluded) ? data.excluded : [];
+    const reasons = excluded.reduce((acc, item) => {
+      const reason = String(item?.reason || '').trim();
+      if (reason) acc[reason] = (acc[reason] || 0) + 1;
+      return acc;
+    }, {});
+    if (reasons.zero_amount) {
+      return 'برای این صنف مبلغ قابل بل‌دهی صفر است؛ مبلغ فیس را وارد کنید یا برای صنف/سال انتخاب‌شده پلان فیس فعال بسازید.';
+    }
+    if (reasons.not_debtor) {
+      return 'گزینه فقط بدهکاران فعال است، اما برای این صنف بدهی باز پیدا نشد.';
+    }
+    if (!excluded.length) {
+      return 'برای این صنف و سال تعلیمی عضویت فعال پیدا نشد. سال تعلیمی یا عضویت شاگردان صنف را بررسی کنید.';
+    }
+    return 'برای این فیلتر موردی برای پیش‌نمایش بل پیدا نشد.';
+  };
+
+  const buildManualBillPayload = () => {
+    const normalizedStudentId = String(manualForm.studentId || '').trim();
+    const selectedMembership = financeMembershipStudents.find((item) => (
+      String(item?._id || '') === normalizedStudentId
+      && (!manualForm.classId || String(item?.classId || '') === String(manualForm.classId || ''))
+    )) || financeMembershipStudents.find((item) => String(item?._id || '') === normalizedStudentId) || null;
+
+    return {
+      ...manualForm,
+      studentId: normalizedStudentId,
+      classId: String(manualForm.classId || selectedMembership?.classId || '').trim(),
+      academicYear: String(manualForm.academicYear || selectedMembership?.academicYearTitle || '').trim(),
+      amount: String(manualForm.amount || '').trim(),
+      dueDate: String(manualForm.dueDate || '').trim()
+    };
   };
 
   const applyDiscountMembershipStudent = (studentId = '') => {
@@ -2133,8 +2212,9 @@ export default function AdminFinance() {
       }
       if (nextClassOptions.length && !manualForm.classId) {
         const firstClassId = nextClassOptions[0].classId;
+        const firstClassMembershipYear = nextMembershipStudents.find((item) => String(item?.classId || '') === String(firstClassId || ''))?.academicYearId || defaultAcademicYearId;
         setManualForm((prev) => ({ ...prev, classId: firstClassId }));
-        setBulkForm((prev) => ({ ...prev, classId: firstClassId }));
+        setBulkForm((prev) => ({ ...prev, classId: firstClassId, academicYearId: prev.academicYearId || firstClassMembershipYear || defaultAcademicYearId }));
         setFeePlanForm((prev) => ({ ...prev, classId: firstClassId }));
         setPaymentDeskForm((prev) => ({ ...prev, classId: prev.classId || firstClassId }));
         setDiscountForm((prev) => ({ ...prev, classId: prev.classId || firstClassId }));
@@ -2144,7 +2224,8 @@ export default function AdminFinance() {
         setFeePlanForm((prev) => ({ ...prev, academicYearId: defaultAcademicYearId }));
       }
       if (defaultAcademicYearId && !bulkForm.academicYearId) {
-        setBulkForm((prev) => ({ ...prev, academicYearId: defaultAcademicYearId }));
+        const membershipYear = nextMembershipStudents.find((item) => String(item?.classId || '') === String((bulkForm.classId || nextClassOptions[0]?.classId || '') || ''))?.academicYearId || '';
+        setBulkForm((prev) => ({ ...prev, academicYearId: membershipYear || defaultAcademicYearId }));
       }
       if (defaultAcademicYearId && !paymentDeskForm.academicYearId) {
         setPaymentDeskForm((prev) => ({ ...prev, academicYearId: defaultAcademicYearId }));
@@ -2998,7 +3079,13 @@ export default function AdminFinance() {
     e.preventDefault();
     try {
       setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/bills`, manualForm);
+      const payload = buildManualBillPayload();
+      if (!payload.studentId || !payload.classId || !payload.dueDate) {
+        setMessage('برای صدور بل دستی، شاگرد، صنف و سررسید را انتخاب کنید.');
+        setBusy(false);
+        return;
+      }
+      const data = await postJson(`${API_BASE}/api/finance/admin/bills`, payload);
       setMessage(data.message || 'بل ایجاد شد');
       await loadAll();
     } catch (err) {
@@ -3011,7 +3098,13 @@ export default function AdminFinance() {
     e.preventDefault();
     try {
       setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/bills/generate`, bulkForm);
+      const payload = buildBulkBillPayload();
+      if (!payload.classId || !payload.dueDate) {
+        setMessage('برای صدور گروهی، صنف و سررسید را انتخاب کنید.');
+        setBusy(false);
+        return;
+      }
+      const data = await postJson(`${API_BASE}/api/finance/admin/bills/generate`, payload);
       setBillingPreview(null);
       setMessage(data.message || 'بل گروهی ایجاد شد');
       await loadAll();
@@ -3024,8 +3117,19 @@ export default function AdminFinance() {
   const previewBulkBills = async () => {
     try {
       setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/bills/preview`, bulkForm);
+      const payload = buildBulkBillPayload();
+      if (!payload.classId || !payload.dueDate) {
+        setMessage('برای پیش‌نمایش بل گروهی، صنف و سررسید را انتخاب کنید.');
+        setBusy(false);
+        return;
+      }
+      const data = await postJson(`${API_BASE}/api/finance/admin/bills/preview`, payload);
       setBillingPreview(data);
+      if (!data?.summary?.candidateCount) {
+        setMessage(getBulkPreviewEmptyMessage(data));
+        setBusy(false);
+        return;
+      }
       setMessage(data?.summary?.candidateCount ? 'پیش‌نمایش بل‌ها آماده شد' : 'برای این فیلتر موردی برای پیش‌نمایش بل پیدا نشد');
       setBusy(false);
     } catch (err) {
@@ -4860,7 +4964,8 @@ export default function AdminFinance() {
                 placeholder="نام، ایمیل یا شناسه متعلم"
               />
             </label>
-            <select value={manualForm.studentId} onChange={(e) => applyManualMembershipStudent(e.target.value)}>
+            <select value={manualForm.studentId} onChange={(e) => applyManualMembershipStudent(e.target.value)} required>
+              <option value="">شاگرد را انتخاب کنید</option>
               {manualStudentOptions.length ? manualStudentOptions.map((student) => (
                 <option key={student.membershipId || student._id} value={student._id}>{getFinanceStudentOptionLabel(student)}</option>
               )) : (
@@ -4868,14 +4973,15 @@ export default function AdminFinance() {
               )}
             </select>
             <div className="finance-split-grid">
-              <select value={manualForm.classId} onChange={(e) => setManualForm((p) => ({ ...p, classId: e.target.value }))}>
+              <select value={manualForm.classId} onChange={(e) => setManualForm((p) => ({ ...p, classId: e.target.value }))} required>
+                <option value="">صنف را انتخاب کنید</option>
                 {classOptions.map((item) => <option key={item.classId} value={item.classId}>{getClassOptionLabel(item)}</option>)}
               </select>
               <input value={manualForm.amount} onChange={(e) => setManualForm((p) => ({ ...p, amount: e.target.value }))} placeholder="مبلغ AFN" />
             </div>
             <div className="finance-split-grid">
               <div className="finance-cell-stack">
-                <AfghanDateInput value={manualForm.dueDate} onChange={(value) => setManualForm((p) => ({ ...p, dueDate: value }))} showGregorianEquivalent />
+                <AfghanDateInput value={manualForm.dueDate} onChange={(value) => setManualForm((p) => ({ ...p, dueDate: value }))} showGregorianEquivalent required />
                 <small>{manualForm.dueDate ? `هجری شمسی: ${toFaDate(manualForm.dueDate)}` : 'سررسید انتخاب نشده است.'}</small>
               </div>
               <input value={manualForm.academicYear} onChange={(e) => setManualForm((p) => ({ ...p, academicYear: e.target.value }))} placeholder="سال آموزشی" />
@@ -5198,18 +5304,20 @@ export default function AdminFinance() {
               </div>
               <span className="finance-chip">{classOptions.length} صنف</span>
             </div>
-            <select value={bulkForm.classId} onChange={(e) => setBulkForm((p) => ({ ...p, classId: e.target.value }))}>
+            <select value={bulkForm.classId} onChange={(e) => applyBulkClassSelection(e.target.value)} required>
+              <option value="">صنف را انتخاب کنید</option>
               {classOptions.map((item) => <option key={item.classId} value={item.classId}>{getClassOptionLabel(item)}</option>)}
             </select>
             <div className="finance-split-grid">
               <select value={bulkForm.academicYearId} onChange={(e) => setBulkForm((p) => ({ ...p, academicYearId: e.target.value }))}>
+                <option value="">سال تعلیمی عضویت‌ها</option>
                 {academicYears.map((item) => <option key={`bulk-year-${item.id}`} value={item.id}>{getAcademicYearOptionLabel(item)}</option>)}
               </select>
               <input value={bulkForm.amount} onChange={(e) => setBulkForm((p) => ({ ...p, amount: e.target.value }))} placeholder="مبلغ فیس/شهریه (اختیاری)" />
             </div>
             <div className="finance-split-grid">
               <div className="finance-cell-stack">
-                <AfghanDateInput value={bulkForm.dueDate} onChange={(value) => setBulkForm((p) => ({ ...p, dueDate: value }))} showGregorianEquivalent />
+                <AfghanDateInput value={bulkForm.dueDate} onChange={(value) => setBulkForm((p) => ({ ...p, dueDate: value }))} showGregorianEquivalent required />
                 <small>{bulkForm.dueDate ? `هجری شمسی: ${toFaDate(bulkForm.dueDate)}` : 'سررسید گروهی انتخاب نشده است.'}</small>
               </div>
               <input value={bulkForm.academicYear} onChange={(e) => setBulkForm((p) => ({ ...p, academicYear: e.target.value }))} placeholder="سال آموزشی" />
