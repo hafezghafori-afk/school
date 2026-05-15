@@ -1248,9 +1248,19 @@
   gap: 3px;
 }
 
+.finance-field-label {
+  color: rgba(238, 245, 255, 0.82);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .finance-cell-stack small {
   color: rgba(238, 245, 255, 0.72);
   line-height: 1.4;
+}
+
+.finance-advanced-toggle {
+  justify-self: start;
 }
 
 .selectable-row {

@@ -522,7 +522,7 @@ async function buildFinanceOverviewReport(filters) {
       { key: 'amountPaid', label: 'پرداخت‌شده' },
       { key: 'outstandingAmount', label: 'باقی‌مانده' },
       { key: 'issuedAt', label: 'تاریخ صدور' },
-      { key: 'dueDate', label: 'سررسید' }
+      { key: 'dueDate', label: 'مهلت پرداخت' }
     ],
     rows,
     summary,
@@ -666,12 +666,12 @@ async function buildFeeDebtorsOverviewReport(filters) {
       { key: 'totalDue', label: 'مبلغ کل' },
       { key: 'totalPaid', label: 'پرداخت‌شده' },
       { key: 'totalOutstanding', label: 'باقی‌مانده' },
-      { key: 'overdueOrders', label: 'بل‌های سررسیدشده' },
+      { key: 'overdueOrders', label: 'بل‌های مهلت‌گذشته' },
       { key: 'partialOrders', label: 'بل‌های نیمه‌پرداخت' },
       { key: 'reliefCount', label: 'تعداد تسهیلات فعال' },
       { key: 'fixedReliefAmount', label: 'مبلغ تسهیلات ثابت' },
       { key: 'fullReliefCount', label: 'معافیت‌های کامل' },
-      { key: 'lastDueDate', label: 'آخرین سررسید' },
+      { key: 'lastDueDate', label: 'آخرین مهلت پرداخت' },
       { key: 'debtorStatus', label: 'وضعیت بدهکاری' }
     ],
     rows,

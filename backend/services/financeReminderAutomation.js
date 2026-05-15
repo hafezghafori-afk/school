@@ -187,11 +187,11 @@ async function runFinanceReminderSweep(app, { force = false, req = null, actorUs
       if (remaining <= 0) continue;
 
       const overdue = order.dueDate && new Date(order.dueDate).getTime() < now.getTime();
-      const title = overdue ? 'یادآوری بدهی معوق' : 'یادآوری سررسید نزدیک';
+      const title = overdue ? 'یادآوری بدهی معوق' : 'یادآوری مهلت پرداخت نزدیک';
       const studentName = order.student?.name || 'متعلم';
       const message = overdue
         ? `بل ${order.orderNumber} برای ${studentName} معوق است. باقی‌مانده: ${formatFinanceAmountLabel(remaining)}`
-        : `بل ${order.orderNumber} برای ${studentName} به سررسید نزدیک شده است. باقی‌مانده: ${formatFinanceAmountLabel(remaining)}`;
+        : `بل ${order.orderNumber} برای ${studentName} به مهلت پرداخت نزدیک شده است. باقی‌مانده: ${formatFinanceAmountLabel(remaining)}`;
 
       await notifyFinanceAudienceForStudent({
         req: runtimeReq,

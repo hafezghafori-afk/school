@@ -218,7 +218,7 @@ function buildStudentStatementHtml({
       <div class="section">
         <h2>بل‌ها</h2>
         <table>
-          <thead><tr><th>عنوان</th><th>نوع</th><th>وضعیت</th><th>سررسید</th><th>مبلغ</th><th>مانده</th></tr></thead>
+          <thead><tr><th>عنوان</th><th>نوع</th><th>وضعیت</th><th>مهلت پرداخت</th><th>مبلغ</th><th>مانده</th></tr></thead>
           <tbody>${ordersRows || '<tr><td colspan="6">داده‌ای ثبت نشده است.</td></tr>'}</tbody>
         </table>
       </div>
@@ -710,7 +710,7 @@ export default function StudentFinance() {
                       <th>نوع</th>
                       <th>ساحه</th>
                       <th>وضعیت</th>
-                      <th>سررسید</th>
+                      <th>مهلت پرداخت</th>
                       <th>مبلغ</th>
                       <th>مانده</th>
                     </tr>

@@ -238,7 +238,7 @@ function buildParentStatementHtml({
       <div class="section">
         <h2>بل‌های باز</h2>
         <table>
-          <thead><tr><th>عنوان</th><th>وضعیت</th><th>سررسید</th><th>مبلغ</th><th>باقی‌مانده</th></tr></thead>
+          <thead><tr><th>عنوان</th><th>وضعیت</th><th>مهلت پرداخت</th><th>مبلغ</th><th>باقی‌مانده</th></tr></thead>
           <tbody>${ordersRows || '<tr><td colspan="5">داده‌ای ثبت نشده است.</td></tr>'}</tbody>
         </table>
       </div>
@@ -752,7 +752,7 @@ export default function ParentDashboard() {
         <div className="dash-card-header">
           <h3>پیگیری مالی فعال</h3>
           <span className="status pending">
-            {toFaNumber(financeSummary.dueSoonOrders)} سررسید نزدیک
+            {toFaNumber(financeSummary.dueSoonOrders)} مهلت پرداخت نزدیک
           </span>
         </div>
         <div className="dash-summary-grid">
@@ -783,7 +783,7 @@ export default function ParentDashboard() {
                 <span>
                   {labelFor(ORDER_STATUS_LABELS, item.status, item.status || '-')}
                   {' | '}
-                  سررسید: {formatDate(item.dueDate)}
+                  مهلت پرداخت: {formatDate(item.dueDate)}
                   {item.periodLabel ? ` | ${item.periodLabel}` : ''}
                 </span>
               </div>
@@ -884,7 +884,7 @@ export default function ParentDashboard() {
               <div className="dash-inline-meta">
                 <span>بل انتخاب‌شده: <strong>{selectedReceiptOrder?.title || formatFinanceCode(selectedReceiptOrder?.orderNumber, '—')}</strong></span>
                 <span>مانده فعلی: <strong>{formatMoney(selectedReceiptOrder?.outstandingAmount || 0)}</strong></span>
-                <span>سررسید: <strong>{formatDate(selectedReceiptOrder?.dueDate)}</strong></span>
+                <span>مهلت پرداخت: <strong>{formatDate(selectedReceiptOrder?.dueDate)}</strong></span>
               </div>
               {receiptMessage ? (
                 <div className={`dash-note ${receiptMessageType === 'error' ? 'danger' : 'success'}`}>

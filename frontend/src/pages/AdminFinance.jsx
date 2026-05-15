@@ -1190,6 +1190,7 @@ export default function AdminFinance() {
   const [activeSection, setActiveSection] = useState('overview');
   const [formLayoutMode, setFormLayoutMode] = useState('landscape');
   const [orderFormMode, setOrderFormMode] = useState('manual');
+  const [billingAdvancedOpen, setBillingAdvancedOpen] = useState(false);
   const [reliefFormMode, setReliefFormMode] = useState('discount');
   const [incomeTrendRange, setIncomeTrendRange] = useState('daily');
   const [manualStudentSearch, setManualStudentSearch] = useState('');
@@ -3081,7 +3082,7 @@ export default function AdminFinance() {
       setBusy(true);
       const payload = buildManualBillPayload();
       if (!payload.studentId || !payload.classId || !payload.dueDate) {
-        setMessage('برای صدور بل دستی، شاگرد، صنف و سررسید را انتخاب کنید.');
+        setMessage('برای صدور بل دستی، شاگرد، صنف و مهلت پرداخت را انتخاب کنید.');
         setBusy(false);
         return;
       }
@@ -3100,7 +3101,7 @@ export default function AdminFinance() {
       setBusy(true);
       const payload = buildBulkBillPayload();
       if (!payload.classId || !payload.dueDate) {
-        setMessage('برای صدور گروهی، صنف و سررسید را انتخاب کنید.');
+        setMessage('برای صدور گروهی، صنف و مهلت پرداخت را انتخاب کنید.');
         setBusy(false);
         return;
       }
@@ -3119,7 +3120,7 @@ export default function AdminFinance() {
       setBusy(true);
       const payload = buildBulkBillPayload();
       if (!payload.classId || !payload.dueDate) {
-        setMessage('برای پیش‌نمایش بل گروهی، صنف و سررسید را انتخاب کنید.');
+        setMessage('برای پیش‌نمایش بل گروهی، صنف و مهلت پرداخت را انتخاب کنید.');
         setBusy(false);
         return;
       }
@@ -4575,7 +4576,7 @@ export default function AdminFinance() {
                 {globalFinanceSpotlight.student.fatherName ? <div><span>نام پدر</span><strong>{globalFinanceSpotlight.student.fatherName}</strong></div> : null}
                 {globalFinanceSpotlight.student.guardianName ? <div><span>سرپرست</span><strong>{globalFinanceSpotlight.student.guardianName}</strong></div> : null}
                 {globalFinanceSpotlight.student.guardianPhone ? <div><span>تماس سرپرست</span><strong>{globalFinanceSpotlight.student.guardianPhone}</strong></div> : null}
-                {globalFinanceSpotlight.snapshot.nextDueOrder?.dueDate ? <div><span>سررسید بعدی</span><strong>{toFaDate(globalFinanceSpotlight.snapshot.nextDueOrder.dueDate)}</strong></div> : null}
+                {globalFinanceSpotlight.snapshot.nextDueOrder?.dueDate ? <div><span>مهلت پرداخت بعدی</span><strong>{toFaDate(globalFinanceSpotlight.snapshot.nextDueOrder.dueDate)}</strong></div> : null}
               </div>
             ) : null}
             {globalFinanceSearchResults.length > 1 ? (
@@ -4981,15 +4982,21 @@ export default function AdminFinance() {
             </div>
             <div className="finance-split-grid">
               <div className="finance-cell-stack">
+                <span className="finance-field-label">مهلت پرداخت</span>
                 <AfghanDateInput value={manualForm.dueDate} onChange={(value) => setManualForm((p) => ({ ...p, dueDate: value }))} showGregorianEquivalent required />
-                <small>{manualForm.dueDate ? `هجری شمسی: ${toFaDate(manualForm.dueDate)}` : 'سررسید انتخاب نشده است.'}</small>
+                <small>{manualForm.dueDate ? `مهلت پرداخت: ${toFaDate(manualForm.dueDate)}` : 'مهلت پرداخت انتخاب نشده است.'}</small>
               </div>
-              <input value={manualForm.academicYear} onChange={(e) => setManualForm((p) => ({ ...p, academicYear: e.target.value }))} placeholder="سال آموزشی" />
+              <input value={manualForm.periodLabel} onChange={(e) => setManualForm((p) => ({ ...p, periodLabel: e.target.value }))} placeholder="عنوان بل / دوره" />
             </div>
-            <div className="finance-split-grid">
-              <input value={manualForm.term} onChange={(e) => setManualForm((p) => ({ ...p, term: e.target.value }))} placeholder="ترم" />
-              <input value={manualForm.periodLabel} onChange={(e) => setManualForm((p) => ({ ...p, periodLabel: e.target.value }))} placeholder="عنوان دوره" />
-            </div>
+            <button type="button" className="secondary finance-advanced-toggle" onClick={() => setBillingAdvancedOpen((value) => !value)}>
+              {billingAdvancedOpen ? 'بستن تنظیمات پیشرفته' : 'تنظیمات پیشرفته'}
+            </button>
+            {billingAdvancedOpen && (
+              <div className="finance-split-grid">
+                <input value={manualForm.academicYear} onChange={(e) => setManualForm((p) => ({ ...p, academicYear: e.target.value }))} placeholder="سال آموزشی متنی" />
+                <input value={manualForm.term} onChange={(e) => setManualForm((p) => ({ ...p, term: e.target.value }))} placeholder="ترم" />
+              </div>
+            )}
             <button type="submit" disabled={busy}>ایجاد بل</button>
           </form>
         )}
@@ -5159,7 +5166,7 @@ export default function AdminFinance() {
                   <span>{paymentDeskFinanceSnapshot.openOrders}</span>
                 </div>
                 <div className="mini-row">
-                  <span>نزدیک‌ترین سررسید</span>
+                  <span>نزدیک‌ترین مهلت پرداخت</span>
                   <span>{paymentDeskFinanceSnapshot.nextDueOrder?.dueDate ? toFaDate(paymentDeskFinanceSnapshot.nextDueOrder.dueDate) : '-'}</span>
                 </div>
                 {paymentDeskFinanceSnapshot.topReliefs.map((item) => (
@@ -5194,7 +5201,7 @@ export default function AdminFinance() {
                     ) : (
                       <strong>{item.title || formatFinanceCode(item.billNumber, '') || 'بدهی مالی'}</strong>
                     )}
-                    <small>سررسید: {toFaDate(item.dueDate)} | مانده: {fmt(item.outstandingAmount || 0)} AFN</small>
+                    <small>مهلت پرداخت: {toFaDate(item.dueDate)} | مانده: {fmt(item.outstandingAmount || 0)} AFN</small>
                   </div>
                   {paymentDeskForm.allocationMode === 'manual' ? (
                     <input
@@ -5317,29 +5324,37 @@ export default function AdminFinance() {
             </div>
             <div className="finance-split-grid">
               <div className="finance-cell-stack">
+                <span className="finance-field-label">مهلت پرداخت</span>
                 <AfghanDateInput value={bulkForm.dueDate} onChange={(value) => setBulkForm((p) => ({ ...p, dueDate: value }))} showGregorianEquivalent required />
-                <small>{bulkForm.dueDate ? `هجری شمسی: ${toFaDate(bulkForm.dueDate)}` : 'سررسید گروهی انتخاب نشده است.'}</small>
+                <small>{bulkForm.dueDate ? `مهلت پرداخت: ${toFaDate(bulkForm.dueDate)}` : 'مهلت پرداخت گروهی انتخاب نشده است.'}</small>
               </div>
-              <input value={bulkForm.academicYear} onChange={(e) => setBulkForm((p) => ({ ...p, academicYear: e.target.value }))} placeholder="سال آموزشی" />
+              <input value={bulkForm.periodLabel} onChange={(e) => setBulkForm((p) => ({ ...p, periodLabel: e.target.value }))} placeholder="عنوان بل / دوره" />
             </div>
-            <div className="finance-split-grid">
-              <input value={bulkForm.term} onChange={(e) => setBulkForm((p) => ({ ...p, term: e.target.value }))} placeholder="ترم" />
-              <input value={bulkForm.periodLabel} onChange={(e) => setBulkForm((p) => ({ ...p, periodLabel: e.target.value }))} placeholder="عنوان دوره" />
-            </div>
-            <div className="finance-flag-grid">
-              <label className="finance-flag">
-                <input type="checkbox" checked={bulkForm.includeAdmission} onChange={(e) => setBulkForm((p) => ({ ...p, includeAdmission: e.target.checked }))} />
-                <span>شامل داخله</span>
-              </label>
-              <label className="finance-flag">
-                <input type="checkbox" checked={bulkForm.includeTransport} onChange={(e) => setBulkForm((p) => ({ ...p, includeTransport: e.target.checked }))} />
-                <span>شامل ترانسپورت</span>
-              </label>
-              <label className="finance-flag">
-                <input type="checkbox" checked={bulkForm.onlyDebtors} onChange={(e) => setBulkForm((p) => ({ ...p, onlyDebtors: e.target.checked }))} />
-                <span>فقط بدهکاران</span>
-              </label>
-            </div>
+            <button type="button" className="secondary finance-advanced-toggle" onClick={() => setBillingAdvancedOpen((value) => !value)}>
+              {billingAdvancedOpen ? 'بستن تنظیمات پیشرفته' : 'تنظیمات پیشرفته'}
+            </button>
+            {billingAdvancedOpen && (
+              <>
+                <div className="finance-split-grid">
+                  <input value={bulkForm.academicYear} onChange={(e) => setBulkForm((p) => ({ ...p, academicYear: e.target.value }))} placeholder="سال آموزشی متنی" />
+                  <input value={bulkForm.term} onChange={(e) => setBulkForm((p) => ({ ...p, term: e.target.value }))} placeholder="ترم" />
+                </div>
+                <div className="finance-flag-grid">
+                  <label className="finance-flag">
+                    <input type="checkbox" checked={bulkForm.includeAdmission} onChange={(e) => setBulkForm((p) => ({ ...p, includeAdmission: e.target.checked }))} />
+                    <span>شامل داخله</span>
+                  </label>
+                  <label className="finance-flag">
+                    <input type="checkbox" checked={bulkForm.includeTransport} onChange={(e) => setBulkForm((p) => ({ ...p, includeTransport: e.target.checked }))} />
+                    <span>شامل ترانسپورت</span>
+                  </label>
+                  <label className="finance-flag">
+                    <input type="checkbox" checked={bulkForm.onlyDebtors} onChange={(e) => setBulkForm((p) => ({ ...p, onlyDebtors: e.target.checked }))} />
+                    <span>فقط بدهکاران</span>
+                  </label>
+                </div>
+              </>
+            )}
             <div className="row-actions">
               <button type="button" onClick={previewBulkBills} disabled={busy}>پیش‌نمایش بل‌ها</button>
               <button type="submit" disabled={busy}>صدور گروهی</button>
@@ -5457,7 +5472,7 @@ export default function AdminFinance() {
                   <span className="finance-plan-step">۳</span>
                   <div>
                     <h4>پالیسی پرداخت</h4>
-                    <p className="muted">سررسید، واحد پول و تاریخ تطبیق را برای پلان تنظیم کنید.</p>
+                    <p className="muted">مهلت پرداخت، واحد پول و تاریخ تطبیق را برای پلان تنظیم کنید.</p>
                   </div>
                 </div>
                 <div className="finance-split-grid">
@@ -5466,7 +5481,7 @@ export default function AdminFinance() {
                     <input value={feePlanForm.currency} onChange={(e) => setFeePlanForm((p) => ({ ...p, currency: e.target.value.toUpperCase() }))} placeholder="AFN" />
                   </label>
                   <label className="finance-field">
-                    <span>روز سررسید</span>
+                    <span>روز مهلت پرداخت</span>
                     <input type="number" min="1" max="28" value={feePlanForm.dueDay} onChange={(e) => setFeePlanForm((p) => ({ ...p, dueDay: e.target.value }))} placeholder="۱۰" />
                   </label>
                   <div className="finance-cell-stack">
@@ -5551,7 +5566,7 @@ export default function AdminFinance() {
                   <div><span>صنف</span><strong>{selectedFeePlanClass ? getClassOptionLabel(selectedFeePlanClass) : '-'}</strong></div>
                   <div><span>سال</span><strong>{selectedFeePlanAcademicYear ? getAcademicYearOptionLabel(selectedFeePlanAcademicYear) : '-'}</strong></div>
                   <div><span>دوره</span><strong>{FEE_PLAN_FREQUENCY_LABELS[feePlanForm.billingFrequency] || feePlanForm.billingFrequency}</strong></div>
-                  <div><span>سررسید</span><strong>روز {fmt(feePlanForm.dueDay || 10)}</strong></div>
+                  <div><span>مهلت پرداخت</span><strong>روز {fmt(feePlanForm.dueDay || 10)}</strong></div>
                   <div><span>اقلام فعال</span><strong>{fmt(feePlanActiveLineItems.length)}</strong></div>
                   <div><span>مبلغ کل</span><strong>{fmt(feePlanTotalAmount)} {feePlanForm.currency || 'AFN'}</strong></div>
                 </div>
@@ -5864,7 +5879,7 @@ export default function AdminFinance() {
               <span>{reliefFocusSnapshot.fullReliefCount} / {reliefFocusSnapshot.percentReliefCount}</span>
             </div>
             <div className="mini-row">
-              <span>نزدیک‌ترین سررسید</span>
+              <span>نزدیک‌ترین مهلت پرداخت</span>
               <span>{reliefFocusSnapshot.nextDueOrder?.dueDate ? toFaDate(reliefFocusSnapshot.nextDueOrder.dueDate) : '-'}</span>
             </div>
             {reliefFocusSnapshot.topReliefs.map((item) => (
@@ -6298,7 +6313,7 @@ export default function AdminFinance() {
           </label>
         </div>
         {!filteredBills.length && <p className="muted">برای این فیلتر، بلی پیدا نشد.</p>}
-        <div className="finance-orders-table-head"><span>سند</span><span>متعلم</span><span>صنف / دوره</span><span>مبلغ</span><span>سررسید</span><span>وضعیت</span><span>عملیات</span></div>
+        <div className="finance-orders-table-head"><span>سند</span><span>متعلم</span><span>صنف / دوره</span><span>مبلغ</span><span>مهلت پرداخت</span><span>وضعیت</span><span>عملیات</span></div>
         <div className="finance-table bills-table finance-orders-table">
           <div className="head"><span>شماره</span><span>شاگرد</span><span>صنف</span><span>وضعیت</span><span>باقیمانده</span><span>عملیات</span></div>
           {filteredBills.slice(0, 120).map((bill) => (

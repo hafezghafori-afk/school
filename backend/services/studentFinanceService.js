@@ -1063,7 +1063,7 @@ function buildStatementRecommendation(packSummary = {}) {
     return 'نیاز به بررسی فوری مالی و تصفیه موردهای حساس وجود دارد.';
   }
   if (Number(packSummary?.warning || 0) > 0) {
-    return 'چند مورد نیازمند پیگیری پیش از سررسید بعدی است.';
+    return 'چند مورد نیازمند پیگیری پیش از مهلت پرداخت بعدی است.';
   }
   return 'در این استیتمنت سیگنال حساس مالی دیده نشد.';
 }

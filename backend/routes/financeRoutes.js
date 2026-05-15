@@ -4459,11 +4459,11 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
   try {
     const { studentId, classId = '', courseId: inputCourseId = '', amount, dueDate, issuedAt, periodType, periodLabel, academicYear, term, currency, note } = req.body || {};
     if (!studentId || (!classId && !inputCourseId) || !dueDate) {
-      return res.status(400).json({ success: false, message: 'شاگرد، صنف و سررسید الزامی است.' });
+      return res.status(400).json({ success: false, message: 'شاگرد، صنف و مهلت پرداخت الزامی است.' });
     }
     const dueDateValue = parseDateSafe(dueDate, null);
     if (!dueDateValue) {
-      return res.status(400).json({ success: false, message: 'تاریخ سررسید معتبر نیست.' });
+      return res.status(400).json({ success: false, message: 'تاریخ مهلت پرداخت معتبر نیست.' });
     }
     const issueDateValue = parseDateSafe(issuedAt, new Date());
     if (await isMonthClosed(issueDateValue)) {
@@ -4607,11 +4607,11 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
     } = req.body || {};
 
     if ((!classId && !inputCourseId) || !dueDate) {
-      return res.status(400).json({ success: false, message: 'شناسه صنف و سررسید الزامی است.' });
+      return res.status(400).json({ success: false, message: 'شناسه صنف و مهلت پرداخت الزامی است.' });
     }
 
     const dueDateValue = parseDateSafe(dueDate, null);
-    if (!dueDateValue) return res.status(400).json({ success: false, message: 'تاریخ سررسید معتبر نیست.' });
+    if (!dueDateValue) return res.status(400).json({ success: false, message: 'تاریخ مهلت پرداخت معتبر نیست.' });
     const issueDateValue = parseDateSafe(issuedAt, new Date());
     if (await isMonthClosed(issueDateValue)) {
       return res.status(400).json({ success: false, message: 'ماه مالی بسته شده است و پیش‌نمایش صدور مجاز نیست.' });
@@ -4714,10 +4714,10 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       onlyDebtors
     } = req.body || {};
     if ((!classId && !inputCourseId) || !dueDate) {
-      return res.status(400).json({ success: false, message: 'شناسه صنف و سررسید الزامی است.' });
+      return res.status(400).json({ success: false, message: 'شناسه صنف و مهلت پرداخت الزامی است.' });
     }
     const dueDateValue = parseDateSafe(dueDate, null);
-    if (!dueDateValue) return res.status(400).json({ success: false, message: 'تاریخ سررسید معتبر نیست.' });
+    if (!dueDateValue) return res.status(400).json({ success: false, message: 'تاریخ مهلت پرداخت معتبر نیست.' });
     const issueDateValue = parseDateSafe(issuedAt, new Date());
     if (await isMonthClosed(issueDateValue)) {
       return res.status(400).json({ success: false, message: 'ماه مالی بسته شده است و صدور گروهی مجاز نیست.' });

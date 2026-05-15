@@ -2985,7 +2985,7 @@ export default function AdminGovernmentFinance() {
               <div className="gov-card-head">
                 <div>
                   <strong>وضعیت معوقات</strong>
-                  <span>نمایش دسته‌های سررسید فعلی</span>
+                  <span>نمایش دسته‌های مهلت فعلی</span>
                 </div>
               </div>
               <div className="gov-mini-stack">

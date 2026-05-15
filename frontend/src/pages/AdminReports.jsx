@@ -69,7 +69,7 @@ const REPORT_UI = {
   },
   __fee_debtors_columns: {
     title: 'گزارش بدهکاران فیس',
-    description: 'لیست بدهکاران، باقی‌مانده‌ها و بل‌های سررسیدشده بر پایه سفارش‌ها'
+    description: 'لیست بدهکاران، باقی‌مانده‌ها و بل‌های مهلت‌گذشته بر پایه سفارش‌ها'
   },
   __fee_discount_exemption_columns: {
     title: 'گزارش تخفیف و معافیت',
@@ -87,9 +87,9 @@ const REPORT_UI = {
     totalDue: 'مبلغ کل',
     totalPaid: 'پرداخت‌شده',
     totalOutstanding: 'باقی‌مانده',
-    overdueOrders: 'بل‌های سررسیدشده',
+    overdueOrders: 'بل‌های مهلت‌گذشته',
     partialOrders: 'بل‌های نیمه‌پرداخت',
-    lastDueDate: 'آخرین سررسید',
+    lastDueDate: 'آخرین مهلت پرداخت',
     debtorStatus: 'وضعیت بدهکاری'
   },
   __fee_discount_exemption_report_columns: {
@@ -167,7 +167,7 @@ const REPORT_COLUMN_LABELS = {
     amountPaid: 'پرداخت‌شده',
     outstandingAmount: 'باقی‌مانده',
     issuedAt: 'تاریخ صدور',
-    dueDate: 'سررسید'
+    dueDate: 'مهلت پرداخت'
   },
   exam_outcomes: {
     studentName: 'متعلم',
@@ -244,7 +244,7 @@ const REPORT_COLUMN_LABELS = {
 const REPORT_UI_OVERRIDES = {
   fee_debtors_overview: {
     title: 'گزارش بدهکاران فیس',
-    description: 'لیست بدهکاران، باقی‌مانده‌ها و بل‌های سررسیدشده بر پایه سفارش‌ها'
+    description: 'لیست بدهکاران، باقی‌مانده‌ها و بل‌های مهلت‌گذشته بر پایه سفارش‌ها'
   },
   fee_discount_exemption_overview: {
     title: 'گزارش تخفیف و معافیت',
@@ -265,9 +265,9 @@ const REPORT_COLUMN_OVERRIDES = {
     totalDue: 'مبلغ کل',
     totalPaid: 'پرداخت‌شده',
     totalOutstanding: 'باقی‌مانده',
-    overdueOrders: 'بل‌های سررسیدشده',
+    overdueOrders: 'بل‌های مهلت‌گذشته',
     partialOrders: 'بل‌های نیمه‌پرداخت',
-    lastDueDate: 'آخرین سررسید',
+    lastDueDate: 'آخرین مهلت پرداخت',
     debtorStatus: 'وضعیت بدهکاری'
   },
   fee_discount_exemption_overview: {
@@ -312,7 +312,7 @@ const SUMMARY_LABELS = {
   totalOutstanding: 'باقی‌مانده',
   totalPaymentAmount: 'مبلغ پرداخت‌ها',
   paidOrders: 'سفارش‌های تصفیه‌شده',
-  overdueOrders: 'سفارش‌های سررسیدشده',
+  overdueOrders: 'سفارش‌های مهلت‌گذشته',
   partialOrders: 'سفارش‌های نیمه‌پرداخت',
   totalResults: 'مجموع نتایج',
   passed: 'کامیاب',
@@ -357,7 +357,7 @@ const SUMMARY_LABELS = {
 
 const SUMMARY_LABEL_OVERRIDES = {
   totalDebtors: 'تعداد بدهکاران',
-  overdueDebtors: 'بدهکاران سررسیدشده',
+  overdueDebtors: 'بدهکاران مهلت‌گذشته',
   partialDebtors: 'بدهکاران نیمه‌پرداخت',
   totalEntries: 'تعداد ثبت‌ها',
   activeDiscounts: 'تخفیف‌های فعال',
@@ -385,7 +385,7 @@ const CLEAN_REPORT_UI = {
   },
   fee_debtors_overview: {
     title: 'گزارش بدهکاران فیس',
-    description: 'لیست بدهکاران، باقی‌مانده‌ها و بل‌های سررسیدشده'
+    description: 'لیست بدهکاران، باقی‌مانده‌ها و بل‌های مهلت‌گذشته'
   },
   fee_discount_exemption_overview: {
     title: 'گزارش تخفیف و معافیت',
@@ -434,9 +434,9 @@ const CLEAN_REPORT_COLUMN_LABELS = {
     totalDue: 'مبلغ کل',
     totalPaid: 'پرداخت‌شده',
     totalOutstanding: 'باقی‌مانده',
-    overdueOrders: 'بل‌های سررسیدشده',
+    overdueOrders: 'بل‌های مهلت‌گذشته',
     partialOrders: 'بل‌های نیمه‌پرداخت',
-    lastDueDate: 'آخرین سررسید',
+    lastDueDate: 'آخرین مهلت پرداخت',
     debtorStatus: 'وضعیت بدهکاری'
   },
   fee_discount_exemption_overview: {
@@ -468,7 +468,7 @@ const CLEAN_REPORT_COLUMN_LABELS = {
 
 const CLEAN_SUMMARY_LABELS = {
   totalDebtors: 'تعداد بدهکاران',
-  overdueDebtors: 'بدهکاران سررسیدشده',
+  overdueDebtors: 'بدهکاران مهلت‌گذشته',
   partialDebtors: 'بدهکاران نیمه‌پرداخت',
   totalEntries: 'تعداد ثبت‌ها',
   activeDiscounts: 'تخفیف‌های فعال',
