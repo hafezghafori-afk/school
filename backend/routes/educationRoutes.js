@@ -25,6 +25,7 @@ const router = express.Router();
 const DEFAULT_SINGLE_SCHOOL_ID = '000000000000000000000001';
 
 const membershipAccessOptions = Object.freeze({});
+const CURRENT_STUDENT_MEMBERSHIP_STATUSES = Object.freeze(['active', 'pending', 'suspended', 'transferred_in']);
 
 const mustObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
 const asObjectIdOrNull = (value) => (mustObjectId(value) ? value : null);
@@ -523,18 +524,41 @@ const buildOnlineQueueItem = (item) => ({
 });
 
 const loadEducationStudentCatalog = async () => {
-  const [canonicalStudents, afghanStudents, onlineRegistrations] = await Promise.all([
+  const [canonicalStudents, afghanStudents, onlineRegistrations, currentMemberships] = await Promise.all([
     User.find({ role: 'student' }).select('name email grade').sort({ name: 1 }),
     AfghanStudent.find({ status: { $ne: 'deleted' } })
       .select('personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari personalInfo.fatherName contactInfo.email contactInfo.mobile contactInfo.phone familyInfo.fatherPhone academicInfo.currentGrade notes status linkedUserId createdAt')
       .sort({ createdAt: -1 }),
     Enrollment.find({ status: { $in: ['pending', 'approved'] } })
       .select('studentName fatherName grade phone email notes status linkedUserId createdAt approvedAt rejectionReason')
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: -1 }),
+    StudentMembership.find({
+      isCurrent: true,
+      status: { $in: CURRENT_STUDENT_MEMBERSHIP_STATUSES }
+    }).select('student')
   ]);
+
+  const memberUserIds = new Set(
+    currentMemberships
+      .map((item) => String(item?.student || '').trim())
+      .filter(Boolean)
+  );
+  const canonicalUserIdByEmail = new Map();
+  canonicalStudents.forEach((item) => {
+    const email = normalizeText(item?.email).toLowerCase();
+    if (email && item?._id) canonicalUserIdByEmail.set(email, String(item._id));
+  });
+  const candidateHasCurrentMembership = (item = {}) => {
+    const linkedId = String(item?.linkedUserId || item?.canonicalUserId || '').trim();
+    if (linkedId && memberUserIds.has(linkedId)) return true;
+    const email = normalizeText(item?.email || item?.contactInfo?.email).toLowerCase();
+    const matchedUserId = email ? canonicalUserIdByEmail.get(email) : '';
+    return Boolean(matchedUserId && memberUserIds.has(matchedUserId));
+  };
 
   const byCanonicalUser = new Map();
   canonicalStudents.forEach((item) => {
+    if (memberUserIds.has(String(item?._id || ''))) return;
     const candidate = buildStudentCandidateFromUser(item);
     if (candidate.value) byCanonicalUser.set(String(candidate.value), candidate);
   });
@@ -543,12 +567,14 @@ const loadEducationStudentCatalog = async () => {
 
   afghanStudents.forEach((item) => {
     const linkedId = item?.linkedUserId ? String(item.linkedUserId) : '';
+    if (candidateHasCurrentMembership(item)) return;
     if (linkedId && byCanonicalUser.has(linkedId)) return;
     studentCandidates.push(buildStudentCandidateFromAfghanStudent(item));
   });
 
   onlineRegistrations.forEach((item) => {
     const linkedId = item?.linkedUserId ? String(item.linkedUserId) : '';
+    if (candidateHasCurrentMembership(item)) return;
     if (linkedId && byCanonicalUser.has(linkedId)) return;
     studentCandidates.push(buildStudentCandidateFromEnrollment(item));
   });
@@ -556,7 +582,9 @@ const loadEducationStudentCatalog = async () => {
   return {
     students: canonicalStudents,
     studentCandidates,
-    onlineRegistrationQueue: onlineRegistrations.map(buildOnlineQueueItem)
+    onlineRegistrationQueue: onlineRegistrations
+      .filter((item) => !candidateHasCurrentMembership(item))
+      .map(buildOnlineQueueItem)
   };
 };
 
@@ -2356,6 +2384,17 @@ router.post('/student-enrollments', ...withManageMemberships, async (req, res) =
 
     const currentItem = await StudentMembership.findOne({ student: studentId, course: nextCourseId, isCurrent: true })
       .sort({ updatedAt: -1, createdAt: -1 });
+    const currentStudentMembership = currentItem || await StudentMembership.findOne({
+      student: studentId,
+      isCurrent: true,
+      status: { $in: CURRENT_STUDENT_MEMBERSHIP_STATUSES }
+    }).sort({ updatedAt: -1, createdAt: -1 });
+    if (currentStudentMembership && String(currentStudentMembership.course || '') !== String(nextCourseId)) {
+      return res.status(409).json({
+        success: false,
+        message: 'این متعلم قبلاً ممبرشیپ فعال دارد و باید از دفتر ممبرشیپ‌ها مدیریت شود.'
+      });
+    }
     const latestRejected = !currentItem && membershipStatus === 'rejected'
       ? await StudentMembership.findOne({ student: studentId, course: nextCourseId, status: 'rejected' })
         .sort({ updatedAt: -1, createdAt: -1 })
@@ -2543,4 +2582,3 @@ router.delete('/student-enrollments/:id', ...withManageMemberships, async (req, 
 });
 
 module.exports = router;
-
