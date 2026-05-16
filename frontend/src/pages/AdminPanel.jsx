@@ -420,7 +420,7 @@ const QUICK_LINK_ITEMS = [
   { to: '/admin-education', label: 'مرکز مدیریت آموزش', permission: 'manage_content' },
   { to: '/admin-users', label: 'کاربران', permission: 'manage_users' },
   { to: '/admin-enrollments', label: 'ثبت‌نام‌ها', permission: 'manage_enrollments' },
-  { to: '/student-registration', label: 'شماره اساس و ریجیستر نمبر', permission: 'manage_enrollments' },
+  { to: '/admin-settings#student-ids', label: 'تنظیم شماره اساس و ریجیستر نمبر', permission: 'manage_content' },
   { to: '/admin-education?section=enrollments', label: 'ممبرشیپ آموزشی', permission: 'manage_memberships' },
   { to: '/admin-financial-memberships', label: 'عضویت‌ها', permission: 'manage_finance' },
   { to: '/admin-finance', label: 'مرکز مالی', permission: 'manage_finance' },
@@ -435,7 +435,7 @@ const QUICK_LINK_ITEMS = [
 ];
 
 const REQUIRED_QUICK_LINK_ITEMS = [
-  { to: '/student-registration', label: 'شماره اساس و ریجیستر نمبر', permission: 'manage_enrollments' }
+  { to: '/admin-settings#student-ids', label: 'تنظیم شماره اساس و ریجیستر نمبر', permission: 'manage_content' }
 ];
 
 const PRIMARY_ADMIN_LINKS = new Set([
@@ -462,9 +462,14 @@ const normalizeQuickLinkItems = (items = []) => {
   if (!Array.isArray(items)) return [];
   return items
     .map((item) => {
-      const to = String(item?.to || item?.href || '').trim();
-      const label = String(item?.label || item?.title || '').trim();
-      const permission = String(item?.permission || '').trim();
+      const rawTo = String(item?.to || item?.href || '').trim();
+      const isLegacyStudentIdLink = rawTo === '/student-registration'
+        && String(item?.label || item?.title || '').includes('ریجیستر');
+      const to = isLegacyStudentIdLink ? '/admin-settings#student-ids' : rawTo;
+      const label = isLegacyStudentIdLink
+        ? 'تنظیم شماره اساس و ریجیستر نمبر'
+        : String(item?.label || item?.title || '').trim();
+      const permission = isLegacyStudentIdLink ? 'manage_content' : String(item?.permission || '').trim();
       const enabled = item?.enabled !== false;
       if (!to || !label) return null;
       return {

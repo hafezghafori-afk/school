@@ -33,19 +33,36 @@ const ADMIN_QUICK_LINK_DEFAULTS = [
   { title: 'لاگ‌ها', href: '/admin-logs', permission: 'view_reports', enabled: true },
   { title: 'مرکز ارتباطات سیما', href: '/admin-communications', permission: 'manage_platform_requests', enabled: true },
   { title: 'ثبت‌نام‌ها', href: '/admin-enrollments', permission: 'manage_enrollments', enabled: true },
-  { title: 'شماره اساس و ریجیستر نمبر', href: '/student-registration', permission: 'manage_enrollments', enabled: true },
+  { title: 'تنظیم شماره اساس و ریجیستر نمبر', href: '/admin-settings#student-ids', permission: 'manage_content', enabled: true },
   { title: 'تقسیم اوقات', href: '/timetable/viewer', permission: 'view_schedule', enabled: true },
   { title: 'مدیریت تقسیم اوقات', href: '/timetable/editor', permission: 'manage_schedule', enabled: true }
 ];
+
+const DEFAULT_STUDENT_ID_FORMATS = {
+  registrationIdFormat: 'REG-{YYYY}-{SEQ}',
+  asasNumberFormat: '{YYYY}-{SEQ}'
+};
 
 const SETTINGS_TABS = [
   { key: 'brand', title: 'برند و تماس', icon: 'fa-id-card' },
   { key: 'home', title: 'صفحه فروش', icon: 'fa-store' },
   { key: 'header', title: 'هیدر و منو', icon: 'fa-bars-staggered' },
   { key: 'footer', title: 'فوتر', icon: 'fa-window-maximize' },
+  { key: 'studentIds', title: 'شماره‌های شاگردان', icon: 'fa-id-badge' },
   { key: 'login', title: 'صفحه ورود', icon: 'fa-user-lock' },
   { key: 'shortcuts', title: 'میانبرهای ادمین', icon: 'fa-gauge-high' }
 ];
+
+const SETTINGS_HASH_TAB_MAP = {
+  '#student-ids': 'studentIds',
+  '#shortcuts': 'shortcuts',
+  '#login': 'login'
+};
+
+const getInitialSettingsTab = () => {
+  if (typeof window === 'undefined') return 'brand';
+  return SETTINGS_HASH_TAB_MAP[window.location.hash] || 'brand';
+};
 
 const PUBLIC_MENU_ITEMS = [
   { title: 'خانه', href: '/' },
@@ -100,9 +117,12 @@ const normalizeAdminQuickLinks = (items = []) => {
   if (!Array.isArray(items)) return [];
   return items
     .map((item) => {
-      const title = String(item?.title || item?.label || '').trim();
-      const href = String(item?.href || item?.to || '').trim();
-      const permission = String(item?.permission || '').trim();
+      const rawTitle = String(item?.title || item?.label || '').trim();
+      const rawHref = String(item?.href || item?.to || '').trim();
+      const isLegacyStudentIdLink = rawHref === '/student-registration' && rawTitle.includes('ریجیستر');
+      const title = isLegacyStudentIdLink ? 'تنظیم شماره اساس و ریجیستر نمبر' : rawTitle;
+      const href = isLegacyStudentIdLink ? '/admin-settings#student-ids' : rawHref;
+      const permission = isLegacyStudentIdLink ? 'manage_content' : String(item?.permission || '').trim();
       const enabled = item?.enabled !== false;
       if (!title || !href) return null;
       return {
@@ -117,7 +137,7 @@ const normalizeAdminQuickLinks = (items = []) => {
 
 export default function AdminSettings() {
   const [settings, setSettings] = useState(null);
-  const [activeTab, setActiveTab] = useState('brand');
+  const [activeTab, setActiveTab] = useState(getInitialSettingsTab);
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -141,6 +161,10 @@ export default function AdminSettings() {
         nextSettings.adminQuickLinks = normalizedQuickLinks.length
           ? normalizedQuickLinks
           : ADMIN_QUICK_LINK_DEFAULTS.map((item) => ({ ...item }));
+        nextSettings.studentIdFormats = {
+          ...DEFAULT_STUDENT_ID_FORMATS,
+          ...(nextSettings.studentIdFormats || {})
+        };
       }
       setSettings(nextSettings);
       setAccessDenied(false);
@@ -157,8 +181,29 @@ export default function AdminSettings() {
     loadSettings();
   }, []);
 
+  useEffect(() => {
+    const syncHashTab = () => {
+      const nextTab = SETTINGS_HASH_TAB_MAP[window.location.hash];
+      if (nextTab) setActiveTab(nextTab);
+    };
+    syncHashTab();
+    window.addEventListener('hashchange', syncHashTab);
+    return () => window.removeEventListener('hashchange', syncHashTab);
+  }, []);
+
   const patchRoot = (patch) => {
     setSettings((prev) => ({ ...prev, ...patch }));
+  };
+
+  const patchStudentIdFormats = (patch) => {
+    setSettings((prev) => ({
+      ...prev,
+      studentIdFormats: {
+        ...DEFAULT_STUDENT_ID_FORMATS,
+        ...(prev?.studentIdFormats || {}),
+        ...patch
+      }
+    }));
   };
 
   const saveAll = async (successText = 'تنظیمات سیما ذخیره شد.') => {
@@ -181,6 +226,10 @@ export default function AdminSettings() {
       }
       const normalized = data.settings || settings;
       normalized.adminQuickLinks = normalizeAdminQuickLinks(normalized.adminQuickLinks);
+      normalized.studentIdFormats = {
+        ...DEFAULT_STUDENT_ID_FORMATS,
+        ...(normalized.studentIdFormats || {})
+      };
       setSettings(normalized);
       setMessage(successText);
     } catch {
@@ -489,6 +538,57 @@ export default function AdminSettings() {
     </>
   );
 
+  const renderStudentIdsTab = () => (
+    <section className="settings-card" id="student-ids">
+      <h3>روش تولید ریجیستر نمبر و شماره اساس</h3>
+      <p className="settings-muted">
+        این فرمت‌ها هنگام ثبت درخواست جدید و هنگام تایید شاگرد برای تولید شماره‌ها استفاده می‌شوند. از
+        {' '}<code>{'{YYYY}'}</code> برای سال جاری و <code>{'{SEQ}'}</code> برای شماره مسلسل استفاده کنید.
+      </p>
+      <div className="settings-grid">
+        <div>
+          <label>فرمت ریجیستر نمبر / کد پیگیری</label>
+          <input
+            dir="ltr"
+            value={settings.studentIdFormats?.registrationIdFormat || DEFAULT_STUDENT_ID_FORMATS.registrationIdFormat}
+            onChange={(e) => patchStudentIdFormats({ registrationIdFormat: e.target.value })}
+            placeholder="REG-{YYYY}-{SEQ}"
+          />
+        </div>
+        <div>
+          <label>فرمت شماره اساس</label>
+          <input
+            dir="ltr"
+            value={settings.studentIdFormats?.asasNumberFormat || DEFAULT_STUDENT_ID_FORMATS.asasNumberFormat}
+            onChange={(e) => patchStudentIdFormats({ asasNumberFormat: e.target.value })}
+            placeholder="{YYYY}-{SEQ}"
+          />
+        </div>
+      </div>
+      <div className="settings-preview-links">
+        <ul>
+          <li>
+            <i className="fa fa-hashtag" aria-hidden="true" />
+            <div>
+              <strong>نمونه ریجیستر نمبر</strong>
+              <small>{String(settings.studentIdFormats?.registrationIdFormat || DEFAULT_STUDENT_ID_FORMATS.registrationIdFormat).replace('{YYYY}', new Date().getFullYear()).replace('{SEQ}', '0001')}</small>
+            </div>
+          </li>
+          <li>
+            <i className="fa fa-id-card" aria-hidden="true" />
+            <div>
+              <strong>نمونه شماره اساس</strong>
+              <small>{String(settings.studentIdFormats?.asasNumberFormat || DEFAULT_STUDENT_ID_FORMATS.asasNumberFormat).replace('{YYYY}', new Date().getFullYear()).replace('{SEQ}', '0001')}</small>
+            </div>
+          </li>
+        </ul>
+      </div>
+      <p className="settings-muted">
+        نمونه‌ها: <code>REG-{'{YYYY}'}-{'{SEQ}'}</code>، <code>ASAS-{'{YYYY}'}-{'{SEQ}'}</code>، <code>{'{YYYY}'}-{'{SEQ}'}</code>.
+      </p>
+    </section>
+  );
+
   const renderShortcutsTab = () => (
     <section className="settings-card">
       <div className="settings-menu-head">
@@ -576,6 +676,7 @@ export default function AdminSettings() {
     if (activeTab === 'home') return renderHomeTab();
     if (activeTab === 'header') return renderHeaderTab();
     if (activeTab === 'footer') return renderFooterTab();
+    if (activeTab === 'studentIds') return renderStudentIdsTab();
     if (activeTab === 'login') return <LoginSettingsManager />;
     if (activeTab === 'shortcuts') return renderShortcutsTab();
     return null;

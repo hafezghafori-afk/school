@@ -444,10 +444,15 @@ const defaultSettings = () => ({
     { title: 'مرکز ارتباطات سیما', href: '/admin-communications', permission: 'manage_platform_requests', enabled: true },
     { title: 'داده‌های آموزشی', href: '/admin-education', permission: 'manage_content', enabled: true },
     { title: 'ثبت‌نام‌ها', href: '/admin-enrollments', permission: 'manage_enrollments', enabled: true },
+    { title: 'تنظیم شماره اساس و ریجیستر نمبر', href: '/admin-settings#student-ids', permission: 'manage_content', enabled: true },
     { title: 'ممبرشیپ آموزشی', href: '/admin-education?section=enrollments', permission: 'manage_memberships', enabled: true },
     { title: 'تقسیم اوقات', href: '/timetable/viewer', permission: 'view_schedule', enabled: true },
     { title: 'مدیریت تقسیم اوقات', href: '/admin-schedule', permission: 'manage_schedule', enabled: true }
   ],
+  studentIdFormats: {
+    registrationIdFormat: 'REG-{YYYY}-{SEQ}',
+    asasNumberFormat: '{YYYY}-{SEQ}'
+  },
   footerLinks: [
     { title: 'درباره ما', href: '/about' },
     { title: 'آموزش', href: '/courses' },
@@ -669,6 +674,20 @@ const ensureSettings = async () => {
     if (!Array.isArray(settings.adminQuickLinks) || !settings.adminQuickLinks.length) {
       settings.adminQuickLinks = defaults.adminQuickLinks;
       shouldSave = true;
+    }
+
+    if (!settings.studentIdFormats || typeof settings.studentIdFormats !== 'object') {
+      settings.studentIdFormats = defaults.studentIdFormats;
+      shouldSave = true;
+    } else {
+      if (!String(settings.studentIdFormats.registrationIdFormat || '').trim()) {
+        settings.studentIdFormats.registrationIdFormat = defaults.studentIdFormats.registrationIdFormat;
+        shouldSave = true;
+      }
+      if (!String(settings.studentIdFormats.asasNumberFormat || '').trim()) {
+        settings.studentIdFormats.asasNumberFormat = defaults.studentIdFormats.asasNumberFormat;
+        shouldSave = true;
+      }
     }
 
     if (!Array.isArray(settings.footerLinks) || !settings.footerLinks.length) {
