@@ -176,6 +176,22 @@
   color: rgba(226, 232, 240, 0.78);
 }
 
+.admin-ownership-audit__repair {
+  margin-top: 12px;
+  padding: 9px 12px;
+  border: 1px solid rgba(251, 191, 36, 0.42);
+  border-radius: 8px;
+  background: rgba(251, 191, 36, 0.16);
+  color: #fef3c7;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.admin-ownership-audit__repair:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .admin-ownership-audit__grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));

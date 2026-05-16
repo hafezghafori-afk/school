@@ -3,6 +3,18 @@ const mongoose = require('mongoose');
 const AfghanSchool = require('../models/AfghanSchool');
 const AfghanStudent = require('../models/AfghanStudent');
 const AfghanTeacher = require('../models/AfghanTeacher');
+require('../models/AcademicYear');
+require('../models/SchoolClass');
+require('../models/Subject');
+require('../models/StudentMembership');
+require('../models/FinanceFeePlan');
+require('../models/FinanceBill');
+require('../models/FeeOrder');
+require('../models/FeePayment');
+require('../models/FinanceReceipt');
+require('../models/Discount');
+require('../models/FeeExemption');
+require('../models/FinanceRelief');
 const { requireFields } = require('../middleware/validate');
 const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
 const { ok, fail } = require('../utils/response');
@@ -87,6 +99,9 @@ const OWNERSHIP_AUDIT_COLLECTIONS = [
 ];
 
 const OWNERSHIP_MODEL_NAMES = {
+  academicyears: 'AcademicYear',
+  schoolclasses: 'SchoolClass',
+  subjects: 'Subject',
   studentmemberships: 'StudentMembership',
   financefeeplans: 'FinanceFeePlan',
   financebills: 'FinanceBill',
@@ -103,6 +118,15 @@ const missingOwnerFilter = (field) => ({
     { [field]: { $exists: false } },
     { [field]: null },
     { [field]: '' }
+  ]
+});
+
+const ownershipProblemFilter = (field, schoolIds = []) => ({
+  $or: [
+    { [field]: { $exists: false } },
+    { [field]: null },
+    { [field]: '' },
+    { [field]: { $nin: [null, '', ...schoolIds] } }
   ]
 });
 
@@ -150,11 +174,142 @@ async function backfillOwnershipCollection(collectionName = '', limit = 500) {
   for (const doc of docs) {
     const schoolId = await resolveSchoolOwnership(doc);
     if (!schoolId) continue;
-    doc.schoolId = schoolId;
-    await doc.save();
+    await Model.updateOne(
+      { _id: doc._id },
+      { $set: { schoolId: new mongoose.Types.ObjectId(String(schoolId)) } }
+    );
     updated += 1;
   }
   return { scanned: docs.length, updated };
+}
+
+async function resolveBackfillTargetSchool(req) {
+  const requestedTargetId = String(req.body?.targetSchoolId || '').trim();
+  if (requestedTargetId && mongoose.Types.ObjectId.isValid(requestedTargetId)) {
+    const exists = await AfghanSchool.exists({ _id: requestedTargetId, status: { $ne: 'deleted' } });
+    if (exists) return requestedTargetId;
+  }
+
+  const resolved = await resolveActiveSchool(req, { allowSingleFallback: true });
+  if (resolved?.schoolId && mongoose.Types.ObjectId.isValid(String(resolved.schoolId))) {
+    return String(resolved.schoolId);
+  }
+
+  const schools = await listActiveSchools(2);
+  return schools.length === 1 ? String(schools[0]._id) : '';
+}
+
+async function backfillModelOwnershipCollection({
+  collectionName = '',
+  schoolIds = [],
+  targetSchoolId = '',
+  limit = 500
+} = {}) {
+  const modelName = OWNERSHIP_MODEL_NAMES[collectionName];
+  if (!modelName) return null;
+
+  const Model = mongoose.model(modelName);
+  const docs = await Model.find(ownershipProblemFilter('schoolId', schoolIds)).limit(limit);
+  let updated = 0;
+  let inferred = 0;
+  let fallback = 0;
+  let unresolved = 0;
+
+  for (const doc of docs) {
+    let schoolId = '';
+    try {
+      const source = doc.toObject ? doc.toObject() : { ...(doc || {}) };
+      source.schoolId = '';
+      schoolId = await resolveSchoolOwnership(source);
+    } catch {
+      schoolId = '';
+    }
+
+    if (schoolId) {
+      inferred += 1;
+    } else if (targetSchoolId) {
+      schoolId = targetSchoolId;
+      fallback += 1;
+    }
+
+    if (!schoolId) {
+      unresolved += 1;
+      continue;
+    }
+
+    await Model.updateOne(
+      { _id: doc._id },
+      { $set: { schoolId: new mongoose.Types.ObjectId(String(schoolId)) } }
+    );
+    updated += 1;
+  }
+
+  return { scanned: docs.length, updated, inferred, fallback, unresolved };
+}
+
+async function backfillRawOwnershipCollection({
+  collectionName = '',
+  field = 'schoolId',
+  schoolIds = [],
+  targetSchoolId = '',
+  limit = 500
+} = {}) {
+  if (!targetSchoolId) return { scanned: 0, updated: 0, inferred: 0, fallback: 0, unresolved: 0 };
+
+  const db = mongoose.connection.db;
+  const exists = (await db.listCollections({ name: collectionName }).toArray()).length > 0;
+  if (!exists) return { scanned: 0, updated: 0, inferred: 0, fallback: 0, unresolved: 0 };
+
+  const collection = db.collection(collectionName);
+  const docs = await collection
+    .find(ownershipProblemFilter(field, schoolIds), { projection: { _id: 1 } })
+    .limit(limit)
+    .toArray();
+  if (!docs.length) return { scanned: 0, updated: 0, inferred: 0, fallback: 0, unresolved: 0 };
+
+  const result = await collection.updateMany(
+    { _id: { $in: docs.map((item) => item._id) } },
+    { $set: { [field]: new mongoose.Types.ObjectId(targetSchoolId) } }
+  );
+
+  return {
+    scanned: docs.length,
+    updated: result.modifiedCount || 0,
+    inferred: 0,
+    fallback: result.modifiedCount || 0,
+    unresolved: 0
+  };
+}
+
+async function backfillOwnership({ req, limit = 500 } = {}) {
+  const schools = await listActiveSchools(100);
+  const schoolIds = schools.map((school) => new mongoose.Types.ObjectId(String(school._id)));
+  const targetSchoolId = await resolveBackfillTargetSchool(req);
+  const results = {};
+
+  for (const item of OWNERSHIP_AUDIT_COLLECTIONS) {
+    const modelResult = item.field === 'schoolId'
+      ? await backfillModelOwnershipCollection({
+        collectionName: item.collection,
+        schoolIds,
+        targetSchoolId,
+        limit
+      })
+      : null;
+
+    results[item.collection] = modelResult || await backfillRawOwnershipCollection({
+      collectionName: item.collection,
+      field: item.field,
+      schoolIds,
+      targetSchoolId,
+      limit
+    });
+  }
+
+  return {
+    targetSchoolId,
+    results
+  };
 }
 
 // Helper functions
@@ -302,12 +457,8 @@ router.get('/ownership-audit', requireAuth, requireRole(['admin']), requirePermi
 router.post('/ownership-backfill', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const limit = Math.min(2000, Math.max(1, Number(req.body?.limit || 500)));
-    const collections = Object.keys(OWNERSHIP_MODEL_NAMES);
-    const results = {};
-    for (const collection of collections) {
-      results[collection] = await backfillOwnershipCollection(collection, limit);
-    }
-    return res.json({ success: true, data: { results, audit: await buildOwnershipAudit() } });
+    const result = await backfillOwnership({ req, limit });
+    return res.json({ success: true, data: { ...result, audit: await buildOwnershipAudit() } });
   } catch (error) {
     console.error('Ownership Backfill Error:', error);
     return fail(res, 'Failed to backfill ownership', 500);

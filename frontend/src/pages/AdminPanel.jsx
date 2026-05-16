@@ -1239,6 +1239,33 @@ export default function AdminPanel() {
     return data?.data || null;
   }, []);
 
+  const handleOwnershipBackfill = async () => {
+    if (!canManageFinance || schoolScopeBusy) return;
+    const confirmed = window.confirm('رکوردهای بدون مکتب یا با مکتب نامعتبر تا حد امکان به مکتب فعال وصل شوند؟ قبل از اجرا مطمئن شوید مکتب فعال درست انتخاب شده است.');
+    if (!confirmed) return;
+    setSchoolScopeBusy(true);
+    setSchoolScopeMessage('');
+    try {
+      const res = await fetch(`${API_BASE}/api/afghan-schools/ownership-backfill`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ targetSchoolId: activeSchoolId, limit: 2000 })
+      });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) {
+        throw new Error(data?.message || 'ترمیم مالکیت دیتا ناموفق بود.');
+      }
+      setOwnershipAudit(data?.data?.audit || null);
+      const updated = Object.values(data?.data?.results || {}).reduce((sum, item) => sum + Number(item?.updated || 0), 0);
+      setSchoolScopeMessage(`ترمیم مالکیت دیتا انجام شد. ${updated.toLocaleString('fa-AF')} رکورد اصلاح شد.`);
+      await loadActiveSchoolContext().catch(() => null);
+    } catch (error) {
+      setSchoolScopeMessage(error?.message || 'ترمیم مالکیت دیتا ناموفق بود.');
+    } finally {
+      setSchoolScopeBusy(false);
+    }
+  };
+
   const handleActiveSchoolChange = async (eventOrSchoolId) => {
     const nextSchoolId = String(eventOrSchoolId?.target?.value || eventOrSchoolId || '').trim();
     if (!nextSchoolId) return;
@@ -3412,6 +3439,16 @@ export default function AdminPanel() {
             <span className="admin-active-school-scope__eyebrow">بررسی مالکیت دیتا</span>
             <strong>{ownershipIssueCount ? 'رکوردهای مبهم وجود دارد' : 'همه بخش‌های کلیدی مکتب مشخص دارند'}</strong>
             <small>برای سیستم چندمکتبه، هر شاگرد، صنف، پلان فیس، بل و پرداخت باید به یک مکتب روشن وصل باشد.</small>
+            {ownershipIssueCount && canManageFinance ? (
+              <button
+                type="button"
+                className="admin-ownership-audit__repair"
+                onClick={handleOwnershipBackfill}
+                disabled={schoolScopeBusy || !activeSchoolId}
+              >
+                {schoolScopeBusy ? 'در حال ترمیم...' : 'رفع خودکار مالکیت مبهم'}
+              </button>
+            ) : null}
           </div>
           <div className="admin-ownership-audit__grid">
             {(ownershipAudit.rows || []).slice(0, 8).map((row) => (
