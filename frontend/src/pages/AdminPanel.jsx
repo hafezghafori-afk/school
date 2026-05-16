@@ -1256,8 +1256,15 @@ export default function AdminPanel() {
         throw new Error(data?.message || 'ترمیم مالکیت دیتا ناموفق بود.');
       }
       setOwnershipAudit(data?.data?.audit || null);
-      const updated = Object.values(data?.data?.results || {}).reduce((sum, item) => sum + Number(item?.updated || 0), 0);
-      setSchoolScopeMessage(`ترمیم مالکیت دیتا انجام شد. ${updated.toLocaleString('fa-AF')} رکورد اصلاح شد.`);
+      const ownershipResults = Object.values(data?.data?.results || {});
+      const updated = ownershipResults.reduce((sum, item) => sum + Number(item?.updated || 0), 0);
+      const failed = ownershipResults.reduce((sum, item) => sum + Number(item?.failed || 0), 0);
+      const unresolved = ownershipResults.reduce((sum, item) => sum + Number(item?.unresolved || 0), 0);
+      const details = [
+        failed ? `${failed.toLocaleString('fa-AF')} خطا باقی ماند` : '',
+        unresolved ? `${unresolved.toLocaleString('fa-AF')} رکورد نیاز به بررسی دستی دارد` : ''
+      ].filter(Boolean).join('، ');
+      setSchoolScopeMessage(`ترمیم مالکیت دیتا انجام شد. ${updated.toLocaleString('fa-AF')} رکورد اصلاح شد.${details ? ` ${details}.` : ''}`);
       await loadActiveSchoolContext().catch(() => null);
     } catch (error) {
       setSchoolScopeMessage(error?.message || 'ترمیم مالکیت دیتا ناموفق بود.');

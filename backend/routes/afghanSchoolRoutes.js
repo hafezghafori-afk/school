@@ -215,45 +215,62 @@ async function backfillModelOwnershipCollection({
   const modelName = OWNERSHIP_MODEL_NAMES[collectionName];
   if (!modelName) return null;
 
-  const Model = mongoose.model(modelName);
-  const docs = await Model.find(ownershipProblemFilter('schoolId', schoolIds)).limit(limit);
+  const db = mongoose.connection.db;
+  const exists = (await db.listCollections({ name: collectionName }).toArray()).length > 0;
+  if (!exists) return { scanned: 0, updated: 0, inferred: 0, fallback: 0, unresolved: 0, failed: 0, errors: [] };
+
+  const collection = db.collection(collectionName);
+  const docs = await collection
+    .find(ownershipProblemFilter('schoolId', schoolIds))
+    .limit(limit)
+    .toArray();
   let updated = 0;
   let inferred = 0;
   let fallback = 0;
   let unresolved = 0;
+  let failed = 0;
+  const errors = [];
 
   for (const doc of docs) {
-    let schoolId = '';
+    let inferredSchoolId = '';
     try {
-      const source = doc.toObject ? doc.toObject() : { ...(doc || {}) };
+      const source = { ...(doc || {}) };
       source.schoolId = '';
-      schoolId = await resolveSchoolOwnership(source);
-    } catch {
-      schoolId = '';
+      inferredSchoolId = normalizeBackfillSchoolId(await resolveSchoolOwnership(source));
+    } catch (error) {
+      if (errors.length < 5) {
+        errors.push({ id: String(doc?._id || ''), stage: 'resolve', message: error?.message || 'Unable to infer school ownership' });
+      }
     }
 
-    schoolId = normalizeBackfillSchoolId(schoolId, targetSchoolId);
-
-    if (schoolId) {
-      inferred += 1;
-    } else if (targetSchoolId) {
-      schoolId = targetSchoolId;
-      fallback += 1;
-    }
+    const schoolId = inferredSchoolId || normalizeBackfillSchoolId(targetSchoolId);
+    const usedFallback = !inferredSchoolId && Boolean(schoolId);
 
     if (!schoolId) {
       unresolved += 1;
       continue;
     }
 
-    await Model.updateOne(
-      { _id: doc._id },
-      { $set: { schoolId: new mongoose.Types.ObjectId(String(schoolId)) } }
-    );
-    updated += 1;
+    try {
+      const result = await collection.updateOne(
+        { _id: doc._id },
+        { $set: { schoolId: new mongoose.Types.ObjectId(String(schoolId)) } }
+      );
+      updated += result.modifiedCount || 0;
+      if (usedFallback) {
+        fallback += 1;
+      } else {
+        inferred += 1;
+      }
+    } catch (error) {
+      failed += 1;
+      if (errors.length < 5) {
+        errors.push({ id: String(doc?._id || ''), stage: 'update', message: error?.message || 'Unable to update school ownership' });
+      }
+    }
   }
 
-  return { scanned: docs.length, updated, inferred, fallback, unresolved };
+  return { scanned: docs.length, updated, inferred, fallback, unresolved, failed, errors };
 }
 
 async function backfillRawOwnershipCollection({
@@ -263,30 +280,49 @@ async function backfillRawOwnershipCollection({
   targetSchoolId = '',
   limit = 500
 } = {}) {
-  if (!targetSchoolId) return { scanned: 0, updated: 0, inferred: 0, fallback: 0, unresolved: 0 };
+  const normalizedTargetSchoolId = normalizeBackfillSchoolId(targetSchoolId);
+  if (!normalizedTargetSchoolId) return { scanned: 0, updated: 0, inferred: 0, fallback: 0, unresolved: 0, failed: 0, errors: [] };
 
   const db = mongoose.connection.db;
   const exists = (await db.listCollections({ name: collectionName }).toArray()).length > 0;
-  if (!exists) return { scanned: 0, updated: 0, inferred: 0, fallback: 0, unresolved: 0 };
+  if (!exists) return { scanned: 0, updated: 0, inferred: 0, fallback: 0, unresolved: 0, failed: 0, errors: [] };
 
   const collection = db.collection(collectionName);
   const docs = await collection
     .find(ownershipProblemFilter(field, schoolIds), { projection: { _id: 1 } })
     .limit(limit)
     .toArray();
-  if (!docs.length) return { scanned: 0, updated: 0, inferred: 0, fallback: 0, unresolved: 0 };
+  if (!docs.length) return { scanned: 0, updated: 0, inferred: 0, fallback: 0, unresolved: 0, failed: 0, errors: [] };
 
-  const result = await collection.updateMany(
-    { _id: { $in: docs.map((item) => item._id) } },
-    { $set: { [field]: new mongoose.Types.ObjectId(targetSchoolId) } }
-  );
+  let updated = 0;
+  let fallback = 0;
+  let failed = 0;
+  const errors = [];
+
+  for (const doc of docs) {
+    try {
+      const result = await collection.updateOne(
+        { _id: doc._id },
+        { $set: { [field]: new mongoose.Types.ObjectId(normalizedTargetSchoolId) } }
+      );
+      updated += result.modifiedCount || 0;
+      fallback += 1;
+    } catch (error) {
+      failed += 1;
+      if (errors.length < 5) {
+        errors.push({ id: String(doc?._id || ''), stage: 'update', message: error?.message || 'Unable to update school ownership' });
+      }
+    }
+  }
 
   return {
     scanned: docs.length,
-    updated: result.modifiedCount || 0,
+    updated,
     inferred: 0,
-    fallback: result.modifiedCount || 0,
-    unresolved: 0
+    fallback,
+    unresolved: 0,
+    failed,
+    errors
   };
 }
 
@@ -297,22 +333,34 @@ async function backfillOwnership({ req, limit = 500 } = {}) {
   const results = {};
 
   for (const item of OWNERSHIP_AUDIT_COLLECTIONS) {
-    const modelResult = item.field === 'schoolId'
-      ? await backfillModelOwnershipCollection({
+    try {
+      const modelResult = item.field === 'schoolId'
+        ? await backfillModelOwnershipCollection({
+          collectionName: item.collection,
+          schoolIds,
+          targetSchoolId,
+          limit
+        })
+        : null;
+
+      results[item.collection] = modelResult || await backfillRawOwnershipCollection({
         collectionName: item.collection,
+        field: item.field,
         schoolIds,
         targetSchoolId,
         limit
-      })
-      : null;
-
-    results[item.collection] = modelResult || await backfillRawOwnershipCollection({
-      collectionName: item.collection,
-      field: item.field,
-      schoolIds,
-      targetSchoolId,
-      limit
-    });
+      });
+    } catch (error) {
+      results[item.collection] = {
+        scanned: 0,
+        updated: 0,
+        inferred: 0,
+        fallback: 0,
+        unresolved: 0,
+        failed: 1,
+        errors: [{ stage: 'collection', message: error?.message || 'Unable to backfill ownership collection' }]
+      };
+    }
   }
 
   return {
