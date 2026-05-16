@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { API_BASE } from '../config/api';
-import { formatAfghanDateTime } from '../utils/afghanDate';
+import { formatAfghanDateTime, formatAfghanStoredDateLabel } from '../utils/afghanDate';
 import './OnlineRegistrations.css';
 
 const STATUS_META = {
@@ -31,6 +31,8 @@ const toAfghanDateTime = (value = '') => {
     minute: '2-digit'
   }) || value || '---';
 };
+
+const toAfghanDate = (value = '') => formatAfghanStoredDateLabel(value) || value || '---';
 
 const normalizeComparable = (value = '') => String(value || '').trim().toLowerCase();
 
@@ -482,7 +484,7 @@ export default function OnlineRegistrations() {
                 <div><span>نام پدر</span><strong>{selectedRegistration.fatherName || '---'}</strong></div>
                 <div><span>نام مادر</span><strong>{selectedRegistration.motherName || '---'}</strong></div>
                 <div><span>جنسیت</span><strong>{selectedRegistration.gender || '---'}</strong></div>
-                <div><span>تاریخ تولد</span><strong>{selectedRegistration.birthDate || '---'}</strong></div>
+                <div><span>تاریخ تولد</span><strong>{toAfghanDate(selectedRegistration.birthDate)}</strong></div>
                 <div><span>پایه درخواستی</span><strong>{selectedRegistration.grade || '---'}</strong></div>
               </section>
 

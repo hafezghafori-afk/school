@@ -23,7 +23,7 @@ import {
   UserPlus
 } from "../components/ui/icons";
 import { useToast } from "../components/ui/toast";
-import { formatAfghanDateTime } from '../utils/afghanDate';
+import { formatAfghanDateTime, formatAfghanStoredDateLabel, toGregorianDateInputValue } from '../utils/afghanDate';
 import { getAuthHeaders, repairDisplayText } from './adminWorkspaceUtils';
 
 const getText = (value, fallback = '') => repairDisplayText(value || fallback);
@@ -44,7 +44,7 @@ const normalizeAfghanStudent = (student = {}) => {
     fatherName: getText(personalInfo.fatherName),
     grandfatherName: getText(personalInfo.grandfatherName),
     nationalId: getText(identification.tazkiraNumber),
-    birthDate: personalInfo.birthDate ? String(personalInfo.birthDate).slice(0, 10) : '',
+    birthDate: toGregorianDateInputValue(personalInfo.birthDate),
     gender: personalInfo.gender || student.gender || '',
     bloodType: medicalInfo.bloodGroup || student.bloodType || '',
     phone: contactInfo.phone || contactInfo.mobile || '',
@@ -380,6 +380,10 @@ const StudentManagement = () => {
     }) || 'N/A';
   };
 
+  const formatBirthDate = (dateString) => {
+    return formatAfghanStoredDateLabel(dateString) || dateString || '---';
+  };
+
   const exportToExcel = () => {
     toast.info('خروجی اکسل در نسخه بعدی اضافه می‌شود.');
   };
@@ -693,7 +697,7 @@ const StudentManagement = () => {
                   <div><strong>نام پدر:</strong> {selectedStudent.fatherName}</div>
                   <div><strong>نام پدرکلان:</strong> {selectedStudent.grandfatherName}</div>
                   <div><strong>شماره تذکره:</strong> {selectedStudent.nationalId}</div>
-                  <div><strong>تاریخ تولد:</strong> {selectedStudent.birthDate}</div>
+                  <div><strong>تاریخ تولد:</strong> {formatBirthDate(selectedStudent.birthDate)}</div>
                   <div><strong>جنسیت:</strong> {selectedStudent.gender === 'male' ? 'ذکور' : 'اناث'}</div>
                   <div><strong>گروپ خونی:</strong> {selectedStudent.bloodType}</div>
                   <div><strong>وضعیت:</strong> <Badge className={getStatusColor(selectedStudent.status)}>{getStatusLabel(selectedStudent.status)}</Badge></div>

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import useSiteSettings from '../hooks/useSiteSettings';
 import { normalizeBrandName, normalizeBrandSubtitle } from '../utils/brand';
+import { formatAfghanStoredDateLabel } from '../utils/afghanDate';
 import './AdminEnrollmentPrint.css';
 
 import { API_BASE } from '../config/api';
@@ -10,6 +11,8 @@ const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
+
+const formatBirthDate = (value = '') => formatAfghanStoredDateLabel(value) || value || '---';
 
 export default function AdminEnrollmentPrint() {
   const { id } = useParams();
@@ -93,7 +96,7 @@ export default function AdminEnrollmentPrint() {
           <div><span>نام</span><strong>{item.studentName}</strong></div>
           <div><span>صنف</span><strong>{item.grade || '---'}</strong></div>
           <div><span>جنسیت</span><strong>{item.gender || '---'}</strong></div>
-          <div><span>تاریخ تولد</span><strong>{item.birthDate || '---'}</strong></div>
+          <div><span>تاریخ تولد</span><strong>{formatBirthDate(item.birthDate)}</strong></div>
         </div>
       </div>
 

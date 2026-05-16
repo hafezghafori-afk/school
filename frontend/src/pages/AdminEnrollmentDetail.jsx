@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import './AdminContent.css';
 
 import { API_BASE } from '../config/api';
+import { formatAfghanStoredDateLabel } from '../utils/afghanDate';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -14,6 +15,8 @@ const resolveFile = (url) => {
   if (url.startsWith('http')) return url;
   return `${API_BASE}/${url.replace(/^\//, '')}`;
 };
+
+const formatBirthDate = (value = '') => formatAfghanStoredDateLabel(value) || value || '---';
 
 const templates = {
   approved: 'درخواست شما تایید شد. لطفاً برای تکمیل روند ثبت‌نام به دفتر مدرسه مراجعه کنید.',
@@ -151,7 +154,7 @@ export default function AdminEnrollmentDetail() {
           <div className="admin-detail-row"><span>کد پیگیری موقت</span><strong>{item.registrationId || '---'}</strong></div>
           <div className="admin-detail-row"><span>شماره اساس (مرجع دائم)</span><strong>{item.asasNumber || '---'}</strong></div>
           <div className="admin-detail-row"><span>پایه</span><strong>{item.grade || '---'}</strong></div>
-          <div className="admin-detail-row"><span>تاریخ تولد</span><strong>{item.birthDate || '---'}</strong></div>
+          <div className="admin-detail-row"><span>تاریخ تولد</span><strong>{formatBirthDate(item.birthDate)}</strong></div>
           <div className="admin-detail-row"><span>جنسیت</span><strong>{item.gender || '---'}</strong></div>
         </div>
         <div className="admin-detail-card">
