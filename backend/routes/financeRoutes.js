@@ -50,7 +50,6 @@ const {
   findClassMemberships,
   resolveMembershipTransactionLink
 } = require('../utils/studentMembershipLookup');
-const { ensureStudentUser } = require('../services/studentClassAssignmentService');
 const {
   normalizeText: normalizeScopeText,
   resolveClassCourseReference,
@@ -2107,6 +2106,7 @@ router.get('/admin/reference-data', requireAuth, requireRole(['admin']), require
       User.find({ role: 'student' }).select('name email grade').sort({ name: 1 }).lean(),
       AfghanStudent.find({ status: { $ne: 'deleted' } })
         .select('personalInfo familyInfo contactInfo academicInfo registrationId asasNumber linkedUserId status')
+        .lean()
         .sort({ createdAt: -1 }),
       StudentCore.find({ status: { $ne: 'archived' } }).select('userId fullName admissionNo phone email').lean(),
       StudentProfile.find({}).select('studentId family contact guardians').lean(),
@@ -2140,24 +2140,30 @@ router.get('/admin/reference-data', requireAuth, requireRole(['admin']), require
       status: item.status || 'planning'
     }));
     const userById = new Map(students.map((item) => [String(item._id), item]));
-    const afghanStudentUsers = await Promise.all(afghanStudents.map(async (student) => {
-      const user = await ensureStudentUser(student);
-      if (!user?._id) return null;
-      return {
-        user: user.toObject ? user.toObject() : user,
-        afghanStudent: student.toObject ? student.toObject() : student
-      };
-    }));
-    afghanStudentUsers.filter(Boolean).forEach(({ user }) => {
-      if (user?._id && !userById.has(String(user._id))) {
-        userById.set(String(user._id), user);
+    const afghanStudentByUserId = new Map();
+
+    afghanStudents.forEach((student) => {
+      const linkedUserId = String(student?.linkedUserId || '').trim();
+      if (linkedUserId) {
+        afghanStudentByUserId.set(linkedUserId, student);
+        if (!userById.has(linkedUserId)) {
+          userById.set(linkedUserId, {
+            _id: student.linkedUserId,
+            name: [
+              student?.personalInfo?.firstNameDari || student?.personalInfo?.firstName || '',
+              student?.personalInfo?.lastNameDari || student?.personalInfo?.lastName || ''
+            ].filter(Boolean).join(' ').trim(),
+            email: student?.contactInfo?.email || '',
+            grade: String(student?.academicInfo?.currentGrade || '').match(/\d+/)?.[0] || ''
+          });
+        }
       }
     });
 
     const enrichedStudents = [...userById.values()].map((item) => {
       const core = studentCoreByUserId.get(String(item._id)) || null;
       const profile = core ? studentProfileByStudentId.get(String(core._id)) || null : null;
-      const afghanStudent = afghanStudentUsers.find((entry) => String(entry?.user?._id || '') === String(item._id))?.afghanStudent || null;
+      const afghanStudent = afghanStudentByUserId.get(String(item._id)) || null;
       const primaryGuardian = Array.isArray(profile?.guardians)
         ? profile.guardians.find((guardian) => guardian?.isPrimary) || profile.guardians[0] || null
         : null;
@@ -2201,7 +2207,8 @@ router.get('/admin/reference-data', requireAuth, requireRole(['admin']), require
         uiLabel: item.uiLabel
       }))
     });
-  } catch {
+  } catch (error) {
+    console.error('Finance admin reference data error:', error);
     res.status(500).json({ success: false, message: 'خطا در دریافت داده‌های مرجع مالی' });
   }
 });

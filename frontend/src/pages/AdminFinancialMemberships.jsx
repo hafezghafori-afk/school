@@ -229,6 +229,9 @@ export default function AdminFinancialMemberships() {
       })
         .then((res) => res.json())
         .then((data) => {
+          if (!data.success) {
+            throw new Error(data.message || 'خطا در دریافت اطلاعات مرجع');
+          }
           // Add registrationType fallback if missing
           const studentsWithType = (data.students || []).map(s => ({
             ...s,
@@ -238,7 +241,7 @@ export default function AdminFinancialMemberships() {
           setAcademicYears(data.academicYears || []);
           setClasses(data.classes || []);
         })
-        .catch(() => setMessage('خطا در دریافت اطلاعات مرجع'))
+        .catch((err) => setMessage(err.message || 'خطا در دریافت اطلاعات مرجع'))
         .finally(() => setLoading(false));
     }, []);
 
