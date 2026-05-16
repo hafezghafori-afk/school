@@ -33,6 +33,7 @@ const ADMIN_QUICK_LINK_DEFAULTS = [
   { title: 'لاگ‌ها', href: '/admin-logs', permission: 'view_reports', enabled: true },
   { title: 'مرکز ارتباطات سیما', href: '/admin-communications', permission: 'manage_platform_requests', enabled: true },
   { title: 'ثبت‌نام‌ها', href: '/admin-enrollments', permission: 'manage_enrollments', enabled: true },
+  { title: 'شماره اساس و ریجیستر نمبر', href: '/student-registration', permission: 'manage_enrollments', enabled: true },
   { title: 'تقسیم اوقات', href: '/timetable/viewer', permission: 'view_schedule', enabled: true },
   { title: 'مدیریت تقسیم اوقات', href: '/timetable/editor', permission: 'manage_schedule', enabled: true }
 ];

@@ -420,6 +420,7 @@ const QUICK_LINK_ITEMS = [
   { to: '/admin-education', label: 'مرکز مدیریت آموزش', permission: 'manage_content' },
   { to: '/admin-users', label: 'کاربران', permission: 'manage_users' },
   { to: '/admin-enrollments', label: 'ثبت‌نام‌ها', permission: 'manage_enrollments' },
+  { to: '/student-registration', label: 'شماره اساس و ریجیستر نمبر', permission: 'manage_enrollments' },
   { to: '/admin-education?section=enrollments', label: 'ممبرشیپ آموزشی', permission: 'manage_memberships' },
   { to: '/admin-financial-memberships', label: 'عضویت‌ها', permission: 'manage_finance' },
   { to: '/admin-finance', label: 'مرکز مالی', permission: 'manage_finance' },
@@ -431,6 +432,10 @@ const QUICK_LINK_ITEMS = [
   { to: '/admin-gallery', label: 'گالری', permission: 'manage_content' },
   { to: '/admin-communications', label: 'مرکز ارتباطات سیما', permission: 'manage_platform_requests' },
   { to: ADMIN_SCHEDULE_VIEW_ROUTE, label: 'تقسیم اوقات', permission: 'view_schedule' }
+];
+
+const REQUIRED_QUICK_LINK_ITEMS = [
+  { to: '/student-registration', label: 'شماره اساس و ریجیستر نمبر', permission: 'manage_enrollments' }
 ];
 
 const PRIMARY_ADMIN_LINKS = new Set([
@@ -867,8 +872,10 @@ export default function AdminPanel() {
           label: item.label,
           permission: item.permission
         }));
+      const requiredLinks = REQUIRED_QUICK_LINK_ITEMS
+        .filter((item) => permissionAllows(item.permission, effectivePermissions));
       const seen = new Set();
-      return [...baseLinks, ...actionLinks].filter((item) => {
+      return [...baseLinks, ...requiredLinks, ...actionLinks].filter((item) => {
         const key = String(item?.to || '').trim();
         if (!key || seen.has(key)) return false;
         seen.add(key);
