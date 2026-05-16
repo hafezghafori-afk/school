@@ -130,6 +130,13 @@ const ownershipProblemFilter = (field, schoolIds = []) => ({
   ]
 });
 
+const normalizeBackfillSchoolId = (value = '', fallback = '') => {
+  const normalized = String(value || '').trim();
+  if (mongoose.Types.ObjectId.isValid(normalized)) return normalized;
+  const fallbackId = String(fallback || '').trim();
+  return mongoose.Types.ObjectId.isValid(fallbackId) ? fallbackId : '';
+};
+
 async function buildOwnershipAudit() {
   const db = mongoose.connection.db;
   const schools = await listActiveSchools(100);
@@ -172,7 +179,7 @@ async function backfillOwnershipCollection(collectionName = '', limit = 500) {
   const docs = await Model.find(missingOwnerFilter('schoolId')).limit(limit);
   let updated = 0;
   for (const doc of docs) {
-    const schoolId = await resolveSchoolOwnership(doc);
+    const schoolId = normalizeBackfillSchoolId(await resolveSchoolOwnership(doc));
     if (!schoolId) continue;
     await Model.updateOne(
       { _id: doc._id },
@@ -224,6 +231,8 @@ async function backfillModelOwnershipCollection({
     } catch {
       schoolId = '';
     }
+
+    schoolId = normalizeBackfillSchoolId(schoolId, targetSchoolId);
 
     if (schoolId) {
       inferred += 1;
