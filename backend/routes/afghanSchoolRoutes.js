@@ -640,26 +640,109 @@ router.post('/', requireFields(['name', 'nameDari', 'schoolCode', 'province', 'd
 // PUT /api/afghan-schools/:id - Update school
 router.put('/:id', async (req, res) => {
   try {
-    const schoolData = {
-      ...req.body,
-      lastUpdatedBy: req.user?.id || 'system'
-    };
-
-    const school = await AfghanSchool.findByIdAndUpdate(
-      req.params.id,
-      schoolData,
-      { new: true, runValidators: true }
-    );
-
+    const school = await AfghanSchool.findById(req.params.id);
     if (!school) {
       return fail(res, 'School not found', 404);
     }
 
+    const body = req.body || {};
+    const editableScalarFields = [
+      'name',
+      'nameDari',
+      'namePashto',
+      'schoolCode',
+      'ministryCode',
+      'provinceCode',
+      'province',
+      'district',
+      'village',
+      'schoolType',
+      'schoolLevel',
+      'ownership',
+      'status',
+      'verificationStatus',
+      'establishmentDate',
+      'lastInspectionDate',
+      'nextInspectionDate'
+    ];
+
+    editableScalarFields.forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(body, field)) {
+        school[field] = body[field];
+      }
+    });
+
+    if (body.coordinates && typeof body.coordinates === 'object') {
+      school.coordinates = {
+        ...school.toObject().coordinates,
+        ...body.coordinates
+      };
+    }
+
+    if (body.contactInfo && typeof body.contactInfo === 'object') {
+      school.contactInfo = {
+        ...school.toObject().contactInfo,
+        ...body.contactInfo
+      };
+    }
+
+    if (body.principal && typeof body.principal === 'object') {
+      school.principal = {
+        ...school.toObject().principal,
+        ...body.principal
+      };
+    }
+
+    if (body.facilities && typeof body.facilities === 'object') {
+      school.facilities = {
+        ...school.toObject().facilities,
+        ...body.facilities
+      };
+    }
+
+    if (body.academicInfo && typeof body.academicInfo === 'object') {
+      school.academicInfo = {
+        ...school.toObject().academicInfo,
+        ...body.academicInfo
+      };
+    }
+
+    if (body.financialInfo && typeof body.financialInfo === 'object') {
+      const currentFinancialInfo = school.toObject().financialInfo || {};
+      school.financialInfo = {
+        ...currentFinancialInfo,
+        ...body.financialInfo,
+        budget: {
+          ...(currentFinancialInfo.budget || {}),
+          ...(body.financialInfo.budget || {})
+        },
+        fees: {
+          ...(currentFinancialInfo.fees || {}),
+          ...(body.financialInfo.fees || {})
+        }
+      };
+    }
+
+    if (body.notes && typeof body.notes === 'object') {
+      school.notes = {
+        ...school.toObject().notes,
+        ...body.notes
+      };
+    }
+
+    if (req.user?.id && mongoose.Types.ObjectId.isValid(String(req.user.id))) {
+      school.lastUpdatedBy = req.user.id;
+    }
+
+    await school.save();
     return ok(res, school, 'School updated successfully');
   } catch (error) {
     console.error('Update School Error:', error);
     if (error.code === 11000) {
       return fail(res, 'School code already exists', 400);
+    }
+    if (error.name === 'ValidationError') {
+      return fail(res, error.message || 'School validation failed', 400);
     }
     return fail(res, 'Failed to update school', 500);
   }

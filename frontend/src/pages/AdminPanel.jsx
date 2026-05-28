@@ -698,6 +698,8 @@ export default function AdminPanel() {
   const [ownershipAudit, setOwnershipAudit] = useState(null);
   const [schoolScopeBusy, setSchoolScopeBusy] = useState(false);
   const [schoolScopeMessage, setSchoolScopeMessage] = useState('');
+  const [editingSchoolProfile, setEditingSchoolProfile] = useState(null);
+  const [schoolEditForm, setSchoolEditForm] = useState(null);
   const [stats, setStats] = useState({
     users: 0,
     courses: 0,
@@ -748,6 +750,38 @@ export default function AdminPanel() {
   const setCreateSchoolBusy = setWizardBusy;
   const createSchoolMessage = wizardMsg.text;
   const setCreateSchoolMessage = (t) => setWizardMsg({ text: t, error: t.includes('خطا') || t.includes('ناموفق') });
+
+  const buildSchoolEditForm = (school = {}) => ({
+    name: school.name || '',
+    nameDari: school.nameDari || '',
+    namePashto: school.namePashto || school.name || '',
+    schoolCode: school.schoolCode || '',
+    ministryCode: school.ministryCode || '',
+    provinceCode: school.provinceCode || '',
+    province: school.province || 'kabul',
+    district: school.district || '',
+    village: school.village || '',
+    schoolType: school.schoolType || 'primary',
+    schoolLevel: school.schoolLevel || 'grade1_6',
+    ownership: school.ownership || 'government',
+    status: school.status || 'active',
+    establishmentDate: school.establishmentDate ? String(school.establishmentDate).slice(0, 10) : '',
+    contactInfo: {
+      phone: school.contactInfo?.phone || '',
+      mobile: school.contactInfo?.mobile || '',
+      email: school.contactInfo?.email || '',
+      website: school.contactInfo?.website || '',
+      address: school.contactInfo?.address || ''
+    },
+    principal: {
+      name: school.principal?.name || '',
+      phone: school.principal?.phone || '',
+      email: school.principal?.email || ''
+    },
+    notes: {
+      general: school.notes?.general || ''
+    }
+  });
   const generateSchoolCodeSuggestion = (currentCode = '') => {
     const base = String(currentCode || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 12) || 'SCH';
     const suffix = String(Date.now()).slice(-4);
@@ -1297,6 +1331,90 @@ export default function AdminPanel() {
       window.setTimeout(() => window.location.reload(), 450);
     } catch (error) {
       setSchoolScopeMessage(error?.message || 'تغییر مکتب فعال ناموفق بود.');
+      setSchoolScopeBusy(false);
+    }
+  };
+
+  const openSchoolEdit = (school) => {
+    if (!school || schoolScopeBusy) return;
+    setEditingSchoolProfile(school);
+    setSchoolEditForm(buildSchoolEditForm(school));
+    setSchoolScopeMessage('');
+  };
+
+  const closeSchoolEdit = () => {
+    if (schoolScopeBusy) return;
+    setEditingSchoolProfile(null);
+    setSchoolEditForm(null);
+  };
+
+  const updateSchoolEditField = (field, value) => {
+    setSchoolEditForm((current) => ({
+      ...(current || {}),
+      [field]: value
+    }));
+  };
+
+  const updateSchoolEditNestedField = (group, field, value) => {
+    setSchoolEditForm((current) => ({
+      ...(current || {}),
+      [group]: {
+        ...((current || {})[group] || {}),
+        [field]: value
+      }
+    }));
+  };
+
+  const submitSchoolEdit = async (event) => {
+    event?.preventDefault?.();
+    const schoolId = String(editingSchoolProfile?._id || editingSchoolProfile?.id || '').trim();
+    if (!schoolId || !schoolEditForm || schoolScopeBusy) return;
+    if (!schoolEditForm.name?.trim() || !schoolEditForm.nameDari?.trim() || !schoolEditForm.schoolCode?.trim() || !schoolEditForm.district?.trim()) {
+      setSchoolScopeMessage('لطفاً نام مکتب، نام دری، کد مکتب و ناحیه/شهر را تکمیل کنید.');
+      return;
+    }
+
+    setSchoolScopeBusy(true);
+    setSchoolScopeMessage('');
+    try {
+      const payload = {
+        ...schoolEditForm,
+        namePashto: schoolEditForm.namePashto?.trim() || schoolEditForm.name?.trim(),
+        contactInfo: {
+          ...schoolEditForm.contactInfo,
+          address: schoolEditForm.contactInfo?.address?.trim() || schoolEditForm.district?.trim()
+        },
+        principal: {
+          ...schoolEditForm.principal,
+          name: schoolEditForm.principal?.name?.trim() || `${schoolEditForm.nameDari} - مدیر`
+        }
+      };
+      const res = await fetch(`${API_BASE}/api/afghan-schools/${schoolId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success === false) {
+        throw new Error(data?.message || 'ویرایش مشخصات مکتب ناموفق بود.');
+      }
+
+      const updatedSchool = data?.data || data?.school || data;
+      setSchoolOptions((current) => current.map((item) => (
+        String(item?._id || item?.id || '') === schoolId ? { ...item, ...updatedSchool } : item
+      )));
+      setActiveSchoolContext((current) => {
+        if (!current?.school || String(current.school?._id || current.school?.id || '') !== schoolId) return current;
+        return { ...current, school: { ...current.school, ...updatedSchool } };
+      });
+      setEditingSchoolProfile(null);
+      setSchoolEditForm(null);
+      setSchoolScopeMessage('مشخصات مکتب با موفقیت به‌روزرسانی شد. شناسه مکتب و داده‌های وصل‌شده تغییر نکردند.');
+      await loadSchoolOptions().catch(() => null);
+      await loadActiveSchoolContext().catch(() => null);
+    } catch (error) {
+      setSchoolScopeMessage(error?.message || 'ویرایش مشخصات مکتب ناموفق بود.');
+    } finally {
       setSchoolScopeBusy(false);
     }
   };
@@ -3508,6 +3626,9 @@ export default function AdminPanel() {
                     <small>{[school.province, school.district].filter(Boolean).join('، ') || 'موقعیت ثبت نشده'}</small>
                   </div>
                   <div className="admin-school-switcher__actions">
+                    <button type="button" onClick={() => openSchoolEdit(school)} disabled={schoolScopeBusy}>
+                      ویرایش مشخصات
+                    </button>
                     {isActive ? (
                       <span className="admin-school-switcher__badge">فعال</span>
                     ) : (
@@ -3533,6 +3654,177 @@ export default function AdminPanel() {
         )}
         {!!schoolScopeMessage && <div className="admin-school-switcher__message">{schoolScopeMessage}</div>}
       </section>
+
+      {editingSchoolProfile && schoolEditForm && (
+        <div className="admin-modal-backdrop" onClick={closeSchoolEdit}>
+          <div className="admin-modal-dialog admin-school-edit-dialog" onClick={(event) => event.stopPropagation()}>
+            <div className="admin-modal-header">
+              <div>
+                <h3>ویرایش مشخصات مکتب</h3>
+                <small>این تغییر فقط مشخصات سند مکتب را عوض می‌کند؛ شناسه مکتب و داده‌های وصل‌شده دست‌نخورده می‌مانند.</small>
+              </div>
+              <button type="button" className="admin-modal-close" onClick={closeSchoolEdit} disabled={schoolScopeBusy}>✕</button>
+            </div>
+
+            <form onSubmit={submitSchoolEdit}>
+              <div className="admin-modal-body">
+                <div className="admin-school-edit-grid">
+                  <div className="admin-form-group">
+                    <label>نام مکتب (دری) *</label>
+                    <input value={schoolEditForm.nameDari} onChange={(event) => updateSchoolEditField('nameDari', event.target.value)} disabled={schoolScopeBusy} />
+                  </div>
+                  <div className="admin-form-group">
+                    <label>نام مکتب (انگلیسی) *</label>
+                    <input value={schoolEditForm.name} onChange={(event) => updateSchoolEditField('name', event.target.value)} disabled={schoolScopeBusy} />
+                  </div>
+                  <div className="admin-form-group">
+                    <label>نام پشتو</label>
+                    <input value={schoolEditForm.namePashto} onChange={(event) => updateSchoolEditField('namePashto', event.target.value)} disabled={schoolScopeBusy} />
+                  </div>
+                  <div className="admin-form-group">
+                    <label>کد مکتب *</label>
+                    <input value={schoolEditForm.schoolCode} onChange={(event) => updateSchoolEditField('schoolCode', event.target.value)} disabled={schoolScopeBusy} />
+                  </div>
+                  <div className="admin-form-group">
+                    <label>کد وزارت</label>
+                    <input value={schoolEditForm.ministryCode} onChange={(event) => updateSchoolEditField('ministryCode', event.target.value)} disabled={schoolScopeBusy} />
+                  </div>
+                  <div className="admin-form-group">
+                    <label>کد ولایت</label>
+                    <input value={schoolEditForm.provinceCode} onChange={(event) => updateSchoolEditField('provinceCode', event.target.value)} disabled={schoolScopeBusy} />
+                  </div>
+                  <div className="admin-form-group">
+                    <label>ولایت</label>
+                    <select value={schoolEditForm.province} onChange={(event) => updateSchoolEditField('province', event.target.value)} disabled={schoolScopeBusy}>
+                      <option value="kabul">کابل</option>
+                      <option value="herat">هرات</option>
+                      <option value="kandahar">قندهار</option>
+                      <option value="balkh">بلخ</option>
+                      <option value="nangarhar">ننگرهار</option>
+                      <option value="badakhshan">بدخشان</option>
+                      <option value="takhar">تخار</option>
+                      <option value="samangan">سمنگان</option>
+                      <option value="kunduz">کندز</option>
+                      <option value="baghlan">بغلان</option>
+                      <option value="farah">فراه</option>
+                      <option value="nimroz">نیمروز</option>
+                      <option value="helmand">هلمند</option>
+                      <option value="ghor">غور</option>
+                      <option value="daykundi">دایکندی</option>
+                      <option value="uruzgan">ارزگان</option>
+                      <option value="zabul">زابل</option>
+                      <option value="paktika">پکتیکا</option>
+                      <option value="khost">خوست</option>
+                      <option value="paktia">پکتیا</option>
+                      <option value="logar">لوگر</option>
+                      <option value="parwan">پروان</option>
+                      <option value="kapisa">کاپیسا</option>
+                      <option value="panjshir">پنجشیر</option>
+                      <option value="badghis">بادغیس</option>
+                      <option value="faryab">فاریاب</option>
+                      <option value="jowzjan">جوزجان</option>
+                      <option value="saripul">سرپل</option>
+                    </select>
+                  </div>
+                  <div className="admin-form-group">
+                    <label>ناحیه/شهر *</label>
+                    <input value={schoolEditForm.district} onChange={(event) => updateSchoolEditField('district', event.target.value)} disabled={schoolScopeBusy} />
+                  </div>
+                  <div className="admin-form-group">
+                    <label>قریه/محل</label>
+                    <input value={schoolEditForm.village} onChange={(event) => updateSchoolEditField('village', event.target.value)} disabled={schoolScopeBusy} />
+                  </div>
+                  <div className="admin-form-group">
+                    <label>نوع مکتب</label>
+                    <select value={schoolEditForm.schoolType} onChange={(event) => updateSchoolEditField('schoolType', event.target.value)} disabled={schoolScopeBusy}>
+                      <option value="primary">ابتدایی</option>
+                      <option value="secondary">متوسطه</option>
+                      <option value="high">عالی</option>
+                      <option value="mosque">مسجد</option>
+                      <option value="madrasa">مدرسه دینی</option>
+                      <option value="technical">فنی</option>
+                      <option value="private">خصوصی</option>
+                    </select>
+                  </div>
+                  <div className="admin-form-group">
+                    <label>سطح تحصیل</label>
+                    <select value={schoolEditForm.schoolLevel} onChange={(event) => updateSchoolEditField('schoolLevel', event.target.value)} disabled={schoolScopeBusy}>
+                      <option value="grade1_6">صنف‌های ۱ تا ۶</option>
+                      <option value="grade7_9">صنف‌های ۷ تا ۹</option>
+                      <option value="grade10_12">صنف‌های ۱۰ تا ۱۲</option>
+                      <option value="grade1_12">صنف‌های ۱ تا ۱۲</option>
+                      <option value="grade1_3">صنف‌های ۱ تا ۳</option>
+                      <option value="grade4_6">صنف‌های ۴ تا ۶</option>
+                    </select>
+                  </div>
+                  <div className="admin-form-group">
+                    <label>مالکیت</label>
+                    <select value={schoolEditForm.ownership} onChange={(event) => updateSchoolEditField('ownership', event.target.value)} disabled={schoolScopeBusy}>
+                      <option value="government">دولتی</option>
+                      <option value="private">خصوصی</option>
+                      <option value="ngp">NGO</option>
+                      <option value="mosque">مسجدی</option>
+                      <option value="community">اجتماعی</option>
+                    </select>
+                  </div>
+                  <div className="admin-form-group">
+                    <label>وضعیت</label>
+                    <select value={schoolEditForm.status} onChange={(event) => updateSchoolEditField('status', event.target.value)} disabled={schoolScopeBusy}>
+                      <option value="active">فعال</option>
+                      <option value="inactive">غیرفعال</option>
+                      <option value="under_construction">در حال ساخت</option>
+                      <option value="closed">بسته</option>
+                      <option value="merged">ادغام‌شده</option>
+                    </select>
+                  </div>
+                  <div className="admin-form-group">
+                    <label>تاریخ تاسیس</label>
+                    <AfghanDateInput value={schoolEditForm.establishmentDate} onChange={(value) => updateSchoolEditField('establishmentDate', value)} disabled={schoolScopeBusy} showGregorianEquivalent />
+                  </div>
+                  <div className="admin-form-group admin-school-edit-grid__wide">
+                    <label>آدرس</label>
+                    <input value={schoolEditForm.contactInfo.address} onChange={(event) => updateSchoolEditNestedField('contactInfo', 'address', event.target.value)} disabled={schoolScopeBusy} />
+                  </div>
+                  <div className="admin-form-group">
+                    <label>تلفن</label>
+                    <input value={schoolEditForm.contactInfo.phone} onChange={(event) => updateSchoolEditNestedField('contactInfo', 'phone', event.target.value)} disabled={schoolScopeBusy} />
+                  </div>
+                  <div className="admin-form-group">
+                    <label>موبایل</label>
+                    <input value={schoolEditForm.contactInfo.mobile} onChange={(event) => updateSchoolEditNestedField('contactInfo', 'mobile', event.target.value)} disabled={schoolScopeBusy} />
+                  </div>
+                  <div className="admin-form-group">
+                    <label>ایمیل مکتب</label>
+                    <input type="email" value={schoolEditForm.contactInfo.email} onChange={(event) => updateSchoolEditNestedField('contactInfo', 'email', event.target.value)} disabled={schoolScopeBusy} />
+                  </div>
+                  <div className="admin-form-group">
+                    <label>وب‌سایت</label>
+                    <input value={schoolEditForm.contactInfo.website} onChange={(event) => updateSchoolEditNestedField('contactInfo', 'website', event.target.value)} disabled={schoolScopeBusy} />
+                  </div>
+                  <div className="admin-form-group">
+                    <label>نام مدیر</label>
+                    <input value={schoolEditForm.principal.name} onChange={(event) => updateSchoolEditNestedField('principal', 'name', event.target.value)} disabled={schoolScopeBusy} />
+                  </div>
+                  <div className="admin-form-group">
+                    <label>تلفن مدیر</label>
+                    <input value={schoolEditForm.principal.phone} onChange={(event) => updateSchoolEditNestedField('principal', 'phone', event.target.value)} disabled={schoolScopeBusy} />
+                  </div>
+                  <div className="admin-form-group admin-school-edit-grid__wide">
+                    <label>یادداشت</label>
+                    <textarea rows="3" value={schoolEditForm.notes.general} onChange={(event) => updateSchoolEditNestedField('notes', 'general', event.target.value)} disabled={schoolScopeBusy} />
+                  </div>
+                </div>
+              </div>
+              <div className="admin-modal-footer">
+                <button type="button" className="admin-btn ghost" onClick={closeSchoolEdit} disabled={schoolScopeBusy}>انصراف</button>
+                <button type="submit" className="admin-btn primary" disabled={schoolScopeBusy}>
+                  {schoolScopeBusy ? 'در حال ذخیره...' : 'ذخیره تغییرات'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {canViewReports && (
         <div className="admin-executive-strip">

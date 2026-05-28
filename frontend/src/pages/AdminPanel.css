@@ -316,6 +316,28 @@
   color: #fecaca;
 }
 
+.admin-school-edit-dialog {
+  max-width: 860px;
+}
+
+.admin-modal-header small {
+  display: block;
+  margin-top: 6px;
+  color: rgba(226, 232, 240, 0.68);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.admin-school-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.admin-school-edit-grid__wide {
+  grid-column: 1 / -1;
+}
+
 .admin-school-switcher__badge {
   display: inline-flex;
   align-items: center;
@@ -2577,6 +2599,14 @@
 
   .admin-school-switcher__actions {
     justify-content: flex-start;
+  }
+
+  .admin-school-edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-school-edit-grid__wide {
+    grid-column: auto;
   }
 
   .admin-schedule-hero {
