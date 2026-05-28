@@ -182,6 +182,20 @@
   align-items: flex-start;
 }
 
+.parent-dashboard-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.parent-dashboard-toolbar .notify-wrap,
+.parent-dashboard-toolbar .dash-profile-menu {
+  flex: 0 0 auto;
+}
+
 .dash-hero-actions button {
   width: auto;
   padding: 10px 16px;

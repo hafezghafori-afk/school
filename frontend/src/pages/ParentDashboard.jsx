@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import './Dashboard.css';
 import '../components/dashboard/dashboard.css';
+import DashboardProfileCard from '../components/DashboardProfileCard';
+import NotificationBell from '../components/NotificationBell';
 import DashboardShell from '../components/dashboard/DashboardShell';
 import KpiRingCard from '../components/dashboard/KpiRingCard';
 import QuickActionRail from '../components/dashboard/QuickActionRail';
@@ -343,6 +345,11 @@ export default function ParentDashboard() {
   const receiptUploadOrders = useMemo(() => (
     financeOrders.filter((item) => item?.supportsReceiptUpload && Number(item?.outstandingAmount || 0) > 0)
   ), [financeOrders]);
+  const parentUser = {
+    name: getName(),
+    role: role || 'parent',
+    orgRole: role || 'parent'
+  };
 
   useEffect(() => {
     if (!receiptUploadOrders.length) {
@@ -530,8 +537,10 @@ export default function ParentDashboard() {
     ? [
         { to: `${location.pathname}${location.search}#finance`, label: 'وضعیت فیس', caption: 'بدهی، رسید و باقی‌مانده', tone: 'copper' },
         { to: `${location.pathname}${location.search}#finance-workbench`, label: 'بل‌ها و رسیدها', caption: 'پیگیری آخرین حرکت‌های مالی', tone: 'teal' },
+        { to: `${location.pathname}${location.search}#attendance`, label: 'حاضری و پیشرفت', caption: 'حضور، نمرات و درس‌های امروز', tone: 'mint' },
         { to: `${location.pathname}${location.search}#reliefs`, label: 'تسهیلات مالی', caption: 'بورسیه، تخفیف و حمایت', tone: 'mint' },
-        { to: `${location.pathname}${location.search}#tasks`, label: 'کارهای باز', caption: 'هشدارها و پیگیری‌ها', tone: 'slate' }
+        { to: `${location.pathname}${location.search}#tasks`, label: 'کارهای باز', caption: 'هشدارها و پیگیری‌ها', tone: 'slate' },
+        { to: '/profile', label: 'پروفایل', caption: 'حساب کاربری و رمز عبور', tone: 'teal' }
       ]
     : [
         { to: '/student-report', label: 'گزارش شاگرد', caption: 'مرکز گزارش شاگردان', tone: 'teal' },
@@ -567,6 +576,15 @@ export default function ParentDashboard() {
           hint={`${formatMoney(summary.outstandingAmount)} باقی‌مانده`}
           progress={financeProgress}
           tone="copper"
+        />
+      </div>
+      <div>
+        <KpiRingCard
+          label="باقی‌مانده فیس"
+          value={formatMoney(summary.outstandingAmount)}
+          hint={`${toFaNumber(financeSummary.overdueOrders)} بل معوق | ${toFaNumber(financeSummary.dueSoonOrders)} نزدیک موعد`}
+          progress={Math.min(100, Number(summary.outstandingAmount || 0) > 0 ? 100 - financeProgress : 100)}
+          tone={Number(summary.outstandingAmount || 0) > 0 ? 'rose' : 'mint'}
         />
       </div>
       <div>
@@ -607,6 +625,10 @@ export default function ParentDashboard() {
         </div>
       </div>
       <div className="dash-hero-actions dash-form-grid">
+        <div className="parent-dashboard-toolbar">
+          <NotificationBell apiBase={API_BASE} title="اعلان‌های والدین" panelPath="/parent-dashboard" />
+          <DashboardProfileCard user={parentUser} fallbackName={getName()} apiBase={API_BASE} variant="dropdown" />
+        </div>
         {linkedStudents.length > 1 ? (
           <label className="dash-form-grid">
             <span className="muted">انتخاب متعلم</span>
