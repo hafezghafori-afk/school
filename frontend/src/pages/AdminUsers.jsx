@@ -2,6 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './AdminUsers.css';
 
 import { API_BASE } from '../config/api';
+import {
+  PERMISSION_GROUPS,
+  PERMISSION_OPTIONS as CATALOG_PERMISSION_OPTIONS,
+  expandLegacyPermissions
+} from '../config/permissionCatalog';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -71,7 +76,7 @@ const USER_STATUS_OPTIONS = [
   { key: 'suspended', label: 'تعلیق' }
 ];
 
-const PERMISSION_OPTIONS = [
+const LEGACY_PERMISSION_OPTIONS = [
   { key: 'manage_users', label: 'مدیریت کاربران' },
   { key: 'manage_enrollments', label: 'مدیریت ثبت‌نام‌ها' },
   { key: 'manage_memberships', label: 'مدیریت ممبرشیپ آموزشی' },
@@ -83,6 +88,8 @@ const PERMISSION_OPTIONS = [
   { key: 'access_school_manager', label: 'دسترسی پست مدیر مکتب' },
   { key: 'access_head_teacher', label: 'دسترسی پست سر معلم مکتب' }
 ];
+
+const PERMISSION_OPTIONS = CATALOG_PERMISSION_OPTIONS;
 
 const ROLE_OPTIONS = [
   { key: 'student', label: 'شاگرد' },
@@ -300,6 +307,96 @@ const toDateTime = (value) => {
 
 const uniquePermissions = (permissions = []) => Array.from(new Set((permissions || []).filter(Boolean)));
 
+function PermissionTree({ value = [], onChange, disabled = false, compact = false, idPrefix = 'permission' }) {
+  const selected = useMemo(() => new Set(value || []), [value]);
+  const [openGroups, setOpenGroups] = useState(() => new Set(PERMISSION_GROUPS.slice(0, 2).map((group) => group.key)));
+
+  const emit = (nextSet) => {
+    if (typeof onChange === 'function') onChange(Array.from(nextSet));
+  };
+
+  const toggleGroupOpen = (groupKey) => {
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
+  };
+
+  const togglePermission = (permissionKey, checked) => {
+    const next = new Set(selected);
+    if (checked) next.add(permissionKey);
+    else next.delete(permissionKey);
+    emit(next);
+  };
+
+  const toggleGroupPermissions = (permissions = [], checked) => {
+    const next = new Set(selected);
+    permissions.forEach((permission) => {
+      if (checked) next.add(permission.key);
+      else next.delete(permission.key);
+    });
+    emit(next);
+  };
+
+  return (
+    <div className={`permission-tree${compact ? ' compact' : ''}`}>
+      {PERMISSION_GROUPS.map((group) => {
+        const groupPermissions = group.permissions || [];
+        const selectedCount = groupPermissions.filter((permission) => selected.has(permission.key)).length;
+        const allSelected = selectedCount > 0 && selectedCount === groupPermissions.length;
+        const isPartial = selectedCount > 0 && selectedCount < groupPermissions.length;
+        const isOpen = openGroups.has(group.key);
+
+        return (
+          <div key={`${idPrefix}-${group.key}`} className={`permission-group${isOpen ? ' is-open' : ''}`}>
+            <div className="permission-group-head">
+              <button
+                type="button"
+                className="permission-group-toggle"
+                onClick={() => toggleGroupOpen(group.key)}
+                aria-expanded={isOpen}
+              >
+                <span className="permission-group-caret">{isOpen ? '-' : '+'}</span>
+                <span>{group.label}</span>
+                <small>{selectedCount}/{groupPermissions.length}</small>
+              </button>
+              <label className="permission-group-select">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  disabled={disabled}
+                  ref={(node) => {
+                    if (node) node.indeterminate = isPartial;
+                  }}
+                  onChange={(event) => toggleGroupPermissions(groupPermissions, event.target.checked)}
+                />
+                <span>انتخاب همه</span>
+              </label>
+            </div>
+            {isOpen ? (
+              <div className="permission-group-body">
+                {groupPermissions.map((permission) => (
+                  <label key={`${idPrefix}-${permission.key}`} className="permission-option">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(permission.key)}
+                      disabled={disabled}
+                      onChange={(event) => togglePermission(permission.key, event.target.checked)}
+                    />
+                    <span>{permission.label}</span>
+                  </label>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 const normalizeManagedUser = (user = {}) => {
   const resolvedOrgRole = deriveOrgRole(user);
   const compatibilityRole = compatibilityRoleForOrgRole(resolvedOrgRole);
@@ -327,8 +424,8 @@ const resolveEffectivePermissions = (user = {}, explicitPermissions = []) => {
         permissions: explicitPermissions.length ? explicitPermissions : user.permissions
       });
   const defaults = ORG_ROLE_DEFAULT_PERMISSIONS[identity.orgRole] || [];
-  if (isPermissionsLocked(identity.orgRole)) return uniquePermissions(defaults);
-  return uniquePermissions([...defaults, ...identity.permissions]);
+  if (isPermissionsLocked(identity.orgRole)) return expandLegacyPermissions(uniquePermissions(defaults));
+  return expandLegacyPermissions(uniquePermissions([...defaults, ...identity.permissions]));
 };
 
 const matchesDirectorySection = (user = {}, sectionKey = 'all') => {
@@ -1696,19 +1793,12 @@ export default function AdminUsers() {
                             ? 'برای ریاست عمومی، مجوزهای پیش‌فرض فعال است و در کنار آن می‌توانید مجوزهای تکمیلی را هم انتخاب کنید.'
                             : 'مجوزهای انتخابی به مجوزهای پیش‌فرض همین نقش افزوده می‌شود.'}
                       </div>
-                      <div className="permissions-grid">
-                        {PERMISSION_OPTIONS.map((opt) => (
-                          <label key={`dedicated-${opt.key}`} className="permission-option">
-                            <input
-                              type="checkbox"
-                              checked={(form.permissions || []).includes(opt.key)}
-                              disabled={isPermissionsLocked(form.orgRole)}
-                              onChange={() => togglePermissionInForm(opt.key)}
-                            />
-                            <span>{opt.label}</span>
-                          </label>
-                        ))}
-                      </div>
+                      <PermissionTree
+                        idPrefix="dedicated-form"
+                        value={form.permissions || []}
+                        disabled={isPermissionsLocked(form.orgRole)}
+                        onChange={(permissions) => setForm((prev) => ({ ...prev, permissions }))}
+                      />
                     </div>
 
                     <div className="effective-permissions-preview">
@@ -2012,19 +2102,12 @@ export default function AdminUsers() {
                   ? 'برای ریاست عمومی، مجوزهای پیش‌فرض اعمال می‌شود و مجوزهای اضافی هم قابل انتخاب است.'
                   : 'برای شاگرد و استاد، مجوزهای انتخابی به مجوزهای پیش‌فرض نقش اضافه می‌شود.'}
             </div>
-            <div className="permissions-grid">
-              {PERMISSION_OPTIONS.map((opt) => (
-                <label key={opt.key} className="permission-option">
-                  <input
-                    type="checkbox"
-                    checked={(form.permissions || []).includes(opt.key)}
-                    disabled={isPermissionsLocked(form.orgRole)}
-                    onChange={() => togglePermissionInForm(opt.key)}
-                  />
-                  <span>{opt.label}</span>
-                </label>
-              ))}
-            </div>
+            <PermissionTree
+              idPrefix="legacy-form"
+              value={form.permissions || []}
+              disabled={isPermissionsLocked(form.orgRole)}
+              onChange={(permissions) => setForm((prev) => ({ ...prev, permissions }))}
+            />
           </div>
 
           <div className="effective-permissions-preview">
@@ -2136,22 +2219,13 @@ export default function AdminUsers() {
                       </label>
 
                       <div className="access-editor-permissions">
-                        {PERMISSION_OPTIONS.map((opt) => (
-                          <label key={`access-editor-${user._id}-${opt.key}`} className="permission-option">
-                            <input
-                              type="checkbox"
-                              checked={(user.permissions || []).includes(opt.key)}
-                              disabled={rowBusy || permissionsLocked}
-                              onChange={(e) => {
-                                const next = new Set(user.permissions || []);
-                                if (e.target.checked) next.add(opt.key);
-                                else next.delete(opt.key);
-                                updatePermissions(user._id, Array.from(next), user.orgRole);
-                              }}
-                            />
-                            <span>{opt.label}</span>
-                          </label>
-                        ))}
+                        <PermissionTree
+                          compact
+                          idPrefix={`access-editor-${user._id}`}
+                          value={user.permissions || []}
+                          disabled={rowBusy || permissionsLocked}
+                          onChange={(permissions) => updatePermissions(user._id, permissions, user.orgRole)}
+                        />
                         <small className="adminlevel-hint">
                           {permissionsLocked
                             ? 'مجوزهای نقش مالی ثابت است و از همین نقش محاسبه می‌شود.'
@@ -2385,22 +2459,13 @@ export default function AdminUsers() {
                   </select>
                 </div>
                 <div className="permissions-mini">
-                  {PERMISSION_OPTIONS.map((opt) => (
-                    <label key={`${user._id}-${opt.key}`} className="permission-option">
-                      <input
-                        type="checkbox"
-                        checked={(user.permissions || []).includes(opt.key)}
-                        disabled={busyId === user._id || permissionsLocked}
-                        onChange={(e) => {
-                          const next = new Set(user.permissions || []);
-                          if (e.target.checked) next.add(opt.key);
-                          else next.delete(opt.key);
-                          updatePermissions(user._id, Array.from(next), user.orgRole);
-                        }}
-                      />
-                      <span>{opt.label}</span>
-                    </label>
-                  ))}
+                  <PermissionTree
+                    compact
+                    idPrefix={`user-row-${user._id}`}
+                    value={user.permissions || []}
+                    disabled={busyId === user._id || permissionsLocked}
+                    onChange={(permissions) => updatePermissions(user._id, permissions, user.orgRole)}
+                  />
                   <small className="adminlevel-hint">
                     {permissionsLocked
                       ? `مجوزهای ${orgRoleLabel(user.orgRole)} از خود نقش سازمانی محاسبه می‌شود.`
@@ -2579,19 +2644,15 @@ export default function AdminUsers() {
                       ? 'برای نقش‌های مالی، مجوزها از خود نقش سازمانی تعیین می‌شود و در این بخش دستی نیست.'
                       : 'مجوزهای انتخابی به مجوزهای پیش‌فرض نقش افزوده می‌شود.'}
                   </div>
-                  <div className="permissions-grid">
-                    {PERMISSION_OPTIONS.map((opt) => (
-                      <label key={`edit-permission-${opt.key}`} className="permission-option">
-                        <input
-                          type="checkbox"
-                          checked={(editModal.form.permissions || []).includes(opt.key)}
-                          disabled={isPermissionsLocked(editModal.form.orgRole)}
-                          onChange={() => togglePermissionInEditForm(opt.key)}
-                        />
-                        <span>{opt.label}</span>
-                      </label>
-                    ))}
-                  </div>
+                  <PermissionTree
+                    idPrefix="edit-permission"
+                    value={editModal.form.permissions || []}
+                    disabled={isPermissionsLocked(editModal.form.orgRole)}
+                    onChange={(permissions) => setEditModal((prev) => ({
+                      ...prev,
+                      form: { ...prev.form, permissions }
+                    }))}
+                  />
                   <div className="effective-permissions-preview">
                     <span>مجوزهای موثر:</span>
                     <div className="effective-chip-wrap">

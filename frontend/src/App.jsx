@@ -8,6 +8,7 @@ import AccessDenied from './components/AccessDenied';
 import { ToastProvider } from './components/ui/toast';
 import useSiteSettings from './hooks/useSiteSettings';
 import { API_BASE, API_ORIGIN } from './config/api';
+import { expandLegacyPermissions } from './config/permissionCatalog';
 import { formatAfghanDate, formatAfghanDateTime, formatAfghanTime } from './utils/afghanDate';
 import { normalizeBrandName, normalizeBrandSubtitle } from './utils/brand';
 
@@ -453,19 +454,19 @@ const getStoredEffectivePermissions = () => {
     const raw = localStorage.getItem('effectivePermissions');
     if (!raw) {
       if (isGeneralPresident) {
-        return ['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_finance', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'manage_platform_requests', 'access_school_manager', 'access_head_teacher'];
+        return expandLegacyPermissions(['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_finance', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'manage_platform_requests', 'access_school_manager', 'access_head_teacher']);
       }
       return [];
     }
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
       if (isGeneralPresident) {
-        return ['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_finance', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'manage_platform_requests', 'access_school_manager', 'access_head_teacher'];
+        return expandLegacyPermissions(['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_finance', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'manage_platform_requests', 'access_school_manager', 'access_head_teacher']);
       }
       return [];
     }
     if (isGeneralPresident) {
-      return Array.from(new Set([
+      return expandLegacyPermissions(Array.from(new Set([
         'manage_users',
         'manage_enrollments',
         'manage_memberships',
@@ -478,12 +479,12 @@ const getStoredEffectivePermissions = () => {
         'access_school_manager',
         'access_head_teacher',
         ...parsed
-      ]));
+      ])));
     }
-    return parsed;
+    return expandLegacyPermissions(parsed);
   } catch {
     if (isGeneralPresident) {
-      return ['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_finance', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'manage_platform_requests', 'access_school_manager', 'access_head_teacher'];
+      return expandLegacyPermissions(['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_finance', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'manage_platform_requests', 'access_school_manager', 'access_head_teacher']);
     }
     return [];
   }

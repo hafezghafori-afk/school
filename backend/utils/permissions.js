@@ -1,3 +1,5 @@
+const { expandLegacyPermissions } = require('./permissionCatalog');
+
 const ROLE_DEFAULT_PERMISSIONS = Object.freeze({
   admin: [
     'manage_users',
@@ -138,10 +140,10 @@ function resolvePermissions(roleOrContext = 'student', explicitPermissions = [],
   const defaults = ORG_ROLE_DEFAULT_PERMISSIONS[context.orgRole] || [];
 
   if (context.orgRole === 'finance_manager' || context.orgRole === 'finance_lead') {
-    return Array.from(new Set(defaults));
+    return expandLegacyPermissions(Array.from(new Set(defaults)));
   }
 
-  return Array.from(new Set([...defaults, ...context.explicitPermissions]));
+  return expandLegacyPermissions(Array.from(new Set([...defaults, ...context.explicitPermissions])));
 }
 
 module.exports = {

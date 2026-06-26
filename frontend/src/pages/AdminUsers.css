@@ -806,6 +806,113 @@
   gap: 6px;
 }
 
+.permission-tree {
+  display: grid;
+  gap: 8px;
+}
+
+.permission-tree.compact {
+  gap: 6px;
+}
+
+.permission-group {
+  min-width: 0;
+  border-radius: 12px;
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  background: rgba(8, 19, 34, 0.68);
+  overflow: hidden;
+}
+
+.permission-group.is-open {
+  border-color: rgba(74, 222, 128, 0.28);
+}
+
+.permission-group-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+}
+
+.permission-group-toggle {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  text-align: right;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(15, 23, 42, 0.56);
+  color: #f8fafc;
+  cursor: pointer;
+  padding: 6px 8px;
+}
+
+.permission-group-toggle span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.permission-group-toggle small {
+  font-size: 11px;
+  color: #bfdbfe;
+  direction: ltr;
+}
+
+.permission-group-caret {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: rgba(14, 165, 233, 0.16);
+  border: 1px solid rgba(125, 211, 252, 0.26);
+  color: #dff5ff;
+}
+
+.permission-group-select {
+  display: inline-grid;
+  grid-template-columns: 16px auto;
+  gap: 6px;
+  align-items: center;
+  color: #dbeafe;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.permission-group-select input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.permission-group-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.permission-tree.compact .permission-group-body {
+  grid-template-columns: 1fr;
+}
+
+.permission-tree.compact .permission-group-head {
+  grid-template-columns: 1fr;
+}
+
+.permission-tree.compact .permission-group-select {
+  justify-self: start;
+}
+
 .permission-option,
 .permissions-grid label,
 .permissions-mini label {
@@ -979,7 +1086,7 @@
 }
 
 .access-editor-permissions {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
 }
 
 .access-editor-permissions .adminlevel-hint {

@@ -10,6 +10,7 @@ import TaskAlertPanel from '../components/dashboard/TaskAlertPanel';
 import TrendBars from '../components/dashboard/TrendBars';
 
 import { API_BASE } from '../config/api';
+import { expandLegacyPermissions } from '../config/permissionCatalog';
 import { formatAfghanDate, formatAfghanDateTime, formatAfghanTime } from '../utils/afghanDate';
 import { formatFinanceCode } from '../utils/latinFinanceCode';
 import {
@@ -185,7 +186,7 @@ const getStoredPermissions = () => {
   try {
     const raw = localStorage.getItem('effectivePermissions');
     const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? expandLegacyPermissions(parsed) : [];
   } catch {
     return [];
   }
@@ -794,7 +795,7 @@ export default function AdminPanel() {
 
   const effectivePermissions = useMemo(() => {
     const fromUser = Array.isArray(user?.effectivePermissions) ? user.effectivePermissions : [];
-    if (fromUser.length) return Array.from(new Set(fromUser));
+    if (fromUser.length) return expandLegacyPermissions(Array.from(new Set(fromUser)));
     return getStoredPermissions();
   }, [user?.effectivePermissions]);
 
