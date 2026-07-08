@@ -958,6 +958,8 @@ const getReliefSourceEntityId = (item = {}) => {
   return sourceKey.split(':').slice(1).join(':').trim();
 };
 
+const getFeeOrderRowId = (item = {}) => String(item?.id || item?._id || item?.feeOrderId || '').trim();
+
 const formatFeeLineSummary = (lineItems = []) => (
   (Array.isArray(lineItems) ? lineItems : [])
     .filter((item) => Number(item?.netAmount || item?.grossAmount || 0) > 0)
@@ -967,7 +969,7 @@ const formatFeeLineSummary = (lineItems = []) => (
 );
 
 const toLegacyLikeBillRow = (order = {}) => {
-  const canonicalId = String(order?.id || '').trim();
+  const canonicalId = String(order?.id || order?._id || '').trim();
   const legacyBillId = String(order?.sourceBillId || '').trim();
   const classTitle = String(order?.schoolClass?.title || order?.course?.title || '').trim() || '---';
   const lineItems = Array.isArray(order?.lineItems) ? order.lineItems : [];
@@ -1190,6 +1192,7 @@ export default function AdminFinance() {
   const [formLayoutMode, setFormLayoutMode] = useState('landscape');
   const [orderFormMode, setOrderFormMode] = useState('manual');
   const [billingAdvancedOpen, setBillingAdvancedOpen] = useState(false);
+  const [paymentAdvancedOpen, setPaymentAdvancedOpen] = useState(false);
   const [reliefFormMode, setReliefFormMode] = useState('discount');
   const [incomeTrendRange, setIncomeTrendRange] = useState('daily');
   const [manualStudentSearch, setManualStudentSearch] = useState('');
@@ -1339,11 +1342,11 @@ export default function AdminFinance() {
       })
   ), [bills, paymentDeskForm.studentId, paymentDeskForm.classId, paymentDeskForm.academicYearId]);
   const paymentDeskSelectedOrderIds = useMemo(() => {
-    const validIds = new Set(paymentDeskOpenOrders.map((item) => String(item?.id || '')));
+    const validIds = new Set(paymentDeskOpenOrders.map(getFeeOrderRowId).filter(Boolean));
     return paymentDeskForm.selectedFeeOrderIds.filter((item) => validIds.has(String(item || '')));
   }, [paymentDeskForm.selectedFeeOrderIds, paymentDeskOpenOrders]);
   const paymentDeskManualAllocated = useMemo(() => (
-    paymentDeskOpenOrders.reduce((sum, item) => sum + (Number(paymentDeskForm.manualAllocations?.[item.id] || 0) || 0), 0)
+    paymentDeskOpenOrders.reduce((sum, item) => sum + (Number(paymentDeskForm.manualAllocations?.[getFeeOrderRowId(item)] || 0) || 0), 0)
   ), [paymentDeskForm.manualAllocations, paymentDeskOpenOrders]);
   const paymentDeskTotalOutstanding = useMemo(() => (
     paymentDeskOpenOrders.reduce((sum, item) => sum + Number(item?.outstandingAmount || 0), 0)
@@ -1355,6 +1358,15 @@ export default function AdminFinance() {
     paymentDeskForm.allocationMode === 'manual'
       && Math.abs(Number(paymentDeskRemainingAmount || 0)) > 0.009
   ), [paymentDeskForm.allocationMode, paymentDeskRemainingAmount]);
+  const paymentDeskRequiresReference = paymentDeskForm.paymentMethod !== 'cash';
+  const paymentDeskCanSubmit = Boolean(
+    Number(paymentDeskForm.amount || 0) > 0
+    && paymentDeskForm.paidAt
+    && paymentDeskOpenOrders.length
+    && (!paymentDeskRequiresReference || String(paymentDeskForm.referenceNo || '').trim())
+    && !(paymentDeskForm.allocationMode === 'auto_selected' && !paymentDeskSelectedOrderIds.length)
+    && !(paymentDeskForm.allocationMode === 'manual' && (paymentDeskManualAllocated <= 0 || paymentDeskManualMismatch))
+  );
   const openBillsCount = useMemo(() => (
     bills.filter((item) => OPEN_ORDER_STATUSES.has(String(item?.status || '').trim())).length
   ), [bills]);
@@ -2961,7 +2973,7 @@ export default function AdminFinance() {
 
   useEffect(() => {
     setPaymentDeskForm((prev) => {
-      const validIds = new Set(paymentDeskOpenOrders.map((item) => String(item?.id || '')));
+      const validIds = new Set(paymentDeskOpenOrders.map(getFeeOrderRowId).filter(Boolean));
       const nextSelected = prev.selectedFeeOrderIds.filter((item) => validIds.has(String(item || '')));
       const nextManual = Object.fromEntries(
         Object.entries(prev.manualAllocations || {}).filter(([key]) => validIds.has(String(key || '')))
@@ -3165,12 +3177,12 @@ export default function AdminFinance() {
     allocations: paymentDeskForm.allocationMode === 'manual'
       ? paymentDeskOpenOrders
         .map((item) => ({
-          feeOrderId: item.id,
-          amount: Number(paymentDeskForm.manualAllocations?.[item.id] || 0)
+          feeOrderId: getFeeOrderRowId(item),
+          amount: Number(paymentDeskForm.manualAllocations?.[getFeeOrderRowId(item)] || 0)
         }))
         .filter((item) => item.amount > 0)
       : [],
-    referenceNo: paymentDeskForm.referenceNo,
+    referenceNo: paymentDeskForm.paymentMethod === 'cash' ? '' : paymentDeskForm.referenceNo,
     note: paymentDeskForm.note
   });
 
@@ -5133,7 +5145,15 @@ export default function AdminFinance() {
           </div>
           <div className="finance-split-grid">
             <input value={paymentDeskForm.amount} onChange={(e) => { setPaymentDeskForm((p) => ({ ...p, amount: e.target.value })); setPaymentPreview(null); }} placeholder="مبلغ پرداخت" />
-            <select data-testid="desk-payment-method-select" value={paymentDeskForm.paymentMethod} onChange={(e) => setPaymentDeskForm((p) => ({ ...p, paymentMethod: e.target.value }))}>
+            <select data-testid="desk-payment-method-select" value={paymentDeskForm.paymentMethod} onChange={(e) => {
+              const nextMethod = e.target.value;
+              setPaymentDeskForm((p) => ({
+                ...p,
+                paymentMethod: nextMethod,
+                referenceNo: nextMethod === 'cash' ? '' : p.referenceNo
+              }));
+              setPaymentPreview(null);
+            }}>
               <option value="cash">نقدی</option>
               <option value="bank_transfer">بانکی</option>
               <option value="hawala">حواله</option>
@@ -5144,6 +5164,21 @@ export default function AdminFinance() {
             <AfghanDateInput value={paymentDeskForm.paidAt} onChange={(value) => setPaymentDeskForm((p) => ({ ...p, paidAt: value }))} showGregorianEquivalent />
             <span className="finance-chip finance-chip-muted">{paymentDeskForm.paidAt ? `تاریخ پرداخت: ${toFaDate(paymentDeskForm.paidAt)}` : 'تاریخ پرداخت انتخاب نشده'}</span>
           </div>
+          {paymentDeskRequiresReference && (
+            <input
+              value={paymentDeskForm.referenceNo}
+              onChange={(e) => {
+                setPaymentDeskForm((p) => ({ ...p, referenceNo: e.target.value }));
+                setPaymentPreview(null);
+              }}
+              placeholder="شماره رسید / مرجع"
+              required
+            />
+          )}
+          <button type="button" className="secondary finance-advanced-toggle" onClick={() => setPaymentAdvancedOpen((value) => !value)}>
+            {paymentAdvancedOpen ? 'بستن تنظیمات تخصیص' : 'تخصیص پیشرفته'}
+          </button>
+          {paymentAdvancedOpen && (
           <div className="finance-split-grid">
             <select data-testid="desk-allocation-mode-select" value={paymentDeskForm.allocationMode} onChange={(e) => {
               setPaymentDeskForm((p) => ({
@@ -5158,8 +5193,8 @@ export default function AdminFinance() {
               <option value="auto_selected">تخصیص فقط به بدهی‌های انتخاب‌شده</option>
               <option value="manual">تخصیص دستی روی هر بدهی</option>
             </select>
-            <input value={paymentDeskForm.referenceNo} onChange={(e) => setPaymentDeskForm((p) => ({ ...p, referenceNo: e.target.value }))} placeholder="شماره رسید / مرجع" />
           </div>
+          )}
           <textarea value={paymentDeskForm.note} onChange={(e) => setPaymentDeskForm((p) => ({ ...p, note: e.target.value }))} rows={3} placeholder="یادداشت پرداخت" />
           <div className="finance-chip-group">
             <span className="finance-chip">{paymentDeskClass?.title || 'صنف'}</span>
@@ -5227,17 +5262,19 @@ export default function AdminFinance() {
               </div>
             </div>
           )}
-          {paymentDeskOpenOrders.length > 0 ? (
+          {paymentDeskOpenOrders.length > 0 && (paymentAdvancedOpen || paymentDeskForm.allocationMode !== 'auto_oldest_due') ? (
             <div className="finance-order-pick-list" data-testid="desk-open-orders">
-              {paymentDeskOpenOrders.map((item) => (
-                <div key={`pick-${item.id}`} className="finance-flag finance-order-pick-row">
+              {paymentDeskOpenOrders.map((item) => {
+                const orderId = getFeeOrderRowId(item);
+                return (
+                <div key={`pick-${orderId}`} className="finance-flag finance-order-pick-row">
                   <div className="finance-order-pick-copy">
                     {paymentDeskForm.allocationMode === 'auto_selected' ? (
                       <label className="finance-order-pick-toggle">
                         <input
                           type="checkbox"
-                          checked={paymentDeskSelectedOrderIds.includes(item.id)}
-                          onChange={() => toggleDeskOrderSelection(item.id)}
+                          checked={paymentDeskSelectedOrderIds.includes(orderId)}
+                          onChange={() => toggleDeskOrderSelection(orderId)}
                         />
                         <span>{item.title || formatFinanceCode(item.billNumber, '') || 'بدهی مالی'}</span>
                       </label>
@@ -5252,24 +5289,24 @@ export default function AdminFinance() {
                       min="0"
                       step="0.01"
                       max={item.outstandingAmount || 0}
-                      value={paymentDeskForm.manualAllocations?.[item.id] || ''}
-                      onChange={(e) => updateDeskManualAllocation(item.id, e.target.value)}
+                      value={paymentDeskForm.manualAllocations?.[orderId] || ''}
+                      onChange={(e) => updateDeskManualAllocation(orderId, e.target.value)}
                       placeholder="مبلغ تخصیص"
-                      data-testid={`desk-manual-allocation-${item.id}`}
+                      data-testid={`desk-manual-allocation-${orderId}`}
                     />
                   ) : (
-                    <span className={`finance-chip ${paymentDeskSelectedOrderIds.includes(item.id) ? 'finance-chip-emerald' : 'finance-chip-muted'}`}>
+                    <span className={`finance-chip ${paymentDeskSelectedOrderIds.includes(orderId) ? 'finance-chip-emerald' : 'finance-chip-muted'}`}>
                       {paymentDeskForm.allocationMode === 'auto_selected'
-                        ? (paymentDeskSelectedOrderIds.includes(item.id) ? 'انتخاب شده' : 'انتخاب نشده')
+                        ? (paymentDeskSelectedOrderIds.includes(orderId) ? 'انتخاب شده' : 'انتخاب نشده')
                         : `${fmt(item.outstandingAmount || 0)} AFN`}
                     </span>
                   )}
                 </div>
-              ))}
+              );})}
             </div>
-          ) : (
+          ) : paymentDeskOpenOrders.length <= 0 ? (
             <p className="muted finance-order-empty">برای متعلم، صنف و سال تعلیمی انتخاب‌شده هیچ بدهی باز پیدا نشد.</p>
-          )}
+          ) : null}
           {false && paymentPreview?.membership && (
             <div className="finance-chip-group">
               <span className="finance-chip">{paymentPreview.membership?.schoolClass?.title || 'صنف'}</span>
@@ -5308,7 +5345,7 @@ export default function AdminFinance() {
               ))}
             </div>
           )}
-          <p className="finance-payment-action-hint">{paymentDeskActionHint}</p>
+          <p className="finance-payment-action-hint">{paymentDeskCanSubmit && !paymentPreview?.allocations?.length ? 'پرداخت آماده ثبت است؛ تخصیص هنگام ثبت محاسبه می‌شود.' : paymentDeskActionHint}</p>
           <div className="row-actions">
             <button
               type="button"
@@ -5329,7 +5366,7 @@ export default function AdminFinance() {
               type="submit"
               className="secondary"
               onClick={() => setDeskPaymentSubmitMode('save_print')}
-              disabled={busy || !paymentPreview?.allocations?.length || !paymentDeskForm.paidAt || paymentDeskManualMismatch}
+              disabled={busy || !paymentDeskCanSubmit}
               data-testid="submit-print-desk-payment"
             >
               ثبت و چاپ رسید
@@ -5337,7 +5374,7 @@ export default function AdminFinance() {
             <button
               type="submit"
               onClick={() => setDeskPaymentSubmitMode('save')}
-              disabled={busy || !paymentPreview?.allocations?.length || !paymentDeskForm.paidAt || paymentDeskManualMismatch}
+              disabled={busy || !paymentDeskCanSubmit}
               data-testid="submit-desk-payment"
             >
               ثبت پرداخت

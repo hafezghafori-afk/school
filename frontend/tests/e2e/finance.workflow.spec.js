@@ -3379,6 +3379,7 @@ test.describe('finance workflow', () => {
     await paymentDesk.getByTestId('desk-class-select').selectOption('class-1');
     await paymentDesk.getByTestId('desk-academic-year-select').selectOption('year-1');
     await paymentDesk.locator('input[placeholder="مبلغ پرداخت"]').fill('700');
+    await paymentDesk.getByRole('button', { name: 'تخصیص پیشرفته' }).click();
     await paymentDesk.getByTestId('desk-allocation-mode-select').selectOption('manual');
     await expect(paymentDesk.getByTestId('desk-open-orders')).toContainText('Transport Monthly');
     await paymentDesk.getByTestId('desk-manual-allocation-order-1').fill('500');
