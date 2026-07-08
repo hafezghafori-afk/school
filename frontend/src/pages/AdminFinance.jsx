@@ -353,7 +353,7 @@ const buildFinanceMembershipStudentOptions = (items = []) => {
 
 const RECEIPT_STAGE_LABELS = {
   finance_manager_review: 'در انتظار مدیر مالی',
-  finance_lead_review: 'در انتظار آمریت مالی',
+  finance_lead_review: 'مرحله قدیمی آمریت مالی',
   general_president_review: 'در انتظار ریاست عمومی',
   completed: 'تایید نهایی',
   rejected: 'رد شده'
@@ -416,7 +416,7 @@ const getStudentDisplayName = (student = {}) => (
 
 const RECEIPT_STAGE_UI_LABELS = {
   finance_manager_review: 'در انتظار مدیر مالی',
-  finance_lead_review: 'در انتظار آمریت مالی',
+  finance_lead_review: 'مرحله قدیمی آمریت مالی',
   general_president_review: 'در انتظار ریاست عمومی',
   completed: 'تایید نهایی',
   rejected: 'رد شده'
@@ -462,7 +462,6 @@ const PAYMENT_SOURCE_UI_LABELS = {
 
 const FOLLOW_UP_LEVEL_OPTIONS = [
   { value: 'finance_manager', label: 'مدیر مالی' },
-  { value: 'finance_lead', label: 'آمریت مالی' },
   { value: 'general_president', label: 'ریاست عمومی' }
 ];
 
@@ -1917,19 +1916,13 @@ export default function AdminFinance() {
 
   const canReviewReceipt = (receipt) => {
     if (!receipt || receipt.status !== 'pending') return false;
-    const stage = normalizeReceiptStage(receipt.approvalStage || '');
     if (financeRole === 'general_president') return true;
-    if (financeRole === 'finance_manager') return stage === 'finance_manager_review';
-    if (financeRole === 'finance_lead') return stage === 'finance_lead_review';
+    if (financeRole === 'finance_manager') return true;
     return false;
   };
 
   const getApproveLabel = (receipt) => {
-    const stage = normalizeReceiptStage(receipt?.approvalStage || '');
-    if (financeRole === 'finance_manager') return 'ارسال به آمریت';
-    if (financeRole === 'finance_lead') return 'ارسال به ریاست';
-    if (stage === 'general_president_review') return 'تایید نهایی';
-    return 'تایید مستقیم';
+    return 'تایید نهایی';
   };
 
   const defaultMonthKey = useMemo(() => {
@@ -4676,8 +4669,7 @@ export default function AdminFinance() {
         <div><span>تسهیلات ثابت</span><strong>{fmt(summary?.fixedReliefAmount || 0)} AFN</strong></div>
         <div><span>نرخ وصول</span><strong>{summary?.collectionRate || 0}%</strong></div>
         <div><span>مرحله مدیر مالی</span><strong>{summary?.receiptWorkflow?.financeManager || 0}</strong></div>
-        <div><span>مرحله آمریت مالی</span><strong>{summary?.receiptWorkflow?.financeLead || 0}</strong></div>
-        <div><span>مرحله ریاست عمومی</span><strong>{summary?.receiptWorkflow?.generalPresident || 0}</strong></div>
+        <div><span>مرحله ریاست عمومی</span><strong>{(summary?.receiptWorkflow?.generalPresident || 0) + (summary?.receiptWorkflow?.financeLead || 0)}</strong></div>
       </div>
 
       <div className="finance-grid finance-dashboard-grid" data-finance-section="overview">
@@ -6079,7 +6071,6 @@ export default function AdminFinance() {
             <select value={receiptStageFilter} onChange={(e) => setReceiptStageFilter(e.target.value)}>
               <option value="all">همه مراحل</option>
               <option value="finance_manager_review">مدیر مالی</option>
-              <option value="finance_lead_review">آمریت مالی</option>
               <option value="general_president_review">ریاست عمومی</option>
             </select>
           </label>

@@ -16,7 +16,7 @@ const { roundMoney, getBillRemainingAmount } = require('../utils/financeReceiptV
 const { syncStudentFinanceFromFinanceBill, syncStudentFinanceFromFinanceReceipt } = require('../utils/studentFinanceSync');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 
-const FINANCE_FOUR_EYES_ENABLED = String(process.env.FINANCE_FOUR_EYES_ENABLED || 'true').toLowerCase() !== 'false';
+const FINANCE_FOUR_EYES_ENABLED = String(process.env.FINANCE_FOUR_EYES_ENABLED || 'false').toLowerCase() !== 'false';
 
 function repairDisplayText(value) {
   const text = typeof value === 'string' ? value.trim() : '';
@@ -236,16 +236,15 @@ function canReviewReceiptStage(adminLevel = '', stage = '') {
   const level = normalizeAdminLevel(adminLevel || '');
   const normalizedStage = normalizeReceiptStage(stage);
   if (!OPEN_RECEIPT_STAGES.includes(normalizedStage)) return false;
-  if (level === 'general_president') return true;
-  return getRequiredLevelForStage(normalizedStage) === level;
+  return level === 'finance_manager' || level === 'general_president';
 }
 
 function getNextReceiptStage(adminLevel = '', currentStage = '') {
   const level = normalizeAdminLevel(adminLevel || '');
   const stage = normalizeReceiptStage(currentStage);
-  if (level === 'general_president') return RECEIPT_STAGES.completed;
-  if (level === 'finance_manager' && stage === RECEIPT_STAGES.financeManager) return RECEIPT_STAGES.financeLead;
-  if (level === 'finance_lead' && stage === RECEIPT_STAGES.financeLead) return RECEIPT_STAGES.generalPresident;
+  if (OPEN_RECEIPT_STAGES.includes(stage) && (level === 'finance_manager' || level === 'general_president')) {
+    return RECEIPT_STAGES.completed;
+  }
   return '';
 }
 
@@ -265,7 +264,7 @@ function getReceiptStageMessage(stage = '') {
   return repairDisplayText('Ø±Ø³ÛŒØ¯ Ø¨Ø±Ø§ÛŒ Ø¨Ø±Ø±Ø³ÛŒ Ù…Ø¯ÛŒØ± Ù…Ø§Ù„ÛŒ Ø«Ø¨Øª Ø´Ø¯');
 }
 
-const FOLLOW_UP_LEVELS = ['finance_manager', 'finance_lead', 'general_president'];
+const FOLLOW_UP_LEVELS = ['finance_manager', 'general_president'];
 const FOLLOW_UP_STATUSES = ['new', 'in_progress', 'on_hold', 'escalated', 'resolved'];
 
 function normalizeFollowUpLevel(value = '') {

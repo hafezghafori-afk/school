@@ -548,16 +548,15 @@ const canReviewReceiptStage = (adminLevel = '', stage = '') => {
   const level = normalizeAdminLevel(adminLevel || '');
   const normalizedStage = normalizeReceiptStage(stage);
   if (!OPEN_RECEIPT_STAGES.includes(normalizedStage)) return false;
-  if (level === 'general_president') return true;
-  return getRequiredLevelForStage(normalizedStage) === level;
+  return level === 'finance_manager' || level === 'general_president';
 };
 
 const getNextReceiptStage = (adminLevel = '', currentStage = '') => {
   const level = normalizeAdminLevel(adminLevel || '');
   const stage = normalizeReceiptStage(currentStage);
-  if (level === 'general_president') return RECEIPT_STAGES.completed;
-  if (level === 'finance_manager' && stage === RECEIPT_STAGES.financeManager) return RECEIPT_STAGES.financeLead;
-  if (level === 'finance_lead' && stage === RECEIPT_STAGES.financeLead) return RECEIPT_STAGES.generalPresident;
+  if (OPEN_RECEIPT_STAGES.includes(stage) && (level === 'finance_manager' || level === 'general_president')) {
+    return RECEIPT_STAGES.completed;
+  }
   return '';
 };
 
@@ -575,7 +574,7 @@ const getReceiptStageMessage = (stage = '') => {
   return 'رسید برای بررسی مدیر مالی ثبت شد';
 };
 
-const FOLLOW_UP_LEVELS = ['finance_manager', 'finance_lead', 'general_president'];
+const FOLLOW_UP_LEVELS = ['finance_manager', 'general_president'];
 const FOLLOW_UP_STATUSES = ['new', 'in_progress', 'on_hold', 'escalated', 'resolved'];
 
 const normalizeFollowUpLevel = (value = '') => {
@@ -835,7 +834,7 @@ const createCanonicalPaymentSubmissionRecord = async ({
 
   let targetAdmins = await findAdminsByLevels(['finance_manager']);
   if (!targetAdmins.length) {
-    targetAdmins = await findAdminsByLevels(['finance_lead', 'general_president']);
+    targetAdmins = await findAdminsByLevels(['general_president']);
   }
 
   const actorLabel = actorType === 'parent' ? 'ولی/سرپرست' : 'متعلم';
@@ -983,7 +982,7 @@ const createReceiptSubmissionRecord = async ({
 
   let targetAdmins = await findAdminsByLevels(['finance_manager']);
   if (!targetAdmins.length) {
-    targetAdmins = await findAdminsByLevels(['finance_lead', 'general_president']);
+    targetAdmins = await findAdminsByLevels(['general_president']);
   }
 
   const actorLabel = actorType === 'parent' ? 'ولی/سرپرست' : 'متعلم';
@@ -5095,7 +5094,7 @@ const normalizeAuditSeverity = (value = '') => {
   return FINANCE_AUDIT_SEVERITY_VALUES.has(normalized) ? normalized : 'all';
 };
 
-const FINANCE_ANOMALY_ASSIGNABLE_LEVELS = new Set(['finance_manager', 'finance_lead', 'general_president']);
+const FINANCE_ANOMALY_ASSIGNABLE_LEVELS = new Set(['finance_manager', 'general_president']);
 
 const normalizeAnomalyAssignedLevel = (value = '', fallback = 'finance_manager') => {
   const normalized = normalizeAdminLevel(String(value || '').trim());

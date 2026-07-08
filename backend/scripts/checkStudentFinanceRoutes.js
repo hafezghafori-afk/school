@@ -337,7 +337,7 @@ const financeAdminActionServiceMock = {
   },
   async approveFeePaymentAction({ feePaymentId, body = {} } = {}) {
     financeActionCalls.push({ route: 'payment-approve', feePaymentId, body });
-    return { message: 'Receipt approved', nextStage: 'finance_lead_review', requiresFinalApproval: true };
+    return { message: 'Receipt approved', nextStage: 'completed', requiresFinalApproval: false };
   },
   async rejectFeePaymentAction({ feePaymentId, body = {} } = {}) {
     financeActionCalls.push({ route: 'payment-reject', feePaymentId, body });
@@ -603,7 +603,7 @@ async function run() {
       method: 'POST',
       user: adminUser,
       body: {
-        assignedLevel: 'finance_lead',
+        assignedLevel: 'general_president',
         status: 'in_progress',
         note: 'Escalated for review'
       }
@@ -657,10 +657,10 @@ async function run() {
     assertCase(cases[25].status === 200 && String(cases[25].data?.item?._id || '') === IDS.orderDirect, 'Expected unlinked canonical order discount action to execute without legacy bridge.');
     assertCase(cases[26].status === 200 && String(cases[26].data?.item?._id || '') === IDS.order, 'Expected canonical order installments action to execute on canonical fee order id.');
     assertCase(cases[27].status === 200 && String(cases[27].data?.item?._id || '') === IDS.order, 'Expected canonical order void action to execute on canonical fee order id.');
-    assertCase(cases[28].status === 200 && cases[28].data?.nextStage === 'finance_lead_review', 'Expected canonical payment approve action to execute shared finance approval logic.');
-    assertCase(cases[29].status === 200 && cases[29].data?.nextStage === 'finance_lead_review', 'Expected unlinked canonical payment approve action to execute without legacy bridge.');
+    assertCase(cases[28].status === 200 && cases[28].data?.nextStage === 'completed', 'Expected canonical payment approve action to finalize shared finance approval logic.');
+    assertCase(cases[29].status === 200 && cases[29].data?.nextStage === 'completed', 'Expected unlinked canonical payment approve action to finalize without legacy bridge.');
     assertCase(cases[30].status === 200 && cases[30].data?.nextStage === 'rejected', 'Expected canonical payment reject action to execute shared finance rejection logic.');
-    assertCase(cases[31].status === 200 && cases[31].data?.item?.followUp?.assignedLevel === 'finance_lead', 'Expected canonical payment follow-up action to update follow-up state.');
+    assertCase(cases[31].status === 200 && cases[31].data?.item?.followUp?.assignedLevel === 'general_president', 'Expected canonical payment follow-up action to update follow-up state.');
     assertCase(financeActionCalls.length === 8, `Expected 8 canonical finance action calls, received ${financeActionCalls.length}.`);
     assertCase(financeActionCalls[0]?.body?.amount === 75, 'Expected discount action body to preserve amount.');
     assertCase(financeActionCalls[1]?.body?.amount === 25, 'Expected direct canonical discount action body to preserve amount.');

@@ -3214,7 +3214,7 @@ test.describe('finance workflow', () => {
       approveCalls += 1;
       financeState.receipts = financeState.receipts.map((item) => (
         item._id === 'receipt-1'
-          ? { ...item, approvalStage: 'finance_lead_review' }
+          ? { ...item, status: 'approved', approvalStage: 'completed' }
           : item
       ));
       await route.fulfill({
@@ -3222,9 +3222,9 @@ test.describe('finance workflow', () => {
         contentType: 'application/json',
         body: JSON.stringify({
           success: true,
-          message: 'رسید به مرحله بعد ارسال شد',
-          nextStage: 'finance_lead_review',
-          requiresFinalApproval: true
+          message: 'رسید تایید نهایی شد',
+          nextStage: 'completed',
+          requiresFinalApproval: false
         })
       });
     });
@@ -3396,21 +3396,21 @@ test.describe('finance workflow', () => {
     await expect.poll(() => Number(lastCreatedPaymentBody?.allocations?.[0]?.amount || 0)).toBe(500);
     await expect.poll(() => Number(lastCreatedPaymentBody?.allocations?.[1]?.amount || 0)).toBe(200);
 
-    await receiptFilters.nth(0).selectOption('finance_lead_review');
+    await receiptFilters.nth(0).selectOption('general_president_review');
     await expect(page.locator('.finance-table.receipts-table .row')).toHaveCount(1);
     await expect(page.locator('.finance-table.receipts-table .row')).toContainText('Student Beta');
 
     await receiptFilters.nth(0).selectOption('all');
-    await page.locator('.finance-table.receipts-table .row').filter({ hasText: 'Student Alpha' }).first().getByRole('button', { name: 'ارسال به آمریت' }).click();
+    await page.locator('.finance-table.receipts-table .row').filter({ hasText: 'Student Alpha' }).first().getByRole('button', { name: 'تایید نهایی' }).click();
     await expect.poll(() => approveCalls).toBe(1);
 
     await financeTabs.nth(4).click();
     await expect(page.getByTestId('finance-anomalies-card')).toContainText('Student Alpha');
     await expect(page.getByTestId('finance-anomalies-card')).toContainText('Student Beta');
-    await page.getByTestId('anomaly-assigned-level').selectOption('finance_lead');
-    await page.getByTestId('anomaly-note-input').fill('Escalate overdue case to finance lead');
+    await page.getByTestId('anomaly-assigned-level').selectOption('general_president');
+    await page.getByTestId('anomaly-note-input').fill('Escalate overdue case to general president');
     await page.getByTestId('anomaly-assign-button').click();
-    await expect(page.getByTestId('finance-anomaly-inspector')).toContainText('Escalate overdue case to finance lead');
+    await expect(page.getByTestId('finance-anomaly-inspector')).toContainText('Escalate overdue case to general president');
     await expect(page.getByTestId('finance-anomaly-inspector')).toContainText(/ارجاع|assigned/i);
     await page.getByTestId('anomaly-snooze-until').fill('2026-04-15');
     await page.getByTestId('anomaly-note-input').fill('Pause follow-up until the guardian call');
