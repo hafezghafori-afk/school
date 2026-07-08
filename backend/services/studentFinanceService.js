@@ -483,12 +483,17 @@ async function resolveMembershipForFinanceRegistry(payload = {}) {
   }
 
   const student = normalizeNullableId(payload.student);
+  const studentId = normalizeNullableId(payload.studentId);
   const classId = normalizeNullableId(payload.classId);
   const academicYearId = normalizeNullableId(payload.academicYearId);
-  if (!student || !classId || !academicYearId) return null;
+  if ((!student && !studentId) || !classId || !academicYearId) return null;
 
   return StudentMembership.findOne({
-    student,
+    ...(student && studentId
+      ? { $or: [{ student }, { studentId }] }
+      : student
+        ? { student }
+        : { studentId }),
     classId,
     academicYearId,
     isCurrent: true,

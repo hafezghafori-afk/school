@@ -4110,7 +4110,7 @@ router.post('/admin/fee-plans', requireAuth, requireRole(['admin']), requirePerm
       setLegacyScopeFieldHeaders(res);
     }
     const courseId = scope.courseId;
-    if (!scope.classId) return res.status(400).json({ success: false, message: 'Class mapping is required for fee plans.' });
+    if (!scope.classId) return res.status(400).json({ success: false, message: 'برای تعریف پلان مالی، صنف معتبر الزامی است.' });
     if (!courseId) return res.status(400).json({ success: false, message: 'شناسه صنف الزامی است' });
 
     const academicYear = await resolveAcademicYearForFeePlan({
@@ -4119,7 +4119,7 @@ router.post('/admin/fee-plans', requireAuth, requireRole(['admin']), requirePerm
       academicYearCode: payload.academicYearCode
     });
     if (!academicYear) {
-      return res.status(400).json({ success: false, message: 'Academic year is required for canonical fee plans.' });
+      return res.status(400).json({ success: false, message: 'برای تعریف پلان مالی، سال تعلیمی الزامی است.' });
     }
 
     const planQuery = buildFeePlanIdentityFilter(payload, {

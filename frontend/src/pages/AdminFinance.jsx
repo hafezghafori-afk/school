@@ -1270,6 +1270,7 @@ export default function AdminFinance() {
 
   const [discountForm, setDiscountForm] = useState({
     studentId: '',
+    studentMembershipId: '',
     classId: '',
     academicYearId: '',
     discountType: 'discount',
@@ -1279,6 +1280,7 @@ export default function AdminFinance() {
 
   const [exemptionForm, setExemptionForm] = useState({
     studentId: '',
+    studentMembershipId: '',
     classId: '',
     academicYearId: '',
     exemptionType: 'full',
@@ -1832,6 +1834,7 @@ export default function AdminFinance() {
     setDiscountForm((prev) => ({
       ...prev,
       studentId: normalizedStudentId,
+      studentMembershipId: membershipStudent?.membershipId || '',
       classId: membershipStudent?.classId || prev.classId,
       academicYearId: membershipStudent?.academicYearId || prev.academicYearId
     }));
@@ -1843,9 +1846,23 @@ export default function AdminFinance() {
     setExemptionForm((prev) => ({
       ...prev,
       studentId: normalizedStudentId,
+      studentMembershipId: membershipStudent?.membershipId || '',
       classId: membershipStudent?.classId || prev.classId,
       academicYearId: membershipStudent?.academicYearId || prev.academicYearId
     }));
+  };
+
+  const findFinanceMembershipId = ({ studentId = '', classId = '', academicYearId = '' } = {}) => {
+    const normalizedStudentId = String(studentId || '').trim();
+    const normalizedClassId = String(classId || '').trim();
+    const normalizedAcademicYearId = String(academicYearId || '').trim();
+    const exact = financeMembershipStudents.find((item) => (
+      String(item?._id || '') === normalizedStudentId
+      && String(item?.classId || '') === normalizedClassId
+      && String(item?.academicYearId || '') === normalizedAcademicYearId
+    ));
+    const fallback = financeMembershipStudents.find((item) => String(item?._id || '') === normalizedStudentId);
+    return String((exact || fallback)?.membershipId || '').trim();
   };
 
   const filteredFeePlans = useMemo(() => (
@@ -2195,12 +2212,14 @@ export default function AdminFinance() {
         if (!discountForm.studentId) setDiscountForm((prev) => ({
           ...prev,
           studentId: onlyStudentId,
+          studentMembershipId: onlyStudent.membershipId || '',
           classId: onlyStudent.classId || prev.classId,
           academicYearId: onlyStudent.academicYearId || prev.academicYearId
         }));
         if (!exemptionForm.studentId) setExemptionForm((prev) => ({
           ...prev,
           studentId: onlyStudentId,
+          studentMembershipId: onlyStudent.membershipId || '',
           classId: onlyStudent.classId || prev.classId,
           academicYearId: onlyStudent.academicYearId || prev.academicYearId
         }));
@@ -2208,8 +2227,8 @@ export default function AdminFinance() {
         // If multiple membership students, leave studentId empty for user selection.
         if (!manualForm.studentId) setManualForm((prev) => ({ ...prev, studentId: '' }));
         if (!paymentDeskForm.studentId) setPaymentDeskForm((prev) => ({ ...prev, studentId: '' }));
-        if (!discountForm.studentId) setDiscountForm((prev) => ({ ...prev, studentId: '' }));
-        if (!exemptionForm.studentId) setExemptionForm((prev) => ({ ...prev, studentId: '' }));
+        if (!discountForm.studentId) setDiscountForm((prev) => ({ ...prev, studentId: '', studentMembershipId: '' }));
+        if (!exemptionForm.studentId) setExemptionForm((prev) => ({ ...prev, studentId: '', studentMembershipId: '' }));
       }
       if (nextClassOptions.length && !manualForm.classId) {
         const firstClassId = nextClassOptions[0].classId;
@@ -2305,12 +2324,14 @@ export default function AdminFinance() {
       setDiscountForm((prev) => ({
         ...prev,
         studentId,
+        studentMembershipId: findFinanceMembershipId({ studentId, classId, academicYearId }),
         classId: classId || prev.classId,
         academicYearId: academicYearId || prev.academicYearId
       }));
       setExemptionForm((prev) => ({
         ...prev,
         studentId,
+        studentMembershipId: findFinanceMembershipId({ studentId, classId, academicYearId }),
         classId: classId || prev.classId,
         academicYearId: academicYearId || prev.academicYearId
       }));
@@ -3246,6 +3267,9 @@ export default function AdminFinance() {
     e.preventDefault();
     try {
       setBusy(true);
+      if (!feePlanForm.classId || !feePlanForm.academicYearId) {
+        throw new Error('برای تعریف پلان مالی، صنف و سال تعلیمی را انتخاب کنید.');
+      }
       const data = await postJson(`${API_BASE}/api/finance/admin/fee-plans`, feePlanForm);
       setMessage(data.message || 'پلان فیس ذخیره شد');
       setFeePlanForm((prev) => ({
@@ -3356,8 +3380,13 @@ export default function AdminFinance() {
     e.preventDefault();
     try {
       setBusy(true);
+      const resolvedMembershipId = discountForm.studentMembershipId || findFinanceMembershipId(discountForm);
+      if (!discountForm.studentId || !discountForm.classId || !discountForm.academicYearId || !resolvedMembershipId) {
+        throw new Error('برای ثبت تخفیف، متعلم، صنف و سال تعلیمی مربوط به همان عضویت را انتخاب کنید.');
+      }
       const data = await postJson(`${API_BASE}/api/student-finance/discounts`, {
         student: discountForm.studentId,
+        studentMembershipId: resolvedMembershipId,
         classId: discountForm.classId,
         academicYearId: discountForm.academicYearId,
         discountType: discountForm.discountType,
@@ -3423,8 +3452,13 @@ export default function AdminFinance() {
     e.preventDefault();
     try {
       setBusy(true);
+      const resolvedMembershipId = exemptionForm.studentMembershipId || findFinanceMembershipId(exemptionForm);
+      if (!exemptionForm.studentId || !exemptionForm.classId || !exemptionForm.academicYearId || !resolvedMembershipId) {
+        throw new Error('برای ثبت معافیت، متعلم، صنف و سال تعلیمی مربوط به همان عضویت را انتخاب کنید.');
+      }
       const data = await postJson(`${API_BASE}/api/student-finance/exemptions`, {
         student: exemptionForm.studentId,
+        studentMembershipId: resolvedMembershipId,
         classId: exemptionForm.classId,
         academicYearId: exemptionForm.academicYearId,
         exemptionType: exemptionForm.exemptionType,
@@ -5691,10 +5725,16 @@ export default function AdminFinance() {
               )}
             </select>
             <div className="finance-split-grid">
-              <select value={discountForm.classId} onChange={(e) => setDiscountForm((prev) => ({ ...prev, classId: e.target.value }))}>
+              <select value={discountForm.classId} onChange={(e) => setDiscountForm((prev) => {
+                const next = { ...prev, classId: e.target.value };
+                return { ...next, studentMembershipId: findFinanceMembershipId(next) };
+              })}>
                 {classOptions.map((item) => <option key={`discount-class-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>)}
               </select>
-              <select value={discountForm.academicYearId} onChange={(e) => setDiscountForm((prev) => ({ ...prev, academicYearId: e.target.value }))}>
+              <select value={discountForm.academicYearId} onChange={(e) => setDiscountForm((prev) => {
+                const next = { ...prev, academicYearId: e.target.value };
+                return { ...next, studentMembershipId: findFinanceMembershipId(next) };
+              })}>
                 {academicYears.map((item) => <option key={`discount-year-${item.id}`} value={item.id}>{getAcademicYearOptionLabel(item)}</option>)}
               </select>
             </div>
@@ -5734,10 +5774,16 @@ export default function AdminFinance() {
               )}
             </select>
             <div className="finance-split-grid">
-              <select value={exemptionForm.classId} onChange={(e) => setExemptionForm((prev) => ({ ...prev, classId: e.target.value }))}>
+              <select value={exemptionForm.classId} onChange={(e) => setExemptionForm((prev) => {
+                const next = { ...prev, classId: e.target.value };
+                return { ...next, studentMembershipId: findFinanceMembershipId(next) };
+              })}>
                 {classOptions.map((item) => <option key={`exemption-class-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>)}
               </select>
-              <select value={exemptionForm.academicYearId} onChange={(e) => setExemptionForm((prev) => ({ ...prev, academicYearId: e.target.value }))}>
+              <select value={exemptionForm.academicYearId} onChange={(e) => setExemptionForm((prev) => {
+                const next = { ...prev, academicYearId: e.target.value };
+                return { ...next, studentMembershipId: findFinanceMembershipId(next) };
+              })}>
                 {academicYears.map((item) => <option key={`exemption-year-${item.id}`} value={item.id}>{getAcademicYearOptionLabel(item)}</option>)}
               </select>
             </div>

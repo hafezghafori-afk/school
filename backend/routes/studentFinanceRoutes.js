@@ -394,7 +394,7 @@ router.post('/discounts', requireAuth, requireRole(['admin']), requirePermission
   } catch (error) {
     const code = String(error?.message || '');
     const status = code === 'student_finance_membership_not_found' ? 400 : 500;
-    return res.status(status).json({ success: false, message: status === 400 ? 'بافت عضویت برای ثبت تخفیف معتبر نیست.' : 'ثبت تخفیف ناموفق بود.' });
+    return res.status(status).json({ success: false, message: status === 400 ? 'عضویت انتخاب‌شده برای ثبت تخفیف معتبر نیست.' : 'ثبت تخفیف ناموفق بود.' });
   }
 });
 
@@ -451,7 +451,7 @@ router.post('/exemptions', requireAuth, requireRole(['admin']), requirePermissio
   } catch (error) {
     const code = String(error?.message || '');
     const status = code === 'student_finance_membership_not_found' ? 400 : 500;
-    return res.status(status).json({ success: false, message: status === 400 ? 'بافت عضویت برای ثبت معافیت معتبر نیست.' : 'ثبت معافیت فیس ناموفق بود.' });
+    return res.status(status).json({ success: false, message: status === 400 ? 'عضویت انتخاب‌شده برای ثبت معافیت معتبر نیست.' : 'ثبت معافیت فیس ناموفق بود.' });
   }
 });
 
