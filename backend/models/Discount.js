@@ -16,6 +16,14 @@ const discountSchema = new mongoose.Schema({
   discountType: { type: String, enum: ['discount', 'waiver', 'penalty', 'manual'], default: 'discount', index: true },
   amount: { type: Number, default: 0, min: 0 },
   reason: { type: String, default: '' },
+  durationMode: {
+    type: String,
+    enum: ['academic_year', 'custom_period', 'selected_bills'],
+    default: 'academic_year',
+    index: true
+  },
+  startDate: { type: Date, default: null, index: true },
+  endDate: { type: Date, default: null, index: true },
   status: { type: String, enum: ['active', 'cancelled'], default: 'active', index: true },
   source: { type: String, enum: ['finance_adjustment', 'manual', 'migration'], default: 'finance_adjustment' },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
@@ -24,7 +32,15 @@ const discountSchema = new mongoose.Schema({
 discountSchema.pre('validate', async function syncDiscountState() {
   if (typeof this.sourceKey === 'string') this.sourceKey = this.sourceKey.trim();
   if (typeof this.reason === 'string') this.reason = this.reason.trim();
+  this.durationMode = ['academic_year', 'custom_period', 'selected_bills'].includes(this.durationMode)
+    ? this.durationMode
+    : 'academic_year';
   this.amount = Math.max(0, Number(this.amount) || 0);
+  if (this.startDate && Number.isNaN(new Date(this.startDate).getTime())) this.startDate = null;
+  if (this.endDate && Number.isNaN(new Date(this.endDate).getTime())) this.endDate = null;
+  if (this.startDate && this.endDate && new Date(this.endDate).getTime() < new Date(this.startDate).getTime()) {
+    this.endDate = this.startDate;
+  }
   this.linkScope = deriveLinkScope({
     linkScope: this.linkScope,
     studentMembershipId: this.studentMembershipId,

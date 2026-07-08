@@ -4917,6 +4917,7 @@ function loadFinanceRouter() {
     if (isFinanceFeePlanService && request === '../models/AcademicYear') return AcademicYearMock;
     if (isFeeBillingService && request === '../models/FinanceBill') return FinanceBillMock;
     if (isFeeBillingService && request === '../models/FinanceFeePlan') return FinanceFeePlanMock;
+    if (isFeeBillingService && request === '../models/AcademicYear') return AcademicYearMock;
     if (isFeeBillingService && request === '../models/Discount') return DiscountMock;
     if (isFeeBillingService && request === '../models/FeeExemption') return FeeExemptionMock;
     if (isFeeBillingService && request === '../models/FinanceRelief') return FinanceReliefMock;

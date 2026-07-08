@@ -4644,6 +4644,7 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
       term: normalizedTerm,
       feePlanId,
       amount,
+      dueDate: dueDateValue,
       currency,
       periodType: normalizedPeriodType,
       periodLabel: normalizedPeriodLabel,
@@ -4662,10 +4663,10 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
         studentId: candidate.student,
         courseId: scope.courseId,
         academicYear: normalizedAcademicYear,
-        term: normalizedTerm,
+        term: candidate.term || normalizedTerm,
         periodType: normalizedPeriodType,
-        periodLabel: normalizedPeriodLabel,
-        dueDate: dueDateValue
+        periodLabel: candidate.periodLabel || normalizedPeriodLabel,
+        dueDate: candidate.dueDate || dueDateValue
       });
       if (duplicate) duplicateCount += 1;
       items.push({
@@ -4678,6 +4679,9 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
         feeBreakdown: candidate.feeBreakdown,
         lineItems: candidate.lineItems,
         adjustments: candidate.adjustments,
+        dueDate: candidate.dueDate || dueDateValue,
+        periodLabel: candidate.periodLabel || normalizedPeriodLabel,
+        term: candidate.term || normalizedTerm,
         duplicate: duplicate ? { id: String(duplicate._id || ''), billNumber: String(duplicate.billNumber || '') } : null
       });
     }
@@ -4750,6 +4754,7 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       term: normalizedTerm,
       feePlanId,
       amount,
+      dueDate: dueDateValue,
       currency,
       periodType: normalizedPeriodType,
       periodLabel: normalizedPeriodLabel,
@@ -4773,10 +4778,10 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
         studentId: candidate.student,
         courseId: scope.courseId,
         academicYear: normalizedAcademicYear,
-        term: normalizedTerm,
+        term: candidate.term || normalizedTerm,
         periodType: normalizedPeriodType,
-        periodLabel: normalizedPeriodLabel,
-        dueDate: dueDateValue
+        periodLabel: candidate.periodLabel || normalizedPeriodLabel,
+        dueDate: candidate.dueDate || dueDateValue
       });
       if (exists) {
         skipped += 1;
@@ -4794,12 +4799,12 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
         academicYearId: candidate.academicYearId || null,
         amountOriginal: candidate.amountOriginal,
         amountDue: candidate.amountDue,
-        dueDate: dueDateValue,
+        dueDate: candidate.dueDate || dueDateValue,
         issuedAt: issueDateValue,
         periodType: normalizedPeriodType,
-        periodLabel: normalizedPeriodLabel,
+        periodLabel: candidate.periodLabel || normalizedPeriodLabel,
         academicYear: normalizedAcademicYear,
-        term: normalizedTerm,
+        term: candidate.term || normalizedTerm,
         currency: String(currency || 'AFN').trim().toUpperCase(),
         feeScopes: candidate.feeScopes,
         feeBreakdown: candidate.feeBreakdown,
@@ -8341,8 +8346,44 @@ router.put('/admin/student-memberships/:id', requireAuth, requireRole(['admin'])
 
     await membership.save();
 
+    const billingStopDate = membership.endedAt || membership.leftAt || null;
+    let stoppedFutureBills = { bills: 0, orders: 0 };
+    if (billingStopDate && !Number.isNaN(new Date(billingStopDate).getTime())) {
+      const stopDate = new Date(billingStopDate);
+      const nextMonthStart = new Date(stopDate.getFullYear(), stopDate.getMonth() + 1, 1);
+      const voidFields = {
+        status: 'void',
+        voidReason: 'عضویت مالی شاگرد ختم شده است.',
+        voidedBy: req.user?.id || null,
+        voidedAt: new Date()
+      };
+      const [billUpdate, orderUpdate] = await Promise.all([
+        FinanceBill.updateMany(
+          {
+            studentMembershipId: membership._id,
+            status: { $in: ['new', 'overdue'] },
+            dueDate: { $gte: nextMonthStart }
+          },
+          { $set: voidFields }
+        ),
+        FeeOrder.updateMany(
+          {
+            studentMembershipId: membership._id,
+            status: { $in: ['new', 'overdue'] },
+            dueDate: { $gte: nextMonthStart }
+          },
+          { $set: voidFields }
+        )
+      ]);
+      stoppedFutureBills = {
+        bills: billUpdate?.modifiedCount || 0,
+        orders: orderUpdate?.modifiedCount || 0
+      };
+    }
+
     return res.json({
       success: true,
+      stoppedFutureBills,
       item: {
         ...membership.toObject(),
         studentId: membership?.student || null,

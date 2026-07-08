@@ -53,6 +53,12 @@ function normalizeNullableId(value) {
   return String(value);
 }
 
+function normalizeDateValue(value = null) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function roundMoney(value) {
   return Math.max(0, Math.round((Number(value) || 0) * 100) / 100);
 }
@@ -384,6 +390,9 @@ function formatDiscount(doc) {
     discountType: normalizeText(item.discountType),
     amount: Number(item.amount || 0),
     reason: normalizeText(item.reason),
+    durationMode: normalizeText(item.durationMode) || 'academic_year',
+    startDate: item.startDate || null,
+    endDate: item.endDate || null,
     linkScope: deriveLinkScope({ linkScope: item.linkScope, studentMembershipId: item.studentMembershipId, classId: item.classId }),
     status: normalizeText(item.status),
     source: normalizeText(item.source),
@@ -1203,6 +1212,20 @@ async function createDiscount(payload = {}) {
     throw new Error('student_finance_membership_not_found');
   }
 
+  const durationMode = ['academic_year', 'custom_period', 'selected_bills'].includes(normalizeText(payload.durationMode))
+    ? normalizeText(payload.durationMode)
+    : 'academic_year';
+  const requestedStartDate = normalizeDateValue(payload.startDate);
+  const requestedEndDate = normalizeDateValue(payload.endDate);
+  const membershipStartDate = normalizeDateValue(membership.enrolledAt || membership.joinedAt);
+  const academicYearEndDate = normalizeDateValue(membership.academicYearId?.endDate);
+  const startDate = requestedStartDate || membershipStartDate || new Date();
+  const endDate = durationMode === 'custom_period'
+    ? (requestedEndDate || academicYearEndDate || null)
+    : durationMode === 'academic_year'
+      ? (academicYearEndDate || requestedEndDate || null)
+      : requestedEndDate;
+
   const item = await Discount.create({
     studentMembershipId: membership._id,
     studentId: membership.studentId?._id || membership.studentId || null,
@@ -1214,6 +1237,9 @@ async function createDiscount(payload = {}) {
       : 'discount',
     amount: Math.max(0, Number(payload.amount) || 0),
     reason: normalizeText(payload.reason),
+    durationMode,
+    startDate,
+    endDate,
     source: 'manual',
     createdBy: normalizeNullableId(payload.createdBy),
     sourceKey: `manual:${membership._id}:${Date.now()}`

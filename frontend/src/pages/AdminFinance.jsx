@@ -1277,6 +1277,9 @@ export default function AdminFinance() {
     academicYearId: '',
     discountType: 'discount',
     amount: '',
+    durationMode: 'academic_year',
+    startDate: '',
+    endDate: '',
     reason: ''
   });
 
@@ -3396,6 +3399,9 @@ export default function AdminFinance() {
         academicYearId: discountForm.academicYearId,
         discountType: discountForm.discountType,
         amount: discountForm.amount,
+        durationMode: discountForm.durationMode,
+        startDate: discountForm.durationMode === 'custom_period' ? discountForm.startDate : '',
+        endDate: discountForm.durationMode === 'custom_period' ? discountForm.endDate : '',
         reason: discountForm.reason
       });
       const selectedStudent = students.find((item) => String(item?._id || '') === String(discountForm.studentId || ''));
@@ -3406,6 +3412,9 @@ export default function AdminFinance() {
         id: data?.item?.id || data?.item?._id || `discount-${Date.now()}`,
         discountType: data?.item?.discountType || discountForm.discountType,
         amount: Number(data?.item?.amount || discountForm.amount || 0),
+        durationMode: data?.item?.durationMode || discountForm.durationMode || 'academic_year',
+        startDate: data?.item?.startDate || (discountForm.durationMode === 'custom_period' ? discountForm.startDate : null),
+        endDate: data?.item?.endDate || (discountForm.durationMode === 'custom_period' ? discountForm.endDate : null),
         reason: data?.item?.reason || discountForm.reason,
         status: data?.item?.status || 'active',
         student: data?.item?.student || {
@@ -3427,6 +3436,9 @@ export default function AdminFinance() {
       setDiscountForm((prev) => ({
         ...prev,
         amount: '',
+        durationMode: 'academic_year',
+        startDate: '',
+        endDate: '',
         reason: ''
       }));
       await loadAll();
@@ -5773,6 +5785,34 @@ export default function AdminFinance() {
               </select>
               <input value={discountForm.amount} onChange={(e) => setDiscountForm((prev) => ({ ...prev, amount: e.target.value }))} placeholder="مبلغ تخفیف / تعدیل" />
             </div>
+            <select
+              value={discountForm.durationMode}
+              onChange={(e) => setDiscountForm((prev) => ({
+                ...prev,
+                durationMode: e.target.value,
+                startDate: e.target.value === 'custom_period' ? prev.startDate : '',
+                endDate: e.target.value === 'custom_period' ? prev.endDate : ''
+              }))}
+            >
+              <option value="academic_year">تا ختم سال تعلیمی</option>
+              <option value="custom_period">دوره مشخص</option>
+            </select>
+            {discountForm.durationMode === 'custom_period' && (
+              <div className="finance-split-grid">
+                <AfghanDateInput
+                  value={discountForm.startDate}
+                  onChange={(value) => setDiscountForm((prev) => ({ ...prev, startDate: value }))}
+                  showGregorianEquivalent
+                  required
+                />
+                <AfghanDateInput
+                  value={discountForm.endDate}
+                  onChange={(value) => setDiscountForm((prev) => ({ ...prev, endDate: value }))}
+                  showGregorianEquivalent
+                  required
+                />
+              </div>
+            )}
             <textarea value={discountForm.reason} onChange={(e) => setDiscountForm((prev) => ({ ...prev, reason: e.target.value }))} rows={3} placeholder="دلیل تخفیف، معافیت یا تعدیل" />
             <button type="submit" disabled={busy} data-testid="save-discount-registry">ثبت تخفیف</button>
           </form>
