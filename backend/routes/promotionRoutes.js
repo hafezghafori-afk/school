@@ -46,7 +46,7 @@ router.get('/rules', requireAuth, requireRole(['admin', 'instructor']), requireP
   }
 });
 
-router.post('/rules', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.post('/rules', requireAuth, requireRole(['admin']), requirePermission('education.promotions.manage'), async (req, res) => {
   try {
     if (!String(req.body?.name || '').trim()) {
       return res.status(400).json({ success: false, message: 'Promotion rule name is required.' });
@@ -104,7 +104,7 @@ router.post('/preview', requireAuth, requireRole(['admin', 'instructor']), requi
   }
 });
 
-router.post('/apply', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.post('/apply', requireAuth, requireRole(['admin']), requirePermission('education.promotions.manage'), async (req, res) => {
   try {
     if (!req.body?.sessionId) {
       return res.status(400).json({ success: false, message: 'Session is required.' });
@@ -130,7 +130,7 @@ router.post('/apply', requireAuth, requireRole(['admin']), requirePermission('ma
   }
 });
 
-router.post('/rollback/:transactionId', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.post('/rollback/:transactionId', requireAuth, requireRole(['admin']), requirePermission('education.promotions.manage'), async (req, res) => {
   try {
     const item = await rollbackPromotionTransaction(req.params.transactionId, req.body || {}, req.user?.id || null);
     await logActivity({

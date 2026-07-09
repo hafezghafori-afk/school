@@ -41,6 +41,9 @@ export const PERMISSION_GROUPS = [
       { key: 'students.documents.manage', label: 'اسناد شاگرد', legacy: ['manage_users'] },
       { key: 'students.guardians.manage', label: 'والد/سرپرست شاگرد', legacy: ['manage_users'] },
       { key: 'students.transfers.manage', label: 'انتقالات شاگرد', legacy: ['manage_users'] },
+      { key: 'students.lifecycle.view', label: 'مشاهده چرخه آموزشی شاگرد', legacy: ['manage_users', 'manage_memberships'] },
+      { key: 'students.lifecycle.manage', label: 'مدیریت تبدیلی/ترک تحصیل شاگرد', legacy: ['manage_users', 'manage_memberships'] },
+      { key: 'students.lifecycle.approve', label: 'تایید تغییرات چرخه آموزشی شاگرد', legacy: ['manage_users'] },
       { key: 'students.activity.view', label: 'گزارش فعالیت شاگرد', legacy: ['view_reports'] }
     ]
   },
@@ -133,6 +136,7 @@ export const PERMISSION_GROUPS = [
       { key: 'finance.reports.view', label: 'گزارش‌های مالی', legacy: ['manage_finance', 'view_reports'] },
       { key: 'finance.month_close.manage', label: 'بستن ماه مالی', legacy: ['manage_finance'] },
       { key: 'finance.documents.manage', label: 'سند/آرشیف مالی', legacy: ['manage_finance'] },
+      { key: 'finance.lifecycle_effects.manage', label: 'اثر مالی تغییرات آموزشی', legacy: ['manage_finance'] },
       { key: 'finance.my.view', label: 'پرداخت شاگرد / مالی خود شاگرد' },
       { key: 'finance.receipt.submit', label: 'ثبت رسید توسط کاربر' }
     ]

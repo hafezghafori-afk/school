@@ -12,6 +12,9 @@ const LEGACY_PERMISSION_MAP = Object.freeze({
     'students.documents.manage',
     'students.guardians.manage',
     'students.transfers.manage',
+    'students.lifecycle.view',
+    'students.lifecycle.manage',
+    'students.lifecycle.approve',
     'teachers.manage',
     'education.promotions.manage',
     'settings.login.manage',
@@ -29,7 +32,11 @@ const LEGACY_PERMISSION_MAP = Object.freeze({
     'enrollments.print'
   ],
   manage_memberships: [
-    'education.memberships.manage'
+    'education.memberships.manage',
+    'students.lifecycle.view',
+    'students.lifecycle.manage',
+    'students.transfers.manage',
+    'education.promotions.manage'
   ],
   manage_finance: [
     'finance.center.manage',
@@ -48,6 +55,7 @@ const LEGACY_PERMISSION_MAP = Object.freeze({
     'finance.reports.view',
     'finance.month_close.manage',
     'finance.documents.manage',
+    'finance.lifecycle_effects.manage',
     'reports.government_finance.view'
   ],
   manage_content: [

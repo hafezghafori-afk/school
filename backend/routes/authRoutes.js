@@ -33,7 +33,7 @@ const isDemoEnabled = () => String(process.env.DEMO_ENABLED || '').toLowerCase()
 const DEMO_PASSWORD = 'Demo@12345';
 const DEMO_SCHOOL_CODE = 'DEMO-SCHOOL';
 const DEMO_USERS = {
-  admin: { name: 'Demo Admin', email: 'demo.admin@school.local', role: 'admin', orgRole: 'general_president', adminLevel: 'general_president', permissions: ['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_finance', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule'] },
+  admin: { name: 'Demo Admin', email: 'demo.admin@school.local', role: 'admin', orgRole: 'general_president', adminLevel: 'general_president', permissions: ['manage_users', 'manage_enrollments', 'manage_memberships', 'students.transfers.manage', 'students.lifecycle.manage', 'students.lifecycle.approve', 'education.promotions.manage', 'manage_finance', 'finance.lifecycle_effects.manage', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule'] },
   finance: { name: 'Demo Finance', email: 'demo.finance@school.local', role: 'admin', orgRole: 'finance_manager', adminLevel: 'finance_manager', permissions: ['manage_finance', 'view_reports'] },
   instructor: { name: 'Demo Teacher', email: 'demo.teacher@school.local', role: 'instructor', orgRole: 'teacher', adminLevel: '', permissions: ['view_schedule'] },
   student: { name: 'Demo Student', email: 'demo.student@school.local', role: 'student', orgRole: 'student', adminLevel: '', permissions: [] }

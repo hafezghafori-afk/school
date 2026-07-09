@@ -29,7 +29,7 @@ const ORG_ROLE_DEFAULT_PERMISSIONS = Object.freeze({
   finance_manager: ['manage_finance'],
   finance_lead: ['manage_finance', 'view_reports'],
   school_manager: ['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_school_manager'],
-  academic_manager: ['manage_enrollments', 'manage_memberships', 'view_schedule'],
+  academic_manager: ['manage_enrollments', 'manage_memberships', 'manage_content', 'view_reports', 'view_schedule'],
   head_teacher: ['manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_head_teacher'],
   general_president: ROLE_DEFAULT_PERMISSIONS.admin
 });

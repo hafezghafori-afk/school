@@ -196,7 +196,12 @@ const PERMISSION_ORDER = [
   'manage_users',
   'manage_enrollments',
   'manage_memberships',
+  'students.transfers.manage',
+  'students.lifecycle.manage',
+  'students.lifecycle.approve',
+  'education.promotions.manage',
   'manage_finance',
+  'finance.lifecycle_effects.manage',
   'manage_content',
   'manage_platform_requests',
   'view_reports',
@@ -210,7 +215,12 @@ const PERMISSION_LABELS = {
   manage_users: 'مدیریت کاربران',
   manage_enrollments: 'مدیریت ثبت‌نام‌ها',
   manage_memberships: 'مدیریت ممبرشیپ آموزشی',
+  'students.transfers.manage': 'تبدیلی شاگرد',
+  'students.lifecycle.manage': 'تبدیلی/ترک تحصیل شاگرد',
+  'students.lifecycle.approve': 'تایید چرخه آموزشی شاگرد',
+  'education.promotions.manage': 'ارتقای صنف',
   manage_finance: 'مدیریت مالی',
+  'finance.lifecycle_effects.manage': 'اثر مالی تغییرات آموزشی',
   manage_content: 'مدیریت محتوا',
   view_reports: 'مشاهده گزارشات',
   view_schedule: 'مشاهده تقسیم اوقات',
@@ -243,8 +253,8 @@ const formatWorkflowNote = (value) => {
 const ADMIN_LEVEL_PERMISSION_MATRIX = [
   { level: 'finance_manager', permissions: ['manage_finance'] },
   { level: 'finance_lead', permissions: ['manage_finance', 'view_reports'] },
-  { level: 'school_manager', permissions: ['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_school_manager'] },
-  { level: 'academic_manager', permissions: ['manage_enrollments', 'manage_memberships', 'view_schedule'] },
+  { level: 'school_manager', permissions: ['manage_users', 'manage_enrollments', 'manage_memberships', 'students.lifecycle.manage', 'education.promotions.manage', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_school_manager'] },
+  { level: 'academic_manager', permissions: ['manage_enrollments', 'manage_memberships', 'students.transfers.manage', 'students.lifecycle.manage', 'education.promotions.manage', 'manage_content', 'view_reports', 'view_schedule'] },
   { level: 'head_teacher', permissions: ['manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_head_teacher'] },
   { level: 'general_president', permissions: PERMISSION_ORDER }
 ];
@@ -421,12 +431,16 @@ const QUICK_LINK_ITEMS = [
   { to: '/admin-education', label: 'مرکز مدیریت آموزش', permission: 'manage_content' },
   { to: '/admin-users', label: 'کاربران', permission: 'manage_users' },
   { to: '/admin-enrollments', label: 'ثبت‌نام‌ها', permission: 'manage_enrollments' },
+  { to: '/admin-education?section=enrollments&lifecycle=transfer-in', label: 'تبدیلی آمد', permission: 'students.transfers.manage' },
+  { to: '/admin-education?section=enrollments&lifecycle=end', label: 'تبدیلی رفت / ترک تحصیل', permission: 'students.lifecycle.manage' },
+  { to: '/admin-promotions', label: 'ارتقای صنف', permission: 'education.promotions.manage' },
+  { to: '/admin-financial-memberships', label: 'اثر مالی تغییرات آموزشی', permission: 'finance.lifecycle_effects.manage' },
   { to: '/admin-settings#student-ids', label: 'تنظیم شماره اساس و ریجیستر نمبر', permission: 'manage_content' },
   { to: '/admin-education?section=enrollments', label: 'ممبرشیپ آموزشی', permission: 'manage_memberships' },
   { to: '/admin-financial-memberships', label: 'عضویت‌ها', permission: 'manage_finance' },
   { to: '/admin-finance', label: 'مرکز مالی', permission: 'manage_finance' },
   { to: '/admin-reports', label: 'گزارش‌ساز', permission: 'view_reports' },
-  { to: '/admin-promotions', label: 'ارتقا صنف', permission: 'manage_users' },
+  { to: '/admin-promotions', label: 'ارتقا صنف', permission: 'education.promotions.manage' },
   { to: '/admin-result-tables', label: 'جدول نتایج', permission: 'manage_content' },
   { to: '/admin-logs', label: 'لاگ‌ها', permission: 'view_reports' },
   { to: '/admin-news', label: 'اخبار', permission: 'manage_content' },
@@ -436,6 +450,10 @@ const QUICK_LINK_ITEMS = [
 ];
 
 const REQUIRED_QUICK_LINK_ITEMS = [
+  { to: '/admin-education?section=enrollments&lifecycle=transfer-in', label: 'تبدیلی آمد', permission: 'students.transfers.manage' },
+  { to: '/admin-education?section=enrollments&lifecycle=end', label: 'تبدیلی رفت / ترک تحصیل', permission: 'students.lifecycle.manage' },
+  { to: '/admin-promotions', label: 'ارتقای صنف', permission: 'education.promotions.manage' },
+  { to: '/admin-financial-memberships', label: 'اثر مالی تغییرات آموزشی', permission: 'finance.lifecycle_effects.manage' },
   { to: '/admin-settings#student-ids', label: 'تنظیم شماره اساس و ریجیستر نمبر', permission: 'manage_content' }
 ];
 
@@ -452,7 +470,12 @@ const ALLOWED_QUICK_LINK_PERMISSIONS = new Set([
   'manage_users',
   'manage_enrollments',
   'manage_memberships',
+  'students.transfers.manage',
+  'students.lifecycle.manage',
+  'students.lifecycle.approve',
+  'education.promotions.manage',
   'manage_finance',
+  'finance.lifecycle_effects.manage',
   'manage_content',
   'view_reports',
   'view_schedule',
@@ -492,6 +515,12 @@ const permissionAllows = (permission = '', permissions = []) => {
   if (permissions.includes(permission)) return true;
   if (permission === 'manage_enrollments' && permissions.includes('manage_users')) return true;
   if (permission === 'manage_memberships' && permissions.includes('manage_users')) return true;
+  if (permission === 'students.transfers.manage' && permissions.includes('manage_users')) return true;
+  if (permission === 'students.lifecycle.manage' && permissions.includes('manage_memberships')) return true;
+  if (permission === 'students.lifecycle.manage' && permissions.includes('manage_users')) return true;
+  if (permission === 'education.promotions.manage' && permissions.includes('manage_memberships')) return true;
+  if (permission === 'education.promotions.manage' && permissions.includes('manage_users')) return true;
+  if (permission === 'finance.lifecycle_effects.manage' && permissions.includes('manage_finance')) return true;
   if (permission === 'view_schedule' && permissions.includes('manage_schedule')) return true;
   return false;
 };

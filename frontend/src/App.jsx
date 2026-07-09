@@ -3052,7 +3052,7 @@ function AppShell() {
             />
             <Route
               path="/admin-promotions"
-              element={adminRoute('manage_users', <AdminPromotions />, 'دسترسی ارتقا صنف برای این حساب فعال نیست.')}
+              element={adminRoute('education.promotions.manage', <AdminPromotions />, 'دسترسی ارتقای صنف برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-result-tables"
@@ -3116,7 +3116,7 @@ function AppShell() {
             />
             <Route
               path="/admin-financial-memberships"
-              element={adminRoute('manage_finance', <AdminFinancialMemberships />, 'دسترسی مدیریت عضویت مالی برای این حساب فعال نیست.')}
+              element={adminRoute(['manage_finance', 'finance.lifecycle_effects.manage'], <AdminFinancialMemberships />, 'دسترسی اثر مالی تغییرات آموزشی برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-finance/profile/:studentId"

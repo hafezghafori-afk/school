@@ -110,7 +110,7 @@ router.post('/:studentRef/remarks', requireAuth, requireRole(['admin']), require
   }
 });
 
-router.post('/:studentRef/transfers', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.post('/:studentRef/transfers', requireAuth, requireRole(['admin']), requirePermission('students.transfers.manage'), async (req, res) => {
   try {
     const item = await addStudentTransfer(req.params.studentRef, req.body || {});
     if (!item) {
