@@ -14,32 +14,41 @@
 }
 
 .print-letterhead {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) 72px;
   align-items: center;
+  gap: 16px;
   border-bottom: 2px solid #0f172a;
   padding-bottom: 16px;
   margin-bottom: 20px;
 }
 
 .print-brand {
-  display: flex;
-  gap: 12px;
-  align-items: center;
+  text-align: center;
+  min-width: 0;
 }
 
-.print-brand img,
+.print-official-logo,
 .print-logo-fallback {
   width: 64px;
   height: 64px;
-  border-radius: 12px;
-  object-fit: cover;
-  background: #0f172a;
-  color: #fff;
   display: grid;
   place-items: center;
+  justify-self: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
   font-weight: 700;
-  font-size: 24px;
+  font-size: 10px;
+  text-align: center;
+  overflow: hidden;
+}
+
+.print-official-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .print-brand strong {

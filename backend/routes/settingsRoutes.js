@@ -44,7 +44,7 @@ const assetUpload = multer({
   limits: { fileSize: 3 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    const ok = ['.jpg', '.jpeg', '.png', '.webp'].includes(ext);
+    const ok = ['.jpg', '.jpeg', '.png', '.webp', '.svg'].includes(ext);
     if (!ok) return cb(new Error('فرمت فایل معتبر نیست'), false);
     cb(null, true);
   }
@@ -215,6 +215,8 @@ const defaultSettings = () => ({
   brandName: 'سیما',
   brandSubtitle: 'سیستم مدیریت هوشمند مکاتیب افغانستان',
   logoUrl: '',
+  schoolLogoUrl: '',
+  ministryLogoUrl: '',
   hoursLabel: 'راه‌اندازی سیستم',
   hoursText: 'دمو، تنظیم، آموزش و پشتیبانی',
   contactLabel: 'مشوره فروش',
@@ -725,6 +727,8 @@ router.get('/login-page', async (req, res) => {
       brandName: settings.brandName || 'سیما',
       brandSubtitle: settings.brandSubtitle || 'سیستم مدیریت هوشمند مکاتیب افغانستان',
       logoUrl: settings.logoUrl || '',
+      schoolLogoUrl: settings.schoolLogoUrl || settings.logoUrl || '',
+      ministryLogoUrl: settings.ministryLogoUrl || '',
       loginPageTitle: settings.homeHeroTitle || 'سیما؛ سیستم مدیریت هوشمند مکاتیب افغانستان',
       loginPageSubtitle: settings.homeHeroHighlight || 'مدیریت کامل مکتب در یک سیستم',
       loginPageText: settings.homeHeroText || 'مدیریت شاگردان، استادان، حاضری، فیس، امتحانات، تقسیم اوقات و گزارش‌ها در یک سیستم ساده و منظم.',
@@ -797,6 +801,8 @@ router.put('/logo', requireAuth, requireRole(['admin']), requirePermission('mana
 
 router.put('/assets', requireAuth, requireRole(['admin']), requirePermission('manage_content'), (req, res, next) => {
   assetUpload.fields([
+    { name: 'schoolLogo', maxCount: 1 },
+    { name: 'ministryLogo', maxCount: 1 },
     { name: 'signature', maxCount: 1 },
     { name: 'stamp', maxCount: 1 }
   ])(req, res, (err) => {
@@ -806,6 +812,13 @@ router.put('/assets', requireAuth, requireRole(['admin']), requirePermission('ma
 }, async (req, res) => {
   try {
     const settings = await ensureSettings();
+    if (req.files?.schoolLogo?.[0]?.filename) {
+      settings.schoolLogoUrl = `uploads/site/${req.files.schoolLogo[0].filename}`;
+      settings.logoUrl = settings.schoolLogoUrl;
+    }
+    if (req.files?.ministryLogo?.[0]?.filename) {
+      settings.ministryLogoUrl = `uploads/site/${req.files.ministryLogo[0].filename}`;
+    }
     if (req.files?.signature?.[0]?.filename) {
       settings.signatureUrl = `uploads/site/${req.files.signature[0].filename}`;
     }

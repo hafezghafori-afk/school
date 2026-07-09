@@ -5,6 +5,8 @@ import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, formatAfghanDateTime, toGregorianDateInputValue } from '../utils/afghanDate';
 import { formatFinanceCode, toEnglishAlphaNumeric } from '../utils/latinFinanceCode';
+import useSiteSettings from '../hooks/useSiteSettings';
+import { getPrintLogoUrls } from '../utils/printLogos';
 import { readStoredSchoolId, resolveActiveSchoolContext } from './adminWorkspaceUtils';
 
 const getAuthHeaders = () => {
@@ -1097,6 +1099,7 @@ const buildAnomalyActionPayload = (item = {}, extras = {}) => ({
 });
 
 export default function AdminFinance() {
+  const { settings: siteSettings } = useSiteSettings();
   const [summary, setSummary] = useState(null);
   const [topDebtors, setTopDebtors] = useState([]);
   const [students, setStudents] = useState([]);
@@ -2909,6 +2912,7 @@ export default function AdminFinance() {
       principal: school.principal?.name || ''
     };
   }, [activeSchoolContext]);
+  const printLogoUrls = useMemo(() => getPrintLogoUrls(siteSettings), [siteSettings]);
 
   useEffect(() => {
     if (!selectedReceipt) {
@@ -8851,8 +8855,18 @@ export default function AdminFinance() {
           ].map((copy) => (
             <section key={`receipt-copy-${copy.key}`} className="finance-receipt-print-copy">
               <div className="finance-receipt-copy-label">{copy.label}</div>
-              <div className="finance-receipt-print-kicker">{activeSchoolPrintInfo.title}</div>
-              <h3>رسید پرداخت فیس شاگرد</h3>
+              <div className="finance-receipt-letterhead">
+                <div className="finance-print-logo-box">
+                  {printLogoUrls.schoolLogoUrl ? <img src={printLogoUrls.schoolLogoUrl} alt="لوگوی مکتب" /> : <span>لوگو مکتب</span>}
+                </div>
+                <div className="finance-receipt-letterhead-center">
+                  <div className="finance-receipt-print-kicker">{activeSchoolPrintInfo.title}</div>
+                  <h3>رسید پرداخت فیس شاگرد</h3>
+                </div>
+                <div className="finance-print-logo-box">
+                  {printLogoUrls.ministryLogoUrl ? <img src={printLogoUrls.ministryLogoUrl} alt="لوگوی وزارت معارف" /> : <span>لوگو وزارت</span>}
+                </div>
+              </div>
               <div className="finance-receipt-fields">
                 <div>
                   <span>نام مکتب:</span>
@@ -8906,7 +8920,9 @@ export default function AdminFinance() {
       {printMode === 'cashier' && cashierReportPrintModel && (
         <div className="finance-print-sheet" data-testid="printable-cashier-report-sheet">
           <div className="finance-print-school-header">
-            <div className="finance-print-logo-box">لوگو وزارت</div>
+            <div className="finance-print-logo-box">
+              {printLogoUrls.schoolLogoUrl ? <img src={printLogoUrls.schoolLogoUrl} alt="لوگوی مکتب" /> : <span>لوگو مکتب</span>}
+            </div>
             <div className="finance-print-school-center">
               <span>امارت اسلامی افغانستان</span>
               <span>وزارت معارف</span>
@@ -8914,7 +8930,9 @@ export default function AdminFinance() {
               <span>آمریت معارف حوزه (     ) تعلیمی</span>
               <strong>{activeSchoolPrintInfo.title}</strong>
             </div>
-            <div className="finance-print-logo-box">لوگو مکتب</div>
+            <div className="finance-print-logo-box">
+              {printLogoUrls.ministryLogoUrl ? <img src={printLogoUrls.ministryLogoUrl} alt="لوگوی وزارت معارف" /> : <span>لوگو وزارت</span>}
+            </div>
           </div>
           <h3>گزارش صندوق روزانه</h3>
           <p className="muted">تاریخ گزارش: {toFaDate(cashierReportPrintModel.date)}</p>

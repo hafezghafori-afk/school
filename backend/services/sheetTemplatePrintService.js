@@ -526,8 +526,12 @@ function buildOfficialReportCss(layout = {}) {
 }
 
 function buildOfficialLogoMarkup(src = '', label = 'لوگو') {
-  return src
-    ? `<img class="official-report-logo" src="${escapeHtml(src)}" alt="${escapeHtml(label)}" />`
+  const normalizedSrc = normalizeText(src);
+  const assetSrc = normalizedSrc && !/^(https?:)?\/\//i.test(normalizedSrc) && !normalizedSrc.startsWith('data:') && !normalizedSrc.startsWith('/')
+    ? `/${normalizedSrc}`
+    : normalizedSrc;
+  return assetSrc
+    ? `<img class="official-report-logo" src="${escapeHtml(assetSrc)}" alt="${escapeHtml(label)}" />`
     : `<div class="official-report-logo official-report-logo--empty">${escapeHtml(label)}</div>`;
 }
 
@@ -537,7 +541,7 @@ function buildOfficialHeaderHtml({ title = '', siteSettings = null, logoUrl = ''
   const districtLine = normalizeText(siteSettings?.educationZone || siteSettings?.district || '');
   const schoolLine = brandName || normalizeText(siteSettings?.name) || '';
   const ministryLogo = normalizeText(siteSettings?.ministryLogoUrl || siteSettings?.governmentLogoUrl || '');
-  const schoolLogo = normalizeText(logoUrl || siteSettings?.logoUrl || '');
+  const schoolLogo = normalizeText(logoUrl || siteSettings?.schoolLogoUrl || siteSettings?.logoUrl || '');
   return `
         <section class="official-report-header">
           ${buildOfficialLogoMarkup(ministryLogo, 'لوگو وزارت')}
@@ -736,7 +740,7 @@ async function renderReportPrintHtml({ report = {}, template = null, req = null 
   const subtitle = normalizeText(template?.layout?.headerText) || normalizeText(siteSettings?.brandName) || 'سیستم مدیریت مکتب';
   const footerText = normalizeText(template?.layout?.footerText) || normalizeText(siteSettings?.footerNote);
   const signatures = buildSignatureBlocks(type, siteSettings, report);
-  const logoUrl = layout.showLogo ? normalizeText(siteSettings?.logoUrl) : '';
+  const logoUrl = layout.showLogo ? normalizeText(siteSettings?.schoolLogoUrl || siteSettings?.logoUrl) : '';
 
   return `<!doctype html>
 <html lang="fa" dir="rtl">
@@ -964,7 +968,7 @@ async function renderReportPrintHtml({ report = {}, template = null, req = null 
   const subtitle = normalizeText(template?.layout?.headerText) || normalizeText(siteSettings?.brandName) || 'لیسه خصوصی مدیر';
   const footerText = normalizeText(template?.layout?.footerText) || normalizeText(siteSettings?.footerNote);
   const signatures = buildSignatureBlocks(type, siteSettings, report);
-  const logoUrl = layout.showLogo ? normalizeText(siteSettings?.logoUrl) : '';
+  const logoUrl = layout.showLogo ? normalizeText(siteSettings?.schoolLogoUrl || siteSettings?.logoUrl) : '';
 
   if (type === 'exam') {
     return renderExamSheetPrintHtml({

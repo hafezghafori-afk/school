@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import useSiteSettings from '../hooks/useSiteSettings';
 import { normalizeBrandName, normalizeBrandSubtitle } from '../utils/brand';
 import { formatAfghanStoredDateLabel } from '../utils/afghanDate';
+import { getPrintLogoUrls } from '../utils/printLogos';
 import './AdminEnrollmentPrint.css';
 
 import { API_BASE } from '../config/api';
@@ -55,30 +56,24 @@ export default function AdminEnrollmentPrint() {
     );
   }
 
-  const logoUrl = settings?.logoUrl
-    ? (settings.logoUrl.startsWith('http') ? settings.logoUrl : `${API_BASE}/${settings.logoUrl}`)
-    : '';
+  const { schoolLogoUrl, ministryLogoUrl } = getPrintLogoUrls(settings);
   const brandName = normalizeBrandName(settings?.brandName);
   const brandSubtitle = normalizeBrandSubtitle(settings?.brandSubtitle);
 
   return (
     <section className="admin-print-page">
       <header className="print-letterhead">
+        <div className="print-official-logo print-official-logo-left">
+          {schoolLogoUrl ? <img src={schoolLogoUrl} alt="لوگوی مکتب" /> : <span>لوگو مکتب</span>}
+        </div>
         <div className="print-brand">
-          {logoUrl ? (
-            <img src={logoUrl} alt="logo" />
-          ) : (
-            <div className="print-logo-fallback">س</div>
-          )}
           <div>
             <strong>{brandName}</strong>
             <span>{brandSubtitle}</span>
           </div>
         </div>
-        <div className="print-contact">
-          <span>{settings?.contactLabel || 'مشوره فروش'}</span>
-          <strong>{settings?.contactPhone || '0700000000'}</strong>
-          <span>{settings?.hoursText || 'دمو، تنظیم، آموزش و پشتیبانی'}</span>
+        <div className="print-official-logo print-official-logo-right">
+          {ministryLogoUrl ? <img src={ministryLogoUrl} alt="لوگوی وزارت معارف" /> : <span>لوگو وزارت</span>}
         </div>
       </header>
 

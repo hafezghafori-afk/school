@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './AdminSettings.css';
 import { API_BASE } from '../config/api';
 import LoginSettingsManager from '../components/LoginSettingsManager';
+import { getPrintLogoUrls } from '../utils/printLogos';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -142,6 +143,7 @@ export default function AdminSettings() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
+  const [officialLogoFiles, setOfficialLogoFiles] = useState({ schoolLogo: null, ministryLogo: null });
 
   const loadSettings = async () => {
     setLoading(true);
@@ -239,6 +241,43 @@ export default function AdminSettings() {
     }
   };
 
+  const uploadOfficialLogos = async () => {
+    if (!officialLogoFiles.schoolLogo && !officialLogoFiles.ministryLogo) {
+      setMessage('اول لوگوی مکتب یا لوگوی وزارت معارف را انتخاب کنید.');
+      return;
+    }
+    setSaving(true);
+    setMessage('');
+    try {
+      const formData = new FormData();
+      if (officialLogoFiles.schoolLogo) formData.append('schoolLogo', officialLogoFiles.schoolLogo);
+      if (officialLogoFiles.ministryLogo) formData.append('ministryLogo', officialLogoFiles.ministryLogo);
+      const res = await fetch(`${API_BASE}/api/settings/assets`, {
+        method: 'PUT',
+        headers: { ...getAuthHeaders() },
+        body: formData
+      });
+      const data = await res.json();
+      if (!data?.success) {
+        setMessage(data?.message || 'بارگذاری لوگوها ناموفق بود.');
+        return;
+      }
+      const normalized = data.settings || settings;
+      normalized.adminQuickLinks = normalizeAdminQuickLinks(normalized.adminQuickLinks);
+      normalized.studentIdFormats = {
+        ...DEFAULT_STUDENT_ID_FORMATS,
+        ...(normalized.studentIdFormats || {})
+      };
+      setSettings(normalized);
+      setOfficialLogoFiles({ schoolLogo: null, ministryLogo: null });
+      setMessage('لوگوهای رسمی فرم‌ها و گزارش‌ها ذخیره شد.');
+    } catch {
+      setMessage('خطا در بارگذاری لوگوها');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const adminQuickLinks = useMemo(() => {
     const normalized = normalizeAdminQuickLinks(settings?.adminQuickLinks || []);
     return normalized.length ? normalized : ADMIN_QUICK_LINK_DEFAULTS.map((item) => ({ ...item }));
@@ -274,6 +313,38 @@ export default function AdminSettings() {
             <label>توضیح خدمات</label>
             <input value={settings.hoursText || ''} onChange={(e) => patchRoot({ hoursText: e.target.value })} />
           </div>
+        </div>
+      </section>
+
+      <section className="settings-card">
+        <h3>لوگوهای رسمی فرم‌ها و گزارش‌ها</h3>
+        <p className="settings-muted">در چاپ‌ها لوگوی مکتب در سمت چپ و لوگوی وزارت معارف در سمت راست با اندازه ثابت نمایش داده می‌شود.</p>
+        <div className="settings-logo-upload-grid">
+          {[
+            { key: 'schoolLogo', title: 'لوگوی مکتب', src: getPrintLogoUrls(settings).schoolLogoUrl },
+            { key: 'ministryLogo', title: 'لوگوی وزارت معارف', src: getPrintLogoUrls(settings).ministryLogoUrl }
+          ].map((item) => (
+            <div key={item.key} className="settings-logo-upload-card">
+              <div className="settings-logo-preview">
+                {item.src ? <img src={item.src} alt={item.title} /> : <span>لوگو</span>}
+              </div>
+              <div>
+                <label>{item.title}</label>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  onChange={(event) => {
+                    const [file] = event.target.files || [];
+                    setOfficialLogoFiles((prev) => ({ ...prev, [item.key]: file || null }));
+                  }}
+                />
+                {officialLogoFiles[item.key] ? <small>{officialLogoFiles[item.key].name}</small> : null}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="settings-actions">
+          <button type="button" disabled={saving} onClick={uploadOfficialLogos}>ذخیره لوگوها</button>
         </div>
       </section>
 
