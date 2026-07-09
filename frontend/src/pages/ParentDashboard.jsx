@@ -15,10 +15,10 @@ import { downloadBlob, errorMessage, fetchBlob } from './adminWorkspaceUtils';
 import { formatFinanceCode } from '../utils/latinFinanceCode';
 
 const ORDER_STATUS_LABELS = {
-  new: 'جدید',
-  partial: 'نیمه‌تصفیه',
-  paid: 'تصفیه',
-  overdue: 'معوق',
+  new: 'پرداخت نشده',
+  partial: 'پرداخت ناقص',
+  paid: 'پرداخت شده',
+  overdue: 'سررسید گذشته',
   void: 'باطل'
 };
 
@@ -68,7 +68,7 @@ const SIGNAL_TYPE_LABELS = {
   overpayment: 'بیش‌پرداخت',
   full_relief_with_open_balance: 'بل باز با تسهیل کامل',
   relief_expiring: 'تسهیل رو به ختم',
-  long_overdue_balance: 'معوق بیش از سه ماه',
+  long_overdue_balance: 'سررسید گذشته بیش از سه ماه',
   pending_payment_stalled: 'پرداخت معطل در بررسی',
   admission_missing: 'داخله ثبت نشده'
 };
@@ -582,7 +582,7 @@ export default function ParentDashboard() {
         <KpiRingCard
           label="باقی‌مانده فیس"
           value={formatMoney(summary.outstandingAmount)}
-          hint={`${toFaNumber(financeSummary.overdueOrders)} بل معوق | ${toFaNumber(financeSummary.dueSoonOrders)} نزدیک موعد`}
+          hint={`${toFaNumber(financeSummary.overdueOrders)} بل سررسید گذشته | ${toFaNumber(financeSummary.dueSoonOrders)} نزدیک موعد`}
           progress={Math.min(100, Number(summary.outstandingAmount || 0) > 0 ? 100 - financeProgress : 100)}
           tone={Number(summary.outstandingAmount || 0) > 0 ? 'rose' : 'mint'}
         />
@@ -679,7 +679,7 @@ export default function ParentDashboard() {
             <strong>{toFaNumber(summary.pendingPayments)}</strong>
           </div>
           <div className="dash-summary-card">
-            <span>بل‌های معوق</span>
+            <span>بل‌های سررسید گذشته</span>
             <strong>{toFaNumber(summary.overdueOrders)}</strong>
           </div>
           <div className="dash-summary-card">

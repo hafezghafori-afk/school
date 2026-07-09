@@ -15,10 +15,10 @@ import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate
 import { formatFinanceCode } from '../utils/latinFinanceCode';
 
 const ORDER_STATUS_LABELS = {
-  new: 'جدید',
-  partial: 'پرداخت قسمتی',
-  paid: 'تسویه شده',
-  overdue: 'معوق',
+  new: 'پرداخت نشده',
+  partial: 'پرداخت ناقص',
+  paid: 'پرداخت شده',
+  overdue: 'سررسید گذشته',
   void: 'باطل'
 };
 
@@ -38,9 +38,9 @@ const PAYMENT_STAGE_LABELS = {
 };
 
 const FEE_STATUS_LABELS = {
-  clear: 'تصفیه',
+  clear: 'تصفیه شده',
   due: 'نیازمند پرداخت',
-  overdue: 'معوق',
+  overdue: 'سررسید گذشته',
   under_review: 'در حال بررسی'
 };
 
@@ -89,7 +89,7 @@ const SIGNAL_TYPE_LABELS = {
   overpayment: 'بیش‌پرداخت',
   full_relief_with_open_balance: 'بل باز با تسهیل کامل',
   relief_expiring: 'تسهیل رو به ختم',
-  long_overdue_balance: 'معوق بیش از سه ماه',
+  long_overdue_balance: 'سررسید گذشته بیش از سه ماه',
   pending_payment_stalled: 'پرداخت معطل در بررسی',
   admission_missing: 'داخله ثبت نشده'
 };
@@ -856,7 +856,7 @@ export default function StudentFinance() {
               </span>
               <strong>{pickLabel(FEE_STATUS_LABELS, eligibility.feeStatus, 'نامشخص')}</strong>
               <div className="student-finance-meta-list">
-                <span>بل‌های معوق: {eligibility.overdueOrders || 0}</span>
+                <span>بل‌های سررسید گذشته: {eligibility.overdueOrders || 0}</span>
                 <span>پرداخت‌های در انتظار: {eligibility.pendingPayments || 0}</span>
                 <span>مانده قابل پرداخت: {formatCurrency(eligibility.totalOutstanding)}</span>
               </div>

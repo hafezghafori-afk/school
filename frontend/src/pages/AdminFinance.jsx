@@ -603,7 +603,7 @@ const FINANCE_ANOMALY_UI_LABELS = {
   overpayment: 'بیش‌پرداخت',
   full_relief_with_open_balance: 'بل باز با تسهیل کامل',
   relief_expiring: 'تسهیل رو به ختم',
-  long_overdue_balance: 'معوق بیش از سه ماه',
+  long_overdue_balance: 'سررسید گذشته بیش از سه ماه',
   pending_payment_stalled: 'پرداخت معطل در بررسی',
   admission_missing: 'داخله ثبت نشده'
 };
@@ -856,7 +856,7 @@ const FINANCE_SECTION_LABELS = {
 };
 
 const FINANCE_SECTION_DESCRIPTIONS = {
-  overview: 'نمای کلان از وصول، معوقات، صندوق و وضعیت عملیات مالی.',
+  overview: 'نمای کلان از وصول، بدهی‌های سررسید گذشته، صندوق و وضعیت عملیات مالی.',
   payments: 'ثبت پرداخت، بررسی رسیدها و مدیریت صندوق روزانه.',
   orders: 'صدور بل، بازبینی بدهی‌ها و مدیریت تعهدات مالی متعلمین.',
   discounts: 'تخفیف‌ها، معافیت‌ها و رجیستر مزایای مالی متعلمین.',
@@ -866,11 +866,11 @@ const FINANCE_SECTION_DESCRIPTIONS = {
 
 const OPEN_ORDER_STATUSES = new Set(['new', 'partial', 'overdue']);
 const ORDER_STATUS_UI_LABELS = {
-  new: 'باز',
-  pending: 'در انتظار',
-  partial: 'پرداخت جزئی',
+  new: 'پرداخت نشده',
+  pending: 'در انتظار پرداخت',
+  partial: 'پرداخت ناقص',
   paid: 'پرداخت‌شده',
-  overdue: 'معوق',
+  overdue: 'سررسید گذشته',
   void: 'باطل'
 };
 
@@ -4737,7 +4737,7 @@ export default function AdminFinance() {
 
       <div className="finance-summary" data-finance-section="overview">
         <div><span>رسیدهای در انتظار</span><strong>{summary?.pendingReceipts || 0}</strong></div>
-        <div><span>بل‌های معوق</span><strong>{summary?.overdueBills || 0}</strong></div>
+        <div><span>بل‌های سررسید گذشته</span><strong>{summary?.overdueBills || 0}</strong></div>
         <div><span>وصول امروز</span><strong>{fmt(summary?.todayCollection)} AFN</strong></div>
         <div><span>وصول ماه</span><strong>{fmt(summary?.monthCollection)} AFN</strong></div>
         <div><span>تسهیلات فعال</span><strong>{summary?.activeReliefs || activeFinanceReliefCount}</strong></div>
@@ -4835,9 +4835,9 @@ export default function AdminFinance() {
           <div className="finance-card-head">
             <div>
               <h3>شاگردان مشکل‌دار</h3>
-              <p className="muted">شاگردانی که بیشترین بدهی یا وضعیت معوق دارند.</p>
+              <p className="muted">شاگردانی که بیشترین بدهی یا بل سررسید گذشته دارند.</p>
             </div>
-            <span className="finance-chip finance-chip-rose">{summary?.overdueBills || 0} بل معوق</span>
+            <span className="finance-chip finance-chip-rose">{summary?.overdueBills || 0} بل سررسید گذشته</span>
           </div>
           <div className="finance-problem-list">
             {problemStudents.map((row) => (
@@ -5039,11 +5039,11 @@ export default function AdminFinance() {
           <div className="finance-card-head">
             <div>
               <h3>بل‌ها و تعهدات مالی</h3>
-              <p className="muted">نمای سریع بدهی‌ها، بل‌های معوق و تعهدات فعال پیش از صدور یا پیگیری بل.</p>
+              <p className="muted">نمای سریع بدهی‌ها، بل‌های سررسید گذشته و تعهدات فعال پیش از صدور یا پیگیری بل.</p>
             </div>
             <div className="finance-chip-group">
               <span className="finance-chip finance-chip-emerald">{orderWorkspaceStats.openCount} بدهی باز</span>
-              <span className="finance-chip finance-chip-rose">{orderWorkspaceStats.overdueCount} معوق</span>
+              <span className="finance-chip finance-chip-rose">{orderWorkspaceStats.overdueCount} سررسید گذشته</span>
             </div>
           </div>
           <div className="finance-kpi-grid finance-kpi-grid-dense finance-order-kpis">
@@ -5056,7 +5056,7 @@ export default function AdminFinance() {
               <strong>{orderWorkspaceStats.monthCount}</strong>
             </div>
             <div className="finance-kpi-item">
-              <span>پرداخت جزئی</span>
+              <span>پرداخت ناقص</span>
               <strong>{orderWorkspaceStats.partialCount}</strong>
             </div>
             <div className="finance-kpi-item">
@@ -6539,9 +6539,9 @@ export default function AdminFinance() {
               <option value="all">همه وضعیت‌ها</option>
               <option value="new">جدید</option>
               <option value="pending">در انتظار</option>
-              <option value="partial">نیمه‌پرداخت</option>
-              <option value="paid">تصفیه‌شده</option>
-              <option value="overdue">معوق</option>
+              <option value="partial">پرداخت ناقص</option>
+              <option value="paid">پرداخت‌شده</option>
+              <option value="overdue">سررسید گذشته</option>
               <option value="void">باطل</option>
             </select>
           </label>
@@ -6590,9 +6590,9 @@ export default function AdminFinance() {
 
       <div className="finance-grid" data-finance-section="overview reports">
         <div className="finance-card" data-finance-section="overview reports" data-testid="aging-report-card">
-          <h3>گزارش معوقات</h3>
+          <h3>گزارش بل‌های سررسید گذشته</h3>
           <p>جاری: {fmt(visibleAging?.buckets?.current || 0)} | 1-30: {fmt(visibleAging?.buckets?.d1_30 || 0)} | 31-60: {fmt(visibleAging?.buckets?.d31_60 || 0)} | 60+: {fmt(visibleAging?.buckets?.d61_plus || 0)}</p>
-          <p>مجموع معوق: {fmt(visibleAging?.totalRemaining || 0)} AFN</p>
+          <p>مجموع سررسید گذشته: {fmt(visibleAging?.totalRemaining || 0)} AFN</p>
           <p className="muted">تسهیلات فعال: {visibleAging?.reliefSummary?.activeCount || aging?.reliefSummary?.activeCount || 0} | ثابت: {fmt(visibleAging?.reliefSummary?.fixedAmount || aging?.reliefSummary?.fixedAmount || 0)} AFN</p>
         </div>
         <div className="finance-card" data-finance-section="overview reports" data-testid="by-class-report-card">
@@ -6656,7 +6656,7 @@ export default function AdminFinance() {
           <div className="finance-card-head">
             <div>
               <h3>ناهجاری‌های مالی</h3>
-              <p className="muted">هشدارهای هوشمند برای بیش‌پرداخت، معوقات طولانی، ختم تسهیلات و مغایرت‌های مالی.</p>
+              <p className="muted">هشدارهای هوشمند برای بیش‌پرداخت، بدهی‌های سررسید گذشته طولانی، ختم تسهیلات و مغایرت‌های مالی.</p>
             </div>
             <div className="finance-chip-group">
               <span className="finance-chip">{visibleAnomalySummary.total}</span>
@@ -6845,7 +6845,7 @@ export default function AdminFinance() {
             <div className="finance-card-head">
               <div>
                 <h3>snapshot ماه مالی {toFaMonthKey(selectedMonthClose.monthKey)}</h3>
-                <p className="muted">نمای ثابت از ارقام ماه، معوقات، تسهیلات مالی و ناهنجاری‌های همان بستن ماه.</p>
+                <p className="muted">نمای ثابت از ارقام ماه، بل‌های سررسید گذشته، تسهیلات مالی و ناهنجاری‌های همان بستن ماه.</p>
               </div>
               <div className="finance-chip-group">
                 <label className="finance-inline-filter">
@@ -6897,7 +6897,7 @@ export default function AdminFinance() {
             </div>
             <div className="finance-subcard-list">
               <div className="mini-row">
-                <span>معوقات</span>
+                <span>سررسید گذشته</span>
                 <span>{fmt(monthCloseSnapshot?.aging?.totalRemaining || 0)} AFN</span>
               </div>
               <div className="mini-row">

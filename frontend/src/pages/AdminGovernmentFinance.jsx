@@ -2747,7 +2747,7 @@ export default function AdminGovernmentFinance() {
       label: 'مانده باز',
       value: formatMoney(payload.financeOverview?.summary?.totalOutstanding || 0),
       tone: 'slate',
-      hint: `${formatNumber(payload.financeOverview?.summary?.overdueOrders || 0)} مورد معوق`
+      hint: `${formatNumber(payload.financeOverview?.summary?.overdueOrders || 0)} مورد سررسید گذشته`
     },
     {
       label: 'وصول این ماه',
@@ -2782,7 +2782,7 @@ export default function AdminGovernmentFinance() {
             </div>
             <h1>فرماندهی گزارش مالی دولت و مکتب</h1>
             <p>
-              این نسخه روی داده‌های اصلی فعلی سوار است و از خلاصه مالی، جریان نقدینگی، گزارش معوقات، صورت‌حساب صنوف و موتور گزارش‌ساز
+              این نسخه روی داده‌های اصلی فعلی سوار است و از خلاصه مالی، جریان نقدینگی، گزارش سررسید گذشته، صورت‌حساب صنوف و موتور گزارش‌ساز
               برای ساخت یک رابط کاربری رسمی، مدرن و آماده‌ی فاز بعدی استفاده می‌کند.
             </p>
             <div className="gov-finance-hero-meta">
@@ -2984,7 +2984,7 @@ export default function AdminGovernmentFinance() {
             <article className="gov-card" data-span="5">
               <div className="gov-card-head">
                 <div>
-                  <strong>وضعیت معوقات</strong>
+                  <strong>وضعیت سررسید گذشته</strong>
                   <span>نمایش دسته‌های مهلت فعلی</span>
                 </div>
               </div>
@@ -3019,7 +3019,7 @@ export default function AdminGovernmentFinance() {
                   <strong>{formatNumber(payload.summary?.receiptWorkflow?.generalPresident || 0)}</strong>
                 </div>
                 <div className="gov-health-row">
-                  <span>بل‌های معوق</span>
+                  <span>بل‌های سررسید گذشته</span>
                   <strong>{formatNumber(payload.summary?.overdueBills || 0)}</strong>
                 </div>
               </div>
