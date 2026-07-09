@@ -8845,56 +8845,62 @@ export default function AdminFinance() {
       </div>
       {printMode === 'receipt' && selectedReceiptPrintModel && (
         <div className="finance-print-sheet finance-receipt-print-sheet" data-testid="printable-receipt-sheet">
-          <section className="finance-receipt-print-copy">
-            <div className="finance-receipt-print-kicker">{activeSchoolPrintInfo.title}</div>
-            <h3>رسید پرداخت فیس شاگرد</h3>
-            <div className="finance-receipt-fields">
-              <div>
-                <span>نام مکتب:</span>
-                <strong>{activeSchoolPrintInfo.title}</strong>
-              </div>
-              <div>
-                <span>شماره بل:</span>
-                <strong className="finance-latin-code">{selectedReceiptPrintModel.billNumber || '-'}</strong>
-              </div>
-              <div>
-                <span>تاریخ:</span>
-                <strong>{toFaDate(selectedReceiptPrintModel.paidAt)}</strong>
-              </div>
-              <div>
-                <span>نام شاگرد:</span>
-                <strong>{selectedReceiptPrintModel.studentName}</strong>
-              </div>
-              <div>
-                <span>صنف:</span>
-                <strong>{selectedReceiptPrintModel.classTitle}</strong>
-              </div>
-              <div>
-                <span>مبلغ پرداختی:</span>
-                <strong>{fmt(selectedReceiptPrintModel.amount)} {selectedReceiptPrintModel.currencyLabel || 'افغانی'}</strong>
-              </div>
-              <div className="finance-receipt-field-wide">
-                <span>بابت:</span>
-                <strong>{selectedReceiptPrintModel.purpose}</strong>
-              </div>
-              {!!selectedReceiptPrintModel.note && (
-                <div className="finance-receipt-field-wide">
-                  <span>یادداشت:</span>
-                  <strong>{selectedReceiptPrintModel.note}</strong>
+          {[
+            { key: 'student', label: 'نسخه شاگرد' },
+            { key: 'school', label: 'نسخه آرشیف مکتب' }
+          ].map((copy) => (
+            <section key={`receipt-copy-${copy.key}`} className="finance-receipt-print-copy">
+              <div className="finance-receipt-copy-label">{copy.label}</div>
+              <div className="finance-receipt-print-kicker">{activeSchoolPrintInfo.title}</div>
+              <h3>رسید پرداخت فیس شاگرد</h3>
+              <div className="finance-receipt-fields">
+                <div>
+                  <span>نام مکتب:</span>
+                  <strong>{activeSchoolPrintInfo.title}</strong>
                 </div>
-              )}
-            </div>
-            <div className="finance-receipt-signatures">
-              <div>
-                <span>مسوول مالی</span>
-                <strong>{selectedReceiptPrintModel.receivedBy || ' '}</strong>
+                <div>
+                  <span>شماره بل:</span>
+                  <strong className="finance-latin-code">{selectedReceiptPrintModel.billNumber || '-'}</strong>
+                </div>
+                <div>
+                  <span>تاریخ:</span>
+                  <strong>{toFaDate(selectedReceiptPrintModel.paidAt)}</strong>
+                </div>
+                <div>
+                  <span>نام شاگرد:</span>
+                  <strong>{selectedReceiptPrintModel.studentName}</strong>
+                </div>
+                <div>
+                  <span>صنف:</span>
+                  <strong>{selectedReceiptPrintModel.classTitle}</strong>
+                </div>
+                <div>
+                  <span>مبلغ پرداختی:</span>
+                  <strong>{fmt(selectedReceiptPrintModel.amount)} {selectedReceiptPrintModel.currencyLabel || 'افغانی'}</strong>
+                </div>
+                <div className="finance-receipt-field-wide">
+                  <span>بابت:</span>
+                  <strong>{selectedReceiptPrintModel.purpose}</strong>
+                </div>
+                {!!selectedReceiptPrintModel.note && (
+                  <div className="finance-receipt-field-wide">
+                    <span>یادداشت:</span>
+                    <strong>{selectedReceiptPrintModel.note}</strong>
+                  </div>
+                )}
               </div>
-              <div>
-                <span>امضا و مهر مکتب</span>
-                <strong> </strong>
+              <div className="finance-receipt-signatures">
+                <div>
+                  <span>مسوول مالی</span>
+                  <strong>{selectedReceiptPrintModel.receivedBy || ' '}</strong>
+                </div>
+                <div>
+                  <span>امضا و مهر مکتب</span>
+                  <strong> </strong>
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
+          ))}
         </div>
       )}
       {printMode === 'cashier' && cashierReportPrintModel && (

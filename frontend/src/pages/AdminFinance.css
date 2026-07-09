@@ -2349,7 +2349,9 @@
   }
 
   .finance-receipt-print-sheet {
-    display: block;
+    display: grid;
+    grid-template-rows: repeat(2, minmax(0, auto));
+    gap: 5mm;
     width: 100%;
     max-width: 186mm;
     min-height: auto;
@@ -2361,35 +2363,41 @@
     min-height: auto;
     break-inside: avoid;
     page-break-inside: avoid;
-    font-size: 11pt;
-    gap: 7px;
+    font-size: 9.5pt;
+    gap: 4px;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-print-kicker,
+  .finance-receipt-print-sheet .finance-receipt-copy-label {
+    line-height: 1.35;
   }
 
   .finance-receipt-print-sheet .finance-receipt-print-copy h3 {
-    font-size: 14pt;
+    font-size: 12.5pt;
+    line-height: 1.35;
   }
 
   .finance-receipt-print-sheet .finance-receipt-fields {
-    margin-top: 4px;
+    margin-top: 2px;
   }
 
   .finance-receipt-print-sheet .finance-receipt-fields > div {
-    min-height: 8mm;
+    min-height: 6.5mm;
   }
 
   .finance-receipt-print-sheet .finance-receipt-fields span,
   .finance-receipt-print-sheet .finance-receipt-fields strong {
-    padding: 3px 6px;
+    padding: 2px 5px;
   }
 
   .finance-receipt-print-sheet .finance-receipt-signatures {
-    margin-top: 10px;
-    gap: 14px;
+    margin-top: 7px;
+    gap: 12px;
   }
 
   .finance-receipt-print-sheet .finance-receipt-signatures > div {
-    min-height: 34px;
-    gap: 12px;
+    min-height: 27px;
+    gap: 8px;
   }
 
   .finance-print-sheet:not(.finance-receipt-print-sheet) {
