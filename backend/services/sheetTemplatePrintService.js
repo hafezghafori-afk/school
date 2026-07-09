@@ -27,6 +27,43 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function getImageMimeType(filePath = '') {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.svg') return 'image/svg+xml';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.gif') return 'image/gif';
+  return 'image/png';
+}
+
+function resolveLocalUploadAssetPath(value = '') {
+  const raw = normalizeText(value).replace(/^\/+/, '');
+  if (!raw || !raw.startsWith('uploads/')) return '';
+  const fullPath = path.resolve(__dirname, '..', raw);
+  const uploadsRoot = path.resolve(__dirname, '..', 'uploads');
+  if (!fullPath.startsWith(`${uploadsRoot}${path.sep}`)) return '';
+  return fs.existsSync(fullPath) ? fullPath : '';
+}
+
+function toPrintableImageSrc(value = '', assetBaseUrl = '') {
+  const raw = normalizeText(value);
+  if (!raw) return '';
+  if (/^(https?:)?\/\//i.test(raw) || raw.startsWith('data:')) return raw;
+  const localPath = resolveLocalUploadAssetPath(raw);
+  if (!localPath) {
+    const assetPath = `/${raw.replace(/^\/+/, '')}`;
+    const base = normalizeText(assetBaseUrl).replace(/\/+$/, '');
+    return base && assetPath.startsWith('/uploads/') ? `${base}${assetPath}` : assetPath;
+  }
+  try {
+    return `data:${getImageMimeType(localPath)};base64,${fs.readFileSync(localPath).toString('base64')}`;
+  } catch {
+    const assetPath = `/${raw.replace(/^\/+/, '')}`;
+    const base = normalizeText(assetBaseUrl).replace(/\/+$/, '');
+    return base && assetPath.startsWith('/uploads/') ? `${base}${assetPath}` : assetPath;
+  }
+}
+
 function humanizeKey(value = '') {
   const text = normalizeText(value)
     .replace(/([a-z])([A-Z])/g, '$1 $2')
@@ -525,11 +562,8 @@ function buildOfficialReportCss(layout = {}) {
   `;
 }
 
-function buildOfficialLogoMarkup(src = '', label = 'لوگو') {
-  const normalizedSrc = normalizeText(src);
-  const assetSrc = normalizedSrc && !/^(https?:)?\/\//i.test(normalizedSrc) && !normalizedSrc.startsWith('data:') && !normalizedSrc.startsWith('/')
-    ? `/${normalizedSrc}`
-    : normalizedSrc;
+function buildOfficialLogoMarkup(src = '', label = 'لوگو', assetBaseUrl = '') {
+  const assetSrc = toPrintableImageSrc(src, assetBaseUrl);
   return assetSrc
     ? `<img class="official-report-logo" src="${escapeHtml(assetSrc)}" alt="${escapeHtml(label)}" />`
     : `<div class="official-report-logo official-report-logo--empty">${escapeHtml(label)}</div>`;
@@ -542,9 +576,10 @@ function buildOfficialHeaderHtml({ title = '', siteSettings = null, logoUrl = ''
   const schoolLine = brandName || normalizeText(siteSettings?.name) || '';
   const ministryLogo = normalizeText(siteSettings?.ministryLogoUrl || siteSettings?.governmentLogoUrl || '');
   const schoolLogo = normalizeText(logoUrl || siteSettings?.schoolLogoUrl || siteSettings?.logoUrl || '');
+  const assetBaseUrl = normalizeText(siteSettings?._printAssetBaseUrl || '');
   return `
         <section class="official-report-header">
-          ${buildOfficialLogoMarkup(ministryLogo, 'لوگو وزارت')}
+          ${buildOfficialLogoMarkup(ministryLogo, 'لوگو وزارت', assetBaseUrl)}
           <div class="official-report-center">
             <div class="line">امارت اسلامی افغانستان</div>
             <div class="line">وزارت معارف</div>
@@ -553,7 +588,7 @@ function buildOfficialHeaderHtml({ title = '', siteSettings = null, logoUrl = ''
             ${schoolLine ? `<div class="school">${escapeHtml(schoolLine)}</div>` : ''}
             ${title ? `<h1>${escapeHtml(title)}</h1>` : ''}
           </div>
-          ${buildOfficialLogoMarkup(schoolLogo, 'لوگو مکتب')}
+          ${buildOfficialLogoMarkup(schoolLogo, 'لوگو مکتب', assetBaseUrl)}
         </section>
   `;
 }
@@ -570,6 +605,13 @@ function buildOfficialFooterHtml(siteSettings = null, footerText = '') {
           <div><strong>آدرس مکتب:</strong> ${escapeHtml(address || note)}</div>
         </footer>
   `;
+}
+
+function getRequestOrigin(req = null) {
+  if (!req) return '';
+  const protocol = normalizeText(req.get?.('x-forwarded-proto') || req.protocol || 'https').split(',')[0];
+  const host = normalizeText(req.get?.('x-forwarded-host') || req.get?.('host') || '');
+  return host ? `${protocol || 'https'}://${host}` : '';
 }
 
 function renderExamSheetPrintHtml({ report = {}, title = '', subtitle = '', metadata = [], signatures = [], formalNote = '', footerText = '', logoUrl = '', siteSettings = null } = {}) {
@@ -711,6 +753,7 @@ function renderExamSheetPrintHtml({ report = {}, title = '', subtitle = '', meta
 
 async function loadSiteSettings(req = null) {
   let schoolBranding = null;
+  const printAssetBaseUrl = getRequestOrigin(req);
   if (req) {
     try {
       const resolved = await resolveActiveSchool(req, { allowSingleFallback: true });
@@ -719,12 +762,18 @@ async function loadSiteSettings(req = null) {
       schoolBranding = null;
     }
   }
-  if (mongoose.connection.readyState !== 1) return schoolBranding || null;
+  if (mongoose.connection.readyState !== 1) {
+    return (schoolBranding || printAssetBaseUrl)
+      ? { ...(schoolBranding || {}), _printAssetBaseUrl: printAssetBaseUrl }
+      : null;
+  }
   try {
     const settings = await SiteSettings.findOne({}).sort({ updatedAt: -1 }).lean();
-    return schoolBranding ? { ...(settings || {}), ...schoolBranding } : settings;
+    return { ...(settings || {}), ...(schoolBranding || {}), _printAssetBaseUrl: printAssetBaseUrl };
   } catch {
-    return schoolBranding || null;
+    return (schoolBranding || printAssetBaseUrl)
+      ? { ...(schoolBranding || {}), _printAssetBaseUrl: printAssetBaseUrl }
+      : null;
   }
 }
 
