@@ -277,7 +277,10 @@ const normalizeAcademicYearOptions = (refData = {}) => (
       code: String(item?.code || '').trim(),
       isActive: item?.isActive === true,
       isCurrent: item?.isCurrent === true,
-      status: String(item?.status || '').trim()
+      status: String(item?.status || '').trim(),
+      feeBillingMonths: Array.isArray(item?.feeBillingMonths) && item.feeBillingMonths.length
+        ? item.feeBillingMonths.map(Number)
+        : [1, 2, 3, 4, 5, 6, 7, 8, 9]
     }))
     .filter((item) => item.id)
 );
@@ -295,6 +298,7 @@ const getAcademicYearOptionLabel = (item = {}) => (
     .join(' ')
     .trim()
 );
+const AFGHAN_SCHOOL_MONTHS = ['حمل', 'ثور', 'جوزا', 'سرطان', 'اسد', 'سنبله', 'میزان', 'عقرب', 'قوس', 'جدی', 'دلو', 'حوت'];
 
 const getFinanceStudentOptionLabel = (item = {}) => (
   [
@@ -1192,6 +1196,9 @@ export default function AdminFinance() {
   const [formLayoutMode, setFormLayoutMode] = useState('landscape');
   const [orderFormMode, setOrderFormMode] = useState('manual');
   const [billingAdvancedOpen, setBillingAdvancedOpen] = useState(false);
+  const [planVisibleCount, setPlanVisibleCount] = useState(5);
+  const [billVisibleCount, setBillVisibleCount] = useState(5);
+  const [discountVisibleCount, setDiscountVisibleCount] = useState(5);
   const [paymentAdvancedOpen, setPaymentAdvancedOpen] = useState(false);
   const [reliefFormMode, setReliefFormMode] = useState('discount');
   const [incomeTrendRange, setIncomeTrendRange] = useState('daily');
@@ -1258,7 +1265,7 @@ export default function AdminFinance() {
     effectiveFrom: '',
     effectiveTo: '',
     eligibilityRule: '',
-    billingFrequency: 'term',
+    billingFrequency: 'monthly',
     tuitionFee: '',
     admissionFee: '',
     examFee: '',
@@ -1271,12 +1278,15 @@ export default function AdminFinance() {
   });
 
   const [discountForm, setDiscountForm] = useState({
+    targetScope: 'student',
     studentId: '',
     studentMembershipId: '',
     classId: '',
     academicYearId: '',
     discountType: 'discount',
+    coverageMode: 'fixed',
     amount: '',
+    percentage: '',
     durationMode: 'academic_year',
     startDate: '',
     endDate: '',
@@ -3305,6 +3315,38 @@ export default function AdminFinance() {
     }
   };
 
+  const toggleAcademicYearBillingMonth = (monthNumber) => {
+    setAcademicYears((prev) => prev.map((year) => {
+      if (year.id !== feePlanForm.academicYearId) return year;
+      const current = new Set(year.feeBillingMonths || [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+      if (current.has(monthNumber)) current.delete(monthNumber);
+      else current.add(monthNumber);
+      return { ...year, feeBillingMonths: [...current].sort((left, right) => left - right) };
+    }));
+  };
+
+  const saveAcademicYearBillingMonths = async () => {
+    const selectedYear = academicYears.find((year) => year.id === feePlanForm.academicYearId);
+    if (!selectedYear?.id || !selectedYear.feeBillingMonths?.length) {
+      setMessage('حداقل یک ماه فیس‌دار را انتخاب کنید.');
+      return;
+    }
+    try {
+      setBusy(true);
+      const data = await fetchJson(`${API_BASE}/api/academic-years/${selectedYear.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feeBillingMonths: selectedYear.feeBillingMonths })
+      });
+      if (!data?.success) throw new Error(data?.message || 'ذخیره ماه‌های فیس‌دار ناموفق بود.');
+      setMessage('ماه‌های فیس‌دار سال تعلیمی ذخیره شد.');
+      setBusy(false);
+    } catch (err) {
+      setMessage(err.message);
+      setBusy(false);
+    }
+  };
+
   const loadFeePlanIntoForm = (plan = {}) => {
     setFeePlanForm((prev) => ({
       ...prev,
@@ -3388,17 +3430,21 @@ export default function AdminFinance() {
     e.preventDefault();
     try {
       setBusy(true);
-      const resolvedMembershipId = discountForm.studentMembershipId || findFinanceMembershipId(discountForm);
-      if (!discountForm.studentId || !discountForm.classId || !discountForm.academicYearId || !resolvedMembershipId) {
+      const isClassDiscount = discountForm.targetScope === 'class';
+      const resolvedMembershipId = isClassDiscount ? '' : (discountForm.studentMembershipId || findFinanceMembershipId(discountForm));
+      if (!discountForm.classId || !discountForm.academicYearId || (!isClassDiscount && (!discountForm.studentId || !resolvedMembershipId))) {
         throw new Error('برای ثبت تخفیف، متعلم، صنف و سال تعلیمی مربوط به همان عضویت را انتخاب کنید.');
       }
       const data = await postJson(`${API_BASE}/api/student-finance/discounts`, {
-        student: discountForm.studentId,
+        targetScope: discountForm.targetScope,
+        student: isClassDiscount ? '' : discountForm.studentId,
         studentMembershipId: resolvedMembershipId,
         classId: discountForm.classId,
         academicYearId: discountForm.academicYearId,
         discountType: discountForm.discountType,
+        coverageMode: discountForm.coverageMode,
         amount: discountForm.amount,
+        percentage: discountForm.percentage,
         durationMode: discountForm.durationMode,
         startDate: discountForm.durationMode === 'custom_period' ? discountForm.startDate : '',
         endDate: discountForm.durationMode === 'custom_period' ? discountForm.endDate : '',
@@ -3436,6 +3482,7 @@ export default function AdminFinance() {
       setDiscountForm((prev) => ({
         ...prev,
         amount: '',
+        percentage: '',
         durationMode: 'academic_year',
         startDate: '',
         endDate: '',
@@ -5530,6 +5577,26 @@ export default function AdminFinance() {
                     <input value={feePlanForm.term} onChange={(e) => setFeePlanForm((p) => ({ ...p, term: e.target.value }))} placeholder="مثلاً ترم اول" />
                   </label>
                 </div>
+                <div className="finance-field">
+                  <span>ماه‌های فیس‌دار سال تعلیمی</span>
+                  <div className="finance-flag-grid">
+                    {AFGHAN_SCHOOL_MONTHS.map((label, index) => {
+                      const monthNumber = index + 1;
+                      const selectedYear = academicYears.find((year) => year.id === feePlanForm.academicYearId);
+                      return (
+                        <label className="finance-flag" key={`billing-month-${monthNumber}`}>
+                          <input
+                            type="checkbox"
+                            checked={(selectedYear?.feeBillingMonths || [1, 2, 3, 4, 5, 6, 7, 8, 9]).includes(monthNumber)}
+                            onChange={() => toggleAcademicYearBillingMonth(monthNumber)}
+                          />
+                          <span>{label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <button type="button" className="secondary" onClick={saveAcademicYearBillingMonths} disabled={busy || !feePlanForm.academicYearId}>ذخیره ماه‌های فیس‌دار</button>
+                </div>
               </section>
 
               <section className="finance-plan-builder-section">
@@ -5688,7 +5755,7 @@ export default function AdminFinance() {
                 />
               </label>
               <div className="finance-plan-list">
-                {filteredFeePlans.slice(0, 8).map((plan) => {
+                {filteredFeePlans.slice(0, planVisibleCount).map((plan) => {
                   const lifecycleStatus = String(plan.lifecycleStatus || (plan.isActive === false ? 'inactive' : 'active')).trim() || 'active';
                   const lifecycleLabel = FEE_PLAN_LIFECYCLE_LABELS[lifecycleStatus] || lifecycleStatus;
                   return (
@@ -5734,6 +5801,12 @@ export default function AdminFinance() {
                   );
                 })}
                 {!filteredFeePlans.length && <p className="muted">برای این جستجو یا تنظیمات، پلانی پیدا نشد.</p>}
+                {filteredFeePlans.length > 5 && (
+                  <div className="row-actions">
+                    {planVisibleCount < filteredFeePlans.length && <button type="button" className="secondary" onClick={() => setPlanVisibleCount((value) => value + 5)}>نمایش بیشتر</button>}
+                    {planVisibleCount > 5 && <button type="button" className="secondary" onClick={() => setPlanVisibleCount(5)}>نمایش کمتر</button>}
+                  </div>
+                )}
               </div>
             </aside>
           </div>
@@ -5750,21 +5823,37 @@ export default function AdminFinance() {
               </div>
               <span className="finance-chip">{discountRegistry.length} فعال</span>
             </div>
-            <label className="finance-inline-filter finance-inline-filter-wide">
+            <div className="finance-split-grid">
+              <label className="finance-field">
+                <span>دامنه تخفیف</span>
+                <select value={discountForm.targetScope} onChange={(e) => setDiscountForm((prev) => ({ ...prev, targetScope: e.target.value }))}>
+                  <option value="student">یک شاگرد</option>
+                  <option value="class">تمام شاگردان صنف</option>
+                </select>
+              </label>
+              <label className="finance-field">
+                <span>روش محاسبه</span>
+                <select value={discountForm.coverageMode} onChange={(e) => setDiscountForm((prev) => ({ ...prev, coverageMode: e.target.value }))}>
+                  <option value="fixed">مبلغ ثابت</option>
+                  <option value="percent">درصدی</option>
+                </select>
+              </label>
+            </div>
+            {discountForm.targetScope === 'student' && <label className="finance-inline-filter finance-inline-filter-wide">
               <span>جستجوی متعلم</span>
               <input
                 value={discountStudentSearch}
                 onChange={(e) => setDiscountStudentSearch(e.target.value)}
                 placeholder="نام، ایمیل یا شناسه متعلم"
               />
-            </label>
-            <select value={discountForm.studentId} onChange={(e) => applyDiscountMembershipStudent(e.target.value)}>
+            </label>}
+            {discountForm.targetScope === 'student' && <select value={discountForm.studentId} onChange={(e) => applyDiscountMembershipStudent(e.target.value)}>
               {discountStudentOptions.length ? discountStudentOptions.map((student) => (
                 <option key={`discount-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student)}</option>
               )) : (
                 <option value="">متعلمی پیدا نشد</option>
               )}
-            </select>
+            </select>}
             <div className="finance-split-grid">
               <select value={discountForm.classId} onChange={(e) => setDiscountForm((prev) => {
                 const next = { ...prev, classId: e.target.value };
@@ -5783,7 +5872,11 @@ export default function AdminFinance() {
               <select value={discountForm.discountType} onChange={(e) => setDiscountForm((prev) => ({ ...prev, discountType: e.target.value }))}>
                 {Object.entries(DISCOUNT_TYPE_UI_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
-              <input value={discountForm.amount} onChange={(e) => setDiscountForm((prev) => ({ ...prev, amount: e.target.value }))} placeholder="مبلغ تخفیف / تعدیل" />
+              {discountForm.coverageMode === 'fixed' ? (
+                <input type="number" min="0" value={discountForm.amount} onChange={(e) => setDiscountForm((prev) => ({ ...prev, amount: e.target.value }))} placeholder="مبلغ تخفیف" required />
+              ) : (
+                <input type="number" min="1" max="100" value={discountForm.percentage} onChange={(e) => setDiscountForm((prev) => ({ ...prev, percentage: e.target.value }))} placeholder="درصد تخفیف" required />
+              )}
             </div>
             <select
               value={discountForm.durationMode}
@@ -6049,7 +6142,7 @@ export default function AdminFinance() {
             />
           </label>
           <div className="finance-registry-list">
-            {filteredDiscountRegistry.map((item) => (
+            {filteredDiscountRegistry.slice(0, discountVisibleCount).map((item) => (
               <div key={item.id} className="finance-registry-row">
                 <div>
                   <strong>{item.student?.fullName || item.student?.name || 'متعلم'}</strong>
@@ -6058,7 +6151,7 @@ export default function AdminFinance() {
                 </div>
                 <div className="finance-registry-meta">
                   <span className="finance-chip">{DISCOUNT_TYPE_UI_LABELS[item.discountType] || item.discountType || 'تخفیف'}</span>
-                  <strong>{fmt(item.amount)} AFN</strong>
+                  <strong>{item.coverageMode === 'percent' ? `${fmt(item.percentage)}%` : `${fmt(item.amount)} AFN`}</strong>
                 </div>
                 <div className="row-actions">
                   <button type="button" className="danger" disabled={busy} onClick={() => cancelDiscountRegistry(item.id)} data-testid={`cancel-discount-${item.id}`}>لغو</button>
@@ -6066,6 +6159,12 @@ export default function AdminFinance() {
               </div>
             ))}
             {!filteredDiscountRegistry.length && <p className="muted">برای این جستجو، تخفیفی پیدا نشد.</p>}
+            {filteredDiscountRegistry.length > 5 && (
+              <div className="row-actions">
+                {discountVisibleCount < filteredDiscountRegistry.length && <button type="button" className="secondary" onClick={() => setDiscountVisibleCount((value) => value + 5)}>نمایش بیشتر</button>}
+                {discountVisibleCount > 5 && <button type="button" className="secondary" onClick={() => setDiscountVisibleCount(5)}>نمایش کمتر</button>}
+              </div>
+            )}
           </div>
         </div>
 
@@ -6447,7 +6546,7 @@ export default function AdminFinance() {
         <div className="finance-orders-table-head"><span>سند</span><span>متعلم</span><span>صنف / دوره</span><span>مبلغ</span><span>مهلت پرداخت</span><span>وضعیت</span><span>عملیات</span></div>
         <div className="finance-table bills-table finance-orders-table">
           <div className="head"><span>شماره</span><span>شاگرد</span><span>صنف</span><span>وضعیت</span><span>باقیمانده</span><span>عملیات</span></div>
-          {filteredBills.slice(0, 120).map((bill) => (
+          {filteredBills.slice(0, billVisibleCount).map((bill) => (
             <div key={bill._id} className="row">
               <span className="finance-cell-stack">
                 <strong className="finance-latin-code">{formatFinanceCode(bill.billNumber, '-')}</strong>
@@ -6477,6 +6576,12 @@ export default function AdminFinance() {
             </div>
           ))}
         </div>
+        {filteredBills.length > 5 && (
+          <div className="row-actions">
+            {billVisibleCount < filteredBills.length && <button type="button" className="secondary" onClick={() => setBillVisibleCount((value) => value + 5)}>نمایش بیشتر</button>}
+            {billVisibleCount > 5 && <button type="button" className="secondary" onClick={() => setBillVisibleCount(5)}>نمایش کمتر</button>}
+          </div>
+        )}
       </div>
 
       <div className="finance-grid" data-finance-section="overview reports">

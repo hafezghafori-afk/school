@@ -71,9 +71,11 @@ function buildFinanceReliefPayloadFromDiscount(discount = {}) {
     academicYearId: normalizeNullableId(discount.academicYearId?._id || discount.academicYearId),
     reliefType: mapDiscountTypeToReliefType(discount.discountType),
     scope: 'all',
-    coverageMode: 'fixed',
-    amount: roundMoney(discount.amount),
-    percentage: 0,
+    coverageMode: normalizeCoverageMode(discount.coverageMode, 'fixed'),
+    amount: discount.coverageMode === 'percent' ? 0 : roundMoney(discount.amount),
+    percentage: discount.coverageMode === 'percent'
+      ? Math.max(0, Math.min(100, Number(discount.percentage) || 0))
+      : 0,
     sponsorName: '',
     reason: normalizeText(discount.reason),
     note: '',

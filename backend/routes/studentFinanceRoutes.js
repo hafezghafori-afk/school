@@ -374,10 +374,11 @@ router.get('/reliefs', requireAuth, requireRole(['admin']), requirePermission('m
 
 router.post('/discounts', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await createDiscount({
+    const result = await createDiscount({
       ...(req.body || {}),
       createdBy: req.user?.id || ''
     });
+    const item = result?.bulk ? result.item : result;
     await logActivity({
       req,
       action: 'create_discount_registry',
@@ -390,7 +391,12 @@ router.post('/discounts', requireAuth, requireRole(['admin']), requirePermission
         amount: Number(item?.amount || req.body?.amount || 0)
       }
     });
-    return res.status(201).json({ success: true, item });
+    return res.status(201).json({
+      success: true,
+      item,
+      items: result?.bulk ? result.items : [item],
+      count: result?.bulk ? result.count : 1
+    });
   } catch (error) {
     const code = String(error?.message || '');
     const status = code === 'student_finance_membership_not_found' ? 400 : 500;

@@ -14,7 +14,11 @@ const discountSchema = new mongoose.Schema({
   classId: { type: mongoose.Schema.Types.ObjectId, ref: 'SchoolClass', default: null, index: true },
   academicYearId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicYear', default: null, index: true },
   discountType: { type: String, enum: ['discount', 'waiver', 'penalty', 'manual'], default: 'discount', index: true },
+  targetScope: { type: String, enum: ['student', 'class'], default: 'student', index: true },
+  groupKey: { type: String, default: '', trim: true, index: true },
+  coverageMode: { type: String, enum: ['fixed', 'percent'], default: 'fixed' },
   amount: { type: Number, default: 0, min: 0 },
+  percentage: { type: Number, default: 0, min: 0, max: 100 },
   reason: { type: String, default: '' },
   durationMode: {
     type: String,
@@ -32,10 +36,15 @@ const discountSchema = new mongoose.Schema({
 discountSchema.pre('validate', async function syncDiscountState() {
   if (typeof this.sourceKey === 'string') this.sourceKey = this.sourceKey.trim();
   if (typeof this.reason === 'string') this.reason = this.reason.trim();
+  if (typeof this.groupKey === 'string') this.groupKey = this.groupKey.trim();
+  this.targetScope = this.targetScope === 'class' ? 'class' : 'student';
+  this.coverageMode = this.coverageMode === 'percent' ? 'percent' : 'fixed';
+  this.percentage = Math.max(0, Math.min(100, Number(this.percentage) || 0));
   this.durationMode = ['academic_year', 'custom_period', 'selected_bills'].includes(this.durationMode)
     ? this.durationMode
     : 'academic_year';
   this.amount = Math.max(0, Number(this.amount) || 0);
+  if (this.coverageMode === 'percent') this.amount = 0;
   if (this.startDate && Number.isNaN(new Date(this.startDate).getTime())) this.startDate = null;
   if (this.endDate && Number.isNaN(new Date(this.endDate).getTime())) this.endDate = null;
   if (this.startDate && this.endDate && new Date(this.endDate).getTime() < new Date(this.startDate).getTime()) {

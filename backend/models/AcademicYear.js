@@ -24,6 +24,14 @@ const academicYearSchema = new mongoose.Schema({
     enum: ['cold', 'warm', 'custom'],
     default: 'custom'
   },
+  feeBillingMonths: {
+    type: [{
+      type: Number,
+      min: 1,
+      max: 12
+    }],
+    default: () => [1, 2, 3, 4, 5, 6, 7, 8, 9]
+  },
   sequence: { type: Number, default: 0 },
   status: {
     type: String,
@@ -52,6 +60,14 @@ academicYearSchema.pre('validate', function syncAcademicYearState() {
   if (typeof this.note === 'string') this.note = this.note.trim();
   if (typeof this.startDateLocal === 'string') this.startDateLocal = this.startDateLocal.trim();
   if (typeof this.endDateLocal === 'string') this.endDateLocal = this.endDateLocal.trim();
+  this.feeBillingMonths = [...new Set(
+    (Array.isArray(this.feeBillingMonths) ? this.feeBillingMonths : [])
+      .map(Number)
+      .filter((month) => Number.isInteger(month) && month >= 1 && month <= 12)
+  )].sort((left, right) => left - right);
+  if (!this.feeBillingMonths.length) {
+    this.feeBillingMonths = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+  }
 
   if (!this.code) {
     this.code = undefined;

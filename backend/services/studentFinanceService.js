@@ -388,7 +388,11 @@ function formatDiscount(doc) {
     id: String(item._id || ''),
     feeOrderId: normalizeNullableId(item.feeOrderId),
     discountType: normalizeText(item.discountType),
+    targetScope: normalizeText(item.targetScope) || 'student',
+    groupKey: normalizeText(item.groupKey),
+    coverageMode: normalizeText(item.coverageMode) || 'fixed',
     amount: Number(item.amount || 0),
+    percentage: Number(item.percentage || 0),
     reason: normalizeText(item.reason),
     durationMode: normalizeText(item.durationMode) || 'academic_year',
     startDate: item.startDate || null,
@@ -400,6 +404,39 @@ function formatDiscount(doc) {
     schoolClass: formatSchoolClass(item.classId),
     academicYear: formatAcademicYear(item.academicYearId)
   };
+}
+
+async function syncDiscountOpenBills(discount = null) {
+  if (!discount?._id || !discount?.studentMembershipId) return;
+  const marker = `[discount:${String(discount._id)}]`;
+  const bills = await FinanceBill.find({
+    studentMembershipId: discount.studentMembershipId,
+    status: { $in: ['new', 'partial', 'overdue'] }
+  });
+  for (const bill of bills) {
+    const dueDate = normalizeDateValue(bill.dueDate);
+    const periodStart = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth(), 1) : null;
+    const periodEnd = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth() + 1, 0, 23, 59, 59, 999) : null;
+    const startsAfterBill = discount.startDate && periodEnd && new Date(discount.startDate) > periodEnd;
+    const endsBeforeBill = discount.endDate && periodStart && new Date(discount.endDate) < periodStart;
+    bill.adjustments = (bill.adjustments || []).filter((row) => !normalizeText(row.reason).startsWith(marker));
+    if (discount.status === 'active' && !startsAfterBill && !endsBeforeBill) {
+      const amount = discount.coverageMode === 'percent'
+        ? Math.min(Number(bill.amountOriginal || 0), Number(bill.amountOriginal || 0) * (Number(discount.percentage || 0) / 100))
+        : Math.min(Number(bill.amountOriginal || 0), Number(discount.amount || 0));
+      if (amount > 0) {
+        bill.adjustments.push({
+          type: discount.discountType === 'penalty' ? 'penalty' : 'discount',
+          amount,
+          reason: `${marker} ${normalizeText(discount.reason)}`.trim(),
+          createdBy: discount.createdBy || null,
+          createdAt: discount.createdAt || new Date()
+        });
+      }
+    }
+    await bill.save();
+    await syncStudentFinanceFromFinanceBill(bill).catch(() => null);
+  }
 }
 
 function formatTransportFee(doc) {
@@ -1207,6 +1244,31 @@ async function listFinanceReliefs(filters = {}) {
 }
 
 async function createDiscount(payload = {}) {
+  if (normalizeText(payload.targetScope) === 'class' && !normalizeNullableId(payload.studentMembershipId)) {
+    const classId = normalizeNullableId(payload.classId);
+    const academicYearId = normalizeNullableId(payload.academicYearId);
+    if (!classId || !academicYearId) throw new Error('student_finance_membership_not_found');
+    const StudentMembership = require('../models/StudentMembership');
+    const memberships = await StudentMembership.find({
+      classId,
+      $or: [{ academicYearId }, { academicYear: academicYearId }],
+      status: { $in: ['active', 'pending', 'suspended', 'transferred_in'] },
+      isCurrent: true
+    }).select('_id').lean();
+    if (!memberships.length) throw new Error('student_finance_membership_not_found');
+    const groupKey = `class:${classId}:${academicYearId}:${Date.now()}`;
+    const items = [];
+    for (const membership of memberships) {
+      items.push(await createDiscount({
+        ...payload,
+        targetScope: 'class',
+        groupKey,
+        studentMembershipId: membership._id
+      }));
+    }
+    return { bulk: true, count: items.length, items, item: items[0] || null };
+  }
+
   const membership = await resolveMembershipForFinanceRegistry(payload);
   if (!membership) {
     throw new Error('student_finance_membership_not_found');
@@ -1235,7 +1297,13 @@ async function createDiscount(payload = {}) {
     discountType: ['discount', 'waiver', 'penalty', 'manual'].includes(normalizeText(payload.discountType))
       ? normalizeText(payload.discountType)
       : 'discount',
-    amount: Math.max(0, Number(payload.amount) || 0),
+    targetScope: normalizeText(payload.targetScope) === 'class' ? 'class' : 'student',
+    groupKey: normalizeText(payload.groupKey),
+    coverageMode: normalizeText(payload.coverageMode) === 'percent' ? 'percent' : 'fixed',
+    amount: normalizeText(payload.coverageMode) === 'percent' ? 0 : Math.max(0, Number(payload.amount) || 0),
+    percentage: normalizeText(payload.coverageMode) === 'percent'
+      ? Math.max(0, Math.min(100, Number(payload.percentage) || 0))
+      : 0,
     reason: normalizeText(payload.reason),
     durationMode,
     startDate,
@@ -1253,6 +1321,7 @@ async function createDiscount(payload = {}) {
     .populate('createdBy', 'name');
 
   await syncFinanceReliefFromDiscount(populated);
+  await syncDiscountOpenBills(populated);
 
   return formatDiscount(populated);
 }
@@ -1268,10 +1337,25 @@ async function cancelDiscount(discountId, payload = {}) {
     throw new Error('student_finance_discount_not_found');
   }
 
+  if (item.targetScope === 'class' && item.groupKey) {
+    const groupedItems = await Discount.find({ groupKey: item.groupKey, status: 'active' });
+    for (const groupedItem of groupedItems) {
+      groupedItem.status = 'cancelled';
+      groupedItem.reason = normalizeText(payload.reason) || groupedItem.reason;
+      await groupedItem.save();
+      await syncFinanceReliefFromDiscount(groupedItem);
+      await syncDiscountOpenBills(groupedItem);
+    }
+    item.status = 'cancelled';
+    item.reason = normalizeText(payload.reason) || item.reason;
+    return formatDiscount(item);
+  }
+
   item.status = 'cancelled';
   item.reason = normalizeText(payload.reason) || item.reason;
   await item.save();
   await syncFinanceReliefFromDiscount(item);
+  await syncDiscountOpenBills(item);
 
   return formatDiscount(item);
 }

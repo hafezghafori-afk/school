@@ -77,6 +77,7 @@
     "backfill:phase7-student-finance": "node ./scripts/backfillPhase7StudentFinance.js",
     "backfill:phase7-student-finance:dry": "node ./scripts/backfillPhase7StudentFinance.js --dry-run",
     "check:student-finance-routes": "node ./scripts/checkStudentFinanceRoutes.js",
+    "check:monthly-billing-calendar": "node ./scripts/checkMonthlyBillingCalendar.js",
     "finance:fee-plan-variants": "node ./scripts/migrateFinanceFeePlanVariants.js --apply",
     "finance:fee-plan-variants:dry": "node ./scripts/migrateFinanceFeePlanVariants.js --dry-run",
     "finance:line-items": "node ./scripts/backfillFeeOrderLineItems.js --apply",
