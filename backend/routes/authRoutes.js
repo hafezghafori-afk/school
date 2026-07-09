@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const User = require('../models/User');
+const AfghanSchool = require('../models/AfghanSchool');
 const AuthOtpChallenge = require('../models/AuthOtpChallenge');
 const { requireFields } = require('../middleware/validate');
 const { ok, fail } = require('../utils/response');
@@ -30,6 +31,7 @@ const TWO_FACTOR_LEVEL_FILTER = String(process.env.ADMIN_2FA_LEVELS || 'finance_
 
 const isDemoEnabled = () => String(process.env.DEMO_ENABLED || '').toLowerCase() === 'true';
 const DEMO_PASSWORD = 'Demo@12345';
+const DEMO_SCHOOL_CODE = 'DEMO-SCHOOL';
 const DEMO_USERS = {
   admin: { name: 'Demo Admin', email: 'demo.admin@school.local', role: 'admin', orgRole: 'general_president', adminLevel: 'general_president', permissions: ['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_finance', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule'] },
   finance: { name: 'Demo Finance', email: 'demo.finance@school.local', role: 'admin', orgRole: 'finance_manager', adminLevel: 'finance_manager', permissions: ['manage_finance', 'view_reports'] },
@@ -63,11 +65,40 @@ const shouldRequireTwoFactor = (user) => {
 
 const issueAuthPayload = (user) => {
   const identity = serializeUserIdentity(user);
-  const token = jwt.sign({ id: user._id.toString(), role: identity.role, orgRole: identity.orgRole, adminLevel: identity.adminLevel, status: identity.status, name: user.name }, JWT_SECRET, { expiresIn: '7d' });
+  const schoolId = user.schoolId ? String(user.schoolId) : '';
+  const isDemo = user.isDemo === true;
+  const token = jwt.sign({ id: user._id.toString(), role: identity.role, orgRole: identity.orgRole, adminLevel: identity.adminLevel, status: identity.status, name: user.name, schoolId, isDemo }, JWT_SECRET, { expiresIn: '7d' });
   const adminLevel = identity.role === 'admin' ? normalizeAdminLevel(identity.adminLevel || '') : '';
   const effectivePermissions = resolvePermissions({ role: identity.role, orgRole: identity.orgRole, permissions: user.permissions || [], adminLevel });
-  return { userId: user._id, name: user.name, role: identity.role, orgRole: identity.orgRole, status: identity.status, adminLevel, token, avatarUrl: user.avatarUrl || '', lastLoginAt: user.lastLoginAt, effectivePermissions };
+  return { userId: user._id, name: user.name, role: identity.role, orgRole: identity.orgRole, status: identity.status, adminLevel, token, schoolId, isDemo, avatarUrl: user.avatarUrl || '', lastLoginAt: user.lastLoginAt, effectivePermissions };
 };
+
+async function ensureDemoSchool() {
+  return AfghanSchool.findOneAndUpdate(
+    { schoolCode: DEMO_SCHOOL_CODE },
+    {
+      $set: {
+        name: 'Demo School',
+        nameDari: 'مکتب آزمایشی دیمو',
+        namePashto: 'د ازموینې ښوونځی',
+        ministryCode: DEMO_SCHOOL_CODE,
+        provinceCode: 'KBL',
+        province: 'kabul',
+        district: 'demo',
+        schoolType: 'private',
+        schoolLevel: 'grade1_12',
+        ownership: 'private',
+        contactInfo: { address: 'محیط آزمایشی سیستم' },
+        principal: { name: 'Demo Manager' },
+        academicInfo: { academicYear: '1405' },
+        establishmentDate: new Date('2025-03-21T00:00:00.000Z'),
+        status: 'active',
+        verificationStatus: 'verified'
+      }
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
+  );
+}
 
 const cleanupChallenges = async () => {
   const now = new Date();
@@ -100,9 +131,10 @@ router.post('/demo-seed', async (req, res) => {
     const secret = String(req.headers['x-demo-seed-secret'] || req.body?.secret || '').trim();
     if (!process.env.DEMO_SEED_SECRET || secret !== process.env.DEMO_SEED_SECRET) return fail(res, 'اجازه ساخت دیمو ندارید', 403);
     const hashedPassword = await bcrypt.hash(DEMO_PASSWORD, 10);
+    const demoSchool = await ensureDemoSchool();
     const created = [];
     for (const profile of Object.values(DEMO_USERS)) {
-      await User.findOneAndUpdate({ email: profile.email }, { $set: { ...profile, password: hashedPassword, status: 'active' } }, { upsert: true, new: true, setDefaultsOnInsert: true });
+      await User.findOneAndUpdate({ email: profile.email }, { $set: { ...profile, password: hashedPassword, status: 'active', schoolId: demoSchool._id, isDemo: true } }, { upsert: true, new: true, setDefaultsOnInsert: true });
       created.push({ email: profile.email, role: profile.role, orgRole: profile.orgRole, adminLevel: profile.adminLevel });
     }
     return ok(res, { users: created, password: DEMO_PASSWORD }, 'کاربران دیمو ساخته یا به‌روزرسانی شدند');
@@ -120,6 +152,9 @@ router.post('/demo-login', async (req, res) => {
     if (!profile) return fail(res, 'نقش دیمو معتبر نیست');
     const user = await User.findOne({ email: profile.email });
     if (!user) return fail(res, 'کاربر دیمو ساخته نشده است. اول demo-seed را اجرا کنید.', 404);
+    const demoSchool = await ensureDemoSchool();
+    user.schoolId = demoSchool._id;
+    user.isDemo = true;
     user.lastLoginAt = new Date();
     await user.save();
     return ok(res, issueAuthPayload(user), 'ورود دیمو موفق');

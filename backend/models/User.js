@@ -43,6 +43,8 @@ const userSchema = new mongoose.Schema({
     default: ''
   },
   avatarUrl: { type: String, default: '' },
+  schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'AfghanSchool', default: null, index: true },
+  isDemo: { type: Boolean, default: false, index: true },
   lastLoginAt: { type: Date, default: null },
   grade: { type: String, default: '' },
   subject: { type: String, default: '' },

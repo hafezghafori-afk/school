@@ -16,7 +16,7 @@ require('../models/Discount');
 require('../models/FeeExemption');
 require('../models/FinanceRelief');
 const { requireFields } = require('../middleware/validate');
-const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
+const { requireAuth, optionalAuth, requireRole, requirePermission } = require('../middleware/auth');
 const { ok, fail } = require('../utils/response');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
@@ -426,7 +426,7 @@ router.get('/dashboard', async (req, res) => {
 });
 
 // GET /api/afghan-schools - Get all schools with filtering
-router.get('/', async (req, res) => {
+router.get('/', optionalAuth, async (req, res) => {
   try {
     const {
       page = 1,
@@ -440,6 +440,9 @@ router.get('/', async (req, res) => {
     } = req.query;
 
     const query = { status };
+    if (req.user?.isDemo === true && req.user?.schoolId) {
+      query._id = req.user.schoolId;
+    }
 
     if (province) query.province = province;
     if (district) query.district = district;
@@ -479,10 +482,12 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/afghan-schools/active - Resolve active school context for the UI
-router.get('/active', async (req, res) => {
+router.get('/active', optionalAuth, async (req, res) => {
   try {
     const resolved = await resolveActiveSchool(req, { allowSingleFallback: true });
-    const schools = await listActiveSchools(100);
+    const schools = req.user?.isDemo === true && resolved.school
+      ? [resolved.school]
+      : await listActiveSchools(100);
     return res.json({
       success: true,
       data: {
@@ -523,8 +528,11 @@ router.post('/ownership-backfill', requireAuth, requireRole(['admin']), requireP
 });
 
 // GET /api/afghan-schools/:id - Get single school
-router.get('/:id', async (req, res) => {
+router.get('/:id', optionalAuth, async (req, res) => {
   try {
+    if (req.user?.isDemo === true && String(req.params.id || '') !== String(req.user.schoolId || '')) {
+      return fail(res, 'دسترسی حساب دیمو به این مکتب مجاز نیست', 403);
+    }
     const school = await AfghanSchool.findById(req.params.id)
       .populate('createdBy', 'name email')
       .populate('lastUpdatedBy', 'name email');

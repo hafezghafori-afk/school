@@ -30,6 +30,8 @@ export const persistAuthSession = (data = {}) => {
     ? Array.from(new Set([...GENERAL_PRESIDENT_PERMISSIONS, ...incomingPermissions]))
     : incomingPermissions;
 
+  ['schoolId', 'school_id', 'selectedSchoolId'].forEach((key) => localStorage.removeItem(key));
+
   localStorage.setItem('token', data.token || '');
   localStorage.setItem('userId', String(data.userId || ''));
   localStorage.setItem('userName', data.name || '');
@@ -40,4 +42,10 @@ export const persistAuthSession = (data = {}) => {
   localStorage.setItem('avatarUrl', data.avatarUrl || '');
   localStorage.setItem('effectivePermissions', JSON.stringify(normalizedPermissions));
   localStorage.setItem('lastLoginAt', data.lastLoginAt || '');
+  localStorage.setItem('isDemo', data.isDemo === true ? 'true' : 'false');
+  if (/^[a-f\d]{24}$/i.test(String(data.schoolId || '').trim())) {
+    localStorage.setItem('schoolId', String(data.schoolId));
+    localStorage.setItem('school_id', String(data.schoolId));
+    localStorage.setItem('selectedSchoolId', String(data.schoolId));
+  }
 };

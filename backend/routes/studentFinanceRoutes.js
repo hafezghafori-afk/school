@@ -129,7 +129,7 @@ function resolveUnexpectedPaymentFailure(error = null) {
 
 router.get('/reference-data', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const data = await listStudentFinanceReferenceData();
+    const data = await listStudentFinanceReferenceData(req.query || {});
     res.json({ success: true, ...data });
   } catch (error) {
     res.status(500).json({ success: false, message: 'دریافت اطلاعات مرجع مالی متعلم ناموفق بود.' });

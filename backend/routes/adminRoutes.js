@@ -548,7 +548,10 @@ router.get('/users', requireAuth, requireRole(['admin']), requirePermission('man
     await ensureRegisteredStudentsInUserDirectory();
     await ensureRegisteredTeachersInUserDirectory();
 
-    const items = await User.find({})
+    const userQuery = req.user?.isDemo === true && req.user?.schoolId
+      ? { schoolId: req.user.schoolId }
+      : {};
+    const items = await User.find(userQuery)
       .select(MANAGED_USER_SELECT)
       .sort({ createdAt: -1 });
 
@@ -1000,14 +1003,15 @@ router.get('/stats', requireAuth, requireRole(['admin']), requirePermission('vie
       startDate.setHours(0, 0, 0, 0); // daily
     }
 
+    const schoolFilter = req.user?.isDemo === true && req.user?.schoolId ? { schoolId: req.user.schoolId } : {};
     const [users, activeUsers, courses, totalReceipts, pendingReceipts, approvedReceipts, periodApprovedReceipts] = await Promise.all([
-      User.countDocuments(),
-      User.countDocuments({ status: 'active' }),
+      User.countDocuments(schoolFilter),
+      User.countDocuments({ ...schoolFilter, status: 'active' }),
       Course.countDocuments(),
-      FeePayment.countDocuments(),
-      FeePayment.countDocuments({ status: 'pending' }),
-      FeePayment.countDocuments({ status: 'approved' }),
-      FeePayment.countDocuments({ status: 'approved', paidAt: { $gte: startDate } })
+      FeePayment.countDocuments(schoolFilter),
+      FeePayment.countDocuments({ ...schoolFilter, status: 'pending' }),
+      FeePayment.countDocuments({ ...schoolFilter, status: 'approved' }),
+      FeePayment.countDocuments({ ...schoolFilter, status: 'approved', paidAt: { $gte: startDate } })
     ]);
 
     res.json({

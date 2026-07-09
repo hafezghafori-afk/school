@@ -46,6 +46,9 @@ function serializeSchoolBranding(school = null) {
 }
 
 function getRequestSchoolCandidates(req = {}, payload = {}) {
+  if (req.user?.isDemo === true && req.user?.schoolId) {
+    return [normalizeId(req.user.schoolId)];
+  }
   return unique([
     payload.schoolId,
     payload.currentSchool,

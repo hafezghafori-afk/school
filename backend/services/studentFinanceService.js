@@ -553,6 +553,7 @@ async function resolveMembershipForFinanceRegistry(payload = {}) {
 
 function buildOrderQuery(filters = {}) {
   const query = {};
+  if (normalizeNullableId(filters.schoolId)) query.schoolId = filters.schoolId;
   if (normalizeNullableId(filters.studentMembershipId)) query.studentMembershipId = filters.studentMembershipId;
   if (normalizeNullableId(filters.studentId)) query.studentId = filters.studentId;
   if (normalizeNullableId(filters.student)) query.student = filters.student;
@@ -564,18 +565,20 @@ function buildOrderQuery(filters = {}) {
   return query;
 }
 
-async function listStudentFinanceReferenceData() {
+async function listStudentFinanceReferenceData(filters = {}) {
+  const schoolId = normalizeNullableId(filters.schoolId);
+  const schoolFilter = schoolId ? { schoolId } : {};
   const [academicYears, schoolClasses, memberships, sessions] = await Promise.all([
-    AcademicYear.find({}).sort({ isActive: -1, sequence: 1, createdAt: 1 }),
-    SchoolClass.find({ status: { $ne: 'archived' } }).populate('academicYearId').sort({ title: 1, createdAt: 1 }),
-    StudentMembership.find({ isCurrent: true })
+    AcademicYear.find(schoolFilter).sort({ isActive: -1, sequence: 1, createdAt: 1 }),
+    SchoolClass.find({ ...schoolFilter, status: { $ne: 'archived' } }).populate('academicYearId').sort({ title: 1, createdAt: 1 }),
+    StudentMembership.find({ ...schoolFilter, isCurrent: true })
       .populate('studentId')
       .populate('student', 'name email')
       .populate({ path: 'classId', populate: { path: 'academicYearId' } })
       .populate('academicYearId')
       .sort({ createdAt: -1 })
       .limit(200),
-    ExamSession.find({}).populate('academicYearId').populate('assessmentPeriodId').populate({ path: 'classId', populate: { path: 'academicYearId' } }).populate('examTypeId').sort({ createdAt: -1 }).limit(200)
+    ExamSession.find(schoolFilter).populate('academicYearId').populate('assessmentPeriodId').populate({ path: 'classId', populate: { path: 'academicYearId' } }).populate('examTypeId').sort({ createdAt: -1 }).limit(200)
   ]);
 
   return {
@@ -749,6 +752,7 @@ function resolvePaymentAllocations({ openOrders = [], payload = {} } = {}) {
 
 async function listFeePayments(filters = {}) {
   const query = {};
+  if (normalizeNullableId(filters.schoolId)) query.schoolId = filters.schoolId;
   if (normalizeNullableId(filters.feeOrderId)) query.feeOrderId = filters.feeOrderId;
   if (normalizeNullableId(filters.studentMembershipId)) query.studentMembershipId = filters.studentMembershipId;
   if (normalizeNullableId(filters.studentId)) query.studentId = filters.studentId;
@@ -1203,6 +1207,7 @@ function buildMembershipStatement({ membership = null, summary = {}, orders = []
 
 async function listDiscounts(filters = {}) {
   const query = {};
+  if (normalizeNullableId(filters.schoolId)) query.schoolId = filters.schoolId;
   if (normalizeNullableId(filters.feeOrderId)) query.feeOrderId = filters.feeOrderId;
   if (normalizeNullableId(filters.studentMembershipId)) query.studentMembershipId = filters.studentMembershipId;
   if (normalizeText(filters.linkScope)) query.linkScope = normalizeText(filters.linkScope);
@@ -1220,6 +1225,7 @@ async function listDiscounts(filters = {}) {
 
 async function listFinanceReliefs(filters = {}) {
   const query = {};
+  if (normalizeNullableId(filters.schoolId)) query.schoolId = filters.schoolId;
   if (normalizeNullableId(filters.feeOrderId)) query.feeOrderId = filters.feeOrderId;
   if (normalizeNullableId(filters.studentMembershipId)) query.studentMembershipId = filters.studentMembershipId;
   if (normalizeNullableId(filters.studentId)) query.studentId = filters.studentId;
@@ -1362,6 +1368,7 @@ async function cancelDiscount(discountId, payload = {}) {
 
 async function listFeeExemptions(filters = {}) {
   const query = {};
+  if (normalizeNullableId(filters.schoolId)) query.schoolId = filters.schoolId;
   if (normalizeNullableId(filters.studentMembershipId)) query.studentMembershipId = filters.studentMembershipId;
   if (normalizeNullableId(filters.studentId)) query.studentId = filters.studentId;
   if (normalizeNullableId(filters.classId)) query.classId = filters.classId;
