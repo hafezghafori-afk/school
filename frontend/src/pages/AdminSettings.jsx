@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './AdminSettings.css';
 import { API_BASE } from '../config/api';
 import LoginSettingsManager from '../components/LoginSettingsManager';
-import { getPrintLogoUrls } from '../utils/printLogos';
+import { getPrintLogoUrls, storePrintLogos } from '../utils/printLogos';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -169,6 +169,7 @@ export default function AdminSettings() {
         };
       }
       setSettings(nextSettings);
+      storePrintLogos(nextSettings);
       setAccessDenied(false);
       setMessage('');
     } catch {
@@ -239,6 +240,7 @@ export default function AdminSettings() {
         ...(normalized.studentIdFormats || {})
       };
       setSettings(normalized);
+      storePrintLogos(normalized);
       setMessage(successText);
     } catch {
       setMessage('خطا در ذخیره تنظیمات');
@@ -275,6 +277,7 @@ export default function AdminSettings() {
         ...(normalized.studentIdFormats || {})
       };
       setSettings(normalized);
+      storePrintLogos(normalized);
       setOfficialLogoFiles({ schoolLogo: null, ministryLogo: null });
       if (!quiet) setMessage('لوگوهای رسمی فرم‌ها و گزارش‌ها ذخیره شد.');
       return normalized;
