@@ -876,16 +876,17 @@
 
 .finance-receipt-letterhead {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr) 58px;
+  grid-template-columns: 76px minmax(0, 1fr) 76px;
   gap: 8px;
   align-items: center;
   direction: ltr;
 }
 
 .finance-receipt-letterhead .finance-print-logo-box {
-  width: 54px;
-  height: 54px;
+  width: 72px;
+  height: 72px;
   font-size: 8pt;
+  padding: 2px;
 }
 
 .finance-receipt-letterhead-center {

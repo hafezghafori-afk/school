@@ -23,9 +23,10 @@ export const readStoredPrintLogos = () => {
 
 export const storePrintLogos = (settings = {}) => {
   if (typeof window === 'undefined') return;
+  const stored = readStoredPrintLogos();
   const payload = {
-    schoolLogoUrl: settings?.schoolLogoUrl || settings?.logoUrl || '',
-    ministryLogoUrl: settings?.ministryLogoUrl || ''
+    schoolLogoUrl: settings?.schoolLogoUrl || settings?.logoUrl || stored.schoolLogoUrl || '',
+    ministryLogoUrl: settings?.ministryLogoUrl || stored.ministryLogoUrl || ''
   };
   try {
     window.localStorage.setItem(PRINT_LOGOS_STORAGE_KEY, JSON.stringify(payload));
