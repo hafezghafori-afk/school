@@ -2156,12 +2156,12 @@ export default function AdminFinance() {
         fetchJson(`${API_BASE}/api/student-finance/discounts?status=active`),
         fetchJson(`${API_BASE}/api/student-finance/reliefs?status=active`),
         fetchJson(`${API_BASE}/api/student-finance/exemptions?status=active`),
-        fetchJson(`${API_BASE}/api/finance/admin/delivery-providers`),
-        fetchJson(`${API_BASE}/api/finance/admin/delivery-campaigns?limit=12`),
-        fetchJson(`${API_BASE}/api/finance/admin/delivery-campaigns/templates`),
-        fetchJson(`${API_BASE}/api/finance/admin/delivery-campaigns/analytics${buildDeliveryOperationsQuery()}`),
-        fetchJson(`${API_BASE}/api/finance/admin/delivery-campaigns/retry-queue${buildDeliveryOperationsQuery({ includeLimit: true })}`),
-        fetchJson(`${API_BASE}/api/finance/admin/delivery-campaigns/recovery-queue${buildDeliveryRecoveryQuery({ includeLimit: true })}`),
+        Promise.resolve({ success: true, items: [] }),
+        Promise.resolve({ success: true, items: [] }),
+        Promise.resolve({ success: true, items: [], variables: [] }),
+        Promise.resolve({ success: true, analytics: null }),
+        Promise.resolve({ success: true, items: [] }),
+        Promise.resolve({ success: true, items: [] }),
         fetchJson(`${API_BASE}/api/finance/admin/document-archive?limit=12`),
         fetchJson(buildScopedReportUrl('/api/finance/admin/reports/audit-timeline')),
         fetchJson(buildScopedReportUrl('/api/finance/admin/reports/anomalies'))
@@ -6969,7 +6969,7 @@ export default function AdminFinance() {
         ) : null}
       </div>
 
-      <div className="finance-card" data-finance-section="reports settings" data-testid="finance-delivery-provider-config-card">
+      {false && <div className="finance-card" data-finance-section="reports settings" data-testid="finance-delivery-provider-config-card">
         <div className="finance-card-head">
           <div>
             <h3>تنظیمات ارایه‌کننده و وب‌هوک</h3>
@@ -7295,9 +7295,9 @@ export default function AdminFinance() {
             </div>
           </div>
         </div>
-      </div>
+      </div>}
 
-      <div className="finance-card" data-finance-section="reports settings" data-testid="finance-delivery-campaign-card">
+      {false && <div className="finance-card" data-finance-section="reports settings" data-testid="finance-delivery-campaign-card">
         <div className="finance-card-head">
           <div>
             <h3>کمپاین و اتوماسیون ارسال</h3>
@@ -8353,7 +8353,7 @@ export default function AdminFinance() {
             </div>
           </div>
         </div>
-      </div>
+      </div>}
 
       <div className="finance-card" data-finance-section="reports settings" data-testid="finance-document-archive-card">
         <div className="finance-card-head">
