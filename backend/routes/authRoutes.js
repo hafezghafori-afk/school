@@ -56,6 +56,7 @@ const maskEmail = (email = '') => {
 
 const shouldRequireTwoFactor = (user) => {
   const identity = serializeUserIdentity(user);
+  if (user?.isDemo === true) return false;
   if (!ADMIN_2FA_ENABLED) return false;
   if (identity.role !== 'admin') return false;
   if (!TWO_FACTOR_LEVEL_FILTER.length) return true;
@@ -98,6 +99,20 @@ async function ensureDemoSchool() {
     },
     { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
   );
+}
+
+function isDemoUser(user = null) {
+  const email = String(user?.email || '').trim().toLowerCase();
+  return Object.values(DEMO_USERS).some((profile) => profile.email === email);
+}
+
+async function ensureDemoIdentity(user = null) {
+  if (!user || !isDemoUser(user)) return user;
+  const demoSchool = await ensureDemoSchool();
+  user.schoolId = demoSchool._id;
+  user.isDemo = true;
+  await user.save();
+  return user;
 }
 
 const cleanupChallenges = async () => {
@@ -152,9 +167,7 @@ router.post('/demo-login', async (req, res) => {
     if (!profile) return fail(res, 'نقش دیمو معتبر نیست');
     const user = await User.findOne({ email: profile.email });
     if (!user) return fail(res, 'کاربر دیمو ساخته نشده است. اول demo-seed را اجرا کنید.', 404);
-    const demoSchool = await ensureDemoSchool();
-    user.schoolId = demoSchool._id;
-    user.isDemo = true;
+    await ensureDemoIdentity(user);
     user.lastLoginAt = new Date();
     await user.save();
     return ok(res, issueAuthPayload(user), 'ورود دیمو موفق');
@@ -189,6 +202,7 @@ router.post('/login', requireFields(['email', 'password']), async (req, res) => 
     if (!user) return fail(res, 'ایمیل یا رمز عبور اشتباه است');
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return fail(res, 'ایمیل یا رمز عبور اشتباه است');
+    await ensureDemoIdentity(user);
     if (shouldRequireTwoFactor(user)) {
       await cleanupChallenges();
       await AuthOtpChallenge.deleteMany({ user: user._id, purpose: 'login_2fa', consumedAt: null });
