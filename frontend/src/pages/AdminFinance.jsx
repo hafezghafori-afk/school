@@ -850,7 +850,7 @@ const FINANCE_SECTION_LABELS = {
   orders: 'بل‌ها و تعهدات',
   discounts: 'تخفیف و معافیت',
   reports: 'گزارش‌ها',
-  settings: 'تنظیمات'
+  settings: 'تنظیمات و پلان مالی'
 };
 
 const FINANCE_SECTION_DESCRIPTIONS = {
@@ -4952,7 +4952,7 @@ export default function AdminFinance() {
             <button type="button" className="secondary" onClick={() => setActiveSection('orders')}>بل‌ها و تعهدات</button>
             <button type="button" className="secondary" onClick={() => setActiveSection('discounts')}>تخفیف و معافیت</button>
             <button type="button" className="secondary" onClick={() => setActiveSection('reports')}>گزارش‌های مالی</button>
-            <button type="button" className="secondary" onClick={() => setActiveSection('settings')}>پلان فیس و تنظیمات</button>
+            <button type="button" className="secondary" onClick={() => setActiveSection('settings')}>تنظیمات و پلان مالی</button>
             <Link className="finance-launch-link" to="/admin-government-finance">فرماندهی مالی دولت</Link>
           </div>
           <div className="finance-subcard-list">
