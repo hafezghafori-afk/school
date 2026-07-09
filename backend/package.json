@@ -132,6 +132,7 @@
     "node-fetch": "^3.3.2",
     "nodemailer": "^6.10.1",
     "pdfkit": "^0.17.2",
+    "playwright": "^1.59.1",
     "qrcode": "^1.5.3",
     "socket.io": "^4.7.5"
   },

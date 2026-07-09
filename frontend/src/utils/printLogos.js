@@ -2,12 +2,20 @@ import { API_BASE } from '../config/api';
 
 const PRINT_LOGOS_STORAGE_KEY = 'officialPrintLogos';
 
+const getBrowserOrigin = () => {
+  if (typeof window === 'undefined') return '';
+  return window.location?.origin || '';
+};
+
+const isLocalApiBase = (base = '') => /(^|\/\/)(localhost|127\.0\.0\.1)(:|\/|$)/i.test(base);
+
 export const toAssetUrl = (value = '') => {
   const raw = String(value || '').trim();
   if (!raw) return '';
   if (/^(https?:)?\/\//i.test(raw) || raw.startsWith('data:')) return raw;
   const assetPath = `/${raw.replace(/^\/+/, '')}`;
-  const base = String(API_BASE || '').replace(/\/+$/, '').replace(/\/api$/i, '');
+  const configuredBase = String(API_BASE || '').replace(/\/+$/, '').replace(/\/api$/i, '');
+  const base = isLocalApiBase(configuredBase) ? getBrowserOrigin() : configuredBase;
   return `${base}${assetPath}`;
 };
 
