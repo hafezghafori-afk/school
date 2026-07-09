@@ -2302,12 +2302,33 @@
 
 @media print {
   @page {
-    size: A4 landscape;
-    margin: 25.4mm;
+    size: A4 portrait;
+    margin: 12mm;
+  }
+
+  html,
+  body,
+  #root {
+    width: 100%;
+    min-height: 0;
+    margin: 0;
+    background: #fff;
   }
 
   body * {
     visibility: hidden;
+  }
+
+  .finance-page > :not(.finance-print-sheet) {
+    display: none !important;
+  }
+
+  .finance-page {
+    display: block !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    overflow: visible !important;
   }
 
   .finance-print-sheet,
@@ -2317,25 +2338,62 @@
 
   .finance-print-sheet {
     display: block;
-    position: absolute;
-    inset: 0;
+    position: static;
+    inset: auto;
+    width: 100%;
     padding: 0;
     background: #fff;
     color: #111;
     font-size: 12pt;
+    box-sizing: border-box;
   }
 
   .finance-receipt-print-sheet {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12.7mm;
-    align-items: start;
+    display: block;
+    width: 100%;
+    max-width: 186mm;
+    min-height: auto;
+    margin: 0 auto;
     direction: rtl;
   }
 
   .finance-receipt-print-sheet .finance-receipt-print-copy {
     min-height: auto;
     break-inside: avoid;
+    page-break-inside: avoid;
+    font-size: 11pt;
+    gap: 7px;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-print-copy h3 {
+    font-size: 14pt;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-fields {
+    margin-top: 4px;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-fields > div {
+    min-height: 8mm;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-fields span,
+  .finance-receipt-print-sheet .finance-receipt-fields strong {
+    padding: 3px 6px;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-signatures {
+    margin-top: 10px;
+    gap: 14px;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-signatures > div {
+    min-height: 34px;
+    gap: 12px;
+  }
+
+  .finance-print-sheet:not(.finance-receipt-print-sheet) {
+    font-size: 11pt;
   }
 
   .finance-print-sheet .receipt-meta-grid > div,
