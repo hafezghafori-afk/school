@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
 const PDFDocument = require('pdfkit');
+const { execFile } = require('child_process');
 
 const SiteSettings = require('../models/SiteSettings');
 
@@ -1526,9 +1527,7 @@ async function buildBrowserReportPdfBuffer({ report = {}, template = null, req =
     const layout = getLayout(template);
     const html = await renderReportPrintHtml({ report, template, req });
 
-    browser = await chromium.launch({
-      headless: true
-    });
+    browser = await launchChromium(chromium);
     const page = await browser.newPage({
       locale: 'fa-AF'
     });
@@ -1556,6 +1555,50 @@ async function buildBrowserReportPdfBuffer({ report = {}, template = null, req =
   }
 }
 
+function isMissingPlaywrightBrowserError(error) {
+  const message = String(error?.message || error || '');
+  return message.includes('Executable doesn') || message.includes('playwright install') || message.includes('chrome-headless-shell');
+}
+
+function installPlaywrightChromium() {
+  return new Promise((resolve, reject) => {
+    const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+    execFile(command, ['playwright', 'install', 'chromium'], {
+      cwd: path.join(__dirname, '..'),
+      windowsHide: true,
+      timeout: 180000
+    }, (error, stdout, stderr) => {
+      if (error) {
+        error.message = `${error.message}\n${stderr || stdout || ''}`.trim();
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+async function launchChromium(chromium) {
+  try {
+    return await chromium.launch({ headless: true });
+  } catch (error) {
+    if (!isMissingPlaywrightBrowserError(error)) throw error;
+    console.warn('Playwright Chromium browser is missing; attempting runtime install.');
+    await installPlaywrightChromium();
+    return chromium.launch({ headless: true });
+  }
+}
+
+async function buildReportPdfBufferWithFallback(args = {}) {
+  try {
+    return await buildBrowserReportPdfBuffer(args);
+  } catch (error) {
+    if (!isMissingPlaywrightBrowserError(error)) throw error;
+    console.warn(`Playwright PDF rendering unavailable; falling back to PDFKit. ${error.message}`);
+    return buildReportPdfBuffer(args);
+  }
+}
+
 module.exports = {
-  buildReportPdfBuffer: buildBrowserReportPdfBuffer
+  buildReportPdfBuffer: buildReportPdfBufferWithFallback
 };

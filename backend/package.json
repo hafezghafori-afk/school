@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
-    "postinstall": "npx playwright install chromium",
+    "install:playwright": "npx playwright install chromium",
+    "postinstall": "npm run install:playwright",
     "lint": "eslint \"**/*.js\" --ignore-pattern node_modules --ignore-pattern uploads",
     "lint:fix": "npm run lint -- --fix",
     "check:syntax": "node ./scripts/checkSyntax.js",
