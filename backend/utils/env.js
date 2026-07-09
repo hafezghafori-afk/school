@@ -69,6 +69,7 @@ const getCorsOptions = () => {
   const openInDev = !isProduction() && allowList.size === 0;
 
   return {
+    exposedHeaders: ['Content-Disposition', 'Content-Type', 'Content-Length'],
     origin(origin, callback) {
       // Allow server-to-server and same-origin requests without Origin header.
       if (!origin) return callback(null, true);

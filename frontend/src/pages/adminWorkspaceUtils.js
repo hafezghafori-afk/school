@@ -179,6 +179,16 @@ function readFilename(disposition = '', fallback = 'download.bin') {
   return decodeURIComponent(match[1].replace(/\"/g, '').trim());
 }
 
+function filenameForContentType(contentType = '', fallback = 'download') {
+  const type = String(contentType || '').toLowerCase();
+  if (type.includes('application/pdf')) return `${fallback}.pdf`;
+  if (type.includes('text/html')) return `${fallback}.html`;
+  if (type.includes('text/csv')) return `${fallback}.csv`;
+  if (type.includes('spreadsheetml')) return `${fallback}.xlsx`;
+  if (type.includes('application/zip')) return `${fallback}.zip`;
+  return `${fallback}.bin`;
+}
+
 export async function fetchBlob(path, body = {}, options = {}) {
   const method = String(options.method || 'POST').toUpperCase();
   const headers = {
@@ -201,10 +211,11 @@ export async function fetchBlob(path, body = {}, options = {}) {
     throw error;
   }
 
+  const contentType = response.headers.get('content-type') || '';
   return {
     blob: await response.blob(),
-    filename: readFilename(response.headers.get('content-disposition') || '', 'download.bin'),
-    contentType: response.headers.get('content-type') || ''
+    filename: readFilename(response.headers.get('content-disposition') || '', filenameForContentType(contentType, 'report')),
+    contentType
   };
 }
 
@@ -230,10 +241,11 @@ export async function fetchText(path, body = {}, options = {}) {
     throw error;
   }
 
+  const contentType = response.headers.get('content-type') || 'text/html; charset=utf-8';
   return {
     text: await response.text(),
-    filename: readFilename(response.headers.get('content-disposition') || '', 'report.html'),
-    contentType: response.headers.get('content-type') || 'text/html; charset=utf-8'
+    filename: readFilename(response.headers.get('content-disposition') || '', filenameForContentType(contentType, 'report')),
+    contentType
   };
 }
 
