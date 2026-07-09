@@ -63,7 +63,6 @@ const ORG_ROLE_OPTIONS = [
   { key: 'parent', label: 'والد/سرپرست', role: 'parent' },
   { key: 'instructor', label: 'استاد', role: 'instructor' },
   { key: 'finance_manager', label: 'مدیر مالی', role: 'admin' },
-  { key: 'finance_lead', label: 'آمر مالی', role: 'admin' },
   { key: 'school_manager', label: 'مدیر مکتب', role: 'admin' },
   { key: 'academic_manager', label: 'مدیر تدریسی', role: 'admin' },
   { key: 'head_teacher', label: 'سر معلم مکتب', role: 'admin' },
@@ -100,7 +99,6 @@ const ROLE_OPTIONS = [
 
 const ADMIN_LEVEL_OPTIONS = [
   { key: 'finance_manager', label: 'مدیر مالی' },
-  { key: 'finance_lead', label: 'آمر مالی' },
   { key: 'school_manager', label: 'مدیر مکتب' },
   { key: 'academic_manager', label: 'مدیر تدریسی' },
   { key: 'head_teacher', label: 'سر معلم مکتب' },
@@ -120,7 +118,7 @@ const ORG_ROLE_DEFAULT_PERMISSIONS = {
 };
 
 const LOCKED_PERMISSION_ORG_ROLES = new Set(['finance_manager', 'finance_lead']);
-const KNOWN_ORG_ROLES = new Set(ORG_ROLE_OPTIONS.map((item) => item.key));
+const KNOWN_ORG_ROLES = new Set([...ORG_ROLE_OPTIONS.map((item) => item.key), 'finance_lead']);
 const KNOWN_USER_STATUSES = new Set(USER_STATUS_OPTIONS.map((item) => item.key));
 
 const ACCESS_STATUS_LABELS = {
@@ -287,9 +285,27 @@ const deriveOrgRole = ({ orgRole = '', role = '', adminLevel = '' } = {}) => {
 };
 
 const roleLabel = (role) => ROLE_OPTIONS.find((item) => item.key === role)?.label || role;
-const orgRoleLabel = (orgRole) => ORG_ROLE_OPTIONS.find((item) => item.key === orgRole)?.label || orgRole;
+const orgRoleLabel = (orgRole) => (
+  String(orgRole || '').trim().toLowerCase() === 'finance_lead'
+    ? 'آمر مالی (قدیمی)'
+    : ORG_ROLE_OPTIONS.find((item) => item.key === orgRole)?.label || orgRole
+);
+const orgRoleSelectOptions = (current = '') => {
+  const normalized = String(current || '').trim().toLowerCase();
+  if (normalized === 'finance_lead') {
+    return [
+      { key: 'finance_lead', label: 'آمر مالی (قدیمی)', role: 'admin' },
+      ...ORG_ROLE_OPTIONS
+    ];
+  }
+  return ORG_ROLE_OPTIONS;
+};
 const isDeactivatableUser = (user) => DEACTIVATABLE_ORG_ROLES.has(String(user?.orgRole || '').trim().toLowerCase());
-const adminLevelLabel = (level) => ADMIN_LEVEL_OPTIONS.find((item) => item.key === level)?.label || '-';
+const adminLevelLabel = (level) => (
+  String(level || '').trim().toLowerCase() === 'finance_lead'
+    ? 'آمر مالی (قدیمی)'
+    : ADMIN_LEVEL_OPTIONS.find((item) => item.key === level)?.label || '-'
+);
 const userStatusLabel = (status) => USER_STATUS_OPTIONS.find((item) => item.key === status)?.label || status;
 const permissionLabel = (permission) => PERMISSION_OPTIONS.find((item) => item.key === permission)?.label || permission;
 const accessStatusLabel = (status) => ACCESS_STATUS_LABELS[String(status || '').trim().toLowerCase()] || '-';
@@ -1793,12 +1809,13 @@ export default function AdminUsers() {
                             ? 'برای ریاست عمومی، مجوزهای پیش‌فرض فعال است و در کنار آن می‌توانید مجوزهای تکمیلی را هم انتخاب کنید.'
                             : 'مجوزهای انتخابی به مجوزهای پیش‌فرض همین نقش افزوده می‌شود.'}
                       </div>
-                      <PermissionTree
-                        idPrefix="dedicated-form"
-                        value={form.permissions || []}
-                        disabled={isPermissionsLocked(form.orgRole)}
-                        onChange={(permissions) => setForm((prev) => ({ ...prev, permissions }))}
-                      />
+                      {!isPermissionsLocked(form.orgRole) ? (
+                        <PermissionTree
+                          idPrefix="dedicated-form"
+                          value={form.permissions || []}
+                          onChange={(permissions) => setForm((prev) => ({ ...prev, permissions }))}
+                        />
+                      ) : null}
                     </div>
 
                     <div className="effective-permissions-preview">
@@ -2102,12 +2119,13 @@ export default function AdminUsers() {
                   ? 'برای ریاست عمومی، مجوزهای پیش‌فرض اعمال می‌شود و مجوزهای اضافی هم قابل انتخاب است.'
                   : 'برای شاگرد و استاد، مجوزهای انتخابی به مجوزهای پیش‌فرض نقش اضافه می‌شود.'}
             </div>
-            <PermissionTree
-              idPrefix="legacy-form"
-              value={form.permissions || []}
-              disabled={isPermissionsLocked(form.orgRole)}
-              onChange={(permissions) => setForm((prev) => ({ ...prev, permissions }))}
-            />
+            {!isPermissionsLocked(form.orgRole) ? (
+              <PermissionTree
+                idPrefix="legacy-form"
+                value={form.permissions || []}
+                onChange={(permissions) => setForm((prev) => ({ ...prev, permissions }))}
+              />
+            ) : null}
           </div>
 
           <div className="effective-permissions-preview">
@@ -2212,20 +2230,22 @@ export default function AdminUsers() {
                           disabled={rowBusy}
                           onChange={(e) => updateRole(user._id, e.target.value)}
                         >
-                          {ORG_ROLE_OPTIONS.map((opt) => (
+                          {orgRoleSelectOptions(user.orgRole).map((opt) => (
                             <option key={`access-role-${user._id}-${opt.key}`} value={opt.key}>{opt.label}</option>
                           ))}
                         </select>
                       </label>
 
                       <div className="access-editor-permissions">
-                        <PermissionTree
-                          compact
-                          idPrefix={`access-editor-${user._id}`}
-                          value={user.permissions || []}
-                          disabled={rowBusy || permissionsLocked}
-                          onChange={(permissions) => updatePermissions(user._id, permissions, user.orgRole)}
-                        />
+                        {!permissionsLocked ? (
+                          <PermissionTree
+                            compact
+                            idPrefix={`access-editor-${user._id}`}
+                            value={user.permissions || []}
+                            disabled={rowBusy}
+                            onChange={(permissions) => updatePermissions(user._id, permissions, user.orgRole)}
+                          />
+                        ) : null}
                         <small className="adminlevel-hint">
                           {permissionsLocked
                             ? 'مجوزهای نقش مالی ثابت است و از همین نقش محاسبه می‌شود.'
@@ -2459,13 +2479,15 @@ export default function AdminUsers() {
                   </select>
                 </div>
                 <div className="permissions-mini">
-                  <PermissionTree
-                    compact
-                    idPrefix={`user-row-${user._id}`}
-                    value={user.permissions || []}
-                    disabled={busyId === user._id || permissionsLocked}
-                    onChange={(permissions) => updatePermissions(user._id, permissions, user.orgRole)}
-                  />
+                  {!permissionsLocked ? (
+                    <PermissionTree
+                      compact
+                      idPrefix={`user-row-${user._id}`}
+                      value={user.permissions || []}
+                      disabled={busyId === user._id}
+                      onChange={(permissions) => updatePermissions(user._id, permissions, user.orgRole)}
+                    />
+                  ) : null}
                   <small className="adminlevel-hint">
                     {permissionsLocked
                       ? `مجوزهای ${orgRoleLabel(user.orgRole)} از خود نقش سازمانی محاسبه می‌شود.`
@@ -2488,7 +2510,7 @@ export default function AdminUsers() {
                     disabled={busyId === user._id}
                     onChange={(e) => updateRole(user._id, e.target.value)}
                   >
-                    {ORG_ROLE_OPTIONS.map((opt) => (
+                    {orgRoleSelectOptions(user.orgRole).map((opt) => (
                       <option key={opt.key} value={opt.key}>{opt.label}</option>
                     ))}
                   </select>
@@ -2598,7 +2620,7 @@ export default function AdminUsers() {
                       form: adaptDraftForOrgRole(prev.form, e.target.value)
                     }))}
                   >
-                    {ORG_ROLE_OPTIONS.map((opt) => (
+                    {orgRoleSelectOptions(editModal.form.orgRole).map((opt) => (
                       <option key={`edit-${opt.key}`} value={opt.key}>{opt.label}</option>
                     ))}
                   </select>
@@ -2644,15 +2666,16 @@ export default function AdminUsers() {
                       ? 'برای نقش‌های مالی، مجوزها از خود نقش سازمانی تعیین می‌شود و در این بخش دستی نیست.'
                       : 'مجوزهای انتخابی به مجوزهای پیش‌فرض نقش افزوده می‌شود.'}
                   </div>
-                  <PermissionTree
-                    idPrefix="edit-permission"
-                    value={editModal.form.permissions || []}
-                    disabled={isPermissionsLocked(editModal.form.orgRole)}
-                    onChange={(permissions) => setEditModal((prev) => ({
-                      ...prev,
-                      form: { ...prev.form, permissions }
-                    }))}
-                  />
+                  {!isPermissionsLocked(editModal.form.orgRole) ? (
+                    <PermissionTree
+                      idPrefix="edit-permission"
+                      value={editModal.form.permissions || []}
+                      onChange={(permissions) => setEditModal((prev) => ({
+                        ...prev,
+                        form: { ...prev.form, permissions }
+                      }))}
+                    />
+                  ) : null}
                   <div className="effective-permissions-preview">
                     <span>مجوزهای موثر:</span>
                     <div className="effective-chip-wrap">

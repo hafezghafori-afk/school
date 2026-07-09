@@ -213,20 +213,26 @@ export default function AdminSettings() {
     setSaving(true);
     setMessage('');
     try {
+      let settingsToSave = settings;
+      if (officialLogoFiles.schoolLogo || officialLogoFiles.ministryLogo) {
+        const uploadedSettings = await uploadOfficialLogos({ keepSaving: true, quiet: true });
+        if (!uploadedSettings) return;
+        settingsToSave = uploadedSettings;
+      }
       const res = await fetch(`${API_BASE}/api/settings`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           ...getAuthHeaders()
         },
-        body: JSON.stringify(settings)
+        body: JSON.stringify(settingsToSave)
       });
       const data = await res.json();
       if (!data?.success) {
         setMessage(data?.message || 'ذخیره تنظیمات ناموفق بود.');
         return;
       }
-      const normalized = data.settings || settings;
+      const normalized = data.settings || settingsToSave;
       normalized.adminQuickLinks = normalizeAdminQuickLinks(normalized.adminQuickLinks);
       normalized.studentIdFormats = {
         ...DEFAULT_STUDENT_ID_FORMATS,
@@ -241,12 +247,12 @@ export default function AdminSettings() {
     }
   };
 
-  const uploadOfficialLogos = async () => {
+  const uploadOfficialLogos = async ({ keepSaving = false, quiet = false } = {}) => {
     if (!officialLogoFiles.schoolLogo && !officialLogoFiles.ministryLogo) {
       setMessage('اول لوگوی مکتب یا لوگوی وزارت معارف را انتخاب کنید.');
-      return;
+      return null;
     }
-    setSaving(true);
+    if (!keepSaving) setSaving(true);
     setMessage('');
     try {
       const formData = new FormData();
@@ -260,7 +266,7 @@ export default function AdminSettings() {
       const data = await res.json();
       if (!data?.success) {
         setMessage(data?.message || 'بارگذاری لوگوها ناموفق بود.');
-        return;
+        return null;
       }
       const normalized = data.settings || settings;
       normalized.adminQuickLinks = normalizeAdminQuickLinks(normalized.adminQuickLinks);
@@ -270,11 +276,13 @@ export default function AdminSettings() {
       };
       setSettings(normalized);
       setOfficialLogoFiles({ schoolLogo: null, ministryLogo: null });
-      setMessage('لوگوهای رسمی فرم‌ها و گزارش‌ها ذخیره شد.');
+      if (!quiet) setMessage('لوگوهای رسمی فرم‌ها و گزارش‌ها ذخیره شد.');
+      return normalized;
     } catch {
       setMessage('خطا در بارگذاری لوگوها');
+      return null;
     } finally {
-      setSaving(false);
+      if (!keepSaving) setSaving(false);
     }
   };
 
@@ -346,6 +354,7 @@ export default function AdminSettings() {
         <div className="settings-actions">
           <button type="button" disabled={saving} onClick={uploadOfficialLogos}>ذخیره لوگوها</button>
         </div>
+        {message && <div className="settings-message settings-message-inline">{message}</div>}
       </section>
 
       <section className="settings-card">
