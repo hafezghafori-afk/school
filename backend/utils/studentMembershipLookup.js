@@ -6,7 +6,7 @@ const StudentCore = require('../models/StudentCore');
 const StudentMembership = require('../models/StudentMembership');
 const { deriveLinkScope } = require('./financeLinkScope');
 
-const ACTIVE_MEMBERSHIP_STATUSES = Object.freeze(['active', 'transferred_in', 'suspended']);
+const ACTIVE_MEMBERSHIP_STATUSES = Object.freeze(['active', 'pending', 'transferred_in', 'suspended']);
 
 const trimText = (value = '') => String(value || '').trim();
 
