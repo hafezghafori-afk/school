@@ -6,6 +6,8 @@ const Course = require('../models/Course');
 const CourseJoinRequest = require('../models/CourseJoinRequest');
 const Schedule = require('../models/Schedule');
 const StudentMembership = require('../models/StudentMembership');
+const FinanceBill = require('../models/FinanceBill');
+const FeeOrder = require('../models/FeeOrder');
 const User = require('../models/User');
 const Enrollment = require('../models/Enrollment');
 const AfghanStudent = require('../models/AfghanStudent');
@@ -26,6 +28,7 @@ const DEFAULT_SINGLE_SCHOOL_ID = '000000000000000000000001';
 
 const membershipAccessOptions = Object.freeze({});
 const CURRENT_STUDENT_MEMBERSHIP_STATUSES = Object.freeze(['active', 'pending', 'suspended', 'transferred_in']);
+const STUDENT_LIFECYCLE_MANAGE_PERMISSIONS = Object.freeze(['students.lifecycle.manage', 'students.transfers.manage', 'manage_memberships', 'manage_users']);
 
 const mustObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
 const asObjectIdOrNull = (value) => (mustObjectId(value) ? value : null);
@@ -770,19 +773,26 @@ const findInstructorSubjectDuplicate = ({ excludeId = '', instructorId = '', sub
 const enrollmentStatusToMembershipStatus = (value = '') => ({
   approved: 'active',
   active: 'active',
+  transferred_in: 'transferred_in',
+  transfer_in: 'transferred_in',
   pending: 'pending',
   rejected: 'rejected',
   dropped: 'dropped',
+  dropout: 'dropped',
   transferred: 'transferred',
+  transferred_out: 'transferred_out',
+  transfer_out: 'transferred_out',
   graduated: 'graduated'
 }[String(value || '').trim().toLowerCase()] || '');
 
 const membershipStatusToEnrollmentStatus = (value = '') => ({
   active: 'approved',
+  transferred_in: 'transferred_in',
   pending: 'pending',
   rejected: 'rejected',
   dropped: 'dropped',
   transferred: 'transferred',
+  transferred_out: 'transferred_out',
   graduated: 'graduated'
 }[String(value || '').trim().toLowerCase()] || 'approved');
 
@@ -834,7 +844,13 @@ const withEducationReferenceRead = [
 const withManageMemberships = [
   requireAuth,
   requireRole(['admin']),
-  requireAnyPermission(['manage_memberships', 'manage_users'])
+  requireAnyPermission(STUDENT_LIFECYCLE_MANAGE_PERMISSIONS)
+];
+
+const withManageStudentLifecycle = [
+  requireAuth,
+  requireRole(['admin']),
+  requireAnyPermission(STUDENT_LIFECYCLE_MANAGE_PERMISSIONS)
 ];
 
 const withInstructorManageContent = [
@@ -2323,7 +2339,7 @@ router.get('/student-enrollments', ...withManageMemberships, async (req, res) =>
     if (normalizedStatus) {
       filter.status = enrollmentStatusToMembershipStatus(normalizedStatus);
     } else {
-      filter.status = { $in: ['active', 'pending', 'rejected'] };
+      filter.status = { $in: ['active', 'transferred_in', 'pending', 'rejected', 'transferred_out', 'dropped'] };
     }
     if (mustObjectId(studentId)) filter.student = studentId;
     if (classId) {
@@ -2458,6 +2474,152 @@ router.post('/student-enrollments', ...withManageMemberships, async (req, res) =
     });
   } catch (error) {
     res.status(500).json({ success: false, message: 'ذخیره ثبت‌نام متعلم ناموفق بود.' });
+  }
+});
+
+router.post('/student-enrollments/lifecycle', ...withManageStudentLifecycle, async (req, res) => {
+  try {
+    const action = normalizeText(req.body?.action).toLowerCase();
+    const effectiveAt = req.body?.effectiveDate ? new Date(req.body.effectiveDate) : new Date();
+    const note = normalizeText(req.body?.note);
+
+    if (!['transfer_in', 'transfer_out', 'dropout'].includes(action)) {
+      return res.status(400).json({ success: false, message: 'نوع عملیات چرخه شاگرد معتبر نیست.' });
+    }
+    if (Number.isNaN(effectiveAt.getTime())) {
+      return res.status(400).json({ success: false, message: 'تاریخ اثر معتبر نیست.' });
+    }
+
+    let item = null;
+    let stoppedFutureBills = { bills: 0, orders: 0 };
+
+    if (action === 'transfer_in') {
+      const studentIdInput = normalizeText(req.body?.studentId);
+      const classId = normalizeText(req.body?.classId);
+      const courseId = normalizeText(req.body?.courseId);
+      if (!studentIdInput || (!mustObjectId(classId) && !mustObjectId(courseId))) {
+        return res.status(400).json({ success: false, message: 'برای تبدیلی آمد، شاگرد و صنف الزامی است.' });
+      }
+
+      const [resolvedStudent, classRef] = await Promise.all([
+        resolveCanonicalStudentUser(studentIdInput),
+        resolveClassReference({ classId, courseId })
+      ]);
+      if (resolvedStudent?.error) return res.status(400).json({ success: false, message: resolvedStudent.error });
+      if (classRef.error) return res.status(400).json({ success: false, message: classRef.error });
+      if (!classRef.course) return res.status(400).json({ success: false, message: 'صنف معتبر نیست.' });
+
+      const nextCourseId = String(classRef.course._id);
+      const nextClassId = classRef.classId || '';
+      const nextAcademicYearId = classRef.schoolClass?.academicYearId?._id || classRef.schoolClass?.academicYearId || classRef.course.academicYearRef || null;
+
+      item = await StudentMembership.findOne({
+        student: resolvedStudent.studentId,
+        course: nextCourseId,
+        isCurrent: true
+      }).sort({ updatedAt: -1, createdAt: -1 });
+
+      if (!item) {
+        const otherCurrent = await StudentMembership.findOne({
+          student: resolvedStudent.studentId,
+          isCurrent: true,
+          status: { $in: CURRENT_STUDENT_MEMBERSHIP_STATUSES }
+        }).sort({ updatedAt: -1, createdAt: -1 });
+
+        if (otherCurrent && String(otherCurrent.course || '') !== String(nextCourseId)) {
+          return res.status(409).json({
+            success: false,
+            message: 'این شاگرد فعلاً عضویت فعال دیگری دارد؛ اول تبدیلی رفت یا ترک تحصیل را برای عضویت قبلی ثبت کنید.'
+          });
+        }
+
+        item = new StudentMembership({
+          student: resolvedStudent.studentId,
+          course: nextCourseId,
+          classId: nextClassId || null
+        });
+      }
+
+      item.student = resolvedStudent.studentId;
+      item.course = nextCourseId;
+      item.classId = nextClassId || null;
+      item.academicYear = nextAcademicYearId || null;
+      item.academicYearId = nextAcademicYearId || null;
+      item.status = 'transferred_in';
+      item.source = 'admin';
+      item.joinedAt = effectiveAt;
+      item.enrolledAt = effectiveAt;
+      item.note = note || 'تبدیلی آمد';
+      item.rejectedReason = '';
+      if (req.user?.id) item.createdBy = req.user.id;
+      await item.save();
+    } else {
+      const membershipId = normalizeText(req.body?.membershipId);
+      if (!mustObjectId(membershipId)) {
+        return res.status(400).json({ success: false, message: 'برای این عملیات، عضویت شاگرد را انتخاب کنید.' });
+      }
+
+      item = await StudentMembership.findById(membershipId);
+      if (!item) return res.status(404).json({ success: false, message: 'عضویت شاگرد پیدا نشد.' });
+
+      item.status = action === 'transfer_out' ? 'transferred_out' : 'dropped';
+      item.endedAt = effectiveAt;
+      item.leftAt = effectiveAt;
+      item.endedReason = item.status;
+      item.note = note || (action === 'transfer_out' ? 'تبدیلی رفت' : 'ترک تحصیل');
+      if (req.user?.id) item.createdBy = req.user.id;
+      await item.save();
+
+      const nextMonthStart = new Date(effectiveAt.getFullYear(), effectiveAt.getMonth() + 1, 1);
+      const voidFields = {
+        status: 'void',
+        voidReason: action === 'transfer_out' ? 'شاگرد تبدیلی رفت.' : 'شاگرد ترک تحصیل کرد.',
+        voidedBy: req.user?.id || null,
+        voidedAt: new Date()
+      };
+      const [billUpdate, orderUpdate] = await Promise.all([
+        FinanceBill.updateMany(
+          { studentMembershipId: item._id, status: { $in: ['new', 'overdue'] }, dueDate: { $gte: nextMonthStart } },
+          { $set: voidFields }
+        ),
+        FeeOrder.updateMany(
+          { studentMembershipId: item._id, status: { $in: ['new', 'overdue'] }, dueDate: { $gte: nextMonthStart } },
+          { $set: voidFields }
+        )
+      ]);
+      stoppedFutureBills = {
+        bills: billUpdate?.modifiedCount || 0,
+        orders: orderUpdate?.modifiedCount || 0
+      };
+    }
+
+    await logActivity({
+      req,
+      action: `student_lifecycle_${action}`,
+      targetType: 'StudentMembership',
+      targetId: item._id.toString(),
+      meta: {
+        lifecycleAction: action,
+        effectiveAt: effectiveAt.toISOString(),
+        stoppedFutureBills
+      },
+      reason: note
+    });
+
+    const populated = await populateStudentEnrollments(StudentMembership.findById(item._id));
+    const schoolClass = item.classId ? await loadSerializedSchoolClassById(item.classId) : null;
+    return res.json({
+      success: true,
+      stoppedFutureBills,
+      item: serializeStudentEnrollment(populated, schoolClass),
+      message: action === 'transfer_in'
+        ? 'تبدیلی آمد ثبت شد.'
+        : action === 'transfer_out'
+          ? 'تبدیلی رفت ثبت شد و بل‌های آینده متوقف شدند.'
+          : 'ترک تحصیل ثبت شد و بل‌های آینده متوقف شدند.'
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'ثبت عملیات چرخه شاگرد ناموفق بود.' });
   }
 });
 

@@ -10,6 +10,7 @@ const emptyYear = { id: '', title: '', startDate: '', endDate: '', note: '', isA
 const emptyTerm = { id: '', academicYearId: '', title: '', code: '', order: 1, type: 'term', startDate: '', endDate: '', note: '' };
 const emptyMap = { id: '', instructorId: '', subjectId: '', academicYearId: '', classId: '', note: '', isPrimary: false };
 const emptyEnroll = { id: '', studentId: '', classId: '', status: 'approved', note: '', rejectedReason: '' };
+const emptyLifecycle = { action: 'transfer_in', studentId: '', classId: '', membershipId: '', effectiveDate: '', note: '' };
 
 const putJson = (path, body) => fetchJson(path, {
   method: 'PUT',
@@ -46,8 +47,17 @@ const SECTION_OPTIONS = [
 
 const ENROLLMENT_STATUS_OPTIONS = [
   { value: 'approved', label: 'تایید شده' },
+  { value: 'transferred_in', label: 'تبدیلی آمد' },
   { value: 'pending', label: 'در انتظار' },
-  { value: 'rejected', label: 'رد شده' }
+  { value: 'rejected', label: 'رد شده' },
+  { value: 'transferred_out', label: 'تبدیلی رفت' },
+  { value: 'dropped', label: 'ترک تحصیل' }
+];
+
+const STUDENT_LIFECYCLE_ACTIONS = [
+  { value: 'transfer_in', label: 'تبدیلی آمد', needsStudent: true, needsClass: true },
+  { value: 'transfer_out', label: 'تبدیلی رفت', needsMembership: true },
+  { value: 'dropout', label: 'ترک تحصیل', needsMembership: true }
 ];
 
 const TERM_TYPE_OPTIONS = [
@@ -302,6 +312,7 @@ export default function AdminEducationCore() {
   const [termForm, setTermForm] = useState(emptyTerm);
   const [mapForm, setMapForm] = useState(emptyMap);
   const [enrollForm, setEnrollForm] = useState(emptyEnroll);
+  const [lifecycleForm, setLifecycleForm] = useState(emptyLifecycle);
 
   const effectivePermissions = useMemo(() => {
     try {
@@ -313,7 +324,11 @@ export default function AdminEducationCore() {
   }, []);
   const canManageUsers = effectivePermissions.includes('manage_users');
   const canManageContent = effectivePermissions.includes('manage_content');
-  const canManageMemberships = canManageUsers || effectivePermissions.includes('manage_memberships');
+  const canManageMemberships = canManageUsers
+    || effectivePermissions.includes('manage_memberships')
+    || effectivePermissions.includes('students.lifecycle.manage')
+    || effectivePermissions.includes('students.transfers.manage');
+  const canManageStudentLifecycle = canManageMemberships;
   const visibleEducationSections = useMemo(() => (
     canManageContent
       ? EDUCATION_SECTIONS
@@ -350,6 +365,12 @@ export default function AdminEducationCore() {
   const selectedEnrollmentCandidate = useMemo(() => (
     studentOptions.find((item) => String(item.value || '') === String(enrollForm.studentId || '')) || null
   ), [studentOptions, enrollForm.studentId]);
+  const lifecycleAction = useMemo(() => (
+    STUDENT_LIFECYCLE_ACTIONS.find((item) => item.value === lifecycleForm.action) || STUDENT_LIFECYCLE_ACTIONS[0]
+  ), [lifecycleForm.action]);
+  const activeLifecycleMemberships = useMemo(() => (
+    enrollments.filter((item) => ['approved', 'transferred_in', 'pending'].includes(String(item.status || '').trim()))
+  ), [enrollments]);
   const filteredStudentOptions = useMemo(() => {
     const needle = String(candidateSearchQuery || '').trim().toLowerCase();
 
@@ -1167,6 +1188,46 @@ export default function AdminEducationCore() {
     }
   };
 
+  const saveLifecycleAction = async () => {
+    const action = lifecycleForm.action;
+    if (action === 'transfer_in' && (!lifecycleForm.studentId || !lifecycleForm.classId)) {
+      showMessage('برای تبدیلی آمد، شاگرد و صنف را انتخاب کنید.', 'error');
+      return;
+    }
+    if (action !== 'transfer_in' && !lifecycleForm.membershipId) {
+      showMessage('برای تبدیلی رفت یا ترک تحصیل، عضویت شاگرد را انتخاب کنید.', 'error');
+      return;
+    }
+    if (!lifecycleForm.effectiveDate) {
+      showMessage('تاریخ اثر عملیات را انتخاب کنید.', 'error');
+      return;
+    }
+
+    try {
+      setBusyAction('lifecycle');
+      const payload = {
+        action,
+        studentId: lifecycleForm.studentId,
+        classId: lifecycleForm.classId,
+        membershipId: lifecycleForm.membershipId,
+        effectiveDate: lifecycleForm.effectiveDate,
+        note: lifecycleForm.note
+      };
+      const data = await postJson('/api/education/student-enrollments/lifecycle', payload);
+      const stopped = data?.stoppedFutureBills || {};
+      const stoppedText = Number(stopped.bills || 0) || Number(stopped.orders || 0)
+        ? ` بل‌های آینده متوقف شد: ${Number(stopped.bills || 0).toLocaleString('fa-AF-u-ca-persian')} بل و ${Number(stopped.orders || 0).toLocaleString('fa-AF-u-ca-persian')} فیس.`
+        : '';
+      showMessage(`${data?.message || 'عملیات چرخه شاگرد ثبت شد.'}${stoppedText}`, 'info');
+      setLifecycleForm({ ...emptyLifecycle, action });
+      await loadAll();
+    } catch (error) {
+      showMessage(errorMessage(error, 'ثبت عملیات چرخه شاگرد ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
   const saveInlineEnrollment = async (candidateId, classId) => {
     if (!classId) return showMessage('لطفاً صنف را انتخاب کنید.', 'error');
     try {
@@ -1899,6 +1960,93 @@ export default function AdminEducationCore() {
             </button>
           </div>
         </article>
+
+        {canManageStudentLifecycle ? (
+          <article className="admin-workspace-card admin-registration-panel-card open" data-span="12">
+            <div className="admin-education-enrollment-pane-head">
+              <div>
+                <h2>عملیات چرخه شاگرد</h2>
+                <p>تبدیلی آمد، تبدیلی رفت و ترک تحصیل از همین فورم ثبت می‌شود و اثر مالی ماه‌های آینده خودکار اعمال می‌گردد.</p>
+              </div>
+              <span className="admin-workspace-badge info">آموزشی با اثر مالی</span>
+            </div>
+            <div className="admin-workspace-form">
+              <div className="admin-workspace-form-grid">
+                <div className="admin-workspace-field">
+                  <label>نوع عملیات</label>
+                  <select
+                    value={lifecycleForm.action}
+                    onChange={(event) => setLifecycleForm((current) => ({
+                      ...emptyLifecycle,
+                      action: event.target.value,
+                      effectiveDate: current.effectiveDate,
+                      note: current.note
+                    }))}
+                  >
+                    {STUDENT_LIFECYCLE_ACTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                  </select>
+                </div>
+
+                {lifecycleAction.needsStudent ? (
+                  <div className="admin-workspace-field">
+                    <label>شاگرد</label>
+                    <select value={lifecycleForm.studentId} onChange={(event) => setLifecycleForm((current) => ({ ...current, studentId: event.target.value }))}>
+                      <option value="">انتخاب شاگرد</option>
+                      {studentOptions.map((item) => <option key={item.value} value={item.value}>{item.uiLabel}</option>)}
+                    </select>
+                  </div>
+                ) : null}
+
+                {lifecycleAction.needsClass ? (
+                  <div className="admin-workspace-field">
+                    <label>صنف جدید</label>
+                    <select value={lifecycleForm.classId} onChange={(event) => setLifecycleForm((current) => ({ ...current, classId: event.target.value }))}>
+                      <option value="">انتخاب صنف</option>
+                      {classOptions.map((item) => <option key={item.id || item._id} value={item.id || item._id}>{item.uiLabel}</option>)}
+                    </select>
+                  </div>
+                ) : null}
+
+                {lifecycleAction.needsMembership ? (
+                  <div className="admin-workspace-field">
+                    <label>عضویت شاگرد</label>
+                    <select value={lifecycleForm.membershipId} onChange={(event) => setLifecycleForm((current) => ({ ...current, membershipId: event.target.value }))}>
+                      <option value="">انتخاب عضویت فعال</option>
+                      {activeLifecycleMemberships.map((item) => (
+                        <option key={item._id} value={item._id}>
+                          {[item.user?.name, item.schoolClass?.title || item.course?.title, item.schoolClass?.academicYear?.title].filter(Boolean).join(' | ')}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+
+                <div className="admin-workspace-field">
+                  <label>تاریخ اثر</label>
+                  <AfghanDateInput
+                    value={lifecycleForm.effectiveDate}
+                    onChange={(value) => setLifecycleForm((current) => ({ ...current, effectiveDate: value }))}
+                    showGregorianEquivalent
+                  />
+                </div>
+              </div>
+              <div className="admin-workspace-field">
+                <label>یادداشت</label>
+                <textarea
+                  value={lifecycleForm.note}
+                  onChange={(event) => setLifecycleForm((current) => ({ ...current, note: event.target.value }))}
+                  placeholder="مثلاً: شاگرد از مکتب دیگر تبدیلی آورد یا به مکتب دیگر تبدیل شد"
+                />
+              </div>
+              <div className="admin-workspace-actions">
+                <button type="button" className="admin-workspace-button primary" onClick={saveLifecycleAction} disabled={busyAction === 'lifecycle'}>
+                  {busyAction === 'lifecycle' ? 'در حال ثبت...' : 'ثبت عملیات'}
+                </button>
+                <button type="button" className="admin-workspace-button-ghost" onClick={() => setLifecycleForm(emptyLifecycle)}>پاک‌کردن فورم</button>
+              </div>
+            </div>
+          </article>
+        ) : null}
 
         <div id="admin-registration-panels" className="admin-registration-panel-stack">
         <article id="admin-registration-workspace" className={`admin-workspace-card admin-registration-panel-card${activeEnrollmentPanel === 'registration' ? ' open' : ''}`} data-span="12">
