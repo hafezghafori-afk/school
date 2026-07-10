@@ -30,6 +30,7 @@ const SCORE_CLEARING_STATUSES = new Set(['pending', 'absent', 'excused']);
 const INITIAL_FILTERS = {
   academicYearId: '',
   assessmentPeriodId: '',
+  teacherId: '',
   classId: '',
   subjectId: '',
   examTypeId: '',
@@ -106,6 +107,12 @@ const encodeParams = (params = {}) => {
 const sanitizeExamNote = (value = '') => {
   const note = String(value || '').trim();
   return note === 'initialized_roster' ? '' : note;
+};
+
+const isMonthlyExamType = (item = {}) => {
+  const code = String(item?.code || '').trim().toUpperCase();
+  const title = String(item?.title || '').trim();
+  return code === 'MONTHLY' || title.includes('ماهوار');
 };
 
 const buildSessionScopeFilters = (filters = {}, { isInstructorView = false } = {}) => ({
@@ -194,7 +201,6 @@ export default function GradeManager() {
   const [publishing, setPublishing] = useState(false);
 
   const isInstructor = userRole() === 'instructor';
-  const isAdmin = userRole() === 'admin';
   const selectedSession = useMemo(
     () => sessions.find((item) => String(item.id) === String(selectedSessionId)) || null,
     [sessions, selectedSessionId]
@@ -206,21 +212,35 @@ export default function GradeManager() {
     ))
   ), [referenceData.teacherAssignments, isInstructor]);
 
-  const filteredTerms = useMemo(() => (
-    referenceData.assessmentPeriods.filter((item) => (
-      !filters.academicYearId || String(item?.academicYear?.id || '') === String(filters.academicYearId)
-    ))
-  ), [referenceData.assessmentPeriods, filters.academicYearId]);
+  const visibleExamTypes = useMemo(
+    () => (referenceData.examTypes || []).filter((item) => !isMonthlyExamType(item)),
+    [referenceData.examTypes]
+  );
+
+  const teacherOptions = useMemo(() => (
+    Array.from(
+      new Map(
+        scopedAssignments
+          .filter((item) => item?.teacher?.id)
+          .filter((item) => !filters.academicYearId || String(item?.academicYear?.id || '') === String(filters.academicYearId))
+          .map((item) => [String(item.teacher.id), item.teacher])
+      ).values()
+    ).sort((left, right) => String(left.name || '').localeCompare(String(right.name || '')))
+  ), [scopedAssignments, filters.academicYearId]);
 
   const filteredClasses = useMemo(() => {
     const fallbackClasses = referenceData.classes.filter((item) => (
       !filters.academicYearId || String(item?.academicYear?.id || '') === String(filters.academicYearId)
     ));
-    if (!isInstructor) {
+    if (!isInstructor && !filters.teacherId) {
+      return [];
+    }
+    if (!isInstructor && !scopedAssignments.length) {
       return fallbackClasses;
     }
     const sourceAssignments = scopedAssignments.filter((item) => (
-      !filters.academicYearId || String(item?.academicYear?.id || '') === String(filters.academicYearId)
+      (!filters.academicYearId || String(item?.academicYear?.id || '') === String(filters.academicYearId))
+      && (isInstructor || !filters.teacherId || String(item?.teacher?.id || '') === String(filters.teacherId))
     ));
     if (!sourceAssignments.length) {
       return fallbackClasses;
@@ -232,7 +252,7 @@ export default function GradeManager() {
           .map((item) => [String(item.schoolClass.id), item.schoolClass])
       ).values()
     );
-  }, [referenceData.classes, scopedAssignments, filters.academicYearId, isInstructor]);
+  }, [referenceData.classes, scopedAssignments, filters.academicYearId, filters.teacherId, isInstructor]);
 
   const filteredSubjects = useMemo(() => {
     const fallbackSubjects = referenceData.subjects.filter((item) => {
@@ -242,14 +262,17 @@ export default function GradeManager() {
       if (!gradeLevel || !Array.isArray(item.gradeLevels) || !item.gradeLevels.length) return true;
       return item.gradeLevels.map(Number).includes(gradeLevel);
     });
-    if (!isInstructor) {
+    if (!isInstructor && !filters.teacherId) {
+      return [];
+    }
+    if (!isInstructor && !scopedAssignments.length) {
       return fallbackSubjects;
     }
     const sourceAssignments = scopedAssignments.filter((item) => {
       const matchesYear = !filters.academicYearId || String(item?.academicYear?.id || '') === String(filters.academicYearId);
-      const matchesTerm = !filters.assessmentPeriodId || !item?.assessmentPeriod?.id || String(item?.assessmentPeriod?.id || '') === String(filters.assessmentPeriodId);
+      const matchesTeacher = isInstructor || !filters.teacherId || String(item?.teacher?.id || '') === String(filters.teacherId);
       const matchesClass = !filters.classId || String(item?.schoolClass?.id || '') === String(filters.classId);
-      return matchesYear && matchesTerm && matchesClass;
+      return matchesYear && matchesTeacher && matchesClass;
     });
     if (!sourceAssignments.length) {
       return fallbackSubjects;
@@ -261,7 +284,7 @@ export default function GradeManager() {
           .map((item) => [String(item.subject.id), item.subject])
       ).values()
     );
-  }, [referenceData.subjects, referenceData.classes, scopedAssignments, filters.academicYearId, filters.assessmentPeriodId, filters.classId, isInstructor]);
+  }, [referenceData.subjects, referenceData.classes, scopedAssignments, filters.academicYearId, filters.teacherId, filters.classId, isInstructor]);
 
   const scoreComponents = useMemo(() => ({
     writtenMax: toSafeNumber(sheet?.scoreComponents?.writtenMax || filters.writtenMax),
@@ -299,24 +322,34 @@ export default function GradeManager() {
         || (data.assessmentPeriods || []).find((item) => String(item?.academicYear?.id || '') === String(activeYear?.id || ''))
         || data.assessmentPeriods?.[0]
         || null;
-      const monthlyExam = (data.examTypes || []).find((item) => String(item.code || '').toUpperCase() === 'MONTHLY')
-        || data.examTypes?.[0]
+      const availableExamTypes = (data.examTypes || []).filter((item) => !isMonthlyExamType(item));
+      const defaultExamType = availableExamTypes?.[0]
         || null;
       const defaultAssignment = (data.teacherAssignments || []).find((item) => (
         !isInstructor || String(item?.teacher?.id || '') === String(userId())
       )) || null;
+      const defaultTeacher = defaultAssignment?.teacher || (!isInstructor
+        ? Array.from(
+            new Map(
+              (data.teacherAssignments || [])
+                .filter((item) => item?.teacher?.id)
+                .map((item) => [String(item.teacher.id), item.teacher])
+            ).values()
+          )[0]
+        : null);
       const defaultClass = (data.classes || []).find((item) => (
         !activeYear?.id || String(item?.academicYear?.id || '') === String(activeYear.id)
       )) || data.classes?.[0] || null;
-      const defaultSubject = data.subjects?.[0] || null;
+      const defaultSubject = defaultAssignment?.subject || null;
 
       setFilters((prev) => ({
         ...prev,
         academicYearId: prev.academicYearId || defaultAssignment?.academicYear?.id || activeYear?.id || '',
         assessmentPeriodId: prev.assessmentPeriodId || defaultAssignment?.assessmentPeriod?.id || activeTerm?.id || '',
-        classId: prev.classId || defaultAssignment?.schoolClass?.id || (!isInstructor ? defaultClass?.id : '') || '',
-        subjectId: prev.subjectId || defaultAssignment?.subject?.id || (!isInstructor ? defaultSubject?.id : '') || '',
-        examTypeId: prev.examTypeId || monthlyExam?.id || ''
+        teacherId: prev.teacherId || defaultTeacher?.id || '',
+        classId: prev.classId || defaultAssignment?.schoolClass?.id || (!isInstructor && defaultTeacher ? '' : defaultClass?.id || '') || '',
+        subjectId: prev.subjectId || defaultSubject?.id || '',
+        examTypeId: prev.examTypeId || defaultExamType?.id || ''
       }));
     } catch {
       applyMessage('بارگیری معلومات مرجع امتحانات موفق نشد.', 'error');
@@ -398,17 +431,36 @@ export default function GradeManager() {
   const findTeacherAssignmentId = () => {
     const matches = scopedAssignments.filter((item) => {
       const matchesYear = !filters.academicYearId || String(item?.academicYear?.id || '') === String(filters.academicYearId);
-      const matchesTerm = !filters.assessmentPeriodId || !item?.assessmentPeriod?.id || String(item?.assessmentPeriod?.id || '') === String(filters.assessmentPeriodId);
+      const matchesTeacher = isInstructor || !filters.teacherId || String(item?.teacher?.id || '') === String(filters.teacherId);
       const matchesClass = !filters.classId || String(item?.schoolClass?.id || '') === String(filters.classId);
       const matchesSubject = !filters.subjectId || String(item?.subject?.id || '') === String(filters.subjectId);
-      return matchesYear && matchesTerm && matchesClass && matchesSubject;
+      return matchesYear && matchesTeacher && matchesClass && matchesSubject;
     });
     return matches[0]?.id || '';
   };
 
   const handleFilterChange = (event) => {
     const { name, value } = event.target;
-    setFilters((prev) => ({ ...prev, [name]: value }));
+    setFilters((prev) => {
+      const next = { ...prev, [name]: value };
+      if (name === 'academicYearId') {
+        const nextTerm = referenceData.assessmentPeriods.find((item) => item.isActive && String(item?.academicYear?.id || '') === String(value))
+          || referenceData.assessmentPeriods.find((item) => String(item?.academicYear?.id || '') === String(value))
+          || null;
+        next.assessmentPeriodId = nextTerm?.id || '';
+        next.teacherId = '';
+        next.classId = '';
+        next.subjectId = '';
+      }
+      if (name === 'teacherId') {
+        next.classId = '';
+        next.subjectId = '';
+      }
+      if (name === 'classId') {
+        next.subjectId = '';
+      }
+      return next;
+    });
   };
 
   const handleSearch = () => {
@@ -416,8 +468,8 @@ export default function GradeManager() {
   };
 
   const handleOpenSheet = async () => {
-    if (!filters.academicYearId || !filters.assessmentPeriodId || !filters.classId || !filters.subjectId || !filters.examTypeId) {
-      applyMessage('برای باز کردن شقه، سال تعلیمی، ترم، صنف، مضمون و نوع امتحان را تعیین کنید.', 'error');
+    if (!filters.academicYearId || !filters.assessmentPeriodId || !filters.teacherId || !filters.classId || !filters.subjectId || !filters.examTypeId) {
+      applyMessage('برای باز کردن شقه، سال تعلیمی، استاد، صنف، مضمون و نوع امتحان را تعیین کنید.', 'error');
       return;
     }
 
@@ -619,7 +671,7 @@ export default function GradeManager() {
         <section className="grade-manager-filters">
           <div className="grade-flow-note">
             <strong>مسیر رسمی:</strong>
-            <span>سال، ترم، صنف، مضمون و نوع امتحان را انتخاب کن، سپس «ایجاد یا بازکردن شقه» را بزن. لیست صنف و مضمون برای ادمین از مرکز مدیریت آموزش خوانده می‌شود.</span>
+            <span>سال و استاد را انتخاب کن؛ سیستم خودش فقط صنف‌ها و مضمون‌های مربوط همان استاد را نشان می‌دهد. سپس نوع امتحان را تعیین و شقه رسمی را بساز.</span>
           </div>
 
           <label>
@@ -633,11 +685,11 @@ export default function GradeManager() {
           </label>
 
           <label>
-            <span>ترم</span>
-            <select name="assessmentPeriodId" value={filters.assessmentPeriodId} onChange={handleFilterChange} disabled={loadingRefs}>
-              <option value="">انتخاب ترم</option>
-              {filteredTerms.map((item) => (
-                <option key={item.id} value={item.id}>{item.title}</option>
+            <span>استاد</span>
+            <select name="teacherId" value={filters.teacherId} onChange={handleFilterChange} disabled={loadingRefs || isInstructor}>
+              <option value="">انتخاب استاد</option>
+              {teacherOptions.map((item) => (
+                <option key={item.id} value={item.id}>{item.name || item.email || 'استاد'}</option>
               ))}
             </select>
           </label>
@@ -666,7 +718,7 @@ export default function GradeManager() {
             <span>نوع امتحان</span>
             <select name="examTypeId" value={filters.examTypeId} onChange={handleFilterChange} disabled={loadingRefs}>
               <option value="">انتخاب نوع</option>
-              {referenceData.examTypes.map((item) => (
+              {visibleExamTypes.map((item) => (
                 <option key={item.id} value={item.id}>{item.title}</option>
               ))}
             </select>
