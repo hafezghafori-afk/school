@@ -478,6 +478,22 @@ async function recoverClassMembershipsFromRegisteredStudents({
   return memberships;
 }
 
+function dedupeBillableMemberships(memberships = []) {
+  const unique = [];
+  const seen = new Set();
+  for (const membership of Array.isArray(memberships) ? memberships : []) {
+    const key = [
+      normalizeText(membership?.student),
+      normalizeText(membership?.classId),
+      normalizeText(membership?.academicYearId || membership?.academicYear)
+    ].join('|');
+    if (!normalizeText(membership?._id) || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(membership);
+  }
+  return unique;
+}
+
 async function resolveFeePlanForBilling({
   feePlanId = '',
   courseId = '',
@@ -587,10 +603,11 @@ async function buildGroupedBillCandidates({
       feePlan: null,
       items: [],
       excluded: [],
-      summary: { candidateCount: 0, excludedCount: 0, totalAmountDue: 0 }
+      summary: { candidateCount: 0, billCount: 0, studentCount: 0, membershipCount: 0, excludedCount: 0, totalAmountDue: 0 }
     };
   }
 
+  memberships = dedupeBillableMemberships(memberships);
   const membershipIds = memberships.map((item) => item._id);
   const firstMembershipAcademicYearId = memberships[0]?.academicYearId || memberships[0]?.academicYear || null;
   const effectiveAcademicYearId = academicYearId || firstMembershipAcademicYearId;
@@ -778,6 +795,9 @@ async function buildGroupedBillCandidates({
     excluded,
     summary: {
       candidateCount: items.length,
+      billCount: items.length,
+      studentCount: new Set(items.map((item) => normalizeText(item.student)).filter(Boolean)).size,
+      membershipCount: memberships.length,
       excludedCount: excluded.length,
       totalAmountDue: roundMoney(items.reduce((sum, item) => sum + (Number(item.amountDue) || 0), 0))
     }

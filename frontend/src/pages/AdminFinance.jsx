@@ -5564,8 +5564,10 @@ export default function AdminFinance() {
             {billingPreview && (
               <div className="finance-preview-list" data-testid="bulk-billing-preview">
                 <div className="finance-chip-group">
-                  <span className="finance-chip">{billingPreview.summary?.candidateCount || 0} مورد قابل صدور</span>
-                  <span className="finance-chip finance-chip-muted">{billingPreview.summary?.duplicateCount || 0} duplicate</span>
+                  <span className="finance-chip">{billingPreview.summary?.billCount || billingPreview.summary?.candidateCount || 0} بل قابل صدور</span>
+                  <span className="finance-chip finance-chip-muted">{billingPreview.summary?.studentCount || 0} شاگرد</span>
+                  <span className="finance-chip finance-chip-muted">{billingPreview.summary?.membershipCount || 0} عضویت مالی</span>
+                  <span className="finance-chip finance-chip-muted">{billingPreview.summary?.duplicateCount || 0} بل تکراری</span>
                   <span className="finance-chip finance-chip-emerald">{fmt(billingPreview.summary?.totalAmountDue || 0)} AFN</span>
                 </div>
                 {(billingPreview.items || []).slice(0, 5).map((item) => (
