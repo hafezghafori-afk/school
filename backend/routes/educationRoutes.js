@@ -480,6 +480,9 @@ const buildStudentCandidateFromEnrollment = (item) => ({
   grade: normalizeStudentGrade(item?.grade),
   fatherName: item?.fatherName || '',
   note: item?.notes || '',
+  previousSchool: item?.previousSchool || '',
+  previousGrade: '',
+  isTransferCandidate: Boolean(normalizeText(item?.previousSchool)),
   sourceType: 'enrollment',
   sourceLabel: 'ثبت‌نام آنلاین',
   status: item?.status || 'pending',
@@ -500,6 +503,9 @@ const buildStudentCandidateFromAfghanStudent = (item) => {
     grade: normalizeStudentGrade(item?.academicInfo?.currentGrade),
     fatherName: item?.personalInfo?.fatherName || '',
     note: item?.notes || '',
+    previousSchool: item?.academicInfo?.previousSchool?.name || '',
+    previousGrade: item?.academicInfo?.previousSchool?.lastGrade || '',
+    isTransferCandidate: Boolean(normalizeText(item?.academicInfo?.previousSchool?.name || item?.academicInfo?.previousSchool?.lastGrade)),
     sourceType: 'afghan',
     sourceLabel: 'ثبت‌نام دستی',
     status: item?.status || 'active',
@@ -530,10 +536,10 @@ const loadEducationStudentCatalog = async () => {
   const [canonicalStudents, afghanStudents, onlineRegistrations, currentMemberships] = await Promise.all([
     User.find({ role: 'student' }).select('name email grade').sort({ name: 1 }),
     AfghanStudent.find({ status: { $ne: 'deleted' } })
-      .select('personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari personalInfo.fatherName contactInfo.email contactInfo.mobile contactInfo.phone familyInfo.fatherPhone academicInfo.currentGrade notes status linkedUserId createdAt')
+      .select('personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari personalInfo.fatherName contactInfo.email contactInfo.mobile contactInfo.phone familyInfo.fatherPhone academicInfo.currentGrade academicInfo.previousSchool notes status linkedUserId createdAt')
       .sort({ createdAt: -1 }),
     Enrollment.find({ status: { $in: ['pending', 'approved'] } })
-      .select('studentName fatherName grade phone email notes status linkedUserId createdAt approvedAt rejectionReason')
+      .select('studentName fatherName grade phone email previousSchool notes status linkedUserId createdAt approvedAt rejectionReason')
       .sort({ createdAt: -1 }),
     StudentMembership.find({
       isCurrent: true,
@@ -2482,6 +2488,8 @@ router.post('/student-enrollments/lifecycle', ...withManageStudentLifecycle, asy
     const action = normalizeText(req.body?.action).toLowerCase();
     const effectiveAt = req.body?.effectiveDate ? new Date(req.body.effectiveDate) : new Date();
     const note = normalizeText(req.body?.note);
+    const previousSchool = normalizeText(req.body?.previousSchool);
+    const previousGrade = normalizeText(req.body?.previousGrade);
 
     if (!['transfer_in', 'transfer_out', 'dropout'].includes(action)) {
       return res.status(400).json({ success: false, message: 'نوع عملیات چرخه شاگرد معتبر نیست.' });
@@ -2549,7 +2557,11 @@ router.post('/student-enrollments/lifecycle', ...withManageStudentLifecycle, asy
       item.source = 'admin';
       item.joinedAt = effectiveAt;
       item.enrolledAt = effectiveAt;
-      item.note = note || 'تبدیلی آمد';
+      item.note = [
+        note || 'تبدیلی آمد',
+        previousSchool ? `مکتب قبلی: ${previousSchool}` : '',
+        previousGrade ? `صنف قبلی: ${previousGrade}` : ''
+      ].filter(Boolean).join(' | ');
       item.rejectedReason = '';
       if (req.user?.id) item.createdBy = req.user.id;
       await item.save();

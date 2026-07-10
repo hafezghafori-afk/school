@@ -10,7 +10,7 @@ const emptyYear = { id: '', title: '', startDate: '', endDate: '', note: '', isA
 const emptyTerm = { id: '', academicYearId: '', title: '', code: '', order: 1, type: 'term', startDate: '', endDate: '', note: '' };
 const emptyMap = { id: '', instructorId: '', subjectId: '', academicYearId: '', classId: '', note: '', isPrimary: false };
 const emptyEnroll = { id: '', studentId: '', classId: '', status: 'approved', note: '', rejectedReason: '' };
-const emptyLifecycle = { action: 'transfer_in', studentId: '', classId: '', membershipId: '', effectiveDate: '', note: '' };
+const emptyLifecycle = { action: 'transfer_in', studentId: '', classId: '', membershipId: '', effectiveDate: '', previousSchool: '', previousGrade: '', note: '' };
 
 const putJson = (path, body) => fetchJson(path, {
   method: 'PUT',
@@ -306,6 +306,9 @@ export default function AdminEducationCore() {
   const [bulkSelectedIds, setBulkSelectedIds] = useState([]);
   const [bulkClassId, setBulkClassId] = useState('');
   const [inlineClasses, setInlineClasses] = useState({});
+  const [lifecycleStudentSearch, setLifecycleStudentSearch] = useState('');
+  const [lifecycleStudentSourceFilter, setLifecycleStudentSourceFilter] = useState('');
+  const [lifecycleMembershipSearch, setLifecycleMembershipSearch] = useState('');
   const [classForm, setClassForm] = useState(emptyClass);
   const [subjectForm, setSubjectForm] = useState(emptySubject);
   const [yearForm, setYearForm] = useState(emptyYear);
@@ -352,10 +355,11 @@ export default function AdminEducationCore() {
     const value = String(item.value || item.id || item._id || '');
     const gradeLabel = item.grade ? `پایه ${item.grade}` : '';
     const sourceLabel = item.sourceLabel || getStudentCandidateSourceLabel(item.sourceType);
+    const previousSchoolLabel = item.previousSchool ? `مکتب قبلی: ${item.previousSchool}` : '';
     return {
       ...item,
       value,
-      uiLabel: [item.name, gradeLabel, sourceLabel].filter(Boolean).join(' | ')
+      uiLabel: [item.name, gradeLabel, sourceLabel, previousSchoolLabel].filter(Boolean).join(' | ')
     };
   }), [students]);
   const candidateGradeOptions = useMemo(() => (
@@ -371,6 +375,44 @@ export default function AdminEducationCore() {
   const activeLifecycleMemberships = useMemo(() => (
     enrollments.filter((item) => ['approved', 'transferred_in', 'pending'].includes(String(item.status || '').trim()))
   ), [enrollments]);
+  const selectedLifecycleStudent = useMemo(() => (
+    studentOptions.find((item) => String(item.value || '') === String(lifecycleForm.studentId || '')) || null
+  ), [studentOptions, lifecycleForm.studentId]);
+  const lifecycleStudentOptions = useMemo(() => {
+    const needle = String(lifecycleStudentSearch || '').trim().toLowerCase();
+    return studentOptions.filter((item) => {
+      const matchesQuery = !needle || [
+        item.name,
+        item.fatherName,
+        item.phone,
+        item.email,
+        item.grade,
+        item.sourceLabel,
+        item.previousSchool,
+        item.previousGrade,
+        item.uiLabel
+      ].filter(Boolean).some((value) => String(value).toLowerCase().includes(needle));
+      const sourceType = String(item.sourceType || '').trim();
+      const matchesSource = !lifecycleStudentSourceFilter
+        || (lifecycleStudentSourceFilter === 'transfer' ? !!item.isTransferCandidate || !!item.previousSchool || !!item.previousGrade : sourceType === lifecycleStudentSourceFilter);
+      return matchesQuery && matchesSource;
+    });
+  }, [studentOptions, lifecycleStudentSearch, lifecycleStudentSourceFilter]);
+  const lifecycleMembershipOptions = useMemo(() => {
+    const needle = String(lifecycleMembershipSearch || '').trim().toLowerCase();
+    return activeLifecycleMemberships.filter((item) => {
+      if (!needle) return true;
+      return [
+        item.user?.name,
+        item.user?.email,
+        item.schoolClass?.title,
+        item.course?.title,
+        item.schoolClass?.academicYear?.title,
+        getEnrollmentStatusLabel(item.status),
+        item.note
+      ].filter(Boolean).some((value) => String(value).toLowerCase().includes(needle));
+    });
+  }, [activeLifecycleMemberships, lifecycleMembershipSearch]);
   const filteredStudentOptions = useMemo(() => {
     const needle = String(candidateSearchQuery || '').trim().toLowerCase();
 
@@ -771,7 +813,9 @@ export default function AdminEducationCore() {
       setSubjects(subjectData.items || []);
       setYears(yearData.items || []);
       setInstructors(metaData.instructors || []);
-      setStudents(metaData.studentCandidates || metaData.students || []);
+      setStudents(Array.isArray(metaData.studentCandidates) && metaData.studentCandidates.length
+        ? metaData.studentCandidates
+        : (metaData.students || []));
       setOnlineRegistrationQueue(metaData.onlineRegistrationQueue || []);
       setMaps(mapData.items || []);
       setEnrollments(enrollData.items || []);
@@ -1211,6 +1255,8 @@ export default function AdminEducationCore() {
         classId: lifecycleForm.classId,
         membershipId: lifecycleForm.membershipId,
         effectiveDate: lifecycleForm.effectiveDate,
+        previousSchool: lifecycleForm.previousSchool,
+        previousGrade: lifecycleForm.previousGrade,
         note: lifecycleForm.note
       };
       const data = await postJson('/api/education/student-enrollments/lifecycle', payload);
@@ -1989,11 +2035,52 @@ export default function AdminEducationCore() {
 
                 {lifecycleAction.needsStudent ? (
                   <div className="admin-workspace-field">
-                    <label>شاگرد</label>
-                    <select value={lifecycleForm.studentId} onChange={(event) => setLifecycleForm((current) => ({ ...current, studentId: event.target.value }))}>
-                      <option value="">انتخاب شاگرد</option>
-                      {studentOptions.map((item) => <option key={item.value} value={item.value}>{item.uiLabel}</option>)}
+                    <label>جستجوی شاگرد</label>
+                    <input
+                      value={lifecycleStudentSearch}
+                      onChange={(event) => setLifecycleStudentSearch(event.target.value)}
+                      placeholder="نام، نام پدر، تلفن، ایمیل یا مکتب قبلی"
+                    />
+                  </div>
+                ) : null}
+
+                {lifecycleAction.needsStudent ? (
+                  <div className="admin-workspace-field">
+                    <label>فلتر شاگرد</label>
+                    <select value={lifecycleStudentSourceFilter} onChange={(event) => setLifecycleStudentSourceFilter(event.target.value)}>
+                      <option value="">همه شاگردان قابل معرفی</option>
+                      <option value="transfer">فقط شاگردان تبدیلی</option>
+                      <option value="enrollment">ثبت‌نام آنلاین</option>
+                      <option value="afghan">ثبت‌نام دستی</option>
+                      <option value="user">حساب شاگرد</option>
                     </select>
+                  </div>
+                ) : null}
+
+                {lifecycleAction.needsStudent ? (
+                  <div className="admin-workspace-field">
+                    <label>شاگرد</label>
+                    <select
+                      value={lifecycleForm.studentId}
+                      onChange={(event) => {
+                        const selected = studentOptions.find((item) => String(item.value || '') === String(event.target.value || '')) || null;
+                        setLifecycleForm((current) => ({
+                          ...current,
+                          studentId: event.target.value,
+                          previousSchool: selected?.previousSchool || current.previousSchool,
+                          previousGrade: selected?.previousGrade || current.previousGrade
+                        }));
+                      }}
+                    >
+                      <option value="">انتخاب شاگرد</option>
+                      {selectedLifecycleStudent && !lifecycleStudentOptions.some((item) => String(item.value || '') === String(selectedLifecycleStudent.value || '')) ? (
+                        <option value={selectedLifecycleStudent.value}>{selectedLifecycleStudent.uiLabel}</option>
+                      ) : null}
+                      {lifecycleStudentOptions.map((item) => <option key={item.value} value={item.value}>{item.uiLabel}</option>)}
+                    </select>
+                    <small className="admin-workspace-subtitle">
+                      {lifecycleStudentOptions.length.toLocaleString('fa-AF-u-ca-persian')} نتیجه
+                    </small>
                   </div>
                 ) : null}
 
@@ -2009,15 +2096,29 @@ export default function AdminEducationCore() {
 
                 {lifecycleAction.needsMembership ? (
                   <div className="admin-workspace-field">
+                    <label>جستجوی عضویت فعال</label>
+                    <input
+                      value={lifecycleMembershipSearch}
+                      onChange={(event) => setLifecycleMembershipSearch(event.target.value)}
+                      placeholder="نام شاگرد، صنف، سال یا وضعیت"
+                    />
+                  </div>
+                ) : null}
+
+                {lifecycleAction.needsMembership ? (
+                  <div className="admin-workspace-field">
                     <label>عضویت شاگرد</label>
                     <select value={lifecycleForm.membershipId} onChange={(event) => setLifecycleForm((current) => ({ ...current, membershipId: event.target.value }))}>
                       <option value="">انتخاب عضویت فعال</option>
-                      {activeLifecycleMemberships.map((item) => (
+                      {lifecycleMembershipOptions.map((item) => (
                         <option key={item._id} value={item._id}>
                           {[item.user?.name, item.schoolClass?.title || item.course?.title, item.schoolClass?.academicYear?.title].filter(Boolean).join(' | ')}
                         </option>
                       ))}
                     </select>
+                    <small className="admin-workspace-subtitle">
+                      {lifecycleMembershipOptions.length.toLocaleString('fa-AF-u-ca-persian')} نتیجه
+                    </small>
                   </div>
                 ) : null}
 
@@ -2030,6 +2131,26 @@ export default function AdminEducationCore() {
                   />
                 </div>
               </div>
+              {lifecycleAction.needsStudent ? (
+                <div className="admin-workspace-form-grid">
+                  <div className="admin-workspace-field">
+                    <label>مکتب قبلی</label>
+                    <input
+                      value={lifecycleForm.previousSchool}
+                      onChange={(event) => setLifecycleForm((current) => ({ ...current, previousSchool: event.target.value }))}
+                      placeholder="از فورم ثبت‌نام پر می‌شود یا دستی بنویسید"
+                    />
+                  </div>
+                  <div className="admin-workspace-field">
+                    <label>صنف قبلی</label>
+                    <input
+                      value={lifecycleForm.previousGrade}
+                      onChange={(event) => setLifecycleForm((current) => ({ ...current, previousGrade: event.target.value }))}
+                      placeholder="اختیاری"
+                    />
+                  </div>
+                </div>
+              ) : null}
               <div className="admin-workspace-field">
                 <label>یادداشت</label>
                 <textarea
