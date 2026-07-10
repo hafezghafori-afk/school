@@ -329,13 +329,14 @@ const buildFinanceMembershipStudentOptions = (items = []) => {
   return (Array.isArray(items) ? items : [])
     .filter(isCurrentFinanceMembership)
     .map((item) => {
-      const userId = toFinanceOptionId(item?.studentId || item?.student?._id);
+      const studentCoreId = toFinanceOptionId(item?.studentCoreId);
+      const userId = toFinanceOptionId(item?.studentId || item?.student?._id) || studentCoreId;
       const classId = toFinanceOptionId(item?.classId);
       const academicYearId = toFinanceOptionId(item?.academicYearId || item?.academicYear);
       return {
         _id: userId,
-        membershipId: toFinanceOptionId(item?._id),
-        studentCoreId: toFinanceOptionId(item?.studentCoreId),
+        membershipId: toFinanceOptionId(item?._id || item?.id),
+        studentCoreId,
         name: item?.studentName || item?.student?.name || item?.fullName || '',
         fullName: item?.studentName || item?.student?.name || item?.fullName || '',
         email: item?.studentEmail || item?.student?.email || '',
@@ -1862,8 +1863,8 @@ export default function AdminFinance() {
       ...prev,
       studentId: normalizedStudentId,
       studentMembershipId: membershipStudent?.membershipId || '',
-      classId: membershipStudent?.classId || prev.classId,
-      academicYearId: membershipStudent?.academicYearId || prev.academicYearId
+      classId: membershipStudent?.classId || '',
+      academicYearId: membershipStudent?.academicYearId || ''
     }));
   };
 
@@ -1874,8 +1875,8 @@ export default function AdminFinance() {
       ...prev,
       studentId: normalizedStudentId,
       studentMembershipId: membershipStudent?.membershipId || '',
-      classId: membershipStudent?.classId || prev.classId,
-      academicYearId: membershipStudent?.academicYearId || prev.academicYearId
+      classId: membershipStudent?.classId || '',
+      academicYearId: membershipStudent?.academicYearId || ''
     }));
   };
 
@@ -1891,6 +1892,39 @@ export default function AdminFinance() {
     const fallback = financeMembershipStudents.find((item) => String(item?._id || '') === normalizedStudentId);
     return String((exact || fallback)?.membershipId || '').trim();
   };
+
+  const selectedDiscountMembershipStudent = useMemo(() => {
+    const membershipId = String(discountForm.studentMembershipId || '').trim();
+    const studentId = String(discountForm.studentId || '').trim();
+    return financeMembershipStudents.find((item) => membershipId && String(item?.membershipId || '') === membershipId)
+      || financeMembershipStudents.find((item) => studentId && String(item?._id || '') === studentId)
+      || null;
+  }, [discountForm.studentId, discountForm.studentMembershipId, financeMembershipStudents]);
+
+  useEffect(() => {
+    if (discountForm.targetScope !== 'student' || !discountForm.studentId || !selectedDiscountMembershipStudent) return;
+    const nextMembershipId = selectedDiscountMembershipStudent.membershipId || '';
+    const nextClassId = selectedDiscountMembershipStudent.classId || '';
+    const nextAcademicYearId = selectedDiscountMembershipStudent.academicYearId || '';
+    if (
+      String(discountForm.studentMembershipId || '') === String(nextMembershipId || '')
+      && String(discountForm.classId || '') === String(nextClassId || '')
+      && String(discountForm.academicYearId || '') === String(nextAcademicYearId || '')
+    ) return;
+    setDiscountForm((prev) => ({
+      ...prev,
+      studentMembershipId: nextMembershipId,
+      classId: nextClassId,
+      academicYearId: nextAcademicYearId
+    }));
+  }, [
+    discountForm.academicYearId,
+    discountForm.classId,
+    discountForm.studentId,
+    discountForm.studentMembershipId,
+    discountForm.targetScope,
+    selectedDiscountMembershipStudent
+  ]);
 
   const filteredFeePlans = useMemo(() => (
     feePlans.filter((plan) => includesFinanceSearch([
@@ -3435,16 +3469,19 @@ export default function AdminFinance() {
     try {
       setBusy(true);
       const isClassDiscount = discountForm.targetScope === 'class';
-      const resolvedMembershipId = isClassDiscount ? '' : (discountForm.studentMembershipId || findFinanceMembershipId(discountForm));
-      if (!discountForm.classId || !discountForm.academicYearId || (!isClassDiscount && (!discountForm.studentId || !resolvedMembershipId))) {
+      const membershipStudent = isClassDiscount ? null : selectedDiscountMembershipStudent;
+      const resolvedMembershipId = isClassDiscount ? '' : (membershipStudent?.membershipId || discountForm.studentMembershipId || findFinanceMembershipId(discountForm));
+      const resolvedClassId = isClassDiscount ? discountForm.classId : (membershipStudent?.classId || discountForm.classId);
+      const resolvedAcademicYearId = isClassDiscount ? discountForm.academicYearId : (membershipStudent?.academicYearId || discountForm.academicYearId);
+      if (!resolvedClassId || !resolvedAcademicYearId || (!isClassDiscount && (!discountForm.studentId || !resolvedMembershipId))) {
         throw new Error('برای ثبت تخفیف، متعلم، صنف و سال تعلیمی مربوط به همان عضویت را انتخاب کنید.');
       }
       const data = await postJson(`${API_BASE}/api/student-finance/discounts`, {
         targetScope: discountForm.targetScope,
         student: isClassDiscount ? '' : discountForm.studentId,
         studentMembershipId: resolvedMembershipId,
-        classId: discountForm.classId,
-        academicYearId: discountForm.academicYearId,
+        classId: resolvedClassId,
+        academicYearId: resolvedAcademicYearId,
         discountType: discountForm.discountType,
         coverageMode: discountForm.coverageMode,
         amount: discountForm.amount,
@@ -3455,8 +3492,8 @@ export default function AdminFinance() {
         reason: discountForm.reason
       });
       const selectedStudent = students.find((item) => String(item?._id || '') === String(discountForm.studentId || ''));
-      const selectedClass = classOptions.find((item) => item.classId === discountForm.classId);
-      const selectedAcademicYear = academicYears.find((item) => item.id === discountForm.academicYearId);
+      const selectedClass = classOptions.find((item) => item.classId === resolvedClassId);
+      const selectedAcademicYear = academicYears.find((item) => item.id === resolvedAcademicYearId);
       const createdDiscount = {
         ...(data?.item || {}),
         id: data?.item?.id || data?.item?._id || `discount-${Date.now()}`,
@@ -3469,16 +3506,16 @@ export default function AdminFinance() {
         status: data?.item?.status || 'active',
         student: data?.item?.student || {
           userId: discountForm.studentId,
-          fullName: selectedStudent?.fullName || selectedStudent?.name || '',
-          name: selectedStudent?.name || selectedStudent?.fullName || ''
+          fullName: selectedStudent?.fullName || selectedStudent?.name || membershipStudent?.fullName || membershipStudent?.name || '',
+          name: selectedStudent?.name || selectedStudent?.fullName || membershipStudent?.name || membershipStudent?.fullName || ''
         },
         schoolClass: data?.item?.schoolClass || {
-          id: discountForm.classId,
-          title: selectedClass?.title || ''
+          id: resolvedClassId,
+          title: membershipStudent?.classTitle || selectedClass?.title || ''
         },
         academicYear: data?.item?.academicYear || {
-          id: discountForm.academicYearId,
-          title: selectedAcademicYear?.title || ''
+          id: resolvedAcademicYearId,
+          title: membershipStudent?.academicYearTitle || selectedAcademicYear?.title || ''
         }
       };
       setDiscountRegistry((prev) => [createdDiscount, ...prev.filter((item) => item.id !== createdDiscount.id)]);
@@ -5830,7 +5867,12 @@ export default function AdminFinance() {
             <div className="finance-split-grid">
               <label className="finance-field">
                 <span>دامنه تخفیف</span>
-                <select value={discountForm.targetScope} onChange={(e) => setDiscountForm((prev) => ({ ...prev, targetScope: e.target.value }))}>
+                <select value={discountForm.targetScope} onChange={(e) => setDiscountForm((prev) => ({
+                  ...prev,
+                  targetScope: e.target.value,
+                  studentId: e.target.value === 'class' ? '' : prev.studentId,
+                  studentMembershipId: e.target.value === 'class' ? '' : prev.studentMembershipId
+                }))}>
                   <option value="student">یک شاگرد</option>
                   <option value="class">تمام شاگردان صنف</option>
                 </select>
@@ -5852,6 +5894,7 @@ export default function AdminFinance() {
               />
             </label>}
             {discountForm.targetScope === 'student' && <select value={discountForm.studentId} onChange={(e) => applyDiscountMembershipStudent(e.target.value)}>
+              <option value="">متعلم را انتخاب کنید</option>
               {discountStudentOptions.length ? discountStudentOptions.map((student) => (
                 <option key={`discount-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student)}</option>
               )) : (
@@ -5859,16 +5902,18 @@ export default function AdminFinance() {
               )}
             </select>}
             <div className="finance-split-grid">
-              <select value={discountForm.classId} onChange={(e) => setDiscountForm((prev) => {
+              <select value={discountForm.classId} disabled={discountForm.targetScope === 'student'} onChange={(e) => setDiscountForm((prev) => {
                 const next = { ...prev, classId: e.target.value };
                 return { ...next, studentMembershipId: findFinanceMembershipId(next) };
               })}>
+                {discountForm.targetScope === 'student' && !discountForm.classId ? <option value="">صنف اتوماتیک</option> : null}
                 {classOptions.map((item) => <option key={`discount-class-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>)}
               </select>
-              <select value={discountForm.academicYearId} onChange={(e) => setDiscountForm((prev) => {
+              <select value={discountForm.academicYearId} disabled={discountForm.targetScope === 'student'} onChange={(e) => setDiscountForm((prev) => {
                 const next = { ...prev, academicYearId: e.target.value };
                 return { ...next, studentMembershipId: findFinanceMembershipId(next) };
               })}>
+                {discountForm.targetScope === 'student' && !discountForm.academicYearId ? <option value="">سال اتوماتیک</option> : null}
                 {academicYears.map((item) => <option key={`discount-year-${item.id}`} value={item.id}>{getAcademicYearOptionLabel(item)}</option>)}
               </select>
             </div>
