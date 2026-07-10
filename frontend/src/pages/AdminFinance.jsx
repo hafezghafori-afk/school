@@ -1251,6 +1251,7 @@ export default function AdminFinance() {
     academicYear: '',
     academicYearId: '',
     term: '',
+    periodType: 'monthly',
     periodLabel: '',
     includeAdmission: false,
     includeTransport: false,
@@ -5516,6 +5517,10 @@ export default function AdminFinance() {
             {billingAdvancedOpen && (
               <>
                 <div className="finance-split-grid">
+                  <select value={bulkForm.periodType} onChange={(e) => setBulkForm((p) => ({ ...p, periodType: e.target.value }))}>
+                    <option value="monthly">بل ماهانه</option>
+                    <option value="term">بل دوره‌ای</option>
+                  </select>
                   <input value={bulkForm.academicYear} onChange={(e) => setBulkForm((p) => ({ ...p, academicYear: e.target.value }))} placeholder="سال آموزشی متنی" />
                   <input value={bulkForm.term} onChange={(e) => setBulkForm((p) => ({ ...p, term: e.target.value }))} placeholder="ترم" />
                 </div>

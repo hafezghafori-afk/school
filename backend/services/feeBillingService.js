@@ -496,12 +496,7 @@ async function buildGroupedBillCandidates({
 
   const membershipIds = memberships.map((item) => item._id);
   const firstMembershipAcademicYearId = memberships[0]?.academicYearId || memberships[0]?.academicYear || null;
-  const hasRequestedAcademicYearMembership = !academicYearId || memberships.some((item) => (
-    String(item?.academicYearId || item?.academicYear || '') === String(academicYearId || '')
-  ));
-  const effectiveAcademicYearId = hasRequestedAcademicYearMembership
-    ? (academicYearId || firstMembershipAcademicYearId)
-    : firstMembershipAcademicYearId;
+  const effectiveAcademicYearId = academicYearId || firstMembershipAcademicYearId;
   const billingFrequency = normalizeBillingFrequency(periodType === 'monthly' ? 'monthly' : 'term');
 
   const [feePlan, academicYearDoc, financeReliefs, discounts, exemptions, openBills] = await Promise.all([
@@ -651,7 +646,7 @@ async function buildGroupedBillCandidates({
         studentId: membership.studentId || null,
         studentMembershipId: membership._id,
         classId: membership.classId || classId || null,
-        academicYearId: membership.academicYearId || effectiveAcademicYearId || null,
+        academicYearId: effectiveAcademicYearId || membership.academicYearId || membership.academicYear || null,
         academicYear: academicYear || '',
         course: courseId || membership.course || null,
         dueDate: period.dueDate || asDate(dueDate) || null,
