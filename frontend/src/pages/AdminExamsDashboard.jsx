@@ -96,8 +96,9 @@ export default function AdminExamsDashboard() {
   const quickActions = (
     <QuickActionRail
       actions={[
-        { to: '/quiz-builder', label: 'ایجاد امتحان', caption: 'ساخت جلسه و سوالات', tone: 'copper' },
-        { to: '/grade-manager', label: 'مدیریت نمرات', caption: 'مرور نمره‌ها و تصحیح', tone: 'teal' },
+        { to: '/grade-manager', label: 'ایجاد شقه امتحان', caption: 'سشن رسمی نمرات و ارتقا', tone: 'teal' },
+        { to: '/quiz-builder', label: 'ایجاد کوییز', caption: 'سوالات تمرینی و آزمون کوتاه', tone: 'copper' },
+        { to: '/admin-promotions', label: 'مرکز ارتقای صنف', caption: 'تصمیم بر اساس شقه‌ها', tone: 'slate' },
         { to: '/admin-reports', label: 'گزارش‌های آموزشی', caption: 'خروجی و مقایسه', tone: 'mint' },
         { to: '/admin-education', label: 'مرکز مدیریت آموزش', caption: 'صنف و مضمون', tone: 'slate' }
       ]}
@@ -124,14 +125,35 @@ export default function AdminExamsDashboard() {
         </div>
       </div>
       <div className="dash-hero-actions">
-        <Link className="dash-btn" to="/quiz-builder">ایجاد امتحان</Link>
-        <Link className="dash-btn ghost" to="/grade-manager">مدیریت نمرات</Link>
+        <Link className="dash-btn" to="/grade-manager">ایجاد شقه امتحان</Link>
+        <Link className="dash-btn ghost" to="/quiz-builder">ایجاد کوییز</Link>
       </div>
     </div>
   );
 
   const main = (
     <>
+      <div className="dash-card">
+        <div className="dashboard-summary-card__head">
+          <div>
+            <h3>مسیرهای امتحان در سیستم</h3>
+            <p className="muted">
+              برای ارتقای صنف و گزارش رسمی، شقه امتحان لازم است؛ کوییز فقط برای سوالات و آزمون‌های کوتاه استفاده می‌شود.
+            </p>
+          </div>
+        </div>
+        <div className="dashboard-summary-card__quick">
+          <QuickActionRail
+            actions={[
+              { to: '/grade-manager', label: 'شقه امتحان رسمی', caption: 'ساخت سشن، ثبت نمره، نشر نتیجه', tone: 'teal' },
+              { to: '/quiz-builder', label: 'کوییز / آزمون کوتاه', caption: 'ساخت سوال و گزینه‌ها؛ شامل ارتقا نیست', tone: 'copper' },
+              { to: '/admin-result-tables', label: 'جدول نتایج', caption: 'جدول و گزارش از سشن‌های رسمی', tone: 'mint' },
+              { to: '/admin-promotions', label: 'ارتقای صنف', caption: 'محاسبه از شقه‌های رسمی همان سال', tone: 'slate' }
+            ]}
+          />
+        </div>
+      </div>
+
       <div className="dash-card dashboard-summary-card">
         <div className="dashboard-summary-card__head">
           <div>
@@ -182,8 +204,8 @@ export default function AdminExamsDashboard() {
             meta: item.tone === 'rose' ? 'فوری' : item.tone === 'copper' ? 'نیازمند پیگیری' : 'آماده'
           }))}
           emptyText="کار باز مهمی برای امتحانات دیده نشد."
-          actionLabel="باز کردن آزمون‌ساز"
-          actionTo="/quiz-builder"
+          actionLabel="باز کردن شقه نمرات"
+          actionTo="/grade-manager"
         />
       </div>
 

@@ -194,6 +194,7 @@ export default function GradeManager() {
   const [publishing, setPublishing] = useState(false);
 
   const isInstructor = userRole() === 'instructor';
+  const isAdmin = userRole() === 'admin';
   const selectedSession = useMemo(
     () => sessions.find((item) => String(item.id) === String(selectedSessionId)) || null,
     [sessions, selectedSessionId]
@@ -215,6 +216,9 @@ export default function GradeManager() {
     const fallbackClasses = referenceData.classes.filter((item) => (
       !filters.academicYearId || String(item?.academicYear?.id || '') === String(filters.academicYearId)
     ));
+    if (!isInstructor) {
+      return fallbackClasses;
+    }
     const sourceAssignments = scopedAssignments.filter((item) => (
       !filters.academicYearId || String(item?.academicYear?.id || '') === String(filters.academicYearId)
     ));
@@ -228,9 +232,19 @@ export default function GradeManager() {
           .map((item) => [String(item.schoolClass.id), item.schoolClass])
       ).values()
     );
-  }, [referenceData.classes, scopedAssignments, filters.academicYearId]);
+  }, [referenceData.classes, scopedAssignments, filters.academicYearId, isInstructor]);
 
   const filteredSubjects = useMemo(() => {
+    const fallbackSubjects = referenceData.subjects.filter((item) => {
+      if (!filters.classId) return true;
+      const selectedClass = referenceData.classes.find((entry) => String(entry.id) === String(filters.classId));
+      const gradeLevel = Number(selectedClass?.gradeLevel || selectedClass?.grade || 0);
+      if (!gradeLevel || !Array.isArray(item.gradeLevels) || !item.gradeLevels.length) return true;
+      return item.gradeLevels.map(Number).includes(gradeLevel);
+    });
+    if (!isInstructor) {
+      return fallbackSubjects;
+    }
     const sourceAssignments = scopedAssignments.filter((item) => {
       const matchesYear = !filters.academicYearId || String(item?.academicYear?.id || '') === String(filters.academicYearId);
       const matchesTerm = !filters.assessmentPeriodId || !item?.assessmentPeriod?.id || String(item?.assessmentPeriod?.id || '') === String(filters.assessmentPeriodId);
@@ -238,7 +252,7 @@ export default function GradeManager() {
       return matchesYear && matchesTerm && matchesClass;
     });
     if (!sourceAssignments.length) {
-      return referenceData.subjects;
+      return fallbackSubjects;
     }
     return Array.from(
       new Map(
@@ -247,7 +261,7 @@ export default function GradeManager() {
           .map((item) => [String(item.subject.id), item.subject])
       ).values()
     );
-  }, [referenceData.subjects, scopedAssignments, filters.academicYearId, filters.assessmentPeriodId, filters.classId]);
+  }, [referenceData.subjects, referenceData.classes, scopedAssignments, filters.academicYearId, filters.assessmentPeriodId, filters.classId, isInstructor]);
 
   const scoreComponents = useMemo(() => ({
     writtenMax: toSafeNumber(sheet?.scoreComponents?.writtenMax || filters.writtenMax),
@@ -291,13 +305,17 @@ export default function GradeManager() {
       const defaultAssignment = (data.teacherAssignments || []).find((item) => (
         !isInstructor || String(item?.teacher?.id || '') === String(userId())
       )) || null;
+      const defaultClass = (data.classes || []).find((item) => (
+        !activeYear?.id || String(item?.academicYear?.id || '') === String(activeYear.id)
+      )) || data.classes?.[0] || null;
+      const defaultSubject = data.subjects?.[0] || null;
 
       setFilters((prev) => ({
         ...prev,
         academicYearId: prev.academicYearId || defaultAssignment?.academicYear?.id || activeYear?.id || '',
         assessmentPeriodId: prev.assessmentPeriodId || defaultAssignment?.assessmentPeriod?.id || activeTerm?.id || '',
-        classId: prev.classId || defaultAssignment?.schoolClass?.id || '',
-        subjectId: prev.subjectId || defaultAssignment?.subject?.id || '',
+        classId: prev.classId || defaultAssignment?.schoolClass?.id || (!isInstructor ? defaultClass?.id : '') || '',
+        subjectId: prev.subjectId || defaultAssignment?.subject?.id || (!isInstructor ? defaultSubject?.id : '') || '',
         examTypeId: prev.examTypeId || monthlyExam?.id || ''
       }));
     } catch {
@@ -404,7 +422,7 @@ export default function GradeManager() {
     }
 
     const teacherAssignmentId = findTeacherAssignmentId();
-    if (!teacherAssignmentId) {
+    if (!teacherAssignmentId && isInstructor) {
       applyMessage('برای این صنف و مضمون، استاد مسئول فعال ثبت نشده است.', 'error');
       return;
     }
@@ -416,7 +434,6 @@ export default function GradeManager() {
       classId: filters.classId,
       subjectId: filters.subjectId,
       examTypeId: filters.examTypeId,
-      teacherAssignmentId,
       monthLabel: filters.monthLabel,
       reviewedByName: filters.reviewedByName,
       heldAt: filters.heldAt || undefined,
@@ -429,6 +446,9 @@ export default function GradeManager() {
         homeworkMax: toSafeNumber(filters.homeworkMax)
       }
     };
+    if (teacherAssignmentId) {
+      payload.teacherAssignmentId = teacherAssignmentId;
+    }
 
     setCreating(true);
     try {
@@ -582,8 +602,8 @@ export default function GradeManager() {
           <div>
             <h2>شقه مضمون و مدیریت نمرات</h2>
             <p>
-              این بخش شقه واقعی مضمون را از سیستم امتحانات باز می‌کند. برای هر صنف و هر مضمون، استاد مربوطه
-              نمرات شاگردان را داخل همین جدول ثبت می‌کند و پس از نشر، نتیجه از همین منبع به شاگرد می‌رسد.
+              این بخش شقه رسمی امتحان را می‌سازد؛ همین سشن‌ها در گزارش‌ها و مرکز ارتقای صنف استفاده می‌شوند.
+              کوییز و سوالات تمرینی مسیر جداگانه دارند و برای ارتقای صنف محاسبه نمی‌شوند.
             </p>
           </div>
           <div className="grade-manager-actions">
@@ -597,6 +617,11 @@ export default function GradeManager() {
         </header>
 
         <section className="grade-manager-filters">
+          <div className="grade-flow-note">
+            <strong>مسیر رسمی:</strong>
+            <span>سال، ترم، صنف، مضمون و نوع امتحان را انتخاب کن، سپس «ایجاد یا بازکردن شقه» را بزن. لیست صنف و مضمون برای ادمین از مرکز مدیریت آموزش خوانده می‌شود.</span>
+          </div>
+
           <label>
             <span>سال تعلیمی</span>
             <select name="academicYearId" value={filters.academicYearId} onChange={handleFilterChange} disabled={loadingRefs}>

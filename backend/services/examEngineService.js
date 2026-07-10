@@ -265,9 +265,10 @@ function formatSubject(doc) {
   if (!item) return null;
   return {
     id: String(item._id),
-    name: normalizeText(item.name),
+    name: normalizeText(item.nameDari) || normalizeText(item.name),
     code: normalizeText(item.code),
     grade: normalizeText(item.grade),
+    gradeLevels: Array.isArray(item.gradeLevels) ? item.gradeLevels.map(Number).filter(Number.isFinite) : [],
     isActive: Boolean(item.isActive)
   };
 }
@@ -943,7 +944,7 @@ async function resolveSessionReferences(payload = {}, actor = null) {
   if (!examType || !academicYear || !assessmentPeriod || !schoolClass) {
     throw new Error('exam_session_refs_not_found');
   }
-  if (sessionKind === 'subject_sheet' && !teacherAssignment) {
+  if (sessionKind === 'subject_sheet' && normalizeText(actor?.role) === 'instructor' && !teacherAssignment) {
     throw new Error('exam_session_teacher_assignment_required');
   }
   if (

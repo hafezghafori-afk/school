@@ -100,6 +100,24 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.grade-flow-note {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 14px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  line-height: 1.8;
+}
+
+.grade-flow-note strong {
+  white-space: nowrap;
+  color: #1d4ed8;
+}
+
 .grade-manager-component-config {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
