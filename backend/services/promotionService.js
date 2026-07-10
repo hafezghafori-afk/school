@@ -9,6 +9,8 @@ require('../models/StudentMembership');
 require('../models/User');
 require('../models/ExamSession');
 require('../models/ExamResult');
+require('../models/Subject');
+require('../models/SheetTemplate');
 
 const AcademicYear = require('../models/AcademicYear');
 const AcademicTerm = require('../models/AcademicTerm');
@@ -19,8 +21,11 @@ const StudentMembership = require('../models/StudentMembership');
 const User = require('../models/User');
 const ExamSession = require('../models/ExamSession');
 const ExamResult = require('../models/ExamResult');
+const SheetTemplate = require('../models/SheetTemplate');
 const PromotionRule = require('../models/PromotionRule');
 const PromotionTransaction = require('../models/PromotionTransaction');
+
+const SCORE_BREAKDOWN_KEYS = ['writtenScore', 'oralScore', 'classActivityScore', 'homeworkScore'];
 
 function toPlain(doc) {
   if (!doc) return null;
@@ -116,7 +121,27 @@ function formatExamSession(doc) {
       title: normalizeText(item.examTypeId.title),
       code: normalizeText(item.examTypeId.code),
       category: normalizeText(item.examTypeId.category)
-    } : null
+    } : null,
+    subject: item.subjectId ? {
+      id: String(item.subjectId._id || item.subjectId || ''),
+      name: normalizeText(item.subjectId.nameDari) || normalizeText(item.subjectId.name) || normalizeText(item.subjectId.code),
+      code: normalizeText(item.subjectId.code)
+    } : null,
+    sessionKind: normalizeText(item.sessionKind),
+    monthLabel: normalizeText(item.monthLabel)
+  };
+}
+
+function formatSheetTemplateRef(doc) {
+  const item = toPlain(doc);
+  if (!item) return null;
+  return {
+    id: String(item._id || item.id || ''),
+    title: normalizeText(item.title),
+    code: normalizeText(item.code),
+    type: normalizeText(item.type),
+    isDefault: Boolean(item.ownership?.isDefault),
+    isPublic: Boolean(item.ownership?.isPublic)
   };
 }
 
@@ -171,6 +196,18 @@ function formatPromotionRule(doc) {
     promotedMembershipStatus: normalizeText(item.promotedMembershipStatus),
     repeatedMembershipStatus: normalizeText(item.repeatedMembershipStatus),
     conditionalMembershipStatus: normalizeText(item.conditionalMembershipStatus),
+    evaluationMode: normalizeText(item.evaluationMode) || 'score_policy',
+    passingScore: Number(item.passingScore ?? 55),
+    subjectPassingScore: Number(item.subjectPassingScore ?? item.passingScore ?? 55),
+    maxConditionalSubjects: Number(item.maxConditionalSubjects ?? 3),
+    requireCompleteResults: item.requireCompleteResults !== false,
+    missingResultOutcome: normalizeText(item.missingResultOutcome) || 'blocked',
+    componentWeights: {
+      writtenScore: Number(item.componentWeights?.writtenScore || 0),
+      oralScore: Number(item.componentWeights?.oralScore || 0),
+      classActivityScore: Number(item.componentWeights?.classActivityScore || 0),
+      homeworkScore: Number(item.componentWeights?.homeworkScore || 0)
+    },
     promotedStatuses: Array.isArray(item.promotedStatuses) ? item.promotedStatuses.map((entry) => normalizeText(entry)) : [],
     conditionalStatuses: Array.isArray(item.conditionalStatuses) ? item.conditionalStatuses.map((entry) => normalizeText(entry)) : [],
     repeatedStatuses: Array.isArray(item.repeatedStatuses) ? item.repeatedStatuses.map((entry) => normalizeText(entry)) : [],
@@ -243,6 +280,18 @@ function buildDefaultPromotionRulePayload() {
     promotedMembershipStatus: 'pending',
     repeatedMembershipStatus: 'pending',
     conditionalMembershipStatus: 'pending',
+    evaluationMode: 'score_policy',
+    passingScore: 55,
+    subjectPassingScore: 55,
+    maxConditionalSubjects: 3,
+    requireCompleteResults: true,
+    missingResultOutcome: 'blocked',
+    componentWeights: {
+      writtenScore: 0,
+      oralScore: 0,
+      classActivityScore: 0,
+      homeworkScore: 0
+    },
     promotedStatuses: ['passed', 'distinction', 'placement'],
     conditionalStatuses: ['conditional', 'temporary', 'excused'],
     repeatedStatuses: ['failed', 'absent', 'pending'],
@@ -276,6 +325,13 @@ async function seedPromotionReferenceData({ dryRun = false } = {}) {
     normalizeText(existing.promotedMembershipStatus) !== payload.promotedMembershipStatus ||
     normalizeText(existing.repeatedMembershipStatus) !== payload.repeatedMembershipStatus ||
     normalizeText(existing.conditionalMembershipStatus) !== payload.conditionalMembershipStatus ||
+    normalizeText(existing.evaluationMode) !== payload.evaluationMode ||
+    Number(existing.passingScore ?? 55) !== Number(payload.passingScore) ||
+    Number(existing.subjectPassingScore ?? 55) !== Number(payload.subjectPassingScore) ||
+    Number(existing.maxConditionalSubjects ?? 3) !== Number(payload.maxConditionalSubjects) ||
+    Boolean(existing.requireCompleteResults) !== Boolean(payload.requireCompleteResults) ||
+    normalizeText(existing.missingResultOutcome) !== payload.missingResultOutcome ||
+    JSON.stringify(existing.componentWeights || {}) !== JSON.stringify(payload.componentWeights) ||
     Boolean(existing.isDefault) !== Boolean(payload.isDefault) ||
     Boolean(existing.isActive) !== Boolean(payload.isActive) ||
     normalizeText(existing.note) !== payload.note ||
@@ -350,6 +406,22 @@ async function createPromotionRule(payload = {}) {
     conditionalMembershipStatus: ['active', 'pending', 'suspended'].includes(normalizeText(payload.conditionalMembershipStatus))
       ? normalizeText(payload.conditionalMembershipStatus)
       : 'pending',
+    evaluationMode: ['result_status', 'score_policy'].includes(normalizeText(payload.evaluationMode))
+      ? normalizeText(payload.evaluationMode)
+      : 'score_policy',
+    passingScore: Number.isFinite(Number(payload.passingScore)) ? Number(payload.passingScore) : 55,
+    subjectPassingScore: Number.isFinite(Number(payload.subjectPassingScore)) ? Number(payload.subjectPassingScore) : 55,
+    maxConditionalSubjects: Number.isFinite(Number(payload.maxConditionalSubjects)) ? Math.max(0, Math.floor(Number(payload.maxConditionalSubjects))) : 3,
+    requireCompleteResults: payload.requireCompleteResults !== false,
+    missingResultOutcome: ['blocked', 'conditional', 'repeated'].includes(normalizeText(payload.missingResultOutcome))
+      ? normalizeText(payload.missingResultOutcome)
+      : 'blocked',
+    componentWeights: {
+      writtenScore: Number(payload.componentWeights?.writtenScore || 0),
+      oralScore: Number(payload.componentWeights?.oralScore || 0),
+      classActivityScore: Number(payload.componentWeights?.classActivityScore || 0),
+      homeworkScore: Number(payload.componentWeights?.homeworkScore || 0)
+    },
     promotedStatuses: Array.isArray(payload.promotedStatuses) ? payload.promotedStatuses : undefined,
     conditionalStatuses: Array.isArray(payload.conditionalStatuses) ? payload.conditionalStatuses : undefined,
     repeatedStatuses: Array.isArray(payload.repeatedStatuses) ? payload.repeatedStatuses : undefined,
@@ -461,6 +533,184 @@ function resolvePromotionOutcome(rule, resultStatus) {
     return 'repeated';
   }
   return 'blocked';
+}
+
+function getScoreBreakdown(source = {}) {
+  const breakdown = source?.scoreBreakdown && typeof source.scoreBreakdown === 'object' ? source.scoreBreakdown : {};
+  return SCORE_BREAKDOWN_KEYS.reduce((memo, key) => {
+    const value = Number(breakdown[key]);
+    memo[key] = Number.isFinite(value) ? Math.max(0, value) : 0;
+    return memo;
+  }, {});
+}
+
+function getSubjectLabel(result = {}) {
+  const subject = result.subjectId || result.sessionId?.subjectId || null;
+  return normalizeText(subject?.nameDari)
+    || normalizeText(subject?.name)
+    || normalizeText(subject?.code)
+    || normalizeText(result.sessionId?.title)
+    || 'بدون مضمون';
+}
+
+function getSubjectKey(result = {}) {
+  const subjectId = result.subjectId?._id || result.subjectId || result.sessionId?.subjectId?._id || result.sessionId?.subjectId;
+  if (subjectId) return `subject:${String(subjectId)}`;
+  return `session:${String(result.sessionId?._id || result.sessionId || result._id || '')}`;
+}
+
+function normalizePolicyNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function evaluateScorePolicyForMembership({ membershipId, resultsByMembership, sessions = [], rule = null, sheetTemplates = [] }) {
+  const passingScore = normalizePolicyNumber(rule?.passingScore, 55);
+  const subjectPassingScore = normalizePolicyNumber(rule?.subjectPassingScore, passingScore);
+  const maxConditionalSubjects = Math.max(0, Math.floor(normalizePolicyNumber(rule?.maxConditionalSubjects, 3)));
+  const requireCompleteResults = rule?.requireCompleteResults !== false;
+  const missingResultOutcome = ['blocked', 'conditional', 'repeated'].includes(normalizeText(rule?.missingResultOutcome))
+    ? normalizeText(rule?.missingResultOutcome)
+    : 'blocked';
+  const relatedResults = resultsByMembership.get(String(membershipId || '')) || [];
+  const recordedResults = relatedResults.filter((result) => normalizeText(result.markStatus) === 'recorded');
+  const subjectMap = new Map();
+
+  relatedResults.forEach((result) => {
+    const key = getSubjectKey(result);
+    if (!key) return;
+    if (!subjectMap.has(key)) {
+      subjectMap.set(key, {
+        key,
+        subjectId: String(result.subjectId?._id || result.subjectId || result.sessionId?.subjectId?._id || result.sessionId?.subjectId || ''),
+        subjectTitle: getSubjectLabel(result),
+        obtainedMark: 0,
+        totalMark: 0,
+        percentage: 0,
+        resultCount: 0,
+        recordedCount: 0,
+        absentCount: 0,
+        excusedCount: 0,
+        pendingCount: 0,
+        breakdown: SCORE_BREAKDOWN_KEYS.reduce((memo, breakdownKey) => ({ ...memo, [breakdownKey]: 0 }), {}),
+        sessions: []
+      });
+    }
+
+    const subject = subjectMap.get(key);
+    const markStatus = normalizeText(result.markStatus) || 'pending';
+    const obtainedMark = Number(result.obtainedMark || 0);
+    const totalMark = Number(result.totalMark || 0);
+    const breakdown = getScoreBreakdown(result);
+    subject.resultCount += 1;
+    subject.sessions.push({
+      id: String(result.sessionId?._id || result.sessionId || ''),
+      title: normalizeText(result.sessionId?.title),
+      code: normalizeText(result.sessionId?.code),
+      examType: normalizeText(result.examTypeId?.title || result.sessionId?.examTypeId?.title),
+      assessmentPeriod: normalizeText(result.assessmentPeriodId?.title || result.sessionId?.assessmentPeriodId?.title),
+      percentage: Number(result.percentage || 0),
+      resultStatus: normalizeText(result.resultStatus),
+      markStatus
+    });
+    if (markStatus === 'recorded') {
+      subject.recordedCount += 1;
+      subject.obtainedMark += Number.isFinite(obtainedMark) ? obtainedMark : 0;
+      subject.totalMark += Number.isFinite(totalMark) && totalMark > 0 ? totalMark : 100;
+      SCORE_BREAKDOWN_KEYS.forEach((breakdownKey) => {
+        subject.breakdown[breakdownKey] += breakdown[breakdownKey] || 0;
+      });
+    } else if (markStatus === 'absent') {
+      subject.absentCount += 1;
+    } else if (markStatus === 'excused') {
+      subject.excusedCount += 1;
+    } else {
+      subject.pendingCount += 1;
+    }
+  });
+
+  const expectedSessionCount = sessions.length;
+  const missingSessionCount = Math.max(0, expectedSessionCount - relatedResults.length);
+  const subjects = Array.from(subjectMap.values()).map((subject) => {
+    const percentage = subject.totalMark > 0 ? Number(((subject.obtainedMark / subject.totalMark) * 100).toFixed(2)) : 0;
+    return {
+      ...subject,
+      obtainedMark: Number(subject.obtainedMark.toFixed(2)),
+      totalMark: Number(subject.totalMark.toFixed(2)),
+      percentage,
+      isFailed: subject.recordedCount > 0 ? percentage < subjectPassingScore : true
+    };
+  }).sort((left, right) => normalizeText(left.subjectTitle).localeCompare(normalizeText(right.subjectTitle)));
+
+  const missingSubjectCount = subjects.filter((subject) => subject.recordedCount === 0).length;
+  const failedSubjects = subjects.filter((subject) => subject.isFailed);
+  const averageScore = subjects.length
+    ? Number((subjects.reduce((sum, subject) => sum + Number(subject.percentage || 0), 0) / subjects.length).toFixed(2))
+    : 0;
+  const incomplete = relatedResults.length === 0 || missingSessionCount > 0 || missingSubjectCount > 0 || recordedResults.length === 0;
+
+  let sourceResultStatus = 'pending';
+  let computedOutcome = 'blocked';
+  let issueCode = '';
+
+  if (requireCompleteResults && incomplete) {
+    computedOutcome = missingResultOutcome;
+    sourceResultStatus = missingResultOutcome === 'repeated' ? 'failed' : missingResultOutcome;
+    issueCode = 'score_policy_incomplete_results';
+  } else if (failedSubjects.length === 0 && averageScore >= passingScore) {
+    sourceResultStatus = 'passed';
+    computedOutcome = rule?.isTerminalClass ? 'graduated' : 'promoted';
+  } else if (failedSubjects.length > 0 && failedSubjects.length <= maxConditionalSubjects) {
+    sourceResultStatus = 'conditional';
+    computedOutcome = 'conditional';
+  } else {
+    sourceResultStatus = 'failed';
+    computedOutcome = 'repeated';
+  }
+
+  return {
+    mode: 'score_policy',
+    passingScore,
+    subjectPassingScore,
+    maxConditionalSubjects,
+    requireCompleteResults,
+    missingResultOutcome,
+    averageScore,
+    totalSubjects: subjects.length,
+    failedSubjectCount: failedSubjects.length,
+    missingSessionCount,
+    missingSubjectCount,
+    sourceResultStatus,
+    computedOutcome,
+    issueCode,
+    subjects,
+    failedSubjects: failedSubjects.map((subject) => ({
+      subjectId: subject.subjectId,
+      subjectTitle: subject.subjectTitle,
+      percentage: subject.percentage,
+      obtainedMark: subject.obtainedMark,
+      totalMark: subject.totalMark
+    })),
+    includedSessions: sessions.map(formatExamSession).filter(Boolean),
+    sheetTemplates: sheetTemplates.map(formatSheetTemplateRef).filter(Boolean)
+  };
+}
+
+function buildLegacyPolicyEvaluation(result = {}, computedOutcome = 'blocked') {
+  return {
+    mode: 'result_status',
+    sourceResultStatus: normalizeText(result.resultStatus),
+    computedOutcome,
+    averageScore: Number(result.percentage || 0),
+    totalSubjects: 0,
+    failedSubjectCount: computedOutcome === 'repeated' ? 1 : 0,
+    missingSessionCount: 0,
+    missingSubjectCount: 0,
+    failedSubjects: [],
+    subjects: [],
+    includedSessions: [],
+    sheetTemplates: []
+  };
 }
 
 function resolveTargetClassFromCandidates({ sourceClass, targetClasses, rule, payload, outcome }) {
@@ -644,14 +894,68 @@ async function resolvePromotionPreviewState(payload = {}) {
     })
     .populate('studentId')
     .populate('student', 'name email')
+    .populate('subjectId')
+    .populate({ path: 'examTypeId' })
+    .populate({ path: 'assessmentPeriodId' })
     .sort({ rank: 1, percentage: -1, createdAt: 1 });
+
+  const membershipIds = results.map((result) => normalizeNullableId(result.studentMembershipId?._id || result.studentMembershipId)).filter(Boolean);
+  const allYearSessions = await ExamSession.find({
+    academicYearId: session.academicYearId?._id || session.academicYearId,
+    classId: session.classId?._id || session.classId,
+    status: { $ne: 'archived' }
+  })
+    .populate('academicYearId')
+    .populate('assessmentPeriodId')
+    .populate({ path: 'classId', populate: { path: 'academicYearId' } })
+    .populate('examTypeId')
+    .populate('subjectId')
+    .sort({ heldAt: 1, createdAt: 1 });
+  const scorePolicySessions = allYearSessions.filter((item) => normalizeText(item.sessionKind) === 'subject_sheet' || item.subjectId);
+  const allYearResults = membershipIds.length
+    ? await ExamResult.find({
+        academicYearId: session.academicYearId?._id || session.academicYearId,
+        classId: session.classId?._id || session.classId,
+        studentMembershipId: { $in: membershipIds }
+      })
+        .populate({ path: 'sessionId', populate: ['academicYearId', 'assessmentPeriodId', { path: 'classId', populate: { path: 'academicYearId' } }, 'examTypeId', 'subjectId'] })
+        .populate('examTypeId')
+        .populate('assessmentPeriodId')
+        .populate('subjectId')
+        .sort({ createdAt: 1 })
+    : [];
+  const resultsByMembership = allYearResults.reduce((memo, result) => {
+    const key = String(result.studentMembershipId?._id || result.studentMembershipId || '');
+    if (!memo.has(key)) memo.set(key, []);
+    memo.get(key).push(result);
+    return memo;
+  }, new Map());
+  const sheetTemplates = await SheetTemplate.find({
+    type: 'exam',
+    isActive: true,
+    $or: [
+      { 'ownership.isDefault': true },
+      { 'ownership.isPublic': true },
+      { 'scope.academicYearId': session.academicYearId?._id || session.academicYearId },
+      { 'scope.classId': session.classId?._id || session.classId }
+    ]
+  }).sort({ 'ownership.isDefault': -1, createdAt: -1 }).limit(10);
 
   const items = [];
   for (const result of results) {
     const membership = result.studentMembershipId;
     if (!membership) continue;
 
-    const computedOutcome = resolvePromotionOutcome(rule, result.resultStatus);
+    const policyEvaluation = normalizeText(rule.evaluationMode) === 'result_status'
+      ? buildLegacyPolicyEvaluation(result, resolvePromotionOutcome(rule, result.resultStatus))
+      : evaluateScorePolicyForMembership({
+          membershipId: membership._id,
+          resultsByMembership,
+          sessions: scorePolicySessions.length ? scorePolicySessions : allYearSessions,
+          rule,
+          sheetTemplates
+        });
+    const computedOutcome = policyEvaluation.computedOutcome;
     const targetClass = needsGeneratedMembership(computedOutcome, rule)
       ? resolveTargetClassFromCandidates({
           sourceClass: membership.classId || session.classId,
@@ -662,16 +966,18 @@ async function resolvePromotionPreviewState(payload = {}) {
         })
       : null;
     const targetCourseId = targetClass ? await resolveCourseForTargetClass(targetClass, membership) : null;
-    const issueCode = computedOutcome === 'blocked'
-      ? 'result_status_not_mapped'
-      : needsGeneratedMembership(computedOutcome, rule) && !targetAcademicYear
+    const issueCode = policyEvaluation.issueCode
+      || (computedOutcome === 'blocked' && normalizeText(rule.evaluationMode) === 'result_status'
+        ? 'result_status_not_mapped'
+        : needsGeneratedMembership(computedOutcome, rule) && !targetAcademicYear
         ? 'target_year_not_resolved'
         : needsGeneratedMembership(computedOutcome, rule) && !targetClass
           ? 'target_class_not_resolved'
           : needsGeneratedMembership(computedOutcome, rule) && !targetCourseId
             ? 'target_course_not_resolved'
-            : '';
-    const canApply = computedOutcome === 'graduated' || (!needsGeneratedMembership(computedOutcome, rule)) || !issueCode;
+            : '');
+    const canApply = computedOutcome === 'graduated'
+      || (computedOutcome !== 'blocked' && ((!needsGeneratedMembership(computedOutcome, rule)) || !issueCode));
 
     items.push({
       examResult: result,
@@ -679,6 +985,7 @@ async function resolvePromotionPreviewState(payload = {}) {
       studentCore: result.studentId || membership.studentId || null,
       studentUser: result.student || membership.student || null,
       computedOutcome,
+      policyEvaluation,
       canApply,
       issueCode,
       targetAcademicYear,
@@ -704,12 +1011,14 @@ function serializePromotionPreview(state) {
     summary: summarizePromotionItems(state.items),
     items: state.items.map((item) => ({
       examResultId: String(item.examResult._id),
-      sourceResultStatus: normalizeText(item.examResult.resultStatus),
+      sourceResultStatus: normalizeText(item.policyEvaluation?.sourceResultStatus || item.examResult.resultStatus),
       percentage: Number(item.examResult.percentage || 0),
+      averageScore: Number(item.policyEvaluation?.averageScore ?? item.examResult.percentage ?? 0),
       computedOutcome: item.computedOutcome,
       canApply: item.canApply,
       issueCode: item.issueCode,
       generatedMembershipStatus: item.generatedMembershipStatus,
+      policyEvaluation: item.policyEvaluation || null,
       sourceMembership: formatMembership(item.sourceMembership),
       targetAcademicYear: formatAcademicYear(item.targetAcademicYear),
       targetClass: formatSchoolClass(item.targetClass)
@@ -824,7 +1133,7 @@ async function applyPromotions(payload = {}, actorUserId = null) {
       assessmentPeriodId: state.session.assessmentPeriodId?._id || state.session.assessmentPeriodId || null,
       classId: item.sourceMembership.classId?._id || item.sourceMembership.classId || null,
       targetClassId: item.targetClass?._id || null,
-      sourceResultStatus: normalizeText(item.examResult.resultStatus),
+      sourceResultStatus: normalizeText(item.policyEvaluation?.sourceResultStatus || item.examResult.resultStatus),
       promotionOutcome,
       transactionStatus: 'applied',
       generatedMembershipStatus: targetMembership ? normalizeText(targetMembership.status) : item.generatedMembershipStatus,

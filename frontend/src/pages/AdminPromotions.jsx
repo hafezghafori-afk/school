@@ -51,6 +51,53 @@ function targetLabel(item) {
   return [classTitle, yearTitle].filter(Boolean).join(' | ') || '---';
 }
 
+function outcomeLabel(value) {
+  const key = String(value || '').trim();
+  const labels = {
+    promoted: 'ارتقا',
+    repeated: 'ناکام صنف',
+    conditional: 'مشروط',
+    graduated: 'فارغ',
+    blocked: 'متوقف',
+    skipped: 'رد شده'
+  };
+  return labels[key] || key || '---';
+}
+
+function resultStatusLabel(value) {
+  const key = String(value || '').trim();
+  const labels = {
+    passed: 'کامیاب',
+    failed: 'ناکام',
+    conditional: 'مشروط',
+    distinction: 'عالی',
+    temporary: 'موقت',
+    placement: 'تعیین سویه',
+    excused: 'معذور',
+    absent: 'غایب',
+    pending: 'در انتظار',
+    blocked: 'متوقف'
+  };
+  return labels[key] || key || '---';
+}
+
+function policySummary(item) {
+  const policy = item?.policyEvaluation || {};
+  const failed = Array.isArray(policy.failedSubjects) ? policy.failedSubjects : [];
+  const failedText = failed.length
+    ? failed.slice(0, 3).map((subject) => `${subject.subjectTitle || 'مضمون'} (${formatNumber(subject.percentage || 0)})`).join('، ')
+    : 'ندارد';
+  const extra = failed.length > 3 ? ` +${formatNumber(failed.length - 3)}` : '';
+  return {
+    average: formatNumber(policy.averageScore ?? item?.averageScore ?? item?.percentage ?? 0),
+    failedCount: formatNumber(policy.failedSubjectCount || 0),
+    failedText: `${failedText}${extra}`,
+    totalSubjects: formatNumber(policy.totalSubjects || 0),
+    sheets: Array.isArray(policy.includedSessions) ? policy.includedSessions.length : 0,
+    templates: Array.isArray(policy.sheetTemplates) ? policy.sheetTemplates : []
+  };
+}
+
 function summarizeTransactions(items = []) {
   return items.reduce((summary, item) => {
     summary.total += 1;
@@ -283,35 +330,46 @@ export default function AdminPromotions() {
 
           <article className="admin-workspace-card" data-span="7">
             <h2>پیش‌نمایش فعلی</h2>
-            <p className="admin-workspace-subtitle">این بخش نشان می‌دهد هر membership به کدام outcome می‌رسد و آیا بدون خطا قابل اعمال است یا نه.</p>
+            <p className="admin-workspace-subtitle">سیستم بر اساس پالیسی ۵۵ نمره، حداکثر ۳ مضمون مشروط، و شقه‌های همان سال/صنف تصمیم را محاسبه می‌کند.</p>
             {preview?.items?.length ? (
               <div className="admin-workspace-table-wrap">
                 <table className="admin-workspace-table">
                   <thead>
                     <tr>
                       <th>متعلم</th>
-                      <th>وضعیت نتیجه</th>
-                      <th>Outcome</th>
-                      <th>Target</th>
+                      <th>نتیجه</th>
+                      <th>تصمیم</th>
+                      <th>میانگین</th>
+                      <th>مضامین ناکام</th>
+                      <th>هدف</th>
                       <th>قابل اعمال</th>
                       <th>Issue</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {preview.items.map((item) => (
-                      <tr key={item.examResultId}>
-                        <td>{studentName(item)}</td>
-                        <td>{item.sourceResultStatus || '---'}</td>
-                        <td>{item.computedOutcome || '---'}</td>
-                        <td>{targetLabel(item)}</td>
-                        <td>
-                          <span className={`admin-workspace-badge ${item.canApply ? 'good' : ''}`}>{item.canApply ? 'بله' : 'خیر'}</span>
-                        </td>
-                        <td>{item.issueCode || '---'}</td>
-                      </tr>
-                    ))}
+                    {preview.items.map((item) => {
+                      const details = policySummary(item);
+                      return (
+                        <tr key={item.examResultId}>
+                          <td>{studentName(item)}</td>
+                          <td>{resultStatusLabel(item.sourceResultStatus)}</td>
+                          <td>{outcomeLabel(item.computedOutcome)}</td>
+                          <td>{details.average}</td>
+                          <td title={details.failedText}>{details.failedCount} / {details.totalSubjects}</td>
+                          <td>{targetLabel(item)}</td>
+                          <td>
+                            <span className={`admin-workspace-badge ${item.canApply ? 'good' : ''}`}>{item.canApply ? 'بله' : 'خیر'}</span>
+                          </td>
+                          <td>{item.issueCode || '---'}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
+                <div className="admin-workspace-meta">
+                  <span>شقه‌های شامل: {formatNumber(policySummary(preview.items[0]).sheets)}</span>
+                  <span>قالب‌ها: {policySummary(preview.items[0]).templates.map((item) => item.title || item.code).filter(Boolean).join('، ') || '---'}</span>
+                </div>
               </div>
             ) : (
               <div className="admin-workspace-empty">هنوز پیش‌نمایشی اجرا نشده است.</div>

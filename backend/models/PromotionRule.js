@@ -3,6 +3,12 @@ const mongoose = require('mongoose');
 const DEFAULT_PROMOTED_STATUSES = ['passed', 'distinction', 'placement'];
 const DEFAULT_CONDITIONAL_STATUSES = ['conditional', 'temporary', 'excused'];
 const DEFAULT_REPEATED_STATUSES = ['failed', 'absent', 'pending'];
+const DEFAULT_COMPONENT_WEIGHTS = {
+  writtenScore: 0,
+  oralScore: 0,
+  classActivityScore: 0,
+  homeworkScore: 0
+};
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -67,6 +73,27 @@ const promotionRuleSchema = new mongoose.Schema({
     enum: ['active', 'pending', 'suspended'],
     default: 'pending'
   },
+  evaluationMode: {
+    type: String,
+    enum: ['result_status', 'score_policy'],
+    default: 'score_policy',
+    index: true
+  },
+  passingScore: { type: Number, default: 55, min: 0, max: 100 },
+  subjectPassingScore: { type: Number, default: 55, min: 0, max: 100 },
+  maxConditionalSubjects: { type: Number, default: 3, min: 0, max: 20 },
+  requireCompleteResults: { type: Boolean, default: true },
+  missingResultOutcome: {
+    type: String,
+    enum: ['blocked', 'conditional', 'repeated'],
+    default: 'blocked'
+  },
+  componentWeights: {
+    writtenScore: { type: Number, default: 0, min: 0, max: 100 },
+    oralScore: { type: Number, default: 0, min: 0, max: 100 },
+    classActivityScore: { type: Number, default: 0, min: 0, max: 100 },
+    homeworkScore: { type: Number, default: 0, min: 0, max: 100 }
+  },
   promotedStatuses: [{ type: String, trim: true }],
   conditionalStatuses: [{ type: String, trim: true }],
   repeatedStatuses: [{ type: String, trim: true }],
@@ -85,6 +112,18 @@ promotionRuleSchema.pre('validate', function syncPromotionRuleState() {
   this.promotedStatuses = normalizeStatusList(this.promotedStatuses, DEFAULT_PROMOTED_STATUSES);
   this.conditionalStatuses = normalizeStatusList(this.conditionalStatuses, DEFAULT_CONDITIONAL_STATUSES);
   this.repeatedStatuses = normalizeStatusList(this.repeatedStatuses, DEFAULT_REPEATED_STATUSES);
+  if (!['result_status', 'score_policy'].includes(this.evaluationMode)) this.evaluationMode = 'score_policy';
+  this.passingScore = Math.min(100, Math.max(0, Number(this.passingScore ?? 55)));
+  this.subjectPassingScore = Math.min(100, Math.max(0, Number(this.subjectPassingScore ?? this.passingScore ?? 55)));
+  this.maxConditionalSubjects = Math.max(0, Math.floor(Number(this.maxConditionalSubjects ?? 3)));
+  if (!['blocked', 'conditional', 'repeated'].includes(this.missingResultOutcome)) this.missingResultOutcome = 'blocked';
+  this.componentWeights = {
+    ...DEFAULT_COMPONENT_WEIGHTS,
+    ...(this.componentWeights || {})
+  };
+  Object.keys(DEFAULT_COMPONENT_WEIGHTS).forEach((key) => {
+    this.componentWeights[key] = Math.min(100, Math.max(0, Number(this.componentWeights[key] || 0)));
+  });
 
   if (this.scope === 'global') {
     this.academicYearId = null;

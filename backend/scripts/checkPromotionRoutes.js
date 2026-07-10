@@ -156,7 +156,7 @@ async function request(server, targetPath, { method = 'GET', user = null, body }
 
 async function run() {
   const server = await createServer();
-  const adminUser = { id: IDS.admin, role: 'admin', permissions: ['manage_users', 'view_reports'] };
+  const adminUser = { id: IDS.admin, role: 'admin', permissions: ['manage_users', 'view_reports', 'education.promotions.manage'] };
   const instructorUser = { id: IDS.instructor, role: 'instructor', permissions: ['view_reports'] };
 
   try {
