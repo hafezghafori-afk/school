@@ -429,6 +429,7 @@ const SCHEDULE_WIDGET_HELP_OPEN_STORAGE_KEY = 'admin_schedule_widget_help_open_v
 const QUICK_LINK_ITEMS = [
   { to: '/admin-government-finance', label: 'فرماندهی مالی دولت', permission: 'manage_finance' },
   { to: '/admin-education', label: 'مرکز مدیریت آموزش', permission: 'manage_content' },
+  { to: '/admin-exams-dashboard', label: 'داشبورد امتحانات', permission: 'manage_content' },
   { to: '/admin-users', label: 'کاربران', permission: 'manage_users' },
   { to: '/admin-enrollments', label: 'ثبت‌نام‌ها', permission: 'manage_enrollments' },
   { to: '/admin-education?section=enrollments&lifecycle=transfer-in', label: 'تبدیلی آمد', permission: 'students.transfers.manage' },

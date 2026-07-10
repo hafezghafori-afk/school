@@ -34,6 +34,7 @@ const ADMIN_QUICK_LINK_DEFAULTS = [
   { title: 'کاربران', href: '/admin-users', permission: 'manage_users', enabled: true },
   { title: 'مرکز مالی', href: '/admin-finance', permission: 'manage_finance', enabled: true },
   { title: 'عضویت‌های مالی', href: '/admin-financial-memberships', permission: 'manage_finance', enabled: true },
+  { title: 'داشبورد امتحانات', href: '/admin-exams-dashboard', permission: 'manage_content', enabled: true },
   { title: 'گزارشات', href: '/admin-stats', permission: 'view_reports', enabled: true },
   { title: 'لاگ‌ها', href: '/admin-logs', permission: 'view_reports', enabled: true },
   { title: 'مرکز ارتباطات سیما', href: '/admin-communications', permission: 'manage_platform_requests', enabled: true },
