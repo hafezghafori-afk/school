@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import useSiteSettings from '../hooks/useSiteSettings';
+import { getPublicWebsiteLocale } from '../i18n/publicWebsite';
 import './Contact.css';
 
 import { API_BASE } from '../config/api';
@@ -65,8 +66,8 @@ const text = {
 };
 
 export default function Contact() {
-  const { settings } = useSiteSettings();
-  const t = text[settings?.language || 'fa'] || text.fa;
+  const { settings, language } = useSiteSettings();
+  const t = getPublicWebsiteLocale(language || settings?.language).contact || text[settings?.language || 'fa'] || text.fa;
   const [form, setForm] = useState({ name: '', phone: '', email: '', type: 'contact', message: '' });
   const [status, setStatus] = useState('');
   const [sending, setSending] = useState(false);

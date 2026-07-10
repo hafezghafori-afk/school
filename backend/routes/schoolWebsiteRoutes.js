@@ -5,6 +5,7 @@ const School = require('../models/School');
 const SchoolWebsiteProfile = require('../models/SchoolWebsiteProfile');
 const ContactMessage = require('../models/ContactMessage');
 const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
+const { getSchoolWebsiteLocale } = require('../config/schoolWebsiteLocales');
 
 const router = express.Router();
 
@@ -220,7 +221,9 @@ const resolveProfile = async (slug = '') => {
 const serializeProfile = (profile, lang = 'fa') => {
   if (!profile) return null;
   const language = normalizeLanguage(lang || profile.primaryLanguage);
+  const locale = getSchoolWebsiteLocale(language);
   const basePath = `/schools/${profile.slug}`;
+  const withLanguage = (href) => (language === 'fa' ? href : `${href}${href.includes('?') ? '&' : '?'}lang=${language}`);
   const contactAddress = pickText(profile.contactAddress, language);
   return {
     id: String(profile._id),
@@ -239,14 +242,14 @@ const serializeProfile = (profile, lang = 'fa') => {
     homeHeroBadge: pickText(profile.homeHeroBadge, language),
     homeHeroTitle: pickText(profile.homeHeroTitle, language),
     homeHeroText: pickText(profile.homeHeroText, language),
-    homeHeroPrimaryLabel: language === 'en' ? 'Contact us' : language === 'ps' ? 'اړیکه ونیسئ' : 'تماس با مکتب',
-    homeHeroPrimaryHref: `${basePath}/contact`,
-    homeHeroSecondaryLabel: language === 'en' ? 'Login' : language === 'ps' ? 'سیستم ته ننوتل' : 'ورود به سیستم',
+    homeHeroPrimaryLabel: locale.contactUs,
+    homeHeroPrimaryHref: withLanguage(`${basePath}/contact`),
+    homeHeroSecondaryLabel: locale.login,
     homeHeroSecondaryHref: '/login',
-    homeCtaTitle: language === 'en' ? 'Contact the school office' : language === 'ps' ? 'له ادارې سره اړیکه' : 'با اداره مکتب تماس بگیرید',
+    homeCtaTitle: locale.contactOffice,
     homeCtaText: pickText(profile.contactText, language),
-    homeCtaLabel: language === 'en' ? 'Send message' : language === 'ps' ? 'پیغام ولېږئ' : 'ارسال پیام',
-    homeCtaHref: `${basePath}/contact`,
+    homeCtaLabel: locale.sendMessage,
+    homeCtaHref: withLanguage(`${basePath}/contact`),
     aboutTitle: pickText(profile.aboutTitle, language),
     aboutBody: pickText(profile.aboutBody, language),
     missionTitle: pickText(profile.missionTitle, language),
@@ -264,19 +267,19 @@ const serializeProfile = (profile, lang = 'fa') => {
     footerLinks: localizeItems(profile.footerLinks, language).length
       ? localizeItems(profile.footerLinks, language)
       : [
-          { title: language === 'en' ? 'Home' : language === 'ps' ? 'کور' : 'خانه', href: basePath },
-          { title: language === 'en' ? 'Facilities' : language === 'ps' ? 'امکانات' : 'امکانات', href: `${basePath}/features` },
-          { title: language === 'en' ? 'About' : language === 'ps' ? 'په اړه' : 'درباره مکتب', href: `${basePath}/about` },
-          { title: language === 'en' ? 'Contact' : language === 'ps' ? 'اړیکه' : 'تماس', href: `${basePath}/contact` },
-          { title: language === 'en' ? 'Login' : language === 'ps' ? 'ننوتل' : 'ورود به سیستم', href: '/login' }
+          { title: locale.home, href: withLanguage(basePath) },
+          { title: locale.facilities, href: withLanguage(`${basePath}/features`) },
+          { title: locale.about, href: withLanguage(`${basePath}/about`) },
+          { title: locale.contact, href: withLanguage(`${basePath}/contact`) },
+          { title: locale.login, href: '/login' }
         ],
     mainMenu: [
-      { title: language === 'en' ? 'Home' : language === 'ps' ? 'کور' : 'خانه', href: basePath, icon: 'fa-house', enabled: true },
-      { title: language === 'en' ? 'Facilities' : language === 'ps' ? 'امکانات' : 'امکانات', href: `${basePath}/features`, icon: 'fa-layer-group', enabled: true },
-      { title: language === 'en' ? 'About school' : language === 'ps' ? 'د ښوونځي په اړه' : 'درباره مکتب', href: `${basePath}/about`, icon: 'fa-circle-info', enabled: true },
-      { title: language === 'en' ? 'Contact' : language === 'ps' ? 'اړیکه' : 'تماس', href: `${basePath}/contact`, icon: 'fa-phone', enabled: true }
+      { title: locale.home, href: withLanguage(basePath), icon: 'fa-house', enabled: true },
+      { title: locale.facilities, href: withLanguage(`${basePath}/features`), icon: 'fa-layer-group', enabled: true },
+      { title: locale.aboutSchool, href: withLanguage(`${basePath}/about`), icon: 'fa-circle-info', enabled: true },
+      { title: locale.contact, href: withLanguage(`${basePath}/contact`), icon: 'fa-phone', enabled: true }
     ],
-    footerContactTitle: language === 'en' ? 'School contact' : language === 'ps' ? 'د ښوونځي اړیکه' : 'تماس مکتب',
+    footerContactTitle: locale.schoolContact,
     footerContactText: pickText(profile.footerNote, language) || pickText(profile.aboutBody, language),
     footerNote: pickText(profile.footerNote, language),
     footerCopyright: ''

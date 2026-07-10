@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import useSiteSettings from '../hooks/useSiteSettings';
+import { getPublicWebsiteLocale } from '../i18n/publicWebsite';
 import { normalizeBrandName } from '../utils/brand';
 import './Home.css';
 
@@ -192,8 +193,8 @@ const pageText = {
 };
 
 export default function Home() {
-  const { settings } = useSiteSettings();
-  const t = pageText[settings?.language || 'fa'] || pageText.fa;
+  const { settings, language } = useSiteSettings();
+  const t = getPublicWebsiteLocale(language || settings?.language).home || pageText[settings?.language || 'fa'] || pageText.fa;
   const brandName = normalizeBrandName(settings?.brandName);
   const heroBadge = settings?.homeHeroBadge || 'طراحی‌شده برای مکاتب افغانستان';
   const heroTitle = settings?.homeHeroTitle || 'سیما؛ سیستم مدیریت هوشمند مکاتیب افغانستان';

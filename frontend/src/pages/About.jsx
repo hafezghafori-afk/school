@@ -1,5 +1,6 @@
 import React from 'react';
 import useSiteSettings from '../hooks/useSiteSettings';
+import { getPublicWebsiteLocale } from '../i18n/publicWebsite';
 import { normalizeBrandName } from '../utils/brand';
 import './About.css';
 
@@ -30,8 +31,8 @@ const labels = {
 };
 
 export default function About() {
-  const { settings } = useSiteSettings();
-  const t = labels[settings?.language || 'fa'] || labels.fa;
+  const { settings, language } = useSiteSettings();
+  const t = getPublicWebsiteLocale(language || settings?.language).about || labels[settings?.language || 'fa'] || labels.fa;
   const brand = normalizeBrandName(settings?.brandName);
   const isSchoolWebsite = settings?.isSchoolWebsite;
   const aboutTitle = settings?.aboutTitle || `درباره ${brand}`;

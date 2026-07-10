@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { normalizeBrandName } from '../utils/brand';
+import { getPublicWebsiteLocale } from '../i18n/publicWebsite';
 import './Footer.css';
 
 const productModules = [
@@ -22,6 +23,7 @@ const productLinks = [
 function Footer({ settings }) {
   const currentYear = new Date().getFullYear();
   const brandName = normalizeBrandName(settings?.brandName);
+  const footerText = getPublicWebsiteLocale(settings?.language).footer;
   const contactPhone = settings?.contactPhone || '0702855557';
   const contactEmail = settings?.contactEmail || '---';
   const contactAddress = settings?.contactAddress || 'افغانستان';

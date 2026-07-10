@@ -7,6 +7,7 @@ import Footer from './components/Footer';
 import AccessDenied from './components/AccessDenied';
 import { ToastProvider } from './components/ui/toast';
 import useSiteSettings, { PUBLIC_WEBSITE_LANGUAGE_KEY } from './hooks/useSiteSettings';
+import { getPublicWebsiteLocale, publicLanguageOptions } from './i18n/publicWebsite';
 import { API_BASE, API_ORIGIN } from './config/api';
 import { expandLegacyPermissions } from './config/permissionCatalog';
 import { formatAfghanDate, formatAfghanDateTime, formatAfghanTime } from './utils/afghanDate';
@@ -405,11 +406,7 @@ const SALES_PUBLIC_MENU = [
   }
 ];
 
-const PUBLIC_LANGUAGE_OPTIONS = [
-  { code: 'fa', label: 'فارسی' },
-  { code: 'en', label: 'English' },
-  { code: 'ps', label: 'پشتو' }
-];
+const PUBLIC_LANGUAGE_OPTIONS = publicLanguageOptions;
 
 const getStoredPublicLanguage = () => {
   try {
@@ -979,7 +976,9 @@ function AppShell() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [profileMenuPosition, setProfileMenuPosition] = useState({ top: 0, left: 0 });
   const [publicWebsiteLanguage, setPublicWebsiteLanguage] = useState(getStoredPublicLanguage);
-  const { settings } = useSiteSettings();
+  const { settings, language: activePublicLanguage } = useSiteSettings();
+  const publicLocale = getPublicWebsiteLocale(activePublicLanguage || publicWebsiteLanguage);
+  const headerText = publicLocale.header;
   const displayBrandName = normalizeBrandName(settings?.brandName);
   const displayBrandSubtitle = normalizeBrandSubtitle(settings?.brandSubtitle);
   const menuBlueprintLibrary = useMemo(
@@ -1091,6 +1090,15 @@ function AppShell() {
     } catch {
       // ignore storage issues
     }
+    const params = new URLSearchParams(location.search || '');
+    params.set('lang', nextLanguage);
+    navigate(`${location.pathname}?${params.toString()}${location.hash || ''}`, { replace: false });
+  };
+
+  const getLanguageHref = (language) => {
+    const params = new URLSearchParams(location.search || '');
+    params.set('lang', language);
+    return `${location.pathname}?${params.toString()}${location.hash || ''}`;
   };
 
   const prefetchRouteByHref = useCallback((href = '') => {
@@ -2659,7 +2667,7 @@ function AppShell() {
     );
   };
 
-  const showMobileRegisterShortcut = !authed;
+  const showMobileRegisterShortcut = !authed && !settings?.isSchoolWebsite;
   const showMobileLoginShortcut = false;
   const showMobileAccountShortcuts = authed;
   const showMobileDrawerCta = showMobileRegisterShortcut || showMobileLoginShortcut || showMobileAccountShortcuts;
@@ -2686,14 +2694,17 @@ function AppShell() {
         <div className="topbar">
           <div className="topbar-lang">
             {isPublicWebsite ? PUBLIC_LANGUAGE_OPTIONS.map((item) => (
-              <button
+              <Link
                 key={item.code}
-                type="button"
-                className={`lang-btn ${publicWebsiteLanguage === item.code ? 'active' : ''}`}
-                onClick={() => handlePublicLanguageChange(item.code)}
+                to={getLanguageHref(item.code)}
+                className={`lang-btn ${(activePublicLanguage || publicWebsiteLanguage) === item.code ? 'active' : ''}`}
+                onClick={(event) => {
+                  event.preventDefault();
+                  handlePublicLanguageChange(item.code);
+                }}
               >
                 {item.label}
-              </button>
+              </Link>
             )) : (
               <>
                 <button className="lang-btn active" type="button">وب‌سایت مکتب</button>
@@ -2905,7 +2916,7 @@ function AppShell() {
                 <div className="main-nav-actions">
                   {!authed && (
                     <>
-                      {!hasRegisterMenu && (
+                      {!settings?.isSchoolWebsite && !hasRegisterMenu && (
                         <Link to={contactHref} className="nav-action-btn cta" {...getPrefetchHandlers(contactHref)}>
                           <i className="fa fa-headset" aria-hidden="true" />
                           <span>تماس با مکتب</span>
