@@ -23,23 +23,37 @@ const timeline = [
   { year: '1403', text: 'افزودن کارخانگی، چت و کارنامه دیجیتال.' }
 ];
 
+const labels = {
+  fa: { why: 'چرا ما؟', values: 'ارزش‌ها و امکانات', growth: 'مسیر رشد' },
+  en: { why: 'Why us?', values: 'Values and facilities', growth: 'Growth path' },
+  ps: { why: 'ولې موږ؟', values: 'ارزښتونه او امکانات', growth: 'د ودې لاره' }
+};
+
 export default function About() {
   const { settings } = useSiteSettings();
+  const t = labels[settings?.language || 'fa'] || labels.fa;
   const brand = normalizeBrandName(settings?.brandName);
+  const isSchoolWebsite = settings?.isSchoolWebsite;
+  const aboutTitle = settings?.aboutTitle || `درباره ${brand}`;
+  const aboutBody = settings?.aboutBody || `${brand} با هدف ارتقای کیفیت آموزش و فراهم‌سازی دسترسی منظم به محتوا، سیستم آموزشی دیجیتال را برای شاگردان، استادان و مدیران ایجاد کرده است.`;
+  const missionTitle = settings?.missionTitle || 'ماموریت';
+  const missionBody = settings?.missionBody || 'ایجاد محیط یادگیری منظم، شفاف و قابل پیگیری برای همه صنف‌ها.';
+  const visionTitle = settings?.visionTitle || 'چشم‌انداز ما';
+  const visionBody = settings?.visionBody || 'تبدیل شدن به مرجع آموزش دیجیتال در سطح مکاتب افغانستان.';
+  const featureValues = isSchoolWebsite && Array.isArray(settings?.salesQuickCards) && settings.salesQuickCards.length
+    ? settings.salesQuickCards.map((item) => ({ title: item.title, text: item.text || item.desc || '' })).filter((item) => item.title && item.text)
+    : values;
 
   return (
-    <section className="about-page">
+    <section className="about-page" dir={settings?.language === 'en' ? 'ltr' : 'rtl'}>
       <div className="about-hero">
         <div>
-          <h1>درباره {brand}</h1>
-          <p>
-            {brand} با هدف ارتقای کیفیت آموزش و فراهم‌سازی دسترسی منظم به محتوا،
-            سیستم آموزشی دیجیتال را برای شاگردان، استادان و مدیران ایجاد کرده است.
-          </p>
+          <h1>{aboutTitle}</h1>
+          <p>{aboutBody}</p>
         </div>
         <div className="about-hero-card">
-          <h3>چشم‌انداز ما</h3>
-          <p>تبدیل شدن به مرجع آموزش دیجیتال در سطح مکاتب افغانستان.</p>
+          <h3>{visionTitle}</h3>
+          <p>{visionBody}</p>
         </div>
       </div>
 
@@ -54,19 +68,19 @@ export default function About() {
 
       <div className="about-grid">
         <div className="about-card">
-          <h3>ماموریت</h3>
-          <p>ایجاد محیط یادگیری منظم، شفاف و قابل پیگیری برای همه صنف‌ها.</p>
+          <h3>{missionTitle}</h3>
+          <p>{missionBody}</p>
         </div>
         <div className="about-card">
-          <h3>چرا ما؟</h3>
-          <p>ترکیب استادان باتجربه با فناوری آموزشی برای تجربه یادگیری بهتر.</p>
+          <h3>{t.why}</h3>
+          <p>{isSchoolWebsite ? aboutBody : 'ترکیب استادان باتجربه با فناوری آموزشی برای تجربه یادگیری بهتر.'}</p>
         </div>
       </div>
 
       <div className="about-values">
-        <h2>ارزش‌های ما</h2>
+        <h2>{t.values}</h2>
         <div className="about-values-grid">
-          {values.map(item => (
+          {featureValues.map(item => (
             <div key={item.title}>
               <h4>{item.title}</h4>
               <p>{item.text}</p>
@@ -76,7 +90,7 @@ export default function About() {
       </div>
 
       <div className="about-timeline">
-        <h2>مسیر رشد</h2>
+        <h2>{t.growth}</h2>
         <div className="about-timeline-grid">
           {timeline.map(item => (
             <div key={item.year}>

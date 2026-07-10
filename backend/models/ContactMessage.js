@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 
 const contactMessageSchema = new mongoose.Schema({
+  schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'AfghanSchool', default: null, index: true },
   name: { type: String, default: '' },
   phone: { type: String, default: '' },
   email: { type: String, default: '' },

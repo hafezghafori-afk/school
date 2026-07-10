@@ -146,20 +146,67 @@ const normalizeFaqList = (items, fallback) => {
   return normalized.length ? normalized : fallback;
 };
 
+const pageText = {
+  fa: {
+    facilities: 'امکانات مکتب',
+    modules: 'ماژول‌های اصلی سیستم',
+    facilitiesIntro: 'صفحه اصلی روی بخش‌هایی تمرکز دارد که کار روزانه مکتب را ساده‌تر، دقیق‌تر و قابل گزارش می‌سازد.',
+    audienceKicker: 'برای کی ساخته شده؟',
+    audienceTitle: 'مناسب برای مراکز آموزشی که می‌خواهند کارها دیجیتال شود',
+    why: 'چرا این سیستم؟',
+    panelsKicker: 'نمونه داشبوردها',
+    panelsTitle: 'هر کاربر پنل منظم خودش را دارد',
+    faqKicker: 'سوالات متداول',
+    faqTitle: 'پاسخ کوتاه به سوال‌های مهم مدیران مکتب',
+    start: 'شروع همکاری',
+    contact: 'تماس با ما'
+  },
+  en: {
+    facilities: 'School Facilities',
+    modules: 'Main system modules',
+    facilitiesIntro: 'The home page highlights the services that make daily school work clearer, faster, and reportable.',
+    audienceKicker: 'Who is it for?',
+    audienceTitle: 'For schools that want organized digital operations',
+    why: 'Why this system?',
+    panelsKicker: 'Dashboard examples',
+    panelsTitle: 'Every user has a clear workspace',
+    faqKicker: 'FAQ',
+    faqTitle: 'Short answers to common school management questions',
+    start: 'Get in touch',
+    contact: 'Contact us'
+  },
+  ps: {
+    facilities: 'د ښوونځي امکانات',
+    modules: 'د سیستم اصلي برخې',
+    facilitiesIntro: 'اصلي پاڼه هغه برخې ښيي چې د ښوونځي ورځني کارونه اسانه، منظم او د راپور وړ کوي.',
+    audienceKicker: 'د چا لپاره؟',
+    audienceTitle: 'د هغو ښوونځیو لپاره چې منظم ډیجیټلي کار غواړي',
+    why: 'ولې دا سیستم؟',
+    panelsKicker: 'د ډشبورډ بېلګې',
+    panelsTitle: 'هر کاروونکی خپل منظم پنل لري',
+    faqKicker: 'عامې پوښتنې',
+    faqTitle: 'د ښوونځي د مدیریت مهمو پوښتنو ته لنډ ځوابونه',
+    start: 'اړیکه پیل کړئ',
+    contact: 'اړیکه'
+  }
+};
+
 export default function Home() {
   const { settings } = useSiteSettings();
+  const t = pageText[settings?.language || 'fa'] || pageText.fa;
   const brandName = normalizeBrandName(settings?.brandName);
   const heroBadge = settings?.homeHeroBadge || 'طراحی‌شده برای مکاتب افغانستان';
   const heroTitle = settings?.homeHeroTitle || 'سیما؛ سیستم مدیریت هوشمند مکاتیب افغانستان';
   const heroText = settings?.homeHeroText || 'تمام امور مکتب را از ثبت شاگرد تا فیس، حاضری، امتحانات، تقسیم اوقات و گزارش‌ها در یک سیستم ساده و منظم مدیریت کنید.';
-  const primaryLabel = settings?.homeHeroPrimaryLabel || 'درخواست دمو';
-  const primaryHref = settings?.homeHeroPrimaryHref || '/demo-request';
+  const primaryLabel = settings?.homeHeroPrimaryLabel || 'تماس با مکتب';
+  const primaryHref = settings?.homeHeroPrimaryHref || (settings?.publicBasePath ? `${settings.publicBasePath}/contact` : '/contact');
   const secondaryLabel = settings?.homeHeroSecondaryLabel || 'ورود به سیستم';
   const secondaryHref = settings?.homeHeroSecondaryHref || '/login';
   const ctaTitle = settings?.homeCtaTitle || 'می‌خواهید سیستم را برای مکتب خود فعال کنید؟';
-  const ctaText = settings?.homeCtaText || 'برای دریافت دمو، قیمت و راه‌اندازی با ما تماس بگیرید.';
-  const ctaLabel = settings?.homeCtaLabel || 'درخواست دمو';
-  const ctaHref = settings?.homeCtaHref || '/demo-request';
+  const ctaText = settings?.homeCtaText || 'برای معلومات بیشتر و راه‌اندازی با اداره مکتب تماس بگیرید.';
+  const ctaLabel = settings?.homeCtaLabel || 'ارسال پیام';
+  const ctaHref = settings?.homeCtaHref || (settings?.publicBasePath ? `${settings.publicBasePath}/contact` : '/contact');
+  const contactHref = settings?.publicBasePath ? `${settings.publicBasePath}/contact` : '/contact';
   const quickCardItems = normalizeCardList(settings?.salesQuickCards, quickCards);
   const moduleCardItems = normalizeCardList(settings?.salesModules, moduleItems);
   const audienceList = normalizeAudienceList(settings?.salesAudience, audienceItems);
@@ -185,7 +232,7 @@ export default function Home() {
   }, []);
 
   return (
-    <section className="home-page" dir="rtl">
+    <section className="home-page" dir={settings?.language === 'en' ? 'ltr' : 'rtl'}>
       <div className="home-shell">
         <section className="home-hero reveal">
           <div className="hero-content">
@@ -246,10 +293,10 @@ export default function Home() {
 
         <section className="home-section reveal" id="modules">
           <div className="section-head">
-            <span>ماژول‌های اصلی سیستم</span>
-            <h2>امکاناتی که مدیر مکتب فوراً ارزش آن را می‌فهمد</h2>
+            <span>{settings?.isSchoolWebsite ? t.facilities : t.modules}</span>
+            <h2>{settings?.isSchoolWebsite ? t.facilities : 'امکاناتی که مدیر مکتب فوراً ارزش آن را می‌فهمد'}</h2>
             <p>
-              صفحه اصلی روی بخش‌هایی تمرکز دارد که کار روزانه مکتب را ساده‌تر، دقیق‌تر و قابل گزارش می‌سازد.
+              {t.facilitiesIntro}
             </p>
           </div>
           <div className="module-grid">
@@ -267,8 +314,8 @@ export default function Home() {
 
         <section className="home-section audience-section reveal" id="schools">
           <div className="section-head">
-            <span>برای کی ساخته شده؟</span>
-            <h2>مناسب برای مراکز آموزشی که می‌خواهند کارها دیجیتال شود</h2>
+            <span>{t.audienceKicker}</span>
+            <h2>{t.audienceTitle}</h2>
           </div>
           <div className="audience-list">
             {audienceList.map((item) => (
@@ -282,7 +329,7 @@ export default function Home() {
 
         <section className="trust-section reveal">
           <div>
-            <span className="home-kicker">چرا این سیستم؟</span>
+            <span className="home-kicker">{t.why}</span>
             <h2>{trustTitle}</h2>
             <p>{trustText}</p>
           </div>
@@ -293,8 +340,8 @@ export default function Home() {
 
         <section className="home-section reveal">
           <div className="section-head">
-            <span>نمونه داشبوردها</span>
-            <h2>هر کاربر پنل منظم خودش را دارد</h2>
+            <span>{t.panelsKicker}</span>
+            <h2>{t.panelsTitle}</h2>
           </div>
           <div className="dashboard-grid">
             {dashboardList.map((item) => (
@@ -312,8 +359,8 @@ export default function Home() {
 
         <section className="home-section reveal">
           <div className="section-head">
-            <span>سوالات متداول</span>
-            <h2>پاسخ کوتاه به سوال‌های مهم مدیران مکتب</h2>
+            <span>{t.faqKicker}</span>
+            <h2>{t.faqTitle}</h2>
           </div>
           <div className="faq-list">
             {faqList.map((item) => (
@@ -327,7 +374,7 @@ export default function Home() {
 
         <section className="home-cta reveal">
           <div>
-            <span className="home-kicker">شروع همکاری</span>
+            <span className="home-kicker">{t.start}</span>
             <h2>{ctaTitle}</h2>
             <p>{ctaText}</p>
           </div>
@@ -335,8 +382,8 @@ export default function Home() {
             <Link className="hero-btn primary" to={ctaHref}>
               {ctaLabel}
             </Link>
-            <Link className="hero-btn secondary" to="/contact">
-              تماس با ما
+            <Link className="hero-btn secondary" to={contactHref}>
+              {t.contact}
             </Link>
           </div>
         </section>

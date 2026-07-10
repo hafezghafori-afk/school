@@ -124,6 +124,7 @@ const timetableLegacyRoutes = require('./routes/timetableLegacyRoutes');
 const schoolClassLegacyRoutes = require('./routes/schoolClassLegacyRoutes');
 const subjectLegacyRoutes = require('./routes/subjectLegacyRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
+const schoolWebsiteRoutes = require('./routes/schoolWebsiteRoutes');
 const errorHandler = require('./middleware/errorHandler');
 const { getDatabaseStatus, requireDatabase } = require('./middleware/requireDatabase');
 const ChatThread = require('./models/ChatThread');
@@ -205,6 +206,7 @@ app.use('/api/timetable', timetableLegacyRoutes);
 app.use('/api/school-classes', schoolClassLegacyRoutes);
 app.use('/api/subjects', subjectLegacyRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/school-websites', schoolWebsiteRoutes);
 
 if (hasFrontendBuild) {
   app.use(express.static(frontendDistDir));

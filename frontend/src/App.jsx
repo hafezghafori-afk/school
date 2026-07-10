@@ -6,7 +6,7 @@ import './pages/TimetableSharedRedesign.css';
 import Footer from './components/Footer';
 import AccessDenied from './components/AccessDenied';
 import { ToastProvider } from './components/ui/toast';
-import useSiteSettings from './hooks/useSiteSettings';
+import useSiteSettings, { PUBLIC_WEBSITE_LANGUAGE_KEY } from './hooks/useSiteSettings';
 import { API_BASE, API_ORIGIN } from './config/api';
 import { expandLegacyPermissions } from './config/permissionCatalog';
 import { formatAfghanDate, formatAfghanDateTime, formatAfghanTime } from './utils/afghanDate';
@@ -58,8 +58,6 @@ const FAQ = lazy(() => import('./pages/FAQ'));
 const Terms = lazy(() => import('./pages/Terms'));
 const About = lazy(() => import('./pages/About'));
 const Contact = lazy(() => import('./pages/Contact'));
-const DemoRequest = lazy(() => import('./pages/DemoRequest'));
-const Demo = lazy(() => import('./pages/Demo'));
 const AdminNews = lazy(() => import('./pages/AdminNews'));
 const AdminGallery = lazy(() => import('./pages/AdminGallery'));
 const AdminContact = lazy(() => import('./pages/AdminContact'));
@@ -121,8 +119,6 @@ const routePrefetchers = {
   login: () => import('./pages/Login'),
   faq: () => import('./pages/FAQ'),
   contact: () => import('./pages/Contact'),
-  demoRequest: () => import('./pages/DemoRequest'),
-  demo: () => import('./pages/Demo'),
   about: () => import('./pages/About'),
   terms: () => import('./pages/Terms'),
   adminSettings: () => import('./pages/AdminSettings'),
@@ -184,8 +180,6 @@ const routePrefetchersByPath = {
   '/admin-login': routePrefetchers.login,
   '/faq': routePrefetchers.faq,
   '/contact': routePrefetchers.contact,
-  '/demo-request': routePrefetchers.demoRequest,
-  '/demo': routePrefetchers.demo,
   '/about': routePrefetchers.about,
   '/terms': routePrefetchers.terms,
   '/admin-settings': routePrefetchers.adminSettings,
@@ -404,12 +398,27 @@ const SALES_PUBLIC_MENU = [
     enabled: true
   },
   {
-    title: 'تماس و دمو',
-    href: '/demo-request',
+    title: 'تماس',
+    href: '/contact',
     icon: 'fa-headset',
     enabled: true
   }
 ];
+
+const PUBLIC_LANGUAGE_OPTIONS = [
+  { code: 'fa', label: 'فارسی' },
+  { code: 'en', label: 'English' },
+  { code: 'ps', label: 'پشتو' }
+];
+
+const getStoredPublicLanguage = () => {
+  try {
+    const value = localStorage.getItem(PUBLIC_WEBSITE_LANGUAGE_KEY);
+    return ['fa', 'en', 'ps'].includes(value) ? value : 'fa';
+  } catch {
+    return 'fa';
+  }
+};
 
 const getTokenClaims = () => {
   const token = localStorage.getItem('token');
@@ -967,6 +976,7 @@ function AppShell() {
   const lastScrollYRef = useRef(0);
   const prefetchedRoutesRef = useRef(new Set());
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [publicWebsiteLanguage, setPublicWebsiteLanguage] = useState(getStoredPublicLanguage);
   const { settings } = useSiteSettings();
   const displayBrandName = normalizeBrandName(settings?.brandName);
   const displayBrandSubtitle = normalizeBrandSubtitle(settings?.brandSubtitle);
@@ -978,6 +988,7 @@ function AppShell() {
   const path = location.pathname || '';
   const isHome = path === '/';
   const authed = isAuthed();
+  const isPublicWebsite = !authed && (path === '/' || path === '/about' || path === '/contact' || path.startsWith('/schools/'));
   const roleLabel = role === 'admin'
     ? '\u0627\u062F\u0645\u06CC\u0646'
     : role === 'parent'
@@ -1030,7 +1041,7 @@ function AppShell() {
 
   const useSalesMenu = !isDashboardArea;
   const menuItems = (useSalesMenu
-    ? SALES_PUBLIC_MENU
+    ? (settings?.isSchoolWebsite && Array.isArray(settings?.mainMenu) && settings.mainMenu.length ? settings.mainMenu : SALES_PUBLIC_MENU)
     : (settings?.mainMenu || [])
   ).filter((item) => item && item.enabled !== false);
   const hasLoginMenu = menuItems.some((item) => isLoginMenuItem(item));
@@ -1049,6 +1060,18 @@ function AppShell() {
   const headerLogoSrc = settings?.logoUrl
     ? (settings.logoUrl.startsWith('http') ? settings.logoUrl : `${API_BASE}/${settings.logoUrl}`)
     : '';
+  const contactHref = settings?.publicBasePath ? `${settings.publicBasePath}/contact` : '/contact';
+  const featuresHref = settings?.publicBasePath ? `${settings.publicBasePath}/features` : '/#modules';
+  const handlePublicLanguageChange = (language) => {
+    const nextLanguage = ['fa', 'en', 'ps'].includes(language) ? language : 'fa';
+    setPublicWebsiteLanguage(nextLanguage);
+    try {
+      localStorage.setItem(PUBLIC_WEBSITE_LANGUAGE_KEY, nextLanguage);
+      window.dispatchEvent(new CustomEvent('publicWebsiteLanguageChange', { detail: { language: nextLanguage } }));
+    } catch {
+      // ignore storage issues
+    }
+  };
 
   const prefetchRouteByHref = useCallback((href = '') => {
     const job = getRoutePrefetchJob(href, role);
@@ -2617,8 +2640,21 @@ function AppShell() {
       <header className={`site-header ${headerHidden ? 'is-hidden' : ''}`}>
         <div className="topbar">
           <div className="topbar-lang">
-            <button className="lang-btn active">دمو و مشوره رایگان</button>
-            <button className="lang-btn">قابل تنظیم برای هر مکتب</button>
+            {isPublicWebsite ? PUBLIC_LANGUAGE_OPTIONS.map((item) => (
+              <button
+                key={item.code}
+                type="button"
+                className={`lang-btn ${publicWebsiteLanguage === item.code ? 'active' : ''}`}
+                onClick={() => handlePublicLanguageChange(item.code)}
+              >
+                {item.label}
+              </button>
+            )) : (
+              <>
+                <button className="lang-btn active" type="button">وب‌سایت مکتب</button>
+                <button className="lang-btn" type="button">قابل تنظیم برای هر مکتب</button>
+              </>
+            )}
           </div>
 
           {authed ? (
@@ -2777,8 +2813,8 @@ function AppShell() {
             </div>
           ) : (
             <div className="topbar-sales-note" aria-label="تعهد راه‌اندازی">
-              <span>معرفی، دمو و قیمت‌گذاری برای مکاتب</span>
-              <strong>شروع سریع با تنظیمات اختصاصی هر مکتب</strong>
+              <span>{settings?.isSchoolWebsite ? 'وب‌سایت رسمی مکتب' : 'وب‌سایت چندمکتبی'}</span>
+              <strong>{settings?.isSchoolWebsite ? settings?.brandName : 'هر مکتب با خانه، امکانات، درباره و تماس خودش'}</strong>
             </div>
           )}
         </div>
@@ -2805,11 +2841,11 @@ function AppShell() {
             </div>
           </div>
           <div className="midbar-hours">
-            <span>راه‌اندازی سیستم</span>
-            <strong>دمو، تنظیم، آموزش و پشتیبانی</strong>
+            <span>{settings?.isSchoolWebsite ? 'وب‌سایت مکتب' : 'مدیریت مکتب'}</span>
+            <strong>{settings?.brandSubtitle || 'اطلاعات، امکانات و ارتباط رسمی'}</strong>
           </div>
           <div className="midbar-contact">
-            <span>مشوره فروش</span>
+            <span>تماس</span>
             <strong>{settings?.contactPhone || '0702855557'}</strong>
           </div>
         </div>
@@ -2825,9 +2861,9 @@ function AppShell() {
                   {!authed && (
                     <>
                       {!hasRegisterMenu && (
-                        <Link to="/demo-request" className="nav-action-btn cta" {...getPrefetchHandlers('/demo-request')}>
+                        <Link to={contactHref} className="nav-action-btn cta" {...getPrefetchHandlers(contactHref)}>
                           <i className="fa fa-headset" aria-hidden="true" />
-                          <span>درخواست دمو</span>
+                          <span>تماس با مکتب</span>
                         </Link>
                       )}
                       <Link to="/login" className="nav-action-btn ghost" {...getPrefetchHandlers('/login')}>
@@ -2864,7 +2900,7 @@ function AppShell() {
                 <div className="mobile-nav-shortcuts">
                   {!authed ? (
                     <>
-                      <Link to="/demo-request" className="mobile-shortcut-btn" {...getPrefetchHandlers('/demo-request')}>دمو</Link>
+                      <Link to={contactHref} className="mobile-shortcut-btn" {...getPrefetchHandlers(contactHref)}>تماس</Link>
                       <Link to="/login" className="mobile-shortcut-btn" {...getPrefetchHandlers('/login')}>ورود</Link>
                     </>
                   ) : (
@@ -2906,7 +2942,7 @@ function AppShell() {
                   {showMobileDrawerCta && (
                     <div className="mobile-drawer-cta">
                       {showMobileRegisterShortcut && (
-                        <Link to="/demo-request" {...getPrefetchHandlers('/demo-request')}>درخواست دمو</Link>
+                        <Link to={contactHref} {...getPrefetchHandlers(contactHref)}>تماس با مکتب</Link>
                       )}
                       {authed && (
                         <>
@@ -2918,26 +2954,26 @@ function AppShell() {
                   )}
 
                   <div className="mobile-drawer-shortcuts-grid">
-                    <Link to="/#modules" className="mobile-mini-link" {...getPrefetchHandlers('/')}>
+                    <Link to={featuresHref} className="mobile-mini-link" {...getPrefetchHandlers(featuresHref)}>
                       <i className="fa fa-layer-group" aria-hidden="true" />
-                      <span>{'ماژول‌ها'}</span>
+                      <span>{'امکانات'}</span>
                     </Link>
-                    <Link to="/#modules" className="mobile-mini-link" {...getPrefetchHandlers('/')}>
+                    <Link to={featuresHref} className="mobile-mini-link" {...getPrefetchHandlers(featuresHref)}>
                       <i className="fa fa-wallet" aria-hidden="true" />
                       <span>{'مالی'}</span>
                     </Link>
-                    <Link to="/contact" className="mobile-mini-link" {...getPrefetchHandlers('/contact')}>
+                    <Link to={contactHref} className="mobile-mini-link" {...getPrefetchHandlers(contactHref)}>
                       <i className="fa fa-headset" aria-hidden="true" />
-                      <span>{'مشوره'}</span>
+                      <span>{'تماس'}</span>
                     </Link>
                     <Link
-                      to={authed ? '/dashboard' : '/demo-request'}
+                      to={authed ? '/dashboard' : contactHref}
                       className="mobile-mini-link"
-                      onMouseEnter={() => prefetchRouteByHref(authed ? '/dashboard' : '/demo-request')}
-                      onFocus={() => prefetchRouteByHref(authed ? '/dashboard' : '/demo-request')}
+                      onMouseEnter={() => prefetchRouteByHref(authed ? '/dashboard' : contactHref)}
+                      onFocus={() => prefetchRouteByHref(authed ? '/dashboard' : contactHref)}
                     >
                       <i className={`fa ${authed ? 'fa-table-cells-large' : 'fa-phone'}`} aria-hidden="true" />
-                      <span>{authed ? 'داشبورد' : 'دمو'}</span>
+                      <span>{authed ? 'داشبورد' : 'تماس'}</span>
                     </Link>
                   </div>
                 </div>
@@ -2986,9 +3022,9 @@ function AppShell() {
                     <span>{'دسترسی سریع / پشتیبانی'}</span>
                   </div>
                   <div className="mobile-drawer-help-links">
-                    <Link to="/#modules" {...getPrefetchHandlers('/')}>ماژول‌ها</Link>
-                    <Link to="/demo-request" {...getPrefetchHandlers('/demo-request')}>درخواست دمو</Link>
-                    <Link to="/demo-request" {...getPrefetchHandlers('/demo-request')}>مشوره و دمو</Link>
+                    <Link to={featuresHref} {...getPrefetchHandlers(featuresHref)}>امکانات</Link>
+                    <Link to={contactHref} {...getPrefetchHandlers(contactHref)}>تماس با مکتب</Link>
+                    <Link to="/login" {...getPrefetchHandlers('/login')}>ورود به سیستم</Link>
                   </div>
                 </section>
               </div>
@@ -3228,8 +3264,12 @@ function AppShell() {
             <Route path="/terms" element={<Terms />} />
             <Route path="/about" element={<About />} />
             <Route path="/contact" element={<Contact />} />
-            <Route path="/demo-request" element={<DemoRequest />} />
-            <Route path="/demo" element={<Demo />} />
+            <Route path="/schools/:schoolSlug" element={<Home />} />
+            <Route path="/schools/:schoolSlug/features" element={<Home />} />
+            <Route path="/schools/:schoolSlug/about" element={<About />} />
+            <Route path="/schools/:schoolSlug/contact" element={<Contact />} />
+            <Route path="/demo-request" element={<Navigate to="/contact" replace />} />
+            <Route path="/demo" element={<Navigate to="/contact" replace />} />
             <Route path="/student-registration" element={adminRoute(['manage_enrollments', 'manage_users'], <StudentRegistration />, 'دسترسی ثبت دانش‌آموز برای این حساب فعال نیست.')} />
             <Route path="/online-registrations" element={adminRoute(['manage_enrollments', 'manage_users'], <OnlineRegistrations />, 'دسترسی مدیریت ثبت‌نام‌های آنلاین برای این حساب فعال نیست.')} />
             <Route path="/student-management" element={adminRoute('manage_users', <StudentManagement />, 'دسترسی مدیریت دانش‌آموزان برای این حساب فعال نیست.')} />

@@ -1,16 +1,67 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { API_BASE } from '../config/api';
 
+export const PUBLIC_WEBSITE_LANGUAGE_KEY = 'publicWebsiteLanguage';
+
+const normalizeLanguage = (value = '') => {
+  const text = String(value || '').trim().toLowerCase();
+  if (['en', 'english'].includes(text)) return 'en';
+  if (['ps', 'pa', 'pashto'].includes(text)) return 'ps';
+  return 'fa';
+};
+
+const getStoredLanguage = () => {
+  if (typeof window === 'undefined') return 'fa';
+  return normalizeLanguage(window.localStorage.getItem(PUBLIC_WEBSITE_LANGUAGE_KEY) || 'fa');
+};
+
+const extractSchoolSlug = (pathname = '') => {
+  const match = String(pathname || '').match(/^\/schools\/([^/]+)/);
+  return match ? decodeURIComponent(match[1]) : '';
+};
+
+const isPublicWebsitePath = (pathname = '') => {
+  const path = String(pathname || '/');
+  return path === '/'
+    || path === '/about'
+    || path === '/contact'
+    || path.startsWith('/schools/');
+};
+
+const mergeSchoolWebsiteSettings = (settings, profile) => {
+  if (!profile) return settings;
+  return {
+    ...(settings || {}),
+    ...profile,
+    isSchoolWebsite: true,
+    languages: ['فارسی', 'English', 'پشتو'],
+    mainMenu: profile.mainMenu || settings?.mainMenu || [],
+    footerLinks: profile.footerLinks || settings?.footerLinks || [],
+    socialLinks: profile.socialLinks || settings?.socialLinks || []
+  };
+};
+
 export default function useSiteSettings() {
+  const location = useLocation();
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [language, setLanguage] = useState(getStoredLanguage);
+  const schoolSlug = useMemo(() => extractSchoolSlug(location.pathname), [location.pathname]);
+  const shouldLoadSchoolProfile = useMemo(() => isPublicWebsitePath(location.pathname), [location.pathname]);
 
   const fetchSettings = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/settings/public`);
-      const data = await res.json();
-      setSettings(data?.settings || null);
+      const [settingsResponse, profileResponse] = await Promise.all([
+        fetch(`${API_BASE}/api/settings/public`),
+        shouldLoadSchoolProfile
+          ? fetch(`${API_BASE}/api/school-websites/public?slug=${encodeURIComponent(schoolSlug)}&lang=${encodeURIComponent(language)}`)
+          : Promise.resolve(null)
+      ]);
+      const data = await settingsResponse.json();
+      const profileData = profileResponse ? await profileResponse.json().catch(() => ({})) : {};
+      setSettings(mergeSchoolWebsiteSettings(data?.settings || null, profileData?.profile || null));
     } catch (error) {
       setSettings(null);
     } finally {
@@ -20,7 +71,16 @@ export default function useSiteSettings() {
 
   useEffect(() => {
     fetchSettings();
+  }, [schoolSlug, language, shouldLoadSchoolProfile]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const handleLanguageChange = (event) => {
+      setLanguage(normalizeLanguage(event?.detail?.language || getStoredLanguage()));
+    };
+    window.addEventListener('publicWebsiteLanguageChange', handleLanguageChange);
+    return () => window.removeEventListener('publicWebsiteLanguageChange', handleLanguageChange);
   }, []);
 
-  return { settings, loading, refresh: fetchSettings };
+  return { settings, loading, language, refresh: fetchSettings };
 }

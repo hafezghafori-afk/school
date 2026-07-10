@@ -15,7 +15,6 @@ const productModules = [
 const productLinks = [
   { title: 'خانه', href: '/' },
   { title: 'ماژول‌های سیستم', href: '/#modules' },
-  { title: 'درخواست دمو', href: '/demo-request' },
   { title: 'تماس با ما', href: '/contact' },
   { title: 'ورود به سیستم', href: '/login' }
 ];
@@ -31,6 +30,7 @@ function Footer({ settings }) {
   const footerLinks = Array.isArray(settings?.footerLinks) && settings.footerLinks.length
     ? settings.footerLinks.filter((item) => item?.title && item?.href)
     : productLinks;
+  const contactHref = settings?.publicBasePath ? `${settings.publicBasePath}/contact` : '/contact';
 
   return (
     <footer className="site-footer" dir="rtl">
@@ -39,7 +39,7 @@ function Footer({ settings }) {
         <h2>{brandName}</h2>
         <p>{footerIntro}</p>
         <div className="footer-cta-row">
-          <Link to="/demo-request">درخواست دمو</Link>
+          <Link to={contactHref}>تماس با مکتب</Link>
           <Link to="/login">ورود به سیستم</Link>
         </div>
       </div>
@@ -67,7 +67,7 @@ function Footer({ settings }) {
         <p>شماره تماس: {contactPhone}</p>
         <p>ایمیل: {contactEmail}</p>
         <p>آدرس: {contactAddress}</p>
-        <Link className="footer-contact-btn" to="/demo-request">ارسال درخواست دمو</Link>
+        <Link className="footer-contact-btn" to={contactHref}>ارسال پیام</Link>
       </div>
 
       <div className="footer-bottom">
