@@ -1450,6 +1450,17 @@ export default function AdminFinance() {
       });
     return grouped;
   }, [studentMemberships]);
+  const bulkFeePlanByClass = useMemo(() => {
+    const grouped = new Map();
+    (Array.isArray(feePlans) ? feePlans : [])
+      .filter((plan) => plan?.isActive !== false && String(plan?.lifecycleStatus || 'active') === 'active')
+      .forEach((plan) => {
+        const classId = toFinanceOptionId(plan?.classId || plan?.schoolClass?.id || plan?.schoolClass?._id);
+        if (!classId || grouped.has(classId)) return;
+        grouped.set(classId, plan);
+      });
+    return grouped;
+  }, [feePlans]);
   const paymentDeskMembershipStudent = useMemo(
     () => financeMembershipStudents.find((item) => String(item?._id || '') === String(paymentDeskForm.studentId || '')) || null,
     [financeMembershipStudents, paymentDeskForm.studentId]
@@ -1795,6 +1806,9 @@ export default function AdminFinance() {
   const resolveBulkAcademicYearId = (classId = '', requestedYearId = '') => {
     const normalizedClassId = String(classId || '').trim();
     const normalizedYearId = String(requestedYearId || '').trim();
+    const planYearId = toFinanceOptionId(bulkFeePlanByClass.get(normalizedClassId)?.academicYearId);
+    if (normalizedYearId && normalizedYearId === planYearId) return normalizedYearId;
+    if (planYearId) return planYearId;
     const classYears = bulkAcademicYearsByClass.get(normalizedClassId) || [];
     if (normalizedYearId && (!classYears.length || classYears.includes(normalizedYearId))) return normalizedYearId;
     return classYears[0] || normalizedYearId || currentAcademicYearId || '';
@@ -1802,10 +1816,13 @@ export default function AdminFinance() {
 
   const applyBulkClassSelection = (classId = '') => {
     const normalizedClassId = String(classId || '').trim();
+    const classPlan = bulkFeePlanByClass.get(normalizedClassId);
+    const nextPeriodType = String(classPlan?.billingFrequency || '').trim() === 'monthly' ? 'monthly' : 'term';
     setBulkForm((prev) => ({
       ...prev,
       classId: normalizedClassId,
-      academicYearId: resolveBulkAcademicYearId(normalizedClassId, prev.academicYearId)
+      academicYearId: resolveBulkAcademicYearId(normalizedClassId, prev.academicYearId),
+      periodType: classPlan ? nextPeriodType : prev.periodType
     }));
     setBillingPreview(null);
   };

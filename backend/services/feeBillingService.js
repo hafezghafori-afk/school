@@ -6,6 +6,7 @@ const FeeExemption = require('../models/FeeExemption');
 const FinanceRelief = require('../models/FinanceRelief');
 const AfghanStudent = require('../models/AfghanStudent');
 const SchoolClass = require('../models/SchoolClass');
+const Course = require('../models/Course');
 const { findClassMemberships, listCourseMemberships } = require('../utils/studentMembershipLookup');
 const { assignStudentToClass } = require('./studentClassAssignmentService');
 const {
@@ -368,6 +369,76 @@ async function buildAcademicYearLookupVariants(academicYearId = '', academicYear
   return variants;
 }
 
+function pushUniqueId(list = [], value = '') {
+  const normalized = normalizeText(value?._id || value);
+  if (normalized && !list.includes(normalized)) list.push(normalized);
+}
+
+async function buildFeePlanScopeVariants({ classId = '', courseId = '' } = {}) {
+  const classIds = [];
+  const courseIds = [];
+  pushUniqueId(classIds, classId);
+  pushUniqueId(courseIds, courseId);
+
+  const lookups = [];
+  if (normalizeText(classId)) {
+    lookups.push(
+      SchoolClass.findById(classId).select('_id legacyCourseId').lean().catch(() => null),
+      Course.findOne({ schoolClassRef: classId, kind: 'academic_class' }).select('_id schoolClassRef').lean().catch(() => null),
+      Course.findById(classId).select('_id schoolClassRef').lean().catch(() => null)
+    );
+  }
+  if (normalizeText(courseId) && normalizeText(courseId) !== normalizeText(classId)) {
+    lookups.push(
+      Course.findById(courseId).select('_id schoolClassRef').lean().catch(() => null),
+      SchoolClass.findOne({ legacyCourseId: courseId }).select('_id legacyCourseId').lean().catch(() => null)
+    );
+  }
+
+  const rows = await Promise.all(lookups);
+  for (const row of rows) {
+    if (!row) continue;
+    if (row.schoolClassRef) {
+      pushUniqueId(courseIds, row._id);
+      pushUniqueId(classIds, row.schoolClassRef);
+      continue;
+    }
+    if (row.legacyCourseId) {
+      pushUniqueId(classIds, row._id);
+      pushUniqueId(courseIds, row.legacyCourseId);
+      continue;
+    }
+    if (row._id) {
+      pushUniqueId(courseIds, row._id);
+    }
+  }
+
+  const variants = [];
+  const seen = new Set();
+  const push = (item = {}) => {
+    const variant = {
+      classId: normalizeText(item.classId),
+      courseId: normalizeText(item.courseId)
+    };
+    const key = JSON.stringify(variant);
+    if (seen.has(key)) return;
+    seen.add(key);
+    variants.push(variant);
+  };
+
+  for (const resolvedClassId of classIds) {
+    for (const resolvedCourseId of courseIds) {
+      push({ classId: resolvedClassId, courseId: resolvedCourseId });
+    }
+    push({ classId: resolvedClassId });
+  }
+  for (const resolvedCourseId of courseIds) {
+    push({ courseId: resolvedCourseId });
+  }
+  push({ classId, courseId });
+  return variants;
+}
+
 async function recoverClassMembershipsFromRegisteredStudents({
   classId = '',
   academicYearId = null
@@ -420,18 +491,21 @@ async function resolveFeePlanForBilling({
 
   const sort = { isDefault: -1, priority: 1, updatedAt: -1, createdAt: -1 };
   const yearVariants = await buildAcademicYearLookupVariants(academicYearId, academicYear);
+  const scopeVariants = await buildFeePlanScopeVariants({ classId, courseId });
   const relaxedAttempts = [];
-  for (const yearVariant of yearVariants) {
-    relaxedAttempts.push(
-      buildFeePlanFilter({ courseId, classId, ...yearVariant, term, billingFrequency }),
-      buildFeePlanFilter({ courseId, classId, ...yearVariant, billingFrequency }),
-      buildFeePlanFilter({ courseId, classId, ...yearVariant }),
-      buildFeePlanFilter({ classId, ...yearVariant, term, billingFrequency }),
-      buildFeePlanFilter({ classId, ...yearVariant, billingFrequency }),
-      buildFeePlanFilter({ classId, ...yearVariant }),
-      buildFeePlanFilter({ courseId, ...yearVariant, billingFrequency }),
-      buildFeePlanFilter({ courseId, ...yearVariant })
-    );
+  for (const scopeVariant of scopeVariants) {
+    for (const yearVariant of yearVariants) {
+      relaxedAttempts.push(
+        buildFeePlanFilter({ ...scopeVariant, ...yearVariant, term, billingFrequency }),
+        buildFeePlanFilter({ ...scopeVariant, ...yearVariant, billingFrequency }),
+        buildFeePlanFilter({ ...scopeVariant, ...yearVariant }),
+        buildFeePlanFilter({ classId: scopeVariant.classId, ...yearVariant, term, billingFrequency }),
+        buildFeePlanFilter({ classId: scopeVariant.classId, ...yearVariant, billingFrequency }),
+        buildFeePlanFilter({ classId: scopeVariant.classId, ...yearVariant }),
+        buildFeePlanFilter({ courseId: scopeVariant.courseId, ...yearVariant, billingFrequency }),
+        buildFeePlanFilter({ courseId: scopeVariant.courseId, ...yearVariant })
+      );
+    }
   }
 
   const seen = new Set();
