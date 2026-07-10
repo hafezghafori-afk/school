@@ -10,6 +10,52 @@ const { getSchoolWebsiteLocale } = require('../config/schoolWebsiteLocales');
 const router = express.Router();
 
 const SUPPORTED_LANGUAGES = ['fa', 'en', 'ps'];
+const TRANSLATABLE_TEXT_FIELDS = [
+  'brandName', 'brandSubtitle', 'homeHeroBadge', 'homeHeroTitle', 'homeHeroText',
+  'aboutTitle', 'aboutBody', 'missionTitle', 'missionBody', 'visionTitle', 'visionBody',
+  'contactTitle', 'contactText', 'contactAddress', 'footerNote'
+];
+const TRANSLATABLE_LIST_FIELDS = ['features', 'stats', 'menuItems', 'footerLinks', 'socialLinks'];
+
+const TRANSLATION_MEMORY = {
+  en: {
+    'خانه': 'Home',
+    'امکانات': 'Facilities',
+    'درباره مکتب': 'About school',
+    'تماس': 'Contact',
+    'تماس با مکتب': 'Contact school',
+    'ورود به سیستم': 'Login',
+    'وب‌سایت رسمی مکتب': 'Official school website',
+    'ماموریت': 'Mission',
+    'چشم‌انداز': 'Vision',
+    'شاگردان': 'Students',
+    'استادان': 'Teachers',
+    'صنف‌ها': 'Classes',
+    'مدیریت آموزشی': 'Academic management',
+    'امور مالی': 'Finance',
+    'ارتباط با خانواده': 'Family communication',
+    'برای معلومات بیشتر، پیشنهاد یا پیام رسمی با اداره مکتب تماس بگیرید.': 'For more information, suggestions, or official messages, contact the school office.'
+  },
+  ps: {
+    'خانه': 'کور',
+    'امکانات': 'امکانات',
+    'درباره مکتب': 'د ښوونځي په اړه',
+    'تماس': 'اړیکه',
+    'تماس با مکتب': 'له ښوونځي سره اړیکه',
+    'ورود به سیستم': 'سیستم ته ننوتل',
+    'وب‌سایت رسمی مکتب': 'د ښوونځي رسمي وېب‌پاڼه',
+    'ماموریت': 'ماموریت',
+    'چشم‌انداز': 'لیدلوری',
+    'شاگردان': 'زده کوونکي',
+    'استادان': 'ښوونکي',
+    'صنف‌ها': 'صنفونه',
+    'مدیریت آموزشی': 'تعلیمي مدیریت',
+    'امور مالی': 'مالي چارې',
+    'ارتباط با خانواده': 'له کورنۍ سره اړیکه',
+    'برای معلومات بیشتر، پیشنهاد یا پیام رسمی با اداره مکتب تماس بگیرید.': 'د نورو معلوماتو، وړاندیزونو یا رسمي پیغامونو لپاره د ښوونځي له ادارې سره اړیکه ونیسئ.'
+  },
+  fa: {}
+};
 
 const normalizeLanguage = (value = '') => {
   const text = String(value || '').trim().toLowerCase();
@@ -83,6 +129,49 @@ const makeUniqueSlug = async (baseSlug, currentProfileId = null) => {
 const pickText = (value = {}, lang = 'fa', fallback = '') => {
   if (typeof value === 'string') return value;
   return String(value?.[lang] || value?.fa || value?.en || value?.ps || fallback || '').trim();
+};
+
+const translateText = (text = '', targetLanguage = 'en') => {
+  const source = String(text || '').trim();
+  if (!source) return '';
+  const memory = TRANSLATION_MEMORY[targetLanguage] || {};
+  if (memory[source]) return memory[source];
+  let translated = source;
+  Object.entries(memory)
+    .sort((a, b) => b[0].length - a[0].length)
+    .forEach(([from, to]) => {
+      translated = translated.split(from).join(to);
+    });
+  return translated;
+};
+
+const translateLocalizedText = (value = {}, sourceLanguage = 'fa', targetLanguages = ['en', 'ps'], overwrite = false) => {
+  const next = {
+    fa: String(value?.fa || ''),
+    en: String(value?.en || ''),
+    ps: String(value?.ps || '')
+  };
+  const sourceText = next[sourceLanguage] || pickText(next, sourceLanguage);
+  targetLanguages.forEach((language) => {
+    if (!SUPPORTED_LANGUAGES.includes(language) || language === sourceLanguage) return;
+    if (!overwrite && String(next[language] || '').trim()) return;
+    next[language] = translateText(sourceText, language);
+  });
+  return next;
+};
+
+const translateProfileContent = (profile, sourceLanguage = 'fa', targetLanguages = ['en', 'ps'], overwrite = false) => {
+  TRANSLATABLE_TEXT_FIELDS.forEach((field) => {
+    profile[field] = translateLocalizedText(profile[field] || {}, sourceLanguage, targetLanguages, overwrite);
+  });
+
+  TRANSLATABLE_LIST_FIELDS.forEach((field) => {
+    profile[field] = (Array.isArray(profile[field]) ? profile[field] : []).map((item) => ({
+      ...item,
+      title: translateLocalizedText(item?.title || {}, sourceLanguage, targetLanguages, overwrite),
+      text: translateLocalizedText(item?.text || {}, sourceLanguage, targetLanguages, overwrite)
+    }));
+  });
 };
 
 const localizeItems = (items = [], lang = 'fa') => (
@@ -273,12 +362,18 @@ const serializeProfile = (profile, lang = 'fa') => {
           { title: locale.contact, href: withLanguage(`${basePath}/contact`) },
           { title: locale.login, href: '/login' }
         ],
-    mainMenu: [
-      { title: locale.home, href: withLanguage(basePath), icon: 'fa-house', enabled: true },
-      { title: locale.facilities, href: withLanguage(`${basePath}/features`), icon: 'fa-layer-group', enabled: true },
-      { title: locale.aboutSchool, href: withLanguage(`${basePath}/about`), icon: 'fa-circle-info', enabled: true },
-      { title: locale.contact, href: withLanguage(`${basePath}/contact`), icon: 'fa-phone', enabled: true }
-    ],
+    mainMenu: localizeItems(profile.menuItems, language).length
+      ? localizeItems(profile.menuItems, language).map((item) => ({
+          ...item,
+          href: item.href?.startsWith('/schools/') ? withLanguage(item.href.split('?')[0]) : item.href,
+          enabled: true
+        }))
+      : [
+          { title: locale.home, href: withLanguage(basePath), icon: 'fa-house', enabled: true },
+          { title: locale.facilities, href: withLanguage(`${basePath}/features`), icon: 'fa-layer-group', enabled: true },
+          { title: locale.aboutSchool, href: withLanguage(`${basePath}/about`), icon: 'fa-circle-info', enabled: true },
+          { title: locale.contact, href: withLanguage(`${basePath}/contact`), icon: 'fa-phone', enabled: true }
+        ],
     footerContactTitle: locale.schoolContact,
     footerContactText: pickText(profile.footerNote, language) || pickText(profile.aboutBody, language),
     footerNote: pickText(profile.footerNote, language),
@@ -308,6 +403,53 @@ router.get('/admin', requireAuth, requireRole(['admin']), requirePermission('man
   }
 });
 
+router.get('/admin/primary', requireAuth, requireRole(['admin']), requirePermission('manage_content'), async (req, res) => {
+  try {
+    if (req.user?.schoolId) {
+      const school = await School.findById(req.user.schoolId);
+      if (school) {
+        const profile = await ensureProfileForSchool(school);
+        return res.json({ success: true, profile });
+      }
+    }
+
+    const existing = await SchoolWebsiteProfile.findOne({ siteStatus: 'active' }).sort({ updatedAt: -1 });
+    if (existing) return res.json({ success: true, profile: existing });
+
+    const school = await School.findOne().sort({ createdAt: -1 });
+    const profile = school ? await ensureProfileForSchool(school) : null;
+    return res.json({ success: true, profile });
+  } catch {
+    return res.status(500).json({ success: false, message: 'Failed to load school website profile.' });
+  }
+});
+
+router.post('/admin/:schoolId/translate', requireAuth, requireRole(['admin']), requirePermission('manage_content'), async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.schoolId)) {
+      return res.status(400).json({ success: false, message: 'Invalid school id.' });
+    }
+    if (req.user?.isDemo === true && String(req.user.schoolId || '') !== String(req.params.schoolId || '')) {
+      return res.status(403).json({ success: false, message: 'Demo account cannot edit another school website.' });
+    }
+
+    const profile = await SchoolWebsiteProfile.findOne({ schoolId: req.params.schoolId });
+    if (!profile) return res.status(404).json({ success: false, message: 'School website profile was not found.' });
+
+    const sourceLanguage = normalizeLanguage(req.body?.sourceLanguage || 'fa');
+    const targetLanguages = (Array.isArray(req.body?.targetLanguages) ? req.body.targetLanguages : SUPPORTED_LANGUAGES)
+      .map(normalizeLanguage)
+      .filter((language, index, list) => SUPPORTED_LANGUAGES.includes(language) && language !== sourceLanguage && list.indexOf(language) === index);
+    const overwrite = req.body?.overwrite === true;
+
+    translateProfileContent(profile, sourceLanguage, targetLanguages, overwrite);
+    await profile.save();
+    return res.json({ success: true, profile, message: 'School website content translated.' });
+  } catch {
+    return res.status(500).json({ success: false, message: 'Failed to translate school website content.' });
+  }
+});
+
 router.put('/admin/:schoolId', requireAuth, requireRole(['admin']), requirePermission('manage_content'), async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.schoolId)) {
@@ -324,7 +466,7 @@ router.put('/admin/:schoolId', requireAuth, requireRole(['admin']), requirePermi
       'heroImageUrl', 'brandName', 'brandSubtitle', 'homeHeroBadge', 'homeHeroTitle', 'homeHeroText',
       'aboutTitle', 'aboutBody', 'missionTitle', 'missionBody', 'visionTitle', 'visionBody',
       'contactTitle', 'contactText', 'contactPhone', 'contactEmail', 'contactAddress',
-      'features', 'stats', 'menuItems', 'footerLinks', 'footerNote', 'metadata'
+      'features', 'stats', 'menuItems', 'footerLinks', 'socialLinks', 'footerNote', 'metadata'
     ];
     allowed.forEach((key) => {
       if (req.body && Object.prototype.hasOwnProperty.call(req.body, key)) profile[key] = req.body[key];

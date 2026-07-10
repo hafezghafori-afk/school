@@ -54,6 +54,7 @@ const DEFAULT_STUDENT_ID_FORMATS = {
 };
 
 const SETTINGS_TABS = [
+  { key: 'schoolWebsite', title: 'وب‌سایت مکتب', icon: 'fa-globe' },
   { key: 'brand', title: 'برند و تماس', icon: 'fa-id-card' },
   { key: 'home', title: 'صفحه فروش', icon: 'fa-store' },
   { key: 'header', title: 'هیدر و منو', icon: 'fa-bars-staggered' },
@@ -80,6 +81,30 @@ const PUBLIC_MENU_ITEMS = [
   { title: 'برای مکاتب', href: '/#schools' },
   { title: 'درباره سیستم', href: '/about' },
   { title: 'تماس و دمو', href: '/demo-request' }
+];
+
+const WEBSITE_LANGUAGES = [
+  { key: 'fa', label: 'فارسی دری' },
+  { key: 'en', label: 'English' },
+  { key: 'ps', label: 'پښتو' }
+];
+
+const WEBSITE_TEXT_FIELDS = [
+  ['brandName', 'نام مکتب در هدر'],
+  ['brandSubtitle', 'زیرعنوان هدر'],
+  ['homeHeroBadge', 'نشانک صفحه خانه'],
+  ['homeHeroTitle', 'عنوان اصلی صفحه خانه'],
+  ['homeHeroText', 'متن معرفی صفحه خانه'],
+  ['aboutTitle', 'عنوان درباره مکتب'],
+  ['aboutBody', 'متن درباره مکتب'],
+  ['missionTitle', 'عنوان ماموریت'],
+  ['missionBody', 'متن ماموریت'],
+  ['visionTitle', 'عنوان چشم‌انداز'],
+  ['visionBody', 'متن چشم‌انداز'],
+  ['contactTitle', 'عنوان تماس'],
+  ['contactText', 'متن تماس'],
+  ['contactAddress', 'آدرس'],
+  ['footerNote', 'یادداشت فوتر']
 ];
 
 const PRODUCT_MODULES = [
@@ -112,6 +137,61 @@ const rowsToDelimited = (rows = [], fields = ['title', 'href']) => {
     .map((row) => fields.map((field) => String(row?.[field] || '').trim()).join('|'))
     .filter((line) => line.replace(/\|/g, '').trim())
     .join('\n');
+};
+
+const localizedRowsToDelimited = (rows = [], language = 'fa') => {
+  if (!Array.isArray(rows)) return '';
+  return rows
+    .map((row) => [
+      row?.title?.[language] || '',
+      row?.text?.[language] || '',
+      row?.href || '',
+      row?.icon || row?.value || ''
+    ].map((value) => String(value || '').trim()).join('|'))
+    .filter((line) => line.replace(/\|/g, '').trim())
+    .join('\n');
+};
+
+const parseLocalizedRows = (value = '', language = 'fa', currentRows = []) => {
+  const lines = parseLines(value);
+  return lines.map((line, index) => {
+    const parts = line.split('|').map((part) => part.trim());
+    const existing = currentRows[index] || {};
+    return {
+      ...existing,
+      title: { ...(existing.title || {}), [language]: parts[0] || '' },
+      text: { ...(existing.text || {}), [language]: parts[1] || '' },
+      href: parts[2] || existing.href || '',
+      icon: parts[3] || existing.icon || existing.value || '',
+      value: parts[3] || existing.value || existing.icon || '',
+      enabled: existing.enabled !== false
+    };
+  });
+};
+
+const normalizeWebsiteProfile = (profile = null) => {
+  if (!profile) return null;
+  const localized = (value = {}) => ({
+    fa: value?.fa || '',
+    en: value?.en || '',
+    ps: value?.ps || ''
+  });
+  const next = { ...profile };
+  WEBSITE_TEXT_FIELDS.forEach(([field]) => {
+    next[field] = localized(next[field]);
+  });
+  ['features', 'stats', 'menuItems', 'footerLinks', 'socialLinks'].forEach((field) => {
+    next[field] = (Array.isArray(next[field]) ? next[field] : []).map((item) => ({
+      ...item,
+      title: localized(item?.title),
+      text: localized(item?.text),
+      href: item?.href || '',
+      icon: item?.icon || item?.value || '',
+      value: item?.value || item?.icon || '',
+      enabled: item?.enabled !== false
+    }));
+  });
+  return next;
 };
 
 const moveItem = (list, index, direction) => {
@@ -153,12 +233,19 @@ export default function AdminSettings() {
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
   const [officialLogoFiles, setOfficialLogoFiles] = useState({ schoolLogo: null, ministryLogo: null });
+  const [websiteProfile, setWebsiteProfile] = useState(null);
+  const [websiteLanguage, setWebsiteLanguage] = useState('fa');
+  const [websiteBusy, setWebsiteBusy] = useState(false);
 
   const loadSettings = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/settings`, { headers: { ...getAuthHeaders() } });
+      const [res, websiteRes] = await Promise.all([
+        fetch(`${API_BASE}/api/settings`, { headers: { ...getAuthHeaders() } }),
+        fetch(`${API_BASE}/api/school-websites/admin/primary`, { headers: { ...getAuthHeaders() } }).catch(() => null)
+      ]);
       const data = await res.json();
+      const websiteData = websiteRes ? await websiteRes.json().catch(() => ({})) : {};
       if (!data?.success) {
         if (res.status === 403) setAccessDenied(true);
         setMessage(data?.message || 'دریافت تنظیمات ناموفق بود.');
@@ -178,6 +265,7 @@ export default function AdminSettings() {
         };
       }
       setSettings(nextSettings);
+      setWebsiteProfile(normalizeWebsiteProfile(websiteData?.profile || null));
       storePrintLogos(nextSettings);
       setAccessDenied(false);
       setMessage('');
@@ -309,6 +397,233 @@ export default function AdminSettings() {
       const base = current.length ? current : ADMIN_QUICK_LINK_DEFAULTS.map((item) => ({ ...item }));
       return { ...prev, adminQuickLinks: normalizeAdminQuickLinks(updater(base)) };
     });
+  };
+
+  const patchWebsiteProfile = (patch) => {
+    setWebsiteProfile((prev) => normalizeWebsiteProfile({ ...(prev || {}), ...patch }));
+  };
+
+  const patchWebsiteLocalizedField = (field, language, value) => {
+    setWebsiteProfile((prev) => ({
+      ...(prev || {}),
+      [field]: {
+        ...(prev?.[field] || {}),
+        [language]: value
+      }
+    }));
+  };
+
+  const patchWebsiteRows = (field, language, value) => {
+    setWebsiteProfile((prev) => ({
+      ...(prev || {}),
+      [field]: parseLocalizedRows(value, language, prev?.[field] || [])
+    }));
+  };
+
+  const saveWebsiteProfile = async () => {
+    if (!websiteProfile?.schoolId) {
+      setMessage('برای این مکتب هنوز پروفایل وب‌سایت ساخته نشده است.');
+      return;
+    }
+    setWebsiteBusy(true);
+    setMessage('');
+    try {
+      const res = await fetch(`${API_BASE}/api/school-websites/admin/${websiteProfile.schoolId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify(websiteProfile)
+      });
+      const data = await res.json();
+      if (!data?.success) {
+        setMessage(data?.message || 'ذخیره محتوای وب‌سایت ناموفق بود.');
+        return;
+      }
+      setWebsiteProfile(normalizeWebsiteProfile(data.profile));
+      setMessage('محتوای وب‌سایت مکتب ذخیره شد.');
+    } catch {
+      setMessage('خطا در ذخیره محتوای وب‌سایت مکتب.');
+    } finally {
+      setWebsiteBusy(false);
+    }
+  };
+
+  const translateWebsiteProfile = async ({ overwrite = false } = {}) => {
+    if (!websiteProfile?.schoolId) return;
+    setWebsiteBusy(true);
+    setMessage('');
+    try {
+      const targetLanguages = WEBSITE_LANGUAGES.map((item) => item.key).filter((key) => key !== websiteLanguage);
+      const res = await fetch(`${API_BASE}/api/school-websites/admin/${websiteProfile.schoolId}/translate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify({ sourceLanguage: websiteLanguage, targetLanguages, overwrite })
+      });
+      const data = await res.json();
+      if (!data?.success) {
+        setMessage(data?.message || 'ترجمه خودکار ناموفق بود.');
+        return;
+      }
+      setWebsiteProfile(normalizeWebsiteProfile(data.profile));
+      setMessage(overwrite ? 'ترجمه خودکار انجام شد و زبان‌های مقصد بازنویسی شدند.' : 'ترجمه خودکار فیلدهای خالی انجام شد.');
+    } catch {
+      setMessage('خطا در ترجمه خودکار محتوای وب‌سایت.');
+    } finally {
+      setWebsiteBusy(false);
+    }
+  };
+
+  const renderWebsiteTextField = (field, label) => {
+    const isLong = /Text|Body|Note|Address/.test(field);
+    const value = websiteProfile?.[field]?.[websiteLanguage] || '';
+    return (
+      <div key={field} className={isLong ? 'settings-wide-field' : ''}>
+        <label>{label}</label>
+        {isLong ? (
+          <textarea
+            rows={field.includes('Body') || field.includes('Text') ? 4 : 2}
+            value={value}
+            onChange={(event) => patchWebsiteLocalizedField(field, websiteLanguage, event.target.value)}
+          />
+        ) : (
+          <input
+            value={value}
+            onChange={(event) => patchWebsiteLocalizedField(field, websiteLanguage, event.target.value)}
+          />
+        )}
+      </div>
+    );
+  };
+
+  const renderWebsiteRowsField = (field, title, hint) => (
+    <section className="settings-card" key={field}>
+      <h3>{title}</h3>
+      <p className="settings-muted">{hint}</p>
+      <textarea
+        rows="6"
+        value={localizedRowsToDelimited(websiteProfile?.[field] || [], websiteLanguage)}
+        onChange={(event) => patchWebsiteRows(field, websiteLanguage, event.target.value)}
+      />
+    </section>
+  );
+
+  const renderSchoolWebsiteTab = () => {
+    if (!websiteProfile) {
+      return (
+        <section className="settings-card">
+          <h3>وب‌سایت مکتب</h3>
+          <p className="settings-muted">برای این اکانت هنوز مکتب یا پروفایل وب‌سایت پیدا نشد.</p>
+          <div className="settings-actions">
+            <button type="button" onClick={loadSettings}>بارگذاری دوباره</button>
+          </div>
+        </section>
+      );
+    }
+
+    const previewPath = websiteProfile.slug ? `/schools/${websiteProfile.slug}?lang=${websiteLanguage}` : '/';
+    return (
+      <>
+        <section className="settings-card">
+          <div className="settings-menu-head">
+            <div>
+              <h3>تنظیمات وب‌سایت مکتب</h3>
+              <p className="settings-muted">هدر، منو، صفحه خانه، درباره، تماس و فوتر همین وب‌سایت از اینجا مدیریت می‌شود.</p>
+            </div>
+            <div className="settings-inline-actions">
+              <button type="button" className="ghost" disabled={websiteBusy} onClick={() => translateWebsiteProfile({ overwrite: false })}>
+                ترجمه فیلدهای خالی
+              </button>
+              <button type="button" className="ghost" disabled={websiteBusy} onClick={() => translateWebsiteProfile({ overwrite: true })}>
+                ترجمه و بازنویسی زبان‌های دیگر
+              </button>
+              <button type="button" disabled={websiteBusy} onClick={saveWebsiteProfile}>
+                {websiteBusy ? 'در حال ذخیره...' : 'ذخیره وب‌سایت'}
+              </button>
+            </div>
+          </div>
+
+          <div className="settings-language-tabs">
+            {WEBSITE_LANGUAGES.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className={websiteLanguage === item.key ? 'active' : ''}
+                onClick={() => setWebsiteLanguage(item.key)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="settings-grid">
+            <div>
+              <label>آدرس وب‌سایت</label>
+              <input value={websiteProfile.slug || ''} onChange={(event) => patchWebsiteProfile({ slug: event.target.value })} dir="ltr" />
+            </div>
+            <div>
+              <label>وضعیت سایت</label>
+              <select value={websiteProfile.siteStatus || 'active'} onChange={(event) => patchWebsiteProfile({ siteStatus: event.target.value })}>
+                <option value="active">فعال</option>
+                <option value="inactive">غیرفعال</option>
+              </select>
+            </div>
+            <div>
+              <label>زبان اصلی</label>
+              <select value={websiteProfile.primaryLanguage || 'fa'} onChange={(event) => patchWebsiteProfile({ primaryLanguage: event.target.value })}>
+                {WEBSITE_LANGUAGES.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label>پیش‌نمایش</label>
+              <input value={previewPath} readOnly dir="ltr" />
+            </div>
+            <div>
+              <label>رنگ اصلی</label>
+              <input value={websiteProfile.primaryColor || ''} onChange={(event) => patchWebsiteProfile({ primaryColor: event.target.value })} />
+            </div>
+            <div>
+              <label>تصویر Hero</label>
+              <input value={websiteProfile.heroImageUrl || ''} onChange={(event) => patchWebsiteProfile({ heroImageUrl: event.target.value })} dir="ltr" />
+            </div>
+            <div>
+              <label>لوگوی مکتب</label>
+              <input value={websiteProfile.schoolLogoUrl || ''} onChange={(event) => patchWebsiteProfile({ schoolLogoUrl: event.target.value })} dir="ltr" />
+            </div>
+            <div>
+              <label>لوگوی وزارت</label>
+              <input value={websiteProfile.ministryLogoUrl || ''} onChange={(event) => patchWebsiteProfile({ ministryLogoUrl: event.target.value })} dir="ltr" />
+            </div>
+            <div>
+              <label>شماره تماس</label>
+              <input value={websiteProfile.contactPhone || ''} onChange={(event) => patchWebsiteProfile({ contactPhone: event.target.value })} />
+            </div>
+            <div>
+              <label>ایمیل</label>
+              <input value={websiteProfile.contactEmail || ''} onChange={(event) => patchWebsiteProfile({ contactEmail: event.target.value })} dir="ltr" />
+            </div>
+          </div>
+        </section>
+
+        <section className="settings-card">
+          <h3>محتوای متنی زبان انتخاب‌شده</h3>
+          <p className="settings-muted">زبان فعلی: {WEBSITE_LANGUAGES.find((item) => item.key === websiteLanguage)?.label}</p>
+          <div className="settings-grid website-content-grid">
+            {WEBSITE_TEXT_FIELDS.map(([field, label]) => renderWebsiteTextField(field, label))}
+          </div>
+        </section>
+
+        {renderWebsiteRowsField('menuItems', 'منوهای هدر', 'هر خط: عنوان|توضیح اختیاری|لینک|آیکن. مثال: خانه||/schools/iman|fa-house')}
+        {renderWebsiteRowsField('features', 'امکانات / کارت‌های صفحه خانه', 'هر خط: عنوان|متن|لینک اختیاری|آیکن')}
+        {renderWebsiteRowsField('stats', 'آمار صفحه خانه', 'هر خط: عنوان|متن یا توضیح|مقدار|آیکن')}
+        {renderWebsiteRowsField('footerLinks', 'لینک‌های فوتر', 'هر خط: عنوان|توضیح اختیاری|لینک|آیکن')}
+        {renderWebsiteRowsField('socialLinks', 'شبکه‌های اجتماعی', 'هر خط: عنوان|توضیح اختیاری|لینک|آیکن')}
+      </>
+    );
   };
 
   const renderBrandTab = () => (
@@ -764,6 +1079,7 @@ export default function AdminSettings() {
   );
 
   const renderActiveTab = () => {
+    if (activeTab === 'schoolWebsite') return renderSchoolWebsiteTab();
     if (activeTab === 'brand') return renderBrandTab();
     if (activeTab === 'home') return renderHomeTab();
     if (activeTab === 'header') return renderHeaderTab();
