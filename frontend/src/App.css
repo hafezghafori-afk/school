@@ -1115,7 +1115,7 @@ button:hover {
 }
 
 .nav-profile > .nav-menu-profile-card {
-  top: 100%;
+  top: calc(100% - 2px);
 }
 
 .nav-profile::after {
@@ -1136,7 +1136,8 @@ button:hover {
   right: auto;
   width: min(310px, calc(100vw - 28px));
   min-width: min(280px, calc(100vw - 28px));
-  z-index: 95;
+  z-index: 220;
+  padding-top: 12px;
 }
 
 /* Submenu design system: shared panel + item visual language */
@@ -1156,6 +1157,18 @@ button:hover {
   background: var(--submenu-item-bg);
   border-radius: var(--submenu-item-radius);
   transition: background 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+}
+
+.nav-menu-profile-card .nav-menu-btn {
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: right;
+  color: #eef6ff;
+  text-decoration: none;
+  pointer-events: auto;
 }
 
 .nav-menu:not(.nav-menu-mega):not(.nav-menu-profile-card):not(.nav-menu-login-card) a:hover,

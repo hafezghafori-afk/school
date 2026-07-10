@@ -2228,7 +2228,11 @@ function AppShell() {
   );
 
   const profileMenu = authed ? (
-    <div className={`nav-dropdown nav-profile ${profileMenuOpen ? 'open' : ''}`} ref={profileMenuRef}>
+    <div
+      className={`nav-dropdown nav-profile ${profileMenuOpen ? 'open' : ''}`}
+      ref={profileMenuRef}
+      onMouseEnter={() => setProfileMenuOpen(true)}
+    >
       <button
         type="button"
         className="nav-link nav-link-button nav-profile-trigger"
@@ -2246,7 +2250,10 @@ function AppShell() {
         <span className="nav-name">{userName}</span>
         <i className="fa fa-angle-down" aria-hidden="true" />
       </button>
-      <div className="nav-menu nav-menu-right nav-menu-profile-card">
+      <div
+        className="nav-menu nav-menu-right nav-menu-profile-card"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
         <div className="nav-menu-profile-head">
           {userAvatarSrc ? (
             <img className="nav-avatar-img" src={userAvatarSrc} alt="avatar" loading="lazy" decoding="async" />
@@ -2264,16 +2271,15 @@ function AppShell() {
 
         <div className="nav-menu-group">
           <div className="nav-menu-group-label">{'حساب کاربری'}</div>
-          <button
-            type="button"
+          <Link
+            to="/profile"
             className="nav-menu-btn"
             onClick={() => {
               setProfileMenuOpen(false);
-              navigate('/profile');
             }}
           >
             {'پروفایل'}
-          </button>
+          </Link>
         </div>
 
         <div className="nav-menu-group">
