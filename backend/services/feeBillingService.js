@@ -4,7 +4,10 @@ const AcademicYear = require('../models/AcademicYear');
 const Discount = require('../models/Discount');
 const FeeExemption = require('../models/FeeExemption');
 const FinanceRelief = require('../models/FinanceRelief');
+const AfghanStudent = require('../models/AfghanStudent');
+const SchoolClass = require('../models/SchoolClass');
 const { findClassMemberships, listCourseMemberships } = require('../utils/studentMembershipLookup');
+const { assignStudentToClass } = require('./studentClassAssignmentService');
 const {
   getFeePlanPrimaryAmount,
   normalizeBillingFrequency,
@@ -338,6 +341,45 @@ function buildFeePlanFilter({
   return filter;
 }
 
+async function recoverClassMembershipsFromRegisteredStudents({
+  classId = '',
+  academicYearId = null
+} = {}) {
+  if (!classId) return [];
+
+  const schoolClass = await SchoolClass.findById(classId).lean();
+  if (!schoolClass?._id || !schoolClass?.schoolId || !schoolClass?.gradeLevel) return [];
+
+  const query = {
+    status: 'active',
+    'academicInfo.currentSchool': schoolClass.schoolId,
+    'academicInfo.currentGrade': `grade${schoolClass.gradeLevel}`
+  };
+  if (schoolClass.section) query['academicInfo.currentSection'] = schoolClass.section;
+  if (schoolClass.shift) query['academicInfo.currentShift'] = schoolClass.shift;
+
+  const students = await AfghanStudent.find(query).limit(500);
+  const memberships = [];
+  for (const student of students) {
+    try {
+      const membership = await assignStudentToClass({
+        student,
+        payload: {
+          classId: schoolClass._id,
+          academicYearId: academicYearId || schoolClass.academicYearId || null,
+          enrollmentDate: student?.academicInfo?.enrollmentDate || new Date()
+        },
+        source: 'system',
+        note: 'Auto-synced from registration records before grouped billing.'
+      });
+      if (membership?._id) memberships.push(membership);
+    } catch {
+      // Keep billing recovery best-effort; invalid student rows should not block valid classmates.
+    }
+  }
+  return memberships;
+}
+
 async function resolveFeePlanForBilling({
   feePlanId = '',
   courseId = '',
@@ -426,6 +468,21 @@ async function buildGroupedBillCandidates({
     memberships = await findClassMemberships({
       classId
     });
+  }
+
+  if (!memberships.length && classId) {
+    await recoverClassMembershipsFromRegisteredStudents({
+      classId,
+      academicYearId
+    });
+    memberships = await findClassMemberships({
+      classId,
+      academicYearId,
+      academicYear
+    });
+    if (!memberships.length && (academicYearId || academicYear)) {
+      memberships = await findClassMemberships({ classId });
+    }
   }
 
   if (!memberships.length) {

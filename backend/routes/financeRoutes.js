@@ -4767,7 +4767,12 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
     });
 
     if (!preview.items.length) {
-      return res.status(400).json({ success: false, message: 'هیچ متعلم قابل بل‌دهی برای تولید بل یافت نشد.' });
+      return res.status(400).json({
+        success: false,
+        message: resolveGroupedBillingEmptyMessage(preview),
+        excluded: preview.excluded || [],
+        summary: preview.summary || {}
+      });
     }
 
     let created = 0;
@@ -5062,6 +5067,28 @@ async function resolveFinanceScope({ classId = '', courseId = '' } = {}) {
     classId: scope.classId || '',
     courseId: scope.courseId || ''
   };
+}
+
+function resolveGroupedBillingEmptyMessage(preview = {}) {
+  const excluded = Array.isArray(preview?.excluded) ? preview.excluded : [];
+  const reasons = excluded.reduce((acc, item) => {
+    const reason = String(item?.reason || '').trim();
+    if (reason) acc[reason] = (acc[reason] || 0) + 1;
+    return acc;
+  }, {});
+  if (!excluded.length) {
+    return 'هیچ عضویت مالی یا شاگرد فعال برای صنف و سال انتخاب‌شده پیدا نشد. اگر شاگردان در ثبت‌نام موجود اند، صنف/سال تعلیمی همان‌ها را بررسی کنید.';
+  }
+  if (reasons.zero_amount) {
+    return 'برای صنف و سال انتخاب‌شده مبلغ قابل بل‌دهی صفر است. پلان مالی فعال یا مبلغ فیس را بررسی کنید.';
+  }
+  if (reasons.outside_membership_period) {
+    return 'تاریخ بل‌دهی خارج از دوره عضویت شاگردان یا خارج از سال تعلیمی/ماه‌های فیس‌دار است.';
+  }
+  if (reasons.not_debtor) {
+    return 'گزینه فقط بدهکاران فعال است، اما برای این صنف بدهی باز پیدا نشد.';
+  }
+  return 'هیچ متعلم قابل بل‌دهی برای تولید بل یافت نشد.';
 }
 
 const FINANCE_AUDIT_KIND_VALUES = new Set(['order', 'payment', 'relief', 'system']);
