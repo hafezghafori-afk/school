@@ -971,11 +971,13 @@ function AppShell() {
   const remoteQueryCacheRef = useRef(new Map());
   const searchBoxRef = useRef(null);
   const profileMenuRef = useRef(null);
+  const profileTriggerRef = useRef(null);
   const searchResultRefs = useRef([]);
   const megaCloseTimerRef = useRef(null);
   const lastScrollYRef = useRef(0);
   const prefetchedRoutesRef = useRef(new Set());
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [profileMenuPosition, setProfileMenuPosition] = useState({ top: 0, left: 0 });
   const [publicWebsiteLanguage, setPublicWebsiteLanguage] = useState(getStoredPublicLanguage);
   const { settings } = useSiteSettings();
   const displayBrandName = normalizeBrandName(settings?.brandName);
@@ -2162,6 +2164,16 @@ function AppShell() {
 
   useEffect(() => {
     if (!profileMenuOpen) return undefined;
+    const updateProfileMenuPosition = () => {
+      const rect = profileTriggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const panelWidth = Math.min(310, Math.max(280, window.innerWidth - 24));
+      const nextLeft = Math.max(12, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 12));
+      setProfileMenuPosition({
+        top: Math.min(rect.bottom + 8, window.innerHeight - 16),
+        left: nextLeft
+      });
+    };
     const handlePointerDown = (event) => {
       if (profileMenuRef.current?.contains(event.target)) return;
       setProfileMenuOpen(false);
@@ -2169,11 +2181,16 @@ function AppShell() {
     const handleEsc = (event) => {
       if (event.key === 'Escape') setProfileMenuOpen(false);
     };
+    updateProfileMenuPosition();
     document.addEventListener('mousedown', handlePointerDown);
     document.addEventListener('keydown', handleEsc);
+    window.addEventListener('resize', updateProfileMenuPosition);
+    window.addEventListener('scroll', updateProfileMenuPosition, true);
     return () => {
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleEsc);
+      window.removeEventListener('resize', updateProfileMenuPosition);
+      window.removeEventListener('scroll', updateProfileMenuPosition, true);
     };
   }, [profileMenuOpen]);
 
@@ -2231,11 +2248,11 @@ function AppShell() {
     <div
       className={`nav-dropdown nav-profile ${profileMenuOpen ? 'open' : ''}`}
       ref={profileMenuRef}
-      onMouseEnter={() => setProfileMenuOpen(true)}
     >
       <button
         type="button"
         className="nav-link nav-link-button nav-profile-trigger"
+        ref={profileTriggerRef}
         onClick={(event) => {
           event.preventDefault();
           setProfileMenuOpen((open) => !open);
@@ -2252,6 +2269,10 @@ function AppShell() {
       </button>
       <div
         className="nav-menu nav-menu-right nav-menu-profile-card"
+        style={profileMenuOpen ? {
+          top: `${profileMenuPosition.top}px`,
+          left: `${profileMenuPosition.left}px`
+        } : undefined}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="nav-menu-profile-head">

@@ -1132,12 +1132,19 @@ button:hover {
 }
 
 .main-nav-actions .nav-profile > .nav-menu-profile-card {
-  left: 0;
+  position: fixed;
   right: auto;
   width: min(310px, calc(100vw - 28px));
   min-width: min(280px, calc(100vw - 28px));
-  z-index: 220;
+  z-index: 1000;
   padding-top: 12px;
+}
+
+.nav-profile.open > .nav-menu-profile-card {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 /* Submenu design system: shared panel + item visual language */
