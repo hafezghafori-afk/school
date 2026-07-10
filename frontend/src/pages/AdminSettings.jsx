@@ -53,6 +53,14 @@ const DEFAULT_STUDENT_ID_FORMATS = {
   asasNumberFormat: '{YYYY}-{SEQ}'
 };
 
+const VISIBLE_SETTINGS_TAB_KEYS = new Set(['schoolWebsite', 'brand', 'studentIds', 'shortcuts']);
+const SETTINGS_TAB_LABELS = {
+  schoolWebsite: 'وب‌سایت مکتب',
+  brand: 'لوگوها و تماس مکتب',
+  studentIds: 'شماره‌های شاگردان',
+  shortcuts: 'میانبرهای ادمین'
+};
+
 const SETTINGS_TABS = [
   { key: 'schoolWebsite', title: 'وب‌سایت مکتب', icon: 'fa-globe' },
   { key: 'brand', title: 'برند و تماس', icon: 'fa-id-card' },
@@ -71,8 +79,9 @@ const SETTINGS_HASH_TAB_MAP = {
 };
 
 const getInitialSettingsTab = () => {
-  if (typeof window === 'undefined') return 'brand';
-  return SETTINGS_HASH_TAB_MAP[window.location.hash] || 'brand';
+  if (typeof window === 'undefined') return 'schoolWebsite';
+  const tab = SETTINGS_HASH_TAB_MAP[window.location.hash] || 'schoolWebsite';
+  return VISIBLE_SETTINGS_TAB_KEYS.has(tab) ? tab : 'schoolWebsite';
 };
 
 const PUBLIC_MENU_ITEMS = [
@@ -336,6 +345,27 @@ export default function AdminSettings() {
         ...DEFAULT_STUDENT_ID_FORMATS,
         ...(normalized.studentIdFormats || {})
       };
+      if (websiteProfile?.schoolId) {
+        const nextWebsiteProfile = normalizeWebsiteProfile({
+          ...websiteProfile,
+          schoolLogoUrl: normalized.schoolLogoUrl || normalized.logoUrl || websiteProfile.schoolLogoUrl || '',
+          ministryLogoUrl: normalized.ministryLogoUrl || websiteProfile.ministryLogoUrl || ''
+        });
+        const websiteRes = await fetch(`${API_BASE}/api/school-websites/admin/${websiteProfile.schoolId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
+          },
+          body: JSON.stringify(nextWebsiteProfile)
+        });
+        const websiteData = await websiteRes.json().catch(() => ({}));
+        if (websiteData?.success && websiteData?.profile) {
+          setWebsiteProfile(normalizeWebsiteProfile(websiteData.profile));
+        } else {
+          setWebsiteProfile(nextWebsiteProfile);
+        }
+      }
       setSettings(normalized);
       storePrintLogos(normalized);
       setMessage(successText);
@@ -625,6 +655,68 @@ export default function AdminSettings() {
       </>
     );
   };
+
+  const renderSchoolBasicsTab = () => (
+    <>
+      <section className="settings-card">
+        <h3>لوگوهای رسمی فورم‌ها، گزارشات و وب‌سایت</h3>
+        <p className="settings-muted">لوگوی مکتب و لوگوی وزارت معارف از اینجا بارگذاری می‌شود و به‌صورت خودکار با وب‌سایت مکتب نیز همگام می‌گردد.</p>
+        <div className="settings-logo-upload-grid">
+          {[
+            { key: 'schoolLogo', title: 'لوگوی مکتب', src: getPrintLogoUrls(settings).schoolLogoUrl },
+            { key: 'ministryLogo', title: 'لوگوی وزارت معارف', src: getPrintLogoUrls(settings).ministryLogoUrl }
+          ].map((item) => (
+            <div key={item.key} className="settings-logo-upload-card">
+              <div className="settings-logo-preview">
+                {item.src ? <img src={item.src} alt={item.title} /> : <span>لوگو</span>}
+              </div>
+              <div>
+                <label>{item.title}</label>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  onChange={(event) => {
+                    const [file] = event.target.files || [];
+                    setOfficialLogoFiles((prev) => ({ ...prev, [item.key]: file || null }));
+                  }}
+                />
+                {officialLogoFiles[item.key] ? <small>{officialLogoFiles[item.key].name}</small> : null}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="settings-actions">
+          <button type="button" disabled={saving} onClick={uploadOfficialLogos}>ذخیره لوگوها</button>
+        </div>
+      </section>
+
+      <section className="settings-card">
+        <h3>اطلاعات تماس مکتب</h3>
+        <div className="settings-grid">
+          <div>
+            <label>نام مکتب / عنوان چاپ</label>
+            <input value={settings.brandName || ''} onChange={(e) => patchRoot({ brandName: e.target.value })} />
+          </div>
+          <div>
+            <label>زیرعنوان چاپ</label>
+            <input value={settings.brandSubtitle || ''} onChange={(e) => patchRoot({ brandSubtitle: e.target.value })} />
+          </div>
+          <div>
+            <label>شماره تماس</label>
+            <input value={settings.contactPhone || ''} onChange={(e) => patchRoot({ contactPhone: e.target.value })} />
+          </div>
+          <div>
+            <label>ایمیل</label>
+            <input value={settings.contactEmail || ''} onChange={(e) => patchRoot({ contactEmail: e.target.value })} />
+          </div>
+          <div className="settings-wide-field">
+            <label>آدرس</label>
+            <input value={settings.contactAddress || ''} onChange={(e) => patchRoot({ contactAddress: e.target.value })} />
+          </div>
+        </div>
+      </section>
+    </>
+  );
 
   const renderBrandTab = () => (
     <>
@@ -1080,7 +1172,7 @@ export default function AdminSettings() {
 
   const renderActiveTab = () => {
     if (activeTab === 'schoolWebsite') return renderSchoolWebsiteTab();
-    if (activeTab === 'brand') return renderBrandTab();
+    if (activeTab === 'brand') return renderSchoolBasicsTab();
     if (activeTab === 'home') return renderHomeTab();
     if (activeTab === 'header') return renderHeaderTab();
     if (activeTab === 'footer') return renderFooterTab();
@@ -1134,12 +1226,12 @@ export default function AdminSettings() {
       </div>
 
       <div className="admin-settings-hero">
-        <h2>تنظیمات محصول سیما</h2>
-        <p>تنظیمات اصلی برند، صفحه فروش، هیدر، فوتر، صفحه ورود و میانبرهای داخلی را از این‌جا مدیریت کنید.</p>
+        <h2>تنظیمات مکتب و وب‌سایت</h2>
+        <p>از این بخش فقط تنظیمات ضروری مکتب، وب‌سایت، لوگوها، شماره‌های شاگردان و میانبرهای ادمین مدیریت می‌شود.</p>
       </div>
 
       <div className="settings-tabs" role="tablist" aria-label="بخش‌های تنظیمات سیما">
-        {SETTINGS_TABS.map((tab) => (
+        {SETTINGS_TABS.filter((tab) => VISIBLE_SETTINGS_TAB_KEYS.has(tab.key)).map((tab) => (
           <button
             key={tab.key}
             type="button"
@@ -1147,7 +1239,7 @@ export default function AdminSettings() {
             onClick={() => setActiveTab(tab.key)}
           >
             <i className={`fa ${tab.icon}`} aria-hidden="true" />
-            <span>{tab.title}</span>
+            <span>{SETTINGS_TAB_LABELS[tab.key] || tab.title}</span>
           </button>
         ))}
       </div>
