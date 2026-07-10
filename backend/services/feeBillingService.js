@@ -341,6 +341,33 @@ function buildFeePlanFilter({
   return filter;
 }
 
+async function buildAcademicYearLookupVariants(academicYearId = '', academicYear = '') {
+  const variants = [];
+  const seen = new Set();
+  const push = (item = {}) => {
+    const normalized = {
+      academicYearId: normalizeText(item.academicYearId),
+      academicYear: normalizeText(item.academicYear)
+    };
+    const key = JSON.stringify(normalized);
+    if (seen.has(key)) return;
+    seen.add(key);
+    variants.push(normalized);
+  };
+
+  if (academicYearId) push({ academicYearId });
+  if (academicYear) push({ academicYear });
+
+  if (academicYearId) {
+    const year = await AcademicYear.findById(academicYearId).select('title code').lean().catch(() => null);
+    if (year?.title) push({ academicYear: year.title });
+    if (year?.code) push({ academicYear: year.code });
+  }
+
+  push({});
+  return variants;
+}
+
 async function recoverClassMembershipsFromRegisteredStudents({
   classId = '',
   academicYearId = null
@@ -392,24 +419,20 @@ async function resolveFeePlanForBilling({
   if (feePlanId) return FinanceFeePlan.findById(feePlanId);
 
   const sort = { isDefault: -1, priority: 1, updatedAt: -1, createdAt: -1 };
-  const exactFilter = buildFeePlanFilter({
-    courseId,
-    classId,
-    academicYearId,
-    academicYear,
-    term,
-    billingFrequency
-  });
-
-  const exact = await FinanceFeePlan.findOne(exactFilter).sort(sort);
-  if (exact) return exact;
-
-  const relaxedAttempts = [
-    buildFeePlanFilter({ courseId, classId, academicYearId, academicYear, billingFrequency }),
-    buildFeePlanFilter({ courseId, classId, academicYearId, academicYear }),
-    buildFeePlanFilter({ classId, academicYearId, academicYear, billingFrequency }),
-    buildFeePlanFilter({ classId, academicYearId, academicYear })
-  ];
+  const yearVariants = await buildAcademicYearLookupVariants(academicYearId, academicYear);
+  const relaxedAttempts = [];
+  for (const yearVariant of yearVariants) {
+    relaxedAttempts.push(
+      buildFeePlanFilter({ courseId, classId, ...yearVariant, term, billingFrequency }),
+      buildFeePlanFilter({ courseId, classId, ...yearVariant, billingFrequency }),
+      buildFeePlanFilter({ courseId, classId, ...yearVariant }),
+      buildFeePlanFilter({ classId, ...yearVariant, term, billingFrequency }),
+      buildFeePlanFilter({ classId, ...yearVariant, billingFrequency }),
+      buildFeePlanFilter({ classId, ...yearVariant }),
+      buildFeePlanFilter({ courseId, ...yearVariant, billingFrequency }),
+      buildFeePlanFilter({ courseId, ...yearVariant })
+    );
+  }
 
   const seen = new Set();
   for (const filter of relaxedAttempts) {
@@ -611,7 +634,7 @@ async function buildGroupedBillCandidates({
         excluded.push({
           membershipId,
           studentId: String(membership.student || ''),
-          reason: 'zero_amount'
+          reason: feePlan ? 'zero_amount' : 'fee_plan_not_found'
         });
         continue;
       }
