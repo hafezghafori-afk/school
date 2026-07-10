@@ -26,6 +26,59 @@ const slugify = (value = '') => {
   return normalized || `school-${Date.now()}`;
 };
 
+const EMPTY_SLUG_VALUES = new Set([
+  'ندارد',
+  'نداشته',
+  'نامشخص',
+  'بدون',
+  'none',
+  'no',
+  'n-a',
+  'na',
+  'n/a',
+  'null',
+  'undefined',
+  '-'
+]);
+
+const normalizeSlugSource = (value = '') => String(value || '')
+  .trim()
+  .toLowerCase()
+  .replace(/\s+/g, ' ');
+
+const isEmptySlugSource = (value = '') => {
+  const text = normalizeSlugSource(value);
+  if (!text) return true;
+  return EMPTY_SLUG_VALUES.has(text) || EMPTY_SLUG_VALUES.has(slugify(text));
+};
+
+const pickSlugSource = (school = {}) => [
+  school.schoolCode,
+  school.nameDari,
+  school.name,
+  school.namePashto,
+  school.contactInfo?.website,
+  school._id
+].find((value) => !isEmptySlugSource(value));
+
+const buildSchoolSlug = (school = {}) => slugify(pickSlugSource(school) || school._id || '');
+
+const makeUniqueSlug = async (baseSlug, currentProfileId = null) => {
+  const fallbackSlug = slugify(baseSlug);
+  let slug = fallbackSlug;
+  let suffix = 1;
+  const filterFor = (candidate) => ({
+    slug: candidate,
+    ...(currentProfileId ? { _id: { $ne: currentProfileId } } : {})
+  });
+
+  while (await SchoolWebsiteProfile.exists(filterFor(slug))) {
+    suffix += 1;
+    slug = `${fallbackSlug}-${suffix}`;
+  }
+  return slug;
+};
+
 const pickText = (value = {}, lang = 'fa', fallback = '') => {
   if (typeof value === 'string') return value;
   return String(value?.[lang] || value?.fa || value?.en || value?.ps || fallback || '').trim();
@@ -53,7 +106,7 @@ const buildFallbackProfile = (school) => {
   const address = school.contactInfo?.address || [school.district, school.province].filter(Boolean).join('، ');
   return {
     schoolId: school._id,
-    slug: slugify(school.contactInfo?.website || school.schoolCode || school.name || school.nameDari),
+    slug: buildSchoolSlug(school),
     siteStatus: 'active',
     brandName: { fa: nameFa, en: nameEn, ps: namePs },
     brandSubtitle: {
@@ -119,16 +172,26 @@ const buildFallbackProfile = (school) => {
 const ensureProfileForSchool = async (school) => {
   if (!school?._id) return null;
   let profile = await SchoolWebsiteProfile.findOne({ schoolId: school._id });
-  if (profile) return profile;
+  if (profile) {
+    if (isEmptySlugSource(profile.slug)) {
+      profile.slug = await makeUniqueSlug(buildSchoolSlug(school), profile._id);
+      await profile.save();
+    }
+    return profile;
+  }
 
   const fallback = buildFallbackProfile(school);
-  let slug = fallback.slug;
-  let suffix = 1;
-  while (await SchoolWebsiteProfile.exists({ slug })) {
-    suffix += 1;
-    slug = `${fallback.slug}-${suffix}`;
-  }
+  const slug = await makeUniqueSlug(fallback.slug);
   profile = await SchoolWebsiteProfile.create({ ...fallback, slug });
+  return profile;
+};
+
+const repairProfileSlugIfNeeded = async (profile) => {
+  if (!profile || !isEmptySlugSource(profile.slug)) return profile;
+  const school = profile.schoolId ? await School.findById(profile.schoolId) : null;
+  if (!school) return profile;
+  profile.slug = await makeUniqueSlug(buildSchoolSlug(school), profile._id);
+  await profile.save();
   return profile;
 };
 
@@ -136,7 +199,7 @@ const resolveProfile = async (slug = '') => {
   const cleanSlug = slugify(slug);
   if (slug) {
     const direct = await SchoolWebsiteProfile.findOne({ slug: cleanSlug, siteStatus: 'active' });
-    if (direct) return direct;
+    if (direct) return repairProfileSlugIfNeeded(direct);
     const school = await School.findOne({
       $or: [
         { schoolCode: slug },
@@ -149,7 +212,7 @@ const resolveProfile = async (slug = '') => {
   }
 
   const existing = await SchoolWebsiteProfile.findOne({ siteStatus: 'active' }).sort({ updatedAt: -1 });
-  if (existing) return existing;
+  if (existing) return repairProfileSlugIfNeeded(existing);
   const school = await School.findOne().sort({ createdAt: -1 });
   return school ? ensureProfileForSchool(school) : null;
 };
@@ -263,7 +326,7 @@ router.put('/admin/:schoolId', requireAuth, requireRole(['admin']), requirePermi
     allowed.forEach((key) => {
       if (req.body && Object.prototype.hasOwnProperty.call(req.body, key)) profile[key] = req.body[key];
     });
-    if (req.body?.slug) profile.slug = slugify(req.body.slug);
+    if (req.body?.slug && !isEmptySlugSource(req.body.slug)) profile.slug = slugify(req.body.slug);
     await profile.save();
     return res.json({ success: true, profile, message: 'School website profile saved.' });
   } catch (error) {

@@ -1064,6 +1064,24 @@ function AppShell() {
     : '';
   const contactHref = settings?.publicBasePath ? `${settings.publicBasePath}/contact` : '/contact';
   const featuresHref = settings?.publicBasePath ? `${settings.publicBasePath}/features` : '/#modules';
+  useEffect(() => {
+    if (!settings?.publicBasePath || !path.startsWith('/schools/')) return;
+    const match = path.match(/^\/schools\/([^/]+)(.*)$/);
+    if (!match) return;
+
+    const canonicalBase = String(settings.publicBasePath || '').replace(/\/+$/g, '');
+    const currentBase = `/schools/${match[1]}`;
+    const decodePath = (value) => {
+      try {
+        return decodeURIComponent(value);
+      } catch {
+        return value;
+      }
+    };
+
+    if (decodePath(currentBase) === decodePath(canonicalBase)) return;
+    navigate(`${canonicalBase}${match[2] || ''}${location.search || ''}${location.hash || ''}`, { replace: true });
+  }, [settings?.publicBasePath, path, location.search, location.hash, navigate]);
   const handlePublicLanguageChange = (language) => {
     const nextLanguage = ['fa', 'en', 'ps'].includes(language) ? language : 'fa';
     setPublicWebsiteLanguage(nextLanguage);
