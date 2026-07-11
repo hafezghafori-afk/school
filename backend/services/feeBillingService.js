@@ -7,6 +7,7 @@ const FinanceRelief = require('../models/FinanceRelief');
 const AfghanStudent = require('../models/AfghanStudent');
 const SchoolClass = require('../models/SchoolClass');
 const Course = require('../models/Course');
+const Enrollment = require('../models/Enrollment');
 const { findClassMemberships, listCourseMemberships } = require('../utils/studentMembershipLookup');
 const { assignStudentToClass } = require('./studentClassAssignmentService');
 const {
@@ -470,26 +471,21 @@ async function recoverClassMembershipsFromRegisteredStudents({
   if (!classId) return [];
 
   const schoolClass = await SchoolClass.findById(classId).lean();
-  if (!schoolClass?._id || !schoolClass?.schoolId || !schoolClass?.gradeLevel) return [];
+  if (!schoolClass?._id || !schoolClass?.schoolId) return [];
 
-  const query = {
-    status: 'active',
-    'academicInfo.currentSchool': schoolClass.schoolId,
-    'academicInfo.currentGrade': `grade${schoolClass.gradeLevel}`
-  };
-  if (schoolClass.section) query['academicInfo.currentSection'] = schoolClass.section;
-  if (schoolClass.shift) query['academicInfo.currentShift'] = schoolClass.shift;
-
-  const students = await AfghanStudent.find(query).limit(500);
   const memberships = [];
-  for (const student of students) {
+  const seenStudents = new Set();
+  const syncStudent = async (student, payload = {}) => {
+    const key = normalizeText(student?._id);
+    if (!key || seenStudents.has(key)) return;
+    seenStudents.add(key);
     try {
       const membership = await assignStudentToClass({
         student,
         payload: {
           classId: schoolClass._id,
-          academicYearId: academicYearId || schoolClass.academicYearId || null,
-          enrollmentDate: student?.academicInfo?.enrollmentDate || new Date()
+          academicYearId: academicYearId || payload.academicYearId || schoolClass.academicYearId || null,
+          enrollmentDate: payload.enrollmentDate || student?.academicInfo?.enrollmentDate || new Date()
         },
         source: 'system',
         note: 'Auto-synced from registration records before grouped billing.'
@@ -498,6 +494,49 @@ async function recoverClassMembershipsFromRegisteredStudents({
     } catch {
       // Keep billing recovery best-effort; invalid student rows should not block valid classmates.
     }
+  };
+
+  const enrollmentRows = await Enrollment.find({
+    status: 'approved',
+    'academicContext.classId': schoolClass._id
+  }).select('linkedStudentId academicContext.academicYearId academicContext.enrollmentDate').limit(500);
+
+  const linkedStudentIds = enrollmentRows.map((item) => item.linkedStudentId).filter(Boolean);
+  const linkedStudents = linkedStudentIds.length
+    ? await AfghanStudent.find({ _id: { $in: linkedStudentIds }, status: { $ne: 'deleted' } }).limit(500)
+    : [];
+  const studentById = new Map(linkedStudents.map((student) => [normalizeText(student._id), student]));
+  for (const enrollment of enrollmentRows) {
+    const student = studentById.get(normalizeText(enrollment.linkedStudentId));
+    if (student) {
+      await syncStudent(student, {
+        academicYearId: enrollment.academicContext?.academicYearId,
+        enrollmentDate: enrollment.academicContext?.enrollmentDate
+      });
+    }
+  }
+
+  if (!schoolClass.gradeLevel) return memberships;
+
+  const exactQuery = {
+    status: 'active',
+    'academicInfo.currentSchool': schoolClass.schoolId,
+    'academicInfo.currentGrade': `grade${schoolClass.gradeLevel}`
+  };
+  if (schoolClass.section) exactQuery['academicInfo.currentSection'] = schoolClass.section;
+  if (schoolClass.shift) exactQuery['academicInfo.currentShift'] = schoolClass.shift;
+
+  let students = await AfghanStudent.find(exactQuery).limit(500);
+  if (!students.length && (schoolClass.section || schoolClass.shift)) {
+    students = await AfghanStudent.find({
+      status: 'active',
+      'academicInfo.currentSchool': schoolClass.schoolId,
+      'academicInfo.currentGrade': `grade${schoolClass.gradeLevel}`
+    }).limit(500);
+  }
+
+  for (const student of students) {
+    await syncStudent(student);
   }
   return memberships;
 }
@@ -607,18 +646,20 @@ async function buildGroupedBillCandidates({
     });
   }
 
-  if (!memberships.length && classId) {
-    await recoverClassMembershipsFromRegisteredStudents({
+  if (classId) {
+    const recoveredMemberships = await recoverClassMembershipsFromRegisteredStudents({
       classId,
       academicYearId
     });
-    memberships = await findClassMemberships({
-      classId,
-      academicYearId,
-      academicYear
-    });
-    if (!memberships.length && (academicYearId || academicYear)) {
-      memberships = await findClassMemberships({ classId });
+    if (recoveredMemberships.length || !memberships.length) {
+      memberships = await findClassMemberships({
+        classId,
+        academicYearId,
+        academicYear
+      });
+      if (!memberships.length && (academicYearId || academicYear)) {
+        memberships = await findClassMemberships({ classId });
+      }
     }
   }
 

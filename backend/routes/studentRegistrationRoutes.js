@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const AfghanStudent = require('../models/AfghanStudent');
+const SchoolClass = require('../models/SchoolClass');
 const User = require('../models/User');
 const Counter = require('../models/Counter');
 const SiteSettings = require('../models/SiteSettings');
@@ -12,6 +13,7 @@ const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
 const cache = require('../utils/simpleCache');
 const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
 const { requireWritableSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
+const { assignStudentToClass } = require('../services/studentClassAssignmentService');
 
 const router = express.Router();
 const auditWrite = (payload) => logActivity(payload);
@@ -133,6 +135,8 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
       registrationType = 'manual'
     } = req.body;
     const schoolId = schoolContext.schoolId;
+    const selectedClass = classId ? await SchoolClass.findById(classId).select('gradeLevel section shift academicYearId') : null;
+    const currentGrade = selectedClass?.gradeLevel ? `grade${selectedClass.gradeLevel}` : String(req.body?.academicInfo?.currentGrade || '').trim();
 
     // Check for duplicate national ID
     const existingStudent = await AfghanStudent.findOne({
@@ -206,7 +210,9 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
       },
       academicInfo: {
         currentSchool: schoolId,
-        currentGrade: classId,
+        currentGrade,
+        currentSection: selectedClass?.section || req.body?.academicInfo?.currentSection || '',
+        currentShift: selectedClass?.shift || req.body?.academicInfo?.currentShift || 'morning',
         enrollmentDate: enrollmentDate || new Date(),
         previousSchool,
         previousGrade,
@@ -272,6 +278,17 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
 
     if (registrationType !== 'online') {
       await ensureStudentLinkedUser(student, { forceActive: true });
+      await assignStudentToClass({
+        student,
+        payload: {
+          classId,
+          academicYearId: academicYearId || selectedClass?.academicYearId || null,
+          enrollmentDate: enrollmentDate || new Date()
+        },
+        actorId: req.user?.id || null,
+        source: 'admin',
+        note: 'Auto-synced from manual student registration.'
+      });
       await student.save();
     }
 

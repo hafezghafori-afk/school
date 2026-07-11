@@ -3005,6 +3005,12 @@ const AfghanStudentMock = {
   }
 };
 
+const EnrollmentMock = {
+  find() {
+    return new MockQuery(() => []);
+  }
+};
+
 const toCanonicalOrder = (bill) => ({
   _id: `fee-order-${bill._id}`,
   orderNumber: bill.billNumber,
@@ -3379,6 +3385,12 @@ const SchoolClassMock = {
         return matchesFilter(item, filter);
       }).map((item) => clone(item))
     ));
+  },
+  findById(id) {
+    return new MockQuery(() => clone(findSchoolClass(id)));
+  },
+  findOne(filter = {}) {
+    return new MockQuery(() => clone(schoolClasses.find((item) => matchesFilter(item, filter)) || null));
   }
 };
 
@@ -3403,6 +3415,12 @@ const CourseMock = {
         return matchesFilter(item, filter);
       }).map((item) => clone(item))
     ));
+  },
+  findById(id) {
+    return new MockQuery(() => clone(findCourse(id)));
+  },
+  findOne(filter = {}) {
+    return new MockQuery(() => clone(courses.find((item) => matchesFilter(item, filter)) || null));
   }
 };
 
@@ -4921,7 +4939,14 @@ function loadFinanceRouter() {
     if (isFeeBillingService && request === '../models/Discount') return DiscountMock;
     if (isFeeBillingService && request === '../models/FeeExemption') return FeeExemptionMock;
     if (isFeeBillingService && request === '../models/FinanceRelief') return FinanceReliefMock;
+    if (isFeeBillingService && request === '../models/AfghanStudent') return AfghanStudentMock;
+    if (isFeeBillingService && request === '../models/SchoolClass') return SchoolClassMock;
+    if (isFeeBillingService && request === '../models/Course') return CourseMock;
+    if (isFeeBillingService && request === '../models/Enrollment') return EnrollmentMock;
     if (isFeeBillingService && request === '../utils/studentMembershipLookup') return studentMembershipLookupMock;
+    if (isFeeBillingService && request === './studentClassAssignmentService') {
+      return { assignStudentToClass: async () => null };
+    }
     if (isFeeBillingService && request === './financeFeePlanService') {
       return require(path.join(__dirname, '..', 'services', 'financeFeePlanService'));
     }

@@ -4723,7 +4723,8 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
         duplicateCount
       }
     });
-  } catch {
+  } catch (error) {
+    console.error('[finance][bulk-billing-preview]', error);
     return res.status(500).json({ success: false, message: 'خطا در پیش‌نمایش صدور بل‌ها' });
   }
 });
@@ -4882,7 +4883,8 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       skipped,
       feePlan: preview.feePlan
     });
-  } catch {
+  } catch (error) {
+    console.error('[finance][bulk-billing-generate]', error);
     res.status(500).json({ success: false, message: 'خطا در صدور گروهی بل‌ها' });
   }
 });
