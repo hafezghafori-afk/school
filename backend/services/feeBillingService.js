@@ -122,35 +122,66 @@ function buildMonthlyBillingPeriods({
   academicYear = null,
   dueDate = null,
   periodLabel = '',
-  term = ''
+  term = '',
+  includeFutureMonths = false
 } = {}) {
   const requestedDueDate = asDate(dueDate) || new Date();
-  const rawStart = maxDate(
-    requestedDueDate,
+  const coverageStart = maxDate(
     membership.enrolledAt,
     membership.joinedAt,
     feePlan?.effectiveFrom,
     academicYear?.startDate
-  );
-  const rawEnd = minDate(
+  ) || requestedDueDate;
+  const coverageEnd = minDate(
     feePlan?.effectiveTo,
     academicYear?.endDate,
     membership.endedAt,
     membership.leftAt
-  ) || academicYear?.endDate || feePlan?.effectiveTo || addMonths(rawStart, 11);
+  ) || academicYear?.endDate || feePlan?.effectiveTo || addMonths(coverageStart || requestedDueDate, 11);
 
-  if (!rawStart || !rawEnd || rawEnd.getTime() < rawStart.getTime()) return [];
+  if (!coverageStart || !coverageEnd || coverageEnd.getTime() < coverageStart.getTime()) return [];
 
   const configuredMonths = Array.isArray(academicYear?.feeBillingMonths)
     ? academicYear.feeBillingMonths.map(Number).filter((month) => month >= 1 && month <= 12)
     : [];
   const feeBillingMonths = new Set(configuredMonths.length ? configuredMonths : [1, 2, 3, 4, 5, 6, 7, 8, 9]);
   const requestedDay = Math.max(1, Math.min(28, Number(feePlan?.dueDay || requestedDueDate.getDate() || 10) || 10));
-  const periods = [];
-  let bounds = solarMonthBounds(rawStart);
-  while (bounds.start.getTime() <= rawEnd.getTime()) {
+
+  const buildPeriod = (bounds, dueDateValue = null) => {
     const solarMonth = bounds.solar?.month || (bounds.start.getMonth() + 1);
-    if (!feeBillingMonths.has(solarMonth)) {
+    if (!feeBillingMonths.has(solarMonth)) return null;
+    const solarYear = bounds.solar?.year || bounds.start.getFullYear();
+    const label = normalizeText(periodLabel)
+      ? `${normalizeText(periodLabel)} - ${solarYear}-${String(solarMonth).padStart(2, '0')}`
+      : `${solarYear}-${String(solarMonth).padStart(2, '0')}`;
+    return {
+      dueDate: dueDateValue || bounds.start,
+      periodStart: bounds.start,
+      periodEnd: bounds.end,
+      periodLabel: label,
+      term: normalizeText(term) || label
+    };
+  };
+
+  if (!includeFutureMonths) {
+    const bounds = solarMonthBounds(requestedDueDate);
+    if (
+      !bounds.start
+      || !bounds.end
+      || coverageStart.getTime() > bounds.end.getTime()
+      || coverageEnd.getTime() < bounds.start.getTime()
+    ) {
+      return [];
+    }
+    const period = buildPeriod(bounds, requestedDueDate);
+    return period ? [period] : [];
+  }
+
+  const periods = [];
+  let bounds = solarMonthBounds(coverageStart);
+  while (bounds.start.getTime() <= coverageEnd.getTime()) {
+    const period = buildPeriod(bounds);
+    if (!period) {
       bounds = solarMonthBounds(addDays(bounds.end, 1));
       continue;
     }
@@ -158,16 +189,9 @@ function buildMonthlyBillingPeriods({
     while ((getSolarDateParts(periodDueDate)?.day || periodDueDate.getDate()) < requestedDay) {
       periodDueDate = addDays(periodDueDate, 1);
     }
-    const solarYear = bounds.solar?.year || bounds.start.getFullYear();
-    const label = normalizeText(periodLabel)
-      ? `${normalizeText(periodLabel)} - ${solarYear}-${String(solarMonth).padStart(2, '0')}`
-      : `${solarYear}-${String(solarMonth).padStart(2, '0')}`;
     periods.push({
+      ...period,
       dueDate: periodDueDate,
-      periodStart: bounds.start,
-      periodEnd: bounds.end,
-      periodLabel: label,
-      term: normalizeText(term) || label
     });
     bounds = solarMonthBounds(addDays(bounds.end, 1));
   }

@@ -5196,6 +5196,40 @@ async function run() {
       assertCase((beta?.lineItems || []).some((item) => Number(item.netAmount || 0) < Number(item.grossAmount || 0)), 'expected beta preview line items to reflect relief reductions');
     });
 
+    await check('route smoke: monthly grouped billing previews only the selected month', async () => {
+      feePlans.push({
+        _id: 'fee-plan-monthly-preview',
+        title: 'Class One 1405 Monthly',
+        course: IDS.course1,
+        classId: IDS.class1,
+        academicYear: '1405',
+        academicYearId: 'year-1405',
+        billingFrequency: 'monthly',
+        periodType: 'monthly',
+        tuitionFee: 700,
+        isActive: true
+      });
+
+      const response = await request(server, '/api/finance/admin/bills/preview', {
+        method: 'POST',
+        user: financeManagerUser,
+        body: {
+          classId: IDS.class1,
+          dueDate: '2026-05-12',
+          issuedAt: '2026-03-06',
+          academicYear: '1405',
+          academicYearId: 'year-1405',
+          periodType: 'monthly'
+        }
+      });
+
+      feePlans.pop();
+
+      assertCase(response.status === 200, `expected 200, received ${response.status}: ${response.text}`);
+      assertCase(response.data?.summary?.candidateCount === 2, `expected one monthly bill per active membership, received ${response.data?.summary?.candidateCount}`);
+      assertCase(Number(response.data?.summary?.totalAmountDue || 0) === 1400, `expected selected month total 1400, received ${response.data?.summary?.totalAmountDue}`);
+    });
+
     await check('route smoke: admin bills list accepts canonical class filter', async () => {
       const response = await request(server, `/api/finance/admin/bills?classId=${IDS.class1}`, {
         user: financeManagerUser
