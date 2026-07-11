@@ -344,6 +344,14 @@ function summarizeAdjustments(adjustments = []) {
   }, { reductionTotal: 0, penaltyTotal: 0 });
 }
 
+function summarizeExcludedReasons(excluded = []) {
+  return (Array.isArray(excluded) ? excluded : []).reduce((acc, item) => {
+    const reason = normalizeText(item?.reason) || 'unknown';
+    acc[reason] = (acc[reason] || 0) + 1;
+    return acc;
+  }, {});
+}
+
 function buildFeePlanFilter({
   courseId = '',
   classId = '',
@@ -668,7 +676,7 @@ async function buildGroupedBillCandidates({
       feePlan: null,
       items: [],
       excluded: [],
-      summary: { candidateCount: 0, billCount: 0, studentCount: 0, membershipCount: 0, excludedCount: 0, totalAmountDue: 0 }
+      summary: { candidateCount: 0, billCount: 0, studentCount: 0, membershipCount: 0, excludedCount: 0, excludedReasons: {}, totalAmountDue: 0 }
     };
   }
 
@@ -740,6 +748,7 @@ async function buildGroupedBillCandidates({
     }
   });
 
+  const effectiveBillingFrequency = normalizeBillingFrequency(feePlan?.billingFrequency || billingFrequency);
   const debtorSet = new Set(openBills.map((item) => String(item.studentMembershipId || '')));
   const excluded = [];
   const items = [];
@@ -757,7 +766,7 @@ async function buildGroupedBillCandidates({
       continue;
     }
 
-    const periods = billingFrequency === 'monthly'
+    const periods = effectiveBillingFrequency === 'monthly'
       ? buildMonthlyBillingPeriods({
         membership,
         feePlan,
@@ -864,6 +873,7 @@ async function buildGroupedBillCandidates({
       studentCount: new Set(items.map((item) => normalizeText(item.student)).filter(Boolean)).size,
       membershipCount: memberships.length,
       excludedCount: excluded.length,
+      excludedReasons: summarizeExcludedReasons(excluded),
       totalAmountDue: roundMoney(items.reduce((sum, item) => sum + (Number(item.amountDue) || 0), 0))
     }
   };

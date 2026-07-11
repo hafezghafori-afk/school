@@ -1857,6 +1857,27 @@ export default function AdminFinance() {
     return 'برای این فیلتر موردی برای پیش‌نمایش بل پیدا نشد.';
   };
 
+  const getBulkPreviewExcludedReasons = (data = {}) => {
+    const summaryReasons = data?.summary?.excludedReasons && typeof data.summary.excludedReasons === 'object'
+      ? data.summary.excludedReasons
+      : null;
+    const reasons = summaryReasons || (Array.isArray(data?.excluded) ? data.excluded : []).reduce((acc, item) => {
+      const reason = String(item?.reason || 'unknown').trim() || 'unknown';
+      acc[reason] = (acc[reason] || 0) + 1;
+      return acc;
+    }, {});
+    const labels = {
+      fee_plan_not_found: 'پلان مالی فعال برای این صنف/سال پیدا نشد',
+      zero_amount: 'مبلغ قابل بل‌دهی صفر است',
+      outside_membership_period: 'تاریخ انتخاب‌شده خارج از دوره عضویت یا ماه فیس‌دار است',
+      not_debtor: 'گزینه فقط بدهکاران فعال است',
+      unknown: 'دلیل نامشخص'
+    };
+    return Object.entries(reasons)
+      .filter(([, count]) => Number(count || 0) > 0)
+      .map(([reason, count]) => `${labels[reason] || reason}: ${count}`);
+  };
+
   const buildManualBillPayload = () => {
     const normalizedStudentId = String(manualForm.studentId || '').trim();
     const selectedMembership = financeMembershipStudents.find((item) => (
@@ -5589,7 +5610,12 @@ export default function AdminFinance() {
                     <small>{item.duplicate ? `duplicate: ${formatFinanceCode(item.duplicate.billNumber, '-')}` : `${item.adjustments?.length || 0} adjustment`}</small>
                   </div>
                 ))}
-                {!!billingPreview.excluded?.length && <p className="muted">Excluded: {billingPreview.excluded.length}</p>}
+                {!!billingPreview.excluded?.length && (
+                  <p className="muted">
+                    حذف‌شده: {billingPreview.excluded.length}
+                    {getBulkPreviewExcludedReasons(billingPreview).length ? ` - ${getBulkPreviewExcludedReasons(billingPreview).join('، ')}` : ''}
+                  </p>
+                )}
               </div>
             )}
           </form>
