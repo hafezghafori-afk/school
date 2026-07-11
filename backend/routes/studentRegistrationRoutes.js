@@ -11,6 +11,7 @@ const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
 const cache = require('../utils/simpleCache');
 const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
+const { requireWritableSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
 
 const router = express.Router();
 const auditWrite = (payload) => logActivity(payload);
@@ -90,8 +91,9 @@ const ensureStudentLinkedUser = async (student, { forceActive = false } = {}) =>
 // Create new student (for manual registration)
 router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_manager']), requirePermission('manage_content'), async (req, res) => {
   try {
+    const schoolContext = await requireWritableSchool(req, req.body || {});
+    writeSchoolContextHeaders(res, schoolContext.schoolId);
     const {
-      schoolId,
       firstName,
       lastName,
       fatherName,
@@ -130,6 +132,7 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
       notes,
       registrationType = 'manual'
     } = req.body;
+    const schoolId = schoolContext.schoolId;
 
     // Check for duplicate national ID
     const existingStudent = await AfghanStudent.findOne({
@@ -284,7 +287,15 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
     });
   } catch (error) {
     console.error('Error creating student:', error);
-    res.status(500).json({
+    if (error?.message === 'school_context_required') {
+      return res.status(400).json({
+        success: false,
+        message: error.messageDari || 'اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید.',
+        error: error.message
+      });
+    }
+    const status = Number(error?.statusCode || 500);
+    res.status(status).json({
       success: false,
       message: 'خطا در ثبت دانش‌آموز',
       error: error.message

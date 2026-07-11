@@ -25,7 +25,7 @@ async function resolveClassCourseReference({ classId = '', courseId = '' } = {})
   let course = null;
 
   if (normalizedClassId) {
-    schoolClass = await SchoolClass.findById(normalizedClassId).select('_id legacyCourseId title code gradeLevel section');
+    schoolClass = await SchoolClass.findById(normalizedClassId).select('_id legacyCourseId title code gradeLevel section schoolId academicYearId');
     if (!schoolClass) {
       return { error: 'Class is invalid.' };
     }
@@ -49,10 +49,10 @@ async function resolveClassCourseReference({ classId = '', courseId = '' } = {})
     }
     course = course || linkedCourse;
     if (!schoolClass && linkedCourse.schoolClassRef) {
-      schoolClass = await SchoolClass.findById(linkedCourse.schoolClassRef).select('_id legacyCourseId title code gradeLevel section');
+      schoolClass = await SchoolClass.findById(linkedCourse.schoolClassRef).select('_id legacyCourseId title code gradeLevel section schoolId academicYearId');
     }
     if (!schoolClass) {
-      schoolClass = await SchoolClass.findOne({ legacyCourseId: linkedCourse._id }).select('_id legacyCourseId title code gradeLevel section');
+      schoolClass = await SchoolClass.findOne({ legacyCourseId: linkedCourse._id }).select('_id legacyCourseId title code gradeLevel section schoolId academicYearId');
     }
   }
 

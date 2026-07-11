@@ -165,6 +165,7 @@ const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedY
   const previousGrade = trimValue(formData.previousGrade);
 
   return {
+    schoolId: currentSchool,
     personalInfo: {
       firstName: trimValue(formData.firstName),
       lastName: trimValue(formData.lastName),

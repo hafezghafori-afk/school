@@ -117,6 +117,7 @@ const {
 } = require('../services/studentFinanceService');
 const { resolveQuarterForDate } = require('../services/financialPeriodService');
 const { runReport } = require('../services/reportEngineService');
+const { resolveActiveSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
 const {
   buildFinanceAnomalyReport,
   buildAnomalySummary
@@ -2101,20 +2102,28 @@ const serializeExpenseCategoryDefinition = (value = null) => {
 
 router.get('/admin/reference-data', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: false });
+    const schoolId = schoolContext.schoolId || '';
+    if (schoolId) writeSchoolContextHeaders(res, schoolId);
+    const classFilter = schoolId ? { schoolId, status: { $ne: 'archived' } } : { status: { $ne: 'archived' } };
+    const yearFilter = schoolId ? { schoolId, status: { $ne: 'archived' } } : { status: { $ne: 'archived' } };
+    const afghanStudentFilter = schoolId
+      ? { status: { $ne: 'deleted' }, 'academicInfo.currentSchool': schoolId }
+      : { status: { $ne: 'deleted' } };
     const [students, afghanStudents, studentCores, studentProfiles, schoolClasses, academicYears] = await Promise.all([
       User.find({ role: 'student' }).select('name email grade').sort({ name: 1 }).lean(),
-      AfghanStudent.find({ status: { $ne: 'deleted' } })
+      AfghanStudent.find(afghanStudentFilter)
         .select('personalInfo familyInfo contactInfo academicInfo registrationId asasNumber linkedUserId status')
         .lean()
         .sort({ createdAt: -1 }),
       StudentCore.find({ status: { $ne: 'archived' } }).select('userId fullName admissionNo phone email').lean(),
       StudentProfile.find({}).select('studentId family contact guardians').lean(),
-      SchoolClass.find({ status: { $ne: 'archived' } })
-        .select('title code gradeLevel section legacyCourseId')
+      SchoolClass.find(classFilter)
+        .select('title code gradeLevel section legacyCourseId schoolId academicYearId')
         .sort({ gradeLevel: 1, section: 1, title: 1 })
         .lean(),
-      AcademicYear.find({ status: { $ne: 'archived' } })
-        .select('title code isActive isCurrent status')
+      AcademicYear.find(yearFilter)
+        .select('title code isActive isCurrent status schoolId')
         .sort({ isCurrent: -1, isActive: -1, sequence: 1, createdAt: 1 })
         .lean()
     ]);
@@ -4084,6 +4093,11 @@ router.get('/admin/fee-plans', requireAuth, requireRole(['admin']), requirePermi
     if (normalizeScopeText(planCode)) {
       filter.planCode = String(planCode).trim().toUpperCase();
     }
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: false });
+    if (schoolContext.schoolId) {
+      filter.schoolId = schoolContext.schoolId;
+      writeSchoolContextHeaders(res, schoolContext.schoolId);
+    }
     addFilterClause(filter, buildScopedCourseFilter(scope));
 
     const items = await FinanceFeePlan.find(filter)
@@ -4100,6 +4114,7 @@ router.get('/admin/fee-plans', requireAuth, requireRole(['admin']), requirePermi
 router.post('/admin/fee-plans', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const payload = req.body || {};
+    const schoolContext = await resolveActiveSchool(req, { payload, allowSingleFallback: false });
     const scope = await resolveFinanceScope({
       classId: payload.classId,
       courseId: payload.courseId
@@ -4127,6 +4142,13 @@ router.post('/admin/fee-plans', requireAuth, requireRole(['admin']), requirePerm
       schoolClass: scope.schoolClass,
       academicYear
     });
+    const resolvedSchoolId = schoolContext.schoolId
+      || (scope.schoolClass?.schoolId ? String(scope.schoolClass.schoolId) : '')
+      || (academicYear?.schoolId ? String(academicYear.schoolId) : '');
+    if (resolvedSchoolId) {
+      planQuery.schoolId = resolvedSchoolId;
+      writeSchoolContextHeaders(res, resolvedSchoolId);
+    }
     addFilterClause(planQuery, buildScopedCourseFilter(scope));
 
     const update = normalizeFeePlanPayload(payload, {
@@ -4135,6 +4157,9 @@ router.post('/admin/fee-plans', requireAuth, requireRole(['admin']), requirePerm
       schoolClass: scope.schoolClass,
       academicYear
     });
+    if (resolvedSchoolId) {
+      update.schoolId = resolvedSchoolId;
+    }
 
     const item = await FinanceFeePlan.findOneAndUpdate(planQuery, { $set: update }, {
       new: true,
@@ -4144,6 +4169,7 @@ router.post('/admin/fee-plans', requireAuth, requireRole(['admin']), requirePerm
     if (update.isDefault && item?._id) {
       await FinanceFeePlan.updateMany({
         _id: { $ne: item._id },
+        ...(resolvedSchoolId ? { schoolId: resolvedSchoolId } : {}),
         classId: scope.classId,
         academicYearId: update.academicYearId || null,
         term: update.term,
@@ -4181,8 +4207,9 @@ router.post('/admin/fee-plans', requireAuth, requireRole(['admin']), requirePerm
       message: 'Canonical fee plan saved successfully.'
     });
 
-  } catch {
-    res.status(500).json({ success: false, message: 'خطا در ذخیره پلان فیس' });
+  } catch (error) {
+    const status = Number(error?.statusCode || 500);
+    res.status(status).json({ success: false, message: error?.messageDari || 'خطا در ذخیره پلان فیس' });
   }
 });
 
