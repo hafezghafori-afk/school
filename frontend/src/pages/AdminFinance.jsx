@@ -3494,6 +3494,15 @@ export default function AdminFinance() {
       if (!resolvedClassId || !resolvedAcademicYearId || (!isClassDiscount && (!discountForm.studentId || !resolvedMembershipId))) {
         throw new Error('برای ثبت تخفیف، متعلم، صنف و سال تعلیمی مربوط به همان عضویت را انتخاب کنید.');
       }
+      if (discountForm.coverageMode === 'percent' && toSafeNumber(discountForm.percentage) <= 0) {
+        throw new Error('برای تخفیف فیصدی، فیصدی معتبر بزرگ‌تر از صفر وارد کنید.');
+      }
+      if (discountForm.coverageMode === 'fixed' && toSafeNumber(discountForm.amount) <= 0) {
+        throw new Error('برای تخفیف پولی، مبلغ معتبر بزرگ‌تر از صفر وارد کنید.');
+      }
+      if (discountForm.durationMode === 'custom_period' && (!discountForm.startDate || !discountForm.endDate)) {
+        throw new Error('برای تخفیف دوره‌ای، تاریخ شروع و ختم را انتخاب کنید.');
+      }
       const data = await postJson(`${API_BASE}/api/student-finance/discounts`, {
         targetScope: discountForm.targetScope,
         student: isClassDiscount ? '' : discountForm.studentId,
@@ -3516,7 +3525,9 @@ export default function AdminFinance() {
         ...(data?.item || {}),
         id: data?.item?.id || data?.item?._id || `discount-${Date.now()}`,
         discountType: data?.item?.discountType || discountForm.discountType,
+        coverageMode: data?.item?.coverageMode || discountForm.coverageMode,
         amount: Number(data?.item?.amount || discountForm.amount || 0),
+        percentage: Number(data?.item?.percentage || discountForm.percentage || 0),
         durationMode: data?.item?.durationMode || discountForm.durationMode || 'academic_year',
         startDate: data?.item?.startDate || (discountForm.durationMode === 'custom_period' ? discountForm.startDate : null),
         endDate: data?.item?.endDate || (discountForm.durationMode === 'custom_period' ? discountForm.endDate : null),

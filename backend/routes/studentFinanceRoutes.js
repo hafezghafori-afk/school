@@ -90,6 +90,17 @@ function mapPaymentErrorMessage(code = '') {
   return messageMap[code] || 'عملیات پرداخت مالی ناموفق بود.';
 }
 
+function mapDiscountErrorMessage(code = '') {
+  const messageMap = {
+    student_finance_membership_not_found: 'عضویت انتخاب‌شده برای ثبت تخفیف معتبر نیست.',
+    student_finance_discount_percentage_invalid: 'برای تخفیف درصدی، فیصدی معتبر بزرگ‌تر از صفر وارد کنید.',
+    student_finance_discount_amount_invalid: 'برای تخفیف پولی، مبلغ معتبر بزرگ‌تر از صفر وارد کنید.',
+    student_finance_discount_period_required: 'برای تخفیف دوره‌ای، تاریخ شروع و ختم را انتخاب کنید.',
+    student_finance_discount_period_invalid: 'تاریخ ختم تخفیف نمی‌تواند قبل از تاریخ شروع باشد.'
+  };
+  return messageMap[code] || '';
+}
+
 function resolveUnexpectedPaymentFailure(error = null) {
   if (!error) {
     return { status: 500, message: 'ثبت پرداخت مالی ناموفق بود.' };
@@ -399,7 +410,11 @@ router.post('/discounts', requireAuth, requireRole(['admin']), requirePermission
     });
   } catch (error) {
     const code = String(error?.message || '');
-    const status = code === 'student_finance_membership_not_found' ? 400 : 500;
+    const discountMessage = mapDiscountErrorMessage(code);
+    const status = discountMessage ? 400 : 500;
+    if (discountMessage) {
+      return res.status(status).json({ success: false, message: discountMessage });
+    }
     return res.status(status).json({ success: false, message: status === 400 ? 'عضویت انتخاب‌شده برای ثبت تخفیف معتبر نیست.' : 'ثبت تخفیف ناموفق بود.' });
   }
 });

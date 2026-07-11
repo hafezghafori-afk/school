@@ -439,6 +439,56 @@ async function syncDiscountOpenBills(discount = null) {
   }
 }
 
+function normalizeDiscountCoverage(payload = {}) {
+  const coverageMode = normalizeText(payload.coverageMode) === 'percent' ? 'percent' : 'fixed';
+  const amount = roundMoney(payload.amount);
+  const percentage = Math.max(0, Math.min(100, Number(payload.percentage) || 0));
+  if (coverageMode === 'percent' && percentage <= 0) {
+    throw new Error('student_finance_discount_percentage_invalid');
+  }
+  if (coverageMode === 'fixed' && amount <= 0) {
+    throw new Error('student_finance_discount_amount_invalid');
+  }
+  return {
+    coverageMode,
+    amount: coverageMode === 'percent' ? 0 : amount,
+    percentage: coverageMode === 'percent' ? percentage : 0
+  };
+}
+
+function resolveAnnualDiscountWindow(membership = null, payload = {}) {
+  const requestedStartDate = normalizeDateValue(payload.startDate);
+  const requestedEndDate = normalizeDateValue(payload.endDate);
+  const membershipStartDate = normalizeDateValue(membership?.enrolledAt || membership?.joinedAt);
+  const academicYearStartDate = normalizeDateValue(membership?.academicYearId?.startDate);
+  const academicYearEndDate = normalizeDateValue(membership?.academicYearId?.endDate);
+  const startDate = requestedStartDate || membershipStartDate || academicYearStartDate || new Date();
+  const endDate = academicYearEndDate || requestedEndDate || null;
+  return { startDate, endDate };
+}
+
+function resolvePeriodDiscountWindow(payload = {}) {
+  const startDate = normalizeDateValue(payload.startDate);
+  const endDate = normalizeDateValue(payload.endDate);
+  if (!startDate || !endDate) {
+    throw new Error('student_finance_discount_period_required');
+  }
+  if (endDate.getTime() < startDate.getTime()) {
+    throw new Error('student_finance_discount_period_invalid');
+  }
+  return { startDate, endDate };
+}
+
+function resolveDiscountDurationWindow(membership = null, payload = {}) {
+  const durationMode = normalizeText(payload.durationMode) === 'custom_period'
+    ? 'custom_period'
+    : 'academic_year';
+  const window = durationMode === 'custom_period'
+    ? resolvePeriodDiscountWindow(payload)
+    : resolveAnnualDiscountWindow(membership, payload);
+  return { durationMode, ...window };
+}
+
 function formatTransportFee(doc) {
   const item = toPlain(doc);
   if (!item) return null;
@@ -1280,19 +1330,8 @@ async function createDiscount(payload = {}) {
     throw new Error('student_finance_membership_not_found');
   }
 
-  const durationMode = ['academic_year', 'custom_period', 'selected_bills'].includes(normalizeText(payload.durationMode))
-    ? normalizeText(payload.durationMode)
-    : 'academic_year';
-  const requestedStartDate = normalizeDateValue(payload.startDate);
-  const requestedEndDate = normalizeDateValue(payload.endDate);
-  const membershipStartDate = normalizeDateValue(membership.enrolledAt || membership.joinedAt);
-  const academicYearEndDate = normalizeDateValue(membership.academicYearId?.endDate);
-  const startDate = requestedStartDate || membershipStartDate || new Date();
-  const endDate = durationMode === 'custom_period'
-    ? (requestedEndDate || academicYearEndDate || null)
-    : durationMode === 'academic_year'
-      ? (academicYearEndDate || requestedEndDate || null)
-      : requestedEndDate;
+  const discountCoverage = normalizeDiscountCoverage(payload);
+  const discountWindow = resolveDiscountDurationWindow(membership, payload);
 
   const item = await Discount.create({
     studentMembershipId: membership._id,
@@ -1305,15 +1344,13 @@ async function createDiscount(payload = {}) {
       : 'discount',
     targetScope: normalizeText(payload.targetScope) === 'class' ? 'class' : 'student',
     groupKey: normalizeText(payload.groupKey),
-    coverageMode: normalizeText(payload.coverageMode) === 'percent' ? 'percent' : 'fixed',
-    amount: normalizeText(payload.coverageMode) === 'percent' ? 0 : Math.max(0, Number(payload.amount) || 0),
-    percentage: normalizeText(payload.coverageMode) === 'percent'
-      ? Math.max(0, Math.min(100, Number(payload.percentage) || 0))
-      : 0,
+    coverageMode: discountCoverage.coverageMode,
+    amount: discountCoverage.amount,
+    percentage: discountCoverage.percentage,
     reason: normalizeText(payload.reason),
-    durationMode,
-    startDate,
-    endDate,
+    durationMode: discountWindow.durationMode,
+    startDate: discountWindow.startDate,
+    endDate: discountWindow.endDate,
     source: 'manual',
     createdBy: normalizeNullableId(payload.createdBy),
     sourceKey: `manual:${membership._id}:${Date.now()}`
