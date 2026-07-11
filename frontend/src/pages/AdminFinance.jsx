@@ -1869,7 +1869,7 @@ export default function AdminFinance() {
     const labels = {
       fee_plan_not_found: 'پلان مالی فعال برای این صنف/سال پیدا نشد',
       zero_amount: 'مبلغ قابل بل‌دهی صفر است',
-      outside_membership_period: 'تاریخ انتخاب‌شده خارج از دوره عضویت یا ماه فیس‌دار است',
+      outside_membership_period: 'تاریخ انتخاب‌شده خارج از دوره عضویت شاگرد یا ماه فیس‌دار در پلان است',
       not_debtor: 'گزینه فقط بدهکاران فعال است',
       unknown: 'دلیل نامشخص'
     };
@@ -5611,8 +5611,8 @@ export default function AdminFinance() {
                   </div>
                 ))}
                 {!!billingPreview.excluded?.length && (
-                  <p className="muted">
-                    حذف‌شده: {billingPreview.excluded.length}
+                  <p className="finance-warning-note" dir="rtl">
+                    هشدار: {billingPreview.excluded.length} مورد قابل صدور نیست.
                     {getBulkPreviewExcludedReasons(billingPreview).length ? ` - ${getBulkPreviewExcludedReasons(billingPreview).join('، ')}` : ''}
                   </p>
                 )}

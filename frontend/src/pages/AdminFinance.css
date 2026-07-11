@@ -526,6 +526,19 @@
   gap: 8px;
 }
 
+.finance-warning-note {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.12);
+  color: #fde68a;
+  direction: rtl;
+  text-align: right;
+  line-height: 1.8;
+  font-size: 0.92rem;
+}
+
 .finance-order-pick-list {
   display: grid;
   gap: 8px;
