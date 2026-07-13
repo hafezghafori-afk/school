@@ -56,7 +56,7 @@ const isDevLanOrigin = (origin = '') => {
 
 const getCorsOptions = () => {
   const configured = parseCorsOrigins();
-  const productionDefaults = [
+  const deployedFrontendOrigins = [
     'https://school-swart-delta.vercel.app',
     'https://imangirlschool.com',
     'https://www.imangirlschool.com'
@@ -70,9 +70,13 @@ const getCorsOptions = () => {
     'http://127.0.0.1:5173'
   ];
 
-  const defaults = isProduction() ? productionDefaults : devDefaults;
-  const allowList = new Set([...defaults, ...configured]);
-  const openInDev = !isProduction() && allowList.size === 0;
+  // Always allow the deployed frontend domains, even if NODE_ENV is not set on Render.
+  const allowList = new Set([
+    ...deployedFrontendOrigins,
+    ...configured,
+    ...(!isProduction() ? devDefaults : [])
+  ]);
+  const openInDev = !isProduction() && configured.length === 0;
 
   return {
     exposedHeaders: ['Content-Disposition', 'Content-Type', 'Content-Length'],
