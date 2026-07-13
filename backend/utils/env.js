@@ -56,6 +56,11 @@ const isDevLanOrigin = (origin = '') => {
 
 const getCorsOptions = () => {
   const configured = parseCorsOrigins();
+  const productionDefaults = [
+    'https://school-swart-delta.vercel.app',
+    'https://imangirlschool.com',
+    'https://www.imangirlschool.com'
+  ];
   const devDefaults = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
@@ -65,16 +70,15 @@ const getCorsOptions = () => {
     'http://127.0.0.1:5173'
   ];
 
-  const allowList = new Set(configured.length ? configured : (isProduction() ? [] : devDefaults));
+  const defaults = isProduction() ? productionDefaults : devDefaults;
+  const allowList = new Set([...defaults, ...configured]);
   const openInDev = !isProduction() && allowList.size === 0;
 
   return {
     exposedHeaders: ['Content-Disposition', 'Content-Type', 'Content-Length'],
     origin(origin, callback) {
-      // Allow server-to-server and same-origin requests without Origin header.
       if (!origin) return callback(null, true);
       if (openInDev || allowList.has(origin)) return callback(null, true);
-      // In development, allow LAN testing from private-network device browsers.
       if (!isProduction() && isDevLanOrigin(origin)) return callback(null, true);
       return callback(new Error('CORS blocked for this origin'));
     }
