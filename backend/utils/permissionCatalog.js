@@ -136,6 +136,203 @@ const LEGACY_PERMISSION_MAP = Object.freeze({
   ]
 });
 
+const PERMISSION_GROUPS = Object.freeze([
+  {
+    key: 'dashboard',
+    permissions: [
+      'dashboard.view',
+      'profile.view',
+      'profile.update.request',
+      'notifications.view',
+      'chat.use',
+      'recordings.view',
+      'schedule.public.view'
+    ]
+  },
+  {
+    key: 'users',
+    permissions: [
+      'users.manage',
+      'users.create',
+      'users.edit',
+      'users.deactivate',
+      'users.roles.manage',
+      'users.permissions.manage',
+      'users.access_requests.manage',
+      'users.profile_requests.manage',
+      'users.logs.view'
+    ]
+  },
+  {
+    key: 'students',
+    permissions: [
+      'students.register',
+      'students.manage',
+      'enrollments.online.manage',
+      'enrollments.manage',
+      'enrollments.detail.view',
+      'enrollments.print',
+      'students.profile.view',
+      'students.documents.manage',
+      'students.guardians.manage',
+      'students.transfers.manage',
+      'students.lifecycle.view',
+      'students.lifecycle.manage',
+      'students.lifecycle.approve',
+      'students.activity.view'
+    ]
+  },
+  {
+    key: 'education',
+    permissions: [
+      'education.core.manage',
+      'education.years.manage',
+      'education.terms.manage',
+      'education.classes.manage',
+      'education.shifts.manage',
+      'education.subjects.manage',
+      'education.curriculum.manage',
+      'education.annual_plan.manage',
+      'education.weekly_plan.manage',
+      'education.memberships.manage',
+      'education.promotions.manage',
+      'education.result_tables.manage',
+      'education.sheet_templates.manage',
+      'education.exams.manage'
+    ]
+  },
+  {
+    key: 'teachers',
+    permissions: [
+      'teachers.manage',
+      'teachers.assignments.manage',
+      'teachers.dashboard.access',
+      'teachers.students.add',
+      'teachers.reports.view',
+      'teachers.attendance.manage',
+      'teachers.timetable.view'
+    ]
+  },
+  {
+    key: 'timetable',
+    permissions: [
+      'timetable.hub.view',
+      'timetable.view',
+      'timetable.config.manage',
+      'timetable.shifts.manage',
+      'timetable.teacher_assignments.manage',
+      'timetable.teacher_availability.manage',
+      'timetable.generate',
+      'timetable.editor.manage',
+      'timetable.operations.manage',
+      'timetable.reports.view',
+      'timetable.conflicts.manage',
+      'timetable.history.view',
+      'timetable.student_view.access',
+      'timetable.teacher_view.access'
+    ]
+  },
+  {
+    key: 'learning',
+    permissions: [
+      'attendance.students.manage',
+      'attendance.my.view',
+      'attendance.employees.manage',
+      'grades.manage',
+      'grades.my.view',
+      'grades.detail.view',
+      'homework.manage',
+      'homework.my.view',
+      'quiz.take',
+      'quiz.manage'
+    ]
+  },
+  {
+    key: 'finance',
+    permissions: [
+      'finance.center.manage',
+      'finance.government.view',
+      'finance.memberships.manage',
+      'finance.student_profile.view',
+      'finance.bills.manage',
+      'finance.payments.manage',
+      'finance.receipts.approve',
+      'finance.receipts.reject',
+      'finance.receipts.follow_up',
+      'finance.discounts.manage',
+      'finance.exemptions.manage',
+      'finance.reliefs.manage',
+      'finance.transport.manage',
+      'finance.reports.view',
+      'finance.month_close.manage',
+      'finance.documents.manage',
+      'finance.lifecycle_effects.manage',
+      'finance.my.view',
+      'finance.receipt.submit'
+    ]
+  },
+  {
+    key: 'content',
+    permissions: [
+      'content.news.manage',
+      'content.news.archive',
+      'content.news.categories',
+      'content.gallery.manage',
+      'content.pages.manage',
+      'content.contacts.manage',
+      'content.faq.manage',
+      'content.terms.manage'
+    ]
+  },
+  {
+    key: 'reports',
+    permissions: [
+      'reports.builder.view',
+      'reports.students.view',
+      'reports.teachers.view',
+      'reports.government_finance.view',
+      'reports.schools.view',
+      'reports.logs.view',
+      'reports.alerts.view',
+      'reports.admin_search.use'
+    ]
+  },
+  {
+    key: 'schools',
+    permissions: [
+      'schools.dashboard.view',
+      'schools.map.view',
+      'schools.manage',
+      'schools.reports.view',
+      'schools.create',
+      'schools.edit',
+      'schools.documents.manage',
+      'schools.province_stats.view'
+    ]
+  },
+  {
+    key: 'settings',
+    permissions: [
+      'settings.general.manage',
+      'settings.login.manage',
+      'settings.student_ids.manage',
+      'settings.brand.manage',
+      'settings.academic.manage',
+      'settings.security.manage',
+      'access_school_manager',
+      'access_head_teacher'
+    ]
+  }
+]);
+
+const PERMISSION_KEYS = Object.freeze(Array.from(new Set([
+  ...Object.keys(LEGACY_PERMISSION_MAP),
+  ...Object.values(LEGACY_PERMISSION_MAP).flat(),
+  ...PERMISSION_GROUPS.flatMap((group) => group.permissions)
+])));
+
+const ACCESS_PERMISSION_KEYS = Object.freeze(new Set(PERMISSION_KEYS));
+
 function expandLegacyPermissions(permissions = []) {
   const next = new Set();
   (Array.isArray(permissions) ? permissions : []).forEach((permission) => {
@@ -149,5 +346,8 @@ function expandLegacyPermissions(permissions = []) {
 
 module.exports = {
   LEGACY_PERMISSION_MAP,
+  PERMISSION_GROUPS,
+  PERMISSION_KEYS,
+  ACCESS_PERMISSION_KEYS,
   expandLegacyPermissions
 };

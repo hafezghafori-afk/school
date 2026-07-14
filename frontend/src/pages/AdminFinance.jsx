@@ -4677,6 +4677,14 @@ export default function AdminFinance() {
           <strong>ممبرشیپ مالی</strong>
           <span>{financeMembershipStudents.length} شاگرد فعال</span>
         </Link>
+        <Link
+          to="/academy"
+          className="finance-shell-tab finance-shell-link"
+          data-testid="finance-academy-link"
+        >
+          <strong>آموزشگاه</strong>
+          <span>سیستم جدا برای شاگرد، فیس، بل و مصارف</span>
+        </Link>
       </div>
 
       <div className="finance-section-head">

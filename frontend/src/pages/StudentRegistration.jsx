@@ -163,6 +163,7 @@ const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedY
   const shiftCode = normalizeShiftCode(selectedClass?.shift || selectedShift?.code || selectedShift?.name || selectedShift?.title);
   const previousSchoolName = trimValue(formData.previousSchool);
   const previousGrade = trimValue(formData.previousGrade);
+  const isTransferAdmission = formData.registrationType === 'transfer' || Boolean(previousSchoolName || previousGrade);
 
   return {
     schoolId: currentSchool,
@@ -214,8 +215,8 @@ const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedY
       currentSection: trimValue(selectedClass?.section),
       currentShift: shiftCode,
       enrollmentDate: formData.enrollmentDate || new Date().toISOString(),
-      enrollmentType: previousSchoolName ? 'transfer' : 'new',
-      previousSchool: previousSchoolName || previousGrade
+      enrollmentType: isTransferAdmission ? 'transfer' : 'new',
+      previousSchool: isTransferAdmission && (previousSchoolName || previousGrade)
         ? {
             name: previousSchoolName,
             lastGrade: previousGrade,
@@ -258,6 +259,7 @@ const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedY
 };
 
 const createEmptyForm = (academicYearId = '') => ({
+  registrationType: 'new',
   firstName: '',
   lastName: '',
   fatherName: '',
@@ -411,6 +413,12 @@ const StudentRegistration = () => {
   const handleInputChange = (field, value) => {
     setFormData((current) => {
       const next = { ...current, [field]: value };
+      if (field === 'registrationType' && value === 'new') {
+        next.previousSchool = '';
+        next.previousGrade = '';
+        setStudentFiles((prev) => ({ ...prev, seParcha: null }));
+        setFileInputResetKey((key) => key + 1);
+      }
       if (field === 'classId') {
         const classItem = classes.find((item) => String(item._id) === String(value));
         const classShiftId = getEntityId(classItem?.shiftId);
@@ -454,6 +462,10 @@ const StudentRegistration = () => {
     if (formData.classId && !selectedClass) nextErrors.classId = 'صنف انتخاب‌شده معتبر نیست.';
     if (!formData.shiftId) nextErrors.shiftId = 'نوبت الزامی است.';
     if (!formData.fatherPhone.trim()) nextErrors.fatherPhone = 'شماره تماس پدر الزامی است.';
+
+    if (formData.registrationType === 'transfer' && !formData.previousSchool.trim()) {
+      nextErrors.previousSchool = 'Ù…Ú©ØªØ¨ Ù‚Ø¨Ù„ÛŒ Ø¨Ø±Ø§ÛŒ ØªØ¨Ø¯ÛŒÙ„ÛŒ Ø¢Ù…Ø¯ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª.';
+    }
 
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -750,6 +762,14 @@ const StudentRegistration = () => {
           <h3 style={{ color: '#3498db', marginBottom: 12 }}>اطلاعات تعلیمی</h3>
           <div className="form-grid">
             <div className="form-group">
+              <label htmlFor="registrationType">نوع ثبت‌نام *</label>
+              <select id="registrationType" value={formData.registrationType} onChange={e => handleInputChange('registrationType', e.target.value)} required>
+                <option value="new">ثبت‌نام جدید</option>
+                <option value="transfer">تبدیلی آمد</option>
+              </select>
+              <small className="form-subtitle">تبدیلی آمد از همین فورم ثبت می‌شود و فورم جدا ندارد.</small>
+            </div>
+            <div className="form-group">
               <label htmlFor="academicYearId">سال تعلیمی *</label>
               <select id="academicYearId" value={formData.academicYearId} onChange={e => handleInputChange('academicYearId', e.target.value)} required className={errors.academicYearId ? 'border-red-500' : ''}>
                 <option value="">انتخاب کنید</option>
@@ -780,16 +800,21 @@ const StudentRegistration = () => {
               <label htmlFor="enrollmentDate">تاریخ ثبت‌نام</label>
               <AfghanDateInput id="enrollmentDate" value={formData.enrollmentDate} onChange={value => handleInputChange('enrollmentDate', value)} showGregorianEquivalent />
             </div>
-            <div className="form-group">
-              <label htmlFor="previousSchool">مکتب قبلی</label>
-              <input id="previousSchool" value={formData.previousSchool} onChange={e => handleInputChange('previousSchool', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="previousGrade">صنف قبلی</label>
-              <input id="previousGrade" value={formData.previousGrade} onChange={e => handleInputChange('previousGrade', e.target.value)} />
-            </div>
+            {formData.registrationType === 'transfer' ? (
+              <>
+                <div className="form-group">
+                  <label htmlFor="previousSchool">مکتب قبلی *</label>
+                  <input id="previousSchool" value={formData.previousSchool} onChange={e => handleInputChange('previousSchool', e.target.value)} required className={errors.previousSchool ? 'border-red-500' : ''} />
+                  {errors.previousSchool && <span className="text-red-500">{errors.previousSchool}</span>}
+                </div>
+                <div className="form-group">
+                  <label htmlFor="previousGrade">صنف قبلی</label>
+                  <input id="previousGrade" value={formData.previousGrade} onChange={e => handleInputChange('previousGrade', e.target.value)} />
+                </div>
+              </>
+            ) : null}
             {/* سه پارچه فقط برای شاگردان تبدیلی */}
-            {(formData.previousSchool.trim() || formData.previousGrade.trim()) && (
+            {formData.registrationType === 'transfer' && (
               <div className="form-group" style={{ minWidth: 170 }}>
                 <label>سه پارچه<br /><span style={{ fontSize: 12, color: '#888' }}>(ویژه شاگردان تبدیلی) (PDF, JPG, PNG)</span></label>
                 <input key={`seParcha-${fileInputResetKey}`} type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => handleFileChange('seParcha', e.target.files?.[0])} />

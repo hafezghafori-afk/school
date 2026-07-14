@@ -35,7 +35,7 @@ test.describe('access request workflow', () => {
     await expect(page.locator('.access-denied__feedback')).toBeVisible();
 
     expect(accessRequestPayload).toBeTruthy();
-    expect(accessRequestPayload.permission).toBe('manage_users');
+    expect(accessRequestPayload.permission).toBe('users.manage');
     expect(accessRequestPayload.route).toBe('/admin-users');
   });
 

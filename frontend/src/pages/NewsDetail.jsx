@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import useSiteSettings from '../hooks/useSiteSettings';
+import { PublicLayout } from '../components/public';
 import './News.css';
 
 import { API_BASE } from '../config/api';
@@ -38,6 +40,7 @@ const setMeta = (name, content) => {
 
 export default function NewsDetail() {
   const { id } = useParams();
+  const { settings } = useSiteSettings();
   const [item, setItem] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -70,7 +73,8 @@ export default function NewsDetail() {
   }, [item]);
 
   return (
-    <section className="news-page">
+    <PublicLayout active="اخبار" settings={settings}>
+      <section className="news-page public-container">
       <div className="news-hero">
         <div>
           <h1>جزئیات خبر</h1>
@@ -103,6 +107,7 @@ export default function NewsDetail() {
           </div>
         </article>
       )}
-    </section>
+      </section>
+    </PublicLayout>
   );
 }

@@ -732,6 +732,9 @@ export default function AdminPanel() {
   const [schoolScopeMessage, setSchoolScopeMessage] = useState('');
   const [editingSchoolProfile, setEditingSchoolProfile] = useState(null);
   const [schoolEditForm, setSchoolEditForm] = useState(null);
+  const [schoolSearchQuery, setSchoolSearchQuery] = useState('');
+  const [schoolStatusFilter, setSchoolStatusFilter] = useState('all');
+  const [adminModernView, setAdminModernView] = useState('overview');
   const [stats, setStats] = useState({
     users: 0,
     courses: 0,
@@ -980,6 +983,36 @@ export default function AdminPanel() {
       String(left?.nameDari || left?.name || '').localeCompare(String(right?.nameDari || right?.name || ''), 'fa')
     ));
   }, [activeSchoolContext?.school, activeSchoolContext?.schools, schoolOptions]);
+
+  const schoolOverviewStats = useMemo(() => {
+    const total = visibleSchoolOptions.length;
+    const activeRecords = visibleSchoolOptions.filter((school) => String(school?.status || 'active') === 'active').length;
+    return {
+      total,
+      activeRecords,
+      inactiveRecords: Math.max(total - activeRecords, 0),
+      currentSchoolName: activeSchoolContext?.school?.nameDari || activeSchoolContext?.school?.name || 'انتخاب نشده'
+    };
+  }, [activeSchoolContext?.school?.name, activeSchoolContext?.school?.nameDari, visibleSchoolOptions]);
+
+  const filteredSchoolOptions = useMemo(() => {
+    const query = schoolSearchQuery.trim().toLowerCase();
+    return visibleSchoolOptions.filter((school) => {
+      const status = String(school?.status || 'active');
+      if (schoolStatusFilter === 'active' && status !== 'active') return false;
+      if (schoolStatusFilter === 'inactive' && status === 'active') return false;
+      if (!query) return true;
+      const haystack = [
+        school?.nameDari,
+        school?.name,
+        school?.schoolCode,
+        school?.province,
+        school?.district,
+        school?.principal?.name
+      ].filter(Boolean).join(' ').toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [schoolSearchQuery, schoolStatusFilter, visibleSchoolOptions]);
 
   const ownershipIssueCount = useMemo(() => (
     (ownershipAudit?.rows || []).reduce((sum, row) => sum + Number(row?.missing || 0) + Number(row?.unknownSchool || 0), 0)
@@ -3358,10 +3391,605 @@ export default function AdminPanel() {
     return zeroCount >= 3;
   }, [canViewReports, executiveSummary.totalStudents, zeroSignalValues]);
 
+  const modernKpiItems = [
+    {
+      label: 'شاگردان',
+      value: Number(executiveSummary.totalStudents || stats.users || 0).toLocaleString('fa-AF-u-ca-persian'),
+      hint: `${Number(executiveSummary.totalInstructors || 0).toLocaleString('fa-AF-u-ca-persian')} استاد`
+    },
+    {
+      label: 'پرداخت امروز',
+      value: Number(executiveSummary.todayPayments || stats.todayPayments || 0).toLocaleString('fa-AF-u-ca-persian'),
+      hint: `${Number(executiveSummary.pendingFinanceReviews || orders.length || 0).toLocaleString('fa-AF-u-ca-persian')} رسید در انتظار`
+    },
+    {
+      label: 'حضور عمومی',
+      value: `${Number(executiveSummary.attendanceRate || 0).toLocaleString('fa-AF-u-ca-persian')}%`,
+      hint: `${Number(todayScheduleSummary.total || 0).toLocaleString('fa-AF-u-ca-persian')} برنامه امروز`
+    },
+    {
+      label: 'پیام‌ها',
+      value: Number(supportMessages.length || 0).toLocaleString('fa-AF-u-ca-persian'),
+      hint: `${Number(visibleAlerts.length || 0).toLocaleString('fa-AF-u-ca-persian')} هشدار فعال`
+    },
+    {
+      label: 'مکاتب فعال',
+      value: Number(schoolOverviewStats.activeRecords || 0).toLocaleString('fa-AF-u-ca-persian'),
+      hint: schoolOverviewStats.currentSchoolName
+    }
+  ];
+
+  const modernUrgentItems = [
+    ...(urgentAlerts || []).slice(0, 4).map((alert) => ({
+      key: `alert-${alert.key}`,
+      title: alert.title,
+      meta: `${Number(alert.count || 0).toLocaleString('fa-AF-u-ca-persian')} مورد`,
+      to: ALERT_LINKS[alert.key] || ''
+    })),
+    ...(inboxItems || []).filter((item) => item.kind !== 'profile').slice(0, 4).map((item) => ({
+      key: `inbox-${item.kind}-${item.id}`,
+      title: item.title,
+      meta: item.subtitle,
+      to: item.kind === 'receipt' ? '/admin-finance#pending-receipts' : '/admin-communications'
+    }))
+  ].slice(0, 6);
+
+  const modernActivityItems = [
+    ...(reportActivityItems || []).slice(0, 3).map((item) => ({
+      key: `report-${item._id}`,
+      title: reportActionLabel(item.action),
+      meta: `${item.actor?.name || 'ادمین'} | ${toDateTime(item.createdAt)}`
+    })),
+    ...(todaySchedule || []).slice(0, 3).map((item, index) => ({
+      key: `schedule-${item?._id || item?.id || index}`,
+      title: item?.subjectTitle || item?.subject || item?.courseTitle || 'برنامه درسی',
+      meta: [item?.classTitle, item?.teacherName, item?.startTime].filter(Boolean).join(' | ') || todayScheduleCardLabel
+    }))
+  ].slice(0, 5);
+
+  const modernManagementSections = [
+    {
+      key: 'schools',
+      title: 'مکاتب',
+      group: 'ساختار مکتب',
+      subtitle: 'لیست، انتخاب مکتب فعال و ویرایش مشخصات',
+      count: schoolOverviewStats.total,
+      action: 'ایجاد مکتب',
+      onAction: canManageContent ? () => setCreateSchoolOpen(true) : null
+    },
+    {
+      key: 'registrations',
+      title: 'ثبت‌نام‌ها',
+      group: 'ثبت‌نام و شاگردان',
+      subtitle: 'درخواست‌های ثبت‌نام، بررسی و تایید',
+      count: inboxCounts?.enrollments || 0,
+      to: canManageEnrollments ? '/admin-enrollments' : ''
+    },
+    {
+      key: 'student-registration',
+      title: 'ثبت شاگرد جدید',
+      group: 'ثبت‌نام و شاگردان',
+      subtitle: 'ثبت مستقیم شاگرد و معلومات اولیه',
+      count: 0,
+      to: canManageEnrollments || canManageUsers ? '/student-registration' : ''
+    },
+    {
+      key: 'online-registrations',
+      title: 'ثبت‌نام آنلاین',
+      group: 'ثبت‌نام و شاگردان',
+      subtitle: 'درخواست‌های آنلاین خانواده‌ها',
+      count: 0,
+      to: canManageEnrollments || canManageUsers ? '/online-registrations' : ''
+    },
+    {
+      key: 'students',
+      title: 'مدیریت شاگردان',
+      group: 'ثبت‌نام و شاگردان',
+      subtitle: 'لیست، جستجو و مدیریت شاگردان',
+      count: stats.users,
+      to: canManageUsers ? '/student-management' : ''
+    },
+    {
+      key: 'memberships',
+      title: 'عضویت آموزشی',
+      group: 'ثبت‌نام و شاگردان',
+      subtitle: 'وصل شاگرد به صنف و سال تعلیمی',
+      count: 0,
+      to: canManageMemberships ? '/admin-education?section=enrollments' : ''
+    },
+    {
+      key: 'transfer-in',
+      title: 'تبدیلی آمد',
+      group: 'ثبت‌نام و شاگردان',
+      subtitle: 'ثبت شاگردان انتقالی به مکتب',
+      count: 0,
+      to: permissionAllows('students.transfers.manage', effectivePermissions) ? '/admin-education?section=enrollments&lifecycle=transfer-in' : ''
+    },
+    {
+      key: 'transfer-out',
+      title: 'تبدیلی رفت / ترک تحصیل',
+      group: 'ثبت‌نام و شاگردان',
+      subtitle: 'خروج، انتقال یا ختم عضویت آموزشی',
+      count: 0,
+      to: permissionAllows('students.lifecycle.manage', effectivePermissions) ? '/admin-education?section=enrollments&lifecycle=end' : ''
+    },
+    {
+      key: 'promotions',
+      title: 'ارتقای صنف',
+      group: 'ثبت‌نام و شاگردان',
+      subtitle: 'انتقال جمعی شاگردان به صنف بعدی',
+      count: 0,
+      to: permissionAllows('education.promotions.manage', effectivePermissions) ? '/admin-promotions' : ''
+    },
+    {
+      key: 'users',
+      title: 'کاربران',
+      group: 'کاربران و دسترسی',
+      subtitle: 'حساب‌ها، نقش‌ها و سطح دسترسی',
+      count: stats.users,
+      to: canManageUsers ? '/admin-users' : ''
+    },
+    {
+      key: 'education',
+      title: 'آموزش',
+      group: 'آموزش و برنامه',
+      subtitle: 'صنف‌ها، مضمون‌ها، سال تعلیمی و شقه‌ها',
+      count: stats.courses,
+      to: canManageContent ? '/admin-education' : ''
+    },
+    {
+      key: 'attendance',
+      title: 'حاضری',
+      group: 'آموزش و برنامه',
+      subtitle: 'ثبت و بررسی حضور و غیاب',
+      count: 0,
+      to: canManageContent || canViewReports ? '/attendance-manager' : ''
+    },
+    {
+      key: 'homework',
+      title: 'کارخانگی',
+      group: 'آموزش و برنامه',
+      subtitle: 'ایجاد، پیگیری و بررسی کارخانگی',
+      count: 0,
+      to: canManageContent ? '/homework-manager' : ''
+    },
+    {
+      key: 'exams',
+      title: 'امتحانات',
+      group: 'آموزش و برنامه',
+      subtitle: 'جلسه‌ها، نمرات و وضعیت امتحان',
+      count: 0,
+      to: canManageContent ? '/admin-exams-dashboard' : ''
+    },
+    {
+      key: 'result-tables',
+      title: 'جدول نتایج',
+      group: 'آموزش و برنامه',
+      subtitle: 'ساخت، بررسی و چاپ جدول نتایج',
+      count: 0,
+      to: canManageContent ? '/admin-result-tables' : ''
+    },
+    {
+      key: 'sheet-templates',
+      title: 'مدیریت شقه‌ها',
+      group: 'آموزش و برنامه',
+      subtitle: 'قالب‌های چاپ، حاضری و گزارش',
+      count: activeSchoolContext?.scopeSummary?.sheetTemplates?.count || 0,
+      to: canManageContent ? '/admin-sheet-templates' : ''
+    },
+    {
+      key: 'schedule',
+      title: 'تقسیم اوقات',
+      group: 'آموزش و برنامه',
+      subtitle: 'برنامه امروز، نشر و بررسی تداخل‌ها',
+      count: todayScheduleSummary.total,
+      to: canViewSchedule ? (canManageSchedule ? ADMIN_SCHEDULE_ROUTE : ADMIN_SCHEDULE_VIEW_ROUTE) : ''
+    },
+    {
+      key: 'schedule-reports',
+      title: 'گزارش تقسیم اوقات',
+      group: 'آموزش و برنامه',
+      subtitle: 'گزارش‌ها و وضعیت برنامه درسی',
+      count: 0,
+      to: canManageSchedule ? '/timetable/reports' : ''
+    },
+    {
+      key: 'finance',
+      title: 'مالی',
+      group: 'مالی',
+      subtitle: 'رسیدها، بل‌ها، صندوق و گزارش‌های رسمی',
+      count: orders.length,
+      to: canManageFinance ? '/admin-finance' : ''
+    },
+    {
+      key: 'government-finance',
+      title: 'مالی دولت',
+      group: 'مالی',
+      subtitle: 'گزارش، آرشیف و فورم‌های رسمی',
+      count: 0,
+      to: canManageFinance ? '/admin-government-finance' : ''
+    },
+    {
+      key: 'financial-memberships',
+      title: 'اثر مالی تغییرات آموزشی',
+      group: 'مالی',
+      subtitle: 'اثر تبدیلی، ارتقا و تغییر عضویت روی مالی',
+      count: 0,
+      to: permissionAllows('finance.lifecycle_effects.manage', effectivePermissions) ? '/admin-financial-memberships' : ''
+    },
+    {
+      key: 'academy',
+      title: 'مدیریت آموزشگاه',
+      group: 'مالی',
+      subtitle: 'دوره‌ها، پرداخت‌ها و مدیریت آموزشگاه',
+      count: 0,
+      to: canManageFinance ? '/academy-management' : ''
+    },
+    {
+      key: 'reports',
+      title: 'گزارش‌ها',
+      group: 'گزارش‌ها',
+      subtitle: 'خروجی‌ها، وضعیت مدیریتی و گزارش دولت',
+      count: reportActivityItems.length,
+      to: canViewReports ? '/admin-reports' : ''
+    },
+    {
+      key: 'student-report',
+      title: 'گزارش شاگرد',
+      group: 'گزارش‌ها',
+      subtitle: 'پرونده و گزارش جامع شاگرد',
+      count: 0,
+      to: canViewReports ? '/student-report' : ''
+    },
+    {
+      key: 'instructor-report',
+      title: 'گزارش استاد',
+      group: 'گزارش‌ها',
+      subtitle: 'گزارش فعالیت و تدریس استاد',
+      count: 0,
+      to: canViewReports ? '/instructor-report' : ''
+    },
+    {
+      key: 'logs',
+      title: 'لاگ‌ها',
+      group: 'گزارش‌ها',
+      subtitle: 'ردیابی فعالیت‌ها و تغییرات سیستم',
+      count: 0,
+      to: canViewReports ? '/admin-logs' : ''
+    },
+    {
+      key: 'communications',
+      title: 'ارتباطات',
+      group: 'سیستم و تنظیمات',
+      subtitle: 'دمو، تماس و پیام‌های پشتیبانی',
+      count: supportMessages.length,
+      to: canManagePlatformRequests ? '/admin-communications' : ''
+    },
+    {
+      key: 'notifications',
+      title: 'اعلان‌ها',
+      group: 'سیستم و تنظیمات',
+      subtitle: 'پیام‌های سیستم و یادآوری‌ها',
+      count: 0,
+      to: canManageFinance ? '/admin-notifications' : ''
+    },
+    {
+      key: 'settings',
+      title: 'تنظیمات',
+      group: 'سیستم و تنظیمات',
+      subtitle: 'تنظیمات سایت، منوها و شماره اساس',
+      count: 0,
+      to: canManageContent ? '/admin-settings' : ''
+    }
+  ];
+
+  const modernUtilityShortcuts = [
+    { key: 'profile', title: 'پروفایل من', subtitle: 'مشخصات حساب و فعالیت‌ها', to: '/profile' },
+    { key: 'search', title: 'جستجوی سراسری', subtitle: 'کاربر، پیام، خبر و درخواست', action: () => setSearchToolOpen((prev) => !prev) },
+    { key: 'notifications', title: 'اعلان‌ها', subtitle: 'پیام‌های سیستم و یادآوری‌ها', to: '/admin-notifications' }
+  ];
+
+  const visibleManagementSections = modernManagementSections.filter((item) => item.to || item.onAction);
+  const managementGroups = Array.from(new Set(visibleManagementSections.map((item) => item.group || 'عمومی')));
+
   return (
     <section className="admin-page">
       <div className="card-back">
         <button type="button" onClick={() => window.history.back()}>بازگشت</button>
+      </div>
+
+      <div className="admin-modern-dashboard" dir="rtl">
+        <header className="admin-modern-hero">
+          <div>
+            <span className="admin-modern-eyebrow">داشبورد ادمین</span>
+            <h1>سلام {user?.name || getName()}، همه چیز در یک نگاه</h1>
+            <p>نمای سبک برای وضعیت امروز، کارهای فوری و دسترسی سریع به مرکز مدیریت.</p>
+          </div>
+          <div className="admin-modern-top-actions">
+            {canManageContent && (
+              <button type="button" onClick={() => setCreateSchoolOpen(true)}>
+                ایجاد مکتب
+              </button>
+            )}
+            <NotificationBell apiBase={API_BASE} panelPath="/admin-notifications" showLabel title="اعلان‌ها" />
+            <button type="button" className="danger" onClick={logout}>خروج</button>
+          </div>
+        </header>
+
+        <nav className="admin-modern-tabs" aria-label="نمای داشبورد">
+          <button
+            type="button"
+            className={adminModernView === 'overview' ? 'active' : ''}
+            onClick={() => setAdminModernView('overview')}
+          >
+            نمای کلی
+          </button>
+          <button
+            type="button"
+            className={adminModernView === 'management' ? 'active' : ''}
+            onClick={() => setAdminModernView('management')}
+          >
+            مرکز مدیریت
+          </button>
+        </nav>
+
+        {adminModernView === 'overview' && (
+          <div className="admin-modern-overview">
+            <section className="admin-modern-kpis" aria-label="خلاصه امروز">
+              {modernKpiItems.map((item) => (
+                <article key={item.label} className="admin-modern-kpi">
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                  <small>{item.hint}</small>
+                </article>
+              ))}
+            </section>
+
+            <section className="admin-modern-grid">
+              <article className="admin-modern-panel admin-modern-panel--wide">
+                <div className="admin-modern-panel-head">
+                  <div>
+                    <span className="admin-modern-eyebrow">مکتب فعال</span>
+                    <h2>{schoolOverviewStats.currentSchoolName}</h2>
+                  </div>
+                  <button type="button" onClick={() => setAdminModernView('management')}>مدیریت مکاتب</button>
+                </div>
+                <div className="admin-modern-school-summary">
+                  <span>همه مکاتب <b>{Number(schoolOverviewStats.total || 0).toLocaleString('fa-AF-u-ca-persian')}</b></span>
+                  <span>فعال <b>{Number(schoolOverviewStats.activeRecords || 0).toLocaleString('fa-AF-u-ca-persian')}</b></span>
+                  <span>غیرفعال <b>{Number(schoolOverviewStats.inactiveRecords || 0).toLocaleString('fa-AF-u-ca-persian')}</b></span>
+                  <span>مالکیت مبهم <b>{Number(ownershipIssueCount || 0).toLocaleString('fa-AF-u-ca-persian')}</b></span>
+                </div>
+              </article>
+
+              <article className="admin-modern-panel">
+                <div className="admin-modern-panel-head">
+                  <h2>کارهای فوری</h2>
+                  <button type="button" onClick={refreshAdminInbox}>بروزرسانی</button>
+                </div>
+                <div className="admin-modern-list">
+                  {!modernUrgentItems.length && <span className="admin-modern-empty">مورد فوری ثبت نشده است.</span>}
+                  {modernUrgentItems.map((item) => (
+                    item.to ? (
+                      <Link key={item.key} to={item.to} className="admin-modern-list-item">
+                        <strong>{item.title}</strong>
+                        <small>{item.meta}</small>
+                      </Link>
+                    ) : (
+                      <div key={item.key} className="admin-modern-list-item">
+                        <strong>{item.title}</strong>
+                        <small>{item.meta}</small>
+                      </div>
+                    )
+                  ))}
+                </div>
+              </article>
+
+              <article className="admin-modern-panel">
+                <div className="admin-modern-panel-head">
+                  <h2>آخرین فعالیت‌ها</h2>
+                  {canViewReports && <Link to="/admin-reports">گزارش‌ها</Link>}
+                </div>
+                <div className="admin-modern-list">
+                  {!modernActivityItems.length && <span className="admin-modern-empty">فعالیت تازه‌ای برای نمایش نیست.</span>}
+                  {modernActivityItems.map((item) => (
+                    <div key={item.key} className="admin-modern-list-item">
+                      <strong>{item.title}</strong>
+                      <small>{item.meta}</small>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            </section>
+
+            <section className="admin-modern-shortcuts" aria-label="میانبرهای اصلی">
+              {modernUtilityShortcuts.map((item) => (
+                item.to ? (
+                  <Link key={item.key} to={item.to}>
+                    <strong>{item.title}</strong>
+                    <small>{item.subtitle}</small>
+                  </Link>
+                ) : (
+                  <button key={item.key} type="button" onClick={item.action}>
+                    <strong>{item.title}</strong>
+                    <small>{item.subtitle}</small>
+                  </button>
+                )
+              ))}
+            </section>
+
+            {searchToolOpen && (
+              <section className="admin-modern-search-panel" aria-label="جستجوی سراسری">
+                <div className="admin-modern-panel-head">
+                  <h2>جستجوی سراسری</h2>
+                  <button type="button" onClick={() => setSearchToolOpen(false)}>بستن</button>
+                </div>
+                <div className="admin-modern-search-row">
+                  <input
+                    ref={searchToolInputRef}
+                    value={searchQ}
+                    onChange={(e) => setSearchQ(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        onSearchToolSubmit();
+                      }
+                    }}
+                    placeholder="نام، ایمیل، پیام، خبر..."
+                  />
+                  <button type="button" onClick={onSearchToolSubmit}>
+                    {searching ? 'در حال جستجو...' : 'جستجو'}
+                  </button>
+                </div>
+                {searchMessage && <div className="admin-modern-empty">{searchMessage}</div>}
+                {!!searchQ.trim() && !searchMessage && (
+                  <div className="admin-modern-search-results">
+                    {!totalSearchHits && <div className="admin-modern-empty">نتیجه‌ای پیدا نشد.</div>}
+                    {!!totalSearchHits && searchSections.map((section) => (
+                      <div key={section.key} className="admin-modern-search-group">
+                        <h3>{section.title} ({section.count})</h3>
+                        {section.items.slice(0, 4).map((item, index) => {
+                          const itemKey = item?._id || item?.id || `${section.key}-${index}`;
+                          const itemLink = section.to(item);
+                          const primary = section.primary(item);
+                          const secondary = section.secondary(item);
+                          return (
+                            <Link key={itemKey} to={itemLink} onClick={() => setSearchToolOpen(false)}>
+                              <strong>{renderHighlightedSearchText(primary)}</strong>
+                              {!!secondary && <small>{renderHighlightedSearchText(secondary)}</small>}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
+        )}
+
+        {adminModernView === 'management' && (
+          <div className="admin-modern-management">
+            <section className="admin-modern-management-groups">
+              {managementGroups.map((group) => (
+                <div key={group} className="admin-modern-management-group">
+                  <div className="admin-modern-management-group__head">
+                    <span className="admin-modern-eyebrow">{group}</span>
+                    <strong>{visibleManagementSections.filter((item) => (item.group || 'عمومی') === group).length.toLocaleString('fa-AF-u-ca-persian')} بخش</strong>
+                  </div>
+                  <div className="admin-modern-management-grid">
+                    {visibleManagementSections
+                      .filter((item) => (item.group || 'عمومی') === group)
+                      .map((item) => (
+                        <article key={item.key} className="admin-modern-management-card">
+                          <div>
+                            <span>{Number(item.count || 0).toLocaleString('fa-AF-u-ca-persian')}</span>
+                            <h2>{item.title}</h2>
+                            <p>{item.subtitle}</p>
+                          </div>
+                          {item.to ? (
+                            <Link to={item.to}>باز کردن</Link>
+                          ) : item.onAction ? (
+                            <button type="button" onClick={item.onAction}>{item.action || 'اقدام'}</button>
+                          ) : (
+                            <em>بدون دسترسی</em>
+                          )}
+                        </article>
+                      ))}
+                  </div>
+                </div>
+              ))}
+            </section>
+
+            <section className="admin-school-switcher admin-modern-schools" aria-label="لیست مکاتب فعال">
+              <div className="admin-school-switcher__head">
+                <div>
+                  <span className="admin-active-school-scope__eyebrow">مکاتب</span>
+                  <h3>لیست مکاتب فعال و ویرایش سریع</h3>
+                  <p>جستجو، انتخاب مکتب فعال و ویرایش مشخصات در همین بخش انجام می‌شود.</p>
+                </div>
+                <button type="button" className="admin-school-switcher__refresh" onClick={loadSchoolOptions} disabled={schoolScopeBusy}>
+                  بازبینی لیست
+                </button>
+              </div>
+
+              <div className="admin-school-switcher__toolbar">
+                <label>
+                  جستجوی مکتب
+                  <input
+                    type="search"
+                    value={schoolSearchQuery}
+                    onChange={(event) => setSchoolSearchQuery(event.target.value)}
+                    placeholder="نام، کد، ولایت یا مدیر"
+                  />
+                </label>
+                <label>
+                  وضعیت
+                  <select value={schoolStatusFilter} onChange={(event) => setSchoolStatusFilter(event.target.value)}>
+                    <option value="all">همه</option>
+                    <option value="active">فقط فعال</option>
+                    <option value="inactive">غیرفعال / بسته</option>
+                  </select>
+                </label>
+              </div>
+
+              {visibleSchoolOptions.length === 0 ? (
+                <div className="admin-school-switcher__empty">هنوز مکتبی در لیست دریافت نشد.</div>
+              ) : filteredSchoolOptions.length === 0 ? (
+                <div className="admin-school-switcher__empty">موردی با این جستجو یا فیلتر پیدا نشد.</div>
+              ) : (
+                <div className="admin-school-switcher__table-wrap">
+                  <table className="admin-school-switcher__table">
+                    <thead>
+                      <tr>
+                        <th>نام مکتب</th>
+                        <th>ولایت / ناحیه</th>
+                        <th>مدیر</th>
+                        <th>وضعیت</th>
+                        <th>عملیات</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSchoolOptions.map((school) => {
+                        const schoolId = String(school?._id || school?.id || '');
+                        const isCurrent = schoolId === activeSchoolId;
+                        const isRecordActive = String(school?.status || 'active') === 'active';
+                        return (
+                          <tr key={schoolId} className={isCurrent ? 'is-current' : ''}>
+                            <td>
+                              <strong>{school.nameDari || school.name || 'مکتب'}</strong>
+                              <small>کد: {school.schoolCode || '-'}</small>
+                            </td>
+                            <td>{[school.province, school.district].filter(Boolean).join('، ') || '-'}</td>
+                            <td>{school?.principal?.name || '-'}</td>
+                            <td>
+                              <span className={`admin-school-switcher__badge${isRecordActive ? '' : ' muted'}`}>
+                                {isCurrent ? 'مکتب فعال' : (isRecordActive ? 'فعال' : 'غیرفعال')}
+                              </span>
+                            </td>
+                            <td>
+                              <div className="admin-school-switcher__actions">
+                                <button type="button" onClick={() => openSchoolEdit(school)} disabled={schoolScopeBusy}>ویرایش</button>
+                                {!isCurrent && (
+                                  <button type="button" onClick={() => handleActiveSchoolChange(schoolId)} disabled={schoolScopeBusy}>انتخاب</button>
+                                )}
+                                {!isCurrent && (
+                                  <button type="button" className="danger" onClick={() => handleDeleteSchool(school)} disabled={schoolScopeBusy}>حذف</button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {!!schoolScopeMessage && <div className="admin-school-switcher__message">{schoolScopeMessage}</div>}
+            </section>
+          </div>
+        )}
       </div>
 
       <div className="admin-hero">
@@ -3631,57 +4259,122 @@ export default function AdminPanel() {
         </section>
       )}
 
-      <section className="admin-school-switcher" aria-label="انتخاب مکتب فعال">
+      <section className="admin-school-switcher" aria-label="مرکز مدیریت مکاتب">
         <div className="admin-school-switcher__head">
           <div>
-            <span className="admin-active-school-scope__eyebrow">لیست مکاتب</span>
-            <h3>انتخاب و فعال‌سازی مکتب</h3>
+            <span className="admin-active-school-scope__eyebrow">مرکز مدیریت مکاتب</span>
+            <h3>لیست مکاتب فعال و ویرایش سریع</h3>
+            <p>مکتب فعال را ببینید، جستجو کنید و مشخصات هر مکتب را بدون رفتن به صفحه شلوغ ویرایش کنید.</p>
           </div>
           <button type="button" className="admin-school-switcher__refresh" onClick={loadSchoolOptions} disabled={schoolScopeBusy}>
             بازبینی لیست
           </button>
         </div>
+
+        <div className="admin-school-switcher__summary" aria-label="خلاصه مکاتب">
+          <span>
+            همه مکاتب
+            <b>{Number(schoolOverviewStats.total || 0).toLocaleString('fa-AF')}</b>
+          </span>
+          <span>
+            فعال
+            <b>{Number(schoolOverviewStats.activeRecords || 0).toLocaleString('fa-AF')}</b>
+          </span>
+          <span>
+            غیرفعال
+            <b>{Number(schoolOverviewStats.inactiveRecords || 0).toLocaleString('fa-AF')}</b>
+          </span>
+          <span>
+            مکتب انتخاب‌شده
+            <b>{schoolOverviewStats.currentSchoolName}</b>
+          </span>
+        </div>
+
+        <div className="admin-school-switcher__toolbar">
+          <label>
+            جستجوی مکتب
+            <input
+              type="search"
+              value={schoolSearchQuery}
+              onChange={(event) => setSchoolSearchQuery(event.target.value)}
+              placeholder="نام، کد، ولایت یا مدیر"
+            />
+          </label>
+          <label>
+            وضعیت
+            <select value={schoolStatusFilter} onChange={(event) => setSchoolStatusFilter(event.target.value)}>
+              <option value="all">همه</option>
+              <option value="active">فقط فعال</option>
+              <option value="inactive">غیرفعال / بسته</option>
+            </select>
+          </label>
+        </div>
+
         {visibleSchoolOptions.length === 0 ? (
           <div className="admin-school-switcher__empty">
             هنوز مکتبی در لیست دریافت نشد. اگر مکتب ساخته‌اید، backend را restart و صفحه را تازه کنید.
           </div>
+        ) : filteredSchoolOptions.length === 0 ? (
+          <div className="admin-school-switcher__empty">
+            موردی با این جستجو یا فیلتر پیدا نشد.
+          </div>
         ) : (
-          <div className="admin-school-switcher__grid">
-            {visibleSchoolOptions.map((school) => {
-              const schoolId = String(school?._id || school?.id || '');
-              const isActive = schoolId === activeSchoolId;
-              return (
-                <div key={schoolId} className={`admin-school-switcher__item${isActive ? ' is-active' : ''}`}>
-                  <div>
-                    <strong>{school.nameDari || school.name || 'مکتب'}</strong>
-                    <span>کد: {school.schoolCode || '-'}</span>
-                    <small>{[school.province, school.district].filter(Boolean).join('، ') || 'موقعیت ثبت نشده'}</small>
-                  </div>
-                  <div className="admin-school-switcher__actions">
-                    <button type="button" onClick={() => openSchoolEdit(school)} disabled={schoolScopeBusy}>
-                      ویرایش مشخصات
-                    </button>
-                    {isActive ? (
-                      <span className="admin-school-switcher__badge">فعال</span>
-                    ) : (
-                      <button type="button" onClick={() => handleActiveSchoolChange(schoolId)} disabled={schoolScopeBusy}>
-                        فعال‌سازی
-                      </button>
-                    )}
-                    {!isActive && (
-                      <button
-                        type="button"
-                        className="danger"
-                        onClick={() => handleDeleteSchool(school)}
-                        disabled={schoolScopeBusy}
-                      >
-                        حذف
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+          <div className="admin-school-switcher__table-wrap">
+            <table className="admin-school-switcher__table">
+              <thead>
+                <tr>
+                  <th>نام مکتب</th>
+                  <th>ولایت / ناحیه</th>
+                  <th>مدیر</th>
+                  <th>وضعیت</th>
+                  <th>عملیات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredSchoolOptions.map((school) => {
+                  const schoolId = String(school?._id || school?.id || '');
+                  const isCurrent = schoolId === activeSchoolId;
+                  const isRecordActive = String(school?.status || 'active') === 'active';
+                  return (
+                    <tr key={schoolId} className={isCurrent ? 'is-current' : ''}>
+                      <td>
+                        <strong>{school.nameDari || school.name || 'مکتب'}</strong>
+                        <small>کد: {school.schoolCode || '-'}</small>
+                      </td>
+                      <td>{[school.province, school.district].filter(Boolean).join('، ') || '-'}</td>
+                      <td>{school?.principal?.name || '-'}</td>
+                      <td>
+                        <span className={`admin-school-switcher__badge${isRecordActive ? '' : ' muted'}`}>
+                          {isCurrent ? 'مکتب فعال' : (isRecordActive ? 'فعال' : 'غیرفعال')}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="admin-school-switcher__actions">
+                          <button type="button" onClick={() => openSchoolEdit(school)} disabled={schoolScopeBusy}>
+                            ویرایش
+                          </button>
+                          {!isCurrent && (
+                            <button type="button" onClick={() => handleActiveSchoolChange(schoolId)} disabled={schoolScopeBusy}>
+                              انتخاب
+                            </button>
+                          )}
+                          {!isCurrent && (
+                            <button
+                              type="button"
+                              className="danger"
+                              onClick={() => handleDeleteSchool(school)}
+                              disabled={schoolScopeBusy}
+                            >
+                              حذف
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
         {!!schoolScopeMessage && <div className="admin-school-switcher__message">{schoolScopeMessage}</div>}

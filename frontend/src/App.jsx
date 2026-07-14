@@ -9,7 +9,7 @@ import { ToastProvider } from './components/ui/toast';
 import useSiteSettings, { PUBLIC_WEBSITE_LANGUAGE_KEY } from './hooks/useSiteSettings';
 import { getPublicWebsiteLocale, publicLanguageOptions } from './i18n/publicWebsite';
 import { API_BASE, API_ORIGIN } from './config/api';
-import { expandLegacyPermissions } from './config/permissionCatalog';
+import { LEGACY_PERMISSION_MAP, expandLegacyPermissions } from './config/permissionCatalog';
 import { formatAfghanDate, formatAfghanDateTime, formatAfghanTime } from './utils/afghanDate';
 import { normalizeBrandName, normalizeBrandSubtitle } from './utils/brand';
 
@@ -71,6 +71,7 @@ const AdminFinance = lazy(() => import('./pages/AdminFinance'));
 const AdminFinanceProfile = lazy(() => import('./pages/AdminFinanceProfile'));
 const AdminFinancialMemberships = lazy(() => import('./pages/AdminFinancialMemberships'));
 const AdminGovernmentFinance = lazy(() => import('./pages/AdminGovernmentFinance'));
+const AcademyManagement = lazy(() => import('./pages/AcademyManagement'));
 const AdminEducationCore = lazy(() => import('./pages/AdminEducationCore'));
 const StudentFinance = lazy(() => import('./pages/StudentFinance'));
 const TimetableHub = lazy(() => import('./pages/TimetableHub'));
@@ -135,6 +136,7 @@ const routePrefetchers = {
   adminSheetTemplates: () => import('./pages/AdminSheetTemplates'),
   adminLogs: () => import('./pages/AdminLogs'),
   adminFinance: () => import('./pages/AdminFinance'),
+  academyManagement: () => import('./pages/AcademyManagement'),
   adminGovernmentFinance: () => import('./pages/AdminGovernmentFinance'),
   adminEducation: () => import('./pages/AdminEducationCore'),
   timetableConfig: () => import('./pages/TimetableConfiguration'),
@@ -196,6 +198,8 @@ const routePrefetchersByPath = {
   '/admin-sheet-templates': routePrefetchers.adminSheetTemplates,
   '/admin-logs': routePrefetchers.adminLogs,
   '/admin-finance': routePrefetchers.adminFinance,
+  '/academy': routePrefetchers.academyManagement,
+  '/academy-management': routePrefetchers.academyManagement,
   '/admin-government-finance': routePrefetchers.adminGovernmentFinance,
   '/admin-education': routePrefetchers.adminEducation,
   '/timetable': routePrefetchers.timetableConfig,
@@ -417,6 +421,20 @@ const getStoredPublicLanguage = () => {
   }
 };
 
+const toBrowserAssetUrl = (value = '') => {
+  const src = String(value || '').trim();
+  if (!src) return '';
+  if (/^(https?:|data:|blob:)/i.test(src)) return src;
+  const normalized = src.startsWith('/') ? src : `/${src}`;
+  return API_ORIGIN ? `${API_ORIGIN}${normalized}` : normalized;
+};
+
+const setHeadMetaContent = (selector, content) => {
+  if (!content) return;
+  const meta = document.querySelector(selector);
+  if (meta) meta.setAttribute('content', content);
+};
+
 const getTokenClaims = () => {
   const token = localStorage.getItem('token');
   if (!token || !token.includes('.')) return {};
@@ -440,9 +458,7 @@ const getAuthHeaders = () => {
 };
 const isAuthed = () => {
   const token = localStorage.getItem('token');
-  const userId = localStorage.getItem('userId');
-  const role = localStorage.getItem('role');
-  return !!token || !!userId || !!role;
+  return !!token;
 };
 const isInstructor = () => ['admin', 'instructor'].includes(getRole());
 const isStudent = () => getRole() === 'student';
@@ -504,10 +520,13 @@ const hasEffectivePermission = (permission) => {
   const expected = normalizePermissionList(permission);
   if (!expected.length) return true;
   const permissions = getStoredEffectivePermissions();
-  return expected.some((item) => permissions.includes(item));
+  return expected.some((item) => (
+    permissions.includes(item)
+    || (LEGACY_PERMISSION_MAP[item] || []).some((mapped) => permissions.includes(mapped))
+  ));
 };
 
-const logout = () => {
+const clearAuthSession = () => {
   localStorage.removeItem('token');
   localStorage.removeItem('userId');
   localStorage.removeItem('userName');
@@ -518,6 +537,14 @@ const logout = () => {
   localStorage.removeItem('avatarUrl');
   localStorage.removeItem('effectivePermissions');
   localStorage.removeItem('lastLoginAt');
+  localStorage.removeItem('isDemo');
+  localStorage.removeItem('schoolId');
+  localStorage.removeItem('school_id');
+  localStorage.removeItem('selectedSchoolId');
+};
+
+const logout = () => {
+  clearAuthSession();
   window.location.href = '/';
 };
 
@@ -885,7 +912,10 @@ function PermissionAccessGuard({
         } catch {
           // ignore storage errors
         }
-        finish(permissionList.some((item) => permissions.includes(item)));
+        finish(permissionList.some((item) => (
+          permissions.includes(item)
+          || (LEGACY_PERMISSION_MAP[item] || []).some((mapped) => permissions.includes(mapped))
+        )));
       } catch {
         finish(false);
       }
@@ -981,6 +1011,7 @@ function AppShell() {
   const headerText = publicLocale.header;
   const displayBrandName = normalizeBrandName(settings?.brandName);
   const displayBrandSubtitle = normalizeBrandSubtitle(settings?.brandSubtitle);
+  const browserLogoUrl = toBrowserAssetUrl(settings?.schoolLogoUrl || settings?.logoUrl || settings?.logo || '');
   const menuBlueprintLibrary = useMemo(
     () => buildMenuBlueprintLibrary(settings?.menuBlueprints),
     [settings?.menuBlueprints]
@@ -1006,10 +1037,46 @@ function AppShell() {
     minute: '2-digit'
   });
 
+  useEffect(() => {
+    const title = displayBrandName || 'مکتب';
+    const description = displayBrandSubtitle
+      ? `${title} - ${displayBrandSubtitle}`
+      : title;
+    document.title = title;
+    setHeadMetaContent('meta[name="application-name"]', title);
+    setHeadMetaContent('meta[name="apple-mobile-web-app-title"]', title);
+    setHeadMetaContent('meta[name="description"]', description);
+    setHeadMetaContent('meta[property="og:title"]', title);
+    setHeadMetaContent('meta[property="og:description"]', description);
+    setHeadMetaContent('meta[name="twitter:title"]', title);
+    setHeadMetaContent('meta[name="twitter:description"]', description);
+
+    if (browserLogoUrl) {
+      let icon = document.querySelector('link[rel="icon"]') || document.querySelector('link[rel="shortcut icon"]');
+      if (!icon) {
+        icon = document.createElement('link');
+        icon.setAttribute('rel', 'icon');
+        document.head.appendChild(icon);
+      }
+      icon.setAttribute('href', browserLogoUrl);
+
+      let appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
+      if (!appleIcon) {
+        appleIcon = document.createElement('link');
+        appleIcon.setAttribute('rel', 'apple-touch-icon');
+        document.head.appendChild(appleIcon);
+      }
+      appleIcon.setAttribute('href', browserLogoUrl);
+      setHeadMetaContent('meta[property="og:image"]', browserLogoUrl);
+      setHeadMetaContent('meta[name="twitter:image"]', browserLogoUrl);
+    }
+  }, [browserLogoUrl, displayBrandName, displayBrandSubtitle]);
+
   const isDashboardArea = authed && (
     path === '/dashboard' ||
     path === '/parent-dashboard' ||
     path.startsWith('/admin') ||
+    path.startsWith('/academy') ||
     path.startsWith('/timetable') ||
     path.startsWith('/instructor') ||
     path.startsWith('/quiz') ||
@@ -1034,7 +1101,15 @@ function AppShell() {
     path === '/student-management'
   );
 
-  const hideMainNav = isDashboardArea;
+  const usesPublicRedesign = path === '/'
+    || path === '/login'
+    || path === '/about'
+    || path === '/contact'
+    || path === '/gallery'
+    || path === '/news'
+    || path.startsWith('/news/')
+    || path.startsWith('/schools/');
+  const hideMainNav = isDashboardArea || usesPublicRedesign;
   const useCompactAdminApiHealth = role === 'admin' && (path === '/dashboard' || path.startsWith('/admin') || path.startsWith('/timetable'));
   const apiHealthCheckedLabel = useMemo(() => {
     return formatAfghanTime(apiHealth.checkedAt, { hour: '2-digit', minute: '2-digit' });
@@ -1158,7 +1233,7 @@ function AppShell() {
     if (typeof window === 'undefined') return undefined;
 
     const originalFetch = window.fetch.bind(window);
-    const patchedFetch = (input, init = {}) => {
+    const patchedFetch = async (input, init = {}) => {
       const token = localStorage.getItem('token');
       if (!token) {
         return originalFetch(input, init);
@@ -1183,11 +1258,25 @@ function AppShell() {
         headers.set('Authorization', `Bearer ${token}`);
       }
 
-      if (input instanceof Request) {
-        return originalFetch(new Request(input, { ...init, headers }));
+      const response = input instanceof Request
+        ? await originalFetch(new Request(input, { ...init, headers }))
+        : await originalFetch(input, { ...init, headers });
+
+      if (response.status === 401) {
+        const data = await response.clone().json().catch(() => ({}));
+        const message = String(data?.message || '').trim();
+        const isInvalidSession = message.includes('توکن نامعتبر') || message.includes('احراز هویت لازم');
+        if (isInvalidSession) {
+          clearAuthSession();
+          const nextPath = `${window.location.pathname || ''}${window.location.search || ''}`;
+          if (!window.location.pathname.startsWith('/login')) {
+            const next = nextPath && nextPath !== '/' ? `?next=${encodeURIComponent(nextPath)}` : '';
+            window.location.href = `/login${next}`;
+          }
+        }
       }
 
-      return originalFetch(input, { ...init, headers });
+      return response;
     };
 
     window.fetch = patchedFetch;
@@ -2680,8 +2769,18 @@ function AppShell() {
   const contentRoute = (element, deniedMessage) => (
     <PermissionAccessGuard
       roles={['admin', 'instructor']}
-      permission="manage_content"
+      permission="settings.general.manage"
       deniedMessage={deniedMessage || '\u062f\u0633\u062a\u0631\u0633\u06cc \u0645\u062f\u06cc\u0631\u06cc\u062a \u06a9\u0627\u0631\u062e\u0627\u0646\u06af\u06cc \u0628\u0631\u0627\u06cc \u0627\u06cc\u0646 \u062d\u0633\u0627\u0628 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a.'}
+    >
+      {element}
+    </PermissionAccessGuard>
+  );
+
+  const protectedRoute = (roles, permission, element, deniedMessage) => (
+    <PermissionAccessGuard
+      roles={roles}
+      permission={permission}
+      deniedMessage={deniedMessage}
     >
       {element}
     </PermissionAccessGuard>
@@ -3148,11 +3247,11 @@ function AppShell() {
             />
             <Route
               path="/admin-result-tables"
-              element={adminRoute('manage_content', <AdminResultTables />, 'دسترسی جدول‌های نتیجه برای این حساب فعال نیست.')}
+              element={adminRoute('education.result_tables.manage', <AdminResultTables />, 'دسترسی جدول‌های نتیجه برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-sheet-templates"
-              element={adminRoute('manage_content', <AdminSheetTemplates />, 'دسترسی مدیریت شقه‌ها برای این حساب فعال نیست.')}
+              element={adminRoute('education.sheet_templates.manage', <AdminSheetTemplates />, 'دسترسی مدیریت شقه‌ها برای این حساب فعال نیست.')}
             />
             <Route
               path="/instructor"
@@ -3168,59 +3267,67 @@ function AppShell() {
             />
             <Route
               path="/admin-users"
-              element={adminRoute('manage_users', <AdminUsers />, 'دسترسی مدیریت کاربران برای این حساب فعال نیست.')}
+              element={adminRoute(['users.manage', 'users.access_requests.manage', 'users.profile_requests.manage'], <AdminUsers />, 'دسترسی مدیریت کاربران برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-news"
-              element={adminRoute('manage_content', <AdminNews />, 'دسترسی مدیریت اخبار برای این حساب فعال نیست.')}
+              element={adminRoute('content.news.manage', <AdminNews />, 'دسترسی مدیریت اخبار برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-gallery"
-              element={adminRoute('manage_content', <AdminGallery />, 'دسترسی مدیریت گالری برای این حساب فعال نیست.')}
+              element={adminRoute('content.gallery.manage', <AdminGallery />, 'دسترسی مدیریت گالری برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-contact"
-              element={adminRoute('manage_platform_requests', <AdminContact />, 'دسترسی مرکز ارتباطات سیما برای این حساب فعال نیست.')}
+              element={adminRoute('content.contacts.manage', <AdminContact />, 'دسترسی مرکز ارتباطات سیما برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-communications"
-              element={adminRoute('manage_platform_requests', <AdminContact />, 'دسترسی مرکز ارتباطات سیما برای این حساب فعال نیست.')}
+              element={adminRoute('content.contacts.manage', <AdminContact />, 'دسترسی مرکز ارتباطات سیما برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-enrollments"
-              element={adminRoute(['manage_enrollments', 'manage_users'], <AdminEnrollments />, 'دسترسی مدیریت ثبت‌نام‌ها برای این حساب فعال نیست.')}
+              element={adminRoute(['enrollments.manage', 'students.register', 'users.manage'], <AdminEnrollments />, 'دسترسی مدیریت ثبت‌نام‌ها برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-enrollments/:id"
-              element={adminRoute(['manage_enrollments', 'manage_users'], <AdminEnrollmentDetail />, 'دسترسی مدیریت ثبت‌نام‌ها برای این حساب فعال نیست.')}
+              element={adminRoute(['enrollments.detail.view', 'enrollments.manage', 'users.manage'], <AdminEnrollmentDetail />, 'دسترسی مدیریت ثبت‌نام‌ها برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-enrollments/:id/print"
-              element={adminRoute(['manage_enrollments', 'manage_users'], <AdminEnrollmentPrint />, 'دسترسی چاپ ثبت‌نام برای این حساب فعال نیست.')}
+              element={adminRoute(['enrollments.print', 'enrollments.manage', 'users.manage'], <AdminEnrollmentPrint />, 'دسترسی چاپ ثبت‌نام برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-logs"
-              element={adminRoute('view_reports', <AdminLogs />, 'دسترسی لاگ‌ها برای این حساب فعال نیست.')}
+              element={adminRoute(['users.logs.view', 'reports.logs.view'], <AdminLogs />, 'دسترسی لاگ‌ها برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-finance"
-              element={adminRoute('manage_finance', <AdminFinance />, 'دسترسی مدیریت مالی برای این حساب فعال نیست.')}
+              element={adminRoute('finance.center.manage', <AdminFinance />, 'دسترسی مدیریت مالی برای این حساب فعال نیست.')}
+            />
+            <Route
+              path="/academy"
+              element={adminRoute('finance.center.manage', <AcademyManagement />, 'دسترسی مدیریت آموزشگاه برای این حساب فعال نیست.')}
+            />
+            <Route
+              path="/academy-management"
+              element={adminRoute('finance.center.manage', <AcademyManagement />, 'دسترسی مدیریت آموزشگاه برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-financial-memberships"
-              element={adminRoute(['manage_finance', 'finance.lifecycle_effects.manage'], <AdminFinancialMemberships />, 'دسترسی اثر مالی تغییرات آموزشی برای این حساب فعال نیست.')}
+              element={adminRoute(['finance.lifecycle_effects.manage', 'finance.memberships.manage'], <AdminFinancialMemberships />, 'دسترسی اثر مالی تغییرات آموزشی برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-finance/profile/:studentId"
-              element={adminRoute('manage_finance', <AdminFinanceProfile />, 'دسترسی مدیریت مالی برای این حساب فعال نیست.')}
+              element={adminRoute('finance.student_profile.view', <AdminFinanceProfile />, 'دسترسی مدیریت مالی برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-government-finance"
-              element={adminRoute('manage_finance', <AdminGovernmentFinance />, 'دسترسی گزارش مالی دولت برای این حساب فعال نیست.')}
+              element={adminRoute('finance.government.view', <AdminGovernmentFinance />, 'دسترسی گزارش مالی دولت برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-exams-dashboard"
-              element={adminRoute('manage_content', <AdminExamsDashboard />, 'دسترسی داشبورد امتحانات برای این حساب فعال نیست.')}
+              element={adminRoute('education.exams.manage', <AdminExamsDashboard />, 'دسترسی داشبورد امتحانات برای این حساب فعال نیست.')}
             />
             <Route
               path="/quiz-builder"
@@ -3239,11 +3346,11 @@ function AppShell() {
             />
             <Route
               path="/student-report"
-              element={adminRoute('view_reports', <StudentReport />, 'دسترسی گزارش شاگرد برای این حساب فعال نیست.')}
+              element={adminRoute('reports.students.view', <StudentReport />, 'دسترسی گزارش شاگرد برای این حساب فعال نیست.')}
             />
             <Route
               path="/instructor-report"
-              element={adminRoute('view_reports', <AdminInstructorReport />, 'دسترسی گزارش استاد برای این حساب فعال نیست.')}
+              element={adminRoute('reports.teachers.view', <AdminInstructorReport />, 'دسترسی گزارش استاد برای این حساب فعال نیست.')}
             />
             <Route
               path="/instructor-add-student"
@@ -3252,15 +3359,15 @@ function AppShell() {
             <Route path="/admin-settings" element={<AdminSettingsAccessGuard />} />
             <Route
               path="/grade-manager"
-              element={contentRoute(<GradeManager />, '\u062f\u0633\u062a\u0631\u0633\u06cc \u0645\u062f\u06cc\u0631\u06cc\u062a \u062d\u0636\u0648\u0631 \u0648 \u063a\u06CC\u0627\u0628 \u0628\u0631\u0627\u06cc \u0627\u06cc\u0646 \u062d\u0633\u0627\u0628 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a.')}
+              element={protectedRoute(['admin', 'instructor'], 'grades.manage', <GradeManager />, '\u062f\u0633\u062a\u0631\u0633\u06cc \u0645\u062f\u06cc\u0631\u06cc\u062a \u0646\u0645\u0631\u0627\u062a \u0628\u0631\u0627\u06cc \u0627\u06cc\u0646 \u062d\u0633\u0627\u0628 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a.')}
             />
             <Route
               path="/attendance-manager"
-              element={contentRoute(<AttendanceManager />, '\u062f\u0633\u062a\u0631\u0633\u06cc \u0645\u062f\u06cc\u0631\u06cc\u062a \u062d\u0636\u0648\u0631 \u0648 \u063a\u06CC\u0627\u0628 \u0628\u0631\u0627\u06cc \u0627\u06cc\u0646 \u062d\u0633\u0627\u0628 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a.')}
+              element={protectedRoute(['admin', 'instructor'], 'attendance.students.manage', <AttendanceManager />, '\u062f\u0633\u062a\u0631\u0633\u06cc \u0645\u062f\u06cc\u0631\u06cc\u062a \u062d\u0636\u0648\u0631 \u0648 \u063a\u06cc\u0627\u0628 \u0628\u0631\u0627\u06cc \u0627\u06cc\u0646 \u062d\u0633\u0627\u0628 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a.')}
             />
             <Route
               path="/homework-manager"
-              element={contentRoute(<HomeworkManager />, '\u062f\u0633\u062a\u0631\u0633\u06cc \u0645\u062f\u06cc\u0631\u06cc\u062a \u06a9\u0627\u0631\u062e\u0627\u0646\u06af\u06cc \u0628\u0631\u0627\u06cc \u0627\u06cc\u0646 \u062d\u0633\u0627\u0628 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a.')}
+              element={protectedRoute(['admin', 'instructor'], 'homework.manage', <HomeworkManager />, '\u062f\u0633\u062a\u0631\u0633\u06cc \u0645\u062f\u06cc\u0631\u06cc\u062a \u06a9\u0627\u0631\u062e\u0627\u0646\u06af\u06cc \u0628\u0631\u0627\u06cc \u0627\u06cc\u0646 \u062d\u0633\u0627\u0628 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a.')}
             />
             <Route
               path="/admin-schedule"
@@ -3272,18 +3379,18 @@ function AppShell() {
             />
             <Route
               path="/admin-education"
-              element={adminRoute(['manage_content', 'manage_memberships', 'manage_users'], <AdminEducationCore />, '\u062f\u0633\u062a\u0631\u0633\u06cc \u0645\u062f\u06cc\u0631\u06cc\u062a \u062f\u0627\u062f\u0647\u200c\u0647\u0627\u06cc \u067e\u0627\u06cc\u0647 \u0622\u0645\u0648\u0632\u0634\u06cc \u0628\u0631\u0627\u06cc \u0627\u06cc\u0646 \u062d\u0633\u0627\u0628 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a.')}
+              element={adminRoute(['education.core.manage', 'education.memberships.manage', 'students.manage'], <AdminEducationCore />, '\u062f\u0633\u062a\u0631\u0633\u06cc \u0645\u062f\u06cc\u0631\u06cc\u062a \u062f\u0627\u062f\u0647\u200c\u0647\u0627\u06cc \u067e\u0627\u06cc\u0647 \u0622\u0645\u0648\u0632\u0634\u06cc \u0628\u0631\u0627\u06cc \u0627\u06cc\u0646 \u062d\u0633\u0627\u0628 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a.')}
             />
-            <Route path="/timetable" element={adminRoute('manage_schedule', <TimetableHub />, 'دسترسی مرکز تقسیم اوقات برای این حساب فعال نیست.')} />
-            <Route path="/timetable/timetable-configurations/index" element={adminRoute('manage_schedule', <TimetableConfiguration />, 'دسترسی تنظیم تقسیم اوقات برای این حساب فعال نیست.')} />
-            <Route path="/timetable/shift-management" element={adminRoute('manage_schedule', <ShiftManagement />, 'دسترسی مدیریت نوبت برای این حساب فعال نیست.')} />
-            <Route path="/timetable/teacher-timetable-configurations" element={adminRoute('manage_schedule', <TeacherAssignmentManagement />, 'دسترسی تنظیم استادان برای این حساب فعال نیست.')} />
-            <Route path="/timetable/teacher-availability" element={adminRoute('manage_schedule', <TeacherAvailabilityManagement />, 'دسترسی حضور استاد برای این حساب فعال نیست.')} />
-            <Route path="/timetable/curriculum" element={adminRoute('manage_content', <CurriculumManagement />, 'دسترسی نصاب تعلیمی برای این حساب فعال نیست.')} />
-            <Route path="/timetable/generation" element={adminRoute('manage_schedule', <TimableViewer />, 'دسترسی ساخت تقسیم اوقات برای این حساب فعال نیست.')} />
-            <Route path="/timetable/viewer" element={adminRoute(['view_schedule', 'manage_schedule'], <TimableViewer />, 'دسترسی مشاهده تقسیم اوقات برای این حساب فعال نیست.')} />
-            <Route path="/timetable/editor" element={adminRoute('manage_schedule', <TimetableEditor />, 'دسترسی ویرایش تقسیم اوقات برای این حساب فعال نیست.')} />
-            <Route path="/timetable/operations" element={adminRoute('manage_schedule', <TimetableOperations />, 'دسترسی عملیات روزانه تقسیم اوقات برای این حساب فعال نیست.')} />
+            <Route path="/timetable" element={adminRoute('timetable.hub.view', <TimetableHub />, 'دسترسی مرکز تقسیم اوقات برای این حساب فعال نیست.')} />
+            <Route path="/timetable/timetable-configurations/index" element={adminRoute('timetable.config.manage', <TimetableConfiguration />, 'دسترسی تنظیم تقسیم اوقات برای این حساب فعال نیست.')} />
+            <Route path="/timetable/shift-management" element={adminRoute('timetable.shifts.manage', <ShiftManagement />, 'دسترسی مدیریت نوبت برای این حساب فعال نیست.')} />
+            <Route path="/timetable/teacher-timetable-configurations" element={adminRoute('timetable.teacher_assignments.manage', <TeacherAssignmentManagement />, 'دسترسی تنظیم استادان برای این حساب فعال نیست.')} />
+            <Route path="/timetable/teacher-availability" element={adminRoute('timetable.teacher_availability.manage', <TeacherAvailabilityManagement />, 'دسترسی حضور استاد برای این حساب فعال نیست.')} />
+            <Route path="/timetable/curriculum" element={adminRoute('education.curriculum.manage', <CurriculumManagement />, 'دسترسی نصاب تعلیمی برای این حساب فعال نیست.')} />
+            <Route path="/timetable/generation" element={adminRoute('timetable.generate', <TimableViewer />, 'دسترسی ساخت تقسیم اوقات برای این حساب فعال نیست.')} />
+            <Route path="/timetable/viewer" element={adminRoute(['timetable.view', 'timetable.generate'], <TimableViewer />, 'دسترسی مشاهده تقسیم اوقات برای این حساب فعال نیست.')} />
+            <Route path="/timetable/editor" element={adminRoute('timetable.editor.manage', <TimetableEditor />, 'دسترسی ویرایش تقسیم اوقات برای این حساب فعال نیست.')} />
+            <Route path="/timetable/operations" element={adminRoute('timetable.operations.manage', <TimetableOperations />, 'دسترسی عملیات روزانه تقسیم اوقات برای این حساب فعال نیست.')} />
             <Route
               path="/timetable/my-teacher-view"
               element={authed
@@ -3296,21 +3403,21 @@ function AppShell() {
                 ? (isStudent() ? <StudentTimetableView /> : <AccessDenied message="این صفحه فقط برای شاگرد فعال است." />)
                 : <Login />}
             />
-            <Route path="/timetable/reports" element={adminRoute('manage_schedule', <TimetableReports />, 'دسترسی گزارش تقسیم اوقات برای این حساب فعال نیست.')} />
-            <Route path="/timetable/conflicts" element={adminRoute('manage_schedule', <TimetableConflictManager />, 'دسترسی مدیریت تداخل‌های تقسیم اوقات برای این حساب فعال نیست.')} />
-            <Route path="/timetable/history" element={adminRoute('manage_schedule', <TimetableChangeLog />, 'دسترسی تاریخچه تقسیم اوقات برای این حساب فعال نیست.')} />
-            <Route path="/timetable/education-annual-plan" element={adminRoute('manage_schedule', <TimetableHub />, 'دسترسی پلان تعلیمی سالانه برای این حساب فعال نیست.')} />
-            <Route path="/timetable/education-weekly-plan" element={adminRoute('manage_schedule', <TimetableHub />, 'دسترسی پلان تعلیمی هفته‌وار برای این حساب فعال نیست.')} />
-            <Route path="/timetable/education-weekly-plan-new" element={adminRoute('manage_schedule', <TimetableHub />, 'دسترسی پلان تعلیمی هفته‌وار برای این حساب فعال نیست.')} />
+            <Route path="/timetable/reports" element={adminRoute('timetable.reports.view', <TimetableReports />, 'دسترسی گزارش تقسیم اوقات برای این حساب فعال نیست.')} />
+            <Route path="/timetable/conflicts" element={adminRoute('timetable.conflicts.manage', <TimetableConflictManager />, 'دسترسی مدیریت تداخل‌های تقسیم اوقات برای این حساب فعال نیست.')} />
+            <Route path="/timetable/history" element={adminRoute('timetable.history.view', <TimetableChangeLog />, 'دسترسی تاریخچه تقسیم اوقات برای این حساب فعال نیست.')} />
+            <Route path="/timetable/education-annual-plan" element={adminRoute('education.annual_plan.manage', <TimetableHub />, 'دسترسی پلان تعلیمی سالانه برای این حساب فعال نیست.')} />
+            <Route path="/timetable/education-weekly-plan" element={adminRoute('education.weekly_plan.manage', <TimetableHub />, 'دسترسی پلان تعلیمی هفته‌وار برای این حساب فعال نیست.')} />
+            <Route path="/timetable/education-weekly-plan-new" element={adminRoute('education.weekly_plan.manage', <TimetableHub />, 'دسترسی پلان تعلیمی هفته‌وار برای این حساب فعال نیست.')} />
             <Route path="/profile" element={<Profile />} />
-            <Route path="/my-grades" element={authed ? <MyGrades /> : <Login />} />
-            <Route path="/my-attendance" element={authed ? <MyAttendance /> : <Login />} />
-            <Route path="/my-homework" element={authed ? <MyHomework /> : <Login />} />
-            <Route path="/my-finance" element={isStudent() ? <StudentFinance /> : <Login />} />
-            <Route path="/parent-dashboard" element={authed ? <ParentDashboard /> : <Login />} />
-            <Route path="/chat" element={authed ? <ChatPage /> : <Login />} />
-            <Route path="/recordings" element={authed ? <RecordingsPage /> : <Login />} />
-            <Route path="/schedule" element={authed ? <SchedulePage /> : <Login />} />
+            <Route path="/my-grades" element={protectedRoute(['student'], 'grades.my.view', <MyGrades />, 'دسترسی مشاهده نمرات برای این حساب فعال نیست.')} />
+            <Route path="/my-attendance" element={protectedRoute(['student'], 'attendance.my.view', <MyAttendance />, 'دسترسی مشاهده حاضری برای این حساب فعال نیست.')} />
+            <Route path="/my-homework" element={protectedRoute(['student'], 'homework.my.view', <MyHomework />, 'دسترسی مشاهده کارخانگی برای این حساب فعال نیست.')} />
+            <Route path="/my-finance" element={protectedRoute(['student'], 'finance.my.view', <StudentFinance />, 'دسترسی مالی شاگرد برای این حساب فعال نیست.')} />
+            <Route path="/parent-dashboard" element={protectedRoute(['parent'], 'dashboard.view', <ParentDashboard />, 'دسترسی داشبورد والد برای این حساب فعال نیست.')} />
+            <Route path="/chat" element={protectedRoute(['admin', 'instructor', 'student', 'parent'], 'chat.use', <ChatPage />, 'دسترسی پیام‌ها برای این حساب فعال نیست.')} />
+            <Route path="/recordings" element={protectedRoute(['admin', 'instructor', 'student', 'parent'], 'recordings.view', <RecordingsPage />, 'دسترسی آرشیف ضبط جلسات برای این حساب فعال نیست.')} />
+            <Route path="/schedule" element={protectedRoute(['admin', 'instructor', 'student', 'parent'], 'schedule.public.view', <SchedulePage />, 'دسترسی تقویم برای این حساب فعال نیست.')} />
             <Route path="/news" element={<News />} />
             <Route path="/news/:id" element={<NewsDetail />} />
             <Route path="/news/archive" element={<NewsArchive />} />
@@ -3326,16 +3433,16 @@ function AppShell() {
             <Route path="/schools/:schoolSlug/contact" element={<Contact />} />
             <Route path="/demo-request" element={<Navigate to="/contact" replace />} />
             <Route path="/demo" element={<Navigate to="/contact" replace />} />
-            <Route path="/student-registration" element={adminRoute(['manage_enrollments', 'manage_users'], <StudentRegistration />, 'دسترسی ثبت دانش‌آموز برای این حساب فعال نیست.')} />
-            <Route path="/online-registrations" element={adminRoute(['manage_enrollments', 'manage_users'], <OnlineRegistrations />, 'دسترسی مدیریت ثبت‌نام‌های آنلاین برای این حساب فعال نیست.')} />
-            <Route path="/student-management" element={adminRoute('manage_users', <StudentManagement />, 'دسترسی مدیریت دانش‌آموزان برای این حساب فعال نیست.')} />
-            <Route path="/quiz/:courseId" element={authed ? <Quiz /> : <Login />} />
+            <Route path="/student-registration" element={adminRoute(['students.register', 'users.manage'], <StudentRegistration />, 'دسترسی ثبت دانش‌آموز برای این حساب فعال نیست.')} />
+            <Route path="/online-registrations" element={adminRoute(['enrollments.online.manage', 'enrollments.manage'], <OnlineRegistrations />, 'دسترسی مدیریت ثبت‌نام‌های آنلاین برای این حساب فعال نیست.')} />
+            <Route path="/student-management" element={adminRoute(['students.manage', 'users.manage'], <StudentManagement />, 'دسترسی مدیریت دانش‌آموزان برای این حساب فعال نیست.')} />
+            <Route path="/quiz/:courseId" element={protectedRoute(['student', 'instructor', 'admin'], 'quiz.take', <Quiz />, 'دسترسی آزمون برای این حساب فعال نیست.')} />
             <Route path="/dashboard" element={authed ? <RoleDashboard /> : <Login />} />
             <Route path="*" element={<MenuContent settings={settings} />} />
           </Routes>
         </Suspense>
       </div>
-      {!isDashboardArea && <Footer settings={settings} />}
+      {!isDashboardArea && !usesPublicRedesign && <Footer settings={settings} />}
     </div>
   );
 }

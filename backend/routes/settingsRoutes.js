@@ -212,6 +212,10 @@ const normalizeVirtualMenuItems = (settings) => {
 };
 
 const defaultSettings = () => ({
+  publicStatus: 'pending_school_connection',
+  pendingPageTitle: 'سایت مکتب هنوز وصل نشده است',
+  pendingPageText: 'ما در حال آماده‌سازی اتصال سایت اصلی مکتب هستیم. لطفاً چند لحظه صبر کنید.',
+  pendingPageHint: 'می‌توانید کمی بعد صفحه را تازه یا Refresh کنید.',
   brandName: 'سیما',
   brandSubtitle: 'سیستم مدیریت هوشمند مکاتیب افغانستان',
   logoUrl: '',
@@ -493,6 +497,14 @@ const ensureSettings = async () => {
     const heroBadge = String(settings.homeHeroBadge || '').trim();
     const legacyBrandNames = ['مدرسه ایمان', 'سیستم مدیریت هوشمند مکتب'];
     const legacyBrandSubtitles = ['Academy Pro', 'نرم‌افزار مدیریت مکاتب افغانستان'];
+
+    if (!settings.publicStatus) {
+      settings.publicStatus = defaults.publicStatus;
+      settings.pendingPageTitle = settings.pendingPageTitle || defaults.pendingPageTitle;
+      settings.pendingPageText = settings.pendingPageText || defaults.pendingPageText;
+      settings.pendingPageHint = settings.pendingPageHint || defaults.pendingPageHint;
+      shouldSave = true;
+    }
 
     if (!brandName || legacyBrandNames.includes(brandName)) {
       settings.brandName = defaults.brandName;

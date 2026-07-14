@@ -178,6 +178,7 @@ const assignStudentToClass = async ({ student, payload = {}, actorId = null, sou
     {
       $set: {
         student: user._id,
+        afghanStudentId: student._id || null,
         course: course._id,
         classId: schoolClass._id,
         academicYear: academicYearId || null,

@@ -5,12 +5,12 @@ import LoginModernBase from './LoginModernBase';
 
 const DEFAULT_LOGIN_SETTINGS = {
   logo: null,
-  logoText: 'سیستم آموزشی',
-  title: 'ورود به سیستم آموزشی',
-  subtitle: 'از یک درگاه عمومی وارد شوید و به داشبورد متناسب با نقش خود بروید.',
-  footerText: '© 2026 سیستم آموزشی. تمام حقوق محفوظ است.',
-  backgroundColor: 'linear-gradient(135deg, #083344 0%, #0f766e 30%, #1d4ed8 68%, #f59e0b 100%)',
-  primaryColor: '#0f766e',
+  logoText: 'Iman Girls School',
+  title: 'ورود به سیستم',
+  subtitle: 'با حساب مکتب دخترانه ایمان وارد داشبورد مربوط به نقش خود شوید.',
+  footerText: '© 2026 Iman Girls School. تمام حقوق محفوظ است.',
+  backgroundColor: 'linear-gradient(135deg, rgba(109, 74, 255, 0.95), rgba(243, 166, 200, 0.92))',
+  primaryColor: '#6d4aff',
   showRegistrationLink: true,
   customMessage: ''
 };

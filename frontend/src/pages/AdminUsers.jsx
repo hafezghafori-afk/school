@@ -90,6 +90,70 @@ const LEGACY_PERMISSION_OPTIONS = [
 
 const PERMISSION_OPTIONS = CATALOG_PERMISSION_OPTIONS;
 
+const PERMISSION_GROUP_MODES = [
+  { key: 'none', label: 'بدون دسترسی' },
+  { key: 'view', label: 'مشاهده فقط' },
+  { key: 'manage', label: 'مدیریت کامل' }
+];
+
+const VIEW_PERMISSION_PATTERNS = [
+  '.view',
+  'view_',
+  '_view',
+  'dashboard.view',
+  'profile.view',
+  'notifications.view',
+  'chat.use',
+  'recordings.view',
+  'schedule.public.view',
+  'quiz.take'
+];
+
+const PERMISSION_PRESETS = [
+  {
+    key: 'student_basic',
+    label: 'قالب شاگرد عادی',
+    orgRoles: ['student'],
+    permissions: ['grades.my.view', 'attendance.my.view', 'homework.my.view', 'finance.my.view', 'timetable.student_view.access', 'chat.use', 'schedule.public.view']
+  },
+  {
+    key: 'teacher_basic',
+    label: 'قالب استاد عادی',
+    orgRoles: ['instructor'],
+    permissions: ['teachers.dashboard.access', 'teachers.timetable.view', 'attendance.students.manage', 'grades.manage', 'homework.manage', 'quiz.manage', 'reports.students.view', 'chat.use', 'recordings.view']
+  },
+  {
+    key: 'teacher_lead',
+    label: 'قالب استاد مسئول صنف',
+    orgRoles: ['instructor'],
+    permissions: ['teachers.dashboard.access', 'teachers.timetable.view', 'teachers.students.add', 'attendance.students.manage', 'grades.manage', 'homework.manage', 'quiz.manage', 'students.profile.view', 'reports.students.view', 'chat.use', 'recordings.view']
+  },
+  {
+    key: 'registration_manager',
+    label: 'قالب مدیر ثبت‌نام',
+    orgRoles: ['school_manager', 'academic_manager', 'head_teacher', 'general_president'],
+    permissions: ['students.register', 'enrollments.online.manage', 'enrollments.manage', 'enrollments.detail.view', 'enrollments.print', 'students.manage', 'students.profile.view']
+  },
+  {
+    key: 'finance_operator',
+    label: 'قالب مدیر مالی',
+    orgRoles: ['finance_manager', 'finance_lead', 'school_manager', 'general_president'],
+    permissions: ['finance.center.manage', 'finance.bills.manage', 'finance.payments.manage', 'finance.receipts.approve', 'finance.receipts.reject', 'finance.reports.view', 'finance.student_profile.view']
+  },
+  {
+    key: 'head_teacher',
+    label: 'قالب سرمعلم',
+    orgRoles: ['head_teacher', 'academic_manager', 'school_manager', 'general_president'],
+    permissions: ['education.core.manage', 'education.classes.manage', 'education.subjects.manage', 'teachers.manage', 'teachers.reports.view', 'attendance.students.manage', 'grades.manage', 'homework.manage', 'timetable.view', 'timetable.teacher_assignments.manage']
+  },
+  {
+    key: 'school_manager',
+    label: 'قالب مدیر مکتب',
+    orgRoles: ['school_manager', 'general_president'],
+    permissions: ['users.manage', 'users.create', 'users.edit', 'users.roles.manage', 'users.permissions.manage', 'users.access_requests.manage', 'students.manage', 'students.register', 'enrollments.manage', 'education.core.manage', 'reports.builder.view', 'reports.students.view', 'reports.teachers.view', 'timetable.view', 'timetable.editor.manage']
+  }
+];
+
 const ROLE_OPTIONS = [
   { key: 'student', label: 'شاگرد' },
   { key: 'parent', label: 'والد/سرپرست' },
@@ -409,6 +473,248 @@ function PermissionTree({ value = [], onChange, disabled = false, compact = fals
           </div>
         );
       })}
+    </div>
+  );
+}
+
+const isViewPermission = (permissionKey = '') => {
+  const key = String(permissionKey || '').trim();
+  if (!key) return false;
+  return VIEW_PERMISSION_PATTERNS.some((pattern) => key.includes(pattern));
+};
+
+const groupModeFor = (groupPermissions = [], selected = new Set()) => {
+  const permissions = groupPermissions.map((permission) => permission.key);
+  const selectedCount = permissions.filter((permission) => selected.has(permission)).length;
+  if (!selectedCount) return 'none';
+  if (selectedCount === permissions.length) return 'manage';
+  const viewPermissions = permissions.filter(isViewPermission);
+  const selectedViewCount = viewPermissions.filter((permission) => selected.has(permission)).length;
+  if (viewPermissions.length && selectedCount === selectedViewCount) return 'view';
+  return 'custom';
+};
+
+const permissionsForGroupMode = (groupPermissions = [], mode = 'none') => {
+  if (mode === 'manage') return groupPermissions.map((permission) => permission.key);
+  if (mode === 'view') return groupPermissions.filter((permission) => isViewPermission(permission.key)).map((permission) => permission.key);
+  return [];
+};
+
+const summarizePermissions = (permissions = [], max = 4) => {
+  const selected = new Set(permissions || []);
+  const groups = PERMISSION_GROUPS
+    .map((group) => ({
+      group,
+      selectedCount: (group.permissions || []).filter((permission) => selected.has(permission.key)).length
+    }))
+    .filter((item) => item.selectedCount > 0);
+  return {
+    total: uniquePermissions(permissions).length,
+    groups,
+    visibleGroups: groups.slice(0, max),
+    extraGroupsCount: Math.max(0, groups.length - max)
+  };
+};
+
+function PermissionSummary({ permissions = [], compact = false }) {
+  const summary = summarizePermissions(permissions, compact ? 3 : 5);
+  if (!summary.total) return <span className="permission-summary-empty">بدون مجوز اضافی</span>;
+
+  return (
+    <div className={`permission-summary${compact ? ' compact' : ''}`}>
+      <strong>{summary.total} مجوز</strong>
+      <div className="permission-summary-groups">
+        {summary.visibleGroups.map(({ group, selectedCount }) => (
+          <span key={`summary-${group.key}`}>{group.label}: {selectedCount}</span>
+        ))}
+        {summary.extraGroupsCount > 0 && <span>+{summary.extraGroupsCount} گروه</span>}
+      </div>
+    </div>
+  );
+}
+
+function PermissionManager({
+  value = [],
+  onChange,
+  disabled = false,
+  compact = false,
+  idPrefix = 'permission',
+  orgRole = 'student',
+  users = [],
+  currentUserId = ''
+}) {
+  const selected = useMemo(() => new Set(value || []), [value]);
+  const [openGroups, setOpenGroups] = useState(() => new Set(compact ? [] : PERMISSION_GROUPS.slice(0, 2).map((group) => group.key)));
+  const [showDetails, setShowDetails] = useState(!compact);
+  const [query, setQuery] = useState('');
+  const normalizedQuery = String(query || '').trim().toLowerCase();
+  const normalizedRole = normalizeOrgRole(orgRole, 'student');
+  const availablePresets = useMemo(
+    () => PERMISSION_PRESETS.filter((preset) => !preset.orgRoles?.length || preset.orgRoles.includes(normalizedRole)),
+    [normalizedRole]
+  );
+  const copyCandidates = useMemo(() => (
+    (Array.isArray(users) ? users : [])
+      .filter((user) => user?._id && String(user._id) !== String(currentUserId || ''))
+      .filter((user) => normalizeOrgRole(user.orgRole || '', '') === normalizedRole)
+      .slice(0, 80)
+  ), [users, currentUserId, normalizedRole]);
+
+  const emit = (nextSet) => {
+    if (typeof onChange === 'function') onChange(Array.from(nextSet));
+  };
+
+  const toggleGroupOpen = (groupKey) => {
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
+  };
+
+  const togglePermission = (permissionKey, checked) => {
+    const next = new Set(selected);
+    if (checked) next.add(permissionKey);
+    else next.delete(permissionKey);
+    emit(next);
+  };
+
+  const toggleGroupPermissions = (permissions = [], checked) => {
+    const next = new Set(selected);
+    permissions.forEach((permission) => {
+      if (checked) next.add(permission.key);
+      else next.delete(permission.key);
+    });
+    emit(next);
+  };
+
+  const setGroupMode = (groupPermissions = [], mode = 'none') => {
+    const groupKeys = new Set(groupPermissions.map((permission) => permission.key));
+    const next = new Set(selected);
+    groupKeys.forEach((permission) => next.delete(permission));
+    permissionsForGroupMode(groupPermissions, mode).forEach((permission) => next.add(permission));
+    emit(next);
+  };
+
+  const applyPreset = (presetKey = '') => {
+    const preset = PERMISSION_PRESETS.find((item) => item.key === presetKey);
+    if (preset) emit(new Set(preset.permissions || []));
+  };
+
+  const copyFromUser = (userId = '') => {
+    const source = (Array.isArray(users) ? users : []).find((user) => String(user?._id || '') === String(userId || ''));
+    if (source) emit(new Set(source.permissions || []));
+  };
+
+  const clearAll = () => emit(new Set());
+  const expandSelectedGroups = () => {
+    const next = new Set();
+    PERMISSION_GROUPS.forEach((group) => {
+      if ((group.permissions || []).some((permission) => selected.has(permission.key))) next.add(group.key);
+    });
+    setOpenGroups(next);
+    setShowDetails(true);
+  };
+
+  const visibleGroups = useMemo(() => {
+    if (!normalizedQuery) return PERMISSION_GROUPS;
+    return PERMISSION_GROUPS
+      .map((group) => {
+        const labelMatch = String(group.label || '').toLowerCase().includes(normalizedQuery);
+        const permissions = (group.permissions || []).filter((permission) => (
+          labelMatch
+          || String(permission.label || '').toLowerCase().includes(normalizedQuery)
+          || String(permission.key || '').toLowerCase().includes(normalizedQuery)
+        ));
+        return labelMatch ? group : { ...group, permissions };
+      })
+      .filter((group) => (group.permissions || []).length > 0);
+  }, [normalizedQuery]);
+
+  return (
+    <div className={`permission-manager${compact ? ' compact' : ''}`}>
+      <div className="permission-manager-toolbar">
+        <PermissionSummary permissions={value} compact={compact} />
+        <div className="permission-manager-actions">
+          <select value="" disabled={disabled || !availablePresets.length} onChange={(event) => { applyPreset(event.target.value); event.target.value = ''; }}>
+            <option value="">قالب آماده</option>
+            {availablePresets.map((preset) => (
+              <option key={`${idPrefix}-preset-${preset.key}`} value={preset.key}>{preset.label}</option>
+            ))}
+          </select>
+          <select value="" disabled={disabled || !copyCandidates.length} onChange={(event) => { copyFromUser(event.target.value); event.target.value = ''; }}>
+            <option value="">کپی از کاربر</option>
+            {copyCandidates.map((user) => (
+              <option key={`${idPrefix}-copy-${user._id}`} value={user._id}>{(user.name || user.email || 'کاربر')} - {orgRoleLabel(user.orgRole)}</option>
+            ))}
+          </select>
+          <button type="button" onClick={clearAll} disabled={disabled || !value.length}>پاک‌سازی</button>
+          <button type="button" onClick={() => setShowDetails((prev) => !prev)}>{showDetails ? 'بستن جزئیات' : 'تنظیم جزئی'}</button>
+        </div>
+      </div>
+
+      {showDetails ? (
+        <div className="permission-manager-details">
+          <div className="permission-manager-search">
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="جست‌وجو در صلاحیت‌ها: مالی، نمره، حاضری، ثبت‌نام..." />
+            <button type="button" onClick={expandSelectedGroups}>نمایش انتخاب‌شده‌ها</button>
+          </div>
+          <div className={`permission-tree${compact ? ' compact' : ''}`}>
+            {visibleGroups.map((group) => {
+              const groupPermissions = group.permissions || [];
+              const selectedCount = groupPermissions.filter((permission) => selected.has(permission.key)).length;
+              const allSelected = selectedCount > 0 && selectedCount === groupPermissions.length;
+              const isPartial = selectedCount > 0 && selectedCount < groupPermissions.length;
+              const isOpen = openGroups.has(group.key);
+              const mode = groupModeFor(groupPermissions, selected);
+
+              return (
+                <div key={`${idPrefix}-${group.key}`} className={`permission-group${isOpen ? ' is-open' : ''}`}>
+                  <div className="permission-group-head">
+                    <button type="button" className="permission-group-toggle" onClick={() => toggleGroupOpen(group.key)} aria-expanded={isOpen}>
+                      <span className="permission-group-caret">{isOpen ? '-' : '+'}</span>
+                      <span>{group.label}</span>
+                      <small>{selectedCount}/{groupPermissions.length}</small>
+                    </button>
+                    <div className="permission-group-controls">
+                      <select value={mode} disabled={disabled} onChange={(event) => setGroupMode(groupPermissions, event.target.value)}>
+                        {PERMISSION_GROUP_MODES.map((item) => (
+                          <option key={`${idPrefix}-${group.key}-${item.key}`} value={item.key}>{item.label}</option>
+                        ))}
+                        {mode === 'custom' && <option value="custom">تنظیم جزئی</option>}
+                      </select>
+                      <label className="permission-group-select">
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          disabled={disabled}
+                          ref={(node) => {
+                            if (node) node.indeterminate = isPartial;
+                          }}
+                          onChange={(event) => toggleGroupPermissions(groupPermissions, event.target.checked)}
+                        />
+                        <span>همه</span>
+                      </label>
+                    </div>
+                  </div>
+                  {isOpen ? (
+                    <div className="permission-group-body">
+                      {groupPermissions.map((permission) => (
+                        <label key={`${idPrefix}-${permission.key}`} className="permission-option">
+                          <input type="checkbox" checked={selected.has(permission.key)} disabled={disabled} onChange={(event) => togglePermission(permission.key, event.target.checked)} />
+                          <span>{permission.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+            {!visibleGroups.length && <div className="permission-search-empty">موردی با این جست‌وجو پیدا نشد.</div>}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1810,8 +2116,10 @@ export default function AdminUsers() {
                             : 'مجوزهای انتخابی به مجوزهای پیش‌فرض همین نقش افزوده می‌شود.'}
                       </div>
                       {!isPermissionsLocked(form.orgRole) ? (
-                        <PermissionTree
+                        <PermissionManager
                           idPrefix="dedicated-form"
+                          orgRole={form.orgRole}
+                          users={items}
                           value={form.permissions || []}
                           onChange={(permissions) => setForm((prev) => ({ ...prev, permissions }))}
                         />
@@ -2120,8 +2428,10 @@ export default function AdminUsers() {
                   : 'برای شاگرد و استاد، مجوزهای انتخابی به مجوزهای پیش‌فرض نقش اضافه می‌شود.'}
             </div>
             {!isPermissionsLocked(form.orgRole) ? (
-              <PermissionTree
+              <PermissionManager
                 idPrefix="legacy-form"
+                orgRole={form.orgRole}
+                users={items}
                 value={form.permissions || []}
                 onChange={(permissions) => setForm((prev) => ({ ...prev, permissions }))}
               />
@@ -2238,9 +2548,12 @@ export default function AdminUsers() {
 
                       <div className="access-editor-permissions">
                         {!permissionsLocked ? (
-                          <PermissionTree
+                          <PermissionManager
                             compact
                             idPrefix={`access-editor-${user._id}`}
+                            orgRole={user.orgRole}
+                            users={items}
+                            currentUserId={user._id}
                             value={user.permissions || []}
                             disabled={rowBusy}
                             onChange={(permissions) => updatePermissions(user._id, permissions, user.orgRole)}
@@ -2480,9 +2793,12 @@ export default function AdminUsers() {
                 </div>
                 <div className="permissions-mini">
                   {!permissionsLocked ? (
-                    <PermissionTree
+                    <PermissionManager
                       compact
                       idPrefix={`user-row-${user._id}`}
+                      orgRole={user.orgRole}
+                      users={items}
+                      currentUserId={user._id}
                       value={user.permissions || []}
                       disabled={busyId === user._id}
                       onChange={(permissions) => updatePermissions(user._id, permissions, user.orgRole)}
@@ -2667,8 +2983,11 @@ export default function AdminUsers() {
                       : 'مجوزهای انتخابی به مجوزهای پیش‌فرض نقش افزوده می‌شود.'}
                   </div>
                   {!isPermissionsLocked(editModal.form.orgRole) ? (
-                    <PermissionTree
+                    <PermissionManager
                       idPrefix="edit-permission"
+                      orgRole={editModal.form.orgRole}
+                      users={items}
+                      currentUserId={editModal.user?._id || ''}
                       value={editModal.form.permissions || []}
                       onChange={(permissions) => setEditModal((prev) => ({
                         ...prev,

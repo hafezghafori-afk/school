@@ -39,6 +39,10 @@ const homeSlideSchema = new mongoose.Schema({
 }, { _id: false });
 
 const siteSettingsSchema = new mongoose.Schema({
+  publicStatus: { type: String, default: 'pending_school_connection' },
+  pendingPageTitle: { type: String, default: 'سایت مکتب هنوز وصل نشده است' },
+  pendingPageText: { type: String, default: 'ما در حال آماده‌سازی اتصال سایت اصلی مکتب هستیم. لطفاً چند لحظه صبر کنید.' },
+  pendingPageHint: { type: String, default: 'می‌توانید کمی بعد صفحه را تازه یا Refresh کنید.' },
   brandName: { type: String, default: 'سیما' },
   brandSubtitle: { type: String, default: 'سیستم مدیریت هوشمند مکاتیب افغانستان' },
   logoUrl: { type: String, default: '' },

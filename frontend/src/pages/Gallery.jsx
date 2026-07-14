@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import useSiteSettings from '../hooks/useSiteSettings';
+import { PublicLayout } from '../components/public';
 import './Gallery.css';
 
 import { API_BASE } from '../config/api';
@@ -11,6 +13,7 @@ const resolveImage = (url) => {
 };
 
 export default function Gallery() {
+  const { settings } = useSiteSettings();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [activeItem, setActiveItem] = useState(null);
@@ -84,7 +87,8 @@ export default function Gallery() {
   };
 
   return (
-    <section className="gallery-page">
+    <PublicLayout active="گالری" settings={settings}>
+      <section className="gallery-page public-container">
       <div className="gallery-hero">
         <div>
           <h1>گالری تصاویر</h1>
@@ -158,6 +162,7 @@ export default function Gallery() {
           </div>
         </div>
       )}
-    </section>
+      </section>
+    </PublicLayout>
   );
 }

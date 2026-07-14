@@ -10,7 +10,7 @@ const emptyYear = { id: '', title: '', startDate: '', endDate: '', note: '', isA
 const emptyTerm = { id: '', academicYearId: '', title: '', code: '', order: 1, type: 'term', startDate: '', endDate: '', note: '' };
 const emptyMap = { id: '', instructorId: '', subjectId: '', academicYearId: '', classId: '', note: '', isPrimary: false };
 const emptyEnroll = { id: '', studentId: '', classId: '', status: 'approved', note: '', rejectedReason: '' };
-const emptyLifecycle = { action: 'transfer_in', studentId: '', classId: '', membershipId: '', effectiveDate: '', previousSchool: '', previousGrade: '', note: '' };
+const emptyLifecycle = { action: 'transfer_out', studentId: '', classId: '', membershipId: '', effectiveDate: '', destinationSchool: '', reason: '', financialStatus: '', returnPossibility: '', note: '' };
 
 const putJson = (path, body) => fetchJson(path, {
   method: 'PUT',
@@ -55,9 +55,23 @@ const ENROLLMENT_STATUS_OPTIONS = [
 ];
 
 const STUDENT_LIFECYCLE_ACTIONS = [
-  { value: 'transfer_in', label: 'تبدیلی آمد', needsStudent: true, needsClass: true },
   { value: 'transfer_out', label: 'تبدیلی رفت', needsMembership: true },
   { value: 'dropout', label: 'ترک تحصیل', needsMembership: true }
+];
+
+const LIFECYCLE_FINANCIAL_STATUS_OPTIONS = [
+  { value: '', label: 'انتخاب وضعیت مالی' },
+  { value: 'cleared', label: 'تصفیه شده' },
+  { value: 'balance_due', label: 'باقی‌دار' },
+  { value: 'follow_up', label: 'در حال پیگیری' },
+  { value: 'waived', label: 'معاف شده' }
+];
+
+const DROPOUT_RETURN_OPTIONS = [
+  { value: '', label: 'امکان بازگشت' },
+  { value: 'yes', label: 'بلی' },
+  { value: 'no', label: 'نخیر' },
+  { value: 'unknown', label: 'نامعلوم' }
 ];
 
 const TERM_TYPE_OPTIONS = [
@@ -301,7 +315,7 @@ export default function AdminEducationCore() {
   const [showAllEnrollments, setShowAllEnrollments] = useState(false);
   const [pendingEnrollmentCandidateRef, setPendingEnrollmentCandidateRef] = useState(initialNavigation.candidateRef);
   const [enrollmentMode, setEnrollmentMode] = useState('quick'); // 'quick', 'bulk', 'detailed'
-  const [activeRegistrationTask, setActiveRegistrationTask] = useState('assign');
+  const [activeRegistrationTask, setActiveRegistrationTask] = useState('');
   const [activeEnrollmentPanel, setActiveEnrollmentPanel] = useState('');
   const [bulkSelectedIds, setBulkSelectedIds] = useState([]);
   const [bulkClassId, setBulkClassId] = useState('');
@@ -681,6 +695,9 @@ export default function AdminEducationCore() {
       setEnrollmentMode('quick');
       setRegistrationQueueView('all');
       setShowAllEnrollments(true);
+    } else if (task === 'lifecycle') {
+      setActiveEnrollmentPanel('');
+      setRegistrationQueueView('all');
     }
     focusRegistrationWorkspace();
   };
@@ -1234,11 +1251,7 @@ export default function AdminEducationCore() {
 
   const saveLifecycleAction = async () => {
     const action = lifecycleForm.action;
-    if (action === 'transfer_in' && (!lifecycleForm.studentId || !lifecycleForm.classId)) {
-      showMessage('برای تبدیلی آمد، شاگرد و صنف را انتخاب کنید.', 'error');
-      return;
-    }
-    if (action !== 'transfer_in' && !lifecycleForm.membershipId) {
+    if (!lifecycleForm.membershipId) {
       showMessage('برای تبدیلی رفت یا ترک تحصیل، عضویت شاگرد را انتخاب کنید.', 'error');
       return;
     }
@@ -1246,18 +1259,41 @@ export default function AdminEducationCore() {
       showMessage('تاریخ اثر عملیات را انتخاب کنید.', 'error');
       return;
     }
+    if (action === 'transfer_out' && !String(lifecycleForm.destinationSchool || '').trim()) {
+      showMessage('مکتب یا مرکز مقصد را برای تبدیلی رفت وارد کنید.', 'error');
+      return;
+    }
+    if (!String(lifecycleForm.reason || '').trim()) {
+      showMessage('علت عملیات را وارد کنید.', 'error');
+      return;
+    }
+    if (!lifecycleForm.financialStatus) {
+      showMessage('وضعیت مالی شاگرد را انتخاب کنید.', 'error');
+      return;
+    }
+    if (action === 'dropout' && !lifecycleForm.returnPossibility) {
+      showMessage('امکان بازگشت شاگرد را مشخص کنید.', 'error');
+      return;
+    }
 
     try {
       setBusyAction('lifecycle');
+      const financialLabel = LIFECYCLE_FINANCIAL_STATUS_OPTIONS.find((item) => item.value === lifecycleForm.financialStatus)?.label || '';
+      const returnLabel = DROPOUT_RETURN_OPTIONS.find((item) => item.value === lifecycleForm.returnPossibility)?.label || '';
+      const noteParts = [
+        action === 'transfer_out' && lifecycleForm.destinationSchool ? `مقصد: ${lifecycleForm.destinationSchool}` : '',
+        lifecycleForm.reason ? `علت: ${lifecycleForm.reason}` : '',
+        financialLabel ? `وضعیت مالی: ${financialLabel}` : '',
+        action === 'dropout' && returnLabel ? `امکان بازگشت: ${returnLabel}` : '',
+        lifecycleForm.note
+      ].filter(Boolean).join('\n');
       const payload = {
         action,
         studentId: lifecycleForm.studentId,
         classId: lifecycleForm.classId,
         membershipId: lifecycleForm.membershipId,
         effectiveDate: lifecycleForm.effectiveDate,
-        previousSchool: lifecycleForm.previousSchool,
-        previousGrade: lifecycleForm.previousGrade,
-        note: lifecycleForm.note
+        note: noteParts
       };
       const data = await postJson('/api/education/student-enrollments/lifecycle', payload);
       const stopped = data?.stoppedFutureBills || {};
@@ -2004,15 +2040,27 @@ export default function AdminEducationCore() {
               <strong>جستجو، فلتر، ویرایش و پیگیری</strong>
               <em>{approvedEnrollments.toLocaleString('fa-AF-u-ca-persian')} تاییدشده</em>
             </button>
+            {canManageStudentLifecycle ? (
+              <button type="button" className={`admin-registration-task-card${activeRegistrationTask === 'lifecycle' ? ' active' : ''}`} onClick={() => openRegistrationTask('lifecycle')}>
+                <span>عملیات چرخه شاگرد</span>
+                <strong>تبدیلی رفت و ترک تحصیل</strong>
+                <em>تبدیلی آمد از فورم ثبت‌نام انجام می‌شود</em>
+              </button>
+            ) : null}
+            <button type="button" className={`admin-registration-task-card${activeRegistrationTask === 'bulk' ? ' active' : ''}`} onClick={() => openRegistrationTask('bulk')}>
+              <span>معرفی دسته‌جمعی</span>
+              <strong>چند متعلم را یکجا به یک صنف معرفی کنید</strong>
+              <em>{bulkSelectedIds.length.toLocaleString('fa-AF-u-ca-persian')} انتخاب‌شده</em>
+            </button>
           </div>
         </article>
 
-        {canManageStudentLifecycle ? (
+        {canManageStudentLifecycle && activeRegistrationTask === 'lifecycle' ? (
           <article className="admin-workspace-card admin-registration-panel-card open" data-span="12">
             <div className="admin-education-enrollment-pane-head">
               <div>
                 <h2>عملیات چرخه شاگرد</h2>
-                <p>تبدیلی آمد، تبدیلی رفت و ترک تحصیل از همین فورم ثبت می‌شود و اثر مالی ماه‌های آینده خودکار اعمال می‌گردد.</p>
+                <p>تبدیلی رفت و ترک تحصیل از همین فورم ثبت می‌شود. تبدیلی آمد از فورم ثبت‌نام شاگرد انجام می‌شود تا ثبت دوگانه ساخته نشود.</p>
               </div>
               <span className="admin-workspace-badge info">آموزشی با اثر مالی</span>
             </div>
@@ -2130,6 +2178,46 @@ export default function AdminEducationCore() {
                     showGregorianEquivalent
                   />
                 </div>
+                {lifecycleForm.action === 'transfer_out' ? (
+                  <div className="admin-workspace-field">
+                    <label>مکتب/مرکز مقصد *</label>
+                    <input
+                      value={lifecycleForm.destinationSchool}
+                      onChange={(event) => setLifecycleForm((current) => ({ ...current, destinationSchool: event.target.value }))}
+                      placeholder="نام مکتب یا مرکز مقصد"
+                    />
+                  </div>
+                ) : null}
+                <div className="admin-workspace-field">
+                  <label>علت *</label>
+                  <input
+                    value={lifecycleForm.reason}
+                    onChange={(event) => setLifecycleForm((current) => ({ ...current, reason: event.target.value }))}
+                    placeholder={lifecycleForm.action === 'dropout' ? 'مثلاً مالی، خانوادگی، مهاجرت، صحی...' : 'علت تبدیلی رفت'}
+                  />
+                </div>
+                <div className="admin-workspace-field">
+                  <label>وضعیت مالی *</label>
+                  <select
+                    value={lifecycleForm.financialStatus}
+                    onChange={(event) => setLifecycleForm((current) => ({ ...current, financialStatus: event.target.value }))}
+                  >
+                    {LIFECYCLE_FINANCIAL_STATUS_OPTIONS
+                      .filter((item) => lifecycleForm.action === 'dropout' || item.value !== 'waived')
+                      .map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                  </select>
+                </div>
+                {lifecycleForm.action === 'dropout' ? (
+                  <div className="admin-workspace-field">
+                    <label>امکان بازگشت *</label>
+                    <select
+                      value={lifecycleForm.returnPossibility}
+                      onChange={(event) => setLifecycleForm((current) => ({ ...current, returnPossibility: event.target.value }))}
+                    >
+                      {DROPOUT_RETURN_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                    </select>
+                  </div>
+                ) : null}
               </div>
               {lifecycleAction.needsStudent ? (
                 <div className="admin-workspace-form-grid">
@@ -2660,7 +2748,7 @@ export default function AdminEducationCore() {
   };
 
   return (
-    <div className="admin-workspace-page admin-education-page">
+    <div className={`admin-workspace-page admin-education-page${activeSection === 'enrollments' ? ' enrollments-mode' : ''}`}>
       <div className="admin-workspace-shell">
         <section className="admin-workspace-hero admin-education-hero">
           <div className="admin-workspace-badges">

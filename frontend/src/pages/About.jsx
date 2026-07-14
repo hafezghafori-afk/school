@@ -2,6 +2,7 @@ import React from 'react';
 import useSiteSettings from '../hooks/useSiteSettings';
 import { getPublicWebsiteLocale } from '../i18n/publicWebsite';
 import { normalizeBrandName } from '../utils/brand';
+import { PublicLayout } from '../components/public';
 import './About.css';
 
 const stats = [
@@ -46,7 +47,8 @@ export default function About() {
     : values;
 
   return (
-    <section className="about-page" dir={settings?.language === 'en' ? 'ltr' : 'rtl'}>
+    <PublicLayout active="درباره مکتب" settings={settings}>
+      <section className="about-page public-container" dir={settings?.language === 'en' ? 'ltr' : 'rtl'}>
       <div className="about-hero">
         <div>
           <h1>{aboutTitle}</h1>
@@ -101,6 +103,7 @@ export default function About() {
           ))}
         </div>
       </div>
-    </section>
+      </section>
+    </PublicLayout>
   );
 }

@@ -1,6 +1,7 @@
 ﻿const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { resolvePermissions } = require('../utils/permissions');
+const { LEGACY_PERMISSION_MAP } = require('../utils/permissionCatalog');
 const { getJwtSecret } = require('../utils/env');
 
 const JWT_SECRET = getJwtSecret();
@@ -63,6 +64,13 @@ async function resolveUserPermissions(userId) {
   });
 }
 
+function hasPermissionMatch(permissions = [], requiredPermission = '') {
+  const required = String(requiredPermission || '').trim();
+  if (!required) return true;
+  if (permissions.includes(required)) return true;
+  return (LEGACY_PERMISSION_MAP[required] || []).some((permission) => permissions.includes(permission));
+}
+
 function requirePermission(permission) {
   return async (req, res, next) => {
     try {
@@ -73,7 +81,7 @@ function requirePermission(permission) {
       if (!permissions) {
         return res.status(401).json({ success: false, message: 'کاربر یافت نشد' });
       }
-      if (!permissions.includes(permission)) {
+      if (!hasPermissionMatch(permissions, permission)) {
         return res.status(403).json({ success: false, message: 'دسترسی غیرمجاز' });
       }
       next();
@@ -94,7 +102,7 @@ function requireAnyPermission(permissionList = []) {
       if (!permissions) {
         return res.status(401).json({ success: false, message: 'کاربر یافت نشد' });
       }
-      if (!expected.length || expected.some((item) => permissions.includes(item))) {
+      if (!expected.length || expected.some((item) => hasPermissionMatch(permissions, item))) {
         return next();
       }
       return res.status(403).json({ success: false, message: 'دسترسی غیرمجاز' });

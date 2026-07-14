@@ -25,6 +25,12 @@ const membershipSchema = new mongoose.Schema({
     default: null,
     index: true
   },
+  afghanStudentId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'AfghanStudent',
+    default: null,
+    index: true
+  },
   course: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Course',

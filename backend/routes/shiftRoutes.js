@@ -11,6 +11,8 @@ const { DEFAULT_SCHOOL_ID, resolveActiveSchool, requireWritableSchool, writeScho
 const auditWrite = (payload) => logActivity(payload);
 attachWriteActivityAudit(router, { targetType: 'Shift', actionPrefix: 'shift', audit: auditWrite });
 
+const isValidObjectId = (value = '') => /^[a-f\d]{24}$/i.test(String(value || '').trim());
+
 // Get all shifts for a school
 router.get('/school/:schoolId', requireAuth, checkRole(['admin', 'principal']), async (req, res) => {
   try {

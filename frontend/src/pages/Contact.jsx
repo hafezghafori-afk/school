@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import useSiteSettings from '../hooks/useSiteSettings';
 import { getPublicWebsiteLocale } from '../i18n/publicWebsite';
+import { PublicLayout } from '../components/public';
 import './Contact.css';
 
 import { API_BASE } from '../config/api';
@@ -108,7 +109,8 @@ export default function Contact() {
   };
 
   return (
-    <section className="contact-page" dir={settings?.language === 'en' ? 'ltr' : 'rtl'}>
+    <PublicLayout active="تماس با ما" settings={settings}>
+      <section className="contact-page public-container" dir={settings?.language === 'en' ? 'ltr' : 'rtl'}>
       <div className="contact-hero">
         <div>
           <h1>{settings?.contactTitle || 'ارتباط با ما'}</h1>
@@ -184,6 +186,7 @@ export default function Contact() {
         <p>{t.setup}: {settings?.hoursText || 'تنظیم، آموزش و پشتیبانی'}</p>
         <p>{t.supportText}</p>
       </div>
-    </section>
+      </section>
+    </PublicLayout>
   );
 }

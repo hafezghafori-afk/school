@@ -1,394 +1,213 @@
-import React, { useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import React from 'react';
 import useSiteSettings from '../hooks/useSiteSettings';
-import { getPublicWebsiteLocale } from '../i18n/publicWebsite';
-import { normalizeBrandName } from '../utils/brand';
+import { PublicLayout, PrimaryButton, SecondaryButton, SectionTitle } from '../components/public';
 import './Home.css';
 
-const quickCards = [
+const features = [
   {
-    title: 'برای مدیریت مکتب',
-    desc: 'کنترول صنف‌ها، استادان، شاگردان، گزارش‌ها و تنظیمات عمومی.',
-    icon: 'fa-school'
+    title: 'محیط آموزشی امن',
+    text: 'فضایی آرام، منظم و پشتیبان برای رشد علمی و شخصیتی دختران.',
+    icon: 'fa-shield-heart'
   },
   {
-    title: 'برای بخش مالی',
-    desc: 'ثبت فیس، رسید پرداخت، تخفیف، باقیات و گزارش مالی.',
-    icon: 'fa-receipt'
-  },
-  {
-    title: 'برای آموزش',
-    desc: 'حاضری، امتحانات، نمرات، کارخانگی و تقسیم اوقات.',
-    icon: 'fa-graduation-cap'
-  }
-];
-
-const moduleItems = [
-  {
-    title: 'مدیریت شاگردان',
-    desc: 'ثبت معلومات شخصی، صنف، سال تعلیمی، اسناد و وضعیت شاگرد.',
-    icon: 'fa-user-graduate'
-  },
-  {
-    title: 'مدیریت مالی',
-    desc: 'فیس ماهانه، داخله، تخفیف، پرداخت، رسید و باقیات.',
-    icon: 'fa-wallet'
-  },
-  {
-    title: 'مدیریت امتحانات',
-    desc: 'ثبت نمرات، جدول نتایج، کارنامه PDF و گزارش صنفی.',
-    icon: 'fa-clipboard-check'
-  },
-  {
-    title: 'حاضری',
-    desc: 'حاضری روزانه شاگردان، استادان و کارمندان.',
+    title: 'برنامه درسی منظم',
+    text: 'تقسیم اوقات روشن، پیگیری درس‌ها و ارتباط بهتر میان اداره، استاد و خانواده.',
     icon: 'fa-calendar-check'
   },
   {
-    title: 'تقسیم اوقات',
-    desc: 'تنظیم روز، ساعت، مضمون، صنف و استاد در یک برنامه منظم.',
-    icon: 'fa-calendar-days'
-  },
-  {
-    title: 'گزارش‌ها',
-    desc: 'گزارش مالی، آموزشی، حاضری و وضعیت عمومی مکتب.',
+    title: 'پیگیری پیشرفت',
+    text: 'حاضری، نمرات، کارخانگی و گزارش‌ها در یک مسیر ساده و قابل فهم.',
     icon: 'fa-chart-line'
   }
 ];
 
-const audienceItems = [
-  'مکاتب خصوصی',
-  'مکاتب دخترانه و پسرانه',
-  'آموزشگاه‌ها',
-  'مراکز کورس‌های آموزشی',
-  'اداره‌هایی که ثبت شاگرد، فیس و گزارشات را دیجیتال می‌کنند'
+const programs = [
+  'تعلیمات پایه و متوسطه',
+  'تقویت زبان و مهارت‌های ارتباطی',
+  'آمادگی امتحانات و ارزیابی منظم',
+  'فعالیت‌های فرهنگی و تربیتی'
 ];
 
-const dashboardItems = [
+const stats = [
+  { value: '۱۲+', label: 'سال تجربه آموزشی' },
+  { value: '۴۵۰+', label: 'شاگرد فعال' },
+  { value: '۳۵+', label: 'استاد و کارمند' },
+  { value: '۹۶٪', label: 'رضایت خانواده‌ها' }
+];
+
+const newsItems = [
   {
-    title: 'پنل مدیریت',
-    points: ['شاگردان و استادان', 'صنف‌ها و سال تعلیمی', 'گزارش عمومی']
+    title: 'آغاز ثبت‌نام سال تعلیمی جدید',
+    text: 'خانواده‌ها می‌توانند برای معلومات بیشتر با اداره مکتب تماس بگیرند.'
   },
   {
-    title: 'پنل مالی',
-    points: ['فیس و پرداخت‌ها', 'رسید و تخفیف', 'باقیات و گزارش مالی']
+    title: 'برنامه تقویتی امتحانات',
+    text: 'صنف‌های آمادگی و مرور دروس برای شاگردان دوره متوسطه برگزار می‌شود.'
   },
   {
-    title: 'پنل استاد',
-    points: ['حاضری روزانه', 'نمره‌دهی', 'کارخانگی و مضمون']
-  },
-  {
-    title: 'پنل شاگرد و والدین',
-    points: ['نمرات و کارنامه', 'حاضری', 'برنامه درسی و اطلاعیه‌ها']
+    title: 'نمایشگاه فعالیت‌های شاگردان',
+    text: 'نمونه کارهای آموزشی و فرهنگی شاگردان در گالری مکتب منتشر می‌شود.'
   }
 ];
 
-const faqItems = [
-  {
-    q: 'آیا این سیستم برای هر مکتب قابل تنظیم است؟',
-    a: 'بلی، ساختار صنف‌ها، سال تعلیمی، فیس، امتحانات، نقش‌ها و گزارش‌ها مطابق نیاز هر مکتب تنظیم می‌شود.'
-  },
-  {
-    q: 'برای شروع استفاده از سیستم چه نیاز است؟',
-    a: 'ابتدا معلومات پایه مکتب، صنف‌ها، استادان، شاگردان و تنظیمات مالی وارد می‌شود؛ بعد سیستم برای کاربران فعال می‌گردد.'
-  },
-  {
-    q: 'آیا بخش مالی و رسید پرداخت دارد؟',
-    a: 'بلی، ثبت فیس، تخفیف، پرداخت، باقیات، رسید و گزارش مالی در ساختار سیستم پیش‌بینی شده است.'
-  },
-  {
-    q: 'آیا شاگردان و استادان پنل جداگانه دارند؟',
-    a: 'بلی، هر نقش با دسترسی مناسب خود وارد سیستم می‌شود و فقط بخش‌های مربوط به خودش را می‌بیند.'
-  }
-];
-
-const normalizeCardList = (items, fallback, iconFallback = 'fa-circle-check') => {
+const normalizeCardList = (items, fallback) => {
   if (!Array.isArray(items) || !items.length) return fallback;
   const normalized = items
     .map((item, index) => ({
       title: String(item?.title || '').trim(),
-      desc: String(item?.text || item?.desc || '').trim(),
-      icon: String(item?.value || item?.icon || fallback[index]?.icon || iconFallback).trim()
+      text: String(item?.text || item?.desc || '').trim(),
+      icon: String(item?.value || item?.icon || fallback[index]?.icon || 'fa-circle-check').trim()
     }))
-    .filter((item) => item.title && item.desc);
+    .filter((item) => item.title && item.text);
   return normalized.length ? normalized : fallback;
 };
 
-const normalizeAudienceList = (items, fallback) => {
-  if (!Array.isArray(items) || !items.length) return fallback;
-  const normalized = items.map((item) => String(item || '').trim()).filter(Boolean);
-  return normalized.length ? normalized : fallback;
-};
-
-const splitPoints = (value = '') => String(value || '')
-  .split(/\s*[|،،,]\s*|\n/g)
-  .map((item) => item.trim())
-  .filter(Boolean);
-
-const normalizeDashboardList = (items, fallback) => {
+const normalizeStats = (items, fallback) => {
   if (!Array.isArray(items) || !items.length) return fallback;
   const normalized = items
     .map((item) => ({
-      title: String(item?.title || '').trim(),
-      points: splitPoints(item?.text || item?.href || '')
+      value: String(item?.value || item?.title || '').trim(),
+      label: String(item?.label || item?.text || item?.desc || '').trim()
     }))
-    .filter((item) => item.title && item.points.length);
+    .filter((item) => item.value && item.label);
   return normalized.length ? normalized : fallback;
-};
-
-const normalizeFaqList = (items, fallback) => {
-  if (!Array.isArray(items) || !items.length) return fallback;
-  const normalized = items
-    .map((item) => ({
-      q: String(item?.title || item?.q || '').trim(),
-      a: String(item?.text || item?.a || '').trim()
-    }))
-    .filter((item) => item.q && item.a);
-  return normalized.length ? normalized : fallback;
-};
-
-const pageText = {
-  fa: {
-    facilities: 'امکانات مکتب',
-    modules: 'ماژول‌های اصلی سیستم',
-    facilitiesIntro: 'صفحه اصلی روی بخش‌هایی تمرکز دارد که کار روزانه مکتب را ساده‌تر، دقیق‌تر و قابل گزارش می‌سازد.',
-    audienceKicker: 'برای کی ساخته شده؟',
-    audienceTitle: 'مناسب برای مراکز آموزشی که می‌خواهند کارها دیجیتال شود',
-    why: 'چرا این سیستم؟',
-    panelsKicker: 'نمونه داشبوردها',
-    panelsTitle: 'هر کاربر پنل منظم خودش را دارد',
-    faqKicker: 'سوالات متداول',
-    faqTitle: 'پاسخ کوتاه به سوال‌های مهم مدیران مکتب',
-    start: 'شروع همکاری',
-    contact: 'تماس با ما'
-  },
-  en: {
-    facilities: 'School Facilities',
-    modules: 'Main system modules',
-    facilitiesIntro: 'The home page highlights the services that make daily school work clearer, faster, and reportable.',
-    audienceKicker: 'Who is it for?',
-    audienceTitle: 'For schools that want organized digital operations',
-    why: 'Why this system?',
-    panelsKicker: 'Dashboard examples',
-    panelsTitle: 'Every user has a clear workspace',
-    faqKicker: 'FAQ',
-    faqTitle: 'Short answers to common school management questions',
-    start: 'Get in touch',
-    contact: 'Contact us'
-  },
-  ps: {
-    facilities: 'د ښوونځي امکانات',
-    modules: 'د سیستم اصلي برخې',
-    facilitiesIntro: 'اصلي پاڼه هغه برخې ښيي چې د ښوونځي ورځني کارونه اسانه، منظم او د راپور وړ کوي.',
-    audienceKicker: 'د چا لپاره؟',
-    audienceTitle: 'د هغو ښوونځیو لپاره چې منظم ډیجیټلي کار غواړي',
-    why: 'ولې دا سیستم؟',
-    panelsKicker: 'د ډشبورډ بېلګې',
-    panelsTitle: 'هر کاروونکی خپل منظم پنل لري',
-    faqKicker: 'عامې پوښتنې',
-    faqTitle: 'د ښوونځي د مدیریت مهمو پوښتنو ته لنډ ځوابونه',
-    start: 'اړیکه پیل کړئ',
-    contact: 'اړیکه'
-  }
 };
 
 export default function Home() {
-  const { settings, language } = useSiteSettings();
-  const t = getPublicWebsiteLocale(language || settings?.language).home || pageText[settings?.language || 'fa'] || pageText.fa;
-  const brandName = normalizeBrandName(settings?.brandName);
-  const heroBadge = settings?.homeHeroBadge || 'طراحی‌شده برای مکاتب افغانستان';
-  const heroTitle = settings?.homeHeroTitle || 'سیما؛ سیستم مدیریت هوشمند مکاتیب افغانستان';
-  const heroText = settings?.homeHeroText || 'تمام امور مکتب را از ثبت شاگرد تا فیس، حاضری، امتحانات، تقسیم اوقات و گزارش‌ها در یک سیستم ساده و منظم مدیریت کنید.';
-  const primaryLabel = settings?.homeHeroPrimaryLabel || 'تماس با مکتب';
-  const primaryHref = settings?.homeHeroPrimaryHref || (settings?.publicBasePath ? `${settings.publicBasePath}/contact` : '/contact');
-  const secondaryLabel = settings?.homeHeroSecondaryLabel || 'ورود به سیستم';
-  const secondaryHref = settings?.homeHeroSecondaryHref || '/login';
-  const ctaTitle = settings?.homeCtaTitle || 'می‌خواهید سیستم را برای مکتب خود فعال کنید؟';
-  const ctaText = settings?.homeCtaText || 'برای معلومات بیشتر و راه‌اندازی با اداره مکتب تماس بگیرید.';
-  const ctaLabel = settings?.homeCtaLabel || 'ارسال پیام';
-  const ctaHref = settings?.homeCtaHref || (settings?.publicBasePath ? `${settings.publicBasePath}/contact` : '/contact');
-  const contactHref = settings?.publicBasePath ? `${settings.publicBasePath}/contact` : '/contact';
-  const quickCardItems = normalizeCardList(settings?.salesQuickCards, quickCards);
-  const moduleCardItems = normalizeCardList(settings?.salesModules, moduleItems);
-  const audienceList = normalizeAudienceList(settings?.salesAudience, audienceItems);
-  const dashboardList = normalizeDashboardList(settings?.salesDashboardCards, dashboardItems);
-  const faqList = normalizeFaqList(settings?.salesFaqs, faqItems);
-  const trustTitle = settings?.salesTrustTitle || 'ساخته‌شده برای نیازهای واقعی مکاتب افغانستان';
-  const trustText = settings?.salesTrustText || 'ساختار صنف‌ها، سال تعلیمی، فیس، حاضری، امتحانات و گزارش‌ها مطابق کار روزانه مکتب تنظیم می‌شود و برای هر مکتب قابل تغییر است.';
-  const trustPoints = normalizeAudienceList(settings?.salesTrustPoints, ['راه‌اندازی مرحله‌به‌مرحله', 'دسترسی جداگانه برای نقش‌ها', 'گزارش‌های قابل پیگیری']);
+  const { settings } = useSiteSettings();
+  const isPendingSchoolConnection = settings?.publicStatus === 'pending_school_connection' && !settings?.isSchoolWebsite;
+  const schoolName = settings?.brandName || 'Iman Girls School';
+  const schoolSubtitle = settings?.brandSubtitle || 'مکتب دخترانه ایمان';
+  const logoSrc = settings?.logo || settings?.logoUrl || '';
+  const heroBadge = settings?.homeHeroBadge || 'مکتب دخترانه ایمان';
+  const heroTitle = settings?.homeHeroTitle || 'آموزش با اعتماد، نظم و آینده‌نگری برای دختران';
+  const heroText = settings?.homeHeroText || 'Iman Girls School محیطی حرفه‌ای، مهربان و منظم برای آموزش دختران فراهم می‌کند؛ جایی که درس، اخلاق و رشد فردی کنار هم پیش می‌روند.';
+  const primaryLabel = settings?.homeHeroSecondaryLabel || 'ورود به سیستم';
+  const primaryHref = settings?.homeHeroSecondaryHref || '/login';
+  const secondaryLabel = settings?.homeHeroPrimaryLabel || 'تماس با ما';
+  const secondaryHref = settings?.homeHeroPrimaryHref || '/contact';
+  const featureItems = normalizeCardList(settings?.salesQuickCards, features);
+  const programItems = normalizeCardList(settings?.salesModules, programs.map((title) => ({ title, text: title }))).map((item) => item.title);
+  const statItems = normalizeStats(settings?.homeStats || settings?.stats, stats);
+  const ctaTitle = settings?.homeCtaTitle || 'کاربران مکتب می‌توانند از همین‌جا وارد سیستم شوند';
+  const ctaText = settings?.homeCtaText || 'شاگردان، استادان و مدیران با حساب خود به پنل مربوط وارد می‌شوند.';
+  const ctaLabel = settings?.homeHeroSecondaryLabel || 'ورود به سیستم';
+  const ctaHref = settings?.homeHeroSecondaryHref || '/login';
 
-  useEffect(() => {
-    const reveal = () => {
-      document.querySelectorAll('.home-page .reveal').forEach((el) => {
-        const rect = el.getBoundingClientRect();
-        if (rect.top < window.innerHeight - 70) {
-          el.classList.add('visible');
-        }
-      });
-    };
-
-    reveal();
-    window.addEventListener('scroll', reveal);
-    return () => window.removeEventListener('scroll', reveal);
-  }, []);
+  if (isPendingSchoolConnection) {
+    return (
+      <PublicLayout active="خانه" settings={settings} logoSrc={logoSrc} schoolName={schoolName} schoolSubtitle={schoolSubtitle}>
+        <section className="home-pending public-container" dir="rtl">
+          <p className="home-pending-kicker">{schoolName}</p>
+          <h1>{settings?.pendingPageTitle || 'سایت مکتب هنوز وصل نشده است'}</h1>
+          <p>{settings?.pendingPageText || 'ما در حال آماده‌سازی اتصال سایت اصلی مکتب هستیم. لطفاً چند لحظه صبر کنید.'}</p>
+          <p>{settings?.pendingPageHint || 'می‌توانید کمی بعد صفحه را تازه یا Refresh کنید.'}</p>
+          <button type="button" className="home-pending-refresh" onClick={() => window.location.reload()}>
+            تازه‌سازی صفحه
+          </button>
+        </section>
+      </PublicLayout>
+    );
+  }
 
   return (
-    <section className="home-page" dir={settings?.language === 'en' ? 'ltr' : 'rtl'}>
-      <div className="home-shell">
-        <section className="home-hero reveal">
-          <div className="hero-content">
+    <PublicLayout active="خانه" settings={settings} logoSrc={logoSrc} schoolName={schoolName} schoolSubtitle={schoolSubtitle}>
+      <section className="home-hero">
+        <div className="public-container home-hero-inner">
+          <div className="home-hero-copy">
             <span className="home-kicker">{heroBadge}</span>
             <h1>{heroTitle}</h1>
             <p>{heroText}</p>
-            <div className="hero-buttons">
-              <Link className="hero-btn primary" to={secondaryHref}>
-                {secondaryLabel}
-              </Link>
-              <Link className="hero-btn secondary" to={primaryHref}>
-                {primaryLabel}
-              </Link>
+            <div className="home-hero-actions">
+              <PrimaryButton to={primaryHref}>{primaryLabel}</PrimaryButton>
+              <SecondaryButton to={secondaryHref}>{secondaryLabel}</SecondaryButton>
             </div>
           </div>
 
-          <div className="hero-preview" aria-label="نمای کلی سیستم">
-            <div className="preview-top">
-              <span>{brandName}</span>
-              <strong>داشبورد مدیریت</strong>
+          <div className="home-hero-panel" aria-label="نمای معرفی مکتب">
+            <div className="hero-panel-top">
+              <span>{schoolName}</span>
+              <strong>تعلیم، تربیه، اعتماد</strong>
             </div>
-            <div className="preview-grid">
-              <div>
-                <strong>شاگردان</strong>
-                <span>ثبت و پیگیری</span>
-              </div>
-              <div>
-                <strong>فیس</strong>
-                <span>رسید و باقیات</span>
-              </div>
-              <div>
-                <strong>حاضری</strong>
-                <span>روزانه و دقیق</span>
-              </div>
-              <div>
-                <strong>امتحانات</strong>
-                <span>نمرات و کارنامه</span>
-              </div>
-            </div>
-            <div className="preview-strip">
-              <span>مدیریت</span>
-              <span>مالی</span>
-              <span>آموزش</span>
-              <span>گزارش‌ها</span>
+            <div className="hero-panel-grid">
+              <span>صنف‌های منظم</span>
+              <span>استادان متعهد</span>
+              <span>گزارش‌دهی شفاف</span>
+              <span>ارتباط با خانواده</span>
             </div>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section className="quick-grid reveal" aria-label="بخش‌های سریع سیستم">
-          {quickCardItems.map((item) => (
-            <article className="home-card quick-card" key={item.title}>
-              <i className={`fa ${item.icon}`} aria-hidden="true" />
-              <h2>{item.title}</h2>
-              <p>{item.desc}</p>
+      <section className="home-section public-container" id="about">
+        <SectionTitle kicker="معرفی مکتب" title={settings?.aboutTitle || 'مکتبی برای یادگیری آرام، دقیق و هدفمند'}>
+          {settings?.aboutBody || 'مکتب دخترانه ایمان با تمرکز بر کیفیت آموزشی، نظم اداری و همراهی خانواده‌ها تلاش می‌کند هر شاگرد مسیر رشد خودش را با اعتماد طی کند.'}
+        </SectionTitle>
+        <div className="home-intro-card">
+          <p>
+            {settings?.missionBody || 'برنامه‌های آموزشی مکتب برای نیازهای روز شاگردان طراحی شده و با مدیریت دیجیتال، پیگیری درس‌ها، حاضری، نمرات و اطلاعیه‌ها ساده‌تر و شفاف‌تر انجام می‌شود.'}
+          </p>
+        </div>
+      </section>
+
+      <section className="home-section public-container" id="programs">
+        <SectionTitle kicker="ویژگی‌ها" title="آنچه تجربه آموزشی را منظم‌تر می‌کند" />
+        <div className="home-feature-grid">
+          {featureItems.map((item) => (
+            <article className="home-card" key={item.title}>
+              <span className="home-card-icon"><i className={`fa ${item.icon}`} aria-hidden="true" /></span>
+              <h3>{item.title}</h3>
+              <p>{item.text}</p>
             </article>
           ))}
-        </section>
+        </div>
+      </section>
 
-        <section className="home-section reveal" id="modules">
-          <div className="section-head">
-            <span>{settings?.isSchoolWebsite ? t.facilities : t.modules}</span>
-            <h2>{settings?.isSchoolWebsite ? t.facilities : 'امکاناتی که مدیر مکتب فوراً ارزش آن را می‌فهمد'}</h2>
-            <p>
-              {t.facilitiesIntro}
-            </p>
+      <section className="home-section home-program-band">
+        <div className="public-container home-program-inner">
+          <SectionTitle kicker="برنامه‌های آموزشی" title="مسیرهای آموزشی روشن برای رشد شاگردان">
+            برنامه‌ها با توجه به سطح درسی، نیازهای تربیتی و آمادگی آینده شاگردان تنظیم می‌شوند.
+          </SectionTitle>
+          <div className="home-program-list">
+            {programItems.map((item) => <span key={item}>{item}</span>)}
           </div>
-          <div className="module-grid">
-            {moduleCardItems.map((item) => (
-              <article className="home-card module-card" key={item.title}>
-                <div className="card-icon">
-                  <i className={`fa ${item.icon}`} aria-hidden="true" />
-                </div>
-                <h3>{item.title}</h3>
-                <p>{item.desc}</p>
-              </article>
-            ))}
-          </div>
-        </section>
+        </div>
+      </section>
 
-        <section className="home-section audience-section reveal" id="schools">
-          <div className="section-head">
-            <span>{t.audienceKicker}</span>
-            <h2>{t.audienceTitle}</h2>
-          </div>
-          <div className="audience-list">
-            {audienceList.map((item) => (
-              <div className="audience-item" key={item}>
-                <i className="fa fa-check" aria-hidden="true" />
-                <span>{item}</span>
-              </div>
-            ))}
-          </div>
-        </section>
+      <section className="home-section public-container">
+        <div className="home-stats-grid">
+          {statItems.map((item) => (
+            <div className="home-stat" key={item.label}>
+              <strong>{item.value}</strong>
+              <span>{item.label}</span>
+            </div>
+          ))}
+        </div>
+      </section>
 
-        <section className="trust-section reveal">
+      <section className="home-section public-container">
+        <SectionTitle kicker="آخرین اخبار" title="تازه‌ترین اطلاعیه‌ها و رویدادهای مکتب" />
+        <div className="home-news-grid">
+          {newsItems.map((item) => (
+            <article className="home-card home-news-card" key={item.title}>
+              <h3>{item.title}</h3>
+              <p>{item.text}</p>
+              <SecondaryButton to="/news">مشاهده اخبار</SecondaryButton>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="home-section public-container">
+        <div className="home-login-cta">
           <div>
-            <span className="home-kicker">{t.why}</span>
-            <h2>{trustTitle}</h2>
-            <p>{trustText}</p>
-          </div>
-          <div className="trust-points">
-            {trustPoints.map((point) => <span key={point}>{point}</span>)}
-          </div>
-        </section>
-
-        <section className="home-section reveal">
-          <div className="section-head">
-            <span>{t.panelsKicker}</span>
-            <h2>{t.panelsTitle}</h2>
-          </div>
-          <div className="dashboard-grid">
-            {dashboardList.map((item) => (
-              <article className="home-card dashboard-card" key={item.title}>
-                <h3>{item.title}</h3>
-                <ul>
-                  {item.points.map((point) => (
-                    <li key={point}>{point}</li>
-                  ))}
-                </ul>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="home-section reveal">
-          <div className="section-head">
-            <span>{t.faqKicker}</span>
-            <h2>{t.faqTitle}</h2>
-          </div>
-          <div className="faq-list">
-            {faqList.map((item) => (
-              <details className="home-card faq-item" key={item.q}>
-                <summary>{item.q}</summary>
-                <p>{item.a}</p>
-              </details>
-            ))}
-          </div>
-        </section>
-
-        <section className="home-cta reveal">
-          <div>
-            <span className="home-kicker">{t.start}</span>
+            <span className="home-kicker">دسترسی سریع</span>
             <h2>{ctaTitle}</h2>
             <p>{ctaText}</p>
           </div>
-          <div className="cta-actions">
-            <Link className="hero-btn primary" to={ctaHref}>
-              {ctaLabel}
-            </Link>
-            <Link className="hero-btn secondary" to={contactHref}>
-              {t.contact}
-            </Link>
-          </div>
-        </section>
-      </div>
-    </section>
+          <PrimaryButton to={ctaHref}>{ctaLabel}</PrimaryButton>
+        </div>
+      </section>
+    </PublicLayout>
   );
 }

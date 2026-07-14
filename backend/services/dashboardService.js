@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 
 const User = require('../models/User');
+const AfghanStudent = require('../models/AfghanStudent');
+const AfghanTeacher = require('../models/AfghanTeacher');
 const StudentMembership = require('../models/StudentMembership');
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
@@ -132,6 +134,35 @@ function compareMonthChange(current, previous) {
   const previousValue = Number(previous || 0);
   if (!previousValue) return currentValue > 0 ? 100 : 0;
   return Number((((currentValue - previousValue) / previousValue) * 100).toFixed(1));
+}
+
+async function getOfficialPeopleCounts() {
+  const [
+    totalStudents,
+    totalInstructors,
+    directoryStudentUsers,
+    directoryInstructorUsers,
+    activeMembershipStudents
+  ] = await Promise.all([
+    AfghanStudent.countDocuments({ status: 'active' }),
+    AfghanTeacher.countDocuments({ status: 'active' }),
+    User.countDocuments({ role: 'student', status: 'active' }),
+    User.countDocuments({ role: 'instructor', status: 'active' }),
+    StudentMembership.distinct('student', {
+      status: { $in: ['active', 'pending', 'suspended', 'transferred_in'] },
+      isCurrent: true
+    })
+  ]);
+
+  return {
+    totalStudents,
+    totalInstructors,
+    directoryStudentUsers,
+    directoryInstructorUsers,
+    activeMembershipStudents: activeMembershipStudents.length,
+    orphanStudentUsers: Math.max(0, directoryStudentUsers - totalStudents),
+    orphanInstructorUsers: Math.max(0, directoryInstructorUsers - totalInstructors)
+  };
 }
 
 function buildClassLabelMap(classes = [], courses = []) {
@@ -385,8 +416,7 @@ async function getAdminDashboard() {
   const attendanceStart = startOfDay(shiftDays(new Date(), -29));
 
   const [
-    totalStudents,
-    totalInstructors,
+    officialPeopleCounts,
     outstandingStats,
     approvedPayments,
     attendanceRows,
@@ -397,8 +427,7 @@ async function getAdminDashboard() {
     draftSchedules,
     recentMemberships
   ] = await Promise.all([
-    User.countDocuments({ role: 'student', status: 'active' }),
-    User.countDocuments({ role: 'instructor', status: 'active' }),
+    getOfficialPeopleCounts(),
     FeeOrder.aggregate([
       { $match: { status: { $ne: 'void' } } },
       {
@@ -423,6 +452,8 @@ async function getAdminDashboard() {
     }).select('createdAt joinedAt')
   ]);
 
+  const totalStudents = officialPeopleCounts.totalStudents;
+  const totalInstructors = officialPeopleCounts.totalInstructors;
   const financeSummary = outstandingStats[0] || { totalDue: 0, outstandingAmount: 0 };
   const monthlyRevenue = sumBy(
     approvedPayments.filter((item) => item.paidAt && new Date(item.paidAt) >= monthStart),
@@ -475,7 +506,14 @@ async function getAdminDashboard() {
       pendingAccessRequests,
       monthlyRevenue: Number(monthlyRevenue.toFixed(0)),
       previousMonthRevenue: Number(previousMonthRevenue.toFixed(0)),
-      monthDeltaPercent: compareMonthChange(monthlyRevenue, previousMonthRevenue)
+      monthDeltaPercent: compareMonthChange(monthlyRevenue, previousMonthRevenue),
+      directoryHealth: {
+        studentUsers: officialPeopleCounts.directoryStudentUsers,
+        instructorUsers: officialPeopleCounts.directoryInstructorUsers,
+        activeMembershipStudents: officialPeopleCounts.activeMembershipStudents,
+        orphanStudentUsers: officialPeopleCounts.orphanStudentUsers,
+        orphanInstructorUsers: officialPeopleCounts.orphanInstructorUsers
+      }
     },
     studentGrowth,
     revenueTrend,

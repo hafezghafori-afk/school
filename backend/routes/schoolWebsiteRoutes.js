@@ -307,13 +307,25 @@ const resolveProfile = async (slug = '') => {
   return school ? ensureProfileForSchool(school) : null;
 };
 
-const serializeProfile = (profile, lang = 'fa') => {
+const pickSchoolName = (school, language = 'fa') => {
+  if (!school) return '';
+  if (language === 'ps') return school.namePashto || school.nameDari || school.name || '';
+  if (language === 'en') return school.name || school.nameDari || school.namePashto || '';
+  return school.nameDari || school.name || school.namePashto || '';
+};
+
+const serializeProfile = (profile, lang = 'fa', school = null) => {
   if (!profile) return null;
   const language = normalizeLanguage(lang || profile.primaryLanguage);
   const locale = getSchoolWebsiteLocale(language);
   const basePath = `/schools/${profile.slug}`;
   const withLanguage = (href) => (language === 'fa' ? href : `${href}${href.includes('?') ? '&' : '?'}lang=${language}`);
-  const contactAddress = pickText(profile.contactAddress, language);
+  const officialSchoolName = pickSchoolName(school, language);
+  const officialContact = school?.contactInfo || {};
+  const contactAddress = officialContact.address || pickText(profile.contactAddress, language);
+  const contactPhone = officialContact.phone || officialContact.mobile || profile.contactPhone || '';
+  const contactEmail = officialContact.email || profile.contactEmail || '';
+  const schoolLogoUrl = profile.schoolLogoUrl || school?.logoUrl || school?.schoolLogoUrl || school?.logo || '';
   return {
     id: String(profile._id),
     schoolId: String(profile.schoolId || ''),
@@ -322,11 +334,11 @@ const serializeProfile = (profile, lang = 'fa') => {
     enabledLanguages: profile.enabledLanguages || SUPPORTED_LANGUAGES,
     publicBasePath: basePath,
     primaryColor: profile.primaryColor || '#0f766e',
-    logoUrl: profile.schoolLogoUrl || '',
-    schoolLogoUrl: profile.schoolLogoUrl || '',
+    logoUrl: schoolLogoUrl,
+    schoolLogoUrl,
     ministryLogoUrl: profile.ministryLogoUrl || '',
     heroImageUrl: profile.heroImageUrl || '',
-    brandName: pickText(profile.brandName, language, 'مکتب'),
+    brandName: officialSchoolName || pickText(profile.brandName, language, 'مکتب'),
     brandSubtitle: pickText(profile.brandSubtitle, language, ''),
     homeHeroBadge: pickText(profile.homeHeroBadge, language),
     homeHeroTitle: pickText(profile.homeHeroTitle, language),
@@ -347,8 +359,8 @@ const serializeProfile = (profile, lang = 'fa') => {
     visionBody: pickText(profile.visionBody, language),
     contactTitle: pickText(profile.contactTitle, language),
     contactText: pickText(profile.contactText, language),
-    contactPhone: profile.contactPhone || '',
-    contactEmail: profile.contactEmail || '',
+    contactPhone,
+    contactEmail,
     contactAddress,
     salesQuickCards: localizeItems(profile.features, language),
     salesModules: localizeItems(profile.features, language),
@@ -387,7 +399,8 @@ router.get('/public', async (req, res) => {
     if (!profile) {
       return res.json({ success: true, profile: null });
     }
-    return res.json({ success: true, profile: serializeProfile(profile, req.query.lang) });
+    const school = profile.schoolId ? await School.findById(profile.schoolId).lean() : null;
+    return res.json({ success: true, profile: serializeProfile(profile, req.query.lang, school) });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Failed to load school website profile.' });
   }

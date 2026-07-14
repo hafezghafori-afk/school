@@ -10,6 +10,8 @@ const { requireFields } = require('../middleware/validate');
 const Counter = require('../models/Counter');
 const SiteSettings = require('../models/SiteSettings');
 const StudentMembership = require('../models/StudentMembership');
+const StudentCore = require('../models/StudentCore');
+const User = require('../models/User');
 const { ok, fail } = require('../utils/response');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
@@ -59,6 +61,22 @@ const calculateAge = (birthDate) => {
     age--;
   }
   return age;
+};
+
+const formatStudentUpdateError = (error) => {
+  if (error?.code === 11000) {
+    return 'شماره تذکره/شناسه شاگرد قبلاً برای شاگرد دیگری ثبت شده است.';
+  }
+  if (error?.name === 'ValidationError' && error.errors) {
+    return Object.values(error.errors)
+      .map((item) => item?.message)
+      .filter(Boolean)
+      .join('، ') || 'اطلاعات شاگرد با فیلدهای ضروری سازگار نیست.';
+  }
+  if (error?.name === 'CastError') {
+    return 'شناسه شاگرد معتبر نیست.';
+  }
+  return 'ذخیره مشخصات شاگرد ناموفق بود.';
 };
 
 const gradeLabelFromStudent = (studentData = {}) => {
@@ -116,6 +134,97 @@ const syncManualStudentEnrollment = async ({ student, studentData, req }) => {
   }
 
   return Enrollment.create(payload);
+};
+
+const syncRelatedStudentIdentity = async (student) => {
+  if (!student?._id) return;
+  const firstName = student.personalInfo?.firstNameDari || student.personalInfo?.firstName || '';
+  const lastName = student.personalInfo?.lastNameDari || student.personalInfo?.lastName || '';
+  const studentName = [firstName, lastName].filter(Boolean).join(' ').trim();
+  const fatherName = student.personalInfo?.fatherName || '';
+  const email = student.contactInfo?.email || '';
+  const phone = student.contactInfo?.phone || student.contactInfo?.mobile || '';
+  const grade = gradeLabelFromStudent(student);
+  const linkedUserId = student.linkedUserId || null;
+
+  if (linkedUserId && studentName) {
+    await User.findByIdAndUpdate(linkedUserId, {
+      $set: {
+        name: studentName,
+        grade
+      }
+    });
+  }
+
+  await Enrollment.updateMany(
+    {
+      $or: [
+        { linkedStudentId: student._id },
+        ...(linkedUserId ? [{ linkedUserId }] : [])
+      ]
+    },
+    {
+      $set: {
+        ...(studentName ? { studentName } : {}),
+        fatherName,
+        gender: student.personalInfo?.gender || 'male',
+        birthDate: student.personalInfo?.birthDate || '',
+        grade,
+        phone,
+        email,
+        address: student.contactInfo?.address || '',
+        province: student.contactInfo?.province || '',
+        district: student.contactInfo?.district || '',
+        emergencyPhone: student.contactInfo?.emergencyContact?.phone || ''
+      }
+    }
+  );
+
+  await StudentMembership.updateMany(
+    {
+      $or: [
+        { afghanStudentId: student._id },
+        ...(linkedUserId ? [{ student: linkedUserId }] : [])
+      ]
+    },
+    {
+      $set: {
+        afghanStudentId: student._id,
+        ...(linkedUserId ? { student: linkedUserId } : {})
+      }
+    }
+  );
+
+  const membershipStudentCoreIds = await StudentMembership.find({
+    $or: [
+      { afghanStudentId: student._id },
+      ...(linkedUserId ? [{ student: linkedUserId }] : [])
+    ],
+    studentId: { $ne: null }
+  }).distinct('studentId');
+
+  const studentCoreFilter = {
+    $or: [
+      ...(linkedUserId ? [{ userId: linkedUserId }] : []),
+      ...(membershipStudentCoreIds.length ? [{ _id: { $in: membershipStudentCoreIds } }] : [])
+    ]
+  };
+
+  if (studentName && studentCoreFilter.$or.length) {
+    const studentCoreSet = {
+      fullName: studentName,
+      preferredName: studentName,
+      givenName: firstName,
+      familyName: lastName,
+      phone,
+      email,
+      gender: student.personalInfo?.gender || '',
+      dateOfBirth: student.personalInfo?.birthDate ? String(student.personalInfo.birthDate).slice(0, 10) : ''
+    };
+    const admissionNo = student.asasNumber || student.registrationId || student.identification?.tazkiraNumber || '';
+    if (admissionNo) studentCoreSet.admissionNo = admissionNo;
+    await StudentCore.updateMany(studentCoreFilter, { $set: studentCoreSet });
+  }
 };
 
 const getStudentStats = async (schoolId, grade) => {
@@ -463,7 +572,7 @@ router.put('/:id', requireAuth, requireRole(['admin', 'principal', 'registration
 
     const student = await AfghanStudent.findByIdAndUpdate(
       req.params.id,
-      studentData,
+      { $set: studentData },
       { new: true, runValidators: true }
     ).populate('academicInfo.currentSchool', 'name province district');
 
@@ -478,14 +587,13 @@ router.put('/:id', requireAuth, requireRole(['admin', 'principal', 'registration
       source: 'admin'
     });
     await syncManualStudentEnrollment({ student, studentData: student.toObject(), req });
+    await syncRelatedStudentIdentity(student);
 
-    return ok(res, student, 'Student updated successfully');
+    return ok(res, { data: student.toObject() }, 'Student updated successfully');
   } catch (error) {
     console.error('Update Student Error:', error);
-    if (error.code === 11000) {
-      return fail(res, 'Tazkira number already exists', 400);
-    }
-    return fail(res, 'Failed to update student', 500);
+    const status = error?.code === 11000 || error?.name === 'ValidationError' || error?.name === 'CastError' ? 400 : 500;
+    return fail(res, formatStudentUpdateError(error), status);
   }
 });
 

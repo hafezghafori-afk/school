@@ -16,6 +16,7 @@ const AdminLog = require('../models/AdminLog');
 const SiteSettings = require('../models/SiteSettings');
 const Counter = require('../models/Counter');
 const { assignStudentToClass } = require('../services/studentClassAssignmentService');
+const { ensureAfghanStudentProfile } = require('../services/afghanStudentProfileService');
 const { sendMail } = require('../utils/mailer');
 const { requireAuth, requireRole, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const { serializeUserIdentity } = require('../utils/userRole');
@@ -23,7 +24,7 @@ const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
 
 const router = express.Router();
-const manageEnrollmentAccess = requireAnyPermission(['manage_enrollments', 'manage_users']);
+const manageEnrollmentAccess = requireAnyPermission(['manage_enrollments', 'manage_users', 'enrollments.manage', 'enrollments.detail.view']);
 const auditWrite = (payload) => logActivity(payload);
 attachWriteActivityAudit(router, { targetType: 'Enrollment', actionPrefix: 'enrollment', audit: auditWrite });
 
@@ -84,6 +85,49 @@ const buildStudentFromEnrollment = async (enrollment, req, asasNumber) => {
   if (!classItem) {
     classItem = await findMatchingClass({ schoolId, grade: enrollment.grade });
   }
+
+  const { student: profileStudent } = await ensureAfghanStudentProfile({
+    source: 'online_enrollment',
+    enrollment: { ...enrollment.toObject(), asasNumber },
+    schoolId,
+    schoolClass: classItem,
+    academicYearId: context.academicYearId || classItem?.academicYearId || null,
+    shiftId: context.shiftId || classItem?.shiftId || null,
+    actorId: req.user?.id || null,
+    defaults: {
+      registrationId: enrollment.registrationId,
+      asasNumber,
+      note: enrollment.notes || 'ساخته/وصل شده از درخواست ثبت‌نام آنلاین تایید شده'
+    }
+  });
+
+  const enrollmentDocs = [
+    enrollment.documents?.idCardUrl ? { type: 'tazkira', title: 'تذکره', url: enrollment.documents.idCardUrl } : null,
+    enrollment.documents?.birthCertUrl ? { type: 'birth_certificate', title: 'سند تولد', url: enrollment.documents.birthCertUrl } : null,
+    enrollment.documents?.reportCardUrl ? { type: 'previous_transcript', title: 'کارنامه', url: enrollment.documents.reportCardUrl } : null,
+    enrollment.documents?.photoUrl ? { type: 'photo', title: 'عکس', url: enrollment.documents.photoUrl } : null
+  ].filter(Boolean);
+  if (enrollmentDocs.length) {
+    const existingUrls = new Set((profileStudent.documents || []).map((item) => item.url).filter(Boolean));
+    enrollmentDocs.forEach((doc) => {
+      if (!existingUrls.has(doc.url)) profileStudent.documents.push(doc);
+    });
+    await profileStudent.save();
+  }
+
+  if (!context.schoolId || !context.classId) {
+    enrollment.academicContext = {
+      ...(enrollment.academicContext || {}),
+      schoolId,
+      classId: classItem?._id || null,
+      shiftId: context.shiftId || classItem?.shiftId || null,
+      academicYearId: context.academicYearId || classItem?.academicYearId || null,
+      enrollmentDate: context.enrollmentDate || new Date()
+    };
+    await enrollment.save();
+  }
+
+  return profileStudent;
 
   const { firstName, lastName } = splitStudentName(enrollment.studentName);
   const fallbackPhone = enrollment.phone || enrollment.emergencyPhone || '0000000000';

@@ -160,6 +160,123 @@
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
+.website-editor-card {
+  overflow: hidden;
+}
+
+.website-language-pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: rgba(109, 74, 255, 0.18);
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.website-editor-shell {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.34fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.website-editor-menu {
+  display: grid;
+  gap: 8px;
+}
+
+.website-editor-menu button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e2e8f0;
+  text-align: right;
+  cursor: pointer;
+}
+
+.website-editor-menu button:hover,
+.website-editor-menu button.active {
+  border-color: rgba(243, 166, 200, 0.7);
+  background: linear-gradient(135deg, rgba(109, 74, 255, 0.34), rgba(243, 166, 200, 0.16));
+  color: #fff;
+}
+
+.website-editor-menu i {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: rgba(243, 166, 200, 0.18);
+  color: #f3a6c8;
+}
+
+.website-editor-menu strong,
+.website-editor-menu small {
+  display: block;
+}
+
+.website-editor-menu strong {
+  margin-bottom: 3px;
+  font-size: 0.95rem;
+}
+
+.website-editor-menu small {
+  color: rgba(226, 232, 240, 0.72);
+  line-height: 1.45;
+}
+
+.website-editor-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.website-editor-panel .settings-card {
+  margin-bottom: 0;
+}
+
+.website-admin-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgba(243, 166, 200, 0.32);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(243, 166, 200, 0.08);
+}
+
+.website-admin-link strong,
+.website-admin-link span {
+  display: block;
+}
+
+.website-admin-link span {
+  margin-top: 4px;
+  color: rgba(226, 232, 240, 0.78);
+  line-height: 1.55;
+}
+
+.website-admin-link a {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 9px 14px;
+  background: #6d4aff;
+  color: #fff;
+  text-decoration: none;
+  font-weight: 800;
+}
+
 .settings-wide-field {
   grid-column: 1 / -1;
 }
@@ -496,6 +613,19 @@
 @media (max-width: 1000px) {
   .submenu-row {
     grid-template-columns: 1fr;
+  }
+
+  .website-editor-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .website-admin-link {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .website-admin-link a {
+    text-align: center;
   }
 
   .quick-link-row {

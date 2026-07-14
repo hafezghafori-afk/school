@@ -30,21 +30,60 @@ const extractSchoolSlug = (pathname = '') => {
   return match ? decodeURIComponent(match[1]) : '';
 };
 
+const getAuthHeaders = () => {
+  try {
+    const token = window.localStorage.getItem('token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+};
+
 const isPublicWebsitePath = (pathname = '') => {
   const path = String(pathname || '/');
   return path === '/'
+    || path === '/login'
     || path === '/about'
     || path === '/contact'
+    || path === '/news'
+    || path.startsWith('/news/')
+    || path === '/gallery'
     || path.startsWith('/schools/');
 };
 
-const mergeSchoolWebsiteSettings = (settings, profile) => {
-  if (!profile) return settings;
+const pickSchoolName = (school, language = 'fa') => {
+  if (!school) return '';
+  if (language === 'ps') return school.namePashto || school.nameDari || school.name || '';
+  if (language === 'en') return school.name || school.nameDari || school.namePashto || '';
+  return school.nameDari || school.name || school.namePashto || '';
+};
+
+const mergeSchoolWebsiteSettings = (settings, profile, activeSchool, language = 'fa') => {
+  const schoolName = pickSchoolName(activeSchool, language);
+  const schoolContact = activeSchool?.contactInfo || {};
+  const officialLogo = settings?.schoolLogoUrl || settings?.logoUrl || profile?.schoolLogoUrl || profile?.logoUrl || '';
+  if (!profile) {
+    return {
+      ...(settings || {}),
+      brandName: schoolName || settings?.brandName,
+      schoolLogoUrl: officialLogo || settings?.schoolLogoUrl || settings?.logoUrl || '',
+      logoUrl: officialLogo || settings?.logoUrl || settings?.schoolLogoUrl || '',
+      contactPhone: schoolContact.phone || schoolContact.mobile || settings?.contactPhone || '',
+      contactEmail: schoolContact.email || settings?.contactEmail || '',
+      contactAddress: schoolContact.address || settings?.contactAddress || ''
+    };
+  }
   return {
     ...(settings || {}),
     ...profile,
     isSchoolWebsite: true,
     languages: ['فارسی', 'English', 'پشتو'],
+    brandName: schoolName || profile.brandName || settings?.brandName,
+    schoolLogoUrl: officialLogo || '',
+    logoUrl: officialLogo || '',
+    contactPhone: schoolContact.phone || schoolContact.mobile || profile.contactPhone || settings?.contactPhone || '',
+    contactEmail: schoolContact.email || profile.contactEmail || settings?.contactEmail || '',
+    contactAddress: schoolContact.address || profile.contactAddress || settings?.contactAddress || '',
     mainMenu: profile.mainMenu || settings?.mainMenu || [],
     footerLinks: profile.footerLinks || settings?.footerLinks || [],
     socialLinks: profile.socialLinks || settings?.socialLinks || []
@@ -70,9 +109,18 @@ export default function useSiteSettings() {
           ? fetch(`${API_BASE}/api/school-websites/public?slug=${encodeURIComponent(schoolSlug)}&lang=${encodeURIComponent(language)}`)
           : Promise.resolve(null)
       ]);
+      const activeSchoolResponse = await fetch(`${API_BASE}/api/afghan-schools/active`, {
+        headers: { ...getAuthHeaders() }
+      }).catch(() => null);
       const data = await settingsResponse.json();
       const profileData = profileResponse ? await profileResponse.json().catch(() => ({})) : {};
-      setSettings(mergeSchoolWebsiteSettings(data?.settings || null, profileData?.profile || null));
+      const activeSchoolData = activeSchoolResponse ? await activeSchoolResponse.json().catch(() => ({})) : {};
+      setSettings(mergeSchoolWebsiteSettings(
+        data?.settings || null,
+        profileData?.profile || null,
+        activeSchoolData?.data?.school || null,
+        language
+      ));
     } catch (error) {
       setSettings(null);
     } finally {

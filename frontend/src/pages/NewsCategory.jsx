@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import useSiteSettings from '../hooks/useSiteSettings';
+import { PublicLayout } from '../components/public';
 import './News.css';
 
 import { API_BASE } from '../config/api';
@@ -27,6 +29,7 @@ const label = (cat) => {
 
 export default function NewsCategory() {
   const { category } = useParams();
+  const { settings } = useSiteSettings();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -51,7 +54,8 @@ export default function NewsCategory() {
   }, [category]);
 
   return (
-    <section className="news-page">
+    <PublicLayout active="اخبار" settings={settings}>
+      <section className="news-page public-container">
       <div className="news-hero">
         <div>
           <h1>{label(category)}</h1>
@@ -87,6 +91,7 @@ export default function NewsCategory() {
           </article>
         ))}
       </div>
-    </section>
+      </section>
+    </PublicLayout>
   );
 }

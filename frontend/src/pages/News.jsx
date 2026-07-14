@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, Link } from 'react-router-dom';
+import useSiteSettings from '../hooks/useSiteSettings';
+import { PublicLayout } from '../components/public';
 import './News.css';
 
 import { API_BASE } from '../config/api';
@@ -28,6 +30,7 @@ const resolveImage = (url) => {
 
 export default function News() {
   const location = useLocation();
+  const { settings } = useSiteSettings();
   const [items, setItems] = useState([]);
   const [active, setActive] = useState('all');
   const [loading, setLoading] = useState(false);
@@ -68,7 +71,8 @@ export default function News() {
   }, [active]);
 
   return (
-    <section className="news-page">
+    <PublicLayout active="اخبار" settings={settings}>
+      <section className="news-page public-container">
       <div className="news-hero">
         <div>
           <h1>خبرها و اعلانات</h1>
@@ -121,6 +125,7 @@ export default function News() {
           </article>
         ))}
       </div>
-    </section>
+      </section>
+    </PublicLayout>
   );
 }

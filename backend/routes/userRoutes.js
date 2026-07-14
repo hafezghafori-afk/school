@@ -12,21 +12,10 @@ const AccessRequest = require('../models/AccessRequest');
 const UserNotification = require('../models/UserNotification');
 const { resolvePermissions } = require('../utils/permissions');
 const { normalizeAdminLevel } = require('../utils/permissions');
+const { ACCESS_PERMISSION_KEYS } = require('../utils/permissionCatalog');
 const { serializeUserIdentity } = require('../utils/userRole');
 
 const router = express.Router();
-const ACCESS_PERMISSION_KEYS = new Set([
-  'manage_users',
-  'manage_enrollments',
-  'manage_memberships',
-  'manage_finance',
-  'manage_content',
-  'view_reports',
-  'view_schedule',
-  'manage_schedule',
-  'access_school_manager',
-  'access_head_teacher'
-]);
 
 const avatarDir = path.join(__dirname, '..', 'uploads', 'avatars');
 if (!fs.existsSync(avatarDir)) {

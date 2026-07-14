@@ -140,3 +140,69 @@
     transition: none;
   }
 }
+
+.public-layout .contact-page {
+  max-width: none;
+  padding: 42px 0 12px;
+  color: var(--public-ink);
+}
+
+.public-layout .contact-hero p,
+.public-layout .contact-support p,
+.public-layout .contact-note {
+  color: var(--public-muted);
+}
+
+.public-layout .contact-hero-btn,
+.public-layout .contact-form button {
+  width: auto;
+  color: #ffffff;
+  background: var(--public-primary);
+  border-radius: var(--public-radius);
+  box-shadow: 0 14px 28px rgba(109, 74, 255, 0.22);
+}
+
+.public-layout .contact-card,
+.public-layout .contact-support {
+  background: var(--public-surface);
+  border: 1px solid var(--public-border);
+  border-radius: var(--public-radius);
+  box-shadow: var(--public-shadow-soft);
+}
+
+.public-layout .contact-item span {
+  color: var(--public-muted);
+}
+
+.public-layout .contact-item strong {
+  color: var(--public-ink);
+}
+
+.public-layout .contact-form {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.public-layout .contact-form input,
+.public-layout .contact-form select,
+.public-layout .contact-form textarea {
+  color: var(--public-ink);
+  background: #ffffff;
+  border: 1px solid rgba(109, 74, 255, 0.18);
+  border-radius: var(--public-radius);
+}
+
+.public-layout .contact-form input:hover,
+.public-layout .contact-form textarea:hover,
+.public-layout .contact-form select:hover,
+.public-layout .contact-form input:focus,
+.public-layout .contact-form textarea:focus,
+.public-layout .contact-form select:focus {
+  outline: none;
+  border-color: var(--public-primary);
+  box-shadow: 0 0 0 3px rgba(109, 74, 255, 0.12);
+}

@@ -7,6 +7,550 @@
   line-height: 1.65;
 }
 
+.admin-page > :is(
+  .admin-hero,
+  .admin-active-school-scope,
+  .admin-ownership-audit,
+  .admin-school-switcher,
+  .admin-executive-strip,
+  .admin-stats,
+  .admin-access-note,
+  .admin-access-matrix,
+  .admin-action-strip,
+  .admin-report-audit,
+  .admin-workflow-report,
+  .admin-inbox,
+  .admin-columns,
+  .admin-alerts,
+  .admin-activity
+) {
+  display: none !important;
+}
+
+.admin-page > .admin-orders {
+  display: none !important;
+}
+
+.admin-page > :is(
+  .admin-hero,
+  .admin-active-school-scope,
+  .admin-ownership-audit,
+  .admin-school-switcher,
+  .admin-executive-strip,
+  .admin-stats,
+  .admin-access-note,
+  .admin-access-matrix,
+  .admin-action-strip,
+  .admin-report-audit,
+  .admin-workflow-report,
+  .admin-inbox,
+  .admin-columns,
+  .admin-alerts,
+  .admin-activity
+) {
+  display: none !important;
+}
+
+.admin-modern-dashboard {
+  display: grid;
+  gap: 16px;
+  color: #172033;
+}
+
+.admin-modern-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #f8fafc;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+}
+
+.admin-modern-eyebrow {
+  display: block;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.admin-modern-hero h1,
+.admin-modern-panel h2,
+.admin-modern-management-card h2 {
+  margin: 0;
+  color: #0f172a;
+  line-height: 1.45;
+}
+
+.admin-modern-hero h1 {
+  font-size: clamp(24px, 3vw, 34px);
+}
+
+.admin-modern-hero p,
+.admin-modern-management-card p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.admin-modern-top-actions,
+.admin-modern-tabs,
+.admin-modern-panel-head,
+.admin-school-switcher__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-modern-top-actions {
+  justify-content: flex-end;
+}
+
+.admin-modern-top-actions button,
+.admin-modern-tabs button,
+.admin-modern-panel-head button,
+.admin-modern-management-card a,
+.admin-modern-management-card button,
+.admin-modern-shortcuts a,
+.admin-modern-shortcuts button,
+.admin-school-switcher__refresh,
+.admin-school-switcher__actions button {
+  width: auto;
+  min-height: 36px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 118, 110, 0.2);
+  background: #0f766e;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.admin-modern-top-actions button.danger,
+.admin-school-switcher__actions button.danger {
+  border-color: rgba(220, 38, 38, 0.28);
+  background: #dc2626;
+}
+
+.admin-modern-tabs {
+  padding: 6px;
+  border-radius: 12px;
+  background: #e2e8f0;
+  width: fit-content;
+}
+
+.admin-modern-tabs button {
+  background: transparent;
+  color: #334155;
+  border-color: transparent;
+}
+
+.admin-modern-tabs button.active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.1);
+}
+
+.admin-modern-overview,
+.admin-modern-management {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-modern-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-modern-kpi,
+.admin-modern-panel,
+.admin-modern-management-card {
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.admin-modern-kpi {
+  display: grid;
+  gap: 2px;
+  padding: 12px;
+}
+
+.admin-modern-kpi span,
+.admin-modern-kpi small,
+.admin-modern-list-item small,
+.admin-modern-shortcuts small {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.admin-modern-kpi strong {
+  color: #0f172a;
+  font-size: 22px;
+  line-height: 1.35;
+}
+
+.admin-modern-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.9fr 0.9fr;
+  gap: 12px;
+}
+
+.admin-modern-panel {
+  padding: 14px;
+}
+
+.admin-modern-panel--wide {
+  grid-row: span 1;
+}
+
+.admin-modern-panel-head {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.admin-modern-panel-head a {
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.admin-modern-school-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-modern-school-summary span {
+  padding: 10px;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.admin-modern-school-summary b {
+  display: block;
+  color: #0f172a;
+  font-size: 18px;
+}
+
+.admin-modern-list {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-modern-list-item {
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #0f172a;
+  text-decoration: none;
+}
+
+.admin-modern-empty {
+  padding: 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.admin-modern-shortcuts,
+.admin-modern-management-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.admin-modern-management-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-modern-management-group {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-modern-management-group__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px;
+}
+
+.admin-modern-management-group__head strong {
+  color: rgba(203, 213, 225, 0.78);
+  font-size: 12px;
+}
+
+.admin-modern-shortcuts a,
+.admin-modern-shortcuts button {
+  display: grid;
+  gap: 2px;
+  justify-content: stretch;
+  min-height: 76px;
+  padding: 12px;
+  text-align: right;
+  background: #ffffff;
+  color: #0f172a;
+  border-color: rgba(15, 23, 42, 0.08);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
+}
+
+.admin-modern-shortcuts strong {
+  font-size: 14px;
+}
+
+.admin-modern-management-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+}
+
+.admin-modern-management-card span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 30px;
+  margin-bottom: 5px;
+  border-radius: 999px;
+  background: #ccfbf1;
+  color: #0f766e;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.admin-modern-management-card em {
+  color: #94a3b8;
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.admin-modern-schools {
+  margin: 0;
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.admin-modern-schools .admin-active-school-scope__eyebrow,
+.admin-modern-schools .admin-school-switcher__head h3,
+.admin-modern-schools .admin-school-switcher__head p,
+.admin-modern-schools .admin-school-switcher__empty,
+.admin-modern-schools .admin-school-switcher__table td,
+.admin-modern-schools .admin-school-switcher__table th,
+.admin-modern-schools .admin-school-switcher__toolbar label {
+  color: #0f172a;
+}
+
+.admin-modern-schools .admin-school-switcher__head p,
+.admin-modern-schools .admin-school-switcher__empty,
+.admin-modern-schools .admin-school-switcher__table small {
+  color: #64748b;
+}
+
+.admin-modern-schools .admin-school-switcher__toolbar input,
+.admin-modern-schools .admin-school-switcher__toolbar select {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.admin-modern-schools .admin-school-switcher__table-wrap,
+.admin-modern-schools .admin-school-switcher__table th,
+.admin-modern-schools .admin-school-switcher__table tbody tr,
+.admin-modern-schools .admin-school-switcher__table tbody tr:nth-child(even) {
+  background: #ffffff;
+}
+
+.admin-modern-schools .admin-school-switcher__table tbody tr.is-current {
+  background: #ecfdf5;
+}
+
+.admin-modern-dashboard {
+  color: #e5edf7;
+}
+
+.admin-modern-hero,
+.admin-modern-kpi,
+.admin-modern-panel,
+.admin-modern-management-card,
+.admin-modern-shortcuts a,
+.admin-modern-shortcuts button,
+.admin-modern-search-panel,
+.admin-modern-schools {
+  border-color: rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.78);
+  box-shadow: 0 16px 34px rgba(2, 6, 23, 0.22);
+}
+
+.admin-modern-hero {
+  background:
+    linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.9)),
+    linear-gradient(135deg, rgba(20, 184, 166, 0.12), rgba(56, 189, 248, 0.08));
+}
+
+.admin-modern-hero h1,
+.admin-modern-panel h2,
+.admin-modern-management-card h2,
+.admin-modern-kpi strong,
+.admin-modern-school-summary b,
+.admin-modern-shortcuts strong,
+.admin-modern-list-item strong,
+.admin-modern-search-group h3,
+.admin-modern-schools .admin-school-switcher__head h3,
+.admin-modern-schools .admin-school-switcher__table td,
+.admin-modern-schools .admin-school-switcher__table th {
+  color: #f8fafc;
+}
+
+.admin-modern-hero p,
+.admin-modern-management-card p,
+.admin-modern-kpi span,
+.admin-modern-kpi small,
+.admin-modern-list-item small,
+.admin-modern-shortcuts small,
+.admin-modern-schools .admin-school-switcher__head p,
+.admin-modern-schools .admin-school-switcher__empty,
+.admin-modern-schools .admin-school-switcher__table small,
+.admin-modern-schools .admin-school-switcher__toolbar label {
+  color: rgba(203, 213, 225, 0.82);
+}
+
+.admin-modern-eyebrow,
+.admin-modern-panel-head a,
+.admin-modern-schools .admin-active-school-scope__eyebrow {
+  color: #5eead4;
+}
+
+.admin-modern-tabs {
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.admin-modern-tabs button {
+  color: rgba(226, 232, 240, 0.78);
+}
+
+.admin-modern-tabs button.active {
+  background: rgba(20, 184, 166, 0.16);
+  color: #f8fafc;
+  box-shadow: none;
+}
+
+.admin-modern-school-summary span,
+.admin-modern-list-item,
+.admin-modern-empty,
+.admin-modern-search-group a {
+  background: rgba(30, 41, 59, 0.72);
+  color: #f8fafc;
+}
+
+.admin-modern-management-card span {
+  background: rgba(20, 184, 166, 0.16);
+  color: #99f6e4;
+}
+
+.admin-modern-management-card--utility span {
+  background: rgba(59, 130, 246, 0.18);
+  color: #bfdbfe;
+}
+
+.admin-modern-search-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 10px;
+}
+
+.admin-modern-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.admin-modern-search-row input,
+.admin-modern-schools .admin-school-switcher__toolbar input,
+.admin-modern-schools .admin-school-switcher__toolbar select {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.72);
+  color: #f8fafc;
+}
+
+.admin-modern-search-row input {
+  min-height: 40px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  padding: 8px 10px;
+  font-family: inherit;
+}
+
+.admin-modern-search-row button {
+  width: auto;
+  min-height: 40px;
+  border-radius: 8px;
+  border: 1px solid rgba(20, 184, 166, 0.28);
+  background: #0f766e;
+  color: #ffffff;
+  font-family: inherit;
+  font-weight: 900;
+}
+
+.admin-modern-search-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.admin-modern-search-group {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-modern-search-group h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.admin-modern-search-group a {
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+  border-radius: 8px;
+  text-decoration: none;
+}
+
+.admin-modern-schools .admin-school-switcher__table-wrap,
+.admin-modern-schools .admin-school-switcher__table th,
+.admin-modern-schools .admin-school-switcher__table tbody tr,
+.admin-modern-schools .admin-school-switcher__table tbody tr:nth-child(even) {
+  background: rgba(15, 23, 42, 0.34);
+}
+
+.admin-modern-schools .admin-school-switcher__table tbody tr.is-current {
+  background: rgba(20, 184, 166, 0.13);
+}
+
 .admin-page :is(a, button, input, select, textarea) {
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }
@@ -246,6 +790,13 @@
   line-height: 1.5;
 }
 
+.admin-school-switcher__head p {
+  margin: 3px 0 0;
+  color: rgba(226, 232, 240, 0.72);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .admin-school-switcher__refresh,
 .admin-school-switcher__actions button {
   width: auto;
@@ -261,43 +812,119 @@
   cursor: pointer;
 }
 
-.admin-school-switcher__grid {
+.admin-school-switcher__summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
 }
 
-.admin-school-switcher__item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px;
+.admin-school-switcher__summary span {
+  min-width: 0;
+  padding: 9px 10px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(2, 6, 23, 0.24);
+  color: rgba(226, 232, 240, 0.78);
+  font-size: 12px;
+  font-weight: 800;
 }
 
-.admin-school-switcher__item.is-active {
-  border-color: rgba(45, 212, 191, 0.45);
+.admin-school-switcher__summary b {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  color: #ffffff;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-school-switcher__toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(150px, 220px);
+  gap: 10px;
+  align-items: end;
+}
+
+.admin-school-switcher__toolbar label {
+  display: grid;
+  gap: 5px;
+  color: rgba(226, 232, 240, 0.84);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.admin-school-switcher__toolbar input,
+.admin-school-switcher__toolbar select {
+  min-height: 38px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.56);
+  color: #f8fafc;
+  padding: 7px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.admin-school-switcher__table-wrap {
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.admin-school-switcher__table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+
+.admin-school-switcher__table th,
+.admin-school-switcher__table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.13);
+  text-align: right;
+  vertical-align: middle;
+}
+
+.admin-school-switcher__table th {
+  background: rgba(15, 23, 42, 0.72);
+  color: rgba(226, 232, 240, 0.82);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.admin-school-switcher__table td {
+  color: rgba(248, 250, 252, 0.88);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.admin-school-switcher__table tbody tr {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.admin-school-switcher__table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.admin-school-switcher__table tbody tr.is-current {
   background: rgba(20, 184, 166, 0.13);
 }
 
-.admin-school-switcher__item strong,
-.admin-school-switcher__item span,
-.admin-school-switcher__item small {
+.admin-school-switcher__table strong,
+.admin-school-switcher__table small,
+.admin-school-switcher__empty {
   display: block;
 }
 
-.admin-school-switcher__item strong {
+.admin-school-switcher__table strong {
   color: #ffffff;
-  font-size: 14px;
 }
 
-.admin-school-switcher__item span,
-.admin-school-switcher__item small,
+.admin-school-switcher__table small,
 .admin-school-switcher__empty {
-  color: rgba(226, 232, 240, 0.82);
+  color: rgba(226, 232, 240, 0.68);
   font-size: 12px;
   font-weight: 700;
 }
@@ -349,6 +976,12 @@
   border: 1px solid rgba(45, 212, 191, 0.42);
   font-size: 12px;
   font-weight: 800;
+}
+
+.admin-school-switcher__badge.muted {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(71, 85, 105, 0.2);
+  color: rgba(226, 232, 240, 0.78);
 }
 
 .admin-school-switcher__message {
@@ -2547,6 +3180,31 @@
     padding: 20px 14px 44px;
   }
 
+  .admin-modern-hero,
+  .admin-modern-management-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .admin-modern-top-actions,
+  .admin-modern-panel-head {
+    justify-content: flex-start;
+  }
+
+  .admin-modern-tabs {
+    width: 100%;
+  }
+
+  .admin-modern-tabs button {
+    flex: 1;
+  }
+
+  .admin-modern-kpis,
+  .admin-modern-grid,
+  .admin-modern-school-summary {
+    grid-template-columns: 1fr;
+  }
+
   .admin-hero {
     flex-direction: column;
     align-items: flex-start;
@@ -2591,10 +3249,14 @@
     grid-template-columns: 1fr;
   }
 
-  .admin-school-switcher__head,
-  .admin-school-switcher__item {
+  .admin-school-switcher__head {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .admin-school-switcher__summary,
+  .admin-school-switcher__toolbar {
+    grid-template-columns: 1fr;
   }
 
   .admin-school-switcher__actions {

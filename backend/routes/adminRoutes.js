@@ -25,6 +25,7 @@ const AccessRequest = require('../models/AccessRequest');
 const UserNotification = require('../models/UserNotification');
 const { sendMail } = require('../utils/mailer');
 const { resolvePermissions, normalizeAdminLevel } = require('../utils/permissions');
+const { ACCESS_PERMISSION_KEYS } = require('../utils/permissionCatalog');
 const {
   buildUserRoleState,
   serializeUserIdentity,
@@ -34,7 +35,7 @@ const {
   isKnownCompatibilityRole,
   normalizeUserStatus
 } = require('../utils/userRole');
-const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
+const { requireAuth, requireRole, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const { runSlaEscalationSweep, LEVEL_TIMEOUT_MINUTES } = require('../services/slaAutomation');
 
 const router = express.Router();
@@ -201,19 +202,6 @@ const serializeMembershipAccessRecord = (item = {}) => ({
   createdAt: item.createdAt || null,
   updatedAt: item.updatedAt || null
 });
-const ACCESS_PERMISSION_KEYS = new Set([
-  'manage_users',
-  'manage_enrollments',
-  'manage_memberships',
-  'manage_finance',
-  'manage_content',
-  'view_reports',
-  'view_schedule',
-  'manage_schedule',
-  'access_school_manager',
-  'access_head_teacher'
-]);
-
 const normalizeFollowUpLevel = (value = '', fallback = 'finance_manager') => {
   const normalized = normalizeAdminLevel(value || fallback);
   return FOLLOW_UP_LEVELS.includes(normalized) ? normalized : 'finance_manager';
@@ -543,7 +531,7 @@ const sanitizeManagedPermissions = (orgRole = 'student', permissions = []) => {
   ));
 };
 
-router.get('/users', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.get('/users', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.manage']), async (req, res) => {
   try {
     await ensureRegisteredStudentsInUserDirectory();
     await ensureRegisteredTeachersInUserDirectory();
@@ -564,7 +552,7 @@ router.get('/users', requireAuth, requireRole(['admin']), requirePermission('man
   }
 });
 
-router.post('/users', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.post('/users', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.create']), async (req, res) => {
   try {
     const name = String(req.body?.name || '').trim();
     const email = String(req.body?.email || '').trim().toLowerCase();
@@ -622,7 +610,7 @@ router.post('/users', requireAuth, requireRole(['admin']), requirePermission('ma
   }
 });
 
-router.put('/users/:id/role', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.put('/users/:id/role', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.roles.manage']), async (req, res) => {
   try {
     const userId = String(req.params.id || '').trim();
     const current = await User.findById(userId).select('_id permissions');
@@ -662,7 +650,7 @@ router.put('/users/:id/role', requireAuth, requireRole(['admin']), requirePermis
   }
 });
 
-router.put('/users/:id/permissions', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.put('/users/:id/permissions', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.permissions.manage']), async (req, res) => {
   try {
     const userId = String(req.params.id || '').trim();
     const current = await User.findById(userId).select('_id orgRole');
@@ -694,7 +682,7 @@ router.put('/users/:id/permissions', requireAuth, requireRole(['admin']), requir
   }
 });
 
-router.put('/users/:id/status', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.put('/users/:id/status', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.deactivate']), async (req, res) => {
   try {
     const userId = String(req.params.id || '').trim();
     const status = normalizeUserStatus(req.body?.status || '', 'active');
@@ -728,7 +716,7 @@ router.put('/users/:id/status', requireAuth, requireRole(['admin']), requirePerm
   }
 });
 
-router.put('/users/:id', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.put('/users/:id', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.edit']), async (req, res) => {
   try {
     const userId = String(req.params.id || '').trim();
     const current = await User.findById(userId).select('_id email orgRole status');
@@ -927,8 +915,8 @@ const deactivateManagedUser = async (req, res) => {
   }
 };
 
-router.put('/users/:id/deactivate', requireAuth, requireRole(['admin']), requirePermission('manage_users'), deactivateManagedUser);
-router.put('/users/:id/student-deactivate', requireAuth, requireRole(['admin']), requirePermission('manage_users'), deactivateManagedUser);
+router.put('/users/:id/deactivate', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.deactivate']), deactivateManagedUser);
+router.put('/users/:id/student-deactivate', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.deactivate']), deactivateManagedUser);
 
 const sortAlertsByPriority = (items = []) => [...items].sort((a, b) => {
   const levelA = Object.prototype.hasOwnProperty.call(ALERT_LEVEL_ORDER, a?.level || '')
@@ -1004,9 +992,11 @@ router.get('/stats', requireAuth, requireRole(['admin']), requirePermission('vie
     }
 
     const schoolFilter = req.user?.isDemo === true && req.user?.schoolId ? { schoolId: req.user.schoolId } : {};
-    const [users, activeUsers, courses, totalReceipts, pendingReceipts, approvedReceipts, periodApprovedReceipts] = await Promise.all([
+    const [users, activeUsers, officialStudents, officialTeachers, courses, totalReceipts, pendingReceipts, approvedReceipts, periodApprovedReceipts] = await Promise.all([
       User.countDocuments(schoolFilter),
       User.countDocuments({ ...schoolFilter, status: 'active' }),
+      AfghanStudent.countDocuments({ status: 'active' }),
+      AfghanTeacher.countDocuments({ status: 'active' }),
       Course.countDocuments(),
       FeePayment.countDocuments(schoolFilter),
       FeePayment.countDocuments({ ...schoolFilter, status: 'pending' }),
@@ -1019,6 +1009,8 @@ router.get('/stats', requireAuth, requireRole(['admin']), requirePermission('vie
       period,
       users,
       activeUsers,
+      officialStudents,
+      officialTeachers,
       courses,
       receipts: totalReceipts,
       pendingReceipts,
@@ -1055,7 +1047,7 @@ router.get('/students/:id/activity', requireAuth, requireRole(['admin']), requir
   }
 });
 
-router.get('/profile-update-requests', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.get('/profile-update-requests', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.profile_requests.manage']), async (req, res) => {
   try {
     const status = String(req.query.status || 'pending');
     const filter = ['pending', 'approved', 'rejected'].includes(status) ? { status } : {};
@@ -1072,7 +1064,7 @@ router.get('/profile-update-requests', requireAuth, requireRole(['admin']), requ
   }
 });
 
-router.post('/profile-update-requests/:id/approve', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.post('/profile-update-requests/:id/approve', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.profile_requests.manage']), async (req, res) => {
   try {
     const item = await ProfileUpdateRequest.findById(req.params.id);
     if (!item) return res.status(404).json({ success: false, message: 'درخواست یافت نشد' });
@@ -1135,7 +1127,7 @@ router.post('/profile-update-requests/:id/approve', requireAuth, requireRole(['a
   }
 });
 
-router.post('/profile-update-requests/:id/reject', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.post('/profile-update-requests/:id/reject', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.profile_requests.manage']), async (req, res) => {
   try {
     const reason = String(req.body?.reason || '').trim();
     const item = await ProfileUpdateRequest.findById(req.params.id);
@@ -1181,7 +1173,7 @@ router.post('/profile-update-requests/:id/reject', requireAuth, requireRole(['ad
   }
 });
 
-router.post('/profile-update-requests/:id/follow-up', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.post('/profile-update-requests/:id/follow-up', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.profile_requests.manage']), async (req, res) => {
   try {
     const item = await ProfileUpdateRequest.findById(req.params.id).populate('user', 'name');
     if (!item) return res.status(404).json({ success: false, message: 'درخواست یافت نشد' });
@@ -1233,7 +1225,7 @@ router.post('/profile-update-requests/:id/follow-up', requireAuth, requireRole([
   }
 });
 
-router.get('/access-requests', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.get('/access-requests', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.access_requests.manage']), async (req, res) => {
   try {
     const statusRaw = String(req.query?.status || 'pending').trim().toLowerCase();
     const status = ['pending', 'approved', 'rejected', 'all'].includes(statusRaw) ? statusRaw : 'pending';
@@ -1258,7 +1250,7 @@ router.get('/access-requests', requireAuth, requireRole(['admin']), requirePermi
   }
 });
 
-router.post('/access-requests/bulk', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.post('/access-requests/bulk', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.access_requests.manage']), async (req, res) => {
   try {
     const action = String(req.body?.action || '').trim().toLowerCase();
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((id) => String(id || '').trim()).filter(Boolean) : [];
@@ -1406,7 +1398,7 @@ router.post('/access-requests/bulk', requireAuth, requireRole(['admin']), requir
   }
 });
 
-router.post('/access-requests/:id/approve', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.post('/access-requests/:id/approve', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.access_requests.manage']), async (req, res) => {
   try {
     const decisionNote = String(req.body?.note || '').trim().slice(0, 400);
     const item = await AccessRequest.findById(req.params.id);
@@ -1492,7 +1484,7 @@ router.post('/access-requests/:id/approve', requireAuth, requireRole(['admin']),
   }
 });
 
-router.post('/access-requests/:id/reject', requireAuth, requireRole(['admin']), requirePermission('manage_users'), async (req, res) => {
+router.post('/access-requests/:id/reject', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.access_requests.manage']), async (req, res) => {
   try {
     const decisionNote = String(req.body?.note || '').trim().slice(0, 400);
     const item = await AccessRequest.findById(req.params.id);

@@ -154,3 +154,45 @@
     transition: none;
   }
 }
+
+.public-layout .about-page {
+  max-width: none;
+  padding: 42px 0 12px;
+  color: var(--public-ink);
+}
+
+.public-layout .about-hero {
+  align-items: stretch;
+}
+
+.public-layout .about-hero p,
+.public-layout .about-card p,
+.public-layout .about-values-grid p,
+.public-layout .about-timeline-grid p {
+  color: var(--public-muted);
+}
+
+.public-layout .about-hero-card,
+.public-layout .about-stats div,
+.public-layout .about-card,
+.public-layout .about-values-grid div,
+.public-layout .about-timeline-grid div {
+  background: var(--public-surface);
+  border: 1px solid var(--public-border);
+  border-radius: var(--public-radius);
+  box-shadow: var(--public-shadow-soft);
+}
+
+.public-layout .about-stats strong {
+  color: var(--public-primary);
+}
+
+.public-layout .about-timeline-grid span {
+  color: var(--public-primary);
+  font-weight: 900;
+}
+
+.public-layout .about-page :is(a, button, input, select, textarea):focus-visible {
+  outline-color: var(--public-primary);
+  box-shadow: 0 0 0 3px rgba(109, 74, 255, 0.14);
+}

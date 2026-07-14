@@ -20,6 +20,7 @@ const TeacherAssignment = require('../models/TeacherAssignment');
 const UserNotification = require('../models/UserNotification');
 const { deactivateCurrentMemberships } = require('../utils/studentMembershipSync');
 const { findAccessibleCourses } = require('../utils/courseAccess');
+const { ensureAfghanStudentProfile } = require('../services/afghanStudentProfileService');
 const { requireAuth, requireRole, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const { logActivity } = require('../utils/activity');
 
@@ -818,6 +819,7 @@ const populateStudentEnrollments = (query) => query
 const serializeStudentEnrollment = (item, schoolClass = null) => ({
   _id: item._id,
   user: item.student || null,
+  afghanStudentId: item.afghanStudentId || null,
   course: item.course || null,
   courseId: item.course?._id || item.course || null,
   classId: schoolClass?.id || schoolClass?._id || item.classId?._id || item.classId || null,
@@ -2457,6 +2459,27 @@ router.post('/student-enrollments', ...withManageMemberships, async (req, res) =
     if (req.user?.id) item.createdBy = req.user.id;
 
     await item.save();
+
+    const profileResult = await ensureAfghanStudentProfile({
+      source: 'teaching_enrollment',
+      user: resolvedStudent.user,
+      enrollment: resolvedStudent.sourceType === 'enrollment' ? resolvedStudent.sourceItem : null,
+      schoolId: classRef.schoolClass?.schoolId || null,
+      schoolClass: classRef.schoolClass || null,
+      academicYearId: nextAcademicYearId,
+      actorId: req.user?.id || null,
+      defaults: {
+        fullName: resolvedStudent.user?.name || '',
+        email: resolvedStudent.user?.email || '',
+        classId: nextClassId || null,
+        academicYearId: nextAcademicYearId || null,
+        note: 'ساخته/وصل شده از ثبت تدریسی'
+      }
+    });
+    if (profileResult?.student?._id && String(item.afghanStudentId || '') !== String(profileResult.student._id)) {
+      item.afghanStudentId = profileResult.student._id;
+      await item.save();
+    }
 
     await logActivity({
       req,

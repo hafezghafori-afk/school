@@ -1245,6 +1245,207 @@
   justify-content: flex-start;
 }
 
+.admin-education-page.enrollments-mode .admin-education-main {
+  gap: 14px;
+}
+
+.admin-education-page.enrollments-mode .admin-registration-command-center {
+  padding: 18px;
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(180, 83, 9, 0.06)),
+    rgba(255, 255, 255, 0.94);
+}
+
+.admin-education-page.enrollments-mode .admin-registration-command-head {
+  padding: 2px 4px 4px;
+  border-bottom: 1px solid rgba(15, 118, 110, 0.1);
+}
+
+.admin-education-page.enrollments-mode .admin-registration-command-head h2 {
+  font-size: 1.28rem;
+}
+
+.admin-education-page.enrollments-mode .admin-registration-command-head p {
+  max-width: 760px;
+  line-height: 1.8;
+}
+
+.admin-education-page.enrollments-mode .admin-registration-main-rail {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.admin-education-page.enrollments-mode .admin-registration-main-rail .admin-registration-task-card {
+  position: relative;
+  min-height: 118px;
+  border: 1px solid #d8e8e4;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
+}
+
+.admin-education-page.enrollments-mode .admin-registration-main-rail .admin-registration-task-card::before {
+  content: '';
+  position: absolute;
+  inset: 12px auto 12px 12px;
+  width: 4px;
+  border-radius: 999px;
+  background: #0f766e;
+  opacity: 0.34;
+}
+
+.admin-education-page.enrollments-mode .admin-registration-main-rail .admin-registration-task-card:hover,
+.admin-education-page.enrollments-mode .admin-registration-main-rail .admin-registration-task-card.active {
+  border-color: #0f766e;
+  box-shadow: 0 18px 34px rgba(15, 118, 110, 0.12);
+}
+
+.admin-education-page.enrollments-mode .admin-registration-main-rail .admin-registration-task-card.active {
+  background: linear-gradient(135deg, #0f766e 0%, #155e75 100%);
+}
+
+.admin-education-page.enrollments-mode .admin-registration-main-rail .admin-registration-task-card:last-child {
+  border-left: 1px solid #d8e8e4;
+}
+
+.admin-education-page.enrollments-mode .admin-registration-panel-stack {
+  gap: 12px;
+}
+
+.admin-education-page.enrollments-mode .admin-registration-panel-card {
+  padding: 14px;
+  border-radius: 18px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.055);
+}
+
+.admin-education-page.enrollments-mode .admin-registration-panel-card:not(.open) {
+  display: none;
+}
+
+.admin-education-page.enrollments-mode .admin-registration-panel-toggle {
+  min-height: 74px;
+  border-radius: 14px;
+  background: #f8fbfa;
+}
+
+.admin-education-page.enrollments-mode .admin-registration-panel-card.open .admin-registration-panel-toggle {
+  background: linear-gradient(135deg, #ecfdf5, #eff6ff);
+}
+
+.admin-education-page.enrollments-mode .admin-registration-panel-toggle strong {
+  font-size: 1rem;
+}
+
+.admin-education-page.enrollments-mode .admin-registration-panel-toggle em {
+  max-width: 760px;
+}
+
+.admin-education-page.enrollments-mode .admin-registration-panel-card.open > h2,
+.admin-education-page.enrollments-mode .admin-registration-panel-card.open > p,
+.admin-education-page.enrollments-mode .admin-registration-panel-card.open > .admin-education-list-toolbar,
+.admin-education-page.enrollments-mode .admin-registration-panel-card.open > .admin-education-search-group,
+.admin-education-page.enrollments-mode .admin-registration-panel-card.open > .admin-education-list,
+.admin-education-page.enrollments-mode .admin-registration-panel-card.open > .admin-workspace-table-wrap,
+.admin-education-page.enrollments-mode .admin-registration-panel-card.open > .admin-education-list-footer {
+  margin-inline: 4px;
+}
+
+.admin-education-page.enrollments-mode .admin-registration-panel-card.open > h2 {
+  margin-top: 2px;
+}
+
+.admin-education-page.enrollments-mode .admin-registration-panel-card.open[data-span='12'] + .admin-registration-panel-card.open[data-span='12'] {
+  margin-top: 2px;
+}
+
+.admin-education-page.enrollments-mode .admin-education-enrollment-layout {
+  gap: 14px;
+}
+
+.admin-education-page.enrollments-mode .admin-education-enrollment-pane {
+  border-radius: 16px;
+  padding: 16px;
+  background: #ffffff;
+}
+
+.admin-education-page.enrollments-mode .admin-education-candidate-card,
+.admin-education-page.enrollments-mode .admin-education-list-item {
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.admin-education-page.enrollments-mode .admin-education-candidate-card:hover,
+.admin-education-page.enrollments-mode .admin-education-list-item:hover {
+  border-color: rgba(15, 118, 110, 0.28);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.055);
+}
+
+.admin-education-page.enrollments-mode .admin-education-search-group {
+  padding: 10px;
+  border-radius: 16px;
+  background: #f8fbfa;
+  border: 1px solid #e1ece9;
+}
+
+.admin-education-page.enrollments-mode .admin-education-search-group input,
+.admin-education-page.enrollments-mode .admin-education-search-group select,
+.admin-education-page.enrollments-mode .admin-workspace-select {
+  min-height: 42px;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.admin-education-page.enrollments-mode .admin-workspace-table-wrap {
+  border-radius: 14px;
+}
+
+.admin-education-page.enrollments-mode .admin-workspace-table {
+  min-width: 820px;
+}
+
+.admin-education-page.enrollments-mode .admin-workspace-table th {
+  background: #f0fdfa;
+  color: #115e59;
+}
+
+.admin-education-page.enrollments-mode .admin-workspace-table td {
+  vertical-align: middle;
+}
+
+.admin-education-page.enrollments-mode .admin-workspace-card.admin-registration-panel-card.open:first-of-type {
+  border-color: rgba(180, 83, 9, 0.18);
+}
+
+.admin-education-page.enrollments-mode .admin-registration-panel-card.open:has(.admin-workspace-form) {
+  border-color: rgba(180, 83, 9, 0.22);
+  background:
+    linear-gradient(180deg, rgba(255, 251, 235, 0.6), rgba(255, 255, 255, 0.95)),
+    #ffffff;
+}
+
+.admin-education-page.enrollments-mode .admin-registration-mode-rail {
+  border-radius: 12px;
+}
+
+.admin-education-page.enrollments-mode .admin-registration-mode-rail button {
+  min-height: 42px;
+}
+
+.admin-education-page.enrollments-mode .admin-registration-wizard-step {
+  border-radius: 12px;
+}
+
+@supports not selector(:has(*)) {
+  .admin-education-page.enrollments-mode .admin-registration-panel-card.open {
+    background: rgba(255, 255, 255, 0.94);
+  }
+}
+
 @media (max-width: 1120px) {
   .admin-education-layout {
     grid-template-columns: 1fr;

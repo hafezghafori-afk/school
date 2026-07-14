@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import useSiteSettings from '../hooks/useSiteSettings';
+import { PublicLayout } from '../components/public';
 import './News.css';
 
 import { API_BASE } from '../config/api';
@@ -14,6 +16,7 @@ const toDate = (value) => {
 };
 
 export default function NewsArchive() {
+  const { settings } = useSiteSettings();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -49,7 +52,8 @@ export default function NewsArchive() {
   }, [items]);
 
   return (
-    <section className="news-page">
+    <PublicLayout active="اخبار" settings={settings}>
+      <section className="news-page public-container">
       <div className="news-hero">
         <div>
           <h1>آرشیف خبرها</h1>
@@ -78,6 +82,7 @@ export default function NewsArchive() {
           </div>
         ))}
       </div>
-    </section>
+      </section>
+    </PublicLayout>
   );
 }

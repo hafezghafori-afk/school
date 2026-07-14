@@ -4,6 +4,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import './LoginModernBase.css';
 import PasswordField from './PasswordField';
 import { persistAuthSession } from '../utils/authSession';
+import { PublicFooter, PublicHeader, SchoolLogo } from './public';
+import useSiteSettings from '../hooks/useSiteSettings';
 
 // استفاده از متغیر محیطی VITE_API_BASE
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -43,6 +45,7 @@ export default function LoginModernBase({
   settingsLoading = false
 }) {
   const navigate = useNavigate();
+  const { settings: publicSettings } = useSiteSettings();
   const emailInputId = useId();
   const passwordInputId = useId();
   const codeInputId = useId();
@@ -251,25 +254,28 @@ export default function LoginModernBase({
   };
 
   return (
-    <div className="login-modern-container" dir="rtl">
-      {/* Simplified background */}
-      <div className="animated-background" style={backgroundStyle} aria-hidden="true"></div>
-
-      <div className="login-card">
+    <div className="login-public-page" dir="rtl">
+      <PublicHeader
+        logoSrc={logoSrc || publicSettings?.schoolLogoUrl || publicSettings?.logoUrl || ''}
+        schoolName={publicSettings?.brandName || 'Iman Girls School'}
+        schoolSubtitle={publicSettings?.brandSubtitle || 'مکتب دخترانه ایمان'}
+        navItems={publicSettings?.mainMenu}
+      />
+      <main className="login-modern-container">
+        <div className="animated-background" style={backgroundStyle} aria-hidden="true"></div>
+        <div className="login-card">
         <div className="login-header">
           <div className="logo-wrapper">
-            <div className="logo-circle" style={{ background: config.gradient }}>
-              {logoSrc && !logoBroken ? (
-                <img
-                  src={logoSrc}
-                  alt={logoAlt}
-                  className="login-logo-image"
-                  onError={() => setLogoBroken(true)}
-                />
-              ) : (
-                config.icon
-              )}
-            </div>
+            <SchoolLogo
+              to={null}
+              logoSrc={logoSrc && !logoBroken ? logoSrc : ''}
+              name="Iman Girls School"
+              subtitle="مکتب دخترانه ایمان"
+              className="login-school-logo"
+            />
+            {logoSrc && !logoBroken ? (
+              <img src={logoSrc} alt={logoAlt} className="login-hidden-logo-probe" onError={() => setLogoBroken(true)} />
+            ) : null}
           </div>
 
           <h1 className="login-title">
@@ -409,6 +415,9 @@ export default function LoginModernBase({
                   نام کاربری یا رمز عبور خود را فراموش کرده‌اید؟
                 </button>
               </p>
+              <p>
+                <Link to="/" className="nav-link">بازگشت به صفحه اصلی</Link>
+              </p>
             </div>
           )}
 
@@ -418,6 +427,9 @@ export default function LoginModernBase({
                 <button type="button" onClick={resetState} className="nav-link" style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer' }}>
                   بازگشت به صفحه ورود
                 </button>
+              </p>
+              <p>
+                <Link to="/" className="nav-link">بازگشت به صفحه اصلی</Link>
               </p>
             </div>
           )}
@@ -433,7 +445,15 @@ export default function LoginModernBase({
             </div>
           )}
         </form>
-      </div>
+        </div>
+      </main>
+      <PublicFooter
+        logoSrc={logoSrc || publicSettings?.schoolLogoUrl || publicSettings?.logoUrl || ''}
+        schoolName={publicSettings?.brandName || 'Iman Girls School'}
+        schoolSubtitle={publicSettings?.brandSubtitle || 'مکتب دخترانه ایمان'}
+        footerLinks={publicSettings?.footerLinks}
+        footerNote={publicSettings?.footerNote || publicSettings?.aboutBody || ''}
+      />
     </div>
   );
 }

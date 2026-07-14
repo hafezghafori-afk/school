@@ -1,14 +1,9 @@
 const fs = require('fs');
 const path = require('path');
+const { ACCESS_PERMISSION_KEYS } = require('../utils/permissionCatalog');
 
 const ROUTES_DIR = path.join(__dirname, '..', 'routes');
-const KNOWN_PERMISSIONS = new Set([
-  'manage_users',
-  'manage_finance',
-  'manage_content',
-  'view_reports',
-  'manage_schedule'
-]);
+const KNOWN_PERMISSIONS = ACCESS_PERMISSION_KEYS;
 
 const ADMIN_ROLE_ALLOWLIST = [
   /backend[\\/]routes[\\/]adminRoutes\.js:\d+.*\/client-activity/
@@ -41,10 +36,25 @@ for (const filePath of routeFiles) {
       }
     }
 
+    const anyPermissionMatches = normalized.matchAll(/requireAnyPermission\(\s*\[([^\]]*)\]\s*\)/g);
+    for (const match of anyPermissionMatches) {
+      const listSource = String(match?.[1] || '');
+      const keys = Array.from(listSource.matchAll(/['"`]([^'"`]+)['"`]/g))
+        .map((item) => String(item?.[1] || '').trim())
+        .filter(Boolean);
+      keys.forEach((permission) => {
+        if (!KNOWN_PERMISSIONS.has(permission)) {
+          unknownPermissions.add(permission);
+        }
+      });
+    }
+
     if (!normalized.includes("requireRole(['admin")) return;
 
     const routeIdentifier = `${filePath}:${lineNo}:${normalized}`;
-    const hasPermissionGuard = normalized.includes('requirePermission(');
+    const hasPermissionGuard = normalized.includes('requirePermission(')
+      || normalized.includes('requireAnyPermission(')
+      || normalized.includes('manageEnrollmentAccess');
     if (!hasPermissionGuard && !isAllowlisted(routeIdentifier)) {
       violations.push({
         file: filePath,

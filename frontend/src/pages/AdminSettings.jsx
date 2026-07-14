@@ -56,14 +56,14 @@ const DEFAULT_STUDENT_ID_FORMATS = {
 const VISIBLE_SETTINGS_TAB_KEYS = new Set(['schoolWebsite', 'brand', 'studentIds', 'shortcuts']);
 const SETTINGS_TAB_LABELS = {
   schoolWebsite: 'وب‌سایت مکتب',
-  brand: 'لوگوها و تماس مکتب',
+  brand: 'لوگوهای رسمی',
   studentIds: 'شماره‌های شاگردان',
   shortcuts: 'میانبرهای ادمین'
 };
 
 const SETTINGS_TABS = [
   { key: 'schoolWebsite', title: 'وب‌سایت مکتب', icon: 'fa-globe' },
-  { key: 'brand', title: 'برند و تماس', icon: 'fa-id-card' },
+  { key: 'brand', title: 'لوگوهای رسمی', icon: 'fa-id-card' },
   { key: 'home', title: 'صفحه فروش', icon: 'fa-store' },
   { key: 'header', title: 'هیدر و منو', icon: 'fa-bars-staggered' },
   { key: 'footer', title: 'فوتر', icon: 'fa-window-maximize' },
@@ -114,6 +114,17 @@ const WEBSITE_TEXT_FIELDS = [
   ['contactText', 'متن تماس'],
   ['contactAddress', 'آدرس'],
   ['footerNote', 'یادداشت فوتر']
+];
+
+const WEBSITE_EDITOR_SECTIONS = [
+  { key: 'home', title: 'خانه', icon: 'fa-house', description: 'Hero، معرفی، امکانات و آمار' },
+  { key: 'about', title: 'درباره مکتب', icon: 'fa-circle-info', description: 'متن معرفی، ماموریت و چشم‌انداز' },
+  { key: 'programs', title: 'برنامه‌های آموزشی', icon: 'fa-layer-group', description: 'کارت‌ها و خدمات آموزشی' },
+  { key: 'news', title: 'اخبار', icon: 'fa-newspaper', description: 'لینک منو و مدیریت خبرها' },
+  { key: 'gallery', title: 'گالری', icon: 'fa-images', description: 'لینک منو و مدیریت تصاویر' },
+  { key: 'contact', title: 'تماس با ما', icon: 'fa-phone', description: 'متن تماس، آدرس، تلفن و ایمیل' },
+  { key: 'identity', title: 'هدر و هویت', icon: 'fa-id-card', description: 'نام، لوگو، رنگ و منوها' },
+  { key: 'footer', title: 'فوتر', icon: 'fa-window-maximize', description: 'یادداشت، لینک‌ها و شبکه‌ها' }
 ];
 
 const PRODUCT_MODULES = [
@@ -245,6 +256,7 @@ export default function AdminSettings() {
   const [websiteProfile, setWebsiteProfile] = useState(null);
   const [websiteLanguage, setWebsiteLanguage] = useState('fa');
   const [websiteBusy, setWebsiteBusy] = useState(false);
+  const [activeWebsiteSection, setActiveWebsiteSection] = useState('home');
 
   const loadSettings = async () => {
     setLoading(true);
@@ -315,6 +327,29 @@ export default function AdminSettings() {
     }));
   };
 
+  const syncWebsiteLogosFromSettings = async (nextSettings) => {
+    if (!websiteProfile?.schoolId || !nextSettings) return null;
+    const nextWebsiteProfile = normalizeWebsiteProfile({
+      ...websiteProfile,
+      schoolLogoUrl: nextSettings.schoolLogoUrl || nextSettings.logoUrl || websiteProfile.schoolLogoUrl || '',
+      ministryLogoUrl: nextSettings.ministryLogoUrl || websiteProfile.ministryLogoUrl || ''
+    });
+    const websiteRes = await fetch(`${API_BASE}/api/school-websites/admin/${websiteProfile.schoolId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify(nextWebsiteProfile)
+    });
+    const websiteData = await websiteRes.json().catch(() => ({}));
+    const syncedProfile = websiteData?.success && websiteData?.profile
+      ? normalizeWebsiteProfile(websiteData.profile)
+      : nextWebsiteProfile;
+    setWebsiteProfile(syncedProfile);
+    return syncedProfile;
+  };
+
   const saveAll = async (successText = 'تنظیمات سیما ذخیره شد.') => {
     if (!settings) return;
     setSaving(true);
@@ -345,27 +380,7 @@ export default function AdminSettings() {
         ...DEFAULT_STUDENT_ID_FORMATS,
         ...(normalized.studentIdFormats || {})
       };
-      if (websiteProfile?.schoolId) {
-        const nextWebsiteProfile = normalizeWebsiteProfile({
-          ...websiteProfile,
-          schoolLogoUrl: normalized.schoolLogoUrl || normalized.logoUrl || websiteProfile.schoolLogoUrl || '',
-          ministryLogoUrl: normalized.ministryLogoUrl || websiteProfile.ministryLogoUrl || ''
-        });
-        const websiteRes = await fetch(`${API_BASE}/api/school-websites/admin/${websiteProfile.schoolId}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            ...getAuthHeaders()
-          },
-          body: JSON.stringify(nextWebsiteProfile)
-        });
-        const websiteData = await websiteRes.json().catch(() => ({}));
-        if (websiteData?.success && websiteData?.profile) {
-          setWebsiteProfile(normalizeWebsiteProfile(websiteData.profile));
-        } else {
-          setWebsiteProfile(nextWebsiteProfile);
-        }
-      }
+      await syncWebsiteLogosFromSettings(normalized);
       setSettings(normalized);
       storePrintLogos(normalized);
       setMessage(successText);
@@ -406,6 +421,7 @@ export default function AdminSettings() {
       setSettings(normalized);
       storePrintLogos(normalized);
       setOfficialLogoFiles({ schoolLogo: null, ministryLogo: null });
+      await syncWebsiteLogosFromSettings(normalized);
       if (!quiet) setMessage('لوگوهای رسمی فرم‌ها و گزارش‌ها ذخیره شد.');
       return normalized;
     } catch {
@@ -542,6 +558,125 @@ export default function AdminSettings() {
     </section>
   );
 
+  const renderWebsiteFieldGroup = (fields) => (
+    <div className="settings-grid website-content-grid">
+      {fields.map(([field, label]) => renderWebsiteTextField(field, label))}
+    </div>
+  );
+
+  const renderWebsiteManagerLink = (href, title, text) => (
+    <div className="website-admin-link">
+      <div>
+        <strong>{title}</strong>
+        <span>{text}</span>
+      </div>
+      <a href={href}>باز کردن مدیریت</a>
+    </div>
+  );
+
+  const renderWebsiteActiveEditor = () => {
+    const languageLabel = WEBSITE_LANGUAGES.find((item) => item.key === websiteLanguage)?.label;
+
+    switch (activeWebsiteSection) {
+      case 'about':
+        return (
+          <>
+            <section className="settings-card">
+              <h3>ویرایش محتوای درباره مکتب</h3>
+              <p className="settings-muted">زبان فعلی: {languageLabel}</p>
+              {renderWebsiteFieldGroup([
+                ['aboutTitle', 'عنوان درباره مکتب'],
+                ['aboutBody', 'متن درباره مکتب'],
+                ['missionTitle', 'عنوان ماموریت'],
+                ['missionBody', 'متن ماموریت'],
+                ['visionTitle', 'عنوان چشم‌انداز'],
+                ['visionBody', 'متن چشم‌انداز']
+              ])}
+            </section>
+          </>
+        );
+      case 'programs':
+        return (
+          <>
+            {renderWebsiteRowsField('features', 'برنامه‌ها و کارت‌های آموزشی', 'هر خط: عنوان|متن|لینک اختیاری|آیکن. این موارد در صفحه خانه و بخش برنامه‌های آموزشی استفاده می‌شود.')}
+          </>
+        );
+      case 'news':
+        return (
+          <>
+            {renderWebsiteRowsField('menuItems', 'لینک اخبار در منوی هدر', 'هر خط: عنوان|توضیح اختیاری|لینک|آیکن. برای اخبار لینک /news را نگه دارید.')}
+            {renderWebsiteManagerLink('/admin-news', 'محتوای خبرها', 'خبرها، تصویرها و متن هر خبر از بخش مدیریت اخبار تغییر می‌کند.')}
+          </>
+        );
+      case 'gallery':
+        return (
+          <>
+            {renderWebsiteRowsField('menuItems', 'لینک گالری در منوی هدر', 'هر خط: عنوان|توضیح اختیاری|لینک|آیکن. برای گالری لینک /gallery را نگه دارید.')}
+            {renderWebsiteManagerLink('/admin-gallery', 'محتوای گالری', 'تصاویر و دسته‌بندی‌های گالری از بخش مدیریت گالری تغییر می‌کند.')}
+          </>
+        );
+      case 'contact':
+        return (
+          <>
+            <section className="settings-card">
+              <h3>ویرایش محتوای تماس با ما</h3>
+              <p className="settings-muted">زبان فعلی: {languageLabel}</p>
+              {renderWebsiteFieldGroup([
+                ['contactTitle', 'عنوان تماس'],
+                ['contactText', 'متن تماس'],
+                ['contactAddress', 'آدرس']
+              ])}
+              <p className="settings-muted">شماره، ایمیل و آدرس اصلی از مکتب فعال سیستم خوانده می‌شود.</p>
+            </section>
+          </>
+        );
+      case 'identity':
+        return (
+          <>
+            <section className="settings-card">
+              <h3>هدر، لوگو و هویت وب‌سایت</h3>
+              <p className="settings-muted">زبان فعلی: {languageLabel}</p>
+              {renderWebsiteFieldGroup([
+                ['brandSubtitle', 'زیرعنوان هدر']
+              ])}
+            </section>
+            {renderWebsiteRowsField('menuItems', 'منوهای هدر', 'هر خط: عنوان|توضیح اختیاری|لینک|آیکن. مثال: خانه||/|fa-house')}
+          </>
+        );
+      case 'footer':
+        return (
+          <>
+            <section className="settings-card">
+              <h3>یادداشت فوتر</h3>
+              <p className="settings-muted">زبان فعلی: {languageLabel}</p>
+              {renderWebsiteFieldGroup([['footerNote', 'یادداشت فوتر']])}
+            </section>
+            {renderWebsiteRowsField('footerLinks', 'لینک‌های فوتر', 'هر خط: عنوان|توضیح اختیاری|لینک|آیکن')}
+            {renderWebsiteRowsField('socialLinks', 'شبکه‌های اجتماعی', 'هر خط: عنوان|توضیح اختیاری|لینک|آیکن')}
+          </>
+        );
+      case 'home':
+      default:
+        return (
+          <>
+            <section className="settings-card">
+              <h3>ویرایش محتوای صفحه خانه</h3>
+              <p className="settings-muted">زبان فعلی: {languageLabel}</p>
+              {renderWebsiteFieldGroup([
+                ['homeHeroBadge', 'نشانک صفحه خانه'],
+                ['homeHeroTitle', 'عنوان اصلی صفحه خانه'],
+                ['homeHeroText', 'متن معرفی صفحه خانه'],
+                ['aboutTitle', 'عنوان معرفی مکتب'],
+                ['aboutBody', 'متن معرفی مکتب']
+              ])}
+            </section>
+            {renderWebsiteRowsField('features', 'امکانات / کارت‌های صفحه خانه', 'هر خط: عنوان|متن|لینک اختیاری|آیکن')}
+            {renderWebsiteRowsField('stats', 'آمار صفحه خانه', 'هر خط: عنوان|متن یا توضیح|مقدار|آیکن')}
+          </>
+        );
+    }
+  };
+
   const renderSchoolWebsiteTab = () => {
     if (!websiteProfile) {
       return (
@@ -620,38 +755,43 @@ export default function AdminSettings() {
               <label>تصویر Hero</label>
               <input value={websiteProfile.heroImageUrl || ''} onChange={(event) => patchWebsiteProfile({ heroImageUrl: event.target.value })} dir="ltr" />
             </div>
-            <div>
-              <label>لوگوی مکتب</label>
-              <input value={websiteProfile.schoolLogoUrl || ''} onChange={(event) => patchWebsiteProfile({ schoolLogoUrl: event.target.value })} dir="ltr" />
-            </div>
-            <div>
-              <label>لوگوی وزارت</label>
-              <input value={websiteProfile.ministryLogoUrl || ''} onChange={(event) => patchWebsiteProfile({ ministryLogoUrl: event.target.value })} dir="ltr" />
-            </div>
-            <div>
-              <label>شماره تماس</label>
-              <input value={websiteProfile.contactPhone || ''} onChange={(event) => patchWebsiteProfile({ contactPhone: event.target.value })} />
-            </div>
-            <div>
-              <label>ایمیل</label>
-              <input value={websiteProfile.contactEmail || ''} onChange={(event) => patchWebsiteProfile({ contactEmail: event.target.value })} dir="ltr" />
-            </div>
           </div>
         </section>
 
-        <section className="settings-card">
-          <h3>محتوای متنی زبان انتخاب‌شده</h3>
-          <p className="settings-muted">زبان فعلی: {WEBSITE_LANGUAGES.find((item) => item.key === websiteLanguage)?.label}</p>
-          <div className="settings-grid website-content-grid">
-            {WEBSITE_TEXT_FIELDS.map(([field, label]) => renderWebsiteTextField(field, label))}
+        <section className="settings-card website-editor-card">
+          <div className="settings-menu-head">
+            <div>
+              <h3>ویرایش محتوای منوهای وب‌سایت</h3>
+              <p className="settings-muted">روی هر منو کلیک کنید تا محتوای همان بخش برای زبان انتخاب‌شده باز شود.</p>
+            </div>
+            <span className="website-language-pill">
+              {WEBSITE_LANGUAGES.find((item) => item.key === websiteLanguage)?.label}
+            </span>
+          </div>
+          <div className="website-editor-shell">
+            <div className="website-editor-menu" role="tablist" aria-label="Website content sections">
+              {WEBSITE_EDITOR_SECTIONS.map((section) => (
+                <button
+                  key={section.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeWebsiteSection === section.key}
+                  className={activeWebsiteSection === section.key ? 'active' : ''}
+                  onClick={() => setActiveWebsiteSection(section.key)}
+                >
+                  <i className={`fa-solid ${section.icon}`} />
+                  <span>
+                    <strong>{section.title}</strong>
+                    <small>{section.description}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="website-editor-panel">
+              {renderWebsiteActiveEditor()}
+            </div>
           </div>
         </section>
-
-        {renderWebsiteRowsField('menuItems', 'منوهای هدر', 'هر خط: عنوان|توضیح اختیاری|لینک|آیکن. مثال: خانه||/schools/iman|fa-house')}
-        {renderWebsiteRowsField('features', 'امکانات / کارت‌های صفحه خانه', 'هر خط: عنوان|متن|لینک اختیاری|آیکن')}
-        {renderWebsiteRowsField('stats', 'آمار صفحه خانه', 'هر خط: عنوان|متن یا توضیح|مقدار|آیکن')}
-        {renderWebsiteRowsField('footerLinks', 'لینک‌های فوتر', 'هر خط: عنوان|توضیح اختیاری|لینک|آیکن')}
-        {renderWebsiteRowsField('socialLinks', 'شبکه‌های اجتماعی', 'هر خط: عنوان|توضیح اختیاری|لینک|آیکن')}
       </>
     );
   };
@@ -690,31 +830,6 @@ export default function AdminSettings() {
         </div>
       </section>
 
-      <section className="settings-card">
-        <h3>اطلاعات تماس مکتب</h3>
-        <div className="settings-grid">
-          <div>
-            <label>نام مکتب / عنوان چاپ</label>
-            <input value={settings.brandName || ''} onChange={(e) => patchRoot({ brandName: e.target.value })} />
-          </div>
-          <div>
-            <label>زیرعنوان چاپ</label>
-            <input value={settings.brandSubtitle || ''} onChange={(e) => patchRoot({ brandSubtitle: e.target.value })} />
-          </div>
-          <div>
-            <label>شماره تماس</label>
-            <input value={settings.contactPhone || ''} onChange={(e) => patchRoot({ contactPhone: e.target.value })} />
-          </div>
-          <div>
-            <label>ایمیل</label>
-            <input value={settings.contactEmail || ''} onChange={(e) => patchRoot({ contactEmail: e.target.value })} />
-          </div>
-          <div className="settings-wide-field">
-            <label>آدرس</label>
-            <input value={settings.contactAddress || ''} onChange={(e) => patchRoot({ contactAddress: e.target.value })} />
-          </div>
-        </div>
-      </section>
     </>
   );
 
