@@ -2573,6 +2573,11 @@ router.patch('/admin/expense-categories/:id', requireAuth, requireRole(['admin']
 router.get('/admin/financial-years', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const filter = {};
+    const schoolContext = await resolveActiveSchool(req, { allowSingleFallback: true });
+    if (schoolContext.schoolId) {
+      filter.schoolId = schoolContext.schoolId;
+      writeSchoolContextHeaders(res, schoolContext.schoolId);
+    }
     const academicYearId = String(req.query?.academicYearId || '').trim();
     const status = String(req.query?.status || '').trim();
     if (academicYearId) filter.academicYearId = academicYearId;
