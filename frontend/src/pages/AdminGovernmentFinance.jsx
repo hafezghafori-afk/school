@@ -3766,9 +3766,24 @@ export default function AdminGovernmentFinance() {
 
             <article className="gov-card" data-span="12" data-budget-category-table="true">
               <div className="gov-card-head">
+                <button
+                  type="button"
+                  className="gov-primary-btn"
+                  data-budget-category-save="true"
+                  onClick={saveSelectedFinancialYearBudget}
+                  disabled={!!busyAction || !selectedFinancialYearId || selectedFinancialYear?.isClosed}
+                >
+                  {String(busyAction || '').startsWith('save-budget-') ? 'در حال ثبت...' : 'ثبت بودجه دسته‌ها'}
+                </button>
                 <div>
                   <strong>بودجه بر اساس دسته‌بندی مصرف</strong>
                   <span>محدودیت‌های سالانه و ماهانه، آستانه‌های هشدار، و استفاده واقعی بر اساس دسته‌بندی مصرف.</span>
+                </div>
+              </div>
+              <div className="gov-help-note compact">
+                <div className="gov-help-note-copy">
+                  <strong>راهنمای مقداردهی</strong>
+                  <span>بودجه سالانه سقف کل همان دسته است. بودجه ماهانه سقف مصرف همان دسته در هر ماه است. آستانه هشدار معمولاً ۸۵٪ است؛ یعنی قبل از تمام‌شدن بودجه هشدار می‌دهد.</span>
                 </div>
               </div>
               {!expenseCategoryRegistry.length ? (
@@ -3809,18 +3824,21 @@ export default function AdminGovernmentFinance() {
                             <td>
                               <input
                                 data-budget-annual={item.key}
+                                placeholder="سقف سالانه"
                                 value={draftBucket.annualBudget || ''}
                                 onChange={(event) => handleSelectedYearCategoryBudgetChange(key, 'annualBudget', event.target.value)}
                               />
                             </td>
                             <td>
                               <input
+                                placeholder="سقف ماهانه"
                                 value={draftBucket.monthlyBudget || ''}
                                 onChange={(event) => handleSelectedYearCategoryBudgetChange(key, 'monthlyBudget', event.target.value)}
                               />
                             </td>
                             <td>
                               <input
+                                placeholder="85"
                                 value={draftBucket.alertThresholdPercent || '85'}
                                 onChange={(event) => handleSelectedYearCategoryBudgetChange(key, 'alertThresholdPercent', event.target.value)}
                               />
@@ -3838,6 +3856,25 @@ export default function AdminGovernmentFinance() {
                   </table>
                 </div>
               )}
+              <div className="gov-card-actions">
+                <button
+                  type="button"
+                  className="gov-primary-btn"
+                  data-budget-category-save-bottom="true"
+                  onClick={saveSelectedFinancialYearBudget}
+                  disabled={!!busyAction || !selectedFinancialYearId || selectedFinancialYear?.isClosed}
+                >
+                  {String(busyAction || '').startsWith('save-budget-') ? 'در حال ثبت بودجه دسته‌ها...' : 'ثبت و ذخیره بودجه دسته‌بندی‌ها'}
+                </button>
+                <button
+                  type="button"
+                  className="gov-ghost-btn"
+                  onClick={requestBudgetReview}
+                  disabled={!!busyAction || !selectedFinancialYearId || !selectedBudgetApproval.configured || selectedFinancialYear?.isClosed || selectedBudgetApproval.stage.includes('review') || selectedBudgetApproval.stage === 'approved'}
+                >
+                  {String(busyAction || '').startsWith('budget-review-request-') ? 'در حال ارسال...' : 'ارسال بودجه برای بررسی'}
+                </button>
+              </div>
             </article>
 
             <article className="gov-card" data-span="12">
