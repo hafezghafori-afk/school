@@ -1320,15 +1320,14 @@ export default function AdminGovernmentFinance() {
   ), [reference.academicYears]);
 
   const activeFinancialYear = useMemo(() => (
-    payload.financialYears.find((item) => item.isActive) || reference.financialYears.find((item) => item.isActive) || payload.financialYears[0] || reference.financialYears[0] || null
-  ), [payload.financialYears, reference.financialYears]);
+    payload.financialYears.find((item) => item.isActive) || payload.financialYears[0] || null
+  ), [payload.financialYears]);
 
   const selectedFinancialYear = useMemo(() => (
     payload.financialYears.find((item) => item._id === selectedFinancialYearId || item.id === selectedFinancialYearId)
-      || reference.financialYears.find((item) => item.id === selectedFinancialYearId)
       || activeFinancialYear
       || null
-  ), [payload.financialYears, reference.financialYears, selectedFinancialYearId, activeFinancialYear]);
+  ), [payload.financialYears, selectedFinancialYearId, activeFinancialYear]);
 
   const selectedAcademicYear = useMemo(() => (
     reference.academicYears.find((item) => item.id === selectedAcademicYearId)
@@ -1629,7 +1628,6 @@ export default function AdminGovernmentFinance() {
       };
       setReference(normalizeDisplayPayload(nextReference));
       setSelectedAcademicYearId((current) => current || nextReference.academicYears.find((item) => item.isActive)?.id || nextReference.academicYears[0]?.id || '');
-      setSelectedFinancialYearId((current) => current || nextReference.financialYears.find((item) => item.isActive)?.id || nextReference.financialYears[0]?.id || '');
     } catch (error) {
       showMessage(errorMessage(error, 'دریافت داده‌های مرجع مالی ناموفق بود.'), 'error');
     }
@@ -1839,12 +1837,17 @@ export default function AdminGovernmentFinance() {
         };
         return nextMeta;
       });
-      setSelectedFinancialYearId((current) => (
-        current
-        || nextPayload.financialYears?.find((item) => item.isActive)?._id
-        || nextPayload.financialYears?.[0]?._id
-        || ''
-      ));
+      if (!prefetch) {
+        const nextFinancialYears = nextPayload.financialYears || [];
+        const fallbackFinancialYear = nextFinancialYears.find((item) => item.isActive) || nextFinancialYears[0] || null;
+        setSelectedFinancialYearId((current) => {
+          const currentFinancialYear = nextFinancialYears.find((item) => String(item._id || item.id || '') === String(current || ''));
+          const nextFinancialYear = currentFinancialYear || fallbackFinancialYear;
+          const nextAcademicYearId = String(nextFinancialYear?.academicYearId || '');
+          if (nextAcademicYearId) setSelectedAcademicYearId(nextAcademicYearId);
+          return String(nextFinancialYear?._id || nextFinancialYear?.id || '');
+        });
+      }
       prefetchedTabsRef.current.set(`${resolvedTargetTab}|${requestScopeKey}`, true);
       if (!prefetch && errors.length) {
         showMessage('بخشی از داده‌ها بارگذاری شد، اما بعضی مسیرهای خدماتی هنوز برای فاز بعدی آماده نشده‌اند.', 'info');
@@ -3077,10 +3080,9 @@ export default function AdminGovernmentFinance() {
               <span>سال مالی</span>
               <select value={selectedFinancialYearId} onChange={(event) => setSelectedFinancialYearId(event.target.value)} disabled={isWorkspaceLoading}>
                 <option value="">همه / بدون محدودیت</option>
-                {[...(payload.financialYears || []), ...(reference.financialYears || []).filter((item) => !(payload.financialYears || []).some((current) => String(current._id || current.id) === String(item.id)))]
-                  .map((item) => (
-                    <option key={item._id || item.id} value={item._id || item.id}>{item.title || item.code || item._id || item.id}</option>
-                  ))}
+                {(payload.financialYears || []).map((item) => (
+                  <option key={item._id || item.id} value={item._id || item.id}>{item.title || item.code || item._id || item.id}</option>
+                ))}
               </select>
             </label>
             <label className="gov-field">
