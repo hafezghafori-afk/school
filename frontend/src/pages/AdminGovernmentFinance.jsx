@@ -1433,6 +1433,9 @@ export default function AdminGovernmentFinance() {
   const archivePreview = useMemo(() => buildTablePreview(payload.expenses || [], 8), [payload.expenses]);
   const treasurySummary = useMemo(() => payload.treasuryAnalytics?.summary || {}, [payload.treasuryAnalytics]);
   const treasuryAccounts = useMemo(() => payload.treasuryAnalytics?.accounts || [], [payload.treasuryAnalytics]);
+  const automaticStudentPaymentTreasuryAccounts = useMemo(() => (
+    treasuryAccounts.filter((item) => String(item?.code || '').trim().toUpperCase().startsWith('AUTO-'))
+  ), [treasuryAccounts]);
   const treasuryRecentTransactions = useMemo(() => payload.treasuryAnalytics?.recentTransactions || [], [payload.treasuryAnalytics]);
   const treasuryAlerts = useMemo(() => payload.treasuryAnalytics?.alerts || [], [payload.treasuryAnalytics]);
   const treasuryReports = useMemo(() => payload.treasuryReports || null, [payload.treasuryReports]);
@@ -5000,6 +5003,30 @@ export default function AdminGovernmentFinance() {
                           ))}
                         </tbody>
                       </table>
+                    </div>
+                  )}
+                </article>
+
+                <article className="gov-card" data-span="12" data-auto-student-payment-treasury="true">
+                  <div className="gov-card-head">
+                    <div>
+                      <strong>حساب‌های خودکار پرداخت شاگردان</strong>
+                      <span>پرداخت‌های تاییدشده شاگردان به‌صورت خودکار وارد این حساب‌های خزانه می‌شوند.</span>
+                    </div>
+                  </div>
+                  {!automaticStudentPaymentTreasuryAccounts.length ? (
+                    <div className="gov-empty-state compact">
+                      هنوز حساب خودکار پرداخت شاگردان ساخته نشده است. بعد از تایید پرداخت شاگرد یا بازخوانی تب خزانه، سیستم برای روش پرداخت مربوطه حساب خودکار می‌سازد.
+                    </div>
+                  ) : (
+                    <div className="gov-governance-grid">
+                      {automaticStudentPaymentTreasuryAccounts.map((item) => (
+                        <div key={item._id || item.id || item.code} className="gov-governance-stat" data-tone={item.accountType === 'bank' ? 'copper' : item.accountType === 'hawala' ? 'sand' : 'mint'}>
+                          <span>{item.title || item.code}</span>
+                          <strong>{formatMoney(item.metrics?.bookBalance || 0)}</strong>
+                          <small>{item.code || 'AUTO'} | {resolveTreasuryAccountTypeLabel(item.accountType)}</small>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </article>
