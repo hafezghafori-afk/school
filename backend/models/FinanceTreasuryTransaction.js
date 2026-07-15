@@ -75,7 +75,7 @@ const financeTreasuryTransactionSchema = new mongoose.Schema({
   },
   sourceType: {
     type: String,
-    enum: ['manual', 'transfer', 'reconciliation', 'procurement_settlement'],
+    enum: ['manual', 'transfer', 'reconciliation', 'procurement_settlement', 'fee_payment'],
     default: 'manual',
     index: true
   },
@@ -118,5 +118,9 @@ financeTreasuryTransactionSchema.pre('validate', function syncFinanceTreasuryTra
 financeTreasuryTransactionSchema.index({ financialYearId: 1, status: 1, transactionDate: -1 });
 financeTreasuryTransactionSchema.index({ accountId: 1, status: 1, transactionDate: -1 });
 financeTreasuryTransactionSchema.index({ transactionGroupKey: 1, transactionType: 1 });
+financeTreasuryTransactionSchema.index(
+  { sourceType: 1, transactionGroupKey: 1 },
+  { unique: true, partialFilterExpression: { sourceType: 'fee_payment' } }
+);
 
 module.exports = mongoose.model('FinanceTreasuryTransaction', financeTreasuryTransactionSchema);

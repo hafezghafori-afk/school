@@ -2,6 +2,8 @@ const crypto = require('crypto');
 const FinanceTreasuryAccount = require('../models/FinanceTreasuryAccount');
 const FinanceTreasuryTransaction = require('../models/FinanceTreasuryTransaction');
 const ExpenseEntry = require('../models/ExpenseEntry');
+const FeePayment = require('../models/FeePayment');
+const FinancialYear = require('../models/FinancialYear');
 
 const TREASURY_ACCOUNT_TYPES = new Set(['cashbox', 'bank', 'hawala', 'mobile_money', 'other']);
 const TREASURY_TRANSACTION_TYPE_META = Object.freeze({
@@ -22,6 +24,173 @@ function normalizeMoney(value, fallback = 0) {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return fallback;
   return Math.max(0, Number(amount.toFixed(2)));
+}
+
+function resolveFeePaymentTreasuryAccountTemplate(paymentMethod = '') {
+  const method = normalizeText(paymentMethod).toLowerCase();
+  if (method === 'bank_transfer' || method === 'gateway') {
+    return {
+      code: 'AUTO-BANK',
+      title: 'حساب خودکار پرداخت‌های بانکی شاگردان',
+      accountType: 'bank'
+    };
+  }
+  if (method === 'hawala') {
+    return {
+      code: 'AUTO-HAWALA',
+      title: 'حساب خودکار حواله‌های شاگردان',
+      accountType: 'hawala'
+    };
+  }
+  if (method === 'other') {
+    return {
+      code: 'AUTO-OTHER',
+      title: 'حساب خودکار پرداخت‌های دیگر شاگردان',
+      accountType: 'other'
+    };
+  }
+  return {
+    code: 'AUTO-CASH',
+    title: 'صندوق خودکار پرداخت‌های شاگردان',
+    accountType: 'cashbox'
+  };
+}
+
+async function resolveFeePaymentFinancialYear(payment = {}) {
+  const academicYearId = normalizeText(payment?.academicYearId);
+  if (!academicYearId) return null;
+  const schoolId = normalizeText(payment?.schoolId);
+  return FinancialYear.findOne({
+    ...(schoolId ? { schoolId } : {}),
+    academicYearId,
+    isClosed: { $ne: true }
+  }).sort({ isActive: -1, updatedAt: -1, createdAt: -1 });
+}
+
+async function resolveFeePaymentTreasuryAccount(financialYear, payment = {}) {
+  if (!financialYear?._id) return null;
+  const template = resolveFeePaymentTreasuryAccountTemplate(payment?.paymentMethod);
+  const existing = await FinanceTreasuryAccount.findOne({
+    schoolId: financialYear.schoolId,
+    financialYearId: financialYear._id,
+    code: template.code
+  });
+  if (existing) return existing;
+
+  try {
+    return await FinanceTreasuryAccount.create({
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      code: template.code,
+      title: template.title,
+      accountType: template.accountType,
+      currency: normalizeText(payment?.currency || 'AFN').toUpperCase() || 'AFN',
+      openingBalance: 0,
+      isActive: true,
+      note: 'این حساب به‌صورت خودکار برای ورود پرداخت‌های تاییدشده شاگردان ساخته شده است.',
+      createdBy: payment?.reviewedBy || payment?.receivedBy || null,
+      updatedBy: payment?.reviewedBy || payment?.receivedBy || null
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return FinanceTreasuryAccount.findOne({
+        schoolId: financialYear.schoolId,
+        financialYearId: financialYear._id,
+        code: template.code
+      });
+    }
+    throw error;
+  }
+}
+
+async function syncApprovedFeePaymentToTreasury(payment = {}) {
+  if (!payment || normalizeText(payment.status) !== 'approved') return null;
+  const amount = normalizeMoney(payment.amount, 0);
+  if (amount <= 0) return null;
+
+  const paymentId = normalizeText(payment._id);
+  if (!paymentId) return null;
+  const transactionGroupKey = `fee-payment:${paymentId}`;
+  const existing = await FinanceTreasuryTransaction.findOne({
+    transactionGroupKey,
+    sourceType: 'fee_payment',
+    status: { $ne: 'void' }
+  });
+  if (existing) return existing;
+
+  const financialYear = await resolveFeePaymentFinancialYear(payment);
+  if (!financialYear?._id) return null;
+  const account = await resolveFeePaymentTreasuryAccount(financialYear, payment);
+  if (!account?._id) return null;
+
+  try {
+    return await FinanceTreasuryTransaction.create({
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      accountId: account._id,
+      transactionGroupKey,
+      transactionType: 'deposit',
+      direction: 'in',
+      amount,
+      currency: normalizeText(payment.currency || account.currency || 'AFN').toUpperCase() || 'AFN',
+      transactionDate: toDate(payment.paidAt || payment.reviewedAt || payment.updatedAt || payment.createdAt, new Date()),
+      sourceType: 'fee_payment',
+      referenceNo: normalizeText(payment.referenceNo || payment.paymentNumber || transactionGroupKey),
+      note: `ورود خودکار پرداخت تاییدشده شاگرد ${payment.paymentNumber || ''}`.trim(),
+      createdBy: payment.reviewedBy || payment.receivedBy || null,
+      updatedBy: payment.reviewedBy || payment.receivedBy || null
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return FinanceTreasuryTransaction.findOne({
+        transactionGroupKey,
+        sourceType: 'fee_payment',
+        status: { $ne: 'void' }
+      });
+    }
+    throw error;
+  }
+}
+
+async function syncApprovedFeePaymentsToTreasury({
+  financialYearId = '',
+  academicYearId = ''
+} = {}) {
+  const normalizedFinancialYearId = normalizeText(financialYearId);
+  const normalizedAcademicYearId = normalizeText(academicYearId);
+  let financialYear = null;
+  if (normalizedFinancialYearId) {
+    financialYear = await FinancialYear.findById(normalizedFinancialYearId);
+  } else if (normalizedAcademicYearId) {
+    financialYear = await FinancialYear.findOne({
+      academicYearId: normalizedAcademicYearId,
+      isClosed: { $ne: true }
+    }).sort({ isActive: -1, updatedAt: -1, createdAt: -1 });
+  }
+  if (!financialYear?._id) return { synced: 0 };
+
+  const payments = await FeePayment.find({
+    status: 'approved',
+    academicYearId: financialYear.academicYearId,
+    ...(financialYear.schoolId
+      ? {
+          $or: [
+            { schoolId: financialYear.schoolId },
+            { schoolId: null },
+            { schoolId: { $exists: false } }
+          ]
+        }
+      : {})
+  }).sort({ paidAt: 1, createdAt: 1 }).limit(500);
+
+  let synced = 0;
+  for (const payment of payments) {
+    const result = await syncApprovedFeePaymentToTreasury(payment);
+    if (result) synced += 1;
+  }
+  return { synced };
 }
 
 function toDate(value = null, fallback = null) {
@@ -561,6 +730,7 @@ async function buildTreasuryReportBundle({
   academicYearId = '',
   accountId = ''
 } = {}) {
+  await syncApprovedFeePaymentsToTreasury({ financialYearId, academicYearId });
   const {
     accounts,
     transactions,
@@ -600,6 +770,7 @@ async function buildTreasuryAnalytics({
   academicYearId = '',
   accountId = ''
 } = {}) {
+  await syncApprovedFeePaymentsToTreasury({ financialYearId, academicYearId });
   const {
     transactions,
     unassignedApprovedExpenses,
@@ -998,5 +1169,7 @@ module.exports = {
   resolveTreasuryAccountSelection,
   serializeTreasuryAccount,
   serializeTreasuryTransaction,
+  syncApprovedFeePaymentToTreasury,
+  syncApprovedFeePaymentsToTreasury,
   updateTreasuryAccount
 };

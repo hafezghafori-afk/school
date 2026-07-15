@@ -15,6 +15,7 @@ const { resolveAdminOrgRole } = require('../utils/userRole');
 const { roundMoney, getBillRemainingAmount } = require('../utils/financeReceiptValidation');
 const { syncStudentFinanceFromFinanceBill, syncStudentFinanceFromFinanceReceipt } = require('../utils/studentFinanceSync');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
+const { syncApprovedFeePaymentToTreasury } = require('./treasuryGovernanceService');
 
 const FINANCE_FOUR_EYES_ENABLED = String(process.env.FINANCE_FOUR_EYES_ENABLED || 'false').toLowerCase() !== 'false';
 
@@ -756,6 +757,10 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
   await bill.save();
   await syncStudentFinanceFromFinanceReceipt(receipt._id);
   await syncStudentFinanceFromFinanceBill(bill._id);
+  const syncedPayment = await FeePayment.findOne({ sourceReceiptId: receipt._id });
+  if (syncedPayment?.status === 'approved') {
+    await syncApprovedFeePaymentToTreasury(syncedPayment);
+  }
 
   await notifyStudent({
     req,
@@ -788,6 +793,9 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
   if (payment.sourceReceiptId) {
     const result = await approveReceiptAction({ req, receiptId: payment.sourceReceiptId, body });
     const refreshed = await FeePayment.findById(feePaymentId);
+    if (refreshed?.status === 'approved') {
+      await syncApprovedFeePaymentToTreasury(refreshed);
+    }
     return {
       ...result,
       item: refreshed || payment,
@@ -925,6 +933,25 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
     await order.save();
     updatedOrders.push(order);
   }
+
+  const scopeOrder = updatedOrders[0] || null;
+  let paymentScopeChanged = false;
+  if (!payment.schoolId && scopeOrder?.schoolId) {
+    payment.schoolId = scopeOrder.schoolId;
+    paymentScopeChanged = true;
+  }
+  if (!payment.academicYearId && scopeOrder?.academicYearId) {
+    payment.academicYearId = scopeOrder.academicYearId;
+    paymentScopeChanged = true;
+  }
+  if (!payment.classId && scopeOrder?.classId) {
+    payment.classId = scopeOrder.classId;
+    paymentScopeChanged = true;
+  }
+  if (paymentScopeChanged) {
+    await payment.save();
+  }
+  await syncApprovedFeePaymentToTreasury(payment);
 
   await notifyStudent({
     req,
