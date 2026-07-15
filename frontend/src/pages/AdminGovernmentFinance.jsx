@@ -457,6 +457,72 @@ function buildTablePreview(rows = [], limit = 8) {
   return Array.isArray(rows) ? rows.slice(0, limit) : [];
 }
 
+function buildIntelligentTreasurySummary({
+  financeSummary = {},
+  financeRows = [],
+  budgetVsActual = {},
+  treasurySummary = {},
+  procurementSummary = {},
+  procurementItems = []
+} = {}) {
+  const rows = Array.isArray(financeRows) ? financeRows : [];
+  const totalBilledFromRows = rows.reduce((sum, row) => sum + toNumber(row.amountDue), 0);
+  const totalOutstandingFromRows = rows.reduce((sum, row) => sum + toNumber(row.outstandingAmount), 0);
+  const totalCollectedFromRows = Math.max(0, totalBilledFromRows - totalOutstandingFromRows);
+  const budgetSummary = budgetVsActual?.summary || {};
+
+  const expectedIncome = Math.max(
+    toNumber(financeSummary.totalDue),
+    toNumber(financeSummary.totalBilled),
+    totalBilledFromRows,
+    toNumber(budgetSummary.annualIncomeTarget)
+  );
+  const collectedIncome = Math.max(
+    toNumber(financeSummary.totalPaid),
+    toNumber(financeSummary.collected),
+    totalCollectedFromRows,
+    toNumber(budgetSummary.actualIncome)
+  );
+  const receivableBalance = Math.max(
+    toNumber(financeSummary.outstandingAmount),
+    toNumber(financeSummary.totalOutstanding),
+    totalOutstandingFromRows,
+    Math.max(0, expectedIncome - collectedIncome)
+  );
+  const realCashBalance = toNumber(treasurySummary.bookBalance);
+  const expenseOutflow = Math.max(
+    toNumber(treasurySummary.expenseOutflow),
+    toNumber(budgetSummary.actualExpense)
+  );
+  const approvedCommitmentBalance = Math.max(
+    toNumber(procurementSummary.totalOutstandingAmount),
+    (Array.isArray(procurementItems) ? procurementItems : [])
+      .filter((item) => item.status === 'approved')
+      .reduce((sum, item) => sum + toNumber(item.outstandingAmount || item.settlementBalanceAmount), 0)
+  );
+  const readyPayable = Math.max(
+    toNumber(procurementSummary.totalPayableReadyAmount),
+    (Array.isArray(procurementItems) ? procurementItems : [])
+      .filter((item) => item.status === 'approved')
+      .reduce((sum, item) => sum + toNumber(item.payableReadyAmount), 0)
+  );
+  const freeCashBalance = Math.max(0, realCashBalance - approvedCommitmentBalance);
+
+  return {
+    expectedIncome,
+    collectedIncome,
+    receivableBalance,
+    realCashBalance,
+    expenseOutflow,
+    approvedCommitmentBalance,
+    readyPayable,
+    freeCashBalance,
+    expectedCoveragePercent: expectedIncome > 0
+      ? Math.min(100, Math.max(0, (collectedIncome / expectedIncome) * 100))
+      : 0
+  };
+}
+
 function toInputDate(value) {
   return toGregorianDateInputValue(value);
 }
@@ -1379,6 +1445,21 @@ export default function AdminGovernmentFinance() {
   const procurementSummary = useMemo(() => procurementAnalytics.summary || {}, [procurementAnalytics]);
   const procurementItems = useMemo(() => procurementAnalytics.items || [], [procurementAnalytics]);
   const procurementVendors = useMemo(() => procurementAnalytics.vendors || [], [procurementAnalytics]);
+  const intelligentTreasurySummary = useMemo(() => buildIntelligentTreasurySummary({
+    financeSummary: payload.summary || {},
+    financeRows: payload.financeOverview?.rows || [],
+    budgetVsActual,
+    treasurySummary,
+    procurementSummary,
+    procurementItems
+  }), [
+    budgetVsActual,
+    payload.financeOverview,
+    payload.summary,
+    procurementItems,
+    procurementSummary,
+    treasurySummary
+  ]);
   const approvedProcurementOptions = useMemo(() => (
     procurementItems.filter((item) => item.status === 'approved' && Number(item.outstandingAmount || 0) > 0)
   ), [procurementItems]);
@@ -4798,6 +4879,56 @@ export default function AdminGovernmentFinance() {
                       <span>مانده دفتری، حرکات دستی، انتقال بین حساب‌ها و تطبیق رسمی روی هسته مالی موجود.</span>
                     </div>
                   </div>
+                  <div className="gov-help-note compact">
+                    <div className="gov-help-note-copy">
+                      <strong>نمای هوشمند خزانه</strong>
+                      <span>بل‌ها و پلان‌ها پول قابل‌انتظار را نشان می‌دهند؛ خزانه نقد واقعی را نشان می‌دهد؛ تعهدات پیشرو از مانده آزاد کم می‌شوند.</span>
+                    </div>
+                  </div>
+                  <div className="gov-governance-grid">
+                    <div className="gov-governance-stat" data-tone="teal">
+                      <span>پول قابل‌انتظار</span>
+                      <strong>{formatMoney(intelligentTreasurySummary.expectedIncome || 0)}</strong>
+                      <small>از بل‌ها، پلان‌ها و هدف درآمد</small>
+                    </div>
+                    <div className="gov-governance-stat" data-tone={(intelligentTreasurySummary.receivableBalance || 0) > 0 ? 'copper' : 'mint'}>
+                      <span>باقی قابل دریافت</span>
+                      <strong>{formatMoney(intelligentTreasurySummary.receivableBalance || 0)}</strong>
+                      <small>{formatNumber(intelligentTreasurySummary.expectedCoveragePercent || 0)}٪ جمع‌آوری شده</small>
+                    </div>
+                    <div className="gov-governance-stat" data-tone="mint">
+                      <span>نقد واقعی خزانه</span>
+                      <strong>{formatMoney(intelligentTreasurySummary.realCashBalance || 0)}</strong>
+                      <small>مانده حساب‌های خزانه</small>
+                    </div>
+                    <div className="gov-governance-stat" data-tone={(intelligentTreasurySummary.freeCashBalance || 0) > 0 ? 'teal' : 'rose'}>
+                      <span>مانده آزاد بعد از تعهدات</span>
+                      <strong>{formatMoney(intelligentTreasurySummary.freeCashBalance || 0)}</strong>
+                      <small>نقد واقعی منهای تعهدات تاییدشده</small>
+                    </div>
+                  </div>
+                  <div className="gov-governance-grid">
+                    <div className="gov-governance-stat" data-tone="rose">
+                      <span>مصارف ثبت‌شده</span>
+                      <strong>{formatMoney(intelligentTreasurySummary.expenseOutflow || 0)}</strong>
+                      <small>از گزارش مصارف و خزانه</small>
+                    </div>
+                    <div className="gov-governance-stat" data-tone={(intelligentTreasurySummary.approvedCommitmentBalance || 0) > 0 ? 'copper' : 'sand'}>
+                      <span>تعهدات پیشرو</span>
+                      <strong>{formatMoney(intelligentTreasurySummary.approvedCommitmentBalance || 0)}</strong>
+                      <small>{formatNumber(procurementSummary.openCommitmentCount || 0)} تعهد باز</small>
+                    </div>
+                    <div className="gov-governance-stat" data-tone={(intelligentTreasurySummary.readyPayable || 0) > 0 ? 'copper' : 'mint'}>
+                      <span>آماده پرداخت</span>
+                      <strong>{formatMoney(intelligentTreasurySummary.readyPayable || 0)}</strong>
+                      <small>{formatNumber(procurementSummary.settlementReadyCount || 0)} پرداخت قابل تسویه</small>
+                    </div>
+                    <div className="gov-governance-stat" data-tone={(intelligentTreasurySummary.realCashBalance || 0) >= (intelligentTreasurySummary.approvedCommitmentBalance || 0) ? 'mint' : 'rose'}>
+                      <span>پوشش تعهدات</span>
+                      <strong>{formatMoney((intelligentTreasurySummary.realCashBalance || 0) - (intelligentTreasurySummary.approvedCommitmentBalance || 0))}</strong>
+                      <small>اگر منفی باشد، نقد فعلی تعهدات را پوشش نمی‌دهد</small>
+                    </div>
+                  </div>
                   <div className="gov-governance-grid">
                     <div className="gov-governance-stat" data-tone="teal">
                       <span>مانده دفتری</span>
@@ -4825,6 +4956,50 @@ export default function AdminGovernmentFinance() {
                       {treasuryAlerts.map((item) => (
                         <span key={item.key} className="gov-subcategory-pill">{item.label}</span>
                       ))}
+                    </div>
+                  )}
+                </article>
+
+                <article className="gov-card" data-span="12">
+                  <div className="gov-card-head">
+                    <div>
+                      <strong>گزارش پرداخت‌های پیشرو تعهدات</strong>
+                      <span>تعهدات تاییدشده‌ای که باید از خزانه پرداخت یا تسویه شوند.</span>
+                    </div>
+                  </div>
+                  {!approvedProcurementOptions.length && !settlementReadyProcurementOptions.length ? (
+                    <div className="gov-empty-state compact">فعلاً تعهد تاییدشده یا پرداخت پیشرو برای خزانه وجود ندارد.</div>
+                  ) : (
+                    <div className="gov-table-wrap">
+                      <table className="gov-table">
+                        <thead>
+                          <tr>
+                            <th>تعهد</th>
+                            <th>فروشنده</th>
+                            <th>پرداخت پیشرو</th>
+                            <th>حساب</th>
+                            <th>تاریخ</th>
+                            <th>وضعیت</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {approvedProcurementOptions.slice(0, 8).map((item) => (
+                            <tr key={item._id || item.id}>
+                              <td>
+                                <div className="gov-table-stack">
+                                  <strong>{item.title || item.referenceNo || 'تعهد خرید'}</strong>
+                                  <span>{resolveProcurementTypeLabel(item.procurementType)}</span>
+                                </div>
+                              </td>
+                              <td>{item.vendorName || '---'}</td>
+                              <td>{formatMoney(item.payableReadyAmount || item.outstandingAmount || 0)}</td>
+                              <td>{item.treasuryAccount?.title || item.treasuryAccount?.code || 'حساب تعیین نشده'}</td>
+                              <td>{toFaDate(item.expectedDeliveryDate || item.requestDate || item.createdAt)}</td>
+                              <td><ProcurementStatusBadge status={item.status} /></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   )}
                 </article>
