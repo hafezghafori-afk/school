@@ -358,7 +358,7 @@ async function buildGovernmentBudgetVsActualReport(filters = {}) {
     }
     return {
       categoryKey,
-      categoryLabel: registryItem?.label || budget?.label || categoryKey || 'Unassigned',
+      categoryLabel: registryItem?.label || budget?.label || categoryKey || 'بدون دسته‌بندی',
       colorTone: registryItem?.colorTone || 'slate',
       annualBudget,
       monthlyBudget,
@@ -401,32 +401,32 @@ async function buildGovernmentBudgetVsActualReport(filters = {}) {
     alerts.push({
       key: 'expense_over_budget',
       tone: 'rose',
-      title: 'Expense budget exceeded',
-      detail: `Actual approved expense exceeded the annual budget by ${summary.expenseVariance.toFixed(2)} AFN.`
+      title: 'بودجه مصرفات بیشتر از حد تعیین‌شده شد',
+      detail: `مصارف تاییدشده ${summary.expenseVariance.toFixed(2)} افغانی از بودجه سالانه بیشتر است.`
     });
   }
   if (summary.annualIncomeTarget > 0 && summary.actualIncome < summary.annualIncomeTarget) {
     alerts.push({
       key: 'income_under_target',
       tone: 'copper',
-      title: 'Income target not reached',
-      detail: `Collected income is ${(summary.annualIncomeTarget - summary.actualIncome).toFixed(2)} AFN below target.`
+      title: 'هدف درآمد تکمیل نشده است',
+      detail: `درآمد جمع‌آوری‌شده ${(summary.annualIncomeTarget - summary.actualIncome).toFixed(2)} افغانی کمتر از هدف تعیین‌شده است.`
     });
   }
   if (summary.treasuryReserveTarget > 0 && summary.treasuryReserveBalance < summary.treasuryReserveTarget) {
     alerts.push({
       key: 'treasury_reserve_gap',
       tone: 'copper',
-      title: 'Treasury reserve below target',
-      detail: `Treasury balance is ${(summary.treasuryReserveTarget - summary.treasuryReserveBalance).toFixed(2)} AFN below the reserve target.`
+      title: 'ذخیره خزانه کمتر از هدف است',
+      detail: `مانده خزانه ${(summary.treasuryReserveTarget - summary.treasuryReserveBalance).toFixed(2)} افغانی کمتر از هدف ذخیره تعیین‌شده است.`
     });
   }
   if (summary.overBudgetCategoryCount > 0 || summary.unbudgetedCategoryCount > 0) {
     alerts.push({
       key: 'category_budget_attention',
       tone: 'rose',
-      title: 'Category budgets need review',
-      detail: `${summary.overBudgetCategoryCount} category budget(s) are over limit and ${summary.unbudgetedCategoryCount} category(ies) have spend without a defined budget.`
+      title: 'بودجه دسته‌بندی‌ها نیاز به بررسی دارد',
+      detail: `${summary.overBudgetCategoryCount} دسته‌بندی از حد بودجه گذشته و ${summary.unbudgetedCategoryCount} دسته‌بندی مصرف بدون بودجه تعریف‌شده دارد.`
     });
   }
 

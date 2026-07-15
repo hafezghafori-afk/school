@@ -332,7 +332,7 @@ async function buildStatementPackPdfBuffer({
           formatDateTime(item?.dueDate || item?.endDate || item?.at)
         ].filter(Boolean).join(' | ')
       })),
-      'No active finance signals recorded.'
+      'هیچ سیگنال مالی فعالی ثبت نشده است.'
     );
 
     drawSectionTitle(doc, 'Latest Activity');
@@ -363,7 +363,7 @@ async function buildStatementPackPdfBuffer({
           `Outstanding ${formatMoney(item?.outstandingAmount || 0, item?.currency || currency)}`
         ].filter(Boolean).join(' | ')
       })),
-      'No finance orders recorded.'
+      'هیچ دستور مالی ثبت نشده است.'
     );
 
     drawSectionTitle(doc, 'Payments');
@@ -379,7 +379,7 @@ async function buildStatementPackPdfBuffer({
           formatDateTime(item?.paidAt)
         ].filter(Boolean).join(' | ')
       })),
-      'No payments recorded.'
+      'هیچ پرداختی ثبت نشده است.'
     );
 
     drawSectionTitle(doc, 'Reliefs');
@@ -469,7 +469,7 @@ async function buildMonthClosePdfBuffer(item = {}, options = {}) {
           item?.amount != null ? `amount=${formatMoney(item.amount || 0)}` : ''
         ].filter(Boolean).join(' | ')
       })),
-      'No blocking issues recorded.'
+      'هیچ مورد مسدودکننده‌ای ثبت نشده است.'
     );
     drawItemList(
       doc,
@@ -480,7 +480,7 @@ async function buildMonthClosePdfBuffer(item = {}, options = {}) {
           item?.amount != null ? `amount=${formatMoney(item.amount || 0)}` : ''
         ].filter(Boolean).join(' | ')
       })),
-      'No warning issues recorded.'
+      'هیچ هشدار ثبت نشده است.'
     );
 
     drawSectionTitle(doc, 'Cashflow');
@@ -499,7 +499,7 @@ async function buildMonthClosePdfBuffer(item = {}, options = {}) {
           entry?.approvedCount != null ? `count=${formatNumber(entry.approvedCount)}` : ''
         ].filter(Boolean).join(' | ')
       })),
-      'No cashflow rows recorded for this month.'
+      'برای این ماه هیچ ردیف جریان نقدی ثبت نشده است.'
     );
 
     drawSectionTitle(doc, 'Anomalies');
@@ -518,7 +518,7 @@ async function buildMonthClosePdfBuffer(item = {}, options = {}) {
           entry?.description || ''
         ].filter(Boolean).join(' | ')
       })),
-      'No anomaly items recorded.'
+      'هیچ مورد ناهنجاری ثبت نشده است.'
     );
 
     drawSectionTitle(doc, 'Class Snapshot');
@@ -533,7 +533,7 @@ async function buildMonthClosePdfBuffer(item = {}, options = {}) {
           row?.activeReliefs != null ? `reliefs=${formatNumber(row.activeReliefs)}` : ''
         ].filter(Boolean).join(' | ')
       })),
-      'No class snapshot rows recorded.'
+      'هیچ ردیف نسخه صنفی ثبت نشده است.'
     );
 
     drawSectionTitle(doc, 'Approval Trail');
@@ -547,7 +547,7 @@ async function buildMonthClosePdfBuffer(item = {}, options = {}) {
           entry?.note || entry?.reason || ''
         ].filter(Boolean).join(' | ')
       })),
-      'No approval trail recorded.'
+      'هیچ ردپای تایید ثبت نشده است.'
     );
 
     drawSectionTitle(doc, 'History');
@@ -561,9 +561,48 @@ async function buildMonthClosePdfBuffer(item = {}, options = {}) {
           entry?.note || ''
         ].filter(Boolean).join(' | ')
       })),
-      'No workflow history recorded.'
+      'هیچ تاریخچه گردش کار ثبت نشده است.'
     );
   });
+}
+
+const GOVERNMENT_REPORT_TYPE_LABELS = {
+  quarterly: 'ربع‌وار',
+  annual: 'سالانه',
+  government_finance_quarterly: 'گزارش مالی ربع‌وار',
+  government_finance_annual: 'گزارش مالی سالانه',
+  snapshot: 'نسخه رسمی'
+};
+
+const BUDGET_APPROVAL_STAGE_LABELS = {
+  draft: 'پیش‌نویس بودجه',
+  finance_manager_review: 'بررسی مدیر مالی',
+  finance_lead_review: 'بررسی آمریت مالی',
+  general_president_review: 'بررسی ریاست عمومی',
+  approved: 'بودجه تایید شد',
+  rejected: 'بودجه رد شد'
+};
+
+const APPROVAL_ACTION_LABELS = {
+  saved: 'ذخیره شد',
+  revision_started: 'بازنگری شروع شد',
+  review_requested: 'برای بررسی ارسال شد',
+  approved: 'تایید شد',
+  rejected: 'رد شد',
+  submitted: 'ارسال شد'
+};
+
+const PROCUREMENT_STATUS_LABELS = {
+  draft: 'پیش‌نویس',
+  pending_review: 'در انتظار بررسی',
+  approved: 'تایید شده',
+  rejected: 'رد شده',
+  cancelled: 'لغو شده'
+};
+
+function pickDariLabel(labels = {}, value = '', fallback = '') {
+  const normalized = String(value || '').trim();
+  return labels[normalized] || normalized || fallback;
 }
 
 async function buildGovernmentFinanceSnapshotPdfBuffer(snapshot = {}, options = {}) {
@@ -576,27 +615,28 @@ async function buildGovernmentFinanceSnapshotPdfBuffer(snapshot = {}, options = 
   const documentNo = options?.documentNo || buildGovernmentSnapshotDocumentNo(snapshot);
   const reportSummaryValue = snapshot?.summary?.balance ?? snapshot?.summary?.netProfit ?? 0;
   const rows = Array.isArray(snapshot?.rows) ? snapshot.rows : [];
+  const reportTypeLabel = pickDariLabel(GOVERNMENT_REPORT_TYPE_LABELS, snapshot?.reportType || 'snapshot', 'نسخه رسمی');
 
   return withPdfDocument({
-    title: `Government Finance ${sanitizeLine(snapshot?.reportType || 'snapshot')}`,
-    subject: 'Official government finance PDF pack'
+    title: `گزارش مالی دولت ${sanitizeLine(reportTypeLabel)}`,
+    subject: 'بسته رسمی گزارش مالی دولت'
   }, (doc) => {
     drawHeader(doc, {
-      title: `Government Finance / ${sanitizeLine(snapshot?.title || snapshot?.reportType || 'Snapshot')}`,
-      subtitle: 'Official snapshot pack with treasury, budget, and procurement context',
+      title: `گزارش مالی دولت / ${sanitizeLine(snapshot?.title || reportTypeLabel || 'نسخه رسمی')}`,
+      subtitle: 'بسته رسمی با معلومات خزانه، بودجه، مصرفات و تعهدات خریداری',
       documentNo,
-      statusLabel: snapshot?.isOfficial === false ? 'draft' : 'official'
+      statusLabel: snapshot?.isOfficial === false ? 'پیش‌نویس' : 'رسمی'
     });
 
     drawMetaLines(doc, [
-      `Financial Year: ${sanitizeLine(snapshot?.financialYear?.title || snapshot?.financialYearId || '-')}`,
-      `Academic Year: ${sanitizeLine(snapshot?.academicYear?.title || snapshot?.academicYearId || '-')}`,
-      `Class: ${sanitizeLine(snapshot?.schoolClass?.title || 'All classes')}`,
-      `Report Type: ${sanitizeLine(snapshot?.reportType || '-')}`,
-      `Quarter: ${sanitizeLine(snapshot?.quarter || '-')}`,
-      `Version: ${sanitizeLine(snapshot?.version || '1')}`,
-      `Generated At: ${formatDateTime(snapshot?.generatedAt)}`,
-      `Generated By: ${sanitizeLine(snapshot?.generatedBy?.name || options?.generatedByName || '-')}`
+      `سال مالی: ${sanitizeLine(snapshot?.financialYear?.title || snapshot?.financialYearId || '-')}`,
+      `سال تعلیمی: ${sanitizeLine(snapshot?.academicYear?.title || snapshot?.academicYearId || '-')}`,
+      `صنف: ${sanitizeLine(snapshot?.schoolClass?.title || 'همه صنف‌ها')}`,
+      `نوع گزارش: ${sanitizeLine(reportTypeLabel || '-')}`,
+      `ربع: ${sanitizeLine(snapshot?.quarter || '-')}`,
+      `نسخه: ${sanitizeLine(snapshot?.version || '1')}`,
+      `تاریخ تولید: ${formatDateTime(snapshot?.generatedAt)}`,
+      `تولیدکننده: ${sanitizeLine(snapshot?.generatedBy?.name || options?.generatedByName || '-')}`
     ]);
 
     drawVerificationBlock(doc, {
@@ -606,110 +646,110 @@ async function buildGovernmentFinanceSnapshotPdfBuffer(snapshot = {}, options = 
       verificationQrBuffer: options?.verificationQrBuffer
     });
 
-    drawSectionTitle(doc, 'Snapshot Summary');
+    drawSectionTitle(doc, 'خلاصه نسخه رسمی');
     drawKeyValueList(doc, [
-      { label: 'Report Key', value: sanitizeLine(snapshot?.reportKey || '-') },
-      { label: 'Rows', value: formatNumber(rows.length) },
-      { label: 'Columns', value: formatNumber((snapshot?.columns || []).length) },
-      { label: 'Net / Balance', value: formatMoney(reportSummaryValue || 0) }
+      { label: 'کلید گزارش', value: sanitizeLine(pickDariLabel(GOVERNMENT_REPORT_TYPE_LABELS, snapshot?.reportKey || '', snapshot?.reportKey || '-')) },
+      { label: 'تعداد ردیف‌ها', value: formatNumber(rows.length) },
+      { label: 'تعداد ستون‌ها', value: formatNumber((snapshot?.columns || []).length) },
+      { label: 'خالص / مانده', value: formatMoney(reportSummaryValue || 0) }
     ]);
 
-    drawSectionTitle(doc, 'Expense Governance');
+    drawSectionTitle(doc, 'کنترل و نظارت مصرفات');
     drawKeyValueList(doc, [
-      { label: 'Total Expense Rows', value: formatNumber(expenseAnalytics?.summary?.totalCount || 0) },
-      { label: 'Approved Amount', value: formatMoney(expenseAnalytics?.summary?.approvedAmount || 0) },
-      { label: 'Pending Amount', value: formatMoney(expenseAnalytics?.summary?.pendingAmount || 0) },
-      { label: 'Vendors', value: formatNumber(expenseAnalytics?.summary?.vendorCount || 0) }
+      { label: 'تعداد ردیف‌های مصرف', value: formatNumber(expenseAnalytics?.summary?.totalCount || 0) },
+      { label: 'مبلغ تاییدشده', value: formatMoney(expenseAnalytics?.summary?.approvedAmount || 0) },
+      { label: 'مبلغ در انتظار بررسی', value: formatMoney(expenseAnalytics?.summary?.pendingAmount || 0) },
+      { label: 'فروشندگان', value: formatNumber(expenseAnalytics?.summary?.vendorCount || 0) }
     ]);
 
-    drawSectionTitle(doc, 'Treasury');
+    drawSectionTitle(doc, 'خزانه');
     drawKeyValueList(doc, [
-      { label: 'Book Balance', value: formatMoney(treasuryAnalytics?.summary?.bookBalance || 0) },
-      { label: 'Cash Balance', value: formatMoney(treasuryAnalytics?.summary?.cashBalance || 0) },
-      { label: 'Bank Balance', value: formatMoney(treasuryAnalytics?.summary?.bankBalance || 0) },
-      { label: 'Unassigned Approved Expense', value: formatMoney(treasuryAnalytics?.summary?.unassignedApprovedExpenseAmount || 0) }
+      { label: 'مانده دفتری', value: formatMoney(treasuryAnalytics?.summary?.bookBalance || 0) },
+      { label: 'مانده نقدی', value: formatMoney(treasuryAnalytics?.summary?.cashBalance || 0) },
+      { label: 'مانده بانکی', value: formatMoney(treasuryAnalytics?.summary?.bankBalance || 0) },
+      { label: 'مصرف تاییدشده بدون حساب خزانه', value: formatMoney(treasuryAnalytics?.summary?.unassignedApprovedExpenseAmount || 0) }
     ]);
     drawItemList(
       doc,
       (treasuryAnalytics?.alerts || []).map((item) => ({
-        title: item?.key || 'Treasury alert',
-        meta: item?.label || ''
+        title: item?.label || item?.key || 'هشدار خزانه',
+        meta: item?.detail || ''
       })),
-      'No treasury alerts recorded.'
+      'هیچ هشداری برای خزانه ثبت نشده است.'
     );
 
-    drawSectionTitle(doc, 'Budget vs Actual');
+    drawSectionTitle(doc, 'بودجه در برابر عملکرد واقعی');
     drawKeyValueList(doc, [
-      { label: 'Income Target', value: formatMoney(budgetVsActual?.summary?.annualIncomeTarget || 0) },
-      { label: 'Actual Income', value: formatMoney(budgetVsActual?.summary?.actualIncome || 0) },
-      { label: 'Expense Budget', value: formatMoney(budgetVsActual?.summary?.annualExpenseBudget || 0) },
-      { label: 'Actual Expense', value: formatMoney(budgetVsActual?.summary?.actualExpense || 0) },
-      { label: 'Reserve Target', value: formatMoney(budgetVsActual?.summary?.treasuryReserveTarget || 0) },
-      { label: 'Reserve Balance', value: formatMoney(budgetVsActual?.summary?.treasuryReserveBalance || 0) }
+      { label: 'هدف درآمد', value: formatMoney(budgetVsActual?.summary?.annualIncomeTarget || 0) },
+      { label: 'درآمد واقعی', value: formatMoney(budgetVsActual?.summary?.actualIncome || 0) },
+      { label: 'بودجه مصرفات', value: formatMoney(budgetVsActual?.summary?.annualExpenseBudget || 0) },
+      { label: 'مصرف واقعی', value: formatMoney(budgetVsActual?.summary?.actualExpense || 0) },
+      { label: 'هدف ذخیره خزانه', value: formatMoney(budgetVsActual?.summary?.treasuryReserveTarget || 0) },
+      { label: 'مانده ذخیره خزانه', value: formatMoney(budgetVsActual?.summary?.treasuryReserveBalance || 0) }
     ]);
     drawItemList(
       doc,
       (budgetVsActual?.alerts || []).map((item) => ({
-        title: item?.title || item?.key || 'Budget alert',
+        title: item?.title || item?.key || 'هشدار بودجه',
         meta: item?.detail || ''
       })),
-      'No budget alerts recorded.'
+      'هیچ هشداری برای بودجه ثبت نشده است.'
     );
 
-    drawSectionTitle(doc, 'Budget Approval');
+    drawSectionTitle(doc, 'تایید بودجه');
     drawKeyValueList(doc, [
-      { label: 'Stage', value: sanitizeLine(budgetApproval?.stage || 'draft') },
-      { label: 'Submitted At', value: formatDateTime(budgetApproval?.submittedAt) },
-      { label: 'Approved At', value: formatDateTime(budgetApproval?.approvedAt) },
-      { label: 'Rejected At', value: formatDateTime(budgetApproval?.rejectedAt) }
+      { label: 'مرحله', value: sanitizeLine(pickDariLabel(BUDGET_APPROVAL_STAGE_LABELS, budgetApproval?.stage || 'draft', 'پیش‌نویس بودجه')) },
+      { label: 'تاریخ ارسال', value: formatDateTime(budgetApproval?.submittedAt) },
+      { label: 'تاریخ تایید', value: formatDateTime(budgetApproval?.approvedAt) },
+      { label: 'تاریخ رد', value: formatDateTime(budgetApproval?.rejectedAt) }
     ]);
     drawItemList(
       doc,
       (budgetApproval?.trail || []).slice(0, 8).map((entry) => ({
-        title: `${sanitizeLine(entry?.level || 'review')} / ${sanitizeLine(entry?.action || '-')}`,
+        title: `${sanitizeLine(pickDariLabel(BUDGET_APPROVAL_STAGE_LABELS, entry?.level || '', 'بررسی'))} / ${sanitizeLine(pickDariLabel(APPROVAL_ACTION_LABELS, entry?.action || '', '-'))}`,
         meta: [
           sanitizeLine(entry?.by?.name || ''),
           formatDateTime(entry?.at),
           sanitizeLine(entry?.note || entry?.reason || '')
         ].filter(Boolean).join(' | ')
       })),
-      'No budget approval trail recorded.'
+      'هیچ ردپای تایید بودجه ثبت نشده است.'
     );
 
-    drawSectionTitle(doc, 'Procurement & Vendor Commitments');
+    drawSectionTitle(doc, 'خریداری و تعهدات فروشندگان');
     drawKeyValueList(doc, [
-      { label: 'Commitment Count', value: formatNumber(procurementAnalytics?.summary?.totalCount || 0) },
-      { label: 'Total Committed', value: formatMoney(procurementAnalytics?.summary?.totalCommittedAmount || 0) },
-      { label: 'Covered By Approved Expense', value: formatMoney(procurementAnalytics?.summary?.totalApprovedExpenseAmount || 0) },
-      { label: 'Outstanding Exposure', value: formatMoney(procurementAnalytics?.summary?.totalOutstandingAmount || 0) },
-      { label: 'Settled Amount', value: formatMoney(procurementAnalytics?.summary?.totalSettledAmount || 0) },
-      { label: 'Ready To Pay', value: formatMoney(procurementAnalytics?.summary?.totalPayableReadyAmount || 0) }
+      { label: 'تعداد تعهدات', value: formatNumber(procurementAnalytics?.summary?.totalCount || 0) },
+      { label: 'مجموع تعهدشده', value: formatMoney(procurementAnalytics?.summary?.totalCommittedAmount || 0) },
+      { label: 'پوشش‌شده با مصرف تاییدشده', value: formatMoney(procurementAnalytics?.summary?.totalApprovedExpenseAmount || 0) },
+      { label: 'باقی‌مانده تعهد', value: formatMoney(procurementAnalytics?.summary?.totalOutstandingAmount || 0) },
+      { label: 'مبلغ تصفیه‌شده', value: formatMoney(procurementAnalytics?.summary?.totalSettledAmount || 0) },
+      { label: 'آماده پرداخت', value: formatMoney(procurementAnalytics?.summary?.totalPayableReadyAmount || 0) }
     ]);
     drawItemList(
       doc,
       (procurementAnalytics?.items || []).slice(0, 10).map((item) => ({
-        title: item?.title || item?.vendorName || 'Commitment',
+        title: item?.title || item?.vendorName || 'تعهد',
         meta: [
           sanitizeLine(item?.vendorName || ''),
-          sanitizeLine(item?.status || ''),
-          `committed=${formatMoney(item?.committedAmount || 0)}`,
-          `outstanding=${formatMoney(item?.outstandingAmount || 0)}`
+          sanitizeLine(pickDariLabel(PROCUREMENT_STATUS_LABELS, item?.status || '', '')),
+          `تعهد=${formatMoney(item?.committedAmount || 0)}`,
+          `باقی‌مانده=${formatMoney(item?.outstandingAmount || 0)}`
         ].filter(Boolean).join(' | ')
       })),
-      'No procurement commitments recorded.'
+      'هیچ تعهد خریداری ثبت نشده است.'
     );
 
-    drawSectionTitle(doc, 'Snapshot Rows');
+    drawSectionTitle(doc, 'ردیف‌های نسخه رسمی');
     drawItemList(
       doc,
       rows.slice(0, 12).map((row, index) => ({
-        title: `${sanitizeLine(row?.classTitle || row?.quarterLabel || `Row ${index + 1}`)}`,
+        title: `${sanitizeLine(row?.classTitle || row?.quarterLabel || `ردیف ${index + 1}`)}`,
         meta: Object.entries(row || {})
           .slice(0, 4)
           .map(([key, value]) => `${sanitizeLine(key)}=${sanitizeLine(value)}`)
           .join(' | ')
       })),
-      'No row preview is available.'
+      'پیش‌نمایش ردیفی در دسترس نیست.'
     );
   });
 }

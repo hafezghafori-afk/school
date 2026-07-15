@@ -109,6 +109,34 @@ const BUDGET_APPROVAL_STAGE_LABELS = {
   rejected: 'بودجه رد شد'
 };
 
+const BUDGET_APPROVAL_ACTION_LABELS = {
+  saved: 'ذخیره شد',
+  revision_started: 'بازنگری شروع شد',
+  review_requested: 'برای بررسی ارسال شد',
+  approved: 'تایید شد',
+  rejected: 'رد شد',
+  submitted: 'ارسال شد'
+};
+
+const GOVERNMENT_BUDGET_ALERT_LABELS = {
+  expense_over_budget: {
+    title: 'بودجه مصرفات بیشتر از حد تعیین‌شده شد',
+    detail: 'مصارف تاییدشده از بودجه سالانه بیشتر است.'
+  },
+  income_under_target: {
+    title: 'هدف درآمد تکمیل نشده است',
+    detail: 'درآمد جمع‌آوری‌شده کمتر از هدف تعیین‌شده است.'
+  },
+  treasury_reserve_gap: {
+    title: 'ذخیره خزانه کمتر از هدف است',
+    detail: 'مانده خزانه کمتر از هدف ذخیره تعیین‌شده است.'
+  },
+  category_budget_attention: {
+    title: 'بودجه دسته‌بندی‌ها نیاز به بررسی دارد',
+    detail: 'برخی دسته‌بندی‌ها از حد بودجه گذشته یا مصرف بدون بودجه تعریف‌شده دارند.'
+  }
+};
+
 const FINANCIAL_YEAR_STATUS_LABELS = {
   planning: 'در پلان',
   draft: 'پیش‌نویس',
@@ -255,6 +283,28 @@ function normalizeDisplayPayload(value) {
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [key, normalizeDisplayPayload(item)])
   );
+}
+
+function mergeFinancialYearItem(items = [], nextItem = null) {
+  if (!nextItem?._id && !nextItem?.id) return items;
+  const normalizedItem = normalizeDisplayPayload(nextItem);
+  const nextId = String(normalizedItem._id || normalizedItem.id || '');
+  const list = Array.isArray(items) ? items : [];
+  const found = list.some((item) => String(item?._id || item?.id || '') === nextId);
+  if (!found) return [normalizedItem, ...list];
+  return list.map((item) => (
+    String(item?._id || item?.id || '') === nextId
+      ? { ...item, ...normalizedItem }
+      : item
+  ));
+}
+
+function applyFinancialYearItemToPayload(setPayload, item) {
+  if (!item?._id && !item?.id) return;
+  setPayload((current) => ({
+    ...current,
+    financialYears: mergeFinancialYearItem(current.financialYears || [], item)
+  }));
 }
 
 function toMonthKey(value) {
@@ -444,6 +494,27 @@ function resolveBudgetApprovalStageLabel(stage = '') {
   return BUDGET_APPROVAL_STAGE_LABELS[String(stage || '').trim()] || String(stage || 'پیش‌نویس بودجه').trim();
 }
 
+function resolveBudgetApprovalActionLabel(action = '') {
+  return BUDGET_APPROVAL_ACTION_LABELS[String(action || '').trim()] || String(action || '---').trim();
+}
+
+function isPlainEnglishText(value = '') {
+  const text = String(value || '').trim();
+  return Boolean(text) && /^[A-Za-z0-9 ,.'()/:%-]+$/.test(text);
+}
+
+function resolveGovernmentBudgetAlert(item = {}) {
+  const fallback = GOVERNMENT_BUDGET_ALERT_LABELS[String(item?.key || '').trim()] || {};
+  return {
+    title: item?.title && !isPlainEnglishText(item.title)
+      ? item.title
+      : fallback.title || item?.title || item?.key || 'هشدار بودجه',
+    detail: item?.detail && !isPlainEnglishText(item.detail)
+      ? item.detail
+      : fallback.detail || item?.detail || ''
+  };
+}
+
 function resolveProcurementStatusLabel(status = '') {
   return PROCUREMENT_STATUS_LABELS[String(status || '').trim()] || String(status || 'پیش‌نویس').trim();
 }
@@ -518,18 +589,10 @@ function resolveReportLabel(tabKey) {
 
 function readInitialSearchValue(searchParams, key) {
   const directValue = searchParams.get(key);
-  if (typeof window !== 'undefined') {
-    const windowValue = new URLSearchParams(window.location.search).get(key);
-    if (windowValue) return windowValue;
-  }
   return directValue || '';
 }
 
 function readInitialSearchText(searchParams) {
-  if (typeof window !== 'undefined') {
-    const windowText = new URLSearchParams(window.location.search).toString();
-    if (windowText) return windowText;
-  }
   return searchParams.toString();
 }
 
@@ -1331,8 +1394,8 @@ export default function AdminGovernmentFinance() {
     if (activeTab === 'treasury') {
       chips.push({
         key: 'treasury-account',
-        label: 'Treasury account',
-        value: selectedTreasuryReportAccount?.title || selectedTreasuryReportAccount?.code || 'All accounts'
+        label: 'حساب خزانه',
+        value: selectedTreasuryReportAccount?.title || selectedTreasuryReportAccount?.code || 'همه حساب‌ها'
       });
     }
 
@@ -1800,19 +1863,12 @@ export default function AdminGovernmentFinance() {
     const nextClassId = readInitialSearchValue(searchParams, 'classId');
     const nextQuarter = sanitizeQuarter(readInitialSearchValue(searchParams, 'quarter'));
 
-    if (nextTab !== activeTab) setActiveTab(nextTab);
-    if (nextFinancialYearId !== selectedFinancialYearId) setSelectedFinancialYearId(nextFinancialYearId);
-    if (nextAcademicYearId !== selectedAcademicYearId) setSelectedAcademicYearId(nextAcademicYearId);
-    if (nextClassId !== selectedClassId) setSelectedClassId(nextClassId);
-    if (nextQuarter !== selectedQuarter) setSelectedQuarter(nextQuarter);
-  }, [
-    activeTab,
-    searchParams,
-    selectedAcademicYearId,
-    selectedClassId,
-    selectedFinancialYearId,
-    selectedQuarter
-  ]);
+    setActiveTab((current) => (current === nextTab ? current : nextTab));
+    setSelectedFinancialYearId((current) => (current === nextFinancialYearId ? current : nextFinancialYearId));
+    setSelectedAcademicYearId((current) => (current === nextAcademicYearId ? current : nextAcademicYearId));
+    setSelectedClassId((current) => (current === nextClassId ? current : nextClassId));
+    setSelectedQuarter((current) => (current === nextQuarter ? current : nextQuarter));
+  }, [searchParams]);
 
   useEffect(() => {
     const nextParams = buildGovernmentFinanceSearchParams({
@@ -2091,13 +2147,14 @@ export default function AdminGovernmentFinance() {
 
     try {
       setBusyAction(`save-budget-${selectedFinancialYearId}`);
-      await fetchJson(`/api/finance/admin/financial-years/${selectedFinancialYearId}`, {
+      const response = await fetchJson(`/api/finance/admin/financial-years/${selectedFinancialYearId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           budgetTargets: serializeBudgetDraft(selectedYearBudgetDraft, expenseCategoryRegistry)
         })
       });
+      applyFinancialYearItemToPayload(setPayload, response.item);
       showMessage('اهداف بودجه به‌روزرسانی شد.');
       await loadWorkspace('year');
     } catch (error) {
@@ -2114,9 +2171,10 @@ export default function AdminGovernmentFinance() {
     }
     try {
       setBusyAction(`budget-review-request-${selectedFinancialYearId}`);
-      await postJson(`/api/finance/admin/financial-years/${selectedFinancialYearId}/budget/request-review`, {
+      const response = await postJson(`/api/finance/admin/financial-years/${selectedFinancialYearId}/budget/request-review`, {
         note: 'ارسال بودجه از میز مدیریت سال مالی'
       });
+      applyFinancialYearItemToPayload(setPayload, response.item);
       showMessage('بودجه برای بررسی ارسال شد.');
       await loadWorkspace('year');
     } catch (error) {
@@ -2138,11 +2196,12 @@ export default function AdminGovernmentFinance() {
 
     try {
       setBusyAction(`${action}-budget-${selectedFinancialYearId}`);
-      await postJson(`/api/finance/admin/financial-years/${selectedFinancialYearId}/budget/review`, {
+      const response = await postJson(`/api/finance/admin/financial-years/${selectedFinancialYearId}/budget/review`, {
         action,
         reason: reason || '',
         note: action === 'reject' ? 'بودجه از میز سال مالی رد شد.' : 'بودجه از میز سال مالی تایید شد.'
       });
+      applyFinancialYearItemToPayload(setPayload, response.item);
       showMessage(action === 'reject' ? 'درخواست بودجه رد شد.' : 'مرحله بودجه ثبت شد.');
       await loadWorkspace('year');
     } catch (error) {
@@ -2159,9 +2218,10 @@ export default function AdminGovernmentFinance() {
     }
     try {
       setBusyAction(`budget-start-revision-${selectedFinancialYearId}`);
-      await postJson(`/api/finance/admin/financial-years/${selectedFinancialYearId}/budget/start-revision`, {
+      const response = await postJson(`/api/finance/admin/financial-years/${selectedFinancialYearId}/budget/start-revision`, {
         note: 'بازنگری از دفتر گزارش مالی دولت آغاز شد.'
       });
+      applyFinancialYearItemToPayload(setPayload, response.item);
       showMessage('بازنگری بودجه آغاز شد.');
       await loadWorkspace('year');
     } catch (error) {
@@ -3500,12 +3560,15 @@ export default function AdminGovernmentFinance() {
                 <div className="gov-readiness-good">سال مالی انتخاب شده در حال حاضر با اهداف بودجه تنظیم شده هماهنگ است.</div>
               ) : (
                 <ul className="gov-readiness-list">
-                  {budgetVsActual.alerts.map((item) => (
-                    <li key={item.key} className="gov-readiness-item">
-                      <strong>{item.title || item.key}</strong>
-                      <span>{item.detail || ''}</span>
-                    </li>
-                  ))}
+                  {budgetVsActual.alerts.map((item) => {
+                    const translatedAlert = resolveGovernmentBudgetAlert(item);
+                    return (
+                      <li key={item.key} className="gov-readiness-item">
+                        <strong>{translatedAlert.title}</strong>
+                        <span>{translatedAlert.detail}</span>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </article>
@@ -3661,7 +3724,7 @@ export default function AdminGovernmentFinance() {
                         <tr key={`budget-revision-${index}`}>
                           <td>{formatNumber(entry.revisionNumber || entry.toVersion || 0)}</td>
                           <td>{formatNumber(entry.fromVersion || 0)} -&gt; {formatNumber(entry.toVersion || 0)}</td>
-                          <td>{entry.action || '---'}</td>
+                          <td>{resolveBudgetApprovalActionLabel(entry.action)}</td>
                           <td>{entry.by?.name || '---'}</td>
                           <td>{toLocaleDateTime(entry.at)}</td>
                           <td>{entry.note || entry.reason || '---'}</td>
@@ -3688,8 +3751,8 @@ export default function AdminGovernmentFinance() {
                     <tbody>
                       {(selectedBudgetApproval.trail || []).slice().reverse().map((entry, index) => (
                         <tr key={`budget-trail-${index}`}>
-                          <td>{entry.level || '---'}</td>
-                          <td>{entry.action || '---'}</td>
+                          <td>{resolveBudgetApprovalStageLabel(entry.level)}</td>
+                          <td>{resolveBudgetApprovalActionLabel(entry.action)}</td>
                           <td>{entry.by?.name || '---'}</td>
                           <td>{toLocaleDateTime(entry.at)}</td>
                           <td>{entry.note || entry.reason || '---'}</td>

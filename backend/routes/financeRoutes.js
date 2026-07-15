@@ -2467,7 +2467,7 @@ router.get('/admin/expense-categories', requireAuth, requireRole(['admin']), req
       items: items.map((item) => serializeExpenseCategoryDefinition(item))
     });
   } catch {
-    return res.status(500).json({ success: false, message: 'Failed to load official expense categories.' });
+    return res.status(500).json({ success: false, message: 'دریافت دسته‌بندی‌های رسمی مصرفات ناموفق بود.' });
   }
 });
 
@@ -2749,7 +2749,7 @@ router.patch('/admin/financial-years/:id', requireAuth, requireRole(['admin']), 
     return res.json({
       success: true,
       item: serializeFinancialYear(saved),
-      message: 'Financial year updated.'
+      message: 'سال مالی به‌روزرسانی شد.'
     });
   } catch (error) {
     return res.status(resolveFinancialYearErrorStatus(error)).json({
@@ -2763,7 +2763,7 @@ router.post('/admin/financial-years/:id/activate', requireAuth, requireRole(['ad
   try {
     const item = await FinancialYear.findById(req.params.id);
     if (!item) {
-      return res.status(404).json({ success: false, message: 'Financial year not found.' });
+      return res.status(404).json({ success: false, message: 'سال مالی پیدا نشد.' });
     }
     if (item.isClosed || item.status === 'closed') {
       return res.status(409).json({ success: false, message: 'سال مالی بسته‌شده قابل فعال‌سازی نیست.' });
@@ -2805,7 +2805,7 @@ router.get('/admin/financial-years/:id/close-readiness', requireAuth, requireRol
   try {
     const item = await FinancialYear.findById(req.params.id);
     if (!item) {
-      return res.status(404).json({ success: false, message: 'Financial year not found.' });
+      return res.status(404).json({ success: false, message: 'سال مالی پیدا نشد.' });
     }
 
     const readiness = await buildFinancialYearCloseReadiness({ financialYearId: String(item._id) });
@@ -2823,14 +2823,14 @@ router.post('/admin/financial-years/:id/close', requireAuth, requireRole(['admin
   try {
     const item = await FinancialYear.findById(req.params.id);
     if (!item) {
-      return res.status(404).json({ success: false, message: 'Financial year not found.' });
+      return res.status(404).json({ success: false, message: 'سال مالی پیدا نشد.' });
     }
     if (item.isClosed || item.status === 'closed') {
       const current = await populateFinancialYearQuery(FinancialYear.findById(item._id));
       return res.json({
         success: true,
         item: serializeFinancialYear(current),
-        message: 'Financial year was already closed.'
+        message: 'سال مالی قبلاً بسته شده است.'
       });
     }
 
@@ -3040,7 +3040,7 @@ router.get('/admin/expenses/analytics', requireAuth, requireRole(['admin']), req
       analytics
     });
   } catch {
-    return res.status(500).json({ success: false, message: 'Failed to load expense governance analytics.' });
+    return res.status(500).json({ success: false, message: 'دریافت تحلیل کنترلی مصرفات ناموفق بود.' });
   }
 });
 
@@ -3404,7 +3404,7 @@ router.get('/admin/expenses', requireAuth, requireRole(['admin']), requirePermis
       items: items.map((item) => serializeExpenseEntry(item))
     });
   } catch {
-    return res.status(500).json({ success: false, message: 'Failed to load expenses.' });
+    return res.status(500).json({ success: false, message: 'دریافت مصرفات ناموفق بود.' });
   }
 });
 
@@ -3975,14 +3975,14 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
       success: true,
       item: serializeGovernmentFinanceSnapshot(saved),
       report,
-      message: 'Government finance snapshot generated.'
+      message: 'نسخه رسمی گزارش مالی دولت ساخته شد.'
     });
   } catch (error) {
     const code = String(error?.message || '');
     const status = Number(error?.statusCode || (code.startsWith('report_') ? 400 : 500));
     return res.status(status).json({
       success: false,
-      message: resolveFinancialYearMessage(error, code || 'Failed to generate government finance snapshot.')
+      message: resolveFinancialYearMessage(error, code || 'ساخت نسخه رسمی گزارش مالی دولت ناموفق بود.')
     });
   }
 });
@@ -4036,8 +4036,8 @@ router.get('/admin/government-snapshots/:id/export.pdf', requireAuth, requireRol
       filename,
       contentType: 'application/pdf',
       buffer: pdfBuffer,
-      title: String(snapshot.title || snapshot.reportType || 'Government finance snapshot').trim(),
-      subjectName: String(snapshot.title || snapshot.reportType || 'Government finance snapshot').trim(),
+      title: String(snapshot.title || snapshot.reportType || 'نسخه رسمی گزارش مالی دولت').trim(),
+      subjectName: String(snapshot.title || snapshot.reportType || 'نسخه رسمی گزارش مالی دولت').trim(),
       classId: snapshot.classId?._id || snapshot.classId || null,
       academicYearId: snapshot.academicYearId?._id || snapshot.academicYearId || null,
       meta: {
@@ -4204,7 +4204,7 @@ router.post('/admin/fee-plans', requireAuth, requireRole(['admin']), requirePerm
     return res.json({
       success: true,
       item: serializeFinanceFeePlan(refreshed),
-      message: 'Canonical fee plan saved successfully.'
+      message: 'پلان فیس رسمی با موفقیت ذخیره شد.'
     });
 
   } catch (error) {
@@ -4510,7 +4510,7 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
     const scope = await resolveFinanceScope({ classId, courseId: inputCourseId });
     if (scope.error) return res.status(400).json({ success: false, message: scope.error });
     if (!scope.courseId) {
-      return res.status(400).json({ success: false, message: 'Class mapping is required for finance bill creation.' });
+      return res.status(400).json({ success: false, message: 'برای ایجاد بل مالی، وصل بودن صنف الزامی است.' });
     }
     if (normalizeScopeText(inputCourseId) && !normalizeScopeText(classId)) {
       setLegacyScopeFieldHeaders(res);
@@ -4657,7 +4657,7 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
     const scope = await resolveFinanceScope({ classId, courseId: inputCourseId });
     if (scope.error) return res.status(400).json({ success: false, message: scope.error });
     if (!scope.courseId) {
-      return res.status(400).json({ success: false, message: 'Class mapping is required for bill generation.' });
+      return res.status(400).json({ success: false, message: 'برای تولید بل، وصل بودن صنف الزامی است.' });
     }
     if (normalizeScopeText(inputCourseId) && !normalizeScopeText(classId)) {
       setLegacyScopeFieldHeaders(res);
@@ -4768,7 +4768,7 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
     const scope = await resolveFinanceScope({ classId, courseId: inputCourseId });
     if (scope.error) return res.status(400).json({ success: false, message: scope.error });
     if (!scope.courseId) {
-      return res.status(400).json({ success: false, message: 'Class mapping is required for bill generation.' });
+      return res.status(400).json({ success: false, message: 'برای تولید بل، وصل بودن صنف الزامی است.' });
     }
     if (normalizeScopeText(inputCourseId) && !normalizeScopeText(classId)) {
       setLegacyScopeFieldHeaders(res);
@@ -4955,7 +4955,7 @@ router.post('/admin/bills/:id/discount', requireAuth, requireRole(['admin']), re
   return res.status(410).json({
     success: false,
     retired: true,
-    message: 'Legacy finance bill discount route is retired. Use /api/student-finance/orders/:feeOrderId/discount instead.',
+    message: 'مسیر قدیمی تخفیف بل مالی غیرفعال شده است. از مسیر /api/student-finance/orders/:feeOrderId/discount استفاده کنید.',
     replacementEndpoint: '/api/student-finance/orders/:feeOrderId/discount'
   });
 });
@@ -4965,7 +4965,7 @@ router.post('/admin/bills/:id/installments', requireAuth, requireRole(['admin'])
   return res.status(410).json({
     success: false,
     retired: true,
-    message: 'Legacy finance bill installments route is retired. Use /api/student-finance/orders/:feeOrderId/installments instead.',
+    message: 'مسیر قدیمی اقساط بل مالی غیرفعال شده است. از مسیر /api/student-finance/orders/:feeOrderId/installments استفاده کنید.',
     replacementEndpoint: '/api/student-finance/orders/:feeOrderId/installments'
   });
 });
@@ -4975,7 +4975,7 @@ router.post('/admin/bills/:id/void', requireAuth, requireRole(['admin']), requir
   return res.status(410).json({
     success: false,
     retired: true,
-    message: 'Legacy finance bill void route is retired. Use /api/student-finance/orders/:feeOrderId/void instead.',
+    message: 'مسیر قدیمی باطل‌سازی بل مالی غیرفعال شده است. از مسیر /api/student-finance/orders/:feeOrderId/void استفاده کنید.',
     replacementEndpoint: '/api/student-finance/orders/:feeOrderId/void'
   });
 });
@@ -5020,7 +5020,7 @@ router.post('/admin/receipts/:id/follow-up', requireAuth, requireRole(['admin'])
   return res.status(410).json({
     success: false,
     retired: true,
-    message: 'Legacy finance receipt follow-up route is retired. Use /api/student-finance/payments/:feePaymentId/follow-up instead.',
+    message: 'مسیر قدیمی پیگیری رسید مالی غیرفعال شده است. از مسیر /api/student-finance/payments/:feePaymentId/follow-up استفاده کنید.',
     replacementEndpoint: '/api/student-finance/payments/:feePaymentId/follow-up'
   });
 });
@@ -5933,7 +5933,7 @@ router.post('/admin/receipts/:id/approve', requireAuth, requireRole(['admin']), 
   return res.status(410).json({
     success: false,
     retired: true,
-    message: 'Legacy finance receipt approval route is retired. Use /api/student-finance/payments/:feePaymentId/approve instead.',
+    message: 'مسیر قدیمی تایید رسید مالی غیرفعال شده است. از مسیر /api/student-finance/payments/:feePaymentId/approve استفاده کنید.',
     replacementEndpoint: '/api/student-finance/payments/:feePaymentId/approve'
   });
 });
@@ -5943,7 +5943,7 @@ router.post('/admin/receipts/:id/reject', requireAuth, requireRole(['admin']), r
   return res.status(410).json({
     success: false,
     retired: true,
-    message: 'Legacy finance receipt rejection route is retired. Use /api/student-finance/payments/:feePaymentId/reject instead.',
+    message: 'مسیر قدیمی رد رسید مالی غیرفعال شده است. از مسیر /api/student-finance/payments/:feePaymentId/reject استفاده کنید.',
     replacementEndpoint: '/api/student-finance/payments/:feePaymentId/reject'
   });
 });
@@ -5957,7 +5957,7 @@ router.get('/student/me', requireAuth, async (req, res) => {
     return res.status(410).json({
       success: false,
       retired: true,
-      message: 'Legacy student finance summary has been retired. Use /api/student-finance/me/overviews instead.',
+      message: 'خلاصه قدیمی مالی شاگرد غیرفعال شده است. از مسیر /api/student-finance/me/overviews استفاده کنید.',
       replacementEndpoint: '/api/student-finance/me/overviews'
     });
   } catch {
@@ -6334,7 +6334,7 @@ router.get('/admin/reports/by-class', requireAuth, requireRole(['admin']), requi
       : await listFinanceClassReportItems(scope);
     res.json({ success: true, items, summary: report?.summary || null });
   } catch {
-    res.status(500).json({ success: false, message: 'Error while loading class finance report' });
+    res.status(500).json({ success: false, message: 'دریافت گزارش مالی صنف ناموفق بود.' });
   }
 });
 
@@ -6344,11 +6344,11 @@ router.get('/admin/reports/by-course', requireAuth, requireRole(['admin']), requ
     return res.status(410).json({
       success: false,
       retired: true,
-      message: 'Legacy course finance report has been retired. Use /api/finance/admin/reports/by-class instead.',
+      message: 'گزارش مالی قدیمی کورس غیرفعال شده است. از مسیر /api/finance/admin/reports/by-class استفاده کنید.',
       replacementEndpoint: '/api/finance/admin/reports/by-class'
     });
   } catch {
-    res.status(500).json({ success: false, message: 'Error while loading legacy course finance report' });
+    res.status(500).json({ success: false, message: 'دریافت گزارش مالی قدیمی کورس ناموفق بود.' });
   }
 });
 
@@ -7399,7 +7399,7 @@ router.post('/delivery/providers/:provider/status', express.json(), express.urle
     );
     const acceptedTokens = Array.from(new Set([expectedToken, ...providerTokens].filter(Boolean)));
     if (acceptedTokens.length && !acceptedTokens.includes(providedToken)) {
-      return res.status(403).json({ success: false, message: 'Webhook token معتبر نیست.' });
+      return res.status(403).json({ success: false, message: 'توکن وبهوک معتبر نیست.' });
     }
     const result = await ingestFinanceDeliveryProviderWebhook({
       providerKey: req.params.provider,
@@ -7471,7 +7471,7 @@ router.post('/admin/delivery-providers/:channel/rotate', requireAuth, requireRol
           : ['accountSid', 'authToken', 'accessToken', 'phoneNumberId', 'webhookToken'].filter((field) => String(req.body?.[field] || '').trim())
       }
     });
-    return res.json({ success: true, item, message: 'rotation credentialها ثبت شد.' });
+    return res.json({ success: true, item, message: 'کلیدهای چرخشی دسترسی ثبت شد.' });
   } catch (error) {
     return res.status(Number(error?.statusCode || 500)).json({
       success: false,
@@ -7712,7 +7712,7 @@ router.post('/admin/delivery-campaigns/templates/:key/rollback', requireAuth, re
         publishedVersionNumber: Number(item?.publishedVersionNumber || 0) || null
       }
     });
-    return res.json({ success: true, item, message: 'rollback template انجام شد.' });
+    return res.json({ success: true, item, message: 'برگشت قالب انجام شد.' });
   } catch (error) {
     return res.status(Number(error?.statusCode || 500)).json({
       success: false,
@@ -7780,7 +7780,7 @@ router.post('/admin/delivery-campaigns/recovery-queue/replay', requireAuth, requ
     return res.json({
       success: true,
       result,
-      message: 'replay وضعیت provider انجام شد.'
+      message: 'بازپخش وضعیت فراهم‌کننده انجام شد.'
     });
   } catch (error) {
     return res.status(Number(error?.statusCode || 500)).json({
@@ -7853,7 +7853,7 @@ router.post('/admin/delivery-campaigns/:id/retry-target', requireAuth, requireRo
       message: result?.message || 'retry delivery انجام شد.'
     });
   } catch {
-    return res.status(500).json({ success: false, message: 'retry delivery ناموفق بود.' });
+    return res.status(500).json({ success: false, message: 'تلاش دوباره برای ارسال ناموفق بود.' });
   }
 });
 
@@ -7957,7 +7957,7 @@ router.post('/admin/documents/batch-statements.zip', requireAuth, requireRole(['
     const monthKey = String(req.body?.monthKey || '').trim();
 
     if (!classId) {
-      return res.status(400).json({ success: false, message: 'classId الزامی است.' });
+      return res.status(400).json({ success: false, message: 'شناسه صنف الزامی است.' });
     }
 
     const memberships = await findClassMemberships({
