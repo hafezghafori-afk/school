@@ -403,7 +403,8 @@ router.get('/dashboard', async (req, res) => {
       'takhar', 'samangan', 'kunduz', 'baghlan', 'farah', 'nimroz',
       'helmand', 'ghor', 'daykundi', 'uruzgan', 'zabul', 'paktika',
       'khost', 'paktia', 'logar', 'parwan', 'kapisa', 'panjshir',
-      'badghis', 'faryab', 'jowzjan', 'saripul'
+      'badghis', 'faryab', 'jowzjan', 'saripul', 'bamyan', 'ghazni',
+      'wardak', 'laghman', 'kunar', 'nuristan'
     ];
 
     const nationalStats = {
@@ -790,7 +791,8 @@ router.get('/provinces/stats', async (req, res) => {
       'takhar', 'samangan', 'kunduz', 'baghlan', 'farah', 'nimroz',
       'helmand', 'ghor', 'daykundi', 'uruzgan', 'zabul', 'paktika',
       'khost', 'paktia', 'logar', 'parwan', 'kapisa', 'panjshir',
-      'badghis', 'faryab', 'jowzjan', 'saripul'
+      'badghis', 'faryab', 'jowzjan', 'saripul', 'bamyan', 'ghazni',
+      'wardak', 'laghman', 'kunar', 'nuristan'
     ];
 
     const provinceStats = {};
@@ -890,7 +892,8 @@ router.get('/reports/annual', async (req, res) => {
       'takhar', 'samangan', 'kunduz', 'baghlan', 'farah', 'nimroz',
       'helmand', 'ghor', 'daykundi', 'uruzgan', 'zabul', 'paktika',
       'khost', 'paktia', 'logar', 'parwan', 'kapisa', 'panjshir',
-      'badghis', 'faryab', 'jowzjan', 'saripul'
+      'badghis', 'faryab', 'jowzjan', 'saripul', 'bamyan', 'ghazni',
+      'wardak', 'laghman', 'kunar', 'nuristan'
     ];
 
     for (const province of provinces) {

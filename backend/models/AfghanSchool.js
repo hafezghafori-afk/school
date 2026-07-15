@@ -48,7 +48,8 @@ const afghanSchoolSchema = new mongoose.Schema({
       'takhar', 'samangan', 'kunduz', 'baghlan', 'farah', 'nimroz',
       'helmand', 'ghor', 'daykundi', 'uruzgan', 'zabul', 'paktika',
       'khost', 'paktia', 'logar', 'parwan', 'kapisa', 'panjshir',
-      'badghis', 'faryab', 'jowzjan', 'saripul'
+      'badghis', 'faryab', 'jowzjan', 'saripul', 'bamyan', 'ghazni',
+      'wardak', 'laghman', 'kunar', 'nuristan'
     ]
   },
   district: {

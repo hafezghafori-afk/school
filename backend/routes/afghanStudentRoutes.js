@@ -482,6 +482,9 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
     if (error.code === 11000) {
       return fail(res, 'Tazkira number already exists', 400);
     }
+    if (error?.name === 'ValidationError') {
+      return fail(res, formatStudentUpdateError(error), 400);
+    }
     return fail(res, 'Failed to create student', 500);
   }
 });

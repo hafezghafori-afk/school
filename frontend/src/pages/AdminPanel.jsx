@@ -4449,6 +4449,12 @@ export default function AdminPanel() {
                       <option value="faryab">فاریاب</option>
                       <option value="jowzjan">جوزجان</option>
                       <option value="saripul">سرپل</option>
+                      <option value="bamyan">بامیان</option>
+                      <option value="ghazni">غزنی</option>
+                      <option value="wardak">میدان وردک</option>
+                      <option value="laghman">لغمان</option>
+                      <option value="kunar">کنر</option>
+                      <option value="nuristan">نورستان</option>
                     </select>
                   </div>
                   <div className="admin-form-group">
@@ -5563,6 +5569,12 @@ export default function AdminPanel() {
                         <option value="faryab">فاریاب</option>
                         <option value="jowzjan">جوزجان</option>
                         <option value="saripul">سریپل</option>
+                        <option value="bamyan">بامیان</option>
+                        <option value="ghazni">غزنی</option>
+                        <option value="wardak">میدان وردک</option>
+                        <option value="laghman">لغمان</option>
+                        <option value="kunar">کنر</option>
+                        <option value="nuristan">نورستان</option>
                       </select>
                     </div>
                     <div className="admin-form-group">

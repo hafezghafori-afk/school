@@ -48,7 +48,13 @@ const AfghanSchoolManagement = () => {
     { code: 'badghis', name: 'بادغیس' },
     { code: 'faryab', name: 'فاریاب' },
     { code: 'jowzjan', name: 'جوزجان' },
-    { code: 'saripul', name: 'سرپل' }
+    { code: 'saripul', name: 'سرپل' },
+    { code: 'bamyan', name: 'بامیان' },
+    { code: 'ghazni', name: 'غزنی' },
+    { code: 'wardak', name: 'میدان وردک' },
+    { code: 'laghman', name: 'لغمان' },
+    { code: 'kunar', name: 'کنر' },
+    { code: 'nuristan', name: 'نورستان' }
   ];
 
   const schoolTypes = [

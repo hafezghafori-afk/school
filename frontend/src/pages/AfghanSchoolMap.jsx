@@ -44,7 +44,13 @@ const AfghanSchoolMap = () => {
     { code: 'badghis', name: 'بادغیس', center: [34.9833, 63.0500] },
     { code: 'faryab', name: 'فاریاب', center: [36.5833, 64.8667] },
     { code: 'jowzjan', name: 'جوزجان', center: [36.7000, 65.8333] },
-    { code: 'saripul', name: 'سرپل', center: [36.2167, 66.0167] }
+    { code: 'saripul', name: 'سرپل', center: [36.2167, 66.0167] },
+    { code: 'bamyan', name: 'بامیان', center: [34.8216, 67.8273] },
+    { code: 'ghazni', name: 'غزنی', center: [33.5490, 68.4220] },
+    { code: 'wardak', name: 'میدان وردک', center: [34.3956, 68.8662] },
+    { code: 'laghman', name: 'لغمان', center: [34.6898, 70.1456] },
+    { code: 'kunar', name: 'کنر', center: [34.8466, 71.0973] },
+    { code: 'nuristan', name: 'نورستان', center: [35.3250, 70.9071] }
   ];
 
   const schoolTypes = [

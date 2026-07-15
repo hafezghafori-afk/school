@@ -59,7 +59,13 @@ const provinceOptions = [
   { value: 'badghis', label: 'بادغیس' },
   { value: 'faryab', label: 'فاریاب' },
   { value: 'jowzjan', label: 'جوزجان' },
-  { value: 'saripul', label: 'سرپل' }
+  { value: 'saripul', label: 'سرپل' },
+  { value: 'bamyan', label: 'بامیان' },
+  { value: 'ghazni', label: 'غزنی' },
+  { value: 'wardak', label: 'میدان وردک' },
+  { value: 'laghman', label: 'لغمان' },
+  { value: 'kunar', label: 'کنر' },
+  { value: 'nuristan', label: 'نورستان' }
 ];
 
 const provinceAliases = new Map([
@@ -69,7 +75,9 @@ const provinceAliases = new Map([
   ['دای کندی', 'daykundi'],
   ['دایکوندی', 'daykundi'],
   ['جوزجان', 'jowzjan'],
-  ['ساری پل', 'saripul']
+  ['ساری پل', 'saripul'],
+  ['میدان وردک', 'wardak'],
+  ['وردک', 'wardak']
 ]);
 
 const normalizeProvinceValue = (value) => {
