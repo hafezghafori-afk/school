@@ -1597,7 +1597,10 @@ const getNextBudgetStage = (adminLevel = '', currentStage = '') => {
 };
 
 const actorAlreadyReviewedBudget = (trail = [], actorId = '') => Array.isArray(trail)
-  && trail.some((entry) => String(entry?.by || '') === String(actorId || ''));
+  && trail.some((entry) => {
+    const action = String(entry?.action || '').trim().toLowerCase();
+    return ['approve', 'reject'].includes(action) && String(entry?.by || '') === String(actorId || '');
+  });
 
 const appendBudgetApprovalTrail = (item, {
   level = '',

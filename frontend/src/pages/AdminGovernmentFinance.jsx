@@ -137,6 +137,12 @@ const GOVERNMENT_BUDGET_ALERT_LABELS = {
   }
 };
 
+const OPEN_BUDGET_APPROVAL_STAGES = new Set([
+  'finance_manager_review',
+  'finance_lead_review',
+  'general_president_review'
+]);
+
 const FINANCIAL_YEAR_STATUS_LABELS = {
   planning: 'در پلان',
   draft: 'پیش‌نویس',
@@ -512,6 +518,73 @@ function resolveGovernmentBudgetAlert(item = {}) {
     detail: item?.detail && !isPlainEnglishText(item.detail)
       ? item.detail
       : fallback.detail || item?.detail || ''
+  };
+}
+
+function normalizeBudgetApprovalStageValue(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (OPEN_BUDGET_APPROVAL_STAGES.has(normalized)) return normalized;
+  if (normalized === 'approved' || normalized === 'rejected') return normalized;
+  return 'draft';
+}
+
+function isBudgetReviewStage(stage = '') {
+  return OPEN_BUDGET_APPROVAL_STAGES.has(normalizeBudgetApprovalStageValue(stage));
+}
+
+function budgetTargetsConfigured(value = {}) {
+  const targets = value && typeof value === 'object' ? value : {};
+  return Number(targets.annualIncomeTarget || 0) > 0
+    || Number(targets.annualExpenseBudget || 0) > 0
+    || Number(targets.monthlyIncomeTarget || 0) > 0
+    || Number(targets.monthlyExpenseBudget || 0) > 0
+    || Number(targets.treasuryReserveTarget || 0) > 0
+    || (Array.isArray(targets.categoryBudgets) && targets.categoryBudgets.some((item) => (
+      Number(item?.annualBudget || 0) > 0 || Number(item?.monthlyBudget || 0) > 0
+    )));
+}
+
+function buildBudgetApprovalState(financialYear = null) {
+  const nested = financialYear?.budgetApproval && typeof financialYear.budgetApproval === 'object'
+    ? financialYear.budgetApproval
+    : {};
+  const rawStage = nested.stage || financialYear?.budgetApprovalStage || '';
+  let stage = normalizeBudgetApprovalStageValue(rawStage);
+  const approvedAt = nested.approvedAt || financialYear?.budgetApprovedAt || null;
+  const rejectedAt = nested.rejectedAt || financialYear?.budgetRejectedAt || null;
+  const lastApprovedVersion = Math.max(
+    0,
+    Number(nested.lastApprovedVersion || financialYear?.budgetLastApprovedVersion || 0)
+  );
+
+  if (stage !== 'approved' && approvedAt && lastApprovedVersion > 0 && !rejectedAt) {
+    stage = 'approved';
+  }
+  if (stage !== 'rejected' && rejectedAt && !approvedAt) {
+    stage = 'rejected';
+  }
+
+  return {
+    ...nested,
+    configured: nested.configured === true || budgetTargetsConfigured(financialYear?.budgetTargets || {}),
+    stage,
+    version: Math.max(1, Number(nested.version || financialYear?.budgetVersion || 1)),
+    lastApprovedVersion,
+    frozenAt: nested.frozenAt || financialYear?.budgetFrozenAt || null,
+    canStartRevision: nested.canStartRevision === true || (!financialYear?.isClosed && stage === 'approved'),
+    submittedBy: nested.submittedBy || financialYear?.budgetSubmittedBy || null,
+    submittedAt: nested.submittedAt || financialYear?.budgetSubmittedAt || null,
+    approvedBy: nested.approvedBy || financialYear?.budgetApprovedBy || null,
+    approvedAt,
+    rejectedBy: nested.rejectedBy || financialYear?.budgetRejectedBy || null,
+    rejectedAt,
+    rejectReason: nested.rejectReason || financialYear?.budgetRejectReason || '',
+    trail: Array.isArray(nested.trail)
+      ? nested.trail
+      : (Array.isArray(financialYear?.budgetApprovalTrail) ? financialYear.budgetApprovalTrail : []),
+    revisionHistory: Array.isArray(nested.revisionHistory)
+      ? nested.revisionHistory
+      : (Array.isArray(financialYear?.budgetRevisionHistory) ? financialYear.budgetRevisionHistory : [])
   };
 }
 
@@ -1313,7 +1386,7 @@ export default function AdminGovernmentFinance() {
     procurementItems.filter((item) => item.status === 'approved' && Number(item.payableReadyAmount || 0) > 0)
   ), [procurementItems]);
   const selectedBudgetApproval = useMemo(() => (
-    selectedFinancialYear?.budgetApproval || { stage: 'draft', trail: [], configured: false }
+    buildBudgetApprovalState(selectedFinancialYear)
   ), [selectedFinancialYear]);
   const selectedProcurementSettlement = useMemo(() => (
     procurementItems.find((item) => String(item._id || item.id || '') === String(procurementSettlementDraft.commitmentId || ''))
@@ -1339,6 +1412,9 @@ export default function AdminGovernmentFinance() {
     selectedBudgetApproval.canStartRevision === true
       || (!selectedFinancialYear?.isClosed && String(selectedBudgetApproval.stage || '').trim() === 'approved')
   ), [selectedBudgetApproval, selectedFinancialYear]);
+  const selectedBudgetStage = selectedBudgetApproval.stage || 'draft';
+  const selectedBudgetInReview = isBudgetReviewStage(selectedBudgetStage);
+  const selectedBudgetApproved = selectedBudgetStage === 'approved';
   const selectedTreasuryReportAccount = useMemo(() => (
     treasuryAccounts.find((item) => String(item._id || item.id || '') === String(selectedTreasuryReportAccountId || ''))
       || treasuryCashbook.account
@@ -3627,7 +3703,7 @@ export default function AdminGovernmentFinance() {
                 </div>
               </div>
               <div className="gov-governance-grid">
-                <div className="gov-governance-stat" data-tone={selectedBudgetApproval.stage === 'approved' ? 'mint' : selectedBudgetApproval.stage === 'rejected' ? 'rose' : selectedBudgetApproval.stage.includes('review') ? 'copper' : 'slate'}>
+                <div className="gov-governance-stat" data-tone={selectedBudgetApproved ? 'mint' : selectedBudgetStage === 'rejected' ? 'rose' : selectedBudgetInReview ? 'copper' : 'slate'}>
                   <span>مرحله فعلی</span>
                   <strong>{resolveBudgetApprovalStageLabel(selectedBudgetApproval.stage)}</strong>
                   <small>{selectedBudgetApproval.configured ? 'بودجه تنظیم شد' : 'هنوز بودجه‌ای تنظیم نشده است'}</small>
@@ -3654,7 +3730,7 @@ export default function AdminGovernmentFinance() {
                   className="gov-primary-btn"
                   data-budget-request-review="true"
                   onClick={requestBudgetReview}
-                  disabled={!!busyAction || !selectedFinancialYearId || !selectedBudgetApproval.configured || selectedFinancialYear?.isClosed || selectedBudgetApproval.stage.includes('review') || selectedBudgetApproval.stage === 'approved'}
+                  disabled={!!busyAction || !selectedFinancialYearId || !selectedBudgetApproval.configured || selectedFinancialYear?.isClosed || selectedBudgetInReview || selectedBudgetApproved}
                 >
                   {String(busyAction || '').startsWith('budget-review-request-') ? 'در حال ارسال...' : 'ارسال بودجه برای بررسی'}
                 </button>
@@ -3663,7 +3739,7 @@ export default function AdminGovernmentFinance() {
                   className="gov-ghost-btn"
                   data-budget-approve="true"
                   onClick={() => reviewBudgetApproval('approve')}
-                  disabled={!!busyAction || !selectedFinancialYearId || !selectedBudgetApproval.stage.includes('review')}
+                  disabled={!!busyAction || !selectedFinancialYearId || !selectedBudgetInReview}
                 >
                   تایید مرحله بودجه
                 </button>
@@ -3672,7 +3748,7 @@ export default function AdminGovernmentFinance() {
                   className="gov-ghost-btn"
                   data-budget-reject="true"
                   onClick={() => reviewBudgetApproval('reject')}
-                  disabled={!!busyAction || !selectedFinancialYearId || !selectedBudgetApproval.stage.includes('review')}
+                  disabled={!!busyAction || !selectedFinancialYearId || !selectedBudgetInReview}
                 >
                   رد بودجه
                 </button>
@@ -3870,7 +3946,7 @@ export default function AdminGovernmentFinance() {
                   type="button"
                   className="gov-ghost-btn"
                   onClick={requestBudgetReview}
-                  disabled={!!busyAction || !selectedFinancialYearId || !selectedBudgetApproval.configured || selectedFinancialYear?.isClosed || selectedBudgetApproval.stage.includes('review') || selectedBudgetApproval.stage === 'approved'}
+                  disabled={!!busyAction || !selectedFinancialYearId || !selectedBudgetApproval.configured || selectedFinancialYear?.isClosed || selectedBudgetInReview || selectedBudgetApproved}
                 >
                   {String(busyAction || '').startsWith('budget-review-request-') ? 'در حال ارسال...' : 'ارسال بودجه برای بررسی'}
                 </button>
