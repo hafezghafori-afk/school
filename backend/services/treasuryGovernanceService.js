@@ -3,6 +3,7 @@ const FinanceTreasuryAccount = require('../models/FinanceTreasuryAccount');
 const FinanceTreasuryTransaction = require('../models/FinanceTreasuryTransaction');
 const ExpenseEntry = require('../models/ExpenseEntry');
 const FeePayment = require('../models/FeePayment');
+const FeeOrder = require('../models/FeeOrder');
 const FinancialYear = require('../models/FinancialYear');
 
 const TREASURY_ACCOUNT_TYPES = new Set(['cashbox', 'bank', 'hawala', 'mobile_money', 'other']);
@@ -24,6 +25,28 @@ function normalizeMoney(value, fallback = 0) {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return fallback;
   return Math.max(0, Number(amount.toFixed(2)));
+}
+
+function idsMatch(left = '', right = '') {
+  const normalizedLeft = normalizeText(left);
+  const normalizedRight = normalizeText(right);
+  return normalizedLeft && normalizedRight && normalizedLeft === normalizedRight;
+}
+
+async function resolveFeePaymentOrderContext(payment = {}) {
+  const orderIds = new Set();
+  const directOrderId = normalizeText(payment?.feeOrderId);
+  if (directOrderId) orderIds.add(directOrderId);
+  if (Array.isArray(payment?.allocations)) {
+    payment.allocations.forEach((item) => {
+      const allocationOrderId = normalizeText(item?.feeOrderId);
+      if (allocationOrderId) orderIds.add(allocationOrderId);
+    });
+  }
+  if (!orderIds.size) return null;
+  return FeeOrder.findOne({ _id: { $in: Array.from(orderIds) } })
+    .select('schoolId academicYearId classId currency')
+    .sort({ updatedAt: -1, createdAt: -1 });
 }
 
 function resolveFeePaymentTreasuryAccountTemplate(paymentMethod = '') {
@@ -56,10 +79,24 @@ function resolveFeePaymentTreasuryAccountTemplate(paymentMethod = '') {
   };
 }
 
-async function resolveFeePaymentFinancialYear(payment = {}) {
-  const academicYearId = normalizeText(payment?.academicYearId);
+async function resolveFeePaymentFinancialYear(payment = {}, { preferredFinancialYear = null } = {}) {
+  const orderContext = (!payment?.academicYearId || !payment?.schoolId)
+    ? await resolveFeePaymentOrderContext(payment)
+    : null;
+  const academicYearId = normalizeText(payment?.academicYearId || orderContext?.academicYearId);
+  const schoolId = normalizeText(payment?.schoolId || orderContext?.schoolId);
+
+  if (preferredFinancialYear?._id) {
+    const preferredAcademicYearId = normalizeText(preferredFinancialYear.academicYearId);
+    const preferredSchoolId = normalizeText(preferredFinancialYear.schoolId);
+    const academicYearMatches = !academicYearId || idsMatch(academicYearId, preferredAcademicYearId);
+    const schoolMatches = !schoolId || idsMatch(schoolId, preferredSchoolId);
+    if (academicYearMatches && schoolMatches && preferredFinancialYear.isClosed !== true) {
+      return preferredFinancialYear;
+    }
+  }
+
   if (!academicYearId) return null;
-  const schoolId = normalizeText(payment?.schoolId);
   return FinancialYear.findOne({
     ...(schoolId ? { schoolId } : {}),
     academicYearId,
@@ -104,7 +141,7 @@ async function resolveFeePaymentTreasuryAccount(financialYear, payment = {}) {
   }
 }
 
-async function syncApprovedFeePaymentToTreasury(payment = {}) {
+async function syncApprovedFeePaymentToTreasury(payment = {}, options = {}) {
   if (!payment || normalizeText(payment.status) !== 'approved') return null;
   const amount = normalizeMoney(payment.amount, 0);
   if (amount <= 0) return null;
@@ -119,7 +156,7 @@ async function syncApprovedFeePaymentToTreasury(payment = {}) {
   });
   if (existing) return existing;
 
-  const financialYear = await resolveFeePaymentFinancialYear(payment);
+  const financialYear = await resolveFeePaymentFinancialYear(payment, options);
   if (!financialYear?._id) return null;
   const account = await resolveFeePaymentTreasuryAccount(financialYear, payment);
   if (!account?._id) return null;
@@ -171,23 +208,44 @@ async function syncApprovedFeePaymentsToTreasury({
   }
   if (!financialYear?._id) return { synced: 0 };
 
-  const payments = await FeePayment.find({
-    status: 'approved',
+  const schoolFilter = financialYear.schoolId
+    ? {
+        $or: [
+          { schoolId: financialYear.schoolId },
+          { schoolId: null },
+          { schoolId: { $exists: false } }
+        ]
+      }
+    : {};
+  const linkedOrderIds = await FeeOrder.find({
     academicYearId: financialYear.academicYearId,
-    ...(financialYear.schoolId
-      ? {
-          $or: [
-            { schoolId: financialYear.schoolId },
-            { schoolId: null },
-            { schoolId: { $exists: false } }
+    ...schoolFilter
+  }).select('_id').limit(5000);
+  const linkedOrderIdValues = linkedOrderIds.map((item) => item._id);
+
+  const paymentAcademicScope = [
+      { academicYearId: financialYear.academicYearId },
+      { academicYearId: null },
+      { academicYearId: { $exists: false } },
+      ...(linkedOrderIdValues.length
+        ? [
+            { feeOrderId: { $in: linkedOrderIdValues } },
+            { 'allocations.feeOrderId': { $in: linkedOrderIdValues } }
           ]
-        }
-      : {})
-  }).sort({ paidAt: 1, createdAt: 1 }).limit(500);
+        : [])
+    ];
+  const paymentQuery = {
+    status: 'approved',
+    ...(Object.keys(schoolFilter).length
+      ? { $and: [schoolFilter, { $or: paymentAcademicScope }] }
+      : { $or: paymentAcademicScope })
+  };
+
+  const payments = await FeePayment.find(paymentQuery).sort({ paidAt: 1, createdAt: 1 }).limit(1000);
 
   let synced = 0;
   for (const payment of payments) {
-    const result = await syncApprovedFeePaymentToTreasury(payment);
+    const result = await syncApprovedFeePaymentToTreasury(payment, { preferredFinancialYear: financialYear });
     if (result) synced += 1;
   }
   return { synced };
