@@ -4009,7 +4009,21 @@ export default function AdminGovernmentFinance() {
                   <strong>گارد بستن سال</strong>
                   <span>موانعی که باید پیش از بستن سال مالی رفع شوند</span>
                 </div>
+                <button
+                  type="button"
+                  className="gov-primary-btn"
+                  data-close-selected-financial-year="true"
+                  onClick={() => closeFinancialYear(selectedFinancialYearId)}
+                  disabled={!!busyAction || !selectedFinancialYearId || selectedFinancialYear?.isClosed || !expenseCloseReadiness?.canClose}
+                >
+                  {String(busyAction || '').startsWith('close-year-') ? 'در حال بستن...' : 'بستن سال مالی'}
+                </button>
               </div>
+              {selectedFinancialYear?.isClosed ? (
+                <div className="gov-readiness-good">این سال مالی قبلاً بسته شده است.</div>
+              ) : !expenseCloseReadiness?.canClose ? (
+                <div className="gov-empty-state compact">برای فعال‌شدن دکمه بستن سال مالی، اول موانع زیر را رفع کنید.</div>
+              ) : null}
               <div className="gov-governance-grid">
                 <div className="gov-governance-stat" data-tone="teal">
                   <span>پیش‌نویس</span>
