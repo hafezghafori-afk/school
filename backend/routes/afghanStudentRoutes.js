@@ -102,6 +102,7 @@ const syncManualStudentEnrollment = async ({ student, studentData, req }) => {
   const payload = {
     studentName,
     fatherName: studentData?.personalInfo?.fatherName || '',
+    nationalId: studentData?.identification?.tazkiraNumber || '',
     motherName: studentData?.familyInfo?.motherName || '',
     gender: studentData?.personalInfo?.gender || 'male',
     birthDate: studentData?.personalInfo?.birthDate || '',

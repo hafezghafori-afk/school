@@ -516,6 +516,13 @@
   resize: vertical;
 }
 
+.student-edit-grid .student-readonly-input {
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.58);
+  border-color: rgba(148, 163, 184, 0.16);
+  cursor: default;
+}
+
 .student-checkbox-line {
   align-content: center;
   grid-template-columns: 18px 1fr;

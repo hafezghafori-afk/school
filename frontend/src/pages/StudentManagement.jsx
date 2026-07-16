@@ -128,6 +128,20 @@ const readApiResponse = async (response) => {
   }
 };
 
+const readStudentIdentifier = (student = {}) => getText(
+  student.studentIdentifier
+  || student.asasNumber
+  || student.registrationId
+  || student.admissionNo
+  || student.studentCode
+);
+
+const readStudentTazkira = (student = {}) => getText(
+  student.identification?.tazkiraNumber
+  || student.nationalId
+  || student.tazkiraNumber
+);
+
 function readEntityId(value) {
   if (!value) return '';
   if (typeof value === 'object') return String(value._id || value.id || '').trim();
@@ -152,7 +166,8 @@ const normalizeAfghanStudent = (student = {}) => {
     grandfatherName: getText(personalInfo.grandfatherName),
     birthPlace: getText(personalInfo.birthPlace),
     nationality: getText(personalInfo.nationality || 'Afghan'),
-    nationalId: getText(identification.tazkiraNumber || student.nationalId || student.tazkiraNumber || student.asasNumber || student.registrationId),
+    nationalId: readStudentTazkira(student),
+    studentIdentifier: readStudentIdentifier(student),
     tazkiraVolume: getText(identification.tazkiraVolume),
     tazkiraPage: getText(identification.tazkiraPage),
     birthCertificateNumber: getText(identification.birthCertificateNumber),
@@ -231,6 +246,7 @@ const studentKeys = (student = {}) => [
   student.afghanStudentId,
   student.registrationId,
   student.asasNumber,
+  student.studentIdentifier,
   student.nationalId
 ].map(makeKey).filter(Boolean);
 
@@ -274,7 +290,8 @@ const mergeFinancialMemberships = (rows, memberships = []) => {
         firstName: repairDisplayText(membership.studentName || '').split(' ')[0] || repairDisplayText(membership.studentName || ''),
         lastName: repairDisplayText(membership.studentName || '').split(' ').slice(1).join(' '),
         fatherName: repairDisplayText(membership.fatherName || ''),
-        nationalId: repairDisplayText(membership.admissionNo || ''),
+        nationalId: '',
+        studentIdentifier: repairDisplayText(membership.admissionNo || ''),
         phone: membership.primaryPhone || '',
         email: membership.studentEmail || '',
         status: membership.status || 'active',
@@ -288,6 +305,7 @@ const mergeFinancialMemberships = (rows, memberships = []) => {
 
     row.financialMemberships = [...(row.financialMemberships || []), membership];
     row.profileId = row.profileId || makeKey(membership.afghanStudentId || '');
+    row.studentIdentifier = row.studentIdentifier || repairDisplayText(membership.admissionNo || '');
     row.financeStatus = membership.status || row.financeStatus || '';
     row.membershipType = membership.membershipType || row.membershipType || '';
     if (!row.classId?._id && membership.classId) row.classId = { _id: membership.classId, title: repairDisplayText(membership.classTitle || '') };
@@ -386,7 +404,8 @@ const mergeOnlineEnrollmentRecords = (rows, enrollments = []) => {
     row.linkedUserId = row.linkedUserId || makeKey(enrollment.linkedUserId || '');
     row.registrationId = row.registrationId || enrollment.registrationId || '';
     row.asasNumber = row.asasNumber || enrollment.asasNumber || '';
-    applyFallback(row, 'nationalId', enrollment.nationalId || enrollment.tazkiraNumber || enrollment.asasNumber || enrollment.registrationId);
+    row.studentIdentifier = row.studentIdentifier || repairDisplayText(enrollment.asasNumber || enrollment.registrationId || '');
+    applyFallback(row, 'nationalId', enrollment.nationalId || enrollment.tazkiraNumber);
     applyFallback(row, 'fatherName', enrollment.fatherName);
     applyFallback(row, 'motherName', enrollment.motherName);
     applyFallbackRaw(row, 'birthDate', toGregorianDateInputValue(enrollment.birthDate) || enrollment.birthDate);
@@ -479,6 +498,7 @@ const StudentManagement = () => {
     birthPlace: '',
     nationality: 'Afghan',
     nationalId: '',
+    studentIdentifier: '',
     tazkiraVolume: '',
     tazkiraPage: '',
     birthCertificateNumber: '',
@@ -784,6 +804,7 @@ const StudentManagement = () => {
         student.lastName?.toLowerCase().includes(searchLower) ||
         student.fatherName?.toLowerCase().includes(searchLower) ||
         student.nationalId?.toLowerCase().includes(searchLower) ||
+        student.studentIdentifier?.toLowerCase().includes(searchLower) ||
         student.phone?.toLowerCase().includes(searchLower) ||
         student.email?.toLowerCase().includes(searchLower)
       );
@@ -839,7 +860,8 @@ const StudentManagement = () => {
       birthDate: student.birthDate || '',
       birthPlace: student.birthPlace || '',
       nationality: student.nationality || 'Afghan',
-      nationalId: student.nationalId || student.tazkiraNumber || student.asasNumber || student.registrationId || '',
+      nationalId: readStudentTazkira(student),
+      studentIdentifier: readStudentIdentifier(student),
       tazkiraVolume: student.tazkiraVolume || '',
       tazkiraPage: student.tazkiraPage || '',
       birthCertificateNumber: student.birthCertificateNumber || '',
@@ -908,7 +930,7 @@ const StudentManagement = () => {
       return;
     }
     if (!editForm.nationalId.trim()) {
-      toast.error('شماره تذکره/شناسه شاگرد برای جلوگیری از تکرار ضروری است.');
+      toast.error('شماره تذکره شاگرد برای جلوگیری از تکرار ضروری است.');
       return;
     }
     if (!editForm.gender) {
@@ -983,7 +1005,7 @@ const StudentManagement = () => {
       return;
     }
     if (!editForm.nationalId.trim()) {
-      showEditError('شماره تذکره/شناسه شاگرد برای جلوگیری از تکرار ضروری است.');
+      showEditError('شماره تذکره شاگرد برای جلوگیری از تکرار ضروری است.');
       return;
     }
     if (!editForm.gender) {
@@ -1495,7 +1517,7 @@ const StudentManagement = () => {
                           <span className="student-avatar">{fullName.charAt(0)}</span>
                           <div>
                             <strong>{fullName}</strong>
-                            <small>ولد {displayValue(student.fatherName)} | {displayValue(student.nationalId, 'بدون تذکره')}</small>
+                            <small>ولد {displayValue(student.fatherName)} | تذکره: {displayValue(student.nationalId, 'بدون تذکره')} | شناسه: {displayValue(student.studentIdentifier, 'ثبت نشده')}</small>
                           </div>
                         </div>
                       </td>
@@ -1626,6 +1648,10 @@ const StudentManagement = () => {
               </label>
               <label className="required"><span>شماره تذکره</span>
                 <input value={editForm.nationalId} onChange={(event) => handleEditFormChange('nationalId', event.target.value)} />
+              </label>
+              <label>
+                <span>شماره شناسایی شاگرد</span>
+                <input value={editForm.studentIdentifier || ''} readOnly className="student-readonly-input" />
               </label>
               <label className="required"><span>تاریخ تولد</span>
                 <AfghanDateInput
@@ -1845,6 +1871,7 @@ const StudentManagement = () => {
                 <p><strong>نام پدر:</strong> {displayValue(selectedStudent.fatherName)}</p>
                 <p><strong>نام پدرکلان:</strong> {displayValue(selectedStudent.grandfatherName)}</p>
                 <p><strong>تذکره:</strong> {displayValue(selectedStudent.nationalId)}</p>
+                <p><strong>شماره شناسایی شاگرد:</strong> {displayValue(selectedStudent.studentIdentifier)}</p>
                 <p><strong>تاریخ تولد:</strong> {formatBirthDate(selectedStudent.birthDate)}</p>
                 <p><strong>جنسیت:</strong> {genderLabelMap[selectedStudent.gender] || displayValue(selectedStudent.gender)}</p>
               </article>
@@ -2114,7 +2141,8 @@ const StudentManagement = () => {
                         </div>
                         
                         <div className="flex items-center gap-3 text-xs text-gray-600">
-                          <span>نمبر تذکره: {student.nationalId}</span>
+                          <span>نمبر تذکره: {student.nationalId || '---'}</span>
+                          <span>شناسه شاگرد: {student.studentIdentifier || '---'}</span>
                           <span>صنف: {student.classId?.title}</span>
                           <span>نوبت: {student.shiftId?.name}</span>
                           <span>سال تعلیمی: {student.academicYearId?.title}</span>
@@ -2195,6 +2223,7 @@ const StudentManagement = () => {
                   <div><strong>نام پدر:</strong> {selectedStudent.fatherName}</div>
                   <div><strong>نام پدرکلان:</strong> {selectedStudent.grandfatherName}</div>
                   <div><strong>شماره تذکره:</strong> {selectedStudent.nationalId}</div>
+                  <div><strong>شماره شناسایی شاگرد:</strong> {selectedStudent.studentIdentifier}</div>
                   <div><strong>تاریخ تولد:</strong> {formatBirthDate(selectedStudent.birthDate)}</div>
                   <div><strong>جنسیت:</strong> {selectedStudent.gender === 'male' ? 'ذکور' : 'اناث'}</div>
                   <div><strong>گروپ خونی:</strong> {selectedStudent.bloodType}</div>

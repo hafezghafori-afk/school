@@ -97,6 +97,7 @@ const buildStudentFromEnrollment = async (enrollment, req, asasNumber) => {
     defaults: {
       registrationId: enrollment.registrationId,
       asasNumber,
+      tazkiraNumber: enrollment.nationalId || enrollment.tazkiraNumber || '',
       note: enrollment.notes || 'ساخته/وصل شده از درخواست ثبت‌نام آنلاین تایید شده'
     }
   });
@@ -240,7 +241,7 @@ const gradeFromAfghanStudent = (student = {}) => {
 
 const ensureEnrollmentRowsForAfghanStudents = async () => {
   const students = await AfghanStudent.find({ status: { $ne: 'deleted' } })
-    .select('personalInfo familyInfo contactInfo academicInfo registrationId asasNumber linkedUserId status createdAt')
+    .select('personalInfo familyInfo contactInfo academicInfo identification registrationId asasNumber linkedUserId status createdAt')
     .lean();
 
   await Promise.all(students.map(async (student) => {
@@ -255,6 +256,7 @@ const ensureEnrollmentRowsForAfghanStudents = async () => {
     const payload = {
       studentName: studentNameFromAfghanStudent(student),
       fatherName: student?.personalInfo?.fatherName || '',
+      nationalId: student?.identification?.tazkiraNumber || '',
       motherName: student?.familyInfo?.motherName || '',
       gender: student?.personalInfo?.gender || 'male',
       birthDate: student?.personalInfo?.birthDate || '',
@@ -301,7 +303,7 @@ router.post('/', (req, res, next) => { upload.fields([{ name: 'idCard', maxCount
     const counter = await Counter.findByIdAndUpdate(`reg_${afghanYear}`, { $inc: { seq: 1 } }, { new: true, upsert: true });
     const registrationId = format.replace(/{YYYY}/g, afghanYear).replace(/{YY}/g, afghanYearShort).replace(/{SEQ}/g, counter.seq.toString().padStart(4, '0'));
     const enrollment = await Enrollment.create({
-      studentName: body.studentName, fatherName: body.fatherName || '', motherName: body.motherName || '', gender: body.gender || 'male', birthDate: body.birthDate || '', grade: body.grade || '', phone: body.phone || '', email: body.email || '', address: body.address || '', province: body.province || '', district: body.district || '', previousSchool: body.previousSchool || '', emergencyPhone: body.emergencyPhone || '', notes: body.notes || '',
+      studentName: body.studentName, fatherName: body.fatherName || '', nationalId: body.nationalId || body.tazkiraNumber || '', motherName: body.motherName || '', gender: body.gender || 'male', birthDate: body.birthDate || '', grade: body.grade || '', phone: body.phone || '', email: body.email || '', address: body.address || '', province: body.province || '', district: body.district || '', previousSchool: body.previousSchool || '', emergencyPhone: body.emergencyPhone || '', notes: body.notes || '',
       academicContext: { schoolId: body.schoolId || null, classId: body.classId || null, shiftId: body.shiftId || null, academicYearId: body.academicYearId || null, enrollmentDate: body.enrollmentDate || null },
       registrationId,
       documents: { idCardUrl: getFile('idCard'), birthCertUrl: getFile('birthCert'), reportCardUrl: getFile('reportCard'), photoUrl: getFile('photo') }

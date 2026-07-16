@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const enrollmentSchema = new mongoose.Schema({
   studentName: { type: String, required: true },
   fatherName: { type: String, default: '' },
+  nationalId: { type: String, default: '', trim: true },
   motherName: { type: String, default: '' },
   gender: { type: String, enum: ['male', 'female', 'other'], default: 'male' },
   birthDate: { type: String, default: '' },
