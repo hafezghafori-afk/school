@@ -2455,12 +2455,13 @@
   }
 
   .finance-receipt-print-sheet {
-    display: grid;
-    grid-template-rows: repeat(2, minmax(0, auto));
-    gap: 5mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 14mm;
     width: 100%;
     max-width: 186mm;
-    min-height: auto;
+    min-height: 273mm;
     margin: 0 auto;
     direction: rtl;
   }
