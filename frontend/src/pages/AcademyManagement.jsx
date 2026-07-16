@@ -403,6 +403,7 @@ export default function AcademyManagement() {
           <p>شاگردان، ثبت‌نام‌ها، فیس، پرداخت‌ها، بل‌ها و مصارف این بخش از مالی مکتب جدا ذخیره می‌شوند.</p>
         </div>
         <div className="academy-topbar-actions">
+          <Link to="/academy-supplies">کتاب و یونیفرم</Link>
           <Link to="/admin-finance">بازگشت به مالی مکتب</Link>
           <button type="button" onClick={loadData} disabled={loading || busy}>تازه‌سازی</button>
         </div>

@@ -72,6 +72,7 @@ const AdminFinanceProfile = lazy(() => import('./pages/AdminFinanceProfile'));
 const AdminFinancialMemberships = lazy(() => import('./pages/AdminFinancialMemberships'));
 const AdminGovernmentFinance = lazy(() => import('./pages/AdminGovernmentFinance'));
 const AcademyManagement = lazy(() => import('./pages/AcademyManagement'));
+const AcademySupplies = lazy(() => import('./pages/AcademySupplies'));
 const AdminEducationCore = lazy(() => import('./pages/AdminEducationCore'));
 const StudentFinance = lazy(() => import('./pages/StudentFinance'));
 const TimetableHub = lazy(() => import('./pages/TimetableHub'));
@@ -137,6 +138,7 @@ const routePrefetchers = {
   adminLogs: () => import('./pages/AdminLogs'),
   adminFinance: () => import('./pages/AdminFinance'),
   academyManagement: () => import('./pages/AcademyManagement'),
+  academySupplies: () => import('./pages/AcademySupplies'),
   adminGovernmentFinance: () => import('./pages/AdminGovernmentFinance'),
   adminEducation: () => import('./pages/AdminEducationCore'),
   timetableConfig: () => import('./pages/TimetableConfiguration'),
@@ -200,6 +202,7 @@ const routePrefetchersByPath = {
   '/admin-finance': routePrefetchers.adminFinance,
   '/academy': routePrefetchers.academyManagement,
   '/academy-management': routePrefetchers.academyManagement,
+  '/academy-supplies': routePrefetchers.academySupplies,
   '/admin-government-finance': routePrefetchers.adminGovernmentFinance,
   '/admin-education': routePrefetchers.adminEducation,
   '/timetable': routePrefetchers.timetableConfig,
@@ -3312,6 +3315,10 @@ function AppShell() {
             <Route
               path="/academy-management"
               element={adminRoute('finance.center.manage', <AcademyManagement />, 'دسترسی مدیریت آموزشگاه برای این حساب فعال نیست.')}
+            />
+            <Route
+              path="/academy-supplies"
+              element={adminRoute('finance.center.manage', <AcademySupplies />, 'دسترسی بخش کتاب و یونیفرم آموزشگاه برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-financial-memberships"
