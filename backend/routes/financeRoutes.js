@@ -4498,7 +4498,7 @@ router.get('/admin/bills', requireAuth, requireRole(['admin']), requirePermissio
 
 router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const { studentId, classId = '', courseId: inputCourseId = '', amount, dueDate, issuedAt, periodType, periodLabel, academicYear, term, currency, note } = req.body || {};
+    const { studentId, classId = '', courseId: inputCourseId = '', amount, dueDate, issuedAt, periodType, periodLabel, academicYear, academicYearId, term, currency, note } = req.body || {};
     if (!studentId || (!classId && !inputCourseId) || !dueDate) {
       return res.status(400).json({ success: false, message: 'شاگرد، صنف و مهلت پرداخت الزامی است.' });
     }
@@ -4514,6 +4514,7 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
     const normalizedPeriodType = normalizeBillPeriodType(periodType);
     const normalizedPeriodLabel = String(periodLabel || '').trim();
     const normalizedAcademicYear = String(academicYear || '').trim();
+    const normalizedAcademicYearId = String(academicYearId || '').trim();
     const normalizedTerm = String(term || '').trim();
     const scope = await resolveFinanceScope({ classId, courseId: inputCourseId });
     if (scope.error) return res.status(400).json({ success: false, message: scope.error });
@@ -4527,6 +4528,7 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
     const { membership, linkFields, courseContext } = await resolveMembershipTransactionLink({
       studentUserId: studentId,
       courseId,
+      academicYearId: normalizedAcademicYearId || null,
       academicYear: normalizedAcademicYear,
       statuses: null
     });

@@ -979,6 +979,11 @@ const toLegacyLikeBillRow = (order = {}) => {
   const canonicalId = String(order?.id || order?._id || '').trim();
   const legacyBillId = String(order?.sourceBillId || '').trim();
   const classTitle = String(order?.schoolClass?.title || order?.course?.title || '').trim() || '---';
+  const academicYear = order?.academicYear?.id
+    ? order.academicYear
+    : order?.schoolClass?.academicYear?.id
+      ? order.schoolClass.academicYear
+      : null;
   const lineItems = Array.isArray(order?.lineItems) ? order.lineItems : [];
   return {
     id: canonicalId,
@@ -996,7 +1001,7 @@ const toLegacyLikeBillRow = (order = {}) => {
     },
     classId: order?.schoolClass?.id ? { _id: order.schoolClass.id, title: classTitle } : null,
     schoolClass: order?.schoolClass?.id ? { id: order.schoolClass.id, title: classTitle } : null,
-    academicYear: order?.academicYear?.id ? { id: order.academicYear.id, title: String(order?.academicYear?.title || '').trim() } : null,
+    academicYear: academicYear?.id ? { id: academicYear.id, title: String(academicYear?.title || '').trim() } : null,
     course: order?.course?.title ? { title: order.course.title } : null,
     status: String(order?.status || '').trim() || 'new',
     amountOriginal: Number(order?.amountOriginal || 0),
@@ -1202,7 +1207,9 @@ export default function AdminFinance() {
   const [billingAdvancedOpen, setBillingAdvancedOpen] = useState(false);
   const [planVisibleCount, setPlanVisibleCount] = useState(5);
   const [billVisibleCount, setBillVisibleCount] = useState(5);
-  const [discountVisibleCount, setDiscountVisibleCount] = useState(5);
+  const [discountRegistryPage, setDiscountRegistryPage] = useState(1);
+  const [discountRegistryPageSize, setDiscountRegistryPageSize] = useState(10);
+  const [discountRegistryClassFilter, setDiscountRegistryClassFilter] = useState('all');
   const [paymentAdvancedOpen, setPaymentAdvancedOpen] = useState(false);
   const [reliefFormMode, setReliefFormMode] = useState('discount');
   const [incomeTrendRange, setIncomeTrendRange] = useState('daily');
@@ -1238,6 +1245,7 @@ export default function AdminFinance() {
     classId: '',
     amount: '',
     dueDate: '',
+    academicYearId: '',
     academicYear: '',
     term: '',
     periodLabel: '',
@@ -1347,7 +1355,7 @@ export default function AdminFinance() {
       .filter((item) => (
         String(item?.student?.userId || '') === String(paymentDeskForm.studentId || '')
         && String(item?.schoolClass?.id || item?.classId?._id || '') === String(paymentDeskForm.classId || '')
-        && String(item?.academicYear?.id || '') === String(paymentDeskForm.academicYearId || '')
+        && getFinanceRecordAcademicYearId(item) === String(paymentDeskForm.academicYearId || '')
         && OPEN_ORDER_STATUSES.has(String(item?.status || '').trim())
         && Number(item?.outstandingAmount || 0) > 0
       ))
@@ -1546,15 +1554,54 @@ export default function AdminFinance() {
     };
   }, [bills, filteredBills.length]);
   const filteredDiscountRegistry = useMemo(() => (
-    discountRegistry.filter((item) => includesFinanceSearch([
-      item?.student?.fullName,
-      item?.student?.name,
-      item?.schoolClass?.title,
-      item?.academicYear?.title,
-      item?.reason,
-      item?.discountType
-    ], discountRegistrySearch))
-  ), [discountRegistry, discountRegistrySearch]);
+    discountRegistry.filter((item) => (
+      (discountRegistryClassFilter === 'all' || getFinanceRecordClassId(item) === discountRegistryClassFilter)
+      && includesFinanceSearch([
+        item?.student?.fullName,
+        item?.student?.name,
+        item?.schoolClass?.title,
+        item?.academicYear?.title,
+        item?.reason,
+        item?.discountType
+      ], discountRegistrySearch)
+    ))
+  ), [discountRegistry, discountRegistryClassFilter, discountRegistrySearch]);
+  const discountRegistryByClass = useMemo(() => {
+    const groups = new Map();
+    filteredDiscountRegistry.forEach((item) => {
+      const classId = getFinanceRecordClassId(item) || 'unknown';
+      const classTitle = String(item?.schoolClass?.title || '').trim() || 'صنف نامشخص';
+      if (!groups.has(classId)) {
+        groups.set(classId, {
+          classId,
+          classTitle,
+          count: 0,
+          studentIds: new Set(),
+          totalAmount: 0,
+          percentCount: 0
+        });
+      }
+      const group = groups.get(classId);
+      group.count += 1;
+      group.totalAmount += Number(item?.amount || 0) || 0;
+      if (String(item?.coverageMode || '').trim() === 'percent') group.percentCount += 1;
+      const studentId = getFinanceRecordStudentUserId(item) || String(item?.student?.studentId || item?.student?.fullName || item?.id || '').trim();
+      if (studentId) group.studentIds.add(studentId);
+    });
+    return Array.from(groups.values())
+      .map((item) => ({
+        ...item,
+        studentCount: item.studentIds.size
+      }))
+      .sort((left, right) => right.studentCount - left.studentCount || right.count - left.count || left.classTitle.localeCompare(right.classTitle));
+  }, [filteredDiscountRegistry]);
+  const discountRegistryTotalPages = Math.max(1, Math.ceil(filteredDiscountRegistry.length / Math.max(1, Number(discountRegistryPageSize) || 10)));
+  const pagedDiscountRegistry = useMemo(() => {
+    const pageSize = Math.max(1, Number(discountRegistryPageSize) || 10);
+    const safePage = Math.min(Math.max(1, Number(discountRegistryPage) || 1), discountRegistryTotalPages);
+    const start = (safePage - 1) * pageSize;
+    return filteredDiscountRegistry.slice(start, start + pageSize);
+  }, [discountRegistryPage, discountRegistryPageSize, discountRegistryTotalPages, filteredDiscountRegistry]);
   const filteredExemptionRegistry = useMemo(() => (
     exemptions.filter((item) => includesFinanceSearch([
       item?.student?.fullName,
@@ -1799,6 +1846,7 @@ export default function AdminFinance() {
       ...prev,
       studentId: normalizedStudentId,
       classId: membershipStudent?.classId || prev.classId,
+      academicYearId: membershipStudent?.academicYearId || prev.academicYearId,
       academicYear: membershipStudent?.academicYearTitle || prev.academicYear
     }));
   };
@@ -1884,12 +1932,16 @@ export default function AdminFinance() {
       String(item?._id || '') === normalizedStudentId
       && (!manualForm.classId || String(item?.classId || '') === String(manualForm.classId || ''))
     )) || financeMembershipStudents.find((item) => String(item?._id || '') === normalizedStudentId) || null;
+    const selectedAcademicYear = academicYears.find((item) => (
+      String(item?.id || '') === String(manualForm.academicYearId || selectedMembership?.academicYearId || '')
+    )) || null;
 
     return {
       ...manualForm,
       studentId: normalizedStudentId,
       classId: String(manualForm.classId || selectedMembership?.classId || '').trim(),
-      academicYear: String(manualForm.academicYear || selectedMembership?.academicYearTitle || '').trim(),
+      academicYearId: String(manualForm.academicYearId || selectedMembership?.academicYearId || '').trim(),
+      academicYear: String(manualForm.academicYear || selectedAcademicYear?.title || selectedMembership?.academicYearTitle || '').trim(),
       amount: String(manualForm.amount || '').trim(),
       dueDate: String(manualForm.dueDate || '').trim()
     };
@@ -2473,6 +2525,16 @@ export default function AdminFinance() {
     loadCashierReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cashierReportDate]);
+
+  useEffect(() => {
+    setDiscountRegistryPage(1);
+  }, [discountRegistryClassFilter, discountRegistryPageSize, discountRegistrySearch]);
+
+  useEffect(() => {
+    if (discountRegistryPage > discountRegistryTotalPages) {
+      setDiscountRegistryPage(discountRegistryTotalPages);
+    }
+  }, [discountRegistryPage, discountRegistryTotalPages]);
 
   useEffect(() => {
     if (!closedMonths.length) {
@@ -5187,7 +5249,19 @@ export default function AdminFinance() {
               )}
             </select>
             <div className="finance-split-grid">
-              <select value={manualForm.classId} onChange={(e) => setManualForm((p) => ({ ...p, classId: e.target.value }))} required>
+              <select value={manualForm.classId} onChange={(e) => {
+                const classId = e.target.value;
+                const membership = financeMembershipStudents.find((item) => (
+                  String(item?._id || '') === String(manualForm.studentId || '')
+                  && String(item?.classId || '') === String(classId || '')
+                )) || null;
+                setManualForm((p) => ({
+                  ...p,
+                  classId,
+                  academicYearId: membership?.academicYearId || p.academicYearId,
+                  academicYear: membership?.academicYearTitle || p.academicYear
+                }));
+              }} required>
                 <option value="">صنف را انتخاب کنید</option>
                 {classOptions.map((item) => <option key={item.classId} value={item.classId}>{getClassOptionLabel(item)}</option>)}
               </select>
@@ -6259,8 +6333,44 @@ export default function AdminFinance() {
               placeholder="نام متعلم، صنف، سال، دلیل یا نوع تخفیف"
             />
           </label>
+          <div className="finance-split-grid">
+            <label className="finance-field">
+              <span>نمایش بر اساس صنف</span>
+              <select value={discountRegistryClassFilter} onChange={(e) => setDiscountRegistryClassFilter(e.target.value)}>
+                <option value="all">همه صنف‌ها</option>
+                {classOptions.map((item) => (
+                  <option key={`discount-registry-class-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>
+                ))}
+              </select>
+            </label>
+            <label className="finance-field">
+              <span>تعداد در هر صفحه</span>
+              <select value={discountRegistryPageSize} onChange={(e) => setDiscountRegistryPageSize(Number(e.target.value) || 10)}>
+                <option value={5}>5 مورد</option>
+                <option value={10}>10 مورد</option>
+                <option value={20}>20 مورد</option>
+                <option value={50}>50 مورد</option>
+              </select>
+            </label>
+          </div>
+          {!!discountRegistryByClass.length && (
+            <div className="finance-class-discount-summary">
+              {discountRegistryByClass.slice(0, 8).map((item) => (
+                <button
+                  type="button"
+                  key={`discount-class-summary-${item.classId}`}
+                  className={`finance-class-discount-card ${discountRegistryClassFilter === item.classId ? 'is-active' : ''}`}
+                  onClick={() => setDiscountRegistryClassFilter(item.classId)}
+                >
+                  <span>{item.classTitle}</span>
+                  <strong>{item.studentCount} نفر</strong>
+                  <small>{item.count} تخفیف | {fmt(item.totalAmount)} AFN</small>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="finance-registry-list">
-            {filteredDiscountRegistry.slice(0, discountVisibleCount).map((item) => (
+            {pagedDiscountRegistry.map((item) => (
               <div key={item.id} className="finance-registry-row">
                 <div>
                   <strong>{item.student?.fullName || item.student?.name || 'متعلم'}</strong>
@@ -6277,10 +6387,11 @@ export default function AdminFinance() {
               </div>
             ))}
             {!filteredDiscountRegistry.length && <p className="muted">برای این جستجو، تخفیفی پیدا نشد.</p>}
-            {filteredDiscountRegistry.length > 5 && (
-              <div className="row-actions">
-                {discountVisibleCount < filteredDiscountRegistry.length && <button type="button" className="secondary" onClick={() => setDiscountVisibleCount((value) => value + 5)}>نمایش بیشتر</button>}
-                {discountVisibleCount > 5 && <button type="button" className="secondary" onClick={() => setDiscountVisibleCount(5)}>نمایش کمتر</button>}
+            {filteredDiscountRegistry.length > discountRegistryPageSize && (
+              <div className="finance-pagination">
+                <button type="button" className="secondary" disabled={discountRegistryPage <= 1} onClick={() => setDiscountRegistryPage((value) => Math.max(1, value - 1))}>قبلی</button>
+                <span>صفحه {discountRegistryPage} از {discountRegistryTotalPages}</span>
+                <button type="button" className="secondary" disabled={discountRegistryPage >= discountRegistryTotalPages} onClick={() => setDiscountRegistryPage((value) => Math.min(discountRegistryTotalPages, value + 1))}>بعدی</button>
               </div>
             )}
           </div>

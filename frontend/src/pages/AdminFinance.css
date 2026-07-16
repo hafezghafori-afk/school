@@ -1019,6 +1019,39 @@
   gap: 8px;
 }
 
+.finance-class-discount-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.finance-class-discount-card {
+  display: grid;
+  gap: 4px;
+  text-align: right;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #eef5ff;
+  padding: 10px;
+  cursor: pointer;
+}
+
+.finance-class-discount-card:hover,
+.finance-class-discount-card.is-active {
+  border-color: rgba(34, 197, 94, 0.45);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.finance-class-discount-card span,
+.finance-class-discount-card small {
+  color: rgba(238, 245, 255, 0.78);
+}
+
+.finance-class-discount-card strong {
+  font-size: 18px;
+}
+
 .finance-registry-row {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.9fr) auto;
@@ -1049,6 +1082,22 @@
   display: grid;
   gap: 6px;
   justify-items: end;
+}
+
+.finance-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.finance-pagination span {
+  min-width: 110px;
+  text-align: center;
+  color: rgba(238, 245, 255, 0.78);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .finance-flag-grid {
