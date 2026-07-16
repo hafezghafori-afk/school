@@ -439,6 +439,44 @@ async function syncDiscountOpenBills(discount = null) {
   }
 }
 
+async function syncExemptionOpenBills(exemption = null) {
+  if (!exemption?._id || !exemption?.studentMembershipId) return;
+  const marker = `[exemption:${String(exemption._id)}]`;
+  const scope = normalizeText(exemption.scope) || 'all';
+  const bills = await FinanceBill.find({
+    studentMembershipId: exemption.studentMembershipId,
+    status: { $in: ['new', 'partial', 'overdue'] }
+  });
+
+  for (const bill of bills) {
+    bill.adjustments = (bill.adjustments || []).filter((row) => !normalizeText(row.reason).startsWith(marker));
+    if (exemption.status === 'active') {
+      const baseAmount = scope === 'all'
+        ? Number(bill.amountOriginal || 0)
+        : (Array.isArray(bill.lineItems) ? bill.lineItems : [])
+          .filter((item) => normalizeText(item?.feeType) === scope)
+          .reduce((sum, item) => sum + (Number(item?.grossAmount || item?.netAmount || 0) || 0), 0);
+      const effectiveBase = baseAmount > 0 ? baseAmount : Number(bill.amountOriginal || 0);
+      const amount = exemption.exemptionType === 'full'
+        ? effectiveBase
+        : Number(exemption.amount || 0) > 0
+          ? Math.min(effectiveBase, Number(exemption.amount || 0))
+          : Math.min(effectiveBase, effectiveBase * (Number(exemption.percentage || 0) / 100));
+      if (amount > 0) {
+        bill.adjustments.push({
+          type: 'waiver',
+          amount: roundMoney(amount),
+          reason: `${marker} ${normalizeText(exemption.reason)}`.trim(),
+          createdBy: exemption.createdBy || exemption.approvedBy || null,
+          createdAt: exemption.createdAt || new Date()
+        });
+      }
+    }
+    await bill.save();
+    await syncStudentFinanceFromFinanceBill(bill).catch(() => null);
+  }
+}
+
 function normalizeDiscountCoverage(payload = {}) {
   const coverageMode = normalizeText(payload.coverageMode) === 'percent' ? 'percent' : 'fixed';
   const amount = roundMoney(payload.amount);
@@ -1464,6 +1502,7 @@ async function createFeeExemption(payload = {}) {
     .populate('cancelledBy', 'name');
 
   await syncFinanceReliefFromFeeExemption(populated);
+  await syncExemptionOpenBills(populated);
 
   return formatFeeExemption(populated);
 }
@@ -1487,6 +1526,7 @@ async function cancelFeeExemption(exemptionId, payload = {}) {
   item.cancelledAt = new Date();
   await item.save();
   await syncFinanceReliefFromFeeExemption(item);
+  await syncExemptionOpenBills(item);
 
   return formatFeeExemption(item);
 }

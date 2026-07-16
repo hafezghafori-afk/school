@@ -1210,6 +1210,12 @@ export default function AdminFinance() {
   const [discountRegistryPage, setDiscountRegistryPage] = useState(1);
   const [discountRegistryPageSize, setDiscountRegistryPageSize] = useState(10);
   const [discountRegistryClassFilter, setDiscountRegistryClassFilter] = useState('all');
+  const [reliefRegistryPage, setReliefRegistryPage] = useState(1);
+  const [reliefRegistryPageSize, setReliefRegistryPageSize] = useState(10);
+  const [exemptionRegistryPage, setExemptionRegistryPage] = useState(1);
+  const [exemptionRegistryPageSize, setExemptionRegistryPageSize] = useState(10);
+  const [reliefFocusPage, setReliefFocusPage] = useState(1);
+  const [reliefFocusPageSize, setReliefFocusPageSize] = useState(5);
   const [paymentAdvancedOpen, setPaymentAdvancedOpen] = useState(false);
   const [reliefFormMode, setReliefFormMode] = useState('discount');
   const [incomeTrendRange, setIncomeTrendRange] = useState('daily');
@@ -1613,6 +1619,13 @@ export default function AdminFinance() {
       item?.exemptionType
     ], exemptionRegistrySearch))
   ), [exemptions, exemptionRegistrySearch]);
+  const exemptionRegistryTotalPages = Math.max(1, Math.ceil(filteredExemptionRegistry.length / Math.max(1, Number(exemptionRegistryPageSize) || 10)));
+  const pagedExemptionRegistry = useMemo(() => {
+    const pageSize = Math.max(1, Number(exemptionRegistryPageSize) || 10);
+    const safePage = Math.min(Math.max(1, Number(exemptionRegistryPage) || 1), exemptionRegistryTotalPages);
+    const start = (safePage - 1) * pageSize;
+    return filteredExemptionRegistry.slice(start, start + pageSize);
+  }, [exemptionRegistryPage, exemptionRegistryPageSize, exemptionRegistryTotalPages, filteredExemptionRegistry]);
   const reliefRegistryTypeOptions = useMemo(() => (
     Array.from(new Set(reliefs.map((item) => String(item?.reliefType || '').trim()).filter(Boolean)))
   ), [reliefs]);
@@ -1633,6 +1646,13 @@ export default function AdminFinance() {
       ], reliefRegistrySearch)
     ))
   ), [reliefs, reliefRegistrySearch, reliefRegistryTypeFilter]);
+  const reliefRegistryTotalPages = Math.max(1, Math.ceil(filteredReliefRegistry.length / Math.max(1, Number(reliefRegistryPageSize) || 10)));
+  const pagedReliefRegistry = useMemo(() => {
+    const pageSize = Math.max(1, Number(reliefRegistryPageSize) || 10);
+    const safePage = Math.min(Math.max(1, Number(reliefRegistryPage) || 1), reliefRegistryTotalPages);
+    const start = (safePage - 1) * pageSize;
+    return filteredReliefRegistry.slice(start, start + pageSize);
+  }, [filteredReliefRegistry, reliefRegistryPage, reliefRegistryPageSize, reliefRegistryTotalPages]);
   const reliefRegistrySummary = useMemo(() => ({
     fixedAmount: reliefs.reduce((sum, item) => (
       String(item?.coverageMode || '').trim() === 'fixed' ? sum + toSafeNumber(item?.amount) : sum
@@ -1675,6 +1695,13 @@ export default function AdminFinance() {
       academicYearId: reliefFocusAcademicYearId
     })
   ), [bills, reliefs, reliefFocusStudentId, reliefFocusClassId, reliefFocusAcademicYearId]);
+  const reliefFocusTotalPages = Math.max(1, Math.ceil((reliefFocusSnapshot.scopedReliefs?.length || 0) / Math.max(1, Number(reliefFocusPageSize) || 5)));
+  const pagedReliefFocusItems = useMemo(() => {
+    const pageSize = Math.max(1, Number(reliefFocusPageSize) || 5);
+    const safePage = Math.min(Math.max(1, Number(reliefFocusPage) || 1), reliefFocusTotalPages);
+    const start = (safePage - 1) * pageSize;
+    return (reliefFocusSnapshot.scopedReliefs || []).slice(start, start + pageSize);
+  }, [reliefFocusPage, reliefFocusPageSize, reliefFocusSnapshot.scopedReliefs, reliefFocusTotalPages]);
   const globalFinanceSearchResults = useMemo(() => {
     const term = String(deferredGlobalFinanceSearch || '').trim();
     if (!term) return [];
@@ -2535,6 +2562,36 @@ export default function AdminFinance() {
       setDiscountRegistryPage(discountRegistryTotalPages);
     }
   }, [discountRegistryPage, discountRegistryTotalPages]);
+
+  useEffect(() => {
+    setReliefRegistryPage(1);
+  }, [reliefRegistryPageSize, reliefRegistrySearch, reliefRegistryTypeFilter]);
+
+  useEffect(() => {
+    if (reliefRegistryPage > reliefRegistryTotalPages) {
+      setReliefRegistryPage(reliefRegistryTotalPages);
+    }
+  }, [reliefRegistryPage, reliefRegistryTotalPages]);
+
+  useEffect(() => {
+    setExemptionRegistryPage(1);
+  }, [exemptionRegistryPageSize, exemptionRegistrySearch]);
+
+  useEffect(() => {
+    if (exemptionRegistryPage > exemptionRegistryTotalPages) {
+      setExemptionRegistryPage(exemptionRegistryTotalPages);
+    }
+  }, [exemptionRegistryPage, exemptionRegistryTotalPages]);
+
+  useEffect(() => {
+    setReliefFocusPage(1);
+  }, [reliefFocusAcademicYearId, reliefFocusClassId, reliefFocusPageSize, reliefFocusStudentId]);
+
+  useEffect(() => {
+    if (reliefFocusPage > reliefFocusTotalPages) {
+      setReliefFocusPage(reliefFocusTotalPages);
+    }
+  }, [reliefFocusPage, reliefFocusTotalPages]);
 
   useEffect(() => {
     if (!closedMonths.length) {
@@ -3577,10 +3634,13 @@ export default function AdminFinance() {
       if (!resolvedClassId || !resolvedAcademicYearId || (!isClassDiscount && (!discountForm.studentId || !resolvedMembershipId))) {
         throw new Error('برای ثبت تخفیف، متعلم، صنف و سال تعلیمی مربوط به همان عضویت را انتخاب کنید.');
       }
-      if (discountForm.coverageMode === 'percent' && toSafeNumber(discountForm.percentage) <= 0) {
+      const normalizedDiscountCoverageMode = discountForm.coverageMode === 'full' ? 'percent' : discountForm.coverageMode;
+      const normalizedDiscountPercentage = discountForm.coverageMode === 'full' ? 100 : discountForm.percentage;
+      const normalizedDiscountAmount = discountForm.coverageMode === 'full' ? '' : discountForm.amount;
+      if (normalizedDiscountCoverageMode === 'percent' && toSafeNumber(normalizedDiscountPercentage) <= 0) {
         throw new Error('برای تخفیف فیصدی، فیصدی معتبر بزرگ‌تر از صفر وارد کنید.');
       }
-      if (discountForm.coverageMode === 'fixed' && toSafeNumber(discountForm.amount) <= 0) {
+      if (normalizedDiscountCoverageMode === 'fixed' && toSafeNumber(normalizedDiscountAmount) <= 0) {
         throw new Error('برای تخفیف پولی، مبلغ معتبر بزرگ‌تر از صفر وارد کنید.');
       }
       if (discountForm.durationMode === 'custom_period' && (!discountForm.startDate || !discountForm.endDate)) {
@@ -3593,9 +3653,9 @@ export default function AdminFinance() {
         classId: resolvedClassId,
         academicYearId: resolvedAcademicYearId,
         discountType: discountForm.discountType,
-        coverageMode: discountForm.coverageMode,
-        amount: discountForm.amount,
-        percentage: discountForm.percentage,
+        coverageMode: normalizedDiscountCoverageMode,
+        amount: normalizedDiscountAmount,
+        percentage: normalizedDiscountPercentage,
         durationMode: discountForm.durationMode,
         startDate: discountForm.durationMode === 'custom_period' ? discountForm.startDate : '',
         endDate: discountForm.durationMode === 'custom_period' ? discountForm.endDate : '',
@@ -3608,9 +3668,9 @@ export default function AdminFinance() {
         ...(data?.item || {}),
         id: data?.item?.id || data?.item?._id || `discount-${Date.now()}`,
         discountType: data?.item?.discountType || discountForm.discountType,
-        coverageMode: data?.item?.coverageMode || discountForm.coverageMode,
-        amount: Number(data?.item?.amount || discountForm.amount || 0),
-        percentage: Number(data?.item?.percentage || discountForm.percentage || 0),
+        coverageMode: data?.item?.coverageMode || normalizedDiscountCoverageMode,
+        amount: Number(data?.item?.amount || normalizedDiscountAmount || 0),
+        percentage: Number(data?.item?.percentage || normalizedDiscountPercentage || 0),
         durationMode: data?.item?.durationMode || discountForm.durationMode || 'academic_year',
         startDate: data?.item?.startDate || (discountForm.durationMode === 'custom_period' ? discountForm.startDate : null),
         endDate: data?.item?.endDate || (discountForm.durationMode === 'custom_period' ? discountForm.endDate : null),
@@ -6025,6 +6085,7 @@ export default function AdminFinance() {
                 <select value={discountForm.coverageMode} onChange={(e) => setDiscountForm((prev) => ({ ...prev, coverageMode: e.target.value }))}>
                   <option value="fixed">مبلغ ثابت</option>
                   <option value="percent">درصدی</option>
+                  <option value="full">صد درصد / کامل</option>
                 </select>
               </label>
             </div>
@@ -6064,7 +6125,9 @@ export default function AdminFinance() {
               <select value={discountForm.discountType} onChange={(e) => setDiscountForm((prev) => ({ ...prev, discountType: e.target.value }))}>
                 {Object.entries(DISCOUNT_TYPE_UI_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
-              {discountForm.coverageMode === 'fixed' ? (
+              {discountForm.coverageMode === 'full' ? (
+                <div className="finance-readonly-field">100% تخفیف روی بدهی‌های باز</div>
+              ) : discountForm.coverageMode === 'fixed' ? (
                 <input type="number" min="0" value={discountForm.amount} onChange={(e) => setDiscountForm((prev) => ({ ...prev, amount: e.target.value }))} placeholder="مبلغ تخفیف" required />
               ) : (
                 <input type="number" min="1" max="100" value={discountForm.percentage} onChange={(e) => setDiscountForm((prev) => ({ ...prev, percentage: e.target.value }))} placeholder="درصد تخفیف" required />
@@ -6209,9 +6272,18 @@ export default function AdminFinance() {
                 ))}
               </select>
             </label>
+            <label className="finance-inline-filter">
+              <span>تعداد در صفحه</span>
+              <select value={reliefRegistryPageSize} onChange={(e) => setReliefRegistryPageSize(Number(e.target.value) || 10)}>
+                <option value={5}>5 مورد</option>
+                <option value={10}>10 مورد</option>
+                <option value={20}>20 مورد</option>
+                <option value={50}>50 مورد</option>
+              </select>
+            </label>
           </div>
           <div className="finance-registry-list">
-            {filteredReliefRegistry.map((item) => {
+            {pagedReliefRegistry.map((item) => {
               const sourceEntityId = getReliefSourceEntityId(item);
               const canCancel = !!sourceEntityId && (item.sourceModel === 'discount' || item.sourceModel === 'fee_exemption');
               return (
@@ -6249,6 +6321,13 @@ export default function AdminFinance() {
               );
             })}
             {!filteredReliefRegistry.length && <p className="muted">برای این جستجو یا فیلتر، تسهیل مالی فعالی پیدا نشد.</p>}
+            {filteredReliefRegistry.length > reliefRegistryPageSize && (
+              <div className="finance-pagination">
+                <button type="button" className="secondary" disabled={reliefRegistryPage <= 1} onClick={() => setReliefRegistryPage((value) => Math.max(1, value - 1))}>قبلی</button>
+                <span>صفحه {reliefRegistryPage} از {reliefRegistryTotalPages}</span>
+                <button type="button" className="secondary" disabled={reliefRegistryPage >= reliefRegistryTotalPages} onClick={() => setReliefRegistryPage((value) => Math.min(reliefRegistryTotalPages, value + 1))}>بعدی</button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -6268,6 +6347,14 @@ export default function AdminFinance() {
             <span className="finance-chip finance-chip-muted">{reliefFocusAcademicYear?.title || 'سال تعلیمی'}</span>
             <span className="finance-chip finance-chip-emerald">{reliefFocusSnapshot.reliefCount} تسهیل در همین دامنه</span>
           </div>
+          <label className="finance-inline-filter">
+            <span>نمایش تسهیلات</span>
+            <select value={reliefFocusPageSize} onChange={(e) => setReliefFocusPageSize(Number(e.target.value) || 5)}>
+              <option value={3}>3 مورد</option>
+              <option value={5}>5 مورد</option>
+              <option value={10}>10 مورد</option>
+            </select>
+          </label>
           <div className="finance-kpi-grid finance-kpi-grid-dense">
             <div className="finance-kpi-item">
               <span>کل بدهی</span>
@@ -6299,16 +6386,23 @@ export default function AdminFinance() {
               <span>نزدیک‌ترین مهلت پرداخت</span>
               <span>{reliefFocusSnapshot.nextDueOrder?.dueDate ? toFaDate(reliefFocusSnapshot.nextDueOrder.dueDate) : '-'}</span>
             </div>
-            {reliefFocusSnapshot.topReliefs.map((item) => (
+            {pagedReliefFocusItems.map((item) => (
               <div key={`focus-relief-${item.id}`} className="mini-row">
                 <span>{RELIEF_TYPE_UI_LABELS[item.reliefType] || item.reliefType || 'تسهیل'}</span>
                 <span>{getReliefValueLabel(item)}</span>
               </div>
             ))}
-            {!reliefFocusSnapshot.topReliefs.length && (
+            {!reliefFocusSnapshot.scopedReliefs.length && (
               <div className="mini-row">
                 <span>تسهیلات فعال</span>
                 <span className="finance-chip finance-chip-muted">0 مورد</span>
+              </div>
+            )}
+            {reliefFocusSnapshot.scopedReliefs.length > reliefFocusPageSize && (
+              <div className="finance-pagination">
+                <button type="button" className="secondary" disabled={reliefFocusPage <= 1} onClick={() => setReliefFocusPage((value) => Math.max(1, value - 1))}>قبلی</button>
+                <span>صفحه {reliefFocusPage} از {reliefFocusTotalPages}</span>
+                <button type="button" className="secondary" disabled={reliefFocusPage >= reliefFocusTotalPages} onClick={() => setReliefFocusPage((value) => Math.min(reliefFocusTotalPages, value + 1))}>بعدی</button>
               </div>
             )}
           </div>
@@ -6416,8 +6510,17 @@ export default function AdminFinance() {
               placeholder="نام متعلم، صنف، سال، دلیل یا دامنه معافیت"
             />
           </label>
+          <label className="finance-inline-filter">
+            <span>تعداد در صفحه</span>
+            <select value={exemptionRegistryPageSize} onChange={(e) => setExemptionRegistryPageSize(Number(e.target.value) || 10)}>
+              <option value={5}>5 مورد</option>
+              <option value={10}>10 مورد</option>
+              <option value={20}>20 مورد</option>
+              <option value={50}>50 مورد</option>
+            </select>
+          </label>
           <div className="finance-registry-list">
-            {filteredExemptionRegistry.map((item) => (
+            {pagedExemptionRegistry.map((item) => (
               <div key={item.id} className="finance-registry-row">
                 <div>
                   <strong>{item.student?.fullName || item.student?.name || 'متعلم'}</strong>
@@ -6434,6 +6537,13 @@ export default function AdminFinance() {
               </div>
             ))}
             {!filteredExemptionRegistry.length && <p className="muted">برای این جستجو، معافیتی پیدا نشد.</p>}
+            {filteredExemptionRegistry.length > exemptionRegistryPageSize && (
+              <div className="finance-pagination">
+                <button type="button" className="secondary" disabled={exemptionRegistryPage <= 1} onClick={() => setExemptionRegistryPage((value) => Math.max(1, value - 1))}>قبلی</button>
+                <span>صفحه {exemptionRegistryPage} از {exemptionRegistryTotalPages}</span>
+                <button type="button" className="secondary" disabled={exemptionRegistryPage >= exemptionRegistryTotalPages} onClick={() => setExemptionRegistryPage((value) => Math.min(exemptionRegistryTotalPages, value + 1))}>بعدی</button>
+              </div>
+            )}
           </div>
         </div>
       </div>
