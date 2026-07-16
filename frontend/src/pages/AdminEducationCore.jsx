@@ -125,6 +125,18 @@ function asId(value) {
   return String(value?._id || value?.id || value || '');
 }
 
+function optionMatchesSearch(item = {}, query = '') {
+  const needle = String(query || '').trim().toLowerCase();
+  if (!needle) return true;
+  return [
+    item.uiLabel,
+    item.name,
+    item.email,
+    item.code,
+    item.grade
+  ].filter(Boolean).some((value) => String(value).toLowerCase().includes(needle));
+}
+
 function getEnrollmentStatusLabel(value) {
   return ENROLLMENT_STATUS_OPTIONS.find((item) => item.value === value)?.label || value || '---';
 }
@@ -297,9 +309,12 @@ export default function AdminEducationCore() {
   const [mapSearchInput, setMapSearchInput] = useState('');
   const [mapSearchQuery, setMapSearchQuery] = useState('');
   const [mapInstructorFilter, setMapInstructorFilter] = useState('');
+  const [mapSubjectFilter, setMapSubjectFilter] = useState('');
   const [mapYearFilter, setMapYearFilter] = useState('');
   const [mapClassFilter, setMapClassFilter] = useState('');
   const [mapPrimaryFilter, setMapPrimaryFilter] = useState('all');
+  const [mapInstructorPickerSearch, setMapInstructorPickerSearch] = useState('');
+  const [mapSubjectPickerSearch, setMapSubjectPickerSearch] = useState('');
   const [showAllMaps, setShowAllMaps] = useState(false);
   const [enrollSearchInput, setEnrollSearchInput] = useState('');
   const [enrollSearchQuery, setEnrollSearchQuery] = useState('');
@@ -365,6 +380,18 @@ export default function AdminEducationCore() {
       .sort((left, right) => Number(left) - Number(right))
   ), [subjects]);
   const instructorOptions = useMemo(() => instructors.map((item) => ({ ...item, uiLabel: [item.name, item.email].filter(Boolean).join(' | ') })), [instructors]);
+  const mapInstructorPickerOptions = useMemo(() => (
+    instructorOptions.filter((item) => (
+      optionMatchesSearch(item, mapInstructorPickerSearch)
+      || String(item._id || item.id) === String(mapForm.instructorId)
+    ))
+  ), [instructorOptions, mapInstructorPickerSearch, mapForm.instructorId]);
+  const mapSubjectPickerOptions = useMemo(() => (
+    subjectOptions.filter((item) => (
+      optionMatchesSearch(item, mapSubjectPickerSearch)
+      || String(item._id || item.id) === String(mapForm.subjectId)
+    ))
+  ), [subjectOptions, mapSubjectPickerSearch, mapForm.subjectId]);
   const studentOptions = useMemo(() => students.map((item) => {
     const value = String(item.value || item.id || item._id || '');
     const gradeLabel = item.grade ? `پایه ${item.grade}` : '';
@@ -550,6 +577,8 @@ export default function AdminEducationCore() {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(needle));
       const matchesInstructor = !mapInstructorFilter || String(asId(item.instructor)) === String(mapInstructorFilter);
+      const mapSubjectId = item.subjectId || asId(item.subject);
+      const matchesSubject = !mapSubjectFilter || String(mapSubjectId) === String(mapSubjectFilter);
       const mapYearId = asId(item.academicYear) || asId(item.schoolClass?.academicYearId) || asId(item.schoolClass?.academicYear);
       const matchesYear = !mapYearFilter || String(mapYearId) === String(mapYearFilter);
       const mapClassId = item.classId || asId(item.schoolClass);
@@ -559,9 +588,9 @@ export default function AdminEducationCore() {
         : mapPrimaryFilter === 'primary'
           ? !!item.isPrimary
           : !item.isPrimary;
-      return matchesQuery && matchesInstructor && matchesYear && matchesClass && matchesPrimary;
+      return matchesQuery && matchesInstructor && matchesSubject && matchesYear && matchesClass && matchesPrimary;
     });
-  }, [maps, mapSearchQuery, mapInstructorFilter, mapYearFilter, mapClassFilter, mapPrimaryFilter]);
+  }, [maps, mapSearchQuery, mapInstructorFilter, mapSubjectFilter, mapYearFilter, mapClassFilter, mapPrimaryFilter]);
   const visibleMaps = useMemo(() => (
     showAllMaps ? filteredMaps : filteredMaps.slice(0, MAP_REGISTRY_VISIBLE_LIMIT)
   ), [filteredMaps, showAllMaps]);
@@ -758,6 +787,8 @@ export default function AdminEducationCore() {
       note: item.note || '',
       isPrimary: !!item.isPrimary
     });
+    setMapInstructorPickerSearch(item.instructor?.name || item.instructor?.email || '');
+    setMapSubjectPickerSearch(item.subject?.name || item.subject?.code || '');
   };
 
   const loadEnrollmentForEdit = (item) => {
@@ -917,7 +948,7 @@ export default function AdminEducationCore() {
 
   useEffect(() => {
     setShowAllMaps(false);
-  }, [mapSearchQuery, mapInstructorFilter, mapYearFilter, mapClassFilter, mapPrimaryFilter]);
+  }, [mapSearchQuery, mapInstructorFilter, mapSubjectFilter, mapYearFilter, mapClassFilter, mapPrimaryFilter]);
 
   useEffect(() => {
     setShowAllEnrollmentCandidates(false);
@@ -1220,6 +1251,8 @@ export default function AdminEducationCore() {
       if (mapForm.id) await putJson(`/api/education/instructor-subjects/${mapForm.id}`, payload);
       else await postJson('/api/education/instructor-subjects', payload);
       setMapForm(emptyMap);
+      setMapInstructorPickerSearch('');
+      setMapSubjectPickerSearch('');
       showMessage('تقسیم مضمون به استاد ذخیره شد.');
       await loadAll();
     } catch (error) {
@@ -1408,9 +1441,16 @@ export default function AdminEducationCore() {
     setMapSearchInput('');
     setMapSearchQuery('');
     setMapInstructorFilter('');
+    setMapSubjectFilter('');
     setMapYearFilter('');
     setMapClassFilter('');
     setMapPrimaryFilter('all');
+  };
+
+  const resetMapForm = () => {
+    setMapForm(emptyMap);
+    setMapInstructorPickerSearch('');
+    setMapSubjectPickerSearch('');
   };
 
   const applyEnrollmentSearch = () => {
@@ -1924,8 +1964,34 @@ export default function AdminEducationCore() {
         <p className="admin-workspace-subtitle">اتصال استاد، مضمون، سال تعلیمی و صنف را از همین بخش مدیریت کنید.</p>
         <div className="admin-workspace-form">
           <div className="admin-workspace-form-grid">
-            <div className="admin-workspace-field"><label>استاد</label><select value={mapForm.instructorId} onChange={(event) => setMapForm((current) => ({ ...current, instructorId: event.target.value }))}><option value="">انتخاب استاد</option>{instructorOptions.map((item) => <option key={item._id || item.id} value={item._id || item.id}>{item.uiLabel}</option>)}</select></div>
-            <div className="admin-workspace-field"><label>مضمون</label><select value={mapForm.subjectId} onChange={(event) => setMapForm((current) => ({ ...current, subjectId: event.target.value }))}><option value="">انتخاب مضمون</option>{subjectOptions.map((item) => <option key={item._id || item.id} value={item._id || item.id}>{item.uiLabel}</option>)}</select></div>
+            <div className="admin-workspace-field">
+              <label>استاد</label>
+              <input
+                value={mapInstructorPickerSearch}
+                onChange={(event) => setMapInstructorPickerSearch(event.target.value)}
+                placeholder="جستجوی نام یا ایمیل استاد"
+                aria-label="جستجوی استاد برای تقسیم مضمون"
+              />
+              <select value={mapForm.instructorId} onChange={(event) => setMapForm((current) => ({ ...current, instructorId: event.target.value }))}>
+                <option value="">انتخاب استاد</option>
+                {mapInstructorPickerOptions.map((item) => <option key={item._id || item.id} value={item._id || item.id}>{item.uiLabel}</option>)}
+              </select>
+              <small>{mapInstructorPickerOptions.length.toLocaleString('fa-AF-u-ca-persian')} استاد قابل انتخاب</small>
+            </div>
+            <div className="admin-workspace-field">
+              <label>مضمون</label>
+              <input
+                value={mapSubjectPickerSearch}
+                onChange={(event) => setMapSubjectPickerSearch(event.target.value)}
+                placeholder="جستجوی نام، کد یا پایه مضمون"
+                aria-label="جستجوی مضمون برای تقسیم به استاد"
+              />
+              <select value={mapForm.subjectId} onChange={(event) => setMapForm((current) => ({ ...current, subjectId: event.target.value }))}>
+                <option value="">انتخاب مضمون</option>
+                {mapSubjectPickerOptions.map((item) => <option key={item._id || item.id} value={item._id || item.id}>{item.uiLabel}</option>)}
+              </select>
+              <small>{mapSubjectPickerOptions.length.toLocaleString('fa-AF-u-ca-persian')} مضمون قابل انتخاب</small>
+            </div>
             <div className="admin-workspace-field"><label>سال تعلیمی</label><select value={mapForm.academicYearId} onChange={(event) => setMapForm((current) => ({ ...current, academicYearId: event.target.value }))}><option value="">انتخاب سال</option>{yearOptions.map((item) => <option key={asId(item)} value={asId(item)}>{item.uiLabel}</option>)}</select></div>
             <div className="admin-workspace-field"><label>صنف</label><select value={mapForm.classId} onChange={(event) => setMapForm((current) => ({ ...current, classId: event.target.value }))}><option value="">انتخاب صنف</option>{classOptions.map((item) => <option key={item.id || item._id} value={item.id || item._id}>{item.uiLabel}</option>)}</select></div>
           </div>
@@ -1933,7 +1999,7 @@ export default function AdminEducationCore() {
           <label className="admin-workspace-field"><span>استاد اصلی باشد</span><input type="checkbox" checked={!!mapForm.isPrimary} onChange={(event) => setMapForm((current) => ({ ...current, isPrimary: event.target.checked }))} /></label>
           <div className="admin-workspace-actions">
             <button type="button" className="admin-workspace-button" onClick={saveMap} disabled={busyAction === 'map'}>{busyAction === 'map' ? '...' : mapForm.id ? 'ذخیره تقسیم' : 'ایجاد تقسیم'}</button>
-            {mapForm.id ? <button type="button" className="admin-workspace-button-ghost" onClick={() => setMapForm(emptyMap)}>انصراف</button> : null}
+            {mapForm.id ? <button type="button" className="admin-workspace-button-ghost" onClick={resetMapForm}>انصراف</button> : null}
           </div>
         </div>
       </article>
@@ -1959,6 +2025,10 @@ export default function AdminEducationCore() {
               <option value="">همه استادان</option>
               {instructorOptions.map((item) => <option key={item._id || item.id} value={item._id || item.id}>{item.uiLabel}</option>)}
             </select>
+            <select value={mapSubjectFilter} onChange={(event) => setMapSubjectFilter(event.target.value)} aria-label="فیلتر مضمون تقسیم">
+              <option value="">همه مضمون‌ها</option>
+              {subjectOptions.map((item) => <option key={item._id || item.id} value={item._id || item.id}>{item.uiLabel}</option>)}
+            </select>
             <select value={mapYearFilter} onChange={(event) => setMapYearFilter(event.target.value)} aria-label="فیلتر سال تقسیم">
               <option value="">همه سال‌ها</option>
               {yearOptions.map((item) => <option key={asId(item)} value={asId(item)}>{item.uiLabel}</option>)}
@@ -1973,7 +2043,7 @@ export default function AdminEducationCore() {
               <option value="secondary">فقط کمکی</option>
             </select>
             <button type="button" className="admin-workspace-button-ghost" onClick={applyMapSearch}>جستجو</button>
-            {(mapSearchQuery || mapInstructorFilter || mapYearFilter || mapClassFilter || mapPrimaryFilter !== 'all') ? (
+            {(mapSearchQuery || mapInstructorFilter || mapSubjectFilter || mapYearFilter || mapClassFilter || mapPrimaryFilter !== 'all') ? (
               <button type="button" className="admin-workspace-button-ghost" onClick={resetMapSearch}>پاک‌کردن</button>
             ) : null}
           </div>
@@ -1997,7 +2067,7 @@ export default function AdminEducationCore() {
                 <button type="button" className="admin-workspace-button-danger" onClick={() => removeItem('map', item._id)}>حذف</button>
               </div>
             </div>
-          )) : <div className="admin-workspace-empty">{(mapSearchQuery || mapInstructorFilter || mapYearFilter || mapClassFilter || mapPrimaryFilter !== 'all') ? 'نتیجه‌ای برای این جستجو پیدا نشد.' : 'هنوز تقسیمی ثبت نشده است.'}</div>}
+          )) : <div className="admin-workspace-empty">{(mapSearchQuery || mapInstructorFilter || mapSubjectFilter || mapYearFilter || mapClassFilter || mapPrimaryFilter !== 'all') ? 'نتیجه‌ای برای این جستجو پیدا نشد.' : 'هنوز تقسیمی ثبت نشده است.'}</div>}
         </div>
         {filteredMaps.length > MAP_REGISTRY_VISIBLE_LIMIT ? (
           <div className="admin-education-list-footer">
