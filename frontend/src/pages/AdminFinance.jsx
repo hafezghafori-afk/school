@@ -305,13 +305,22 @@ const AFGHAN_SCHOOL_MONTHS = ['حمل', 'ثور', 'جوزا', 'سرطان', 'ا�
 const getFinanceStudentOptionLabel = (item = {}) => (
   [
     getStudentOptionLabel(item),
+    item?.fatherName ? `- پدر: ${item.fatherName}` : '',
     item?.classTitle ? `- ${item.classTitle}` : '',
-    item?.academicYearTitle ? `- ${item.academicYearTitle}` : ''
+    item?.academicYearTitle ? `- ${item.academicYearTitle}` : '',
+    item?.admissionNo ? `- ID: ${item.admissionNo}` : item?.studentCoreId ? `- ID: ${String(item.studentCoreId).slice(-6)}` : ''
   ]
     .filter(Boolean)
     .join(' ')
     .trim()
 );
+
+const getFinanceStudentIdentityRows = (item = {}) => ([
+  ['نام پدر', item?.fatherName || '-'],
+  ['صنف', item?.classTitle || '-'],
+  ['سال', item?.academicYearTitle || '-'],
+  ['ID', item?.admissionNo || item?.studentCoreId || item?.membershipId || item?._id || '-']
+]);
 
 const CURRENT_FINANCE_MEMBERSHIP_STATUSES = new Set(['active', 'pending', 'suspended', 'transferred_in']);
 
@@ -887,6 +896,14 @@ const getFinanceRecordAcademicYearId = (item = {}) => (
   String(item?.academicYear?.id || item?.academicYearId?.id || item?.academicYearId || '').trim()
 );
 
+const getFinanceBillMonthLabel = (item = {}) => {
+  const explicitLabel = String(item?.periodLabel || '').trim();
+  if (explicitLabel) return explicitLabel;
+  if (item?.periodType === 'monthly' && item?.dueDate) return toFaMonthKey(getMonthBucket(item.dueDate));
+  if (item?.dueDate) return toFaDate(item.dueDate);
+  return item?.title || formatFinanceCode(item?.billNumber, 'باقیات');
+};
+
 const buildFinanceItemsByStudentMap = (items = []) => {
   const grouped = new Map();
   (Array.isArray(items) ? items : []).forEach((item) => {
@@ -1249,7 +1266,6 @@ export default function AdminFinance() {
   const [paymentStudentSearch, setPaymentStudentSearch] = useState('');
   const [discountStudentSearch, setDiscountStudentSearch] = useState('');
   const [exemptionStudentSearch, setExemptionStudentSearch] = useState('');
-  const [globalFinanceSearch, setGlobalFinanceSearch] = useState('');
   const [receiptSearchTerm, setReceiptSearchTerm] = useState('');
   const [orderSearchTerm, setOrderSearchTerm] = useState('');
   const [orderStatusFilter, setOrderStatusFilter] = useState('all');
@@ -1270,7 +1286,6 @@ export default function AdminFinance() {
   const deferredPaymentStudentSearch = useDeferredValue(paymentStudentSearch);
   const deferredDiscountStudentSearch = useDeferredValue(discountStudentSearch);
   const deferredExemptionStudentSearch = useDeferredValue(exemptionStudentSearch);
-  const deferredGlobalFinanceSearch = useDeferredValue(globalFinanceSearch);
 
   const [manualForm, setManualForm] = useState({
     studentId: '',
@@ -1399,6 +1414,21 @@ export default function AdminFinance() {
         return safeLeft - safeRight;
       })
   ), [bills, paymentDeskForm.studentId, paymentDeskForm.classId, paymentDeskForm.academicYearId]);
+  const paymentDeskStudentOpenOrders = useMemo(() => (
+    bills
+      .filter((item) => (
+        String(item?.student?.userId || '') === String(paymentDeskForm.studentId || '')
+        && OPEN_ORDER_STATUSES.has(String(item?.status || '').trim())
+        && Number(item?.outstandingAmount || 0) > 0
+      ))
+      .sort((left, right) => {
+        const leftTime = new Date(left?.dueDate || 0).getTime();
+        const rightTime = new Date(right?.dueDate || 0).getTime();
+        const safeLeft = Number.isNaN(leftTime) ? Number.MAX_SAFE_INTEGER : leftTime;
+        const safeRight = Number.isNaN(rightTime) ? Number.MAX_SAFE_INTEGER : rightTime;
+        return safeLeft - safeRight;
+      })
+  ), [bills, paymentDeskForm.studentId]);
   const paymentDeskSelectedOrderIds = useMemo(() => {
     const validIds = new Set(paymentDeskOpenOrders.map(getFeeOrderRowId).filter(Boolean));
     return paymentDeskForm.selectedFeeOrderIds.filter((item) => validIds.has(String(item || '')));
@@ -1409,6 +1439,47 @@ export default function AdminFinance() {
   const paymentDeskTotalOutstanding = useMemo(() => (
     paymentDeskOpenOrders.reduce((sum, item) => sum + Number(item?.outstandingAmount || 0), 0)
   ), [paymentDeskOpenOrders]);
+  const paymentDeskStudentTotalOutstanding = useMemo(() => (
+    paymentDeskStudentOpenOrders.reduce((sum, item) => sum + Number(item?.outstandingAmount || 0), 0)
+  ), [paymentDeskStudentOpenOrders]);
+  const paymentDeskMonthlyArrears = useMemo(() => {
+    const grouped = new Map();
+    paymentDeskStudentOpenOrders.forEach((item) => {
+      const classId = getFinanceRecordClassId(item);
+      const academicYearId = getFinanceRecordAcademicYearId(item);
+      const bucket = String(item?.periodLabel || '').trim()
+        || (item?.dueDate ? getMonthBucket(item.dueDate) : '')
+        || getFeeOrderRowId(item)
+        || String(grouped.size + 1);
+      const groupId = [bucket, classId, academicYearId].filter(Boolean).join(':');
+      const groupKey = groupId || bucket;
+      const existing = grouped.get(groupKey) || {
+        id: groupId || bucket,
+        label: getFinanceBillMonthLabel(item),
+        classTitle: item?.schoolClass?.title || item?.classId?.title || '',
+        academicYearTitle: item?.academicYear?.title || item?.academicYearId?.title || '',
+        dueDate: item?.dueDate || '',
+        amountDue: 0,
+        amountPaid: 0,
+        outstandingAmount: 0,
+        count: 0,
+        bills: []
+      };
+      existing.amountDue += Number(item?.amountDue || 0);
+      existing.amountPaid += Number(item?.amountPaid || 0);
+      existing.outstandingAmount += Number(item?.outstandingAmount || 0);
+      existing.count += 1;
+      existing.bills.push(item);
+      grouped.set(groupKey, existing);
+    });
+    return [...grouped.values()].sort((left, right) => {
+      const leftTime = new Date(left.dueDate || 0).getTime();
+      const rightTime = new Date(right.dueDate || 0).getTime();
+      const safeLeft = Number.isNaN(leftTime) ? Number.MAX_SAFE_INTEGER : leftTime;
+      const safeRight = Number.isNaN(rightTime) ? Number.MAX_SAFE_INTEGER : rightTime;
+      return safeLeft - safeRight;
+    });
+  }, [paymentDeskStudentOpenOrders]);
   const paymentDeskRemainingAmount = useMemo(() => (
     Number(paymentDeskForm.amount || 0) - paymentDeskManualAllocated
   ), [paymentDeskForm.amount, paymentDeskManualAllocated]);
@@ -1728,81 +1799,6 @@ export default function AdminFinance() {
     const start = (safePage - 1) * pageSize;
     return (reliefFocusSnapshot.scopedReliefs || []).slice(start, start + pageSize);
   }, [reliefFocusPage, reliefFocusPageSize, reliefFocusSnapshot.scopedReliefs, reliefFocusTotalPages]);
-  const globalFinanceSearchResults = useMemo(() => {
-    const term = String(deferredGlobalFinanceSearch || '').trim();
-    if (!term) return [];
-    const normalizedTerm = normalizeFinanceSearchTerm(term);
-
-    return indexedStudents
-      .map(({ student, searchBlob }) => {
-        const studentUserId = String(student?._id || '').trim();
-        if (!studentUserId) return null;
-
-        const studentBills = billsByStudentUserId.get(studentUserId) || [];
-        const studentReceipts = pendingReceiptsByStudentUserId.get(studentUserId) || [];
-        const studentReliefs = reliefsByStudentUserId.get(studentUserId) || [];
-        const matchedBills = studentBills.filter((item) => includesFinanceSearch([
-          item?.billNumber,
-          item?.title,
-          item?.feeLineSummary,
-          item?.schoolClass?.title,
-          item?.academicYear?.title,
-          item?.note
-        ], term));
-        const matchedReceipts = studentReceipts.filter((item) => includesFinanceSearch([
-          item?.bill?.billNumber,
-          item?.referenceNo,
-          item?.paymentMethod,
-          item?.note,
-          item?.student?.name
-        ], term));
-        const matchedReliefs = studentReliefs.filter((item) => includesFinanceSearch([
-          item?.reliefType,
-          item?.scope,
-          item?.coverageMode,
-          item?.reason,
-          item?.sponsorName,
-          item?.sourceModel
-        ], term));
-        const directMatch = searchBlob.includes(normalizedTerm);
-
-        if (!directMatch && !matchedBills.length && !matchedReceipts.length && !matchedReliefs.length) {
-          return null;
-        }
-
-        const snapshot = buildStudentFinanceSnapshot({ bills, reliefs, studentId: studentUserId });
-        const primaryMatch = matchedBills[0] || matchedReliefs[0] || matchedReceipts[0] || snapshot.scopedBills[0] || null;
-        const classTitle = primaryMatch?.schoolClass?.title || primaryMatch?.classId?.title || studentBills[0]?.schoolClass?.title || 'بدون صنف';
-        const academicYearTitle = primaryMatch?.academicYear?.title || studentBills[0]?.academicYear?.title || 'نامشخص';
-        const score = [
-          directMatch ? 20 : 0,
-          matchedBills.length * 6,
-          matchedReceipts.length * 5,
-          matchedReliefs.length * 4,
-          snapshot.openOrders > 0 ? 2 : 0
-        ].reduce((sum, value) => sum + value, 0);
-
-        return {
-          id: studentUserId,
-          student,
-          snapshot,
-          classTitle,
-          academicYearTitle,
-          matchedBills,
-          matchedReceipts,
-          matchedReliefs,
-          primaryMatch,
-          score
-        };
-      })
-      .filter(Boolean)
-      .sort((left, right) => {
-        if (right.score !== left.score) return right.score - left.score;
-        return right.snapshot.outstanding - left.snapshot.outstanding;
-      })
-      .slice(0, 6);
-  }, [deferredGlobalFinanceSearch, indexedStudents, billsByStudentUserId, pendingReceiptsByStudentUserId, reliefsByStudentUserId, bills, reliefs]);
-  const globalFinanceSpotlight = useMemo(() => globalFinanceSearchResults[0] || null, [globalFinanceSearchResults]);
   const paymentDeskStudentSearchBlob = useMemo(
     () => studentSearchBlobById.get(String(paymentDeskForm.studentId || '').trim()) || '',
     [studentSearchBlobById, paymentDeskForm.studentId]
@@ -1811,6 +1807,11 @@ export default function AdminFinance() {
   const highlightedPaymentStudentOptions = useMemo(
     () => (hasPaymentStudentSearchTerm ? paymentStudentOptions.slice(0, 8) : []),
     [hasPaymentStudentSearchTerm, paymentStudentOptions]
+  );
+  const hasDiscountStudentSearchTerm = Boolean(normalizeFinanceSearchTerm(discountStudentSearch));
+  const highlightedDiscountStudentOptions = useMemo(
+    () => (hasDiscountStudentSearchTerm ? discountStudentOptions.slice(0, 8) : []),
+    [hasDiscountStudentSearchTerm, discountStudentOptions]
   );
   const paymentDeskActionHint = useMemo(() => {
     if (!paymentDeskForm.studentId) return 'برای فعال شدن کارت مالی و دکمه‌های پرداخت، ابتدا متعلم را از نتیجه‌های جستجو انتخاب کنید.';
@@ -2298,6 +2299,13 @@ export default function AdminFinance() {
   const loadAll = async () => {
     setBusy(true);
     try {
+      const safeFetchJson = async (url, fallback = { success: false }) => {
+        try {
+          return await fetchJson(url);
+        } catch {
+          return fallback;
+        }
+      };
       const [
         refData,
         membershipData,
@@ -2323,33 +2331,33 @@ export default function AdminFinance() {
         auditTimelineData,
         anomaliesData
       ] = await Promise.all([
-        fetchJson(`${API_BASE}/api/finance/admin/reference-data`),
-        fetchJson(`${API_BASE}/api/finance/admin/student-memberships`),
-        fetchJson(`${API_BASE}/api/finance/admin/summary`),
-        fetchJson(`${API_BASE}/api/student-finance/orders`),
-        fetchJson(`${API_BASE}/api/student-finance/payments?view=inbox`),
-        fetchJson(`${API_BASE}/api/finance/admin/fee-plans`),
-        fetchJson(`${API_BASE}/api/finance/admin/month-close`),
-        fetchJson(buildScopedReportUrl('/api/finance/admin/reports/aging')),
-        fetchJson(buildScopedReportUrl('/api/finance/admin/reports/cashflow')),
-        fetchJson(buildScopedReportUrl('/api/finance/admin/reports/by-class')),
-        fetchJson(`${API_BASE}/api/finance/admin/reports/discounts`),
-        fetchJson(`${API_BASE}/api/student-finance/discounts?status=active`),
-        fetchJson(`${API_BASE}/api/student-finance/reliefs?status=active`),
-        fetchJson(`${API_BASE}/api/student-finance/exemptions?status=active`),
+        safeFetchJson(`${API_BASE}/api/finance/admin/reference-data`, { success: false, students: [], classes: [], academicYears: [] }),
+        safeFetchJson(`${API_BASE}/api/finance/admin/student-memberships`, { success: true, items: [] }),
+        safeFetchJson(`${API_BASE}/api/finance/admin/summary`, { success: false, summary: null, topDebtors: [] }),
+        safeFetchJson(`${API_BASE}/api/student-finance/orders`, { success: true, items: [] }),
+        safeFetchJson(`${API_BASE}/api/student-finance/payments?view=inbox`, { success: true, items: [] }),
+        safeFetchJson(`${API_BASE}/api/finance/admin/fee-plans`, { success: true, items: [] }),
+        safeFetchJson(`${API_BASE}/api/finance/admin/month-close`, { success: true, items: [] }),
+        safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/aging'), { success: true, items: [] }),
+        safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/cashflow'), { success: true, items: [] }),
+        safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/by-class'), { success: true, items: [] }),
+        safeFetchJson(`${API_BASE}/api/finance/admin/reports/discounts`, { success: true, items: [] }),
+        safeFetchJson(`${API_BASE}/api/student-finance/discounts?status=active`, { success: true, items: [] }),
+        safeFetchJson(`${API_BASE}/api/student-finance/reliefs?status=active`, { success: true, items: [] }),
+        safeFetchJson(`${API_BASE}/api/student-finance/exemptions?status=active`, { success: true, items: [] }),
         Promise.resolve({ success: true, items: [] }),
         Promise.resolve({ success: true, items: [] }),
         Promise.resolve({ success: true, items: [], variables: [] }),
         Promise.resolve({ success: true, analytics: null }),
         Promise.resolve({ success: true, items: [] }),
         Promise.resolve({ success: true, items: [] }),
-        fetchJson(`${API_BASE}/api/finance/admin/document-archive?limit=12`),
-        fetchJson(buildScopedReportUrl('/api/finance/admin/reports/audit-timeline')),
-        fetchJson(buildScopedReportUrl('/api/finance/admin/reports/anomalies'))
+        safeFetchJson(`${API_BASE}/api/finance/admin/document-archive?limit=12`, { success: true, items: [] }),
+        safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/audit-timeline'), { success: true, items: [], summary: null }),
+        safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/anomalies'), { success: true, items: [], summary: null })
       ]);
 
-      if (!refData?.success || !summaryData?.success) {
-        setMessage(refData?.message || summaryData?.message || 'خطا در دریافت اطلاعات مالی');
+      if (!refData?.success) {
+        setMessage(refData?.message || 'خطا در دریافت اطلاعات مالی');
         return;
       }
 
@@ -2494,57 +2502,6 @@ export default function AdminFinance() {
     } catch {
       setCashierReport(null);
     }
-  };
-
-  const applyFinanceSearchScope = (result = {}, callback) => {
-    if (!result?.student?._id) return;
-    const scopeSource = result.primaryMatch || result.snapshot?.scopedBills?.[0] || null;
-    callback({
-      studentId: String(result.student._id || '').trim(),
-      classId: getFinanceRecordClassId(scopeSource),
-      academicYearId: getFinanceRecordAcademicYearId(scopeSource)
-    });
-  };
-
-  const openFinanceSearchInPayments = (result = {}) => {
-    applyFinanceSearchScope(result, ({ studentId, classId, academicYearId }) => {
-      resetPaymentDeskSelection({
-        studentId,
-        classId: classId || '',
-        academicYearId: academicYearId || currentAcademicYearId
-      });
-      setPaymentStudentSearch(result?.student?.fullName || result?.student?.name || '');
-      setActiveSection('payments');
-    });
-  };
-
-  const openFinanceSearchInReliefs = (result = {}) => {
-    applyFinanceSearchScope(result, ({ studentId, classId, academicYearId }) => {
-      setDiscountForm((prev) => ({
-        ...prev,
-        studentId,
-        studentMembershipId: findFinanceMembershipId({ studentId, classId, academicYearId }),
-        classId: classId || prev.classId,
-        academicYearId: academicYearId || prev.academicYearId
-      }));
-      setExemptionForm((prev) => ({
-        ...prev,
-        studentId,
-        studentMembershipId: findFinanceMembershipId({ studentId, classId, academicYearId }),
-        classId: classId || prev.classId,
-        academicYearId: academicYearId || prev.academicYearId
-      }));
-      setDiscountStudentSearch(result?.student?.fullName || result?.student?.name || '');
-      setExemptionStudentSearch(result?.student?.fullName || result?.student?.name || '');
-      setActiveSection('discounts');
-    });
-  };
-
-  const openFinanceSearchInOrders = (result = {}) => {
-    const studentName = result?.student?.fullName || result?.student?.name || '';
-    if (!studentName) return;
-    setOrderSearchTerm(studentName);
-    setActiveSection('orders');
   };
 
   useEffect(() => {
@@ -4868,103 +4825,6 @@ export default function AdminFinance() {
         </div>
       ) : null}
 
-      <div className="finance-card finance-global-search-card">
-        <div className="finance-card-head">
-          <div>
-            <h3>جستجوی سراسری مالی</h3>
-            <p className="muted">نام متعلم، شماره بل، نمبر رسید، نام پدر، شماره تماس یا تمویل‌کننده را جستجو کنید.</p>
-          </div>
-          {globalFinanceSpotlight ? (
-            <div className="finance-chip-group">
-              <span className="finance-chip finance-chip-emerald">{globalFinanceSpotlight.snapshot.openOrders} بدهی باز</span>
-              <span className="finance-chip">{globalFinanceSpotlight.snapshot.reliefCount} تسهیل</span>
-              <span className="finance-chip finance-chip-rose">{fmt(globalFinanceSpotlight.snapshot.outstanding)} AFN</span>
-            </div>
-          ) : null}
-        </div>
-        <div className="finance-inline-controls">
-          <label className="finance-inline-filter finance-inline-filter-wide">
-            <span>کلید جستجو</span>
-            <input
-              value={globalFinanceSearch}
-              onChange={(e) => setGlobalFinanceSearch(e.target.value)}
-              placeholder="نام متعلم، شماره بل/رسید، نام پدر، تماس یا خیریه"
-            />
-          </label>
-        </div>
-        {globalFinanceSearch && !globalFinanceSearchResults.length ? (
-          <p className="muted">برای این جستجو نتیجه‌ای پیدا نشد.</p>
-        ) : null}
-        {globalFinanceSpotlight ? (
-          <div className="finance-subcard finance-student-spotlight">
-            <div className="finance-card-head">
-              <div>
-                <h4>
-                  <Link to={`/admin-finance/profile/${globalFinanceSpotlight.student.userId || globalFinanceSpotlight.student._id || globalFinanceSpotlight.student.id || ''}`}
-                    className="finance-student-profile-link"
-                  >
-                    {globalFinanceSpotlight.student.fullName || globalFinanceSpotlight.student.name || 'متعلم'}
-                  </Link>
-                </h4>
-                <p className="muted">{globalFinanceSpotlight.classTitle} - {globalFinanceSpotlight.academicYearTitle}</p>
-              </div>
-              <div className="finance-chip-group">
-                {globalFinanceSpotlight.student.admissionNo ? <span className="finance-chip">{globalFinanceSpotlight.student.admissionNo}</span> : null}
-                {globalFinanceSpotlight.student.primaryPhone ? <span className="finance-chip finance-chip-muted">{globalFinanceSpotlight.student.primaryPhone}</span> : null}
-              </div>
-            </div>
-            <div className="finance-kpi-grid finance-kpi-grid-dense">
-              <div className="finance-kpi-item">
-                <span>جمع بدهی</span>
-                <strong>{fmt(globalFinanceSpotlight.snapshot.totalDue)} AFN</strong>
-              </div>
-              <div className="finance-kpi-item">
-                <span>پرداخت‌شده</span>
-                <strong>{fmt(globalFinanceSpotlight.snapshot.totalPaid)} AFN</strong>
-              </div>
-              <div className="finance-kpi-item finance-kpi-item-accent">
-                <span>باقی‌مانده</span>
-                <strong>{fmt(globalFinanceSpotlight.snapshot.outstanding)} AFN</strong>
-              </div>
-              <div className="finance-kpi-item">
-                <span>تسهیلات فعال</span>
-                <strong>{globalFinanceSpotlight.snapshot.reliefCount}</strong>
-              </div>
-            </div>
-            <div className="finance-inline-controls">
-              <button type="button" className="secondary" onClick={() => openFinanceSearchInPayments(globalFinanceSpotlight)}>باز کردن در میز پرداخت</button>
-              <button type="button" className="secondary" onClick={() => openFinanceSearchInReliefs(globalFinanceSpotlight)}>باز کردن در تسهیلات</button>
-              <button type="button" className="secondary" onClick={() => openFinanceSearchInOrders(globalFinanceSpotlight)}>فیلتر بل‌ها</button>
-            </div>
-            {globalFinanceSpotlight.student.guardianName || globalFinanceSpotlight.student.fatherName || globalFinanceSpotlight.student.guardianPhone ? (
-              <div className="finance-meta-grid">
-                {globalFinanceSpotlight.student.fatherName ? <div><span>نام پدر</span><strong>{globalFinanceSpotlight.student.fatherName}</strong></div> : null}
-                {globalFinanceSpotlight.student.guardianName ? <div><span>سرپرست</span><strong>{globalFinanceSpotlight.student.guardianName}</strong></div> : null}
-                {globalFinanceSpotlight.student.guardianPhone ? <div><span>تماس سرپرست</span><strong>{globalFinanceSpotlight.student.guardianPhone}</strong></div> : null}
-                {globalFinanceSpotlight.snapshot.nextDueOrder?.dueDate ? <div><span>مهلت پرداخت بعدی</span><strong>{toFaDate(globalFinanceSpotlight.snapshot.nextDueOrder.dueDate)}</strong></div> : null}
-              </div>
-            ) : null}
-            {globalFinanceSearchResults.length > 1 ? (
-              <div className="finance-search-results">
-                {globalFinanceSearchResults.slice(1, 5).map((result) => (
-                  <div key={result.id} className="mini-row">
-                    <span>
-                      <Link to={`/admin-finance/profile/${result.student.userId || result.student._id || result.student.id || ''}`}
-                        className="finance-student-profile-link"
-                      >
-                        {result.student.fullName || result.student.name || 'متعلم'}
-                      </Link>
-                    </span>
-                    <span>{fmt(result.snapshot.outstanding)} AFN</span>
-                    <button type="button" className="secondary" onClick={() => openFinanceSearchInPayments(result)}>انتخاب</button>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-
       <div className="finance-control-rail">
         {/* حذف دکمه‌های لندسکیپ و پورتریت */}
         {activeSection === 'orders' && (
@@ -5188,98 +5048,71 @@ export default function AdminFinance() {
         </div>
       </div>
 
-      <div className="finance-grid" data-finance-section="overview">
-        <div className="finance-card finance-spotlight-card">
+      <div className="finance-grid finance-payment-workspace" data-finance-section="payments orders settings">
+        <div className="finance-card finance-arrears-card" data-finance-section="payments" data-testid="student-monthly-arrears">
           <div className="finance-card-head">
             <div>
-              <h3>میانبرهای عملیاتی</h3>
-              <p className="muted">از اینجا مستقیم به میز پرداخت، بل‌ها، تخفیف‌ها، گزارش‌ها و تنظیمات بروید.</p>
+              <h3>صندوق باقیات ماهانه شاگرد</h3>
+              <p className="muted">ماه‌های باقی‌دار شاگرد انتخاب‌شده در میز پرداخت را همراه با مبلغ، پرداخت‌شده و مهلت پرداخت ببینید.</p>
             </div>
-          </div>
-          <div className="finance-shell-shortcuts">
-            <Link className="finance-launch-link finance-membership-launch-link" to="/admin-financial-memberships">ممبرشیپ مالی</Link>
-            <button type="button" onClick={() => setActiveSection('payments')}>ثبت پرداخت و رسید</button>
-            <button type="button" className="secondary" onClick={() => setActiveSection('orders')}>بل‌ها و تعهدات</button>
-            <button type="button" className="secondary" onClick={() => setActiveSection('discounts')}>تخفیف و معافیت</button>
-            <button type="button" className="secondary" onClick={() => setActiveSection('reports')}>گزارش‌های مالی</button>
-            <button type="button" className="secondary" onClick={() => setActiveSection('settings')}>تنظیمات و پلان مالی</button>
-            <Link className="finance-launch-link" to="/admin-government-finance">فرماندهی مالی دولت</Link>
-          </div>
-          <div className="finance-subcard-list">
-            <div className="mini-row">
-              <span>جمع تخفیف و معافیت فعال</span>
-              <span>{activeFinanceReliefCount}</span>
-            </div>
-            <div className="mini-row">
-              <span>پلان‌های فیس ثبت‌شده</span>
-              <span>{feePlans.length}</span>
-            </div>
-            <div className="mini-row">
-              <span>ماه‌های مالی بسته‌شده</span>
-              <span>{closedMonths.length}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="finance-grid" data-finance-section="overview payments orders settings">
-        <div className="finance-card" data-finance-section="overview payments" data-testid="cashier-daily-report">
-          <div className="finance-card-head">
-            <div>
-              <h3>گزارش صندوق روزانه</h3>
-              <p className="muted">وصول همان روز، تفکیک روش پرداخت، و سهم هر مسئول ثبت را از اینجا ببینید.</p>
-            </div>
-            <label className="finance-inline-filter">
-              <span>تاریخ گزارش</span>
-              <AfghanDateInput value={cashierReportDate} onChange={setCashierReportDate} showGregorianEquivalent />
-              <small>{cashierReportDate ? `هجری شمسی: ${toFaDate(cashierReportDate)}` : 'تاریخ انتخاب نشده است.'}</small>
-            </label>
-            <button type="button" className="secondary" onClick={exportCashierReportCsv}>CSV</button>
-            <button type="button" className="secondary" onClick={printCashierReport}>چاپ</button>
+            {paymentDeskStudent ? (
+              <div className="finance-chip-group">
+                <span className="finance-chip finance-chip-emerald">{paymentDeskMonthlyArrears.length} ماه</span>
+                <span className="finance-chip finance-chip-rose">{fmt(paymentDeskStudentTotalOutstanding)} AFN</span>
+              </div>
+            ) : null}
           </div>
           <div className="finance-summary finance-summary-compact">
-            <div><span>کل پرداخت‌ها</span><strong>{cashierReport?.summary?.totalPayments || 0}</strong></div>
-            <div><span>ثبت‌شده</span><strong>{fmt(cashierReport?.summary?.totalCollected || 0)} AFN</strong></div>
-            <div><span>تاییدشده</span><strong>{fmt(cashierReport?.summary?.approvedAmount || 0)} AFN</strong></div>
-            <div><span>در انتظار</span><strong>{fmt(cashierReport?.summary?.pendingAmount || 0)} AFN</strong></div>
+            <div><span>شاگرد</span><strong>{paymentDeskStudent?.fullName || paymentDeskStudent?.name || '-'}</strong></div>
+            <div><span>صنف</span><strong>{paymentDeskClass?.title || '-'}</strong></div>
+            <div><span>سال تعلیمی</span><strong>{paymentDeskAcademicYear?.title || '-'}</strong></div>
+            <div><span>کل باقیات</span><strong>{fmt(paymentDeskStudentTotalOutstanding)} AFN</strong></div>
           </div>
-          <div className="finance-grid finance-grid-tight">
-            <div className="finance-subcard">
-              <h4>روش‌های پرداخت تاییدشده</h4>
-              {(cashierReport?.methodTotals || []).map((item) => (
-                <div key={`cashier-method-${item.method}`} className="mini-row">
-                  <span>{PAYMENT_METHOD_UI_LABELS[item.method] || item.method}</span>
-                  <span>{fmt(item.amount)} AFN / {item.count}</span>
+          <div className="finance-subcard-list">
+            {paymentDeskMonthlyArrears.map((item) => (
+              <div key={`student-arrears-${item.id}`} className="mini-row finance-arrears-month-row">
+                <div className="finance-arrears-month-head">
+                  <span>
+                    <strong>{item.label}</strong>
+                    <small>
+                      {item.dueDate ? `مهلت: ${toFaDate(item.dueDate)}` : 'مهلت ثبت نشده'}
+                      {item.classTitle ? ` | ${item.classTitle}` : ''}
+                      {item.academicYearTitle ? ` | ${item.academicYearTitle}` : ''}
+                      {item.count > 1 ? ` | ${item.count} بل` : ''}
+                    </small>
+                  </span>
+                  <strong>{fmt(item.outstandingAmount)} AFN</strong>
                 </div>
-              ))}
-              {!cashierReport?.methodTotals?.length && <p className="muted">برای این روز پرداخت تاییدشده‌ای ثبت نشده است.</p>}
-            </div>
-            <div className="finance-subcard">
-              <h4>ثبت‌کنندگان پرداخت تاییدشده</h4>
-              {(cashierReport?.cashiers || []).map((item) => (
-                <div key={`cashier-user-${item.id}`} className="mini-row">
-                  <span>{item.name}</span>
-                  <span>{fmt(item.amount)} AFN / {item.count}</span>
+                <div className="finance-arrears-breakdown">
+                  <span><b>اصل بل</b>{fmt(item.amountDue)} AFN</span>
+                  <span><b>پرداخت‌شده</b>{fmt(item.amountPaid)} AFN</span>
+                  <span><b>باقی‌مانده</b>{fmt(item.outstandingAmount)} AFN</span>
                 </div>
-              ))}
-              {!cashierReport?.cashiers?.length && <p className="muted">برای این روز ثبت‌کننده تاییدشده‌ای دیده نشد.</p>}
-            </div>
+                {item.bills?.length > 1 ? (
+                  <div className="finance-arrears-bill-list">
+                    {item.bills.map((bill) => (
+                      <div key={`arrears-bill-${getFeeOrderRowId(bill)}`} className="finance-arrears-bill-row">
+                        <span>{bill.title || formatFinanceCode(bill.billNumber, 'بل مالی')}</span>
+                        <small>
+                          {bill.dueDate ? toFaDate(bill.dueDate) : 'بدون مهلت'}
+                          {' | '}
+                          پرداخت: {fmt(bill.amountPaid || 0)} AFN
+                        </small>
+                        <strong>{fmt(bill.outstandingAmount || 0)} AFN</strong>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+            {paymentDeskStudent && !paymentDeskMonthlyArrears.length ? (
+              <p className="muted">برای این شاگرد باقیات ماهانه ثبت نشده است.</p>
+            ) : null}
+            {!paymentDeskStudent ? (
+              <p className="muted">برای دیدن باقیات ماهانه، ابتدا شاگرد را در میز پرداخت انتخاب کنید.</p>
+            ) : null}
           </div>
         </div>
-
-        {!!cashierReport?.items?.length && (
-          <div className="finance-card" data-finance-section="overview payments">
-            <h3>آخرین ثبت‌های روز</h3>
-            <div className="finance-subcard-list">
-              {cashierReport.items.slice(0, 5).map((item) => (
-                <div key={`cashier-row-${item.id || item.paymentNumber}`} className="mini-row">
-                  <span>{item.student?.fullName || item.student?.name || 'متعلم'}</span>
-                  <span>{fmt(item.amount)} AFN / {PAYMENT_METHOD_UI_LABELS[item.paymentMethod] || item.paymentMethod || '-'}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         <section className="finance-card finance-order-overview-card" data-finance-section="orders" data-testid="orders-command-summary">
           <div className="finance-card-head">
@@ -5377,7 +5210,7 @@ export default function AdminFinance() {
           </form>
         )}
 
-        <form className="finance-card" data-finance-section="payments" onSubmit={createDeskPayment} data-testid="finance-payment-desk">
+        <form className="finance-card finance-payment-desk-card" data-finance-section="payments" onSubmit={createDeskPayment} data-testid="finance-payment-desk">
           <div className="finance-card-head">
             <div>
               <h3>ثبت پرداخت دفتر مالی</h3>
@@ -5385,7 +5218,13 @@ export default function AdminFinance() {
             </div>
             <span className="finance-chip finance-chip-emerald">{paymentPreview?.membership?.student?.fullName || paymentDeskMembershipStudent?.name || paymentDeskStudent?.name || 'عضویت مالی'}</span>
           </div>
-          <label className="finance-inline-filter finance-inline-filter-wide">
+          <div className="finance-payment-form-grid">
+          <div className="finance-payment-section-title">
+            <span>انتخاب متعلم</span>
+            <small>جستجو، صنف و سال تعلیمی</small>
+          </div>
+          <div className="finance-payment-row finance-payment-row-primary">
+          <label className="finance-inline-filter finance-inline-filter-wide finance-payment-search-field">
             <span>جستجوی متعلم</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <input
@@ -5407,7 +5246,7 @@ export default function AdminFinance() {
             </div>
           </label>
           {highlightedPaymentStudentOptions.length > 0 && (
-            <div className="finance-student-search-results" data-testid="payment-student-search-results">
+            <div className="finance-student-search-results finance-payment-search-results" data-testid="payment-student-search-results">
               {highlightedPaymentStudentOptions.map((student) => {
                 const selected = String(student?._id || '') === String(paymentDeskForm.studentId || '');
                 return (
@@ -5420,7 +5259,13 @@ export default function AdminFinance() {
                   >
                     <span>
                       <strong>{student.name || student.fullName || 'متعلم'}</strong>
-                      <small>{getFinanceStudentOptionLabel(student)}</small>
+                      <small className="finance-student-identity-grid">
+                        {getFinanceStudentIdentityRows(student).map(([label, value]) => (
+                          <span key={`payment-student-${student.membershipId || student._id}-${label}`}>
+                            <b>{label}:</b> {value}
+                          </span>
+                        ))}
+                      </small>
                     </span>
                     <span className="finance-chip finance-chip-muted">{selected ? 'انتخاب شده' : 'انتخاب'}</span>
                   </button>
@@ -5429,7 +5274,7 @@ export default function AdminFinance() {
             </div>
           )}
           {hasPaymentStudentSearchTerm && !highlightedPaymentStudentOptions.length && (
-            <p className="muted finance-order-empty">برای این جستجو متعلم فعال در دفتر ممبرشیپ پیدا نشد.</p>
+            <p className="muted finance-order-empty finance-payment-search-results">برای این جستجو متعلم فعال در دفتر ممبرشیپ پیدا نشد.</p>
           )}
           <select data-testid="desk-student-select" value={paymentDeskForm.studentId} onChange={(e) => handlePaymentDeskStudentChange(e.target.value)}>
             <option value="">ابتدا شاگرد را انتخاب کنید</option>
@@ -5439,7 +5284,7 @@ export default function AdminFinance() {
               <option value="" disabled>متعلمی پیدا نشد</option>
             )}
           </select>
-          <div className="finance-split-grid">
+          <div className="finance-split-grid finance-payment-class-year">
             <select data-testid="desk-class-select" value={paymentDeskForm.classId} onChange={(e) => {
               setPaymentDeskForm((p) => ({
                 ...p,
@@ -5464,7 +5309,22 @@ export default function AdminFinance() {
               {academicYears.map((item) => <option key={`payment-year-${item.id}`} value={item.id}>{getAcademicYearOptionLabel(item)}</option>)}
             </select>
           </div>
-          <div className="finance-split-grid">
+          </div>
+          {!!paymentDeskMembershipStudent && (
+            <div className="finance-payment-identity-strip">
+              <strong>{paymentDeskMembershipStudent.name || paymentDeskMembershipStudent.fullName || 'متعلم'}</strong>
+              {getFinanceStudentIdentityRows(paymentDeskMembershipStudent).map(([label, value]) => (
+                <span key={`payment-identity-${label}`}>
+                  <b>{label}:</b> {value}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="finance-payment-section-title">
+            <span>مشخصات پرداخت</span>
+            <small>مبلغ، نوع پرداخت و تاریخ</small>
+          </div>
+          <div className="finance-payment-row finance-payment-row-money">
             <input value={paymentDeskForm.amount} onChange={(e) => { setPaymentDeskForm((p) => ({ ...p, amount: e.target.value })); setPaymentPreview(null); }} placeholder="مبلغ پرداخت" />
             <select data-testid="desk-payment-method-select" value={paymentDeskForm.paymentMethod} onChange={(e) => {
               const nextMethod = e.target.value;
@@ -5480,11 +5340,9 @@ export default function AdminFinance() {
               <option value="hawala">حواله</option>
               <option value="manual">دستی</option>
             </select>
-          </div>
-          <div className="finance-split-grid">
-            <AfghanDateInput value={paymentDeskForm.paidAt} onChange={(value) => setPaymentDeskForm((p) => ({ ...p, paidAt: value }))} showGregorianEquivalent />
-            <span className="finance-chip finance-chip-muted">{paymentDeskForm.paidAt ? `تاریخ پرداخت: ${toFaDate(paymentDeskForm.paidAt)}` : 'تاریخ پرداخت انتخاب نشده'}</span>
-          </div>
+            <div className="finance-payment-date-field">
+            <AfghanDateInput value={paymentDeskForm.paidAt} onChange={(value) => setPaymentDeskForm((p) => ({ ...p, paidAt: value }))} />
+            </div>
           {paymentDeskRequiresReference && (
             <input
               value={paymentDeskForm.referenceNo}
@@ -5496,11 +5354,33 @@ export default function AdminFinance() {
               required
             />
           )}
+          </div>
+          <div className="finance-payment-section-title">
+            <span>خلاصه مالی سریع</span>
+            <small>مانده و بدهی‌های باز</small>
+          </div>
+          <div className="finance-chip-group finance-payment-summary-chips">
+            <span className="finance-chip">{paymentDeskClass?.title || 'صنف'}</span>
+            <span className="finance-chip finance-chip-muted">{paymentDeskAcademicYear?.title || 'سال تعلیمی'}</span>
+            <span className="finance-chip finance-chip-emerald">{fmt(paymentDeskTotalOutstanding)} AFN مانده کل</span>
+            <span className="finance-chip">{paymentDeskOpenOrders.length} بدهی باز</span>
+            {paymentDeskFinanceSnapshot.nextDueOrder?.dueDate && (
+              <span className="finance-chip finance-chip-muted">مهلت بعدی: {toFaDate(paymentDeskFinanceSnapshot.nextDueOrder.dueDate)}</span>
+            )}
+            {paymentDeskForm.allocationMode === 'auto_selected' && <span className="finance-chip finance-chip-muted">{paymentDeskSelectedOrderIds.length} مورد انتخاب شده</span>}
+            {paymentDeskForm.allocationMode === 'manual' && <span className="finance-chip finance-chip-muted">{fmt(paymentDeskManualAllocated)} AFN تخصیص دستی</span>}
+            {paymentDeskForm.allocationMode === 'manual' && Number(paymentDeskForm.amount || 0) > 0 && (
+              <span className={`finance-chip ${paymentDeskRemainingAmount < 0 ? 'finance-chip-rose' : 'finance-chip-muted'}`}>{fmt(paymentDeskRemainingAmount)} AFN اختلاف با مبلغ پرداخت</span>
+            )}
+          </div>
+          <div className="finance-payment-section-title">
+            <span>تخصیص پرداخت</span>
+            <small>روش تخصیص و یادداشت مالی</small>
+          </div>
+          <div className="finance-payment-row finance-payment-row-allocation">
           <button type="button" className="secondary finance-advanced-toggle" onClick={() => setPaymentAdvancedOpen((value) => !value)}>
             {paymentAdvancedOpen ? 'بستن تنظیمات تخصیص' : 'تخصیص پیشرفته'}
           </button>
-          {paymentAdvancedOpen && (
-          <div className="finance-split-grid">
             <select data-testid="desk-allocation-mode-select" value={paymentDeskForm.allocationMode} onChange={(e) => {
               setPaymentDeskForm((p) => ({
                 ...p,
@@ -5514,26 +5394,13 @@ export default function AdminFinance() {
               <option value="auto_selected">تخصیص فقط به بدهی‌های انتخاب‌شده</option>
               <option value="manual">تخصیص دستی روی هر بدهی</option>
             </select>
-          </div>
-          )}
           <textarea value={paymentDeskForm.note} onChange={(e) => setPaymentDeskForm((p) => ({ ...p, note: e.target.value }))} rows={3} placeholder="یادداشت پرداخت" />
-          <div className="finance-chip-group">
-            <span className="finance-chip">{paymentDeskClass?.title || 'صنف'}</span>
-            <span className="finance-chip finance-chip-muted">{paymentDeskAcademicYear?.title || 'سال تعلیمی'}</span>
-            <span className="finance-chip finance-chip-emerald">{fmt(paymentDeskTotalOutstanding)} AFN مانده کل</span>
-            <span className="finance-chip">{paymentDeskOpenOrders.length} بدهی باز</span>
-            {paymentDeskForm.allocationMode === 'auto_selected' && <span className="finance-chip finance-chip-muted">{paymentDeskSelectedOrderIds.length} مورد انتخاب شده</span>}
-            {paymentDeskForm.allocationMode === 'manual' && <span className="finance-chip finance-chip-muted">{fmt(paymentDeskManualAllocated)} AFN تخصیص دستی</span>}
-            {paymentDeskForm.allocationMode === 'manual' && Number(paymentDeskForm.amount || 0) > 0 && (
-              <span className={`finance-chip ${paymentDeskRemainingAmount < 0 ? 'finance-chip-rose' : 'finance-chip-muted'}`}>{fmt(paymentDeskRemainingAmount)} AFN اختلاف با مبلغ پرداخت</span>
-            )}
           </div>
           {!!paymentDeskForm.studentId && (
-            <div className="finance-subcard finance-student-spotlight">
+            <div className="finance-subcard finance-student-spotlight finance-payment-student-card-row">
               <div className="finance-card-head">
                 <div>
                   <h4>کارت مالی متعلم</h4>
-                  <p className="muted">خلاصه بدهی، وصول و تسهیلات فعال برای همین دامنه انتخاب‌شده.</p>
                 </div>
                 <div className="finance-chip-group">
                   <span className="finance-chip finance-chip-emerald">{paymentDeskFinanceSnapshot.reliefCount} تسهیل فعال</span>
@@ -5584,7 +5451,7 @@ export default function AdminFinance() {
             </div>
           )}
           {paymentDeskOpenOrders.length > 0 && (paymentAdvancedOpen || paymentDeskForm.allocationMode !== 'auto_oldest_due') ? (
-            <div className="finance-order-pick-list" data-testid="desk-open-orders">
+            <div className="finance-order-pick-list finance-payment-open-orders-row" data-testid="desk-open-orders">
               {paymentDeskOpenOrders.map((item) => {
                 const orderId = getFeeOrderRowId(item);
                 return (
@@ -5651,7 +5518,7 @@ export default function AdminFinance() {
             </div>
           )}
           {Array.isArray(paymentPreview?.allocations) && paymentPreview.allocations.length > 0 && (
-            <div className="finance-preview-list" data-testid="desk-payment-preview">
+            <div className="finance-preview-list finance-payment-preview-row" data-testid="desk-payment-preview">
               <div className="finance-chip-group">
                 <span className="finance-chip">{paymentPreview.allocations.length} تخصیص</span>
                 <span className="finance-chip finance-chip-emerald">{fmt(paymentPreview.totalAllocated || 0)} AFN</span>
@@ -5666,8 +5533,9 @@ export default function AdminFinance() {
               ))}
             </div>
           )}
+          <div className="finance-payment-actions-row">
           <p className="finance-payment-action-hint">{paymentDeskCanSubmit && !paymentPreview?.allocations?.length ? 'پرداخت آماده ثبت است؛ تخصیص هنگام ثبت محاسبه می‌شود.' : paymentDeskActionHint}</p>
-          <div className="row-actions">
+          <div className="row-actions finance-payment-action-buttons">
             <button
               type="button"
               onClick={previewDeskPayment}
@@ -5700,6 +5568,8 @@ export default function AdminFinance() {
             >
               ثبت پرداخت
             </button>
+          </div>
+          </div>
           </div>
         </form>
 
@@ -6126,6 +5996,37 @@ export default function AdminFinance() {
                 placeholder="نام، ایمیل یا شناسه متعلم"
               />
             </label>}
+            {discountForm.targetScope === 'student' && highlightedDiscountStudentOptions.length > 0 && (
+              <div className="finance-student-search-results" data-testid="discount-student-search-results">
+                {highlightedDiscountStudentOptions.map((student) => {
+                  const selected = String(student?._id || '') === String(discountForm.studentId || '');
+                  return (
+                    <button
+                      key={`discount-student-card-${student.membershipId || student._id}`}
+                      type="button"
+                      className={`finance-student-result ${selected ? 'is-selected' : ''}`}
+                      onClick={() => applyDiscountMembershipStudent(student._id)}
+                      data-testid={`discount-student-result-${student._id}`}
+                    >
+                      <span>
+                        <strong>{student.name || student.fullName || 'متعلم'}</strong>
+                        <small className="finance-student-identity-grid">
+                          {getFinanceStudentIdentityRows(student).map(([label, value]) => (
+                            <span key={`discount-student-${student.membershipId || student._id}-${label}`}>
+                              <b>{label}:</b> {value}
+                            </span>
+                          ))}
+                        </small>
+                      </span>
+                      <span className="finance-chip finance-chip-muted">{selected ? 'انتخاب شده' : 'انتخاب'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {discountForm.targetScope === 'student' && hasDiscountStudentSearchTerm && !highlightedDiscountStudentOptions.length && (
+              <p className="muted finance-order-empty">برای این جستجو متعلم فعال در دفتر ممبرشیپ پیدا نشد.</p>
+            )}
             {discountForm.targetScope === 'student' && <select value={discountForm.studentId} onChange={(e) => applyDiscountMembershipStudent(e.target.value)}>
               <option value="">متعلم را انتخاب کنید</option>
               {discountStudentOptions.length ? discountStudentOptions.map((student) => (

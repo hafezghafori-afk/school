@@ -581,7 +581,9 @@
 
 .finance-student-search-results {
   display: grid;
-  gap: 8px;
+  gap: 5px;
+  max-height: 160px;
+  overflow: auto;
 }
 
 .finance-student-result {
@@ -589,12 +591,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 6px;
   text-align: right;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.04);
-  border-radius: 12px;
-  padding: 10px 12px;
+  border-radius: 8px;
+  padding: 5px 7px;
   color: #eef5ff;
 }
 
@@ -604,10 +606,12 @@
   background: rgba(34, 197, 94, 0.1);
 }
 
-.finance-student-result span:first-child {
+.finance-student-result > span:first-child {
   min-width: 0;
-  display: grid;
-  gap: 4px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
 }
 
 .finance-student-result strong,
@@ -619,6 +623,27 @@
 
 .finance-student-result small {
   color: rgba(226, 232, 240, 0.72);
+}
+
+.finance-student-result .finance-student-identity-grid {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.finance-student-identity-grid span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finance-student-identity-grid b {
+  color: rgba(226, 232, 240, 0.9);
 }
 
 .finance-payment-action-hint {
@@ -1278,6 +1303,334 @@
   align-items: start;
 }
 
+.finance-page[data-active-section="payments"] .finance-payment-workspace {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  grid-template-areas: "payment-desk arrears";
+  align-items: start;
+  gap: 12px;
+  margin-bottom: 18px;
+  direction: ltr;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.finance-page[data-active-section="payments"] .finance-payment-desk-card {
+  grid-area: payment-desk;
+  padding: 20px;
+  min-height: auto;
+  gap: 14px;
+  direction: rtl;
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(148, 163, 184, 0.18);
+  box-shadow: none;
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+  justify-self: stretch;
+}
+
+.finance-page[data-active-section="payments"] .finance-payment-desk-card .finance-card-head h3 {
+  font-size: 22px;
+}
+
+.finance-payment-form-grid {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.finance-payment-section-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.finance-payment-section-title:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.finance-payment-section-title span {
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.finance-payment-section-title small {
+  color: rgba(226, 232, 240, 0.58);
+  font-size: 11px;
+}
+
+.finance-payment-row {
+  display: grid;
+  gap: 10px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.finance-payment-row > * {
+  min-width: 0;
+}
+
+.finance-payment-row-primary {
+  grid-template-columns: minmax(180px, 1.1fr) minmax(160px, 0.8fr) minmax(220px, 1fr);
+}
+
+.finance-payment-search-field {
+  margin: 0;
+  height: 100%;
+  align-content: end;
+}
+
+.finance-payment-search-field > div {
+  min-height: 44px;
+}
+
+.finance-page[data-active-section="payments"] .finance-payment-desk-card .finance-payment-row-primary :is(input, select),
+.finance-page[data-active-section="payments"] .finance-payment-desk-card .finance-payment-row-money :is(input, select),
+.finance-page[data-active-section="payments"] .finance-payment-desk-card .finance-payment-class-year :is(select) {
+  height: 44px;
+}
+
+.finance-page[data-active-section="payments"] .finance-payment-desk-card .finance-payment-row-primary > select,
+.finance-page[data-active-section="payments"] .finance-payment-desk-card .finance-payment-class-year,
+.finance-page[data-active-section="payments"] .finance-payment-desk-card .finance-payment-row-money > input,
+.finance-page[data-active-section="payments"] .finance-payment-desk-card .finance-payment-row-money > select,
+.finance-page[data-active-section="payments"] .finance-payment-desk-card .finance-payment-date-field {
+  align-self: end;
+}
+
+.finance-payment-identity-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.finance-payment-identity-strip strong {
+  color: #f8fafc;
+  font-size: 14px;
+  margin-left: 6px;
+}
+
+.finance-payment-identity-strip span {
+  color: rgba(226, 232, 240, 0.84);
+  font-size: 12px;
+}
+
+.finance-payment-identity-strip b {
+  color: rgba(186, 230, 253, 0.88);
+}
+
+.finance-payment-search-results {
+  grid-column: 1 / -1;
+}
+
+.finance-payment-class-year {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.finance-payment-row-money {
+  grid-template-columns: minmax(130px, 0.8fr) minmax(130px, 0.75fr) minmax(260px, 1.2fr) minmax(160px, 0.85fr);
+}
+
+.finance-payment-date-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  min-height: 44px;
+}
+
+.finance-payment-date-field .afghan-date-field,
+.finance-payment-date-field .afghan-date-input-grid {
+  height: 44px;
+}
+
+.finance-payment-date-field .afghan-date-input {
+  height: 44px;
+}
+
+.finance-payment-row-allocation {
+  grid-template-columns: minmax(130px, 0.6fr) minmax(240px, 1fr) minmax(320px, 1.35fr);
+}
+
+.finance-payment-row-allocation > textarea {
+  min-height: 48px;
+}
+
+.finance-payment-summary-chips {
+  justify-content: flex-start;
+  align-self: stretch;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(255, 255, 255, 0.035);
+  grid-column: 1 / -1;
+}
+
+.finance-payment-student-card-row,
+.finance-payment-open-orders-row,
+.finance-payment-preview-row,
+.finance-payment-actions-row {
+  grid-column: 1 / -1;
+}
+
+.finance-payment-student-card-row .finance-kpi-grid-dense {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.finance-payment-student-card-row .finance-subcard-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.finance-payment-student-card-row {
+  padding: 12px;
+}
+
+.finance-payment-student-card-row .finance-card-head {
+  align-items: center;
+}
+
+.finance-payment-student-card-row .finance-card-head h4 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.finance-payment-student-card-row .finance-kpi-item {
+  min-height: 70px;
+  padding: 10px;
+}
+
+.finance-payment-student-card-row .finance-kpi-item strong {
+  font-size: 16px;
+}
+
+.finance-payment-student-card-row .mini-row {
+  padding: 8px 10px;
+}
+
+.finance-payment-actions-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.finance-payment-action-buttons {
+  justify-content: flex-end;
+  margin: 0;
+}
+
+@media (max-width: 1450px) {
+  .finance-payment-row-primary {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .finance-payment-class-year {
+    grid-column: 1 / -1;
+  }
+
+  .finance-payment-row-money,
+  .finance-payment-row-allocation {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .finance-payment-summary-chips {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 1250px) {
+  .finance-page[data-active-section="payments"] .finance-payment-workspace {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "payment-desk"
+      "arrears";
+  }
+
+  .finance-page[data-active-section="payments"] .finance-arrears-card {
+    position: static;
+  }
+}
+
+.finance-page[data-active-section="payments"] .finance-payment-desk-card :is(input, select, textarea) {
+  min-height: 44px;
+}
+
+.finance-page[data-active-section="payments"] .finance-payment-desk-card textarea {
+  min-height: 52px;
+}
+
+.finance-page[data-active-section="payments"] .finance-arrears-card {
+  grid-area: arrears;
+  padding: 12px;
+  align-self: start;
+  position: sticky;
+  top: 12px;
+  direction: rtl;
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(148, 163, 184, 0.16);
+  box-shadow: none;
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+  justify-self: stretch;
+}
+
+.finance-page[data-active-section="payments"] .finance-arrears-card .finance-card-head {
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.finance-page[data-active-section="payments"] .finance-arrears-card .finance-card-head h3 {
+  font-size: 16px;
+}
+
+.finance-page[data-active-section="payments"] .finance-arrears-card .finance-card-head p {
+  display: none;
+}
+
+.finance-page[data-active-section="payments"] .finance-arrears-card .finance-summary-compact {
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.finance-page[data-active-section="payments"] .finance-arrears-card .finance-summary-compact div {
+  min-height: 58px;
+  padding: 8px 9px;
+}
+
+.finance-page[data-active-section="payments"] .finance-arrears-card .finance-subcard-list {
+  max-height: 300px;
+  overflow: auto;
+  padding-left: 2px;
+}
+
+.finance-page[data-active-section="payments"] .finance-arrears-card .mini-row {
+  padding: 8px 9px;
+  margin-bottom: 6px;
+}
+
 .finance-order-overview-card {
   grid-column: auto;
 }
@@ -1894,6 +2247,84 @@
   margin-bottom: 0;
 }
 
+.finance-arrears-month-row {
+  display: grid;
+  gap: 8px;
+}
+
+.finance-arrears-month-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.finance-arrears-month-head > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.finance-arrears-month-head > strong {
+  color: #f8fafc;
+  white-space: nowrap;
+}
+
+.finance-arrears-month-row small,
+.finance-arrears-bill-row small {
+  color: rgba(226, 232, 240, 0.68);
+  white-space: normal;
+}
+
+.finance-arrears-breakdown {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.finance-arrears-breakdown span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 8px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.32);
+  color: #f8fafc;
+  font-size: 12px;
+}
+
+.finance-arrears-breakdown b {
+  color: rgba(186, 230, 253, 0.82);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.finance-arrears-bill-list {
+  display: grid;
+  gap: 6px;
+}
+
+.finance-arrears-bill-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  padding: 7px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.finance-arrears-bill-row span,
+.finance-arrears-bill-row small {
+  min-width: 0;
+}
+
+.finance-arrears-bill-row strong {
+  grid-row: span 2;
+  align-self: center;
+  color: #f8fafc;
+  white-space: nowrap;
+}
+
 .finance-summary-compact {
   margin-top: 14px;
 }
@@ -1911,16 +2342,6 @@
 
 .finance-student-spotlight {
   margin-top: 4px;
-}
-
-.finance-global-search-card {
-  margin-bottom: 4px;
-}
-
-.finance-search-results {
-  display: grid;
-  gap: 8px;
-  margin-top: 8px;
 }
 
 .finance-subcard h4 {
@@ -2341,11 +2762,33 @@
   .finance-plan-builder-layout {
     grid-template-columns: minmax(560px, 1.45fr) minmax(310px, 0.9fr);
   }
+
+  .finance-page[data-active-section="payments"] .finance-payment-workspace {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "payment-desk"
+      "arrears";
+  }
+
+  .finance-page[data-active-section="payments"] .finance-arrears-card {
+    position: static;
+  }
 }
 
 @media (max-width: 980px) {
   .finance-plan-builder-layout {
     grid-template-columns: 1fr;
+  }
+
+  .finance-page[data-active-section="payments"] .finance-payment-workspace {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "payment-desk"
+      "arrears";
+  }
+
+  .finance-page[data-active-section="payments"] .finance-arrears-card {
+    position: static;
   }
 }
 
@@ -2387,6 +2830,53 @@
 
   .finance-split-grid {
     grid-template-columns: 1fr;
+  }
+
+  .finance-page[data-active-section="payments"] .finance-payment-workspace {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "payment-desk"
+      "arrears";
+  }
+
+  .finance-page[data-active-section="payments"] .finance-payment-desk-card {
+    padding: 14px;
+    min-height: auto;
+  }
+
+  .finance-page[data-active-section="payments"] .finance-payment-desk-card .finance-card-head h3 {
+    font-size: 18px;
+  }
+
+  .finance-page[data-active-section="payments"] .finance-payment-desk-card .finance-split-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .finance-payment-row-primary,
+  .finance-payment-row-money,
+  .finance-payment-row-allocation,
+  .finance-payment-date-field,
+  .finance-payment-actions-row,
+  .finance-payment-student-card-row .finance-kpi-grid-dense,
+  .finance-payment-student-card-row .finance-subcard-list {
+    grid-template-columns: 1fr;
+  }
+
+  .finance-payment-class-year,
+  .finance-payment-summary-chips {
+    grid-column: auto;
+  }
+
+  .finance-payment-action-buttons {
+    justify-content: stretch;
+  }
+
+  .finance-payment-action-buttons button {
+    width: 100%;
+  }
+
+  .finance-page[data-active-section="payments"] .finance-arrears-card .finance-subcard-list {
+    max-height: 220px;
   }
 
   .finance-fee-line-grid {

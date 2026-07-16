@@ -8230,13 +8230,26 @@ router.get('/admin/student-memberships', requireAuth, requireRole(['admin']), re
     const memberships = await StudentMembership.find({ endedReason: { $ne: 'deleted_by_admin' } })
       .populate('student', 'name email')
       .populate('studentId', 'fullName name admissionNo studentCode fatherName primaryPhone')
+      .populate('afghanStudentId', 'personalInfo contactInfo familyInfo')
       .populate('classId', 'title shift shiftId academicYearId')
       .populate('academicYearId', 'title')
       .sort({ createdAt: -1, updatedAt: -1 })
       .lean();
 
+    const studentCoreIds = memberships
+      .map((item) => item?.studentId && typeof item.studentId === 'object' ? item.studentId._id : item?.studentId)
+      .filter(Boolean);
+    const profiles = studentCoreIds.length
+      ? await StudentProfile.find({ studentId: { $in: studentCoreIds } }).select('studentId family contact').lean()
+      : [];
+    const profileByStudentCoreId = new Map(
+      profiles.map((profile) => [String(profile.studentId || ''), profile])
+    );
+
     const items = memberships.map((item) => {
       const studentCore = item?.studentId && typeof item.studentId === 'object' ? item.studentId : null;
+      const afghanStudent = item?.afghanStudentId && typeof item.afghanStudentId === 'object' ? item.afghanStudentId : null;
+      const profile = profileByStudentCoreId.get(String(studentCore?._id || item?.studentId || '')) || null;
       return {
         ...item,
         studentId: item?.student?._id || null,
@@ -8244,8 +8257,8 @@ router.get('/admin/student-memberships', requireAuth, requireRole(['admin']), re
         studentName: item?.student?.name || studentCore?.fullName || studentCore?.name || '',
         studentEmail: item?.student?.email || '',
         admissionNo: studentCore?.admissionNo || studentCore?.studentCode || '',
-        fatherName: studentCore?.fatherName || '',
-        primaryPhone: studentCore?.primaryPhone || '',
+        fatherName: profile?.family?.fatherName || afghanStudent?.personalInfo?.fatherName || studentCore?.fatherName || '',
+        primaryPhone: profile?.contact?.primaryPhone || studentCore?.primaryPhone || afghanStudent?.contactInfo?.mobile || afghanStudent?.contactInfo?.phone || '',
         classId: item?.classId?._id || item?.classId || null,
         classTitle: item?.classId?.title || '',
         shiftId: item?.classId?.shiftId || null,
