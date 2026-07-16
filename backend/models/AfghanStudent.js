@@ -159,6 +159,26 @@ const afghanStudentSchema = new mongoose.Schema({
       ref: 'AfghanSchool',
       required: true
     },
+    classId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'SchoolClass',
+      default: null
+    },
+    currentClassId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'SchoolClass',
+      default: null
+    },
+    shiftId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Shift',
+      default: null
+    },
+    academicYearId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'AcademicYear',
+      default: null
+    },
     currentGrade: {
       type: String,
       required: true,

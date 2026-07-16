@@ -192,6 +192,7 @@ const serializeSchoolClass = (item) => ({
   gradeLevel: item.gradeLevel || '',
   section: item.section || '',
   shift: item.shift || '',
+  shiftId: item.shiftId || null,
   room: item.room || '',
   status: item.status || 'active',
   note: item.note || '',

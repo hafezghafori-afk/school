@@ -79,6 +79,39 @@ const formatStudentUpdateError = (error) => {
   return 'ذخیره مشخصات شاگرد ناموفق بود.';
 };
 
+const expandDotNotationPayload = (payload = {}) => {
+  const expanded = {};
+  Object.entries(payload || {}).forEach(([key, value]) => {
+    if (!key.includes('.')) {
+      expanded[key] = value;
+      return;
+    }
+
+    const parts = key.split('.').filter(Boolean);
+    let target = expanded;
+    parts.forEach((part, index) => {
+      if (index === parts.length - 1) {
+        target[part] = value;
+        return;
+      }
+      if (!target[part] || typeof target[part] !== 'object' || Array.isArray(target[part])) {
+        target[part] = {};
+      }
+      target = target[part];
+    });
+  });
+  return expanded;
+};
+
+const populateAfghanStudentQuery = (query) => query
+  .populate('academicInfo.currentSchool', 'name province district schoolType')
+  .populate('academicInfo.classId', 'title code gradeLevel section shift shiftId academicYearId')
+  .populate('academicInfo.currentClassId', 'title code gradeLevel section shift shiftId academicYearId')
+  .populate('academicInfo.shiftId', 'name nameDari namePashto code')
+  .populate('academicInfo.academicYearId', 'title isActive')
+  .populate('createdBy', 'name email')
+  .populate('lastUpdatedBy', 'name email');
+
 const gradeLabelFromStudent = (studentData = {}) => {
   const grade = String(studentData?.academicInfo?.currentGrade || '').trim();
   const match = grade.match(/\d+/);
@@ -351,6 +384,10 @@ router.get('/', requireAuth, requireRole(['admin', 'principal', 'teacher', 'regi
 
     const students = await AfghanStudent.find(query)
       .populate('academicInfo.currentSchool', 'name province district')
+      .populate('academicInfo.classId', 'title code gradeLevel section shift shiftId academicYearId')
+      .populate('academicInfo.currentClassId', 'title code gradeLevel section shift shiftId academicYearId')
+      .populate('academicInfo.shiftId', 'name nameDari namePashto code')
+      .populate('academicInfo.academicYearId', 'title isActive')
       .populate('createdBy', 'name email')
       .populate('lastUpdatedBy', 'name email')
       .limit(normalizedLimit)
@@ -380,6 +417,10 @@ router.get('/:id', requireAuth, requireRole(['admin', 'principal', 'teacher', 'r
   try {
     const student = await AfghanStudent.findById(req.params.id)
       .populate('academicInfo.currentSchool', 'name province district schoolType')
+      .populate('academicInfo.classId', 'title code gradeLevel section shift shiftId academicYearId')
+      .populate('academicInfo.currentClassId', 'title code gradeLevel section shift shiftId academicYearId')
+      .populate('academicInfo.shiftId', 'name nameDari namePashto code')
+      .populate('academicInfo.academicYearId', 'title isActive')
       .populate('createdBy', 'name email')
       .populate('lastUpdatedBy', 'name email')
       .lean();
@@ -561,10 +602,11 @@ router.post('/:id/documents', requireAuth, requireRole(['admin', 'principal', 'r
 // PUT /api/afghan-students/:id - Update student
 router.put('/:id', requireAuth, requireRole(['admin', 'principal', 'registration_manager']), requireAnyPermission(['manage_content', 'manage_users', 'manage_enrollments']), async (req, res) => {
   try {
-    const studentData = {
+    const rawStudentData = {
       ...req.body,
       lastUpdatedBy: req.user?.id || 'system'
     };
+    const studentData = expandDotNotationPayload(rawStudentData);
 
     // If updating school, validate it exists
     if (studentData.academicInfo?.currentSchool) {
@@ -574,26 +616,28 @@ router.put('/:id', requireAuth, requireRole(['admin', 'principal', 'registration
       }
     }
 
-    const student = await AfghanStudent.findByIdAndUpdate(
-      req.params.id,
-      { $set: studentData },
-      { new: true, runValidators: true }
-    ).populate('academicInfo.currentSchool', 'name province district');
-
+    const student = await AfghanStudent.findById(req.params.id);
     if (!student) {
       return fail(res, 'Student not found', 404);
     }
 
+    Object.entries(rawStudentData).forEach(([key, value]) => {
+      student.set(key, value);
+    });
+    await student.save();
+
     await assignStudentToClass({
       student,
-      payload: studentData,
+      payload: rawStudentData,
       actorId: req.user?.id || null,
       source: 'admin'
     });
-    await syncManualStudentEnrollment({ student, studentData: student.toObject(), req });
-    await syncRelatedStudentIdentity(student);
 
-    return ok(res, { data: student.toObject() }, 'Student updated successfully');
+    const refreshedStudent = await populateAfghanStudentQuery(AfghanStudent.findById(student._id));
+    await syncManualStudentEnrollment({ student: refreshedStudent, studentData: refreshedStudent.toObject(), req });
+    await syncRelatedStudentIdentity(refreshedStudent);
+
+    return ok(res, { data: refreshedStudent.toObject() }, 'Student updated successfully');
   } catch (error) {
     console.error('Update Student Error:', error);
     const status = error?.code === 11000 || error?.name === 'ValidationError' || error?.name === 'CastError' ? 400 : 500;

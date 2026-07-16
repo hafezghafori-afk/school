@@ -191,15 +191,23 @@ const normalizeAfghanStudent = (student = {}) => {
     enrollmentType: academicInfo.enrollmentType || 'new',
     classId: {
       _id: readEntityId(academicInfo.currentClassId || academicInfo.classId || student.classId || academicInfo.currentGrade || ''),
-      title: getText(student.classId?.title || academicInfo.classTitle || academicInfo.currentSection || academicInfo.currentGrade || '---')
+      title: getText(
+        student.classId?.title
+        || academicInfo.currentClassId?.title
+        || academicInfo.classId?.title
+        || academicInfo.classTitle
+        || academicInfo.currentSection
+        || academicInfo.currentGrade
+        || '---'
+      )
     },
     academicYearId: {
       _id: readEntityId(academicInfo.academicYearId || student.academicYearId || ''),
-      title: getText(student.academicYearId?.title || academicInfo.academicYearTitle || '---')
+      title: getText(student.academicYearId?.title || academicInfo.academicYearId?.title || academicInfo.academicYearTitle || '---')
     },
     shiftId: {
       _id: readEntityId(academicInfo.shiftId || student.shiftId || academicInfo.currentShift || ''),
-      name: getText(student.shiftId?.name || academicInfo.currentShift || '---')
+      name: getText(student.shiftId?.name || academicInfo.shiftId?.nameDari || academicInfo.shiftId?.name || academicInfo.currentShift || '---')
     },
     previousSchool: getText(previousSchool.name),
     previousSchoolType: previousSchool.type || '',
@@ -233,6 +241,50 @@ const makeKey = (value) => {
   if (!value) return '';
   if (typeof value === 'object') return String(value._id || value.id || '').trim();
   return String(value || '').trim();
+};
+
+const normalizeLookupText = (value) => repairDisplayText(value || '').trim().toLowerCase();
+
+const resolveOptionId = (items = [], value = '', fields = []) => {
+  const directValue = makeKey(value);
+  if (!directValue) return '';
+  const byId = items.find((item) => makeKey(item._id || item.id) === directValue);
+  if (byId) return makeKey(byId._id || byId.id);
+  const normalizedValue = normalizeLookupText(value);
+  const byText = items.find((item) => fields.some((field) => normalizeLookupText(item?.[field]) === normalizedValue));
+  return byText ? makeKey(byText._id || byText.id) : '';
+};
+
+const resolveShiftId = ({ student = {}, shifts = [], classes = [], classIdValue = '' } = {}) => {
+  const direct = makeKey(student.shiftId?._id || student.shiftIdValue || student.academicInfo?.shiftId || student.shiftId || '');
+  if (direct && shifts.some((item) => makeKey(item._id || item.id) === direct)) return direct;
+
+  const classItem = classes.find((item) => makeKey(item._id || item.id) === makeKey(classIdValue || student.classId?._id || student.classIdValue));
+  const classShiftId = makeKey(classItem?.shiftId);
+  if (classShiftId && shifts.some((item) => makeKey(item._id || item.id) === classShiftId)) return classShiftId;
+
+  const candidates = [
+    student.shiftId?.name,
+    student.shiftId?.title,
+    student.currentShift,
+    student.academicInfo?.currentShift,
+    classItem?.shift,
+    student.shiftName
+  ];
+  for (const candidate of candidates) {
+    const resolved = resolveOptionId(shifts, candidate, ['name', 'code', 'title', 'nameDari', 'namePashto']);
+    if (resolved) return resolved;
+  }
+  return direct;
+};
+
+const normalizeShiftCode = (value = '') => {
+  const normalized = normalizeLookupText(value);
+  if (!normalized) return '';
+  if (normalized.includes('afternoon') || normalized.includes('عصر') || normalized.includes('بعد')) return 'afternoon';
+  if (normalized.includes('evening') || normalized.includes('شب')) return 'evening';
+  if (normalized.includes('morning') || normalized.includes('صبح')) return 'morning';
+  return ['morning', 'afternoon', 'evening'].includes(normalized) ? normalized : '';
 };
 
 const studentKeys = (student = {}) => [
@@ -297,7 +349,7 @@ const mergeFinancialMemberships = (rows, memberships = []) => {
         status: membership.status || 'active',
         classId: { _id: membership.classId || '', title: repairDisplayText(membership.classTitle || '') },
         academicYearId: { _id: membership.academicYearId || '', title: repairDisplayText(membership.academicYearTitle || '') },
-        shiftId: { _id: '', name: '' },
+        shiftId: { _id: makeKey(membership.shiftId || ''), name: repairDisplayText(membership.shiftName || '') },
         createdAt: membership.createdAt || membership.startDate || new Date().toISOString()
       };
       rows.push(row);
@@ -309,6 +361,7 @@ const mergeFinancialMemberships = (rows, memberships = []) => {
     row.financeStatus = membership.status || row.financeStatus || '';
     row.membershipType = membership.membershipType || row.membershipType || '';
     if (!row.classId?._id && membership.classId) row.classId = { _id: membership.classId, title: repairDisplayText(membership.classTitle || '') };
+    if (!row.shiftId?._id && (membership.shiftId || membership.shiftName)) row.shiftId = { _id: makeKey(membership.shiftId || ''), name: repairDisplayText(membership.shiftName || '') };
     if (!row.academicYearId?._id && membership.academicYearId) row.academicYearId = { _id: membership.academicYearId, title: repairDisplayText(membership.academicYearTitle || '') };
     addSourceTag(row, 'financial');
     indexStudentRow(index, row);
@@ -339,7 +392,7 @@ const mergeEducationEnrollments = (rows, enrollments = []) => {
         status: enrollment.status === 'approved' ? 'active' : (enrollment.status || 'inactive'),
         classId: { _id: enrollment.classId || enrollment.schoolClass?.id || '', title: repairDisplayText(enrollment.schoolClass?.title || enrollment.course?.title || '') },
         academicYearId: { _id: enrollment.academicYear?._id || enrollment.academicYear?.id || '', title: repairDisplayText(enrollment.academicYear?.title || enrollment.schoolClass?.academicYear?.title || '') },
-        shiftId: { _id: '', name: '' },
+        shiftId: { _id: enrollment.schoolClass?.shiftId || '', name: repairDisplayText(enrollment.schoolClass?.shift || '') },
         createdAt: enrollment.createdAt || enrollment.joinedAt || new Date().toISOString()
       };
       rows.push(row);
@@ -350,6 +403,9 @@ const mergeEducationEnrollments = (rows, enrollments = []) => {
     row.educationStatus = enrollment.status || row.educationStatus || '';
     if (!row.classId?._id && (enrollment.classId || enrollment.schoolClass?.id)) {
       row.classId = { _id: enrollment.classId || enrollment.schoolClass?.id || '', title: repairDisplayText(enrollment.schoolClass?.title || enrollment.course?.title || '') };
+    }
+    if (!row.shiftId?._id && (enrollment.schoolClass?.shiftId || enrollment.schoolClass?.shift)) {
+      row.shiftId = { _id: makeKey(enrollment.schoolClass.shiftId || ''), name: repairDisplayText(enrollment.schoolClass.shift || '') };
     }
     if (!row.academicYearId?._id && enrollment.academicYear) {
       row.academicYearId = { _id: enrollment.academicYear?._id || enrollment.academicYear?.id || '', title: repairDisplayText(enrollment.academicYear?.title || '') };
@@ -847,7 +903,8 @@ const StudentManagement = () => {
   const handleEdit = (student) => {
     const profileId = makeKey(student?.profileId || (student?.sourceTags?.includes('profile') ? student?._id : ''));
     const classIdValue = makeKey(student.classId?._id || student.classIdValue || '');
-    const shiftIdValue = makeKey(student.shiftId?._id || student.shiftIdValue || '');
+    const selectedClass = classes.find((item) => makeKey(item._id || item.id) === classIdValue) || {};
+    const shiftIdValue = resolveShiftId({ student, shifts, classes, classIdValue });
     const academicYearIdValue = makeKey(student.academicYearId?._id || student.academicYearIdValue || '');
     const registrationType = student.enrollmentType === 'transfer' || student.previousSchool ? 'transfer' : 'new';
     setSelectedStudent({ ...student, profileId });
@@ -875,12 +932,12 @@ const StudentManagement = () => {
       emergencyContact: student.emergencyContact || '',
       emergencyRelation: student.emergencyRelation || '',
       emergencyPhone: student.emergencyPhone || '',
-      academicYearId: academicYearIdValue,
+      academicYearId: academicYearIdValue || makeKey(selectedClass.academicYearId || selectedClass.academicYear?._id || ''),
       classId: classIdValue,
       shiftId: shiftIdValue,
       currentGrade: student.currentGrade || classIdValue || '',
       currentSection: student.currentSection || student.classId?.title || '',
-      currentShift: student.currentShift || shiftIdValue || '',
+      currentShift: student.currentShift || student.shiftId?.name || selectedClass.shift || shiftIdValue || '',
       enrollmentDate: student.enrollmentDate || '',
       enrollmentType: registrationType,
       previousSchool: student.previousSchool || '',
@@ -915,7 +972,23 @@ const StudentManagement = () => {
 
   const handleEditFormChange = (field, value) => {
     setEditFeedback({ type: '', message: '' });
-    setEditForm((current) => ({ ...current, [field]: value }));
+    setEditForm((current) => {
+      const next = { ...current, [field]: value };
+      if (field === 'classId') {
+        const classItem = classes.find((item) => makeKey(item._id || item.id) === makeKey(value));
+        if (classItem) {
+          next.academicYearId = makeKey(classItem.academicYearId || classItem.academicYear?._id || next.academicYearId);
+          next.shiftId = makeKey(classItem.shiftId || '') || resolveOptionId(shifts, classItem.shift, ['name', 'code', 'title', 'nameDari', 'namePashto']) || next.shiftId;
+          next.currentSection = classItem.section || classItem.title || next.currentSection;
+          next.currentShift = normalizeShiftCode(classItem.shift) || next.currentShift;
+        }
+      }
+      if (field === 'shiftId') {
+        const shift = shifts.find((item) => makeKey(item._id || item.id) === makeKey(value));
+        next.currentShift = normalizeShiftCode(shift?.name || shift?.code || shift?.title) || next.currentShift;
+      }
+      return next;
+    });
   };
 
   const saveStudentProfile = async () => {
@@ -1052,7 +1125,13 @@ const StudentManagement = () => {
       const selectedShift = shifts.find((item) => makeKey(item._id || item.id) === makeKey(editForm.shiftId)) || {};
       const gradeLevel = Number(selectedClass.gradeLevel || String(selectedClass.code || '').match(/\d+/)?.[0] || 0);
       const currentGrade = gradeLevel ? `grade${gradeLevel}` : editForm.currentGrade || editForm.classId;
-      const currentShift = selectedShift.code || selectedShift.name || selectedShift.title || editForm.currentShift || editForm.shiftId;
+      const currentShift = normalizeShiftCode(
+        selectedShift.name
+        || selectedShift.code
+        || selectedShift.title
+        || selectedClass.shift
+        || editForm.currentShift
+      ) || 'morning';
       const district = editForm.city.trim() || editForm.birthPlace.trim() || editForm.address.trim();
       const emergencyName = editForm.emergencyContact.trim() || editForm.guardianName.trim() || editForm.fatherName.trim();
       const emergencyRelation = editForm.guardianRelation.trim() || 'سرپرست';

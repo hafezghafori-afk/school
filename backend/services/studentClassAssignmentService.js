@@ -12,6 +12,8 @@ const extractClassId = (payload = {}) => (
   payload.classId
   || payload.currentClassId
   || payload.schoolClassId
+  || payload['academicInfo.classId']
+  || payload['academicInfo.currentClassId']
   || payload.academicInfo?.classId
   || payload.academicInfo?.currentClassId
   || payload.academicContext?.classId
@@ -20,6 +22,7 @@ const extractClassId = (payload = {}) => (
 
 const extractAcademicYearId = (payload = {}, schoolClass = {}) => (
   payload.academicYearId
+  || payload['academicInfo.academicYearId']
   || payload.academicInfo?.academicYearId
   || payload.academicContext?.academicYearId
   || schoolClass.academicYearId
@@ -28,9 +31,18 @@ const extractAcademicYearId = (payload = {}, schoolClass = {}) => (
 
 const extractEnrollmentDate = (payload = {}) => (
   payload.enrollmentDate
+  || payload['academicInfo.enrollmentDate']
   || payload.academicInfo?.enrollmentDate
   || payload.academicContext?.enrollmentDate
   || new Date()
+);
+
+const extractShiftId = (payload = {}) => (
+  payload.shiftId
+  || payload['academicInfo.shiftId']
+  || payload.academicInfo?.shiftId
+  || payload.academicContext?.shiftId
+  || null
 );
 
 const gradeLabelFromStudent = (student = {}) => {
@@ -200,6 +212,10 @@ const assignStudentToClass = async ({ student, payload = {}, actorId = null, sou
   student.academicInfo = {
     ...(student.academicInfo || {}),
     currentSchool: schoolClass.schoolId || student.academicInfo?.currentSchool,
+    classId: schoolClass._id,
+    currentClassId: schoolClass._id,
+    shiftId: extractShiftId(payload) || student.academicInfo?.shiftId || schoolClass.shiftId || null,
+    academicYearId: academicYearId || student.academicInfo?.academicYearId || schoolClass.academicYearId || null,
     currentGrade: schoolClass.gradeLevel ? `grade${schoolClass.gradeLevel}` : student.academicInfo?.currentGrade,
     currentSection: schoolClass.section || student.academicInfo?.currentSection,
     currentShift: schoolClass.shift || student.academicInfo?.currentShift || 'morning'

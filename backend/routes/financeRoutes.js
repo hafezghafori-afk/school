@@ -8228,7 +8228,7 @@ router.get('/admin/student-memberships', requireAuth, requireRole(['admin']), re
     const memberships = await StudentMembership.find({ endedReason: { $ne: 'deleted_by_admin' } })
       .populate('student', 'name email')
       .populate('studentId', 'fullName name admissionNo studentCode fatherName primaryPhone')
-      .populate('classId', 'title')
+      .populate('classId', 'title shift shiftId academicYearId')
       .populate('academicYearId', 'title')
       .sort({ createdAt: -1, updatedAt: -1 })
       .lean();
@@ -8246,6 +8246,8 @@ router.get('/admin/student-memberships', requireAuth, requireRole(['admin']), re
         primaryPhone: studentCore?.primaryPhone || '',
         classId: item?.classId?._id || item?.classId || null,
         classTitle: item?.classId?.title || '',
+        shiftId: item?.classId?.shiftId || null,
+        shiftName: item?.classId?.shift || '',
         academicYearId: item?.academicYearId?._id || item?.academicYearId || item?.academicYear || null,
         academicYearTitle: item?.academicYearId?.title || '',
         membershipType: item?.membershipType || 'normal',
