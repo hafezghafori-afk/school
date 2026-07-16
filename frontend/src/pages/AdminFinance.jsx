@@ -1104,6 +1104,32 @@ const buildAnomalyActionPayload = (item = {}, extras = {}) => ({
   }
 });
 
+const waitForPrintableImages = async (selector = '.finance-print-sheet') => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  await new Promise((resolve) => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+  });
+  const root = document.querySelector(selector);
+  if (!root) return;
+  const images = Array.from(root.querySelectorAll('img'));
+  if (!images.length) return;
+  await Promise.all(images.map((image) => new Promise((resolve) => {
+    if (image.complete && image.naturalWidth > 0) {
+      resolve();
+      return;
+    }
+    const done = () => {
+      image.removeEventListener('load', done);
+      image.removeEventListener('error', done);
+      window.clearTimeout(timer);
+      resolve();
+    };
+    const timer = window.setTimeout(done, 1500);
+    image.addEventListener('load', done, { once: true });
+    image.addEventListener('error', done, { once: true });
+  })));
+};
+
 export default function AdminFinance() {
   const { settings: siteSettings } = useSiteSettings();
   const [summary, setSummary] = useState(null);
@@ -3105,6 +3131,12 @@ export default function AdminFinance() {
     };
   }, [activeSchoolContext]);
   const printLogoUrls = useMemo(() => getPrintLogoUrls(siteSettings), [siteSettings]);
+  const schedulePrint = (mode, selector = '.finance-print-sheet') => {
+    setPrintMode(mode);
+    window.setTimeout(() => {
+      waitForPrintableImages(selector).finally(() => window.print());
+    }, 80);
+  };
 
   useEffect(() => {
     if (!selectedReceipt) {
@@ -3465,8 +3497,7 @@ export default function AdminFinance() {
       }));
       if (deskPaymentSubmitMode === 'save_print' && createdReceipt?._id) {
         setActiveSection('payments');
-        setPrintMode('receipt');
-        window.setTimeout(() => window.print(), 0);
+        schedulePrint('receipt', '.finance-receipt-print-sheet');
       }
       setDeskPaymentSubmitMode('save');
       await loadAll();
@@ -3872,14 +3903,12 @@ export default function AdminFinance() {
 
   const printSelectedReceipt = () => {
     if (!selectedReceiptPrintModel) return;
-    setPrintMode('receipt');
-    window.setTimeout(() => window.print(), 0);
+    schedulePrint('receipt', '.finance-receipt-print-sheet');
   };
 
   const printCashierReport = () => {
     if (!cashierReportPrintModel) return;
-    setPrintMode('cashier');
-    window.setTimeout(() => window.print(), 0);
+    schedulePrint('cashier');
   };
 
   const exportCashierReportCsv = () => {
