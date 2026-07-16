@@ -6237,8 +6237,8 @@ export default function AdminFinance() {
         <div className="finance-card finance-spotlight-card" data-finance-section="discounts" data-testid="relief-registry-hub">
           <div className="finance-card-head">
             <div>
-              <h3>رجیستر یکپارچه تسهیلات مالی</h3>
-              <p className="muted">تخفیف، معافیت، بورسیه و حمایت خیریه را در یک لیست واحد ببینید و از همین‌جا پیگیری کنید.</p>
+              <h3>همه تسهیلات مالی</h3>
+              <p className="muted">نمای مشترک تخفیف، معافیت، بورسیه، شاگردان رایگان و حمایت خیریه؛ این لیست فقط مخصوص تخفیف نیست.</p>
             </div>
             <div className="finance-chip-group">
               <span className="finance-chip">{filteredReliefRegistry.length} مورد</span>
@@ -6411,8 +6411,8 @@ export default function AdminFinance() {
         <div className="finance-card" data-finance-section="discounts" data-testid="discount-registry-list">
           <div className="finance-card-head">
             <div>
-              <h3>رجیستر تخفیف‌ها</h3>
-              <p className="muted">وضعیت تخفیف‌های فعال، مبلغ، دلیل و ساحه‌ی مالی هر متعلم را از اینجا ببینید.</p>
+              <h3>فقط تخفیف‌های ثبت‌شده</h3>
+              <p className="muted">فقط رکوردهای تخفیف مستقیم را نشان می‌دهد؛ معافیت، رایگان، بورسیه و حمایت خیریه در لیست همه تسهیلات مالی دیده می‌شوند.</p>
             </div>
             <div className="finance-chip-group">
               <span className="finance-chip">{filteredDiscountRegistry.length} مورد</span>
@@ -6420,7 +6420,7 @@ export default function AdminFinance() {
             </div>
           </div>
           <label className="finance-inline-filter finance-inline-filter-wide">
-            <span>جستجو در رجیستر تخفیف‌ها</span>
+            <span>جستجو در تخفیف‌های ثبت‌شده</span>
             <input
               value={discountRegistrySearch}
               onChange={(e) => setDiscountRegistrySearch(e.target.value)}
