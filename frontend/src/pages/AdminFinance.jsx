@@ -1251,6 +1251,9 @@ export default function AdminFinance() {
   const [anomalies, setAnomalies] = useState([]);
   const [anomalySummary, setAnomalySummary] = useState(null);
   const [selectedAnomalyId, setSelectedAnomalyId] = useState('');
+  const [anomalyTypeFilter, setAnomalyTypeFilter] = useState('all');
+  const [anomalyWorkflowStatusFilter, setAnomalyWorkflowStatusFilter] = useState('open');
+  const [anomalySearchTerm, setAnomalySearchTerm] = useState('');
   const [anomalyWorkflowForm, setAnomalyWorkflowForm] = useState({
     assignedLevel: 'finance_manager',
     snoozedUntil: '',
@@ -3010,11 +3013,30 @@ export default function AdminFinance() {
     || effectiveDeliveryTemplateSubject
     || effectiveDeliveryTemplateBody
   );
-  const visibleAnomalies = useMemo(() => (
-    reportClassId
+  const visibleAnomalies = useMemo(() => {
+    const normalizedSearch = String(anomalySearchTerm || '').trim().toLowerCase();
+    return (reportClassId
       ? anomalies.filter((item) => String(item?.classTitle || '').trim() === String(selectedReportClass?.title || '').trim())
       : anomalies
-  ), [anomalies, reportClassId, selectedReportClass]);
+    ).filter((item) => {
+      if (anomalyTypeFilter !== 'all' && String(item?.anomalyType || '').trim() !== anomalyTypeFilter) return false;
+      if (anomalyWorkflowStatusFilter !== 'all' && String(item?.workflowStatus || 'open').trim() !== anomalyWorkflowStatusFilter) return false;
+      if (!normalizedSearch) return true;
+      return [
+        item?.studentName,
+        item?.classTitle,
+        item?.referenceNumber,
+        item?.secondaryReference,
+        item?.title,
+        item?.description
+      ].some((value) => String(value || '').toLowerCase().includes(normalizedSearch));
+    });
+  }, [anomalies, reportClassId, selectedReportClass, anomalyTypeFilter, anomalyWorkflowStatusFilter, anomalySearchTerm]);
+  const anomalyTypeOptions = useMemo(() => (
+    Object.entries(FINANCE_ANOMALY_UI_LABELS)
+      .filter(([type]) => anomalies.some((item) => String(item?.anomalyType || '').trim() === type))
+      .map(([value, label]) => ({ value, label }))
+  ), [anomalies]);
   const visibleAnomalySummary = useMemo(() => ({
     ...(anomalySummary || { total: 0, critical: 0, warning: 0, info: 0, actionRequired: 0 }),
     total: visibleAnomalies.length,
@@ -6991,6 +7013,45 @@ export default function AdminFinance() {
               <span className="finance-chip finance-chip-emerald">{visibleAnomalySummary.byWorkflow?.resolved || 0} حل‌شده</span>
             </div>
           </div>
+          <div className="receipt-follow-up-grid">
+            <label className="finance-inline-filter">
+              <span>نوع ناهنجاری</span>
+              <select
+                value={anomalyTypeFilter}
+                onChange={(e) => setAnomalyTypeFilter(e.target.value)}
+                data-testid="anomaly-type-filter"
+              >
+                <option value="all">همه ناهنجاری‌ها</option>
+                {anomalyTypeOptions.map((item) => (
+                  <option key={`anomaly-type-filter-${item.value}`} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>وضعیت</span>
+              <select
+                value={anomalyWorkflowStatusFilter}
+                onChange={(e) => setAnomalyWorkflowStatusFilter(e.target.value)}
+                data-testid="anomaly-workflow-filter"
+              >
+                <option value="open">باز</option>
+                <option value="assigned">ارجاع‌شده</option>
+                <option value="snoozed">معطل</option>
+                <option value="resolved">حل‌شده</option>
+                <option value="all">همه وضعیت‌ها</option>
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>جستجو</span>
+              <input
+                type="search"
+                value={anomalySearchTerm}
+                onChange={(e) => setAnomalySearchTerm(e.target.value)}
+                placeholder="نام شاگرد، صنف یا مرجع"
+                data-testid="anomaly-search"
+              />
+            </label>
+          </div>
           {visibleAnomalies.slice(0, 6).map((item) => (
             <div key={item.id} className="mini-row">
               <span className="finance-cell-stack">
@@ -7005,7 +7066,7 @@ export default function AdminFinance() {
           {!!visibleAnomalies.length && (
             <div className="anomaly-workflow-layout">
               <div className="anomaly-workflow-list" data-testid="finance-anomaly-list">
-                {visibleAnomalies.slice(0, 12).map((item) => (
+                {visibleAnomalies.map((item) => (
                   <article
                     key={`anomaly-workflow-${item.id}`}
                     className={`anomaly-workflow-item ${selectedAnomaly?.id === item.id ? 'selected' : ''}`}
