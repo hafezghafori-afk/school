@@ -2132,16 +2132,44 @@ export default function AdminFinance() {
     () => academicYears.find((item) => String(item?.id || '') === String(feePlanForm.academicYearId || '')) || null,
     [academicYears, feePlanForm.academicYearId]
   );
+  const matchingActiveFeePlan = useMemo(() => {
+    const classId = String(feePlanForm.classId || '').trim();
+    const academicYearId = String(feePlanForm.academicYearId || '').trim();
+    if (!classId || !academicYearId) return null;
+    return feePlans
+      .filter((plan) => {
+        const lifecycleStatus = String(plan?.lifecycleStatus || (plan?.isActive === false ? 'inactive' : 'active')).trim() || 'active';
+        const sameClass = String(plan?.classId || plan?.schoolClass?._id || plan?.schoolClass?.id || '') === classId;
+        const sameYear = String(plan?.academicYearId || plan?.academicYear?._id || plan?.academicYear?.id || '') === academicYearId;
+        const sameFrequency = String(plan?.billingFrequency || 'term') === String(feePlanForm.billingFrequency || 'term');
+        const sameTerm = String(plan?.term || '').trim() === String(feePlanForm.term || '').trim();
+        return lifecycleStatus === 'active' && sameClass && sameYear && sameFrequency && sameTerm;
+      })
+      .sort((left, right) => {
+        const defaultDelta = (right?.isDefault === true ? 1 : 0) - (left?.isDefault === true ? 1 : 0);
+        if (defaultDelta !== 0) return defaultDelta;
+        return toSafeNumber(left?.priority ?? 100) - toSafeNumber(right?.priority ?? 100);
+      })[0] || null;
+  }, [feePlans, feePlanForm.academicYearId, feePlanForm.billingFrequency, feePlanForm.classId, feePlanForm.term]);
+  const feePlanFormHasAmounts = useMemo(
+    () => FEE_PLAN_LINE_CONFIG.some((item) => toSafeNumber(feePlanForm[item.key]) > 0),
+    [feePlanForm]
+  );
+  const feePlanPreviewSource = !feePlanFormHasAmounts && matchingActiveFeePlan ? matchingActiveFeePlan : feePlanForm;
   const feePlanLineItems = useMemo(() => (
     FEE_PLAN_LINE_CONFIG.map((item) => {
-      const amount = Number(feePlanForm[item.key] || 0) || 0;
+      const amount = toSafeNumber(
+        item.key === 'tuitionFee'
+          ? (feePlanPreviewSource?.tuitionFee ?? feePlanPreviewSource?.amount)
+          : feePlanPreviewSource?.[item.key]
+      );
       return {
         ...item,
         amount,
         active: amount > 0
       };
     })
-  ), [feePlanForm]);
+  ), [feePlanPreviewSource]);
   const feePlanActiveLineItems = useMemo(
     () => feePlanLineItems.filter((item) => item.active),
     [feePlanLineItems]
@@ -5954,6 +5982,13 @@ export default function AdminFinance() {
                   <div><span>اقلام فعال</span><strong>{fmt(feePlanActiveLineItems.length)}</strong></div>
                   <div><span>مبلغ کل</span><strong>{fmt(feePlanTotalAmount)} {feePlanForm.currency || 'AFN'}</strong></div>
                 </div>
+                {!feePlanFormHasAmounts && matchingActiveFeePlan && (
+                  <div className="finance-plan-warning">
+                    <strong>پیش‌نمایش از پلان فعال موجود</strong>
+                    <span>{matchingActiveFeePlan.title || 'پلان مالی'} برای این صنف و سال پیدا شد. برای ویرایش یا ذخیره مجدد، آن را به فرم کپی کنید.</span>
+                    <button type="button" className="secondary" onClick={() => loadFeePlanIntoForm(matchingActiveFeePlan)} disabled={busy}>کپی پلان موجود به فرم</button>
+                  </div>
+                )}
                 <div className="finance-plan-line-summary">
                   {feePlanActiveLineItems.map((item) => (
                     <div key={`preview-${item.key}`} className="mini-row">
