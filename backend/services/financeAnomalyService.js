@@ -184,6 +184,12 @@ function isLikelyAdmissionDocumentForPlan(document = {}, feePlan = null) {
   return documentAmount > 0 && Math.abs(documentAmount - plannedAdmissionFee) <= 0.009;
 }
 
+function isPlanGeneratedFinanceDocument(document = {}) {
+  const lineItems = Array.isArray(document?.lineItems) ? document.lineItems : [];
+  if (lineItems.some((entry) => normalizeNullableId(entry?.sourcePlanId))) return true;
+  return normalizeText(document?.note).toLowerCase().includes('plan:');
+}
+
 function getPlannedFeeAmount(plan = {}, feeType = '') {
   const normalizedType = normalizeText(feeType);
   if (normalizedType === 'tuition') return roundMoney(plan?.tuitionFee ?? plan?.amount);
@@ -658,7 +664,8 @@ function buildMembershipFinanceAnomalies({
           });
         }
 
-        if (totalIssuedAmount > 0 && totalIssuedAmount + 0.009 < plannedAmount) {
+        const hasManualOrUnplannedDocument = matchingDocuments.some((document) => !isPlanGeneratedFinanceDocument(document));
+        if (hasManualOrUnplannedDocument && totalIssuedAmount > 0 && totalIssuedAmount + 0.009 < plannedAmount) {
           const difference = roundMoney(plannedAmount - totalIssuedAmount);
           anomalies.push({
             id: `fee-underbilled-${feeType}-${membershipId || normalizeNullableId(membershipItem?.id || membershipItem?._id || studentName)}`,
