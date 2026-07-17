@@ -1337,7 +1337,7 @@ const serializeFinanceSearchPayment = (item = {}) => ({
   followUp: item?.followUp || null
 });
 
-router.get('/stats', requireAuth, requireRole(['admin']), requirePermission('view_reports'), async (req, res) => {
+router.get('/stats', requireAuth, requireRole(['admin']), requireAnyPermission(['view_reports', 'manage_finance']), async (req, res) => {
   try {
     const period = String(req.query.period || 'daily').toLowerCase();
     let startDate = new Date();

@@ -853,6 +853,7 @@ export default function AdminPanel() {
   const canManageFinance = effectivePermissions.includes('manage_finance');
   const canManageContent = effectivePermissions.includes('manage_content');
   const canViewReports = effectivePermissions.includes('view_reports');
+  const canViewDashboardStats = canViewReports || canManageFinance;
   const canManageSchedule = effectivePermissions.includes('manage_schedule');
   const canManageEnrollments = permissionAllows('manage_enrollments', effectivePermissions);
   const canManageMemberships = permissionAllows('manage_memberships', effectivePermissions);
@@ -2014,7 +2015,7 @@ export default function AdminPanel() {
   };
 
   const loadStats = async () => {
-    if (!canViewReports) return;
+    if (!canViewDashboardStats) return;
     try {
       const res = await fetch(`${API_BASE}/api/admin/stats`, { headers: { ...getAuthHeaders() } });
       const data = await res.json();
@@ -2355,22 +2356,31 @@ export default function AdminPanel() {
 
   useEffect(() => {
     loadRecentActivities();
-    if (!canViewReports) {
+    if (!canViewDashboardStats) {
       setAlerts([]);
       setAdminDashboard(null);
       setReportActivityItems([]);
-      setStats({ users: 0, courses: 0, todayPayments: 0, pendingOrders: 0 });
+      setStats({ users: 0, courses: 0, todayPayments: 0, pendingOrders: 0, attendanceRate: 0, openMessages: 0, activeSchools: 0, finance: {} });
       setSlaConfig(null);
       setSlaResult(null);
       setSlaMessage('');
       return;
     }
-    loadAlerts();
     loadStats();
-    loadAdminDashboard();
-    loadReportActivities();
-    loadSlaConfig();
-  }, [canViewReports]);
+    if (canViewReports) {
+      loadAlerts();
+      loadAdminDashboard();
+      loadReportActivities();
+      loadSlaConfig();
+    } else {
+      setAlerts([]);
+      setAdminDashboard(null);
+      setReportActivityItems([]);
+      setSlaConfig(null);
+      setSlaResult(null);
+      setSlaMessage('');
+    }
+  }, [canViewDashboardStats, canViewReports]);
 
   useEffect(() => {
     if (!canViewReports) {
@@ -2404,7 +2414,7 @@ export default function AdminPanel() {
       } else {
         setOrderMessage('رسید تایید شد');
         loadPendingOrders();
-        if (canViewReports) loadStats();
+        if (canViewDashboardStats) loadStats();
       }
     } catch {
       setOrderMessage('خطا در تایید رسید');
@@ -2430,7 +2440,7 @@ export default function AdminPanel() {
       } else {
         setOrderMessage('رسید رد شد');
         loadPendingOrders();
-        if (canViewReports) loadStats();
+        if (canViewDashboardStats) loadStats();
       }
     } catch {
       setOrderMessage('خطا در رد رسید');
@@ -2595,7 +2605,7 @@ export default function AdminPanel() {
     setOrderMessage(`نتیجه تایید گروهی رسیدها: ${success} موفق، ${failed} ناموفق`);
     setSelectedOrderIds([]);
     loadPendingOrders();
-    if (canViewReports) loadStats();
+    if (canViewDashboardStats) loadStats();
     setBulkBusy((prev) => ({ ...prev, orderApprove: false }));
   };
 
@@ -2623,7 +2633,7 @@ export default function AdminPanel() {
     setOrderMessage(`نتیجه رد گروهی رسیدها: ${success} موفق، ${failed} ناموفق`);
     setSelectedOrderIds([]);
     loadPendingOrders();
-    if (canViewReports) loadStats();
+    if (canViewDashboardStats) loadStats();
     setBulkBusy((prev) => ({ ...prev, orderReject: false }));
   };
 
@@ -2895,7 +2905,8 @@ export default function AdminPanel() {
     if (canManageFinance) jobs.push(loadPendingOrders());
     if (canManageUsers) jobs.push(loadProfileRequests());
     if (canManageContent) jobs.push(loadSupportMessages());
-    if (canViewReports) jobs.push(loadAlerts(), loadStats(), loadWorkflowReport());
+    if (canViewDashboardStats) jobs.push(loadStats());
+    if (canViewReports) jobs.push(loadAlerts(), loadWorkflowReport());
     if (!jobs.length) return;
     await Promise.all(jobs);
   };
