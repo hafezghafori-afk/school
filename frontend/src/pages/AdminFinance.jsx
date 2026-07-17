@@ -1586,6 +1586,22 @@ export default function AdminFinance() {
     () => countFinanceMembershipStudents(studentMemberships),
     [studentMemberships]
   );
+  const financeMembershipClassCounts = useMemo(() => {
+    const grouped = new Map();
+    (Array.isArray(studentMemberships) ? studentMemberships : [])
+      .filter(isCurrentFinanceMembership)
+      .forEach((item) => {
+        const classId = toFinanceOptionId(item?.classId);
+        if (!classId) return;
+        if (!grouped.has(classId)) grouped.set(classId, new Set());
+        grouped.get(classId).add(
+          toFinanceOptionId(item?.studentCoreId)
+          || toFinanceOptionId(item?.studentId || item?.student?._id)
+          || toFinanceOptionId(item?._id || item?.id)
+        );
+      });
+    return new Map(Array.from(grouped.entries()).map(([classId, studentIds]) => [classId, studentIds.size]));
+  }, [studentMemberships]);
   const bulkAcademicYearsByClass = useMemo(() => {
     const grouped = new Map();
     (Array.isArray(studentMemberships) ? studentMemberships : [])
@@ -1736,10 +1752,11 @@ export default function AdminFinance() {
     return Array.from(groups.values())
       .map((item) => ({
         ...item,
-        studentCount: item.studentIds.size
+        discountStudentCount: item.studentIds.size,
+        classStudentCount: financeMembershipClassCounts.get(item.classId) || item.studentIds.size
       }))
-      .sort((left, right) => right.studentCount - left.studentCount || right.count - left.count || left.classTitle.localeCompare(right.classTitle));
-  }, [filteredDiscountRegistry]);
+      .sort((left, right) => right.classStudentCount - left.classStudentCount || right.count - left.count || left.classTitle.localeCompare(right.classTitle));
+  }, [filteredDiscountRegistry, financeMembershipClassCounts]);
   const discountRegistryTotalPages = Math.max(1, Math.ceil(filteredDiscountRegistry.length / Math.max(1, Number(discountRegistryPageSize) || 10)));
   const pagedDiscountRegistry = useMemo(() => {
     const pageSize = Math.max(1, Number(discountRegistryPageSize) || 10);
@@ -6507,8 +6524,8 @@ export default function AdminFinance() {
                   onClick={() => setDiscountRegistryClassFilter(item.classId)}
                 >
                   <span>{item.classTitle}</span>
-                  <strong>{item.studentCount} شاگرد دارای تخفیف</strong>
-                  <small>{item.count} رکورد تخفیف | {fmt(item.totalAmount)} AFN</small>
+                  <strong>{fmt(item.classStudentCount)} شاگرد در صنف</strong>
+                  <small>{fmt(item.count)} تخفیف ثبت‌شده | {fmt(item.totalAmount)} AFN</small>
                 </button>
               ))}
             </div>
