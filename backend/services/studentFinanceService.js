@@ -387,6 +387,7 @@ function formatDiscount(doc) {
   return {
     id: String(item._id || ''),
     feeOrderId: normalizeNullableId(item.feeOrderId),
+    studentMembershipId: normalizeNullableId(item.studentMembershipId),
     discountType: normalizeText(item.discountType),
     targetScope: normalizeText(item.targetScope) || 'student',
     groupKey: normalizeText(item.groupKey),

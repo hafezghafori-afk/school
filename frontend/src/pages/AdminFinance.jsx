@@ -1727,7 +1727,10 @@ export default function AdminFinance() {
       group.count += 1;
       group.totalAmount += Number(item?.amount || 0) || 0;
       if (String(item?.coverageMode || '').trim() === 'percent') group.percentCount += 1;
-      const studentId = getFinanceRecordStudentUserId(item) || String(item?.student?.studentId || item?.student?.fullName || item?.id || '').trim();
+      const studentId = String(item?.studentMembershipId || '').trim()
+        || String(item?.student?.studentId || '').trim()
+        || getFinanceRecordStudentUserId(item)
+        || String(item?.student?.fullName || item?.id || '').trim();
       if (studentId) group.studentIds.add(studentId);
     });
     return Array.from(groups.values())
@@ -6504,8 +6507,8 @@ export default function AdminFinance() {
                   onClick={() => setDiscountRegistryClassFilter(item.classId)}
                 >
                   <span>{item.classTitle}</span>
-                  <strong>{item.studentCount} نفر</strong>
-                  <small>{item.count} تخفیف | {fmt(item.totalAmount)} AFN</small>
+                  <strong>{item.studentCount} شاگرد دارای تخفیف</strong>
+                  <small>{item.count} رکورد تخفیف | {fmt(item.totalAmount)} AFN</small>
                 </button>
               ))}
             </div>
