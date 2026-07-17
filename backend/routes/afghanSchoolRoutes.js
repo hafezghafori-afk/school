@@ -50,23 +50,86 @@ const SCHOOL_SCOPE_SUMMARY = [
   { key: 'governmentFinanceSnapshots', label: 'گزارش مالی دولت', collection: 'governmentfinancesnapshots', field: 'schoolId' }
 ];
 
+const CURRENT_STUDENT_MEMBERSHIP_STATUSES = ['active', 'pending', 'suspended', 'transferred_in'];
+
+const schoolValueFilter = (schoolObjectId) => ({ $in: [schoolObjectId, String(schoolObjectId)] });
+
+async function collectionExists(db, name = '') {
+  return (await db.listCollections({ name }).toArray()).length > 0;
+}
+
+function currentMembershipSchoolFilter(schoolObjectId, classIds = []) {
+  const ownershipClauses = [{ schoolId: schoolValueFilter(schoolObjectId) }];
+  if (classIds.length) ownershipClauses.push({ classId: { $in: classIds } });
+  return {
+    endedReason: { $ne: 'deleted_by_admin' },
+    isCurrent: { $ne: false },
+    $or: ownershipClauses,
+    $and: [{
+      $or: [
+        { status: { $in: CURRENT_STUDENT_MEMBERSHIP_STATUSES } },
+        { status: { $exists: false } },
+        { status: '' },
+        { status: null }
+      ]
+    }]
+  };
+}
+
+async function countActiveStudentsForSchool(db, schoolObjectId, classIds = []) {
+  const studentKeys = new Set();
+  if (await collectionExists(db, 'afghanstudents')) {
+    const afghanStudentIds = await db.collection('afghanstudents').distinct('_id', {
+      status: { $ne: 'deleted' },
+      'academicInfo.currentSchool': schoolValueFilter(schoolObjectId)
+    });
+    afghanStudentIds.forEach((id) => studentKeys.add(`afghan:${String(id)}`));
+  }
+
+  if (await collectionExists(db, 'studentmemberships')) {
+    const memberships = await db.collection('studentmemberships')
+      .find(currentMembershipSchoolFilter(schoolObjectId, classIds))
+      .project({ afghanStudentId: 1, studentId: 1, student: 1 })
+      .toArray();
+    memberships.forEach((item) => {
+      const afghanStudentId = item?.afghanStudentId ? String(item.afghanStudentId) : '';
+      const studentCoreId = item?.studentId ? String(item.studentId) : '';
+      const userId = item?.student ? String(item.student) : '';
+      if (afghanStudentId) studentKeys.add(`afghan:${afghanStudentId}`);
+      else if (studentCoreId) studentKeys.add(`core:${studentCoreId}`);
+      else if (userId) studentKeys.add(`user:${userId}`);
+      else if (item?._id) studentKeys.add(`membership:${String(item._id)}`);
+    });
+  }
+
+  return studentKeys.size;
+}
+
 async function countSchoolScope(schoolId = '') {
   if (!schoolId || !mongoose.Types.ObjectId.isValid(String(schoolId))) return {};
   const schoolObjectId = new mongoose.Types.ObjectId(String(schoolId));
   const db = mongoose.connection.db;
   const summary = {};
+  const [academicYearIds, classIds] = await Promise.all([
+    db.collection('academicyears').distinct('_id', { schoolId: schoolValueFilter(schoolObjectId) }),
+    db.collection('schoolclasses').distinct('_id', { schoolId: schoolValueFilter(schoolObjectId) })
+  ]);
   for (const item of SCHOOL_SCOPE_SUMMARY) {
-    const exists = (await db.listCollections({ name: item.collection }).toArray()).length > 0;
+    const exists = await collectionExists(db, item.collection);
+    let count = 0;
+    if (exists && item.key === 'students') {
+      count = await countActiveStudentsForSchool(db, schoolObjectId, classIds);
+    } else if (exists && item.key === 'studentMemberships') {
+      count = await db.collection(item.collection).countDocuments(currentMembershipSchoolFilter(schoolObjectId, classIds));
+    } else if (exists) {
+      count = await db.collection(item.collection).countDocuments({ [item.field]: schoolValueFilter(schoolObjectId) });
+    }
     summary[item.key] = {
       label: item.label,
-      count: exists ? await db.collection(item.collection).countDocuments({ [item.field]: schoolObjectId }) : 0
+      count
     };
   }
-  const [academicYearIds, classIds] = await Promise.all([
-    db.collection('academicyears').distinct('_id', { schoolId: schoolObjectId }),
-    db.collection('schoolclasses').distinct('_id', { schoolId: schoolObjectId })
-  ]);
-  const sheetTemplateExists = (await db.listCollections({ name: 'sheettemplates' }).toArray()).length > 0;
+  const sheetTemplateExists = await collectionExists(db, 'sheettemplates');
   summary.sheetTemplates = {
     label: 'شقه‌ها',
     count: sheetTemplateExists

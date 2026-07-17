@@ -42,6 +42,13 @@ const {
 
 const router = express.Router();
 
+function withRequestSchoolScope(req, filters = {}) {
+  return {
+    ...(filters || {}),
+    schoolId: filters?.schoolId || req.headers?.['x-school-id'] || req.user?.schoolId || req.user?.activeSchoolId || ''
+  };
+}
+
 function canAccessMembershipPayload(req, membership = null) {
   if (!membership) return false;
   if (req.user?.role === 'admin') return true;
@@ -140,7 +147,7 @@ function resolveUnexpectedPaymentFailure(error = null) {
 
 router.get('/reference-data', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const data = await listStudentFinanceReferenceData(req.query || {});
+    const data = await listStudentFinanceReferenceData(withRequestSchoolScope(req, req.query || {}));
     res.json({ success: true, ...data });
   } catch (error) {
     res.status(500).json({ success: false, message: 'دریافت اطلاعات مرجع مالی متعلم ناموفق بود.' });
@@ -149,7 +156,7 @@ router.get('/reference-data', requireAuth, requireRole(['admin']), requirePermis
 
 router.get('/orders', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const items = await listFeeOrders(req.query || {});
+    const items = await listFeeOrders(withRequestSchoolScope(req, req.query || {}));
     res.json({ success: true, items });
   } catch (error) {
     res.status(500).json({ success: false, message: 'دریافت بدهی‌های مالی ناموفق بود.' });
@@ -158,7 +165,7 @@ router.get('/orders', requireAuth, requireRole(['admin']), requirePermission('ma
 
 router.get('/payments', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const items = await listFeePayments(req.query || {});
+    const items = await listFeePayments(withRequestSchoolScope(req, req.query || {}));
     res.json({ success: true, items });
   } catch (error) {
     res.status(500).json({ success: false, message: 'دریافت پرداخت‌های مالی ناموفق بود.' });
@@ -181,10 +188,7 @@ router.get('/payments/:id/receipt', requireAuth, async (req, res) => {
 
 router.get('/reports/daily-cashier', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const data = await getDailyCashierReport({
-      ...(req.query || {}),
-      schoolId: req.headers?.['x-school-id'] || req.query?.schoolId || ''
-    });
+    const data = await getDailyCashierReport(withRequestSchoolScope(req, req.query || {}));
     return res.json({ success: true, ...data });
   } catch (error) {
     const code = String(error?.message || '');
@@ -367,7 +371,7 @@ router.post('/payments/:id/follow-up', requireAuth, requireRole(['admin']), requ
 
 router.get('/discounts', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const items = await listDiscounts(req.query || {});
+    const items = await listDiscounts(withRequestSchoolScope(req, req.query || {}));
     res.json({ success: true, items });
   } catch (error) {
     res.status(500).json({ success: false, message: 'دریافت تخفیف‌ها ناموفق بود.' });
@@ -376,7 +380,7 @@ router.get('/discounts', requireAuth, requireRole(['admin']), requirePermission(
 
 router.get('/reliefs', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const items = await listFinanceReliefs(req.query || {});
+    const items = await listFinanceReliefs(withRequestSchoolScope(req, req.query || {}));
     return res.json({ success: true, items });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Ø¯Ø±ÛŒØ§ÙØª ØªØ³Ù‡ÛŒÙ„Ø§Øª Ù…Ø§Ù„ÛŒ Ù†Ø§Ù…ÙˆÙÙ‚ Ø¨ÙˆØ¯.' });
@@ -442,7 +446,7 @@ router.post('/discounts/:id/cancel', requireAuth, requireRole(['admin']), requir
 
 router.get('/exemptions', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const items = await listFeeExemptions(req.query || {});
+    const items = await listFeeExemptions(withRequestSchoolScope(req, req.query || {}));
     return res.json({ success: true, items });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'دریافت معافیت‌های فیس ناموفق بود.' });
@@ -502,7 +506,7 @@ router.post('/exemptions/:id/cancel', requireAuth, requireRole(['admin']), requi
 
 router.get('/transport-fees', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const items = await listTransportFees(req.query || {});
+    const items = await listTransportFees(withRequestSchoolScope(req, req.query || {}));
     res.json({ success: true, items });
   } catch (error) {
     res.status(500).json({ success: false, message: 'دریافت فیس‌های ترانسپورت ناموفق بود.' });

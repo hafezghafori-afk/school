@@ -2,6 +2,7 @@
 // ...existing code...
 // لیست عضویت‌های مالی شاگردان برای ادمین (در انتهای فایل اضافه شود)
 const express = require('express');
+const mongoose = require('mongoose');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -4326,20 +4327,32 @@ router.delete('/admin/fee-plans/:id', requireAuth, requireRole(['admin']), requi
 
 router.get('/admin/summary', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: false });
+    const schoolId = schoolContext.schoolId || '';
+    const schoolObjectId = schoolId && mongoose.Types.ObjectId.isValid(schoolId) ? new mongoose.Types.ObjectId(schoolId) : null;
+    const schoolIdFilter = schoolObjectId ? { $in: [schoolObjectId, schoolId] } : schoolId;
+    const scopedClassIds = schoolId ? await SchoolClass.find({ schoolId }).distinct('_id') : [];
+    if (schoolId) writeSchoolContextHeaders(res, schoolId);
+    const schoolScopeMatch = schoolId
+      ? { $or: [{ schoolId: schoolIdFilter }, { classId: { $in: scopedClassIds } }] }
+      : {};
+    const withSchoolScope = (match = {}) => (
+      schoolId ? { ...match, ...schoolScopeMatch } : match
+    );
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
     const [pendingReceipts, overdueBills, billTotals, today, monthly, topDebtorsAgg, pendingByStageAgg, reliefRows] = await Promise.all([
-      FeePayment.countDocuments({ status: 'pending' }),
-      FeeOrder.countDocuments({
+      FeePayment.countDocuments(withSchoolScope({ status: 'pending' })),
+      FeeOrder.countDocuments(withSchoolScope({
         status: { $in: ['new', 'partial', 'overdue'] },
         dueDate: { $lt: now },
         outstandingAmount: { $gt: 0 }
-      }),
+      })),
       FeeOrder.aggregate([
-        { $match: { status: { $ne: 'void' } } },
+        { $match: withSchoolScope({ status: { $ne: 'void' } }) },
         {
           $group: {
             _id: null,
@@ -4350,15 +4363,15 @@ router.get('/admin/summary', requireAuth, requireRole(['admin']), requirePermiss
         }
       ]),
       FeePayment.aggregate([
-        { $match: { status: 'approved', paidAt: { $gte: startOfDay } } },
+        { $match: withSchoolScope({ status: 'approved', paidAt: { $gte: startOfDay } }) },
         { $group: { _id: null, total: { $sum: '$amount' } } }
       ]),
       FeePayment.aggregate([
-        { $match: { status: 'approved', paidAt: { $gte: startOfMonth, $lt: endOfMonth } } },
+        { $match: withSchoolScope({ status: 'approved', paidAt: { $gte: startOfMonth, $lt: endOfMonth } }) },
         { $group: { _id: null, total: { $sum: '$amount' } } }
       ]),
       FeeOrder.aggregate([
-        { $match: { status: { $ne: 'void' } } },
+        { $match: withSchoolScope({ status: { $ne: 'void' } }) },
         {
           $project: {
             student: 1,
@@ -4371,7 +4384,7 @@ router.get('/admin/summary', requireAuth, requireRole(['admin']), requirePermiss
         { $limit: 10 }
       ]),
       FeePayment.aggregate([
-        { $match: { status: 'pending' } },
+        { $match: withSchoolScope({ status: 'pending' }) },
         {
           $group: {
             _id: { $ifNull: ['$approvalStage', RECEIPT_STAGES.financeManager] },
@@ -4380,7 +4393,7 @@ router.get('/admin/summary', requireAuth, requireRole(['admin']), requirePermiss
         }
       ]),
       FinanceRelief.aggregate([
-        { $match: { status: 'active' } },
+        { $match: withSchoolScope({ status: 'active' }) },
         {
           $group: {
             _id: '$coverageMode',
@@ -8227,7 +8240,16 @@ router.post('/admin/reminders/run', requireAuth, requireRole(['admin']), require
 // لیست عضویت‌های مالی شاگردان برای ادمین
 router.get('/admin/student-memberships', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const memberships = await StudentMembership.find({ endedReason: { $ne: 'deleted_by_admin' } })
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: false });
+    const schoolId = schoolContext.schoolId || '';
+    const scopedClassIds = schoolId ? await SchoolClass.find({ schoolId }).distinct('_id') : [];
+    if (schoolId) writeSchoolContextHeaders(res, schoolId);
+    const filter = { endedReason: { $ne: 'deleted_by_admin' } };
+    if (schoolId) {
+      filter.$or = [{ schoolId }, { classId: { $in: scopedClassIds } }];
+    }
+
+    const memberships = await StudentMembership.find(filter)
       .populate('student', 'name email')
       .populate('studentId', 'fullName name admissionNo studentCode fatherName primaryPhone')
       .populate('afghanStudentId', 'personalInfo contactInfo familyInfo')
