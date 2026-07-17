@@ -367,6 +367,27 @@ const buildFinanceMembershipStudentOptions = (items = []) => {
     });
 };
 
+const countFinanceMembershipStudents = (items = []) => {
+  const seen = new Set();
+  (Array.isArray(items) ? items : [])
+    .filter(isCurrentFinanceMembership)
+    .forEach((item, index) => {
+      const key = toFinanceOptionId(
+        item?.studentId
+        || item?.student?._id
+        || item?.student
+        || item?.studentCoreId
+        || item?.afghanStudentId
+        || item?.membershipId
+        || item?._id
+        || item?.id
+        || `membership-${index}`
+      );
+      if (key) seen.add(key);
+    });
+  return seen.size;
+};
+
 const RECEIPT_STAGE_LABELS = {
   finance_manager_review: 'در انتظار مدیر مالی',
   finance_lead_review: 'مرحله قدیمی آمریت مالی',
@@ -1545,6 +1566,10 @@ export default function AdminFinance() {
   ), [students]);
   const financeMembershipStudents = useMemo(
     () => buildFinanceMembershipStudentOptions(studentMemberships),
+    [studentMemberships]
+  );
+  const financeMembershipStudentCount = useMemo(
+    () => countFinanceMembershipStudents(studentMemberships),
     [studentMemberships]
   );
   const bulkAcademicYearsByClass = useMemo(() => {
@@ -4783,7 +4808,7 @@ export default function AdminFinance() {
           data-testid="finance-membership-link"
         >
           <strong>ممبرشیپ مالی</strong>
-          <span>{financeMembershipStudents.length} شاگرد فعال</span>
+          <span>{financeMembershipStudentCount} شاگرد فعال</span>
         </Link>
         <Link
           to="/academy"
@@ -4817,6 +4842,7 @@ export default function AdminFinance() {
           </div>
           <div className="finance-chip-group">
             <span className="finance-chip">کد: {activeSchoolContext.school.schoolCode || '-'}</span>
+            <span className="finance-chip finance-chip-muted">شاگردان: {fmt(activeSchoolContext.scopeSummary?.students?.count || financeMembershipStudentCount || 0)}</span>
             <span className="finance-chip finance-chip-muted">سال تعلیمی: {fmt(activeSchoolContext.scopeSummary?.academicYears?.count || 0)}</span>
             <span className="finance-chip finance-chip-muted">صنف‌ها: {fmt(activeSchoolContext.scopeSummary?.classes?.count || 0)}</span>
             <span className="finance-chip finance-chip-emerald">بل‌ها: {fmt(activeSchoolContext.scopeSummary?.financeBills?.count || 0)}</span>
