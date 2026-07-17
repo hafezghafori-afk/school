@@ -112,21 +112,35 @@ function reliefIsActiveAt(relief = {}, asOf = new Date()) {
 
 function getFinanceDocumentFeeTypes(document = {}) {
   const lineItems = Array.isArray(document?.lineItems) ? document.lineItems : [];
-  const lineItemTypes = lineItems
-    .filter((entry) => Math.max(0, Number(entry?.grossAmount ?? entry?.netAmount ?? entry?.reductionAmount ?? entry?.balanceAmount ?? 0) || 0) > 0 || normalizeText(entry?.label))
-    .map((entry) => normalizeText(entry?.feeType))
-    .filter(Boolean);
-  if (lineItemTypes.length) return new Set(lineItemTypes);
-  const feeScopes = Array.isArray(document?.feeScopes)
-    ? document.feeScopes.map((scope) => normalizeText(scope)).filter(Boolean)
-    : [];
-  if (feeScopes.length) return new Set(feeScopes);
+  const rawText = [
+    document?.orderType,
+    document?.title,
+    document?.periodLabel,
+    document?.note,
+    ...(lineItems.map((entry) => entry?.label))
+  ].map((entry) => normalizeText(entry).toLowerCase()).join(' ');
   const feeBreakdown = document?.feeBreakdown && typeof document.feeBreakdown === 'object' ? document.feeBreakdown : {};
   const breakdownTypes = Object.entries(feeBreakdown)
     .filter(([, amount]) => roundMoney(amount) > 0)
     .map(([key]) => normalizeText(key))
     .filter(Boolean);
+  const hasAdmissionSignal = normalizeText(document?.orderType) === 'admission'
+    || breakdownTypes.includes('admission')
+    || rawText.includes('admission')
+    || rawText.includes('داخله');
+  const lineItemTypes = lineItems
+    .filter((entry) => Math.max(0, Number(entry?.grossAmount ?? entry?.netAmount ?? entry?.reductionAmount ?? entry?.balanceAmount ?? 0) || 0) > 0 || normalizeText(entry?.label))
+    .map((entry) => normalizeText(entry?.feeType))
+    .filter(Boolean);
+  if (hasAdmissionSignal && lineItemTypes.length && lineItemTypes.every((type) => type === 'tuition')) {
+    return new Set(['admission']);
+  }
+  if (lineItemTypes.length) return new Set(lineItemTypes);
   if (breakdownTypes.length) return new Set(breakdownTypes);
+  const feeScopes = Array.isArray(document?.feeScopes)
+    ? document.feeScopes.map((scope) => normalizeText(scope)).filter(Boolean)
+    : [];
+  if (feeScopes.length) return new Set(feeScopes);
   const orderType = normalizeText(document?.orderType);
   return orderType ? new Set([orderType]) : new Set();
 }
@@ -135,9 +149,14 @@ function getOrderFeeTypes(order = {}) {
   return getFinanceDocumentFeeTypes(order);
 }
 
+function isAdmissionDocument(document = {}) {
+  return getFinanceDocumentFeeTypes(document).has('admission');
+}
+
 function getFinanceDocumentAmountByType(document = {}, feeType = '') {
   const normalizedType = normalizeText(feeType);
   if (!normalizedType) return 0;
+  if (normalizedType === 'tuition' && isAdmissionDocument(document)) return 0;
   const lineItems = Array.isArray(document?.lineItems) ? document.lineItems : [];
   const lineAmount = lineItems
     .filter((entry) => normalizeText(entry?.feeType) === normalizedType)
@@ -564,7 +583,10 @@ function buildMembershipFinanceAnomalies({
       ['tuition', 'exam', 'transport', 'document', 'other'].forEach((feeType) => {
         const plannedAmount = getPlannedFeeAmount(feePlan, feeType);
         if (plannedAmount <= 0) return;
-        const matchingDocuments = financeDocuments.filter((document) => getFinanceDocumentFeeTypes(document).has(feeType));
+        const matchingDocuments = financeDocuments.filter((document) => {
+          if (feeType === 'tuition' && isAdmissionDocument(document)) return false;
+          return getFinanceDocumentFeeTypes(document).has(feeType);
+        });
         const activeDocuments = matchingDocuments.filter((document) => ['new', 'partial', 'overdue', 'paid'].includes(normalizeText(document?.status)));
         const totalIssuedAmount = roundMoney(matchingDocuments.reduce((sum, document) => sum + getFinanceDocumentAmountByType(document, feeType), 0));
         const feeLabel = getFeeTypeLabel(feeType);
