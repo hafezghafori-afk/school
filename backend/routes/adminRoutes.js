@@ -43,13 +43,277 @@ const CLIENT_ACTIVITY_ACTIONS = new Set([
   'admin_access_matrix_export_csv',
   'admin_access_matrix_print',
   'admin_users_access_matrix_export_csv',
-  'admin_users_access_matrix_print'
+  'admin_users_access_matrix_print',
+  'admin_users_org_role_matrix_export_csv',
+  'admin_users_org_role_matrix_print'
 ]);
 const CLIENT_ACTIVITY_ACTION_PERMISSIONS = Object.freeze({
   admin_access_matrix_export_csv: 'view_reports',
   admin_access_matrix_print: 'view_reports',
   admin_users_access_matrix_export_csv: 'manage_users',
-  admin_users_access_matrix_print: 'manage_users'
+  admin_users_access_matrix_print: 'manage_users',
+  admin_users_org_role_matrix_export_csv: 'manage_users',
+  admin_users_org_role_matrix_print: 'manage_users'
+});
+const REPORT_ACTIVITY_ACTIONS = [
+  'admin_access_matrix_export_csv',
+  'admin_access_matrix_print',
+  'admin_users_access_matrix_export_csv',
+  'admin_users_access_matrix_print',
+  'admin_users_org_role_matrix_export_csv',
+  'admin_users_org_role_matrix_print'
+];
+const IMPORTANT_ACTIVITY_ACTION_REGEX = /^(admin_|create_|update_|delete_|remove_|cancel_|approve_|reject_|submit_|publish_|copy_|bulk_|finance|student_finance|payment|fee|receipt|expense|student_registration|enrollment|promotion|grade|exam|attendance|schedule|homework|site_settings|school|course|module|lesson|result|sheet_template|profile_|access_request)/i;
+const IMPORTANT_ACTIVITY_TARGET_TYPES = [
+  'User',
+  'Student',
+  'AfghanStudent',
+  'StudentProfile',
+  'StudentMembership',
+  'Enrollment',
+  'FeeOrder',
+  'FeePayment',
+  'Discount',
+  'FeeExemption',
+  'TransportFee',
+  'FinanceReceipt',
+  'FinanceBill',
+  'FinanceRelief',
+  'FinanceFeePlan',
+  'FinanceTreasuryAccount',
+  'FinanceTreasuryTransaction',
+  'FinanceProcurementCommitment',
+  'FinanceMonthClose',
+  'FinanceAnomalyCase',
+  'ExpenseEntry',
+  'Payment',
+  'Grade',
+  'Exam',
+  'ExamSession',
+  'ExamResult',
+  'Attendance',
+  'Schedule',
+  'Homework',
+  'ProfileUpdateRequest',
+  'AccessRequest',
+  'SiteSettings',
+  'SchoolClass',
+  'Course',
+  'Module',
+  'Lesson',
+  'Result',
+  'SheetTemplate'
+];
+const RECENT_ACTIVITY_LABELS = Object.freeze({
+  admin_create_user: 'ایجاد کاربر جدید',
+  admin_change_role: 'تغییر نقش کاربر',
+  admin_update_permissions: 'به‌روزرسانی صلاحیت‌ها',
+  admin_update_user_role: 'تغییر نقش کاربر',
+  admin_update_user_permissions: 'به‌روزرسانی صلاحیت‌های کاربر',
+  admin_update_user_status: 'تغییر وضعیت کاربر',
+  admin_update_user_profile: 'ویرایش مشخصات کاربر',
+  admin_deactivate_user: 'غیرفعال‌سازی کاربر',
+  approve_profile_update_request: 'تایید درخواست ویرایش پروفایل',
+  reject_profile_update_request: 'رد درخواست ویرایش پروفایل',
+  profile_request_follow_up_update: 'به‌روزرسانی پیگیری درخواست پروفایل',
+  approve_access_request: 'تایید درخواست دسترسی',
+  reject_access_request: 'رد درخواست دسترسی',
+  bulk_approve_access_requests: 'تایید گروهی درخواست‌های دسترسی',
+  bulk_reject_access_requests: 'رد گروهی درخواست‌های دسترسی',
+  finance_create_bill: 'ایجاد بل مالی',
+  finance_generate_bills: 'ایجاد گروهی بل‌های مالی',
+  finance_edit_bill: 'ویرایش بل مالی',
+  finance_approve_receipt: 'تایید رسید پرداخت',
+  finance_reject_receipt: 'رد رسید پرداخت',
+  finance_add_adjustment: 'افزودن تعدیل مالی',
+  finance_run_reminders: 'ارسال یادآوری‌های مالی',
+  finance_set_installments: 'تنظیم اقساط',
+  finance_upsert_fee_plan: 'به‌روزرسانی پلان فیس',
+  finance_update_fee_plan_status: 'تغییر وضعیت پلان فیس',
+  finance_delete_fee_plan: 'حذف پلان فیس',
+  finance_submit_receipt: 'ثبت رسید پرداخت',
+  finance_submit_receipt_parent: 'ثبت رسید پرداخت توسط والدین',
+  finance_submit_canonical_payment: 'ثبت پرداخت مالی',
+  finance_submit_canonical_payment_parent: 'ثبت پرداخت مالی توسط والدین',
+  finance_create_expense_entry: 'ثبت مصرف مالی',
+  finance_update_expense_entry: 'ویرایش مصرف مالی',
+  finance_submit_expense_entry: 'ارسال مصرف برای بررسی',
+  finance_approve_expense_entry: 'تایید مصرف مالی',
+  finance_void_expense_entry: 'باطل‌سازی مصرف مالی',
+  finance_reject_expense_entry: 'رد مصرف مالی',
+  finance_create_treasury_transaction: 'ثبت تراکنش خزانه',
+  finance_create_treasury_transfer: 'ثبت انتقال خزانه',
+  finance_submit_month_close: 'ارسال بستن ماه مالی',
+  finance_approve_month_close: 'تایید بستن ماه مالی',
+  finance_reject_month_close: 'رد بستن ماه مالی',
+  finance_close_month: 'بستن ماه مالی',
+  payment_simulate_receipt: 'ثبت رسید پرداخت فیس',
+  payment_simulate_blocked: 'پرداخت فیس ناموفق',
+  create_fee_payment: 'دریافت فیس شاگرد',
+  create_discount_registry: 'ثبت تخفیف فیس',
+  cancel_discount_registry: 'لغو تخفیف فیس',
+  create_fee_exemption: 'ثبت معافیت فیس',
+  cancel_fee_exemption: 'لغو معافیت فیس',
+  create_transport_fee: 'ثبت فیس ترانسپورت',
+  create_schedule: 'ایجاد تقسیم اوقات',
+  update_schedule: 'ویرایش تقسیم اوقات',
+  delete_schedule: 'حذف تقسیم اوقات',
+  create_schedule_holiday: 'ثبت رخصتی در تقسیم اوقات',
+  update_schedule_holiday: 'ویرایش رخصتی تقسیم اوقات',
+  delete_schedule_holiday: 'حذف رخصتی تقسیم اوقات',
+  publish_schedule_item: 'نشر برنامه درسی',
+  publish_schedule_range: 'نشر برنامه‌های درسی',
+  copy_schedule_week: 'کاپی برنامه هفته',
+  create_schedule_bulk: 'ایجاد گروهی تقسیم اوقات',
+  create_course: 'ایجاد مضمون جدید',
+  attendance_create: 'ثبت حاضری',
+  attendance_update: 'ویرایش حاضری',
+  attendance_upsert: 'ثبت یا ویرایش حاضری',
+  employee_attendance_upsert: 'ثبت یا ویرایش حاضری کارمند',
+  grade_create: 'ثبت نمره',
+  grade_update: 'ویرایش نمره',
+  grade_upsert: 'ثبت یا ویرایش نمره',
+  homework_create: 'ایجاد تکلیف',
+  homework_update: 'ویرایش تکلیف',
+  homework_delete: 'حذف تکلیف',
+  create_homework: 'ایجاد تکلیف',
+  update_homework: 'ویرایش تکلیف',
+  delete_homework: 'حذف تکلیف',
+  submit_homework: 'ارسال تکلیف',
+  grade_homework_submission: 'نمره‌دهی تکلیف',
+  promotion_rule_create: 'ایجاد قانون ارتقا',
+  promotion_apply: 'اجرای ارتقای شاگردان',
+  promotion_rollback: 'برگشت ارتقا',
+  create_exam_type: 'ایجاد نوع امتحان',
+  create_exam_session: 'ایجاد جلسه امتحان',
+  bootstrap_exam_session: 'آماده‌سازی جلسه امتحان',
+  initialize_exam_session_roster: 'آماده‌سازی فهرست شاگردان امتحان',
+  save_exam_sheet_marks: 'ذخیره نمرات شقه امتحان',
+  upsert_exam_mark: 'ثبت یا ویرایش نمره امتحان',
+  recompute_exam_results: 'محاسبه دوباره نتایج امتحان',
+  update_exam_session_status: 'تغییر وضعیت جلسه امتحان'
+});
+const ACTIVITY_TARGET_TYPE_LABELS = Object.freeze({
+  User: 'کاربر',
+  Student: 'شاگرد',
+  AfghanStudent: 'شاگرد',
+  StudentProfile: 'پروفایل شاگرد',
+  StudentMembership: 'عضویت شاگرد',
+  Enrollment: 'ثبت‌نام',
+  FeeOrder: 'بل فیس',
+  FeePayment: 'پرداخت فیس',
+  Discount: 'تخفیف',
+  FeeExemption: 'معافیت فیس',
+  TransportFee: 'فیس ترانسپورت',
+  FinanceReceipt: 'رسید مالی',
+  FinanceBill: 'بل مالی',
+  FinanceRelief: 'تخفیف/معافیت مالی',
+  FinanceFeePlan: 'پلان فیس',
+  FinanceTreasuryAccount: 'حساب خزانه',
+  FinanceTreasuryTransaction: 'تراکنش خزانه',
+  FinanceProcurementCommitment: 'تعهد خریداری',
+  FinanceMonthClose: 'بستن ماه مالی',
+  FinanceAnomalyCase: 'مورد غیرعادی مالی',
+  ExpenseEntry: 'مصرف مالی',
+  Payment: 'پرداخت',
+  Grade: 'نمره',
+  Exam: 'امتحان',
+  ExamSession: 'جلسه امتحان',
+  ExamResult: 'نتیجه امتحان',
+  Attendance: 'حاضری',
+  Schedule: 'تقسیم اوقات',
+  Homework: 'تکلیف',
+  ProfileUpdateRequest: 'درخواست ویرایش پروفایل',
+  AccessRequest: 'درخواست دسترسی',
+  SiteSettings: 'تنظیمات سایت',
+  SchoolClass: 'صنف',
+  Course: 'مضمون',
+  Module: 'بخش درسی',
+  Lesson: 'درس',
+  Result: 'نتیجه',
+  SheetTemplate: 'قالب شقه'
+});
+const ACTIVITY_REASON_LABELS = Object.freeze({
+  approved_by_reviewer: 'تایید شده',
+  rejected_by_reviewer: 'رد شده',
+  destructive_operation: 'عملیات حذف/حساس',
+  access_control_change: 'تغییر دسترسی'
+});
+const ACTION_WORD_LABELS = Object.freeze({
+  admin: 'مدیریتی',
+  update: 'ویرایش',
+  create: 'ایجاد',
+  delete: 'حذف',
+  remove: 'حذف',
+  cancel: 'لغو',
+  approve: 'تایید',
+  approved: 'تایید شده',
+  reject: 'رد',
+  rejected: 'رد شده',
+  submit: 'ارسال',
+  save: 'ذخیره',
+  saved: 'ذخیره شده',
+  publish: 'نشر',
+  copy: 'کاپی',
+  bulk: 'گروهی',
+  finance: 'مالی',
+  fee: 'فیس',
+  payment: 'پرداخت',
+  receipt: 'رسید',
+  bill: 'بل',
+  bills: 'بل‌ها',
+  expense: 'مصرف',
+  student: 'شاگرد',
+  attendance: 'حاضری',
+  grade: 'نمره',
+  exam: 'امتحان',
+  session: 'جلسه',
+  schedule: 'تقسیم اوقات',
+  holiday: 'رخصتی',
+  homework: 'تکلیف',
+  promotion: 'ارتقا',
+  profile: 'پروفایل',
+  request: 'درخواست',
+  requests: 'درخواست‌ها',
+  access: 'دسترسی',
+  user: 'کاربر',
+  role: 'نقش',
+  permissions: 'صلاحیت‌ها',
+  status: 'وضعیت',
+  transport: 'ترانسپورت',
+  discount: 'تخفیف',
+  registry: 'ثبت',
+  exemption: 'معافیت',
+  treasury: 'خزانه',
+  transaction: 'تراکنش',
+  transfer: 'انتقال',
+  month: 'ماه',
+  close: 'بستن',
+  upsert: 'ثبت/ویرایش',
+  reconcile: 'مطابقت',
+  void: 'باطل‌سازی',
+  reopen: 'بازگشایی',
+  rollback: 'برگشت',
+  recompute: 'محاسبه دوباره',
+  initialize: 'آماده‌سازی',
+  roster: 'فهرست شاگردان',
+  marks: 'نمرات',
+  sheet: 'شقه',
+  type: 'نوع',
+  rule: 'قانون',
+  apply: 'اجرا',
+  follow: 'پیگیری',
+  delivery: 'ارسال',
+  template: 'قالب',
+  draft: 'پیش‌نویس',
+  review: 'بررسی',
+  version: 'نسخه',
+  archive: 'آرشیف',
+  campaign: 'کمپاین',
+  document: 'سند',
+  batch: 'گروهی',
+  statement: 'صورت‌حساب',
+  pack: 'بسته'
 });
 const FOLLOW_UP_LEVELS = ['finance_manager', 'finance_lead', 'general_president'];
 const FOLLOW_UP_STATUSES = ['new', 'in_progress', 'on_hold', 'escalated', 'resolved'];
@@ -202,6 +466,97 @@ const serializeMembershipAccessRecord = (item = {}) => ({
   createdAt: item.createdAt || null,
   updatedAt: item.updatedAt || null
 });
+
+const translateActionText = (action = '') => {
+  const words = String(action || '')
+    .trim()
+    .split(/[_\s-]+/)
+    .map((word) => ACTION_WORD_LABELS[word.toLowerCase()] || word)
+    .filter(Boolean);
+  return words.join(' ');
+};
+
+const humanizeActivityAction = (action = '') => {
+  const normalized = String(action || '').trim();
+  if (!normalized) return 'فعالیت سیستم';
+  if (RECENT_ACTIVITY_LABELS[normalized]) return RECENT_ACTIVITY_LABELS[normalized];
+
+  const actionText = translateActionText(normalized);
+  if (normalized.includes('approve')) return `تایید ${actionText}`;
+  if (normalized.includes('reject')) return `رد ${actionText}`;
+  if (normalized.includes('delete') || normalized.includes('remove')) return `حذف ${actionText}`;
+  if (normalized.includes('create') || normalized.endsWith('_post')) return `ایجاد ${actionText}`;
+  if (normalized.includes('update') || normalized.endsWith('_put') || normalized.endsWith('_patch')) return `ویرایش ${actionText}`;
+  if (normalized.includes('payment') || normalized.includes('receipt') || normalized.includes('finance')) return `رویداد مالی: ${actionText}`;
+  if (normalized.includes('student') || normalized.includes('enrollment')) return `رویداد شاگرد: ${actionText}`;
+  if (normalized.includes('attendance')) return `رویداد حاضری: ${actionText}`;
+  if (normalized.includes('schedule')) return `رویداد تقسیم اوقات: ${actionText}`;
+  return actionText;
+};
+
+const activityDomainFromLog = (log = {}) => {
+  const action = String(log.action || '').toLowerCase();
+  const targetType = String(log.targetType || '').toLowerCase();
+  if (/(finance|payment|fee|receipt|expense|bill|relief)/.test(`${action} ${targetType}`)) return 'finance';
+  if (/(student|enrollment|membership|promotion)/.test(`${action} ${targetType}`)) return 'student';
+  if (/(grade|exam|attendance|schedule|homework|course|module|lesson|result)/.test(`${action} ${targetType}`)) return 'education';
+  if (/(admin|user|permission|role|access|profile|settings)/.test(`${action} ${targetType}`)) return 'admin';
+  return 'system';
+};
+
+const activitySeverityFromLog = (log = {}) => {
+  const action = String(log.action || '').toLowerCase();
+  const reason = String(log.reason || '').toLowerCase();
+  if (/(delete|remove|reject|blocked|forbidden|void|destructive)/.test(`${action} ${reason}`)) return 'high';
+  if (/(approve|payment|receipt|finance|change_role|permissions|promotion|transfer)/.test(action)) return 'medium';
+  return 'low';
+};
+
+const activityLinkFromLog = (log = {}) => {
+  const domain = activityDomainFromLog(log);
+  if (domain === 'finance') return '/admin-finance';
+  if (domain === 'student') return '/student-management';
+  if (domain === 'education') {
+    const action = String(log.action || '').toLowerCase();
+    if (action.includes('schedule')) return '/timetable/editor';
+    if (action.includes('homework')) return '/homework-manager';
+    if (action.includes('grade') || action.includes('exam') || action.includes('result')) return '/admin-exams';
+    return '/admin-education-core';
+  }
+  if (domain === 'admin') return '/admin-users';
+  return '/admin-logs';
+};
+
+const serializeRecentActivity = (log = {}) => {
+  const actorName = String(log.actor?.name || log.actor?.email || '').trim() || 'سیستم';
+  const targetType = String(log.targetType || '').trim();
+  const targetTypeLabel = ACTIVITY_TARGET_TYPE_LABELS[targetType] || translateActionText(targetType);
+  const reason = String(log.reason || '').trim();
+  const reasonLabel = ACTIVITY_REASON_LABELS[reason] || translateActionText(reason);
+  const context = String(log.meta?.context || log.meta?.source || '').trim();
+  const contextLabel = context === 'frontend' ? 'فرانت‌اند' : translateActionText(context);
+  const metaParts = [
+    actorName,
+    targetTypeLabel,
+    reason ? reasonLabel : '',
+    context && context !== 'backend' ? contextLabel : ''
+  ].filter(Boolean);
+
+  return {
+    _id: log._id,
+    action: log.action || '',
+    title: humanizeActivityAction(log.action),
+    meta: metaParts.join(' | '),
+    actor: log.actor || null,
+    targetUser: log.targetUser || null,
+    targetType: targetTypeLabel,
+    targetId: log.targetId || '',
+    domain: activityDomainFromLog(log),
+    severity: activitySeverityFromLog(log),
+    link: activityLinkFromLog(log),
+    createdAt: log.createdAt
+  };
+};
 const normalizeFollowUpLevel = (value = '', fallback = 'finance_manager') => {
   const normalized = normalizeAdminLevel(value || fallback);
   return FOLLOW_UP_LEVELS.includes(normalized) ? normalized : 'finance_manager';
@@ -2065,6 +2420,43 @@ router.get('/search', requireAuth, requireRole(['admin']), requirePermission('vi
     });
   } catch (error) {
     res.status(500).json({ success: false, message: 'خطا در دریافت جستجوی سراسری' });
+  }
+});
+
+router.get('/recent-activity', requireAuth, requireRole(['admin']), async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit || 12), 1), 30);
+    const filter = {
+      action: { $nin: REPORT_ACTIVITY_ACTIONS },
+      $or: [
+        { action: IMPORTANT_ACTIVITY_ACTION_REGEX },
+        { targetType: { $in: IMPORTANT_ACTIVITY_TARGET_TYPES } },
+        { reason: { $ne: '' } }
+      ]
+    };
+
+    let logs = await ActivityLog.find(filter)
+      .populate('actor', 'name email role orgRole')
+      .populate('targetUser', 'name email role orgRole')
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    if (!logs.length) {
+      logs = await ActivityLog.find({ action: { $nin: REPORT_ACTIVITY_ACTIONS } })
+        .populate('actor', 'name email role orgRole')
+        .populate('targetUser', 'name email role orgRole')
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .lean();
+    }
+
+    res.json({
+      success: true,
+      items: logs.map(serializeRecentActivity)
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'خطا در دریافت فعالیت‌های اخیر' });
   }
 });
 

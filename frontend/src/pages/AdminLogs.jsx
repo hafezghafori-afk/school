@@ -105,6 +105,7 @@ export default function AdminLogs() {
   const [items, setItems] = useState([]);
   const [message, setMessage] = useState('');
   const [filters, setFilters] = useState({
+    actorQuery: '',
     orgRole: '',
     action: '',
     preset: '',
@@ -123,6 +124,7 @@ export default function AdminLogs() {
 
   const toQuery = () => {
     const params = new URLSearchParams();
+    if (filters.actorQuery) params.set('actor_q', filters.actorQuery);
     if (filters.orgRole) params.set('orgRole', filters.orgRole);
     if (filters.action) {
       params.set('action', filters.action);
@@ -196,15 +198,17 @@ export default function AdminLogs() {
     const params = new URLSearchParams(location.search || '');
     const preset = String(params.get('preset') || '').trim();
     const action = String(params.get('action') || '').trim();
+    const actorQuery = String(params.get('actor_q') || params.get('actorName') || '').trim();
     const reason = String(params.get('reason') || '').trim();
     const sensitive = String(params.get('sensitive') || '').trim();
 
-    if (!preset && !action && !reason && !sensitive) return;
+    if (!preset && !action && !actorQuery && !reason && !sensitive) return;
 
     setFilters((prev) => ({
       ...prev,
       ...(preset ? { preset } : {}),
       ...(action ? { action } : {}),
+      ...(actorQuery ? { actorQuery } : {}),
       ...(reason ? { reason } : {}),
       ...(sensitive ? { sensitive } : {})
     }));
@@ -223,8 +227,8 @@ export default function AdminLogs() {
 
       <div className="admin-content-hero">
         <div>
-          <h2>لاگ اقدامات ادمین</h2>
-          <p>فیلتر، بررسی و خروجی CSV از فعالیت‌های سیستمی.</p>
+          <h2>همه فعالیت‌ها</h2>
+          <p>مشاهده، فیلتر و خروجی CSV از فعالیت‌های مهم کاربران و سیستم.</p>
         </div>
       </div>
 
@@ -253,6 +257,11 @@ export default function AdminLogs() {
 
       <div className="admin-content-form">
         <div className="form-grid">
+          <input
+            value={filters.actorQuery}
+            onChange={(e) => setFilters((prev) => ({ ...prev, actorQuery: e.target.value }))}
+            placeholder="فیلتر بر اساس کاربر، نام یا ایمیل"
+          />
           <select value={filters.orgRole} onChange={(e) => setFilters((prev) => ({ ...prev, orgRole: e.target.value }))}>
             <option value="">همه نقش‌های سازمانی</option>
             {ORG_ROLE_OPTIONS.map((opt) => (

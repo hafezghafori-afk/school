@@ -1,5 +1,6 @@
 const express = require('express');
 const ActivityLog = require('../models/ActivityLog');
+const User = require('../models/User');
 const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
 
 const router = express.Router();
@@ -17,10 +18,22 @@ const parseDateOrNull = (value) => {
   return date;
 };
 
-const buildFilter = (query) => {
+const buildFilter = async (query) => {
   const filter = {};
   const reasonQuery = String(query.reason || '').trim();
+  const actorQuery = String(query.actor_q || query.actorName || query.actor_name || '').trim();
   if (query.actor) filter.actor = query.actor;
+  if (actorQuery && !query.actor) {
+    const safeActorQuery = actorQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const users = await User.find({
+      $or: [
+        { name: { $regex: safeActorQuery, $options: 'i' } },
+        { email: { $regex: safeActorQuery, $options: 'i' } }
+      ]
+    }).select('_id').limit(100).lean();
+    const userIds = users.map((user) => user._id).filter(Boolean);
+    filter.actor = userIds.length ? { $in: userIds } : { $in: [] };
+  }
   if (query.role) filter.actorRole = query.role;
   if (query.orgRole || query.org_role) filter.actorOrgRole = String(query.orgRole || query.org_role || '').trim();
   if (query.ip) filter.ip = query.ip;
@@ -64,7 +77,7 @@ const buildFilter = (query) => {
 
 router.get('/', requireAuth, requireRole(['admin']), requirePermission('view_reports'), async (req, res) => {
   try {
-    const filter = buildFilter(req.query);
+    const filter = await buildFilter(req.query);
     const items = await ActivityLog.find(filter)
       .populate('actor', 'name email role orgRole')
       .sort({ createdAt: -1 })
@@ -77,7 +90,7 @@ router.get('/', requireAuth, requireRole(['admin']), requirePermission('view_rep
 
 router.get('/export.csv', requireAuth, requireRole(['admin']), requirePermission('view_reports'), async (req, res) => {
   try {
-    const filter = buildFilter(req.query);
+    const filter = await buildFilter(req.query);
     const items = await ActivityLog.find(filter)
       .populate('actor', 'name email role orgRole')
       .sort({ createdAt: -1 })

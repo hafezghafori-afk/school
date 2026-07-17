@@ -519,7 +519,7 @@ router.get('/ownership-audit', requireAuth, requireRole(['admin']), requirePermi
 // POST /api/afghan-schools/ownership-backfill - Fill schoolId for existing finance records when it can be inferred
 router.post('/ownership-backfill', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const limit = Math.min(2000, Math.max(1, Number(req.body?.limit || 500)));
+    const limit = Math.min(20000, Math.max(1, Number(req.body?.limit || 5000)));
     const result = await backfillOwnership({ req, limit });
     return res.json({ success: true, data: { ...result, audit: await buildOwnershipAudit() } });
   } catch (error) {

@@ -724,6 +724,7 @@ export default function AdminPanel() {
     }
   });
   const [reportActivityItems, setReportActivityItems] = useState([]);
+  const [recentActivityItems, setRecentActivityItems] = useState([]);
   const [settingsQuickLinks, setSettingsQuickLinks] = useState([]);
   const [activeSchoolContext, setActiveSchoolContext] = useState(null);
   const [schoolOptions, setSchoolOptions] = useState([]);
@@ -1360,7 +1361,7 @@ export default function AdminPanel() {
       const res = await fetch(`${API_BASE}/api/afghan-schools/ownership-backfill`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({ targetSchoolId: activeSchoolId, limit: 2000 })
+        body: JSON.stringify({ targetSchoolId: activeSchoolId, limit: 20000 })
       });
       const data = await res.json();
       if (!res.ok || data?.success === false) {
@@ -1371,9 +1372,14 @@ export default function AdminPanel() {
       const updated = ownershipResults.reduce((sum, item) => sum + Number(item?.updated || 0), 0);
       const failed = ownershipResults.reduce((sum, item) => sum + Number(item?.failed || 0), 0);
       const unresolved = ownershipResults.reduce((sum, item) => sum + Number(item?.unresolved || 0), 0);
+      const remainingIssues = (data?.data?.audit?.rows || []).reduce(
+        (sum, row) => sum + Number(row?.missing || 0) + Number(row?.unknownSchool || 0),
+        0
+      );
       const details = [
         failed ? `${failed.toLocaleString('fa-AF')} خطا باقی ماند` : '',
-        unresolved ? `${unresolved.toLocaleString('fa-AF')} رکورد نیاز به بررسی دستی دارد` : ''
+        unresolved ? `${unresolved.toLocaleString('fa-AF')} رکورد نیاز به بررسی دستی دارد` : '',
+        remainingIssues ? `${remainingIssues.toLocaleString('fa-AF')} مورد هنوز مبهم است` : ''
       ].filter(Boolean).join('، ');
       setSchoolScopeMessage(`ترمیم مالکیت دیتا انجام شد. ${updated.toLocaleString('fa-AF')} رکورد اصلاح شد.${details ? ` ${details}.` : ''}`);
       await loadActiveSchoolContext().catch(() => null);
@@ -2062,6 +2068,22 @@ export default function AdminPanel() {
     }
   };
 
+  const loadRecentActivities = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/recent-activity?limit=10`, {
+        headers: { ...getAuthHeaders() }
+      });
+      const data = await res.json();
+      if (!data?.success) {
+        setRecentActivityItems([]);
+        return;
+      }
+      setRecentActivityItems(Array.isArray(data.items) ? data.items : []);
+    } catch {
+      setRecentActivityItems([]);
+    }
+  };
+
   const loadWorkflowReport = async () => {
     if (!canViewReports) return;
     try {
@@ -2324,6 +2346,7 @@ export default function AdminPanel() {
   }, [canManageContent]);
 
   useEffect(() => {
+    loadRecentActivities();
     if (!canViewReports) {
       setAlerts([]);
       setAdminDashboard(null);
@@ -3435,15 +3458,17 @@ export default function AdminPanel() {
   ].slice(0, 6);
 
   const modernActivityItems = [
-    ...(reportActivityItems || []).slice(0, 3).map((item) => ({
-      key: `report-${item._id}`,
-      title: reportActionLabel(item.action),
-      meta: `${item.actor?.name || 'ادمین'} | ${toDateTime(item.createdAt)}`
+    ...(recentActivityItems || []).slice(0, 5).map((item) => ({
+      key: `activity-${item._id}`,
+      title: item.title || reportActionLabel(item.action),
+      meta: [item.meta, toDateTime(item.createdAt)].filter(Boolean).join(' | '),
+      to: item.link || '/admin-logs'
     })),
     ...(todaySchedule || []).slice(0, 3).map((item, index) => ({
       key: `schedule-${item?._id || item?.id || index}`,
       title: item?.subjectTitle || item?.subject || item?.courseTitle || 'برنامه درسی',
-      meta: [item?.classTitle, item?.teacherName, item?.startTime].filter(Boolean).join(' | ') || todayScheduleCardLabel
+      meta: [item?.classTitle, item?.teacherName, item?.startTime].filter(Boolean).join(' | ') || todayScheduleCardLabel,
+      to: canManageSchedule ? ADMIN_SCHEDULE_ROUTE : (canViewSchedule ? ADMIN_SCHEDULE_VIEW_ROUTE : '')
     }))
   ].slice(0, 5);
 
@@ -3758,7 +3783,22 @@ export default function AdminPanel() {
                   <span>همه مکاتب <b>{Number(schoolOverviewStats.total || 0).toLocaleString('fa-AF-u-ca-persian')}</b></span>
                   <span>فعال <b>{Number(schoolOverviewStats.activeRecords || 0).toLocaleString('fa-AF-u-ca-persian')}</b></span>
                   <span>غیرفعال <b>{Number(schoolOverviewStats.inactiveRecords || 0).toLocaleString('fa-AF-u-ca-persian')}</b></span>
-                  <span>مالکیت مبهم <b>{Number(ownershipIssueCount || 0).toLocaleString('fa-AF-u-ca-persian')}</b></span>
+                  <span className={ownershipIssueCount ? 'has-action' : ''}>
+                    مالکیت مبهم <b>{Number(ownershipIssueCount || 0).toLocaleString('fa-AF-u-ca-persian')}</b>
+                    {!!ownershipIssueCount && canManageFinance && (
+                      <button
+                        type="button"
+                        className="admin-modern-inline-action"
+                        onClick={handleOwnershipBackfill}
+                        disabled={schoolScopeBusy || !activeSchoolId}
+                      >
+                        {schoolScopeBusy ? 'در حال ترمیم...' : 'رفع خودکار'}
+                      </button>
+                    )}
+                    {!!ownershipIssueCount && !canManageFinance && (
+                      <small>نیازمند صلاحیت مالی</small>
+                    )}
+                  </span>
                 </div>
               </article>
 
@@ -3788,15 +3828,22 @@ export default function AdminPanel() {
               <article className="admin-modern-panel">
                 <div className="admin-modern-panel-head">
                   <h2>آخرین فعالیت‌ها</h2>
-                  {canViewReports && <Link to="/admin-reports">گزارش‌ها</Link>}
+                  {canViewReports && <Link to="/admin-logs">همه فعالیت‌ها</Link>}
                 </div>
                 <div className="admin-modern-list">
                   {!modernActivityItems.length && <span className="admin-modern-empty">فعالیت تازه‌ای برای نمایش نیست.</span>}
                   {modernActivityItems.map((item) => (
-                    <div key={item.key} className="admin-modern-list-item">
-                      <strong>{item.title}</strong>
-                      <small>{item.meta}</small>
-                    </div>
+                    item.to ? (
+                      <Link key={item.key} to={item.to} className="admin-modern-list-item">
+                        <strong>{item.title}</strong>
+                        <small>{item.meta}</small>
+                      </Link>
+                    ) : (
+                      <div key={item.key} className="admin-modern-list-item">
+                        <strong>{item.title}</strong>
+                        <small>{item.meta}</small>
+                      </div>
+                    )
                   ))}
                 </div>
               </article>

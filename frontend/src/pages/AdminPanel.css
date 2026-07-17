@@ -241,10 +241,40 @@
   font-weight: 900;
 }
 
+.admin-modern-school-summary span.has-action {
+  display: grid;
+  gap: 6px;
+}
+
 .admin-modern-school-summary b {
   display: block;
   color: #0f172a;
   font-size: 18px;
+}
+
+.admin-modern-school-summary small {
+  display: block;
+  color: #fbbf24;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.admin-modern-inline-action {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid rgba(251, 191, 36, 0.42);
+  border-radius: 8px;
+  background: rgba(251, 191, 36, 0.16);
+  color: #fef3c7;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.admin-modern-inline-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .admin-modern-list {
