@@ -2256,7 +2256,19 @@ export default function AdminFinance() {
       ...options,
       headers: { ...(options.headers || {}), ...getAuthHeaders() }
     });
-    return res.json();
+    const contentType = String(res.headers.get('content-type') || '').toLowerCase();
+    const text = await res.text();
+    if (!contentType.includes('application/json')) {
+      const message = text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')
+        ? 'مسیر API روی سرور فعال نیست یا هنوز نسخه جدید backend deploy نشده است.'
+        : (text.trim() || 'پاسخ سرور JSON معتبر نیست.');
+      throw new Error(message);
+    }
+    try {
+      return JSON.parse(text || '{}');
+    } catch {
+      throw new Error('پاسخ سرور JSON معتبر نیست.');
+    }
   };
 
   const buildScopedReportUrl = (path) => {

@@ -212,6 +212,14 @@ app.use('/api/school-websites', schoolWebsiteRoutes);
 app.use('/api/academy', academyRoutes);
 app.use('/api/academy-supplies', academySupplyRoutes);
 
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'مسیر API پیدا نشد. لطفاً مطمئن شوید backend با آخرین نسخه deploy شده است.',
+    path: req.originalUrl
+  });
+});
+
 if (hasFrontendBuild) {
   app.use(express.static(frontendDistDir));
 
