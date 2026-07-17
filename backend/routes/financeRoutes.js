@@ -6734,12 +6734,23 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
       return res.status(404).json({ success: false, message: 'عضویت مالی شاگرد معتبر پیدا نشد.' });
     }
 
+    const admissionOwnerOr = [
+      { student: membership.student }
+    ];
+    if (membership.studentId) admissionOwnerOr.push({ studentId: membership.studentId });
     const existingAdmissionOrder = await FeeOrder.findOne({
-      studentMembershipId: membership._id,
       status: { $ne: 'void' },
-      $or: [
-        { orderType: 'admission' },
-        { 'lineItems.feeType': 'admission' }
+      $and: [
+        { $or: admissionOwnerOr },
+        {
+          $or: [
+            { orderType: 'admission' },
+            { 'lineItems.feeType': 'admission' },
+            { title: /داخله|admission/i },
+            { periodLabel: /داخله|admission/i },
+            { note: /داخله|admission/i }
+          ]
+        }
       ]
     });
 

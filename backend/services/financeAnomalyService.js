@@ -359,6 +359,7 @@ function buildMembershipFinanceAnomalies({
   payments = [],
   reliefs = [],
   bills = [],
+  admissionDocuments = [],
   feePlans = [],
   asOf = new Date(),
   limit = 20
@@ -396,6 +397,7 @@ function buildMembershipFinanceAnomalies({
   const normalizedPayments = (Array.isArray(payments) ? payments : []).filter(Boolean);
   const normalizedReliefs = (Array.isArray(reliefs) ? reliefs : []).filter(Boolean);
   const normalizedBills = (Array.isArray(bills) ? bills : []).filter(Boolean);
+  const normalizedAdmissionDocuments = (Array.isArray(admissionDocuments) ? admissionDocuments : []).filter(Boolean);
   const openOrders = normalizedOrders.filter((item) => ['new', 'partial', 'overdue'].includes(normalizeText(item?.status)) && roundMoney(item?.outstandingAmount) > 0);
   const activeReliefs = normalizedReliefs.filter((item) => reliefIsActiveAt(item, now));
   const anomalies = [];
@@ -567,11 +569,12 @@ function buildMembershipFinanceAnomalies({
     const plannedAdmissionFee = roundMoney(feePlan?.admissionFee);
     const financeDocuments = dedupeFinanceDocuments([...normalizedOrders, ...normalizedBills])
       .filter((document) => normalizeText(document?.status) !== 'void');
-    const hasAdmissionOrder = normalizedOrders.some((order) => (
-      normalizeText(order?.status) !== 'void' && isLikelyAdmissionDocumentForPlan(order, feePlan)
-    )) || normalizedBills.some((bill) => (
-      normalizeText(bill?.status) !== 'void' && isLikelyAdmissionDocumentForPlan(bill, feePlan)
-    ));
+    const studentAdmissionDocuments = dedupeFinanceDocuments([
+      ...normalizedAdmissionDocuments,
+      ...normalizedOrders,
+      ...normalizedBills
+    ]).filter((document) => normalizeText(document?.status) !== 'void');
+    const hasAdmissionOrder = studentAdmissionDocuments.some((document) => isLikelyAdmissionDocumentForPlan(document, feePlan));
     const hasActiveCharge = openOrders.some((order) => {
       const feeTypes = getOrderFeeTypes(order);
       return feeTypes.has('tuition') || feeTypes.has('service') || feeTypes.has('exam') || feeTypes.has('transport');
@@ -579,7 +582,7 @@ function buildMembershipFinanceAnomalies({
 
     if (plannedAdmissionFee > 0 && !hasAdmissionOrder && hasActiveCharge) {
       anomalies.push({
-        id: `admission-missing-${membershipId || normalizeNullableId(membershipItem?.id || membershipItem?._id || studentName)}`,
+        id: `admission-missing-${studentUserId || membershipItem?.student?.studentCoreId || membershipId || normalizeNullableId(membershipItem?.id || membershipItem?._id || studentName)}`,
         anomalyType: 'admission_missing',
         severity: 'warning',
         actionRequired: true,
@@ -746,9 +749,12 @@ function formatOrderLite(doc) {
     orderNumber: formatFinanceCode(normalizeText(item.orderNumber)),
     title: normalizeText(item.title),
     orderType: normalizeText(item.orderType),
+    periodLabel: normalizeText(item.periodLabel),
+    note: normalizeText(item.note),
     lineItems: Array.isArray(item.lineItems) ? item.lineItems.map((entry) => ({
       feeType: normalizeText(entry?.feeType),
       label: normalizeText(entry?.label),
+      sourcePlanId: normalizeNullableId(entry?.sourcePlanId?._id || entry?.sourcePlanId),
       grossAmount: roundMoney(entry?.grossAmount),
       netAmount: roundMoney(entry?.netAmount),
       reductionAmount: roundMoney(entry?.reductionAmount),
@@ -794,9 +800,12 @@ function formatBillLite(doc) {
     billNumber: formatFinanceCode(normalizeText(item.billNumber)),
     title: normalizeText(item.periodLabel || item.billNumber),
     orderType: '',
+    periodLabel: normalizeText(item.periodLabel),
+    note: normalizeText(item.note),
     lineItems: Array.isArray(item.lineItems) ? item.lineItems.map((entry) => ({
       feeType: normalizeText(entry?.feeType),
       label: normalizeText(entry?.label),
+      sourcePlanId: normalizeNullableId(entry?.sourcePlanId?._id || entry?.sourcePlanId),
       grossAmount: roundMoney(entry?.grossAmount),
       netAmount: roundMoney(entry?.netAmount),
       reductionAmount: roundMoney(entry?.reductionAmount),
@@ -972,6 +981,34 @@ async function buildFinanceAnomalyReport({
       .lean()
   ]);
 
+  const studentUserIds = [...new Set(memberships
+    .map((item) => normalizeNullableId(item?.student?._id || item?.student))
+    .filter(Boolean))];
+  const studentCoreIds = [...new Set(memberships
+    .map((item) => normalizeNullableId(item?.studentId?._id || item?.studentId))
+    .filter(Boolean))];
+  const studentAdmissionFilter = { status: { $ne: 'void' } };
+  const studentAdmissionOr = [];
+  if (studentUserIds.length) studentAdmissionOr.push({ student: { $in: studentUserIds } });
+  if (studentCoreIds.length) studentAdmissionOr.push({ studentId: { $in: studentCoreIds } });
+  if (studentAdmissionOr.length) studentAdmissionFilter.$or = studentAdmissionOr;
+  const [studentAdmissionOrders, studentAdmissionBills] = studentAdmissionOr.length ? await Promise.all([
+    FeeOrder.find(studentAdmissionFilter)
+      .populate('student', 'name email')
+      .populate('studentId', 'fullName admissionNo')
+      .populate('classId', 'title code gradeLevel section')
+      .populate('academicYearId', 'title code')
+      .sort({ dueDate: -1, createdAt: -1 })
+      .lean(),
+    FinanceBill.find(studentAdmissionFilter)
+      .populate('student', 'name email')
+      .populate('studentId', 'fullName admissionNo')
+      .populate('classId', 'title code gradeLevel section')
+      .populate('academicYearId', 'title code')
+      .sort({ dueDate: -1, createdAt: -1 })
+      .lean()
+  ]) : [[], []];
+
   const membershipMap = new Map(
     memberships.map((item) => [normalizeNullableId(item?._id), formatMembershipLite(item)])
   );
@@ -1040,6 +1077,22 @@ async function buildFinanceAnomalyReport({
     reliefMap.set(membershipId, current);
   });
 
+  const studentAdmissionDocumentMap = new Map();
+  const pushStudentAdmissionDocument = (item = null) => {
+    if (!item) return;
+    const studentKeys = [
+      item?.student?.userId,
+      item?.student?.studentCoreId
+    ].map(normalizeNullableId).filter(Boolean);
+    studentKeys.forEach((studentKey) => {
+      const current = studentAdmissionDocumentMap.get(studentKey) || [];
+      current.push(item);
+      studentAdmissionDocumentMap.set(studentKey, current);
+    });
+  };
+  studentAdmissionOrders.map(formatOrderLite).forEach(pushStudentAdmissionDocument);
+  studentAdmissionBills.map(formatBillLite).forEach(pushStudentAdmissionDocument);
+
   const allItems = [];
   membershipMap.forEach((membership, membershipId) => {
     const contextKey = makeFinanceContextKey({
@@ -1050,10 +1103,15 @@ async function buildFinanceAnomalyReport({
     });
     const membershipOrders = mergeUniqueById(orderMap.get(membershipId) || [], fallbackOrderMap.get(contextKey) || []);
     const membershipBills = mergeUniqueById(billMap.get(membershipId) || [], fallbackBillMap.get(contextKey) || []);
+    const admissionDocuments = mergeUniqueById(
+      studentAdmissionDocumentMap.get(normalizeNullableId(membership?.student?.userId)) || [],
+      studentAdmissionDocumentMap.get(normalizeNullableId(membership?.student?.studentCoreId)) || []
+    );
     const report = buildMembershipFinanceAnomalies({
       membership,
       orders: membershipOrders,
       bills: membershipBills,
+      admissionDocuments,
       payments: paymentMap.get(membershipId) || [],
       reliefs: reliefMap.get(membershipId) || [],
       feePlans,
