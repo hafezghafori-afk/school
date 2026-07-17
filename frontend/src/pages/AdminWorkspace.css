@@ -1197,6 +1197,22 @@
   justify-content: center;
 }
 
+.admin-education-pagination {
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.admin-education-pagination .admin-workspace-badge {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.admin-education-pagination .admin-workspace-button-ghost:disabled {
+  cursor: not-allowed;
+}
+
 .admin-education-chip-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

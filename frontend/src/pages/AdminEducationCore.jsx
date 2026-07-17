@@ -101,7 +101,7 @@ const YEAR_REGISTRY_VISIBLE_LIMIT = 4;
 const CLASS_REGISTRY_VISIBLE_LIMIT = 4;
 const SUBJECT_REGISTRY_VISIBLE_LIMIT = 4;
 const MAP_REGISTRY_VISIBLE_LIMIT = 4;
-const ENROLLMENT_REGISTRY_VISIBLE_LIMIT = 4;
+const ENROLLMENT_REGISTRY_PAGE_SIZE = 10;
 const ENROLLMENT_CANDIDATE_VISIBLE_LIMIT = 4;
 const ONLINE_REGISTRATION_VISIBLE_LIMIT = 4;
 
@@ -327,7 +327,7 @@ export default function AdminEducationCore() {
   const [onlineSearchInput, setOnlineSearchInput] = useState('');
   const [onlineSearchQuery, setOnlineSearchQuery] = useState('');
   const [showAllEnrollmentCandidates, setShowAllEnrollmentCandidates] = useState(false);
-  const [showAllEnrollments, setShowAllEnrollments] = useState(false);
+  const [enrollmentPage, setEnrollmentPage] = useState(1);
   const [pendingEnrollmentCandidateRef, setPendingEnrollmentCandidateRef] = useState(initialNavigation.candidateRef);
   const [enrollmentMode, setEnrollmentMode] = useState('quick'); // 'quick', 'bulk', 'detailed'
   const [activeRegistrationTask, setActiveRegistrationTask] = useState('');
@@ -617,9 +617,25 @@ export default function AdminEducationCore() {
       return matchesQuery && matchesClass && matchesYear && matchesStatus;
     });
   }, [enrollments, enrollSearchQuery, enrollClassFilter, enrollYearFilter, enrollFilter]);
-  const visibleEnrollments = useMemo(() => (
-    showAllEnrollments ? filteredEnrollments : filteredEnrollments.slice(0, ENROLLMENT_REGISTRY_VISIBLE_LIMIT)
-  ), [filteredEnrollments, showAllEnrollments]);
+  const enrollmentPageCount = Math.max(1, Math.ceil(filteredEnrollments.length / ENROLLMENT_REGISTRY_PAGE_SIZE));
+  const visibleEnrollments = useMemo(() => {
+    const start = (enrollmentPage - 1) * ENROLLMENT_REGISTRY_PAGE_SIZE;
+    return filteredEnrollments.slice(start, start + ENROLLMENT_REGISTRY_PAGE_SIZE);
+  }, [filteredEnrollments, enrollmentPage]);
+  const enrollmentPageStart = filteredEnrollments.length
+    ? ((enrollmentPage - 1) * ENROLLMENT_REGISTRY_PAGE_SIZE) + 1
+    : 0;
+  const enrollmentPageEnd = Math.min(enrollmentPage * ENROLLMENT_REGISTRY_PAGE_SIZE, filteredEnrollments.length);
+
+  useEffect(() => {
+    setEnrollmentPage(1);
+  }, [enrollSearchQuery, enrollClassFilter, enrollYearFilter, enrollFilter]);
+
+  useEffect(() => {
+    if (enrollmentPage > enrollmentPageCount) {
+      setEnrollmentPage(enrollmentPageCount);
+    }
+  }, [enrollmentPage, enrollmentPageCount]);
 
   const pendingEnrollments = enrollments.filter((item) => item.status === 'pending').length;
   const pendingOnlineRegistrations = onlineRegistrationQueue.filter((item) => item.status === 'pending').length;
@@ -710,7 +726,7 @@ export default function AdminEducationCore() {
       setActiveEnrollmentPanel('ledger');
       setEnrollmentMode('detailed');
       setRegistrationQueueView('completed');
-      setShowAllEnrollments(true);
+      setEnrollmentPage(1);
     } else if (task === 'bulk') {
       setActiveEnrollmentPanel('registration');
       setEnrollmentMode('bulk');
@@ -723,7 +739,7 @@ export default function AdminEducationCore() {
       setActiveEnrollmentPanel('ledger');
       setEnrollmentMode('quick');
       setRegistrationQueueView('all');
-      setShowAllEnrollments(true);
+      setEnrollmentPage(1);
     } else if (task === 'lifecycle') {
       setActiveEnrollmentPanel('');
       setRegistrationQueueView('all');
@@ -953,10 +969,6 @@ export default function AdminEducationCore() {
   useEffect(() => {
     setShowAllEnrollmentCandidates(false);
   }, [candidateSearchQuery, candidateSourceFilter, candidateGradeFilter]);
-
-  useEffect(() => {
-    setShowAllEnrollments(false);
-  }, [enrollSearchQuery, enrollYearFilter, enrollClassFilter, enrollFilter]);
 
   useEffect(() => {
     if (!pendingEnrollmentCandidateRef) return;
@@ -2671,7 +2683,7 @@ export default function AdminEducationCore() {
           {activeEnrollmentPanel === 'ledger' ? (
           <>
           <h2>دفتر ثبت‌نام‌ها</h2>
-          <p className="admin-workspace-subtitle">ثبت‌نام‌ها را با جستجو، فلتر وضعیت، سال و صنف پیدا کنید و در صورت نیاز بقیه را با دکمه بیشتر ببینید.</p>
+          <p className="admin-workspace-subtitle">ثبت‌نام‌ها را با جستجو، فلتر وضعیت، سال و صنف پیدا کنید؛ لیست در هر صفحه ۱۰ شاگرد را نشان می‌دهد.</p>
           <div className="admin-education-list-toolbar">
             <div className="admin-education-search-group">
               <input
@@ -2727,14 +2739,26 @@ export default function AdminEducationCore() {
               </tbody>
             </table>
           </div>
-          {filteredEnrollments.length > ENROLLMENT_REGISTRY_VISIBLE_LIMIT ? (
-            <div className="admin-education-list-footer">
+          {filteredEnrollments.length > ENROLLMENT_REGISTRY_PAGE_SIZE ? (
+            <div className="admin-education-list-footer admin-education-pagination">
               <button
                 type="button"
                 className="admin-workspace-button-ghost"
-                onClick={() => setShowAllEnrollments((current) => !current)}
+                onClick={() => setEnrollmentPage((current) => Math.max(1, current - 1))}
+                disabled={enrollmentPage <= 1}
               >
-                {showAllEnrollments ? 'نمایش کمتر' : `بیشتر (${(filteredEnrollments.length - ENROLLMENT_REGISTRY_VISIBLE_LIMIT).toLocaleString('fa-AF-u-ca-persian')})`}
+                صفحه قبلی
+              </button>
+              <span className="admin-workspace-badge muted">
+                {`${enrollmentPageStart.toLocaleString('fa-AF-u-ca-persian')} تا ${enrollmentPageEnd.toLocaleString('fa-AF-u-ca-persian')} از ${filteredEnrollments.length.toLocaleString('fa-AF-u-ca-persian')} | صفحه ${enrollmentPage.toLocaleString('fa-AF-u-ca-persian')} از ${enrollmentPageCount.toLocaleString('fa-AF-u-ca-persian')}`}
+              </span>
+              <button
+                type="button"
+                className="admin-workspace-button-ghost"
+                onClick={() => setEnrollmentPage((current) => Math.min(enrollmentPageCount, current + 1))}
+                disabled={enrollmentPage >= enrollmentPageCount}
+              >
+                صفحه بعدی
               </button>
             </div>
           ) : null}

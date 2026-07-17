@@ -58,17 +58,6 @@ const formatActivityAction = (value) => {
   return ACTIVITY_LABELS[key] || '\u0641\u0639\u0627\u0644\u06cc\u062a \u0633\u06cc\u0633\u062a\u0645\u06cc';
 };
 
-const adminMenuShortcuts = [
-  { key: 'home', title: 'خانه', icon: 'fa-house' },
-  { key: 'education', title: 'آموزش', icon: 'fa-graduation-cap' },
-  { key: 'virtual', title: 'سیستم مجازی', icon: 'fa-video' },
-  { key: 'news', title: 'اخبار و اعلانات', icon: 'fa-bullhorn' },
-  { key: 'gallery', title: 'گالری', icon: 'fa-images' },
-  { key: 'about', title: 'درباره ما', icon: 'fa-circle-info' },
-  { key: 'contact', title: 'تماس با ما', icon: 'fa-phone' },
-  { key: 'auth', title: 'ورود', icon: 'fa-right-to-bracket' }
-];
-
 const ACTIVITY_PREVIEW_COUNT = 3;
 const PROFILE_ACTIVITY_EXPANDED_KEY = 'profileActivityExpanded';
 const ACTIVITY_RANGE_OPTIONS = [
@@ -642,15 +631,6 @@ export default function Profile() {
     () => sanitizeSubjectValue(user?.subject || '', user?.email || '') || 'ثبت نشده',
     [user?.email, user?.subject]
   );
-  const canManageContent = useMemo(() => {
-    if (user?.role !== 'admin') return false;
-    const permissions = Array.isArray(user?.effectivePermissions)
-      ? user.effectivePermissions
-      : Array.isArray(user?.permissions)
-        ? user.permissions
-        : [];
-    return permissions.includes('manage_content');
-  }, [user]);
   const assignedClassLabels = useMemo(
     () => uniqueLabels(teacherAssignments.map((item) => getClassLabel(item?.classId))),
     [teacherAssignments]
@@ -981,31 +961,6 @@ export default function Profile() {
         {message && <div className="profile-message">{message}</div>}
 
         <div className="profile-divider" />
-
-        {user?.role === 'admin' && canManageContent && (
-          <div className="profile-admin-menu-manager">
-            <h3>مدیریت منوهای سایت</h3>
-            <p>برای هر منو وارد تنظیمات اختصاصی همان بخش شوید.</p>
-            <div className="profile-admin-menu-grid">
-              {adminMenuShortcuts.map((item) => (
-                <Link
-                  key={item.key}
-                  className="profile-admin-menu-link"
-                  to={`/admin-settings?menu=${item.key}`}
-                >
-                  <i className={`fa ${item.icon}`} aria-hidden="true" />
-                  <span>{item.title}</span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {user?.role === 'admin' && !canManageContent && (
-          <div className="profile-message">
-            دسترسی «مدیریت منوها» برای این ادمین فعال نیست. مجوز `manage_content` را از بخش مدیریت کاربران فعال کنید.
-          </div>
-        )}
 
         <div className="activity-head-row">
           <h3 className="activity-title">فعالیت‌های اخیر</h3>

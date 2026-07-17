@@ -674,50 +674,6 @@
   margin: 20px 0;
 }
 
-.profile-admin-menu-manager {
-  margin-bottom: 18px;
-  padding: 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.profile-admin-menu-manager h3 {
-  margin: 0 0 6px;
-}
-
-.profile-admin-menu-manager p {
-  margin: 0 0 10px;
-  color: rgba(248, 250, 252, 0.76);
-  font-size: 13px;
-}
-
-.profile-admin-menu-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 8px;
-}
-
-.profile-admin-menu-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(15, 23, 42, 0.72);
-  color: #fff;
-  padding: 10px 12px;
-  text-decoration: none;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.profile-admin-menu-link:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 18px rgba(3, 8, 20, 0.3);
-}
-
 .activity-title {
   margin: 0 0 10px;
 }
