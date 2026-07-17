@@ -636,7 +636,7 @@ const FINANCE_ANOMALY_UI_LABELS = {
   relief_expiring: 'تسهیل رو به ختم',
   long_overdue_balance: 'سررسید گذشته بیش از سه ماه',
   pending_payment_stalled: 'پرداخت معطل در بررسی',
-  admission_missing: 'داخله ثبت نشده'
+  admission_missing: 'بل داخله صادر نشده'
 };
 
 const FINANCE_ANOMALY_WORKFLOW_LABELS = {

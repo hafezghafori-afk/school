@@ -6,11 +6,13 @@ require('../models/StudentMembership');
 require('../models/FeeOrder');
 require('../models/FeePayment');
 require('../models/FinanceRelief');
+require('../models/FinanceFeePlan');
 
 const StudentMembership = require('../models/StudentMembership');
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
 const FinanceRelief = require('../models/FinanceRelief');
+const FinanceFeePlan = require('../models/FinanceFeePlan');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 
 function toPlain(doc) {
@@ -126,6 +128,48 @@ function isCurrentMembership(membership = {}) {
   return Boolean(membership?.isCurrent) && ['active', 'pending', 'suspended', 'transferred_in'].includes(normalizeText(membership?.status));
 }
 
+function feePlanIsActiveAt(plan = {}, asOf = new Date()) {
+  if (plan?.isActive === false || normalizeText(plan?.lifecycleStatus || 'active') !== 'active') return false;
+  const at = toDate(asOf) || new Date();
+  const effectiveFrom = toDate(plan?.effectiveFrom);
+  const effectiveTo = toDate(plan?.effectiveTo);
+  if (effectiveFrom && effectiveFrom.getTime() > at.getTime()) return false;
+  if (effectiveTo && effectiveTo.getTime() < at.getTime()) return false;
+  return true;
+}
+
+function resolveMembershipFeePlan(membership = {}, feePlans = [], asOf = new Date()) {
+  const classId = normalizeNullableId(
+    membership?.schoolClass?.id
+    || membership?.schoolClass?._id
+    || membership?.classId?.id
+    || membership?.classId?._id
+    || membership?.classId
+  );
+  const academicYearId = normalizeNullableId(
+    membership?.academicYear?.id
+    || membership?.academicYear?._id
+    || membership?.academicYearId?.id
+    || membership?.academicYearId?._id
+    || membership?.academicYearId
+  );
+  const candidates = (Array.isArray(feePlans) ? feePlans : [])
+    .filter((plan) => feePlanIsActiveAt(plan, asOf))
+    .filter((plan) => {
+      const planClassId = normalizeNullableId(plan?.classId?._id || plan?.classId);
+      const planYearId = normalizeNullableId(plan?.academicYearId?._id || plan?.academicYearId);
+      return (!classId || !planClassId || planClassId === classId)
+        && (!academicYearId || !planYearId || planYearId === academicYearId);
+    })
+    .sort((left, right) => {
+      const rightDefault = right?.isDefault === true ? 1 : 0;
+      const leftDefault = left?.isDefault === true ? 1 : 0;
+      if (rightDefault !== leftDefault) return rightDefault - leftDefault;
+      return Number(left?.priority || 100) - Number(right?.priority || 100);
+    });
+  return candidates[0] || null;
+}
+
 function buildAnomalySummary(items = []) {
   const rows = Array.isArray(items) ? items : [];
   const byType = {};
@@ -178,6 +222,7 @@ function buildMembershipFinanceAnomalies({
   orders = [],
   payments = [],
   reliefs = [],
+  feePlans = [],
   asOf = new Date(),
   limit = 20
 } = {}) {
@@ -380,6 +425,8 @@ function buildMembershipFinanceAnomalies({
     });
 
   if (isCurrentMembership(membershipItem)) {
+    const feePlan = resolveMembershipFeePlan(membershipItem, feePlans, now);
+    const plannedAdmissionFee = roundMoney(feePlan?.admissionFee);
     const hasAdmissionOrder = normalizedOrders.some((order) => (
       normalizeText(order?.status) !== 'void' && (
         normalizeText(order?.orderType) === 'admission' || getOrderFeeTypes(order).has('admission')
@@ -390,14 +437,14 @@ function buildMembershipFinanceAnomalies({
       return feeTypes.has('tuition') || feeTypes.has('service') || feeTypes.has('exam') || feeTypes.has('transport');
     });
 
-    if (!hasAdmissionOrder && hasActiveCharge) {
+    if (plannedAdmissionFee > 0 && !hasAdmissionOrder && hasActiveCharge) {
       anomalies.push({
         id: `admission-missing-${membershipId || normalizeNullableId(membershipItem?.id || membershipItem?._id || studentName)}`,
         anomalyType: 'admission_missing',
         severity: 'warning',
         actionRequired: true,
-        title: 'عضویت فعال بدون داخله مالی',
-        description: `${studentName} عضویت فعال دارد اما هنوز بدهی یا سند داخله برای او دیده نشد.`,
+        title: 'بل داخله از پلان مالی صادر نشده',
+        description: `${studentName} عضویت فعال دارد و پلان مالی صنف ${formatAmountLabel(plannedAdmissionFee, currency)} داخله دارد، اما هنوز بل یا سند داخله برای او دیده نشد.`,
         studentName,
         studentUserId,
         classTitle,
@@ -405,12 +452,13 @@ function buildMembershipFinanceAnomalies({
         academicYearTitle,
         academicYearId,
         membershipId,
-        referenceNumber: membershipId || normalizeNullableId(membershipItem?.id || membershipItem?._id),
-        amount: 0,
-        amountLabel: formatAmountLabel(0, currency),
+        referenceNumber: normalizeText(feePlan?.title) || membershipId || normalizeNullableId(membershipItem?.id || membershipItem?._id),
+        amount: plannedAdmissionFee,
+        amountLabel: formatAmountLabel(plannedAdmissionFee, currency),
         status: normalizeText(membershipItem?.status),
         at: membershipItem?.enrolledAt || membershipItem?.createdAt || null,
-        tags: ['membership', 'admission']
+        feePlanId: normalizeNullableId(feePlan?._id || feePlan?.id),
+        tags: ['membership', 'admission', 'fee_plan']
       });
     }
   }
@@ -564,6 +612,7 @@ async function buildFinanceAnomalyReport({
   const orderFilter = { status: { $ne: 'void' } };
   const paymentFilter = { status: { $in: ['pending', 'approved'] } };
   const reliefFilter = { status: 'active' };
+  const feePlanFilter = { isActive: true, lifecycleStatus: 'active' };
 
   if (normalizeNullableId(studentMembershipId)) {
     membershipFilter._id = studentMembershipId;
@@ -576,15 +625,17 @@ async function buildFinanceAnomalyReport({
     orderFilter.classId = classId;
     paymentFilter.classId = classId;
     reliefFilter.classId = classId;
+    feePlanFilter.classId = classId;
   }
   if (normalizeNullableId(academicYearId)) {
     membershipFilter.academicYearId = academicYearId;
     orderFilter.academicYearId = academicYearId;
     paymentFilter.academicYearId = academicYearId;
     reliefFilter.academicYearId = academicYearId;
+    feePlanFilter.academicYearId = academicYearId;
   }
 
-  const [memberships, orders, payments, reliefs] = await Promise.all([
+  const [memberships, orders, payments, reliefs, feePlans] = await Promise.all([
     StudentMembership.find(membershipFilter)
       .populate('student', 'name email')
       .populate('studentId', 'fullName admissionNo')
@@ -612,6 +663,10 @@ async function buildFinanceAnomalyReport({
       .populate('classId', 'title code gradeLevel section')
       .populate('academicYearId', 'title code')
       .sort({ endDate: 1, createdAt: -1 })
+      .lean(),
+    FinanceFeePlan.find(feePlanFilter)
+      .select('title admissionFee classId academicYearId effectiveFrom effectiveTo isDefault priority isActive lifecycleStatus currency')
+      .sort({ isDefault: -1, priority: 1, createdAt: -1 })
       .lean()
   ]);
 
@@ -653,6 +708,7 @@ async function buildFinanceAnomalyReport({
       orders: orderMap.get(membershipId) || [],
       payments: paymentMap.get(membershipId) || [],
       reliefs: reliefMap.get(membershipId) || [],
+      feePlans,
       asOf,
       limit: Math.max(Number(limit) || 120, 50)
     });
