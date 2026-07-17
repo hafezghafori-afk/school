@@ -740,7 +740,11 @@ export default function AdminPanel() {
     users: 0,
     courses: 0,
     todayPayments: 0,
-    pendingOrders: 0
+    pendingOrders: 0,
+    attendanceRate: 0,
+    openMessages: 0,
+    activeSchools: 0,
+    finance: {}
   });
   // ===== Wizard: ایجاد مکتب (4 مرحله) =====
   const [createSchoolOpen, setCreateSchoolOpen] = useState(false);
@@ -2019,7 +2023,11 @@ export default function AdminPanel() {
         users: data.users || 0,
         courses: data.courses || 0,
         todayPayments: data.todayPayments || 0,
-        pendingOrders: data.pendingOrders || 0
+        pendingOrders: data.pendingOrders || 0,
+        attendanceRate: data.attendanceRate || 0,
+        openMessages: data.openMessages || 0,
+        activeSchools: data.activeSchools || 0,
+        finance: data.finance || {}
       });
     } catch {
       // ignore
@@ -3346,20 +3354,26 @@ export default function AdminPanel() {
 
   };
 
-  const executiveSummary = adminDashboard?.summary || {
-    totalStudents: stats.users,
-    totalInstructors: 0,
-    totalRevenue: 0,
-    totalDue: 0,
-    outstandingAmount: 0,
-    attendanceRate: 0,
-    todayPayments: stats.todayPayments,
-    pendingFinanceReviews: orders.length,
-    pendingProfileRequests: profileRequests.length,
-    pendingAccessRequests: 0,
-    monthlyRevenue: 0,
-    previousMonthRevenue: 0,
-    monthDeltaPercent: 0
+  const dashboardSummary = adminDashboard?.summary || {};
+  const financeStats = stats.finance || {};
+  const executiveSummary = {
+    totalStudents: Number(financeStats.membershipStudents ?? dashboardSummary.totalStudents ?? stats.users ?? 0),
+    totalInstructors: Number(dashboardSummary.totalInstructors || 0),
+    totalRevenue: Number(dashboardSummary.totalRevenue || 0),
+    totalDue: Number(dashboardSummary.totalDue || 0),
+    outstandingAmount: Number(dashboardSummary.outstandingAmount || 0),
+    attendanceRate: Number(financeStats.attendanceRate ?? dashboardSummary.attendanceRate ?? stats.attendanceRate ?? 0),
+    todayPayments: Number(financeStats.todayPayments ?? dashboardSummary.todayPayments ?? stats.todayPayments ?? 0),
+    todayPaymentAmount: Number(financeStats.todayPaymentAmount || 0),
+    activeMemberships: Number(financeStats.activeMemberships || 0),
+    pendingFinanceReviews: Number(financeStats.pendingReceipts ?? dashboardSummary.pendingFinanceReviews ?? orders.length ?? 0),
+    pendingProfileRequests: Number(dashboardSummary.pendingProfileRequests ?? profileRequests.length ?? 0),
+    pendingAccessRequests: Number(dashboardSummary.pendingAccessRequests || 0),
+    monthlyRevenue: Number(dashboardSummary.monthlyRevenue || 0),
+    previousMonthRevenue: Number(dashboardSummary.previousMonthRevenue || 0),
+    monthDeltaPercent: Number(dashboardSummary.monthDeltaPercent || 0),
+    openMessages: Number(financeStats.openMessages ?? stats.openMessages ?? supportMessages.length ?? 0),
+    activeSchools: Number(financeStats.activeSchools ?? stats.activeSchools ?? schoolOverviewStats.activeRecords ?? 0)
   };
 
   const executiveQuickActions = [
@@ -3416,14 +3430,14 @@ export default function AdminPanel() {
 
   const modernKpiItems = [
     {
-      label: 'شاگردان',
+      label: 'شاگردان ممبرشیپ',
       value: Number(executiveSummary.totalStudents || stats.users || 0).toLocaleString('fa-AF-u-ca-persian'),
-      hint: `${Number(executiveSummary.totalInstructors || 0).toLocaleString('fa-AF-u-ca-persian')} استاد`
+      hint: `${Number(executiveSummary.activeMemberships || 0).toLocaleString('fa-AF-u-ca-persian')} ممبرشیپ مالی فعال`
     },
     {
       label: 'پرداخت امروز',
       value: Number(executiveSummary.todayPayments || stats.todayPayments || 0).toLocaleString('fa-AF-u-ca-persian'),
-      hint: `${Number(executiveSummary.pendingFinanceReviews || orders.length || 0).toLocaleString('fa-AF-u-ca-persian')} رسید در انتظار`
+      hint: `${Number(executiveSummary.todayPaymentAmount || 0).toLocaleString('fa-AF-u-ca-persian')} AFN / ${Number(executiveSummary.pendingFinanceReviews || orders.length || 0).toLocaleString('fa-AF-u-ca-persian')} رسید در انتظار`
     },
     {
       label: 'حضور عمومی',
@@ -3432,12 +3446,12 @@ export default function AdminPanel() {
     },
     {
       label: 'پیام‌ها',
-      value: Number(supportMessages.length || 0).toLocaleString('fa-AF-u-ca-persian'),
+      value: Number(executiveSummary.openMessages || supportMessages.length || 0).toLocaleString('fa-AF-u-ca-persian'),
       hint: `${Number(visibleAlerts.length || 0).toLocaleString('fa-AF-u-ca-persian')} هشدار فعال`
     },
     {
       label: 'مکاتب فعال',
-      value: Number(schoolOverviewStats.activeRecords || 0).toLocaleString('fa-AF-u-ca-persian'),
+      value: Number(executiveSummary.activeSchools || schoolOverviewStats.activeRecords || 0).toLocaleString('fa-AF-u-ca-persian'),
       hint: schoolOverviewStats.currentSchoolName
     }
   ];

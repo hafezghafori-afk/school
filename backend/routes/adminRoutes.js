@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const crypto = require('crypto');
 const User = require('../models/User');
+const AfghanSchool = require('../models/AfghanSchool');
 const AfghanStudent = require('../models/AfghanStudent');
 const AfghanTeacher = require('../models/AfghanTeacher');
 const Course = require('../models/Course');
@@ -12,6 +13,8 @@ const Enrollment = require('../models/Enrollment');
 const StudentMembership = require('../models/StudentMembership');
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
+const SchoolClass = require('../models/SchoolClass');
+const Attendance = require('../models/Attendance');
 const Schedule = require('../models/Schedule');
 const Homework = require('../models/Homework');
 const Grade = require('../models/Grade');
@@ -1346,23 +1349,97 @@ router.get('/stats', requireAuth, requireRole(['admin']), requirePermission('vie
       startDate.setHours(0, 0, 0, 0); // daily
     }
 
-    const schoolFilter = req.user?.isDemo === true && req.user?.schoolId ? { schoolId: req.user.schoolId } : {};
-    const [users, activeUsers, officialStudents, officialTeachers, courses, totalReceipts, pendingReceipts, approvedReceipts, periodApprovedReceipts] = await Promise.all([
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const tomorrowStart = new Date(todayStart);
+    tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+    const requestedSchoolId = String(
+      req.query?.schoolId
+      || req.headers?.['x-school-id']
+      || req.user?.activeSchoolId
+      || req.user?.schoolId
+      || ''
+    ).trim();
+    const schoolId = mongoose.Types.ObjectId.isValid(requestedSchoolId) ? requestedSchoolId : '';
+    const schoolObjectId = schoolId ? new mongoose.Types.ObjectId(schoolId) : null;
+    const schoolIdMatchValue = schoolObjectId ? { $in: [schoolObjectId, schoolId] } : schoolId;
+    const scopedClassIds = schoolId ? await SchoolClass.find({ schoolId }).distinct('_id') : [];
+    const schoolFilter = schoolId ? { schoolId } : (req.user?.isDemo === true && req.user?.schoolId ? { schoolId: req.user.schoolId } : {});
+    const classScopeFilter = schoolId ? { classId: { $in: scopedClassIds } } : {};
+    const schoolOrClassFilter = schoolId ? { $or: [{ schoolId: schoolIdMatchValue }, classScopeFilter] } : {};
+    const currentMembershipFilter = {
+      endedReason: { $ne: 'deleted_by_admin' },
+      isCurrent: { $ne: false },
+      status: { $in: ['active', 'pending', 'suspended', 'transferred_in', '', null] },
+      ...(schoolId ? schoolOrClassFilter : {})
+    };
+    const openContactFilter = {
+      ...(schoolId ? {
+        $and: [{
+          $or: [{ schoolId: schoolIdMatchValue }, { schoolId: null }, { schoolId: { $exists: false } }]
+        }]
+      } : {}),
+      $or: [
+        { status: 'new' },
+        { 'followUp.status': { $in: ['new', 'open', 'pending'] } }
+      ]
+    };
+    const attendanceFilter = {
+      date: { $gte: todayStart, $lt: tomorrowStart },
+      ...(schoolId ? classScopeFilter : {})
+    };
+
+    const [
+      users,
+      activeUsers,
+      officialStudents,
+      officialTeachers,
+      courses,
+      totalReceipts,
+      pendingReceipts,
+      approvedReceipts,
+      periodApprovedReceipts,
+      activeMemberships,
+      todayApprovedPayments,
+      todayPaymentAmountAgg,
+      todayAttendanceRows,
+      openMessages,
+      activeSchools
+    ] = await Promise.all([
       User.countDocuments(schoolFilter),
       User.countDocuments({ ...schoolFilter, status: 'active' }),
-      AfghanStudent.countDocuments({ status: 'active' }),
-      AfghanTeacher.countDocuments({ status: 'active' }),
+      AfghanStudent.countDocuments({ status: 'active', ...(schoolId ? { 'academicInfo.currentSchool': schoolId } : {}) }),
+      AfghanTeacher.countDocuments({ status: 'active', ...(schoolId ? { 'employmentInfo.currentSchool': schoolId } : {}) }),
       Course.countDocuments(),
-      FeePayment.countDocuments(schoolFilter),
-      FeePayment.countDocuments({ ...schoolFilter, status: 'pending' }),
-      FeePayment.countDocuments({ ...schoolFilter, status: 'approved' }),
-      FeePayment.countDocuments({ ...schoolFilter, status: 'approved', paidAt: { $gte: startDate } })
+      FeePayment.countDocuments(schoolOrClassFilter),
+      FeePayment.countDocuments({ ...schoolOrClassFilter, status: 'pending' }),
+      FeePayment.countDocuments({ ...schoolOrClassFilter, status: 'approved' }),
+      FeePayment.countDocuments({ ...schoolOrClassFilter, status: 'approved', paidAt: { $gte: startDate } }),
+      StudentMembership.find(currentMembershipFilter).select('_id student studentId afghanStudentId').lean(),
+      FeePayment.countDocuments({ ...schoolOrClassFilter, status: 'approved', paidAt: { $gte: todayStart, $lt: tomorrowStart } }),
+      FeePayment.aggregate([
+        { $match: { ...schoolOrClassFilter, status: 'approved', paidAt: { $gte: todayStart, $lt: tomorrowStart } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]),
+      Attendance.find(attendanceFilter).select('status').lean(),
+      ContactMessage.countDocuments(openContactFilter),
+      AfghanSchool.countDocuments({ status: 'active' })
     ]);
+    const membershipStudentKeys = new Set();
+    activeMemberships.forEach((item, index) => {
+      const key = String(item?.afghanStudentId || item?.studentId || item?.student || item?._id || `membership-${index}`);
+      if (key) membershipStudentKeys.add(key);
+    });
+    const attendedCount = todayAttendanceRows.filter((item) => ['present', 'late'].includes(String(item?.status || ''))).length;
+    const attendanceRate = todayAttendanceRows.length
+      ? Math.round((attendedCount / todayAttendanceRows.length) * 100)
+      : 0;
+    const membershipStudentCount = membershipStudentKeys.size;
 
     res.json({
       success: true,
       period,
-      users,
+      users: membershipStudentCount || users,
       activeUsers,
       officialStudents,
       officialTeachers,
@@ -1373,10 +1450,22 @@ router.get('/stats', requireAuth, requireRole(['admin']), requirePermission('vie
       orders: totalReceipts,
       pendingOrders: pendingReceipts,
       approvedOrders: approvedReceipts,
+      todayPayments: todayApprovedPayments,
       periodPayments: periodApprovedReceipts,
+      attendanceRate,
+      openMessages,
+      activeSchools,
       finance: {
+        membershipStudents: membershipStudentCount,
+        activeMemberships: activeMemberships.length,
+        todayPayments: todayApprovedPayments,
+        todayPaymentAmount: Number(todayPaymentAmountAgg[0]?.total || 0),
         pendingReceipts,
-        approvedPeriodReceipts: periodApprovedReceipts
+        approvedPeriodReceipts: periodApprovedReceipts,
+        attendanceRate,
+        attendanceRecordsToday: todayAttendanceRows.length,
+        openMessages,
+        activeSchools
       }
     });
   } catch (error) {
