@@ -7,12 +7,14 @@ require('../models/FeeOrder');
 require('../models/FeePayment');
 require('../models/FinanceRelief');
 require('../models/FinanceFeePlan');
+require('../models/FinanceBill');
 
 const StudentMembership = require('../models/StudentMembership');
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
 const FinanceRelief = require('../models/FinanceRelief');
 const FinanceFeePlan = require('../models/FinanceFeePlan');
+const FinanceBill = require('../models/FinanceBill');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 
 function toPlain(doc) {
@@ -108,14 +110,29 @@ function reliefIsActiveAt(relief = {}, asOf = new Date()) {
   return true;
 }
 
-function getOrderFeeTypes(order = {}) {
-  const lineItems = Array.isArray(order?.lineItems) ? order.lineItems : [];
+function getFinanceDocumentFeeTypes(document = {}) {
+  const lineItems = Array.isArray(document?.lineItems) ? document.lineItems : [];
   const lineItemTypes = lineItems
+    .filter((entry) => Math.max(0, Number(entry?.grossAmount ?? entry?.netAmount ?? entry?.reductionAmount ?? entry?.balanceAmount ?? 0) || 0) > 0 || normalizeText(entry?.label))
     .map((entry) => normalizeText(entry?.feeType))
     .filter(Boolean);
   if (lineItemTypes.length) return new Set(lineItemTypes);
-  const orderType = normalizeText(order?.orderType);
+  const feeScopes = Array.isArray(document?.feeScopes)
+    ? document.feeScopes.map((scope) => normalizeText(scope)).filter(Boolean)
+    : [];
+  if (feeScopes.length) return new Set(feeScopes);
+  const feeBreakdown = document?.feeBreakdown && typeof document.feeBreakdown === 'object' ? document.feeBreakdown : {};
+  const breakdownTypes = Object.entries(feeBreakdown)
+    .filter(([, amount]) => roundMoney(amount) > 0)
+    .map(([key]) => normalizeText(key))
+    .filter(Boolean);
+  if (breakdownTypes.length) return new Set(breakdownTypes);
+  const orderType = normalizeText(document?.orderType);
   return orderType ? new Set([orderType]) : new Set();
+}
+
+function getOrderFeeTypes(order = {}) {
+  return getFinanceDocumentFeeTypes(order);
 }
 
 function reliefAppliesToOrder(relief = {}, order = {}) {
@@ -170,6 +187,29 @@ function resolveMembershipFeePlan(membership = {}, feePlans = [], asOf = new Dat
   return candidates[0] || null;
 }
 
+function makeFinanceContextKey({ studentId = '', studentUserId = '', classId = '', academicYearId = '' } = {}) {
+  const studentKey = normalizeNullableId(studentId) || normalizeNullableId(studentUserId);
+  if (!studentKey) return '';
+  return [
+    studentKey,
+    normalizeNullableId(classId) || '*',
+    normalizeNullableId(academicYearId) || '*'
+  ].join('|');
+}
+
+function mergeUniqueById(primary = [], fallback = []) {
+  const seen = new Set();
+  const merged = [];
+  [...(Array.isArray(primary) ? primary : []), ...(Array.isArray(fallback) ? fallback : [])].forEach((item) => {
+    const key = normalizeNullableId(item?.id || item?._id || item?.orderNumber || item?.billNumber || item?.referenceNumber);
+    const dedupeKey = key || JSON.stringify(item);
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    merged.push(item);
+  });
+  return merged;
+}
+
 function buildAnomalySummary(items = []) {
   const rows = Array.isArray(items) ? items : [];
   const byType = {};
@@ -222,6 +262,7 @@ function buildMembershipFinanceAnomalies({
   orders = [],
   payments = [],
   reliefs = [],
+  bills = [],
   feePlans = [],
   asOf = new Date(),
   limit = 20
@@ -258,6 +299,7 @@ function buildMembershipFinanceAnomalies({
   const normalizedOrders = (Array.isArray(orders) ? orders : []).filter(Boolean);
   const normalizedPayments = (Array.isArray(payments) ? payments : []).filter(Boolean);
   const normalizedReliefs = (Array.isArray(reliefs) ? reliefs : []).filter(Boolean);
+  const normalizedBills = (Array.isArray(bills) ? bills : []).filter(Boolean);
   const openOrders = normalizedOrders.filter((item) => ['new', 'partial', 'overdue'].includes(normalizeText(item?.status)) && roundMoney(item?.outstandingAmount) > 0);
   const activeReliefs = normalizedReliefs.filter((item) => reliefIsActiveAt(item, now));
   const anomalies = [];
@@ -429,8 +471,10 @@ function buildMembershipFinanceAnomalies({
     const plannedAdmissionFee = roundMoney(feePlan?.admissionFee);
     const hasAdmissionOrder = normalizedOrders.some((order) => (
       normalizeText(order?.status) !== 'void' && (
-        normalizeText(order?.orderType) === 'admission' || getOrderFeeTypes(order).has('admission')
+        normalizeText(order?.orderType) === 'admission' || getFinanceDocumentFeeTypes(order).has('admission')
       )
+    )) || normalizedBills.some((bill) => (
+      normalizeText(bill?.status) !== 'void' && getFinanceDocumentFeeTypes(bill).has('admission')
     ));
     const hasActiveCharge = openOrders.some((order) => {
       const feeTypes = getOrderFeeTypes(order);
@@ -482,11 +526,13 @@ function formatMembershipLite(doc) {
     createdAt: item.createdAt || null,
     student: item.student ? {
       userId: normalizeNullableId(item.student?._id || item.student),
+      studentCoreId: normalizeNullableId(item.studentId?._id || item.studentId),
       fullName: normalizeText(item.studentId?.fullName),
       name: normalizeText(item.student?.name),
       email: normalizeText(item.student?.email)
     } : {
       userId: normalizeNullableId(item.student),
+      studentCoreId: normalizeNullableId(item.studentId?._id || item.studentId),
       fullName: normalizeText(item.studentId?.fullName),
       name: '',
       email: ''
@@ -512,8 +558,14 @@ function formatOrderLite(doc) {
     orderType: normalizeText(item.orderType),
     lineItems: Array.isArray(item.lineItems) ? item.lineItems.map((entry) => ({
       feeType: normalizeText(entry?.feeType),
-      label: normalizeText(entry?.label)
+      label: normalizeText(entry?.label),
+      grossAmount: roundMoney(entry?.grossAmount),
+      netAmount: roundMoney(entry?.netAmount),
+      reductionAmount: roundMoney(entry?.reductionAmount),
+      balanceAmount: roundMoney(entry?.balanceAmount)
     })) : [],
+    feeScopes: Array.isArray(item.feeScopes) ? item.feeScopes.map((entry) => normalizeText(entry)).filter(Boolean) : [],
+    feeBreakdown: item.feeBreakdown || {},
     status: normalizeText(item.status),
     currency: normalizeText(item.currency) || 'AFN',
     amountDue: roundMoney(item.amountDue),
@@ -525,6 +577,54 @@ function formatOrderLite(doc) {
     updatedAt: item.updatedAt || null,
     student: {
       userId: normalizeNullableId(item.student?._id || item.student),
+      studentCoreId: normalizeNullableId(item.studentId?._id || item.studentId),
+      fullName: normalizeText(item.studentId?.fullName),
+      name: normalizeText(item.student?.name),
+      email: normalizeText(item.student?.email)
+    },
+    schoolClass: item.classId ? {
+      id: normalizeNullableId(item.classId?._id || item.classId),
+      title: normalizeText(item.classId?.title)
+    } : null,
+    academicYear: item.academicYearId ? {
+      id: normalizeNullableId(item.academicYearId?._id || item.academicYearId),
+      title: normalizeText(item.academicYearId?.title)
+    } : null
+  };
+}
+
+function formatBillLite(doc) {
+  const item = toPlain(doc);
+  if (!item) return null;
+  const amountDue = roundMoney(item.amountDue);
+  const amountPaid = roundMoney(item.amountPaid);
+  return {
+    id: normalizeNullableId(item._id || item.id),
+    billNumber: formatFinanceCode(normalizeText(item.billNumber)),
+    title: normalizeText(item.periodLabel || item.billNumber),
+    orderType: '',
+    lineItems: Array.isArray(item.lineItems) ? item.lineItems.map((entry) => ({
+      feeType: normalizeText(entry?.feeType),
+      label: normalizeText(entry?.label),
+      grossAmount: roundMoney(entry?.grossAmount),
+      netAmount: roundMoney(entry?.netAmount),
+      reductionAmount: roundMoney(entry?.reductionAmount),
+      balanceAmount: roundMoney(entry?.balanceAmount)
+    })) : [],
+    feeScopes: Array.isArray(item.feeScopes) ? item.feeScopes.map((entry) => normalizeText(entry)).filter(Boolean) : [],
+    feeBreakdown: item.feeBreakdown || {},
+    status: normalizeText(item.status),
+    currency: normalizeText(item.currency) || 'AFN',
+    amountDue,
+    amountPaid,
+    outstandingAmount: roundMoney(amountDue - amountPaid),
+    dueDate: item.dueDate || null,
+    paidAt: item.paidAt || null,
+    createdAt: item.createdAt || null,
+    updatedAt: item.updatedAt || null,
+    student: {
+      userId: normalizeNullableId(item.student?._id || item.student),
+      studentCoreId: normalizeNullableId(item.studentId?._id || item.studentId),
       fullName: normalizeText(item.studentId?.fullName),
       name: normalizeText(item.student?.name),
       email: normalizeText(item.student?.email)
@@ -610,6 +710,7 @@ async function buildFinanceAnomalyReport({
 } = {}) {
   const membershipFilter = {};
   const orderFilter = { status: { $ne: 'void' } };
+  const billFilter = { status: { $ne: 'void' } };
   const paymentFilter = { status: { $in: ['pending', 'approved'] } };
   const reliefFilter = { status: 'active' };
   const feePlanFilter = { isActive: true, lifecycleStatus: 'active' };
@@ -617,12 +718,14 @@ async function buildFinanceAnomalyReport({
   if (normalizeNullableId(studentMembershipId)) {
     membershipFilter._id = studentMembershipId;
     orderFilter.studentMembershipId = studentMembershipId;
+    billFilter.studentMembershipId = studentMembershipId;
     paymentFilter.studentMembershipId = studentMembershipId;
     reliefFilter.studentMembershipId = studentMembershipId;
   }
   if (normalizeNullableId(classId)) {
     membershipFilter.classId = classId;
     orderFilter.classId = classId;
+    billFilter.classId = classId;
     paymentFilter.classId = classId;
     reliefFilter.classId = classId;
     feePlanFilter.classId = classId;
@@ -630,12 +733,13 @@ async function buildFinanceAnomalyReport({
   if (normalizeNullableId(academicYearId)) {
     membershipFilter.academicYearId = academicYearId;
     orderFilter.academicYearId = academicYearId;
+    billFilter.academicYearId = academicYearId;
     paymentFilter.academicYearId = academicYearId;
     reliefFilter.academicYearId = academicYearId;
     feePlanFilter.academicYearId = academicYearId;
   }
 
-  const [memberships, orders, payments, reliefs, feePlans] = await Promise.all([
+  const [memberships, orders, bills, payments, reliefs, feePlans] = await Promise.all([
     StudentMembership.find(membershipFilter)
       .populate('student', 'name email')
       .populate('studentId', 'fullName admissionNo')
@@ -644,6 +748,13 @@ async function buildFinanceAnomalyReport({
       .sort({ createdAt: -1 })
       .lean(),
     FeeOrder.find(orderFilter)
+      .populate('student', 'name email')
+      .populate('studentId', 'fullName admissionNo')
+      .populate('classId', 'title code gradeLevel section')
+      .populate('academicYearId', 'title code')
+      .sort({ dueDate: -1, createdAt: -1 })
+      .lean(),
+    FinanceBill.find(billFilter)
       .populate('student', 'name email')
       .populate('studentId', 'fullName admissionNo')
       .populate('classId', 'title code gradeLevel section')
@@ -675,12 +786,49 @@ async function buildFinanceAnomalyReport({
   );
 
   const orderMap = new Map();
+  const fallbackOrderMap = new Map();
   orders.forEach((item) => {
     const membershipId = normalizeNullableId(item?.studentMembershipId);
-    if (!membershipId) return;
-    const current = orderMap.get(membershipId) || [];
-    current.push(formatOrderLite(item));
-    orderMap.set(membershipId, current);
+    const formatted = formatOrderLite(item);
+    if (membershipId) {
+      const current = orderMap.get(membershipId) || [];
+      current.push(formatted);
+      orderMap.set(membershipId, current);
+      return;
+    }
+    const contextKey = makeFinanceContextKey({
+      studentId: item?.studentId?._id || item?.studentId,
+      studentUserId: item?.student?._id || item?.student,
+      classId: item?.classId?._id || item?.classId,
+      academicYearId: item?.academicYearId?._id || item?.academicYearId
+    });
+    if (!contextKey) return;
+    const current = fallbackOrderMap.get(contextKey) || [];
+    current.push(formatted);
+    fallbackOrderMap.set(contextKey, current);
+  });
+
+  const billMap = new Map();
+  const fallbackBillMap = new Map();
+  bills.forEach((item) => {
+    const membershipId = normalizeNullableId(item?.studentMembershipId);
+    const formatted = formatBillLite(item);
+    if (membershipId) {
+      const current = billMap.get(membershipId) || [];
+      current.push(formatted);
+      billMap.set(membershipId, current);
+      return;
+    }
+    const contextKey = makeFinanceContextKey({
+      studentId: item?.studentId?._id || item?.studentId,
+      studentUserId: item?.student?._id || item?.student,
+      classId: item?.classId?._id || item?.classId,
+      academicYearId: item?.academicYearId?._id || item?.academicYearId
+    });
+    if (!contextKey) return;
+    const current = fallbackBillMap.get(contextKey) || [];
+    current.push(formatted);
+    fallbackBillMap.set(contextKey, current);
   });
 
   const paymentMap = new Map();
@@ -703,9 +851,18 @@ async function buildFinanceAnomalyReport({
 
   const allItems = [];
   membershipMap.forEach((membership, membershipId) => {
+    const contextKey = makeFinanceContextKey({
+      studentId: membership?.student?.studentCoreId,
+      studentUserId: membership?.student?.userId,
+      classId: membership?.schoolClass?.id,
+      academicYearId: membership?.academicYear?.id
+    });
+    const membershipOrders = mergeUniqueById(orderMap.get(membershipId) || [], fallbackOrderMap.get(contextKey) || []);
+    const membershipBills = mergeUniqueById(billMap.get(membershipId) || [], fallbackBillMap.get(contextKey) || []);
     const report = buildMembershipFinanceAnomalies({
       membership,
-      orders: orderMap.get(membershipId) || [],
+      orders: membershipOrders,
+      bills: membershipBills,
       payments: paymentMap.get(membershipId) || [],
       reliefs: reliefMap.get(membershipId) || [],
       feePlans,
