@@ -165,6 +165,25 @@ function getFinanceDocumentAmountByType(document = {}, feeType = '') {
   return roundMoney(document?.feeBreakdown?.[normalizedType]);
 }
 
+function getFinanceDocumentGrossAmount(document = {}) {
+  const lineItems = Array.isArray(document?.lineItems) ? document.lineItems : [];
+  const lineTotal = lineItems.reduce((sum, entry) => sum + roundMoney(entry?.grossAmount ?? entry?.netAmount ?? entry?.reductionAmount ?? 0), 0);
+  if (lineTotal > 0) return roundMoney(lineTotal);
+  const breakdown = document?.feeBreakdown && typeof document.feeBreakdown === 'object' ? document.feeBreakdown : {};
+  const breakdownTotal = Object.values(breakdown).reduce((sum, amount) => sum + roundMoney(amount), 0);
+  if (breakdownTotal > 0) return roundMoney(breakdownTotal);
+  return roundMoney(document?.amountOriginal ?? document?.amountDue ?? document?.amount);
+}
+
+function isLikelyAdmissionDocumentForPlan(document = {}, feePlan = null) {
+  if (isAdmissionDocument(document)) return true;
+  const plannedAdmissionFee = roundMoney(feePlan?.admissionFee);
+  const plannedTuitionFee = roundMoney(feePlan?.tuitionFee ?? feePlan?.amount);
+  if (plannedAdmissionFee <= 0 || Math.abs(plannedAdmissionFee - plannedTuitionFee) <= 0.009) return false;
+  const documentAmount = getFinanceDocumentGrossAmount(document);
+  return documentAmount > 0 && Math.abs(documentAmount - plannedAdmissionFee) <= 0.009;
+}
+
 function getPlannedFeeAmount(plan = {}, feeType = '') {
   const normalizedType = normalizeText(feeType);
   if (normalizedType === 'tuition') return roundMoney(plan?.tuitionFee ?? plan?.amount);
@@ -543,11 +562,9 @@ function buildMembershipFinanceAnomalies({
     const financeDocuments = dedupeFinanceDocuments([...normalizedOrders, ...normalizedBills])
       .filter((document) => normalizeText(document?.status) !== 'void');
     const hasAdmissionOrder = normalizedOrders.some((order) => (
-      normalizeText(order?.status) !== 'void' && (
-        normalizeText(order?.orderType) === 'admission' || getFinanceDocumentFeeTypes(order).has('admission')
-      )
+      normalizeText(order?.status) !== 'void' && isLikelyAdmissionDocumentForPlan(order, feePlan)
     )) || normalizedBills.some((bill) => (
-      normalizeText(bill?.status) !== 'void' && getFinanceDocumentFeeTypes(bill).has('admission')
+      normalizeText(bill?.status) !== 'void' && isLikelyAdmissionDocumentForPlan(bill, feePlan)
     ));
     const hasActiveCharge = openOrders.some((order) => {
       const feeTypes = getOrderFeeTypes(order);
@@ -584,7 +601,7 @@ function buildMembershipFinanceAnomalies({
         const plannedAmount = getPlannedFeeAmount(feePlan, feeType);
         if (plannedAmount <= 0) return;
         const matchingDocuments = financeDocuments.filter((document) => {
-          if (feeType === 'tuition' && isAdmissionDocument(document)) return false;
+          if (feeType === 'tuition' && isLikelyAdmissionDocumentForPlan(document, feePlan)) return false;
           return getFinanceDocumentFeeTypes(document).has(feeType);
         });
         const activeDocuments = matchingDocuments.filter((document) => ['new', 'partial', 'overdue', 'paid'].includes(normalizeText(document?.status)));
