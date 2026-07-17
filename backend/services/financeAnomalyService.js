@@ -135,6 +135,39 @@ function getOrderFeeTypes(order = {}) {
   return getFinanceDocumentFeeTypes(order);
 }
 
+function getFinanceDocumentAmountByType(document = {}, feeType = '') {
+  const normalizedType = normalizeText(feeType);
+  if (!normalizedType) return 0;
+  const lineItems = Array.isArray(document?.lineItems) ? document.lineItems : [];
+  const lineAmount = lineItems
+    .filter((entry) => normalizeText(entry?.feeType) === normalizedType)
+    .reduce((sum, entry) => sum + roundMoney(entry?.grossAmount ?? entry?.netAmount ?? entry?.reductionAmount ?? 0), 0);
+  if (lineAmount > 0) return roundMoney(lineAmount);
+  return roundMoney(document?.feeBreakdown?.[normalizedType]);
+}
+
+function getPlannedFeeAmount(plan = {}, feeType = '') {
+  const normalizedType = normalizeText(feeType);
+  if (normalizedType === 'tuition') return roundMoney(plan?.tuitionFee ?? plan?.amount);
+  if (normalizedType === 'admission') return roundMoney(plan?.admissionFee);
+  if (normalizedType === 'exam') return roundMoney(plan?.examFee);
+  if (normalizedType === 'transport') return roundMoney(plan?.transportDefaultFee);
+  if (normalizedType === 'document') return roundMoney(plan?.documentFee);
+  if (normalizedType === 'other') return roundMoney(plan?.otherFee);
+  return 0;
+}
+
+function getFeeTypeLabel(feeType = '') {
+  return ({
+    tuition: 'فیس/شهریه',
+    admission: 'داخله',
+    exam: 'امتحان',
+    transport: 'ترانسپورت',
+    document: 'اسناد',
+    other: 'سایر فیس'
+  }[normalizeText(feeType)] || feeType || 'فیس');
+}
+
 function reliefAppliesToOrder(relief = {}, order = {}) {
   const scope = normalizeText(relief?.scope) || 'all';
   if (scope === 'all') return true;
@@ -208,6 +241,25 @@ function mergeUniqueById(primary = [], fallback = []) {
     merged.push(item);
   });
   return merged;
+}
+
+function dedupeFinanceDocuments(documents = []) {
+  const seen = new Set();
+  const sourceBillIds = new Set(
+    (Array.isArray(documents) ? documents : [])
+      .map((item) => normalizeNullableId(item?.sourceBillId))
+      .filter(Boolean)
+  );
+  const rows = [];
+  (Array.isArray(documents) ? documents : []).forEach((item) => {
+    const id = normalizeNullableId(item?.id || item?._id);
+    if (id && normalizeText(item?.documentKind) === 'bill' && sourceBillIds.has(id)) return;
+    const key = normalizeNullableId(item?.sourceBillId) || id || normalizeText(item?.orderNumber || item?.billNumber || item?.title);
+    if (key && seen.has(key)) return;
+    if (key) seen.add(key);
+    rows.push(item);
+  });
+  return rows;
 }
 
 function buildAnomalySummary(items = []) {
@@ -469,6 +521,8 @@ function buildMembershipFinanceAnomalies({
   if (isCurrentMembership(membershipItem)) {
     const feePlan = resolveMembershipFeePlan(membershipItem, feePlans, now);
     const plannedAdmissionFee = roundMoney(feePlan?.admissionFee);
+    const financeDocuments = dedupeFinanceDocuments([...normalizedOrders, ...normalizedBills])
+      .filter((document) => normalizeText(document?.status) !== 'void');
     const hasAdmissionOrder = normalizedOrders.some((order) => (
       normalizeText(order?.status) !== 'void' && (
         normalizeText(order?.orderType) === 'admission' || getFinanceDocumentFeeTypes(order).has('admission')
@@ -503,6 +557,94 @@ function buildMembershipFinanceAnomalies({
         at: membershipItem?.enrolledAt || membershipItem?.createdAt || null,
         feePlanId: normalizeNullableId(feePlan?._id || feePlan?.id),
         tags: ['membership', 'admission', 'fee_plan']
+      });
+    }
+
+    if (feePlan) {
+      ['tuition', 'exam', 'transport', 'document', 'other'].forEach((feeType) => {
+        const plannedAmount = getPlannedFeeAmount(feePlan, feeType);
+        if (plannedAmount <= 0) return;
+        const matchingDocuments = financeDocuments.filter((document) => getFinanceDocumentFeeTypes(document).has(feeType));
+        const activeDocuments = matchingDocuments.filter((document) => ['new', 'partial', 'overdue', 'paid'].includes(normalizeText(document?.status)));
+        const totalIssuedAmount = roundMoney(matchingDocuments.reduce((sum, document) => sum + getFinanceDocumentAmountByType(document, feeType), 0));
+        const feeLabel = getFeeTypeLabel(feeType);
+
+        if (!matchingDocuments.length) {
+          anomalies.push({
+            id: `fee-missing-${feeType}-${membershipId || normalizeNullableId(membershipItem?.id || membershipItem?._id || studentName)}`,
+            anomalyType: 'planned_fee_missing',
+            severity: feeType === 'tuition' ? 'critical' : 'warning',
+            actionRequired: true,
+            title: `بل ${feeLabel} صادر نشده`,
+            description: `${studentName} در پلان مالی صنف ${formatAmountLabel(plannedAmount, currency)} ${feeLabel} دارد، اما برای این عضویت بل معتبر دیده نشد.`,
+            studentName,
+            studentUserId,
+            classTitle,
+            classId,
+            academicYearTitle,
+            academicYearId,
+            membershipId,
+            referenceNumber: normalizeText(feePlan?.title) || membershipId,
+            amount: plannedAmount,
+            amountLabel: formatAmountLabel(plannedAmount, currency),
+            status: normalizeText(membershipItem?.status),
+            at: membershipItem?.enrolledAt || membershipItem?.createdAt || null,
+            feePlanId: normalizeNullableId(feePlan?._id || feePlan?.id),
+            tags: ['membership', feeType, 'fee_plan', 'missing_bill']
+          });
+          return;
+        }
+
+        if (activeDocuments.length > 1) {
+          anomalies.push({
+            id: `fee-duplicate-${feeType}-${membershipId || normalizeNullableId(membershipItem?.id || membershipItem?._id || studentName)}`,
+            anomalyType: 'duplicate_fee_bill',
+            severity: 'warning',
+            actionRequired: true,
+            title: `بل تکراری ${feeLabel}`,
+            description: `${studentName} برای ${feeLabel} بیش از یک بل فعال دارد. تعداد سندهای فعال: ${activeDocuments.length.toLocaleString('fa-AF-u-ca-persian')}.`,
+            studentName,
+            studentUserId,
+            classTitle,
+            classId,
+            academicYearTitle,
+            academicYearId,
+            membershipId,
+            referenceNumber: activeDocuments.map((document) => normalizeText(document?.orderNumber || document?.billNumber || document?.title)).filter(Boolean).slice(0, 3).join('، '),
+            amount: totalIssuedAmount,
+            amountLabel: formatAmountLabel(totalIssuedAmount, currency),
+            status: normalizeText(membershipItem?.status),
+            at: activeDocuments[0]?.createdAt || activeDocuments[0]?.dueDate || null,
+            tags: ['membership', feeType, 'duplicate_bill']
+          });
+        }
+
+        if (totalIssuedAmount > 0 && totalIssuedAmount + 0.009 < plannedAmount) {
+          const difference = roundMoney(plannedAmount - totalIssuedAmount);
+          anomalies.push({
+            id: `fee-underbilled-${feeType}-${membershipId || normalizeNullableId(membershipItem?.id || membershipItem?._id || studentName)}`,
+            anomalyType: 'fee_underbilled',
+            severity: feeType === 'tuition' ? 'critical' : 'warning',
+            actionRequired: true,
+            title: `مبلغ بل ${feeLabel} کمتر از پلان است`,
+            description: `${studentName} در پلان مالی ${formatAmountLabel(plannedAmount, currency)} ${feeLabel} دارد، اما مبلغ صادرشده ${formatAmountLabel(totalIssuedAmount, currency)} است.`,
+            studentName,
+            studentUserId,
+            classTitle,
+            classId,
+            academicYearTitle,
+            academicYearId,
+            membershipId,
+            referenceNumber: normalizeText(feePlan?.title) || membershipId,
+            secondaryReference: matchingDocuments.map((document) => normalizeText(document?.orderNumber || document?.billNumber || document?.title)).filter(Boolean).slice(0, 3).join('، '),
+            amount: difference,
+            amountLabel: formatAmountLabel(difference, currency),
+            status: normalizeText(membershipItem?.status),
+            at: matchingDocuments[0]?.createdAt || matchingDocuments[0]?.dueDate || null,
+            feePlanId: normalizeNullableId(feePlan?._id || feePlan?.id),
+            tags: ['membership', feeType, 'fee_plan', 'underbilled']
+          });
+        }
       });
     }
   }
@@ -553,6 +695,8 @@ function formatOrderLite(doc) {
   if (!item) return null;
   return {
     id: normalizeNullableId(item._id || item.id),
+    documentKind: 'order',
+    sourceBillId: normalizeNullableId(item.sourceBillId?._id || item.sourceBillId),
     orderNumber: formatFinanceCode(normalizeText(item.orderNumber)),
     title: normalizeText(item.title),
     orderType: normalizeText(item.orderType),
@@ -600,6 +744,7 @@ function formatBillLite(doc) {
   const amountPaid = roundMoney(item.amountPaid);
   return {
     id: normalizeNullableId(item._id || item.id),
+    documentKind: 'bill',
     billNumber: formatFinanceCode(normalizeText(item.billNumber)),
     title: normalizeText(item.periodLabel || item.billNumber),
     orderType: '',
@@ -776,7 +921,7 @@ async function buildFinanceAnomalyReport({
       .sort({ endDate: 1, createdAt: -1 })
       .lean(),
     FinanceFeePlan.find(feePlanFilter)
-      .select('title admissionFee classId academicYearId effectiveFrom effectiveTo isDefault priority isActive lifecycleStatus currency')
+      .select('title tuitionFee admissionFee examFee documentFee transportDefaultFee otherFee amount classId academicYearId effectiveFrom effectiveTo isDefault priority isActive lifecycleStatus currency')
       .sort({ isDefault: -1, priority: 1, createdAt: -1 })
       .lean()
   ]);

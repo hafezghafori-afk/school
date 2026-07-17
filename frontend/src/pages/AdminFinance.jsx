@@ -636,7 +636,10 @@ const FINANCE_ANOMALY_UI_LABELS = {
   relief_expiring: 'تسهیل رو به ختم',
   long_overdue_balance: 'سررسید گذشته بیش از سه ماه',
   pending_payment_stalled: 'پرداخت معطل در بررسی',
-  admission_missing: 'بل داخله صادر نشده'
+  admission_missing: 'بل داخله صادر نشده',
+  planned_fee_missing: 'بل فیس صادر نشده',
+  duplicate_fee_bill: 'بل تکراری',
+  fee_underbilled: 'مبلغ کمتر از پلان'
 };
 
 const FINANCE_ANOMALY_WORKFLOW_LABELS = {
@@ -882,6 +885,7 @@ const FINANCE_SECTION_LABELS = {
   payments: 'پرداخت‌ها',
   orders: 'بل‌ها و تعهدات',
   discounts: 'تخفیف و معافیت',
+  anomalies: 'ناهنجاری‌ها',
   reports: 'گزارش‌ها',
   settings: 'تنظیمات و پلان مالی'
 };
@@ -891,6 +895,7 @@ const FINANCE_SECTION_DESCRIPTIONS = {
   payments: 'ثبت پرداخت، بررسی رسیدها و مدیریت صندوق روزانه.',
   orders: 'صدور بل، بازبینی بدهی‌ها و مدیریت تعهدات مالی متعلمین.',
   discounts: 'تخفیف‌ها، معافیت‌ها و رجیستر مزایای مالی متعلمین.',
+  anomalies: 'کنترل هوشمند مغایرت‌ها؛ بل صادرنشده، بل تکراری، مبلغ کمتر از پلان و هشدارهای نیازمند اقدام.',
   reports: 'گزارش‌های تحلیلی، کاش‌فلو، بدهکاران و خروجی مدیریتی.',
   settings: 'پلان فیس، بستن ماه مالی، یادآوری و پیوند به فرماندهی دولت.'
 };
@@ -1549,6 +1554,11 @@ export default function AdminFinance() {
       hint: `${activeFinanceReliefCount} ثبت فعال`
     },
     {
+      key: 'anomalies',
+      label: FINANCE_SECTION_LABELS.anomalies,
+      hint: `${anomalies.length || anomalySummary?.total || 0} مورد بررسی`
+    },
+    {
       key: 'reports',
       label: FINANCE_SECTION_LABELS.reports,
       hint: `${byClass.length} ردیف تحلیلی`
@@ -1558,7 +1568,7 @@ export default function AdminFinance() {
       label: FINANCE_SECTION_LABELS.settings,
       hint: `${feePlans.length} پلان فیس`
     }
-  ]), [summary?.pendingReceipts, pendingReceipts.length, openBillsCount, activeFinanceReliefCount, byClass.length, feePlans.length]);
+  ]), [summary?.pendingReceipts, pendingReceipts.length, openBillsCount, activeFinanceReliefCount, anomalies.length, anomalySummary?.total, byClass.length, feePlans.length]);
   const indexedStudents = useMemo(() => (
     students.map((student) => ({
       student,
@@ -4834,20 +4844,6 @@ export default function AdminFinance() {
             <span>{item.hint}</span>
           </button>
         ))}
-        <button
-          type="button"
-          className={`finance-shell-tab finance-shell-link ${activeSection === 'reports' ? 'active' : ''}`}
-          data-testid="finance-anomalies-link"
-          onClick={() => {
-            setActiveSection('reports');
-            window.setTimeout(() => {
-              document.querySelector('[data-testid="finance-anomalies-card"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }, 80);
-          }}
-        >
-          <strong>ناهنجاری‌های مالی</strong>
-          <span>{visibleAnomalySummary.unresolved || visibleAnomalySummary.total || 0} مورد نیازمند بررسی</span>
-        </button>
         <Link
           to="/academy"
           className="finance-shell-tab finance-shell-link"
@@ -6980,8 +6976,8 @@ export default function AdminFinance() {
         </div>
       </div>
 
-      <div className="finance-grid" data-finance-section="overview reports settings">
-        <div className="finance-card" data-finance-section="overview reports settings" data-testid="finance-anomalies-card">
+      <div className="finance-grid" data-finance-section="overview anomalies settings">
+        <div className="finance-card" data-finance-section="overview anomalies settings" data-testid="finance-anomalies-card">
           <div className="finance-card-head">
             <div>
               <h3>ناهجاری‌های مالی</h3>

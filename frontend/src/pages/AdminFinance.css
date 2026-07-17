@@ -13,6 +13,7 @@
 .finance-page[data-active-section="payments"] [data-finance-section]:not([data-finance-section~="payments"]),
 .finance-page[data-active-section="orders"] [data-finance-section]:not([data-finance-section~="orders"]),
 .finance-page[data-active-section="discounts"] [data-finance-section]:not([data-finance-section~="discounts"]),
+.finance-page[data-active-section="anomalies"] [data-finance-section]:not([data-finance-section~="anomalies"]),
 .finance-page[data-active-section="reports"] [data-finance-section]:not([data-finance-section~="reports"]),
 .finance-page[data-active-section="settings"] [data-finance-section]:not([data-finance-section~="settings"]) {
   display: none !important;
