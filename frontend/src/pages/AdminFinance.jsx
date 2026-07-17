@@ -1121,6 +1121,7 @@ const buildAnomalyActionPayload = (item = {}, extras = {}) => ({
     title: String(item?.title || '').trim(),
     description: String(item?.description || '').trim(),
     severity: String(item?.severity || '').trim(),
+    membershipId: String(item?.membershipId || item?.studentMembershipId || '').trim(),
     studentMembershipId: String(item?.membershipId || item?.studentMembershipId || '').trim(),
     studentUserId: String(item?.studentUserId || '').trim(),
     studentName: String(item?.studentName || '').trim(),
@@ -4731,6 +4732,25 @@ export default function AdminFinance() {
     }
   };
 
+  const settleAdmissionAnomaly = async (mode = 'paid') => {
+    if (!selectedAnomaly) return;
+    try {
+      setBusy(true);
+      const data = await postJson(
+        `${API_BASE}/api/finance/admin/anomalies/${selectedAnomaly.id}/settle-admission`,
+        buildAnomalyActionPayload(selectedAnomaly, {
+          mode,
+          note: anomalyWorkflowForm.note
+        })
+      );
+      setMessage(data.message || 'داخله ثبت شد و ناهنجاری مالی حل شد');
+      await loadAll();
+    } catch (err) {
+      setMessage(err.message);
+      setBusy(false);
+    }
+  };
+
   const exportCsv = async () => {
     try {
       const res = await fetch(buildScopedReportUrl('/api/finance/admin/reports/export.csv'), {
@@ -4802,14 +4822,20 @@ export default function AdminFinance() {
             <span>{item.hint}</span>
           </button>
         ))}
-        <Link
-          to="/admin-financial-memberships"
-          className="finance-shell-tab finance-shell-link"
-          data-testid="finance-membership-link"
+        <button
+          type="button"
+          className={`finance-shell-tab finance-shell-link ${activeSection === 'reports' ? 'active' : ''}`}
+          data-testid="finance-anomalies-link"
+          onClick={() => {
+            setActiveSection('reports');
+            window.setTimeout(() => {
+              document.querySelector('[data-testid="finance-anomalies-card"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 80);
+          }}
         >
-          <strong>ممبرشیپ مالی</strong>
-          <span>{financeMembershipStudentCount} شاگرد فعال</span>
-        </Link>
+          <strong>ناهنجاری‌های مالی</strong>
+          <span>{visibleAnomalySummary.unresolved || visibleAnomalySummary.total || 0} مورد نیازمند بررسی</span>
+        </button>
         <Link
           to="/academy"
           className="finance-shell-tab finance-shell-link"
@@ -7099,6 +7125,12 @@ export default function AdminFinance() {
                         <button type="button" className="secondary" onClick={saveAnomalyNote} disabled={busy || !selectedAnomaly} data-testid="anomaly-note-button">ثبت یادداشت</button>
                         <button type="button" className="secondary" onClick={assignAnomaly} disabled={busy || !selectedAnomaly} data-testid="anomaly-assign-button">ارجاع</button>
                         <button type="button" className="secondary" onClick={snoozeAnomaly} disabled={busy || !selectedAnomaly || !anomalyWorkflowForm.snoozedUntil} data-testid="anomaly-snooze-button">تعویق</button>
+                        {selectedAnomaly.anomalyType === 'admission_missing' && (
+                          <>
+                            <button type="button" className="secondary" onClick={() => settleAdmissionAnomaly('paid')} disabled={busy || !selectedAnomaly} data-testid="anomaly-admission-paid-button">داخله پرداخت شده</button>
+                            <button type="button" className="secondary" onClick={() => settleAdmissionAnomaly('waived')} disabled={busy || !selectedAnomaly} data-testid="anomaly-admission-waived-button">معاف/تخفیف کامل</button>
+                          </>
+                        )}
                         <button type="button" onClick={resolveAnomaly} disabled={busy || !selectedAnomaly} data-testid="anomaly-resolve-button">ثبت حل‌شدن</button>
                       </div>
                     </div>

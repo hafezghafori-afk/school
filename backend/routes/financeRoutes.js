@@ -301,6 +301,25 @@ const generateBillNumber = async () => {
   return `BL-${y}${mm}-${String(serial).padStart(4, '0')}`;
 };
 
+const generateFeeOrderNumber = async (prefix = 'FO') => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const mm = String(m + 1).padStart(2, '0');
+  const monthStart = new Date(y, m, 1, 0, 0, 0, 0);
+  const monthEnd = new Date(y, m + 1, 1, 0, 0, 0, 0);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const serial = await FeeOrder.countDocuments({
+      createdAt: { $gte: monthStart, $lt: monthEnd },
+      orderNumber: { $regex: `^${prefix}-${y}${mm}-` }
+    }) + 1 + attempt;
+    const candidate = `${prefix}-${y}${mm}-${String(serial).padStart(4, '0')}`;
+    const exists = await FeeOrder.exists({ orderNumber: candidate });
+    if (!exists) return candidate;
+  }
+  return `${prefix}-${y}${mm}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+};
+
 const normalizeBillPeriodType = (value = '') => {
   if (value === 'monthly') return 'monthly';
   if (value === 'custom') return 'custom';
@@ -5343,6 +5362,7 @@ const resolveFinanceAnomalyActionTitle = (action = '') => ({
   assign: 'finance_anomaly_assign',
   snooze: 'finance_anomaly_snooze',
   resolve: 'finance_anomaly_resolve',
+  admission_settle: 'finance_anomaly_admission_settle',
   note: 'finance_anomaly_note'
 }[String(action || '').trim()] || 'finance_anomaly_update');
 
@@ -6683,6 +6703,167 @@ router.post('/admin/anomalies/:id/resolve', requireAuth, requireRole(['admin']),
     return res.status(code === 'finance_anomaly_id_required' ? 400 : 500).json({
       success: false,
       message: code === 'finance_anomaly_id_required' ? 'شناسه ناهنجاری مالی معتبر نیست.' : 'حل ناهنجاری مالی ممکن نشد'
+    });
+  }
+});
+
+router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const mode = String(req.body?.mode || '').trim();
+    if (!['paid', 'waived'].includes(mode)) {
+      return res.status(400).json({ success: false, message: 'نوع رفع داخله معتبر نیست.' });
+    }
+
+    const note = String(req.body?.note || '').trim();
+    const snapshot = req.body?.snapshot || {};
+    const item = await ensureFinanceAnomalyCase({ anomalyId: req.params.id, snapshot });
+    if (String(item.anomalyType || '').trim() !== 'admission_missing') {
+      return res.status(400).json({ success: false, message: 'این گزینه فقط برای ناهنجاری بل داخله قابل استفاده است.' });
+    }
+
+    const membershipId = String(item.studentMembershipId || snapshot?.studentMembershipId || snapshot?.membershipId || '').trim();
+    if (!membershipId || !mongoose.Types.ObjectId.isValid(membershipId)) {
+      return res.status(400).json({ success: false, message: 'عضویت مالی شاگرد برای ثبت داخله پیدا نشد.' });
+    }
+
+    const membership = await StudentMembership.findById(membershipId)
+      .populate('student', 'name email')
+      .populate('studentId', 'fullName admissionNo')
+      .lean();
+    if (!membership?._id || !membership?.student) {
+      return res.status(404).json({ success: false, message: 'عضویت مالی شاگرد معتبر پیدا نشد.' });
+    }
+
+    const existingAdmissionOrder = await FeeOrder.findOne({
+      studentMembershipId: membership._id,
+      status: { $ne: 'void' },
+      $or: [
+        { orderType: 'admission' },
+        { 'lineItems.feeType': 'admission' }
+      ]
+    });
+
+    let feeOrder = existingAdmissionOrder;
+    const now = new Date();
+    if (!feeOrder) {
+      const classId = membership.classId || null;
+      const academicYearId = membership.academicYearId || membership.academicYear || null;
+      const feePlan = await FinanceFeePlan.findOne({
+        isActive: true,
+        lifecycleStatus: 'active',
+        $and: [
+          { $or: [{ classId }, { classId: null }, { classId: { $exists: false } }] },
+          { $or: [{ academicYearId }, { academicYearId: null }, { academicYearId: { $exists: false } }] }
+        ]
+      }).sort({ isDefault: -1, priority: 1, createdAt: -1 }).lean();
+      const plannedAmount = Math.max(0, Number(feePlan?.admissionFee || item.amount || snapshot?.amount || 0) || 0);
+      if (plannedAmount <= 0) {
+        return res.status(400).json({ success: false, message: 'مبلغ داخله در پلان مالی یا ناهنجاری پیدا نشد.' });
+      }
+
+      const isWaived = mode === 'waived';
+      feeOrder = new FeeOrder({
+        orderNumber: await generateFeeOrderNumber('AD'),
+        title: isWaived ? 'داخله - معافیت کامل' : 'داخله - پرداخت شده',
+        orderType: 'admission',
+        source: 'manual',
+        student: membership.student,
+        studentId: membership.studentId || null,
+        studentMembershipId: membership._id,
+        course: membership.course || null,
+        classId,
+        academicYearId,
+        periodType: 'custom',
+        periodLabel: 'داخله',
+        currency: String(feePlan?.currency || 'AFN').trim().toUpperCase() || 'AFN',
+        amountOriginal: plannedAmount,
+        amountPaid: isWaived ? 0 : plannedAmount,
+        dueDate: now,
+        paidAt: isWaived ? null : now,
+        note: [
+          isWaived ? 'داخله به‌عنوان معاف/تخفیف کامل ثبت شد.' : 'داخله قبلاً دریافت شده و توسط مدیر مالی تایید شد.',
+          note
+        ].filter(Boolean).join(' '),
+        adjustments: isWaived ? [{
+          type: 'waiver',
+          amount: plannedAmount,
+          reason: note || 'معافیت کامل داخله از ناهنجاری مالی',
+          createdBy: req.user?.id || null,
+          createdAt: now
+        }] : [],
+        lineItems: [{
+          feeType: 'admission',
+          label: 'داخله',
+          sourcePlanId: feePlan?._id || null,
+          periodKey: 'admission',
+          grossAmount: plannedAmount,
+          reductionAmount: isWaived ? plannedAmount : 0,
+          netAmount: isWaived ? 0 : plannedAmount,
+          paidAmount: isWaived ? 0 : plannedAmount,
+          balanceAmount: 0,
+          status: isWaived ? 'waived' : 'paid'
+        }],
+        createdBy: req.user?.id || null
+      });
+      await feeOrder.save();
+    }
+
+    item.status = 'resolved';
+    item.snoozedUntil = null;
+    item.resolvedAt = now;
+    item.resolvedBy = req.user.id;
+    item.resolutionNote = note || (mode === 'waived' ? 'داخله به‌عنوان معاف/تخفیف کامل ثبت شد.' : 'داخله به‌عنوان پرداخت‌شده ثبت شد.');
+    item.latestNote = item.resolutionNote;
+    item.latestActionAt = now;
+    item.latestActionBy = req.user.id;
+    item.targetType = 'FeeOrder';
+    item.targetId = String(feeOrder._id || '');
+    item.referenceNumber = String(feeOrder.orderNumber || item.referenceNumber || '').trim();
+    appendFinanceAnomalyHistory(item, {
+      action: 'resolved',
+      actorId: req.user.id,
+      status: 'resolved',
+      note: `${item.resolutionNote} سند: ${feeOrder.orderNumber || ''}`.trim(),
+      assignedLevel: item.assignedLevel || '',
+      at: now
+    });
+    await item.save();
+
+    await logActivity({
+      req,
+      action: resolveFinanceAnomalyActionTitle('admission_settle'),
+      targetType: 'FeeOrder',
+      targetId: String(feeOrder._id || ''),
+      meta: {
+        anomalyId: item.anomalyId,
+        anomalyType: item.anomalyType,
+        mode,
+        orderNumber: feeOrder.orderNumber,
+        amount: feeOrder.amountOriginal,
+        note,
+        classId: item.classId,
+        studentMembershipId: item.studentMembershipId
+      }
+    });
+
+    const refreshed = await buildFinanceAnomalyResponseItem(item);
+    return res.json({
+      success: true,
+      item: refreshed,
+      feeOrder: {
+        id: String(feeOrder._id || ''),
+        orderNumber: String(feeOrder.orderNumber || ''),
+        status: String(feeOrder.status || '')
+      },
+      message: mode === 'waived'
+        ? 'داخله به‌عنوان معاف/تخفیف کامل ثبت شد و ناهنجاری حل شد'
+        : 'داخله به‌عنوان پرداخت‌شده ثبت شد و ناهنجاری حل شد'
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'ثبت رفع خودکار داخله ممکن نشد',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
