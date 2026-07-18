@@ -1299,6 +1299,8 @@ export default function AdminFinance() {
   const [receiptSearchTerm, setReceiptSearchTerm] = useState('');
   const [orderSearchTerm, setOrderSearchTerm] = useState('');
   const [orderStatusFilter, setOrderStatusFilter] = useState('all');
+  const [orderClassFilter, setOrderClassFilter] = useState('all');
+  const [billIssuanceFilter, setBillIssuanceFilter] = useState('all');
   const [discountRegistrySearch, setDiscountRegistrySearch] = useState('');
   const [exemptionRegistrySearch, setExemptionRegistrySearch] = useState('');
   const [reliefRegistrySearch, setReliefRegistrySearch] = useState('');
@@ -1676,6 +1678,7 @@ export default function AdminFinance() {
   const filteredBills = useMemo(() => (
     bills.filter((bill) => (
       (orderStatusFilter === 'all' || String(bill?.status || '').trim() === orderStatusFilter)
+      && (orderClassFilter === 'all' || getFinanceRecordClassId(bill) === orderClassFilter)
       && includesFinanceSearch([
         bill?.billNumber,
         bill?.title,
@@ -1687,7 +1690,40 @@ export default function AdminFinance() {
         bill?.status
       ], orderSearchTerm)
     ))
-  ), [bills, orderSearchTerm, orderStatusFilter]);
+  ), [bills, orderSearchTerm, orderStatusFilter, orderClassFilter]);
+  const billIssuanceRows = useMemo(() => {
+    const rows = new Map();
+    (Array.isArray(studentMemberships) ? studentMemberships : [])
+      .filter(isCurrentFinanceMembership)
+      .forEach((membership) => {
+        const classId = toFinanceOptionId(membership?.classId);
+        const studentUserId = toFinanceOptionId(membership?.studentId || membership?.student?._id);
+        const studentCoreId = toFinanceOptionId(membership?.studentCoreId);
+        if (!classId || (!studentUserId && !studentCoreId)) return;
+        const key = `${classId}:${studentUserId || studentCoreId}`;
+        const studentBills = bills.filter((bill) => {
+          const billUserId = toFinanceOptionId(bill?.student?.userId || bill?.student?._id);
+          const billCoreId = toFinanceOptionId(bill?.student?.studentId);
+          return getFinanceRecordClassId(bill) === classId
+            && ((studentUserId && billUserId === studentUserId) || (studentCoreId && billCoreId === studentCoreId));
+        });
+        rows.set(key, {
+          key,
+          classId,
+          classTitle: membership?.classTitle || membership?.class?.title || membership?.schoolClass?.title || classOptions.find((item) => item.classId === classId)?.title || '---',
+          studentName: membership?.studentName || membership?.student?.name || membership?.fullName || '---',
+          admissionNo: membership?.admissionNo || membership?.studentCode || '',
+          issued: studentBills.length > 0,
+          billCount: studentBills.length,
+          billNumbers: studentBills.map((bill) => bill.billNumber).filter(Boolean)
+        });
+      });
+    return [...rows.values()].filter((row) => (
+      (orderClassFilter === 'all' || row.classId === orderClassFilter)
+      && (billIssuanceFilter === 'all' || (billIssuanceFilter === 'issued' ? row.issued : !row.issued))
+      && includesFinanceSearch([row.studentName, row.admissionNo, row.classTitle, ...row.billNumbers], orderSearchTerm)
+    ));
+  }, [studentMemberships, bills, classOptions, orderClassFilter, billIssuanceFilter, orderSearchTerm]);
   const orderWorkspaceStats = useMemo(() => {
     const now = new Date();
     const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -6947,6 +6983,52 @@ export default function AdminFinance() {
               <option value="void">باطل</option>
             </select>
           </label>
+          <label className="finance-inline-filter">
+            <span>صنف</span>
+            <select value={orderClassFilter} onChange={(e) => setOrderClassFilter(e.target.value)} data-testid="bill-class-filter">
+              <option value="all">همه صنف‌ها</option>
+              {classOptions.map((item) => (
+                <option key={`bill-filter-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>
+              ))}
+            </select>
+          </label>
+          <label className="finance-inline-filter">
+            <span>وضعیت صدور</span>
+            <select value={billIssuanceFilter} onChange={(e) => setBillIssuanceFilter(e.target.value)} data-testid="bill-issuance-filter">
+              <option value="all">همه شاگردان</option>
+              <option value="issued">بل صادر شده</option>
+              <option value="not-issued">بل صادر نشده</option>
+            </select>
+          </label>
+        </div>
+        <div className="finance-issuance-summary" data-testid="bill-issuance-results">
+          <div className="finance-card-head">
+            <div>
+              <h4>وضعیت صدور بل شاگردان</h4>
+              <p className="muted">بر اساس عضویت فعال شاگردان در صنف انتخاب‌شده</p>
+            </div>
+            <div className="finance-chip-group">
+              <span className="finance-chip">{billIssuanceRows.length} شاگرد</span>
+              <span className="finance-chip finance-chip-emerald">{billIssuanceRows.filter((row) => row.issued).length} صادر شده</span>
+              <span className="finance-chip finance-chip-muted">{billIssuanceRows.filter((row) => !row.issued).length} صادر نشده</span>
+            </div>
+          </div>
+          {!billIssuanceRows.length && <p className="muted">شاگردی مطابق این فیلتر پیدا نشد.</p>}
+          {!!billIssuanceRows.length && (
+            <div className="finance-issuance-list">
+              {billIssuanceRows.slice(0, 100).map((row) => (
+                <div key={row.key} className="mini-row">
+                  <span className="finance-cell-stack">
+                    <strong>{row.studentName}</strong>
+                    <small>{row.admissionNo || 'بدون شماره ثبت'} · {row.classTitle}</small>
+                  </span>
+                  <span className={`finance-order-status ${row.issued ? 'paid' : 'void'}`}>
+                    {row.issued ? `صادر شده (${row.billCount})` : 'صادر نشده'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         {!filteredBills.length && <p className="muted">برای این فیلتر، بلی پیدا نشد.</p>}
         <div className="finance-orders-table-head"><span>سند</span><span>متعلم</span><span>صنف / دوره</span><span>مبلغ</span><span>مهلت پرداخت</span><span>وضعیت</span><span>عملیات</span></div>

@@ -5128,7 +5128,11 @@ async function resolveFinanceScope({ classId = '', courseId = '' } = {}) {
 
   const scope = await resolveClassCourseReference({
     classId: normalizedClassId,
-    courseId: normalizedCourseId
+    courseId: normalizedCourseId,
+    // FinanceBill still keeps the compatibility Course reference. Older and
+    // imported classes may legitimately exist without it, so repair that link
+    // when a canonical class is selected instead of rejecting the billing flow.
+    syncMissingCourse: Boolean(normalizedClassId)
   });
 
   if (scope.error) return scope;

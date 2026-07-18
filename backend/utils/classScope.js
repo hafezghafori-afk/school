@@ -18,7 +18,7 @@ function serializeSchoolClassLite(value = null) {
   };
 }
 
-async function resolveClassCourseReference({ classId = '', courseId = '' } = {}) {
+async function resolveClassCourseReference({ classId = '', courseId = '', syncMissingCourse = false } = {}) {
   const normalizedClassId = isObjectId(classId) ? normalizeText(classId) : '';
   const normalizedCourseId = isObjectId(courseId) ? normalizeText(courseId) : '';
   let schoolClass = null;
@@ -36,6 +36,23 @@ async function resolveClassCourseReference({ classId = '', courseId = '' } = {})
       course = await Course.findOne({ schoolClassRef: schoolClass._id, kind: 'academic_class' })
         .sort({ isActive: -1, createdAt: -1 })
         .select('_id schoolClassRef title category');
+    }
+    if (!course && syncMissingCourse) {
+      const preferredTitle = normalizeText(schoolClass.title) || normalizeText(schoolClass.code);
+      const title = preferredTitle.length >= 3 ? preferredTitle : `Class ${preferredTitle || schoolClass._id}`;
+      course = await Course.create({
+        title,
+        price: 0,
+        category: normalizeText(schoolClass.gradeLevel),
+        gradeLevel: normalizeText(schoolClass.gradeLevel),
+        section: normalizeText(schoolClass.section),
+        kind: 'academic_class',
+        academicYearRef: schoolClass.academicYearId || null,
+        schoolClassRef: schoolClass._id,
+        isActive: true
+      });
+      schoolClass.legacyCourseId = course._id;
+      await schoolClass.save();
     }
   }
 
