@@ -45,6 +45,7 @@ test.describe('student management filters workflow', () => {
                 _id: 'profile-1',
                 linkedUserId: 'student-1',
                 registrationId: 'REG-1001',
+                asasNumber: '1405-0001',
                 status: 'active',
                 personalInfo: { firstName: 'علی', lastName: 'احمدی', fatherName: 'کریم', gender: 'male' },
                 contactInfo: { phone: '0700123456', email: 'ali@example.test' },
@@ -117,6 +118,7 @@ test.describe('student management filters workflow', () => {
     await page.goto('/student-management');
     const rows = page.locator('.student-table tbody tr');
     await expect(rows).toHaveCount(2);
+    await expect(rows.first()).toContainText('شماره اساس: 1405-0001');
 
     await page.getByTestId('student-class-filter').selectOption('class-7');
     await expect(rows).toHaveCount(1);
@@ -147,5 +149,27 @@ test.describe('student management filters workflow', () => {
     await page.getByTestId('student-status-filter').selectOption('inactive');
     await expect(rows).toHaveCount(1);
     await expect(rows.first()).toContainText('مریم');
+  });
+
+  test('prints the student Asas number first and loads a Persian PDF font', async ({ page }) => {
+    await page.goto('/student-management');
+    await expect(page.locator('.student-table tbody tr')).toHaveCount(2, { timeout: 20000 });
+    await page.evaluate(() => { window.__DISABLE_STUDENT_PDF_AUTO_PRINT__ = true; });
+
+    const popupPromise = page.waitForEvent('popup');
+    await page.getByRole('button', { name: /PDF/ }).click();
+    const popup = await popupPromise;
+    await popup.waitForLoadState('domcontentloaded');
+    await expect(popup.locator('thead th').first()).toHaveText('شماره اساس شاگرد');
+    await expect(popup.locator('tbody tr').first().locator('td').first()).toHaveText('1405-0001');
+    await expect.poll(() => popup.evaluate(() => getComputedStyle(document.body).fontFamily)).toContain('B Nazanin PDF');
+    await expect.poll(() => popup.evaluate(async () => {
+      const loadedFaces = await Promise.race([
+        document.fonts.load('400 13px "B Nazanin PDF"', 'لیست شاگردان'),
+        new Promise((resolve) => setTimeout(() => resolve([]), 5000))
+      ]);
+      return loadedFaces.length;
+    })).toBeGreaterThan(0);
+    await popup.close();
   });
 });
