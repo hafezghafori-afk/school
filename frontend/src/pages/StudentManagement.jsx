@@ -190,7 +190,7 @@ const normalizeAfghanStudent = (student = {}) => {
     enrollmentDate: toGregorianDateInputValue(academicInfo.enrollmentDate),
     enrollmentType: academicInfo.enrollmentType || 'new',
     classId: {
-      _id: readEntityId(academicInfo.currentClassId || academicInfo.classId || student.classId || academicInfo.currentGrade || ''),
+      _id: readEntityId(academicInfo.currentClassId || academicInfo.classId || student.classId || ''),
       title: getText(
         student.classId?.title
         || academicInfo.currentClassId?.title
@@ -206,7 +206,7 @@ const normalizeAfghanStudent = (student = {}) => {
       title: getText(student.academicYearId?.title || academicInfo.academicYearId?.title || academicInfo.academicYearTitle || '---')
     },
     shiftId: {
-      _id: readEntityId(academicInfo.shiftId || student.shiftId || academicInfo.currentShift || ''),
+      _id: readEntityId(academicInfo.shiftId || student.shiftId || ''),
       name: getText(student.shiftId?.name || academicInfo.shiftId?.nameDari || academicInfo.shiftId?.name || academicInfo.currentShift || '---')
     },
     previousSchool: getText(previousSchool.name),
@@ -244,6 +244,73 @@ const makeKey = (value) => {
 };
 
 const normalizeLookupText = (value) => repairDisplayText(value || '').trim().toLowerCase();
+
+const normalizeStudentSearchText = (value = '') => repairDisplayText(String(value || ''))
+  .normalize('NFKC')
+  .replace(/[\u064B-\u065F\u0670]/g, '')
+  .replace(/[يى]/g, 'ی')
+  .replace(/ك/g, 'ک')
+  .replace(/[ۀة]/g, 'ه')
+  .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+  .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+  .replace(/[\u200B-\u200D\uFEFF]/g, '')
+  .toLocaleLowerCase('fa-AF')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const getStudentScopeIds = (student = {}, scope = 'class') => {
+  const ids = new Set();
+  const add = (value) => {
+    const id = makeKey(value);
+    if (id) ids.add(id);
+  };
+
+  if (scope === 'class') {
+    add(student.classId?._id || student.classId?.id || student.classIdValue);
+    add(student.academicInfo?.currentClassId || student.academicInfo?.classId);
+    (student.financialMemberships || []).forEach((item) => add(item.classId));
+    (student.educationEnrollments || []).forEach((item) => add(item.classId || item.schoolClass?.id || item.schoolClass?._id));
+    (student.onlineEnrollments || []).forEach((item) => add(item.academicContext?.classId));
+  } else if (scope === 'academicYear') {
+    add(student.academicYearId?._id || student.academicYearId?.id || student.academicYearIdValue);
+    add(student.academicInfo?.academicYearId);
+    (student.financialMemberships || []).forEach((item) => add(item.academicYearId || item.academicYear));
+    (student.educationEnrollments || []).forEach((item) => add(item.academicYear?._id || item.academicYear?.id || item.academicYearId || item.schoolClass?.academicYear?.id));
+    (student.onlineEnrollments || []).forEach((item) => add(item.academicContext?.academicYearId));
+  } else if (scope === 'shift') {
+    add(student.shiftId?._id || student.shiftId?.id || student.shiftIdValue);
+    add(student.academicInfo?.shiftId);
+    (student.financialMemberships || []).forEach((item) => add(item.shiftId));
+    (student.educationEnrollments || []).forEach((item) => add(item.shiftId || item.schoolClass?.shiftId));
+    (student.onlineEnrollments || []).forEach((item) => add(item.academicContext?.shiftId));
+  }
+
+  return ids;
+};
+
+const buildStudentSearchText = (student = {}) => normalizeStudentSearchText([
+  student.firstName,
+  student.lastName,
+  `${student.firstName || ''} ${student.lastName || ''}`,
+  student.fatherName,
+  student.grandfatherName,
+  student.nationalId,
+  student.studentIdentifier,
+  student.registrationId,
+  student.asasNumber,
+  student.admissionNo,
+  student.studentCode,
+  student.phone,
+  student.email,
+  student.classId?.title,
+  student.academicYearId?.title,
+  student.shiftId?.name,
+  student.currentGrade,
+  student.currentSection,
+  ...(student.financialMemberships || []).flatMap((item) => [item.studentName, item.admissionNo, item.classTitle, item.academicYearTitle]),
+  ...(student.educationEnrollments || []).flatMap((item) => [item.studentName, item.user?.name, item.schoolClass?.title, item.course?.title]),
+  ...(student.onlineEnrollments || []).flatMap((item) => [item.studentName, item.registrationId, item.asasNumber, item.phone, item.email])
+].filter(Boolean).join(' '));
 
 const resolveOptionId = (items = [], value = '', fields = []) => {
   const directValue = makeKey(value);
@@ -750,7 +817,7 @@ const StudentManagement = () => {
       const data = await response.json();
       
       if (data.success) {
-        setAcademicYears(data.data.filter(year => year.status === 'active'));
+        setAcademicYears((Array.isArray(data.data) ? data.data : []).filter((year) => year.status !== 'archived'));
       } else {
         setAcademicYears([
             // داده‌های نمونه
@@ -829,41 +896,37 @@ const StudentManagement = () => {
 
     // فیلتر بر اساس سال تعلیمی
     if (filters.academicYearId) {
-      filtered = filtered.filter(student => student.academicYearId?._id === filters.academicYearId);
+      filtered = filtered.filter((student) => getStudentScopeIds(student, 'academicYear').has(filters.academicYearId));
     }
 
     // فیلتر بر اساس صنف
     if (filters.classId) {
-      filtered = filtered.filter(student => student.classId?._id === filters.classId);
+      filtered = filtered.filter((student) => getStudentScopeIds(student, 'class').has(filters.classId));
     }
 
     // فیلتر بر اساس نوبت
     if (filters.shiftId) {
-      filtered = filtered.filter(student => student.shiftId?._id === filters.shiftId);
+      filtered = filtered.filter((student) => getStudentScopeIds(student, 'shift').has(filters.shiftId));
     }
 
     // فیلتر بر اساس جنسیت
     if (filters.gender) {
-      filtered = filtered.filter(student => student.gender === filters.gender);
+      filtered = filtered.filter((student) => String(student.gender || '').trim().toLowerCase() === filters.gender);
     }
 
     // فیلتر بر اساس وضعیت
     if (filters.status) {
-      filtered = filtered.filter(student => student.status === filters.status);
+      filtered = filtered.filter((student) => String(student.status || '').trim().toLowerCase() === filters.status);
     }
 
     // جستجو
-    if (filters.search) {
-      const searchLower = filters.search.toLowerCase();
-      filtered = filtered.filter(student => 
-        student.firstName?.toLowerCase().includes(searchLower) ||
-        student.lastName?.toLowerCase().includes(searchLower) ||
-        student.fatherName?.toLowerCase().includes(searchLower) ||
-        student.nationalId?.toLowerCase().includes(searchLower) ||
-        student.studentIdentifier?.toLowerCase().includes(searchLower) ||
-        student.phone?.toLowerCase().includes(searchLower) ||
-        student.email?.toLowerCase().includes(searchLower)
-      );
+    const searchText = normalizeStudentSearchText(filters.search);
+    if (searchText) {
+      const searchTokens = searchText.split(' ').filter(Boolean);
+      filtered = filtered.filter((student) => {
+        const studentSearchText = buildStudentSearchText(student);
+        return searchTokens.every((token) => studentSearchText.includes(token));
+      });
     }
 
     setFilteredStudents(filtered);
@@ -1498,6 +1561,7 @@ const StudentManagement = () => {
               <Search size={16} />
               <input
                 type="search"
+                data-testid="student-search-input"
                 value={filters.search}
                 onChange={(event) => setFilters({ ...filters, search: event.target.value })}
                 placeholder="نام، تذکره، تلفن یا ایمیل"
@@ -1507,7 +1571,7 @@ const StudentManagement = () => {
 
           <label>
             <span>سال تعلیمی</span>
-            <select value={filters.academicYearId} onChange={(event) => setFilters({ ...filters, academicYearId: event.target.value })}>
+            <select data-testid="student-year-filter" value={filters.academicYearId} onChange={(event) => setFilters({ ...filters, academicYearId: event.target.value })}>
               <option value="">همه سال‌ها</option>
               {academicYears.map((year) => (
                 <option key={year._id} value={year._id}>{displayValue(year.title || year.name)}</option>
@@ -1517,7 +1581,7 @@ const StudentManagement = () => {
 
           <label>
             <span>صنف</span>
-            <select value={filters.classId} onChange={(event) => setFilters({ ...filters, classId: event.target.value })}>
+            <select data-testid="student-class-filter" value={filters.classId} onChange={(event) => setFilters({ ...filters, classId: event.target.value })}>
               <option value="">همه صنف‌ها</option>
               {classes.map((classItem) => (
                 <option key={classItem._id} value={classItem._id}>{displayValue(classItem.title || classItem.name)}</option>
@@ -1527,7 +1591,7 @@ const StudentManagement = () => {
 
           <label>
             <span>نوبت</span>
-            <select value={filters.shiftId} onChange={(event) => setFilters({ ...filters, shiftId: event.target.value })}>
+            <select data-testid="student-shift-filter" value={filters.shiftId} onChange={(event) => setFilters({ ...filters, shiftId: event.target.value })}>
               <option value="">همه نوبت‌ها</option>
               {shifts.map((shift) => (
                 <option key={shift._id} value={shift._id}>{displayValue(shift.name || shift.title)}</option>
@@ -1537,7 +1601,7 @@ const StudentManagement = () => {
 
           <label>
             <span>جنسیت</span>
-            <select value={filters.gender} onChange={(event) => setFilters({ ...filters, gender: event.target.value })}>
+            <select data-testid="student-gender-filter" value={filters.gender} onChange={(event) => setFilters({ ...filters, gender: event.target.value })}>
               <option value="">همه</option>
               <option value="male">پسر</option>
               <option value="female">دختر</option>
@@ -1546,7 +1610,7 @@ const StudentManagement = () => {
 
           <label>
             <span>وضعیت</span>
-            <select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}>
+            <select data-testid="student-status-filter" value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}>
               <option value="">همه وضعیت‌ها</option>
               {cleanStatusOptions.map((status) => (
                 <option key={status.value} value={status.value}>{statusLabelMap[status.value] || displayValue(status.label)}</option>
