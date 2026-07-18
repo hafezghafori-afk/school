@@ -128,11 +128,22 @@ const readApiResponse = async (response) => {
   }
 };
 
+const readStudentAsasNumber = (student = {}) => {
+  const financialMemberships = Array.isArray(student.financialMemberships) ? student.financialMemberships : [];
+  const onlineEnrollments = Array.isArray(student.onlineEnrollments) ? student.onlineEnrollments : [];
+  return getText(
+    student.asasNumber
+    || student.admissionNo
+    || student.studentCore?.admissionNo
+    || financialMemberships.find((item) => item?.admissionNo)?.admissionNo
+    || onlineEnrollments.find((item) => item?.asasNumber)?.asasNumber
+  );
+};
+
 const readStudentIdentifier = (student = {}) => getText(
-  student.studentIdentifier
-  || student.asasNumber
+  readStudentAsasNumber(student)
+  || student.studentIdentifier
   || student.registrationId
-  || student.admissionNo
   || student.studentCode
 );
 
@@ -167,6 +178,7 @@ const normalizeAfghanStudent = (student = {}) => {
     birthPlace: getText(personalInfo.birthPlace),
     nationality: getText(personalInfo.nationality || 'Afghan'),
     nationalId: readStudentTazkira(student),
+    asasNumber: readStudentAsasNumber(student),
     studentIdentifier: readStudentIdentifier(student),
     tazkiraVolume: getText(identification.tazkiraVolume),
     tazkiraPage: getText(identification.tazkiraPage),
@@ -410,6 +422,7 @@ const mergeFinancialMemberships = (rows, memberships = []) => {
         lastName: repairDisplayText(membership.studentName || '').split(' ').slice(1).join(' '),
         fatherName: repairDisplayText(membership.fatherName || ''),
         nationalId: '',
+        admissionNo: repairDisplayText(membership.admissionNo || ''),
         studentIdentifier: repairDisplayText(membership.admissionNo || ''),
         phone: membership.primaryPhone || '',
         email: membership.studentEmail || '',
@@ -424,7 +437,8 @@ const mergeFinancialMemberships = (rows, memberships = []) => {
 
     row.financialMemberships = [...(row.financialMemberships || []), membership];
     row.profileId = row.profileId || makeKey(membership.afghanStudentId || '');
-    row.studentIdentifier = row.studentIdentifier || repairDisplayText(membership.admissionNo || '');
+    row.admissionNo = row.admissionNo || repairDisplayText(membership.admissionNo || '');
+    row.studentIdentifier = readStudentIdentifier(row);
     row.financeStatus = membership.status || row.financeStatus || '';
     row.membershipType = membership.membershipType || row.membershipType || '';
     if (!row.classId?._id && membership.classId) row.classId = { _id: membership.classId, title: repairDisplayText(membership.classTitle || '') };
@@ -527,7 +541,7 @@ const mergeOnlineEnrollmentRecords = (rows, enrollments = []) => {
     row.linkedUserId = row.linkedUserId || makeKey(enrollment.linkedUserId || '');
     row.registrationId = row.registrationId || enrollment.registrationId || '';
     row.asasNumber = row.asasNumber || enrollment.asasNumber || '';
-    row.studentIdentifier = row.studentIdentifier || repairDisplayText(enrollment.asasNumber || enrollment.registrationId || '');
+    row.studentIdentifier = readStudentIdentifier(row);
     applyFallback(row, 'nationalId', enrollment.nationalId || enrollment.tazkiraNumber);
     applyFallback(row, 'fatherName', enrollment.fatherName);
     applyFallback(row, 'motherName', enrollment.motherName);
@@ -981,7 +995,7 @@ const StudentManagement = () => {
       birthPlace: student.birthPlace || '',
       nationality: student.nationality || 'Afghan',
       nationalId: readStudentTazkira(student),
-      studentIdentifier: readStudentIdentifier(student),
+      studentIdentifier: readStudentAsasNumber(student),
       tazkiraVolume: student.tazkiraVolume || '',
       tazkiraPage: student.tazkiraPage || '',
       birthCertificateNumber: student.birthCertificateNumber || '',
@@ -1303,7 +1317,7 @@ const StudentManagement = () => {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 
-  const exportStudentListPdf = () => {
+  const exportStudentListPdf = async () => {
     const rows = filteredStudents.length ? filteredStudents : students;
     if (!rows.length) {
       toast.info('برای خروجی PDF شاگردی در لیست موجود نیست.');
@@ -1317,13 +1331,15 @@ const StudentManagement = () => {
       hour: '2-digit',
       minute: '2-digit'
     });
-    const tableRows = rows.map((student, index) => {
+    const autoPrint = window.__DISABLE_STUDENT_PDF_AUTO_PRINT__ !== true;
+    const tableRows = rows.map((student) => {
       const fullName = `${displayValue(student.firstName, '')} ${displayValue(student.lastName, '')}`.trim() || '---';
+      const studentAsasNumber = readStudentAsasNumber(student) || '---';
       const classLabel = student.classId?.title || student.currentSection || student.currentGrade || '---';
       const sources = (student.sourceTags || ['profile']).map((tag) => sourceLabelMap[tag] || tag).join('، ');
       return `
         <tr>
-          <td>${Number(index + 1).toLocaleString('fa-AF-u-ca-persian')}</td>
+          <td class="student-id">${escapePrintText(studentAsasNumber)}</td>
           <td>${escapePrintText(fullName)}</td>
           <td>${escapePrintText(student.fatherName || '---')}</td>
           <td>${escapePrintText(student.nationalId || '---')}</td>
@@ -1342,6 +1358,41 @@ const StudentManagement = () => {
       return;
     }
 
+    printWindow.document.open();
+    printWindow.document.write('<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><title>در حال ساخت PDF</title></head><body style="font-family:Tahoma,sans-serif;padding:24px">در حال آماده‌سازی فورم PDF...</body></html>');
+    printWindow.document.close();
+
+    const fontFileToDataUrl = async (fontPath) => {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 3000);
+      try {
+        const response = await fetch(fontPath, { cache: 'force-cache', signal: controller.signal });
+        if (!response.ok) throw new Error(`Persian font could not be loaded (${response.status})`);
+        const blob = await response.blob();
+        return await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(reader.error || new Error('Persian font could not be read'));
+          reader.readAsDataURL(blob);
+        });
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    };
+
+    let regularFontSource = `${window.location.origin}/fonts/B_Nazanin.ttf`;
+    let boldFontSource = `${window.location.origin}/fonts/B_Nazanin_Bold.ttf`;
+    try {
+      [regularFontSource, boldFontSource] = await Promise.all([
+        fontFileToDataUrl('/fonts/B_Nazanin.ttf'),
+        fontFileToDataUrl('/fonts/B_Nazanin_Bold.ttf')
+      ]);
+    } catch (fontError) {
+      console.warn('Persian PDF font could not be embedded; using the hosted font files.', fontError);
+    }
+
+    if (printWindow.closed) return;
+
     const printHtml = `
       <!doctype html>
       <html lang="fa" dir="rtl">
@@ -1350,11 +1401,25 @@ const StudentManagement = () => {
           <title>لیست شاگردان</title>
           <style>
             @page { size: A4 landscape; margin: 12mm; }
+            @font-face {
+              font-family: 'B Nazanin PDF';
+              src: url('${regularFontSource}') format('truetype');
+              font-weight: 400;
+              font-style: normal;
+              font-display: block;
+            }
+            @font-face {
+              font-family: 'B Nazanin PDF';
+              src: url('${boldFontSource}') format('truetype');
+              font-weight: 700;
+              font-style: normal;
+              font-display: block;
+            }
             * { box-sizing: border-box; }
+            html, body, body * { font-family: 'B Nazanin PDF', Tahoma, Arial, sans-serif !important; }
             body {
               margin: 0;
               color: #111827;
-              font-family: Tahoma, Arial, sans-serif;
               direction: rtl;
               background: #fff;
             }
@@ -1368,13 +1433,14 @@ const StudentManagement = () => {
               margin-bottom: 16px;
             }
             h1 { margin: 0 0 6px; font-size: 22px; }
-            p { margin: 0; color: #4b5563; font-size: 12px; }
+            p { margin: 0; color: #4b5563; font-size: 13px; }
             .meta { text-align: left; line-height: 1.8; }
-            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            table { width: 100%; border-collapse: collapse; font-size: 13px; }
             th, td { border: 1px solid #d1d5db; padding: 7px 8px; vertical-align: top; }
             th { background: #f3f4f6; color: #111827; font-weight: 700; }
+            .student-id { direction: ltr; text-align: center; font-weight: 700; white-space: nowrap; }
             tbody tr:nth-child(even) td { background: #fafafa; }
-            .footer { margin-top: 12px; color: #6b7280; font-size: 10px; }
+            .footer { margin-top: 12px; color: #6b7280; font-size: 12px; }
             @media print {
               body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             }
@@ -1394,7 +1460,7 @@ const StudentManagement = () => {
           <table>
             <thead>
               <tr>
-                <th>#</th>
+                <th>شماره اساس شاگرد</th>
                 <th>نام شاگرد</th>
                 <th>نام پدر</th>
                 <th>شماره تذکره</th>
@@ -1411,7 +1477,21 @@ const StudentManagement = () => {
           <script>
             window.addEventListener('load', function () {
               window.focus();
-              setTimeout(function () { window.print(); }, 250);
+              var fontsReady = document.fonts
+                ? Promise.race([
+                    Promise.all([
+                      document.fonts.load('400 13px "B Nazanin PDF"', 'لیست شاگردان'),
+                      document.fonts.load('700 13px "B Nazanin PDF"', 'لیست شاگردان'),
+                      document.fonts.ready
+                    ]),
+                    new Promise(function (resolve) { setTimeout(resolve, 3000); })
+                  ])
+                : Promise.resolve();
+              if (${autoPrint ? 'true' : 'false'}) {
+                fontsReady.then(function () {
+                  setTimeout(function () { window.print(); }, 150);
+                });
+              }
             });
           </script>
         </body>
@@ -1660,7 +1740,7 @@ const StudentManagement = () => {
                           <span className="student-avatar">{fullName.charAt(0)}</span>
                           <div>
                             <strong>{fullName}</strong>
-                            <small>ولد {displayValue(student.fatherName)} | تذکره: {displayValue(student.nationalId, 'بدون تذکره')} | شناسه: {displayValue(student.studentIdentifier, 'ثبت نشده')}</small>
+                            <small>ولد {displayValue(student.fatherName)} | تذکره: {displayValue(student.nationalId, 'بدون تذکره')} | شماره اساس: {displayValue(readStudentAsasNumber(student), 'ثبت نشده')}</small>
                           </div>
                         </div>
                       </td>
@@ -1793,7 +1873,7 @@ const StudentManagement = () => {
                 <input value={editForm.nationalId} onChange={(event) => handleEditFormChange('nationalId', event.target.value)} />
               </label>
               <label>
-                <span>شماره شناسایی شاگرد</span>
+                <span>شماره اساس شاگرد</span>
                 <input value={editForm.studentIdentifier || ''} readOnly className="student-readonly-input" />
               </label>
               <label className="required"><span>تاریخ تولد</span>
@@ -2014,7 +2094,7 @@ const StudentManagement = () => {
                 <p><strong>نام پدر:</strong> {displayValue(selectedStudent.fatherName)}</p>
                 <p><strong>نام پدرکلان:</strong> {displayValue(selectedStudent.grandfatherName)}</p>
                 <p><strong>تذکره:</strong> {displayValue(selectedStudent.nationalId)}</p>
-                <p><strong>شماره شناسایی شاگرد:</strong> {displayValue(selectedStudent.studentIdentifier)}</p>
+                <p><strong>شماره اساس شاگرد:</strong> {displayValue(readStudentAsasNumber(selectedStudent))}</p>
                 <p><strong>تاریخ تولد:</strong> {formatBirthDate(selectedStudent.birthDate)}</p>
                 <p><strong>جنسیت:</strong> {genderLabelMap[selectedStudent.gender] || displayValue(selectedStudent.gender)}</p>
               </article>
@@ -2285,7 +2365,7 @@ const StudentManagement = () => {
                         
                         <div className="flex items-center gap-3 text-xs text-gray-600">
                           <span>نمبر تذکره: {student.nationalId || '---'}</span>
-                          <span>شناسه شاگرد: {student.studentIdentifier || '---'}</span>
+                          <span>شماره اساس شاگرد: {readStudentAsasNumber(student) || '---'}</span>
                           <span>صنف: {student.classId?.title}</span>
                           <span>نوبت: {student.shiftId?.name}</span>
                           <span>سال تعلیمی: {student.academicYearId?.title}</span>
@@ -2366,7 +2446,7 @@ const StudentManagement = () => {
                   <div><strong>نام پدر:</strong> {selectedStudent.fatherName}</div>
                   <div><strong>نام پدرکلان:</strong> {selectedStudent.grandfatherName}</div>
                   <div><strong>شماره تذکره:</strong> {selectedStudent.nationalId}</div>
-                  <div><strong>شماره شناسایی شاگرد:</strong> {selectedStudent.studentIdentifier}</div>
+                  <div><strong>شماره اساس شاگرد:</strong> {readStudentAsasNumber(selectedStudent) || '---'}</div>
                   <div><strong>تاریخ تولد:</strong> {formatBirthDate(selectedStudent.birthDate)}</div>
                   <div><strong>جنسیت:</strong> {selectedStudent.gender === 'male' ? 'ذکور' : 'اناث'}</div>
                   <div><strong>گروپ خونی:</strong> {selectedStudent.bloodType}</div>
