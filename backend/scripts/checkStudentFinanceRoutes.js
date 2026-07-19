@@ -18,6 +18,7 @@ const IDS = {
 const activityCalls = [];
 const financeActionCalls = [];
 const archivedDocuments = [];
+const discountListFilters = [];
 const discountRegistry = [
   {
     id: IDS.discount,
@@ -187,7 +188,8 @@ const serviceMock = {
       student: { userId: IDS.student, fullName: 'Alpha Student' }
     };
   },
-  async listDiscounts() {
+  async listDiscounts(filters = {}) {
+    discountListFilters.push(filters);
     return discountRegistry;
   },
   async inspectDiscountDuplicates() {
@@ -626,6 +628,7 @@ async function run() {
     assertCase(cases[6].status === 200 && Array.isArray(cases[6].data?.items) && cases[6].data?.items?.length === 2, 'Expected open-orders route to return canonical open fee orders.');
     assertCase(cases[7].status === 200 && Array.isArray(cases[7].data?.allocations) && cases[7].data?.allocations?.length === 2, 'Expected preview-allocation route to return allocation rows.');
     assertCase(cases[8].status === 200 && Array.isArray(cases[8].data?.items) && cases[8].data?.items?.[0]?.id === IDS.discount, 'Expected discounts route to return canonical registry items.');
+    assertCase(String(discountListFilters[0]?.registryOnly || '') === 'true', 'Expected discounts registry route to exclude bill-adjustment mirror records by default.');
     assertCase(cases[9].status === 200 && Array.isArray(cases[9].data?.items) && cases[9].data?.items?.[0]?.id === 'relief-1', 'Expected reliefs route to return canonical relief items.');
     assertCase(cases[10].status === 201 && cases[10].data?.item?.id === 'pay-created', 'Expected create payment route to return canonical payment item.');
     assertCase(Array.isArray(cases[10].data?.item?.allocations) && cases[10].data?.item?.allocations?.length === 2, 'Expected created payment to preserve allocations.');

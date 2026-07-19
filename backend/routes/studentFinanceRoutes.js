@@ -373,7 +373,10 @@ router.post('/payments/:id/follow-up', requireAuth, requireRole(['admin']), requ
 
 router.get('/discounts', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const filters = withRequestSchoolScope(req, req.query || {});
+    const filters = withRequestSchoolScope(req, {
+      ...(req.query || {}),
+      registryOnly: 'true'
+    });
     const [items, duplicateSummary] = await Promise.all([
       listDiscounts(filters),
       inspectDiscountDuplicates(filters)
