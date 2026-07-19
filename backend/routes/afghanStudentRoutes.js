@@ -18,7 +18,10 @@ const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
 const cache = require('../utils/simpleCache');
 const { requireAuth, requireRole, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const { requireWritableSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
-const { assignStudentToClass } = require('../services/studentClassAssignmentService');
+const {
+  assignStudentToClass,
+  serializeTransferAdmissionBilling
+} = require('../services/studentClassAssignmentService');
 
 const router = express.Router();
 const auditWrite = (payload) => logActivity(payload);
@@ -499,12 +502,15 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
     const student = new AfghanStudent(studentData);
     await student.save();
 
-    await assignStudentToClass({
+    const membership = await assignStudentToClass({
       student,
       payload: studentData,
       actorId: req.user?.id || null,
       source: 'admin'
     });
+    const admissionBilling = serializeTransferAdmissionBilling(
+      membership?.$locals?.transferAdmissionBilling || null
+    );
     await syncManualStudentEnrollment({ student, studentData, req });
 
     // Populate school info for response
@@ -513,7 +519,10 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
     writeSchoolContextHeaders(res, schoolContext.schoolId);
     return res.status(201).json({
       success: true,
-      message: 'Student created successfully',
+      message: admissionBilling?.created
+        ? `شاگرد ثبت شد و بل داخله ${admissionBilling.billNumber || ''} صادر گردید.`
+        : 'Student created successfully',
+      admissionBilling,
       data: student
     });
   } catch (error) {

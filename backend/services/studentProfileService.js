@@ -14,6 +14,7 @@ const Result = require('../models/Result');
 const ActivityLog = require('../models/ActivityLog');
 const { serializeUserIdentity } = require('../utils/userRole');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
+const { deriveFinanceOrderStatus } = require('../utils/financeLineItems');
 
 function toPlain(doc) {
   if (!doc) return null;
@@ -195,11 +196,18 @@ function formatBill(billDoc) {
   const bill = toPlain(billDoc);
   if (!bill) return null;
   const academicYear = formatAcademicYear(bill.academicYearId);
+  const status = deriveFinanceOrderStatus({
+    currentStatus: bill.status,
+    amountOriginal: bill.amountOriginal,
+    amountDue: bill.amountDue,
+    amountPaid: bill.amountPaid,
+    dueDate: bill.dueDate
+  });
 
   return {
     id: String(bill._id),
     billNumber: formatFinanceCode(normalizeText(bill.billNumber) || normalizeText(bill.orderNumber)),
-    status: normalizeText(bill.status),
+    status,
     academicYearLabel: normalizeText(bill.academicYear) || normalizeText(academicYear?.label),
     term: normalizeText(bill.term),
     periodType: normalizeText(bill.periodType),
@@ -210,7 +218,7 @@ function formatBill(billDoc) {
     amountPaid: Number(bill.amountPaid || 0),
     issuedAt: bill.issuedAt || bill.createdAt || null,
     dueDate: bill.dueDate || null,
-    paidAt: bill.paidAt || null,
+    paidAt: status === 'paid' ? (bill.paidAt || null) : null,
     note: normalizeText(bill.note),
     course: formatCourse(bill.course),
     schoolClass: formatClass(bill.classId),
@@ -669,7 +677,7 @@ async function getStudentProfile(studentRef) {
   });
 
   const [bills, receipts, grades, quizResults, logs] = await Promise.all([
-    FeeOrder.find(referenceFilter)
+    FeeOrder.find({ ...referenceFilter, status: { $ne: 'void' } })
       .populate('course', 'title category level kind')
       .populate({ path: 'classId', select: 'title code gradeLevel section shift room status academicYearId', populate: { path: 'academicYearId', select: 'name label code status isActive startsAt endsAt' } })
       .populate('academicYearId', 'name label code status isActive startsAt endsAt')

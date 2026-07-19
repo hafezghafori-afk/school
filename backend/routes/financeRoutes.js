@@ -100,9 +100,19 @@ const {
   submitProcurementCommitmentForReview
 } = require('../services/procurementCommitmentService');
 const {
-  buildGroupedBillCandidates
+  buildGroupedBillCandidates,
+  resolveFeePlanForBilling
 } = require('../services/feeBillingService');
-const { normalizeFinanceLineItems } = require('../utils/financeLineItems');
+const {
+  normalizeFinanceFeeType,
+  normalizeFinanceLineItems,
+  applyFinanceOrderStatus
+} = require('../utils/financeLineItems');
+const {
+  buildAdmissionDueDate,
+  findExistingAdmissionObligation
+} = require('../services/transferAdmissionBillingService');
+const { recognizePayments, sumRecognizedPayments } = require('../utils/financeRevenueRecognition');
 const {
   addBillAdjustmentAction,
   setBillInstallmentsAction,
@@ -252,28 +262,22 @@ const applyPaymentToInstallments = (bill, paymentAmount = 0, paidAt = new Date()
 };
 
 const recalculateBill = (bill) => {
-  const base = Math.max(0, Number(bill.amountOriginal) || 0);
-  const discountTotal = sumAdjustments(bill, ['discount', 'waiver']);
-  const penaltyTotal = sumAdjustments(bill, ['penalty']);
-  bill.amountDue = Math.max(0, base - discountTotal + penaltyTotal);
   bill.amountPaid = Math.max(0, Number(bill.amountPaid) || 0);
+  bill.lineItems = normalizeFinanceLineItems({
+    lineItems: bill.lineItems,
+    feeBreakdown: bill.feeBreakdown,
+    feeScopes: bill.feeScopes,
+    amountOriginal: bill.amountOriginal,
+    adjustments: bill.adjustments,
+    amountPaid: bill.amountPaid,
+    defaultType: bill.orderType || 'tuition'
+  });
+  bill.amountDue = Math.max(0, roundMoney(
+    bill.lineItems.reduce((sum, item) => sum + Number(item?.netAmount || 0), 0)
+  ));
   const remaining = Math.max(0, bill.amountDue - bill.amountPaid);
 
-  if (bill.status !== 'void') {
-    if (remaining <= 0) {
-      bill.status = 'paid';
-      if (!bill.paidAt) bill.paidAt = new Date();
-    } else if (bill.dueDate && new Date(bill.dueDate).getTime() < Date.now()) {
-      bill.status = 'overdue';
-      bill.paidAt = null;
-    } else if (bill.amountPaid > 0) {
-      bill.status = 'partial';
-      bill.paidAt = null;
-    } else {
-      bill.status = 'new';
-      bill.paidAt = null;
-    }
-  }
+  applyFinanceOrderStatus(bill);
 
   if (Array.isArray(bill.installments)) {
     for (const installment of bill.installments) {
@@ -324,6 +328,16 @@ const normalizeBillPeriodType = (value = '') => {
   if (value === 'monthly') return 'monthly';
   if (value === 'custom') return 'custom';
   return 'term';
+};
+
+const MANUAL_BILL_FEE_TYPES = new Set(['tuition', 'admission', 'transport', 'exam', 'document', 'other']);
+const MANUAL_BILL_FEE_LABELS = {
+  tuition: 'فیس/شهریه',
+  admission: 'داخله',
+  transport: 'ترانسپورت',
+  exam: 'فیس امتحان',
+  document: 'فیس اسناد',
+  other: 'سایر'
 };
 
 const resolveBillIdentityLabel = ({ periodType = 'term', periodLabel = '', dueDate = null } = {}) => {
@@ -4381,14 +4395,12 @@ router.get('/admin/summary', requireAuth, requireRole(['admin']), requirePermiss
           }
         }
       ]),
-      FeePayment.aggregate([
-        { $match: withSchoolScope({ status: 'approved', paidAt: { $gte: startOfDay } }) },
-        { $group: { _id: null, total: { $sum: '$amount' } } }
-      ]),
-      FeePayment.aggregate([
-        { $match: withSchoolScope({ status: 'approved', paidAt: { $gte: startOfMonth, $lt: endOfMonth } }) },
-        { $group: { _id: null, total: { $sum: '$amount' } } }
-      ]),
+      FeePayment.find(withSchoolScope({ status: 'approved', paidAt: { $gte: startOfDay } }))
+        .select('amount feeOrderId allocations')
+        .lean(),
+      FeePayment.find(withSchoolScope({ status: 'approved', paidAt: { $gte: startOfMonth, $lt: endOfMonth } }))
+        .select('amount feeOrderId allocations')
+        .lean(),
       FeeOrder.aggregate([
         { $match: withSchoolScope({ status: { $ne: 'void' } }) },
         {
@@ -4427,8 +4439,10 @@ router.get('/admin/summary', requireAuth, requireRole(['admin']), requirePermiss
     const totalPaid = billTotals[0]?.totalPaid || 0;
     const totalOutstanding = billTotals[0]?.totalOutstanding || 0;
     const collectionRate = totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0;
-    const todayCollection = today[0]?.total || 0;
-    const monthCollection = monthly[0]?.total || 0;
+    const [todayCollection, monthCollection] = await Promise.all([
+      sumRecognizedPayments(today, { FeeOrderModel: FeeOrder }),
+      sumRecognizedPayments(monthly, { FeeOrderModel: FeeOrder })
+    ]);
     const receiptWorkflow = {
       financeManager: 0,
       financeLead: 0,
@@ -4530,10 +4544,33 @@ router.get('/admin/bills', requireAuth, requireRole(['admin']), requirePermissio
 
 router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const { studentId, classId = '', courseId: inputCourseId = '', amount, dueDate, issuedAt, periodType, periodLabel, academicYear, academicYearId, term, currency, note } = req.body || {};
+    const {
+      studentId,
+      classId = '',
+      courseId: inputCourseId = '',
+      amount,
+      amountSource = 'manual',
+      feeType = 'tuition',
+      feePlanId = '',
+      dueDate,
+      issuedAt,
+      periodType,
+      periodLabel,
+      academicYear,
+      academicYearId,
+      term,
+      currency,
+      note
+    } = req.body || {};
     if (!studentId || (!classId && !inputCourseId) || !dueDate) {
       return res.status(400).json({ success: false, message: 'شاگرد، صنف و مهلت پرداخت الزامی است.' });
     }
+    const requestedFeeType = String(feeType || 'tuition').trim().toLowerCase();
+    const normalizedFeeType = normalizeFinanceFeeType(requestedFeeType, 'tuition');
+    if (!MANUAL_BILL_FEE_TYPES.has(requestedFeeType) || normalizedFeeType !== requestedFeeType) {
+      return res.status(400).json({ success: false, message: 'نوع فیس برای بل دستی معتبر نیست.' });
+    }
+    const normalizedAmountSource = String(amountSource || '').trim().toLowerCase() === 'plan' ? 'plan' : 'manual';
     const dueDateValue = parseDateSafe(dueDate, null);
     if (!dueDateValue) {
       return res.status(400).json({ success: false, message: 'تاریخ مهلت پرداخت معتبر نیست.' });
@@ -4543,8 +4580,10 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       return res.status(400).json({ success: false, message: 'ماه مالی بسته شده است و صدور بل جدید مجاز نیست.' });
     }
 
-    const normalizedPeriodType = normalizeBillPeriodType(periodType);
-    const normalizedPeriodLabel = String(periodLabel || '').trim();
+    const normalizedPeriodType = normalizeBillPeriodType(periodType || (normalizedFeeType === 'admission' ? 'custom' : 'term'));
+    const normalizedPeriodLabel = String(
+      periodLabel || (normalizedFeeType === 'admission' ? MANUAL_BILL_FEE_LABELS.admission : '')
+    ).trim();
     const normalizedAcademicYear = String(academicYear || '').trim();
     const normalizedAcademicYearId = String(academicYearId || '').trim();
     const normalizedTerm = String(term || '').trim();
@@ -4567,6 +4606,64 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
 
     if (courseContext.kind === 'academic_class' && !membership) {
       return res.status(400).json({ success: false, message: 'عضویت مالی برای این دانش‌آموز در این کلاس و سال تعلیمی یافت نشد.' });
+    }
+
+    let selectedFeePlan = null;
+    let resolvedAmount = 0;
+    if (normalizedAmountSource === 'plan') {
+      if (feePlanId && !mongoose.Types.ObjectId.isValid(String(feePlanId))) {
+        return res.status(400).json({ success: false, message: 'پلان مالی انتخاب‌شده معتبر نیست.' });
+      }
+      selectedFeePlan = await resolveFeePlanForBilling({
+        feePlanId: String(feePlanId || '').trim(),
+        courseId,
+        classId: linkFields.classId || scope.classId || classId,
+        academicYearId: linkFields.academicYearId || normalizedAcademicYearId,
+        academicYear: normalizedAcademicYear,
+        term: normalizedTerm
+      });
+      const planIsActive = selectedFeePlan
+        && selectedFeePlan.isActive !== false
+        && !['inactive', 'archived'].includes(String(selectedFeePlan.lifecycleStatus || '').trim().toLowerCase());
+      const planClassId = String(selectedFeePlan?.classId || '').trim();
+      const planCourseId = String(selectedFeePlan?.course || '').trim();
+      const planAcademicYearId = String(selectedFeePlan?.academicYearId || '').trim();
+      const expectedClassId = String(linkFields.classId || scope.classId || classId || '').trim();
+      const expectedAcademicYearId = String(linkFields.academicYearId || normalizedAcademicYearId || '').trim();
+      const planMatchesScope = (!planClassId || planClassId === expectedClassId)
+        && (!planCourseId || planCourseId === String(courseId))
+        && (!planAcademicYearId || !expectedAcademicYearId || planAcademicYearId === expectedAcademicYearId);
+      if (!planIsActive || !planMatchesScope) {
+        return res.status(400).json({ success: false, message: 'پلان مالی فعال و مطابق این صنف/سال پیدا نشد.' });
+      }
+      resolvedAmount = roundMoney(getFeePlanPrimaryAmount(selectedFeePlan, normalizedFeeType));
+      if (resolvedAmount <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: `مبلغ ${MANUAL_BILL_FEE_LABELS[normalizedFeeType]} در پلان مالی تعیین نشده است.`
+        });
+      }
+    } else {
+      resolvedAmount = roundMoney(amount);
+      if (resolvedAmount <= 0) {
+        return res.status(400).json({ success: false, message: 'برای مبلغ دستی، مقدار بیشتر از صفر وارد کنید.' });
+      }
+    }
+
+    if (normalizedFeeType === 'admission') {
+      const existingAdmission = await findExistingAdmissionObligation({
+        membershipId: linkFields.studentMembershipId,
+        studentId,
+        classId: linkFields.classId,
+        academicYearId: linkFields.academicYearId || normalizedAcademicYearId
+      });
+      if (existingAdmission) {
+        const existingNumber = existingAdmission.item?.billNumber || existingAdmission.item?.orderNumber || '';
+        return res.status(409).json({
+          success: false,
+          message: `بل داخله برای این عضویت قبلاً${existingNumber ? ` با شماره ${existingNumber}` : ''} صادر شده است.`
+        });
+      }
     }
 
     const duplicateBill = await findConflictingBill({
@@ -4595,35 +4692,28 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       course: courseId,
       classId: linkFields.classId,
       academicYearId: linkFields.academicYearId,
-      amountOriginal: roundMoney(amount),
-      amountDue: roundMoney(amount),
+      amountOriginal: resolvedAmount,
+      amountDue: resolvedAmount,
       amountPaid: 0,
-      feeScopes: ['tuition'],
-      feeBreakdown: {
-        tuition: roundMoney(amount),
-        admission: 0,
-        transport: 0,
-        exam: 0,
-        document: 0,
-        service: 0,
-        other: 0
-      },
+      feeScopes: [normalizedFeeType],
+      feeBreakdown: { [normalizedFeeType]: resolvedAmount },
       lineItems: normalizeFinanceLineItems({
-        amountOriginal: roundMoney(amount),
-        feeBreakdown: { tuition: roundMoney(amount) },
-        feeScopes: ['tuition'],
+        amountOriginal: resolvedAmount,
+        feeBreakdown: { [normalizedFeeType]: resolvedAmount },
+        feeScopes: [normalizedFeeType],
         amountPaid: 0,
         adjustments: [],
-        defaultType: 'tuition',
+        defaultType: normalizedFeeType,
+        sourcePlanId: selectedFeePlan?._id || null,
         periodKey: normalizedPeriodLabel || normalizedTerm
       }),
       dueDate: dueDateValue,
       issuedAt: issueDateValue,
       periodType: normalizedPeriodType,
       periodLabel: normalizedPeriodLabel,
-      academicYear: normalizedAcademicYear,
+      academicYear: normalizedAcademicYear || String(selectedFeePlan?.academicYear || '').trim(),
       term: normalizedTerm,
-      currency: String(currency || 'AFN').trim().toUpperCase(),
+      currency: String(currency || selectedFeePlan?.currency || 'AFN').trim().toUpperCase(),
       note: String(note || '').trim(),
       createdBy: req.user.id
     });
@@ -4645,7 +4735,14 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       action: 'finance_create_bill',
       targetType: 'FinanceBill',
       targetId: bill._id.toString(),
-      meta: { studentId: String(studentId), courseId: String(courseId), amount: bill.amountOriginal }
+      meta: {
+        studentId: String(studentId),
+        courseId: String(courseId),
+        amount: bill.amountOriginal,
+        amountSource: normalizedAmountSource,
+        feeType: normalizedFeeType,
+        feePlanId: String(selectedFeePlan?._id || '')
+      }
     });
 
     const item = await FinanceBill.findById(bill._id)
@@ -4653,8 +4750,27 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       .populate('course', 'title category')
       .populate('classId', 'title code gradeLevel section');
     res.status(201).json({ success: true, item, message: 'بل با موفقیت ایجاد شد.' });
-  } catch {
-    res.status(500).json({ success: false, message: 'خطا در ایجاد بل' });
+  } catch (error) {
+    console.error('[finance][create-manual-bill]', error);
+    if (Number(error?.code) === 11000) {
+      const duplicateFields = Object.keys(error?.keyPattern || {});
+      const message = duplicateFields.includes('billNumber')
+        ? 'شماره بل تکراری شد؛ دوباره تلاش کنید.'
+        : duplicateFields.includes('issuanceKey')
+          ? 'کلید صدور بل تکراری است؛ صفحه را تازه کرده و دوباره تلاش کنید.'
+          : 'یک بل تکراری با همین مشخصات وجود دارد.';
+      return res.status(409).json({ success: false, message });
+    }
+    if (String(error?.name || '') === 'ValidationError') {
+      const validationMessage = Object.values(error?.errors || {})
+        .map((item) => String(item?.message || '').trim())
+        .find(Boolean);
+      return res.status(400).json({
+        success: false,
+        message: validationMessage || 'مشخصات بل معتبر نیست.'
+      });
+    }
+    return res.status(500).json({ success: false, message: 'خطا در ایجاد بل' });
   }
 });
 
@@ -6293,6 +6409,7 @@ router.get('/admin/reports/cashflow', requireAuth, requireRole(['admin']), requi
         { $group: { _id: '$coverageMode', total: { $sum: '$amount' }, count: { $sum: 1 } } }
       ])
     ]);
+    const recognizedPayments = await recognizePayments(payments, { FeeOrderModel: FeeOrder });
 
     const toPaymentClassId = (item) => String(item?.classId?._id || item?.classId || item?.feeOrderId?.classId?._id || item?.feeOrderId?.classId || '').trim();
     const toCashflowDateKey = (value) => {
@@ -6303,14 +6420,15 @@ router.get('/admin/reports/cashflow', requireAuth, requireRole(['admin']), requi
     const buildDailyRows = (statuses = []) => {
       const allowedStatuses = new Set(statuses);
       const dayMap = new Map();
-      payments.forEach((item) => {
+      recognizedPayments.forEach(({ payment: item, recognizedAmount }) => {
         if (!allowedStatuses.has(String(item?.status || ''))) return;
+        if (recognizedAmount <= 0) return;
         const classRef = toPaymentClassId(item);
         if (scope.classId && classRef !== String(scope.classId)) return;
         const dateKey = toCashflowDateKey(item?.paidAt);
         if (!dateKey) return;
         const current = dayMap.get(dateKey) || { date: dateKey, total: 0, count: 0 };
-        current.total += Number(item?.amount || 0);
+        current.total += Number(recognizedAmount || 0);
         current.count += 1;
         dayMap.set(dateKey, current);
       });
@@ -6714,7 +6832,7 @@ router.post('/admin/anomalies/:id/resolve', requireAuth, requireRole(['admin']),
 router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const mode = String(req.body?.mode || '').trim();
-    if (!['paid', 'waived'].includes(mode)) {
+    if (!['open', 'paid', 'waived'].includes(mode)) {
       return res.status(400).json({ success: false, message: 'نوع رفع داخله معتبر نیست.' });
     }
 
@@ -6777,9 +6895,10 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
       }
 
       const isWaived = mode === 'waived';
+      const isPaid = mode === 'paid';
       feeOrder = new FeeOrder({
         orderNumber: await generateFeeOrderNumber('AD'),
-        title: isWaived ? 'داخله - معافیت کامل' : 'داخله - پرداخت شده',
+        title: isWaived ? 'داخله - معافیت کامل' : isPaid ? 'داخله - پرداخت شده' : 'بل داخله',
         orderType: 'admission',
         source: 'manual',
         student: membership.student,
@@ -6792,15 +6911,20 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
         periodLabel: 'داخله',
         currency: String(feePlan?.currency || 'AFN').trim().toUpperCase() || 'AFN',
         amountOriginal: plannedAmount,
-        amountPaid: isWaived ? 0 : plannedAmount,
-        dueDate: now,
-        paidAt: isWaived ? null : now,
+        amountPaid: isPaid ? plannedAmount : 0,
+        dueDate: mode === 'open' ? buildAdmissionDueDate(now, feePlan?.dueDay) : now,
+        paidAt: isPaid ? now : null,
         note: [
-          isWaived ? 'داخله به‌عنوان معاف/تخفیف کامل ثبت شد.' : 'داخله قبلاً دریافت شده و توسط مدیر مالی تایید شد.',
+          isWaived
+            ? 'داخله به‌عنوان معاف/تخفیف کامل ثبت شد.'
+            : isPaid
+              ? 'داخله قبلاً دریافت شده و توسط مدیر مالی تایید شد.'
+              : 'بل باز داخله از هشدار مالی و بر اساس پلان صنف صادر شد.',
           note
         ].filter(Boolean).join(' '),
         adjustments: isWaived ? [{
           type: 'waiver',
+          scope: 'admission',
           amount: plannedAmount,
           reason: note || 'معافیت کامل داخله از ناهنجاری مالی',
           createdBy: req.user?.id || null,
@@ -6814,9 +6938,9 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
           grossAmount: plannedAmount,
           reductionAmount: isWaived ? plannedAmount : 0,
           netAmount: isWaived ? 0 : plannedAmount,
-          paidAmount: isWaived ? 0 : plannedAmount,
-          balanceAmount: 0,
-          status: isWaived ? 'waived' : 'paid'
+          paidAmount: isPaid ? plannedAmount : 0,
+          balanceAmount: mode === 'open' ? plannedAmount : 0,
+          status: isWaived ? 'waived' : isPaid ? 'paid' : 'open'
         }],
         createdBy: req.user?.id || null
       });
@@ -6827,7 +6951,11 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
     item.snoozedUntil = null;
     item.resolvedAt = now;
     item.resolvedBy = req.user.id;
-    item.resolutionNote = note || (mode === 'waived' ? 'داخله به‌عنوان معاف/تخفیف کامل ثبت شد.' : 'داخله به‌عنوان پرداخت‌شده ثبت شد.');
+    item.resolutionNote = note || (mode === 'waived'
+      ? 'داخله به‌عنوان معاف/تخفیف کامل ثبت شد.'
+      : mode === 'paid'
+        ? 'داخله به‌عنوان پرداخت‌شده ثبت شد.'
+        : 'بل باز داخله از پلان مالی صادر شد.');
     item.latestNote = item.resolutionNote;
     item.latestActionAt = now;
     item.latestActionBy = req.user.id;
@@ -6872,7 +7000,9 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
       },
       message: mode === 'waived'
         ? 'داخله به‌عنوان معاف/تخفیف کامل ثبت شد و ناهنجاری حل شد'
-        : 'داخله به‌عنوان پرداخت‌شده ثبت شد و ناهنجاری حل شد'
+        : mode === 'paid'
+          ? 'داخله به‌عنوان پرداخت‌شده ثبت شد و ناهنجاری حل شد'
+          : 'بل باز داخله از پلان مالی صادر شد و ناهنجاری حل شد'
     });
   } catch (error) {
     return res.status(500).json({

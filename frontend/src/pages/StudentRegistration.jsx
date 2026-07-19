@@ -555,6 +555,20 @@ const StudentRegistration = () => {
         createdStudent.personalInfo?.lastName || formData.lastName
       ].filter(Boolean).join(' ');
       let documentUploadWarning = '';
+      const admissionBilling = data?.admissionBilling || null;
+      let financeNotice = '';
+      let financeWarning = '';
+      if (formData.registrationType === 'transfer') {
+        if (admissionBilling?.created) {
+          financeNotice = ` بل داخله ${admissionBilling.billNumber || ''} به مبلغ ${Number(admissionBilling.amount || 0).toLocaleString('fa-AF')} افغانی صادر شد.`;
+        } else if (admissionBilling?.reason === 'admission_already_issued') {
+          financeNotice = ' بل داخله قبلاً برای این عضویت صادر شده است.';
+        } else if (admissionBilling?.reason === 'fee_plan_not_found') {
+          financeWarning = ' پلان مالی فعال برای صدور بل داخله پیدا نشد؛ پلان صنف و سال تعلیمی را بررسی کنید.';
+        } else if (admissionBilling?.reason === 'admission_fee_not_configured') {
+          financeWarning = ' شاگرد ثبت شد، اما مبلغ داخله در پلان مالی تعیین نشده است.';
+        }
+      }
 
       if (createdStudent._id && hasSelectedStudentFiles(studentFiles)) {
         setSubmitStatus({ type: 'info', text: 'شاگرد ثبت شد. در حال آپلود سندها...' });
@@ -577,7 +591,10 @@ const StudentRegistration = () => {
 
       setLastRegisteredStudent(summary);
       setErrors({});
-      setSubmitStatus({ type: documentUploadWarning ? 'error' : 'success', text: `شاگرد ${summary.displayName} با موفقیت ثبت شد.${documentUploadWarning}` });
+      setSubmitStatus({
+        type: documentUploadWarning || financeWarning ? 'error' : 'success',
+        text: `شاگرد ${summary.displayName} با موفقیت ثبت شد.${financeNotice}${financeWarning}${documentUploadWarning}`
+      });
       setFormData(createEmptyForm(defaultAcademicYearId));
       setStudentFiles({ tazkira: null, fatherTazkira: null, photo: null, seParcha: null });
       setFileInputResetKey((current) => current + 1);
@@ -585,14 +602,21 @@ const StudentRegistration = () => {
       if (documentUploadWarning) {
         toastRef.current.error(documentUploadWarning.trim());
       }
-
       if (submitIntent === 'assign' && candidateRef) {
-        toast.success('شاگرد ثبت شد. در حال انتقال به تخصیص صنف...');
+        if (financeWarning) {
+          toastRef.current.error(financeWarning.trim());
+        } else {
+          toast.success(`شاگرد ثبت شد.${financeNotice} در حال انتقال به تخصیص صنف...`);
+        }
         openEnrollmentDesk(candidateRef);
         return;
       }
 
-      toast.success('شاگرد با موفقیت ثبت شد. می‌توانید ثبت بعدی را ادامه دهید.');
+      if (financeWarning) {
+        toastRef.current.error(financeWarning.trim());
+      } else {
+        toast.success(`شاگرد با موفقیت ثبت شد.${financeNotice}`);
+      }
     } catch (error) {
       console.error('Error registering student:', error);
       const message = displayText(error?.message || 'خطا در ثبت شاگرد.');

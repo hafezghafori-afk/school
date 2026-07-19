@@ -21,10 +21,28 @@ const FinanceRelief = require('../models/FinanceRelief');
 const TransportFee = require('../models/TransportFee');
 const FinanceBill = require('../models/FinanceBill');
 const FinanceReceipt = require('../models/FinanceReceipt');
-const { syncStudentFinanceFromFinanceBill, syncStudentFinanceFromFinanceReceipt } = require('../utils/studentFinanceSync');
+const {
+  refreshFinanceBillStatus,
+  syncStudentFinanceFromFinanceBill,
+  syncStudentFinanceFromFinanceReceipt
+} = require('../utils/studentFinanceSync');
 const { deriveLinkScope } = require('../utils/financeLinkScope');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
-const { buildFeeBreakdownFromLineItems } = require('../utils/financeLineItems');
+const {
+  buildClassDiscountGroupKey,
+  buildDiscountRegistryIdentity,
+  buildDiscountRegistryKey,
+  buildManualDiscountSourceKey,
+  groupDuplicateDiscounts
+} = require('../utils/discountRegistryIdentity');
+const {
+  buildFeeBreakdownFromLineItems,
+  deriveFinanceOrderStatus,
+  getFinanceFeeScopeGrossAmount,
+  normalizeAdjustmentScope,
+  normalizeFinanceLineItems
+} = require('../utils/financeLineItems');
+const { recognizePayments } = require('../utils/financeRevenueRecognition');
 const {
   buildFinanceReliefPayloadFromDiscount,
   buildFinanceReliefPayloadFromExemption,
@@ -154,8 +172,14 @@ function formatExamSession(doc) {
 function formatFeeOrder(doc) {
   const item = toPlain(doc);
   if (!item) return null;
-  const lineItems = Array.isArray(item.lineItems)
-    ? item.lineItems.map((entry) => ({
+  const normalizedLineItems = normalizeFinanceLineItems({
+    lineItems: item.lineItems,
+    amountOriginal: item.amountOriginal,
+    adjustments: item.adjustments,
+    amountPaid: item.amountPaid,
+    defaultType: item.orderType
+  });
+  const lineItems = normalizedLineItems.map((entry) => ({
         feeType: normalizeText(entry?.feeType),
         label: normalizeText(entry?.label),
         sourcePlanId: normalizeNullableId(entry?.sourcePlanId),
@@ -167,9 +191,19 @@ function formatFeeOrder(doc) {
         paidAmount: Number(entry?.paidAmount || 0),
         balanceAmount: Number(entry?.balanceAmount || 0),
         status: normalizeText(entry?.status)
-      }))
-    : [];
+      }));
   const feeBreakdown = buildFeeBreakdownFromLineItems(lineItems);
+  const amountOriginal = roundMoney(lineItems.reduce((sum, entry) => sum + Number(entry?.grossAmount || 0), 0));
+  const amountDue = roundMoney(lineItems.reduce((sum, entry) => sum + Number(entry?.netAmount || 0), 0));
+  const amountPaid = roundMoney(item.amountPaid);
+  const outstandingAmount = Math.max(0, roundMoney(amountDue - amountPaid));
+  const status = deriveFinanceOrderStatus({
+    currentStatus: item.status,
+    amountOriginal,
+    amountDue,
+    amountPaid,
+    dueDate: item.dueDate
+  });
   return {
     id: String(item._id || ''),
     sourceBillId: normalizeNullableId(item.sourceBillId),
@@ -178,23 +212,24 @@ function formatFeeOrder(doc) {
     orderType: normalizeText(item.orderType),
     source: normalizeText(item.source),
     linkScope: deriveLinkScope({ linkScope: item.linkScope, studentMembershipId: item.studentMembershipId, classId: item.classId }),
-    status: normalizeText(item.status),
+    status,
     periodType: normalizeText(item.periodType),
     periodLabel: normalizeText(item.periodLabel),
     currency: normalizeText(item.currency),
-    amountOriginal: Number(item.amountOriginal || 0),
-    amountDue: Number(item.amountDue || 0),
-    amountPaid: Number(item.amountPaid || 0),
-    outstandingAmount: Number(item.outstandingAmount || 0),
+    amountOriginal,
+    amountDue,
+    amountPaid,
+    outstandingAmount,
     lineItems,
     feeBreakdown,
     issuedAt: item.issuedAt || null,
     dueDate: item.dueDate || null,
-    paidAt: item.paidAt || null,
+    paidAt: status === 'paid' ? (item.paidAt || null) : null,
     note: normalizeText(item.note),
     adjustments: Array.isArray(item.adjustments)
       ? item.adjustments.map((entry) => ({
           type: normalizeText(entry?.type),
+          scope: normalizeAdjustmentScope(entry),
           amount: Number(entry?.amount || 0),
           reason: normalizeText(entry?.reason),
           createdAt: entry?.createdAt || null
@@ -224,8 +259,14 @@ function formatFeeOrder(doc) {
 function formatFeeOrderLite(doc) {
   const item = toPlain(doc);
   if (!item) return null;
-  const lineItems = Array.isArray(item.lineItems)
-    ? item.lineItems.map((entry) => ({
+  const normalizedLineItems = normalizeFinanceLineItems({
+    lineItems: item.lineItems,
+    amountOriginal: item.amountOriginal,
+    adjustments: item.adjustments,
+    amountPaid: item.amountPaid,
+    defaultType: item.orderType
+  });
+  const lineItems = normalizedLineItems.map((entry) => ({
         feeType: normalizeText(entry?.feeType),
         label: normalizeText(entry?.label),
         grossAmount: Number(entry?.grossAmount || 0),
@@ -235,19 +276,28 @@ function formatFeeOrderLite(doc) {
         paidAmount: Number(entry?.paidAmount || 0),
         balanceAmount: Number(entry?.balanceAmount || 0),
         status: normalizeText(entry?.status)
-      }))
-    : [];
+      }));
+  const amountOriginal = roundMoney(lineItems.reduce((sum, entry) => sum + Number(entry?.grossAmount || 0), 0));
+  const amountDue = roundMoney(lineItems.reduce((sum, entry) => sum + Number(entry?.netAmount || 0), 0));
+  const amountPaid = roundMoney(item.amountPaid);
+  const status = deriveFinanceOrderStatus({
+    currentStatus: item.status,
+    amountOriginal,
+    amountDue,
+    amountPaid,
+    dueDate: item.dueDate
+  });
   return {
     id: String(item._id || item.id || ''),
     sourceBillId: normalizeNullableId(item.sourceBillId),
     orderNumber: formatFinanceCode(normalizeText(item.orderNumber)),
     title: normalizeText(item.title),
     orderType: normalizeText(item.orderType),
-    status: normalizeText(item.status),
+    status,
     currency: normalizeText(item.currency),
-    amountDue: Number(item.amountDue || 0),
-    amountPaid: Number(item.amountPaid || 0),
-    outstandingAmount: Number(item.outstandingAmount || 0),
+    amountDue,
+    amountPaid,
+    outstandingAmount: Math.max(0, roundMoney(amountDue - amountPaid)),
     lineItems,
     feeBreakdown: buildFeeBreakdownFromLineItems(lineItems),
     dueDate: item.dueDate || null
@@ -394,6 +444,7 @@ function formatDiscount(doc) {
     coverageMode: normalizeText(item.coverageMode) || 'fixed',
     amount: Number(item.amount || 0),
     percentage: Number(item.percentage || 0),
+    feeScope: normalizeText(item.discountType) === 'penalty' ? 'all' : 'tuition',
     reason: normalizeText(item.reason),
     durationMode: normalizeText(item.durationMode) || 'academic_year',
     startDate: item.startDate || null,
@@ -401,6 +452,8 @@ function formatDiscount(doc) {
     linkScope: deriveLinkScope({ linkScope: item.linkScope, studentMembershipId: item.studentMembershipId, classId: item.classId }),
     status: normalizeText(item.status),
     source: normalizeText(item.source),
+    createdAt: item.createdAt || null,
+    updatedAt: item.updatedAt || null,
     student: formatStudentIdentityFromMembership(item),
     schoolClass: formatSchoolClass(item.classId),
     academicYear: formatAcademicYear(item.academicYearId)
@@ -412,7 +465,10 @@ async function syncDiscountOpenBills(discount = null) {
   const marker = `[discount:${String(discount._id)}]`;
   const bills = await FinanceBill.find({
     studentMembershipId: discount.studentMembershipId,
-    status: { $in: ['new', 'partial', 'overdue'] }
+    $or: [
+      { status: { $in: ['new', 'partial', 'overdue'] } },
+      { 'adjustments.reason': { $regex: `^\\[discount:${String(discount._id)}\\]` } }
+    ]
   });
   for (const bill of bills) {
     const dueDate = normalizeDateValue(bill.dueDate);
@@ -421,13 +477,18 @@ async function syncDiscountOpenBills(discount = null) {
     const startsAfterBill = discount.startDate && periodEnd && new Date(discount.startDate) > periodEnd;
     const endsBeforeBill = discount.endDate && periodStart && new Date(discount.endDate) < periodStart;
     bill.adjustments = (bill.adjustments || []).filter((row) => !normalizeText(row.reason).startsWith(marker));
+    const isPenalty = discount.discountType === 'penalty';
     if (discount.status === 'active' && !startsAfterBill && !endsBeforeBill) {
+      const discountBase = isPenalty
+        ? Number(bill.amountOriginal || 0)
+        : getFinanceFeeScopeGrossAmount(bill, 'tuition');
       const amount = discount.coverageMode === 'percent'
-        ? Math.min(Number(bill.amountOriginal || 0), Number(bill.amountOriginal || 0) * (Number(discount.percentage || 0) / 100))
-        : Math.min(Number(bill.amountOriginal || 0), Number(discount.amount || 0));
+        ? Math.min(discountBase, discountBase * (Number(discount.percentage || 0) / 100))
+        : Math.min(discountBase, Number(discount.amount || 0));
       if (amount > 0) {
         bill.adjustments.push({
-          type: discount.discountType === 'penalty' ? 'penalty' : 'discount',
+          type: isPenalty ? 'penalty' : 'discount',
+          scope: isPenalty ? 'all' : 'tuition',
           amount,
           reason: `${marker} ${normalizeText(discount.reason)}`.trim(),
           createdBy: discount.createdBy || null,
@@ -435,8 +496,46 @@ async function syncDiscountOpenBills(discount = null) {
         });
       }
     }
+    refreshFinanceBillStatus(bill);
     await bill.save();
     await syncStudentFinanceFromFinanceBill(bill).catch(() => null);
+  }
+
+  const orders = await FeeOrder.find({
+    studentMembershipId: discount.studentMembershipId,
+    sourceBillId: null,
+    $or: [
+      { status: { $in: ['new', 'partial', 'overdue'] } },
+      { 'adjustments.reason': { $regex: `^\\[discount:${String(discount._id)}\\]` } }
+    ]
+  });
+  for (const order of orders) {
+    const dueDate = normalizeDateValue(order.dueDate);
+    const periodStart = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth(), 1) : null;
+    const periodEnd = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth() + 1, 0, 23, 59, 59, 999) : null;
+    const startsAfterOrder = discount.startDate && periodEnd && new Date(discount.startDate) > periodEnd;
+    const endsBeforeOrder = discount.endDate && periodStart && new Date(discount.endDate) < periodStart;
+    order.adjustments = (order.adjustments || []).filter((row) => !normalizeText(row.reason).startsWith(marker));
+    const isPenalty = discount.discountType === 'penalty';
+    if (discount.status === 'active' && !startsAfterOrder && !endsBeforeOrder) {
+      const discountBase = isPenalty
+        ? Number(order.amountOriginal || 0)
+        : getFinanceFeeScopeGrossAmount(order, 'tuition');
+      const amount = discount.coverageMode === 'percent'
+        ? Math.min(discountBase, discountBase * (Number(discount.percentage || 0) / 100))
+        : Math.min(discountBase, Number(discount.amount || 0));
+      if (amount > 0) {
+        order.adjustments.push({
+          type: isPenalty ? 'penalty' : 'discount',
+          scope: isPenalty ? 'all' : 'tuition',
+          amount: roundMoney(amount),
+          reason: `${marker} ${normalizeText(discount.reason)}`.trim(),
+          createdBy: discount.createdBy || null,
+          createdAt: discount.createdAt || new Date()
+        });
+      }
+    }
+    await order.save();
   }
 }
 
@@ -446,7 +545,10 @@ async function syncExemptionOpenBills(exemption = null) {
   const scope = normalizeText(exemption.scope) || 'all';
   const bills = await FinanceBill.find({
     studentMembershipId: exemption.studentMembershipId,
-    status: { $in: ['new', 'partial', 'overdue'] }
+    $or: [
+      { status: { $in: ['new', 'partial', 'overdue'] } },
+      { 'adjustments.reason': { $regex: `^\\[exemption:${String(exemption._id)}\\]` } }
+    ]
   });
 
   for (const bill of bills) {
@@ -457,7 +559,9 @@ async function syncExemptionOpenBills(exemption = null) {
         : (Array.isArray(bill.lineItems) ? bill.lineItems : [])
           .filter((item) => normalizeText(item?.feeType) === scope)
           .reduce((sum, item) => sum + (Number(item?.grossAmount || item?.netAmount || 0) || 0), 0);
-      const effectiveBase = baseAmount > 0 ? baseAmount : Number(bill.amountOriginal || 0);
+      const effectiveBase = scope === 'all'
+        ? (baseAmount > 0 ? baseAmount : Number(bill.amountOriginal || 0))
+        : baseAmount;
       const amount = exemption.exemptionType === 'full'
         ? effectiveBase
         : Number(exemption.amount || 0) > 0
@@ -466,6 +570,7 @@ async function syncExemptionOpenBills(exemption = null) {
       if (amount > 0) {
         bill.adjustments.push({
           type: 'waiver',
+          scope,
           amount: roundMoney(amount),
           reason: `${marker} ${normalizeText(exemption.reason)}`.trim(),
           createdBy: exemption.createdBy || exemption.approvedBy || null,
@@ -473,8 +578,47 @@ async function syncExemptionOpenBills(exemption = null) {
         });
       }
     }
+    refreshFinanceBillStatus(bill);
     await bill.save();
     await syncStudentFinanceFromFinanceBill(bill).catch(() => null);
+  }
+
+  const orders = await FeeOrder.find({
+    studentMembershipId: exemption.studentMembershipId,
+    sourceBillId: null,
+    $or: [
+      { status: { $in: ['new', 'partial', 'overdue'] } },
+      { 'adjustments.reason': { $regex: `^\\[exemption:${String(exemption._id)}\\]` } }
+    ]
+  });
+  for (const order of orders) {
+    order.adjustments = (order.adjustments || []).filter((row) => !normalizeText(row.reason).startsWith(marker));
+    if (exemption.status === 'active') {
+      const baseAmount = scope === 'all'
+        ? Number(order.amountOriginal || 0)
+        : (Array.isArray(order.lineItems) ? order.lineItems : [])
+          .filter((item) => normalizeText(item?.feeType) === scope)
+          .reduce((sum, item) => sum + (Number(item?.grossAmount || item?.netAmount || 0) || 0), 0);
+      const effectiveBase = scope === 'all'
+        ? (baseAmount > 0 ? baseAmount : Number(order.amountOriginal || 0))
+        : baseAmount;
+      const amount = exemption.exemptionType === 'full'
+        ? effectiveBase
+        : Number(exemption.amount || 0) > 0
+          ? Math.min(effectiveBase, Number(exemption.amount || 0))
+          : Math.min(effectiveBase, effectiveBase * (Number(exemption.percentage || 0) / 100));
+      if (amount > 0) {
+        order.adjustments.push({
+          type: 'waiver',
+          scope,
+          amount: roundMoney(amount),
+          reason: `${marker} ${normalizeText(exemption.reason)}`.trim(),
+          createdBy: exemption.createdBy || exemption.approvedBy || null,
+          createdAt: exemption.createdAt || new Date()
+        });
+      }
+    }
+    await order.save();
   }
 }
 
@@ -1160,22 +1304,34 @@ async function getDailyCashierReport(filters = {}) {
     .limit(100);
 
   const formattedItems = buildPaymentReceiptDetails(items.map(formatFeePayment), [], null);
+  const recognizedRows = await recognizePayments(items);
+  const recognitionById = new Map(recognizedRows.map((row) => [
+    String(row.payment?._id || ''),
+    row
+  ]));
+  formattedItems.forEach((item) => {
+    const recognition = recognitionById.get(String(item?.id || ''));
+    item.recognizedAmount = Number(recognition?.recognizedAmount || 0);
+    item.excludedVoidAmount = Number(recognition?.excludedVoidAmount || 0);
+  });
   const approvedItems = formattedItems.filter((item) => item?.status === 'approved');
+  const recognizedAmount = (item) => Number(item?.recognizedAmount || 0);
   const summary = {
     totalPayments: formattedItems.length,
-    totalCollected: roundMoney(formattedItems.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
-    approvedPayments: approvedItems.length,
+    totalCollected: roundMoney(approvedItems.reduce((sum, item) => sum + recognizedAmount(item), 0)),
+    approvedPayments: approvedItems.filter((item) => recognizedAmount(item) > 0).length,
     pendingPayments: formattedItems.filter((item) => item?.status === 'pending').length,
     rejectedPayments: formattedItems.filter((item) => item?.status === 'rejected').length,
-    approvedAmount: roundMoney(approvedItems.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
-    pendingAmount: roundMoney(formattedItems.filter((item) => item?.status === 'pending').reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
-    rejectedAmount: roundMoney(formattedItems.filter((item) => item?.status === 'rejected').reduce((sum, item) => sum + Number(item?.amount || 0), 0))
+    approvedAmount: roundMoney(approvedItems.reduce((sum, item) => sum + recognizedAmount(item), 0)),
+    pendingAmount: roundMoney(formattedItems.filter((item) => item?.status === 'pending').reduce((sum, item) => sum + recognizedAmount(item), 0)),
+    rejectedAmount: 0,
+    excludedVoidAmount: roundMoney(formattedItems.reduce((sum, item) => sum + Number(item?.excludedVoidAmount || 0), 0))
   };
 
   const methodTotals = ['cash', 'bank_transfer', 'hawala', 'manual', 'gateway', 'other'].map((method) => ({
     method,
-    amount: roundMoney(approvedItems.filter((item) => item?.paymentMethod === method).reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
-    count: approvedItems.filter((item) => item?.paymentMethod === method).length
+    amount: roundMoney(approvedItems.filter((item) => item?.paymentMethod === method).reduce((sum, item) => sum + recognizedAmount(item), 0)),
+    count: approvedItems.filter((item) => item?.paymentMethod === method && recognizedAmount(item) > 0).length
   })).filter((item) => item.count > 0 || item.amount > 0);
 
   const cashierRows = Array.from(approvedItems.reduce((map, item) => {
@@ -1186,11 +1342,13 @@ async function getDailyCashierReport(filters = {}) {
       amount: 0,
       count: 0
     };
-    current.amount = roundMoney(current.amount + Number(item?.amount || 0));
-    current.count += 1;
+    current.amount = roundMoney(current.amount + recognizedAmount(item));
+    if (recognizedAmount(item) > 0) current.count += 1;
     map.set(key, current);
     return map;
-  }, new Map()).values()).sort((left, right) => Number(right.amount || 0) - Number(left.amount || 0));
+  }, new Map()).values())
+    .filter((item) => item.count > 0 || item.amount > 0)
+    .sort((left, right) => Number(right.amount || 0) - Number(left.amount || 0));
 
   return {
     date: range.start.toISOString().slice(0, 10),
@@ -1213,8 +1371,9 @@ function buildStatementRecommendation(packSummary = {}) {
 }
 
 function buildMembershipStatement({ membership = null, summary = {}, orders = [], payments = [], discounts = [], exemptions = [], reliefs = [], transportFees = [], pack = null } = {}) {
-  const approvedPayments = payments.filter((item) => item?.status === 'approved');
-  const pendingPayments = payments.filter((item) => item?.status === 'pending');
+  const recognizedAmount = (item) => Number(item?.recognizedAmount ?? item?.amount ?? 0);
+  const approvedPayments = payments.filter((item) => item?.status === 'approved' && recognizedAmount(item) > 0);
+  const pendingPayments = payments.filter((item) => item?.status === 'pending' && recognizedAmount(item) > 0);
   const totalDiscountAmount = discounts.reduce((sum, item) => sum + Number(item?.amount || 0), 0);
   const totalExemptionAmount = exemptions.reduce((sum, item) => {
     if (String(item?.exemptionType || '') === 'full') {
@@ -1243,7 +1402,7 @@ function buildMembershipStatement({ membership = null, summary = {}, orders = []
     ].filter(Boolean).join(' - '),
     totals: {
       totalOrders: Number(summary.totalOrders || orders.length || 0),
-      totalPayments: Number(summary.totalPayments || payments.length || 0),
+      totalPayments: Number(summary.totalPayments ?? payments.filter((item) => recognizedAmount(item) > 0).length),
       totalDue: Number(summary.totalDue || 0),
       totalPaid: Number(summary.totalPaid || 0),
       totalOutstanding: Number(summary.totalOutstanding || 0),
@@ -1254,8 +1413,8 @@ function buildMembershipStatement({ membership = null, summary = {}, orders = []
       percentReliefCount,
       fullReliefCount,
       totalTransportAmount: Number(totalTransportAmount.toFixed(2)),
-      approvedPaymentAmount: Number(approvedPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0).toFixed(2)),
-      pendingPaymentAmount: Number(pendingPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0).toFixed(2))
+      approvedPaymentAmount: Number(approvedPayments.reduce((sum, item) => sum + recognizedAmount(item), 0).toFixed(2)),
+      pendingPaymentAmount: Number(pendingPayments.reduce((sum, item) => sum + recognizedAmount(item), 0).toFixed(2))
     },
     latestApprovedPayment: latestApprovedPayment ? {
       paymentNumber: formatFinanceCode(latestApprovedPayment.paymentNumber),
@@ -1302,6 +1461,12 @@ async function listDiscounts(filters = {}) {
   if (normalizeText(filters.linkScope)) query.linkScope = normalizeText(filters.linkScope);
   if (normalizeNullableId(filters.academicYearId)) query.academicYearId = filters.academicYearId;
   if (normalizeText(filters.status)) query.status = normalizeText(filters.status);
+  if (normalizeText(filters.discountType)) query.discountType = normalizeText(filters.discountType);
+  if (normalizeText(filters.targetScope)) query.targetScope = normalizeText(filters.targetScope);
+  if (normalizeText(filters.source)) query.source = normalizeText(filters.source);
+  if (String(filters.registryOnly || '').toLowerCase() === 'true') {
+    query.source = { $in: ['manual', 'migration'] };
+  }
 
   const items = await Discount.find(query)
     .populate('studentId')
@@ -1310,6 +1475,161 @@ async function listDiscounts(filters = {}) {
     .populate('academicYearId')
     .sort({ createdAt: -1 });
   return items.map(formatDiscount);
+}
+
+function buildDiscountRegistryQuery(filters = {}) {
+  const query = {
+    status: 'active',
+    source: { $in: ['manual', 'migration'] }
+  };
+  if (normalizeNullableId(filters.schoolId)) query.schoolId = filters.schoolId;
+  if (normalizeNullableId(filters.classId)) query.classId = filters.classId;
+  if (normalizeNullableId(filters.academicYearId)) query.academicYearId = filters.academicYearId;
+  if (normalizeNullableId(filters.studentMembershipId)) query.studentMembershipId = filters.studentMembershipId;
+  if (normalizeText(filters.discountType)) query.discountType = normalizeText(filters.discountType);
+  return query;
+}
+
+function buildMirroredDiscountQuery(filters = {}) {
+  const query = {
+    status: 'active',
+    source: 'finance_adjustment',
+    reason: { $regex: /^Relief \([^)]+\)$/i }
+  };
+  if (normalizeNullableId(filters.schoolId)) query.schoolId = filters.schoolId;
+  if (normalizeNullableId(filters.classId)) query.classId = filters.classId;
+  if (normalizeNullableId(filters.academicYearId)) query.academicYearId = filters.academicYearId;
+  if (normalizeNullableId(filters.studentMembershipId)) query.studentMembershipId = filters.studentMembershipId;
+  if (normalizeText(filters.discountType)) query.discountType = normalizeText(filters.discountType);
+  return query;
+}
+
+async function findMirroredDiscountState(filters = {}) {
+  const discounts = await Discount.find(buildMirroredDiscountQuery(filters))
+    .select('_id studentMembershipId')
+    .sort({ createdAt: 1, _id: 1 });
+  const discountIds = discounts.map((item) => item._id);
+  const reliefs = discountIds.length
+    ? await FinanceRelief.find({
+        status: 'active',
+        sourceModel: 'discount',
+        sourceDiscountId: { $in: discountIds }
+      })
+    : [];
+  return { discounts, reliefs };
+}
+
+function summarizeDiscountDuplicateGroups(groups = []) {
+  const membershipIds = new Set();
+  const classIds = new Set();
+  let duplicateRecords = 0;
+  const samples = [];
+  for (const group of groups) {
+    const rows = group.rows || [];
+    duplicateRecords += Math.max(0, rows.length - 1);
+    const first = rows[0] || {};
+    const membershipId = normalizeNullableId(first.studentMembershipId);
+    const classId = normalizeNullableId(first.classId);
+    if (membershipId) membershipIds.add(membershipId);
+    if (classId) classIds.add(classId);
+    if (samples.length < 12) {
+      samples.push({
+        studentMembershipId: membershipId || '',
+        classId: classId || '',
+        count: rows.length,
+        keepId: normalizeNullableId(first._id) || ''
+      });
+    }
+  }
+  return {
+    duplicateGroups: groups.length,
+    duplicateRecords,
+    affectedStudents: membershipIds.size,
+    affectedClasses: classIds.size,
+    samples
+  };
+}
+
+async function inspectDiscountDuplicates(filters = {}) {
+  const [items, mirrored] = await Promise.all([
+    Discount.find(buildDiscountRegistryQuery(filters))
+      .sort({ createdAt: 1, _id: 1 })
+      .lean(),
+    findMirroredDiscountState(filters)
+  ]);
+  const groups = groupDuplicateDiscounts(items);
+  return {
+    scanned: items.length,
+    mirroredDiscountRecords: mirrored.discounts.length,
+    mirroredActiveReliefs: mirrored.reliefs.length,
+    ...summarizeDiscountDuplicateGroups(groups)
+  };
+}
+
+async function deduplicateDiscounts(filters = {}, payload = {}) {
+  const schoolId = normalizeNullableId(filters.schoolId);
+  if (!schoolId) throw new Error('student_finance_school_scope_required');
+
+  const [items, mirrored] = await Promise.all([
+    Discount.find(buildDiscountRegistryQuery(filters)).sort({ createdAt: 1, _id: 1 }),
+    findMirroredDiscountState(filters)
+  ]);
+  const groups = groupDuplicateDiscounts(items);
+  const summary = {
+    scanned: items.length,
+    mirroredDiscountRecords: mirrored.discounts.length,
+    mirroredActiveReliefs: mirrored.reliefs.length,
+    ...summarizeDiscountDuplicateGroups(groups),
+    cancelled: 0,
+    mirroredReliefsCancelled: 0,
+    billsRepaired: 0
+  };
+  if (payload.apply !== true) return summary;
+
+  for (const group of groups) {
+    const [keeper, ...duplicates] = group.rows;
+    if (!keeper) continue;
+    const registryIdentity = buildDiscountRegistryKey(keeper);
+    if (!normalizeText(keeper.registryIdentity)) {
+      keeper.registryIdentity = registryIdentity;
+      await keeper.save();
+    }
+    for (const duplicate of duplicates) {
+      duplicate.status = 'cancelled';
+      duplicate.duplicateOf = keeper._id;
+      duplicate.deduplicatedAt = new Date();
+      await duplicate.save();
+      await syncDiscountOpenBills(duplicate);
+      await syncFinanceReliefFromDiscount(duplicate);
+      summary.cancelled += 1;
+    }
+  }
+
+  for (const relief of mirrored.reliefs) {
+    relief.status = 'cancelled';
+    relief.cancelReason = 'bill_adjustment_not_registry_relief';
+    relief.cancelledBy = normalizeNullableId(payload.cancelledBy);
+    relief.cancelledAt = new Date();
+    await relief.save();
+    summary.mirroredReliefsCancelled += 1;
+  }
+
+  const membershipIds = Array.from(new Set([
+    ...items.map((item) => normalizeNullableId(item.studentMembershipId)),
+    ...mirrored.discounts.map((item) => normalizeNullableId(item.studentMembershipId))
+  ].filter(Boolean)));
+  if (membershipIds.length) {
+    const bills = await FinanceBill.find({
+      studentMembershipId: { $in: membershipIds },
+      'adjustments.reason': { $regex: /^Relief \(/i }
+    })
+      .sort({ createdAt: 1, _id: 1 });
+    for (const bill of bills) {
+      const result = await syncStudentFinanceFromFinanceBill(bill);
+      if (result?.reliefs?.updated) summary.billsRepaired += 1;
+    }
+  }
+  return summary;
 }
 
 async function listFinanceReliefs(filters = {}) {
@@ -1324,6 +1644,7 @@ async function listFinanceReliefs(filters = {}) {
   if (normalizeText(filters.status)) query.status = normalizeText(filters.status);
   if (normalizeText(filters.reliefType)) query.reliefType = normalizeText(filters.reliefType);
   if (normalizeText(filters.scope)) query.scope = normalizeText(filters.scope);
+  if (String(filters.registryOnly || '').toLowerCase() === 'true') query.feeOrderId = null;
 
   const items = await FinanceRelief.find(query)
     .populate('feeOrderId')
@@ -1351,7 +1672,7 @@ async function createDiscount(payload = {}) {
       isCurrent: true
     }).select('_id').lean();
     if (!memberships.length) throw new Error('student_finance_membership_not_found');
-    const groupKey = `class:${classId}:${academicYearId}:${Date.now()}`;
+    const groupKey = buildClassDiscountGroupKey({ ...payload, classId, academicYearId });
     const items = [];
     for (const membership of memberships) {
       items.push(await createDiscount({
@@ -1361,7 +1682,15 @@ async function createDiscount(payload = {}) {
         studentMembershipId: membership._id
       }));
     }
-    return { bulk: true, count: items.length, items, item: items[0] || null };
+    const createdCount = items.filter((item) => item?.wasCreated || item?.wasReactivated).length;
+    return {
+      bulk: true,
+      count: items.length,
+      createdCount,
+      reusedCount: items.length - createdCount,
+      items,
+      item: items[0] || null
+    };
   }
 
   const membership = await resolveMembershipForFinanceRegistry(payload);
@@ -1372,7 +1701,7 @@ async function createDiscount(payload = {}) {
   const discountCoverage = normalizeDiscountCoverage(payload);
   const discountWindow = resolveDiscountDurationWindow(membership, payload);
 
-  const item = await Discount.create({
+  const discountPayload = {
     studentMembershipId: membership._id,
     studentId: membership.studentId?._id || membership.studentId || null,
     student: membership.student?._id || membership.student || null,
@@ -1392,8 +1721,61 @@ async function createDiscount(payload = {}) {
     endDate: discountWindow.endDate,
     source: 'manual',
     createdBy: normalizeNullableId(payload.createdBy),
-    sourceKey: `manual:${membership._id}:${Date.now()}`
-  });
+  };
+  discountPayload.registryIdentity = buildDiscountRegistryKey(discountPayload);
+  discountPayload.sourceKey = buildManualDiscountSourceKey(discountPayload);
+
+  const candidates = await Discount.find({
+    studentMembershipId: membership._id,
+    source: { $in: ['manual', 'migration'] }
+  }).sort({ createdAt: 1, _id: 1 });
+  const equivalentCandidates = candidates.filter((candidate) => (
+    buildDiscountRegistryIdentity(candidate) === buildDiscountRegistryIdentity(discountPayload)
+  ));
+  const equivalent = equivalentCandidates.find((candidate) => candidate.status === 'active')
+    || equivalentCandidates[0];
+
+  if (equivalent) {
+    const wasReactivated = equivalent.status !== 'active';
+    equivalent.registryIdentity = equivalent.registryIdentity || discountPayload.registryIdentity;
+    equivalent.groupKey = discountPayload.groupKey;
+    equivalent.status = 'active';
+    equivalent.duplicateOf = null;
+    equivalent.deduplicatedAt = null;
+    await equivalent.save();
+    const populatedEquivalent = await Discount.findById(equivalent._id)
+      .populate('studentId')
+      .populate('student', 'name email')
+      .populate({ path: 'classId', populate: { path: 'academicYearId' } })
+      .populate('academicYearId')
+      .populate('createdBy', 'name');
+    if (wasReactivated) {
+      await syncDiscountOpenBills(populatedEquivalent);
+      await syncFinanceReliefFromDiscount(populatedEquivalent);
+    }
+    return { ...formatDiscount(populatedEquivalent), wasCreated: false, wasReactivated };
+  }
+
+  let item;
+  try {
+    item = await Discount.create(discountPayload);
+  } catch (error) {
+    if (Number(error?.code) !== 11000) throw error;
+    const concurrent = await Discount.findOne({
+      $or: [
+        { registryIdentity: discountPayload.registryIdentity },
+        { sourceKey: discountPayload.sourceKey }
+      ]
+    });
+    if (!concurrent) throw error;
+    const populatedConcurrent = await Discount.findById(concurrent._id)
+      .populate('studentId')
+      .populate('student', 'name email')
+      .populate({ path: 'classId', populate: { path: 'academicYearId' } })
+      .populate('academicYearId')
+      .populate('createdBy', 'name');
+    return { ...formatDiscount(populatedConcurrent), wasCreated: false, wasReactivated: false };
+  }
 
   const populated = await Discount.findById(item._id)
     .populate('studentId')
@@ -1402,10 +1784,10 @@ async function createDiscount(payload = {}) {
     .populate('academicYearId')
     .populate('createdBy', 'name');
 
-  await syncFinanceReliefFromDiscount(populated);
   await syncDiscountOpenBills(populated);
+  await syncFinanceReliefFromDiscount(populated);
 
-  return formatDiscount(populated);
+  return { ...formatDiscount(populated), wasCreated: true, wasReactivated: false };
 }
 
 async function cancelDiscount(discountId, payload = {}) {
@@ -1425,8 +1807,8 @@ async function cancelDiscount(discountId, payload = {}) {
       groupedItem.status = 'cancelled';
       groupedItem.reason = normalizeText(payload.reason) || groupedItem.reason;
       await groupedItem.save();
-      await syncFinanceReliefFromDiscount(groupedItem);
       await syncDiscountOpenBills(groupedItem);
+      await syncFinanceReliefFromDiscount(groupedItem);
     }
     item.status = 'cancelled';
     item.reason = normalizeText(payload.reason) || item.reason;
@@ -1436,8 +1818,8 @@ async function cancelDiscount(discountId, payload = {}) {
   item.status = 'cancelled';
   item.reason = normalizeText(payload.reason) || item.reason;
   await item.save();
-  await syncFinanceReliefFromDiscount(item);
   await syncDiscountOpenBills(item);
+  await syncFinanceReliefFromDiscount(item);
 
   return formatDiscount(item);
 }
@@ -1474,6 +1856,11 @@ async function createFeeExemption(payload = {}) {
   const exemptionType = ['full', 'partial'].includes(normalizeText(payload.exemptionType))
     ? normalizeText(payload.exemptionType)
     : 'full';
+  const exemptionAmount = Math.max(0, Number(payload.amount) || 0);
+  const exemptionPercentage = Math.max(0, Math.min(100, Number(payload.percentage) || 0));
+  if (exemptionType === 'partial' && exemptionAmount <= 0 && exemptionPercentage <= 0) {
+    throw new Error('student_finance_exemption_coverage_invalid');
+  }
 
   const item = await FeeExemption.create({
     studentMembershipId: membership._id,
@@ -1485,8 +1872,8 @@ async function createFeeExemption(payload = {}) {
     scope: ['tuition', 'admission', 'exam', 'transport', 'document', 'other', 'all'].includes(normalizeText(payload.scope))
       ? normalizeText(payload.scope)
       : 'all',
-    amount: exemptionType === 'partial' ? Math.max(0, Number(payload.amount) || 0) : 0,
-    percentage: exemptionType === 'partial' ? Math.max(0, Math.min(100, Number(payload.percentage) || 0)) : 100,
+    amount: exemptionType === 'partial' ? exemptionAmount : 0,
+    percentage: exemptionType === 'partial' ? exemptionPercentage : 100,
     reason: normalizeText(payload.reason),
     note: normalizeText(payload.note),
     approvedBy: normalizeNullableId(payload.approvedBy),
@@ -1723,7 +2110,7 @@ async function getMembershipFinanceOverview(studentMembershipId) {
   }
 
   const [orders, payments, discounts, transportFees, exemptions, reliefDocs] = await Promise.all([
-    FeeOrder.find({ studentMembershipId: membership._id }).populate('studentId').populate('student', 'name email').populate('course', 'title kind').populate({ path: 'classId', populate: { path: 'academicYearId' } }).populate('academicYearId').populate('assessmentPeriodId').sort({ dueDate: -1, createdAt: -1 }),
+    FeeOrder.find({ studentMembershipId: membership._id, status: { $ne: 'void' } }).populate('studentId').populate('student', 'name email').populate('course', 'title kind').populate({ path: 'classId', populate: { path: 'academicYearId' } }).populate('academicYearId').populate('assessmentPeriodId').sort({ dueDate: -1, createdAt: -1 }),
     FeePayment.find({ studentMembershipId: membership._id })
       .populate('studentId')
       .populate('student', 'name email')
@@ -1743,10 +2130,10 @@ async function getMembershipFinanceOverview(studentMembershipId) {
       .populate({ path: 'classId', populate: { path: 'academicYearId' } })
       .populate('academicYearId')
       .sort({ paidAt: -1, createdAt: -1 }),
-    Discount.find({ studentMembershipId: membership._id, status: 'active' }).populate('studentId').populate('student', 'name email').populate({ path: 'classId', populate: { path: 'academicYearId' } }).populate('academicYearId').sort({ createdAt: -1 }),
+    Discount.find({ studentMembershipId: membership._id, status: 'active', source: { $in: ['manual', 'migration'] } }).populate('studentId').populate('student', 'name email').populate({ path: 'classId', populate: { path: 'academicYearId' } }).populate('academicYearId').sort({ createdAt: -1 }),
     TransportFee.find({ studentMembershipId: membership._id }).populate('studentId').populate('student', 'name email').populate({ path: 'classId', populate: { path: 'academicYearId' } }).populate('academicYearId').populate('assessmentPeriodId').sort({ createdAt: -1 }),
     FeeExemption.find({ studentMembershipId: membership._id, status: 'active' }).populate('studentId').populate('student', 'name email').populate({ path: 'classId', populate: { path: 'academicYearId' } }).populate('academicYearId').populate('approvedBy', 'name').populate('createdBy', 'name').populate('cancelledBy', 'name').sort({ createdAt: -1 }),
-    FinanceRelief.find({ studentMembershipId: membership._id, status: 'active' })
+    FinanceRelief.find({ studentMembershipId: membership._id, status: 'active', feeOrderId: null })
       .populate('feeOrderId')
       .populate('studentId')
       .populate('student', 'name email')
@@ -1767,6 +2154,16 @@ async function getMembershipFinanceOverview(studentMembershipId) {
     formattedOrders,
     formatMembership(membership)
   );
+  const recognizedPaymentRows = await recognizePayments(payments);
+  const recognitionById = new Map(recognizedPaymentRows.map((row) => [
+    String(row.payment?._id || ''),
+    row
+  ]));
+  formattedPayments.forEach((item) => {
+    const recognition = recognitionById.get(String(item?.id || ''));
+    item.recognizedAmount = Number(recognition?.recognizedAmount || 0);
+    item.excludedVoidAmount = Number(recognition?.excludedVoidAmount || 0);
+  });
   const formattedDiscounts = discounts.map(formatDiscount);
   const formattedExemptions = exemptions.map(formatFeeExemption);
   const formattedReliefs = [];
@@ -1819,7 +2216,7 @@ async function getMembershipFinanceOverview(studentMembershipId) {
   const formattedMembership = formatMembership(membership);
   const summary = {
     totalOrders: orders.length,
-    totalPayments: payments.length,
+    totalPayments: formattedPayments.filter((item) => Number(item?.recognizedAmount || 0) > 0).length,
     totalDiscounts: discounts.length,
     totalExemptions: exemptions.length,
     totalReliefs: formattedReliefs.length,
@@ -1827,9 +2224,9 @@ async function getMembershipFinanceOverview(studentMembershipId) {
     totalDue,
     totalPaid,
     totalOutstanding,
-    openOrders: orders.filter((item) => ['new', 'partial', 'overdue'].includes(item.status)).length,
-    overdueOrders: orders.filter((item) => item.status === 'overdue').length,
-    pendingPayments: payments.filter((item) => item.status === 'pending').length
+    openOrders: formattedOrders.filter((item) => ['new', 'partial', 'overdue'].includes(item.status)).length,
+    overdueOrders: formattedOrders.filter((item) => item.status === 'overdue').length,
+    pendingPayments: formattedPayments.filter((item) => item.status === 'pending' && Number(item?.recognizedAmount || 0) > 0).length
   };
   const anomalyPack = buildMembershipFinanceAnomalies({
     membership: formattedMembership,
@@ -1920,7 +2317,7 @@ async function getExamEligibility({ studentMembershipId, sessionId = null } = {}
   const totalPaid = scopedOrders.reduce((sum, item) => sum + (Number(item.amountPaid) || 0), 0);
   const totalOutstanding = scopedOrders.reduce((sum, item) => sum + (Number(item.outstandingAmount) || 0), 0);
   const overdueOrders = scopedOrders.filter((item) => item.status === 'overdue');
-  const pendingPayments = scopedPayments.filter((item) => item.status === 'pending');
+  const pendingPayments = scopedPayments.filter((item) => item.status === 'pending' && Number(item?.recognizedAmount ?? item?.amount ?? 0) > 0);
 
   const feeStatus = totalOutstanding <= 0
     ? 'clear'
@@ -1955,7 +2352,7 @@ function buildEligibilitySummaryFromOverview(overview = {}) {
   const totalPaid = orders.reduce((sum, item) => sum + (Number(item.amountPaid) || 0), 0);
   const totalOutstanding = orders.reduce((sum, item) => sum + (Number(item.outstandingAmount) || 0), 0);
   const overdueOrders = orders.filter((item) => item.status === 'overdue');
-  const pendingPayments = payments.filter((item) => item.status === 'pending');
+  const pendingPayments = payments.filter((item) => item.status === 'pending' && Number(item?.recognizedAmount ?? item?.amount ?? 0) > 0);
   const feeStatus = totalOutstanding <= 0
     ? 'clear'
     : overdueOrders.length
@@ -2039,6 +2436,7 @@ module.exports = {
   createFeeExemption,
   createFeePayment,
   createTransportFee,
+  deduplicateDiscounts,
   getDailyCashierReport,
   getExamEligibility,
   getFeePaymentReceipt,
@@ -2050,9 +2448,11 @@ module.exports = {
   listOpenFeeOrdersForMembership,
   listFeeOrders,
   listFeePayments,
+  inspectDiscountDuplicates,
   listStudentFinanceReferenceData,
   listStudentMembershipOverviewsByUserId,
   listTransportFees,
   previewFeePaymentAllocation,
-  seedStudentFinanceCanonical
+  seedStudentFinanceCanonical,
+  syncDiscountOpenBills
 };

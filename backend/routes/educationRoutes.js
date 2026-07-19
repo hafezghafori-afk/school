@@ -21,6 +21,7 @@ const UserNotification = require('../models/UserNotification');
 const { deactivateCurrentMemberships } = require('../utils/studentMembershipSync');
 const { findAccessibleCourses } = require('../utils/courseAccess');
 const { ensureAfghanStudentProfile } = require('../services/afghanStudentProfileService');
+const { issueTransferAdmissionBill } = require('../services/transferAdmissionBillingService');
 const { requireAuth, requireRole, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const { logActivity } = require('../utils/activity');
 
@@ -969,7 +970,7 @@ const isCourseAllowedForInstructor = async (user, courseId) => {
 const findActiveMembership = (studentId, courseId) => StudentMembership.findOne({
   student: studentId,
   course: courseId,
-  status: 'active',
+  status: { $in: ['active', 'transferred_in'] },
   isCurrent: true
 });
 
@@ -2134,7 +2135,7 @@ router.get('/instructor/course-students', ...withInstructorManageContent, async 
       return res.json({ success: true, items: [] });
     }
 
-    const filter = { status: 'active', isCurrent: true };
+    const filter = { status: { $in: ['active', 'transferred_in'] }, isCurrent: true };
     if (classId || courseId) {
       const classRef = await resolveClassReference({ classId, courseId });
       if (classRef.error) return res.status(400).json({ success: false, message: classRef.error });
@@ -2248,7 +2249,7 @@ router.delete('/instructor/course-students/:id', ...withInstructorManageContent,
     if (!item) {
       return res.status(404).json({ success: false, message: 'Membership not found' });
     }
-    if (!item.isCurrent || item.status !== 'active') {
+    if (!item.isCurrent || !['active', 'transferred_in'].includes(item.status)) {
       return res.status(400).json({ success: false, message: 'Only active memberships can be removed' });
     }
 
@@ -2308,7 +2309,7 @@ router.get('/course-access-status/:identifier', requireAuth, async (req, res) =>
       student: req.user.id,
       course: classRef.courseId,
       isCurrent: true,
-      status: { $in: ['active', 'pending'] }
+      status: { $in: ['active', 'transferred_in', 'pending', 'suspended'] }
     }).sort({ updatedAt: -1, createdAt: -1 });
 
     const pendingRequest = membership
@@ -2460,6 +2461,13 @@ router.post('/student-enrollments', ...withManageMemberships, async (req, res) =
     if (req.user?.id) item.createdBy = req.user.id;
 
     await item.save();
+    const admissionBilling = membershipStatus === 'transferred_in'
+      ? await issueTransferAdmissionBill({
+          membership: item,
+          actorId: req.user?.id || null,
+          effectiveAt: item.joinedAt || new Date()
+        })
+      : null;
 
     const profileResult = await ensureAfghanStudentProfile({
       source: 'teaching_enrollment',
@@ -2499,8 +2507,17 @@ router.post('/student-enrollments', ...withManageMemberships, async (req, res) =
     const schoolClass = nextClassId ? await loadSerializedSchoolClassById(nextClassId) : null;
     res.status(isUpdate ? 200 : 201).json({
       success: true,
+      admissionBilling: admissionBilling ? {
+        created: admissionBilling.created === true,
+        reason: admissionBilling.reason || '',
+        billId: admissionBilling.bill?._id || null,
+        billNumber: admissionBilling.bill?.billNumber || '',
+        amount: Number(admissionBilling.bill?.amountOriginal || 0)
+      } : null,
       item: serializeStudentEnrollment(populated, schoolClass),
-      message: 'ثبت‌نام متعلم ذخیره شد.'
+      message: admissionBilling?.created
+        ? `ثبت‌نام متعلم ذخیره شد و بل داخله ${admissionBilling.bill?.billNumber || ''} صادر گردید.`
+        : 'ثبت‌نام متعلم ذخیره شد.'
     });
   } catch (error) {
     res.status(500).json({ success: false, message: 'ذخیره ثبت‌نام متعلم ناموفق بود.' });
@@ -2524,6 +2541,7 @@ router.post('/student-enrollments/lifecycle', ...withManageStudentLifecycle, asy
 
     let item = null;
     let stoppedFutureBills = { bills: 0, orders: 0 };
+    let admissionBilling = null;
 
     if (action === 'transfer_in') {
       const studentIdInput = normalizeText(req.body?.studentId);
@@ -2589,6 +2607,11 @@ router.post('/student-enrollments/lifecycle', ...withManageStudentLifecycle, asy
       item.rejectedReason = '';
       if (req.user?.id) item.createdBy = req.user.id;
       await item.save();
+      admissionBilling = await issueTransferAdmissionBill({
+        membership: item,
+        actorId: req.user?.id || null,
+        effectiveAt
+      });
     } else {
       const membershipId = normalizeText(req.body?.membershipId);
       if (!mustObjectId(membershipId)) {
@@ -2637,7 +2660,12 @@ router.post('/student-enrollments/lifecycle', ...withManageStudentLifecycle, asy
       meta: {
         lifecycleAction: action,
         effectiveAt: effectiveAt.toISOString(),
-        stoppedFutureBills
+        stoppedFutureBills,
+        admissionBilling: admissionBilling ? {
+          created: admissionBilling.created === true,
+          reason: admissionBilling.reason || '',
+          billId: String(admissionBilling.bill?._id || '')
+        } : null
       },
       reason: note
     });
@@ -2647,9 +2675,24 @@ router.post('/student-enrollments/lifecycle', ...withManageStudentLifecycle, asy
     return res.json({
       success: true,
       stoppedFutureBills,
+      admissionBilling: admissionBilling ? {
+        created: admissionBilling.created === true,
+        reason: admissionBilling.reason || '',
+        billId: admissionBilling.bill?._id || null,
+        billNumber: admissionBilling.bill?.billNumber || '',
+        amount: Number(admissionBilling.bill?.amountOriginal || 0)
+      } : null,
       item: serializeStudentEnrollment(populated, schoolClass),
       message: action === 'transfer_in'
-        ? 'تبدیلی آمد ثبت شد.'
+        ? admissionBilling?.created
+          ? `تبدیلی آمد ثبت شد و بل داخله ${admissionBilling.bill?.billNumber || ''} صادر گردید.`
+          : admissionBilling?.reason === 'admission_already_issued'
+            ? 'تبدیلی آمد ثبت شد؛ بل داخله قبلاً برای این عضویت صادر شده است.'
+            : admissionBilling?.reason === 'fee_plan_not_found'
+              ? 'تبدیلی آمد ثبت شد، اما پلان مالی فعال برای صدور بل داخله پیدا نشد.'
+              : admissionBilling?.reason === 'admission_fee_not_configured'
+                ? 'تبدیلی آمد ثبت شد، اما مبلغ داخله در پلان مالی تعیین نشده است.'
+                : 'تبدیلی آمد ثبت شد.'
         : action === 'transfer_out'
           ? 'تبدیلی رفت ثبت شد و بل‌های آینده متوقف شدند.'
           : 'ترک تحصیل ثبت شد و بل‌های آینده متوقف شدند.'
@@ -2726,6 +2769,13 @@ router.put('/student-enrollments/:id', ...withManageMemberships, async (req, res
     if (req.user?.id) item.createdBy = req.user.id;
 
     await item.save();
+    const admissionBilling = membershipStatus === 'transferred_in'
+      ? await issueTransferAdmissionBill({
+          membership: item,
+          actorId: req.user?.id || null,
+          effectiveAt: item.joinedAt || new Date()
+        })
+      : null;
 
     await logActivity({
       req,
@@ -2742,7 +2792,20 @@ router.put('/student-enrollments/:id', ...withManageMemberships, async (req, res
 
     const populated = await populateStudentEnrollments(StudentMembership.findById(item._id));
     const schoolClass = nextClassId ? await loadSerializedSchoolClassById(nextClassId) : null;
-    res.json({ success: true, item: serializeStudentEnrollment(populated, schoolClass), message: 'ثبت‌نام متعلم به‌روزرسانی شد.' });
+    res.json({
+      success: true,
+      admissionBilling: admissionBilling ? {
+        created: admissionBilling.created === true,
+        reason: admissionBilling.reason || '',
+        billId: admissionBilling.bill?._id || null,
+        billNumber: admissionBilling.bill?.billNumber || '',
+        amount: Number(admissionBilling.bill?.amountOriginal || 0)
+      } : null,
+      item: serializeStudentEnrollment(populated, schoolClass),
+      message: admissionBilling?.created
+        ? `ثبت‌نام متعلم به‌روزرسانی شد و بل داخله ${admissionBilling.bill?.billNumber || ''} صادر گردید.`
+        : 'ثبت‌نام متعلم به‌روزرسانی شد.'
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: 'ویرایش ثبت‌نام متعلم ناموفق بود.' });
   }

@@ -18,6 +18,7 @@ const CourseJoinRequest = require('../models/CourseJoinRequest');
 const ProfileUpdateRequest = require('../models/ProfileUpdateRequest');
 const AccessRequest = require('../models/AccessRequest');
 const SchoolClass = require('../models/SchoolClass');
+const { recognizePayments } = require('../utils/financeRevenueRecognition');
 
 function startOfDay(date = new Date()) {
   const value = new Date(date);
@@ -438,7 +439,7 @@ async function getAdminDashboard() {
         }
       }
     ]),
-    FeePayment.find({ status: 'approved' }).select('amount paidAt'),
+    FeePayment.find({ status: 'approved' }).select('amount paidAt feeOrderId allocations'),
     Attendance.find({
       date: { $gte: attendanceStart, $lte: todayEnd }
     }).select('status date'),
@@ -455,21 +456,22 @@ async function getAdminDashboard() {
   const totalStudents = officialPeopleCounts.totalStudents;
   const totalInstructors = officialPeopleCounts.totalInstructors;
   const financeSummary = outstandingStats[0] || { totalDue: 0, outstandingAmount: 0 };
+  const recognizedPayments = await recognizePayments(approvedPayments);
   const monthlyRevenue = sumBy(
-    approvedPayments.filter((item) => item.paidAt && new Date(item.paidAt) >= monthStart),
-    (item) => item.amount
+    recognizedPayments.filter((row) => row.payment?.paidAt && new Date(row.payment.paidAt) >= monthStart),
+    (row) => row.recognizedAmount
   );
   const previousMonthRevenue = sumBy(
-    approvedPayments.filter((item) => {
-      const paidAt = item.paidAt ? new Date(item.paidAt) : null;
+    recognizedPayments.filter((row) => {
+      const paidAt = row.payment?.paidAt ? new Date(row.payment.paidAt) : null;
       return paidAt && paidAt >= previousMonthStart && paidAt <= previousMonthEnd;
     }),
-    (item) => item.amount
+    (row) => row.recognizedAmount
   );
-  const totalRevenue = sumBy(approvedPayments, (item) => item.amount);
-  const todayPayments = approvedPayments.filter((item) => {
-    const paidAt = item.paidAt ? new Date(item.paidAt) : null;
-    return paidAt && paidAt >= todayStart && paidAt <= todayEnd;
+  const totalRevenue = sumBy(recognizedPayments, (row) => row.recognizedAmount);
+  const todayPayments = recognizedPayments.filter((row) => {
+    const paidAt = row.payment?.paidAt ? new Date(row.payment.paidAt) : null;
+    return row.recognizedAmount > 0 && paidAt && paidAt >= todayStart && paidAt <= todayEnd;
   });
   const attendanceRate = asPercent(
     attendanceRows.filter((item) => isCountedAsAttended(item.status)).length,
@@ -485,8 +487,8 @@ async function getAdminDashboard() {
   const revenueTrend = buildRecentMonthBuckets(6).map((bucket) => ({
     label: bucket.label,
     value: Number(sumBy(
-      approvedPayments.filter((item) => monthKey(item.paidAt || new Date(0)) === bucket.key),
-      (item) => item.amount
+      recognizedPayments.filter((row) => monthKey(row.payment?.paidAt || new Date(0)) === bucket.key),
+      (row) => row.recognizedAmount
     ).toFixed(0)),
     meta: 'افغانی'
   }));
@@ -737,7 +739,7 @@ async function getParentDashboard(viewer = {}, options = {}) {
     FeePayment.find({
       studentMembershipId: membershipId,
       status: 'approved'
-    }).select('amount paidAt'),
+    }).select('amount paidAt feeOrderId allocations'),
     Attendance.find({
       studentMembershipId: membershipId,
       date: { $gte: weekStart, $lte: endOfDay(today) }
@@ -766,7 +768,8 @@ async function getParentDashboard(viewer = {}, options = {}) {
     ? Number((sumBy(grades, (item) => item.totalScore) / grades.length).toFixed(1))
     : 0;
   const outstandingAmount = sumBy(orders, (item) => item.outstandingAmount);
-  const paidAmount = sumBy(payments, (item) => item.amount);
+  const recognizedPayments = await recognizePayments(payments);
+  const paidAmount = sumBy(recognizedPayments, (item) => item.recognizedAmount);
   const submittedHomeworkIds = new Set(submittedHomework.map((item) => String(item.homework || '')));
   const pendingHomework = upcomingHomework.filter((item) => !submittedHomeworkIds.has(String(item._id))).length;
 

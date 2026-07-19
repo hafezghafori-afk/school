@@ -171,6 +171,7 @@ async function runFinanceReminderSweep(app, { force = false, req = null, actorUs
         .populate('student', 'name email'),
       FinanceRelief.find({
         status: 'active',
+        feeOrderId: null,
         endDate: { $ne: null, $lte: reliefNearDate },
         $or: [
           { lastReminderAt: null },

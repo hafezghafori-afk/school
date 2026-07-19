@@ -5,6 +5,7 @@ const ExpenseEntry = require('../models/ExpenseEntry');
 const FeePayment = require('../models/FeePayment');
 const FeeOrder = require('../models/FeeOrder');
 const FinancialYear = require('../models/FinancialYear');
+const { recognizePayments } = require('../utils/financeRevenueRecognition');
 
 const TREASURY_ACCOUNT_TYPES = new Set(['cashbox', 'bank', 'hawala', 'mobile_money', 'other']);
 const TREASURY_TRANSACTION_TYPE_META = Object.freeze({
@@ -143,18 +144,35 @@ async function resolveFeePaymentTreasuryAccount(financialYear, payment = {}) {
 
 async function syncApprovedFeePaymentToTreasury(payment = {}, options = {}) {
   if (!payment || normalizeText(payment.status) !== 'approved') return null;
-  const amount = normalizeMoney(payment.amount, 0);
-  if (amount <= 0) return null;
-
   const paymentId = normalizeText(payment._id);
   if (!paymentId) return null;
   const transactionGroupKey = `fee-payment:${paymentId}`;
+  const [recognized] = await recognizePayments([payment]);
+  const amount = normalizeMoney(recognized?.recognizedAmount, 0);
   const existing = await FinanceTreasuryTransaction.findOne({
     transactionGroupKey,
-    sourceType: 'fee_payment',
-    status: { $ne: 'void' }
+    sourceType: 'fee_payment'
   });
-  if (existing) return existing;
+  if (amount <= 0) {
+    if (existing && existing.status !== 'void') {
+      existing.status = 'void';
+      existing.note = `ورود پرداخت ${payment.paymentNumber || ''} به‌دلیل باطل‌شدن بل مرتبط از عواید حذف شد.`.trim();
+      existing.updatedBy = payment.reviewedBy || payment.receivedBy || existing.updatedBy || null;
+      await existing.save();
+    }
+    return existing || null;
+  }
+  if (existing) {
+    const shouldUpdate = existing.status !== 'posted' || normalizeMoney(existing.amount, 0) !== amount;
+    if (shouldUpdate) {
+      existing.status = 'posted';
+      existing.amount = amount;
+      existing.note = `ورود خودکار مبلغ معتبر پرداخت شاگرد ${payment.paymentNumber || ''}`.trim();
+      existing.updatedBy = payment.reviewedBy || payment.receivedBy || existing.updatedBy || null;
+      await existing.save();
+    }
+    return existing;
+  }
 
   const financialYear = await resolveFeePaymentFinancialYear(payment, options);
   if (!financialYear?._id) return null;
@@ -183,8 +201,7 @@ async function syncApprovedFeePaymentToTreasury(payment = {}, options = {}) {
     if (error?.code === 11000) {
       return FinanceTreasuryTransaction.findOne({
         transactionGroupKey,
-        sourceType: 'fee_payment',
-        status: { $ne: 'void' }
+        sourceType: 'fee_payment'
       });
     }
     throw error;

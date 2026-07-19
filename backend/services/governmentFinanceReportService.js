@@ -6,6 +6,7 @@ const FinancialYear = require('../models/FinancialYear');
 const SchoolClass = require('../models/SchoolClass');
 const { buildTreasuryAnalytics } = require('./treasuryGovernanceService');
 const { getQuarterRange, listQuarterRanges, startOfDay, endOfDay } = require('./financialPeriodService');
+const { recognizePayments } = require('../utils/financeRevenueRecognition');
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -140,14 +141,16 @@ async function buildQuarterlyGovernmentFinanceReport(filters = {}) {
       }
     ])
   ]);
+  const recognizedPaymentRows = await recognizePayments(payments);
   const paymentMap = new Map();
-  payments.forEach((item) => {
+  recognizedPaymentRows.forEach(({ payment: item, recognizedAmount }) => {
+    if (recognizedAmount <= 0) return;
     const classRef = item.classId || item.feeOrderId?.classId || null;
     const classId = normalizeId(classRef);
     if (filters.classId && classId !== String(filters.classId)) return;
     const key = classId || null;
     const current = paymentMap.get(key) || { _id: key, total: 0, count: 0 };
-    current.total += Number(item.amount || 0);
+    current.total += Number(recognizedAmount || 0);
     current.count += 1;
     paymentMap.set(key, current);
   });
@@ -277,17 +280,8 @@ async function buildGovernmentBudgetVsActualReport(filters = {}) {
     endDate: context.baseEndDate
   }));
 
-  const [paymentSummaryRows, expenseSummaryRows, expenseCategoryRows, categoryRegistry, treasuryAnalytics] = await Promise.all([
-    FeePayment.aggregate([
-      { $match: paymentFilter },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: '$amount' },
-          count: { $sum: 1 }
-        }
-      }
-    ]),
+  const [paymentRows, expenseSummaryRows, expenseCategoryRows, categoryRegistry, treasuryAnalytics] = await Promise.all([
+    FeePayment.find(paymentFilter).select('amount feeOrderId allocations').lean(),
     ExpenseEntry.aggregate([
       { $match: expenseFilter },
       {
@@ -315,7 +309,8 @@ async function buildGovernmentBudgetVsActualReport(filters = {}) {
     })
   ]);
 
-  const actualIncome = Number(paymentSummaryRows[0]?.total || 0);
+  const recognizedPaymentRows = await recognizePayments(paymentRows);
+  const actualIncome = recognizedPaymentRows.reduce((sum, row) => sum + Number(row.recognizedAmount || 0), 0);
   const actualExpense = Number(expenseSummaryRows[0]?.total || 0);
   const actualNet = Number((actualIncome - actualExpense).toFixed(2));
   const budgetTargets = normalizeBudgetTargets(financialYear?.budgetTargets || {});

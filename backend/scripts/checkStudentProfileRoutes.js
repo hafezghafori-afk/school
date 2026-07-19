@@ -19,7 +19,7 @@ const adminWithReports = {
 const adminWithManageUsers = {
   id: IDS.admin,
   role: 'admin',
-  permissions: ['view_reports', 'manage_users']
+  permissions: ['view_reports', 'manage_users', 'students.transfers.manage']
 };
 
 const sampleProfile = {

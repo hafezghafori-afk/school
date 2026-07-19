@@ -1,4 +1,5 @@
 const FinanceBill = require('../models/FinanceBill');
+const FeeOrder = require('../models/FeeOrder');
 const FinanceFeePlan = require('../models/FinanceFeePlan');
 const AcademicYear = require('../models/AcademicYear');
 const Discount = require('../models/Discount');
@@ -237,6 +238,7 @@ function buildDiscountAdjustment(item = {}) {
     : 'discount';
   return {
     type,
+    scope: type === 'discount' ? 'tuition' : 'all',
     amount: roundMoney(item.amount),
     reason: normalizeText(item.reason),
     createdBy: item.createdBy || null,
@@ -246,11 +248,19 @@ function buildDiscountAdjustment(item = {}) {
 
 function buildAdjustmentFromRelief(item = {}) {
   const reliefType = normalizeText(item.reliefType);
+  const sourceKey = normalizeText(item.sourceKey);
+  const sourceMarker = sourceKey.startsWith('discount:')
+    ? `[discount:${sourceKey.slice('discount:'.length)}]`
+    : sourceKey.startsWith('fee_exemption:')
+      ? `[exemption:${sourceKey.slice('fee_exemption:'.length)}]`
+      : '';
+  const reason = `${sourceMarker} ${normalizeText(item.reason)}`.trim();
   if (reliefType === 'penalty') {
     return {
       type: 'penalty',
+      scope: 'all',
       amount: roundMoney(item.amount),
-      reason: normalizeText(item.reason),
+      reason,
       createdBy: item.createdBy || null,
       createdAt: item.createdAt || item.startDate || new Date()
     };
@@ -258,8 +268,9 @@ function buildAdjustmentFromRelief(item = {}) {
 
   return {
     type: reliefType === 'discount' || reliefType === 'sibling_discount' ? 'discount' : 'waiver',
+    scope: normalizeText(item.scope) || (reliefType === 'discount' || reliefType === 'sibling_discount' ? 'tuition' : 'all'),
     amount: roundMoney(item.amount),
-    reason: normalizeText(item.reason),
+    reason,
     createdBy: item.createdBy || item.approvedBy || null,
     createdAt: item.createdAt || item.startDate || new Date()
   };
@@ -290,6 +301,7 @@ function buildExemptionAdjustments(exemptions = [], amountsByScope = {}, selecte
     if (reduction <= 0) continue;
     adjustments.push({
       type: 'waiver',
+      scope: normalizeText(item.scope) || 'all',
       amount: reduction,
       reason: normalizeText(item.reason) || `Fee exemption (${scopes.join(', ')})`,
       createdBy: item.createdBy || item.approvedBy || null,
@@ -324,10 +336,12 @@ function buildReliefAdjustments(reliefs = [], amountsByScope = {}, selectedScope
     }
 
     if (reduction <= 0) continue;
+    const hasRegistrySource = normalizeText(item.sourceKey).startsWith('discount:')
+      || normalizeText(item.sourceKey).startsWith('fee_exemption:');
     adjustments.push(buildAdjustmentFromRelief({
       ...item,
       amount: reduction,
-      reason: item.reason || `Relief (${scopes.join(', ')})`
+      reason: item.reason || (hasRegistrySource ? '' : `Relief (${scopes.join(', ')})`)
     }));
   }
   return adjustments;
@@ -686,7 +700,23 @@ async function buildGroupedBillCandidates({
   const effectiveAcademicYearId = academicYearId || firstMembershipAcademicYearId;
   const billingFrequency = normalizeBillingFrequency(periodType === 'monthly' ? 'monthly' : 'term');
 
-  const [feePlan, academicYearDoc, financeReliefs, discounts, exemptions, openBills] = await Promise.all([
+  const membershipStudentIds = memberships.map((item) => item.student).filter(Boolean);
+  const admissionIdentityFilter = {
+    $or: [
+      { studentMembershipId: { $in: membershipIds } },
+      { student: { $in: membershipStudentIds } }
+    ]
+  };
+  const [
+    feePlan,
+    academicYearDoc,
+    financeReliefs,
+    discounts,
+    exemptions,
+    openBills,
+    existingAdmissionBills,
+    existingAdmissionOrders
+  ] = await Promise.all([
     resolveFeePlanForBilling({
       feePlanId,
       courseId,
@@ -699,12 +729,14 @@ async function buildGroupedBillCandidates({
     effectiveAcademicYearId ? AcademicYear.findById(effectiveAcademicYearId).lean() : null,
     FinanceRelief.find({
       studentMembershipId: { $in: membershipIds },
-      status: 'active'
+      status: 'active',
+      feeOrderId: null
     }),
     Discount.find({
       studentMembershipId: { $in: membershipIds },
       feeOrderId: null,
-      status: 'active'
+      status: 'active',
+      source: { $in: ['manual', 'migration'] }
     }),
     FeeExemption.find({
       studentMembershipId: { $in: membershipIds },
@@ -713,7 +745,28 @@ async function buildGroupedBillCandidates({
     FinanceBill.find({
       studentMembershipId: { $in: membershipIds },
       status: { $in: ['new', 'partial', 'overdue'] }
-    }).select('studentMembershipId')
+    }).select('studentMembershipId'),
+    FinanceBill.find({
+      ...admissionIdentityFilter,
+      status: { $ne: 'void' },
+      $and: [{ $or: [
+        { feeScopes: 'admission' },
+        { 'lineItems.feeType': 'admission' },
+        { periodLabel: /داخله|admission/i },
+        { note: /داخله|admission/i }
+      ] }]
+    }).select('student studentMembershipId'),
+    FeeOrder.find({
+      ...admissionIdentityFilter,
+      status: { $ne: 'void' },
+      $and: [{ $or: [
+        { orderType: 'admission' },
+        { 'lineItems.feeType': 'admission' },
+        { title: /داخله|admission/i },
+        { periodLabel: /داخله|admission/i },
+        { note: /داخله|admission/i }
+      ] }]
+    }).select('student studentMembershipId')
   ]);
 
   const reliefMap = new Map();
@@ -750,6 +803,16 @@ async function buildGroupedBillCandidates({
 
   const effectiveBillingFrequency = normalizeBillingFrequency(feePlan?.billingFrequency || billingFrequency);
   const debtorSet = new Set(openBills.map((item) => String(item.studentMembershipId || '')));
+  const admissionMembershipSet = new Set(
+    [...existingAdmissionBills, ...existingAdmissionOrders]
+      .map((item) => String(item.studentMembershipId || ''))
+      .filter(Boolean)
+  );
+  const admissionStudentSet = new Set(
+    [...existingAdmissionBills, ...existingAdmissionOrders]
+      .map((item) => String(item.student || ''))
+      .filter(Boolean)
+  );
   const excluded = [];
   const items = [];
 
@@ -793,8 +856,11 @@ async function buildGroupedBillCandidates({
     }
 
     for (const period of periods) {
-      const amountsByScope = buildPlanAmountsByScope(feePlan, selectedScopes, roundMoney(amount));
-      const amountOriginal = roundMoney(sumScopedAmount(amountsByScope, selectedScopes));
+      const admissionAlreadyIssued = admissionMembershipSet.has(membershipId)
+        || admissionStudentSet.has(String(membership.student || ''));
+      const candidateScopes = selectedScopes.filter((scope) => scope !== 'admission' || !admissionAlreadyIssued);
+      const amountsByScope = buildPlanAmountsByScope(feePlan, candidateScopes, roundMoney(amount));
+      const amountOriginal = roundMoney(sumScopedAmount(amountsByScope, candidateScopes));
       if (amountOriginal <= 0) {
         excluded.push({
           membershipId,
@@ -805,14 +871,14 @@ async function buildGroupedBillCandidates({
       }
 
       const periodWindow = { start: period.periodStart, end: period.periodEnd };
-      const reliefAdjustments = buildReliefAdjustments(reliefMap.get(membershipId) || [], amountsByScope, selectedScopes, periodWindow);
+      const reliefAdjustments = buildReliefAdjustments(reliefMap.get(membershipId) || [], amountsByScope, candidateScopes, periodWindow);
       const adjustmentRows = reliefAdjustments.length
         ? reliefAdjustments
         : [
             ...(discountMap.get(membershipId) || [])
               .filter((item) => overlapsDateWindow(item, periodWindow.start, periodWindow.end))
               .map(buildDiscountAdjustment),
-            ...buildExemptionAdjustments(exemptionMap.get(membershipId) || [], amountsByScope, selectedScopes, periodWindow)
+            ...buildExemptionAdjustments(exemptionMap.get(membershipId) || [], amountsByScope, candidateScopes, periodWindow)
           ];
       const totals = summarizeAdjustments(adjustmentRows);
       const amountDue = roundMoney(Math.max(0, amountOriginal - totals.reductionTotal + totals.penaltyTotal));
@@ -820,7 +886,7 @@ async function buildGroupedBillCandidates({
       const resolvedTerm = normalizeText(period.term) || normalizeText(term);
       const lineItems = normalizeFinanceLineItems({
         feeBreakdown: amountsByScope,
-        feeScopes: selectedScopes,
+        feeScopes: candidateScopes,
         amountOriginal,
         adjustments: adjustmentRows,
         amountPaid: 0,
@@ -845,12 +911,12 @@ async function buildGroupedBillCandidates({
         amountOriginal,
         amountDue,
         adjustments: adjustmentRows,
-        feeScopes: selectedScopes,
+        feeScopes: candidateScopes,
         feeBreakdown: amountsByScope,
         lineItems,
         note: [
           feePlan?.title ? `plan:${normalizeText(feePlan.title)}` : '',
-          `scopes:${selectedScopes.join(',')}`
+          `scopes:${candidateScopes.join(',')}`
         ].filter(Boolean).join(' | ')
       });
     }
@@ -880,6 +946,8 @@ async function buildGroupedBillCandidates({
 }
 
 module.exports = {
+  buildReliefAdjustments,
   buildGroupedBillCandidates,
-  buildMonthlyBillingPeriods
+  buildMonthlyBillingPeriods,
+  resolveFeePlanForBilling
 };

@@ -15,6 +15,7 @@ const {
   buildFinanceAnomalyWorkflowSummary
 } = require('../utils/financeAnomalyWorkflow');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
+const { recognizePayments } = require('../utils/financeRevenueRecognition');
 
 const CURRENT_MEMBERSHIP_STATUSES = ['active', 'pending', 'suspended', 'transferred_in'];
 
@@ -51,6 +52,7 @@ function dateKey(value) {
 function buildReliefActiveFilter(endAt) {
   return {
     status: 'active',
+    feeOrderId: null,
     $and: [
       {
         $or: [
@@ -284,6 +286,22 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
     }),
     buildFinanceAnomalyReport({ asOf: endAt, limit: 30 })
   ]);
+  const [approvedRecognition, pendingRecognition] = await Promise.all([
+    recognizePayments(approvedPayments),
+    recognizePayments(pendingPayments)
+  ]);
+  const recognizedApprovedPayments = approvedRecognition
+    .filter((row) => row.recognizedAmount > 0)
+    .map((row) => ({
+      ...(typeof row.payment?.toObject === 'function' ? row.payment.toObject() : row.payment),
+      amount: row.recognizedAmount
+    }));
+  const recognizedPendingPayments = pendingRecognition
+    .filter((row) => row.recognizedAmount > 0)
+    .map((row) => ({
+      ...(typeof row.payment?.toObject === 'function' ? row.payment.toObject() : row.payment),
+      amount: row.recognizedAmount
+    }));
   const mergedAnomalies = mergeFinanceAnomalyCases(anomalyReport?.items || [], anomalyCases, { asOf: endAt });
   const anomalySummary = {
     ...(anomalyReport?.summary || { total: 0, critical: 0, warning: 0, info: 0, actionRequired: 0, byType: {} }),
@@ -317,10 +335,10 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
   const totals = {
     ordersIssuedCount: ordersIssuedInMonth.length,
     ordersIssuedAmount: roundMoney(ordersIssuedInMonth.reduce((sum, item) => sum + Number(item?.amountDue || 0), 0)),
-    approvedPaymentCount: approvedPayments.length,
-    approvedPaymentAmount: roundMoney(approvedPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
-    pendingPaymentCount: pendingPayments.length,
-    pendingPaymentAmount: roundMoney(pendingPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
+    approvedPaymentCount: recognizedApprovedPayments.length,
+    approvedPaymentAmount: roundMoney(recognizedApprovedPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
+    pendingPaymentCount: recognizedPendingPayments.length,
+    pendingPaymentAmount: roundMoney(recognizedPendingPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
     standingDueAmount: roundMoney(ordersBeforeClose.reduce((sum, item) => sum + Number(item?.amountDue || 0), 0)),
     standingPaidAmount: roundMoney(ordersBeforeClose.reduce((sum, item) => sum + Number(item?.amountPaid || 0), 0)),
     standingOutstandingAmount: roundMoney(ordersBeforeClose.reduce((sum, item) => sum + Number(item?.outstandingAmount || 0), 0)),
@@ -344,17 +362,17 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
     totals,
     aging: buildAgingSnapshot(ordersBeforeClose, endAt),
     cashflow: {
-      approvedTotal: roundMoney(approvedPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
-      approvedCount: approvedPayments.length,
-      pendingTotal: roundMoney(pendingPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
-      pendingCount: pendingPayments.length,
-      items: buildCashflowItems(approvedPayments).slice(-31)
+      approvedTotal: roundMoney(recognizedApprovedPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
+      approvedCount: recognizedApprovedPayments.length,
+      pendingTotal: roundMoney(recognizedPendingPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
+      pendingCount: recognizedPendingPayments.length,
+      items: buildCashflowItems(recognizedApprovedPayments).slice(-31)
     },
     readiness: buildFinanceMonthCloseReadiness({ totals, anomalies }),
     classes: buildClassSnapshot({
       orders: ordersBeforeClose,
-      approvedPayments,
-      pendingPayments,
+      approvedPayments: recognizedApprovedPayments,
+      pendingPayments: recognizedPendingPayments,
       reliefs
     }),
     anomalies

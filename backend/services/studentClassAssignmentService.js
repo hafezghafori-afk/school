@@ -5,6 +5,7 @@ const SchoolClass = require('../models/SchoolClass');
 const Course = require('../models/Course');
 const User = require('../models/User');
 const StudentMembership = require('../models/StudentMembership');
+const { issueTransferAdmissionBill } = require('./transferAdmissionBillingService');
 
 const CURRENT_MEMBERSHIP_STATUSES = ['active', 'pending', 'suspended', 'transferred_in'];
 
@@ -44,6 +45,42 @@ const extractShiftId = (payload = {}) => (
   || payload.academicContext?.shiftId
   || null
 );
+
+const normalizeEnrollmentType = (value) => String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+
+const hasPreviousSchool = (value) => {
+  if (typeof value === 'string') return Boolean(value.trim());
+  if (!value || typeof value !== 'object') return false;
+  return Boolean(String(value.name || value.schoolName || value.lastGrade || '').trim());
+};
+
+const isTransferAssignment = ({ student = {}, payload = {} } = {}) => {
+  const types = [
+    payload.enrollmentType,
+    payload.registrationType,
+    payload['academicInfo.enrollmentType'],
+    payload.academicInfo?.enrollmentType,
+    student.academicInfo?.enrollmentType
+  ].map(normalizeEnrollmentType);
+  if (types.some((value) => ['transfer', 'transfer_in', 'transferred_in'].includes(value))) return true;
+
+  return hasPreviousSchool(payload.previousSchool)
+    || hasPreviousSchool(payload.academicInfo?.previousSchool)
+    || hasPreviousSchool(student.academicInfo?.previousSchool);
+};
+
+const serializeTransferAdmissionBilling = (result = null) => {
+  if (!result) return null;
+  return {
+    created: result.created === true,
+    reason: String(result.reason || '').trim(),
+    billId: result.bill?._id || null,
+    billNumber: String(result.bill?.billNumber || '').trim(),
+    amount: Number(result.bill?.amountOriginal || 0),
+    feePlanId: result.plan?._id || null,
+    feePlanTitle: String(result.plan?.title || '').trim()
+  };
+};
 
 const gradeLabelFromStudent = (student = {}) => {
   const grade = String(student?.academicInfo?.currentGrade || student?.grade || '').trim();
@@ -179,6 +216,7 @@ const assignStudentToClass = async ({ student, payload = {}, actorId = null, sou
 
   const academicYearId = extractAcademicYearId(payload, schoolClass);
   const joinedAt = extractEnrollmentDate(payload);
+  const transferAssignment = isTransferAssignment({ student, payload });
 
   const membership = await StudentMembership.findOneAndUpdate(
     {
@@ -195,7 +233,7 @@ const assignStudentToClass = async ({ student, payload = {}, actorId = null, sou
         classId: schoolClass._id,
         academicYear: academicYearId || null,
         academicYearId: academicYearId || null,
-        status: 'active',
+        status: transferAssignment ? 'transferred_in' : 'active',
         source,
         enrolledAt: joinedAt,
         joinedAt,
@@ -225,12 +263,24 @@ const assignStudentToClass = async ({ student, payload = {}, actorId = null, sou
   await updateClassCurrentStudentCount(schoolClass._id);
   await Promise.all(previousMemberships.map((item) => updateClassCurrentStudentCount(item.classId)));
 
+  if (transferAssignment) {
+    const admissionBilling = await issueTransferAdmissionBill({
+      membership,
+      actorId,
+      effectiveAt: joinedAt
+    });
+    membership.$locals = membership.$locals || {};
+    membership.$locals.transferAdmissionBilling = admissionBilling;
+  }
+
   return membership;
 };
 
 module.exports = {
   assignStudentToClass,
   ensureStudentUser,
+  isTransferAssignment,
+  serializeTransferAdmissionBilling,
   syncCourseForSchoolClass,
   updateClassCurrentStudentCount
 };

@@ -58,6 +58,8 @@ function mapExemptionToReliefType(exemption = {}) {
 }
 
 function buildFinanceReliefPayloadFromDiscount(discount = {}) {
+  const isFullCoverage = discount.coverageMode === 'percent' && Number(discount.percentage || 0) >= 100;
+  const mappedReliefType = mapDiscountTypeToReliefType(discount.discountType);
   return {
     sourceModel: 'discount',
     sourceDiscountId: normalizeNullableId(discount._id),
@@ -69,9 +71,9 @@ function buildFinanceReliefPayloadFromDiscount(discount = {}) {
     student: normalizeNullableId(discount.student?._id || discount.student),
     classId: normalizeNullableId(discount.classId?._id || discount.classId),
     academicYearId: normalizeNullableId(discount.academicYearId?._id || discount.academicYearId),
-    reliefType: mapDiscountTypeToReliefType(discount.discountType),
-    scope: 'all',
-    coverageMode: normalizeCoverageMode(discount.coverageMode, 'fixed'),
+    reliefType: isFullCoverage && mappedReliefType !== 'penalty' ? 'waiver' : mappedReliefType,
+    scope: 'tuition',
+    coverageMode: isFullCoverage ? 'full' : normalizeCoverageMode(discount.coverageMode, 'fixed'),
     amount: discount.coverageMode === 'percent' ? 0 : roundMoney(discount.amount),
     percentage: discount.coverageMode === 'percent'
       ? Math.max(0, Math.min(100, Number(discount.percentage) || 0))
@@ -130,9 +132,12 @@ function buildFinanceReliefPayloadFromExemption(exemption = {}) {
 }
 
 function toReliefPreviewRecord(item = {}) {
+  const sourceModel = normalizeText(item.sourceModel);
+  const sourceKey = normalizeText(item.sourceKey);
+  const isDiscountSource = sourceModel === 'discount' || sourceKey.startsWith('discount:');
   return {
-    sourceModel: normalizeText(item.sourceModel),
-    sourceKey: normalizeText(item.sourceKey),
+    sourceModel,
+    sourceKey,
     feeOrderId: normalizeNullableId(item.feeOrderId?._id || item.feeOrderId),
     studentMembershipId: normalizeNullableId(item.studentMembershipId?._id || item.studentMembershipId),
     linkScope: normalizeText(item.linkScope) || 'membership',
@@ -141,7 +146,7 @@ function toReliefPreviewRecord(item = {}) {
     classId: normalizeNullableId(item.classId?._id || item.classId),
     academicYearId: normalizeNullableId(item.academicYearId?._id || item.academicYearId),
     reliefType: normalizeReliefType(item.reliefType, 'manual'),
-    scope: normalizeReliefScope(item.scope, 'all'),
+    scope: isDiscountSource ? 'tuition' : normalizeReliefScope(item.scope, 'all'),
     coverageMode: normalizeCoverageMode(item.coverageMode, 'fixed'),
     amount: roundMoney(item.amount),
     percentage: Math.max(0, Math.min(100, Number(item.percentage) || 0)),

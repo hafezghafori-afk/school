@@ -5,6 +5,7 @@ const { requireAuth } = require('../middleware/auth');
 const { isProduction } = require('../utils/env');
 const { logActivity } = require('../utils/activity');
 const { syncStudentFinanceFromFinanceReceipt } = require('../utils/studentFinanceSync');
+const { applyFinanceOrderStatus } = require('../utils/financeLineItems');
 const {
   normalizeText: normalizeScopeText,
   resolveClassCourseReference
@@ -125,21 +126,7 @@ const recalculateBillStatus = (bill, paidAt = new Date()) => {
   const amountPaid = roundMoney(bill.amountPaid);
   const remaining = Math.max(0, roundMoney(amountDue - amountPaid));
 
-  if (bill.status !== 'void') {
-    if (remaining <= 0) {
-      bill.status = 'paid';
-      bill.paidAt = paidAt;
-    } else if (amountPaid > 0) {
-      bill.status = 'partial';
-      bill.paidAt = null;
-    } else if (bill.dueDate && new Date(bill.dueDate).getTime() < Date.now()) {
-      bill.status = 'overdue';
-      bill.paidAt = null;
-    } else {
-      bill.status = 'new';
-      bill.paidAt = null;
-    }
-  }
+  applyFinanceOrderStatus(bill, { paidAt });
 
   if (Array.isArray(bill.installments)) {
     for (const installment of bill.installments) {

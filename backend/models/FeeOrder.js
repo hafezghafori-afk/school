@@ -3,10 +3,12 @@ const { deriveLinkScope } = require('../utils/financeLinkScope');
 const { applySchoolOwnership } = require('../utils/schoolOwnership');
 const { formatAfghanMonthYearLabel, replaceIranianSolarMonthNames } = require('../utils/afghanDate');
 const {
+  BREAKDOWN_KEYS,
   LINE_ITEM_TYPES,
   normalizeFinanceLineItems,
   buildFeeBreakdownFromLineItems,
-  inferPrimaryOrderType
+  inferPrimaryOrderType,
+  applyFinanceOrderStatus
 } = require('../utils/financeLineItems');
 
 const installmentSchema = new mongoose.Schema({
@@ -20,6 +22,7 @@ const installmentSchema = new mongoose.Schema({
 
 const adjustmentSchema = new mongoose.Schema({
   type: { type: String, enum: ['discount', 'waiver', 'penalty', 'manual'], default: 'manual' },
+  scope: { type: String, enum: [...BREAKDOWN_KEYS, 'all'], default: undefined },
   amount: { type: Number, default: 0, min: 0 },
   reason: { type: String, default: '' },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
@@ -56,7 +59,7 @@ const feeOrderSchema = new mongoose.Schema({
   sourceBillId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'FinanceBill',
-    default: null
+    default: undefined
   },
   student: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentCore', default: null, index: true },
@@ -75,7 +78,7 @@ const feeOrderSchema = new mongoose.Schema({
   amountPaid: { type: Number, default: 0, min: 0 },
   outstandingAmount: { type: Number, default: 0, min: 0 },
   lineItems: { type: [lineItemSchema], default: [] },
-  status: { type: String, enum: ['new', 'partial', 'paid', 'overdue', 'void'], default: 'new', index: true },
+  status: { type: String, enum: ['new', 'partial', 'paid', 'waived', 'overdue', 'void'], default: 'new', index: true },
   issuedAt: { type: Date, default: Date.now, index: true },
   dueDate: { type: Date, default: null, index: true },
   paidAt: { type: Date, default: null },
@@ -88,6 +91,10 @@ const feeOrderSchema = new mongoose.Schema({
   lastReminderAt: { type: Date, default: null },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { timestamps: true });
+
+feeOrderSchema.path('amountOriginal').validate(function requirePositiveGrossAmount(value) {
+  return !this.isNew || this.status === 'void' || Number(value || 0) > 0;
+}, 'مبلغ اصلی تعهد مالی باید بیشتر از صفر باشد.');
 
 feeOrderSchema.pre('validate', async function syncFeeOrderState() {
   if (typeof this.orderNumber === 'string') this.orderNumber = this.orderNumber.trim().toUpperCase();
@@ -122,21 +129,7 @@ feeOrderSchema.pre('validate', async function syncFeeOrderState() {
     this.periodLabel = formatAfghanMonthYearLabel(this.dueDate);
   }
   await applySchoolOwnership(this);
-  if (this.status !== 'void') {
-    if (this.outstandingAmount <= 0) {
-      this.status = 'paid';
-      if (!this.paidAt) this.paidAt = new Date();
-    } else if (this.amountPaid > 0) {
-      this.status = 'partial';
-      this.paidAt = null;
-    } else if (this.dueDate && new Date(this.dueDate).getTime() < Date.now()) {
-      this.status = 'overdue';
-      this.paidAt = null;
-    } else {
-      this.status = 'new';
-      this.paidAt = null;
-    }
-  }
+  applyFinanceOrderStatus(this);
 });
 
 feeOrderSchema.index({ sourceBillId: 1 }, { unique: true, sparse: true });

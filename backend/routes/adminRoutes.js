@@ -40,6 +40,7 @@ const {
 } = require('../utils/userRole');
 const { requireAuth, requireRole, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const { runSlaEscalationSweep, LEVEL_TIMEOUT_MINUTES } = require('../services/slaAutomation');
+const { recognizePayments } = require('../utils/financeRevenueRecognition');
 
 const router = express.Router();
 const CLIENT_ACTIVITY_ACTIONS = new Set([
@@ -1398,10 +1399,9 @@ router.get('/stats', requireAuth, requireRole(['admin']), requireAnyPermission([
       totalReceipts,
       pendingReceipts,
       approvedReceipts,
-      periodApprovedReceipts,
+      periodApprovedPaymentRows,
       activeMemberships,
-      todayApprovedPayments,
-      todayPaymentAmountAgg,
+      todayApprovedPaymentRows,
       todayAttendanceRows,
       openMessages,
       activeSchools
@@ -1414,13 +1414,13 @@ router.get('/stats', requireAuth, requireRole(['admin']), requireAnyPermission([
       FeePayment.countDocuments(schoolOrClassFilter),
       FeePayment.countDocuments({ ...schoolOrClassFilter, status: 'pending' }),
       FeePayment.countDocuments({ ...schoolOrClassFilter, status: 'approved' }),
-      FeePayment.countDocuments({ ...schoolOrClassFilter, status: 'approved', paidAt: { $gte: startDate } }),
+      FeePayment.find({ ...schoolOrClassFilter, status: 'approved', paidAt: { $gte: startDate } })
+        .select('amount feeOrderId allocations')
+        .lean(),
       StudentMembership.find(currentMembershipFilter).select('_id student studentId afghanStudentId').lean(),
-      FeePayment.countDocuments({ ...schoolOrClassFilter, status: 'approved', paidAt: { $gte: todayStart, $lt: tomorrowStart } }),
-      FeePayment.aggregate([
-        { $match: { ...schoolOrClassFilter, status: 'approved', paidAt: { $gte: todayStart, $lt: tomorrowStart } } },
-        { $group: { _id: null, total: { $sum: '$amount' } } }
-      ]),
+      FeePayment.find({ ...schoolOrClassFilter, status: 'approved', paidAt: { $gte: todayStart, $lt: tomorrowStart } })
+        .select('amount feeOrderId allocations')
+        .lean(),
       Attendance.find(attendanceFilter).select('status').lean(),
       ContactMessage.countDocuments(openContactFilter),
       AfghanSchool.countDocuments({ status: 'active' })
@@ -1435,6 +1435,13 @@ router.get('/stats', requireAuth, requireRole(['admin']), requireAnyPermission([
       ? Math.round((attendedCount / todayAttendanceRows.length) * 100)
       : 0;
     const membershipStudentCount = membershipStudentKeys.size;
+    const [recognizedTodayPayments, recognizedPeriodPayments] = await Promise.all([
+      recognizePayments(todayApprovedPaymentRows, { FeeOrderModel: FeeOrder }),
+      recognizePayments(periodApprovedPaymentRows, { FeeOrderModel: FeeOrder })
+    ]);
+    const todayApprovedPayments = recognizedTodayPayments.filter((item) => item.recognizedAmount > 0).length;
+    const todayPaymentAmount = recognizedTodayPayments.reduce((sum, item) => sum + Number(item.recognizedAmount || 0), 0);
+    const periodApprovedReceipts = recognizedPeriodPayments.filter((item) => item.recognizedAmount > 0).length;
 
     res.json({
       success: true,
@@ -1459,7 +1466,7 @@ router.get('/stats', requireAuth, requireRole(['admin']), requireAnyPermission([
         membershipStudents: membershipStudentCount,
         activeMemberships: activeMemberships.length,
         todayPayments: todayApprovedPayments,
-        todayPaymentAmount: Number(todayPaymentAmountAgg[0]?.total || 0),
+        todayPaymentAmount,
         pendingReceipts,
         approvedPeriodReceipts: periodApprovedReceipts,
         attendanceRate,

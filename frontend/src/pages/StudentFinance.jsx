@@ -18,6 +18,7 @@ const ORDER_STATUS_LABELS = {
   new: 'پرداخت نشده',
   partial: 'پرداخت ناقص',
   paid: 'پرداخت شده',
+  waived: 'معاف/پوشش کامل',
   overdue: 'سررسید گذشته',
   void: 'باطل'
 };

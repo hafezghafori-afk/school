@@ -87,6 +87,36 @@ function summarizeAdjustments(adjustments = []) {
   }, { reductionTotal: 0, penaltyTotal: 0 });
 }
 
+function normalizeAdjustmentScope(adjustment = {}, fallback = 'all') {
+  const explicitScope = normalizeText(adjustment?.scope).toLowerCase();
+  if (explicitScope === 'all' || BREAKDOWN_KEYS.includes(explicitScope)) return explicitScope;
+  const type = normalizeText(adjustment?.type).toLowerCase();
+  const reason = normalizeText(adjustment?.reason).toLowerCase();
+  if (type === 'discount' || reason.startsWith('[discount:')) return 'tuition';
+  return fallback === 'all' || BREAKDOWN_KEYS.includes(fallback) ? fallback : 'all';
+}
+
+function getFinanceFeeScopeGrossAmount(document = {}, scope = 'tuition') {
+  const normalizedScope = normalizeFinanceFeeType(scope, 'tuition');
+  const lineAmount = (Array.isArray(document?.lineItems) ? document.lineItems : [])
+    .filter((item) => normalizeFinanceFeeType(item?.feeType) === normalizedScope)
+    .reduce((sum, item) => sum + Math.max(0, Number(item?.grossAmount ?? item?.netAmount ?? 0) || 0), 0);
+  if (lineAmount > 0) return Math.max(0, roundMoney(lineAmount));
+
+  const breakdownAmount = Math.max(0, roundMoney(document?.feeBreakdown?.[normalizedScope]));
+  if (breakdownAmount > 0) return breakdownAmount;
+
+  const scopes = Array.isArray(document?.feeScopes)
+    ? document.feeScopes.map((item) => normalizeFinanceFeeType(item)).filter((item) => item !== 'penalty')
+    : [];
+  const rawOrderType = normalizeText(document?.orderType);
+  if ((scopes.length === 1 && scopes[0] === normalizedScope)
+    || (rawOrderType && normalizeFinanceFeeType(rawOrderType) === normalizedScope)) {
+    return Math.max(0, roundMoney(document?.amountOriginal));
+  }
+  return 0;
+}
+
 function buildSeedLines({
   lineItems = [],
   feeBreakdown = {},
@@ -190,17 +220,38 @@ function normalizeFinanceLineItems({
     status: 'open'
   }));
 
-  const reductionShares = distributeAmount(
-    Math.min(totals.reductionTotal, effectiveAmountOriginal),
-    baseLines.filter((item) => item.grossAmount > 0),
-    (item) => item.grossAmount
-  );
+  const reductionAdjustments = (Array.isArray(adjustments) ? adjustments : [])
+    .filter((item) => normalizeText(item?.type).toLowerCase() !== 'penalty')
+    .map((item) => ({
+      amount: Math.max(0, roundMoney(item?.amount)),
+      scope: normalizeAdjustmentScope(item)
+    }))
+    .filter((item) => item.amount > 0);
 
-  let reductionIndex = 0;
+  reductionAdjustments.forEach((adjustment) => {
+    const eligibleLines = baseLines.filter((item) => (
+      (adjustment.scope === 'all' || item.feeType === adjustment.scope)
+      && roundMoney(item.grossAmount - item.reductionAmount) > 0
+    ));
+    const availableAmount = roundMoney(eligibleLines.reduce(
+      (sum, item) => sum + Math.max(0, Number(item.grossAmount || 0) - Number(item.reductionAmount || 0)),
+      0
+    ));
+    const appliedAmount = Math.min(adjustment.amount, availableAmount);
+    const shares = distributeAmount(
+      appliedAmount,
+      eligibleLines,
+      (item) => Math.max(0, Number(item.grossAmount || 0) - Number(item.reductionAmount || 0))
+    );
+    eligibleLines.forEach((item, index) => {
+      item.reductionAmount = Math.min(
+        item.grossAmount,
+        Math.max(0, roundMoney(item.reductionAmount + (shares[index] || 0)))
+      );
+    });
+  });
+
   baseLines.forEach((item) => {
-    if (item.grossAmount <= 0) return;
-    item.reductionAmount = Math.max(0, roundMoney(reductionShares[reductionIndex] || 0));
-    reductionIndex += 1;
     item.netAmount = Math.max(0, roundMoney(item.grossAmount - item.reductionAmount));
   });
 
@@ -294,6 +345,61 @@ function inferPrimaryOrderType(lineItems = [], fallback = 'tuition') {
   return scopes[0] || normalizedFallback || 'tuition';
 }
 
+function deriveFinanceOrderStatus({
+  currentStatus = '',
+  amountOriginal = 0,
+  amountDue = 0,
+  amountPaid = 0,
+  dueDate = null,
+  now = new Date()
+} = {}) {
+  const normalizedStatus = normalizeText(currentStatus).toLowerCase();
+  if (normalizedStatus === 'void') return 'void';
+
+  const grossAmount = Math.max(0, roundMoney(amountOriginal));
+  const payableAmount = Math.max(0, roundMoney(amountDue));
+  const paidAmount = Math.max(0, roundMoney(amountPaid));
+  const remainingAmount = Math.max(0, roundMoney(payableAmount - paidAmount));
+
+  // A fully covered obligation is not a payment: no cash was received.
+  if (grossAmount > 0 && payableAmount <= 0 && paidAmount <= 0) return 'waived';
+  if (paidAmount > 0 && remainingAmount <= 0) return 'paid';
+  if (dueDate) {
+    const deadline = new Date(dueDate);
+    const referenceTime = now instanceof Date ? now : new Date(now);
+    if (!Number.isNaN(deadline.getTime())
+      && !Number.isNaN(referenceTime.getTime())
+      && deadline.getTime() < referenceTime.getTime()) {
+      return 'overdue';
+    }
+  }
+  if (paidAmount > 0) return 'partial';
+  return 'new';
+}
+
+function applyFinanceOrderStatus(order = {}, { paidAt = new Date(), now = new Date() } = {}) {
+  const amountDue = Math.max(0, roundMoney(order?.amountDue));
+  const amountPaid = Math.max(0, roundMoney(order?.amountPaid));
+  const remainingAmount = Math.max(0, roundMoney(amountDue - amountPaid));
+  const status = deriveFinanceOrderStatus({
+    currentStatus: order?.status,
+    amountOriginal: order?.amountOriginal,
+    amountDue,
+    amountPaid,
+    dueDate: order?.dueDate,
+    now
+  });
+
+  order.status = status;
+  if (status === 'paid') {
+    if (!order.paidAt) order.paidAt = paidAt;
+  } else if (status !== 'void') {
+    order.paidAt = null;
+  }
+
+  return remainingAmount;
+}
+
 module.exports = {
   BREAKDOWN_KEYS,
   LINE_ITEM_TYPES,
@@ -304,5 +410,9 @@ module.exports = {
   buildFeeScopesFromLineItems,
   buildScopedBreakdown,
   inferPrimaryOrderType,
+  normalizeAdjustmentScope,
+  getFinanceFeeScopeGrossAmount,
+  deriveFinanceOrderStatus,
+  applyFinanceOrderStatus,
   roundMoney
 };

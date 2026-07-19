@@ -23,6 +23,7 @@ const {
   createFeeExemption,
   createFeePayment,
   createTransportFee,
+  deduplicateDiscounts,
   getDailyCashierReport,
   getExamEligibility,
   getFeePaymentReceipt,
@@ -34,6 +35,7 @@ const {
   listOpenFeeOrdersForMembership,
   listFeeOrders,
   listFeePayments,
+  inspectDiscountDuplicates,
   listStudentFinanceReferenceData,
   listStudentMembershipOverviewsByUserId,
   listTransportFees,
@@ -371,8 +373,12 @@ router.post('/payments/:id/follow-up', requireAuth, requireRole(['admin']), requ
 
 router.get('/discounts', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const items = await listDiscounts(withRequestSchoolScope(req, req.query || {}));
-    res.json({ success: true, items });
+    const filters = withRequestSchoolScope(req, req.query || {});
+    const [items, duplicateSummary] = await Promise.all([
+      listDiscounts(filters),
+      inspectDiscountDuplicates(filters)
+    ]);
+    res.json({ success: true, items, duplicateSummary });
   } catch (error) {
     res.status(500).json({ success: false, message: 'دریافت تخفیف‌ها ناموفق بود.' });
   }
@@ -406,11 +412,22 @@ router.post('/discounts', requireAuth, requireRole(['admin']), requirePermission
         amount: Number(item?.amount || req.body?.amount || 0)
       }
     });
-    return res.status(201).json({
+    const createdCount = result?.bulk
+      ? Number(result.createdCount || 0)
+      : (item?.wasCreated || item?.wasReactivated ? 1 : 0);
+    const reusedCount = result?.bulk ? Number(result.reusedCount || 0) : (createdCount ? 0 : 1);
+    return res.status(createdCount > 0 ? 201 : 200).json({
       success: true,
       item,
       items: result?.bulk ? result.items : [item],
-      count: result?.bulk ? result.count : 1
+      count: result?.bulk ? result.count : 1,
+      createdCount,
+      reusedCount,
+      message: reusedCount > 0 && createdCount === 0
+        ? 'این تخفیف قبلاً ثبت شده بود؛ رکورد تکراری ساخته نشد.'
+        : reusedCount > 0
+          ? `${createdCount} تخفیف تازه ثبت شد و ${reusedCount} رکورد موجود دوباره ساخته نشد.`
+          : 'تخفیف با موفقیت ثبت شد.'
     });
   } catch (error) {
     const code = String(error?.message || '');
@@ -420,6 +437,50 @@ router.post('/discounts', requireAuth, requireRole(['admin']), requirePermission
       return res.status(status).json({ success: false, message: discountMessage });
     }
     return res.status(status).json({ success: false, message: status === 400 ? 'عضویت انتخاب‌شده برای ثبت تخفیف معتبر نیست.' : 'ثبت تخفیف ناموفق بود.' });
+  }
+});
+
+router.post('/discounts/deduplicate', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const filters = withRequestSchoolScope(req, {
+      classId: req.body?.classId || '',
+      academicYearId: req.body?.academicYearId || '',
+      discountType: req.body?.discountType || ''
+    });
+    const summary = await deduplicateDiscounts(filters, {
+      apply: req.body?.apply === true,
+      cancelledBy: req.user?.id || ''
+    });
+    await logActivity({
+      req,
+      action: 'deduplicate_discount_registry',
+      targetType: 'Discount',
+      targetId: '',
+      meta: {
+        scanned: summary.scanned,
+        duplicateGroups: summary.duplicateGroups,
+        cancelled: summary.cancelled,
+        mirroredReliefsCancelled: summary.mirroredReliefsCancelled,
+        billsRepaired: summary.billsRepaired,
+        classId: filters.classId || '',
+        academicYearId: filters.academicYearId || ''
+      }
+    });
+    return res.json({
+      success: true,
+      summary,
+      message: req.body?.apply === true
+        ? `${summary.cancelled} رکورد تکراری لغو، ${summary.mirroredReliefsCancelled} تسهیلات مشتق‌شده غیرفعال و ${summary.billsRepaired} بل اصلاح شد.`
+        : `${summary.duplicateRecords} رکورد تکراری پیدا شد.`
+    });
+  } catch (error) {
+    const status = String(error?.message || '') === 'student_finance_school_scope_required' ? 400 : 500;
+    return res.status(status).json({
+      success: false,
+      message: status === 400
+        ? 'برای پاک‌سازی تخفیف‌ها، نخست مکتب فعال را انتخاب کنید.'
+        : 'پاک‌سازی رکوردهای تکراری تخفیف ناموفق بود.'
+    });
   }
 });
 
@@ -475,8 +536,14 @@ router.post('/exemptions', requireAuth, requireRole(['admin']), requirePermissio
     return res.status(201).json({ success: true, item });
   } catch (error) {
     const code = String(error?.message || '');
-    const status = code === 'student_finance_membership_not_found' ? 400 : 500;
-    return res.status(status).json({ success: false, message: status === 400 ? 'عضویت انتخاب‌شده برای ثبت معافیت معتبر نیست.' : 'ثبت معافیت فیس ناموفق بود.' });
+    if (code === 'student_finance_membership_not_found') {
+      return res.status(400).json({ success: false, message: 'عضویت انتخاب‌شده برای ثبت معافیت معتبر نیست.' });
+    }
+    if (code === 'student_finance_exemption_coverage_invalid') {
+      return res.status(400).json({ success: false, message: 'برای معافیت جزئی، مبلغ یا فیصدی معتبر بزرگ‌تر از صفر وارد کنید.' });
+    }
+    console.error('[student-finance][create-exemption]', error);
+    return res.status(500).json({ success: false, message: 'ثبت معافیت فیس ناموفق بود.' });
   }
 });
 
