@@ -47,6 +47,27 @@ function buildDiscountRegistryIdentity(input = {}) {
   ].join('|');
 }
 
+function buildDiscountRepairIdentity(input = {}) {
+  const coverageMode = String(input.coverageMode || '').trim() === 'percent' ? 'percent' : 'fixed';
+  const durationMode = normalizeText(input.durationMode || 'academic_year');
+  const isCustomPeriod = durationMode === 'custom_period';
+  return [
+    'discount-repair-v1',
+    normalizeId(input.studentMembershipId),
+    normalizeId(input.classId),
+    normalizeId(input.academicYearId),
+    normalizeId(input.feeOrderId),
+    normalizeText(input.discountType || 'discount'),
+    normalizeText(input.targetScope || 'student'),
+    coverageMode,
+    coverageMode === 'fixed' ? normalizeNumber(input.amount) : '0.00',
+    coverageMode === 'percent' ? normalizeNumber(input.percentage) : '0.00',
+    durationMode,
+    isCustomPeriod ? normalizeDate(input.startDate) : '',
+    isCustomPeriod ? normalizeDate(input.endDate) : ''
+  ].join('|');
+}
+
 function hashIdentity(identity = '') {
   return crypto.createHash('sha256').update(String(identity || '')).digest('hex').slice(0, 40);
 }
@@ -81,12 +102,26 @@ function groupDuplicateDiscounts(items = []) {
     .map(([identity, rows]) => ({ identity, rows }));
 }
 
+function groupRepairableDiscounts(items = []) {
+  const groups = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    const identity = buildDiscountRepairIdentity(item);
+    if (!groups.has(identity)) groups.set(identity, []);
+    groups.get(identity).push(item);
+  }
+  return Array.from(groups.entries())
+    .filter(([, rows]) => rows.length > 1)
+    .map(([identity, rows]) => ({ identity, rows }));
+}
+
 module.exports = {
   buildClassDiscountGroupKey,
+  buildDiscountRepairIdentity,
   buildDiscountRegistryIdentity,
   buildDiscountRegistryKey,
   buildManualDiscountSourceKey,
   groupDuplicateDiscounts,
+  groupRepairableDiscounts,
   normalizeDate,
   normalizeId,
   normalizeText

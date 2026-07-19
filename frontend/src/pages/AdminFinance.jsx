@@ -4991,9 +4991,11 @@ export default function AdminFinance() {
     const duplicateCount = Number(discountDuplicateSummary?.duplicateRecords || 0);
     const mirroredCount = Number(discountDuplicateSummary?.mirroredDiscountRecords || 0);
     const mirroredReliefCount = Number(discountDuplicateSummary?.mirroredActiveReliefs || 0);
-    if (duplicateCount + mirroredCount + mirroredReliefCount <= 0) return;
+    const detectedCount = duplicateCount + mirroredCount + mirroredReliefCount;
     const confirmed = window.confirm(
-      `${duplicateCount} رکورد مستقیم تکراری و ${mirroredCount} تصویر تخفیف روی بل پیدا شده است. رکورد اصلی حفظ و محاسبه بل‌ها بازسازی شود؟`
+      detectedCount > 0
+        ? `${duplicateCount} رکورد مستقیم تکراری و ${mirroredCount} تصویر تخفیف روی بل پیدا شده است. رکورد اصلی حفظ و محاسبه بل‌ها بازسازی شود؟`
+        : 'تمام تخفیف‌های فعال بررسی شوند؟ رکوردهای یک شاگرد با صنف، سال، نوع و مبلغ یکسان تکراری شمرده می‌شوند؛ رکورد اصلی و سابقه مالی حفظ خواهد شد.'
     );
     if (!confirmed) return;
     try {
@@ -6738,21 +6740,26 @@ export default function AdminFinance() {
               </select>
             </label>
           </div>
-          {(Number(discountDuplicateSummary?.duplicateRecords || 0)
-            + Number(discountDuplicateSummary?.mirroredDiscountRecords || 0)
-            + Number(discountDuplicateSummary?.mirroredActiveReliefs || 0)) > 0 && (
-            <div className="finance-anomaly-alert" data-testid="discount-duplicate-alert">
+          <div className="finance-anomaly-alert" data-testid="discount-duplicate-alert">
+            {(Number(discountDuplicateSummary?.duplicateRecords || 0)
+              + Number(discountDuplicateSummary?.mirroredDiscountRecords || 0)
+              + Number(discountDuplicateSummary?.mirroredActiveReliefs || 0)) > 0 ? (
               <div>
                 <strong>{fmt(discountDuplicateSummary.duplicateRecords)} تکرار مستقیم و {fmt(discountDuplicateSummary.mirroredDiscountRecords)} تصویر بل پیدا شد</strong>
                 <p className="muted">
                   رکورد اصلی و سابقه مالی حفظ می‌شود؛ تصاویر <code>Relief (tuition)</code> از رجیستر مستقیم جدا و محاسبه بل‌های مرتبط بازسازی می‌گردد.
                 </p>
               </div>
-              <button type="button" className="danger" disabled={busy} onClick={repairDuplicateDiscountRegistry}>
-                رفع تکرارها و اصلاح بل‌ها
-              </button>
-            </div>
-          )}
+            ) : (
+              <div>
+                <strong>بررسی و رفع تکرارهای تخفیف</strong>
+                <p className="muted">اگر تعداد رکوردهای فعال از شاگردان دارای تخفیف بیشتر است، بررسی را اجرا کنید.</p>
+              </div>
+            )}
+            <button type="button" className="danger" disabled={busy} onClick={repairDuplicateDiscountRegistry}>
+              بررسی، رفع تکرارها و اصلاح بل‌ها
+            </button>
+          </div>
           {!!discountRegistryByClass.length && (
             <div className="finance-class-discount-summary">
               {discountRegistryByClass.slice(0, 8).map((item) => (
