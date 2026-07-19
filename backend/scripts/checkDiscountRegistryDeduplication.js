@@ -2,10 +2,12 @@ const assert = require('assert');
 
 const {
   buildClassDiscountGroupKey,
+  buildDiscountRepairIdentity,
   buildDiscountRegistryIdentity,
   buildDiscountRegistryKey,
   buildManualDiscountSourceKey,
   groupDuplicateDiscounts,
+  groupRepairableDiscounts,
   normalizeId
 } = require('../utils/discountRegistryIdentity');
 
@@ -63,6 +65,22 @@ assert.notStrictEqual(
   buildDiscountRegistryIdentity({ ...base, reason: 'تخفیف دیگری' })
 );
 
+assert.strictEqual(
+  buildDiscountRepairIdentity(base),
+  buildDiscountRepairIdentity({
+    ...base,
+    reason: 'تخفیف دیگری',
+    startDate: '2026-04-10T08:00:00.000Z',
+    endDate: '2027-04-09T08:00:00.000Z'
+  }),
+  'Annual legacy repair must tolerate changed reasons and generated annual dates.'
+);
+assert.notStrictEqual(
+  buildDiscountRepairIdentity(base),
+  buildDiscountRepairIdentity({ ...base, amount: 800 }),
+  'Different discount amounts must never be merged by repair.'
+);
+
 const duplicateGroups = groupDuplicateDiscounts([
   { ...base, _id: 'discount-1', sourceKey: 'manual:old:1', groupKey: 'class:old:1' },
   { ...base, _id: 'discount-2', sourceKey: 'manual:old:2', groupKey: 'class:old:2' },
@@ -71,5 +89,15 @@ const duplicateGroups = groupDuplicateDiscounts([
 
 assert.strictEqual(duplicateGroups.length, 1);
 assert.deepStrictEqual(duplicateGroups[0].rows.map((item) => item._id), ['discount-1', 'discount-2']);
+
+const repairableGroups = groupRepairableDiscounts([
+  { ...base, _id: 'discount-1', reason: '', startDate: '2026-03-21T08:00:00.000Z' },
+  { ...base, _id: 'discount-2', reason: 'Relief (tuition)', startDate: '2026-05-01T08:00:00.000Z' },
+  { ...base, _id: 'discount-3', amount: 800 },
+  { ...base, _id: 'discount-4', studentMembershipId: fakeObjectId('membership-2') }
+]);
+
+assert.strictEqual(repairableGroups.length, 1);
+assert.deepStrictEqual(repairableGroups[0].rows.map((item) => item._id), ['discount-1', 'discount-2']);
 
 console.log('Discount registry idempotency and duplicate grouping checks passed.');

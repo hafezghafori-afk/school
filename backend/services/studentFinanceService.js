@@ -33,7 +33,8 @@ const {
   buildDiscountRegistryIdentity,
   buildDiscountRegistryKey,
   buildManualDiscountSourceKey,
-  groupDuplicateDiscounts
+  groupDuplicateDiscounts,
+  groupRepairableDiscounts
 } = require('../utils/discountRegistryIdentity');
 const {
   buildFeeBreakdownFromLineItems,
@@ -1557,11 +1558,15 @@ async function inspectDiscountDuplicates(filters = {}) {
       .lean(),
     findMirroredDiscountState(filters)
   ]);
-  const groups = groupDuplicateDiscounts(items);
+  const exactGroups = groupDuplicateDiscounts(items);
+  const groups = groupRepairableDiscounts(items);
+  const exactSummary = summarizeDiscountDuplicateGroups(exactGroups);
   return {
     scanned: items.length,
     mirroredDiscountRecords: mirrored.discounts.length,
     mirroredActiveReliefs: mirrored.reliefs.length,
+    exactDuplicateGroups: exactSummary.duplicateGroups,
+    exactDuplicateRecords: exactSummary.duplicateRecords,
     ...summarizeDiscountDuplicateGroups(groups)
   };
 }
@@ -1574,11 +1579,15 @@ async function deduplicateDiscounts(filters = {}, payload = {}) {
     Discount.find(buildDiscountRegistryQuery(filters)).sort({ createdAt: 1, _id: 1 }),
     findMirroredDiscountState(filters)
   ]);
-  const groups = groupDuplicateDiscounts(items);
+  const exactGroups = groupDuplicateDiscounts(items);
+  const groups = groupRepairableDiscounts(items);
+  const exactSummary = summarizeDiscountDuplicateGroups(exactGroups);
   const summary = {
     scanned: items.length,
     mirroredDiscountRecords: mirrored.discounts.length,
     mirroredActiveReliefs: mirrored.reliefs.length,
+    exactDuplicateGroups: exactSummary.duplicateGroups,
+    exactDuplicateRecords: exactSummary.duplicateRecords,
     ...summarizeDiscountDuplicateGroups(groups),
     cancelled: 0,
     mirroredReliefsCancelled: 0,
@@ -1589,19 +1598,20 @@ async function deduplicateDiscounts(filters = {}, payload = {}) {
   for (const group of groups) {
     const [keeper, ...duplicates] = group.rows;
     if (!keeper) continue;
-    const registryIdentity = buildDiscountRegistryKey(keeper);
-    if (!normalizeText(keeper.registryIdentity)) {
-      keeper.registryIdentity = registryIdentity;
-      await keeper.save();
-    }
     for (const duplicate of duplicates) {
       duplicate.status = 'cancelled';
       duplicate.duplicateOf = keeper._id;
       duplicate.deduplicatedAt = new Date();
+      duplicate.registryIdentity = undefined;
       await duplicate.save();
       await syncDiscountOpenBills(duplicate);
       await syncFinanceReliefFromDiscount(duplicate);
       summary.cancelled += 1;
+    }
+    const registryIdentity = buildDiscountRegistryKey(keeper);
+    if (!normalizeText(keeper.registryIdentity)) {
+      keeper.registryIdentity = registryIdentity;
+      await keeper.save();
     }
   }
 
