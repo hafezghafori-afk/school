@@ -617,6 +617,16 @@ const FEE_PLAN_LINE_CONFIG = [
   { key: 'otherFee', label: 'سایر', cadence: 'سفارشی', required: false }
 ];
 
+const MANUAL_BILL_FEE_TYPES = ['tuition', 'admission', 'transport', 'exam', 'document', 'other'];
+const MANUAL_BILL_PLAN_FIELDS = {
+  tuition: 'tuitionFee',
+  admission: 'admissionFee',
+  transport: 'transportDefaultFee',
+  exam: 'examFee',
+  document: 'documentFee',
+  other: 'otherFee'
+};
+
 const AUDIT_KIND_UI_LABELS = {
   order: 'بل و بدهی',
   payment: 'پرداخت',
@@ -906,6 +916,7 @@ const ORDER_STATUS_UI_LABELS = {
   pending: 'در انتظار پرداخت',
   partial: 'پرداخت ناقص',
   paid: 'پرداخت‌شده',
+  waived: 'معاف/پوشش کامل',
   overdue: 'سررسید گذشته',
   void: 'باطل'
 };
@@ -956,7 +967,10 @@ const matchesFinanceScope = (item = {}, scope = {}) => {
 };
 
 const buildStudentFinanceSnapshot = ({ bills = [], reliefs = [], studentId = '', classId = '', academicYearId = '' } = {}) => {
-  const scopedBills = (Array.isArray(bills) ? bills : []).filter((item) => matchesFinanceScope(item, { studentId, classId, academicYearId }));
+  const scopedBills = (Array.isArray(bills) ? bills : []).filter((item) => (
+    String(item?.status || '').trim() !== 'void'
+    && matchesFinanceScope(item, { studentId, classId, academicYearId })
+  ));
   const scopedReliefs = (Array.isArray(reliefs) ? reliefs : [])
     .filter((item) => matchesFinanceScope(item, { studentId, classId, academicYearId }))
     .sort((left, right) => new Date(right?.createdAt || right?.startDate || 0).getTime() - new Date(left?.createdAt || left?.startDate || 0).getTime());
@@ -1016,6 +1030,17 @@ const formatFeeLineSummary = (lineItems = []) => (
     .slice(0, 3)
     .map((item) => `${FEE_LINE_TYPE_LABELS[item?.feeType] || item?.label || item?.feeType || 'آیتم'}: ${fmt(item?.netAmount || item?.grossAmount || 0)}`)
     .join(' | ')
+);
+
+const getBillDisplayAmount = (bill = {}) => Math.max(
+  0,
+  Number(bill?.amountOriginal || 0),
+  Number(bill?.amountDue || 0)
+);
+
+const getBillReliefAmount = (bill = {}) => Math.max(
+  0,
+  Number(bill?.amountOriginal || 0) - Number(bill?.amountDue || 0)
 );
 
 const toLegacyLikeBillRow = (order = {}) => {
@@ -1322,6 +1347,8 @@ export default function AdminFinance() {
   const [manualForm, setManualForm] = useState({
     studentId: '',
     classId: '',
+    feeType: 'tuition',
+    amountSource: 'plan',
     amount: '',
     dueDate: '',
     academicYearId: '',
@@ -1532,7 +1559,9 @@ export default function AdminFinance() {
     bills.filter((item) => OPEN_ORDER_STATUSES.has(String(item?.status || '').trim())).length
   ), [bills]);
   const totalOutstandingBalance = useMemo(() => (
-    bills.reduce((sum, item) => sum + Number(item?.outstandingAmount || 0), 0)
+    bills
+      .filter((item) => String(item?.status || '').trim() !== 'void')
+      .reduce((sum, item) => sum + Number(item?.outstandingAmount || 0), 0)
   ), [bills]);
   const activeFinanceReliefCount = useMemo(() => (
     reliefs.length || (discountRegistry.length + exemptions.length)
@@ -1629,6 +1658,36 @@ export default function AdminFinance() {
       });
     return grouped;
   }, [feePlans]);
+  const selectedManualFeePlan = useMemo(() => {
+    const classId = String(manualForm.classId || '').trim();
+    const academicYearId = String(manualForm.academicYearId || '').trim();
+    if (!classId) return null;
+    return (Array.isArray(feePlans) ? feePlans : [])
+      .filter((plan) => {
+        const planClassId = toFinanceOptionId(plan?.classId || plan?.schoolClass?.id || plan?.schoolClass?._id);
+        const planAcademicYearId = toFinanceOptionId(plan?.academicYearId || plan?.academicYear?.id || plan?.academicYear?._id);
+        const active = plan?.isActive !== false && String(plan?.lifecycleStatus || 'active') === 'active';
+        const sameYear = !academicYearId || !planAcademicYearId || planAcademicYearId === academicYearId;
+        return active && planClassId === classId && sameYear;
+      })
+      .sort((left, right) => {
+        const exactLeft = toFinanceOptionId(left?.academicYearId) === academicYearId ? 1 : 0;
+        const exactRight = toFinanceOptionId(right?.academicYearId) === academicYearId ? 1 : 0;
+        if (exactLeft !== exactRight) return exactRight - exactLeft;
+        const defaultDelta = (right?.isDefault === true ? 1 : 0) - (left?.isDefault === true ? 1 : 0);
+        if (defaultDelta !== 0) return defaultDelta;
+        return toSafeNumber(left?.priority ?? 100) - toSafeNumber(right?.priority ?? 100);
+      })[0] || null;
+  }, [feePlans, manualForm.academicYearId, manualForm.classId]);
+  const selectedManualPlanAmount = useMemo(() => {
+    if (!selectedManualFeePlan) return 0;
+    const field = MANUAL_BILL_PLAN_FIELDS[manualForm.feeType] || 'tuitionFee';
+    return toSafeNumber(
+      field === 'tuitionFee'
+        ? (selectedManualFeePlan.tuitionFee ?? selectedManualFeePlan.amount)
+        : selectedManualFeePlan[field]
+    );
+  }, [manualForm.feeType, selectedManualFeePlan]);
   const paymentDeskMembershipStudent = useMemo(
     () => financeMembershipStudents.find((item) => String(item?._id || '') === String(paymentDeskForm.studentId || '')) || null,
     [financeMembershipStudents, paymentDeskForm.studentId]
@@ -2091,7 +2150,8 @@ export default function AdminFinance() {
       classId: String(manualForm.classId || selectedMembership?.classId || '').trim(),
       academicYearId: String(manualForm.academicYearId || selectedMembership?.academicYearId || '').trim(),
       academicYear: String(manualForm.academicYear || selectedAcademicYear?.title || selectedMembership?.academicYearTitle || '').trim(),
-      amount: String(manualForm.amount || '').trim(),
+      amount: manualForm.amountSource === 'manual' ? String(manualForm.amount || '').trim() : '',
+      feePlanId: manualForm.amountSource === 'plan' ? String(selectedManualFeePlan?._id || selectedManualFeePlan?.id || '').trim() : '',
       dueDate: String(manualForm.dueDate || '').trim()
     };
   };
@@ -2279,9 +2339,10 @@ export default function AdminFinance() {
   const [auditTimelineSeverityFilter, setAuditTimelineSeverityFilter] = useState('all');
   const [selectedAuditEntryId, setSelectedAuditEntryId] = useState('');
   const financeHeadlineStats = useMemo(() => {
-    const totalDue = bills.reduce((sum, item) => sum + toSafeNumber(item?.amountDue), 0);
-    const totalPaid = bills.reduce((sum, item) => sum + toSafeNumber(item?.amountPaid), 0);
-    const outstanding = bills.reduce((sum, item) => sum + toSafeNumber(item?.outstandingAmount ?? Math.max(0, toSafeNumber(item?.amountDue) - toSafeNumber(item?.amountPaid))), 0);
+    const activeBills = bills.filter((item) => String(item?.status || '').trim() !== 'void');
+    const totalDue = activeBills.reduce((sum, item) => sum + toSafeNumber(item?.amountDue), 0);
+    const totalPaid = activeBills.reduce((sum, item) => sum + toSafeNumber(item?.amountPaid), 0);
+    const outstanding = activeBills.reduce((sum, item) => sum + toSafeNumber(item?.outstandingAmount ?? Math.max(0, toSafeNumber(item?.amountDue) - toSafeNumber(item?.amountPaid))), 0);
     const todayPayments = cashierReport?.summary?.totalPayments || cashierReport?.items?.length || 0;
     const todayReceipts = cashierReport?.items?.length || 0;
     const todayCash = (cashierReport?.methodTotals || [])
@@ -2543,6 +2604,7 @@ export default function AdminFinance() {
           ...prev,
           studentId: onlyStudentId,
           classId: onlyStudent.classId || prev.classId,
+          academicYearId: onlyStudent.academicYearId || prev.academicYearId,
           academicYear: onlyStudent.academicYearTitle || prev.academicYear
         }));
         if (!paymentDeskForm.studentId) setPaymentDeskForm((prev) => ({
@@ -2575,7 +2637,11 @@ export default function AdminFinance() {
       if (nextClassOptions.length && !manualForm.classId) {
         const firstClassId = nextClassOptions[0].classId;
         const firstClassMembershipYear = nextMembershipStudents.find((item) => String(item?.classId || '') === String(firstClassId || ''))?.academicYearId || defaultAcademicYearId;
-        setManualForm((prev) => ({ ...prev, classId: firstClassId }));
+        setManualForm((prev) => ({
+          ...prev,
+          classId: firstClassId,
+          academicYearId: prev.academicYearId || firstClassMembershipYear || defaultAcademicYearId
+        }));
         setBulkForm((prev) => ({ ...prev, classId: firstClassId, academicYearId: prev.academicYearId || firstClassMembershipYear || defaultAcademicYearId }));
         setFeePlanForm((prev) => ({ ...prev, classId: firstClassId }));
         setPaymentDeskForm((prev) => ({ ...prev, classId: prev.classId || firstClassId }));
@@ -3464,6 +3530,16 @@ export default function AdminFinance() {
         setBusy(false);
         return;
       }
+      if (payload.amountSource === 'manual' && toSafeNumber(payload.amount) <= 0) {
+        setMessage('برای مبلغ دستی، مقدار بیشتر از صفر وارد کنید.');
+        setBusy(false);
+        return;
+      }
+      if (payload.amountSource === 'plan' && payload.feePlanId && selectedManualPlanAmount <= 0) {
+        setMessage(`مبلغ ${FEE_LINE_TYPE_LABELS[payload.feeType] || 'فیس'} در پلان فعال این صنف و سال تعیین نشده است.`);
+        setBusy(false);
+        return;
+      }
       const data = await postJson(`${API_BASE}/api/finance/admin/bills`, payload);
       setMessage(data.message || 'بل ایجاد شد');
       await loadAll();
@@ -3871,15 +3947,26 @@ export default function AdminFinance() {
     e.preventDefault();
     try {
       setBusy(true);
-      const resolvedMembershipId = exemptionForm.studentMembershipId || findFinanceMembershipId(exemptionForm);
-      if (!exemptionForm.studentId || !exemptionForm.classId || !exemptionForm.academicYearId || !resolvedMembershipId) {
+      const membershipStudent = financeMembershipStudents.find((item) => (
+        String(item?._id || '') === String(exemptionForm.studentId || '')
+        && (!exemptionForm.studentMembershipId || String(item?.membershipId || '') === String(exemptionForm.studentMembershipId))
+      )) || null;
+      const resolvedMembershipId = membershipStudent?.membershipId || exemptionForm.studentMembershipId || findFinanceMembershipId(exemptionForm);
+      const resolvedClassId = membershipStudent?.classId || exemptionForm.classId;
+      const resolvedAcademicYearId = membershipStudent?.academicYearId || exemptionForm.academicYearId;
+      if (!exemptionForm.studentId || !resolvedClassId || !resolvedAcademicYearId || !resolvedMembershipId) {
         throw new Error('برای ثبت معافیت، متعلم، صنف و سال تعلیمی مربوط به همان عضویت را انتخاب کنید.');
+      }
+      if (exemptionForm.exemptionType === 'partial'
+        && toSafeNumber(exemptionForm.amount) <= 0
+        && toSafeNumber(exemptionForm.percentage) <= 0) {
+        throw new Error('برای معافیت جزئی، مبلغ یا فیصدی معتبر بزرگ‌تر از صفر وارد کنید.');
       }
       const data = await postJson(`${API_BASE}/api/student-finance/exemptions`, {
         student: exemptionForm.studentId,
         studentMembershipId: resolvedMembershipId,
-        classId: exemptionForm.classId,
-        academicYearId: exemptionForm.academicYearId,
+        classId: resolvedClassId,
+        academicYearId: resolvedAcademicYearId,
         exemptionType: exemptionForm.exemptionType,
         scope: exemptionForm.scope,
         amount: exemptionForm.exemptionType === 'partial' ? exemptionForm.amount : '',
@@ -3888,8 +3975,8 @@ export default function AdminFinance() {
         note: exemptionForm.note
       });
       const selectedStudent = students.find((item) => String(item?._id || '') === String(exemptionForm.studentId || ''));
-      const selectedClass = classOptions.find((item) => item.classId === exemptionForm.classId);
-      const selectedAcademicYear = academicYears.find((item) => item.id === exemptionForm.academicYearId);
+      const selectedClass = classOptions.find((item) => item.classId === resolvedClassId);
+      const selectedAcademicYear = academicYears.find((item) => item.id === resolvedAcademicYearId);
       const createdExemption = {
         ...(data?.item || {}),
         id: data?.item?.id || data?.item?._id || `exemption-${Date.now()}`,
@@ -3906,11 +3993,11 @@ export default function AdminFinance() {
           name: selectedStudent?.name || selectedStudent?.fullName || ''
         },
         schoolClass: data?.item?.schoolClass || {
-          id: exemptionForm.classId,
+          id: resolvedClassId,
           title: selectedClass?.title || ''
         },
         academicYear: data?.item?.academicYear || {
-          id: exemptionForm.academicYearId,
+          id: resolvedAcademicYearId,
           title: selectedAcademicYear?.title || ''
         }
       };
@@ -5353,7 +5440,61 @@ export default function AdminFinance() {
                 <option value="">صنف را انتخاب کنید</option>
                 {classOptions.map((item) => <option key={item.classId} value={item.classId}>{getClassOptionLabel(item)}</option>)}
               </select>
-              <input value={manualForm.amount} onChange={(e) => setManualForm((p) => ({ ...p, amount: e.target.value }))} placeholder="مبلغ AFN" />
+              <select
+                value={manualForm.feeType}
+                onChange={(e) => {
+                  const feeType = e.target.value;
+                  setManualForm((p) => ({
+                    ...p,
+                    feeType,
+                    periodLabel: !p.periodLabel || MANUAL_BILL_FEE_TYPES.some((item) => FEE_LINE_TYPE_LABELS[item] === p.periodLabel)
+                      ? (FEE_LINE_TYPE_LABELS[feeType] || '')
+                      : p.periodLabel
+                  }));
+                }}
+                aria-label="نوع فیس بل دستی"
+                required
+              >
+                {MANUAL_BILL_FEE_TYPES.map((feeType) => (
+                  <option key={feeType} value={feeType}>{FEE_LINE_TYPE_LABELS[feeType] || feeType}</option>
+                ))}
+              </select>
+            </div>
+            <div className="finance-split-grid">
+              <select
+                value={manualForm.amountSource}
+                onChange={(e) => setManualForm((p) => ({ ...p, amountSource: e.target.value }))}
+                aria-label="منبع مبلغ بل دستی"
+              >
+                <option value="plan">مبلغ از پلان مالی</option>
+                <option value="manual">مبلغ دستی</option>
+              </select>
+              {manualForm.amountSource === 'manual' ? (
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={manualForm.amount}
+                  onChange={(e) => setManualForm((p) => ({ ...p, amount: e.target.value }))}
+                  placeholder="مبلغ دستی AFN"
+                  aria-label="مبلغ دستی بل"
+                  required
+                />
+              ) : (
+                <div className="finance-cell-stack">
+                  <input
+                    value={selectedManualFeePlan ? `${fmt(selectedManualPlanAmount)} ${selectedManualFeePlan.currency || 'AFN'}` : ''}
+                    placeholder="از پلان فعال صنف خوانده می‌شود"
+                    aria-label="مبلغ از پلان مالی"
+                    readOnly
+                  />
+                  <small>
+                    {selectedManualFeePlan
+                      ? `${selectedManualFeePlan.title || 'پلان فعال'} — ${FEE_LINE_TYPE_LABELS[manualForm.feeType] || 'فیس'}`
+                      : 'سیستم هنگام صدور، پلان فعال همین صنف و سال را بررسی می‌کند.'}
+                  </small>
+                </div>
+              )}
             </div>
             <div className="finance-split-grid">
               <div className="finance-cell-stack">
@@ -5767,6 +5908,11 @@ export default function AdminFinance() {
               </div>
               <input value={bulkForm.periodLabel} onChange={(e) => setBulkForm((p) => ({ ...p, periodLabel: e.target.value }))} placeholder="عنوان بل / دوره" />
             </div>
+            <label className="finance-flag">
+              <input type="checkbox" checked={bulkForm.includeAdmission} onChange={(e) => setBulkForm((p) => ({ ...p, includeAdmission: e.target.checked }))} />
+              <span>شامل داخله از پلان مالی</span>
+            </label>
+            <p className="muted">اگر این گزینه خاموش باشد، صدور گروهی فقط فیس/شهریه را ایجاد می‌کند و داخله جداگانه صادر نمی‌شود.</p>
             <button type="button" className="secondary finance-advanced-toggle" onClick={() => setBillingAdvancedOpen((value) => !value)}>
               {billingAdvancedOpen ? 'بستن تنظیمات پیشرفته' : 'تنظیمات پیشرفته'}
             </button>
@@ -5781,10 +5927,6 @@ export default function AdminFinance() {
                   <input value={bulkForm.term} onChange={(e) => setBulkForm((p) => ({ ...p, term: e.target.value }))} placeholder="ترم" />
                 </div>
                 <div className="finance-flag-grid">
-                  <label className="finance-flag">
-                    <input type="checkbox" checked={bulkForm.includeAdmission} onChange={(e) => setBulkForm((p) => ({ ...p, includeAdmission: e.target.checked }))} />
-                    <span>شامل داخله</span>
-                  </label>
                   <label className="finance-flag">
                     <input type="checkbox" checked={bulkForm.includeTransport} onChange={(e) => setBulkForm((p) => ({ ...p, includeTransport: e.target.checked }))} />
                     <span>شامل ترانسپورت</span>
@@ -6135,7 +6277,7 @@ export default function AdminFinance() {
             <div className="finance-card-head">
               <div>
                 <h3>ثبت تخفیف متعلم</h3>
-                <p className="muted">تخفیف‌های رسمی و ثبت‌شده را بر اساس متعلم، صنف و سال تعلیمی قفل کنید.</p>
+                <p className="muted">تخفیف عادی فقط روی فیس/شهریه اعمال می‌شود؛ داخله، امتحان، ترانسپورت و سایر فیس‌ها تغییر نمی‌کنند.</p>
               </div>
               <span className="finance-chip">{discountRegistry.length} فعال</span>
             </div>
@@ -6229,7 +6371,7 @@ export default function AdminFinance() {
                 {Object.entries(DISCOUNT_TYPE_UI_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
               {discountForm.coverageMode === 'full' ? (
-                <div className="finance-readonly-field">100% تخفیف روی بدهی‌های باز</div>
+                <div className="finance-readonly-field">100% تخفیف فقط روی فیس/شهریه</div>
               ) : discountForm.coverageMode === 'fixed' ? (
                 <input type="number" min="0" value={discountForm.amount} onChange={(e) => setDiscountForm((prev) => ({ ...prev, amount: e.target.value }))} placeholder="مبلغ تخفیف" required />
               ) : (
@@ -6286,7 +6428,8 @@ export default function AdminFinance() {
                 placeholder="نام، ایمیل یا شناسه متعلم"
               />
             </label>
-            <select value={exemptionForm.studentId} onChange={(e) => applyExemptionMembershipStudent(e.target.value)}>
+            <select value={exemptionForm.studentId} onChange={(e) => applyExemptionMembershipStudent(e.target.value)} required>
+              <option value="">متعلم را انتخاب کنید</option>
               {exemptionStudentOptions.length ? exemptionStudentOptions.map((student) => (
                 <option key={`exemption-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student)}</option>
               )) : (
@@ -6979,6 +7122,7 @@ export default function AdminFinance() {
               <option value="pending">در انتظار</option>
               <option value="partial">پرداخت ناقص</option>
               <option value="paid">پرداخت‌شده</option>
+              <option value="waived">معاف/پوشش کامل</option>
               <option value="overdue">سررسید گذشته</option>
               <option value="void">باطل</option>
             </select>
@@ -7046,7 +7190,10 @@ export default function AdminFinance() {
                 {!!bill.lineItems?.length && <small>{bill.lineItems.length} ردیف مالی</small>}
               </span>
               <span className="finance-cell-stack">
-                <strong>{fmt(bill.amountDue || 0)} AFN</strong>
+                <strong>{fmt(getBillDisplayAmount(bill))} AFN</strong>
+                {getBillReliefAmount(bill) > 0 && (
+                  <small>تخفیف/معافیت: {fmt(getBillReliefAmount(bill))} AFN</small>
+                )}
                 <small>پرداخت: {fmt(bill.amountPaid || 0)} AFN</small>
               </span>
               <span className="finance-cell-stack">
@@ -7333,6 +7480,7 @@ export default function AdminFinance() {
                         <button type="button" className="secondary" onClick={snoozeAnomaly} disabled={busy || !selectedAnomaly || !anomalyWorkflowForm.snoozedUntil} data-testid="anomaly-snooze-button">تعویق</button>
                         {selectedAnomaly.anomalyType === 'admission_missing' && (
                           <>
+                            <button type="button" onClick={() => settleAdmissionAnomaly('open')} disabled={busy || !selectedAnomaly} data-testid="anomaly-admission-open-button">صدور بل داخله</button>
                             <button type="button" className="secondary" onClick={() => settleAdmissionAnomaly('paid')} disabled={busy || !selectedAnomaly} data-testid="anomaly-admission-paid-button">داخله پرداخت شده</button>
                             <button type="button" className="secondary" onClick={() => settleAdmissionAnomaly('waived')} disabled={busy || !selectedAnomaly} data-testid="anomaly-admission-waived-button">معاف/تخفیف کامل</button>
                           </>

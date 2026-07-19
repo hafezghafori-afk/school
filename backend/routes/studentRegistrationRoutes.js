@@ -214,8 +214,14 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
         currentSection: selectedClass?.section || req.body?.academicInfo?.currentSection || '',
         currentShift: selectedClass?.shift || req.body?.academicInfo?.currentShift || 'morning',
         enrollmentDate: enrollmentDate || new Date(),
-        previousSchool,
-        previousGrade,
+        enrollmentType: registrationType === 'transfer' || previousSchool ? 'transfer' : 'new',
+        previousSchool: registrationType === 'transfer' || previousSchool
+          ? {
+              name: String(previousSchool || '').trim(),
+              lastGrade: String(previousGrade || '').trim(),
+              type: 'private'
+            }
+          : undefined,
         attendanceRecord: {
           totalDays: 0,
           presentDays: 0,
@@ -283,7 +289,10 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
         payload: {
           classId,
           academicYearId: academicYearId || selectedClass?.academicYearId || null,
-          enrollmentDate: enrollmentDate || new Date()
+          enrollmentDate: enrollmentDate || new Date(),
+          enrollmentType: registrationType === 'transfer' || previousSchool ? 'transfer' : 'new',
+          previousSchool,
+          previousGrade
         },
         actorId: req.user?.id || null,
         source: 'admin',

@@ -1,6 +1,7 @@
 const FinanceRelief = require('../models/FinanceRelief');
 const Discount = require('../models/Discount');
 const FeeExemption = require('../models/FeeExemption');
+const FeeOrder = require('../models/FeeOrder');
 const {
   buildFinanceReliefPayloadFromDiscount,
   buildFinanceReliefPayloadFromExemption
@@ -37,6 +38,20 @@ function reliefChanged(existing = {}, payload = {}) {
     || String(existing?.sourceUpdatedAt ? new Date(existing.sourceUpdatedAt).toISOString() : '') !== String(payload?.sourceUpdatedAt ? new Date(payload.sourceUpdatedAt).toISOString() : '');
 }
 
+function promoteDiscountReliefToFullCoverage(payload = {}, order = null) {
+  if (payload.status !== 'active' || payload.coverageMode !== 'fixed' || payload.reliefType === 'penalty') return payload;
+  const reliefAmount = Number(payload.amount || 0);
+  const originalAmount = Number(order?.amountOriginal || 0);
+  if (reliefAmount <= 0 || originalAmount <= 0 || reliefAmount < originalAmount) return payload;
+  return {
+    ...payload,
+    coverageMode: 'full',
+    amount: 0,
+    percentage: 100,
+    reliefType: 'waiver'
+  };
+}
+
 async function resolveDiscount(input) {
   if (input && typeof input === 'object' && (input.discountType || input._id)) return input;
   return Discount.findById(input).lean();
@@ -54,6 +69,20 @@ async function syncFinanceReliefFromDiscount(input, { dryRun = false } = {}) {
   }
 
   const payload = buildFinanceReliefPayloadFromDiscount(item);
+  if (payload.status === 'active' && payload.coverageMode === 'fixed' && Number(payload.amount || 0) > 0 && payload.reliefType !== 'penalty') {
+    const sourceFilter = item.feeOrderId
+      ? { _id: item.feeOrderId?._id || item.feeOrderId }
+      : { studentMembershipId: item.studentMembershipId?._id || item.studentMembershipId };
+    const latestDiscountedOrder = await FeeOrder.findOne({
+      ...sourceFilter,
+      status: { $ne: 'void' },
+      'adjustments.reason': { $regex: `^\\[discount:${String(item._id)}\\]` }
+    })
+      .sort({ dueDate: -1, createdAt: -1 })
+      .select('_id amountOriginal amountDue')
+      .lean();
+    Object.assign(payload, promoteDiscountReliefToFullCoverage(payload, latestDiscountedOrder));
+  }
   const existing = await FinanceRelief.findOne({ sourceKey: payload.sourceKey });
   if (!existing) {
     if (dryRun) return { created: true, updated: false, skipped: false, reliefId: null };
@@ -96,6 +125,7 @@ async function syncFinanceReliefFromFeeExemption(input, { dryRun = false } = {})
 }
 
 module.exports = {
+  promoteDiscountReliefToFullCoverage,
   syncFinanceReliefFromDiscount,
   syncFinanceReliefFromFeeExemption
 };

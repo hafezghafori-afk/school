@@ -4906,6 +4906,12 @@ function loadFinanceRouter() {
     if (isFinanceRoute && request === '../services/feeBillingService') {
       return require(path.join(__dirname, '..', 'services', 'feeBillingService'));
     }
+    if (isFinanceRoute && request === '../services/transferAdmissionBillingService') {
+      return {
+        buildAdmissionDueDate: (value = new Date()) => new Date(value),
+        findExistingAdmissionObligation: async () => null
+      };
+    }
     if (isFinanceRoute && request === '../services/reportEngineService') return reportEngineServiceMock;
     if (isFinanceRoute && request === '../models/Order') return OrderMock;
     if (isFinanceRoute && request === '../models/StudentMembership') return StudentMembershipMock;
@@ -4934,6 +4940,7 @@ function loadFinanceRouter() {
     if (isFinanceReceiptValidation && request === '../models/FinanceReceipt') return FinanceReceiptMock;
     if (isFinanceFeePlanService && request === '../models/AcademicYear') return AcademicYearMock;
     if (isFeeBillingService && request === '../models/FinanceBill') return FinanceBillMock;
+    if (isFeeBillingService && request === '../models/FeeOrder') return FeeOrderMock;
     if (isFeeBillingService && request === '../models/FinanceFeePlan') return FinanceFeePlanMock;
     if (isFeeBillingService && request === '../models/AcademicYear') return AcademicYearMock;
     if (isFeeBillingService && request === '../models/Discount') return DiscountMock;
@@ -5124,6 +5131,51 @@ async function run() {
       assertCase(String(response.data?.item?.lineItems?.[0]?.feeType || '') === 'tuition', 'expected manual bill line item to default to tuition');
     });
 
+    await check('route smoke: manual admission bill reads its amount from the active fee plan', async () => {
+      const admissionPlanId = '507f191e810c19729de86991';
+      feePlans.push({
+        _id: admissionPlanId,
+        title: 'Transfer admission plan',
+        planCode: 'TRANSFER',
+        planType: 'standard',
+        priority: 1,
+        isDefault: true,
+        classId: IDS.class1,
+        course: IDS.course1,
+        academicYearId: 'year-1405',
+        academicYear: '1405',
+        billingFrequency: 'term',
+        tuitionFee: 1000,
+        admissionFee: 750,
+        currency: 'AFN',
+        isActive: true,
+        lifecycleStatus: 'active'
+      });
+
+      const response = await request(server, '/api/finance/admin/bills', {
+        method: 'POST',
+        user: financeManagerUser,
+        body: {
+          studentId: IDS.student1,
+          classId: IDS.class1,
+          amountSource: 'plan',
+          feeType: 'admission',
+          feePlanId: admissionPlanId,
+          dueDate: '2026-04-15',
+          issuedAt: '2026-03-06',
+          academicYearId: 'year-1405',
+          periodType: 'custom',
+          periodLabel: 'Transfer admission test'
+        }
+      });
+      feePlans.pop();
+
+      assertCase(response.status === 201, `expected 201, received ${response.status}: ${response.text}`);
+      assertCase(Number(response.data?.item?.amountOriginal || 0) === 750, 'expected admission amount to come from the plan');
+      assertCase(String(response.data?.item?.lineItems?.[0]?.feeType || '') === 'admission', 'expected an admission line item');
+      assertCase(String(response.data?.item?.lineItems?.[0]?.sourcePlanId || '') === admissionPlanId, 'expected the fee plan reference on the line item');
+    });
+
     await check('route smoke: grouped bill generation uses active memberships', async () => {
       const baselineCount = bills.length;
       const response = await request(server, '/api/finance/admin/bills/generate', {
@@ -5212,12 +5264,13 @@ async function run() {
       const previewItems = Array.isArray(response.data?.items) ? response.data.items : [];
       const alpha = previewItems.find((item) => String(item.studentMembershipId || '') === 'mem-1');
       const beta = previewItems.find((item) => String(item.studentMembershipId || '') === 'mem-2');
-      assertCase(Number(alpha?.amountDue || 0) === 650, `expected alpha preview amount 650, received ${alpha?.amountDue}`);
+      assertCase(Number(alpha?.amountDue || 0) === 550, `expected alpha preview amount 550 after skipping its existing admission bill, received ${alpha?.amountDue}`);
       assertCase(Number(beta?.amountDue || 0) === 400, `expected beta preview amount 400, received ${beta?.amountDue}`);
       assertCase((alpha?.adjustments || []).length >= 1, 'expected discount adjustment in preview');
       assertCase((beta?.adjustments || []).some((item) => item.type === 'waiver'), 'expected exemption waiver adjustment in preview');
-      assertCase(Array.isArray(alpha?.lineItems) && alpha.lineItems.length === 2, 'expected alpha preview line items to include fee breakdown');
-      assertCase((alpha?.lineItems || []).some((item) => item.feeType === 'admission'), 'expected alpha preview line items to include admission');
+      assertCase(Array.isArray(alpha?.lineItems) && alpha.lineItems.length === 1, 'expected alpha preview to keep tuition only after admission was already issued');
+      assertCase(!(alpha?.lineItems || []).some((item) => item.feeType === 'admission'), 'expected alpha preview not to duplicate admission');
+      assertCase((beta?.lineItems || []).some((item) => item.feeType === 'admission'), 'expected beta preview to include missing admission');
       assertCase((beta?.lineItems || []).some((item) => Number(item.netAmount || 0) < Number(item.grossAmount || 0)), 'expected beta preview line items to reflect relief reductions');
     });
 

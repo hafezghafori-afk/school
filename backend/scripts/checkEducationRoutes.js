@@ -768,6 +768,13 @@ const authMock = {
         ? next()
         : res.status(403).json({ success: false, message: 'Forbidden by permission.' })
     );
+  },
+  requireAnyPermission(permissions = []) {
+    return (req, res, next) => (
+      Array.isArray(req.user?.permissions) && permissions.some((permission) => req.user.permissions.includes(permission))
+        ? next()
+        : res.status(403).json({ success: false, message: 'Forbidden by permission.' })
+    );
   }
 };
 
@@ -830,6 +837,23 @@ function loadEducationRouter() {
     if (isRoute && request === '../models/InstructorSubject') return InstructorSubjectMock;
     if (isRoute && request === '../utils/studentMembershipSync') return syncMock;
     if (isRoute && request === '../utils/courseAccess') return courseAccessMock;
+    if (isRoute && request === '../services/afghanStudentProfileService') {
+      return {
+        ensureAfghanStudentProfile: async () => ({
+          student: { _id: '507f191e810c19729de86998' },
+          created: false
+        })
+      };
+    }
+    if (isRoute && request === '../services/transferAdmissionBillingService') {
+      return {
+        issueTransferAdmissionBill: async () => ({
+          created: true,
+          reason: 'admission_bill_created',
+          bill: { _id: 'transfer-admission-bill-1', billNumber: 'BL-TEST-0001', amountOriginal: 600 }
+        })
+      };
+    }
     if (isRoute && request === '../middleware/auth') return authMock;
     if (isRoute && request === '../utils/activity') return activityMock;
 
@@ -1208,7 +1232,25 @@ async function run() {
       assertCase(stored?.isCurrent === false, 'Expected membership to be non-current after removal');
     });
 
-    await check('delete enrollment drops current membership out of the visible list', async () => {
+    await check('transfer-in enrollment update issues an admission bill', async () => {
+      const response = await request(server, '/api/education/student-enrollments/mem-1', {
+        method: 'PUT',
+        user: adminUser,
+        body: {
+          studentId: IDS.student1,
+          classId: IDS.class1,
+          status: 'transferred_in',
+          note: 'transfer admission test'
+        }
+      });
+      assertCase(response.status === 200, 'Expected 200 on transfer-in update, got ' + response.status + ' ' + JSON.stringify(response.data));
+      assertCase(response.data?.admissionBilling?.created === true, 'Expected admission bill creation metadata');
+      assertCase(response.data?.admissionBilling?.billNumber === 'BL-TEST-0001', 'Expected the admission bill number');
+      const stored = membershipRecords.find((item) => String(item._id) === 'mem-1');
+      assertCase(stored?.status === 'transferred_in', 'Expected transferred-in membership status');
+    });
+
+    await check('delete enrollment ends the current membership and preserves lifecycle history', async () => {
       const response = await request(server, '/api/education/student-enrollments/mem-1', {
         method: 'DELETE',
         user: adminUser
@@ -1217,7 +1259,9 @@ async function run() {
       const stored = membershipRecords.find((item) => String(item._id) === 'mem-1');
       assertCase(stored && stored.status === 'dropped', 'Expected current membership to be dropped');
       const listResponse = await request(server, '/api/education/student-enrollments', { user: adminUser });
-      assertCase(!listResponse.data.items.some((item) => String(item._id) === 'mem-1'), 'Expected dropped membership to disappear from default list');
+      const historyRow = listResponse.data.items.find((item) => String(item._id) === 'mem-1');
+      assertCase(historyRow?.status === 'dropped', 'Expected dropped membership to remain available as lifecycle history');
+      assertCase(historyRow?.isCurrent === false, 'Expected dropped lifecycle history to be non-current');
     });
   } finally {
     await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));

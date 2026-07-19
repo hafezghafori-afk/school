@@ -236,6 +236,33 @@ function buildDefaultConfigSeed() {
   };
 }
 
+async function ensureResultTableReferenceData() {
+  const summary = {
+    templatesCreated: 0,
+    configsCreated: 0
+  };
+
+  for (const payload of buildTemplateSeedData()) {
+    const result = await TableTemplate.updateOne(
+      { code: payload.code },
+      { $setOnInsert: { ...payload, isActive: true } },
+      { upsert: true, setDefaultsOnInsert: true }
+    );
+    summary.templatesCreated += Number(result.upsertedCount || 0);
+  }
+
+  const configPayload = buildDefaultConfigSeed();
+  const hasDefaultConfig = await TableConfig.exists({ isDefault: true });
+  const configResult = await TableConfig.updateOne(
+    { code: configPayload.code },
+    { $setOnInsert: { ...configPayload, isDefault: !hasDefaultConfig } },
+    { upsert: true, setDefaultsOnInsert: true }
+  );
+  summary.configsCreated += Number(configResult.upsertedCount || 0);
+
+  return summary;
+}
+
 async function seedResultTableReferenceData({ dryRun = false } = {}) {
   const summary = {
     templatesCreated: 0,
@@ -643,5 +670,6 @@ module.exports = {
   listTableConfigs,
   listTableTemplates,
   publishResultTable,
+  ensureResultTableReferenceData,
   seedResultTableReferenceData
 };

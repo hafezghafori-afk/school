@@ -8,6 +8,7 @@ const {
   normalizeFinanceLineItems,
   buildFeeBreakdownFromLineItems,
   buildFeeScopesFromLineItems,
+  applyFinanceOrderStatus,
   roundMoney
 } = require('../utils/financeLineItems');
 
@@ -22,6 +23,7 @@ const installmentSchema = new mongoose.Schema({
 
 const adjustmentSchema = new mongoose.Schema({
   type: { type: String, enum: ['discount', 'waiver', 'penalty', 'manual'], default: 'manual' },
+  scope: { type: String, enum: [...BREAKDOWN_KEYS, 'all'], default: undefined },
   amount: { type: Number, default: 0, min: 0 },
   reason: { type: String, default: '' },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
@@ -56,6 +58,15 @@ const financeBillSchema = new mongoose.Schema({
   term: { type: String, default: '' },
   periodType: { type: String, enum: ['monthly', 'term', 'custom'], default: 'term' },
   periodLabel: { type: String, default: '' },
+  issuanceKey: {
+    type: String,
+    default: undefined,
+    trim: true,
+    set: (value) => {
+      const normalized = String(value || '').trim();
+      return normalized || undefined;
+    }
+  },
   currency: { type: String, default: 'AFN' },
   amountOriginal: { type: Number, default: 0, min: 0 },
   amountDue: { type: Number, default: 0, min: 0 },
@@ -77,7 +88,7 @@ const financeBillSchema = new mongoose.Schema({
     other: { type: Number, default: 0, min: 0 }
   },
   lineItems: { type: [lineItemSchema], default: [] },
-  status: { type: String, enum: ['new', 'partial', 'paid', 'overdue', 'void'], default: 'new', index: true },
+  status: { type: String, enum: ['new', 'partial', 'paid', 'waived', 'overdue', 'void'], default: 'new', index: true },
   issuedAt: { type: Date, default: Date.now, index: true },
   dueDate: { type: Date, required: true, index: true },
   paidAt: { type: Date, default: null },
@@ -90,6 +101,10 @@ const financeBillSchema = new mongoose.Schema({
   lastReminderAt: { type: Date, default: null },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { timestamps: true });
+
+financeBillSchema.path('amountOriginal').validate(function requirePositiveGrossAmount(value) {
+  return !this.isNew || this.status === 'void' || Number(value || 0) > 0;
+}, 'مبلغ اصلی بل باید بیشتر از صفر باشد.');
 
 financeBillSchema.pre('validate', async function syncFinanceBillState() {
   if (typeof this.billNumber === 'string') this.billNumber = this.billNumber.trim().toUpperCase();
@@ -119,6 +134,7 @@ financeBillSchema.pre('validate', async function syncFinanceBillState() {
   this.feeScopes = buildFeeScopesFromLineItems(this.lineItems);
   this.amountOriginal = roundMoney(Object.values(this.feeBreakdown || {}).reduce((sum, item) => sum + (Number(item) || 0), 0));
   this.amountDue = roundMoney(this.lineItems.reduce((sum, item) => sum + (Number(item?.netAmount) || 0), 0));
+  applyFinanceOrderStatus(this);
   if (this.periodType === 'monthly' && this.dueDate) {
     this.periodLabel = formatAfghanMonthYearLabel(this.dueDate);
   }
@@ -132,6 +148,7 @@ financeBillSchema.index({ studentId: 1, academicYearId: 1, status: 1 });
 financeBillSchema.index({ classId: 1, academicYearId: 1, status: 1 });
 financeBillSchema.index({ linkScope: 1, status: 1, dueDate: 1 });
 financeBillSchema.index({ status: 1, dueDate: 1 });
+financeBillSchema.index({ issuanceKey: 1 }, { unique: true, sparse: true });
 
 financeBillSchema.post('save', function syncStudentFinanceCanonical(doc) {
   setImmediate(() => {

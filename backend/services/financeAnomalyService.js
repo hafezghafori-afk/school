@@ -613,7 +613,7 @@ function buildMembershipFinanceAnomalies({
           if (feeType === 'tuition' && isLikelyAdmissionDocumentForPlan(document, feePlan)) return false;
           return getFinanceDocumentFeeTypes(document).has(feeType);
         });
-        const activeDocuments = matchingDocuments.filter((document) => ['new', 'partial', 'overdue', 'paid'].includes(normalizeText(document?.status)));
+        const activeDocuments = matchingDocuments.filter((document) => ['new', 'partial', 'overdue', 'paid', 'waived'].includes(normalizeText(document?.status)));
         const totalIssuedAmount = roundMoney(matchingDocuments.reduce((sum, document) => sum + getFinanceDocumentAmountByType(document, feeType), 0));
         const feeLabel = getFeeTypeLabel(feeType);
 

@@ -7,6 +7,7 @@ const fs = require('fs');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 const { getCorsOptions, getJwtSecret } = require('./utils/env');
+const { ensureResultTableReferenceData } = require('./services/resultTableService');
 
 const app = express();
 const server = http.createServer(app);
@@ -68,6 +69,10 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/school_db')
     }
     if (typeof TeacherAssignment.ensureTeacherAssignmentLegacyIndex === 'function') {
       await TeacherAssignment.ensureTeacherAssignmentLegacyIndex();
+    }
+    const resultTableReferenceSummary = await ensureResultTableReferenceData();
+    if (resultTableReferenceSummary.templatesCreated || resultTableReferenceSummary.configsCreated) {
+      console.log('Result table reference data initialized', resultTableReferenceSummary);
     }
   })
   .catch((err) => console.error('Database connection error:', err));

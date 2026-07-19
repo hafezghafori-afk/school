@@ -13,6 +13,12 @@ const { sendMail } = require('../utils/mailer');
 const { normalizeAdminLevel } = require('../utils/permissions');
 const { resolveAdminOrgRole } = require('../utils/userRole');
 const { roundMoney, getBillRemainingAmount } = require('../utils/financeReceiptValidation');
+const {
+  applyFinanceOrderStatus,
+  getFinanceFeeScopeGrossAmount,
+  normalizeAdjustmentScope,
+  normalizeFinanceLineItems
+} = require('../utils/financeLineItems');
 const { syncStudentFinanceFromFinanceBill, syncStudentFinanceFromFinanceReceipt } = require('../utils/studentFinanceSync');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const { syncApprovedFeePaymentToTreasury } = require('./treasuryGovernanceService');
@@ -57,12 +63,6 @@ function parseDateSafe(value, fallback = null) {
   return Number.isNaN(d.getTime()) ? fallback : d;
 }
 
-function sumAdjustments(bill, types = []) {
-  return (bill.adjustments || [])
-    .filter((item) => types.includes(item.type))
-    .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-}
-
 function applyPaymentToInstallments(bill, paymentAmount = 0, paidAt = new Date()) {
   if (!Array.isArray(bill.installments) || !bill.installments.length) return;
   let remain = Math.max(0, Number(paymentAmount) || 0);
@@ -81,28 +81,22 @@ function applyPaymentToInstallments(bill, paymentAmount = 0, paidAt = new Date()
 }
 
 function recalculateBill(bill) {
-  const base = Math.max(0, Number(bill.amountOriginal) || 0);
-  const discountTotal = sumAdjustments(bill, ['discount', 'waiver']);
-  const penaltyTotal = sumAdjustments(bill, ['penalty']);
-  bill.amountDue = Math.max(0, base - discountTotal + penaltyTotal);
   bill.amountPaid = Math.max(0, Number(bill.amountPaid) || 0);
+  bill.lineItems = normalizeFinanceLineItems({
+    lineItems: bill.lineItems,
+    feeBreakdown: bill.feeBreakdown,
+    feeScopes: bill.feeScopes,
+    amountOriginal: bill.amountOriginal,
+    adjustments: bill.adjustments,
+    amountPaid: bill.amountPaid,
+    defaultType: bill.orderType || 'tuition'
+  });
+  bill.amountDue = Math.max(0, roundMoney(
+    bill.lineItems.reduce((sum, item) => sum + Number(item?.netAmount || 0), 0)
+  ));
   const remaining = Math.max(0, bill.amountDue - bill.amountPaid);
 
-  if (bill.status !== 'void') {
-    if (remaining <= 0) {
-      bill.status = 'paid';
-      if (!bill.paidAt) bill.paidAt = new Date();
-    } else if (bill.dueDate && new Date(bill.dueDate).getTime() < Date.now()) {
-      bill.status = 'overdue';
-      bill.paidAt = null;
-    } else if (bill.amountPaid > 0) {
-      bill.status = 'partial';
-      bill.paidAt = null;
-    } else {
-      bill.status = 'new';
-      bill.paidAt = null;
-    }
-  }
+  applyFinanceOrderStatus(bill);
 
   if (Array.isArray(bill.installments)) {
     for (const installment of bill.installments) {
@@ -134,6 +128,22 @@ function normalizeFeePaymentAllocations(payment = {}) {
       orderNumber: formatFinanceCode(item?.orderNumber)
     }))
     .filter((item) => item.feeOrderId && item.amount > 0);
+}
+
+async function syncTreasuryForFeeOrderPayments(feeOrderId = '') {
+  const normalizedOrderId = String(feeOrderId || '').trim();
+  if (!normalizedOrderId) return 0;
+  const payments = await FeePayment.find({
+    status: 'approved',
+    $or: [
+      { feeOrderId: normalizedOrderId },
+      { 'allocations.feeOrderId': normalizedOrderId }
+    ]
+  });
+  for (const payment of payments) {
+    await syncApprovedFeePaymentToTreasury(payment);
+  }
+  return payments.length;
 }
 
 async function resolveFinanceAudienceUserIds({ studentId = '', studentCoreId = '' } = {}) {
@@ -330,24 +340,35 @@ async function addBillAdjustmentAction({ req, billId = '', body = {} } = {}) {
 
   const type = ['discount', 'waiver', 'penalty', 'manual'].includes(body?.type) ? body.type : 'discount';
   const amount = roundMoney(body?.amount);
+  const scope = type === 'discount'
+    ? 'tuition'
+    : normalizeAdjustmentScope({ type, scope: body?.scope }, 'all');
+  const tuitionGross = type === 'discount' ? getFinanceFeeScopeGrossAmount(item, 'tuition') : 0;
+  if (type === 'discount' && tuitionGross <= 0) {
+    throw createActionError(400, 'تخفیف عادی فقط روی فیس/شهریه قابل اعمال است و این بل ردیف فیس ندارد.');
+  }
+  const effectiveAmount = type === 'discount' ? Math.min(amount, tuitionGross) : amount;
   if (!amount) throw createActionError(400, 'Ù…Ø¨Ù„Øº Ù…Ø¹ØªØ¨Ø± Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª');
 
   item.adjustments.push({
     type,
-    amount,
+    scope,
+    amount: effectiveAmount,
     reason: String(body?.reason || '').trim(),
     createdBy: req.user.id
   });
   recalculateBill(item);
   await item.save();
   await syncStudentFinanceFromFinanceBill(item._id);
+  const syncedOrder = await FeeOrder.findOne({ sourceBillId: item._id }).select('_id');
+  if (syncedOrder?._id) await syncTreasuryForFeeOrderPayments(syncedOrder._id);
 
   await logActivity({
     req,
     action: 'finance_add_adjustment',
     targetType: 'FinanceBill',
     targetId: item._id.toString(),
-    meta: { type, amount }
+    meta: { type, scope, amount: effectiveAmount }
   });
 
   return { item, message: 'ØªØ¹Ø¯ÛŒÙ„ Ù…Ø§Ù„ÛŒ Ø«Ø¨Øª Ø´Ø¯' };
@@ -374,12 +395,21 @@ async function addFeeOrderAdjustmentAction({ req, feeOrderId = '', body = {} } =
 
   const type = ['discount', 'waiver', 'penalty', 'manual'].includes(body?.type) ? body.type : 'discount';
   const amount = roundMoney(body?.amount);
+  const scope = type === 'discount'
+    ? 'tuition'
+    : normalizeAdjustmentScope({ type, scope: body?.scope }, 'all');
+  const tuitionGross = type === 'discount' ? getFinanceFeeScopeGrossAmount(item, 'tuition') : 0;
+  if (type === 'discount' && tuitionGross <= 0) {
+    throw createActionError(400, 'تخفیف عادی فقط روی فیس/شهریه قابل اعمال است و این بل ردیف فیس ندارد.');
+  }
+  const effectiveAmount = type === 'discount' ? Math.min(amount, tuitionGross) : amount;
   if (!amount) throw createActionError(400, 'Adjustment amount is required');
 
   item.adjustments = Array.isArray(item.adjustments) ? item.adjustments : [];
   item.adjustments.push({
     type,
-    amount,
+    scope,
+    amount: effectiveAmount,
     reason: String(body?.reason || '').trim(),
     createdBy: req.user.id,
     createdAt: new Date()
@@ -397,7 +427,7 @@ async function addFeeOrderAdjustmentAction({ req, feeOrderId = '', body = {} } =
     classId: item.classId || null,
     academicYearId: item.academicYearId || null,
     discountType: type,
-    amount,
+    amount: effectiveAmount,
     reason: String(body?.reason || '').trim(),
     status: 'active',
     source: 'manual',
@@ -409,7 +439,7 @@ async function addFeeOrderAdjustmentAction({ req, feeOrderId = '', body = {} } =
     action: 'fee_order_add_adjustment',
     targetType: 'FeeOrder',
     targetId: item._id.toString(),
-    meta: { type, amount }
+    meta: { type, scope, amount: effectiveAmount }
   });
 
   return { item, message: 'Canonical fee order adjustment saved' };
@@ -571,6 +601,8 @@ async function voidBillAction({ req, billId = '', body = {} } = {}) {
   item.voidedAt = new Date();
   await item.save();
   await syncStudentFinanceFromFinanceBill(item._id);
+  const syncedOrder = await FeeOrder.findOne({ sourceBillId: item._id }).select('_id');
+  if (syncedOrder?._id) await syncTreasuryForFeeOrderPayments(syncedOrder._id);
 
   await notifyStudent({
     req,
@@ -622,6 +654,7 @@ async function voidFeeOrderAction({ req, feeOrderId = '', body = {} } = {}) {
   item.voidedBy = req.user.id;
   item.voidedAt = new Date();
   await item.save();
+  await syncTreasuryForFeeOrderPayments(item._id);
 
   await notifyStudent({
     req,

@@ -475,8 +475,14 @@ router.post('/exemptions', requireAuth, requireRole(['admin']), requirePermissio
     return res.status(201).json({ success: true, item });
   } catch (error) {
     const code = String(error?.message || '');
-    const status = code === 'student_finance_membership_not_found' ? 400 : 500;
-    return res.status(status).json({ success: false, message: status === 400 ? 'عضویت انتخاب‌شده برای ثبت معافیت معتبر نیست.' : 'ثبت معافیت فیس ناموفق بود.' });
+    if (code === 'student_finance_membership_not_found') {
+      return res.status(400).json({ success: false, message: 'عضویت انتخاب‌شده برای ثبت معافیت معتبر نیست.' });
+    }
+    if (code === 'student_finance_exemption_coverage_invalid') {
+      return res.status(400).json({ success: false, message: 'برای معافیت جزئی، مبلغ یا فیصدی معتبر بزرگ‌تر از صفر وارد کنید.' });
+    }
+    console.error('[student-finance][create-exemption]', error);
+    return res.status(500).json({ success: false, message: 'ثبت معافیت فیس ناموفق بود.' });
   }
 });
 

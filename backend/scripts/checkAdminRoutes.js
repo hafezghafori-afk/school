@@ -646,6 +646,15 @@ const authMock = {
       }
       return res.status(403).json({ success: false, message: 'Forbidden by permission.' });
     };
+  },
+  requireAnyPermission(allowedPermissions = []) {
+    return (req, res, next) => {
+      const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+      if (!allowedPermissions.length || allowedPermissions.some((permission) => permissions.includes(permission))) {
+        return next();
+      }
+      return res.status(403).json({ success: false, message: 'Forbidden by permission.' });
+    };
   }
 };
 
@@ -656,6 +665,7 @@ function loadRouters() {
 
   const mocks = {
     '../models/User': UserMock,
+    '../models/AfghanSchool': createModelMock([]),
     '../models/AfghanStudent': createModelMock(afghanStudents),
     '../models/AfghanTeacher': createModelMock(afghanTeachers),
     '../models/Course': createModelMock(courses),
@@ -669,6 +679,8 @@ function loadRouters() {
     '../models/FinanceReceipt': createModelMock(financeReceipts),
     '../models/FeeOrder': createModelMock(feeOrders),
     '../models/FeePayment': createModelMock(feePayments),
+    '../models/SchoolClass': createModelMock([]),
+    '../models/Attendance': createModelMock([]),
     '../models/Schedule': createModelMock(schedules),
     '../models/Homework': createModelMock(homeworkItems),
     '../models/Grade': createModelMock(grades),

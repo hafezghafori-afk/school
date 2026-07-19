@@ -46,6 +46,8 @@ const EducationPlanAnnual = require('../models/EducationPlanAnnual');
 const EducationPlanWeekly = require('../models/EducationPlanWeekly');
 const PromotionTransaction = require('../models/PromotionTransaction');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
+const { recognizePayments } = require('../utils/financeRevenueRecognition');
+const { deriveFinanceOrderStatus } = require('../utils/financeLineItems');
 const {
   buildAnnualGovernmentFinanceReport,
   buildQuarterlyGovernmentFinanceReport
@@ -444,7 +446,7 @@ function getReportDefinition(reportKey) {
 }
 async function buildFinanceOverviewReport(filters) {
   const definition = getReportDefinition('finance_overview');
-  const orderFilter = {};
+  const orderFilter = { status: { $ne: 'void' } };
   const paymentFilter = {};
   if (filters.academicYearId) {
     orderFilter.academicYearId = filters.academicYearId;
@@ -478,17 +480,26 @@ async function buildFinanceOverviewReport(filters) {
     FeeOrder.find(orderFilter).populate('student', 'name email grade').populate('studentId').populate('classId').populate('academicYearId').populate('assessmentPeriodId').sort({ issuedAt: -1, createdAt: -1 }),
     FeePayment.find(paymentFilter).populate('student', 'name email grade').populate('studentId').populate('classId').populate('academicYearId').populate('feeOrderId', 'orderNumber title').sort({ paidAt: -1, createdAt: -1 })
   ]);
+  const recognizedPaymentRows = await recognizePayments(payments);
 
+  const orderStatuses = orders.map((item) => deriveFinanceOrderStatus({
+    currentStatus: item.status,
+    amountOriginal: item.amountOriginal,
+    amountDue: item.amountDue,
+    amountPaid: item.amountPaid,
+    dueDate: item.dueDate
+  }));
   const summary = {
     totalOrders: orders.length,
-    totalPayments: payments.length,
+    totalPayments: recognizedPaymentRows.filter((row) => row.recognizedAmount > 0).length,
     totalDue: Number(orders.reduce((sum, item) => sum + Number(item.amountDue || 0), 0).toFixed(2)),
     totalPaidOnOrders: Number(orders.reduce((sum, item) => sum + Number(item.amountPaid || 0), 0).toFixed(2)),
     totalOutstanding: Number(orders.reduce((sum, item) => sum + Number(item.outstandingAmount || 0), 0).toFixed(2)),
-    totalPaymentAmount: Number(payments.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2)),
-    paidOrders: orders.filter((item) => item.status === 'paid').length,
-    overdueOrders: orders.filter((item) => item.status === 'overdue').length,
-    partialOrders: orders.filter((item) => item.status === 'partial').length
+    totalPaymentAmount: Number(recognizedPaymentRows.reduce((sum, row) => sum + Number(row.recognizedAmount || 0), 0).toFixed(2)),
+    paidOrders: orderStatuses.filter((status) => status === 'paid').length,
+    waivedOrders: orderStatuses.filter((status) => status === 'waived').length,
+    overdueOrders: orderStatuses.filter((status) => status === 'overdue').length,
+    partialOrders: orderStatuses.filter((status) => status === 'partial').length
   };
 
   const rows = orders.map((item, index) => ({
@@ -500,7 +511,7 @@ async function buildFinanceOverviewReport(filters) {
     classTitle: getClassTitle(item.classId),
     academicYear: normalizeText(item.academicYearId?.title),
     term: normalizeText(item.assessmentPeriodId?.title),
-    status: normalizeText(item.status),
+    status: orderStatuses[index],
     amountDue: Number(item.amountDue || 0),
     amountPaid: Number(item.amountPaid || 0),
     outstandingAmount: Number(item.outstandingAmount || 0),
@@ -887,6 +898,7 @@ async function buildFeeCollectionByClassReport(filters) {
       .populate('classId', 'title code gradeLevel section')
       .sort({ createdAt: -1, startDate: -1 })
   ]);
+  const recognizedPaymentRows = await recognizePayments(payments);
 
   const grouped = new Map();
   const ensureGroup = (classDoc) => {
@@ -919,15 +931,16 @@ async function buildFeeCollectionByClassReport(filters) {
     current.totalOutstanding += Number(item.outstandingAmount || 0);
   }
 
-  for (const item of payments) {
+  for (const { payment: item, recognizedAmount } of recognizedPaymentRows) {
+    if (recognizedAmount <= 0) continue;
     const current = ensureGroup(item.classId || item.feeOrderId?.classId);
     current.paymentCount += 1;
     if (item.status === 'approved') {
       current.approvedPaymentCount += 1;
-      current.approvedAmount += Number(item.amount || 0);
+      current.approvedAmount += Number(recognizedAmount || 0);
     } else if (item.status === 'pending') {
       current.pendingPaymentCount += 1;
-      current.pendingAmount += Number(item.amount || 0);
+      current.pendingAmount += Number(recognizedAmount || 0);
     }
   }
 

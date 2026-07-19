@@ -252,8 +252,9 @@ async function getParentDashboard(viewer = {}, options = {}) {
   const payments = Array.isArray(financeOverview?.payments) ? financeOverview.payments : [];
   const reliefs = Array.isArray(financeOverview?.reliefs) ? financeOverview.reliefs : [];
 
-  const approvedPayments = payments.filter((item) => item.status === 'approved');
-  const pendingPayments = payments.filter((item) => item.status === 'pending');
+  const recognizedPaymentAmount = (item) => Number(item?.recognizedAmount ?? item?.amount ?? 0);
+  const approvedPayments = payments.filter((item) => item.status === 'approved' && recognizedPaymentAmount(item) > 0);
+  const pendingPayments = payments.filter((item) => item.status === 'pending' && recognizedPaymentAmount(item) > 0);
   const openOrders = orders.filter((item) => ['new', 'partial', 'overdue'].includes(item.status));
   const overdueOrders = openOrders.filter((item) => item.status === 'overdue');
   const dueSoonOrders = openOrders.filter((item) => item.status !== 'overdue' && isWithinDays(item.dueDate, 7, today));
@@ -275,7 +276,7 @@ async function getParentDashboard(viewer = {}, options = {}) {
     ? Number((sumBy(grades, (item) => item.totalScore) / grades.length).toFixed(1))
     : 0;
   const outstandingAmount = sumBy(openOrders, (item) => item.outstandingAmount);
-  const paidAmount = sumBy(approvedPayments, (item) => item.amount);
+  const paidAmount = sumBy(approvedPayments, recognizedPaymentAmount);
   const submittedHomeworkIds = new Set(submittedHomework.map((item) => String(item.homework || '')));
   const pendingHomework = upcomingHomework.filter((item) => !submittedHomeworkIds.has(String(item._id))).length;
 

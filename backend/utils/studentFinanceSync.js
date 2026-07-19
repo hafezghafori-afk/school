@@ -1,7 +1,10 @@
 const { deriveLinkScope } = require('./financeLinkScope');
 const {
   normalizeFinanceLineItems,
-  inferPrimaryOrderType
+  inferPrimaryOrderType,
+  normalizeAdjustmentScope,
+  getFinanceFeeScopeGrossAmount,
+  applyFinanceOrderStatus
 } = require('./financeLineItems');
 const { formatFinanceCode } = require('./latinFinanceCode');
 
@@ -22,6 +25,7 @@ function roundMoney(value) {
 function normalizeAdjustmentPayload(adjustment = {}) {
   return {
     type: normalizeText(adjustment.type) || 'manual',
+    scope: normalizeAdjustmentScope(adjustment),
     amount: roundMoney(adjustment.amount),
     reason: normalizeText(adjustment.reason),
     createdBy: adjustment.createdBy || null,
@@ -67,8 +71,144 @@ async function getModels() {
     FinanceReceipt: require('../models/FinanceReceipt'),
     FeeOrder: require('../models/FeeOrder'),
     FeePayment: require('../models/FeePayment'),
-    Discount: require('../models/Discount')
+    Discount: require('../models/Discount'),
+    FeeExemption: require('../models/FeeExemption')
   };
+}
+
+function isRegistryAdjustment(adjustment = {}) {
+  const reason = normalizeText(adjustment?.reason);
+  return reason.startsWith('[discount:') || reason.startsWith('[exemption:');
+}
+
+function registryAdjustmentsChanged(current = [], next = []) {
+  const serialize = (items) => JSON.stringify((items || []).map((item) => ({
+    type: normalizeText(item?.type) || 'manual',
+    scope: normalizeAdjustmentScope(item),
+    amount: roundMoney(item?.amount),
+    reason: normalizeText(item?.reason),
+    createdBy: normalizeText(item?.createdBy),
+    createdAt: String(normalizeDate(item?.createdAt)?.toISOString() || '')
+  })));
+  return serialize(current) !== serialize(next);
+}
+
+function discountAppliesToBill(discount = {}, bill = {}) {
+  const dueDate = normalizeDate(bill?.dueDate);
+  if (!dueDate) return true;
+  const periodStart = new Date(dueDate.getFullYear(), dueDate.getMonth(), 1);
+  const periodEnd = new Date(dueDate.getFullYear(), dueDate.getMonth() + 1, 0, 23, 59, 59, 999);
+  const startDate = normalizeDate(discount?.startDate);
+  const endDate = normalizeDate(discount?.endDate);
+  return !(startDate && startDate > periodEnd) && !(endDate && endDate < periodStart);
+}
+
+function getExemptionBaseAmount(exemption = {}, bill = {}) {
+  const scope = normalizeText(exemption?.scope) || 'all';
+  if (scope === 'all') return roundMoney(bill?.amountOriginal);
+  const scopedAmount = (Array.isArray(bill?.lineItems) ? bill.lineItems : [])
+    .filter((item) => normalizeText(item?.feeType) === scope)
+    .reduce((sum, item) => sum + Number(item?.grossAmount || item?.netAmount || 0), 0);
+  return roundMoney(scopedAmount);
+}
+
+function refreshFinanceBillStatus(bill = {}) {
+  if (!bill || normalizeText(bill.status) === 'void') return bill;
+  bill.lineItems = normalizeFinanceLineItems({
+    lineItems: bill.lineItems,
+    feeBreakdown: bill.feeBreakdown,
+    feeScopes: bill.feeScopes,
+    amountOriginal: bill.amountOriginal,
+    adjustments: bill.adjustments,
+    amountPaid: bill.amountPaid,
+    defaultType: 'tuition'
+  });
+  bill.amountDue = roundMoney((bill.lineItems || []).reduce(
+    (sum, item) => sum + Number(item?.netAmount || 0),
+    0
+  ));
+  applyFinanceOrderStatus(bill);
+  return bill;
+}
+
+async function applyActiveRegistryReliefsToFinanceBill(input, { dryRun = false } = {}) {
+  const { FinanceBill, Discount, FeeExemption } = await getModels();
+  let bill = await resolveFinanceBill(input);
+  if (!bill?._id || !bill?.studentMembershipId || normalizeText(bill?.status) === 'void') {
+    return { updated: false, skipped: true, bill, reason: 'bill_not_eligible' };
+  }
+
+  const existingAdjustments = Array.isArray(bill.adjustments) ? bill.adjustments : [];
+  const hasRegistryAdjustments = existingAdjustments.some(isRegistryAdjustment);
+  if (!['new', 'partial', 'overdue'].includes(normalizeText(bill.status)) && !hasRegistryAdjustments) {
+    return { updated: false, skipped: true, bill, reason: 'bill_settled_without_relief' };
+  }
+
+  const [discounts, exemptions] = await Promise.all([
+    Discount.find({
+      studentMembershipId: bill.studentMembershipId,
+      status: 'active',
+      source: { $in: ['manual', 'migration'] }
+    }).sort({ createdAt: 1, _id: 1 }).lean(),
+    FeeExemption.find({ studentMembershipId: bill.studentMembershipId, status: 'active' })
+      .sort({ createdAt: 1, _id: 1 })
+      .lean()
+  ]);
+
+  const nextAdjustments = existingAdjustments
+    .filter((adjustment) => !isRegistryAdjustment(adjustment))
+    .map(normalizeAdjustmentPayload);
+  const baseAmount = roundMoney(bill.amountOriginal);
+
+  discounts.forEach((discount) => {
+    if (!discountAppliesToBill(discount, bill)) return;
+    const isPenalty = normalizeText(discount.discountType) === 'penalty';
+    const discountBase = isPenalty
+      ? roundMoney(bill.amountOriginal)
+      : getFinanceFeeScopeGrossAmount(bill, 'tuition');
+    if (discountBase <= 0) return;
+    const amount = discount.coverageMode === 'percent'
+      ? Math.min(discountBase, discountBase * (Number(discount.percentage || 0) / 100))
+      : Math.min(discountBase, Number(discount.amount || 0));
+    if (amount <= 0) return;
+    nextAdjustments.push({
+      type: isPenalty ? 'penalty' : 'discount',
+      scope: isPenalty ? 'all' : 'tuition',
+      amount: roundMoney(amount),
+      reason: `[discount:${String(discount._id)}] ${normalizeText(discount.reason)}`.trim(),
+      createdBy: discount.createdBy || null,
+      createdAt: normalizeDate(discount.createdAt) || new Date()
+    });
+  });
+
+  exemptions.forEach((exemption) => {
+    const exemptionBase = getExemptionBaseAmount(exemption, bill);
+    const amount = exemption.exemptionType === 'full'
+      ? exemptionBase
+      : Number(exemption.amount || 0) > 0
+        ? Math.min(exemptionBase, Number(exemption.amount || 0))
+        : Math.min(exemptionBase, exemptionBase * (Number(exemption.percentage || 0) / 100));
+    if (amount <= 0) return;
+    nextAdjustments.push({
+      type: 'waiver',
+      scope: normalizeText(exemption.scope) || 'all',
+      amount: roundMoney(amount),
+      reason: `[exemption:${String(exemption._id)}] ${normalizeText(exemption.reason)}`.trim(),
+      createdBy: exemption.createdBy || exemption.approvedBy || null,
+      createdAt: normalizeDate(exemption.createdAt) || new Date()
+    });
+  });
+
+  if (!registryAdjustmentsChanged(existingAdjustments, nextAdjustments)) {
+    return { updated: false, skipped: true, bill, reason: 'no_change' };
+  }
+  if (dryRun) return { updated: true, skipped: false, bill };
+
+  if (typeof bill.save !== 'function') bill = await FinanceBill.findById(bill._id);
+  bill.adjustments = nextAdjustments;
+  refreshFinanceBillStatus(bill);
+  await bill.save();
+  return { updated: true, skipped: false, bill };
 }
 
 async function resolveFinanceBill(input) {
@@ -312,6 +452,7 @@ async function syncDiscountsFromFinanceBill(input, { dryRun = false } = {}) {
   const adjustments = Array.isArray(bill.adjustments) ? bill.adjustments : [];
   for (let index = 0; index < adjustments.length; index += 1) {
     const adjustment = adjustments[index] || {};
+    if (isRegistryAdjustment(adjustment)) continue;
     const payload = buildDiscountPayload({ bill, feeOrder, adjustment, index });
     activeSourceKeys.push(payload.sourceKey);
     const existing = await Discount.findOne({ sourceKey: payload.sourceKey });
@@ -388,9 +529,24 @@ async function syncFeePaymentFromFinanceReceipt(input, { dryRun = false } = {}) 
 }
 
 async function syncStudentFinanceFromFinanceBill(input, { dryRun = false } = {}) {
-  const order = await syncFeeOrderFromFinanceBill(input, { dryRun });
-  const discounts = await syncDiscountsFromFinanceBill(input, { dryRun });
-  return { order, discounts };
+  const reliefs = await applyActiveRegistryReliefsToFinanceBill(input, { dryRun });
+  const source = reliefs?.bill || input;
+  const order = await syncFeeOrderFromFinanceBill(source, { dryRun });
+  const discounts = await syncDiscountsFromFinanceBill(source, { dryRun });
+  const membershipId = source?.studentMembershipId?._id || source?.studentMembershipId || null;
+  if (!dryRun && membershipId) {
+    const { Discount } = await getModels();
+    const registryDiscounts = await Discount.find({
+      studentMembershipId: membershipId,
+      status: 'active',
+      source: { $in: ['manual', 'migration'] }
+    }).lean();
+    const { syncFinanceReliefFromDiscount } = require('./financeReliefSync');
+    for (const discount of registryDiscounts) {
+      await syncFinanceReliefFromDiscount(discount);
+    }
+  }
+  return { order, discounts, reliefs };
 }
 
 async function syncStudentFinanceFromFinanceReceipt(input, { dryRun = false } = {}) {
@@ -404,6 +560,8 @@ async function syncStudentFinanceFromFinanceReceipt(input, { dryRun = false } = 
 }
 
 module.exports = {
+  applyActiveRegistryReliefsToFinanceBill,
+  refreshFinanceBillStatus,
   syncDiscountsFromFinanceBill,
   syncFeeOrderFromFinanceBill,
   syncFeePaymentFromFinanceReceipt,
