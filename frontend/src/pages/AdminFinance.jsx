@@ -1818,7 +1818,9 @@ export default function AdminFinance() {
   }, [bills, filteredBills.length]);
   const filteredDiscountRegistry = useMemo(() => (
     discountRegistry.filter((item) => (
-      (discountRegistryClassFilter === 'all' || getFinanceRecordClassId(item) === discountRegistryClassFilter)
+      !String(item?.reason || '').trim().toLowerCase().startsWith('[discount:')
+      && String(item?.source || '').trim().toLowerCase() !== 'finance_adjustment'
+      && (discountRegistryClassFilter === 'all' || getFinanceRecordClassId(item) === discountRegistryClassFilter)
       && includesFinanceSearch([
         item?.student?.fullName,
         item?.student?.name,
