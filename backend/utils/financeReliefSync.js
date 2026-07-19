@@ -52,6 +52,10 @@ function promoteDiscountReliefToFullCoverage(payload = {}, order = null) {
   };
 }
 
+function isRegistryDiscountSource(item = {}) {
+  return ['manual', 'migration'].includes(String(item?.source || '').trim());
+}
+
 async function resolveDiscount(input) {
   if (input && typeof input === 'object' && (input.discountType || input._id)) return input;
   return Discount.findById(input).lean();
@@ -66,6 +70,22 @@ async function syncFinanceReliefFromDiscount(input, { dryRun = false } = {}) {
   const item = await resolveDiscount(input);
   if (!item || !item._id) {
     return { created: false, updated: false, skipped: true, reason: 'discount_not_found', reliefId: null };
+  }
+
+  if (!isRegistryDiscountSource(item)) {
+    const existingMirror = await FinanceRelief.findOne({ sourceKey: `discount:${String(item._id)}` });
+    if (!existingMirror) {
+      return { created: false, updated: false, skipped: true, reason: 'bill_adjustment_not_registry_relief', reliefId: null };
+    }
+    if (existingMirror.status === 'cancelled') {
+      return { created: false, updated: false, skipped: true, reason: 'bill_adjustment_relief_already_cancelled', reliefId: existingMirror._id };
+    }
+    if (dryRun) return { created: false, updated: true, skipped: false, reliefId: existingMirror._id };
+    existingMirror.status = 'cancelled';
+    existingMirror.cancelReason = 'bill_adjustment_not_registry_relief';
+    existingMirror.cancelledAt = new Date();
+    await existingMirror.save();
+    return { created: false, updated: true, skipped: false, reliefId: existingMirror._id };
   }
 
   const payload = buildFinanceReliefPayloadFromDiscount(item);
@@ -125,6 +145,7 @@ async function syncFinanceReliefFromFeeExemption(input, { dryRun = false } = {})
 }
 
 module.exports = {
+  isRegistryDiscountSource,
   promoteDiscountReliefToFullCoverage,
   syncFinanceReliefFromDiscount,
   syncFinanceReliefFromFeeExemption

@@ -6,6 +6,7 @@ const discountSchema = new mongoose.Schema({
   feeOrderId: { type: mongoose.Schema.Types.ObjectId, ref: 'FeeOrder', default: null, index: true },
   sourceBillId: { type: mongoose.Schema.Types.ObjectId, ref: 'FinanceBill', default: null, index: true },
   sourceKey: { type: String, default: '', trim: true },
+  registryIdentity: { type: String, trim: true },
   studentMembershipId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentMembership', default: null, index: true },
   linkScope: { type: String, enum: ['membership', 'student'], default: 'membership', index: true },
   studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentCore', default: null, index: true },
@@ -30,7 +31,9 @@ const discountSchema = new mongoose.Schema({
   endDate: { type: Date, default: null, index: true },
   status: { type: String, enum: ['active', 'cancelled'], default: 'active', index: true },
   source: { type: String, enum: ['finance_adjustment', 'manual', 'migration'], default: 'finance_adjustment' },
-  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  duplicateOf: { type: mongoose.Schema.Types.ObjectId, ref: 'Discount', default: null, index: true },
+  deduplicatedAt: { type: Date, default: null }
 }, { timestamps: true });
 
 discountSchema.pre('validate', async function syncDiscountState() {
@@ -59,6 +62,7 @@ discountSchema.pre('validate', async function syncDiscountState() {
 });
 
 discountSchema.index({ sourceKey: 1 }, { unique: true, sparse: true });
+discountSchema.index({ registryIdentity: 1 }, { unique: true, sparse: true });
 discountSchema.index({ schoolId: 1, status: 1, discountType: 1 });
 discountSchema.index({ feeOrderId: 1, status: 1, discountType: 1 });
 discountSchema.index({ linkScope: 1, status: 1, discountType: 1 });

@@ -248,12 +248,19 @@ function buildDiscountAdjustment(item = {}) {
 
 function buildAdjustmentFromRelief(item = {}) {
   const reliefType = normalizeText(item.reliefType);
+  const sourceKey = normalizeText(item.sourceKey);
+  const sourceMarker = sourceKey.startsWith('discount:')
+    ? `[discount:${sourceKey.slice('discount:'.length)}]`
+    : sourceKey.startsWith('fee_exemption:')
+      ? `[exemption:${sourceKey.slice('fee_exemption:'.length)}]`
+      : '';
+  const reason = `${sourceMarker} ${normalizeText(item.reason)}`.trim();
   if (reliefType === 'penalty') {
     return {
       type: 'penalty',
       scope: 'all',
       amount: roundMoney(item.amount),
-      reason: normalizeText(item.reason),
+      reason,
       createdBy: item.createdBy || null,
       createdAt: item.createdAt || item.startDate || new Date()
     };
@@ -263,7 +270,7 @@ function buildAdjustmentFromRelief(item = {}) {
     type: reliefType === 'discount' || reliefType === 'sibling_discount' ? 'discount' : 'waiver',
     scope: normalizeText(item.scope) || (reliefType === 'discount' || reliefType === 'sibling_discount' ? 'tuition' : 'all'),
     amount: roundMoney(item.amount),
-    reason: normalizeText(item.reason),
+    reason,
     createdBy: item.createdBy || item.approvedBy || null,
     createdAt: item.createdAt || item.startDate || new Date()
   };
@@ -329,10 +336,12 @@ function buildReliefAdjustments(reliefs = [], amountsByScope = {}, selectedScope
     }
 
     if (reduction <= 0) continue;
+    const hasRegistrySource = normalizeText(item.sourceKey).startsWith('discount:')
+      || normalizeText(item.sourceKey).startsWith('fee_exemption:');
     adjustments.push(buildAdjustmentFromRelief({
       ...item,
       amount: reduction,
-      reason: item.reason || `Relief (${scopes.join(', ')})`
+      reason: item.reason || (hasRegistrySource ? '' : `Relief (${scopes.join(', ')})`)
     }));
   }
   return adjustments;
@@ -720,12 +729,14 @@ async function buildGroupedBillCandidates({
     effectiveAcademicYearId ? AcademicYear.findById(effectiveAcademicYearId).lean() : null,
     FinanceRelief.find({
       studentMembershipId: { $in: membershipIds },
-      status: 'active'
+      status: 'active',
+      feeOrderId: null
     }),
     Discount.find({
       studentMembershipId: { $in: membershipIds },
       feeOrderId: null,
-      status: 'active'
+      status: 'active',
+      source: { $in: ['manual', 'migration'] }
     }),
     FeeExemption.find({
       studentMembershipId: { $in: membershipIds },
@@ -935,6 +946,7 @@ async function buildGroupedBillCandidates({
 }
 
 module.exports = {
+  buildReliefAdjustments,
   buildGroupedBillCandidates,
   buildMonthlyBillingPeriods,
   resolveFeePlanForBilling

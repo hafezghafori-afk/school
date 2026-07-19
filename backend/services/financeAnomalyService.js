@@ -912,7 +912,7 @@ async function buildFinanceAnomalyReport({
   const orderFilter = { status: { $ne: 'void' } };
   const billFilter = { status: { $ne: 'void' } };
   const paymentFilter = { status: { $in: ['pending', 'approved'] } };
-  const reliefFilter = { status: 'active' };
+  const reliefFilter = { status: 'active', feeOrderId: null };
   const feePlanFilter = { isActive: true, lifecycleStatus: 'active' };
 
   if (normalizeNullableId(studentMembershipId)) {

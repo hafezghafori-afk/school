@@ -243,7 +243,7 @@ function buildStringDateRangeFilter(field, filters = {}) {
 }
 
 function buildFinanceReliefFilter(filters = {}, { activeOnly = false, dateField = 'createdAt' } = {}) {
-  const query = {};
+  const query = { feeOrderId: null };
   if (filters.academicYearId) query.academicYearId = filters.academicYearId;
   if (filters.classId) query.classId = filters.classId;
   if (filters.studentMembershipId) query.studentMembershipId = filters.studentMembershipId;

@@ -52,6 +52,7 @@ function dateKey(value) {
 function buildReliefActiveFilter(endAt) {
   return {
     status: 'active',
+    feeOrderId: null,
     $and: [
       {
         $or: [

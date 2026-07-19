@@ -29,6 +29,13 @@ const {
 const { deriveLinkScope } = require('../utils/financeLinkScope');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const {
+  buildClassDiscountGroupKey,
+  buildDiscountRegistryIdentity,
+  buildDiscountRegistryKey,
+  buildManualDiscountSourceKey,
+  groupDuplicateDiscounts
+} = require('../utils/discountRegistryIdentity');
+const {
   buildFeeBreakdownFromLineItems,
   deriveFinanceOrderStatus,
   getFinanceFeeScopeGrossAmount,
@@ -445,6 +452,8 @@ function formatDiscount(doc) {
     linkScope: deriveLinkScope({ linkScope: item.linkScope, studentMembershipId: item.studentMembershipId, classId: item.classId }),
     status: normalizeText(item.status),
     source: normalizeText(item.source),
+    createdAt: item.createdAt || null,
+    updatedAt: item.updatedAt || null,
     student: formatStudentIdentityFromMembership(item),
     schoolClass: formatSchoolClass(item.classId),
     academicYear: formatAcademicYear(item.academicYearId)
@@ -1452,6 +1461,12 @@ async function listDiscounts(filters = {}) {
   if (normalizeText(filters.linkScope)) query.linkScope = normalizeText(filters.linkScope);
   if (normalizeNullableId(filters.academicYearId)) query.academicYearId = filters.academicYearId;
   if (normalizeText(filters.status)) query.status = normalizeText(filters.status);
+  if (normalizeText(filters.discountType)) query.discountType = normalizeText(filters.discountType);
+  if (normalizeText(filters.targetScope)) query.targetScope = normalizeText(filters.targetScope);
+  if (normalizeText(filters.source)) query.source = normalizeText(filters.source);
+  if (String(filters.registryOnly || '').toLowerCase() === 'true') {
+    query.source = { $in: ['manual', 'migration'] };
+  }
 
   const items = await Discount.find(query)
     .populate('studentId')
@@ -1460,6 +1475,161 @@ async function listDiscounts(filters = {}) {
     .populate('academicYearId')
     .sort({ createdAt: -1 });
   return items.map(formatDiscount);
+}
+
+function buildDiscountRegistryQuery(filters = {}) {
+  const query = {
+    status: 'active',
+    source: { $in: ['manual', 'migration'] }
+  };
+  if (normalizeNullableId(filters.schoolId)) query.schoolId = filters.schoolId;
+  if (normalizeNullableId(filters.classId)) query.classId = filters.classId;
+  if (normalizeNullableId(filters.academicYearId)) query.academicYearId = filters.academicYearId;
+  if (normalizeNullableId(filters.studentMembershipId)) query.studentMembershipId = filters.studentMembershipId;
+  if (normalizeText(filters.discountType)) query.discountType = normalizeText(filters.discountType);
+  return query;
+}
+
+function buildMirroredDiscountQuery(filters = {}) {
+  const query = {
+    status: 'active',
+    source: 'finance_adjustment',
+    reason: { $regex: /^Relief \([^)]+\)$/i }
+  };
+  if (normalizeNullableId(filters.schoolId)) query.schoolId = filters.schoolId;
+  if (normalizeNullableId(filters.classId)) query.classId = filters.classId;
+  if (normalizeNullableId(filters.academicYearId)) query.academicYearId = filters.academicYearId;
+  if (normalizeNullableId(filters.studentMembershipId)) query.studentMembershipId = filters.studentMembershipId;
+  if (normalizeText(filters.discountType)) query.discountType = normalizeText(filters.discountType);
+  return query;
+}
+
+async function findMirroredDiscountState(filters = {}) {
+  const discounts = await Discount.find(buildMirroredDiscountQuery(filters))
+    .select('_id studentMembershipId')
+    .sort({ createdAt: 1, _id: 1 });
+  const discountIds = discounts.map((item) => item._id);
+  const reliefs = discountIds.length
+    ? await FinanceRelief.find({
+        status: 'active',
+        sourceModel: 'discount',
+        sourceDiscountId: { $in: discountIds }
+      })
+    : [];
+  return { discounts, reliefs };
+}
+
+function summarizeDiscountDuplicateGroups(groups = []) {
+  const membershipIds = new Set();
+  const classIds = new Set();
+  let duplicateRecords = 0;
+  const samples = [];
+  for (const group of groups) {
+    const rows = group.rows || [];
+    duplicateRecords += Math.max(0, rows.length - 1);
+    const first = rows[0] || {};
+    const membershipId = normalizeNullableId(first.studentMembershipId);
+    const classId = normalizeNullableId(first.classId);
+    if (membershipId) membershipIds.add(membershipId);
+    if (classId) classIds.add(classId);
+    if (samples.length < 12) {
+      samples.push({
+        studentMembershipId: membershipId || '',
+        classId: classId || '',
+        count: rows.length,
+        keepId: normalizeNullableId(first._id) || ''
+      });
+    }
+  }
+  return {
+    duplicateGroups: groups.length,
+    duplicateRecords,
+    affectedStudents: membershipIds.size,
+    affectedClasses: classIds.size,
+    samples
+  };
+}
+
+async function inspectDiscountDuplicates(filters = {}) {
+  const [items, mirrored] = await Promise.all([
+    Discount.find(buildDiscountRegistryQuery(filters))
+      .sort({ createdAt: 1, _id: 1 })
+      .lean(),
+    findMirroredDiscountState(filters)
+  ]);
+  const groups = groupDuplicateDiscounts(items);
+  return {
+    scanned: items.length,
+    mirroredDiscountRecords: mirrored.discounts.length,
+    mirroredActiveReliefs: mirrored.reliefs.length,
+    ...summarizeDiscountDuplicateGroups(groups)
+  };
+}
+
+async function deduplicateDiscounts(filters = {}, payload = {}) {
+  const schoolId = normalizeNullableId(filters.schoolId);
+  if (!schoolId) throw new Error('student_finance_school_scope_required');
+
+  const [items, mirrored] = await Promise.all([
+    Discount.find(buildDiscountRegistryQuery(filters)).sort({ createdAt: 1, _id: 1 }),
+    findMirroredDiscountState(filters)
+  ]);
+  const groups = groupDuplicateDiscounts(items);
+  const summary = {
+    scanned: items.length,
+    mirroredDiscountRecords: mirrored.discounts.length,
+    mirroredActiveReliefs: mirrored.reliefs.length,
+    ...summarizeDiscountDuplicateGroups(groups),
+    cancelled: 0,
+    mirroredReliefsCancelled: 0,
+    billsRepaired: 0
+  };
+  if (payload.apply !== true) return summary;
+
+  for (const group of groups) {
+    const [keeper, ...duplicates] = group.rows;
+    if (!keeper) continue;
+    const registryIdentity = buildDiscountRegistryKey(keeper);
+    if (!normalizeText(keeper.registryIdentity)) {
+      keeper.registryIdentity = registryIdentity;
+      await keeper.save();
+    }
+    for (const duplicate of duplicates) {
+      duplicate.status = 'cancelled';
+      duplicate.duplicateOf = keeper._id;
+      duplicate.deduplicatedAt = new Date();
+      await duplicate.save();
+      await syncDiscountOpenBills(duplicate);
+      await syncFinanceReliefFromDiscount(duplicate);
+      summary.cancelled += 1;
+    }
+  }
+
+  for (const relief of mirrored.reliefs) {
+    relief.status = 'cancelled';
+    relief.cancelReason = 'bill_adjustment_not_registry_relief';
+    relief.cancelledBy = normalizeNullableId(payload.cancelledBy);
+    relief.cancelledAt = new Date();
+    await relief.save();
+    summary.mirroredReliefsCancelled += 1;
+  }
+
+  const membershipIds = Array.from(new Set([
+    ...items.map((item) => normalizeNullableId(item.studentMembershipId)),
+    ...mirrored.discounts.map((item) => normalizeNullableId(item.studentMembershipId))
+  ].filter(Boolean)));
+  if (membershipIds.length) {
+    const bills = await FinanceBill.find({
+      studentMembershipId: { $in: membershipIds },
+      'adjustments.reason': { $regex: /^Relief \(/i }
+    })
+      .sort({ createdAt: 1, _id: 1 });
+    for (const bill of bills) {
+      const result = await syncStudentFinanceFromFinanceBill(bill);
+      if (result?.reliefs?.updated) summary.billsRepaired += 1;
+    }
+  }
+  return summary;
 }
 
 async function listFinanceReliefs(filters = {}) {
@@ -1474,6 +1644,7 @@ async function listFinanceReliefs(filters = {}) {
   if (normalizeText(filters.status)) query.status = normalizeText(filters.status);
   if (normalizeText(filters.reliefType)) query.reliefType = normalizeText(filters.reliefType);
   if (normalizeText(filters.scope)) query.scope = normalizeText(filters.scope);
+  if (String(filters.registryOnly || '').toLowerCase() === 'true') query.feeOrderId = null;
 
   const items = await FinanceRelief.find(query)
     .populate('feeOrderId')
@@ -1501,7 +1672,7 @@ async function createDiscount(payload = {}) {
       isCurrent: true
     }).select('_id').lean();
     if (!memberships.length) throw new Error('student_finance_membership_not_found');
-    const groupKey = `class:${classId}:${academicYearId}:${Date.now()}`;
+    const groupKey = buildClassDiscountGroupKey({ ...payload, classId, academicYearId });
     const items = [];
     for (const membership of memberships) {
       items.push(await createDiscount({
@@ -1511,7 +1682,15 @@ async function createDiscount(payload = {}) {
         studentMembershipId: membership._id
       }));
     }
-    return { bulk: true, count: items.length, items, item: items[0] || null };
+    const createdCount = items.filter((item) => item?.wasCreated || item?.wasReactivated).length;
+    return {
+      bulk: true,
+      count: items.length,
+      createdCount,
+      reusedCount: items.length - createdCount,
+      items,
+      item: items[0] || null
+    };
   }
 
   const membership = await resolveMembershipForFinanceRegistry(payload);
@@ -1522,7 +1701,7 @@ async function createDiscount(payload = {}) {
   const discountCoverage = normalizeDiscountCoverage(payload);
   const discountWindow = resolveDiscountDurationWindow(membership, payload);
 
-  const item = await Discount.create({
+  const discountPayload = {
     studentMembershipId: membership._id,
     studentId: membership.studentId?._id || membership.studentId || null,
     student: membership.student?._id || membership.student || null,
@@ -1542,8 +1721,61 @@ async function createDiscount(payload = {}) {
     endDate: discountWindow.endDate,
     source: 'manual',
     createdBy: normalizeNullableId(payload.createdBy),
-    sourceKey: `manual:${membership._id}:${Date.now()}`
-  });
+  };
+  discountPayload.registryIdentity = buildDiscountRegistryKey(discountPayload);
+  discountPayload.sourceKey = buildManualDiscountSourceKey(discountPayload);
+
+  const candidates = await Discount.find({
+    studentMembershipId: membership._id,
+    source: { $in: ['manual', 'migration'] }
+  }).sort({ createdAt: 1, _id: 1 });
+  const equivalentCandidates = candidates.filter((candidate) => (
+    buildDiscountRegistryIdentity(candidate) === buildDiscountRegistryIdentity(discountPayload)
+  ));
+  const equivalent = equivalentCandidates.find((candidate) => candidate.status === 'active')
+    || equivalentCandidates[0];
+
+  if (equivalent) {
+    const wasReactivated = equivalent.status !== 'active';
+    equivalent.registryIdentity = equivalent.registryIdentity || discountPayload.registryIdentity;
+    equivalent.groupKey = discountPayload.groupKey;
+    equivalent.status = 'active';
+    equivalent.duplicateOf = null;
+    equivalent.deduplicatedAt = null;
+    await equivalent.save();
+    const populatedEquivalent = await Discount.findById(equivalent._id)
+      .populate('studentId')
+      .populate('student', 'name email')
+      .populate({ path: 'classId', populate: { path: 'academicYearId' } })
+      .populate('academicYearId')
+      .populate('createdBy', 'name');
+    if (wasReactivated) {
+      await syncDiscountOpenBills(populatedEquivalent);
+      await syncFinanceReliefFromDiscount(populatedEquivalent);
+    }
+    return { ...formatDiscount(populatedEquivalent), wasCreated: false, wasReactivated };
+  }
+
+  let item;
+  try {
+    item = await Discount.create(discountPayload);
+  } catch (error) {
+    if (Number(error?.code) !== 11000) throw error;
+    const concurrent = await Discount.findOne({
+      $or: [
+        { registryIdentity: discountPayload.registryIdentity },
+        { sourceKey: discountPayload.sourceKey }
+      ]
+    });
+    if (!concurrent) throw error;
+    const populatedConcurrent = await Discount.findById(concurrent._id)
+      .populate('studentId')
+      .populate('student', 'name email')
+      .populate({ path: 'classId', populate: { path: 'academicYearId' } })
+      .populate('academicYearId')
+      .populate('createdBy', 'name');
+    return { ...formatDiscount(populatedConcurrent), wasCreated: false, wasReactivated: false };
+  }
 
   const populated = await Discount.findById(item._id)
     .populate('studentId')
@@ -1555,7 +1787,7 @@ async function createDiscount(payload = {}) {
   await syncDiscountOpenBills(populated);
   await syncFinanceReliefFromDiscount(populated);
 
-  return formatDiscount(populated);
+  return { ...formatDiscount(populated), wasCreated: true, wasReactivated: false };
 }
 
 async function cancelDiscount(discountId, payload = {}) {
@@ -1898,10 +2130,10 @@ async function getMembershipFinanceOverview(studentMembershipId) {
       .populate({ path: 'classId', populate: { path: 'academicYearId' } })
       .populate('academicYearId')
       .sort({ paidAt: -1, createdAt: -1 }),
-    Discount.find({ studentMembershipId: membership._id, status: 'active' }).populate('studentId').populate('student', 'name email').populate({ path: 'classId', populate: { path: 'academicYearId' } }).populate('academicYearId').sort({ createdAt: -1 }),
+    Discount.find({ studentMembershipId: membership._id, status: 'active', source: { $in: ['manual', 'migration'] } }).populate('studentId').populate('student', 'name email').populate({ path: 'classId', populate: { path: 'academicYearId' } }).populate('academicYearId').sort({ createdAt: -1 }),
     TransportFee.find({ studentMembershipId: membership._id }).populate('studentId').populate('student', 'name email').populate({ path: 'classId', populate: { path: 'academicYearId' } }).populate('academicYearId').populate('assessmentPeriodId').sort({ createdAt: -1 }),
     FeeExemption.find({ studentMembershipId: membership._id, status: 'active' }).populate('studentId').populate('student', 'name email').populate({ path: 'classId', populate: { path: 'academicYearId' } }).populate('academicYearId').populate('approvedBy', 'name').populate('createdBy', 'name').populate('cancelledBy', 'name').sort({ createdAt: -1 }),
-    FinanceRelief.find({ studentMembershipId: membership._id, status: 'active' })
+    FinanceRelief.find({ studentMembershipId: membership._id, status: 'active', feeOrderId: null })
       .populate('feeOrderId')
       .populate('studentId')
       .populate('student', 'name email')
@@ -2204,6 +2436,7 @@ module.exports = {
   createFeeExemption,
   createFeePayment,
   createTransportFee,
+  deduplicateDiscounts,
   getDailyCashierReport,
   getExamEligibility,
   getFeePaymentReceipt,
@@ -2215,6 +2448,7 @@ module.exports = {
   listOpenFeeOrdersForMembership,
   listFeeOrders,
   listFeePayments,
+  inspectDiscountDuplicates,
   listStudentFinanceReferenceData,
   listStudentMembershipOverviewsByUserId,
   listTransportFees,

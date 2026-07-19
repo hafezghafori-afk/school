@@ -1,4 +1,4 @@
-import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './AdminFinance.css';
 import { API_BASE } from '../config/api';
@@ -1215,6 +1215,16 @@ export default function AdminFinance() {
   const [byClass, setByClass] = useState([]);
   const [discountTotals, setDiscountTotals] = useState([]);
   const [discountRegistry, setDiscountRegistry] = useState([]);
+  const [discountDuplicateSummary, setDiscountDuplicateSummary] = useState({
+    scanned: 0,
+    duplicateGroups: 0,
+    duplicateRecords: 0,
+    affectedStudents: 0,
+    affectedClasses: 0,
+    mirroredDiscountRecords: 0,
+    mirroredActiveReliefs: 0
+  });
+  const discountSubmitInFlightRef = useRef(false);
   const [exemptions, setExemptions] = useState([]);
   const [reliefs, setReliefs] = useState([]);
   const [billingPreview, setBillingPreview] = useState(null);
@@ -2538,8 +2548,8 @@ export default function AdminFinance() {
         safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/cashflow'), { success: true, items: [] }),
         safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/by-class'), { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/reports/discounts`, { success: true, items: [] }),
-        safeFetchJson(`${API_BASE}/api/student-finance/discounts?status=active`, { success: true, items: [] }),
-        safeFetchJson(`${API_BASE}/api/student-finance/reliefs?status=active`, { success: true, items: [] }),
+        safeFetchJson(`${API_BASE}/api/student-finance/discounts?status=active&registryOnly=true&discountType=discount`, { success: true, items: [], duplicateSummary: null }),
+        safeFetchJson(`${API_BASE}/api/student-finance/reliefs?status=active&registryOnly=true`, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/student-finance/exemptions?status=active`, { success: true, items: [] }),
         Promise.resolve({ success: true, items: [] }),
         Promise.resolve({ success: true, items: [] }),
@@ -2581,6 +2591,9 @@ export default function AdminFinance() {
       setDiscountAnalytics(discountsData?.success ? discountsData : null);
       setDiscountTotals(discountsData?.success ? (discountsData.items || []) : []);
         setDiscountRegistry(discountRegistryData?.success ? (discountRegistryData.items || []) : []);
+        setDiscountDuplicateSummary(discountRegistryData?.success && discountRegistryData?.duplicateSummary
+          ? discountRegistryData.duplicateSummary
+          : { scanned: 0, duplicateGroups: 0, duplicateRecords: 0, affectedStudents: 0, affectedClasses: 0, mirroredDiscountRecords: 0, mirroredActiveReliefs: 0 });
         setReliefs(reliefsData?.success ? (reliefsData.items || []) : []);
         setExemptions(exemptionsData?.success ? (exemptionsData.items || []) : []);
         setDeliveryProviderConfigs(deliveryProviderData?.success ? (deliveryProviderData.items || []) : []);
@@ -3842,6 +3855,8 @@ export default function AdminFinance() {
 
   const saveDiscountRegistry = async (e) => {
     e.preventDefault();
+    if (discountSubmitInFlightRef.current) return;
+    discountSubmitInFlightRef.current = true;
     try {
       setBusy(true);
       const isClassDiscount = discountForm.targetScope === 'class';
@@ -3908,7 +3923,9 @@ export default function AdminFinance() {
           title: membershipStudent?.academicYearTitle || selectedAcademicYear?.title || ''
         }
       };
-      setDiscountRegistry((prev) => [createdDiscount, ...prev.filter((item) => item.id !== createdDiscount.id)]);
+      if (createdDiscount.discountType === 'discount') {
+        setDiscountRegistry((prev) => [createdDiscount, ...prev.filter((item) => item.id !== createdDiscount.id)]);
+      }
       setMessage(data.message || 'تخفیف متعلم ثبت شد');
       setDiscountForm((prev) => ({
         ...prev,
@@ -3920,10 +3937,14 @@ export default function AdminFinance() {
         reason: ''
       }));
       await loadAll();
-      setDiscountRegistry((prev) => [createdDiscount, ...prev.filter((item) => item.id !== createdDiscount.id)]);
+      if (createdDiscount.discountType === 'discount') {
+        setDiscountRegistry((prev) => [createdDiscount, ...prev.filter((item) => item.id !== createdDiscount.id)]);
+      }
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
+    } finally {
+      discountSubmitInFlightRef.current = false;
     }
   };
 
@@ -4960,6 +4981,30 @@ export default function AdminFinance() {
       );
       setMessage(data.message || 'داخله ثبت شد و ناهنجاری مالی حل شد');
       await loadAll();
+    } catch (err) {
+      setMessage(err.message);
+      setBusy(false);
+    }
+  };
+
+  const repairDuplicateDiscountRegistry = async () => {
+    const duplicateCount = Number(discountDuplicateSummary?.duplicateRecords || 0);
+    const mirroredCount = Number(discountDuplicateSummary?.mirroredDiscountRecords || 0);
+    const mirroredReliefCount = Number(discountDuplicateSummary?.mirroredActiveReliefs || 0);
+    if (duplicateCount + mirroredCount + mirroredReliefCount <= 0) return;
+    const confirmed = window.confirm(
+      `${duplicateCount} رکورد مستقیم تکراری و ${mirroredCount} تصویر تخفیف روی بل پیدا شده است. رکورد اصلی حفظ و محاسبه بل‌ها بازسازی شود؟`
+    );
+    if (!confirmed) return;
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/student-finance/discounts/deduplicate`, {
+        apply: true,
+        discountType: 'discount'
+      });
+      const successMessage = data.message || `${Number(data?.summary?.cancelled || 0)} رکورد تکراری اصلاح شد.`;
+      await loadAll();
+      setMessage(successMessage);
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -6693,6 +6738,21 @@ export default function AdminFinance() {
               </select>
             </label>
           </div>
+          {(Number(discountDuplicateSummary?.duplicateRecords || 0)
+            + Number(discountDuplicateSummary?.mirroredDiscountRecords || 0)
+            + Number(discountDuplicateSummary?.mirroredActiveReliefs || 0)) > 0 && (
+            <div className="finance-anomaly-alert" data-testid="discount-duplicate-alert">
+              <div>
+                <strong>{fmt(discountDuplicateSummary.duplicateRecords)} تکرار مستقیم و {fmt(discountDuplicateSummary.mirroredDiscountRecords)} تصویر بل پیدا شد</strong>
+                <p className="muted">
+                  رکورد اصلی و سابقه مالی حفظ می‌شود؛ تصاویر <code>Relief (tuition)</code> از رجیستر مستقیم جدا و محاسبه بل‌های مرتبط بازسازی می‌گردد.
+                </p>
+              </div>
+              <button type="button" className="danger" disabled={busy} onClick={repairDuplicateDiscountRegistry}>
+                رفع تکرارها و اصلاح بل‌ها
+              </button>
+            </div>
+          )}
           {!!discountRegistryByClass.length && (
             <div className="finance-class-discount-summary">
               {discountRegistryByClass.slice(0, 8).map((item) => (
@@ -6704,7 +6764,7 @@ export default function AdminFinance() {
                 >
                   <span>{item.classTitle}</span>
                   <strong>{fmt(item.classStudentCount)} شاگرد در صنف</strong>
-                  <small>{fmt(item.count)} تخفیف ثبت‌شده | {fmt(item.totalAmount)} AFN</small>
+                  <small>{fmt(item.discountStudentCount)} شاگرد دارای تخفیف | {fmt(item.count)} رکورد فعال | {fmt(item.totalAmount)} AFN</small>
                 </button>
               ))}
             </div>

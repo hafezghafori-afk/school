@@ -1,7 +1,8 @@
 const assert = require('assert');
 const { buildFinanceReliefPayloadFromDiscount } = require('../utils/financeRelief');
-const { promoteDiscountReliefToFullCoverage } = require('../utils/financeReliefSync');
-const { refreshFinanceBillStatus } = require('../utils/studentFinanceSync');
+const { isRegistryDiscountSource, promoteDiscountReliefToFullCoverage } = require('../utils/financeReliefSync');
+const { isLegacyRegistryReliefAdjustment, refreshFinanceBillStatus } = require('../utils/studentFinanceSync');
+const { buildReliefAdjustments } = require('../services/feeBillingService');
 const { applyFinanceOrderStatus, normalizeFinanceLineItems } = require('../utils/financeLineItems');
 const FinanceBill = require('../models/FinanceBill');
 const FeeOrder = require('../models/FeeOrder');
@@ -18,6 +19,28 @@ function run() {
   assert.strictEqual(percentRelief.reliefType, 'waiver');
   assert.strictEqual(percentRelief.percentage, 100);
   assert.strictEqual(percentRelief.scope, 'tuition');
+  assert.strictEqual(isRegistryDiscountSource({ source: 'manual' }), true);
+  assert.strictEqual(isRegistryDiscountSource({ source: 'migration' }), true);
+  assert.strictEqual(isRegistryDiscountSource({ source: 'finance_adjustment' }), false);
+
+  const registryReliefAdjustments = buildReliefAdjustments([{
+    sourceModel: 'discount',
+    sourceKey: 'discount:discount-direct-1',
+    studentMembershipId: 'membership-1',
+    reliefType: 'discount',
+    scope: 'tuition',
+    coverageMode: 'fixed',
+    amount: 1800,
+    status: 'active'
+  }], { tuition: 3000 }, ['tuition'], {
+    start: new Date('2026-03-01T00:00:00.000Z'),
+    end: new Date('2026-03-31T23:59:59.999Z')
+  });
+  assert.strictEqual(registryReliefAdjustments.length, 1);
+  assert.strictEqual(registryReliefAdjustments[0].amount, 1800);
+  assert.strictEqual(registryReliefAdjustments[0].reason, '[discount:discount-direct-1]');
+  assert.strictEqual(isLegacyRegistryReliefAdjustment({ reason: 'Relief (tuition)' }), true);
+  assert.strictEqual(isLegacyRegistryReliefAdjustment({ reason: '[discount:discount-direct-1]' }), false);
 
   const mixedFeeLines = normalizeFinanceLineItems({
     amountOriginal: 15000,

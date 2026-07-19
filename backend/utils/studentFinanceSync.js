@@ -81,6 +81,11 @@ function isRegistryAdjustment(adjustment = {}) {
   return reason.startsWith('[discount:') || reason.startsWith('[exemption:');
 }
 
+function isLegacyRegistryReliefAdjustment(adjustment = {}) {
+  const reason = normalizeText(adjustment?.reason);
+  return /^Relief \([^)]+\)$/i.test(reason) || /^Fee exemption \([^)]+\)$/i.test(reason);
+}
+
 function registryAdjustmentsChanged(current = [], next = []) {
   const serialize = (items) => JSON.stringify((items || []).map((item) => ({
     type: normalizeText(item?.type) || 'manual',
@@ -139,7 +144,9 @@ async function applyActiveRegistryReliefsToFinanceBill(input, { dryRun = false }
   }
 
   const existingAdjustments = Array.isArray(bill.adjustments) ? bill.adjustments : [];
-  const hasRegistryAdjustments = existingAdjustments.some(isRegistryAdjustment);
+  const hasRegistryAdjustments = existingAdjustments.some((adjustment) => (
+    isRegistryAdjustment(adjustment) || isLegacyRegistryReliefAdjustment(adjustment)
+  ));
   if (!['new', 'partial', 'overdue'].includes(normalizeText(bill.status)) && !hasRegistryAdjustments) {
     return { updated: false, skipped: true, bill, reason: 'bill_settled_without_relief' };
   }
@@ -156,7 +163,7 @@ async function applyActiveRegistryReliefsToFinanceBill(input, { dryRun = false }
   ]);
 
   const nextAdjustments = existingAdjustments
-    .filter((adjustment) => !isRegistryAdjustment(adjustment))
+    .filter((adjustment) => !isRegistryAdjustment(adjustment) && !isLegacyRegistryReliefAdjustment(adjustment))
     .map(normalizeAdjustmentPayload);
   const baseAmount = roundMoney(bill.amountOriginal);
 
@@ -561,6 +568,7 @@ async function syncStudentFinanceFromFinanceReceipt(input, { dryRun = false } = 
 
 module.exports = {
   applyActiveRegistryReliefsToFinanceBill,
+  isLegacyRegistryReliefAdjustment,
   refreshFinanceBillStatus,
   syncDiscountsFromFinanceBill,
   syncFeeOrderFromFinanceBill,

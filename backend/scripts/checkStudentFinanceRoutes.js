@@ -12,7 +12,8 @@ const IDS = {
   discount: '507f191e810c19729de86006',
   exemption: '507f191e810c19729de86007',
   payment: '507f191e810c19729de86008',
-  paymentDirect: '507f191e810c19729de86018'
+  paymentDirect: '507f191e810c19729de86018',
+  school: '507f191e810c19729de86019'
 };
 const activityCalls = [];
 const financeActionCalls = [];
@@ -189,6 +190,12 @@ const serviceMock = {
   async listDiscounts() {
     return discountRegistry;
   },
+  async inspectDiscountDuplicates() {
+    return { scanned: 1, duplicateGroups: 0, duplicateRecords: 0, affectedStudents: 0, affectedClasses: 0 };
+  },
+  async deduplicateDiscounts() {
+    return { scanned: 1, duplicateGroups: 0, duplicateRecords: 0, affectedStudents: 0, affectedClasses: 0, cancelled: 0 };
+  },
   async listFinanceReliefs() {
     return reliefRegistry;
   },
@@ -198,6 +205,7 @@ const serviceMock = {
       discountType: payload.discountType || 'discount',
       amount: Number(payload.amount || 0),
       reason: payload.reason || '',
+      wasCreated: true,
       student: { userId: IDS.student, fullName: 'Alpha Student' }
     };
   },
@@ -483,7 +491,7 @@ async function request(server, targetPath, { method = 'GET', user = null, body }
 
 async function run() {
   const server = await createServer();
-  const adminUser = { id: IDS.admin, role: 'admin', permissions: ['manage_finance'] };
+  const adminUser = { id: IDS.admin, role: 'admin', schoolId: IDS.school, permissions: ['manage_finance'] };
   const studentUser = { id: IDS.student, role: 'student', permissions: [] };
   const outsiderUser = { id: IDS.outsider, role: 'student', permissions: [] };
 
@@ -670,6 +678,16 @@ async function run() {
     assertCase(String(financeActionCalls[5]?.body?.note || '') === 'Direct canonical approval', 'Expected direct canonical approve action body to preserve note.');
     assertCase(String(financeActionCalls[6]?.body?.reason || '') === 'Receipt mismatch', 'Expected reject action body to preserve reason.');
     assertCase(String(financeActionCalls[7]?.body?.note || '') === 'Escalated for review', 'Expected follow-up action body to preserve note.');
+
+    const activityBeforeDeduplication = activityCalls.length;
+    const deduplicationResponse = await request(server, '/api/student-finance/discounts/deduplicate', {
+      method: 'POST',
+      user: adminUser,
+      body: { apply: true, discountType: 'discount' }
+    });
+    assertCase(deduplicationResponse.status === 200 && deduplicationResponse.data?.summary?.cancelled === 0, 'Expected discount deduplication route to return its repair summary.');
+    assertCase(activityCalls.length === activityBeforeDeduplication + 1, 'Expected discount deduplication to create an activity log.');
+    assertCase(activityCalls[activityBeforeDeduplication]?.action === 'deduplicate_discount_registry', 'Expected deduplicate_discount_registry activity.');
 
     console.log('check:student-finance-routes PASS');
   } finally {
