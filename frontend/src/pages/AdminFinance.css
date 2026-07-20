@@ -2209,6 +2209,49 @@
   line-height: 1.6;
 }
 
+.class-payment-approval-panel {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid rgba(16, 185, 129, 0.32);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.11), rgba(255, 255, 255, 0.04));
+}
+
+.class-payment-approval-panel h4,
+.class-payment-approval-panel p {
+  margin: 0;
+}
+
+.class-payment-approval-controls {
+  margin: 0;
+}
+
+.class-payment-approval-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.class-payment-approval-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.35fr) minmax(110px, 0.65fr) minmax(120px, 0.65fr) minmax(170px, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 13px;
+}
+
+.class-payment-approval-row.blocked {
+  border-color: rgba(244, 63, 94, 0.25);
+  background: rgba(244, 63, 94, 0.07);
+}
+
 .admission-receipt-correction-panel {
   display: grid;
   gap: 12px;
@@ -2262,12 +2305,14 @@
 }
 
 @media (max-width: 900px) {
+  .class-payment-approval-row,
   .admission-receipt-correction-row {
     grid-template-columns: 1fr 1fr;
   }
 }
 
 @media (max-width: 560px) {
+  .class-payment-approval-row,
   .admission-receipt-correction-row {
     grid-template-columns: 1fr;
   }
