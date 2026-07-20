@@ -1288,6 +1288,7 @@ export default function AdminFinance() {
   const [selectedAnomalyId, setSelectedAnomalyId] = useState('');
   const [anomalyTypeFilter, setAnomalyTypeFilter] = useState('all');
   const [anomalyWorkflowStatusFilter, setAnomalyWorkflowStatusFilter] = useState('open');
+  const [anomalyClassFilter, setAnomalyClassFilter] = useState('');
   const [anomalySearchTerm, setAnomalySearchTerm] = useState('');
   const [anomalyWorkflowForm, setAnomalyWorkflowForm] = useState({
     assignedLevel: 'finance_manager',
@@ -3276,8 +3277,12 @@ export default function AdminFinance() {
   );
   const visibleAnomalies = useMemo(() => {
     const normalizedSearch = String(anomalySearchTerm || '').trim().toLowerCase();
-    return (reportClassId
-      ? anomalies.filter((item) => String(item?.classTitle || '').trim() === String(selectedReportClass?.title || '').trim())
+    const selectedAnomalyClass = classOptions.find((item) => String(item?.classId || '') === String(anomalyClassFilter)) || null;
+    return (anomalyClassFilter
+      ? anomalies.filter((item) => (
+        String(item?.classId || '').trim() === String(anomalyClassFilter).trim()
+        || String(item?.classTitle || '').trim() === String(selectedAnomalyClass?.title || '').trim()
+      ))
       : anomalies
     ).filter((item) => {
       if (anomalyTypeFilter !== 'all' && String(item?.anomalyType || '').trim() !== anomalyTypeFilter) return false;
@@ -3292,7 +3297,7 @@ export default function AdminFinance() {
         item?.description
       ].some((value) => String(value || '').toLowerCase().includes(normalizedSearch));
     });
-  }, [anomalies, reportClassId, selectedReportClass, anomalyTypeFilter, anomalyWorkflowStatusFilter, anomalySearchTerm]);
+  }, [anomalies, anomalyClassFilter, classOptions, anomalyTypeFilter, anomalyWorkflowStatusFilter, anomalySearchTerm]);
   const anomalyTypeOptions = useMemo(() => (
     Object.entries(FINANCE_ANOMALY_UI_LABELS)
       .filter(([type]) => anomalies.some((item) => String(item?.anomalyType || '').trim() === type))
@@ -7500,17 +7505,17 @@ export default function AdminFinance() {
         </div>
       </div>
 
-      <div className="finance-grid" data-finance-section="overview anomalies settings">
-        <div className="finance-card" data-finance-section="overview anomalies settings" data-testid="finance-anomalies-card">
+      <div className="finance-grid" data-finance-section="anomalies">
+        <div className="finance-card" data-finance-section="anomalies" data-testid="finance-anomalies-card">
           <div className="finance-card-head">
             <div>
-              <h3>ناهجاری‌های مالی</h3>
-              <p className="muted">هشدارهای هوشمند برای بیش‌پرداخت، بدهی‌های سررسید گذشته طولانی، ختم تسهیلات و مغایرت‌های مالی.</p>
+              <h3>ناهنجاری‌های مالی</h3>
+              <p className="muted">مرکز واحد بررسی و رفع همه هشدارها و مغایرت‌های مالی؛ این موارد در بخش‌های دیگر تکرار نمی‌شوند.</p>
             </div>
             <div className="finance-chip-group">
-              <span className="finance-chip">{visibleAnomalySummary.total}</span>
-              <span className="finance-chip finance-chip-rose">{visibleAnomalySummary.critical}</span>
-              <span className="finance-chip finance-chip-amber">{visibleAnomalySummary.warning}</span>
+              <span className="finance-chip">مجموع: {visibleAnomalySummary.total}</span>
+              <span className="finance-chip finance-chip-rose">بحرانی: {visibleAnomalySummary.critical}</span>
+              <span className="finance-chip finance-chip-amber">هشدار: {visibleAnomalySummary.warning}</span>
               <span className="finance-chip finance-chip-muted">{visibleAnomalySummary.byWorkflow?.assigned || 0} ارجاع</span>
               <span className="finance-chip finance-chip-emerald">{visibleAnomalySummary.byWorkflow?.resolved || 0} حل‌شده</span>
             </div>
@@ -7541,6 +7546,21 @@ export default function AdminFinance() {
                 <option value="snoozed">معطل</option>
                 <option value="resolved">حل‌شده</option>
                 <option value="all">همه وضعیت‌ها</option>
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>صنف</span>
+              <select
+                value={anomalyClassFilter}
+                onChange={(e) => setAnomalyClassFilter(e.target.value)}
+                data-testid="anomaly-class-filter"
+              >
+                <option value="">همه صنف‌ها</option>
+                {classOptions.map((item) => (
+                  <option key={`anomaly-class-filter-${item.classId}`} value={item.classId}>
+                    {item.uiLabel || item.title}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="finance-inline-filter">
@@ -7623,17 +7643,6 @@ export default function AdminFinance() {
               </button>
             </div>
           </div>
-          {visibleAnomalies.slice(0, 6).map((item) => (
-            <div key={item.id} className="mini-row">
-              <span className="finance-cell-stack">
-                <strong>{FINANCE_ANOMALY_UI_LABELS[item.anomalyType] || item.anomalyType || 'ناهنجاری'}</strong>
-                <small>{item.studentName || item.classTitle || item.referenceNumber || '—'}</small>
-              </span>
-              <span className={`finance-chip ${item.severity === 'critical' ? 'finance-chip-rose' : item.severity === 'warning' ? 'finance-chip-amber' : 'finance-chip-muted'}`}>
-                {AUDIT_SEVERITY_UI_LABELS[item.severity] || item.severity || 'اطلاع'}
-              </span>
-            </div>
-          ))}
           {!!visibleAnomalies.length && (
             <div className="anomaly-workflow-layout">
               <div className="anomaly-workflow-list" data-testid="finance-anomaly-list">
@@ -7809,7 +7818,7 @@ export default function AdminFinance() {
             <div className="finance-card-head">
               <div>
                 <h3>snapshot ماه مالی {toFaMonthKey(selectedMonthClose.monthKey)}</h3>
-                <p className="muted">نمای ثابت از ارقام ماه، بل‌های سررسید گذشته، تسهیلات مالی و ناهنجاری‌های همان بستن ماه.</p>
+                <p className="muted">نمای ثابت از ارقام ماه، بل‌های سررسید گذشته و تسهیلات مالی همان بستن ماه.</p>
               </div>
               <div className="finance-chip-group">
                 <label className="finance-inline-filter">
@@ -7854,10 +7863,6 @@ export default function AdminFinance() {
                 <span>مانده ایستا</span>
                 <strong>{fmt(monthCloseSnapshot?.totals?.standingOutstandingAmount || 0)} AFN</strong>
               </div>
-              <div className="finance-kpi-item">
-                <span>ناهجاری حساس</span>
-                <strong>{fmt(monthCloseSnapshot?.anomalies?.summary?.critical || 0)}</strong>
-              </div>
             </div>
             <div className="finance-subcard-list">
               <div className="mini-row">
@@ -7871,10 +7876,6 @@ export default function AdminFinance() {
               <div className="mini-row">
                 <span>در انتظار تایید</span>
                 <span>{fmt(monthCloseSnapshot?.totals?.pendingPaymentCount || 0)} / {fmt(monthCloseSnapshot?.totals?.pendingPaymentAmount || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>وضعیت ناهنجاری‌ها</span>
-                <span>{fmt(monthCloseSnapshot?.anomalies?.summary?.byWorkflow?.open || 0)} باز / {fmt(monthCloseSnapshot?.anomalies?.summary?.byWorkflow?.resolved || 0)} حل‌شده</span>
               </div>
               <div className="mini-row">
                 <span>یادداشت بستن ماه</span>
