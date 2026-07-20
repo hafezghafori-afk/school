@@ -25,6 +25,21 @@ const { syncApprovedFeePaymentToTreasury } = require('./treasuryGovernanceServic
 
 const FINANCE_FOUR_EYES_ENABLED = String(process.env.FINANCE_FOUR_EYES_ENABLED || 'false').toLowerCase() !== 'false';
 
+function scheduleFinanceBackgroundTask(label, task) {
+  const run = () => {
+    Promise.resolve()
+      .then(task)
+      .catch((error) => {
+        console.error(`[finance-background:${label}]`, error?.message || error);
+      });
+  };
+  if (typeof setImmediate === 'function') {
+    setImmediate(run);
+  } else {
+    setTimeout(run, 0);
+  }
+}
+
 function repairDisplayText(value) {
   const text = typeof value === 'string' ? value.trim() : '';
   if (!text || !/[ØÙÚÛÂâ€]/.test(text)) return text;
@@ -199,20 +214,18 @@ async function notifyStudent({ req, studentId, studentCoreId, title, message, em
     });
   }
 
-  const users = await User.find({ _id: { $in: audienceUserIds } }).select('email status').lean();
-  await Promise.all(users.map(async (user) => {
-    if (!user?.email || String(user.status || '').trim().toLowerCase() === 'inactive') return;
-    try {
-      await sendMail({
+  scheduleFinanceBackgroundTask('notification-email', async () => {
+    const users = await User.find({ _id: { $in: audienceUserIds } }).select('email status').lean();
+    await Promise.allSettled(users.map((user) => {
+      if (!user?.email || String(user.status || '').trim().toLowerCase() === 'inactive') return Promise.resolve();
+      return sendMail({
         to: user.email,
         subject: normalizedEmailSubject,
         text: normalizedEmailText,
         html: normalizedEmailHtml
       });
-    } catch {
-      return null;
-    }
-  }));
+    }));
+  });
 }
 
 const RECEIPT_STAGES = {
@@ -920,6 +933,19 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
     throw createActionError(404, 'One or more allocated fee orders were not found');
   }
 
+  const orderMonthKeys = Array.from(new Set(orders
+    .map((order) => toMonthKey(order.issuedAt))
+    .filter(Boolean)));
+  if (orderMonthKeys.length) {
+    const hasClosedOrderMonth = await FinanceMonthClose.exists({
+      monthKey: { $in: orderMonthKeys },
+      status: 'closed'
+    });
+    if (hasClosedOrderMonth) {
+      throw createActionError(400, 'Fee order month is closed; changes are blocked');
+    }
+  }
+
   const orderMap = new Map(orders.map((item) => [String(item._id || ''), item]));
   const updatedOrders = [];
   for (const allocation of allocations) {
@@ -931,10 +957,6 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
     if (order.status === 'void') {
       throw createActionError(400, 'Fee order is void; payment cannot be approved');
     }
-    if (await isMonthClosed(order.issuedAt)) {
-      throw createActionError(400, 'Fee order month is closed; changes are blocked');
-    }
-
     const remainingBeforeApproval = getBillRemainingAmount(order);
     if (remainingBeforeApproval <= 0) {
       throw createActionError(400, 'One of the allocated fee orders is already settled');
@@ -986,14 +1008,14 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
   }
   await syncApprovedFeePaymentToTreasury(payment);
 
-  await notifyStudent({
+  scheduleFinanceBackgroundTask('payment-approved-notification', () => notifyStudent({
     req,
     studentId: payment.student,
     studentCoreId: payment.studentId,
     title: 'Canonical payment approved',
     message: `Your payment ${payment.paymentNumber} was approved.`,
     emailSubject: 'Canonical payment approved'
-  });
+  }));
 
   await logActivity({
     req,
