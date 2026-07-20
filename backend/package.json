@@ -91,6 +91,8 @@
     "finance:line-items:dry": "node ./scripts/backfillFeeOrderLineItems.js --dry-run",
     "finance:reliefs": "node ./scripts/backfillFinanceReliefs.js --apply",
     "finance:reliefs:dry": "node ./scripts/backfillFinanceReliefs.js --dry-run",
+    "finance:admission-payment-evidence": "node ./scripts/repairAdmissionPaymentEvidence.js --apply",
+    "finance:admission-payment-evidence:dry": "node ./scripts/repairAdmissionPaymentEvidence.js",
     "backfill:phase8-timetable-planning": "node ./scripts/backfillPhase8TimetablePlanning.js",
     "backfill:phase8-timetable-planning:dry": "node ./scripts/backfillPhase8TimetablePlanning.js --dry-run",
     "check:timetable-routes": "node ./scripts/checkTimetableRoutes.js",

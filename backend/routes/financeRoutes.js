@@ -388,6 +388,28 @@ const getBillObligationKey = (bill = {}) => buildBillObligationKey({
   dueDate: bill.dueDate
 });
 
+const buildGroupedBillIssuanceKey = ({
+  studentMembershipId = '',
+  courseId = '',
+  academicYearId = '',
+  academicYear = '',
+  term = '',
+  periodType = 'term',
+  periodLabel = '',
+  dueDate = null
+} = {}) => {
+  const normalizedPeriodType = normalizeBillPeriodType(periodType);
+  const identity = [
+    String(studentMembershipId || '').trim(),
+    String(courseId || '').trim(),
+    String(academicYearId || academicYear || '').trim(),
+    String(term || '').trim(),
+    normalizedPeriodType,
+    resolveBillIdentityLabel({ periodType: normalizedPeriodType, periodLabel, dueDate })
+  ].join('|');
+  return `grouped-billing:${crypto.createHash('sha256').update(identity).digest('hex')}`;
+};
+
 const findConflictingBill = async ({
   studentId = '',
   courseId = '',
@@ -4838,7 +4860,8 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
       includeExam,
       includeDocument,
       includeOther,
-      onlyDebtors
+      onlyDebtors,
+      recoverMemberships: false
     });
 
     const items = [];
@@ -4949,7 +4972,8 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       includeExam,
       includeDocument,
       includeOther,
-      onlyDebtors
+      onlyDebtors,
+      recoverMemberships: true
     });
 
     if (!preview.items.length) {
@@ -4996,6 +5020,16 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
         periodLabel: candidate.periodLabel || normalizedPeriodLabel,
         academicYear: normalizedAcademicYear,
         term: candidate.term || normalizedTerm,
+        issuanceKey: buildGroupedBillIssuanceKey({
+          studentMembershipId: candidate.studentMembershipId,
+          courseId: scope.courseId,
+          academicYearId: candidate.academicYearId,
+          academicYear: normalizedAcademicYear,
+          term: candidate.term || normalizedTerm,
+          periodType: normalizedPeriodType,
+          periodLabel: candidate.periodLabel || normalizedPeriodLabel,
+          dueDate: candidate.dueDate || dueDateValue
+        }),
         currency: String(currency || 'AFN').trim().toUpperCase(),
         feeScopes: candidate.feeScopes,
         feeBreakdown: candidate.feeBreakdown,
@@ -5005,7 +5039,17 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
         createdBy: req.user.id
       });
       recalculateBill(bill);
-      await bill.save();
+      try {
+        await bill.save();
+      } catch (error) {
+        const duplicateIssuanceKey = Number(error?.code) === 11000
+          && (error?.keyPattern?.issuanceKey || error?.keyValue?.issuanceKey);
+        if (duplicateIssuanceKey) {
+          skipped += 1;
+          continue;
+        }
+        throw error;
+      }
       await syncStudentFinanceFromFinanceBill(bill).catch(() => null);
       created += 1;
       createdIds.push(bill._id);
@@ -6864,6 +6908,13 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
       status: { $ne: 'void' },
       $and: [
         { $or: admissionOwnerOr },
+        membership.schoolId ? {
+          $or: [
+            { schoolId: membership.schoolId },
+            { schoolId: null },
+            { schoolId: { $exists: false } }
+          ]
+        } : {},
         {
           $or: [
             { orderType: 'admission' },
@@ -6877,6 +6928,7 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
     });
 
     let feeOrder = existingAdmissionOrder;
+    let feePayment = null;
     const now = new Date();
     if (!feeOrder) {
       const classId = membership.classId || null;
@@ -6884,6 +6936,7 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
       const feePlan = await FinanceFeePlan.findOne({
         isActive: true,
         lifecycleStatus: 'active',
+        ...(membership.schoolId ? { schoolId: membership.schoolId } : {}),
         $and: [
           { $or: [{ classId }, { classId: null }, { classId: { $exists: false } }] },
           { $or: [{ academicYearId }, { academicYearId: null }, { academicYearId: { $exists: false } }] }
@@ -6895,10 +6948,9 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
       }
 
       const isWaived = mode === 'waived';
-      const isPaid = mode === 'paid';
       feeOrder = new FeeOrder({
         orderNumber: await generateFeeOrderNumber('AD'),
-        title: isWaived ? 'داخله - معافیت کامل' : isPaid ? 'داخله - پرداخت شده' : 'بل داخله',
+        title: isWaived ? 'داخله - معافیت کامل' : mode === 'paid' ? 'داخله - در انتظار تأیید پرداخت' : 'بل داخله',
         orderType: 'admission',
         source: 'manual',
         student: membership.student,
@@ -6911,14 +6963,14 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
         periodLabel: 'داخله',
         currency: String(feePlan?.currency || 'AFN').trim().toUpperCase() || 'AFN',
         amountOriginal: plannedAmount,
-        amountPaid: isPaid ? plannedAmount : 0,
+        amountPaid: 0,
         dueDate: mode === 'open' ? buildAdmissionDueDate(now, feePlan?.dueDay) : now,
-        paidAt: isPaid ? now : null,
+        paidAt: null,
         note: [
           isWaived
             ? 'داخله به‌عنوان معاف/تخفیف کامل ثبت شد.'
-            : isPaid
-              ? 'داخله قبلاً دریافت شده و توسط مدیر مالی تایید شد.'
+            : mode === 'paid'
+              ? 'دریافت قبلی داخله ثبت شد؛ تأیید پرداخت در گردش مالی الزامی است.'
               : 'بل باز داخله از هشدار مالی و بر اساس پلان صنف صادر شد.',
           note
         ].filter(Boolean).join(' '),
@@ -6938,13 +6990,35 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
           grossAmount: plannedAmount,
           reductionAmount: isWaived ? plannedAmount : 0,
           netAmount: isWaived ? 0 : plannedAmount,
-          paidAmount: isPaid ? plannedAmount : 0,
-          balanceAmount: mode === 'open' ? plannedAmount : 0,
-          status: isWaived ? 'waived' : isPaid ? 'paid' : 'open'
+          paidAmount: 0,
+          balanceAmount: isWaived ? 0 : plannedAmount,
+          status: isWaived ? 'waived' : 'open'
         }],
         createdBy: req.user?.id || null
       });
       await feeOrder.save();
+    }
+
+    if (mode === 'paid' && String(feeOrder.status || '').trim() !== 'paid') {
+      const outstandingAmount = Math.max(
+        0,
+        Number(feeOrder.outstandingAmount ?? (Number(feeOrder.amountDue || 0) - Number(feeOrder.amountPaid || 0))) || 0
+      );
+      if (outstandingAmount <= 0) {
+        return res.status(400).json({ success: false, message: 'سند داخله مانده قابل پرداخت ندارد.' });
+      }
+      feePayment = await createFeePayment({
+        studentMembershipId: membership._id,
+        amount: outstandingAmount,
+        currency: String(feeOrder.currency || 'AFN').trim().toUpperCase() || 'AFN',
+        paymentMethod: 'cash',
+        allocationMode: 'manual',
+        allocations: [{ feeOrderId: feeOrder._id, amount: outstandingAmount }],
+        source: 'manual',
+        receivedBy: req.user.id,
+        paidAt: now,
+        note: ['دریافت قبلی داخله از هشدار مالی ثبت شد و در انتظار تأیید است.', note].filter(Boolean).join(' ')
+      });
     }
 
     item.status = 'resolved';
@@ -6954,14 +7028,14 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
     item.resolutionNote = note || (mode === 'waived'
       ? 'داخله به‌عنوان معاف/تخفیف کامل ثبت شد.'
       : mode === 'paid'
-        ? 'داخله به‌عنوان پرداخت‌شده ثبت شد.'
+        ? 'سند داخله صادر و پرداخت آن برای تأیید مالی ثبت شد.'
         : 'بل باز داخله از پلان مالی صادر شد.');
     item.latestNote = item.resolutionNote;
     item.latestActionAt = now;
     item.latestActionBy = req.user.id;
-    item.targetType = 'FeeOrder';
-    item.targetId = String(feeOrder._id || '');
-    item.referenceNumber = String(feeOrder.orderNumber || item.referenceNumber || '').trim();
+    item.targetType = feePayment?.id ? 'FeePayment' : 'FeeOrder';
+    item.targetId = String(feePayment?.id || feeOrder._id || '');
+    item.referenceNumber = String(feePayment?.paymentNumber || feeOrder.orderNumber || item.referenceNumber || '').trim();
     appendFinanceAnomalyHistory(item, {
       action: 'resolved',
       actorId: req.user.id,
@@ -6975,13 +7049,14 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
     await logActivity({
       req,
       action: resolveFinanceAnomalyActionTitle('admission_settle'),
-      targetType: 'FeeOrder',
-      targetId: String(feeOrder._id || ''),
+      targetType: feePayment?.id ? 'FeePayment' : 'FeeOrder',
+      targetId: String(feePayment?.id || feeOrder._id || ''),
       meta: {
         anomalyId: item.anomalyId,
         anomalyType: item.anomalyType,
         mode,
         orderNumber: feeOrder.orderNumber,
+        paymentNumber: feePayment?.paymentNumber || '',
         amount: feeOrder.amountOriginal,
         note,
         classId: item.classId,
@@ -6998,10 +7073,15 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
         orderNumber: String(feeOrder.orderNumber || ''),
         status: String(feeOrder.status || '')
       },
+      feePayment: feePayment ? {
+        id: String(feePayment.id || ''),
+        paymentNumber: String(feePayment.paymentNumber || ''),
+        status: String(feePayment.status || 'pending')
+      } : null,
       message: mode === 'waived'
         ? 'داخله به‌عنوان معاف/تخفیف کامل ثبت شد و ناهنجاری حل شد'
         : mode === 'paid'
-          ? 'داخله به‌عنوان پرداخت‌شده ثبت شد و ناهنجاری حل شد'
+          ? 'سند داخله و پرداخت آن ثبت شد؛ پرداخت در انتظار تأیید مالی است'
           : 'بل باز داخله از پلان مالی صادر شد و ناهنجاری حل شد'
     });
   } catch (error) {

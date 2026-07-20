@@ -638,7 +638,8 @@ async function buildGroupedBillCandidates({
   includeExam = false,
   includeDocument = false,
   includeOther = false,
-  onlyDebtors = false
+  onlyDebtors = false,
+  recoverMemberships = false
 } = {}) {
   const selectedScopes = buildSelectedScopes({
     includeAdmission,
@@ -668,7 +669,9 @@ async function buildGroupedBillCandidates({
     });
   }
 
-  if (classId) {
+  // Preview requests must remain read-only. Membership recovery can create
+  // canonical memberships, so callers must opt in only during generation.
+  if (classId && normalizeBool(recoverMemberships)) {
     const recoveredMemberships = await recoverClassMembershipsFromRegisteredStudents({
       classId,
       academicYearId
@@ -755,7 +758,7 @@ async function buildGroupedBillCandidates({
         { periodLabel: /داخله|admission/i },
         { note: /داخله|admission/i }
       ] }]
-    }).select('student studentMembershipId'),
+    }).select('student studentMembershipId schoolId'),
     FeeOrder.find({
       ...admissionIdentityFilter,
       status: { $ne: 'void' },
@@ -766,7 +769,7 @@ async function buildGroupedBillCandidates({
         { periodLabel: /داخله|admission/i },
         { note: /داخله|admission/i }
       ] }]
-    }).select('student studentMembershipId')
+    }).select('student studentMembershipId schoolId')
   ]);
 
   const reliefMap = new Map();
@@ -808,8 +811,20 @@ async function buildGroupedBillCandidates({
       .map((item) => String(item.studentMembershipId || ''))
       .filter(Boolean)
   );
-  const admissionStudentSet = new Set(
+  const admissionStudentSchoolSet = new Set(
     [...existingAdmissionBills, ...existingAdmissionOrders]
+      .map((item) => {
+        const studentId = String(item.student || '');
+        const schoolId = String(item.schoolId || '');
+        return studentId && schoolId ? `${studentId}|${schoolId}` : '';
+      })
+      .filter(Boolean)
+  );
+  // Legacy admission documents may predate school ownership. Keep recognizing
+  // them so deployment does not create duplicate obligations for old data.
+  const legacyAdmissionStudentSet = new Set(
+    [...existingAdmissionBills, ...existingAdmissionOrders]
+      .filter((item) => !item.schoolId)
       .map((item) => String(item.student || ''))
       .filter(Boolean)
   );
@@ -857,7 +872,8 @@ async function buildGroupedBillCandidates({
 
     for (const period of periods) {
       const admissionAlreadyIssued = admissionMembershipSet.has(membershipId)
-        || admissionStudentSet.has(String(membership.student || ''));
+        || admissionStudentSchoolSet.has(`${String(membership.student || '')}|${String(membership.schoolId || '')}`)
+        || legacyAdmissionStudentSet.has(String(membership.student || ''));
       const candidateScopes = selectedScopes.filter((scope) => scope !== 'admission' || !admissionAlreadyIssued);
       const amountsByScope = buildPlanAmountsByScope(feePlan, candidateScopes, roundMoney(amount));
       const amountOriginal = roundMoney(sumScopedAmount(amountsByScope, candidateScopes));

@@ -26,6 +26,7 @@ const courses = [
 const schoolClasses = [
   {
     _id: IDS.class1,
+    schoolId: 'school-1',
     title: 'Class One Core',
     code: '10-A',
     gradeLevel: 10,
@@ -62,6 +63,7 @@ let treasuryAccountSerial = 1;
 let treasuryTransactionSerial = 1;
 let procurementCommitmentSerial = 0;
 let governmentSnapshotSerial = 0;
+let membershipRecoveryScanCount = 0;
 
 const feePlans = [];
 const discountRegistry = [];
@@ -3007,6 +3009,7 @@ const AfghanStudentMock = {
 
 const EnrollmentMock = {
   find() {
+    membershipRecoveryScanCount += 1;
     return new MockQuery(() => []);
   }
 };
@@ -5178,6 +5181,7 @@ async function run() {
 
     await check('route smoke: grouped bill generation uses active memberships', async () => {
       const baselineCount = bills.length;
+      membershipRecoveryScanCount = 0;
       const response = await request(server, '/api/finance/admin/bills/generate', {
         method: 'POST',
         user: financeManagerUser,
@@ -5202,6 +5206,8 @@ async function run() {
       assertCase(createdBills.every((item) => item.term === '7'), 'expected generated bills to use requested term');
       assertCase(createdBills.every((item) => String(item.classId || '') === IDS.class1), 'expected generated bills to carry canonical classId');
       assertCase(createdBills.every((item) => Array.isArray(item.lineItems) && item.lineItems.length >= 1), 'expected generated bills to persist canonical line items');
+      assertCase(createdBills.every((item) => String(item.issuanceKey || '').startsWith('grouped-billing:')), 'expected generated bills to carry atomic grouped issuance keys');
+      assertCase(membershipRecoveryScanCount > 0, 'expected generation to opt into membership recovery');
     });
 
     await check('route smoke: canonical billing preview applies discount and exemption registry rules', async () => {
@@ -5243,6 +5249,7 @@ async function run() {
         createdAt: new Date('2026-03-05T00:00:00.000Z')
       });
 
+      membershipRecoveryScanCount = 0;
       const response = await request(server, '/api/finance/admin/bills/preview', {
         method: 'POST',
         user: financeManagerUser,
@@ -5273,6 +5280,7 @@ async function run() {
       assertCase(!(alpha?.lineItems || []).some((item) => item.feeType === 'admission'), 'expected alpha preview not to duplicate admission');
       assertCase((beta?.lineItems || []).some((item) => item.feeType === 'admission'), 'expected beta preview to include missing admission');
       assertCase((beta?.lineItems || []).some((item) => Number(item.netAmount || 0) < Number(item.grossAmount || 0)), 'expected beta preview line items to reflect relief reductions');
+      assertCase(membershipRecoveryScanCount === 0, 'expected grouped billing preview to remain read-only');
     });
 
     await check('route smoke: monthly grouped billing previews only the selected month', async () => {
