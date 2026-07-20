@@ -1288,12 +1288,24 @@ export default function AdminFinance() {
   const [selectedAnomalyId, setSelectedAnomalyId] = useState('');
   const [anomalyTypeFilter, setAnomalyTypeFilter] = useState('all');
   const [anomalyWorkflowStatusFilter, setAnomalyWorkflowStatusFilter] = useState('open');
+  const [anomalyClassFilter, setAnomalyClassFilter] = useState('');
   const [anomalySearchTerm, setAnomalySearchTerm] = useState('');
   const [anomalyWorkflowForm, setAnomalyWorkflowForm] = useState({
     assignedLevel: 'finance_manager',
     snoozedUntil: '',
     note: ''
   });
+  const [admissionBatchForm, setAdmissionBatchForm] = useState({
+    classId: '',
+    mode: 'open',
+    note: ''
+  });
+  const [admissionBatchPreview, setAdmissionBatchPreview] = useState({
+    loading: false,
+    items: [],
+    error: ''
+  });
+  const [admissionBatchRefreshKey, setAdmissionBatchRefreshKey] = useState(0);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [activeSchoolContext, setActiveSchoolContext] = useState(null);
@@ -2805,6 +2817,41 @@ export default function AdminFinance() {
   }, [cashierReportDate]);
 
   useEffect(() => {
+    const classId = String(admissionBatchForm.classId || '').trim();
+    if (!classId) {
+      setAdmissionBatchPreview({ loading: false, items: [], error: '' });
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setAdmissionBatchPreview((prev) => ({ ...prev, loading: true, error: '' }));
+    const query = new URLSearchParams({
+      classId,
+      type: 'admission_missing',
+      limit: '500'
+    });
+    fetchJson(`${API_BASE}/api/finance/admin/reports/anomalies?${query.toString()}`, {
+      signal: controller.signal
+    })
+      .then((data) => {
+        if (!data?.success) {
+          setAdmissionBatchPreview({ loading: false, items: [], error: data?.message || 'بررسی داخله صنف ممکن نشد.' });
+          return;
+        }
+        const items = (Array.isArray(data.items) ? data.items : [])
+          .filter((item) => String(item?.anomalyType || '').trim() === 'admission_missing');
+        setAdmissionBatchPreview({ loading: false, items, error: '' });
+      })
+      .catch((error) => {
+        if (error?.name === 'AbortError') return;
+        setAdmissionBatchPreview({ loading: false, items: [], error: error?.message || 'بررسی داخله صنف ممکن نشد.' });
+      });
+
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [admissionBatchForm.classId, admissionBatchRefreshKey]);
+
+  useEffect(() => {
     setDiscountRegistryPage(1);
   }, [discountRegistryClassFilter, discountRegistryPageSize, discountRegistrySearch]);
 
@@ -3232,8 +3279,12 @@ export default function AdminFinance() {
   );
   const visibleAnomalies = useMemo(() => {
     const normalizedSearch = String(anomalySearchTerm || '').trim().toLowerCase();
-    return (reportClassId
-      ? anomalies.filter((item) => String(item?.classTitle || '').trim() === String(selectedReportClass?.title || '').trim())
+    const selectedAnomalyClass = classOptions.find((item) => String(item?.classId || '') === String(anomalyClassFilter)) || null;
+    return (anomalyClassFilter
+      ? anomalies.filter((item) => (
+        String(item?.classId || '').trim() === String(anomalyClassFilter).trim()
+        || String(item?.classTitle || '').trim() === String(selectedAnomalyClass?.title || '').trim()
+      ))
       : anomalies
     ).filter((item) => {
       if (anomalyTypeFilter !== 'all' && String(item?.anomalyType || '').trim() !== anomalyTypeFilter) return false;
@@ -3248,7 +3299,7 @@ export default function AdminFinance() {
         item?.description
       ].some((value) => String(value || '').toLowerCase().includes(normalizedSearch));
     });
-  }, [anomalies, reportClassId, selectedReportClass, anomalyTypeFilter, anomalyWorkflowStatusFilter, anomalySearchTerm]);
+  }, [anomalies, anomalyClassFilter, classOptions, anomalyTypeFilter, anomalyWorkflowStatusFilter, anomalySearchTerm]);
   const anomalyTypeOptions = useMemo(() => (
     Object.entries(FINANCE_ANOMALY_UI_LABELS)
       .filter(([type]) => anomalies.some((item) => String(item?.anomalyType || '').trim() === type))
@@ -3343,6 +3394,14 @@ export default function AdminFinance() {
     selectedAnomaly?.workflowLatestNote,
     selectedAnomaly?.workflowLastActionAt
   ]);
+
+  useEffect(() => {
+    const selectedClassId = String(selectedAnomaly?.classId || '').trim();
+    if (selectedAnomaly?.anomalyType !== 'admission_missing' || !selectedClassId) return;
+    setAdmissionBatchForm((prev) => (
+      prev.classId === selectedClassId ? prev : { ...prev, classId: selectedClassId }
+    ));
+  }, [selectedAnomaly?.id, selectedAnomaly?.anomalyType, selectedAnomaly?.classId]);
 
   const selectedReceiptBase = useMemo(() => {
     if (!filteredReceipts.length) return null;
@@ -5034,6 +5093,51 @@ export default function AdminFinance() {
         })
       );
       setMessage(data.message || 'داخله ثبت شد و ناهنجاری مالی حل شد');
+      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
+    } catch (err) {
+      setMessage(err.message);
+      setBusy(false);
+    }
+  };
+
+  const settleAdmissionAnomaliesByClass = async () => {
+    const classId = String(admissionBatchForm.classId || '').trim();
+    const candidateCount = admissionBatchPreview.items.length;
+    if (!classId) {
+      setMessage('برای ثبت گروهی داخله، ابتدا صنف را انتخاب کنید.');
+      return;
+    }
+    if (!candidateCount) {
+      setMessage('در صنف انتخاب‌شده شاگردی با بل داخله صادرنشده پیدا نشد.');
+      return;
+    }
+
+    const actionLabel = admissionBatchForm.mode === 'paid'
+      ? 'ثبت دریافت داخله در حالت انتظار تأیید'
+      : admissionBatchForm.mode === 'waived'
+        ? 'ثبت معافیت کامل داخله'
+        : 'صدور بل باز داخله';
+    const selectedClass = classOptions.find((item) => item.classId === classId);
+    const confirmed = window.confirm(
+      `${actionLabel} برای ${candidateCount} شاگرد صنف ${selectedClass?.uiLabel || selectedClass?.title || ''} انجام شود؟`
+    );
+    if (!confirmed) return;
+
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/finance/admin/anomalies/settle-admission-batch`, {
+        classId,
+        mode: admissionBatchForm.mode,
+        note: admissionBatchForm.note
+      });
+      const failed = Number(data?.summary?.failed || 0);
+      const failureNames = (Array.isArray(data?.failures) ? data.failures : [])
+        .slice(0, 3)
+        .map((item) => item.studentName)
+        .filter(Boolean)
+        .join('، ');
+      setMessage(`${data.message || 'ثبت گروهی داخله انجام شد'}${failed && failureNames ? ` موارد خطادار: ${failureNames}` : ''}`);
+      setAdmissionBatchRefreshKey((value) => value + 1);
       await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
@@ -7403,17 +7507,17 @@ export default function AdminFinance() {
         </div>
       </div>
 
-      <div className="finance-grid" data-finance-section="overview anomalies settings">
-        <div className="finance-card" data-finance-section="overview anomalies settings" data-testid="finance-anomalies-card">
+      <div className="finance-grid" data-finance-section="anomalies">
+        <div className="finance-card" data-finance-section="anomalies" data-testid="finance-anomalies-card">
           <div className="finance-card-head">
             <div>
-              <h3>ناهجاری‌های مالی</h3>
-              <p className="muted">هشدارهای هوشمند برای بیش‌پرداخت، بدهی‌های سررسید گذشته طولانی، ختم تسهیلات و مغایرت‌های مالی.</p>
+              <h3>ناهنجاری‌های مالی</h3>
+              <p className="muted">مرکز واحد بررسی و رفع همه هشدارها و مغایرت‌های مالی؛ این موارد در بخش‌های دیگر تکرار نمی‌شوند.</p>
             </div>
             <div className="finance-chip-group">
-              <span className="finance-chip">{visibleAnomalySummary.total}</span>
-              <span className="finance-chip finance-chip-rose">{visibleAnomalySummary.critical}</span>
-              <span className="finance-chip finance-chip-amber">{visibleAnomalySummary.warning}</span>
+              <span className="finance-chip">مجموع: {visibleAnomalySummary.total}</span>
+              <span className="finance-chip finance-chip-rose">بحرانی: {visibleAnomalySummary.critical}</span>
+              <span className="finance-chip finance-chip-amber">هشدار: {visibleAnomalySummary.warning}</span>
               <span className="finance-chip finance-chip-muted">{visibleAnomalySummary.byWorkflow?.assigned || 0} ارجاع</span>
               <span className="finance-chip finance-chip-emerald">{visibleAnomalySummary.byWorkflow?.resolved || 0} حل‌شده</span>
             </div>
@@ -7447,6 +7551,21 @@ export default function AdminFinance() {
               </select>
             </label>
             <label className="finance-inline-filter">
+              <span>صنف</span>
+              <select
+                value={anomalyClassFilter}
+                onChange={(e) => setAnomalyClassFilter(e.target.value)}
+                data-testid="anomaly-class-filter"
+              >
+                <option value="">همه صنف‌ها</option>
+                {classOptions.map((item) => (
+                  <option key={`anomaly-class-filter-${item.classId}`} value={item.classId}>
+                    {item.uiLabel || item.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="finance-inline-filter">
               <span>جستجو</span>
               <input
                 type="search"
@@ -7457,17 +7576,75 @@ export default function AdminFinance() {
               />
             </label>
           </div>
-          {visibleAnomalies.slice(0, 6).map((item) => (
-            <div key={item.id} className="mini-row">
-              <span className="finance-cell-stack">
-                <strong>{FINANCE_ANOMALY_UI_LABELS[item.anomalyType] || item.anomalyType || 'ناهنجاری'}</strong>
-                <small>{item.studentName || item.classTitle || item.referenceNumber || '—'}</small>
-              </span>
-              <span className={`finance-chip ${item.severity === 'critical' ? 'finance-chip-rose' : item.severity === 'warning' ? 'finance-chip-amber' : 'finance-chip-muted'}`}>
-                {AUDIT_SEVERITY_UI_LABELS[item.severity] || item.severity || 'اطلاع'}
+          <div className="admission-batch-panel" data-testid="admission-batch-panel">
+            <div className="finance-card-head">
+              <div>
+                <h4>رفع گروهی مشکل داخله بر اساس صنف</h4>
+                <p className="muted">سیستم فقط شاگردانی را ثبت می‌کند که پلان فعال داخله دارند و هنوز بل یا سند داخله برای‌شان موجود نیست.</p>
+              </div>
+              <span className="finance-chip finance-chip-amber" data-testid="admission-batch-count">
+                {admissionBatchPreview.loading ? 'در حال بررسی…' : `${admissionBatchPreview.items.length} شاگرد`}
               </span>
             </div>
-          ))}
+            <div className="receipt-follow-up-grid admission-batch-controls">
+              <label className="finance-inline-filter">
+                <span>صنف مربوطه</span>
+                <select
+                  value={admissionBatchForm.classId}
+                  onChange={(e) => setAdmissionBatchForm((prev) => ({ ...prev, classId: e.target.value }))}
+                  data-testid="admission-batch-class"
+                >
+                  <option value="">انتخاب صنف</option>
+                  {classOptions.map((item) => (
+                    <option key={`admission-batch-class-${item.classId}`} value={item.classId}>
+                      {item.uiLabel || item.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="finance-inline-filter">
+                <span>نوع ثبت گروهی</span>
+                <select
+                  value={admissionBatchForm.mode}
+                  onChange={(e) => setAdmissionBatchForm((prev) => ({ ...prev, mode: e.target.value }))}
+                  data-testid="admission-batch-mode"
+                >
+                  <option value="open">صدور بل باز داخله</option>
+                  <option value="paid">داخله دریافت شده — انتظار تأیید</option>
+                  <option value="waived">معافیت کامل داخله</option>
+                </select>
+              </label>
+              <label className="finance-inline-filter finance-inline-filter-wide">
+                <span>یادداشت گروهی</span>
+                <input
+                  value={admissionBatchForm.note}
+                  onChange={(e) => setAdmissionBatchForm((prev) => ({ ...prev, note: e.target.value }))}
+                  placeholder="مثلاً ثبت داخله صنف از اسناد قبلی"
+                  data-testid="admission-batch-note"
+                />
+              </label>
+            </div>
+            {admissionBatchPreview.error ? <p className="admission-batch-error">{admissionBatchPreview.error}</p> : null}
+            {!!admissionBatchPreview.items.length && (
+              <p className="muted admission-batch-sample">
+                شامل: {admissionBatchPreview.items.slice(0, 5).map((item) => item.studentName).filter(Boolean).join('، ')}
+                {admissionBatchPreview.items.length > 5 ? ` و ${admissionBatchPreview.items.length - 5} شاگرد دیگر` : ''}
+              </p>
+            )}
+            {admissionBatchForm.mode === 'paid' ? (
+              <p className="muted">پرداخت‌های گروهی ابتدا در حالت «در انتظار تأیید مالی» ثبت می‌شوند و مستقیماً تأیید نخواهند شد.</p>
+            ) : null}
+            <div className="row-actions">
+              <button
+                type="button"
+                onClick={settleAdmissionAnomaliesByClass}
+                disabled={busy || admissionBatchPreview.loading || !admissionBatchForm.classId || !admissionBatchPreview.items.length}
+                data-testid="admission-batch-submit"
+              >
+                ثبت داخله تمام شاگردان این صنف
+              </button>
+            </div>
+          </div>
           {!!visibleAnomalies.length && (
             <div className="anomaly-workflow-layout">
               <div className="anomaly-workflow-list" data-testid="finance-anomaly-list">
@@ -7643,7 +7820,7 @@ export default function AdminFinance() {
             <div className="finance-card-head">
               <div>
                 <h3>snapshot ماه مالی {toFaMonthKey(selectedMonthClose.monthKey)}</h3>
-                <p className="muted">نمای ثابت از ارقام ماه، بل‌های سررسید گذشته، تسهیلات مالی و ناهنجاری‌های همان بستن ماه.</p>
+                <p className="muted">نمای ثابت از ارقام ماه، بل‌های سررسید گذشته و تسهیلات مالی همان بستن ماه.</p>
               </div>
               <div className="finance-chip-group">
                 <label className="finance-inline-filter">
@@ -7688,10 +7865,6 @@ export default function AdminFinance() {
                 <span>مانده ایستا</span>
                 <strong>{fmt(monthCloseSnapshot?.totals?.standingOutstandingAmount || 0)} AFN</strong>
               </div>
-              <div className="finance-kpi-item">
-                <span>ناهجاری حساس</span>
-                <strong>{fmt(monthCloseSnapshot?.anomalies?.summary?.critical || 0)}</strong>
-              </div>
             </div>
             <div className="finance-subcard-list">
               <div className="mini-row">
@@ -7705,10 +7878,6 @@ export default function AdminFinance() {
               <div className="mini-row">
                 <span>در انتظار تایید</span>
                 <span>{fmt(monthCloseSnapshot?.totals?.pendingPaymentCount || 0)} / {fmt(monthCloseSnapshot?.totals?.pendingPaymentAmount || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>وضعیت ناهنجاری‌ها</span>
-                <span>{fmt(monthCloseSnapshot?.anomalies?.summary?.byWorkflow?.open || 0)} باز / {fmt(monthCloseSnapshot?.anomalies?.summary?.byWorkflow?.resolved || 0)} حل‌شده</span>
               </div>
               <div className="mini-row">
                 <span>یادداشت بستن ماه</span>

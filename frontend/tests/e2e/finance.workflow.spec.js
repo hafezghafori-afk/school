@@ -3304,6 +3304,8 @@ test.describe('finance workflow', () => {
     await page.goto('/admin-finance', { waitUntil: 'domcontentloaded' });
 
     const financeTabs = page.locator('.finance-shell-tab');
+    const anomalyCenter = page.getByTestId('finance-anomalies-card');
+    await expect(anomalyCenter).toBeHidden();
     await expect(page.getByTestId('income-trend-card')).toBeVisible();
     await page.getByTestId('income-trend-card').locator('button').nth(2).click();
     await expect(page.getByTestId('paid-vs-due-card')).toBeVisible();
@@ -3405,9 +3407,15 @@ test.describe('finance workflow', () => {
     await page.locator('.finance-table.receipts-table .row').filter({ hasText: 'Student Alpha' }).first().getByRole('button', { name: 'تایید نهایی' }).click();
     await expect.poll(() => approveCalls).toBe(1);
 
+    await financeTabs.nth(5).click();
+    await expect(anomalyCenter).toBeHidden();
+    await financeTabs.nth(6).click();
+    await expect(anomalyCenter).toBeHidden();
     await financeTabs.nth(4).click();
-    await expect(page.getByTestId('finance-anomalies-card')).toContainText('Student Alpha');
-    await expect(page.getByTestId('finance-anomalies-card')).toContainText('Student Beta');
+    await expect(anomalyCenter).toBeVisible();
+    await expect(anomalyCenter).toContainText('Student Alpha');
+    await expect(anomalyCenter).toContainText('Student Beta');
+    await expect(anomalyCenter.locator(':scope > .mini-row')).toHaveCount(0);
     await page.getByTestId('anomaly-assigned-level').selectOption('general_president');
     await page.getByTestId('anomaly-note-input').fill('Escalate overdue case to general president');
     await page.getByTestId('anomaly-assign-button').click();
@@ -3421,8 +3429,8 @@ test.describe('finance workflow', () => {
     await page.getByTestId('anomaly-resolve-button').click();
     await expect(page.getByTestId('finance-anomaly-inspector')).toContainText('Guardian paid directly at the branch');
     await expect(page.getByTestId('by-class-report-card')).toContainText('Class Two Core');
-    await page.getByTestId('report-class-filter').selectOption('class-1');
-    await expect(page.getByTestId('finance-anomalies-card')).not.toContainText('Student Beta');
+    await page.getByTestId('anomaly-class-filter').selectOption('class-1');
+    await expect(anomalyCenter).not.toContainText('Student Beta');
     await expect(page.getByTestId('by-class-report-card')).not.toContainText('Class Two Core');
     await expect(page.getByTestId('finance-audit-timeline-card')).toContainText('Overdue tuition order');
     await expect(page.getByTestId('finance-audit-timeline-card')).toContainText('Anomaly resolved');

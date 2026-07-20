@@ -61,6 +61,15 @@ const feeOrderSchema = new mongoose.Schema({
     ref: 'FinanceBill',
     default: undefined
   },
+  issuanceKey: {
+    type: String,
+    default: undefined,
+    trim: true,
+    set: (value) => {
+      const normalized = String(value || '').trim();
+      return normalized || undefined;
+    }
+  },
   student: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentCore', default: null, index: true },
   studentMembershipId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentMembership', default: null, index: true },
@@ -133,6 +142,7 @@ feeOrderSchema.pre('validate', async function syncFeeOrderState() {
 });
 
 feeOrderSchema.index({ sourceBillId: 1 }, { unique: true, sparse: true });
+feeOrderSchema.index({ issuanceKey: 1 }, { unique: true, sparse: true });
 feeOrderSchema.index({ schoolId: 1, status: 1, dueDate: 1 });
 feeOrderSchema.index({ studentMembershipId: 1, status: 1, dueDate: 1 });
 feeOrderSchema.index({ studentId: 1, academicYearId: 1, status: 1 });

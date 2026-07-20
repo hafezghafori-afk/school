@@ -2181,6 +2181,34 @@
   margin-top: 12px;
 }
 
+.admission-batch-panel {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(255, 255, 255, 0.04));
+}
+
+.admission-batch-panel h4,
+.admission-batch-panel p {
+  margin: 0;
+}
+
+.admission-batch-controls {
+  margin: 0;
+}
+
+.admission-batch-sample {
+  line-height: 1.7;
+}
+
+.admission-batch-error {
+  color: #fecaca;
+  line-height: 1.6;
+}
+
 .anomaly-workflow-list {
   display: grid;
   gap: 10px;
