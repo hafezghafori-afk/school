@@ -5547,12 +5547,6 @@ export default function AdminFinance() {
             <button type="button" className={orderFormMode === 'bulk' ? 'secondary is-active' : 'secondary'} onClick={() => setOrderFormMode('bulk')}>صدور گروهی</button>
           </div>
         )}
-        {activeSection === 'discounts' && (
-          <div className="finance-subsection-tabs" role="group" aria-label="فورم‌های تخفیف و معافیت">
-            <button type="button" className={reliefFormMode === 'discount' ? 'secondary is-active' : 'secondary'} onClick={() => setReliefFormMode('discount')}>فورم تخفیف</button>
-            <button type="button" className={reliefFormMode === 'exemption' ? 'secondary is-active' : 'secondary'} onClick={() => setReliefFormMode('exemption')}>فورم معافیت</button>
-          </div>
-        )}
       </div>
 
       <div className="finance-summary" data-finance-section="overview">
@@ -6736,9 +6730,15 @@ export default function AdminFinance() {
         </form>
       </div>
 
-      <div className="finance-grid" data-finance-section="discounts">
+      <section className="finance-relief-entry-workspace" data-finance-section="discounts" data-testid="relief-entry-workspace">
+        <div className="finance-subsection-tabs finance-relief-mode-tabs" role="group" aria-label="فورم‌های تخفیف و معافیت">
+          <button type="button" className={reliefFormMode === 'discount' ? 'secondary is-active' : 'secondary'} onClick={() => setReliefFormMode('discount')}>فورم تخفیف</button>
+          <button type="button" className={reliefFormMode === 'exemption' ? 'secondary is-active' : 'secondary'} onClick={() => setReliefFormMode('exemption')}>فورم معافیت</button>
+        </div>
+        <div className="finance-relief-entry-grid">
+          <div className="finance-relief-form-pane">
         {reliefFormMode === 'discount' && (
-          <form className="finance-card" data-finance-section="discounts" onSubmit={saveDiscountRegistry} data-testid="discount-registry-form">
+          <form className="finance-card finance-relief-entry-form" data-finance-section="discounts" onSubmit={saveDiscountRegistry} data-testid="discount-registry-form">
             <div className="finance-card-head">
               <div>
                 <h3>ثبت تخفیف متعلم</h3>
@@ -6877,7 +6877,7 @@ export default function AdminFinance() {
         )}
 
         {reliefFormMode === 'exemption' && (
-          <form className="finance-card" data-finance-section="discounts" onSubmit={saveExemptionRegistry} data-testid="exemption-registry-form">
+          <form className="finance-card finance-relief-entry-form" data-finance-section="discounts" onSubmit={saveExemptionRegistry} data-testid="exemption-registry-form">
             <div className="finance-card-head">
               <div>
                 <h3>متعلمین رایگان / معاف</h3>
@@ -6942,7 +6942,86 @@ export default function AdminFinance() {
             <button type="submit" disabled={busy} data-testid="save-exemption-registry">ثبت معافیت</button>
           </form>
         )}
-      </div>
+          </div>
+
+          <aside className="finance-card finance-spotlight-card finance-relief-profile-pane" data-finance-section="discounts" data-testid="relief-student-spotlight">
+            <div className="finance-card-head">
+              <div>
+                <h3>پروفایل مالی متعلم</h3>
+                <p className="muted">هم‌زمان با ثبت تخفیف یا معافیت، سوابق و اثر تصمیم مالی را بررسی کنید.</p>
+              </div>
+              <div className="finance-chip-group">
+                <span className="finance-chip finance-chip-emerald">{getStudentDisplayName(reliefFocusStudent)}</span>
+                <span className="finance-chip">{reliefFormMode === 'discount' ? 'فورم تخفیف' : 'فورم معافیت'}</span>
+              </div>
+            </div>
+            <div className="finance-chip-group">
+              <span className="finance-chip">{reliefFocusClass?.title || 'صنف'}</span>
+              <span className="finance-chip finance-chip-muted">{reliefFocusAcademicYear?.title || 'سال تعلیمی'}</span>
+              <span className="finance-chip finance-chip-emerald">{reliefFocusSnapshot.reliefCount} تسهیل در همین دامنه</span>
+            </div>
+            <label className="finance-inline-filter">
+              <span>نمایش تسهیلات</span>
+              <select value={reliefFocusPageSize} onChange={(e) => setReliefFocusPageSize(Number(e.target.value) || 5)}>
+                <option value={3}>3 مورد</option>
+                <option value={5}>5 مورد</option>
+                <option value={10}>10 مورد</option>
+              </select>
+            </label>
+            <div className="finance-kpi-grid finance-kpi-grid-dense">
+              <div className="finance-kpi-item">
+                <span>کل بدهی</span>
+                <strong>{fmt(reliefFocusSnapshot.totalDue)} AFN</strong>
+              </div>
+              <div className="finance-kpi-item">
+                <span>کل پرداخت</span>
+                <strong>{fmt(reliefFocusSnapshot.totalPaid)} AFN</strong>
+              </div>
+              <div className="finance-kpi-item finance-kpi-item-accent">
+                <span>باقی‌مانده</span>
+                <strong>{fmt(reliefFocusSnapshot.outstanding)} AFN</strong>
+              </div>
+              <div className="finance-kpi-item">
+                <span>تسهیلات مبلغی</span>
+                <strong>{fmt(reliefFocusSnapshot.fixedReliefAmount)} AFN</strong>
+              </div>
+            </div>
+            <div className="finance-subcard-list">
+              <div className="mini-row">
+                <span>بدهی‌های باز</span>
+                <span>{reliefFocusSnapshot.openOrders}</span>
+              </div>
+              <div className="mini-row">
+                <span>پوشش کامل / درصدی</span>
+                <span>{reliefFocusSnapshot.fullReliefCount} / {reliefFocusSnapshot.percentReliefCount}</span>
+              </div>
+              <div className="mini-row">
+                <span>نزدیک‌ترین مهلت پرداخت</span>
+                <span>{reliefFocusSnapshot.nextDueOrder?.dueDate ? toFaDate(reliefFocusSnapshot.nextDueOrder.dueDate) : '-'}</span>
+              </div>
+              {pagedReliefFocusItems.map((item) => (
+                <div key={`focus-relief-${item.id}`} className="mini-row">
+                  <span>{RELIEF_TYPE_UI_LABELS[item.reliefType] || item.reliefType || 'تسهیل'}</span>
+                  <span>{getReliefValueLabel(item)}</span>
+                </div>
+              ))}
+              {!reliefFocusSnapshot.scopedReliefs.length && (
+                <div className="mini-row">
+                  <span>تسهیلات فعال</span>
+                  <span className="finance-chip finance-chip-muted">0 مورد</span>
+                </div>
+              )}
+              {reliefFocusSnapshot.scopedReliefs.length > reliefFocusPageSize && (
+                <div className="finance-pagination">
+                  <button type="button" className="secondary" disabled={reliefFocusPage <= 1} onClick={() => setReliefFocusPage((value) => Math.max(1, value - 1))}>قبلی</button>
+                  <span>صفحه {reliefFocusPage} از {reliefFocusTotalPages}</span>
+                  <button type="button" className="secondary" disabled={reliefFocusPage >= reliefFocusTotalPages} onClick={() => setReliefFocusPage((value) => Math.min(reliefFocusTotalPages, value + 1))}>بعدی</button>
+                </div>
+              )}
+            </div>
+          </aside>
+        </div>
+      </section>
 
       <div className="finance-grid" data-finance-section="discounts">
         <div className="finance-card finance-spotlight-card" data-finance-section="discounts" data-testid="relief-registry-hub">
@@ -7037,83 +7116,6 @@ export default function AdminFinance() {
                 <button type="button" className="secondary" disabled={reliefRegistryPage <= 1} onClick={() => setReliefRegistryPage((value) => Math.max(1, value - 1))}>قبلی</button>
                 <span>صفحه {reliefRegistryPage} از {reliefRegistryTotalPages}</span>
                 <button type="button" className="secondary" disabled={reliefRegistryPage >= reliefRegistryTotalPages} onClick={() => setReliefRegistryPage((value) => Math.min(reliefRegistryTotalPages, value + 1))}>بعدی</button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="finance-card finance-spotlight-card" data-finance-section="discounts" data-testid="relief-student-spotlight">
-          <div className="finance-card-head">
-            <div>
-              <h3>پروفایل مالی متعلم</h3>
-              <p className="muted">هم‌زمان با ثبت تخفیف یا معافیت، اثر همان تصمیم را روی وضعیت مالی متعلم ببینید.</p>
-            </div>
-            <div className="finance-chip-group">
-              <span className="finance-chip finance-chip-emerald">{getStudentDisplayName(reliefFocusStudent)}</span>
-              <span className="finance-chip">{reliefFormMode === 'discount' ? 'فورم تخفیف' : 'فورم معافیت'}</span>
-            </div>
-          </div>
-          <div className="finance-chip-group">
-            <span className="finance-chip">{reliefFocusClass?.title || 'صنف'}</span>
-            <span className="finance-chip finance-chip-muted">{reliefFocusAcademicYear?.title || 'سال تعلیمی'}</span>
-            <span className="finance-chip finance-chip-emerald">{reliefFocusSnapshot.reliefCount} تسهیل در همین دامنه</span>
-          </div>
-          <label className="finance-inline-filter">
-            <span>نمایش تسهیلات</span>
-            <select value={reliefFocusPageSize} onChange={(e) => setReliefFocusPageSize(Number(e.target.value) || 5)}>
-              <option value={3}>3 مورد</option>
-              <option value={5}>5 مورد</option>
-              <option value={10}>10 مورد</option>
-            </select>
-          </label>
-          <div className="finance-kpi-grid finance-kpi-grid-dense">
-            <div className="finance-kpi-item">
-              <span>کل بدهی</span>
-              <strong>{fmt(reliefFocusSnapshot.totalDue)} AFN</strong>
-            </div>
-            <div className="finance-kpi-item">
-              <span>کل پرداخت</span>
-              <strong>{fmt(reliefFocusSnapshot.totalPaid)} AFN</strong>
-            </div>
-            <div className="finance-kpi-item finance-kpi-item-accent">
-              <span>باقی‌مانده</span>
-              <strong>{fmt(reliefFocusSnapshot.outstanding)} AFN</strong>
-            </div>
-            <div className="finance-kpi-item">
-              <span>تسهیلات مبلغی</span>
-              <strong>{fmt(reliefFocusSnapshot.fixedReliefAmount)} AFN</strong>
-            </div>
-          </div>
-          <div className="finance-subcard-list">
-            <div className="mini-row">
-              <span>بدهی‌های باز</span>
-              <span>{reliefFocusSnapshot.openOrders}</span>
-            </div>
-            <div className="mini-row">
-              <span>پوشش کامل / درصدی</span>
-              <span>{reliefFocusSnapshot.fullReliefCount} / {reliefFocusSnapshot.percentReliefCount}</span>
-            </div>
-            <div className="mini-row">
-              <span>نزدیک‌ترین مهلت پرداخت</span>
-              <span>{reliefFocusSnapshot.nextDueOrder?.dueDate ? toFaDate(reliefFocusSnapshot.nextDueOrder.dueDate) : '-'}</span>
-            </div>
-            {pagedReliefFocusItems.map((item) => (
-              <div key={`focus-relief-${item.id}`} className="mini-row">
-                <span>{RELIEF_TYPE_UI_LABELS[item.reliefType] || item.reliefType || 'تسهیل'}</span>
-                <span>{getReliefValueLabel(item)}</span>
-              </div>
-            ))}
-            {!reliefFocusSnapshot.scopedReliefs.length && (
-              <div className="mini-row">
-                <span>تسهیلات فعال</span>
-                <span className="finance-chip finance-chip-muted">0 مورد</span>
-              </div>
-            )}
-            {reliefFocusSnapshot.scopedReliefs.length > reliefFocusPageSize && (
-              <div className="finance-pagination">
-                <button type="button" className="secondary" disabled={reliefFocusPage <= 1} onClick={() => setReliefFocusPage((value) => Math.max(1, value - 1))}>قبلی</button>
-                <span>صفحه {reliefFocusPage} از {reliefFocusTotalPages}</span>
-                <button type="button" className="secondary" disabled={reliefFocusPage >= reliefFocusTotalPages} onClick={() => setReliefFocusPage((value) => Math.min(reliefFocusTotalPages, value + 1))}>بعدی</button>
               </div>
             )}
           </div>

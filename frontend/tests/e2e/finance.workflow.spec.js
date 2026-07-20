@@ -3382,6 +3382,11 @@ test.describe('finance workflow', () => {
     await receiptFilters.nth(3).selectOption('all');
 
     await financeTabs.nth(3).click();
+    const reliefEntryWorkspace = page.getByTestId('relief-entry-workspace');
+    await expect(reliefEntryWorkspace).toBeVisible();
+    await expect(reliefEntryWorkspace.locator('.finance-relief-mode-tabs button')).toHaveCount(2);
+    await expect(reliefEntryWorkspace.getByTestId('discount-registry-form')).toBeVisible();
+    await expect(reliefEntryWorkspace.getByTestId('relief-student-spotlight')).toBeVisible();
     await expect(page.getByTestId('discount-registry-list')).toContainText('Merit scholarship');
     await expect(page.getByTestId('exemption-registry-list')).toContainText('Sponsored seat');
     await page.getByRole('button', { name: 'فورم تخفیف' }).click();
