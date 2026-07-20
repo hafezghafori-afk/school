@@ -3,11 +3,17 @@ const nodemailer = require('nodemailer');
 function getTransport() {
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) return null;
+  const connectionTimeout = Math.max(1000, Number(process.env.SMTP_CONNECTION_TIMEOUT_MS) || 5000);
+  const greetingTimeout = Math.max(1000, Number(process.env.SMTP_GREETING_TIMEOUT_MS) || 5000);
+  const socketTimeout = Math.max(1000, Number(process.env.SMTP_SOCKET_TIMEOUT_MS) || 10000);
   return nodemailer.createTransport({
     host: SMTP_HOST,
     port: Number(SMTP_PORT) || 587,
     secure: false,
-    auth: { user: SMTP_USER, pass: SMTP_PASS }
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
+    connectionTimeout,
+    greetingTimeout,
+    socketTimeout
   });
 }
 

@@ -2711,6 +2711,58 @@ export default function AdminFinance() {
     }
   };
 
+  const refreshFinanceOperationalData = async ({
+    includeClassReport = false,
+    includeAnomalies = false
+  } = {}) => {
+    const safeFetchJson = async (url, fallback = { success: false }) => {
+      try {
+        return await fetchJson(url);
+      } catch {
+        return fallback;
+      }
+    };
+
+    try {
+      const [summaryData, ordersData, paymentsData, byClassData, anomaliesData] = await Promise.all([
+        safeFetchJson(`${API_BASE}/api/finance/admin/summary`, { success: false, summary: null, topDebtors: [] }),
+        safeFetchJson(`${API_BASE}/api/student-finance/orders`, { success: true, items: [] }),
+        safeFetchJson(`${API_BASE}/api/student-finance/payments?view=inbox`, { success: true, items: [] }),
+        includeClassReport
+          ? safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/by-class'), { success: true, items: [] })
+          : Promise.resolve(null),
+        includeAnomalies
+          ? safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/anomalies'), { success: true, items: [], summary: null })
+          : Promise.resolve(null)
+      ]);
+
+      if (summaryData?.success) {
+        setSummary(summaryData.summary || null);
+        setTopDebtors(summaryData.topDebtors || []);
+      }
+      if (ordersData?.success) {
+        setBills((ordersData.items || []).map(toLegacyLikeBillRow));
+      }
+      if (paymentsData?.success) {
+        const nextPendingReceipts = (paymentsData.items || []).map(toLegacyLikeReceiptRow);
+        setPendingReceipts(nextPendingReceipts);
+        setSelectedReceiptDetail(null);
+        if (!selectedReceiptId && nextPendingReceipts[0]?._id) {
+          setSelectedReceiptId(nextPendingReceipts[0]._id);
+        }
+      }
+      if (byClassData?.success) {
+        setByClass(byClassData.items || []);
+      }
+      if (anomaliesData?.success) {
+        setAnomalies(anomaliesData.items || []);
+        setAnomalySummary(anomaliesData.summary || null);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const loadCashierReport = async () => {
     try {
       const cashierReportData = await fetchJson(`${API_BASE}/api/student-finance/reports/daily-cashier?date=${encodeURIComponent(cashierReportDate)}`);
@@ -3557,7 +3609,7 @@ export default function AdminFinance() {
       }
       const data = await postJson(`${API_BASE}/api/finance/admin/bills`, payload);
       setMessage(data.message || 'بل ایجاد شد');
-      await loadAll();
+      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -3577,7 +3629,7 @@ export default function AdminFinance() {
       const data = await postJson(`${API_BASE}/api/finance/admin/bills/generate`, payload);
       setBillingPreview(null);
       setMessage(data.message || 'بل گروهی ایجاد شد');
-      await loadAll();
+      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -3702,7 +3754,7 @@ export default function AdminFinance() {
         schedulePrint('receipt', '.finance-receipt-print-sheet');
       }
       setDeskPaymentSubmitMode('save');
-      await loadAll();
+      await refreshFinanceOperationalData();
     } catch (err) {
       setMessage(err.message);
       setDeskPaymentSubmitMode('save');
@@ -4080,7 +4132,7 @@ export default function AdminFinance() {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/student-finance/payments/${id}/approve`, {});
       setMessage(data.message || 'رسید تایید شد');
-      await loadAll();
+      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4094,7 +4146,7 @@ export default function AdminFinance() {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/student-finance/payments/${id}/reject`, { reason });
       setMessage(data.message || 'رسید رد شد');
-      await loadAll();
+      await refreshFinanceOperationalData({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4115,7 +4167,7 @@ export default function AdminFinance() {
         note: receiptFollowUpForm.note
       });
       setMessage(data.message || 'پیگیری پرداخت به‌روزرسانی شد');
-      await loadAll();
+      await refreshFinanceOperationalData({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4909,7 +4961,7 @@ export default function AdminFinance() {
         buildAnomalyActionPayload(selectedAnomaly, { note: anomalyWorkflowForm.note })
       );
       setMessage(data.message || 'یادداشت ناهنجاری مالی ذخیره شد');
-      await loadAll();
+      await refreshFinanceOperationalData({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4928,7 +4980,7 @@ export default function AdminFinance() {
         })
       );
       setMessage(data.message || 'ناهجاری مالی ارجاع شد');
-      await loadAll();
+      await refreshFinanceOperationalData({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4947,7 +4999,7 @@ export default function AdminFinance() {
         })
       );
       setMessage(data.message || 'ناهجاری مالی معطل شد');
-      await loadAll();
+      await refreshFinanceOperationalData({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4963,7 +5015,7 @@ export default function AdminFinance() {
         buildAnomalyActionPayload(selectedAnomaly, { note: anomalyWorkflowForm.note })
       );
       setMessage(data.message || 'ناهجاری مالی حل شد');
-      await loadAll();
+      await refreshFinanceOperationalData({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4982,7 +5034,7 @@ export default function AdminFinance() {
         })
       );
       setMessage(data.message || 'داخله ثبت شد و ناهنجاری مالی حل شد');
-      await loadAll();
+      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);

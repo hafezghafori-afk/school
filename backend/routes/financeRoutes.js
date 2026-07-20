@@ -190,6 +190,21 @@ const {
 } = require('../utils/financeAnomalyWorkflow');
 
 const router = express.Router();
+
+const scheduleFinanceBackgroundTask = (label, task) => {
+  const run = () => {
+    Promise.resolve()
+      .then(task)
+      .catch((error) => {
+        console.error(`[finance-background:${label}]`, error?.message || error);
+      });
+  };
+  if (typeof setImmediate === 'function') {
+    setImmediate(run);
+  } else {
+    setTimeout(run, 0);
+  }
+};
 const FINANCE_FOUR_EYES_ENABLED = String(process.env.FINANCE_FOUR_EYES_ENABLED || 'true').toLowerCase() !== 'false';
 
 const receiptsDir = path.join(__dirname, '..', 'uploads', 'finance-receipts');
@@ -509,20 +524,18 @@ const notifyFinanceAudience = async ({
     });
   }
 
-  const users = await User.find({ _id: { $in: normalizedUserIds } }).select('email status').lean();
-  await Promise.all(users.map(async (user) => {
-    if (!user?.email || String(user.status || '').trim().toLowerCase() === 'inactive') return;
-    try {
-      await sendMail({
+  scheduleFinanceBackgroundTask('notification-email', async () => {
+    const users = await User.find({ _id: { $in: normalizedUserIds } }).select('email status').lean();
+    await Promise.allSettled(users.map((user) => {
+      if (!user?.email || String(user.status || '').trim().toLowerCase() === 'inactive') return Promise.resolve();
+      return sendMail({
         to: user.email,
         subject: emailSubject || title,
         text: emailText || message,
         html: emailHtml || `<p>${message}</p>`
       });
-    } catch {
-      return null;
-    }
-  }));
+    }));
+  });
 
   return notifications;
 };
@@ -4988,8 +5001,17 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
     let created = 0;
     let skipped = preview.excluded.length;
     const createdIds = [];
+    const createdNotifications = [];
+    const existingBills = await FinanceBill.find({
+      student: { $in: preview.items.map((item) => item.student) },
+      course: scope.courseId,
+      status: { $ne: 'void' }
+    })
+      .select('student course academicYear term periodType periodLabel dueDate')
+      .lean();
+    const existingObligationKeys = new Set(existingBills.map((item) => getBillObligationKey(item)));
     for (const candidate of preview.items) {
-      const exists = await findConflictingBill({
+      const obligationKey = buildBillObligationKey({
         studentId: candidate.student,
         courseId: scope.courseId,
         academicYear: normalizedAcademicYear,
@@ -4998,10 +5020,21 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
         periodLabel: candidate.periodLabel || normalizedPeriodLabel,
         dueDate: candidate.dueDate || dueDateValue
       });
-      if (exists) {
+      if (existingObligationKeys.has(obligationKey)) {
         skipped += 1;
         continue;
       }
+
+      const issuanceKey = buildGroupedBillIssuanceKey({
+        studentMembershipId: candidate.studentMembershipId,
+        courseId: scope.courseId,
+        academicYearId: candidate.academicYearId,
+        academicYear: normalizedAcademicYear,
+        term: candidate.term || normalizedTerm,
+        periodType: normalizedPeriodType,
+        periodLabel: candidate.periodLabel || normalizedPeriodLabel,
+        dueDate: candidate.dueDate || dueDateValue
+      });
 
       const bill = new FinanceBill({
         billNumber: await generateBillNumber(),
@@ -5020,16 +5053,7 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
         periodLabel: candidate.periodLabel || normalizedPeriodLabel,
         academicYear: normalizedAcademicYear,
         term: candidate.term || normalizedTerm,
-        issuanceKey: buildGroupedBillIssuanceKey({
-          studentMembershipId: candidate.studentMembershipId,
-          courseId: scope.courseId,
-          academicYearId: candidate.academicYearId,
-          academicYear: normalizedAcademicYear,
-          term: candidate.term || normalizedTerm,
-          periodType: normalizedPeriodType,
-          periodLabel: candidate.periodLabel || normalizedPeriodLabel,
-          dueDate: candidate.dueDate || dueDateValue
-        }),
+        issuanceKey,
         currency: String(currency || 'AFN').trim().toUpperCase(),
         feeScopes: candidate.feeScopes,
         feeBreakdown: candidate.feeBreakdown,
@@ -5051,16 +5075,25 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
         throw error;
       }
       await syncStudentFinanceFromFinanceBill(bill).catch(() => null);
+      existingObligationKeys.add(obligationKey);
       created += 1;
       createdIds.push(bill._id);
-
-      await notifyStudent({
-        req,
+      createdNotifications.push({
         studentId: candidate.student,
         studentCoreId: candidate.studentId,
         title: 'بل جدید صنف صادر شد',
         message: `بل جدید شما برای صنف صادر شد. شماره بل: ${bill.billNumber}`,
         emailSubject: 'صدور بل جدید'
+      });
+    }
+
+    if (createdNotifications.length) {
+      scheduleFinanceBackgroundTask('bulk-bill-notifications', async () => {
+        const batchSize = 10;
+        for (let index = 0; index < createdNotifications.length; index += batchSize) {
+          const batch = createdNotifications.slice(index, index + batchSize);
+          await Promise.allSettled(batch.map((notification) => notifyStudent({ req, ...notification })));
+        }
       });
     }
 
