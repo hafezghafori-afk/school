@@ -5334,6 +5334,37 @@ async function run() {
       }
     });
 
+    await check('route smoke: admission receipt correction preview is protected and class-scoped', async () => {
+      const unauthenticated = await request(
+        server,
+        `/api/finance/admin/admission-receipt-corrections/preview?classId=${IDS.class1}`
+      );
+      assertCase(unauthenticated.status === 401, `expected 401, received ${unauthenticated.status}`);
+
+      const invalidClass = await request(
+        server,
+        '/api/finance/admin/admission-receipt-corrections/preview?classId=invalid',
+        { user: financeManagerUser }
+      );
+      assertCase(invalidClass.status === 400, `expected invalid class 400, received ${invalidClass.status}`);
+
+      const preview = await request(
+        server,
+        `/api/finance/admin/admission-receipt-corrections/preview?classId=${IDS.class1}`,
+        { user: financeManagerUser }
+      );
+      assertCase(preview.status === 200, `expected correction preview 200, received ${preview.status}: ${preview.text}`);
+      assertCase(Array.isArray(preview.data?.items), 'expected correction preview items');
+      assertCase(Number(preview.data?.summary?.eligible || 0) === 0, 'expected no seeded canonical admission corrections');
+
+      const emptyApply = await request(server, '/api/finance/admin/admission-receipt-corrections/apply', {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { classId: IDS.class1, paymentIds: [] }
+      });
+      assertCase(emptyApply.status === 400, `expected empty correction apply 400, received ${emptyApply.status}`);
+    });
+
     await check('route smoke: grouped bill generation uses active memberships', async () => {
       const baselineCount = bills.length;
       membershipRecoveryScanCount = 0;
