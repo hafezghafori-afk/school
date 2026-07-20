@@ -6912,6 +6912,342 @@ const buildBatchAdmissionOrderNumber = () => {
   return `AD-${monthKey}-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
 };
 
+const buildAdmissionCorrectionPaymentNumber = () => {
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+  return `PAY-${stamp}-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+};
+
+const isAdmissionCorrectionOrder = (order = null) => {
+  if (!order) return false;
+  if (String(order.orderType || '').trim() === 'admission') return true;
+  return (Array.isArray(order.lineItems) ? order.lineItems : [])
+    .some((item) => String(item?.feeType || '').trim() === 'admission');
+};
+
+const getAdmissionCorrectionOrderId = (payment = {}) => {
+  const allocations = Array.isArray(payment.allocations) ? payment.allocations : [];
+  if (allocations.length > 1) return '';
+  return String(allocations[0]?.feeOrderId || payment.feeOrderId || '').trim();
+};
+
+const buildAdmissionReceiptCorrectionPreview = async ({
+  scope = {},
+  academicYearId = '',
+  paymentIds = [],
+  actorLevel = ''
+} = {}) => {
+  const normalizedPaymentIds = Array.from(new Set(
+    (Array.isArray(paymentIds) ? paymentIds : [])
+      .map((item) => String(item || '').trim())
+      .filter((item) => mongoose.Types.ObjectId.isValid(item))
+  ));
+  const paymentFilter = {
+    classId: scope.classId,
+    status: 'pending'
+  };
+  if (academicYearId && mongoose.Types.ObjectId.isValid(academicYearId)) {
+    paymentFilter.academicYearId = academicYearId;
+  }
+  if (normalizedPaymentIds.length) paymentFilter._id = { $in: normalizedPaymentIds };
+
+  const payments = await FeePayment.find(paymentFilter)
+    .populate('student', 'name email')
+    .populate('studentId', 'fullName admissionNo')
+    .populate('classId', 'title code gradeLevel section')
+    .populate('academicYearId', 'title code')
+    .sort({ paidAt: -1, createdAt: -1 })
+    .limit(500)
+    .lean();
+  const orderIds = Array.from(new Set(payments.map(getAdmissionCorrectionOrderId).filter(Boolean)));
+  const [orders, activePayments] = orderIds.length ? await Promise.all([
+    FeeOrder.find({ _id: { $in: orderIds } }).lean(),
+    FeePayment.find({
+      status: { $in: ['pending', 'approved'] },
+      $or: [
+        { feeOrderId: { $in: orderIds } },
+        { 'allocations.feeOrderId': { $in: orderIds } }
+      ]
+    }).select('_id feeOrderId allocations status').lean()
+  ]) : [[], []];
+  const orderMap = new Map(orders.map((item) => [String(item._id), item]));
+  const activePaymentMap = new Map();
+  activePayments.forEach((payment) => {
+    const linkedIds = Array.from(new Set([
+      String(payment.feeOrderId || '').trim(),
+      ...(Array.isArray(payment.allocations) ? payment.allocations : [])
+        .map((item) => String(item?.feeOrderId || '').trim())
+    ].filter(Boolean)));
+    linkedIds.forEach((orderId) => {
+      const current = activePaymentMap.get(orderId) || [];
+      current.push(payment);
+      activePaymentMap.set(orderId, current);
+    });
+  });
+
+  const planCache = new Map();
+  const items = [];
+  let totalPendingAdmission = 0;
+  let alreadyCorrect = 0;
+  let blocked = 0;
+
+  for (const payment of payments) {
+    const orderId = getAdmissionCorrectionOrderId(payment);
+    const order = orderMap.get(orderId) || null;
+    if (!order || !isAdmissionCorrectionOrder(order)) continue;
+    totalPendingAdmission += 1;
+
+    const yearId = String(payment.academicYearId?._id || payment.academicYearId || order.academicYearId || '').trim();
+    const yearTitle = String(payment.academicYearId?.title || payment.academicYearId?.code || '').trim();
+    const planKey = `${String(scope.classId || '')}:${yearId || yearTitle || '*'}`;
+    if (!planCache.has(planKey)) {
+      const plan = await resolveFeePlanForBilling({
+        classId: String(scope.classId || ''),
+        courseId: String(scope.courseId || ''),
+        academicYearId: yearId,
+        academicYear: yearTitle
+      });
+      const planIsActive = plan
+        && plan.isActive !== false
+        && !['inactive', 'archived'].includes(String(plan.lifecycleStatus || '').trim().toLowerCase());
+      planCache.set(planKey, planIsActive ? plan : null);
+    }
+    const plan = planCache.get(planKey);
+    const plannedAmount = plan ? roundMoney(getFeePlanPrimaryAmount(plan, 'admission')) : 0;
+    const currentPaymentAmount = roundMoney(payment.amount);
+    const currentOrderAmount = roundMoney(order.amountOriginal);
+    const difference = Math.round(((plannedAmount - currentPaymentAmount) + Number.EPSILON) * 100) / 100;
+    const mismatch = plannedAmount > 0 && (
+      Math.abs(plannedAmount - currentPaymentAmount) > 0.009
+      || Math.abs(plannedAmount - currentOrderAmount) > 0.009
+    );
+    if (!mismatch) {
+      alreadyCorrect += 1;
+      continue;
+    }
+
+    let blockedReason = '';
+    if (!plan || plannedAmount <= 0) {
+      blockedReason = 'پلان فعال با مبلغ داخله برای این صنف و سال پیدا نشد.';
+    } else if (payment.sourceReceiptId || order.sourceBillId || (payment.source && payment.source !== 'manual')) {
+      blockedReason = 'این رسید به مسیر قدیمی مالی وصل است و باید جداگانه بررسی شود.';
+    } else if (!canReviewReceiptStage(actorLevel, payment.approvalStage)) {
+      blockedReason = 'مرحله فعلی رسید با سطح دسترسی شما قابل اصلاح نیست.';
+    } else if (String(order.status || '').trim() === 'void') {
+      blockedReason = 'بل قبلی باطل شده است.';
+    } else if (roundMoney(order.amountPaid) > 0) {
+      blockedReason = 'روی این بل قبلاً پرداخت تأییدشده ثبت شده است.';
+    } else {
+      const otherActivePayments = (activePaymentMap.get(orderId) || [])
+        .filter((item) => String(item._id) !== String(payment._id));
+      if (otherActivePayments.length) {
+        blockedReason = 'برای این بل یک رسید فعال دیگر نیز وجود دارد.';
+      }
+    }
+    if (blockedReason) blocked += 1;
+
+    items.push({
+      paymentId: String(payment._id),
+      paymentNumber: String(payment.paymentNumber || ''),
+      orderId,
+      orderNumber: String(order.orderNumber || ''),
+      studentName: String(payment.studentId?.fullName || payment.student?.name || '').trim(),
+      classId: String(payment.classId?._id || payment.classId || scope.classId || ''),
+      classTitle: String(payment.classId?.title || '').trim(),
+      academicYearId: yearId,
+      academicYearTitle: yearTitle,
+      planId: String(plan?._id || ''),
+      planTitle: String(plan?.title || plan?.planCode || '').trim(),
+      currency: String(plan?.currency || payment.currency || order.currency || 'AFN').trim().toUpperCase(),
+      currentPaymentAmount,
+      currentOrderAmount,
+      plannedAmount,
+      difference,
+      eligible: !blockedReason,
+      blockedReason
+    });
+  }
+
+  return {
+    items,
+    summary: {
+      totalPendingAdmission,
+      correctionRequired: items.length,
+      eligible: items.filter((item) => item.eligible).length,
+      blocked,
+      alreadyCorrect
+    }
+  };
+};
+
+const correctPendingAdmissionReceipt = async ({ req, candidate = {}, note = '', actorLevel = '' } = {}) => {
+  const session = await mongoose.startSession();
+  try {
+    session.startTransaction();
+    const [payment, order, plan] = await Promise.all([
+      FeePayment.findById(candidate.paymentId).session(session),
+      FeeOrder.findById(candidate.orderId).session(session),
+      FinanceFeePlan.findById(candidate.planId).session(session)
+    ]);
+    if (!payment || payment.status !== 'pending') throw createRouteError(409, 'رسید دیگر در انتظار تأیید نیست.');
+    if (!order || !isAdmissionCorrectionOrder(order) || order.status === 'void') throw createRouteError(409, 'بل داخله برای اصلاح معتبر نیست.');
+    if (!plan || plan.isActive === false || ['inactive', 'archived'].includes(String(plan.lifecycleStatus || '').trim().toLowerCase())) {
+      throw createRouteError(409, 'پلان مالی انتخاب‌شده دیگر فعال نیست.');
+    }
+    if (!canReviewReceiptStage(actorLevel, payment.approvalStage)) {
+      throw createRouteError(403, 'مرحله فعلی رسید با سطح دسترسی شما قابل اصلاح نیست.');
+    }
+    if (payment.sourceReceiptId || order.sourceBillId || (payment.source && payment.source !== 'manual')) {
+      throw createRouteError(409, 'این نوع رسید در اصلاح گروهی پشتیبانی نمی‌شود.');
+    }
+    if (roundMoney(order.amountPaid) > 0) throw createRouteError(409, 'روی بل قبلاً پرداخت تأییدشده ثبت شده است.');
+    if (await isMonthClosed(order.issuedAt || payment.paidAt || new Date())) {
+      throw createRouteError(409, 'ماه مالی این بل بسته شده و اصلاح آن مجاز نیست.');
+    }
+    const otherActivePayment = await FeePayment.findOne({
+      _id: { $ne: payment._id },
+      status: { $in: ['pending', 'approved'] },
+      $or: [
+        { feeOrderId: order._id },
+        { 'allocations.feeOrderId': order._id }
+      ]
+    }).session(session).lean();
+    if (otherActivePayment) throw createRouteError(409, 'برای این بل یک رسید فعال دیگر وجود دارد.');
+
+    const plannedAmount = roundMoney(getFeePlanPrimaryAmount(plan, 'admission'));
+    if (plannedAmount <= 0) throw createRouteError(409, 'مبلغ داخله در پلان مالی معتبر نیست.');
+    const now = new Date();
+    const oldPaymentAmount = roundMoney(payment.amount);
+    const oldOrderAmount = roundMoney(order.amountOriginal);
+    if (Math.abs(oldPaymentAmount - plannedAmount) <= 0.009 && Math.abs(oldOrderAmount - plannedAmount) <= 0.009) {
+      throw createRouteError(409, 'مبلغ این رسید قبلاً با پلان مالی برابر شده است.');
+    }
+
+    const replacementOrder = new FeeOrder({
+      orderNumber: buildBatchAdmissionOrderNumber(),
+      issuanceKey: `${String(order.issuanceKey || `admission-correction:${order._id}`)}:revision:${now.getTime()}:${crypto.randomBytes(2).toString('hex')}`,
+      title: 'داخله - اصلاح مبلغ و در انتظار تأیید پرداخت',
+      orderType: 'admission',
+      source: 'manual',
+      student: order.student,
+      studentId: order.studentId || null,
+      studentMembershipId: order.studentMembershipId || payment.studentMembershipId || null,
+      linkScope: order.linkScope || 'membership',
+      course: order.course || null,
+      schoolId: order.schoolId || payment.schoolId || null,
+      classId: order.classId || payment.classId || null,
+      academicYearId: order.academicYearId || payment.academicYearId || null,
+      assessmentPeriodId: order.assessmentPeriodId || null,
+      periodType: 'custom',
+      periodLabel: 'داخله',
+      currency: String(plan.currency || order.currency || payment.currency || 'AFN').trim().toUpperCase(),
+      amountOriginal: plannedAmount,
+      amountPaid: 0,
+      dueDate: order.dueDate || payment.paidAt || now,
+      paidAt: null,
+      note: [
+        `اصلاح گروهی مبلغ داخله؛ جایگزین بل ${order.orderNumber || order._id} و رسید ${payment.paymentNumber || payment._id}.`,
+        `مبلغ قبلی بل: ${oldOrderAmount}، مبلغ قبلی رسید: ${oldPaymentAmount}، مبلغ صحیح پلان: ${plannedAmount}.`,
+        note
+      ].filter(Boolean).join(' '),
+      adjustments: [],
+      lineItems: [{
+        feeType: 'admission',
+        label: 'داخله',
+        sourcePlanId: plan._id,
+        periodKey: 'admission-correction',
+        grossAmount: plannedAmount,
+        reductionAmount: 0,
+        netAmount: plannedAmount,
+        paidAmount: 0,
+        balanceAmount: plannedAmount,
+        status: 'open'
+      }],
+      createdBy: req.user.id
+    });
+    await replacementOrder.save({ session });
+
+    const replacementPayment = new FeePayment({
+      paymentNumber: buildAdmissionCorrectionPaymentNumber(),
+      feeOrderId: replacementOrder._id,
+      source: 'manual',
+      student: payment.student,
+      studentId: payment.studentId || null,
+      studentMembershipId: payment.studentMembershipId || order.studentMembershipId || null,
+      linkScope: payment.linkScope || order.linkScope || 'membership',
+      schoolId: payment.schoolId || order.schoolId || null,
+      classId: payment.classId || order.classId || null,
+      academicYearId: payment.academicYearId || order.academicYearId || null,
+      payerType: payment.payerType || 'student_guardian',
+      receivedBy: payment.receivedBy || req.user.id,
+      amount: plannedAmount,
+      currency: replacementOrder.currency,
+      paymentMethod: payment.paymentMethod || 'cash',
+      allocationMode: 'manual',
+      allocations: [{
+        feeOrderId: replacementOrder._id,
+        amount: plannedAmount,
+        title: replacementOrder.title,
+        orderNumber: replacementOrder.orderNumber
+      }],
+      referenceNo: payment.referenceNo || '',
+      paidAt: payment.paidAt || now,
+      fileUrl: payment.fileUrl || '',
+      note: [
+        `رسید اصلاحی جایگزین ${payment.paymentNumber || payment._id} با مبلغ صحیح پلان مالی است.`,
+        note
+      ].filter(Boolean).join(' '),
+      status: 'pending',
+      approvalStage: RECEIPT_STAGES.financeManager
+    });
+    await replacementPayment.save({ session });
+
+    const correctionReason = `رد خودکار برای اصلاح مبلغ داخله؛ جایگزین: ${replacementPayment.paymentNumber}`;
+    payment.status = 'rejected';
+    payment.approvalStage = RECEIPT_STAGES.rejected;
+    payment.reviewedBy = req.user.id;
+    payment.reviewedAt = now;
+    payment.rejectReason = correctionReason;
+    payment.reviewNote = '';
+    payment.approvalTrail = Array.isArray(payment.approvalTrail) ? payment.approvalTrail : [];
+    payment.approvalTrail.push({
+      level: actorLevel,
+      action: 'reject',
+      by: req.user.id,
+      at: now,
+      reason: correctionReason,
+      note: note || ''
+    });
+    await payment.save({ session });
+
+    order.status = 'void';
+    order.voidReason = `ابطال خودکار به دلیل اصلاح مبلغ پلان؛ بل جایگزین: ${replacementOrder.orderNumber}`;
+    order.voidedBy = req.user.id;
+    order.voidedAt = now;
+    order.note = [order.note, order.voidReason].filter(Boolean).join(' ');
+    await order.save({ session });
+
+    await session.commitTransaction();
+    return {
+      paymentId: String(payment._id),
+      paymentNumber: String(payment.paymentNumber || ''),
+      replacementPaymentId: String(replacementPayment._id),
+      replacementPaymentNumber: String(replacementPayment.paymentNumber || ''),
+      orderId: String(order._id),
+      orderNumber: String(order.orderNumber || ''),
+      replacementOrderId: String(replacementOrder._id),
+      replacementOrderNumber: String(replacementOrder.orderNumber || ''),
+      oldAmount: oldPaymentAmount,
+      correctedAmount: plannedAmount,
+      studentName: candidate.studentName || ''
+    };
+  } catch (error) {
+    if (session.inTransaction()) await session.abortTransaction();
+    throw error;
+  } finally {
+    await session.endSession();
+  }
+};
+
 const settleAdmissionAnomalyRecord = async ({
   req,
   anomalyId = '',
@@ -7265,6 +7601,147 @@ router.post('/admin/anomalies/settle-admission-batch', requireAuth, requireRole(
       success: false,
       message: error?.message || 'ثبت گروهی داخله ممکن نشد',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+router.get('/admin/admission-receipt-corrections/preview', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const classId = String(req.query?.classId || '').trim();
+    if (!classId || !mongoose.Types.ObjectId.isValid(classId)) {
+      return res.status(400).json({ success: false, message: 'برای پیش‌نمایش اصلاح رسیدها، صنف معتبر انتخاب کنید.' });
+    }
+    const scope = await resolveFinanceScope({ classId });
+    if (scope.error || !scope.classId) {
+      return res.status(400).json({ success: false, message: scope.error || 'صنف مالی معتبر پیدا نشد.' });
+    }
+    const actorLevel = await resolveAdminActorLevel(req.user.id);
+    if (!['finance_manager', 'general_president'].includes(actorLevel)) {
+      return res.status(403).json({ success: false, message: 'سطح دسترسی شما اجازه اصلاح رسیدهای در انتظار را نمی‌دهد.' });
+    }
+    const preview = await buildAdmissionReceiptCorrectionPreview({
+      scope,
+      academicYearId: String(req.query?.academicYearId || '').trim(),
+      actorLevel
+    });
+    return res.json({
+      success: true,
+      ...preview,
+      classId: String(scope.classId),
+      generatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({
+      success: false,
+      message: error?.message || 'پیش‌نمایش اصلاح گروهی رسیدهای داخله ممکن نشد'
+    });
+  }
+});
+
+router.post('/admin/admission-receipt-corrections/apply', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const classId = String(req.body?.classId || '').trim();
+    if (!classId || !mongoose.Types.ObjectId.isValid(classId)) {
+      return res.status(400).json({ success: false, message: 'برای اصلاح گروهی رسیدها، صنف معتبر انتخاب کنید.' });
+    }
+    const paymentIds = Array.from(new Set(
+      (Array.isArray(req.body?.paymentIds) ? req.body.paymentIds : [])
+        .map((item) => String(item || '').trim())
+        .filter((item) => mongoose.Types.ObjectId.isValid(item))
+    )).slice(0, 500);
+    if (!paymentIds.length) {
+      return res.status(400).json({ success: false, message: 'هیچ رسید واجد شرایط برای اصلاح انتخاب نشده است.' });
+    }
+    const scope = await resolveFinanceScope({ classId });
+    if (scope.error || !scope.classId) {
+      return res.status(400).json({ success: false, message: scope.error || 'صنف مالی معتبر پیدا نشد.' });
+    }
+    const actorLevel = await resolveAdminActorLevel(req.user.id);
+    if (!['finance_manager', 'general_president'].includes(actorLevel)) {
+      return res.status(403).json({ success: false, message: 'سطح دسترسی شما اجازه اصلاح رسیدهای در انتظار را نمی‌دهد.' });
+    }
+    const note = String(req.body?.note || '').trim().slice(0, 500);
+    const preview = await buildAdmissionReceiptCorrectionPreview({
+      scope,
+      academicYearId: String(req.body?.academicYearId || '').trim(),
+      paymentIds,
+      actorLevel
+    });
+    const eligible = preview.items.filter((item) => item.eligible && paymentIds.includes(item.paymentId));
+    if (!eligible.length) {
+      return res.status(409).json({
+        success: false,
+        summary: preview.summary,
+        items: preview.items,
+        message: 'هیچ رسید نادرست و قابل اصلاح باقی نمانده است؛ پیش‌نمایش را دوباره تازه کنید.'
+      });
+    }
+
+    const results = [];
+    const batchSize = 6;
+    for (let index = 0; index < eligible.length; index += batchSize) {
+      const batch = eligible.slice(index, index + batchSize);
+      const batchResults = await Promise.all(batch.map(async (candidate) => {
+        try {
+          const corrected = await correctPendingAdmissionReceipt({ req, candidate, note, actorLevel });
+          return { ok: true, ...corrected };
+        } catch (error) {
+          return {
+            ok: false,
+            paymentId: candidate.paymentId,
+            paymentNumber: candidate.paymentNumber,
+            studentName: candidate.studentName,
+            message: String(error?.message || 'اصلاح رسید ممکن نشد')
+          };
+        }
+      }));
+      results.push(...batchResults);
+    }
+
+    const corrected = results.filter((item) => item.ok);
+    const failures = results.filter((item) => !item.ok);
+    await logActivity({
+      req,
+      action: 'finance_admission_receipt_correction_batch',
+      targetType: 'SchoolClass',
+      targetId: String(scope.classId),
+      meta: {
+        classId: String(scope.classId),
+        requested: paymentIds.length,
+        eligible: eligible.length,
+        corrected: corrected.length,
+        failed: failures.length,
+        note,
+        replacements: corrected.slice(0, 50).map((item) => ({
+          oldPaymentNumber: item.paymentNumber,
+          replacementPaymentNumber: item.replacementPaymentNumber,
+          oldAmount: item.oldAmount,
+          correctedAmount: item.correctedAmount
+        }))
+      }
+    });
+
+    return res.json({
+      success: corrected.length > 0,
+      partialSuccess: corrected.length > 0 && failures.length > 0,
+      summary: {
+        requested: paymentIds.length,
+        eligible: eligible.length,
+        corrected: corrected.length,
+        failed: failures.length,
+        blocked: preview.summary.blocked,
+        alreadyCorrect: preview.summary.alreadyCorrect
+      },
+      corrected: corrected.slice(0, 100),
+      failures: failures.slice(0, 100),
+      message: failures.length
+        ? `${corrected.length} رسید داخله اصلاح شد و ${failures.length} مورد نیازمند بررسی باقی ماند.`
+        : `${corrected.length} رسید داخله با مبلغ صحیح پلان جایگزین شد.`
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({
+      success: false,
+      message: error?.message || 'اصلاح گروهی رسیدهای داخله ممکن نشد'
     });
   }
 });

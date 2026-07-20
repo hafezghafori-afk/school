@@ -1306,6 +1306,17 @@ export default function AdminFinance() {
     error: ''
   });
   const [admissionBatchRefreshKey, setAdmissionBatchRefreshKey] = useState(0);
+  const [admissionReceiptCorrectionForm, setAdmissionReceiptCorrectionForm] = useState({
+    classId: '',
+    note: ''
+  });
+  const [admissionReceiptCorrectionPreview, setAdmissionReceiptCorrectionPreview] = useState({
+    loading: false,
+    items: [],
+    summary: null,
+    error: ''
+  });
+  const [admissionReceiptCorrectionRefreshKey, setAdmissionReceiptCorrectionRefreshKey] = useState(0);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [activeSchoolContext, setActiveSchoolContext] = useState(null);
@@ -2852,6 +2863,50 @@ export default function AdminFinance() {
   }, [admissionBatchForm.classId, admissionBatchRefreshKey]);
 
   useEffect(() => {
+    const classId = String(admissionReceiptCorrectionForm.classId || '').trim();
+    if (!classId) {
+      setAdmissionReceiptCorrectionPreview({ loading: false, items: [], summary: null, error: '' });
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setAdmissionReceiptCorrectionPreview((prev) => ({ ...prev, loading: true, error: '' }));
+    const query = new URLSearchParams({ classId });
+    fetchJson(`${API_BASE}/api/finance/admin/admission-receipt-corrections/preview?${query.toString()}`, {
+      signal: controller.signal
+    })
+      .then((data) => {
+        if (!data?.success) {
+          setAdmissionReceiptCorrectionPreview({
+            loading: false,
+            items: [],
+            summary: null,
+            error: data?.message || 'پیش‌نمایش اصلاح رسیدهای داخله ممکن نشد.'
+          });
+          return;
+        }
+        setAdmissionReceiptCorrectionPreview({
+          loading: false,
+          items: Array.isArray(data.items) ? data.items : [],
+          summary: data.summary || null,
+          error: ''
+        });
+      })
+      .catch((error) => {
+        if (error?.name === 'AbortError') return;
+        setAdmissionReceiptCorrectionPreview({
+          loading: false,
+          items: [],
+          summary: null,
+          error: error?.message || 'پیش‌نمایش اصلاح رسیدهای داخله ممکن نشد.'
+        });
+      });
+
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [admissionReceiptCorrectionForm.classId, admissionReceiptCorrectionRefreshKey]);
+
+  useEffect(() => {
     setDiscountRegistryPage(1);
   }, [discountRegistryClassFilter, discountRegistryPageSize, discountRegistrySearch]);
 
@@ -4206,6 +4261,48 @@ export default function AdminFinance() {
       const data = await postJson(`${API_BASE}/api/student-finance/payments/${id}/reject`, { reason });
       setMessage(data.message || 'رسید رد شد');
       await refreshFinanceOperationalData({ includeAnomalies: true });
+    } catch (err) {
+      setMessage(err.message);
+      setBusy(false);
+    }
+  };
+
+  const applyAdmissionReceiptCorrections = async () => {
+    const classId = String(admissionReceiptCorrectionForm.classId || '').trim();
+    const eligibleItems = admissionReceiptCorrectionPreview.items.filter((item) => item?.eligible);
+    if (!classId) {
+      setMessage('ابتدا صنف مربوط به رسیدهای داخله را انتخاب کنید.');
+      return;
+    }
+    if (!eligibleItems.length) {
+      setMessage('برای این صنف رسید نادرست و قابل اصلاح پیدا نشد.');
+      return;
+    }
+    const selectedClass = classOptions.find((item) => item.classId === classId);
+    const totalOld = eligibleItems.reduce((sum, item) => sum + toSafeNumber(item?.currentPaymentAmount), 0);
+    const totalNew = eligibleItems.reduce((sum, item) => sum + toSafeNumber(item?.plannedAmount), 0);
+    const confirmed = window.confirm(
+      `${eligibleItems.length} رسید داخله در صنف ${getClassOptionLabel(selectedClass || {})} اصلاح شود؟\n`
+      + `مجموع فعلی: ${fmt(totalOld)} AFN\nمجموع صحیح پلان: ${fmt(totalNew)} AFN\n`
+      + 'رسیدهای قبلی رد و بل‌های قبلی باطل می‌شوند؛ سپس سندهای جایگزین دوباره به صف تأیید می‌آیند.'
+    );
+    if (!confirmed) return;
+
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/finance/admin/admission-receipt-corrections/apply`, {
+        classId,
+        paymentIds: eligibleItems.map((item) => item.paymentId),
+        note: String(admissionReceiptCorrectionForm.note || '').trim()
+      });
+      const corrected = Number(data?.summary?.corrected || 0);
+      const failed = Number(data?.summary?.failed || 0);
+      setMessage(
+        data?.message
+        || `${corrected} رسید اصلاح شد${failed ? ` و ${failed} مورد نیازمند بررسی باقی ماند` : ''}.`
+      );
+      setAdmissionReceiptCorrectionRefreshKey((value) => value + 1);
+      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -7089,6 +7186,99 @@ export default function AdminFinance() {
               ))}
             </select>
           </label>
+        </div>
+        <div className="admission-receipt-correction-panel" data-testid="admission-receipt-correction-panel">
+          <div className="finance-card-head">
+            <div>
+              <h4>اصلاح گروهی مبلغ رسیدهای داخله</h4>
+              <p className="muted">
+                فقط رسیدهای داخلهٔ در انتظار که مبلغ‌شان با پلان فعلی صنف برابر نیست بررسی می‌شوند. سند قبلی حذف نمی‌شود؛ رد و با سند صحیح جایگزین می‌گردد.
+              </p>
+            </div>
+            <span className="finance-chip finance-chip-amber" data-testid="admission-receipt-correction-count">
+              {admissionReceiptCorrectionPreview.loading
+                ? 'در حال بررسی…'
+                : `${admissionReceiptCorrectionPreview.summary?.eligible || 0} قابل اصلاح`}
+            </span>
+          </div>
+          <div className="receipt-follow-up-grid admission-receipt-correction-controls">
+            <label className="finance-inline-filter">
+              <span>صنف</span>
+              <select
+                value={admissionReceiptCorrectionForm.classId}
+                onChange={(e) => setAdmissionReceiptCorrectionForm((prev) => ({ ...prev, classId: e.target.value }))}
+                data-testid="admission-receipt-correction-class"
+              >
+                <option value="">انتخاب صنف</option>
+                {classOptions.map((item) => (
+                  <option key={`admission-receipt-correction-${item.classId}`} value={item.classId}>
+                    {getClassOptionLabel(item)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="finance-inline-filter finance-inline-filter-wide">
+              <span>یادداشت اصلاح</span>
+              <input
+                value={admissionReceiptCorrectionForm.note}
+                onChange={(e) => setAdmissionReceiptCorrectionForm((prev) => ({ ...prev, note: e.target.value }))}
+                placeholder="مثلاً: مبلغ پلان داخله اصلاح شد"
+                data-testid="admission-receipt-correction-note"
+              />
+            </label>
+          </div>
+          {admissionReceiptCorrectionPreview.summary ? (
+            <div className="finance-chip-group">
+              <span className="finance-chip">رسیدهای داخله در انتظار: {fmt(admissionReceiptCorrectionPreview.summary.totalPendingAdmission || 0)}</span>
+              <span className="finance-chip finance-chip-amber">نیازمند اصلاح: {fmt(admissionReceiptCorrectionPreview.summary.correctionRequired || 0)}</span>
+              <span className="finance-chip finance-chip-emerald">قابل اصلاح: {fmt(admissionReceiptCorrectionPreview.summary.eligible || 0)}</span>
+              <span className="finance-chip finance-chip-muted">از قبل صحیح: {fmt(admissionReceiptCorrectionPreview.summary.alreadyCorrect || 0)}</span>
+              {!!admissionReceiptCorrectionPreview.summary.blocked && (
+                <span className="finance-chip finance-chip-rose">نیازمند بررسی دستی: {fmt(admissionReceiptCorrectionPreview.summary.blocked)}</span>
+              )}
+            </div>
+          ) : null}
+          {admissionReceiptCorrectionPreview.error ? (
+            <p className="admission-batch-error">{admissionReceiptCorrectionPreview.error}</p>
+          ) : null}
+          {!!admissionReceiptCorrectionPreview.items.length && (
+            <div className="admission-receipt-correction-list">
+              {admissionReceiptCorrectionPreview.items.slice(0, 12).map((item) => (
+                <div className={`admission-receipt-correction-row ${item.eligible ? '' : 'blocked'}`} key={item.paymentId}>
+                  <span className="finance-cell-stack">
+                    <strong>{item.studentName || 'شاگرد'}</strong>
+                    <small className="finance-latin-code">{formatFinanceCode(item.paymentNumber, '-')}</small>
+                  </span>
+                  <span>فعلی: <strong>{fmt(item.currentPaymentAmount)} AFN</strong></span>
+                  <span>پلان: <strong>{fmt(item.plannedAmount)} AFN</strong></span>
+                  <span className={item.eligible ? 'correction-ready' : 'correction-blocked'}>
+                    {item.eligible ? `اختلاف: ${fmt(Math.abs(toSafeNumber(item.plannedAmount) - toSafeNumber(item.currentPaymentAmount)))} AFN` : item.blockedReason}
+                  </span>
+                </div>
+              ))}
+              {admissionReceiptCorrectionPreview.items.length > 12 ? (
+                <p className="muted">و {fmt(admissionReceiptCorrectionPreview.items.length - 12)} مورد دیگر…</p>
+              ) : null}
+            </div>
+          )}
+          <div className="row-actions">
+            <button
+              type="button"
+              onClick={() => setAdmissionReceiptCorrectionRefreshKey((value) => value + 1)}
+              disabled={busy || admissionReceiptCorrectionPreview.loading || !admissionReceiptCorrectionForm.classId}
+              className="secondary"
+            >
+              تازه‌سازی پیش‌نمایش
+            </button>
+            <button
+              type="button"
+              onClick={applyAdmissionReceiptCorrections}
+              disabled={busy || admissionReceiptCorrectionPreview.loading || !(admissionReceiptCorrectionPreview.summary?.eligible > 0)}
+              data-testid="admission-receipt-correction-submit"
+            >
+              اصلاح و صدور رسیدهای جایگزین
+            </button>
+          </div>
         </div>
         <div className="finance-chip-group receipt-inbox-summary">
           <span className="finance-chip">کل: {receiptInboxSummary.total}</span>
