@@ -1032,6 +1032,31 @@ const formatFeeLineSummary = (lineItems = []) => (
     .join(' | ')
 );
 
+const getBillFeeTypes = (bill = {}) => {
+  const lineTypes = (Array.isArray(bill?.lineItems) ? bill.lineItems : [])
+    .filter((item) => Number(item?.netAmount ?? item?.grossAmount ?? 0) > 0)
+    .map((item) => String(item?.feeType || '').trim())
+    .filter(Boolean);
+  const fallbackType = String(bill?.orderType || '').trim();
+  return Array.from(new Set(lineTypes.length ? lineTypes : (fallbackType ? [fallbackType] : ['other'])));
+};
+
+const getBillTypeLabel = (bill = {}) => getBillFeeTypes(bill)
+  .map((feeType) => FEE_LINE_TYPE_LABELS[feeType] || feeType)
+  .join(' + ');
+
+const summarizeBillTypes = (items = []) => {
+  const counts = new Map();
+  (Array.isArray(items) ? items : []).forEach((bill) => {
+    getBillFeeTypes(bill).forEach((feeType) => {
+      counts.set(feeType, (counts.get(feeType) || 0) + 1);
+    });
+  });
+  return [...counts.entries()]
+    .map(([feeType, count]) => `${FEE_LINE_TYPE_LABELS[feeType] || feeType}: ${fmt(count)}`)
+    .join(' · ');
+};
+
 const getBillDisplayAmount = (bill = {}) => Math.max(
   0,
   Number(bill?.amountOriginal || 0),
@@ -1060,6 +1085,11 @@ const toLegacyLikeBillRow = (order = {}) => {
     legacyCompatible: Boolean(legacyBillId),
     billNumber: formatFinanceCode(order?.orderNumber || order?.title, '---'),
     title: String(order?.title || '').trim(),
+    orderType: String(order?.orderType || '').trim() || 'other',
+    source: String(order?.source || '').trim(),
+    periodType: String(order?.periodType || '').trim(),
+    periodLabel: String(order?.periodLabel || '').trim(),
+    issuedAt: order?.issuedAt || null,
     student: {
       userId: String(order?.student?.userId || order?.student?.id || order?.student?._id || '').trim(),
       studentId: String(order?.student?.studentId || order?.student?.coreId || '').trim(),
@@ -1368,7 +1398,8 @@ export default function AdminFinance() {
   const [exemptionStudentSearch, setExemptionStudentSearch] = useState('');
   const [receiptSearchTerm, setReceiptSearchTerm] = useState('');
   const [orderSearchTerm, setOrderSearchTerm] = useState('');
-  const [orderStatusFilter, setOrderStatusFilter] = useState('all');
+  const [orderStatusFilter, setOrderStatusFilter] = useState('official');
+  const [orderFeeTypeFilter, setOrderFeeTypeFilter] = useState('all');
   const [orderClassFilter, setOrderClassFilter] = useState('all');
   const [billIssuanceFilter, setBillIssuanceFilter] = useState('all');
   const [discountRegistrySearch, setDiscountRegistrySearch] = useState('');
@@ -1781,11 +1812,16 @@ export default function AdminFinance() {
   ), [indexedFinanceMembershipStudents, activeSection, reliefFormMode, deferredExemptionStudentSearch, exemptionForm.studentId]);
   const filteredBills = useMemo(() => (
     bills.filter((bill) => (
-      (orderStatusFilter === 'all' || String(bill?.status || '').trim() === orderStatusFilter)
+      (orderStatusFilter === 'all'
+        || (orderStatusFilter === 'official' && String(bill?.status || '').trim() !== 'void')
+        || String(bill?.status || '').trim() === orderStatusFilter)
+      && (orderFeeTypeFilter === 'all' || getBillFeeTypes(bill).includes(orderFeeTypeFilter))
       && (orderClassFilter === 'all' || getFinanceRecordClassId(bill) === orderClassFilter)
       && includesFinanceSearch([
         bill?.billNumber,
         bill?.title,
+        bill?.periodLabel,
+        getBillTypeLabel(bill),
         bill?.student?.name,
         bill?.student?.fullName,
         bill?.classId?.title,
@@ -1794,7 +1830,17 @@ export default function AdminFinance() {
         bill?.status
       ], orderSearchTerm)
     ))
-  ), [bills, orderSearchTerm, orderStatusFilter, orderClassFilter]);
+  ), [bills, orderSearchTerm, orderStatusFilter, orderFeeTypeFilter, orderClassFilter]);
+  const orderRecordStats = useMemo(() => {
+    const officialBills = bills.filter((item) => String(item?.status || '').trim() !== 'void');
+    const voidBills = bills.filter((item) => String(item?.status || '').trim() === 'void');
+    return {
+      officialCount: officialBills.length,
+      voidCount: voidBills.length,
+      totalCount: bills.length,
+      officialTypeSummary: summarizeBillTypes(officialBills)
+    };
+  }, [bills]);
   const billIssuanceRows = useMemo(() => {
     const rows = new Map();
     (Array.isArray(studentMemberships) ? studentMemberships : [])
@@ -1809,16 +1855,21 @@ export default function AdminFinance() {
           const billUserId = toFinanceOptionId(bill?.student?.userId || bill?.student?._id);
           const billCoreId = toFinanceOptionId(bill?.student?.studentId);
           return getFinanceRecordClassId(bill) === classId
-            && ((studentUserId && billUserId === studentUserId) || (studentCoreId && billCoreId === studentCoreId));
+            && ((studentUserId && billUserId === studentUserId) || (studentCoreId && billCoreId === studentCoreId))
+            && (orderFeeTypeFilter === 'all' || getBillFeeTypes(bill).includes(orderFeeTypeFilter));
         });
+        const officialBills = studentBills.filter((bill) => String(bill?.status || '').trim() !== 'void');
+        const voidBills = studentBills.filter((bill) => String(bill?.status || '').trim() === 'void');
         rows.set(key, {
           key,
           classId,
           classTitle: membership?.classTitle || membership?.class?.title || membership?.schoolClass?.title || classOptions.find((item) => item.classId === classId)?.title || '---',
           studentName: membership?.studentName || membership?.student?.name || membership?.fullName || '---',
           admissionNo: membership?.admissionNo || membership?.studentCode || '',
-          issued: studentBills.length > 0,
-          billCount: studentBills.length,
+          issued: officialBills.length > 0,
+          billCount: officialBills.length,
+          voidCount: voidBills.length,
+          billTypeSummary: summarizeBillTypes(officialBills),
           billNumbers: studentBills.map((bill) => bill.billNumber).filter(Boolean)
         });
       });
@@ -1827,12 +1878,14 @@ export default function AdminFinance() {
       && (billIssuanceFilter === 'all' || (billIssuanceFilter === 'issued' ? row.issued : !row.issued))
       && includesFinanceSearch([row.studentName, row.admissionNo, row.classTitle, ...row.billNumbers], orderSearchTerm)
     ));
-  }, [studentMemberships, bills, classOptions, orderClassFilter, billIssuanceFilter, orderSearchTerm]);
+  }, [studentMemberships, bills, classOptions, orderClassFilter, orderFeeTypeFilter, billIssuanceFilter, orderSearchTerm]);
   const orderWorkspaceStats = useMemo(() => {
     const now = new Date();
     const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const openBills = bills.filter((item) => OPEN_ORDER_STATUSES.has(String(item?.status || '').trim()));
-    const monthBills = bills.filter((item) => {
+    const officialBills = bills.filter((item) => String(item?.status || '').trim() !== 'void');
+    const voidBills = bills.filter((item) => String(item?.status || '').trim() === 'void');
+    const monthBills = officialBills.filter((item) => {
       const rawDate = item?.dueDate || item?.createdAt || item?.updatedAt;
       const date = rawDate ? new Date(rawDate) : null;
       if (!date || Number.isNaN(date.getTime())) return false;
@@ -1848,6 +1901,8 @@ export default function AdminFinance() {
       monthCount: monthBills.length,
       partialCount: partialBills.length,
       activeCommitments: activeCommitments.length,
+      officialCount: officialBills.length,
+      voidCount: voidBills.length,
       filteredCount: filteredBills.length
     };
   }, [bills, filteredBills.length]);
@@ -5782,8 +5837,12 @@ export default function AdminFinance() {
               <p className="muted">نمای سریع بدهی‌ها، بل‌های سررسید گذشته و تعهدات فعال پیش از صدور یا پیگیری بل.</p>
             </div>
             <div className="finance-chip-group">
+              <span className="finance-chip">{orderWorkspaceStats.officialCount} بل رسمی</span>
               <span className="finance-chip finance-chip-emerald">{orderWorkspaceStats.openCount} بدهی باز</span>
               <span className="finance-chip finance-chip-rose">{orderWorkspaceStats.overdueCount} سررسید گذشته</span>
+              {!!orderWorkspaceStats.voidCount && (
+                <span className="finance-chip finance-chip-muted">{orderWorkspaceStats.voidCount} بل باطل (جدا از رسمی)</span>
+              )}
             </div>
           </div>
           <div className="finance-kpi-grid finance-kpi-grid-dense finance-order-kpis">
@@ -5792,7 +5851,7 @@ export default function AdminFinance() {
               <strong>{fmt(orderWorkspaceStats.totalOutstanding)} AFN</strong>
             </div>
             <div className="finance-kpi-item">
-              <span>بل‌های این ماه</span>
+              <span>بل‌های رسمی این ماه</span>
               <strong>{orderWorkspaceStats.monthCount}</strong>
             </div>
             <div className="finance-kpi-item">
@@ -7729,7 +7788,7 @@ export default function AdminFinance() {
         )}
       </div>
 
-      <div className="finance-card finance-orders-table-card" data-finance-section="orders">
+      <div className="finance-card finance-orders-table-card" data-finance-section="orders" data-testid="finance-orders-table-card">
         <div className="finance-toolbar">
           <div>
             <h3>بل‌ها و تعهدات</h3>
@@ -7745,8 +7804,9 @@ export default function AdminFinance() {
           </label>
           <label className="finance-inline-filter">
             <span>وضعیت بل</span>
-            <select value={orderStatusFilter} onChange={(e) => setOrderStatusFilter(e.target.value)}>
-              <option value="all">همه وضعیت‌ها</option>
+            <select value={orderStatusFilter} onChange={(e) => setOrderStatusFilter(e.target.value)} data-testid="bill-status-filter">
+              <option value="official">بل‌های رسمی (بدون باطل)</option>
+              <option value="all">همه؛ رسمی و باطل</option>
               <option value="new">جدید</option>
               <option value="pending">در انتظار</option>
               <option value="partial">پرداخت ناقص</option>
@@ -7754,6 +7814,17 @@ export default function AdminFinance() {
               <option value="waived">معاف/پوشش کامل</option>
               <option value="overdue">سررسید گذشته</option>
               <option value="void">باطل</option>
+            </select>
+          </label>
+          <label className="finance-inline-filter">
+            <span>نوع بل</span>
+            <select value={orderFeeTypeFilter} onChange={(e) => setOrderFeeTypeFilter(e.target.value)} data-testid="bill-fee-type-filter">
+              <option value="all">همه انواع بل</option>
+              {MANUAL_BILL_FEE_TYPES.map((feeType) => (
+                <option key={`bill-fee-filter-${feeType}`} value={feeType}>{FEE_LINE_TYPE_LABELS[feeType] || feeType}</option>
+              ))}
+              <option value="service">خدمت</option>
+              <option value="penalty">جریمه</option>
             </select>
           </label>
           <label className="finance-inline-filter">
@@ -7774,16 +7845,31 @@ export default function AdminFinance() {
             </select>
           </label>
         </div>
+        <div className="finance-chip-group finance-order-record-summary" data-testid="bill-record-summary">
+          <span className="finance-chip finance-chip-emerald">{fmt(orderRecordStats.officialCount)} بل رسمی</span>
+          <span className="finance-chip">{fmt(filteredBills.length)} مطابق فیلتر</span>
+          {!!orderRecordStats.voidCount && (
+            <span className="finance-chip finance-chip-muted">{fmt(orderRecordStats.voidCount)} بل باطل؛ در شمارش رسمی نیست</span>
+          )}
+          {!!orderRecordStats.officialTypeSummary && (
+            <span className="finance-chip finance-chip-muted">تفکیک رسمی: {orderRecordStats.officialTypeSummary}</span>
+          )}
+        </div>
         <div className="finance-issuance-summary" data-testid="bill-issuance-results">
           <div className="finance-card-head">
             <div>
               <h4>وضعیت صدور بل شاگردان</h4>
-              <p className="muted">بر اساس عضویت فعال شاگردان در صنف انتخاب‌شده</p>
+              <p className="muted">بر اساس عضویت فعال شاگردان؛ بل باطل به‌عنوان «صادر شده» یا بل رسمی شمرده نمی‌شود.</p>
             </div>
             <div className="finance-chip-group">
               <span className="finance-chip">{billIssuanceRows.length} شاگرد</span>
               <span className="finance-chip finance-chip-emerald">{billIssuanceRows.filter((row) => row.issued).length} صادر شده</span>
               <span className="finance-chip finance-chip-muted">{billIssuanceRows.filter((row) => !row.issued).length} صادر نشده</span>
+              {!!billIssuanceRows.reduce((sum, row) => sum + Number(row.voidCount || 0), 0) && (
+                <span className="finance-chip finance-chip-muted">
+                  {fmt(billIssuanceRows.reduce((sum, row) => sum + Number(row.voidCount || 0), 0))} سند باطل جداگانه
+                </span>
+              )}
             </div>
           </div>
           {!billIssuanceRows.length && <p className="muted">شاگردی مطابق این فیلتر پیدا نشد.</p>}
@@ -7794,9 +7880,13 @@ export default function AdminFinance() {
                   <span className="finance-cell-stack">
                     <strong>{row.studentName}</strong>
                     <small>{row.admissionNo || 'بدون شماره ثبت'} · {row.classTitle}</small>
+                    {row.billTypeSummary ? <small>بابت: {row.billTypeSummary}</small> : null}
                   </span>
-                  <span className={`finance-order-status ${row.issued ? 'paid' : 'void'}`}>
-                    {row.issued ? `صادر شده (${row.billCount})` : 'صادر نشده'}
+                  <span className="finance-cell-stack finance-issuance-status-stack">
+                    <span className={`finance-order-status ${row.issued ? 'paid' : 'void'}`}>
+                      {row.issued ? `${fmt(row.billCount)} بل رسمی` : 'بل رسمی صادر نشده'}
+                    </span>
+                    {!!row.voidCount && <small>{fmt(row.voidCount)} بل باطل (حساب نشده)</small>}
                   </span>
                 </div>
               ))}
@@ -7811,6 +7901,8 @@ export default function AdminFinance() {
             <div key={bill._id} className="row">
               <span className="finance-cell-stack">
                 <strong className="finance-latin-code">{formatFinanceCode(bill.billNumber, '-')}</strong>
+                <small>بابت: <strong>{getBillTypeLabel(bill)}</strong></small>
+                {!!bill.periodLabel && <small>دوره: {bill.periodLabel}</small>}
                 {!!bill.feeLineSummary && <small>{bill.feeLineSummary}</small>}
               </span>
               <span>{bill.student?.name || '---'}</span>
@@ -7829,13 +7921,19 @@ export default function AdminFinance() {
                 <strong>{bill.dueDate ? toFaDate(bill.dueDate) : '-'}</strong>
                 <small>باقی: {fmt(Math.max(0, (bill.outstandingAmount ?? ((bill.amountDue || 0) - (bill.amountPaid || 0)))))} AFN</small>
               </span>
-              <span className={`finance-order-status ${String(bill.status || '').trim()}`}>{ORDER_STATUS_UI_LABELS[String(bill.status || '').trim()] || bill.status || '-'}</span>
+              <span className="finance-cell-stack">
+                <span className={`finance-order-status ${String(bill.status || '').trim()}`}>{ORDER_STATUS_UI_LABELS[String(bill.status || '').trim()] || bill.status || '-'}</span>
+                {bill.status === 'void' && <small>{bill.voidReason || 'این سند در شمارش رسمی و مبالغ کارت‌ها حساب نمی‌شود.'}</small>}
+              </span>
               <div className="row-actions">
-                <button type="button" onClick={() => addDiscount(bill._id)} disabled={busy}>تخفیف/تعدیل</button>
-                <button type="button" onClick={() => setInstallments(bill._id)} disabled={busy}>قسط‌بندی</button>
                 {bill.status !== 'void' && (
-                  <button type="button" className="danger" onClick={() => voidBill(bill._id)} disabled={busy}>باطل</button>
+                  <>
+                    <button type="button" onClick={() => addDiscount(bill._id)} disabled={busy}>تخفیف/تعدیل</button>
+                    <button type="button" onClick={() => setInstallments(bill._id)} disabled={busy}>قسط‌بندی</button>
+                    <button type="button" className="danger" onClick={() => voidBill(bill._id)} disabled={busy}>باطل</button>
+                  </>
                 )}
+                {bill.status === 'void' && <span className="muted">بدون عملیات مالی</span>}
               </div>
             </div>
           ))}

@@ -382,6 +382,7 @@ test.describe('finance workflow', () => {
           sourceBillId: 'bill-1',
           orderNumber: 'BL-202603-0001',
           title: 'Tuition Term 1',
+          orderType: 'tuition',
           status: 'new',
           amountDue: 1000,
           amountPaid: 0,
@@ -397,6 +398,7 @@ test.describe('finance workflow', () => {
           sourceBillId: 'bill-2',
           orderNumber: 'BL-202603-0002',
           title: 'Tuition Term 1',
+          orderType: 'tuition',
           status: 'partial',
           amountDue: 800,
           amountPaid: 200,
@@ -412,10 +414,27 @@ test.describe('finance workflow', () => {
           sourceBillId: 'bill-3',
           orderNumber: 'BL-202603-0003',
           title: 'Transport Monthly',
+          orderType: 'transport',
           status: 'partial',
           amountDue: 450,
           amountPaid: 150,
           outstandingAmount: 300,
+          student: { userId: 'student-1', fullName: 'Student Alpha', email: 'alpha@example.com' },
+          schoolClass: { id: 'class-1', title: 'Class One Core' },
+          academicYear: { id: 'year-1', title: '1406' },
+          course: { id: 'course-1', title: 'Class One' }
+        },
+        {
+          id: 'order-void-1',
+          studentMembershipId: 'mem-1',
+          orderNumber: 'VOID-ADMISSION-001',
+          title: 'Cancelled Admission Fee',
+          orderType: 'admission',
+          status: 'void',
+          amountDue: 500,
+          amountPaid: 0,
+          outstandingAmount: 500,
+          voidReason: 'Incorrect plan amount replaced by official bill',
           student: { userId: 'student-1', fullName: 'Student Alpha', email: 'alpha@example.com' },
           schoolClass: { id: 'class-1', title: 'Class One Core' },
           academicYear: { id: 'year-1', title: '1406' },
@@ -3309,6 +3328,29 @@ test.describe('finance workflow', () => {
     await expect(page.getByTestId('income-trend-card')).toBeVisible();
     await page.getByTestId('income-trend-card').locator('button').nth(2).click();
     await expect(page.getByTestId('paid-vs-due-card')).toBeVisible();
+
+    await financeTabs.nth(2).click();
+    const ordersCard = page.getByTestId('finance-orders-table-card');
+    await expect(page.getByTestId('bill-record-summary')).toContainText(/3|۳/);
+    await expect(page.getByTestId('bill-record-summary')).toContainText('بل رسمی');
+    await expect(page.getByTestId('bill-record-summary')).toContainText(/1|۱/);
+    await expect(page.getByTestId('bill-record-summary')).toContainText('بل باطل');
+    await expect(ordersCard.locator('.finance-orders-table .row')).toHaveCount(3);
+    await expect(ordersCard.locator('.finance-orders-table .row')).not.toContainText('VOID-ADMISSION-001');
+    const alphaIssuance = page.getByTestId('bill-issuance-results').locator('.mini-row').filter({ hasText: 'Student Alpha' });
+    await expect(alphaIssuance).toContainText(/2|۲/);
+    await expect(alphaIssuance).toContainText('فیس/شهریه');
+    await expect(alphaIssuance).toContainText('ترانسپورت');
+    await page.getByTestId('bill-fee-type-filter').selectOption('admission');
+    await expect(alphaIssuance).toContainText('بل رسمی صادر نشده');
+    await expect(alphaIssuance).toContainText('بل باطل');
+    await page.getByTestId('bill-status-filter').selectOption('void');
+    await expect(ordersCard.locator('.finance-orders-table .row')).toHaveCount(1);
+    await expect(ordersCard.locator('.finance-orders-table .row')).toContainText('VOID-ADMISSION-001');
+    await expect(ordersCard.locator('.finance-orders-table .row')).toContainText('بدون عملیات مالی');
+    await page.getByTestId('bill-fee-type-filter').selectOption('all');
+    await page.getByTestId('bill-status-filter').selectOption('official');
+
     await financeTabs.nth(1).click();
 
     await expect(page.locator('.finance-page h2')).toBeVisible();

@@ -1667,6 +1667,33 @@
   max-width: none;
 }
 
+.finance-order-record-summary {
+  margin: 12px 0;
+}
+
+.finance-issuance-summary {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.finance-issuance-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.finance-issuance-status-stack {
+  justify-items: end;
+  text-align: end;
+}
+
+.finance-issuance-status-stack small {
+  color: rgba(203, 213, 225, 0.72);
+}
+
 .finance-orders-table-head,
 .finance-orders-table .row {
   display: grid;
