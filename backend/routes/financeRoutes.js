@@ -118,6 +118,7 @@ const {
   setBillInstallmentsAction,
   voidBillAction,
   approveReceiptAction,
+  approveFeePaymentAction,
   rejectReceiptAction,
   updateReceiptFollowUpAction
 } = require('../services/financeAdminActionService');
@@ -7079,6 +7080,136 @@ const buildAdmissionReceiptCorrectionPreview = async ({
   };
 };
 
+const CLASS_PAYMENT_APPROVAL_SCOPES = ['all', 'admission', 'tuition'];
+
+const normalizeClassPaymentApprovalScope = (value = 'all') => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return CLASS_PAYMENT_APPROVAL_SCOPES.includes(normalized) ? normalized : '';
+};
+
+const getClassPaymentApprovalOrderIds = (payment = {}) => Array.from(new Set([
+  String(payment.feeOrderId || '').trim(),
+  ...(Array.isArray(payment.allocations) ? payment.allocations : [])
+    .map((item) => String(item?.feeOrderId || '').trim())
+].filter((item) => mongoose.Types.ObjectId.isValid(item))));
+
+const getClassPaymentApprovalOrderTypes = (order = {}) => {
+  const lineItemTypes = (Array.isArray(order.lineItems) ? order.lineItems : [])
+    .map((item) => normalizeFinanceFeeType(item?.feeType, order.orderType || 'tuition'))
+    .filter((item) => item !== 'penalty');
+  if (lineItemTypes.length) return Array.from(new Set(lineItemTypes));
+  return [normalizeFinanceFeeType(order.orderType || 'tuition', 'tuition')];
+};
+
+const buildClassPaymentApprovalPreview = async ({
+  scope = {},
+  feeType = 'all',
+  paymentIds = [],
+  actorLevel = '',
+  actorId = ''
+} = {}) => {
+  const normalizedFeeType = normalizeClassPaymentApprovalScope(feeType);
+  if (!normalizedFeeType) throw createRouteError(400, 'نوع رسید برای تأیید گروهی معتبر نیست.');
+
+  const normalizedPaymentIds = Array.from(new Set(
+    (Array.isArray(paymentIds) ? paymentIds : [])
+      .map((item) => String(item || '').trim())
+      .filter((item) => mongoose.Types.ObjectId.isValid(item))
+  ));
+  const paymentFilter = {
+    classId: scope.classId,
+    status: 'pending'
+  };
+  if (normalizedPaymentIds.length) paymentFilter._id = { $in: normalizedPaymentIds };
+
+  const payments = await FeePayment.find(paymentFilter)
+    .populate('student', 'name email')
+    .populate('studentId', 'fullName admissionNo')
+    .populate('classId', 'title code gradeLevel section')
+    .sort({ paidAt: -1, createdAt: -1 })
+    .limit(500)
+    .lean();
+  const orderIds = Array.from(new Set(payments.flatMap(getClassPaymentApprovalOrderIds)));
+  const orders = orderIds.length
+    ? await FeeOrder.find({ _id: { $in: orderIds } }).lean()
+    : [];
+  const orderMap = new Map(orders.map((item) => [String(item._id), item]));
+
+  const items = [];
+  for (const payment of payments) {
+    const linkedOrderIds = getClassPaymentApprovalOrderIds(payment);
+    if (!linkedOrderIds.length) continue;
+    const linkedOrders = linkedOrderIds.map((orderId) => orderMap.get(orderId)).filter(Boolean);
+    const orderTypes = Array.from(new Set(linkedOrders.flatMap(getClassPaymentApprovalOrderTypes)));
+    const relevantTypes = orderTypes.filter((item) => item === 'admission' || item === 'tuition');
+    if (!relevantTypes.length) continue;
+
+    const hasUnsupportedType = linkedOrders.length !== linkedOrderIds.length
+      || orderTypes.some((item) => item !== 'admission' && item !== 'tuition');
+    const category = relevantTypes.includes('admission') && relevantTypes.includes('tuition')
+      ? 'mixed'
+      : relevantTypes[0];
+    const matchesRequestedScope = normalizedFeeType === 'all'
+      || category === normalizedFeeType;
+    if (!matchesRequestedScope) continue;
+
+    let blockedReason = '';
+    if (hasUnsupportedType) {
+      blockedReason = 'این رسید به بل نامرتبط یا نوع فیس دیگری نیز وصل است و باید جداگانه بررسی شود.';
+    } else if (payment.sourceReceiptId) {
+      blockedReason = 'این رسید به سند قدیمی مالی وصل است و برای تأیید گروهی پشتیبانی نمی‌شود.';
+    } else if (!canReviewReceiptStage(actorLevel, payment.approvalStage)) {
+      blockedReason = 'مرحله فعلی رسید با سطح دسترسی شما قابل تأیید نیست.';
+    } else if (getNextReceiptStage(actorLevel, payment.approvalStage) !== RECEIPT_STAGES.completed) {
+      blockedReason = 'این رسید هنوز به مرحله تأیید نهایی نرسیده است.';
+    } else if (FINANCE_FOUR_EYES_ENABLED && actorAlreadyReviewed(payment.approvalTrail, actorId)) {
+      blockedReason = 'به‌دلیل اصل تفکیک وظایف، تأیید دوباره این رسید توسط همان کاربر مجاز نیست.';
+    } else if (linkedOrders.some((order) => String(order.status || '').trim() === 'void')) {
+      blockedReason = 'یکی از بل‌های مربوط باطل شده است.';
+    } else if (roundMoney(payment.amount) <= 0) {
+      blockedReason = 'مبلغ رسید معتبر نیست.';
+    }
+
+    const amount = roundMoney(payment.amount);
+    items.push({
+      paymentId: String(payment._id),
+      paymentNumber: String(payment.paymentNumber || ''),
+      studentName: String(payment.studentId?.fullName || payment.student?.name || '').trim(),
+      classId: String(payment.classId?._id || payment.classId || scope.classId || ''),
+      classTitle: String(payment.classId?.title || '').trim(),
+      category,
+      feeTypes: relevantTypes,
+      amount,
+      currency: String(payment.currency || linkedOrders[0]?.currency || 'AFN').trim().toUpperCase(),
+      approvalStage: normalizeReceiptStage(payment.approvalStage),
+      eligible: !blockedReason,
+      blockedReason
+    });
+  }
+
+  const summarizeCategory = (category) => {
+    const rows = items.filter((item) => item.category === category);
+    return {
+      count: rows.length,
+      amount: roundMoney(rows.reduce((sum, item) => sum + item.amount, 0))
+    };
+  };
+  const eligibleItems = items.filter((item) => item.eligible);
+  return {
+    items,
+    summary: {
+      total: items.length,
+      eligible: eligibleItems.length,
+      blocked: items.length - eligibleItems.length,
+      totalAmount: roundMoney(items.reduce((sum, item) => sum + item.amount, 0)),
+      eligibleAmount: roundMoney(eligibleItems.reduce((sum, item) => sum + item.amount, 0)),
+      admission: summarizeCategory('admission'),
+      tuition: summarizeCategory('tuition'),
+      mixed: summarizeCategory('mixed')
+    }
+  };
+};
+
 const correctPendingAdmissionReceipt = async ({ req, candidate = {}, note = '', actorLevel = '' } = {}) => {
   const session = await mongoose.startSession();
   try {
@@ -7742,6 +7873,168 @@ router.post('/admin/admission-receipt-corrections/apply', requireAuth, requireRo
     return res.status(Number(error?.status || 500)).json({
       success: false,
       message: error?.message || 'اصلاح گروهی رسیدهای داخله ممکن نشد'
+    });
+  }
+});
+
+router.get('/admin/payment-approvals/preview', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const classId = String(req.query?.classId || '').trim();
+    const feeType = normalizeClassPaymentApprovalScope(req.query?.feeType || 'all');
+    if (!classId || !mongoose.Types.ObjectId.isValid(classId)) {
+      return res.status(400).json({ success: false, message: 'برای پیش‌نمایش تأیید گروهی، صنف معتبر انتخاب کنید.' });
+    }
+    if (!feeType) {
+      return res.status(400).json({ success: false, message: 'نوع رسید برای تأیید گروهی معتبر نیست.' });
+    }
+    const scope = await resolveFinanceScope({ classId });
+    if (scope.error || !scope.classId) {
+      return res.status(400).json({ success: false, message: scope.error || 'صنف مالی معتبر پیدا نشد.' });
+    }
+    const actorLevel = await resolveAdminActorLevel(req.user.id);
+    if (!['finance_manager', 'general_president'].includes(actorLevel)) {
+      return res.status(403).json({ success: false, message: 'سطح دسترسی شما اجازه تأیید نهایی گروهی را نمی‌دهد.' });
+    }
+    const preview = await buildClassPaymentApprovalPreview({
+      scope,
+      feeType,
+      actorLevel,
+      actorId: req.user.id
+    });
+    return res.json({
+      success: true,
+      ...preview,
+      classId: String(scope.classId),
+      feeType,
+      generatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({
+      success: false,
+      message: error?.message || 'پیش‌نمایش تأیید نهایی گروهی ممکن نشد'
+    });
+  }
+});
+
+router.post('/admin/payment-approvals/apply', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const classId = String(req.body?.classId || '').trim();
+    const feeType = normalizeClassPaymentApprovalScope(req.body?.feeType || 'all');
+    if (!classId || !mongoose.Types.ObjectId.isValid(classId)) {
+      return res.status(400).json({ success: false, message: 'برای تأیید نهایی گروهی، صنف معتبر انتخاب کنید.' });
+    }
+    if (!feeType) {
+      return res.status(400).json({ success: false, message: 'نوع رسید برای تأیید گروهی معتبر نیست.' });
+    }
+    const paymentIds = Array.from(new Set(
+      (Array.isArray(req.body?.paymentIds) ? req.body.paymentIds : [])
+        .map((item) => String(item || '').trim())
+        .filter((item) => mongoose.Types.ObjectId.isValid(item))
+    )).slice(0, 500);
+    if (!paymentIds.length) {
+      return res.status(400).json({ success: false, message: 'هیچ رسید واجد شرایط برای تأیید انتخاب نشده است.' });
+    }
+
+    const scope = await resolveFinanceScope({ classId });
+    if (scope.error || !scope.classId) {
+      return res.status(400).json({ success: false, message: scope.error || 'صنف مالی معتبر پیدا نشد.' });
+    }
+    const actorLevel = await resolveAdminActorLevel(req.user.id);
+    if (!['finance_manager', 'general_president'].includes(actorLevel)) {
+      return res.status(403).json({ success: false, message: 'سطح دسترسی شما اجازه تأیید نهایی گروهی را نمی‌دهد.' });
+    }
+    const note = String(req.body?.note || '').trim().slice(0, 500);
+    const preview = await buildClassPaymentApprovalPreview({
+      scope,
+      feeType,
+      paymentIds,
+      actorLevel,
+      actorId: req.user.id
+    });
+    const eligible = preview.items.filter((item) => item.eligible && paymentIds.includes(item.paymentId));
+    if (!eligible.length) {
+      return res.status(409).json({
+        success: false,
+        summary: preview.summary,
+        items: preview.items,
+        message: 'هیچ رسید قابل تأیید باقی نمانده است؛ پیش‌نمایش را دوباره تازه کنید.'
+      });
+    }
+
+    const results = [];
+    const batchSize = 5;
+    for (let index = 0; index < eligible.length; index += batchSize) {
+      const batch = eligible.slice(index, index + batchSize);
+      const batchResults = await Promise.all(batch.map(async (candidate) => {
+        try {
+          await approveFeePaymentAction({
+            req,
+            feePaymentId: candidate.paymentId,
+            body: { note: note || 'تأیید نهایی گروهی بر اساس صنف' }
+          });
+          return {
+            ok: true,
+            paymentId: candidate.paymentId,
+            paymentNumber: candidate.paymentNumber,
+            studentName: candidate.studentName,
+            category: candidate.category,
+            amount: candidate.amount
+          };
+        } catch (error) {
+          return {
+            ok: false,
+            paymentId: candidate.paymentId,
+            paymentNumber: candidate.paymentNumber,
+            studentName: candidate.studentName,
+            category: candidate.category,
+            amount: candidate.amount,
+            message: String(error?.message || 'تأیید رسید ممکن نشد')
+          };
+        }
+      }));
+      results.push(...batchResults);
+    }
+
+    const approved = results.filter((item) => item.ok);
+    const failures = results.filter((item) => !item.ok);
+    await logActivity({
+      req,
+      action: 'finance_payment_approval_batch',
+      targetType: 'SchoolClass',
+      targetId: String(scope.classId),
+      meta: {
+        classId: String(scope.classId),
+        feeType,
+        requested: paymentIds.length,
+        eligible: eligible.length,
+        approved: approved.length,
+        approvedAmount: roundMoney(approved.reduce((sum, item) => sum + item.amount, 0)),
+        failed: failures.length,
+        note
+      }
+    });
+
+    return res.json({
+      success: approved.length > 0,
+      partialSuccess: approved.length > 0 && failures.length > 0,
+      summary: {
+        requested: paymentIds.length,
+        eligible: eligible.length,
+        approved: approved.length,
+        approvedAmount: roundMoney(approved.reduce((sum, item) => sum + item.amount, 0)),
+        failed: failures.length,
+        blocked: preview.summary.blocked
+      },
+      approved: approved.slice(0, 100),
+      failures: failures.slice(0, 100),
+      message: failures.length
+        ? `${approved.length} رسید تأیید نهایی شد و ${failures.length} مورد برای بررسی باقی ماند.`
+        : `${approved.length} رسید صنف با موفقیت تأیید نهایی شد.`
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({
+      success: false,
+      message: error?.message || 'تأیید نهایی گروهی رسیدها ممکن نشد'
     });
   }
 });

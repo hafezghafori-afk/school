@@ -5365,6 +5365,44 @@ async function run() {
       assertCase(emptyApply.status === 400, `expected empty correction apply 400, received ${emptyApply.status}`);
     });
 
+    await check('route smoke: class payment final approval is protected and class-scoped', async () => {
+      const unauthenticated = await request(
+        server,
+        `/api/finance/admin/payment-approvals/preview?classId=${IDS.class1}&feeType=all`
+      );
+      assertCase(unauthenticated.status === 401, `expected 401, received ${unauthenticated.status}`);
+
+      const invalidClass = await request(
+        server,
+        '/api/finance/admin/payment-approvals/preview?classId=invalid&feeType=all',
+        { user: financeManagerUser }
+      );
+      assertCase(invalidClass.status === 400, `expected invalid class 400, received ${invalidClass.status}`);
+
+      const invalidFeeType = await request(
+        server,
+        `/api/finance/admin/payment-approvals/preview?classId=${IDS.class1}&feeType=transport`,
+        { user: financeManagerUser }
+      );
+      assertCase(invalidFeeType.status === 400, `expected invalid fee type 400, received ${invalidFeeType.status}`);
+
+      const preview = await request(
+        server,
+        `/api/finance/admin/payment-approvals/preview?classId=${IDS.class1}&feeType=all`,
+        { user: financeManagerUser }
+      );
+      assertCase(preview.status === 200, `expected class payment approval preview 200, received ${preview.status}: ${preview.text}`);
+      assertCase(Array.isArray(preview.data?.items), 'expected class payment approval preview items');
+      assertCase(preview.data?.summary && typeof preview.data.summary === 'object', 'expected class payment approval summary');
+
+      const emptyApply = await request(server, '/api/finance/admin/payment-approvals/apply', {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { classId: IDS.class1, feeType: 'all', paymentIds: [] }
+      });
+      assertCase(emptyApply.status === 400, `expected empty class approval apply 400, received ${emptyApply.status}`);
+    });
+
     await check('route smoke: grouped bill generation uses active memberships', async () => {
       const baselineCount = bills.length;
       membershipRecoveryScanCount = 0;

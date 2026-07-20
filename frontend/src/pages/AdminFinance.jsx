@@ -1317,6 +1317,18 @@ export default function AdminFinance() {
     error: ''
   });
   const [admissionReceiptCorrectionRefreshKey, setAdmissionReceiptCorrectionRefreshKey] = useState(0);
+  const [classPaymentApprovalForm, setClassPaymentApprovalForm] = useState({
+    classId: '',
+    feeType: 'all',
+    note: ''
+  });
+  const [classPaymentApprovalPreview, setClassPaymentApprovalPreview] = useState({
+    loading: false,
+    items: [],
+    summary: null,
+    error: ''
+  });
+  const [classPaymentApprovalRefreshKey, setClassPaymentApprovalRefreshKey] = useState(0);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [activeSchoolContext, setActiveSchoolContext] = useState(null);
@@ -2905,6 +2917,51 @@ export default function AdminFinance() {
   }, [admissionReceiptCorrectionForm.classId, admissionReceiptCorrectionRefreshKey]);
 
   useEffect(() => {
+    const classId = String(classPaymentApprovalForm.classId || '').trim();
+    const feeType = String(classPaymentApprovalForm.feeType || 'all').trim();
+    if (!classId) {
+      setClassPaymentApprovalPreview({ loading: false, items: [], summary: null, error: '' });
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setClassPaymentApprovalPreview((prev) => ({ ...prev, loading: true, error: '' }));
+    const query = new URLSearchParams({ classId, feeType });
+    fetchJson(`${API_BASE}/api/finance/admin/payment-approvals/preview?${query.toString()}`, {
+      signal: controller.signal
+    })
+      .then((data) => {
+        if (!data?.success) {
+          setClassPaymentApprovalPreview({
+            loading: false,
+            items: [],
+            summary: null,
+            error: data?.message || 'پیش‌نمایش تأیید نهایی گروهی ممکن نشد.'
+          });
+          return;
+        }
+        setClassPaymentApprovalPreview({
+          loading: false,
+          items: Array.isArray(data.items) ? data.items : [],
+          summary: data.summary || null,
+          error: ''
+        });
+      })
+      .catch((error) => {
+        if (error?.name === 'AbortError') return;
+        setClassPaymentApprovalPreview({
+          loading: false,
+          items: [],
+          summary: null,
+          error: error?.message || 'پیش‌نمایش تأیید نهایی گروهی ممکن نشد.'
+        });
+      });
+
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classPaymentApprovalForm.classId, classPaymentApprovalForm.feeType, classPaymentApprovalRefreshKey]);
+
+  useEffect(() => {
     setDiscountRegistryPage(1);
   }, [discountRegistryClassFilter, discountRegistryPageSize, discountRegistrySearch]);
 
@@ -4259,6 +4316,55 @@ export default function AdminFinance() {
       const data = await postJson(`${API_BASE}/api/student-finance/payments/${id}/reject`, { reason });
       setMessage(data.message || 'رسید رد شد');
       await refreshFinanceOperationalData({ includeAnomalies: true });
+    } catch (err) {
+      setMessage(err.message);
+      setBusy(false);
+    }
+  };
+
+  const applyClassPaymentApprovals = async () => {
+    const classId = String(classPaymentApprovalForm.classId || '').trim();
+    const feeType = String(classPaymentApprovalForm.feeType || 'all').trim();
+    const eligibleItems = classPaymentApprovalPreview.items.filter((item) => item?.eligible);
+    if (!classId) {
+      setMessage('ابتدا صنف مربوط به رسیدها را انتخاب کنید.');
+      return;
+    }
+    if (!eligibleItems.length) {
+      setMessage('برای این صنف رسید قابل تأیید نهایی پیدا نشد.');
+      return;
+    }
+
+    const selectedClass = classOptions.find((item) => item.classId === classId);
+    const feeTypeLabel = feeType === 'admission'
+      ? 'داخله'
+      : feeType === 'tuition'
+        ? 'فیس/شهریه'
+        : 'داخله و فیس/شهریه';
+    const totalAmount = eligibleItems.reduce((sum, item) => sum + toSafeNumber(item?.amount), 0);
+    const confirmed = window.confirm(
+      `${eligibleItems.length} رسید ${feeTypeLabel} در صنف ${getClassOptionLabel(selectedClass || {})} تأیید نهایی شود؟\n`
+      + `مجموع قابل تأیید: ${fmt(totalAmount)} AFN\n`
+      + 'پس از تأیید، مبلغ هر رسید روی بل مربوط ثبت و به حساب خزانه منتقل می‌شود.'
+    );
+    if (!confirmed) return;
+
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/finance/admin/payment-approvals/apply`, {
+        classId,
+        feeType,
+        paymentIds: eligibleItems.map((item) => item.paymentId),
+        note: String(classPaymentApprovalForm.note || '').trim()
+      });
+      const approved = Number(data?.summary?.approved || 0);
+      const failed = Number(data?.summary?.failed || 0);
+      setMessage(
+        data?.message
+        || `${approved} رسید تأیید نهایی شد${failed ? ` و ${failed} مورد برای بررسی باقی ماند` : ''}.`
+      );
+      setClassPaymentApprovalRefreshKey((value) => value + 1);
+      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -7184,6 +7290,114 @@ export default function AdminFinance() {
               ))}
             </select>
           </label>
+        </div>
+        <div className="class-payment-approval-panel" data-testid="class-payment-approval-panel">
+          <div className="finance-card-head">
+            <div>
+              <h4>تأیید نهایی گروهی رسیدها بر اساس صنف</h4>
+              <p className="muted">
+                صنف و نوع رسید را انتخاب کنید. فقط رسیدهای در انتظارِ بل داخله و فیس/شهریه که در مرحله تأیید نهایی باشند نمایش داده و تأیید می‌شوند.
+              </p>
+            </div>
+            <span className="finance-chip finance-chip-emerald" data-testid="class-payment-approval-count">
+              {classPaymentApprovalPreview.loading
+                ? 'در حال بررسی…'
+                : `${fmt(classPaymentApprovalPreview.summary?.eligible || 0)} قابل تأیید`}
+            </span>
+          </div>
+          <div className="receipt-follow-up-grid class-payment-approval-controls">
+            <label className="finance-inline-filter">
+              <span>صنف</span>
+              <select
+                value={classPaymentApprovalForm.classId}
+                onChange={(e) => setClassPaymentApprovalForm((prev) => ({ ...prev, classId: e.target.value }))}
+                data-testid="class-payment-approval-class"
+              >
+                <option value="">انتخاب صنف</option>
+                {classOptions.map((item) => (
+                  <option key={`class-payment-approval-${item.classId}`} value={item.classId}>
+                    {getClassOptionLabel(item)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>نوع رسید</span>
+              <select
+                value={classPaymentApprovalForm.feeType}
+                onChange={(e) => setClassPaymentApprovalForm((prev) => ({ ...prev, feeType: e.target.value }))}
+                data-testid="class-payment-approval-type"
+              >
+                <option value="all">داخله و فیس/شهریه</option>
+                <option value="admission">فقط داخله</option>
+                <option value="tuition">فقط فیس/شهریه</option>
+              </select>
+            </label>
+            <label className="finance-inline-filter finance-inline-filter-wide">
+              <span>یادداشت تأیید</span>
+              <input
+                value={classPaymentApprovalForm.note}
+                onChange={(e) => setClassPaymentApprovalForm((prev) => ({ ...prev, note: e.target.value }))}
+                placeholder="مثلاً: تأیید نهایی رسیدهای صنف پس از بررسی"
+                data-testid="class-payment-approval-note"
+              />
+            </label>
+          </div>
+          {classPaymentApprovalPreview.summary ? (
+            <div className="finance-chip-group">
+              <span className="finance-chip finance-chip-emerald">قابل تأیید: {fmt(classPaymentApprovalPreview.summary.eligible || 0)}</span>
+              <span className="finance-chip">مجموع: {fmt(classPaymentApprovalPreview.summary.eligibleAmount || 0)} AFN</span>
+              <span className="finance-chip">داخله: {fmt(classPaymentApprovalPreview.summary.admission?.count || 0)}</span>
+              <span className="finance-chip">فیس/شهریه: {fmt(classPaymentApprovalPreview.summary.tuition?.count || 0)}</span>
+              {!!classPaymentApprovalPreview.summary.mixed?.count && (
+                <span className="finance-chip finance-chip-amber">رسید مشترک: {fmt(classPaymentApprovalPreview.summary.mixed.count)}</span>
+              )}
+              {!!classPaymentApprovalPreview.summary.blocked && (
+                <span className="finance-chip finance-chip-rose">نیازمند بررسی دستی: {fmt(classPaymentApprovalPreview.summary.blocked)}</span>
+              )}
+            </div>
+          ) : null}
+          {classPaymentApprovalPreview.error ? (
+            <p className="admission-batch-error">{classPaymentApprovalPreview.error}</p>
+          ) : null}
+          {!!classPaymentApprovalPreview.items.length && (
+            <div className="class-payment-approval-list">
+              {classPaymentApprovalPreview.items.slice(0, 12).map((item) => (
+                <div className={`class-payment-approval-row ${item.eligible ? '' : 'blocked'}`} key={item.paymentId}>
+                  <span className="finance-cell-stack">
+                    <strong>{item.studentName || 'شاگرد'}</strong>
+                    <small className="finance-latin-code">{formatFinanceCode(item.paymentNumber, '-')}</small>
+                  </span>
+                  <span>{item.category === 'admission' ? 'داخله' : item.category === 'tuition' ? 'فیس/شهریه' : 'داخله و فیس'}</span>
+                  <span><strong>{fmt(item.amount)} {item.currency || 'AFN'}</strong></span>
+                  <span className={item.eligible ? 'correction-ready' : 'correction-blocked'}>
+                    {item.eligible ? 'آماده تأیید نهایی' : item.blockedReason}
+                  </span>
+                </div>
+              ))}
+              {classPaymentApprovalPreview.items.length > 12 ? (
+                <p className="muted">و {fmt(classPaymentApprovalPreview.items.length - 12)} مورد دیگر…</p>
+              ) : null}
+            </div>
+          )}
+          <div className="row-actions">
+            <button
+              type="button"
+              onClick={() => setClassPaymentApprovalRefreshKey((value) => value + 1)}
+              disabled={busy || classPaymentApprovalPreview.loading || !classPaymentApprovalForm.classId}
+              className="secondary"
+            >
+              تازه‌سازی پیش‌نمایش
+            </button>
+            <button
+              type="button"
+              onClick={applyClassPaymentApprovals}
+              disabled={busy || classPaymentApprovalPreview.loading || !(classPaymentApprovalPreview.summary?.eligible > 0)}
+              data-testid="class-payment-approval-submit"
+            >
+              تأیید نهایی رسیدهای این صنف
+            </button>
+          </div>
         </div>
         <div className="admission-receipt-correction-panel" data-testid="admission-receipt-correction-panel">
           <div className="finance-card-head">
