@@ -31,6 +31,7 @@ function normalizeBillSnapshot(item = {}) {
     amountOriginal: item.amountOriginal,
     adjustments: item.adjustments,
     amountPaid: item.amountPaid,
+    paymentBreakdown: item.paymentBreakdown,
     defaultType: 'tuition'
   });
   const feeBreakdown = buildFeeBreakdownFromLineItems(lineItems);
@@ -52,6 +53,7 @@ function normalizeOrderSnapshot(item = {}, sourceBill = null) {
     amountOriginal: item.amountOriginal,
     adjustments: item.adjustments,
     amountPaid: item.amountPaid,
+    paymentBreakdown: item.paymentBreakdown || sourceBill?.paymentBreakdown,
     defaultType: item.orderType || 'tuition',
     sourcePlanId: (sourceBill?.lineItems || []).find((line) => line?.sourcePlanId)?.sourcePlanId || null,
     periodKey: item.periodLabel || ''

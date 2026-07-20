@@ -6,6 +6,7 @@ const {
   BREAKDOWN_KEYS,
   LINE_ITEM_TYPES,
   normalizeFinanceLineItems,
+  normalizePaymentBreakdown,
   buildFeeBreakdownFromLineItems,
   buildFeeScopesFromLineItems,
   applyFinanceOrderStatus,
@@ -71,6 +72,16 @@ const financeBillSchema = new mongoose.Schema({
   amountOriginal: { type: Number, default: 0, min: 0 },
   amountDue: { type: Number, default: 0, min: 0 },
   amountPaid: { type: Number, default: 0, min: 0 },
+  paymentBreakdown: {
+    tuition: { type: Number, default: 0, min: 0 },
+    admission: { type: Number, default: 0, min: 0 },
+    transport: { type: Number, default: 0, min: 0 },
+    exam: { type: Number, default: 0, min: 0 },
+    document: { type: Number, default: 0, min: 0 },
+    service: { type: Number, default: 0, min: 0 },
+    other: { type: Number, default: 0, min: 0 },
+    penalty: { type: Number, default: 0, min: 0 }
+  },
   feeScopes: {
     type: [{
       type: String,
@@ -116,6 +127,7 @@ financeBillSchema.pre('validate', async function syncFinanceBillState() {
   if (typeof this.voidReason === 'string') this.voidReason = this.voidReason.trim();
   this.amountOriginal = Math.max(0, roundMoney(this.amountOriginal));
   this.amountPaid = Math.max(0, roundMoney(this.amountPaid));
+  this.paymentBreakdown = normalizePaymentBreakdown(this.paymentBreakdown);
   this.linkScope = deriveLinkScope({
     linkScope: this.linkScope,
     studentMembershipId: this.studentMembershipId,
@@ -128,6 +140,7 @@ financeBillSchema.pre('validate', async function syncFinanceBillState() {
     amountOriginal: this.amountOriginal,
     adjustments: this.adjustments,
     amountPaid: this.amountPaid,
+    paymentBreakdown: this.paymentBreakdown,
     defaultType: 'tuition'
   });
   this.feeBreakdown = buildFeeBreakdownFromLineItems(this.lineItems);

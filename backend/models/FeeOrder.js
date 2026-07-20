@@ -6,6 +6,7 @@ const {
   BREAKDOWN_KEYS,
   LINE_ITEM_TYPES,
   normalizeFinanceLineItems,
+  normalizePaymentBreakdown,
   buildFeeBreakdownFromLineItems,
   inferPrimaryOrderType,
   applyFinanceOrderStatus
@@ -85,6 +86,16 @@ const feeOrderSchema = new mongoose.Schema({
   amountOriginal: { type: Number, default: 0, min: 0 },
   amountDue: { type: Number, default: 0, min: 0 },
   amountPaid: { type: Number, default: 0, min: 0 },
+  paymentBreakdown: {
+    tuition: { type: Number, default: 0, min: 0 },
+    admission: { type: Number, default: 0, min: 0 },
+    transport: { type: Number, default: 0, min: 0 },
+    exam: { type: Number, default: 0, min: 0 },
+    document: { type: Number, default: 0, min: 0 },
+    service: { type: Number, default: 0, min: 0 },
+    other: { type: Number, default: 0, min: 0 },
+    penalty: { type: Number, default: 0, min: 0 }
+  },
   outstandingAmount: { type: Number, default: 0, min: 0 },
   lineItems: { type: [lineItemSchema], default: [] },
   status: { type: String, enum: ['new', 'partial', 'paid', 'waived', 'overdue', 'void'], default: 'new', index: true },
@@ -117,11 +128,13 @@ feeOrderSchema.pre('validate', async function syncFeeOrderState() {
   }
   this.amountOriginal = Math.max(0, Number(this.amountOriginal) || 0);
   this.amountPaid = Math.max(0, Number(this.amountPaid) || 0);
+  this.paymentBreakdown = normalizePaymentBreakdown(this.paymentBreakdown);
   this.lineItems = normalizeFinanceLineItems({
     lineItems: this.lineItems,
     amountOriginal: this.amountOriginal,
     adjustments: this.adjustments,
     amountPaid: this.amountPaid,
+    paymentBreakdown: this.paymentBreakdown,
     defaultType: this.orderType
   });
   const derivedBreakdown = buildFeeBreakdownFromLineItems(this.lineItems);

@@ -49,6 +49,13 @@ function buildScopedBreakdown(feeBreakdown = {}, feeScopes = []) {
   }, {});
 }
 
+function normalizePaymentBreakdown(paymentBreakdown = {}) {
+  return LINE_ITEM_TYPES.reduce((acc, feeType) => {
+    acc[feeType] = Math.max(0, roundMoney(paymentBreakdown?.[feeType]));
+    return acc;
+  }, {});
+}
+
 function distributeAmount(total = 0, entries = [], weightSelector = () => 0) {
   const normalizedTotal = Math.max(0, roundMoney(total));
   const rows = Array.isArray(entries) ? entries : [];
@@ -117,6 +124,30 @@ function getFinanceFeeScopeGrossAmount(document = {}, scope = 'tuition') {
   return 0;
 }
 
+function getFinanceFeeScopePaidAmount(document = {}, scope = 'tuition') {
+  const normalizedScope = normalizeFinanceFeeType(scope, 'tuition');
+  const lineAmount = (Array.isArray(document?.lineItems) ? document.lineItems : [])
+    .filter((item) => normalizeFinanceFeeType(item?.feeType) === normalizedScope)
+    .reduce((sum, item) => sum + Math.max(0, Number(item?.paidAmount || 0) || 0), 0);
+  if (lineAmount > 0) return Math.max(0, roundMoney(lineAmount));
+  return Math.max(0, roundMoney(document?.paymentBreakdown?.[normalizedScope]));
+}
+
+function getFinanceFeeScopeBalanceAmount(document = {}, scope = 'tuition') {
+  const normalizedScope = normalizeFinanceFeeType(scope, 'tuition');
+  const scopedLines = (Array.isArray(document?.lineItems) ? document.lineItems : [])
+    .filter((item) => normalizeFinanceFeeType(item?.feeType) === normalizedScope);
+  if (scopedLines.length) {
+    return Math.max(0, roundMoney(scopedLines.reduce((sum, item) => (
+      sum + Math.max(0, Number(item?.balanceAmount ?? ((Number(item?.netAmount) || 0) - (Number(item?.paidAmount) || 0))) || 0)
+    ), 0)));
+  }
+  return Math.max(0, roundMoney(
+    getFinanceFeeScopeGrossAmount(document, normalizedScope)
+      - getFinanceFeeScopePaidAmount(document, normalizedScope)
+  ));
+}
+
 function buildSeedLines({
   lineItems = [],
   feeBreakdown = {},
@@ -180,12 +211,14 @@ function normalizeFinanceLineItems({
   amountOriginal = 0,
   adjustments = [],
   amountPaid = 0,
+  paymentBreakdown = {},
   defaultType = 'tuition',
   sourcePlanId = null,
   periodKey = ''
 } = {}) {
   const normalizedAmountOriginal = Math.max(0, roundMoney(amountOriginal));
   const normalizedAmountPaid = Math.max(0, roundMoney(amountPaid));
+  const normalizedPaymentBreakdown = normalizePaymentBreakdown(paymentBreakdown);
   const baseSeeds = buildSeedLines({
     lineItems,
     feeBreakdown,
@@ -280,20 +313,38 @@ function normalizeFinanceLineItems({
 
   const payableLines = normalizedLines.filter((item) => item.netAmount > 0);
   const totalNet = roundMoney(payableLines.reduce((sum, item) => sum + (Number(item.netAmount) || 0), 0));
-  const paidShares = distributeAmount(
-    Math.min(normalizedAmountPaid, totalNet),
-    payableLines,
-    (item) => item.netAmount
-  );
+  let remainingPaid = Math.min(normalizedAmountPaid, totalNet);
 
-  let paidIndex = 0;
+  LINE_ITEM_TYPES.forEach((feeType) => {
+    const scopedAmount = Math.max(0, roundMoney(normalizedPaymentBreakdown[feeType]));
+    if (scopedAmount <= 0 || remainingPaid <= 0) return;
+    const scopedLines = payableLines.filter((item) => item.feeType === feeType);
+    const scopedCapacity = roundMoney(scopedLines.reduce((sum, item) => sum + Number(item.netAmount || 0), 0));
+    const appliedAmount = Math.min(scopedAmount, scopedCapacity, remainingPaid);
+    const shares = distributeAmount(appliedAmount, scopedLines, (item) => item.netAmount);
+    scopedLines.forEach((item, index) => {
+      item.paidAmount = Math.max(0, roundMoney(item.paidAmount + (shares[index] || 0)));
+    });
+    remainingPaid = Math.max(0, roundMoney(remainingPaid - appliedAmount));
+  });
+
+  if (remainingPaid > 0) {
+    const legacyLines = payableLines.filter((item) => roundMoney(item.netAmount - item.paidAmount) > 0);
+    const legacyShares = distributeAmount(
+      remainingPaid,
+      legacyLines,
+      (item) => Math.max(0, roundMoney(item.netAmount - item.paidAmount))
+    );
+    legacyLines.forEach((item, index) => {
+      item.paidAmount = Math.min(
+        item.netAmount,
+        Math.max(0, roundMoney(item.paidAmount + (legacyShares[index] || 0)))
+      );
+    });
+  }
+
   normalizedLines.forEach((item) => {
-    if (item.netAmount > 0) {
-      item.paidAmount = Math.max(0, roundMoney(paidShares[paidIndex] || 0));
-      paidIndex += 1;
-    } else {
-      item.paidAmount = 0;
-    }
+    if (item.netAmount <= 0) item.paidAmount = 0;
     item.balanceAmount = Math.max(0, roundMoney(item.netAmount - item.paidAmount));
     if (item.netAmount <= 0) {
       item.status = item.grossAmount > 0 ? 'waived' : 'open';
@@ -409,9 +460,12 @@ module.exports = {
   buildFeeBreakdownFromLineItems,
   buildFeeScopesFromLineItems,
   buildScopedBreakdown,
+  normalizePaymentBreakdown,
   inferPrimaryOrderType,
   normalizeAdjustmentScope,
   getFinanceFeeScopeGrossAmount,
+  getFinanceFeeScopePaidAmount,
+  getFinanceFeeScopeBalanceAmount,
   deriveFinanceOrderStatus,
   applyFinanceOrderStatus,
   roundMoney

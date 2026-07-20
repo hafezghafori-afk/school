@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const { deriveLinkScope } = require('../utils/financeLinkScope');
 const { applySchoolOwnership } = require('../utils/schoolOwnership');
+const { LINE_ITEM_TYPES, normalizeFinanceFeeType } = require('../utils/financeLineItems');
 
 const approvalTrailEntrySchema = new mongoose.Schema({
   level: { type: String, enum: ['finance_manager', 'finance_lead', 'general_president'], required: true },
@@ -21,6 +22,7 @@ const followUpHistorySchema = new mongoose.Schema({
 
 const paymentAllocationSchema = new mongoose.Schema({
   feeOrderId: { type: mongoose.Schema.Types.ObjectId, ref: 'FeeOrder', required: true },
+  feeType: { type: String, enum: LINE_ITEM_TYPES, default: undefined },
   amount: { type: Number, default: 0, min: 0 },
   title: { type: String, default: '' },
   orderNumber: { type: String, default: '' }
@@ -114,6 +116,9 @@ feePaymentSchema.pre('validate', async function syncFeePaymentState() {
     ? this.allocations
         .map((item) => ({
           feeOrderId: item?.feeOrderId || null,
+          feeType: item?.feeType && LINE_ITEM_TYPES.includes(String(item.feeType).trim().toLowerCase())
+            ? normalizeFinanceFeeType(item.feeType, 'tuition')
+            : undefined,
           amount: Math.max(0, Number(item?.amount) || 0),
           title: String(item?.title || '').trim(),
           orderNumber: String(item?.orderNumber || '').trim().toUpperCase()
@@ -124,6 +129,7 @@ feePaymentSchema.pre('validate', async function syncFeePaymentState() {
   if (!this.allocations.length && this.feeOrderId && this.amount > 0) {
     this.allocations = [{
       feeOrderId: this.feeOrderId,
+      feeType: undefined,
       amount: this.amount,
       title: '',
       orderNumber: ''

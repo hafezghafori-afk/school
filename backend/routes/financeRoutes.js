@@ -104,6 +104,8 @@ const {
   resolveFeePlanForBilling
 } = require('../services/feeBillingService');
 const {
+  LINE_ITEM_TYPES,
+  getFinanceFeeScopeBalanceAmount,
   normalizeFinanceFeeType,
   normalizeFinanceLineItems,
   applyFinanceOrderStatus
@@ -128,6 +130,10 @@ const {
   listFeePayments
 } = require('../services/studentFinanceService');
 const { resolveQuarterForDate } = require('../services/financialPeriodService');
+const {
+  inspectPaymentScopeRepairs,
+  applyPaymentScopeRepairs
+} = require('../services/paymentScopeRepairService');
 const { runReport } = require('../services/reportEngineService');
 const { resolveActiveSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
 const {
@@ -286,6 +292,7 @@ const recalculateBill = (bill) => {
     amountOriginal: bill.amountOriginal,
     adjustments: bill.adjustments,
     amountPaid: bill.amountPaid,
+    paymentBreakdown: bill.paymentBreakdown,
     defaultType: bill.orderType || 'tuition'
   });
   bill.amountDue = Math.max(0, roundMoney(
@@ -890,9 +897,10 @@ const createCanonicalPaymentSubmissionRecord = async ({
 } = {}) => {
   const item = await createFeePayment({
     studentMembershipId: String(membership?._id || ''),
-    selectedOrderIds: [String(feeOrder?._id || '')],
+    selectedFeeOrderIds: [String(feeOrder?._id || '')],
     allocationMode: 'auto_selected',
     amount: draft.amount,
+    feeType: draft.feeType,
     currency: String(feeOrder?.currency || 'AFN'),
     paymentMethod: draft.normalizedMethod,
     paidAt: draft.paidAt,
@@ -971,6 +979,7 @@ const parseReceiptSubmissionDraft = async (req) => {
   return {
     paidAt,
     amount,
+    feeType: String(req.body?.feeType || '').trim().toLowerCase(),
     normalizedMethod: normalizeReceiptSubmissionPaymentMethod(req.body?.paymentMethod),
     referenceNo: String(req.body?.referenceNo || '').trim(),
     note: String(req.body?.note || '').trim()
@@ -1027,11 +1036,51 @@ const createReceiptSubmissionRecord = async ({
   bill,
   paidAt,
   amount,
+  feeType,
   paymentMethod,
   referenceNo,
   note,
   actorType = 'student'
 } = {}) => {
+  const lineItemFeeTypes = (Array.isArray(bill?.lineItems) ? bill.lineItems : [])
+    .filter((item) => Number(item?.netAmount ?? item?.grossAmount ?? item?.balanceAmount ?? 0) > 0)
+    .map((item) => normalizeFinanceFeeType(item?.feeType, 'tuition'));
+  const breakdownFeeTypes = Object.entries(
+    bill?.feeBreakdown && typeof bill.feeBreakdown === 'object' ? bill.feeBreakdown : {}
+  )
+    .filter(([, value]) => Number(value || 0) > 0)
+    .map(([key]) => normalizeFinanceFeeType(key, 'tuition'));
+  const scopeFeeTypes = (Array.isArray(bill?.feeScopes) ? bill.feeScopes : [])
+    .map((item) => normalizeFinanceFeeType(item, 'tuition'));
+  const billFeeTypes = Array.from(new Set([
+    ...lineItemFeeTypes,
+    ...breakdownFeeTypes,
+    ...scopeFeeTypes
+  ]));
+  const rawRequestedFeeType = String(feeType || '').trim().toLowerCase();
+  const requestedFeeType = LINE_ITEM_TYPES.includes(rawRequestedFeeType) ? rawRequestedFeeType : '';
+  if (rawRequestedFeeType && !requestedFeeType) {
+    throw createRouteError(400, 'نوع فیس رسید معتبر نیست.');
+  }
+  const resolvedFeeType = requestedFeeType && billFeeTypes.includes(requestedFeeType)
+    ? requestedFeeType
+    : billFeeTypes.length === 1
+      ? billFeeTypes[0]
+      : billFeeTypes.length === 0
+        ? 'tuition'
+        : '';
+  if (!resolvedFeeType) {
+    throw createRouteError(400, 'این بل چند نوع فیس دارد؛ نوع پرداخت مانند فیس یا داخله را مشخص کنید.');
+  }
+  const explicitScopedRemaining = getFinanceFeeScopeBalanceAmount(bill, resolvedFeeType);
+  const scopedRemaining = explicitScopedRemaining > 0
+    ? explicitScopedRemaining
+    : billFeeTypes.length <= 1
+      ? Math.max(0, roundMoney(Number(bill?.amountDue || 0) - Number(bill?.amountPaid || 0)))
+      : 0;
+  if (amount > scopedRemaining) {
+    throw createRouteError(400, `مبلغ رسید از مانده ${resolvedFeeType === 'admission' ? 'داخله' : 'نوع فیس انتخاب‌شده'} بیشتر است. حداکثر مجاز: ${scopedRemaining}`);
+  }
   const receipt = await FinanceReceipt.create({
     bill: bill._id,
     student: bill.student,
@@ -1042,6 +1091,7 @@ const createReceiptSubmissionRecord = async ({
     classId: bill.classId || null,
     academicYearId: bill.academicYearId || null,
     amount,
+    feeType: resolvedFeeType,
     paymentMethod,
     referenceNo,
     paidAt,
@@ -6235,6 +6285,7 @@ router.post('/student/receipts', requireAuth, (req, res, next) => {
       amount: draft.amount,
       paymentMethod: draft.normalizedMethod,
       referenceNo: draft.referenceNo,
+      feeType: draft.feeType,
       note: draft.note,
       actorType: 'student'
     });
@@ -6320,6 +6371,7 @@ router.post('/parent/receipts', requireAuth, (req, res, next) => {
       amount: draft.amount,
       paymentMethod: draft.normalizedMethod,
       referenceNo: draft.referenceNo,
+      feeType: draft.feeType,
       note: draft.note,
       actorType: 'parent'
     });
@@ -7095,9 +7147,21 @@ const getClassPaymentApprovalOrderIds = (payment = {}) => Array.from(new Set([
 
 const getClassPaymentApprovalOrderTypes = (order = {}) => {
   const lineItemTypes = (Array.isArray(order.lineItems) ? order.lineItems : [])
+    .filter((item) => Number(item?.grossAmount ?? item?.netAmount ?? item?.balanceAmount ?? 0) > 0)
     .map((item) => normalizeFinanceFeeType(item?.feeType, order.orderType || 'tuition'))
     .filter((item) => item !== 'penalty');
   if (lineItemTypes.length) return Array.from(new Set(lineItemTypes));
+  const breakdownTypes = Object.entries(
+    order?.feeBreakdown && typeof order.feeBreakdown === 'object' ? order.feeBreakdown : {}
+  )
+    .filter(([, amount]) => Number(amount || 0) > 0)
+    .map(([key]) => normalizeFinanceFeeType(key, order.orderType || 'tuition'))
+    .filter((item) => item !== 'penalty');
+  if (breakdownTypes.length) return Array.from(new Set(breakdownTypes));
+  const scopeTypes = (Array.isArray(order?.feeScopes) ? order.feeScopes : [])
+    .map((item) => normalizeFinanceFeeType(item, order.orderType || 'tuition'))
+    .filter((item) => item !== 'penalty');
+  if (scopeTypes.length) return Array.from(new Set(scopeTypes));
   return [normalizeFinanceFeeType(order.orderType || 'tuition', 'tuition')];
 };
 
@@ -7140,7 +7204,14 @@ const buildClassPaymentApprovalPreview = async ({
     const linkedOrderIds = getClassPaymentApprovalOrderIds(payment);
     if (!linkedOrderIds.length) continue;
     const linkedOrders = linkedOrderIds.map((orderId) => orderMap.get(orderId)).filter(Boolean);
-    const orderTypes = Array.from(new Set(linkedOrders.flatMap(getClassPaymentApprovalOrderTypes)));
+    const allocationTypes = Array.from(new Set(
+      (Array.isArray(payment.allocations) ? payment.allocations : [])
+        .map((item) => String(item?.feeType || '').trim().toLowerCase())
+        .filter((item) => item === 'admission' || item === 'tuition')
+    ));
+    const orderTypes = allocationTypes.length
+      ? allocationTypes
+      : Array.from(new Set(linkedOrders.flatMap(getClassPaymentApprovalOrderTypes)));
     const relevantTypes = orderTypes.filter((item) => item === 'admission' || item === 'tuition');
     if (!relevantTypes.length) continue;
 
@@ -7154,7 +7225,11 @@ const buildClassPaymentApprovalPreview = async ({
     if (!matchesRequestedScope) continue;
 
     let blockedReason = '';
-    if (hasUnsupportedType) {
+    const hasUntypedMixedOrder = !allocationTypes.length
+      && linkedOrders.some((order) => getClassPaymentApprovalOrderTypes(order).length > 1);
+    if (hasUntypedMixedOrder) {
+      blockedReason = 'نوع فیس این پرداخت در بل چندبخشی مشخص نیست؛ ابتدا ابزار ترمیم تفکیک پرداخت را اجرا کنید.';
+    } else if (hasUnsupportedType) {
       blockedReason = 'این رسید به بل نامرتبط یا نوع فیس دیگری نیز وصل است و باید جداگانه بررسی شود.';
     } else if (payment.sourceReceiptId) {
       blockedReason = 'این رسید به سند قدیمی مالی وصل است و برای تأیید گروهی پشتیبانی نمی‌شود.';
@@ -7273,6 +7348,7 @@ const correctPendingAdmissionReceipt = async ({ req, candidate = {}, note = '', 
       currency: String(plan.currency || order.currency || payment.currency || 'AFN').trim().toUpperCase(),
       amountOriginal: plannedAmount,
       amountPaid: 0,
+      paymentBreakdown: {},
       dueDate: order.dueDate || payment.paidAt || now,
       paidAt: null,
       note: [
@@ -7316,6 +7392,7 @@ const correctPendingAdmissionReceipt = async ({ req, candidate = {}, note = '', 
       allocationMode: 'manual',
       allocations: [{
         feeOrderId: replacementOrder._id,
+        feeType: 'admission',
         amount: plannedAmount,
         title: replacementOrder.title,
         orderNumber: replacementOrder.orderNumber
@@ -7486,6 +7563,7 @@ const settleAdmissionAnomalyRecord = async ({
         currency: String(feePlan?.currency || 'AFN').trim().toUpperCase() || 'AFN',
         amountOriginal: plannedAmount,
         amountPaid: 0,
+        paymentBreakdown: {},
         dueDate: normalizedMode === 'open' ? buildAdmissionDueDate(now, feePlan?.dueDay) : now,
         paidAt: null,
         note: [
@@ -7543,8 +7621,9 @@ const settleAdmissionAnomalyRecord = async ({
         amount: outstandingAmount,
         currency: String(feeOrder.currency || 'AFN').trim().toUpperCase() || 'AFN',
         paymentMethod: 'cash',
+        feeType: 'admission',
         allocationMode: 'manual',
-        allocations: [{ feeOrderId: feeOrder._id, amount: outstandingAmount }],
+        allocations: [{ feeOrderId: feeOrder._id, feeType: 'admission', amount: outstandingAmount }],
         source: 'manual',
         receivedBy: req.user.id,
         paidAt: now,
@@ -7873,6 +7952,104 @@ router.post('/admin/admission-receipt-corrections/apply', requireAuth, requireRo
     return res.status(Number(error?.status || 500)).json({
       success: false,
       message: error?.message || 'اصلاح گروهی رسیدهای داخله ممکن نشد'
+    });
+  }
+});
+
+router.get('/admin/payment-scope-repairs/preview', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const classId = String(req.query?.classId || '').trim();
+    if (!classId || !mongoose.Types.ObjectId.isValid(classId)) {
+      return res.status(400).json({ success: false, message: 'برای بررسی تفکیک پرداخت‌ها، صنف معتبر انتخاب کنید.' });
+    }
+    const academicYearId = String(req.query?.academicYearId || '').trim();
+    if (academicYearId && !mongoose.Types.ObjectId.isValid(academicYearId)) {
+      return res.status(400).json({ success: false, message: 'سال تعلیمی انتخاب‌شده معتبر نیست.' });
+    }
+    const scope = await resolveFinanceScope({ classId });
+    if (scope.error || !scope.classId) {
+      return res.status(400).json({ success: false, message: scope.error || 'صنف مالی معتبر پیدا نشد.' });
+    }
+    const actorLevel = await resolveAdminActorLevel(req.user.id);
+    if (!['finance_manager', 'general_president'].includes(actorLevel)) {
+      return res.status(403).json({ success: false, message: 'سطح دسترسی شما اجازه بررسی ترمیم پرداخت‌ها را نمی‌دهد.' });
+    }
+    const preview = await inspectPaymentScopeRepairs({
+      classId: String(scope.classId),
+      academicYearId
+    });
+    return res.json({
+      success: true,
+      ...preview,
+      classId: String(scope.classId),
+      generatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({
+      success: false,
+      message: error?.message || 'بررسی تفکیک پرداخت‌های فیس و داخله ممکن نشد.'
+    });
+  }
+});
+
+router.post('/admin/payment-scope-repairs/apply', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const classId = String(req.body?.classId || '').trim();
+    if (!classId || !mongoose.Types.ObjectId.isValid(classId)) {
+      return res.status(400).json({ success: false, message: 'برای ترمیم تفکیک پرداخت‌ها، صنف معتبر انتخاب کنید.' });
+    }
+    const academicYearId = String(req.body?.academicYearId || '').trim();
+    if (academicYearId && !mongoose.Types.ObjectId.isValid(academicYearId)) {
+      return res.status(400).json({ success: false, message: 'سال تعلیمی انتخاب‌شده معتبر نیست.' });
+    }
+    const paymentIds = Array.from(new Set(
+      (Array.isArray(req.body?.paymentIds) ? req.body.paymentIds : [])
+        .map((item) => String(item || '').trim())
+        .filter((item) => mongoose.Types.ObjectId.isValid(item))
+    )).slice(0, 500);
+    if (!paymentIds.length) {
+      return res.status(400).json({ success: false, message: 'هیچ پرداخت قابل ترمیم انتخاب نشده است.' });
+    }
+    const scope = await resolveFinanceScope({ classId });
+    if (scope.error || !scope.classId) {
+      return res.status(400).json({ success: false, message: scope.error || 'صنف مالی معتبر پیدا نشد.' });
+    }
+    const actorLevel = await resolveAdminActorLevel(req.user.id);
+    if (!['finance_manager', 'general_president'].includes(actorLevel)) {
+      return res.status(403).json({ success: false, message: 'سطح دسترسی شما اجازه ترمیم پرداخت‌ها را نمی‌دهد.' });
+    }
+    const result = await applyPaymentScopeRepairs({
+      classId: String(scope.classId),
+      academicYearId,
+      paymentIds
+    });
+    await logActivity({
+      req,
+      action: 'finance_payment_scope_repair_batch',
+      targetType: 'SchoolClass',
+      targetId: String(scope.classId),
+      meta: {
+        classId: String(scope.classId),
+        requested: paymentIds.length,
+        repaired: result.summary.repaired,
+        failed: result.summary.failed,
+        ordersRebuilt: result.summary.ordersRebuilt,
+        ordersBlocked: result.summary.ordersBlocked,
+        note: String(req.body?.note || '').trim().slice(0, 500)
+      }
+    });
+    return res.json({
+      success: result.summary.repaired > 0,
+      partialSuccess: result.summary.repaired > 0 && (result.summary.failed > 0 || result.summary.ordersBlocked > 0),
+      ...result,
+      message: result.summary.failed || result.summary.ordersBlocked
+        ? `${result.summary.repaired} پرداخت تفکیک شد؛ بعضی موارد برای بررسی دستی باقی ماند.`
+        : `${result.summary.repaired} پرداخت بدون تغییر مبلغ صندوق، به نوع فیس درست منتسب شد.`
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({
+      success: false,
+      message: error?.message || 'ترمیم گروهی تفکیک پرداخت‌ها ممکن نشد.'
     });
   }
 });

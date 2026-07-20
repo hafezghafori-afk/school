@@ -37,10 +37,13 @@ const {
   groupRepairableDiscounts
 } = require('../utils/discountRegistryIdentity');
 const {
+  LINE_ITEM_TYPES,
   buildFeeBreakdownFromLineItems,
   deriveFinanceOrderStatus,
+  getFinanceFeeScopeBalanceAmount,
   getFinanceFeeScopeGrossAmount,
   normalizeAdjustmentScope,
+  normalizeFinanceFeeType,
   normalizeFinanceLineItems
 } = require('../utils/financeLineItems');
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
@@ -178,6 +181,7 @@ function formatFeeOrder(doc) {
     amountOriginal: item.amountOriginal,
     adjustments: item.adjustments,
     amountPaid: item.amountPaid,
+    paymentBreakdown: item.paymentBreakdown,
     defaultType: item.orderType
   });
   const lineItems = normalizedLineItems.map((entry) => ({
@@ -220,6 +224,7 @@ function formatFeeOrder(doc) {
     amountOriginal,
     amountDue,
     amountPaid,
+    paymentBreakdown: item.paymentBreakdown || {},
     outstandingAmount,
     lineItems,
     feeBreakdown,
@@ -265,6 +270,7 @@ function formatFeeOrderLite(doc) {
     amountOriginal: item.amountOriginal,
     adjustments: item.adjustments,
     amountPaid: item.amountPaid,
+    paymentBreakdown: item.paymentBreakdown,
     defaultType: item.orderType
   });
   const lineItems = normalizedLineItems.map((entry) => ({
@@ -298,6 +304,7 @@ function formatFeeOrderLite(doc) {
     currency: normalizeText(item.currency),
     amountDue,
     amountPaid,
+    paymentBreakdown: item.paymentBreakdown || {},
     outstandingAmount: Math.max(0, roundMoney(amountDue - amountPaid)),
     lineItems,
     feeBreakdown: buildFeeBreakdownFromLineItems(lineItems),
@@ -356,6 +363,7 @@ function formatSourceReceipt(doc) {
   return {
     id: String(item._id || item.id || ''),
     amount: Number(item.amount || 0),
+    feeType: normalizeText(item.feeType),
     paymentMethod: normalizeText(item.paymentMethod),
     referenceNo: normalizeText(item.referenceNo),
     paidAt: item.paidAt || null,
@@ -378,6 +386,7 @@ function formatFeePaymentAllocation(doc) {
   const feeOrder = formatFeeOrderLite(item.feeOrderId);
   return {
     feeOrderId: normalizeNullableId(item.feeOrderId?._id || item.feeOrderId),
+    feeType: normalizeText(item.feeType),
     amount: Number(item.amount || 0),
     title: normalizeText(item.title) || normalizeText(feeOrder?.title),
     orderNumber: formatFinanceCode(normalizeText(item.orderNumber) || normalizeText(feeOrder?.orderNumber)),
@@ -894,6 +903,27 @@ function normalizeSelectedOrderIds(payload = {}) {
   ));
 }
 
+function getOpenOrderFeeTypes(order = {}) {
+  return Array.from(new Set(
+    (Array.isArray(order?.lineItems) ? order.lineItems : [])
+      .filter((item) => getFinanceFeeScopeBalanceAmount(order, item?.feeType) > 0)
+      .map((item) => normalizeFinanceFeeType(item?.feeType, order?.orderType || 'tuition'))
+      .filter((item) => LINE_ITEM_TYPES.includes(item))
+  ));
+}
+
+function resolveOrderPaymentFeeType(order = {}, preferredFeeType = '') {
+  const preferred = normalizeText(preferredFeeType).toLowerCase();
+  if (preferred) {
+    if (!LINE_ITEM_TYPES.includes(preferred)) return '';
+    return getFinanceFeeScopeBalanceAmount(order, preferred) > 0 ? preferred : '';
+  }
+  const openTypes = getOpenOrderFeeTypes(order);
+  if (openTypes.length === 1) return openTypes[0];
+  if (normalizeText(order?.orderType) === 'admission' && openTypes.includes('admission')) return 'admission';
+  return '';
+}
+
 function resolvePaymentAllocations({ openOrders = [], payload = {} } = {}) {
   const amount = roundMoney(payload.amount);
   if (!amount) {
@@ -903,6 +933,11 @@ function resolvePaymentAllocations({ openOrders = [], payload = {} } = {}) {
   const orderMap = new Map(openOrders.map((item) => [String(item?._id || ''), item]));
   const selectedOrderIds = normalizeSelectedOrderIds(payload);
   const allocationMode = resolvePaymentAllocationMode(payload);
+  const rawRequestedFeeType = normalizeText(payload.feeType).toLowerCase();
+  const requestedFeeType = LINE_ITEM_TYPES.includes(rawRequestedFeeType) ? rawRequestedFeeType : '';
+  if (rawRequestedFeeType && !requestedFeeType) {
+    throw new Error('student_finance_payment_fee_type_required');
+  }
   let allocations = [];
 
   if (allocationMode === 'manual') {
@@ -910,6 +945,7 @@ function resolvePaymentAllocations({ openOrders = [], payload = {} } = {}) {
     allocations = manualRows
       .map((item) => ({
         feeOrderId: normalizeNullableId(item?.feeOrderId),
+        feeType: normalizeText(item?.feeType || requestedFeeType).toLowerCase(),
         amount: roundMoney(item?.amount)
       }))
       .filter((item) => item.feeOrderId && item.amount > 0);
@@ -919,13 +955,16 @@ function resolvePaymentAllocations({ openOrders = [], payload = {} } = {}) {
     }
     const seen = new Set();
     for (const item of allocations) {
-      if (seen.has(String(item.feeOrderId || ''))) {
-        throw new Error('student_finance_payment_duplicate_allocations');
-      }
-      seen.add(String(item.feeOrderId || ''));
       const order = orderMap.get(String(item.feeOrderId || ''));
       if (!order) throw new Error('student_finance_payment_order_not_found');
-      if (item.amount > roundMoney(order.outstandingAmount)) {
+      item.feeType = resolveOrderPaymentFeeType(order, item.feeType);
+      if (!item.feeType) throw new Error('student_finance_payment_fee_type_required');
+      const allocationKey = `${String(item.feeOrderId || '')}:${item.feeType}`;
+      if (seen.has(allocationKey)) {
+        throw new Error('student_finance_payment_duplicate_allocations');
+      }
+      seen.add(allocationKey);
+      if (item.amount > getFinanceFeeScopeBalanceAmount(order, item.feeType)) {
         throw new Error('student_finance_payment_allocation_exceeds_balance');
       }
     }
@@ -933,27 +972,37 @@ function resolvePaymentAllocations({ openOrders = [], payload = {} } = {}) {
     if (allocationMode === 'auto_selected' && !selectedOrderIds.length) {
       throw new Error('student_finance_payment_selected_orders_required');
     }
-    const candidateOrders = selectedOrderIds.length
+    const unscopedCandidateOrders = selectedOrderIds.length
       ? sortOpenOrdersForAllocation(openOrders.filter((item) => selectedOrderIds.includes(String(item?._id || ''))))
       : sortOpenOrdersForAllocation(openOrders);
+    const candidateOrders = unscopedCandidateOrders
+      .map((order) => ({
+        order,
+        feeType: resolveOrderPaymentFeeType(order, requestedFeeType)
+      }))
+      .filter((item) => item.feeType && getFinanceFeeScopeBalanceAmount(item.order, item.feeType) > 0);
 
     if (!candidateOrders.length) {
-      throw new Error('student_finance_open_orders_not_found');
+      throw new Error(requestedFeeType ? 'student_finance_payment_fee_scope_not_found' : 'student_finance_payment_fee_type_required');
     }
 
-    const totalCandidateOutstanding = roundMoney(candidateOrders.reduce((sum, item) => sum + roundMoney(item?.outstandingAmount), 0));
+    const totalCandidateOutstanding = roundMoney(candidateOrders.reduce((sum, item) => (
+      sum + getFinanceFeeScopeBalanceAmount(item.order, item.feeType)
+    ), 0));
     if (amount > totalCandidateOutstanding) {
       throw new Error('student_finance_payment_exceeds_open_balance');
     }
 
     let remain = amount;
-    for (const order of candidateOrders) {
+    for (const candidate of candidateOrders) {
       if (remain <= 0) break;
-      const outstandingAmount = roundMoney(order.outstandingAmount);
+      const { order, feeType } = candidate;
+      const outstandingAmount = getFinanceFeeScopeBalanceAmount(order, feeType);
       if (outstandingAmount <= 0) continue;
       const used = Math.min(outstandingAmount, remain);
       allocations.push({
         feeOrderId: String(order._id || ''),
+        feeType,
         amount: used
       });
       remain = roundMoney(remain - used);
@@ -973,11 +1022,12 @@ function resolvePaymentAllocations({ openOrders = [], payload = {} } = {}) {
       const order = orderMap.get(String(item.feeOrderId || ''));
       return {
         feeOrderId: String(item.feeOrderId || ''),
+        feeType: item.feeType,
         amount: roundMoney(item.amount),
         title: normalizeText(order?.title),
         orderNumber: formatFinanceCode(normalizeText(order?.orderNumber)),
         dueDate: order?.dueDate || null,
-        outstandingAmount: roundMoney(order?.outstandingAmount)
+        outstandingAmount: getFinanceFeeScopeBalanceAmount(order, item.feeType)
       };
     }),
     totalAllocated
@@ -1207,7 +1257,7 @@ async function findDuplicateFeePaymentSubmission({
   if (!range) return null;
   const normalizedAllocations = Array.isArray(allocations)
     ? allocations
-        .map((item) => `${normalizeNullableId(item?.feeOrderId)}:${roundMoney(item?.amount)}`)
+        .map((item) => `${normalizeNullableId(item?.feeOrderId)}:${normalizeText(item?.feeType)}:${roundMoney(item?.amount)}`)
         .filter(Boolean)
         .sort()
     : [];
@@ -1223,7 +1273,7 @@ async function findDuplicateFeePaymentSubmission({
   return candidates.find((item) => {
     const candidateAllocations = Array.isArray(item?.allocations)
       ? item.allocations
-          .map((entry) => `${normalizeNullableId(entry?.feeOrderId)}:${roundMoney(entry?.amount)}`)
+          .map((entry) => `${normalizeNullableId(entry?.feeOrderId)}:${normalizeText(entry?.feeType)}:${roundMoney(entry?.amount)}`)
           .filter(Boolean)
           .sort()
       : [];
@@ -1369,6 +1419,27 @@ function buildStatementRecommendation(packSummary = {}) {
     return 'چند مورد نیازمند پیگیری پیش از مهلت پرداخت بعدی است.';
   }
   return 'در این استیتمنت سیگنال حساس مالی دیده نشد.';
+}
+
+function buildFeeTypeLedgerSummary(orders = []) {
+  return LINE_ITEM_TYPES.reduce((result, feeType) => {
+    const totals = (Array.isArray(orders) ? orders : []).reduce((summary, order) => {
+      (Array.isArray(order?.lineItems) ? order.lineItems : [])
+        .filter((item) => normalizeText(item?.feeType) === feeType)
+        .forEach((item) => {
+          summary.totalDue += Number(item?.netAmount || 0);
+          summary.totalPaid += Number(item?.paidAmount || 0);
+          summary.totalOutstanding += Number(item?.balanceAmount || 0);
+        });
+      return summary;
+    }, { totalDue: 0, totalPaid: 0, totalOutstanding: 0 });
+    result[feeType] = {
+      totalDue: roundMoney(totals.totalDue),
+      totalPaid: roundMoney(totals.totalPaid),
+      totalOutstanding: roundMoney(totals.totalOutstanding)
+    };
+    return result;
+  }, {});
 }
 
 function buildMembershipStatement({ membership = null, summary = {}, orders = [], payments = [], discounts = [], exemptions = [], reliefs = [], transportFees = [], pack = null } = {}) {
@@ -2012,12 +2083,19 @@ async function previewFeePaymentAllocation(payload = {}) {
 
   const amount = roundMoney(payload.amount);
   const resolved = resolvePaymentAllocations({ openOrders, payload });
+  const rawRequestedFeeType = normalizeText(payload.feeType).toLowerCase();
+  const requestedFeeType = LINE_ITEM_TYPES.includes(rawRequestedFeeType) ? rawRequestedFeeType : '';
   return {
     membership: formatMembership(membership),
     amount,
     currency: normalizeText(payload.currency).toUpperCase() || 'AFN',
     allocationMode: resolved.allocationMode,
-    totalOutstanding: roundMoney(openOrders.reduce((sum, item) => sum + Number(item.outstandingAmount || 0), 0)),
+    feeType: requestedFeeType,
+    totalOutstanding: roundMoney(openOrders.reduce((sum, item) => (
+      sum + (requestedFeeType
+        ? getFinanceFeeScopeBalanceAmount(item, requestedFeeType)
+        : Number(item.outstandingAmount || 0))
+    ), 0)),
     totalAllocated: resolved.totalAllocated,
     remainingAmount: roundMoney(amount - resolved.totalAllocated),
     allocations: resolved.allocations,
@@ -2094,6 +2172,7 @@ async function createFeePayment(payload = {}) {
     allocationMode: preview.allocationMode,
     allocations: preview.allocations.map((entry) => ({
       feeOrderId: entry.feeOrderId,
+      feeType: entry.feeType,
       amount: entry.amount,
       title: entry.title,
       orderNumber: entry.orderNumber
@@ -2238,6 +2317,7 @@ async function getMembershipFinanceOverview(studentMembershipId) {
     overdueOrders: formattedOrders.filter((item) => item.status === 'overdue').length,
     pendingPayments: formattedPayments.filter((item) => item.status === 'pending' && Number(item?.recognizedAmount || 0) > 0).length
   };
+  summary.byFeeType = buildFeeTypeLedgerSummary(formattedOrders);
   const anomalyPack = buildMembershipFinanceAnomalies({
     membership: formattedMembership,
     orders: formattedOrders,

@@ -1,6 +1,8 @@
 const { deriveLinkScope } = require('./financeLinkScope');
 const {
   normalizeFinanceLineItems,
+  normalizeFinanceFeeType,
+  normalizePaymentBreakdown,
   inferPrimaryOrderType,
   normalizeAdjustmentScope,
   getFinanceFeeScopeGrossAmount,
@@ -126,6 +128,7 @@ function refreshFinanceBillStatus(bill = {}) {
     amountOriginal: bill.amountOriginal,
     adjustments: bill.adjustments,
     amountPaid: bill.amountPaid,
+    paymentBreakdown: bill.paymentBreakdown,
     defaultType: 'tuition'
   });
   bill.amountDue = roundMoney((bill.lineItems || []).reduce(
@@ -238,6 +241,7 @@ function buildFeeOrderPayloadFromBill(bill = {}) {
     amountOriginal: bill.amountOriginal,
     adjustments: bill.adjustments,
     amountPaid: bill.amountPaid,
+    paymentBreakdown: bill.paymentBreakdown,
     defaultType: 'tuition'
   });
   const normalizedAmountOriginal = roundMoney(normalizedLineItems.reduce((sum, item) => (
@@ -268,6 +272,7 @@ function buildFeeOrderPayloadFromBill(bill = {}) {
     amountOriginal: normalizedAmountOriginal,
     amountDue: normalizedAmountDue,
     amountPaid: normalizedAmountPaid,
+    paymentBreakdown: normalizePaymentBreakdown(bill.paymentBreakdown),
     outstandingAmount: roundMoney(normalizedAmountDue - normalizedAmountPaid),
     lineItems: normalizedLineItems,
     status: normalizeText(bill.status) || 'new',
@@ -295,6 +300,21 @@ function buildFeePaymentPayloadFromReceipt(receipt = {}, feeOrder = null) {
   const derivedClassId = receipt.classId || feeOrder?.classId || null;
   const derivedAcademicYearId = receipt.academicYearId || feeOrder?.academicYearId || null;
   const allocationAmount = roundMoney(receipt.amount);
+  const orderFeeTypes = Array.from(new Set(
+    (Array.isArray(feeOrder?.lineItems) ? feeOrder.lineItems : [])
+      .filter((item) => Number(item?.netAmount ?? item?.grossAmount ?? 0) > 0)
+      .map((item) => normalizeFinanceFeeType(item?.feeType, feeOrder?.orderType || 'tuition'))
+  ));
+  const requestedFeeType = receipt.feeType
+    ? normalizeFinanceFeeType(receipt.feeType, feeOrder?.orderType || 'tuition')
+    : '';
+  const allocationFeeType = requestedFeeType && orderFeeTypes.includes(requestedFeeType)
+    ? requestedFeeType
+    : orderFeeTypes.length === 1
+      ? orderFeeTypes[0]
+      : normalizeText(feeOrder?.orderType) === 'admission'
+        ? 'admission'
+        : '';
   return {
     paymentNumber: `PAY-${String(receipt._id || '').slice(-8).toUpperCase()}`,
     feeOrderId: feeOrder?._id || null,
@@ -318,6 +338,7 @@ function buildFeePaymentPayloadFromReceipt(receipt = {}, feeOrder = null) {
     allocationMode: 'single_order',
     allocations: feeOrder?._id ? [{
       feeOrderId: feeOrder._id,
+      feeType: allocationFeeType || undefined,
       amount: allocationAmount,
       title: normalizeText(feeOrder.title),
       orderNumber: formatFinanceCode(normalizeText(feeOrder.orderNumber)).toUpperCase()
@@ -393,6 +414,7 @@ function feeOrderChanged(existing = {}, payload = {}) {
     || JSON.stringify(existing.adjustments || []) !== JSON.stringify(payload.adjustments || [])
     || JSON.stringify(existing.installments || []) !== JSON.stringify(payload.installments || [])
     || JSON.stringify(existing.lineItems || []) !== JSON.stringify(payload.lineItems || [])
+    || JSON.stringify(existing.paymentBreakdown || {}) !== JSON.stringify(payload.paymentBreakdown || {})
     || String(existing.voidReason || '') !== String(payload.voidReason || '')
     || String(existing.voidedBy || '') !== String(payload.voidedBy || '');
 }

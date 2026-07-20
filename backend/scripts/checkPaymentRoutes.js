@@ -25,7 +25,7 @@ const bills = [
     amountDue: 1000,
     amountPaid: 0,
     status: 'new',
-    dueDate: new Date('2026-04-15T00:00:00.000Z'),
+    dueDate: new Date(Date.now() + (30 * 24 * 60 * 60 * 1000)),
     paidAt: null,
     installments: [],
     createdAt: new Date('2026-03-01T00:00:00.000Z'),
