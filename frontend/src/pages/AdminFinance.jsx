@@ -1294,6 +1294,17 @@ export default function AdminFinance() {
     snoozedUntil: '',
     note: ''
   });
+  const [admissionBatchForm, setAdmissionBatchForm] = useState({
+    classId: '',
+    mode: 'open',
+    note: ''
+  });
+  const [admissionBatchPreview, setAdmissionBatchPreview] = useState({
+    loading: false,
+    items: [],
+    error: ''
+  });
+  const [admissionBatchRefreshKey, setAdmissionBatchRefreshKey] = useState(0);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [activeSchoolContext, setActiveSchoolContext] = useState(null);
@@ -2803,6 +2814,41 @@ export default function AdminFinance() {
   }, [cashierReportDate]);
 
   useEffect(() => {
+    const classId = String(admissionBatchForm.classId || '').trim();
+    if (!classId) {
+      setAdmissionBatchPreview({ loading: false, items: [], error: '' });
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setAdmissionBatchPreview((prev) => ({ ...prev, loading: true, error: '' }));
+    const query = new URLSearchParams({
+      classId,
+      type: 'admission_missing',
+      limit: '500'
+    });
+    fetchJson(`${API_BASE}/api/finance/admin/reports/anomalies?${query.toString()}`, {
+      signal: controller.signal
+    })
+      .then((data) => {
+        if (!data?.success) {
+          setAdmissionBatchPreview({ loading: false, items: [], error: data?.message || 'بررسی داخله صنف ممکن نشد.' });
+          return;
+        }
+        const items = (Array.isArray(data.items) ? data.items : [])
+          .filter((item) => String(item?.anomalyType || '').trim() === 'admission_missing');
+        setAdmissionBatchPreview({ loading: false, items, error: '' });
+      })
+      .catch((error) => {
+        if (error?.name === 'AbortError') return;
+        setAdmissionBatchPreview({ loading: false, items: [], error: error?.message || 'بررسی داخله صنف ممکن نشد.' });
+      });
+
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [admissionBatchForm.classId, admissionBatchRefreshKey]);
+
+  useEffect(() => {
     setDiscountRegistryPage(1);
   }, [discountRegistryClassFilter, discountRegistryPageSize, discountRegistrySearch]);
 
@@ -3341,6 +3387,14 @@ export default function AdminFinance() {
     selectedAnomaly?.workflowLatestNote,
     selectedAnomaly?.workflowLastActionAt
   ]);
+
+  useEffect(() => {
+    const selectedClassId = String(selectedAnomaly?.classId || '').trim();
+    if (selectedAnomaly?.anomalyType !== 'admission_missing' || !selectedClassId) return;
+    setAdmissionBatchForm((prev) => (
+      prev.classId === selectedClassId ? prev : { ...prev, classId: selectedClassId }
+    ));
+  }, [selectedAnomaly?.id, selectedAnomaly?.anomalyType, selectedAnomaly?.classId]);
 
   const selectedReceiptBase = useMemo(() => {
     if (!filteredReceipts.length) return null;
@@ -5032,6 +5086,51 @@ export default function AdminFinance() {
         })
       );
       setMessage(data.message || 'داخله ثبت شد و ناهنجاری مالی حل شد');
+      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
+    } catch (err) {
+      setMessage(err.message);
+      setBusy(false);
+    }
+  };
+
+  const settleAdmissionAnomaliesByClass = async () => {
+    const classId = String(admissionBatchForm.classId || '').trim();
+    const candidateCount = admissionBatchPreview.items.length;
+    if (!classId) {
+      setMessage('برای ثبت گروهی داخله، ابتدا صنف را انتخاب کنید.');
+      return;
+    }
+    if (!candidateCount) {
+      setMessage('در صنف انتخاب‌شده شاگردی با بل داخله صادرنشده پیدا نشد.');
+      return;
+    }
+
+    const actionLabel = admissionBatchForm.mode === 'paid'
+      ? 'ثبت دریافت داخله در حالت انتظار تأیید'
+      : admissionBatchForm.mode === 'waived'
+        ? 'ثبت معافیت کامل داخله'
+        : 'صدور بل باز داخله';
+    const selectedClass = classOptions.find((item) => item.classId === classId);
+    const confirmed = window.confirm(
+      `${actionLabel} برای ${candidateCount} شاگرد صنف ${selectedClass?.uiLabel || selectedClass?.title || ''} انجام شود؟`
+    );
+    if (!confirmed) return;
+
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/finance/admin/anomalies/settle-admission-batch`, {
+        classId,
+        mode: admissionBatchForm.mode,
+        note: admissionBatchForm.note
+      });
+      const failed = Number(data?.summary?.failed || 0);
+      const failureNames = (Array.isArray(data?.failures) ? data.failures : [])
+        .slice(0, 3)
+        .map((item) => item.studentName)
+        .filter(Boolean)
+        .join('، ');
+      setMessage(`${data.message || 'ثبت گروهی داخله انجام شد'}${failed && failureNames ? ` موارد خطادار: ${failureNames}` : ''}`);
+      setAdmissionBatchRefreshKey((value) => value + 1);
       await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
@@ -7454,6 +7553,75 @@ export default function AdminFinance() {
                 data-testid="anomaly-search"
               />
             </label>
+          </div>
+          <div className="admission-batch-panel" data-testid="admission-batch-panel">
+            <div className="finance-card-head">
+              <div>
+                <h4>رفع گروهی مشکل داخله بر اساس صنف</h4>
+                <p className="muted">سیستم فقط شاگردانی را ثبت می‌کند که پلان فعال داخله دارند و هنوز بل یا سند داخله برای‌شان موجود نیست.</p>
+              </div>
+              <span className="finance-chip finance-chip-amber" data-testid="admission-batch-count">
+                {admissionBatchPreview.loading ? 'در حال بررسی…' : `${admissionBatchPreview.items.length} شاگرد`}
+              </span>
+            </div>
+            <div className="receipt-follow-up-grid admission-batch-controls">
+              <label className="finance-inline-filter">
+                <span>صنف مربوطه</span>
+                <select
+                  value={admissionBatchForm.classId}
+                  onChange={(e) => setAdmissionBatchForm((prev) => ({ ...prev, classId: e.target.value }))}
+                  data-testid="admission-batch-class"
+                >
+                  <option value="">انتخاب صنف</option>
+                  {classOptions.map((item) => (
+                    <option key={`admission-batch-class-${item.classId}`} value={item.classId}>
+                      {item.uiLabel || item.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="finance-inline-filter">
+                <span>نوع ثبت گروهی</span>
+                <select
+                  value={admissionBatchForm.mode}
+                  onChange={(e) => setAdmissionBatchForm((prev) => ({ ...prev, mode: e.target.value }))}
+                  data-testid="admission-batch-mode"
+                >
+                  <option value="open">صدور بل باز داخله</option>
+                  <option value="paid">داخله دریافت شده — انتظار تأیید</option>
+                  <option value="waived">معافیت کامل داخله</option>
+                </select>
+              </label>
+              <label className="finance-inline-filter finance-inline-filter-wide">
+                <span>یادداشت گروهی</span>
+                <input
+                  value={admissionBatchForm.note}
+                  onChange={(e) => setAdmissionBatchForm((prev) => ({ ...prev, note: e.target.value }))}
+                  placeholder="مثلاً ثبت داخله صنف از اسناد قبلی"
+                  data-testid="admission-batch-note"
+                />
+              </label>
+            </div>
+            {admissionBatchPreview.error ? <p className="admission-batch-error">{admissionBatchPreview.error}</p> : null}
+            {!!admissionBatchPreview.items.length && (
+              <p className="muted admission-batch-sample">
+                شامل: {admissionBatchPreview.items.slice(0, 5).map((item) => item.studentName).filter(Boolean).join('، ')}
+                {admissionBatchPreview.items.length > 5 ? ` و ${admissionBatchPreview.items.length - 5} شاگرد دیگر` : ''}
+              </p>
+            )}
+            {admissionBatchForm.mode === 'paid' ? (
+              <p className="muted">پرداخت‌های گروهی ابتدا در حالت «در انتظار تأیید مالی» ثبت می‌شوند و مستقیماً تأیید نخواهند شد.</p>
+            ) : null}
+            <div className="row-actions">
+              <button
+                type="button"
+                onClick={settleAdmissionAnomaliesByClass}
+                disabled={busy || admissionBatchPreview.loading || !admissionBatchForm.classId || !admissionBatchPreview.items.length}
+                data-testid="admission-batch-submit"
+              >
+                ثبت داخله تمام شاگردان این صنف
+              </button>
+            </div>
           </div>
           {visibleAnomalies.slice(0, 6).map((item) => (
             <div key={item.id} className="mini-row">

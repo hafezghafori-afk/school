@@ -56,6 +56,7 @@ let monthCloseSerial = 0;
 let financeAnomalyCaseSerial = 0;
 let notificationSerial = 0;
 let feePlanSerial = 0;
+let canonicalFeeOrderSerial = 0;
 let financialYearSerial = 1;
 let expenseCategorySerial = 2;
 let expenseEntrySerial = 1;
@@ -66,6 +67,7 @@ let governmentSnapshotSerial = 0;
 let membershipRecoveryScanCount = 0;
 
 const feePlans = [];
+const canonicalFeeOrders = [];
 const discountRegistry = [];
 const feeExemptions = [];
 const financeReliefs = [];
@@ -3031,6 +3033,48 @@ const toCanonicalOrder = (bill) => ({
   lineItems: Array.isArray(bill.lineItems) ? clone(bill.lineItems) : []
 });
 
+const persistCanonicalFeeOrder = (doc) => {
+  const plain = stripMethods(doc);
+  plain.updatedAt = new Date();
+  const index = canonicalFeeOrders.findIndex((item) => String(item._id) === String(plain._id));
+  if (index >= 0) canonicalFeeOrders[index] = clone(plain);
+  else canonicalFeeOrders.push(clone(plain));
+  return plain;
+};
+
+function FeeOrderMock(payload = {}) {
+  Object.assign(this, clone(payload));
+  if (!this._id) this._id = `canonical-fee-order-${++canonicalFeeOrderSerial}`;
+  if (!this.createdAt) this.createdAt = new Date();
+  if (!this.updatedAt) this.updatedAt = new Date();
+  if (!this.status) this.status = 'new';
+}
+
+FeeOrderMock.prototype.save = async function save() {
+  if (this.issuanceKey && canonicalFeeOrders.some((item) => (
+    String(item.issuanceKey || '') === String(this.issuanceKey)
+    && String(item._id) !== String(this._id)
+  ))) {
+    const error = new Error('E11000 duplicate issuanceKey');
+    error.code = 11000;
+    error.keyPattern = { issuanceKey: 1 };
+    error.keyValue = { issuanceKey: this.issuanceKey };
+    throw error;
+  }
+  this.amountOriginal = Math.max(0, Number(this.amountOriginal || 0));
+  this.amountDue = Math.max(0, (this.lineItems || []).reduce((sum, item) => sum + Number(item?.netAmount || 0), 0));
+  this.amountPaid = Math.max(0, Number(this.amountPaid || 0));
+  this.outstandingAmount = Math.max(0, this.amountDue - this.amountPaid);
+  if (this.amountDue === 0 && this.amountOriginal > 0) this.status = 'waived';
+  persistCanonicalFeeOrder(this);
+  return this;
+};
+
+const listCanonicalFeeOrders = () => [
+  ...bills.map(toCanonicalOrder),
+  ...canonicalFeeOrders.map((item) => clone(item))
+];
+
 const toCanonicalPayment = (receipt) => {
   const bill = findBill(receipt.bill);
   return {
@@ -3050,18 +3094,23 @@ const toCanonicalPayment = (receipt) => {
   };
 };
 
-const FeeOrderMock = {
-  find(filter = {}) {
-    return new MockQuery(() => bills.map(toCanonicalOrder).filter((item) => matchesFilter(item, filter)).map((item) => clone(item)));
-  },
-  async countDocuments(filter = {}) {
-    return bills.map(toCanonicalOrder).filter((item) => matchesFilter(item, filter)).length;
-  },
-  async aggregate(pipeline = []) {
+FeeOrderMock.find = (filter = {}) => new MockQuery(() => (
+  listCanonicalFeeOrders().filter((item) => matchesFilter(item, filter)).map((item) => clone(item))
+));
+FeeOrderMock.findOne = (filter = {}) => new MockQuery(() => (
+  clone(listCanonicalFeeOrders().find((item) => matchesFilter(item, filter)) || null)
+));
+FeeOrderMock.exists = async (filter = {}) => (
+  listCanonicalFeeOrders().some((item) => matchesFilter(item, filter))
+);
+FeeOrderMock.countDocuments = async (filter = {}) => (
+  listCanonicalFeeOrders().filter((item) => matchesFilter(item, filter)).length
+);
+FeeOrderMock.aggregate = async (pipeline = []) => {
     const matchStage = pipeline.find((stage) => stage.$match)?.$match || {};
     const projectStage = pipeline.find((stage) => stage.$project)?.$project || {};
     const groupStage = pipeline.find((stage) => stage.$group)?.$group || {};
-    let matchedItems = bills.map(toCanonicalOrder).filter((item) => matchesFilter(item, matchStage));
+    let matchedItems = listCanonicalFeeOrders().filter((item) => matchesFilter(item, matchStage));
 
     if (projectStage.remaining === '$outstandingAmount') {
       matchedItems = matchedItems.map((item) => ({
@@ -3095,7 +3144,6 @@ const FeeOrderMock = {
     }
 
     return [];
-  }
 };
 
 const FeePaymentMock = {
@@ -3458,6 +3506,18 @@ const StudentMembershipMock = {
       .filter((item) => matchesFilter(item, filter))
       .map((item) => item.student)
       .filter((value, index, list) => list.findIndex((entry) => String(entry) === String(value)) === index);
+  },
+  findById(id) {
+    return new MockQuery(() => {
+      const item = memberships.find((entry) => String(entry._id) === String(id));
+      if (!item) return null;
+      return {
+        ...clone(item),
+        academicYearId: item.academicYearId || 'academic-year-1',
+        joinedAt: item.joinedAt || new Date('2026-01-03T00:00:00.000Z'),
+        enrolledAt: item.enrolledAt || new Date('2026-01-03T00:00:00.000Z')
+      };
+    });
   }
 };
 
@@ -4865,6 +4925,7 @@ function loadFinanceRouter() {
     const isFinanceReceiptValidation = parentFile.endsWith('/utils/financeReceiptValidation.js');
     const isFinanceFeePlanService = parentFile.endsWith('/services/financeFeePlanService.js');
     const isFeeBillingService = parentFile.endsWith('/services/feeBillingService.js');
+    const isFinanceAnomalyService = parentFile.endsWith('/services/financeAnomalyService.js');
 
     if (isFinanceRoute && request === '../models/FinanceBill') return FinanceBillMock;
     if (isFinanceRoute && request === '../models/FinanceReceipt') return FinanceReceiptMock;
@@ -4922,6 +4983,16 @@ function loadFinanceRouter() {
     if (isFinanceRoute && request === '../middleware/auth') return authMock;
     if (isFinanceRoute && request === '../utils/activity') return { logActivity: async () => {} };
     if (isFinanceRoute && request === '../utils/mailer') return { sendMail: async () => ({ ok: true }) };
+    if (isFinanceAnomalyService && request === '../models/User') return UserMock;
+    if (isFinanceAnomalyService && request === '../models/StudentCore') return StudentCoreMock;
+    if (isFinanceAnomalyService && request === '../models/SchoolClass') return SchoolClassMock;
+    if (isFinanceAnomalyService && request === '../models/AcademicYear') return AcademicYearMock;
+    if (isFinanceAnomalyService && request === '../models/StudentMembership') return StudentMembershipMock;
+    if (isFinanceAnomalyService && request === '../models/FeeOrder') return FeeOrderMock;
+    if (isFinanceAnomalyService && request === '../models/FeePayment') return FeePaymentMock;
+    if (isFinanceAnomalyService && request === '../models/FinanceRelief') return FinanceReliefMock;
+    if (isFinanceAnomalyService && request === '../models/FinanceFeePlan') return FinanceFeePlanMock;
+    if (isFinanceAnomalyService && request === '../models/FinanceBill') return FinanceBillMock;
     if (isFinanceAdminActionService && request === '../models/FinanceBill') return FinanceBillMock;
     if (isFinanceAdminActionService && request === '../models/FinanceReceipt') return FinanceReceiptMock;
     if (isFinanceAdminActionService && request === '../models/FinanceMonthClose') return FinanceMonthCloseMock;
@@ -5177,6 +5248,90 @@ async function run() {
       assertCase(Number(response.data?.item?.amountOriginal || 0) === 750, 'expected admission amount to come from the plan');
       assertCase(String(response.data?.item?.lineItems?.[0]?.feeType || '') === 'admission', 'expected an admission line item');
       assertCase(String(response.data?.item?.lineItems?.[0]?.sourcePlanId || '') === admissionPlanId, 'expected the fee plan reference on the line item');
+    });
+
+    await check('route smoke: class admission anomaly settlement is bulk and idempotent', async () => {
+      const originalMembershipState = memberships.slice(0, 2).map((item) => ({
+        _id: item._id,
+        schoolId: item.schoolId,
+        academicYearId: item.academicYearId
+      }));
+      const baselineOrderCount = canonicalFeeOrders.length;
+      const baselineCaseCount = financeAnomalyCases.length;
+      const batchPlanId = '507f191e810c19729de86992';
+
+      memberships[0]._id = '507f191e810c19729de86111';
+      memberships[1]._id = '507f191e810c19729de86112';
+      memberships.slice(0, 2).forEach((item) => {
+        item.schoolId = 'school-1';
+        item.academicYearId = 'academic-year-1';
+      });
+      feePlans.push({
+        _id: batchPlanId,
+        title: 'Class admission batch plan',
+        planCode: 'ADMISSION-BATCH',
+        planType: 'standard',
+        priority: 1,
+        isDefault: true,
+        schoolId: 'school-1',
+        classId: IDS.class1,
+        course: IDS.course1,
+        academicYearId: 'academic-year-1',
+        academicYear: '1405',
+        billingFrequency: 'monthly',
+        tuitionFee: 1000,
+        admissionFee: 500,
+        currency: 'AFN',
+        isActive: true,
+        lifecycleStatus: 'active'
+      });
+
+      try {
+        const firstResponse = await request(server, '/api/finance/admin/anomalies/settle-admission-batch', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: {
+            classId: IDS.class1,
+            mode: 'open',
+            note: 'Bulk admission route smoke test'
+          }
+        });
+
+        assertCase(firstResponse.status === 200, `expected 200, received ${firstResponse.status}: ${firstResponse.text}`);
+        assertCase(Number(firstResponse.data?.summary?.total || 0) >= 1, 'expected at least one missing admission candidate');
+        assertCase(Number(firstResponse.data?.summary?.failed || 0) === 0, `expected no failed admission settlements, received ${firstResponse.data?.summary?.failed}`);
+        assertCase(
+          Number(firstResponse.data?.summary?.ordersCreated || 0) === Number(firstResponse.data?.summary?.processed || 0),
+          'expected every processed admission anomaly to create one order'
+        );
+
+        const createdOrders = canonicalFeeOrders.slice(baselineOrderCount);
+        assertCase(createdOrders.length === Number(firstResponse.data?.summary?.ordersCreated || 0), 'expected canonical admission orders to match response summary');
+        assertCase(createdOrders.every((item) => item.orderType === 'admission'), 'expected only admission orders');
+        assertCase(createdOrders.every((item) => Number(item.amountOriginal || 0) === 500), 'expected admission amount from the class fee plan');
+        assertCase(createdOrders.every((item) => String(item.issuanceKey || '').startsWith('admission-anomaly:')), 'expected atomic admission issuance keys');
+
+        const secondResponse = await request(server, '/api/finance/admin/anomalies/settle-admission-batch', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: { classId: IDS.class1, mode: 'open' }
+        });
+        assertCase(secondResponse.status === 200, `expected idempotent retry 200, received ${secondResponse.status}: ${secondResponse.text}`);
+        assertCase(Number(secondResponse.data?.summary?.total || 0) === 0, 'expected no admission anomalies after the first bulk settlement');
+        assertCase(canonicalFeeOrders.length === baselineOrderCount + createdOrders.length, 'expected retry not to create duplicate admission orders');
+      } finally {
+        const batchPlanIndex = feePlans.findIndex((item) => String(item._id) === batchPlanId);
+        if (batchPlanIndex >= 0) feePlans.splice(batchPlanIndex, 1);
+        canonicalFeeOrders.splice(baselineOrderCount);
+        financeAnomalyCases.splice(baselineCaseCount);
+        memberships.slice(0, 2).forEach((item, index) => {
+          item._id = originalMembershipState[index]._id;
+          if (originalMembershipState[index].schoolId === undefined) delete item.schoolId;
+          else item.schoolId = originalMembershipState[index].schoolId;
+          if (originalMembershipState[index].academicYearId === undefined) delete item.academicYearId;
+          else item.academicYearId = originalMembershipState[index].academicYearId;
+        });
+      }
     });
 
     await check('route smoke: grouped bill generation uses active memberships', async () => {

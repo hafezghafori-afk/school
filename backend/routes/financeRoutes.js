@@ -6906,23 +6906,35 @@ router.post('/admin/anomalies/:id/resolve', requireAuth, requireRole(['admin']),
   }
 });
 
-router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
-  try {
-    const mode = String(req.body?.mode || '').trim();
-    if (!['open', 'paid', 'waived'].includes(mode)) {
-      return res.status(400).json({ success: false, message: 'نوع رفع داخله معتبر نیست.' });
+const buildBatchAdmissionOrderNumber = () => {
+  const now = new Date();
+  const monthKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+  return `AD-${monthKey}-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+};
+
+const settleAdmissionAnomalyRecord = async ({
+  req,
+  anomalyId = '',
+  snapshot = {},
+  mode = '',
+  note = '',
+  orderNumber = '',
+  includeResponseItem = true,
+  writeActivity = true
+} = {}) => {
+    const normalizedMode = String(mode || '').trim();
+    if (!['open', 'paid', 'waived'].includes(normalizedMode)) {
+      throw createRouteError(400, 'نوع رفع داخله معتبر نیست.');
     }
 
-    const note = String(req.body?.note || '').trim();
-    const snapshot = req.body?.snapshot || {};
-    const item = await ensureFinanceAnomalyCase({ anomalyId: req.params.id, snapshot });
+    const item = await ensureFinanceAnomalyCase({ anomalyId, snapshot });
     if (String(item.anomalyType || '').trim() !== 'admission_missing') {
-      return res.status(400).json({ success: false, message: 'این گزینه فقط برای ناهنجاری بل داخله قابل استفاده است.' });
+      throw createRouteError(400, 'این گزینه فقط برای ناهنجاری بل داخله قابل استفاده است.');
     }
 
     const membershipId = String(item.studentMembershipId || snapshot?.studentMembershipId || snapshot?.membershipId || '').trim();
     if (!membershipId || !mongoose.Types.ObjectId.isValid(membershipId)) {
-      return res.status(400).json({ success: false, message: 'عضویت مالی شاگرد برای ثبت داخله پیدا نشد.' });
+      throw createRouteError(400, 'عضویت مالی شاگرد برای ثبت داخله پیدا نشد.');
     }
 
     const membership = await StudentMembership.findById(membershipId)
@@ -6930,8 +6942,14 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
       .populate('studentId', 'fullName admissionNo')
       .lean();
     if (!membership?._id || !membership?.student) {
-      return res.status(404).json({ success: false, message: 'عضویت مالی شاگرد معتبر پیدا نشد.' });
+      throw createRouteError(404, 'عضویت مالی شاگرد معتبر پیدا نشد.');
     }
+
+    const admissionIssuanceKey = [
+      'admission-anomaly',
+      String(membership.schoolId || 'legacy'),
+      String(membership.student?._id || membership.student)
+    ].join(':');
 
     const admissionOwnerOr = [
       { student: membership.student }
@@ -6950,6 +6968,7 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
         } : {},
         {
           $or: [
+            { issuanceKey: admissionIssuanceKey },
             { orderType: 'admission' },
             { 'lineItems.feeType': 'admission' },
             { title: /داخله|admission/i },
@@ -6962,6 +6981,7 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
 
     let feeOrder = existingAdmissionOrder;
     let feePayment = null;
+    let orderCreated = false;
     const now = new Date();
     if (!feeOrder) {
       const classId = membership.classId || null;
@@ -6977,19 +6997,21 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
       }).sort({ isDefault: -1, priority: 1, createdAt: -1 }).lean();
       const plannedAmount = Math.max(0, Number(feePlan?.admissionFee || item.amount || snapshot?.amount || 0) || 0);
       if (plannedAmount <= 0) {
-        return res.status(400).json({ success: false, message: 'مبلغ داخله در پلان مالی یا ناهنجاری پیدا نشد.' });
+        throw createRouteError(400, 'مبلغ داخله در پلان مالی یا ناهنجاری پیدا نشد.');
       }
 
-      const isWaived = mode === 'waived';
+      const isWaived = normalizedMode === 'waived';
       feeOrder = new FeeOrder({
-        orderNumber: await generateFeeOrderNumber('AD'),
-        title: isWaived ? 'داخله - معافیت کامل' : mode === 'paid' ? 'داخله - در انتظار تأیید پرداخت' : 'بل داخله',
+        orderNumber: orderNumber || await generateFeeOrderNumber('AD'),
+        issuanceKey: admissionIssuanceKey,
+        title: isWaived ? 'داخله - معافیت کامل' : normalizedMode === 'paid' ? 'داخله - در انتظار تأیید پرداخت' : 'بل داخله',
         orderType: 'admission',
         source: 'manual',
         student: membership.student,
         studentId: membership.studentId || null,
         studentMembershipId: membership._id,
         course: membership.course || null,
+        schoolId: membership.schoolId || null,
         classId,
         academicYearId,
         periodType: 'custom',
@@ -6997,12 +7019,12 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
         currency: String(feePlan?.currency || 'AFN').trim().toUpperCase() || 'AFN',
         amountOriginal: plannedAmount,
         amountPaid: 0,
-        dueDate: mode === 'open' ? buildAdmissionDueDate(now, feePlan?.dueDay) : now,
+        dueDate: normalizedMode === 'open' ? buildAdmissionDueDate(now, feePlan?.dueDay) : now,
         paidAt: null,
         note: [
           isWaived
             ? 'داخله به‌عنوان معاف/تخفیف کامل ثبت شد.'
-            : mode === 'paid'
+            : normalizedMode === 'paid'
               ? 'دریافت قبلی داخله ثبت شد؛ تأیید پرداخت در گردش مالی الزامی است.'
               : 'بل باز داخله از هشدار مالی و بر اساس پلان صنف صادر شد.',
           note
@@ -7029,16 +7051,25 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
         }],
         createdBy: req.user?.id || null
       });
-      await feeOrder.save();
+      try {
+        await feeOrder.save();
+        orderCreated = true;
+      } catch (error) {
+        const duplicateIssuanceKey = Number(error?.code) === 11000
+          && (error?.keyPattern?.issuanceKey || error?.keyValue?.issuanceKey);
+        if (!duplicateIssuanceKey) throw error;
+        feeOrder = await FeeOrder.findOne({ issuanceKey: admissionIssuanceKey });
+        if (!feeOrder) throw error;
+      }
     }
 
-    if (mode === 'paid' && String(feeOrder.status || '').trim() !== 'paid') {
+    if (normalizedMode === 'paid' && String(feeOrder.status || '').trim() !== 'paid') {
       const outstandingAmount = Math.max(
         0,
         Number(feeOrder.outstandingAmount ?? (Number(feeOrder.amountDue || 0) - Number(feeOrder.amountPaid || 0))) || 0
       );
       if (outstandingAmount <= 0) {
-        return res.status(400).json({ success: false, message: 'سند داخله مانده قابل پرداخت ندارد.' });
+        throw createRouteError(400, 'سند داخله مانده قابل پرداخت ندارد.');
       }
       feePayment = await createFeePayment({
         studentMembershipId: membership._id,
@@ -7058,9 +7089,9 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
     item.snoozedUntil = null;
     item.resolvedAt = now;
     item.resolvedBy = req.user.id;
-    item.resolutionNote = note || (mode === 'waived'
+    item.resolutionNote = note || (normalizedMode === 'waived'
       ? 'داخله به‌عنوان معاف/تخفیف کامل ثبت شد.'
-      : mode === 'paid'
+      : normalizedMode === 'paid'
         ? 'سند داخله صادر و پرداخت آن برای تأیید مالی ثبت شد.'
         : 'بل باز داخله از پلان مالی صادر شد.');
     item.latestNote = item.resolutionNote;
@@ -7079,28 +7110,32 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
     });
     await item.save();
 
-    await logActivity({
-      req,
-      action: resolveFinanceAnomalyActionTitle('admission_settle'),
-      targetType: feePayment?.id ? 'FeePayment' : 'FeeOrder',
-      targetId: String(feePayment?.id || feeOrder._id || ''),
-      meta: {
-        anomalyId: item.anomalyId,
-        anomalyType: item.anomalyType,
-        mode,
-        orderNumber: feeOrder.orderNumber,
-        paymentNumber: feePayment?.paymentNumber || '',
-        amount: feeOrder.amountOriginal,
-        note,
-        classId: item.classId,
-        studentMembershipId: item.studentMembershipId
-      }
-    });
+    if (writeActivity) {
+      await logActivity({
+        req,
+        action: resolveFinanceAnomalyActionTitle('admission_settle'),
+        targetType: feePayment?.id ? 'FeePayment' : 'FeeOrder',
+        targetId: String(feePayment?.id || feeOrder._id || ''),
+        meta: {
+          anomalyId: item.anomalyId,
+          anomalyType: item.anomalyType,
+          mode: normalizedMode,
+          orderNumber: feeOrder.orderNumber,
+          paymentNumber: feePayment?.paymentNumber || '',
+          amount: feeOrder.amountOriginal,
+          note,
+          classId: item.classId,
+          studentMembershipId: item.studentMembershipId
+        }
+      });
+    }
 
-    const refreshed = await buildFinanceAnomalyResponseItem(item);
-    return res.json({
-      success: true,
+    const refreshed = includeResponseItem ? await buildFinanceAnomalyResponseItem(item) : null;
+    return {
       item: refreshed,
+      anomalyId: String(item.anomalyId || anomalyId),
+      studentName: String(item.studentName || snapshot?.studentName || '').trim(),
+      orderCreated,
       feeOrder: {
         id: String(feeOrder._id || ''),
         orderNumber: String(feeOrder.orderNumber || ''),
@@ -7111,16 +7146,143 @@ router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['
         paymentNumber: String(feePayment.paymentNumber || ''),
         status: String(feePayment.status || 'pending')
       } : null,
-      message: mode === 'waived'
+      message: normalizedMode === 'waived'
         ? 'داخله به‌عنوان معاف/تخفیف کامل ثبت شد و ناهنجاری حل شد'
-        : mode === 'paid'
+        : normalizedMode === 'paid'
           ? 'سند داخله و پرداخت آن ثبت شد؛ پرداخت در انتظار تأیید مالی است'
           : 'بل باز داخله از پلان مالی صادر شد و ناهنجاری حل شد'
+    };
+};
+
+router.post('/admin/anomalies/settle-admission-batch', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const mode = String(req.body?.mode || '').trim();
+    if (!['open', 'paid', 'waived'].includes(mode)) {
+      return res.status(400).json({ success: false, message: 'نوع رفع گروهی داخله معتبر نیست.' });
+    }
+    const classId = String(req.body?.classId || '').trim();
+    if (!classId || !mongoose.Types.ObjectId.isValid(classId)) {
+      return res.status(400).json({ success: false, message: 'برای رفع گروهی داخله، صنف معتبر انتخاب کنید.' });
+    }
+
+    const scope = await resolveFinanceScope({ classId });
+    if (scope.error || !scope.classId) {
+      return res.status(400).json({ success: false, message: scope.error || 'صنف مالی معتبر پیدا نشد.' });
+    }
+    const academicYearId = String(req.body?.academicYearId || '').trim();
+    const note = String(req.body?.note || '').trim();
+    const report = await buildFinanceAnomalyReport({
+      classId: scope.classId,
+      academicYearId,
+      asOf: new Date(),
+      limit: 500
+    });
+    const candidates = (Array.isArray(report?.items) ? report.items : [])
+      .filter((item) => String(item?.anomalyType || '').trim() === 'admission_missing');
+
+    if (!candidates.length) {
+      return res.json({
+        success: true,
+        summary: { total: 0, processed: 0, ordersCreated: 0, paymentsCreated: 0, skipped: 0, failed: 0 },
+        failures: [],
+        message: 'برای صنف انتخاب‌شده شاگردی با بل داخله صادرنشده پیدا نشد.'
+      });
+    }
+
+    const results = [];
+    const batchSize = 6;
+    for (let index = 0; index < candidates.length; index += batchSize) {
+      const batch = candidates.slice(index, index + batchSize);
+      const batchResults = await Promise.all(batch.map(async (snapshot) => {
+        try {
+          const result = await settleAdmissionAnomalyRecord({
+            req,
+            anomalyId: snapshot.id,
+            snapshot,
+            mode,
+            note,
+            orderNumber: buildBatchAdmissionOrderNumber(),
+            includeResponseItem: false,
+            writeActivity: false
+          });
+          return { ok: true, ...result };
+        } catch (error) {
+          return {
+            ok: false,
+            anomalyId: String(snapshot?.id || ''),
+            studentName: String(snapshot?.studentName || '').trim(),
+            message: String(error?.message || 'ثبت داخله ممکن نشد')
+          };
+        }
+      }));
+      results.push(...batchResults);
+    }
+
+    const succeeded = results.filter((item) => item.ok);
+    const failures = results.filter((item) => !item.ok);
+    const ordersCreated = succeeded.filter((item) => item.orderCreated).length;
+    const paymentsCreated = succeeded.filter((item) => item.feePayment?.id).length;
+    const skipped = succeeded.length - ordersCreated;
+
+    await logActivity({
+      req,
+      action: 'finance_anomaly_admission_settle_batch',
+      targetType: 'SchoolClass',
+      targetId: String(scope.classId),
+      meta: {
+        classId: String(scope.classId),
+        academicYearId,
+        mode,
+        total: candidates.length,
+        processed: succeeded.length,
+        ordersCreated,
+        paymentsCreated,
+        skipped,
+        failed: failures.length,
+        note
+      }
+    });
+
+    return res.json({
+      success: true,
+      partialSuccess: succeeded.length > 0 && failures.length > 0,
+      summary: {
+        total: candidates.length,
+        processed: succeeded.length,
+        ordersCreated,
+        paymentsCreated,
+        waived: mode === 'waived' ? succeeded.length : 0,
+        skipped,
+        failed: failures.length
+      },
+      failures: failures.slice(0, 25),
+      message: failures.length
+        ? `رفع گروهی داخله برای ${succeeded.length} شاگرد انجام شد و ${failures.length} مورد خطا داشت.`
+        : `رفع گروهی داخله برای ${succeeded.length} شاگرد با موفقیت انجام شد.`
     });
   } catch (error) {
-    return res.status(500).json({
+    return res.status(Number(error?.status || 500)).json({
       success: false,
-      message: 'ثبت رفع خودکار داخله ممکن نشد',
+      message: error?.message || 'ثبت گروهی داخله ممکن نشد',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+router.post('/admin/anomalies/:id/settle-admission', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const result = await settleAdmissionAnomalyRecord({
+      req,
+      anomalyId: req.params.id,
+      snapshot: req.body?.snapshot || {},
+      mode: req.body?.mode,
+      note: String(req.body?.note || '').trim()
+    });
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({
+      success: false,
+      message: error?.message || 'ثبت رفع خودکار داخله ممکن نشد',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
