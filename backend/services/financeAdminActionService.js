@@ -14,9 +14,13 @@ const { normalizeAdminLevel } = require('../utils/permissions');
 const { resolveAdminOrgRole } = require('../utils/userRole');
 const { roundMoney, getBillRemainingAmount } = require('../utils/financeReceiptValidation');
 const {
+  LINE_ITEM_TYPES,
   applyFinanceOrderStatus,
+  getFinanceFeeScopeBalanceAmount,
   getFinanceFeeScopeGrossAmount,
   normalizeAdjustmentScope,
+  normalizeFinanceFeeType,
+  normalizePaymentBreakdown,
   normalizeFinanceLineItems
 } = require('../utils/financeLineItems');
 const { syncStudentFinanceFromFinanceBill, syncStudentFinanceFromFinanceReceipt } = require('../utils/studentFinanceSync');
@@ -104,6 +108,7 @@ function recalculateBill(bill) {
     amountOriginal: bill.amountOriginal,
     adjustments: bill.adjustments,
     amountPaid: bill.amountPaid,
+    paymentBreakdown: bill.paymentBreakdown,
     defaultType: bill.orderType || 'tuition'
   });
   bill.amountDue = Math.max(0, roundMoney(
@@ -128,6 +133,62 @@ function recalculateBill(bill) {
   return remaining;
 }
 
+function getPayableFeeTypes(order = {}) {
+  const lineItemTypes = (Array.isArray(order?.lineItems) ? order.lineItems : [])
+    .filter((item) => Number(item?.grossAmount ?? item?.netAmount ?? item?.balanceAmount ?? 0) > 0)
+    .map((item) => normalizeFinanceFeeType(item?.feeType, order?.orderType || 'tuition'));
+  const breakdownTypes = Object.entries(
+    order?.feeBreakdown && typeof order.feeBreakdown === 'object' ? order.feeBreakdown : {}
+  )
+    .filter(([, amount]) => Number(amount || 0) > 0)
+    .map(([key]) => normalizeFinanceFeeType(key, order?.orderType || 'tuition'));
+  const scopeTypes = (Array.isArray(order?.feeScopes) ? order.feeScopes : [])
+    .map((item) => normalizeFinanceFeeType(item, order?.orderType || 'tuition'));
+  const normalizedOrderType = String(order?.orderType || '').trim()
+    ? normalizeFinanceFeeType(order.orderType, 'tuition')
+    : '';
+  const candidateTypes = normalizedOrderType === 'admission'
+      && lineItemTypes.length
+      && lineItemTypes.every((item) => item === 'tuition')
+    ? ['admission']
+    : lineItemTypes.length
+      ? lineItemTypes
+      : breakdownTypes.length
+        ? breakdownTypes
+        : scopeTypes.length
+          ? scopeTypes
+          : normalizedOrderType
+            ? [normalizedOrderType]
+            : [];
+  return Array.from(new Set(candidateTypes)).filter((feeType) => (
+    LINE_ITEM_TYPES.includes(feeType) && getFinanceFeeScopeBalanceAmount(order, feeType) > 0
+  ));
+}
+
+function resolveApprovedPaymentFeeType({ order = {}, requestedFeeType = '', note = '' } = {}) {
+  const requested = String(requestedFeeType || '').trim().toLowerCase();
+  if (requested) {
+    if (!LINE_ITEM_TYPES.includes(requested)) return '';
+    if (getFinanceFeeScopeBalanceAmount(order, requested) > 0) return requested;
+    return '';
+  }
+  const payableTypes = getPayableFeeTypes(order);
+  if (payableTypes.length === 1) return payableTypes[0];
+  const normalizedNote = String(note || '').trim().toLowerCase();
+  if ((normalizedNote.includes('داخله') || normalizedNote.includes('admission'))
+    && payableTypes.includes('admission')) return 'admission';
+  if (String(order?.orderType || '').trim() === 'admission' && payableTypes.includes('admission')) return 'admission';
+  return '';
+}
+
+function addScopedPayment(order = {}, feeType = '', amount = 0) {
+  const normalizedFeeType = normalizeFinanceFeeType(feeType, order?.orderType || 'tuition');
+  const breakdown = normalizePaymentBreakdown(order?.paymentBreakdown);
+  breakdown[normalizedFeeType] = roundMoney((Number(breakdown[normalizedFeeType]) || 0) + Number(amount || 0));
+  order.paymentBreakdown = breakdown;
+  order.amountPaid = roundMoney((Number(order.amountPaid) || 0) + Number(amount || 0));
+}
+
 function normalizeFeePaymentAllocations(payment = {}) {
   const rows = Array.isArray(payment?.allocations) && payment.allocations.length
     ? payment.allocations
@@ -138,6 +199,7 @@ function normalizeFeePaymentAllocations(payment = {}) {
   return rows
     .map((item) => ({
       feeOrderId: String(item?.feeOrderId || '').trim(),
+      feeType: String(item?.feeType || '').trim().toLowerCase(),
       amount: roundMoney(item?.amount),
       title: String(item?.title || '').trim(),
       orderNumber: formatFinanceCode(item?.orderNumber)
@@ -784,20 +846,29 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
   }
 
   const approvalAmount = roundMoney(receipt.amount);
-  const remainingBeforeApproval = getBillRemainingAmount(bill);
+  const approvalFeeType = resolveApprovedPaymentFeeType({
+    order: bill,
+    requestedFeeType: receipt.feeType,
+    note: receipt.note
+  });
+  if (!approvalFeeType) {
+    throw createActionError(400, 'نوع پرداخت این رسید مشخص نیست. برای بل‌های چندبخشی باید فیس، داخله یا نوع مربوطه پیش از تأیید تعیین شود.');
+  }
+  const remainingBeforeApproval = getFinanceFeeScopeBalanceAmount(bill, approvalFeeType);
   if (remainingBeforeApproval <= 0) {
-    throw createActionError(400, 'Ø§ÛŒÙ† Ø¨Ù„ Ø¯ÛŒÚ¯Ø± Ù…Ø§Ù†Ø¯Ù‡ Ø¨Ø§Ø² Ù†Ø¯Ø§Ø±Ø¯ Ùˆ ØªØ§ÛŒÛŒØ¯ Ø§ÛŒÙ† Ø±Ø³ÛŒØ¯ Ù…Ø¬Ø§Ø² Ù†ÛŒØ³Øª');
+    throw createActionError(400, 'این بل در نوع فیس انتخاب‌شده دیگر مانده باز ندارد و تأیید رسید مجاز نیست.');
   }
   if (approvalAmount > remainingBeforeApproval) {
-    throw createActionError(400, `Ù…Ø¨Ù„Øº Ø§ÛŒÙ† Ø±Ø³ÛŒØ¯ Ø§Ø² Ù…Ø§Ù†Ø¯Ù‡ ÙØ¹Ù„ÛŒ Ø¨Ù„ Ø¨ÛŒØ´ØªØ± Ø§Ø³Øª. Ù…Ø§Ù†Ø¯Ù‡ ÙØ¹Ù„ÛŒ: ${remainingBeforeApproval}`);
+    throw createActionError(400, `مبلغ این رسید از مانده نوع فیس انتخاب‌شده بیشتر است. مانده فعلی: ${remainingBeforeApproval}`);
   }
 
   receipt.amount = approvalAmount;
+  receipt.feeType = approvalFeeType;
   receipt.status = 'approved';
   receipt.approvalStage = RECEIPT_STAGES.completed;
   await receipt.save();
 
-  bill.amountPaid = roundMoney((Number(bill.amountPaid) || 0) + approvalAmount);
+  addScopedPayment(bill, approvalFeeType, approvalAmount);
   applyPaymentToInstallments(bill, approvalAmount, receipt.paidAt || new Date());
   recalculateBill(bill);
   await bill.save();
@@ -957,7 +1028,15 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
     if (order.status === 'void') {
       throw createActionError(400, 'Fee order is void; payment cannot be approved');
     }
-    const remainingBeforeApproval = getBillRemainingAmount(order);
+    allocation.feeType = resolveApprovedPaymentFeeType({
+      order,
+      requestedFeeType: allocation.feeType,
+      note: payment.note
+    });
+    if (!allocation.feeType) {
+      throw createActionError(400, 'نوع فیس یکی از تخصیص‌های پرداخت مشخص نیست. پرداخت بل چندبخشی بدون تعیین نوع فیس قابل تأیید نیست.');
+    }
+    const remainingBeforeApproval = getFinanceFeeScopeBalanceAmount(order, allocation.feeType);
     if (remainingBeforeApproval <= 0) {
       throw createActionError(400, 'One of the allocated fee orders is already settled');
     }
@@ -969,6 +1048,7 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
   payment.amount = approvalAmount;
   payment.allocations = allocations.map((item) => ({
     feeOrderId: item.feeOrderId,
+    feeType: item.feeType,
     amount: item.amount,
     title: item.title,
     orderNumber: item.orderNumber
@@ -982,7 +1062,7 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
 
   for (const allocation of allocations) {
     const order = orderMap.get(String(allocation.feeOrderId || ''));
-    order.amountPaid = roundMoney((Number(order.amountPaid) || 0) + allocation.amount);
+    addScopedPayment(order, allocation.feeType, allocation.amount);
     applyPaymentToInstallments(order, allocation.amount, payment.paidAt || new Date());
     recalculateBill(order);
     await order.save();

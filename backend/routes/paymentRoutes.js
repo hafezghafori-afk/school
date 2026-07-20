@@ -5,7 +5,13 @@ const { requireAuth } = require('../middleware/auth');
 const { isProduction } = require('../utils/env');
 const { logActivity } = require('../utils/activity');
 const { syncStudentFinanceFromFinanceReceipt } = require('../utils/studentFinanceSync');
-const { applyFinanceOrderStatus } = require('../utils/financeLineItems');
+const {
+  LINE_ITEM_TYPES,
+  applyFinanceOrderStatus,
+  getFinanceFeeScopeBalanceAmount,
+  normalizeFinanceFeeType,
+  normalizePaymentBreakdown
+} = require('../utils/financeLineItems');
 const {
   normalizeText: normalizeScopeText,
   resolveClassCourseReference
@@ -272,7 +278,42 @@ router.post('/simulate', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'A positive payment amount is required' });
     }
 
-    const remainingBeforePayment = Math.max(0, roundMoney((Number(bill.amountDue) || 0) - (Number(bill.amountPaid) || 0)));
+    const lineItemFeeTypes = (Array.isArray(bill.lineItems) ? bill.lineItems : [])
+      .filter((item) => Number(item?.netAmount ?? item?.grossAmount ?? item?.balanceAmount ?? 0) > 0)
+      .map((item) => normalizeFinanceFeeType(item?.feeType, 'tuition'));
+    const breakdownFeeTypes = Object.entries(
+      bill?.feeBreakdown && typeof bill.feeBreakdown === 'object' ? bill.feeBreakdown : {}
+    )
+      .filter(([, value]) => Number(value || 0) > 0)
+      .map(([key]) => normalizeFinanceFeeType(key, 'tuition'));
+    const scopeFeeTypes = (Array.isArray(bill.feeScopes) ? bill.feeScopes : [])
+      .map((item) => normalizeFinanceFeeType(item, 'tuition'));
+    const billFeeTypes = Array.from(new Set([
+      ...lineItemFeeTypes,
+      ...breakdownFeeTypes,
+      ...scopeFeeTypes
+    ]));
+    const rawRequestedFeeType = String(req.body?.feeType || '').trim().toLowerCase();
+    const requestedFeeType = LINE_ITEM_TYPES.includes(rawRequestedFeeType) ? rawRequestedFeeType : '';
+    if (rawRequestedFeeType && !requestedFeeType) {
+      return res.status(400).json({ success: false, message: 'Invalid fee type' });
+    }
+    const feeType = requestedFeeType && billFeeTypes.includes(requestedFeeType)
+      ? requestedFeeType
+      : billFeeTypes.length === 1
+        ? billFeeTypes[0]
+        : billFeeTypes.length === 0
+          ? 'tuition'
+          : '';
+    if (!feeType) {
+      return res.status(400).json({ success: false, message: 'A fee type is required for a mixed finance bill' });
+    }
+    const explicitScopedRemaining = getFinanceFeeScopeBalanceAmount(bill, feeType);
+    const remainingBeforePayment = explicitScopedRemaining > 0
+      ? explicitScopedRemaining
+      : billFeeTypes.length <= 1
+        ? Math.max(0, roundMoney(Number(bill.amountDue || 0) - Number(bill.amountPaid || 0)))
+        : 0;
     if (remainingBeforePayment <= 0) {
       await logPaymentSimulationActivity({
         req,
@@ -302,6 +343,7 @@ router.post('/simulate', requireAuth, async (req, res) => {
       classId: bill.classId || null,
       academicYearId: bill.academicYearId || null,
       amount: settledAmount,
+      feeType,
       paymentMethod: 'manual',
       referenceNo: 'SIM-' + Date.now(),
       paidAt,
@@ -317,6 +359,9 @@ router.post('/simulate', requireAuth, async (req, res) => {
 
     await syncStudentFinanceFromFinanceReceipt(receipt).catch(() => null);
 
+    const paymentBreakdown = normalizePaymentBreakdown(bill.paymentBreakdown);
+    paymentBreakdown[feeType] = roundMoney(paymentBreakdown[feeType] + settledAmount);
+    bill.paymentBreakdown = paymentBreakdown;
     bill.amountPaid = roundMoney((Number(bill.amountPaid) || 0) + settledAmount);
     applyPaymentToInstallments(bill, settledAmount, paidAt);
     recalculateBillStatus(bill, paidAt);

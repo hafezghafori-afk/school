@@ -966,6 +966,48 @@ const matchesFinanceScope = (item = {}, scope = {}) => {
   return true;
 };
 
+const getBillFeeScopeSummary = (bill = {}, feeType = 'tuition') => {
+  const normalizedFeeType = String(feeType || 'tuition').trim();
+  const scopedLines = (Array.isArray(bill?.lineItems) ? bill.lineItems : [])
+    .filter((item) => String(item?.feeType || '').trim() === normalizedFeeType);
+  if (scopedLines.length) {
+    return scopedLines.reduce((summary, item) => ({
+      due: summary.due + toSafeNumber(item?.netAmount),
+      paid: summary.paid + toSafeNumber(item?.paidAmount),
+      outstanding: summary.outstanding + Math.max(0, toSafeNumber(
+        item?.balanceAmount ?? (toSafeNumber(item?.netAmount) - toSafeNumber(item?.paidAmount))
+      ))
+    }), { due: 0, paid: 0, outstanding: 0 });
+  }
+  const breakdownDue = Math.max(0, toSafeNumber(bill?.feeBreakdown?.[normalizedFeeType]));
+  const scopedPayment = Math.max(0, toSafeNumber(bill?.paymentBreakdown?.[normalizedFeeType]));
+  const feeScopes = Array.isArray(bill?.feeScopes)
+    ? bill.feeScopes.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+  if (breakdownDue > 0 || feeScopes.includes(normalizedFeeType)) {
+    const paid = scopedPayment > 0
+      ? scopedPayment
+      : feeScopes.length === 1
+        ? toSafeNumber(bill?.amountPaid)
+        : 0;
+    return {
+      due: breakdownDue || toSafeNumber(bill?.amountDue),
+      paid,
+      outstanding: Math.max(0, (breakdownDue || toSafeNumber(bill?.amountDue)) - paid)
+    };
+  }
+  if (String(bill?.orderType || '').trim() !== normalizedFeeType) {
+    return { due: 0, paid: 0, outstanding: 0 };
+  }
+  return {
+    due: toSafeNumber(bill?.amountDue),
+    paid: toSafeNumber(bill?.amountPaid),
+    outstanding: Math.max(0, toSafeNumber(
+      bill?.outstandingAmount ?? (toSafeNumber(bill?.amountDue) - toSafeNumber(bill?.amountPaid))
+    ))
+  };
+};
+
 const buildStudentFinanceSnapshot = ({ bills = [], reliefs = [], studentId = '', classId = '', academicYearId = '' } = {}) => {
   const scopedBills = (Array.isArray(bills) ? bills : []).filter((item) => (
     String(item?.status || '').trim() !== 'void'
@@ -977,6 +1019,17 @@ const buildStudentFinanceSnapshot = ({ bills = [], reliefs = [], studentId = '',
   const totalDue = scopedBills.reduce((sum, item) => sum + toSafeNumber(item?.amountDue), 0);
   const totalPaid = scopedBills.reduce((sum, item) => sum + toSafeNumber(item?.amountPaid), 0);
   const outstanding = scopedBills.reduce((sum, item) => sum + toSafeNumber(item?.outstandingAmount), 0);
+  const byFeeType = ['tuition', 'admission', 'transport', 'exam', 'document', 'service', 'other'].reduce((acc, feeType) => {
+    acc[feeType] = scopedBills.reduce((summary, bill) => {
+      const scoped = getBillFeeScopeSummary(bill, feeType);
+      return {
+        due: summary.due + scoped.due,
+        paid: summary.paid + scoped.paid,
+        outstanding: summary.outstanding + scoped.outstanding
+      };
+    }, { due: 0, paid: 0, outstanding: 0 });
+    return acc;
+  }, {});
   const openOrders = scopedBills.filter((item) => OPEN_ORDER_STATUSES.has(String(item?.status || '').trim()));
   const fixedReliefAmount = scopedReliefs.reduce((sum, item) => (
     String(item?.coverageMode || '').trim() === 'fixed' ? sum + toSafeNumber(item?.amount) : sum
@@ -995,6 +1048,7 @@ const buildStudentFinanceSnapshot = ({ bills = [], reliefs = [], studentId = '',
     totalDue,
     totalPaid,
     outstanding,
+    byFeeType,
     openOrders: openOrders.length,
     reliefCount: scopedReliefs.length,
     fixedReliefAmount,
@@ -1347,6 +1401,17 @@ export default function AdminFinance() {
     error: ''
   });
   const [admissionReceiptCorrectionRefreshKey, setAdmissionReceiptCorrectionRefreshKey] = useState(0);
+  const [paymentScopeRepairForm, setPaymentScopeRepairForm] = useState({
+    classId: '',
+    note: ''
+  });
+  const [paymentScopeRepairPreview, setPaymentScopeRepairPreview] = useState({
+    loading: false,
+    items: [],
+    summary: null,
+    error: ''
+  });
+  const [paymentScopeRepairRefreshKey, setPaymentScopeRepairRefreshKey] = useState(0);
   const [classPaymentApprovalForm, setClassPaymentApprovalForm] = useState({
     classId: '',
     feeType: 'all',
@@ -1505,6 +1570,7 @@ export default function AdminFinance() {
     studentId: '',
     classId: '',
     academicYearId: '',
+    feeType: 'tuition',
     amount: '',
     paidAt: toInputDate(new Date()),
     paymentMethod: 'cash',
@@ -1538,6 +1604,7 @@ export default function AdminFinance() {
         String(item?.student?.userId || '') === String(paymentDeskForm.studentId || '')
         && String(item?.schoolClass?.id || item?.classId?._id || '') === String(paymentDeskForm.classId || '')
         && getFinanceRecordAcademicYearId(item) === String(paymentDeskForm.academicYearId || '')
+        && getBillFeeScopeSummary(item, paymentDeskForm.feeType).outstanding > 0
         && OPEN_ORDER_STATUSES.has(String(item?.status || '').trim())
         && Number(item?.outstandingAmount || 0) > 0
       ))
@@ -1548,13 +1615,13 @@ export default function AdminFinance() {
         const safeRight = Number.isNaN(rightTime) ? Number.MAX_SAFE_INTEGER : rightTime;
         return safeLeft - safeRight;
       })
-  ), [bills, paymentDeskForm.studentId, paymentDeskForm.classId, paymentDeskForm.academicYearId]);
+  ), [bills, paymentDeskForm.studentId, paymentDeskForm.classId, paymentDeskForm.academicYearId, paymentDeskForm.feeType]);
   const paymentDeskStudentOpenOrders = useMemo(() => (
     bills
       .filter((item) => (
         String(item?.student?.userId || '') === String(paymentDeskForm.studentId || '')
         && OPEN_ORDER_STATUSES.has(String(item?.status || '').trim())
-        && Number(item?.outstandingAmount || 0) > 0
+        && getBillFeeScopeSummary(item, 'tuition').outstanding > 0
       ))
       .sort((left, right) => {
         const leftTime = new Date(left?.dueDate || 0).getTime();
@@ -1572,14 +1639,15 @@ export default function AdminFinance() {
     paymentDeskOpenOrders.reduce((sum, item) => sum + (Number(paymentDeskForm.manualAllocations?.[getFeeOrderRowId(item)] || 0) || 0), 0)
   ), [paymentDeskForm.manualAllocations, paymentDeskOpenOrders]);
   const paymentDeskTotalOutstanding = useMemo(() => (
-    paymentDeskOpenOrders.reduce((sum, item) => sum + Number(item?.outstandingAmount || 0), 0)
-  ), [paymentDeskOpenOrders]);
+    paymentDeskOpenOrders.reduce((sum, item) => sum + getBillFeeScopeSummary(item, paymentDeskForm.feeType).outstanding, 0)
+  ), [paymentDeskOpenOrders, paymentDeskForm.feeType]);
   const paymentDeskStudentTotalOutstanding = useMemo(() => (
-    paymentDeskStudentOpenOrders.reduce((sum, item) => sum + Number(item?.outstandingAmount || 0), 0)
+    paymentDeskStudentOpenOrders.reduce((sum, item) => sum + getBillFeeScopeSummary(item, 'tuition').outstanding, 0)
   ), [paymentDeskStudentOpenOrders]);
   const paymentDeskMonthlyArrears = useMemo(() => {
     const grouped = new Map();
     paymentDeskStudentOpenOrders.forEach((item) => {
+      const tuitionSummary = getBillFeeScopeSummary(item, 'tuition');
       const classId = getFinanceRecordClassId(item);
       const academicYearId = getFinanceRecordAcademicYearId(item);
       const bucket = String(item?.periodLabel || '').trim()
@@ -1600,9 +1668,9 @@ export default function AdminFinance() {
         count: 0,
         bills: []
       };
-      existing.amountDue += Number(item?.amountDue || 0);
-      existing.amountPaid += Number(item?.amountPaid || 0);
-      existing.outstandingAmount += Number(item?.outstandingAmount || 0);
+      existing.amountDue += tuitionSummary.due;
+      existing.amountPaid += tuitionSummary.paid;
+      existing.outstandingAmount += tuitionSummary.outstanding;
       existing.count += 1;
       existing.bills.push(item);
       grouped.set(groupKey, existing);
@@ -2024,6 +2092,8 @@ export default function AdminFinance() {
       academicYearId: paymentDeskForm.academicYearId
     })
   ), [bills, reliefs, paymentDeskForm.studentId, paymentDeskForm.classId, paymentDeskForm.academicYearId]);
+  const paymentDeskScopeSnapshot = paymentDeskFinanceSnapshot.byFeeType?.[paymentDeskForm.feeType]
+    || { due: 0, paid: 0, outstanding: 0 };
   const reliefFocusStudentId = reliefFormMode === 'discount' ? discountForm.studentId : exemptionForm.studentId;
   const reliefFocusClassId = reliefFormMode === 'discount' ? discountForm.classId : exemptionForm.classId;
   const reliefFocusAcademicYearId = reliefFormMode === 'discount' ? discountForm.academicYearId : exemptionForm.academicYearId;
@@ -2048,6 +2118,14 @@ export default function AdminFinance() {
       academicYearId: reliefFocusAcademicYearId
     })
   ), [bills, reliefs, reliefFocusStudentId, reliefFocusClassId, reliefFocusAcademicYearId]);
+  const reliefFocusFeeScope = reliefFormMode === 'discount' ? 'tuition' : exemptionForm.scope;
+  const reliefFocusLedgerSnapshot = reliefFocusFeeScope === 'all'
+    ? {
+        due: reliefFocusSnapshot.totalDue,
+        paid: reliefFocusSnapshot.totalPaid,
+        outstanding: reliefFocusSnapshot.outstanding
+      }
+    : reliefFocusSnapshot.byFeeType?.[reliefFocusFeeScope] || { due: 0, paid: 0, outstanding: 0 };
   const reliefFocusTotalPages = Math.max(1, Math.ceil((reliefFocusSnapshot.scopedReliefs?.length || 0) / Math.max(1, Number(reliefFocusPageSize) || 5)));
   const pagedReliefFocusItems = useMemo(() => {
     const pageSize = Math.max(1, Number(reliefFocusPageSize) || 5);
@@ -2974,6 +3052,50 @@ export default function AdminFinance() {
   }, [admissionReceiptCorrectionForm.classId, admissionReceiptCorrectionRefreshKey]);
 
   useEffect(() => {
+    const classId = String(paymentScopeRepairForm.classId || '').trim();
+    if (!classId) {
+      setPaymentScopeRepairPreview({ loading: false, items: [], summary: null, error: '' });
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setPaymentScopeRepairPreview((prev) => ({ ...prev, loading: true, error: '' }));
+    const query = new URLSearchParams({ classId });
+    fetchJson(`${API_BASE}/api/finance/admin/payment-scope-repairs/preview?${query.toString()}`, {
+      signal: controller.signal
+    })
+      .then((data) => {
+        if (!data?.success) {
+          setPaymentScopeRepairPreview({
+            loading: false,
+            items: [],
+            summary: null,
+            error: data?.message || 'بررسی تفکیک پرداخت‌های فیس و داخله ممکن نشد.'
+          });
+          return;
+        }
+        setPaymentScopeRepairPreview({
+          loading: false,
+          items: Array.isArray(data.items) ? data.items : [],
+          summary: data.summary || null,
+          error: ''
+        });
+      })
+      .catch((error) => {
+        if (error?.name === 'AbortError') return;
+        setPaymentScopeRepairPreview({
+          loading: false,
+          items: [],
+          summary: null,
+          error: error?.message || 'بررسی تفکیک پرداخت‌های فیس و داخله ممکن نشد.'
+        });
+      });
+
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentScopeRepairForm.classId, paymentScopeRepairRefreshKey]);
+
+  useEffect(() => {
     const classId = String(classPaymentApprovalForm.classId || '').trim();
     const feeType = String(classPaymentApprovalForm.feeType || 'all').trim();
     if (!classId) {
@@ -3891,6 +4013,7 @@ export default function AdminFinance() {
     classId: paymentDeskForm.classId,
     academicYearId: paymentDeskForm.academicYearId,
     amount: Number(paymentDeskForm.amount || 0),
+    feeType: paymentDeskForm.feeType,
     paidAt: paymentDeskForm.paidAt,
     paymentMethod: paymentDeskForm.paymentMethod,
     allocationMode: paymentDeskForm.allocationMode,
@@ -3899,6 +4022,7 @@ export default function AdminFinance() {
       ? paymentDeskOpenOrders
         .map((item) => ({
           feeOrderId: getFeeOrderRowId(item),
+          feeType: paymentDeskForm.feeType,
           amount: Number(paymentDeskForm.manualAllocations?.[getFeeOrderRowId(item)] || 0)
         }))
         .filter((item) => item.amount > 0)
@@ -4463,6 +4587,41 @@ export default function AdminFinance() {
         || `${corrected} رسید اصلاح شد${failed ? ` و ${failed} مورد نیازمند بررسی باقی ماند` : ''}.`
       );
       setAdmissionReceiptCorrectionRefreshKey((value) => value + 1);
+      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
+    } catch (err) {
+      setMessage(err.message);
+      setBusy(false);
+    }
+  };
+
+  const applyPaymentScopeRepair = async () => {
+    const classId = String(paymentScopeRepairForm.classId || '').trim();
+    const eligibleItems = paymentScopeRepairPreview.items.filter((item) => item?.repairable);
+    if (!classId) {
+      setMessage('ابتدا صنف مربوط به پرداخت‌ها را انتخاب کنید.');
+      return;
+    }
+    if (!eligibleItems.length) {
+      setMessage('برای این صنف پرداخت قابل ترمیم خودکار پیدا نشد.');
+      return;
+    }
+    const selectedClass = classOptions.find((item) => item.classId === classId);
+    const confirmed = window.confirm(
+      `${eligibleItems.length} پرداخت صنف ${getClassOptionLabel(selectedClass || {})} بر اساس نوع فیس تفکیک شود؟\n`
+      + `مجموع مبلغ مورد بررسی: ${fmt(eligibleItems.reduce((sum, item) => sum + toSafeNumber(item?.amount), 0))} AFN\n`
+      + 'مبلغ صندوق، شماره رسید و مجموع پرداخت تغییر نمی‌کند؛ فقط انتساب فیس/داخله بازسازی می‌شود.'
+    );
+    if (!confirmed) return;
+
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/finance/admin/payment-scope-repairs/apply`, {
+        classId,
+        paymentIds: eligibleItems.map((item) => item.paymentId),
+        note: String(paymentScopeRepairForm.note || '').trim()
+      });
+      setMessage(data?.message || `${Number(data?.summary?.repaired || 0)} پرداخت تفکیک شد.`);
+      setPaymentScopeRepairRefreshKey((value) => value + 1);
       await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
@@ -6093,6 +6252,23 @@ export default function AdminFinance() {
             <small>مبلغ، نوع پرداخت و تاریخ</small>
           </div>
           <div className="finance-payment-row finance-payment-row-money">
+            <select
+              data-testid="desk-fee-type-select"
+              value={paymentDeskForm.feeType}
+              onChange={(e) => {
+                setPaymentDeskForm((prev) => ({
+                  ...prev,
+                  feeType: e.target.value,
+                  selectedFeeOrderIds: [],
+                  manualAllocations: {}
+                }));
+                setPaymentPreview(null);
+              }}
+            >
+              {MANUAL_BILL_FEE_TYPES.map((feeType) => (
+                <option key={`desk-fee-type-${feeType}`} value={feeType}>{FEE_LINE_TYPE_LABELS[feeType] || feeType}</option>
+              ))}
+            </select>
             <input value={paymentDeskForm.amount} onChange={(e) => { setPaymentDeskForm((p) => ({ ...p, amount: e.target.value })); setPaymentPreview(null); }} placeholder="مبلغ پرداخت" />
             <select data-testid="desk-payment-method-select" value={paymentDeskForm.paymentMethod} onChange={(e) => {
               const nextMethod = e.target.value;
@@ -6178,16 +6354,16 @@ export default function AdminFinance() {
               </div>
               <div className="finance-kpi-grid finance-kpi-grid-dense">
                 <div className="finance-kpi-item">
-                  <span>کل بدهی</span>
-                  <strong>{fmt(paymentDeskFinanceSnapshot.totalDue)} AFN</strong>
+                  <span>اصل {FEE_LINE_TYPE_LABELS[paymentDeskForm.feeType] || 'تعهد'}</span>
+                  <strong>{fmt(paymentDeskScopeSnapshot.due)} AFN</strong>
                 </div>
                 <div className="finance-kpi-item">
-                  <span>کل پرداخت</span>
-                  <strong>{fmt(paymentDeskFinanceSnapshot.totalPaid)} AFN</strong>
+                  <span>پرداخت {FEE_LINE_TYPE_LABELS[paymentDeskForm.feeType] || 'تعهد'}</span>
+                  <strong>{fmt(paymentDeskScopeSnapshot.paid)} AFN</strong>
                 </div>
                 <div className="finance-kpi-item finance-kpi-item-accent">
-                  <span>باقی‌مانده</span>
-                  <strong>{fmt(paymentDeskFinanceSnapshot.outstanding)} AFN</strong>
+                  <span>باقی {FEE_LINE_TYPE_LABELS[paymentDeskForm.feeType] || 'تعهد'}</span>
+                  <strong>{fmt(paymentDeskScopeSnapshot.outstanding)} AFN</strong>
                 </div>
                 <div className="finance-kpi-item">
                   <span>تسهیلات مبلغی</span>
@@ -6195,6 +6371,14 @@ export default function AdminFinance() {
                 </div>
               </div>
               <div className="finance-subcard-list">
+                <div className="mini-row">
+                  <span>فیس/شهریه</span>
+                  <span>پرداخت {fmt(paymentDeskFinanceSnapshot.byFeeType?.tuition?.paid || 0)} | باقی {fmt(paymentDeskFinanceSnapshot.byFeeType?.tuition?.outstanding || 0)} AFN</span>
+                </div>
+                <div className="mini-row">
+                  <span>داخله</span>
+                  <span>پرداخت {fmt(paymentDeskFinanceSnapshot.byFeeType?.admission?.paid || 0)} | باقی {fmt(paymentDeskFinanceSnapshot.byFeeType?.admission?.outstanding || 0)} AFN</span>
+                </div>
                 <div className="mini-row">
                   <span>بدهی‌های باز</span>
                   <span>{paymentDeskFinanceSnapshot.openOrders}</span>
@@ -6222,6 +6406,7 @@ export default function AdminFinance() {
             <div className="finance-order-pick-list finance-payment-open-orders-row" data-testid="desk-open-orders">
               {paymentDeskOpenOrders.map((item) => {
                 const orderId = getFeeOrderRowId(item);
+                const scopedBalance = getBillFeeScopeSummary(item, paymentDeskForm.feeType).outstanding;
                 return (
                 <div key={`pick-${orderId}`} className="finance-flag finance-order-pick-row">
                   <div className="finance-order-pick-copy">
@@ -6237,14 +6422,14 @@ export default function AdminFinance() {
                     ) : (
                       <strong>{item.title || formatFinanceCode(item.billNumber, '') || 'بدهی مالی'}</strong>
                     )}
-                    <small>مهلت پرداخت: {toFaDate(item.dueDate)} | مانده: {fmt(item.outstandingAmount || 0)} AFN</small>
+                    <small>{FEE_LINE_TYPE_LABELS[paymentDeskForm.feeType] || paymentDeskForm.feeType} | مهلت پرداخت: {toFaDate(item.dueDate)} | مانده: {fmt(scopedBalance)} AFN</small>
                   </div>
                   {paymentDeskForm.allocationMode === 'manual' ? (
                     <input
                       type="number"
                       min="0"
                       step="0.01"
-                      max={item.outstandingAmount || 0}
+                      max={scopedBalance}
                       value={paymentDeskForm.manualAllocations?.[orderId] || ''}
                       onChange={(e) => updateDeskManualAllocation(orderId, e.target.value)}
                       placeholder="مبلغ تخصیص"
@@ -6254,7 +6439,7 @@ export default function AdminFinance() {
                     <span className={`finance-chip ${paymentDeskSelectedOrderIds.includes(orderId) ? 'finance-chip-emerald' : 'finance-chip-muted'}`}>
                       {paymentDeskForm.allocationMode === 'auto_selected'
                         ? (paymentDeskSelectedOrderIds.includes(orderId) ? 'انتخاب شده' : 'انتخاب نشده')
-                        : `${fmt(item.outstandingAmount || 0)} AFN`}
+                        : `${fmt(scopedBalance)} AFN`}
                     </span>
                   )}
                 </div>
@@ -6972,16 +7157,16 @@ export default function AdminFinance() {
             </label>
             <div className="finance-kpi-grid finance-kpi-grid-dense">
               <div className="finance-kpi-item">
-                <span>کل بدهی</span>
-                <strong>{fmt(reliefFocusSnapshot.totalDue)} AFN</strong>
+                <span>اصل {reliefFocusFeeScope === 'all' ? 'تعهدات' : (FEE_LINE_TYPE_LABELS[reliefFocusFeeScope] || 'تعهد')}</span>
+                <strong>{fmt(reliefFocusLedgerSnapshot.due)} AFN</strong>
               </div>
               <div className="finance-kpi-item">
-                <span>کل پرداخت</span>
-                <strong>{fmt(reliefFocusSnapshot.totalPaid)} AFN</strong>
+                <span>پرداخت {reliefFocusFeeScope === 'all' ? 'تعهدات' : (FEE_LINE_TYPE_LABELS[reliefFocusFeeScope] || 'تعهد')}</span>
+                <strong>{fmt(reliefFocusLedgerSnapshot.paid)} AFN</strong>
               </div>
               <div className="finance-kpi-item finance-kpi-item-accent">
-                <span>باقی‌مانده</span>
-                <strong>{fmt(reliefFocusSnapshot.outstanding)} AFN</strong>
+                <span>باقی {reliefFocusFeeScope === 'all' ? 'تعهدات' : (FEE_LINE_TYPE_LABELS[reliefFocusFeeScope] || 'تعهد')}</span>
+                <strong>{fmt(reliefFocusLedgerSnapshot.outstanding)} AFN</strong>
               </div>
               <div className="finance-kpi-item">
                 <span>تسهیلات مبلغی</span>
@@ -6989,6 +7174,14 @@ export default function AdminFinance() {
               </div>
             </div>
             <div className="finance-subcard-list">
+              <div className="mini-row">
+                <span>فیس/شهریه</span>
+                <span>پرداخت {fmt(reliefFocusSnapshot.byFeeType?.tuition?.paid || 0)} | باقی {fmt(reliefFocusSnapshot.byFeeType?.tuition?.outstanding || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>داخله</span>
+                <span>پرداخت {fmt(reliefFocusSnapshot.byFeeType?.admission?.paid || 0)} | باقی {fmt(reliefFocusSnapshot.byFeeType?.admission?.outstanding || 0)} AFN</span>
+              </div>
               <div className="mini-row">
                 <span>بدهی‌های باز</span>
                 <span>{reliefFocusSnapshot.openOrders}</span>
@@ -7552,6 +7745,92 @@ export default function AdminFinance() {
               data-testid="admission-receipt-correction-submit"
             >
               اصلاح و صدور رسیدهای جایگزین
+            </button>
+          </div>
+        </div>
+        <div className="admission-receipt-correction-panel" data-testid="payment-scope-repair-panel">
+          <div className="finance-card-head">
+            <div>
+              <h4>ترمیم تفکیک پرداخت فیس و داخله</h4>
+              <p className="muted">
+                پرداخت‌های قبلی را بررسی می‌کند و فقط انتساب آن‌ها به فیس یا داخله را بازسازی می‌کند. مبلغ صندوق، شماره رسید و مجموع پول دریافت‌شده تغییر نمی‌کند.
+              </p>
+            </div>
+            <span className="finance-chip finance-chip-amber" data-testid="payment-scope-repair-count">
+              {paymentScopeRepairPreview.loading
+                ? 'در حال بررسی…'
+                : `${paymentScopeRepairPreview.summary?.repairable || 0} قابل ترمیم`}
+            </span>
+          </div>
+          <div className="receipt-follow-up-grid admission-receipt-correction-controls">
+            <label className="finance-inline-filter">
+              <span>صنف</span>
+              <select
+                value={paymentScopeRepairForm.classId}
+                onChange={(e) => setPaymentScopeRepairForm((prev) => ({ ...prev, classId: e.target.value }))}
+                data-testid="payment-scope-repair-class"
+              >
+                <option value="">انتخاب صنف</option>
+                {classOptions.map((item) => (
+                  <option key={`payment-scope-repair-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>
+                ))}
+              </select>
+            </label>
+            <label className="finance-inline-filter finance-inline-filter-wide">
+              <span>یادداشت ترمیم</span>
+              <input
+                value={paymentScopeRepairForm.note}
+                onChange={(e) => setPaymentScopeRepairForm((prev) => ({ ...prev, note: e.target.value }))}
+                placeholder="مثلاً: تفکیک پرداخت‌های داخله رفع ناهنجاری"
+                data-testid="payment-scope-repair-note"
+              />
+            </label>
+          </div>
+          {paymentScopeRepairPreview.summary ? (
+            <div className="finance-chip-group">
+              <span className="finance-chip">بررسی‌شده: {fmt(paymentScopeRepairPreview.summary.payments || 0)}</span>
+              <span className="finance-chip finance-chip-emerald">قابل ترمیم: {fmt(paymentScopeRepairPreview.summary.repairable || 0)}</span>
+              <span className="finance-chip finance-chip-muted">از قبل تفکیک‌شده: {fmt(paymentScopeRepairPreview.summary.alreadyTyped || 0)}</span>
+              {!!paymentScopeRepairPreview.summary.blocked && (
+                <span className="finance-chip finance-chip-rose">نیازمند بررسی دستی: {fmt(paymentScopeRepairPreview.summary.blocked)}</span>
+              )}
+              <span className="finance-chip finance-chip-amber">مبلغ قابل ترمیم: {fmt(paymentScopeRepairPreview.summary.amount || 0)} AFN</span>
+            </div>
+          ) : null}
+          {paymentScopeRepairPreview.error ? <p className="admission-batch-error">{paymentScopeRepairPreview.error}</p> : null}
+          {!!paymentScopeRepairPreview.items.length && (
+            <div className="admission-receipt-correction-list">
+              {paymentScopeRepairPreview.items.filter((item) => item.repairable || item.blocked).slice(0, 12).map((item) => (
+                <div className={`admission-receipt-correction-row ${item.repairable ? '' : 'blocked'}`} key={`scope-repair-${item.paymentId}`}>
+                  <span className="finance-cell-stack">
+                    <strong>{item.studentName || 'متعلم'}</strong>
+                    <small className="finance-latin-code">{formatFinanceCode(item.paymentNumber, '-')}</small>
+                  </span>
+                  <span>مبلغ: <strong>{fmt(item.amount)} AFN</strong></span>
+                  <span>{item.allocations.map((allocation) => FEE_LINE_TYPE_LABELS[allocation.proposedFeeType] || allocation.proposedFeeType || 'نامشخص').join(' + ')}</span>
+                  <span className={item.repairable ? 'correction-ready' : 'correction-blocked'}>
+                    {item.repairable ? 'آماده ترمیم امن' : 'بل مرکب مبهم؛ بررسی دستی لازم است'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="row-actions">
+            <button
+              type="button"
+              onClick={() => setPaymentScopeRepairRefreshKey((value) => value + 1)}
+              disabled={busy || paymentScopeRepairPreview.loading || !paymentScopeRepairForm.classId}
+              className="secondary"
+            >
+              تازه‌سازی پیش‌نمایش
+            </button>
+            <button
+              type="button"
+              onClick={applyPaymentScopeRepair}
+              disabled={busy || paymentScopeRepairPreview.loading || !(paymentScopeRepairPreview.summary?.repairable > 0)}
+              data-testid="payment-scope-repair-submit"
+            >
+              ترمیم انتساب پرداخت‌ها
             </button>
           </div>
         </div>

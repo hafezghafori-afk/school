@@ -6,6 +6,7 @@ mongoose.set('autoCreate', false);
 
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
+const FinanceBill = require('../models/FinanceBill');
 const { syncApprovedFeePaymentToTreasury } = require('../services/treasuryGovernanceService');
 
 const shouldApply = process.argv.includes('--apply');
@@ -32,7 +33,8 @@ async function run() {
     paymentEvidencePresent: 0,
     paymentEvidenceMissing: 0,
     repaired: 0,
-    skippedWithExistingPendingPayment: 0
+    skippedWithExistingPendingPayment: 0,
+    skippedSourceMismatch: 0
   };
 
   try {
@@ -69,6 +71,11 @@ async function run() {
       const paidAt = order.paidAt || order.updatedAt || order.createdAt || new Date();
       const amount = Math.max(0, Number(order.amountPaid || 0));
       if (amount <= 0) continue;
+      const sourceBill = order.sourceBillId ? await FinanceBill.findById(order.sourceBillId).lean() : null;
+      if (sourceBill && Math.abs(Number(sourceBill.amountPaid || 0) - amount) > 0.009) {
+        summary.skippedSourceMismatch += 1;
+        continue;
+      }
       const actorId = order.createdBy || null;
       const paymentNumber = buildRepairPaymentNumber(order._id);
       let payment = await FeePayment.findOne({ paymentNumber });
@@ -92,6 +99,7 @@ async function run() {
           allocationMode: 'single_order',
           allocations: [{
             feeOrderId: order._id,
+            feeType: 'admission',
             amount,
             title: String(order.title || 'داخله').trim(),
             orderNumber: String(order.orderNumber || '').trim()
@@ -112,6 +120,17 @@ async function run() {
             reason: 'missing_payment_evidence'
           }] : []
         });
+      }
+      order.paymentBreakdown = {
+        ...(order.paymentBreakdown || {}),
+        admission: amount
+      };
+      await FeeOrder.updateOne({ _id: order._id }, { $set: { paymentBreakdown: order.paymentBreakdown } });
+      if (sourceBill) {
+        await FinanceBill.updateOne(
+          { _id: sourceBill._id },
+          { $set: { 'paymentBreakdown.admission': amount } }
+        );
       }
       await syncApprovedFeePaymentToTreasury(payment).catch(() => null);
       summary.repaired += 1;

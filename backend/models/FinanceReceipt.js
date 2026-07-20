@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const { deriveLinkScope } = require('../utils/financeLinkScope');
 const { applySchoolOwnership } = require('../utils/schoolOwnership');
+const { LINE_ITEM_TYPES, normalizeFinanceFeeType } = require('../utils/financeLineItems');
 
 const financeReceiptSchema = new mongoose.Schema({
   bill: { type: mongoose.Schema.Types.ObjectId, ref: 'FinanceBill', required: true, index: true },
@@ -13,6 +14,7 @@ const financeReceiptSchema = new mongoose.Schema({
   classId: { type: mongoose.Schema.Types.ObjectId, ref: 'SchoolClass', default: null, index: true },
   academicYearId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicYear', default: null, index: true },
   amount: { type: Number, default: 0, min: 0 },
+  feeType: { type: String, enum: LINE_ITEM_TYPES, default: undefined },
   paymentMethod: {
     type: String,
     enum: ['cash', 'bank_transfer', 'hawala', 'manual', 'other'],
@@ -78,6 +80,12 @@ financeReceiptSchema.pre('validate', async function syncFinanceReceiptState() {
   if (typeof this.reviewNote === 'string') this.reviewNote = this.reviewNote.trim();
   if (typeof this.rejectReason === 'string') this.rejectReason = this.rejectReason.trim();
   this.amount = Math.max(0, Number(this.amount) || 0);
+  if (this.feeType) {
+    const normalizedFeeType = String(this.feeType).trim().toLowerCase();
+    this.feeType = LINE_ITEM_TYPES.includes(normalizedFeeType)
+      ? normalizeFinanceFeeType(normalizedFeeType, 'tuition')
+      : undefined;
+  }
   this.linkScope = deriveLinkScope({
     linkScope: this.linkScope,
     studentMembershipId: this.studentMembershipId,
