@@ -111,7 +111,7 @@ const financeBillSchema = new mongoose.Schema({
   voidedAt: { type: Date, default: null },
   lastReminderAt: { type: Date, default: null },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
-}, { timestamps: true });
+}, { timestamps: true, optimisticConcurrency: true });
 
 financeBillSchema.path('amountOriginal').validate(function requirePositiveGrossAmount(value) {
   return !this.isNew || this.status === 'void' || Number(value || 0) > 0;

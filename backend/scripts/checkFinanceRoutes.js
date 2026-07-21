@@ -3354,6 +3354,11 @@ const ExpenseEntryMock = {
       expenseEntries.filter((item) => matchesFilter(item, filter)).map((item) => createExpenseEntryDoc(item))
     ));
   },
+  findOne(filter = {}) {
+    return new MockQuery(() => (
+      createExpenseEntryDoc(expenseEntries.find((item) => matchesFilter(item, filter)) || null)
+    ));
+  },
   findById(id) {
     return new MockQuery(() => (
       createExpenseEntryDoc(expenseEntries.find((item) => String(item._id) === String(id)) || null)
@@ -4956,12 +4961,62 @@ function loadFinanceRouter() {
       };
     }
     if (isFinanceRoute && request === '../services/financialYearService') return financialYearServiceMock;
+    if (isFinanceRoute && request === '../services/schoolContextService') {
+      return {
+        resolveActiveSchool: async () => ({
+          schoolId: 'school-1',
+          school: { _id: 'school-1', name: 'Test School' },
+          requiresSelection: false
+        }),
+        writeSchoolContextHeaders: (res, schoolId) => res.set('X-School-Id', schoolId)
+      };
+    }
     if (isFinanceRoute && request === '../services/financeDeliveryService') return financeDeliveryServiceMock;
     if (isFinanceRoute && request === '../services/expenseGovernanceService') return expenseGovernanceServiceMock;
     if (isFinanceRoute && request === '../services/treasuryGovernanceService') return treasuryGovernanceServiceMock;
     if (isFinanceRoute && request === '../services/governmentFinanceReportService') return governmentFinanceReportServiceMock;
     if (isFinanceRoute && request === '../services/procurementCommitmentService') return procurementCommitmentServiceMock;
     if (isFinanceRoute && request === '../services/financialPeriodService') return financialPeriodServiceMock;
+    if (isFinanceRoute && request === '../services/financePeriodGuardService') {
+      const isClosed = async (dateValue, scope = {}) => {
+        const date = new Date(dateValue);
+        const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        return monthClosures.some((item) => (
+          item.monthKey === monthKey
+          && item.status === 'closed'
+          && (!scope.schoolId || String(item.schoolId || '') === String(scope.schoolId))
+        ));
+      };
+      return {
+        assertFinancePeriodWritable: async (scope = {}) => {
+          if (await isClosed(scope.dateValue || new Date(), scope)) {
+            const error = new Error('finance_month_closed');
+            error.status = 400;
+            throw error;
+          }
+          return { writable: true };
+        },
+        isFinanceMonthClosed: isClosed
+      };
+    }
+    if (isFinanceRoute && request === '../services/financeCloseService') {
+      return {
+        toMonthDateRange: (monthKey) => ({
+          startAt: new Date(`${monthKey}-01T00:00:00.000Z`),
+          endAt: new Date(`${monthKey}-28T23:59:59.999Z`)
+        }),
+        buildFinanceMonthCloseSnapshot: async (monthKey) => ({
+          generatedAt: new Date(),
+          monthKey,
+          totals: {},
+          aging: { buckets: {}, rows: [], totalRemaining: 0 },
+          cashflow: { approvedTotal: 0, approvedCount: 0, pendingTotal: 0, pendingCount: 0, items: [] },
+          readiness: { readyToApprove: true, blockingIssues: [], warningIssues: [] },
+          classes: [],
+          anomalies: { summary: {}, items: [] }
+        })
+      };
+    }
     if (isFinanceRoute && request === '../services/studentFinanceService') return studentFinanceServiceMock;
     if (isFinanceRoute && request === '../utils/financeDocumentArchive') return financeDocumentArchiveMock;
     if (isFinanceRoute && request === '../services/financeFeePlanService') {
@@ -5002,6 +5057,12 @@ function loadFinanceRouter() {
     if (isFinanceAdminActionService && request === '../models/UserNotification') return UserNotificationMock;
     if (isFinanceAdminActionService && request === '../utils/activity') return { logActivity: async () => {} };
     if (isFinanceAdminActionService && request === '../utils/mailer') return { sendMail: async () => ({ ok: true }) };
+    if (isFinanceAdminActionService && request === './financePeriodGuardService') {
+      return {
+        assertFinancePeriodWritable: async () => ({ writable: true }),
+        isFinanceMonthClosed: async () => false
+      };
+    }
     if (isFinanceAdminActionService && request === '../utils/financeReceiptValidation') {
       return require(path.join(__dirname, '..', 'utils', 'financeReceiptValidation'));
     }
@@ -5256,8 +5317,13 @@ async function run() {
         schoolId: item.schoolId,
         academicYearId: item.academicYearId
       }));
-      const baselineOrderCount = canonicalFeeOrders.length;
+      const originalOrderCount = canonicalFeeOrders.length;
+      let baselineOrderCount = originalOrderCount;
       const baselineCaseCount = financeAnomalyCases.length;
+      const originalOrderScopes = canonicalFeeOrders.map((item) => ({
+        schoolId: item.schoolId,
+        academicYearId: item.academicYearId
+      }));
       const batchPlanId = '507f191e810c19729de86992';
 
       memberships[0]._id = '507f191e810c19729de86111';
@@ -5266,6 +5332,30 @@ async function run() {
         item.schoolId = 'school-1';
         item.academicYearId = 'academic-year-1';
       });
+      canonicalFeeOrders.forEach((item) => {
+        if (String(item.classId?._id || item.classId || '') !== IDS.class1) return;
+        item.schoolId = 'school-1';
+        item.academicYearId = 'academic-year-1';
+      });
+      canonicalFeeOrders.push({
+        _id: '507f191e810c19729de86993',
+        schoolId: 'school-1',
+        student: memberships[0].student,
+        studentMembershipId: memberships[0]._id,
+        classId: IDS.class1,
+        academicYearId: 'academic-year-1',
+        orderNumber: 'TUITION-SEED-1',
+        orderType: 'tuition',
+        status: 'new',
+        amountDue: 1000,
+        amountPaid: 0,
+        outstandingAmount: 1000,
+        currency: 'AFN',
+        lineItems: [{ feeType: 'tuition', amount: 1000 }],
+        dueDate: new Date('2026-07-31T00:00:00.000Z'),
+        issuedAt: new Date('2026-07-01T00:00:00.000Z')
+      });
+      baselineOrderCount = canonicalFeeOrders.length;
       feePlans.push({
         _id: batchPlanId,
         title: 'Class admission batch plan',
@@ -5322,7 +5412,13 @@ async function run() {
       } finally {
         const batchPlanIndex = feePlans.findIndex((item) => String(item._id) === batchPlanId);
         if (batchPlanIndex >= 0) feePlans.splice(batchPlanIndex, 1);
-        canonicalFeeOrders.splice(baselineOrderCount);
+        canonicalFeeOrders.splice(originalOrderCount);
+        canonicalFeeOrders.forEach((item, index) => {
+          if (originalOrderScopes[index].schoolId === undefined) delete item.schoolId;
+          else item.schoolId = originalOrderScopes[index].schoolId;
+          if (originalOrderScopes[index].academicYearId === undefined) delete item.academicYearId;
+          else item.academicYearId = originalOrderScopes[index].academicYearId;
+        });
         financeAnomalyCases.splice(baselineCaseCount);
         memberships.slice(0, 2).forEach((item, index) => {
           item._id = originalMembershipState[index]._id;
@@ -5829,7 +5925,7 @@ async function run() {
           category: 'admin',
           subCategory: 'stationery',
           amount: 450,
-          expenseDate: '2026-03-22',
+          expenseDate: '2026-04-22',
           vendorName: 'Atlas Supplies',
           procurementCommitmentId: procurementId,
           treasuryAccountId: 'treasury-account-1',
@@ -5872,7 +5968,7 @@ async function run() {
         user: financeManagerUser,
         body: {
           amount: 200,
-          settlementDate: '2026-03-24',
+          settlementDate: '2026-04-24',
           treasuryAccountId: 'treasury-account-1',
           referenceNo: 'SET-PROC-01',
           note: 'Initial vendor settlement.'
@@ -5925,7 +6021,7 @@ async function run() {
           category: 'technology',
           subCategory: 'devices',
           amount: 950,
-          expenseDate: '2026-03-20',
+          expenseDate: '2026-04-20',
           vendorName: 'Atlas Supplies',
           referenceNo: 'GF-2026-009',
           note: 'Technology refresh',
@@ -6322,7 +6418,7 @@ async function run() {
         user: financeManagerUser,
         body: { monthKey: '2026-01', note: 'Ready for manager review' }
       });
-      assertCase(requestResponse.status === 201, `expected 201, received ${requestResponse.status}`);
+      assertCase(requestResponse.status === 201, `expected 201, received ${requestResponse.status}: ${requestResponse.text}`);
       assertCase(requestResponse.data?.item?.status === 'pending_review', 'expected pending_review status after request');
       assertCase(requestResponse.data?.item?.approvalStage === 'finance_manager_review', 'expected finance_manager_review stage');
 

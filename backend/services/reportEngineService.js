@@ -399,15 +399,22 @@ function buildBaseReport(definition, filters, extras = {}) {
   };
 }
 
-async function listReportReferenceData() {
-  const [academicYears, financialYears, academicTerms, classes, students, teachers, examSessions] = await Promise.all([
-    AcademicYear.find({}).sort({ createdAt: -1 }),
-    FinancialYear.find({ status: { $ne: 'archived' } }).populate('academicYearId', 'title code').sort({ isActive: -1, createdAt: -1 }),
-    AcademicTerm.find({}).sort({ academicYearId: 1, sequence: 1 }),
-    SchoolClass.find({ status: { $ne: 'archived' } }).sort({ gradeLevel: 1, section: 1, title: 1 }),
-    StudentCore.find({ status: { $ne: 'archived' } }).sort({ fullName: 1 }).limit(500),
-    User.find({ role: { $in: ['admin', 'instructor'] } }).select('name email role orgRole').sort({ name: 1 }).limit(300),
-    ExamSession.find({ status: { $ne: 'archived' } })
+async function listReportReferenceData({ schoolId = '' } = {}) {
+  const normalizedSchoolId = normalizeText(schoolId);
+  const academicYears = await AcademicYear.find(normalizedSchoolId ? { schoolId: normalizedSchoolId } : { _id: { $in: [] } })
+    .sort({ createdAt: -1 });
+  const academicYearIds = academicYears.map((item) => item._id);
+  const memberships = normalizedSchoolId
+    ? await StudentMembership.find({ schoolId: normalizedSchoolId }).select('studentId').lean()
+    : [];
+  const studentIds = [...new Set(memberships.map((item) => String(item.studentId || '')).filter(Boolean))];
+  const [financialYears, academicTerms, classes, students, teachers, examSessions] = await Promise.all([
+    FinancialYear.find({ schoolId: normalizedSchoolId, status: { $ne: 'archived' } }).populate('academicYearId', 'title code').sort({ isActive: -1, createdAt: -1 }),
+    AcademicTerm.find({ academicYearId: { $in: academicYearIds } }).sort({ academicYearId: 1, sequence: 1 }),
+    SchoolClass.find({ schoolId: normalizedSchoolId, status: { $ne: 'archived' } }).sort({ gradeLevel: 1, section: 1, title: 1 }),
+    StudentCore.find({ _id: { $in: studentIds }, status: { $ne: 'archived' } }).sort({ fullName: 1 }).limit(500),
+    User.find({ schoolId: normalizedSchoolId, role: { $in: ['admin', 'instructor'] } }).select('name email role orgRole').sort({ name: 1 }).limit(300),
+    ExamSession.find({ academicYearId: { $in: academicYearIds }, status: { $ne: 'archived' } })
       .populate('academicYearId', 'title code')
       .populate('assessmentPeriodId', 'title code')
       .populate('classId', 'title code gradeLevel section')
@@ -444,10 +451,21 @@ function listReportCatalog({ permissions = null } = {}) {
 function getReportDefinition(reportKey) {
   return REPORT_DEFINITIONS.find((item) => item.key === normalizeText(reportKey));
 }
+
+function summarizeRecognizedPaymentsByFeeType(rows = []) {
+  const result = {};
+  for (const row of rows || []) {
+    for (const allocation of row.recognizedAllocations || []) {
+      const feeType = normalizeText(allocation.feeType).toLowerCase() || 'other';
+      result[feeType] = Number(((result[feeType] || 0) + Number(allocation.amount || 0)).toFixed(2));
+    }
+  }
+  return result;
+}
 async function buildFinanceOverviewReport(filters) {
   const definition = getReportDefinition('finance_overview');
   const orderFilter = { status: { $ne: 'void' } };
-  const paymentFilter = {};
+  const paymentFilter = { status: 'approved' };
   if (filters.academicYearId) {
     orderFilter.academicYearId = filters.academicYearId;
     paymentFilter.academicYearId = filters.academicYearId;
@@ -496,6 +514,7 @@ async function buildFinanceOverviewReport(filters) {
     totalPaidOnOrders: Number(orders.reduce((sum, item) => sum + Number(item.amountPaid || 0), 0).toFixed(2)),
     totalOutstanding: Number(orders.reduce((sum, item) => sum + Number(item.outstandingAmount || 0), 0).toFixed(2)),
     totalPaymentAmount: Number(recognizedPaymentRows.reduce((sum, row) => sum + Number(row.recognizedAmount || 0), 0).toFixed(2)),
+    paymentsByFeeType: summarizeRecognizedPaymentsByFeeType(recognizedPaymentRows),
     paidOrders: orderStatuses.filter((status) => status === 'paid').length,
     waivedOrders: orderStatuses.filter((status) => status === 'waived').length,
     overdueOrders: orderStatuses.filter((status) => status === 'overdue').length,
@@ -871,7 +890,7 @@ async function buildFeeDiscountExemptionOverviewReport(filters) {
 async function buildFeeCollectionByClassReport(filters) {
   const definition = getReportDefinition('fee_collection_by_class');
   const orderFilter = { status: { $ne: 'void' } };
-  const paymentFilter = {};
+  const paymentFilter = { status: { $in: ['pending', 'approved'] } };
 
   if (filters.academicYearId) {
     orderFilter.academicYearId = filters.academicYearId;

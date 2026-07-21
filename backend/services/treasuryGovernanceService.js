@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const FinanceTreasuryAccount = require('../models/FinanceTreasuryAccount');
 const FinanceTreasuryTransaction = require('../models/FinanceTreasuryTransaction');
 const ExpenseEntry = require('../models/ExpenseEntry');
@@ -6,6 +7,7 @@ const FeePayment = require('../models/FeePayment');
 const FeeOrder = require('../models/FeeOrder');
 const FinancialYear = require('../models/FinancialYear');
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
+const { assertFinancePeriodWritable } = require('./financePeriodGuardService');
 
 const TREASURY_ACCOUNT_TYPES = new Set(['cashbox', 'bank', 'hawala', 'mobile_money', 'other']);
 const TREASURY_TRANSACTION_TYPE_META = Object.freeze({
@@ -17,6 +19,11 @@ const TREASURY_TRANSACTION_TYPE_META = Object.freeze({
   transfer_out: { direction: 'out', sourceType: 'transfer' },
   reconciliation_adjustment: { direction: 'in', sourceType: 'reconciliation' }
 });
+
+function supportsMongoTransactions() {
+  const topologyType = String(mongoose.connection?.client?.topology?.description?.type || '');
+  return ['ReplicaSetWithPrimary', 'ReplicaSetNoPrimary', 'Sharded', 'LoadBalanced'].includes(topologyType);
+}
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -153,6 +160,17 @@ async function syncApprovedFeePaymentToTreasury(payment = {}, options = {}) {
     transactionGroupKey,
     sourceType: 'fee_payment'
   });
+  let financialYear = await resolveFeePaymentFinancialYear(payment, options);
+  if (!financialYear?._id && existing?.financialYearId) {
+    financialYear = await FinancialYear.findById(existing.financialYearId);
+  }
+  if (!financialYear?._id) return null;
+  await assertFinancePeriodWritable({
+    schoolId: financialYear.schoolId,
+    financialYearId: financialYear._id,
+    academicYearId: financialYear.academicYearId,
+    dateValue: payment.paidAt || payment.reviewedAt || payment.updatedAt || payment.createdAt || new Date()
+  });
   if (amount <= 0) {
     if (existing && existing.status !== 'void') {
       existing.status = 'void';
@@ -174,8 +192,6 @@ async function syncApprovedFeePaymentToTreasury(payment = {}, options = {}) {
     return existing;
   }
 
-  const financialYear = await resolveFeePaymentFinancialYear(payment, options);
-  if (!financialYear?._id) return null;
   const account = await resolveFeePaymentTreasuryAccount(financialYear, payment);
   if (!account?._id) return null;
 
@@ -225,47 +241,27 @@ async function syncApprovedFeePaymentsToTreasury({
   }
   if (!financialYear?._id) return { synced: 0 };
 
-  const schoolFilter = financialYear.schoolId
-    ? {
-        $or: [
-          { schoolId: financialYear.schoolId },
-          { schoolId: null },
-          { schoolId: { $exists: false } }
-        ]
-      }
-    : {};
-  const linkedOrderIds = await FeeOrder.find({
-    academicYearId: financialYear.academicYearId,
-    ...schoolFilter
-  }).select('_id').limit(5000);
-  const linkedOrderIdValues = linkedOrderIds.map((item) => item._id);
-
-  const paymentAcademicScope = [
-      { academicYearId: financialYear.academicYearId },
-      { academicYearId: null },
-      { academicYearId: { $exists: false } },
-      ...(linkedOrderIdValues.length
-        ? [
-            { feeOrderId: { $in: linkedOrderIdValues } },
-            { 'allocations.feeOrderId': { $in: linkedOrderIdValues } }
-          ]
-        : [])
-    ];
-  const paymentQuery = {
-    status: 'approved',
-    ...(Object.keys(schoolFilter).length
-      ? { $and: [schoolFilter, { $or: paymentAcademicScope }] }
-      : { $or: paymentAcademicScope })
-  };
-
-  const payments = await FeePayment.find(paymentQuery).sort({ paidAt: 1, createdAt: 1 }).limit(1000);
-
   let synced = 0;
-  for (const payment of payments) {
-    const result = await syncApprovedFeePaymentToTreasury(payment, { preferredFinancialYear: financialYear });
-    if (result) synced += 1;
+  let scanned = 0;
+  let cursorId = null;
+  const batchSize = 250;
+  while (true) {
+    const payments = await FeePayment.find({
+      status: 'approved',
+      schoolId: financialYear.schoolId,
+      academicYearId: financialYear.academicYearId,
+      ...(cursorId ? { _id: { $gt: cursorId } } : {})
+    }).sort({ _id: 1 }).limit(batchSize);
+    if (!payments.length) break;
+    for (const payment of payments) {
+      const result = await syncApprovedFeePaymentToTreasury(payment, { preferredFinancialYear: financialYear });
+      if (result) synced += 1;
+      scanned += 1;
+    }
+    cursorId = payments[payments.length - 1]._id;
+    if (payments.length < batchSize) break;
   }
-  return { synced };
+  return { synced, scanned };
 }
 
 function toDate(value = null, fallback = null) {
@@ -457,6 +453,10 @@ function accumulateAccountMetrics({
   });
 
   (expenses || []).forEach((item) => {
+    // A procurement-linked expense records the obligation/expense. Cash leaves the
+    // treasury only through its procurement settlement transaction, so counting
+    // both here would debit the same amount twice.
+    if (item.procurementCommitmentId) return;
     const accountKey = String(item.treasuryAccountId?._id || item.treasuryAccountId || '');
     if (!metricsByAccountId.has(accountKey)) return;
     const bucket = metricsByAccountId.get(accountKey);
@@ -612,6 +612,7 @@ function buildTreasuryCashbookReport({
   });
 
   (approvedExpenses || []).forEach((item) => {
+    if (item.procurementCommitmentId) return;
     const expenseAccountKey = String(item.treasuryAccountId?._id || item.treasuryAccountId || '');
     if (expenseAccountKey !== selectedAccountKey) return;
     timelineRows.push({
@@ -805,7 +806,6 @@ async function buildTreasuryReportBundle({
   academicYearId = '',
   accountId = ''
 } = {}) {
-  await syncApprovedFeePaymentsToTreasury({ financialYearId, academicYearId });
   const {
     accounts,
     transactions,
@@ -845,7 +845,6 @@ async function buildTreasuryAnalytics({
   academicYearId = '',
   accountId = ''
 } = {}) {
-  await syncApprovedFeePaymentsToTreasury({ financialYearId, academicYearId });
   const {
     transactions,
     unassignedApprovedExpenses,
@@ -1052,22 +1051,44 @@ async function createTreasuryManualTransaction({
     throw error;
   }
 
-  const item = await FinanceTreasuryTransaction.create({
-    schoolId: financialYear.schoolId,
-    financialYearId: financialYear._id,
-    academicYearId: financialYear.academicYearId,
-    accountId: account._id,
-    transactionType,
-    direction: meta.direction,
-    amount,
-    currency: normalizeText(payload.currency || account.currency || 'AFN').toUpperCase() || 'AFN',
-    transactionDate: toDate(payload.transactionDate, new Date()),
-    sourceType: meta.sourceType,
-    referenceNo: normalizeText(payload.referenceNo),
-    note: normalizeText(payload.note),
-    createdBy: actorId || null,
-    updatedBy: actorId || null
-  });
+  const rawIdempotencyKey = normalizeText(payload.idempotencyKey);
+  const idempotencyKey = rawIdempotencyKey ? `manual:${rawIdempotencyKey}` : '';
+  if (idempotencyKey) {
+    const existing = await FinanceTreasuryTransaction.findOne({
+      schoolId: financialYear.schoolId,
+      idempotencyKey,
+      transactionType
+    });
+    if (existing) return serializeTreasuryTransaction(existing);
+  }
+
+  let item;
+  try {
+    item = await FinanceTreasuryTransaction.create({
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      accountId: account._id,
+      idempotencyKey: idempotencyKey || undefined,
+      transactionType,
+      direction: meta.direction,
+      amount,
+      currency: normalizeText(payload.currency || account.currency || 'AFN').toUpperCase() || 'AFN',
+      transactionDate: toDate(payload.transactionDate, new Date()),
+      sourceType: meta.sourceType,
+      referenceNo: normalizeText(payload.referenceNo),
+      note: normalizeText(payload.note),
+      createdBy: actorId || null,
+      updatedBy: actorId || null
+    });
+  } catch (error) {
+    if (error?.code !== 11000 || !idempotencyKey) throw error;
+    item = await FinanceTreasuryTransaction.findOne({
+      schoolId: financialYear.schoolId,
+      idempotencyKey,
+      transactionType
+    });
+  }
 
   const saved = await FinanceTreasuryTransaction.findById(item._id)
     .populate('accountId', 'title code accountType accountNo')
@@ -1110,13 +1131,38 @@ async function createTreasuryTransfer({
     throw error;
   }
 
-  const groupKey = `tr-${crypto.randomBytes(8).toString('hex')}`;
+  const rawIdempotencyKey = normalizeText(payload.idempotencyKey);
+  const idempotencyKey = rawIdempotencyKey ? `transfer:${rawIdempotencyKey}` : '';
+  if (idempotencyKey) {
+    const existingItems = await FinanceTreasuryTransaction.find({
+      schoolId: financialYear.schoolId,
+      idempotencyKey,
+      sourceType: 'transfer'
+    })
+      .populate('accountId', 'title code accountType accountNo')
+      .populate('counterAccountId', 'title code accountType accountNo')
+      .populate('createdBy', 'name')
+      .populate('updatedBy', 'name')
+      .sort({ direction: 1 });
+    if (existingItems.length === 2) {
+      return {
+        transactionGroupKey: existingItems[0].transactionGroupKey,
+        items: existingItems.map((item) => serializeTreasuryTransaction(item)),
+        isDuplicate: true
+      };
+    }
+  }
+
+  const groupKey = idempotencyKey
+    ? `tr-${crypto.createHash('sha256').update(`${financialYear._id}:${idempotencyKey}`).digest('hex').slice(0, 16)}`
+    : `tr-${crypto.randomBytes(8).toString('hex')}`;
   const transactionDate = toDate(payload.transactionDate, new Date());
   const basePayload = {
     schoolId: financialYear.schoolId,
     financialYearId: financialYear._id,
     academicYearId: financialYear.academicYearId,
     transactionGroupKey: groupKey,
+    idempotencyKey: idempotencyKey || undefined,
     amount,
     currency: normalizeText(payload.currency || sourceAccount.currency || destinationAccount.currency || 'AFN').toUpperCase() || 'AFN',
     transactionDate,
@@ -1127,22 +1173,41 @@ async function createTreasuryTransfer({
     updatedBy: actorId || null
   };
 
-  await FinanceTreasuryTransaction.insertMany([
-    {
-      ...basePayload,
-      accountId: sourceAccount._id,
-      counterAccountId: destinationAccount._id,
-      transactionType: 'transfer_out',
-      direction: 'out'
-    },
-    {
-      ...basePayload,
-      accountId: destinationAccount._id,
-      counterAccountId: sourceAccount._id,
-      transactionType: 'transfer_in',
-      direction: 'in'
+  const transferRows = [
+      {
+        ...basePayload,
+        accountId: sourceAccount._id,
+        counterAccountId: destinationAccount._id,
+        transactionType: 'transfer_out',
+        direction: 'out'
+      },
+      {
+        ...basePayload,
+        accountId: destinationAccount._id,
+        counterAccountId: sourceAccount._id,
+        transactionType: 'transfer_in',
+        direction: 'in'
+      }
+    ];
+  if (supportsMongoTransactions()) {
+    const session = await mongoose.startSession();
+    try {
+      session.startTransaction();
+      await FinanceTreasuryTransaction.insertMany(transferRows, { session });
+      await session.commitTransaction();
+    } catch (error) {
+      if (session.inTransaction()) await session.abortTransaction();
+      if (error?.code !== 11000 || !idempotencyKey) throw error;
+    } finally {
+      await session.endSession();
     }
-  ]);
+  } else {
+    try {
+      await FinanceTreasuryTransaction.insertMany(transferRows, { ordered: false });
+    } catch (error) {
+      if (error?.code !== 11000 || !idempotencyKey) throw error;
+    }
+  }
 
   const items = await FinanceTreasuryTransaction.find({ transactionGroupKey: groupKey })
     .populate('accountId', 'title code accountType accountNo')
@@ -1234,6 +1299,7 @@ async function reconcileTreasuryAccount({
 }
 
 module.exports = {
+  accumulateAccountMetrics,
   buildTreasuryAnalytics,
   buildTreasuryReportBundle,
   createTreasuryAccount,

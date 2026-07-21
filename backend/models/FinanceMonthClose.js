@@ -27,7 +27,10 @@ const monthCloseHistorySchema = new mongoose.Schema({
 }, { _id: false });
 
 const financeMonthCloseSchema = new mongoose.Schema({
-  monthKey: { type: String, required: true, unique: true }, // YYYY-MM
+  schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'AfghanSchool', default: null, index: true },
+  financialYearId: { type: mongoose.Schema.Types.ObjectId, ref: 'FinancialYear', default: null, index: true },
+  academicYearId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicYear', default: null, index: true },
+  monthKey: { type: String, required: true }, // YYYY-MM
   status: { type: String, enum: MONTH_CLOSE_STATUSES, default: 'draft', index: true },
   approvalStage: {
     type: String,
@@ -149,5 +152,15 @@ financeMonthCloseSchema.pre('validate', function syncFinanceMonthCloseState() {
 });
 
 financeMonthCloseSchema.index({ status: 1, approvalStage: 1, monthKey: -1 });
+financeMonthCloseSchema.index(
+  { schoolId: 1, financialYearId: 1, monthKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      schoolId: { $type: 'objectId' },
+      financialYearId: { $type: 'objectId' }
+    }
+  }
+);
 
 module.exports = mongoose.model('FinanceMonthClose', financeMonthCloseSchema);

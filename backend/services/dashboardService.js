@@ -446,7 +446,11 @@ async function getAdminDashboard() {
     ProfileUpdateRequest.countDocuments({ status: 'pending' }),
     AccessRequest.countDocuments({ status: 'pending' }),
     FeePayment.countDocuments({ status: 'pending' }),
-    FeeOrder.countDocuments({ status: 'overdue' }),
+    FeeOrder.countDocuments({
+      status: { $in: ['new', 'partial', 'overdue'] },
+      outstandingAmount: { $gt: 0 },
+      dueDate: { $lt: new Date() }
+    }),
     Schedule.countDocuments({ visibility: 'draft' }),
     StudentMembership.find({
       createdAt: { $gte: new Date(previousMonthStart.getFullYear(), previousMonthStart.getMonth() - 4, 1) }

@@ -72,6 +72,14 @@ async function resolveActorIdentity(req) {
 async function logActivity({ req, action, targetUser, targetType, targetId, meta, reason }) {
   try {
     const requestMeta = meta && typeof meta === 'object' ? { ...meta } : {};
+    const requestSchoolId = String(
+      requestMeta.schoolId
+      || req?.body?.schoolId
+      || req?.query?.schoolId
+      || req?.headers?.['x-school-id']
+      || req?.user?.schoolId
+      || ''
+    ).trim();
     const userAgent = String(req?.headers?.['user-agent'] || '').slice(0, MAX_UA_LENGTH);
     const actorIdentity = await resolveActorIdentity(req);
     const resolvedReason = normalizeReason(reason)
@@ -95,6 +103,7 @@ async function logActivity({ req, action, targetUser, targetType, targetId, meta
       reason: resolvedReason,
       meta: {
         ...requestMeta,
+        schoolId: requestSchoolId || undefined,
         actorAdminLevel: requestMeta.actorAdminLevel || actorIdentity.adminLevel || undefined,
         requestId: String(req?.headers?.['x-request-id'] || '').trim() || undefined,
         source: requestMeta.source || 'backend'

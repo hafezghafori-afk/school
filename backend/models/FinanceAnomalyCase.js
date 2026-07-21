@@ -23,7 +23,8 @@ const financeAnomalyHistorySchema = new mongoose.Schema({
 }, { _id: false });
 
 const financeAnomalyCaseSchema = new mongoose.Schema({
-  anomalyId: { type: String, required: true, unique: true, index: true },
+  schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'AfghanSchool', default: null, index: true },
+  anomalyId: { type: String, required: true, index: true },
   anomalyType: { type: String, default: 'finance_signal', index: true },
   title: { type: String, default: '' },
   description: { type: String, default: '' },
@@ -68,6 +69,11 @@ const financeAnomalyCaseSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 financeAnomalyCaseSchema.index({ classId: 1, status: 1, updatedAt: -1 });
+financeAnomalyCaseSchema.index({ schoolId: 1, academicYearId: 1, status: 1, updatedAt: -1 });
+financeAnomalyCaseSchema.index(
+  { schoolId: 1, anomalyId: 1 },
+  { unique: true, partialFilterExpression: { schoolId: { $type: 'objectId' } } }
+);
 financeAnomalyCaseSchema.index({ targetType: 1, targetId: 1 });
 
 module.exports = mongoose.model('FinanceAnomalyCase', financeAnomalyCaseSchema);

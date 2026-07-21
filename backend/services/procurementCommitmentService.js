@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const ExpenseEntry = require('../models/ExpenseEntry');
 const FinanceProcurementCommitment = require('../models/FinanceProcurementCommitment');
 const FinanceTreasuryTransaction = require('../models/FinanceTreasuryTransaction');
@@ -23,6 +24,11 @@ const OPEN_PROCUREMENT_APPROVAL_STAGES = [
   PROCUREMENT_APPROVAL_STAGES.financeLead,
   PROCUREMENT_APPROVAL_STAGES.generalPresident
 ];
+
+function supportsMongoTransactions() {
+  const topologyType = String(mongoose.connection?.client?.topology?.description?.type || '');
+  return ['ReplicaSetWithPrimary', 'ReplicaSetNoPrimary', 'Sharded', 'LoadBalanced'].includes(topologyType);
+}
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -260,6 +266,7 @@ async function populateProcurementCommitmentQuery(query) {
 }
 
 async function buildProcurementCommitmentAnalytics({
+  schoolId = '',
   financialYearId = '',
   academicYearId = '',
   classId = '',
@@ -267,6 +274,7 @@ async function buildProcurementCommitmentAnalytics({
   approvalStage = ''
 } = {}) {
   const filter = {};
+  if (normalizeText(schoolId)) filter.schoolId = normalizeText(schoolId);
   if (normalizeText(financialYearId)) filter.financialYearId = normalizeText(financialYearId);
   if (normalizeText(academicYearId)) filter.academicYearId = normalizeText(academicYearId);
   if (normalizeText(classId)) filter.classId = normalizeText(classId);
@@ -278,7 +286,8 @@ async function buildProcurementCommitmentAnalytics({
   );
   const commitmentIds = commitments.map((item) => item._id);
   const approvedExpenses = commitmentIds.length
-    ? await ExpenseEntry.find({
+      ? await ExpenseEntry.find({
+        ...(normalizeText(schoolId) ? { schoolId: normalizeText(schoolId) } : {}),
         procurementCommitmentId: { $in: commitmentIds },
         status: 'approved'
       }).select('procurementCommitmentId amount expenseDate createdAt')
@@ -369,6 +378,7 @@ async function createProcurementSettlement({
   const academicYearId = String(commitment.academicYearId?._id || commitment.academicYearId || '');
   const classId = String(commitment.classId?._id || commitment.classId || '');
   const analytics = await buildProcurementCommitmentAnalytics({
+    schoolId: String(commitment.schoolId?._id || commitment.schoolId || ''),
     financialYearId,
     academicYearId,
     classId
@@ -389,49 +399,120 @@ async function createProcurementSettlement({
   });
 
   const referenceNo = normalizeText(payload.referenceNo || commitment.referenceNo || `SET-${String(commitment._id || '').slice(-6)}`);
-  const transaction = await FinanceTreasuryTransaction.create({
+  const rawIdempotencyKey = normalizeText(payload.idempotencyKey);
+  const idempotencyKey = rawIdempotencyKey
+    ? `procurement:${String(commitment._id || '')}:${rawIdempotencyKey}`
+    : '';
+  if (idempotencyKey) {
+    const existingTransaction = await FinanceTreasuryTransaction.findOne({
+      schoolId: commitment.schoolId,
+      idempotencyKey,
+      transactionType: 'withdrawal'
+    });
+    if (existingTransaction) {
+      if (String(existingTransaction.transactionGroupKey || '') !== `procurement:${String(commitment._id || '')}`) {
+        const error = new Error('finance_idempotency_key_reused');
+        error.statusCode = 409;
+        throw error;
+      }
+      const settlementRecorded = (commitment.settlements || []).some((row) => (
+        String(row.treasuryTransactionId || '') === String(existingTransaction._id || '')
+      ));
+      if (!settlementRecorded) {
+        commitment.settlements = Array.isArray(commitment.settlements) ? commitment.settlements : [];
+        commitment.settlements.push({
+          amount: existingTransaction.amount,
+          currency: existingTransaction.currency,
+          settlementDate: existingTransaction.transactionDate,
+          treasuryAccountId: existingTransaction.accountId,
+          treasuryTransactionId: existingTransaction._id,
+          referenceNo: existingTransaction.referenceNo,
+          note: normalizeText(payload.note),
+          createdBy: actorId || null,
+          createdAt: new Date()
+        });
+        commitment.updatedBy = actorId || commitment.updatedBy || null;
+        await commitment.save();
+      }
+      const refreshed = await populateProcurementCommitmentQuery(
+        FinanceProcurementCommitment.findById(commitment._id)
+      );
+      return {
+        item: serializeProcurementCommitment(refreshed),
+        settlement: serializeTreasuryTransaction(existingTransaction),
+        isDuplicate: true
+      };
+    }
+  }
+
+  const settlementCurrency = normalizeText(payload.currency || treasuryAccount.currency || commitment.currency || 'AFN').toUpperCase() || 'AFN';
+  let transaction;
+  const transactionPayload = {
     schoolId: commitment.schoolId,
     financialYearId: commitment.financialYearId,
     academicYearId: commitment.academicYearId,
     accountId: treasuryAccount._id,
+    transactionGroupKey: `procurement:${String(commitment._id || '')}`,
+    idempotencyKey: idempotencyKey || undefined,
     transactionType: 'withdrawal',
     direction: 'out',
     amount,
-    currency: normalizeText(payload.currency || treasuryAccount.currency || commitment.currency || 'AFN').toUpperCase() || 'AFN',
+    currency: settlementCurrency,
     transactionDate: settlementDate,
     sourceType: 'procurement_settlement',
     referenceNo,
     note: normalizeText(payload.note) || `Vendor settlement for ${normalizeText(commitment.title || commitment.vendorName || 'commitment')}`,
     createdBy: actorId || null,
     updatedBy: actorId || null
-  });
+  };
+  const appendSettlement = () => {
+    commitment.settlements = Array.isArray(commitment.settlements) ? commitment.settlements : [];
+    commitment.settlements.push({
+      amount,
+      currency: settlementCurrency,
+      settlementDate,
+      treasuryAccountId: treasuryAccount._id,
+      treasuryTransactionId: transaction._id,
+      referenceNo,
+      note: normalizeText(payload.note),
+      createdBy: actorId || null,
+      createdAt: new Date()
+    });
+    commitment.lastSettledAt = settlementDate;
+    commitment.lastSettledBy = actorId || null;
+    commitment.updatedBy = actorId || commitment.updatedBy || null;
+  };
+
+  if (supportsMongoTransactions()) {
+    const session = await mongoose.startSession();
+    try {
+      session.startTransaction();
+      [transaction] = await FinanceTreasuryTransaction.create([transactionPayload], { session });
+      appendSettlement();
+      await commitment.save({ session });
+      await session.commitTransaction();
+    } catch (error) {
+      if (session.inTransaction()) await session.abortTransaction();
+      throw error;
+    } finally {
+      await session.endSession();
+    }
+  } else {
+    transaction = await FinanceTreasuryTransaction.create(transactionPayload);
+    appendSettlement();
+    await commitment.save();
+  }
   const savedTransaction = await FinanceTreasuryTransaction.findById(transaction._id)
     .populate('accountId', 'title code accountType accountNo')
     .populate('counterAccountId', 'title code accountType accountNo')
     .populate('createdBy', 'name')
     .populate('updatedBy', 'name');
 
-  commitment.settlements = Array.isArray(commitment.settlements) ? commitment.settlements : [];
-  commitment.settlements.push({
-    amount,
-    currency: normalizeText(payload.currency || treasuryAccount.currency || commitment.currency || 'AFN').toUpperCase() || 'AFN',
-    settlementDate,
-    treasuryAccountId: treasuryAccount._id,
-    treasuryTransactionId: transaction._id,
-    referenceNo,
-    note: normalizeText(payload.note),
-    createdBy: actorId || null,
-    createdAt: new Date()
-  });
-  commitment.lastSettledAt = settlementDate;
-  commitment.lastSettledBy = actorId || null;
-  commitment.updatedBy = actorId || commitment.updatedBy || null;
-  await commitment.save();
-
   const refreshed = await populateProcurementCommitmentQuery(
     FinanceProcurementCommitment.findById(commitment._id)
   );
   const refreshedAnalytics = await buildProcurementCommitmentAnalytics({
+    schoolId: String(commitment.schoolId?._id || commitment.schoolId || ''),
     financialYearId,
     academicYearId,
     classId
@@ -571,6 +652,7 @@ async function createProcurementCommitment({
     FinanceProcurementCommitment.findById(item._id)
   );
   const analytics = await buildProcurementCommitmentAnalytics({
+    schoolId: String(financialYear.schoolId || ''),
     financialYearId: String(financialYear._id || ''),
     academicYearId: String(financialYear.academicYearId || ''),
     classId

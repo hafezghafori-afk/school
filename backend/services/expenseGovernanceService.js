@@ -1,6 +1,12 @@
 const ExpenseCategoryDefinition = require('../models/ExpenseCategoryDefinition');
 const ExpenseEntry = require('../models/ExpenseEntry');
 const FinancialYear = require('../models/FinancialYear');
+const FeeOrder = require('../models/FeeOrder');
+const FeePayment = require('../models/FeePayment');
+const FinanceAnomalyCase = require('../models/FinanceAnomalyCase');
+const FinanceMonthClose = require('../models/FinanceMonthClose');
+const FinanceProcurementCommitment = require('../models/FinanceProcurementCommitment');
+const FinanceTreasuryAccount = require('../models/FinanceTreasuryAccount');
 
 const DEFAULT_EXPENSE_CATEGORIES = [
   {
@@ -125,6 +131,19 @@ function monthLabel(monthKey = '') {
   return new Intl.DateTimeFormat('fa-AF-u-ca-persian', { month: 'short', year: 'numeric' }).format(date);
 }
 
+function listMonthKeysBetween(startDate, endDate) {
+  const start = startOfMonth(startDate);
+  const end = startOfMonth(endDate);
+  if (!start || !end || start > end) return [];
+  const keys = [];
+  const cursor = new Date(start);
+  while (cursor <= end && keys.length < 36) {
+    keys.push(toMonthKey(cursor));
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return keys;
+}
+
 async function ensureDefaultExpenseCategories() {
   const count = await ExpenseCategoryDefinition.countDocuments({});
   if (!count) {
@@ -210,10 +229,75 @@ async function buildFinancialYearCloseReadiness({ financialYearId = '', items = 
 
   let financialYear = null;
   try {
-    financialYear = await FinancialYear.findById(normalizedFinancialYearId).select('title status isClosed');
+    financialYear = await FinancialYear.findById(normalizedFinancialYearId)
+      .select('schoolId academicYearId title status isClosed startDate endDate budgetTargets budgetApprovalStage')
+      .lean();
   } catch {
     financialYear = null;
   }
+
+  if (!financialYear) return null;
+
+  const scope = {
+    schoolId: financialYear.schoolId,
+    academicYearId: financialYear.academicYearId
+  };
+  const [pendingPayments, actionableAnomalies, procurementRows, openOrders, treasuryAccounts, closedMonths] = await Promise.all([
+    FeePayment.countDocuments({ ...scope, status: 'pending' }),
+    FinanceAnomalyCase.countDocuments({
+      schoolId: financialYear.schoolId,
+      academicYearId: String(financialYear.academicYearId || ''),
+      signalActionRequired: true,
+      status: { $ne: 'resolved' }
+    }),
+    FinanceProcurementCommitment.find({ financialYearId: normalizedFinancialYearId })
+      .select('status committedAmount settledAmount')
+      .lean(),
+    FeeOrder.countDocuments({
+      ...scope,
+      status: { $in: ['new', 'partial', 'overdue'] },
+      outstandingAmount: { $gt: 0 }
+    }),
+    FinanceTreasuryAccount.find({ financialYearId: normalizedFinancialYearId, isActive: true })
+      .select('lastReconciledAt lastReconciliationVariance')
+      .lean(),
+    FinanceMonthClose.find({
+      schoolId: financialYear.schoolId,
+      financialYearId: normalizedFinancialYearId,
+      status: 'closed'
+    }).select('monthKey').lean()
+  ]);
+
+  const procurementCounts = {
+    draft: procurementRows.filter((item) => item.status === 'draft').length,
+    pendingReview: procurementRows.filter((item) => item.status === 'pending_review').length,
+    rejected: procurementRows.filter((item) => item.status === 'rejected').length,
+    unsettledApproved: procurementRows.filter((item) => (
+      item.status === 'approved'
+      && Number(item.settledAmount || 0) + 0.009 < Number(item.committedAmount || 0)
+    )).length
+  };
+  const unreconciledTreasuryAccounts = treasuryAccounts.filter((item) => !item.lastReconciledAt).length;
+  const reconciliationVariances = treasuryAccounts.filter((item) => Math.abs(Number(item.lastReconciliationVariance || 0)) > 0.009).length;
+  const configuredBudget = Object.entries(financialYear.budgetTargets || {})
+    .some(([key, value]) => key !== 'note' && key !== 'categoryBudgets' && Number(value || 0) > 0)
+    || (financialYear.budgetTargets?.categoryBudgets || []).some((item) => Number(item?.annualBudget || 0) > 0);
+  const warnings = [];
+  const expectedMonthKeys = listMonthKeysBetween(financialYear.startDate, financialYear.endDate);
+  const closedMonthKeySet = new Set(closedMonths.map((item) => normalizeText(item.monthKey)));
+  const missingClosedMonths = expectedMonthKeys.filter((monthKey) => !closedMonthKeySet.has(monthKey));
+
+  if (pendingPayments > 0) blockers.push(`${pendingPayments} پرداخت در انتظار تایید باقی مانده است.`);
+  if (actionableAnomalies > 0) blockers.push(`${actionableAnomalies} ناهنجاری مالی عملیاتی هنوز حل نشده است.`);
+  if (procurementCounts.draft > 0) blockers.push(`${procurementCounts.draft} تعهد خرید پیش‌نویس تعیین تکلیف نشده است.`);
+  if (procurementCounts.pendingReview > 0) blockers.push(`${procurementCounts.pendingReview} تعهد خرید در انتظار بررسی است.`);
+  if (procurementCounts.rejected > 0) blockers.push(`${procurementCounts.rejected} تعهد خرید ردشده باید اصلاح یا لغو شود.`);
+  if (procurementCounts.unsettledApproved > 0) blockers.push(`${procurementCounts.unsettledApproved} تعهد خرید تاییدشده هنوز تسویه کامل نشده است.`);
+  if (configuredBudget && financialYear.budgetApprovalStage !== 'approved') blockers.push('بودجه تنظیم‌شده سال مالی هنوز تایید نهایی نشده است.');
+  if (missingClosedMonths.length > 0) blockers.push(`${missingClosedMonths.length} ماه این سال مالی هنوز بسته نشده است.`);
+  if (openOrders > 0) warnings.push(`${openOrders} بل رسمی دارای باقیات است؛ این مورد مانع بستن نیست اما در گزارش اختتامیه درج می‌شود.`);
+  if (unreconciledTreasuryAccounts > 0) warnings.push(`${unreconciledTreasuryAccounts} حساب خزانه هنوز تطبیق بانکی/صندوقی نشده است.`);
+  if (reconciliationVariances > 0) warnings.push(`${reconciliationVariances} حساب خزانه دارای تفاوت تطبیق است.`);
 
   return {
     financialYearId: normalizedFinancialYearId,
@@ -222,12 +306,27 @@ async function buildFinancialYearCloseReadiness({ financialYearId = '', items = 
     canClose: blockers.length === 0,
     blockerCount: blockers.length,
     blockers,
-    counts
+    warningCount: warnings.length,
+    warnings,
+    counts: {
+      expenses: counts,
+      pendingPayments,
+      actionableAnomalies,
+      procurements: procurementCounts,
+      openOrders,
+      treasuryAccounts: treasuryAccounts.length,
+      unreconciledTreasuryAccounts,
+      reconciliationVariances,
+      closedMonthCount: closedMonths.length,
+      expectedMonthCount: expectedMonthKeys.length,
+      missingClosedMonths
+    }
   };
 }
 
-async function buildExpenseGovernanceAnalytics({ financialYearId = '', academicYearId = '', classId = '' } = {}) {
+async function buildExpenseGovernanceAnalytics({ schoolId = '', financialYearId = '', academicYearId = '', classId = '' } = {}) {
   const filter = {};
+  if (normalizeText(schoolId)) filter.schoolId = normalizeText(schoolId);
   if (normalizeText(financialYearId)) filter.financialYearId = normalizeText(financialYearId);
   if (normalizeText(academicYearId)) filter.academicYearId = normalizeText(academicYearId);
   if (normalizeText(classId)) filter.classId = normalizeText(classId);

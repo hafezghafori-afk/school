@@ -157,7 +157,7 @@ const financeProcurementCommitmentSchema = new mongoose.Schema({
     ref: 'User',
     default: null
   }
-}, { timestamps: true });
+}, { timestamps: true, optimisticConcurrency: true });
 
 financeProcurementCommitmentSchema.pre('validate', function syncProcurementCommitmentState() {
   if (typeof this.category === 'string') this.category = this.category.trim().toLowerCase();
@@ -238,5 +238,6 @@ financeProcurementCommitmentSchema.index({ financialYearId: 1, approvalStage: 1,
 financeProcurementCommitmentSchema.index({ academicYearId: 1, classId: 1, status: 1 });
 financeProcurementCommitmentSchema.index({ vendorName: 1, status: 1, requestDate: -1 });
 financeProcurementCommitmentSchema.index({ 'settlements.treasuryTransactionId': 1 });
+financeProcurementCommitmentSchema.index({ schoolId: 1, academicYearId: 1, status: 1, requestDate: -1 });
 
 module.exports = mongoose.model('FinanceProcurementCommitment', financeProcurementCommitmentSchema);

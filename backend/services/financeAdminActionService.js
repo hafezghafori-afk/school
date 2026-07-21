@@ -1,6 +1,6 @@
+const mongoose = require('mongoose');
 const FinanceBill = require('../models/FinanceBill');
 const FinanceReceipt = require('../models/FinanceReceipt');
-const FinanceMonthClose = require('../models/FinanceMonthClose');
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
 const Discount = require('../models/Discount');
@@ -26,8 +26,14 @@ const {
 const { syncStudentFinanceFromFinanceBill, syncStudentFinanceFromFinanceReceipt } = require('../utils/studentFinanceSync');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const { syncApprovedFeePaymentToTreasury } = require('./treasuryGovernanceService');
+const { assertFinancePeriodWritable, isFinanceMonthClosed } = require('./financePeriodGuardService');
 
 const FINANCE_FOUR_EYES_ENABLED = String(process.env.FINANCE_FOUR_EYES_ENABLED || 'false').toLowerCase() !== 'false';
+
+function supportsMongoTransactions() {
+  const topologyType = String(mongoose.connection?.client?.topology?.description?.type || '');
+  return ['ReplicaSetWithPrimary', 'ReplicaSetNoPrimary', 'Sharded', 'LoadBalanced'].includes(topologyType);
+}
 
 function scheduleFinanceBackgroundTask(label, task) {
   const run = () => {
@@ -61,19 +67,8 @@ function createActionError(status, message) {
   return error;
 }
 
-function toMonthKey(dateValue) {
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return '';
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  return `${y}-${m}`;
-}
-
-async function isMonthClosed(dateValue) {
-  const monthKey = toMonthKey(dateValue);
-  if (!monthKey) return false;
-  const exists = await FinanceMonthClose.exists({ monthKey, status: 'closed' });
-  return !!exists;
+async function isMonthClosed(dateValue, scope = {}) {
+  return isFinanceMonthClosed(dateValue, scope);
 }
 
 function parseDateSafe(value, fallback = null) {
@@ -409,7 +404,7 @@ async function addBillAdjustmentAction({ req, billId = '', body = {} } = {}) {
   const item = await FinanceBill.findById(billId);
   if (!item) throw createActionError(404, 'Ø¨Ù„ ÛŒØ§ÙØª Ù†Ø´Ø¯');
   if (item.status === 'void') throw createActionError(400, 'Ø¨Ù„ Ø¨Ø§Ø·Ù„ Ù‚Ø§Ø¨Ù„ ØªØºÛŒÛŒØ± Ù†ÛŒØ³Øª');
-  if (await isMonthClosed(item.issuedAt)) {
+  if (await isMonthClosed(item.issuedAt, item)) {
     throw createActionError(400, 'Ù…Ø§Ù‡ Ù…Ø§Ù„ÛŒ Ø¨Ø³ØªÙ‡ Ø´Ø¯Ù‡ Ø§Ø³Øª Ùˆ ØªØºÛŒÛŒØ±Ø§Øª Ù…Ø¬Ø§Ø² Ù†ÛŒØ³Øª');
   }
 
@@ -464,7 +459,7 @@ async function addFeeOrderAdjustmentAction({ req, feeOrderId = '', body = {} } =
   }
 
   if (item.status === 'void') throw createActionError(400, 'Void fee order cannot be adjusted');
-  if (await isMonthClosed(item.issuedAt)) {
+  if (await isMonthClosed(item.issuedAt, item)) {
     throw createActionError(400, 'Financial month is closed and canonical fee order adjustments are blocked');
   }
 
@@ -524,7 +519,7 @@ async function setBillInstallmentsAction({ req, billId = '', body = {} } = {}) {
   const item = await FinanceBill.findById(billId);
   if (!item) throw createActionError(404, 'Ø¨Ù„ ÛŒØ§ÙØª Ù†Ø´Ø¯');
   if (item.status === 'void') throw createActionError(400, 'Ø¨Ù„ Ø¨Ø§Ø·Ù„ Ù‚Ø§Ø¨Ù„ Ù‚Ø³Ø·â€ŒØ¨Ù†Ø¯ÛŒ Ù†ÛŒØ³Øª');
-  if (await isMonthClosed(item.issuedAt)) {
+  if (await isMonthClosed(item.issuedAt, item)) {
     throw createActionError(400, 'Ù…Ø§Ù‡ Ù…Ø§Ù„ÛŒ Ø¨Ø³ØªÙ‡ Ø´Ø¯Ù‡ Ø§Ø³Øª Ùˆ Ù‚Ø³Ø·â€ŒØ¨Ù†Ø¯ÛŒ Ù…Ø¬Ø§Ø² Ù†ÛŒØ³Øª');
   }
 
@@ -597,7 +592,7 @@ async function setFeeOrderInstallmentsAction({ req, feeOrderId = '', body = {} }
   }
 
   if (item.status === 'void') throw createActionError(400, 'Void fee order cannot be installmentized');
-  if (await isMonthClosed(item.issuedAt)) {
+  if (await isMonthClosed(item.issuedAt, item)) {
     throw createActionError(400, 'Financial month is closed and canonical installments are blocked');
   }
 
@@ -662,7 +657,7 @@ async function voidBillAction({ req, billId = '', body = {} } = {}) {
 
   const item = await FinanceBill.findById(billId);
   if (!item) throw createActionError(404, 'Ø¨Ù„ ÛŒØ§ÙØª Ù†Ø´Ø¯');
-  if (await isMonthClosed(item.issuedAt)) {
+  if (await isMonthClosed(item.issuedAt, item)) {
     throw createActionError(400, 'Ù…Ø§Ù‡ Ù…Ø§Ù„ÛŒ Ø¨Ø³ØªÙ‡ Ø´Ø¯Ù‡ Ø§Ø³Øª Ùˆ Ø¨Ø§Ø·Ù„â€ŒØ³Ø§Ø²ÛŒ Ù…Ø¬Ø§Ø² Ù†ÛŒØ³Øª');
   }
   const reason = String(body?.reason || '').trim();
@@ -718,7 +713,7 @@ async function voidFeeOrderAction({ req, feeOrderId = '', body = {} } = {}) {
     };
   }
 
-  if (await isMonthClosed(item.issuedAt)) {
+  if (await isMonthClosed(item.issuedAt, item)) {
     throw createActionError(400, 'Financial month is closed and canonical fee order void is blocked');
   }
   const reason = String(body?.reason || '').trim();
@@ -832,16 +827,21 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
     };
   }
 
-  if (await isMonthClosed(receipt.paidAt || new Date())) {
+  if (await isMonthClosed(receipt.paidAt || new Date(), receipt)) {
     throw createActionError(400, 'Financial month is closed; final approval is blocked');
   }
 
   const bill = await FinanceBill.findById(receipt.bill);
   if (!bill) throw createActionError(404, 'Linked bill not found');
+  await assertFinancePeriodWritable({
+    schoolId: bill.schoolId,
+    academicYearId: bill.academicYearId,
+    dateValue: receipt.paidAt || bill.issuedAt || new Date()
+  });
   if (bill.status === 'void') {
     throw createActionError(400, 'Bill is void; receipt cannot be approved');
   }
-  if (await isMonthClosed(bill.issuedAt)) {
+  if (await isMonthClosed(bill.issuedAt, bill)) {
     throw createActionError(400, 'Bill month is closed; changes are blocked');
   }
 
@@ -866,12 +866,32 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
   receipt.feeType = approvalFeeType;
   receipt.status = 'approved';
   receipt.approvalStage = RECEIPT_STAGES.completed;
-  await receipt.save();
 
   addScopedPayment(bill, approvalFeeType, approvalAmount);
   applyPaymentToInstallments(bill, approvalAmount, receipt.paidAt || new Date());
   recalculateBill(bill);
-  await bill.save();
+  if (supportsMongoTransactions()) {
+    const session = await mongoose.startSession();
+    try {
+      session.startTransaction();
+      await receipt.save({ session });
+      await bill.save({ session });
+      await session.commitTransaction();
+    } catch (error) {
+      if (session.inTransaction()) await session.abortTransaction();
+      if (error?.name === 'VersionError' || error?.code === 112) {
+        throw createActionError(409, 'این رسید هم‌زمان تغییر کرده است؛ صفحه را تازه کنید و دوباره بررسی نمایید.');
+      }
+      throw error;
+    } finally {
+      await session.endSession();
+    }
+  } else {
+    // Local standalone MongoDB does not support transactions. Optimistic
+    // concurrency still prevents a second approval from applying twice.
+    await receipt.save();
+    await bill.save();
+  }
   await syncStudentFinanceFromFinanceReceipt(receipt._id);
   await syncStudentFinanceFromFinanceBill(bill._id);
   const syncedPayment = await FeePayment.findOne({ sourceReceiptId: receipt._id });
@@ -988,7 +1008,12 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
     };
   }
 
-  if (await isMonthClosed(payment.paidAt || new Date())) {
+  await assertFinancePeriodWritable({
+    schoolId: payment.schoolId,
+    academicYearId: payment.academicYearId,
+    dateValue: payment.paidAt || new Date()
+  });
+  if (await isMonthClosed(payment.paidAt || new Date(), payment)) {
     throw createActionError(400, 'Financial month is closed; final approval is blocked');
   }
 
@@ -1004,17 +1029,12 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
     throw createActionError(404, 'One or more allocated fee orders were not found');
   }
 
-  const orderMonthKeys = Array.from(new Set(orders
-    .map((order) => toMonthKey(order.issuedAt))
-    .filter(Boolean)));
-  if (orderMonthKeys.length) {
-    const hasClosedOrderMonth = await FinanceMonthClose.exists({
-      monthKey: { $in: orderMonthKeys },
-      status: 'closed'
+  for (const order of orders) {
+    await assertFinancePeriodWritable({
+      schoolId: order.schoolId || payment.schoolId,
+      academicYearId: order.academicYearId || payment.academicYearId,
+      dateValue: order.issuedAt || payment.paidAt || new Date()
     });
-    if (hasClosedOrderMonth) {
-      throw createActionError(400, 'Fee order month is closed; changes are blocked');
-    }
   }
 
   const orderMap = new Map(orders.map((item) => [String(item._id || ''), item]));
@@ -1058,33 +1078,46 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
   }
   payment.status = 'approved';
   payment.approvalStage = RECEIPT_STAGES.completed;
-  await payment.save();
 
   for (const allocation of allocations) {
     const order = orderMap.get(String(allocation.feeOrderId || ''));
     addScopedPayment(order, allocation.feeType, allocation.amount);
     applyPaymentToInstallments(order, allocation.amount, payment.paidAt || new Date());
     recalculateBill(order);
-    await order.save();
     updatedOrders.push(order);
   }
 
   const scopeOrder = updatedOrders[0] || null;
-  let paymentScopeChanged = false;
   if (!payment.schoolId && scopeOrder?.schoolId) {
     payment.schoolId = scopeOrder.schoolId;
-    paymentScopeChanged = true;
   }
   if (!payment.academicYearId && scopeOrder?.academicYearId) {
     payment.academicYearId = scopeOrder.academicYearId;
-    paymentScopeChanged = true;
   }
   if (!payment.classId && scopeOrder?.classId) {
     payment.classId = scopeOrder.classId;
-    paymentScopeChanged = true;
   }
-  if (paymentScopeChanged) {
+  if (supportsMongoTransactions()) {
+    const session = await mongoose.startSession();
+    try {
+      session.startTransaction();
+      await payment.save({ session });
+      for (const order of updatedOrders) {
+        await order.save({ session });
+      }
+      await session.commitTransaction();
+    } catch (error) {
+      if (session.inTransaction()) await session.abortTransaction();
+      if (error?.name === 'VersionError' || error?.code === 112) {
+        throw createActionError(409, 'این پرداخت هم‌زمان توسط کاربر دیگری تغییر کرده است؛ صفحه را تازه کنید.');
+      }
+      throw error;
+    } finally {
+      await session.endSession();
+    }
+  } else {
     await payment.save();
+    for (const order of updatedOrders) await order.save();
   }
   await syncApprovedFeePaymentToTreasury(payment);
 

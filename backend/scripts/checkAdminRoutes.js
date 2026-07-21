@@ -144,6 +144,8 @@ const financeBills = [  {
     amountOriginal: 1000,
     amountDue: 1000,
     amountPaid: 0,
+    outstandingAmount: 1000,
+    dueDate: new Date('2026-03-01T00:00:00.000Z'),
     note: 'Alpha tuition',
     createdAt: new Date('2026-03-02T08:00:00.000Z')
   }
@@ -177,6 +179,8 @@ const feeOrders = [
     amountOriginal: 1000,
     amountDue: 1000,
     amountPaid: 0,
+    outstandingAmount: 1000,
+    dueDate: new Date('2026-03-01T00:00:00.000Z'),
     note: 'Alpha tuition',
     createdAt: new Date('2026-03-02T08:00:00.000Z')
   }

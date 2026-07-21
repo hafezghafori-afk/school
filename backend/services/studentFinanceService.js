@@ -57,6 +57,7 @@ const {
   syncFinanceReliefFromFeeExemption
 } = require('../utils/financeReliefSync');
 const { buildMembershipFinanceAnomalies } = require('./financeAnomalyService');
+const { assertFinancePeriodWritable } = require('./financePeriodGuardService');
 
 function toPlain(doc) {
   if (!doc) return null;
@@ -481,6 +482,11 @@ async function syncDiscountOpenBills(discount = null) {
     ]
   });
   for (const bill of bills) {
+    await assertFinancePeriodWritable({
+      schoolId: bill.schoolId,
+      academicYearId: bill.academicYearId,
+      dateValue: bill.issuedAt || bill.dueDate
+    });
     const dueDate = normalizeDateValue(bill.dueDate);
     const periodStart = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth(), 1) : null;
     const periodEnd = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth() + 1, 0, 23, 59, 59, 999) : null;
@@ -520,6 +526,12 @@ async function syncDiscountOpenBills(discount = null) {
     ]
   });
   for (const order of orders) {
+    await assertFinancePeriodWritable({
+      schoolId: order.schoolId,
+      financialYearId: order.financialYearId,
+      academicYearId: order.academicYearId,
+      dateValue: order.issuedAt || order.dueDate
+    });
     const dueDate = normalizeDateValue(order.dueDate);
     const periodStart = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth(), 1) : null;
     const periodEnd = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth() + 1, 0, 23, 59, 59, 999) : null;
@@ -562,6 +574,11 @@ async function syncExemptionOpenBills(exemption = null) {
   });
 
   for (const bill of bills) {
+    await assertFinancePeriodWritable({
+      schoolId: bill.schoolId,
+      academicYearId: bill.academicYearId,
+      dateValue: bill.issuedAt || bill.dueDate
+    });
     bill.adjustments = (bill.adjustments || []).filter((row) => !normalizeText(row.reason).startsWith(marker));
     if (exemption.status === 'active') {
       const baseAmount = scope === 'all'
@@ -602,6 +619,12 @@ async function syncExemptionOpenBills(exemption = null) {
     ]
   });
   for (const order of orders) {
+    await assertFinancePeriodWritable({
+      schoolId: order.schoolId,
+      financialYearId: order.financialYearId,
+      academicYearId: order.academicYearId,
+      dateValue: order.issuedAt || order.dueDate
+    });
     order.adjustments = (order.adjustments || []).filter((row) => !normalizeText(row.reason).startsWith(marker));
     if (exemption.status === 'active') {
       const baseAmount = scope === 'all'
