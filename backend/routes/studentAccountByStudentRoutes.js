@@ -7,6 +7,10 @@ const {
   deriveFinanceOrderStatus,
   normalizeFinanceLineItems
 } = require('../utils/financeLineItems');
+const {
+  solarMonthKey,
+  syncStudentMonthlyArrears
+} = require('../services/studentMonthlyArrearsService');
 
 const router = express.Router();
 
@@ -137,12 +141,31 @@ router.get('/students/:studentId/open-account', requireAuth, requireRole(['admin
     })
       .populate('studentId')
       .populate('student', 'name email')
+      .populate('course')
       .populate({ path: 'classId', populate: { path: 'academicYearId' } })
       .populate('academicYearId')
+      .populate('academicYear')
       .sort({ isCurrent: -1, enrolledAt: -1, createdAt: -1 });
 
     if (!memberships.length) {
       return res.status(404).json({ success: false, message: 'عضویت مالی این شاگرد پیدا نشد.' });
+    }
+
+    let arrearsSync = { created: 0, skipped: 0, memberships: [] };
+    try {
+      arrearsSync = await syncStudentMonthlyArrears({
+        memberships,
+        actorId: req.user?.id || req.user?._id || '',
+        now: new Date()
+      });
+    } catch (syncError) {
+      console.error('Student monthly arrears sync failed:', syncError);
+      arrearsSync = {
+        created: 0,
+        skipped: 0,
+        memberships: [],
+        warning: 'تکمیل خودکار بل‌های ماهانه ناموفق بود.'
+      };
     }
 
     const membershipIds = memberships.map((item) => item._id);
@@ -155,44 +178,61 @@ router.get('/students/:studentId/open-account', requireAuth, requireRole(['admin
       .populate('academicYearId')
       .sort({ dueDate: 1, createdAt: 1 });
 
-    const allOrders = docs
+    const allTuitionOrders = docs
       .map((doc) => formatOrder(doc, membershipMap.get(asId(doc.studentMembershipId)) || null))
-      .filter((item) => item.id && item.status !== 'void');
-    const openOrders = allOrders
-      .map((item) => ({ ...item, tuition: tuitionAmounts(item) }))
-      .filter((item) => item.tuition.outstanding > 0)
-      .sort((left, right) => time(left.dueDate) - time(right.dueDate));
+      .filter((item) => item.id && item.status !== 'void')
+      .map((item) => ({
+        ...item,
+        tuition: tuitionAmounts(item),
+        monthKey: solarMonthKey(item.dueDate || item.issuedAt)
+      }))
+      .filter((item) => item.tuition.gross > 0 || item.tuition.net > 0 || item.tuition.paid > 0)
+      .sort((left, right) => time(left.dueDate || left.issuedAt) - time(right.dueDate || right.issuedAt));
 
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
-    const overdueOrders = openOrders.filter((item) => time(item.dueDate) < Date.now());
-    const currentOrders = openOrders.filter((item) => {
-      const due = time(item.dueDate);
-      return due >= monthStart && due < nextMonthStart;
+    const currentMonthKey = solarMonthKey(new Date());
+    const currentOrders = allTuitionOrders.filter((item) => item.monthKey && item.monthKey === currentMonthKey);
+    const previousOpenOrders = allTuitionOrders.filter((item) => (
+      item.tuition.outstanding > 0
+      && (!item.monthKey || !currentMonthKey || item.monthKey < currentMonthKey)
+    ));
+    const currentOpenOrders = currentOrders.filter((item) => item.tuition.outstanding > 0);
+    const payableOrders = [...previousOpenOrders, ...currentOpenOrders]
+      .sort((left, right) => time(left.dueDate || left.issuedAt) - time(right.dueDate || right.issuedAt));
+
+    const displayOrderMap = new Map();
+    [...previousOpenOrders, ...currentOrders].forEach((item) => {
+      if (item?.id) displayOrderMap.set(item.id, item);
     });
-    const nextPayableOrders = currentOrders.length ? currentOrders : openOrders.slice(0, 1);
-    const sum = (rows, key) => money(rows.reduce((total, item) => total + Number(item?.tuition?.[key] || 0), 0));
+    const displayOrders = [...displayOrderMap.values()]
+      .sort((left, right) => time(left.dueDate || left.issuedAt) - time(right.dueDate || right.issuedAt));
+
+    const sum = (rows, key) => money((Array.isArray(rows) ? rows : []).reduce(
+      (total, item) => total + Number(item?.tuition?.[key] || 0),
+      0
+    ));
 
     return res.json({
       success: true,
       student: formatStudent(memberships[0]),
       membership: formatMembership(memberships[0]),
       memberships: memberships.map(formatMembership),
-      items: openOrders,
+      items: displayOrders,
+      arrearsSync,
       summary: {
-        studentFee: sum(nextPayableOrders, 'gross'),
-        pastArrears: sum(overdueOrders, 'outstanding'),
-        totalDiscount: sum(openOrders, 'discount'),
-        payableFee: sum(openOrders, 'outstanding'),
-        totalGross: sum(openOrders, 'gross'),
-        totalNet: sum(openOrders, 'net'),
-        totalPaid: sum(openOrders, 'paid'),
-        totalOutstanding: sum(openOrders, 'outstanding'),
-        overdueOrders: overdueOrders.length,
-        openMonths: new Set(openOrders.map((item) => `${item.periodLabel || item.dueDate || item.id}:${item.studentMembershipId}`)).size,
-        oldestDueDate: openOrders[0]?.dueDate || null,
-        oldestMembershipId: openOrders[0]?.studentMembershipId || null,
+        studentFee: sum(currentOrders, 'gross'),
+        pastArrears: sum(previousOpenOrders, 'outstanding'),
+        totalDiscount: sum(displayOrders, 'discount'),
+        currentMonthPayable: sum(currentOpenOrders, 'outstanding'),
+        payableFee: sum(payableOrders, 'outstanding'),
+        totalGross: sum(displayOrders, 'gross'),
+        totalNet: sum(displayOrders, 'net'),
+        totalPaid: sum(displayOrders, 'paid'),
+        totalOutstanding: sum(payableOrders, 'outstanding'),
+        overdueOrders: previousOpenOrders.length,
+        openMonths: new Set(payableOrders.map((item) => `${item.monthKey || item.periodLabel || item.dueDate || item.id}:${item.studentMembershipId}`)).size,
+        oldestDueDate: payableOrders[0]?.dueDate || payableOrders[0]?.issuedAt || null,
+        oldestMembershipId: payableOrders[0]?.studentMembershipId || null,
+        autoGeneratedOrders: Number(arrearsSync.created || 0),
         paymentPolicy: 'oldest_due_first'
       }
     });
