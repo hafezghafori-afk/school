@@ -9,6 +9,17 @@ const r2SettingsAssetRoutes = require('./routes/r2SettingsAssetRoutes');
 const combinedSettingsRoutes = express.Router();
 combinedSettingsRoutes.use(r2SettingsAssetRoutes);
 combinedSettingsRoutes.use(legacySettingsRoutes);
-
 require.cache[settingsRoutesPath].exports = combinedSettingsRoutes;
+
+// Show the student's complete open account across current and historical
+// memberships before falling back to the existing finance routes.
+const studentFinanceRoutesPath = require.resolve('./routes/studentFinanceRoutes');
+const legacyStudentFinanceRoutes = require(studentFinanceRoutesPath);
+const studentOpenAccountRoutes = require('./routes/studentOpenAccountRoutes');
+
+const combinedStudentFinanceRoutes = express.Router();
+combinedStudentFinanceRoutes.use(studentOpenAccountRoutes);
+combinedStudentFinanceRoutes.use(legacyStudentFinanceRoutes);
+require.cache[studentFinanceRoutesPath].exports = combinedStudentFinanceRoutes;
+
 require('./server');
