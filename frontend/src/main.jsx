@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import './pages/AdminFinancePaymentCompact.css';
-import './utils/studentOpenAccountFetchPatch';
+import './utils/studentFinanceAccountDirect';
 import App from './App';
 
 const root = document.getElementById('root');
