@@ -86,6 +86,7 @@ const {
   createTreasuryTransfer,
   reconcileTreasuryAccount,
   resolveTreasuryAccountSelection,
+  syncApprovedFeePaymentsToTreasury,
   updateTreasuryAccount
 } = require('../services/treasuryGovernanceService');
 const { buildGovernmentBudgetVsActualReport } = require('../services/governmentFinanceReportService');
@@ -144,6 +145,10 @@ const {
   buildFinanceMonthCloseSnapshot,
   toMonthDateRange
 } = require('../services/financeCloseService');
+const {
+  assertFinancePeriodWritable,
+  isFinanceMonthClosed
+} = require('../services/financePeriodGuardService');
 const {
   buildGovernmentFinanceSnapshotPdfBuffer
 } = require('../utils/financePdfDocuments');
@@ -248,12 +253,7 @@ const parseDateSafe = (value, fallback = null) => {
   return Number.isNaN(d.getTime()) ? fallback : d;
 };
 
-const isMonthClosed = async (dateValue) => {
-  const monthKey = toMonthKey(dateValue);
-  if (!monthKey) return false;
-  const exists = await FinanceMonthClose.exists({ monthKey, status: 'closed' });
-  return !!exists;
-};
+const isMonthClosed = async (dateValue, scope = {}) => isFinanceMonthClosed(dateValue, scope);
 
 const listBillableMembershipsForCourse = async (courseId, academicYear = '') => listCourseMemberships({
   courseId,
@@ -965,11 +965,14 @@ const loadReceiptSubmissionBill = async (req) => {
   return bill;
 };
 
-const parseReceiptSubmissionDraft = async (req) => {
+const parseReceiptSubmissionDraft = async (req, financeScope = {}) => {
   const paidAt = parseDateSafe(req.body?.paidAt, new Date());
-  if (await isMonthClosed(paidAt)) {
-    throw createRouteError(400, 'ماه مالی بسته شده و ثبت رسید برای این تاریخ مجاز نیست');
-  }
+  await assertFinancePeriodWritable({
+    schoolId: financeScope?.schoolId,
+    financialYearId: financeScope?.financialYearId,
+    academicYearId: financeScope?.academicYearId,
+    dateValue: paidAt
+  });
 
   const amount = roundMoney(req.body?.amount);
   if (!amount) {
@@ -2107,6 +2110,7 @@ const resolveFinancialYearMessage = (error, fallback = 'عملیات سال ما
     if (path === 'academicYearId') return 'یک سال تعلیمی معتبر انتخاب کنید.';
     if (path === 'startDate' || path === 'endDate') return 'تاریخ شروع و ختم سال مالی معتبر نیست.';
   }
+  if (String(error?.messageDari || '').trim()) return String(error.messageDari).trim();
   return fallback;
 };
 
@@ -2122,20 +2126,22 @@ async function findFinanceAcademicYearById(id = '') {
   return AcademicYear.findById(normalized);
 }
 
-async function resolveGovernmentSnapshotFinancialYear({ financialYearId = '', academicYearId = '' } = {}) {
+async function resolveGovernmentSnapshotFinancialYear({ financialYearId = '', academicYearId = '', schoolId = '' } = {}) {
   const normalizedFinancialYearId = String(financialYearId || '').trim();
   const normalizedAcademicYearId = String(academicYearId || '').trim();
+  const normalizedSchoolId = String(schoolId || '').trim();
+  if (!normalizedSchoolId) throw createRouteError(400, 'مکتب فعال را انتخاب کنید.');
 
   let financialYear = null;
   if (normalizedFinancialYearId) {
-    financialYear = await FinancialYear.findById(normalizedFinancialYearId);
+    financialYear = await FinancialYear.findOne({ _id: normalizedFinancialYearId, schoolId: normalizedSchoolId });
   }
   if (!financialYear && normalizedAcademicYearId) {
-    financialYear = await FinancialYear.findOne({ academicYearId: normalizedAcademicYearId, status: { $ne: 'archived' } })
+    financialYear = await FinancialYear.findOne({ schoolId: normalizedSchoolId, academicYearId: normalizedAcademicYearId, status: { $ne: 'archived' } })
       .sort({ isActive: -1, createdAt: -1 });
   }
   if (!financialYear) {
-    financialYear = await FinancialYear.findOne({ isActive: true, status: { $ne: 'archived' } }).sort({ createdAt: -1 });
+    financialYear = await FinancialYear.findOne({ schoolId: normalizedSchoolId, isActive: true, status: { $ne: 'archived' } }).sort({ createdAt: -1 });
   }
   if (!financialYear) {
     const error = new Error('finance_financial_year_not_found');
@@ -2346,9 +2352,15 @@ router.get('/admin/reference-data', requireAuth, requireRole(['admin']), require
 
 router.get('/admin/treasury/analytics', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    const financialYear = await resolveGovernmentSnapshotFinancialYear({
+      financialYearId: req.query?.financialYearId,
+      academicYearId: req.query?.academicYearId,
+      schoolId: schoolContext.schoolId
+    });
     const analytics = await buildTreasuryAnalytics({
-      financialYearId: String(req.query?.financialYearId || '').trim(),
-      academicYearId: String(req.query?.academicYearId || '').trim(),
+      financialYearId: String(financialYear._id),
+      academicYearId: String(financialYear.academicYearId || ''),
       accountId: String(req.query?.accountId || '').trim()
     });
     return res.json({
@@ -2362,9 +2374,15 @@ router.get('/admin/treasury/analytics', requireAuth, requireRole(['admin']), req
 
 router.get('/admin/treasury/reports', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    const financialYear = await resolveGovernmentSnapshotFinancialYear({
+      financialYearId: req.query?.financialYearId,
+      academicYearId: req.query?.academicYearId,
+      schoolId: schoolContext.schoolId
+    });
     const reports = await buildTreasuryReportBundle({
-      financialYearId: String(req.query?.financialYearId || '').trim(),
-      academicYearId: String(req.query?.academicYearId || '').trim(),
+      financialYearId: String(financialYear._id),
+      academicYearId: String(financialYear.academicYearId || ''),
       accountId: String(req.query?.accountId || '').trim()
     });
     return res.json({
@@ -2381,11 +2399,19 @@ router.get('/admin/treasury/reports', requireAuth, requireRole(['admin']), requi
 
 router.post('/admin/treasury/accounts', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
     const financialYear = await resolveGovernmentSnapshotFinancialYear({
       financialYearId: req.body?.financialYearId,
-      academicYearId: req.body?.academicYearId
+      academicYearId: req.body?.academicYearId,
+      schoolId: schoolContext.schoolId
     });
     assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      dateValue: financialYear.startDate || new Date()
+    });
 
     const item = await createTreasuryAccount({
       financialYear,
@@ -2420,12 +2446,20 @@ router.post('/admin/treasury/accounts', requireAuth, requireRole(['admin']), req
 
 router.patch('/admin/treasury/accounts/:id', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
     const account = await resolveTreasuryAccountSelection({
       accountId: req.params.id,
+      schoolId: schoolContext.schoolId,
       allowInactive: true
     });
     const financialYear = await FinancialYear.findById(account.financialYearId);
     assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      dateValue: financialYear.startDate || new Date()
+    });
 
     const item = await updateTreasuryAccount({
       account,
@@ -2460,16 +2494,27 @@ router.patch('/admin/treasury/accounts/:id', requireAuth, requireRole(['admin'])
 
 router.post('/admin/treasury/transactions', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
     const account = await resolveTreasuryAccountSelection({
-      accountId: req.body?.accountId
+      accountId: req.body?.accountId,
+      schoolId: schoolContext.schoolId
     });
     const financialYear = await FinancialYear.findById(account.financialYearId);
     assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      dateValue: req.body?.transactionDate || new Date()
+    });
 
     const item = await createTreasuryManualTransaction({
       financialYear,
       account,
-      payload: req.body || {},
+      payload: {
+        ...(req.body || {}),
+        idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey || ''
+      },
       actorId: req.user.id
     });
 
@@ -2500,20 +2545,32 @@ router.post('/admin/treasury/transactions', requireAuth, requireRole(['admin']),
 
 router.post('/admin/treasury/transfers', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
     const sourceAccount = await resolveTreasuryAccountSelection({
-      accountId: req.body?.sourceAccountId
+      accountId: req.body?.sourceAccountId,
+      schoolId: schoolContext.schoolId
     });
     const destinationAccount = await resolveTreasuryAccountSelection({
-      accountId: req.body?.destinationAccountId
+      accountId: req.body?.destinationAccountId,
+      schoolId: schoolContext.schoolId
     });
     const financialYear = await FinancialYear.findById(sourceAccount.financialYearId);
     assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      dateValue: req.body?.transactionDate || new Date()
+    });
 
     const result = await createTreasuryTransfer({
       financialYear,
       sourceAccount,
       destinationAccount,
-      payload: req.body || {},
+      payload: {
+        ...(req.body || {}),
+        idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey || ''
+      },
       actorId: req.user.id
     });
 
@@ -2544,12 +2601,20 @@ router.post('/admin/treasury/transfers', requireAuth, requireRole(['admin']), re
 
 router.post('/admin/treasury/accounts/:id/reconcile', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
     const account = await resolveTreasuryAccountSelection({
       accountId: req.params.id,
+      schoolId: schoolContext.schoolId,
       allowInactive: true
     });
     const financialYear = await FinancialYear.findById(account.financialYearId);
     assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      dateValue: req.body?.reconciliationDate || new Date()
+    });
 
     const result = await reconcileTreasuryAccount({
       account,
@@ -2690,6 +2755,15 @@ router.patch('/admin/expense-categories/:id', requireAuth, requireRole(['admin']
   }
 });
 
+async function loadSchoolOwnedFinancialYear(req, financialYearId, { populate = false } = {}) {
+  const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+  if (!schoolContext.schoolId) {
+    throw createRouteError(400, 'برای ادامه، مکتب فعال را انتخاب کنید.');
+  }
+  const query = FinancialYear.findOne({ _id: financialYearId, schoolId: schoolContext.schoolId });
+  return populate ? populateFinancialYearQuery(query) : query;
+}
+
 router.get('/admin/financial-years', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const filter = {};
@@ -2720,7 +2794,11 @@ router.get('/admin/financial-years', requireAuth, requireRole(['admin']), requir
 router.post('/admin/financial-years', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const payload = req.body || {};
+    const schoolContext = await resolveActiveSchool(req, { payload, allowSingleFallback: true });
     const academicYear = await resolveAcademicYearFinancialContext(String(payload.academicYearId || '').trim());
+    if (!schoolContext.schoolId || String(academicYear.schoolId || '') !== String(schoolContext.schoolId)) {
+      throw createRouteError(403, 'سال تعلیمی انتخاب‌شده مربوط به مکتب فعال نیست.');
+    }
     const { startDate, endDate } = assertFinancialYearDates({
       startDate: payload.startDate || academicYear.startDate,
       endDate: payload.endDate || academicYear.endDate
@@ -2793,12 +2871,15 @@ router.post('/admin/financial-years', requireAuth, requireRole(['admin']), requi
 router.patch('/admin/financial-years/:id', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const payload = req.body || {};
-    const item = await FinancialYear.findById(req.params.id);
+    const item = await loadSchoolOwnedFinancialYear(req, req.params.id);
     assertFinancialYearWritable(item);
 
     const academicYear = payload.academicYearId
       ? await resolveAcademicYearFinancialContext(String(payload.academicYearId || '').trim())
       : await resolveAcademicYearFinancialContext(String(item.academicYearId || '').trim());
+    if (String(academicYear.schoolId || '') !== String(item.schoolId || '')) {
+      throw createRouteError(403, 'انتقال سال مالی به مکتب دیگر مجاز نیست.');
+    }
 
     const { startDate, endDate } = assertFinancialYearDates({
       startDate: payload.startDate || item.startDate || academicYear.startDate,
@@ -2889,7 +2970,7 @@ router.patch('/admin/financial-years/:id', requireAuth, requireRole(['admin']), 
 
 router.post('/admin/financial-years/:id/activate', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await FinancialYear.findById(req.params.id);
+    const item = await loadSchoolOwnedFinancialYear(req, req.params.id);
     if (!item) {
       return res.status(404).json({ success: false, message: 'سال مالی پیدا نشد.' });
     }
@@ -2931,7 +3012,7 @@ router.post('/admin/financial-years/:id/activate', requireAuth, requireRole(['ad
 
 router.get('/admin/financial-years/:id/close-readiness', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await FinancialYear.findById(req.params.id);
+    const item = await loadSchoolOwnedFinancialYear(req, req.params.id);
     if (!item) {
       return res.status(404).json({ success: false, message: 'سال مالی پیدا نشد.' });
     }
@@ -2949,7 +3030,7 @@ router.get('/admin/financial-years/:id/close-readiness', requireAuth, requireRol
 
 router.post('/admin/financial-years/:id/close', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await FinancialYear.findById(req.params.id);
+    const item = await loadSchoolOwnedFinancialYear(req, req.params.id);
     if (!item) {
       return res.status(404).json({ success: false, message: 'سال مالی پیدا نشد.' });
     }
@@ -3008,8 +3089,7 @@ router.post('/admin/financial-years/:id/close', requireAuth, requireRole(['admin
 
 router.get('/admin/financial-years/:id/budget-vs-actual', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await FinancialYear.findById(req.params.id)
-      .populate('academicYearId', 'title code');
+    const item = await loadSchoolOwnedFinancialYear(req, req.params.id, { populate: true });
     if (!item) {
       return res.status(404).json({ success: false, message: 'سال مالی پیدا نشد.' });
     }
@@ -3017,6 +3097,7 @@ router.get('/admin/financial-years/:id/budget-vs-actual', requireAuth, requireRo
     const report = await buildGovernmentBudgetVsActualReport({
       financialYearId: String(item._id || ''),
       academicYearId: String(item.academicYearId?._id || item.academicYearId || ''),
+      schoolId: String(item.schoolId || ''),
       classId: String(req.query?.classId || '').trim()
     });
 
@@ -3034,7 +3115,7 @@ router.get('/admin/financial-years/:id/budget-vs-actual', requireAuth, requireRo
 
 router.post('/admin/financial-years/:id/budget/request-review', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await FinancialYear.findById(req.params.id);
+    const item = await loadSchoolOwnedFinancialYear(req, req.params.id);
     assertFinancialYearWritable(item);
     requestFinancialYearBudgetReview(item, req.user.id, String(req.body?.note || '').trim());
     item.updatedBy = req.user.id;
@@ -3067,7 +3148,7 @@ router.post('/admin/financial-years/:id/budget/request-review', requireAuth, req
 
 router.post('/admin/financial-years/:id/budget/start-revision', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await FinancialYear.findById(req.params.id);
+    const item = await loadSchoolOwnedFinancialYear(req, req.params.id);
     assertFinancialYearWritable(item);
     startFinancialYearBudgetRevision(
       item,
@@ -3105,7 +3186,7 @@ router.post('/admin/financial-years/:id/budget/start-revision', requireAuth, req
 
 router.post('/admin/financial-years/:id/budget/review', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await FinancialYear.findById(req.params.id);
+    const item = await loadSchoolOwnedFinancialYear(req, req.params.id);
     assertFinancialYearWritable(item);
     const actorLevel = await resolveAdminActorLevel(req.user.id);
     const outcome = reviewFinancialYearBudgetTransition({
@@ -3151,13 +3232,19 @@ router.post('/admin/financial-years/:id/budget/review', requireAuth, requireRole
 router.get('/admin/expenses/analytics', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const { classId = '', courseId = '', financialYearId = '', academicYearId = '' } = req.query || {};
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
     const scope = await resolveFinanceScope({ classId, courseId });
     if (scope.error) return res.status(400).json({ success: false, message: scope.error });
+    if (scope.schoolClass?.schoolId && String(scope.schoolClass.schoolId) !== String(schoolContext.schoolId)) {
+      return res.status(403).json({ success: false, message: 'صنف انتخاب‌شده به مکتب فعال تعلق ندارد.' });
+    }
     if (normalizeScopeText(courseId) && !normalizeScopeText(classId) && scope.classId) {
       setLegacyScopeHeaders(res, `/api/finance/admin/expenses/analytics?classId=${scope.classId}`);
     }
 
     const analytics = await buildExpenseGovernanceAnalytics({
+      schoolId: schoolContext.schoolId,
       financialYearId: String(financialYearId || '').trim(),
       academicYearId: String(academicYearId || '').trim(),
       classId: scope.classId || ''
@@ -3175,13 +3262,19 @@ router.get('/admin/expenses/analytics', requireAuth, requireRole(['admin']), req
 router.get('/admin/procurements', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const { classId = '', courseId = '', financialYearId = '', academicYearId = '', status = '', stage = '' } = req.query || {};
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
     const scope = await resolveFinanceScope({ classId, courseId });
     if (scope.error) return res.status(400).json({ success: false, message: scope.error });
+    if (scope.schoolClass?.schoolId && String(scope.schoolClass.schoolId) !== String(schoolContext.schoolId)) {
+      return res.status(403).json({ success: false, message: 'صنف انتخاب‌شده به مکتب فعال تعلق ندارد.' });
+    }
     if (normalizeScopeText(courseId) && !normalizeScopeText(classId) && scope.classId) {
       setLegacyScopeHeaders(res, `/api/finance/admin/procurements?classId=${scope.classId}`);
     }
 
     const analytics = await buildProcurementCommitmentAnalytics({
+      schoolId: schoolContext.schoolId,
       financialYearId: String(financialYearId || '').trim(),
       academicYearId: String(academicYearId || '').trim(),
       classId: scope.classId || '',
@@ -3206,6 +3299,8 @@ router.get('/admin/procurements', requireAuth, requireRole(['admin']), requirePe
 router.post('/admin/procurements', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const payload = req.body || {};
+    const schoolContext = await resolveActiveSchool(req, { payload, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
     const scope = await resolveFinanceScope({
       classId: payload.classId,
       courseId: payload.courseId
@@ -3214,9 +3309,18 @@ router.post('/admin/procurements', requireAuth, requireRole(['admin']), requireP
 
     const financialYearId = String(payload.financialYearId || '').trim();
     const financialYear = financialYearId
-      ? await FinancialYear.findById(financialYearId)
-      : await FinancialYear.findOne({ academicYearId: payload.academicYearId, status: { $ne: 'archived' } }).sort({ isActive: -1, createdAt: -1 });
+      ? await FinancialYear.findOne({ _id: financialYearId, schoolId: schoolContext.schoolId })
+      : await FinancialYear.findOne({ schoolId: schoolContext.schoolId, academicYearId: payload.academicYearId, status: { $ne: 'archived' } }).sort({ isActive: -1, createdAt: -1 });
     assertFinancialYearWritable(financialYear);
+    if (scope.schoolClass?.schoolId && String(scope.schoolClass.schoolId) !== String(schoolContext.schoolId)) {
+      return res.status(403).json({ success: false, message: 'صنف انتخاب‌شده به مکتب فعال تعلق ندارد.' });
+    }
+    await assertFinancePeriodWritable({
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      dateValue: new Date()
+    });
 
     const item = await createProcurementCommitment({
       financialYear,
@@ -3253,10 +3357,17 @@ router.post('/admin/procurements', requireAuth, requireRole(['admin']), requireP
 
 router.post('/admin/procurements/:id/submit', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await FinanceProcurementCommitment.findById(req.params.id);
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    const item = await FinanceProcurementCommitment.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
     if (!item) return res.status(404).json({ success: false, message: 'تعهد خرید پیدا نشد.' });
     const financialYear = await FinancialYear.findById(item.financialYearId);
     assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: item.schoolId,
+      financialYearId: item.financialYearId,
+      academicYearId: item.academicYearId,
+      dateValue: item.createdAt || new Date()
+    });
 
     const saved = await submitProcurementCommitmentForReview({
       commitment: item,
@@ -3264,6 +3375,7 @@ router.post('/admin/procurements/:id/submit', requireAuth, requireRole(['admin']
       note: String(req.body?.note || '').trim()
     });
     const analytics = await buildProcurementCommitmentAnalytics({
+      schoolId: String(item.schoolId || ''),
       financialYearId: String(item.financialYearId || ''),
       academicYearId: String(item.academicYearId || ''),
       classId: String(item.classId || '')
@@ -3302,10 +3414,17 @@ router.post('/admin/procurements/:id/submit', requireAuth, requireRole(['admin']
 
 router.post('/admin/procurements/:id/review', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await FinanceProcurementCommitment.findById(req.params.id);
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    const item = await FinanceProcurementCommitment.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
     if (!item) return res.status(404).json({ success: false, message: 'تعهد خرید پیدا نشد.' });
     const financialYear = await FinancialYear.findById(item.financialYearId);
     assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: item.schoolId,
+      financialYearId: item.financialYearId,
+      academicYearId: item.academicYearId,
+      dateValue: item.createdAt || new Date()
+    });
 
     const actorLevel = await resolveAdminActorLevel(req.user.id);
     const outcome = await reviewProcurementCommitmentTransition({
@@ -3317,6 +3436,7 @@ router.post('/admin/procurements/:id/review', requireAuth, requireRole(['admin']
       reason: String(req.body?.reason || '').trim()
     });
     const analytics = await buildProcurementCommitmentAnalytics({
+      schoolId: String(item.schoolId || ''),
       financialYearId: String(item.financialYearId || ''),
       academicYearId: String(item.academicYearId || ''),
       classId: String(item.classId || '')
@@ -3359,17 +3479,27 @@ router.post('/admin/procurements/:id/review', requireAuth, requireRole(['admin']
 
 router.post('/admin/procurements/:id/settlements', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await FinanceProcurementCommitment.findById(req.params.id);
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    const item = await FinanceProcurementCommitment.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
     if (!item) return res.status(404).json({ success: false, message: 'تعهد خرید پیدا نشد.' });
 
     const financialYear = await FinancialYear.findById(item.financialYearId);
     assertFinancialYearWritable(financialYear);
     const settlementDate = parseDateSafe(req.body?.settlementDate, null);
     assertDateWithinFinancialYear(financialYear, settlementDate);
+    await assertFinancePeriodWritable({
+      schoolId: item.schoolId,
+      financialYearId: item.financialYearId,
+      academicYearId: item.academicYearId,
+      dateValue: settlementDate
+    });
 
     const outcome = await createProcurementSettlement({
       commitment: item,
-      payload: req.body || {},
+      payload: {
+        ...(req.body || {}),
+        idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey || ''
+      },
       actorId: req.user.id
     });
 
@@ -3510,13 +3640,18 @@ const reviewExpenseEntryTransition = ({
 router.get('/admin/expenses', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const { classId = '', courseId = '', financialYearId = '', academicYearId = '', status = '', stage = '' } = req.query || {};
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
     const scope = await resolveFinanceScope({ classId, courseId });
     if (scope.error) return res.status(400).json({ success: false, message: scope.error });
+    if (scope.schoolClass?.schoolId && String(scope.schoolClass.schoolId) !== String(schoolContext.schoolId)) {
+      return res.status(403).json({ success: false, message: 'صنف انتخاب‌شده به مکتب فعال تعلق ندارد.' });
+    }
     if (normalizeScopeText(courseId) && !normalizeScopeText(classId) && scope.classId) {
       setLegacyScopeHeaders(res, `/api/finance/admin/expenses?classId=${scope.classId}`);
     }
 
-    const filter = {};
+    const filter = { schoolId: schoolContext.schoolId };
     if (String(financialYearId || '').trim()) filter.financialYearId = String(financialYearId).trim();
     if (String(academicYearId || '').trim()) filter.academicYearId = String(academicYearId).trim();
     if (String(status || '').trim()) filter.status = String(status).trim();
@@ -3539,21 +3674,32 @@ router.get('/admin/expenses', requireAuth, requireRole(['admin']), requirePermis
 router.post('/admin/expenses', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const payload = req.body || {};
+    const schoolContext = await resolveActiveSchool(req, { payload, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
     const scope = await resolveFinanceScope({
       classId: payload.classId,
       courseId: payload.courseId
     });
     if (scope.error) return res.status(400).json({ success: false, message: scope.error });
+    if (scope.schoolClass?.schoolId && String(scope.schoolClass.schoolId) !== String(schoolContext.schoolId)) {
+      return res.status(403).json({ success: false, message: 'صنف انتخاب‌شده به مکتب فعال تعلق ندارد.' });
+    }
 
     const financialYearId = String(payload.financialYearId || '').trim();
     const financialYear = financialYearId
-      ? await FinancialYear.findById(financialYearId)
-      : await FinancialYear.findOne({ academicYearId: payload.academicYearId, status: { $ne: 'archived' } }).sort({ isActive: -1, createdAt: -1 });
+      ? await FinancialYear.findOne({ _id: financialYearId, schoolId: schoolContext.schoolId })
+      : await FinancialYear.findOne({ schoolId: schoolContext.schoolId, academicYearId: payload.academicYearId, status: { $ne: 'archived' } }).sort({ isActive: -1, createdAt: -1 });
 
     assertFinancialYearWritable(financialYear);
 
     const expenseDate = parseDateSafe(payload.expenseDate, null);
     assertDateWithinFinancialYear(financialYear, expenseDate);
+    await assertFinancePeriodWritable({
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      dateValue: expenseDate
+    });
     const categorySelection = await resolveExpenseCategorySelection({
       category: payload.category,
       subCategory: payload.subCategory
@@ -3653,7 +3799,9 @@ router.post('/admin/expenses', requireAuth, requireRole(['admin']), requirePermi
 router.patch('/admin/expenses/:id', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const payload = req.body || {};
-    const item = await ExpenseEntry.findById(req.params.id);
+    const schoolContext = await resolveActiveSchool(req, { payload, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await ExpenseEntry.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
     if (!item) return res.status(404).json({ success: false, message: 'رکورد مصرف پیدا نشد.' });
     if (['pending_review', 'approved', 'void'].includes(String(item.status || '').trim())) {
       return res.status(409).json({
@@ -3675,6 +3823,12 @@ router.patch('/admin/expenses/:id', requireAuth, requireRole(['admin']), require
 
     const expenseDate = parseDateSafe(payload.expenseDate || item.expenseDate, null);
     assertDateWithinFinancialYear(financialYear, expenseDate);
+    await assertFinancePeriodWritable({
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      dateValue: expenseDate
+    });
     const categorySelection = await resolveExpenseCategorySelection({
       category: payload.category ?? item.category,
       subCategory: payload.subCategory ?? item.subCategory
@@ -3758,11 +3912,19 @@ router.patch('/admin/expenses/:id', requireAuth, requireRole(['admin']), require
 
 router.post('/admin/expenses/:id/submit', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await ExpenseEntry.findById(req.params.id);
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await ExpenseEntry.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
     if (!item) return res.status(404).json({ success: false, message: 'رکورد مصرف پیدا نشد.' });
 
     const financialYear = await FinancialYear.findById(item.financialYearId);
     assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: item.schoolId,
+      financialYearId: item.financialYearId,
+      academicYearId: item.academicYearId,
+      dateValue: item.expenseDate
+    });
 
     if (item.status === 'approved' || item.status === 'void') {
       return res.status(409).json({ success: false, message: 'مصرف تاییدشده یا باطل دوباره برای بررسی فرستاده نمی‌شود.' });
@@ -3801,11 +3963,19 @@ router.post('/admin/expenses/:id/submit', requireAuth, requireRole(['admin']), r
 
 router.post('/admin/expenses/:id/review', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await ExpenseEntry.findById(req.params.id);
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await ExpenseEntry.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
     if (!item) return res.status(404).json({ success: false, message: 'رکورد مصرف پیدا نشد.' });
 
     const financialYear = await FinancialYear.findById(item.financialYearId);
     assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: item.schoolId,
+      financialYearId: item.financialYearId,
+      academicYearId: item.academicYearId,
+      dateValue: item.expenseDate
+    });
 
     const actorLevel = await resolveAdminActorLevel(req.user.id);
     const outcome = reviewExpenseEntryTransition({
@@ -3844,18 +4014,27 @@ router.post('/admin/expenses/:id/review', requireAuth, requireRole(['admin']), r
   } catch (error) {
     return res.status(resolveFinancialYearErrorStatus(error)).json({
       success: false,
-      message: resolveFinancialYearMessage(error, 'بررسی مصرف ناموفق بود.')
+      message: resolveFinancialYearMessage(error, 'بررسی مصرف ناموفق بود.'),
+      error: process.env.NODE_ENV === 'development' ? String(error?.stack || error?.message || error) : undefined
     });
   }
 });
 
 router.post('/admin/expenses/:id/approve', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await ExpenseEntry.findById(req.params.id);
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await ExpenseEntry.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
     if (!item) return res.status(404).json({ success: false, message: 'رکورد مصرف پیدا نشد.' });
 
     const financialYear = await FinancialYear.findById(item.financialYearId);
     assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: item.schoolId,
+      financialYearId: item.financialYearId,
+      academicYearId: item.academicYearId,
+      dateValue: item.expenseDate
+    });
 
     if (item.status === 'draft' || item.status === 'rejected') {
       submitExpenseEntryForReview(item, req.user.id, 'Submitted through legacy approve shortcut.');
@@ -3904,11 +4083,19 @@ router.post('/admin/expenses/:id/approve', requireAuth, requireRole(['admin']), 
 
 router.post('/admin/expenses/:id/void', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await ExpenseEntry.findById(req.params.id);
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await ExpenseEntry.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
     if (!item) return res.status(404).json({ success: false, message: 'رکورد مصرف پیدا نشد.' });
 
     const financialYear = await FinancialYear.findById(item.financialYearId);
     assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: item.schoolId,
+      financialYearId: item.financialYearId,
+      academicYearId: item.academicYearId,
+      dateValue: item.expenseDate
+    });
     item.status = 'void';
     item.approvalStage = EXPENSE_APPROVAL_STAGES.void;
     item.updatedBy = req.user.id;
@@ -3948,7 +4135,9 @@ router.post('/admin/expenses/:id/void', requireAuth, requireRole(['admin']), req
 
 router.get('/admin/government-snapshots', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const filter = {};
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const filter = { schoolId: schoolContext.schoolId };
     const financialYearId = String(req.query?.financialYearId || '').trim();
     const academicYearId = String(req.query?.academicYearId || '').trim();
     const classId = String(req.query?.classId || '').trim();
@@ -3985,13 +4174,16 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
       ? Math.max(1, Math.min(4, Number(payload.quarter) || 1))
       : null;
     const classId = String(payload.classId || '').trim() || null;
+    const schoolContext = await resolveActiveSchool(req, { payload, allowSingleFallback: true });
 
     const financialYear = await resolveGovernmentSnapshotFinancialYear({
       financialYearId: payload.financialYearId,
-      academicYearId: payload.academicYearId
+      academicYearId: payload.academicYearId,
+      schoolId: schoolContext.schoolId
     });
 
     const filters = {
+      schoolId: String(financialYear.schoolId || ''),
       financialYearId: String(financialYear._id),
       academicYearId: String(financialYear.academicYearId || ''),
       classId: classId || '',
@@ -4001,11 +4193,25 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
     if (!quarter) delete filters.quarter;
 
     const reportKey = resolveGovernmentReportKey(reportType);
+    const isOfficial = parseBooleanInput(payload.isOfficial, true);
+    const closeReadiness = await buildFinancialYearCloseReadiness({ financialYearId: String(financialYear._id) });
+    if (isOfficial && (
+      Number(closeReadiness?.counts?.pendingPayments || 0) > 0
+      || Number(closeReadiness?.counts?.actionableAnomalies || 0) > 0
+    )) {
+      return res.status(409).json({
+        success: false,
+        code: 'finance_government_snapshot_blocked',
+        readiness: closeReadiness,
+        message: 'تا تعیین تکلیف پرداخت‌های منتظر و ناهنجاری‌های عملیاتی، نسخه رسمی ساخته نمی‌شود.'
+      });
+    }
     const [report, expenseAnalytics, treasuryAnalytics, treasuryReports, budgetVsActual, procurementAnalytics] = await Promise.all([
       runReport(reportKey, filters),
       buildExpenseGovernanceAnalytics({
         financialYearId: String(financialYear._id || ''),
         academicYearId: String(financialYear.academicYearId || ''),
+        schoolId: String(financialYear.schoolId || ''),
         classId: classId || ''
       }),
       buildTreasuryAnalytics({
@@ -4022,6 +4228,7 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
         classId: classId || ''
       }),
       buildProcurementCommitmentAnalytics({
+        schoolId: String(financialYear.schoolId || ''),
         financialYearId: String(financialYear._id || ''),
         academicYearId: String(financialYear.academicYearId || ''),
         classId: classId || ''
@@ -4034,10 +4241,12 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
       treasuryReports,
       budgetVsActual,
       budgetApproval: serializeFinancialYearBudgetApproval(financialYear),
-      procurementAnalytics
+      procurementAnalytics,
+      closeReadiness
     };
 
     const latest = await GovernmentFinanceSnapshot.findOne({
+      schoolId: financialYear.schoolId,
       financialYearId: financialYear._id,
       reportType,
       quarter: quarter || null,
@@ -4046,12 +4255,14 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
 
     const version = Number(latest?.version || 0) + 1;
     const sourceDigest = crypto
-      .createHash('sha1')
+      .createHash('sha256')
       .update(JSON.stringify({
         reportKey,
         filters,
+        columns: report?.columns || [],
         summary: report?.summary || {},
-        rowCount: Array.isArray(report?.rows) ? report.rows.length : 0
+        rows: report?.rows || [],
+        pack: snapshotPack
       }))
       .digest('hex');
 
@@ -4071,7 +4282,7 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
       pack: snapshotPack,
       sourceDigest,
       version,
-      isOfficial: parseBooleanInput(payload.isOfficial, true),
+      isOfficial,
       generatedAt: new Date(),
       generatedBy: req.user.id
     });
@@ -4117,7 +4328,8 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
 
 router.get('/admin/government-snapshots/:id/export.pdf', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const snapshot = await GovernmentFinanceSnapshot.findById(req.params.id)
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    const snapshot = await GovernmentFinanceSnapshot.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId })
       .populate('financialYearId', 'title code status isActive isClosed budgetTargets budgetApprovalStage budgetSubmittedBy budgetSubmittedAt budgetApprovedBy budgetApprovedAt budgetRejectedBy budgetRejectedAt budgetRejectReason budgetApprovalTrail budgetVersion budgetLastApprovedVersion budgetFrozenAt budgetRevisionHistory')
       .populate('academicYearId', 'title code')
       .populate('classId', 'title code gradeLevel section')
@@ -4133,12 +4345,27 @@ router.get('/admin/government-snapshots/:id/export.pdf', requireAuth, requireRol
       ? snapshot.pack
       : {
           generatedAt: new Date().toISOString(),
-          expenseAnalytics: await buildExpenseGovernanceAnalytics({ financialYearId, academicYearId, classId }),
+          expenseAnalytics: await buildExpenseGovernanceAnalytics({
+            schoolId: String(snapshot.schoolId || ''),
+            financialYearId,
+            academicYearId,
+            classId
+          }),
           treasuryAnalytics: await buildTreasuryAnalytics({ financialYearId, academicYearId }),
           treasuryReports: await buildTreasuryReportBundle({ financialYearId, academicYearId }),
-          budgetVsActual: await buildGovernmentBudgetVsActualReport({ financialYearId, academicYearId, classId }),
+          budgetVsActual: await buildGovernmentBudgetVsActualReport({
+            financialYearId,
+            academicYearId,
+            schoolId: String(snapshot.schoolId || ''),
+            classId
+          }),
           budgetApproval: serializeFinancialYearBudgetApproval(snapshot.financialYearId || null),
-          procurementAnalytics: await buildProcurementCommitmentAnalytics({ financialYearId, academicYearId, classId })
+          procurementAnalytics: await buildProcurementCommitmentAnalytics({
+            schoolId: String(snapshot.schoolId || ''),
+            financialYearId,
+            academicYearId,
+            classId
+          })
         };
 
     const payload = serializeGovernmentFinanceSnapshot({
@@ -4662,9 +4889,6 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       return res.status(400).json({ success: false, message: 'تاریخ مهلت پرداخت معتبر نیست.' });
     }
     const issueDateValue = parseDateSafe(issuedAt, new Date());
-    if (await isMonthClosed(issueDateValue)) {
-      return res.status(400).json({ success: false, message: 'ماه مالی بسته شده است و صدور بل جدید مجاز نیست.' });
-    }
 
     const normalizedPeriodType = normalizeBillPeriodType(periodType || (normalizedFeeType === 'admission' ? 'custom' : 'term'));
     const normalizedPeriodLabel = String(
@@ -4678,6 +4902,11 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
     if (!scope.courseId) {
       return res.status(400).json({ success: false, message: 'برای ایجاد بل مالی، وصل بودن صنف الزامی است.' });
     }
+    await assertFinancePeriodWritable({
+      schoolId: scope.schoolClass?.schoolId,
+      academicYearId: normalizedAcademicYearId || scope.schoolClass?.academicYearId,
+      dateValue: issueDateValue
+    });
     if (normalizeScopeText(inputCourseId) && !normalizeScopeText(classId)) {
       setLegacyScopeFieldHeaders(res);
     }
@@ -4837,7 +5066,6 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       .populate('classId', 'title code gradeLevel section');
     res.status(201).json({ success: true, item, message: 'بل با موفقیت ایجاد شد.' });
   } catch (error) {
-    console.error('[finance][create-manual-bill]', error);
     if (Number(error?.code) === 11000) {
       const duplicateFields = Object.keys(error?.keyPattern || {});
       const message = duplicateFields.includes('billNumber')
@@ -4856,6 +5084,14 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
         message: validationMessage || 'مشخصات بل معتبر نیست.'
       });
     }
+    if (error?.status || error?.statusCode) {
+      return res.status(Number(error.status || error.statusCode)).json({
+        success: false,
+        code: error.code || error.message || '',
+        message: error.messageDari || error.message || 'تغییر سند مالی مجاز نیست.'
+      });
+    }
+    console.error('[finance][create-manual-bill]', error);
     return res.status(500).json({ success: false, message: 'خطا در ایجاد بل' });
   }
 });
@@ -4890,9 +5126,6 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
     const dueDateValue = parseDateSafe(dueDate, null);
     if (!dueDateValue) return res.status(400).json({ success: false, message: 'تاریخ مهلت پرداخت معتبر نیست.' });
     const issueDateValue = parseDateSafe(issuedAt, new Date());
-    if (await isMonthClosed(issueDateValue)) {
-      return res.status(400).json({ success: false, message: 'ماه مالی بسته شده است و پیش‌نمایش صدور مجاز نیست.' });
-    }
 
     const normalizedPeriodType = normalizeBillPeriodType(periodType);
     const normalizedPeriodLabel = String(periodLabel || '').trim();
@@ -4903,6 +5136,11 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
     if (!scope.courseId) {
       return res.status(400).json({ success: false, message: 'برای تولید بل، وصل بودن صنف الزامی است.' });
     }
+    await assertFinancePeriodWritable({
+      schoolId: scope.schoolClass?.schoolId,
+      academicYearId: academicYearId || scope.schoolClass?.academicYearId,
+      dateValue: issueDateValue
+    });
     if (normalizeScopeText(inputCourseId) && !normalizeScopeText(classId)) {
       setLegacyScopeFieldHeaders(res);
     }
@@ -5002,9 +5240,6 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
     const dueDateValue = parseDateSafe(dueDate, null);
     if (!dueDateValue) return res.status(400).json({ success: false, message: 'تاریخ مهلت پرداخت معتبر نیست.' });
     const issueDateValue = parseDateSafe(issuedAt, new Date());
-    if (await isMonthClosed(issueDateValue)) {
-      return res.status(400).json({ success: false, message: 'ماه مالی بسته شده است و صدور گروهی مجاز نیست.' });
-    }
 
     const normalizedPeriodType = normalizeBillPeriodType(periodType);
     const normalizedPeriodLabel = String(periodLabel || '').trim();
@@ -5015,6 +5250,11 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
     if (!scope.courseId) {
       return res.status(400).json({ success: false, message: 'برای تولید بل، وصل بودن صنف الزامی است.' });
     }
+    await assertFinancePeriodWritable({
+      schoolId: scope.schoolClass?.schoolId,
+      academicYearId: academicYearId || scope.schoolClass?.academicYearId,
+      dateValue: issueDateValue
+    });
     if (normalizeScopeText(inputCourseId) && !normalizeScopeText(classId)) {
       setLegacyScopeFieldHeaders(res);
     }
@@ -5137,7 +5377,6 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
         emailSubject: 'صدور بل جدید'
       });
     }
-
     if (createdNotifications.length) {
       scheduleFinanceBackgroundTask('bulk-bill-notifications', async () => {
         const batchSize = 10;
@@ -5180,7 +5419,7 @@ router.put('/admin/bills/:id', requireAuth, requireRole(['admin']), requirePermi
     const item = await FinanceBill.findById(req.params.id);
     if (!item) return res.status(404).json({ success: false, message: 'بل یافت نشد.' });
     if (item.status === 'void') return res.status(400).json({ success: false, message: 'بل باطل قابل ویرایش نیست.' });
-    if (await isMonthClosed(item.issuedAt)) {
+    if (await isMonthClosed(item.issuedAt, item)) {
       return res.status(400).json({ success: false, message: 'ماه مالی بسته شده است و ویرایش بل مجاز نیست.' });
     }
 
@@ -5462,8 +5701,9 @@ const populateFinanceAnomalyCaseQuery = (query) => query
   .populate('latestActionBy', 'name email adminLevel orgRole')
   .populate('history.by', 'name email adminLevel orgRole');
 
-const buildFinanceAnomalyCaseFilter = ({ scope = {}, academicYearId = '', studentMembershipId = '', anomalyIds = [] } = {}) => {
+const buildFinanceAnomalyCaseFilter = ({ schoolId = '', scope = {}, academicYearId = '', studentMembershipId = '', anomalyIds = [] } = {}) => {
   const filter = {};
+  if (String(schoolId || '').trim()) filter.schoolId = String(schoolId).trim();
   if (scope?.classId) filter.classId = String(scope.classId).trim();
   if (String(academicYearId || '').trim()) filter.academicYearId = String(academicYearId).trim();
   if (String(studentMembershipId || '').trim()) filter.studentMembershipId = String(studentMembershipId).trim();
@@ -5501,6 +5741,7 @@ const appendFinanceAnomalyHistory = (item, {
 
 const hydrateFinanceAnomalyCase = (item, snapshot = {}) => {
   const normalizedSnapshot = buildFinanceAnomalyCaseSnapshot(snapshot);
+  if (normalizedSnapshot.schoolId) item.schoolId = normalizedSnapshot.schoolId;
   if (normalizedSnapshot.anomalyId) item.anomalyId = normalizedSnapshot.anomalyId;
   item.anomalyType = normalizedSnapshot.anomalyType || item.anomalyType || 'finance_signal';
   item.title = normalizedSnapshot.title || item.title || 'ناهنجاری مالی';
@@ -5588,22 +5829,38 @@ const buildFinanceAnomalyTimelineItems = (cases = []) => {
   return items;
 };
 
-const ensureFinanceAnomalyCase = async ({ anomalyId = '', snapshot = {} } = {}) => {
+const ensureFinanceAnomalyCase = async ({ schoolId = '', anomalyId = '', snapshot = {} } = {}) => {
+  const normalizedSchoolId = String(schoolId || snapshot?.schoolId || '').trim();
   const normalizedAnomalyId = String(anomalyId || snapshot?.id || '').trim();
+  if (!normalizedSchoolId) {
+    throw createRouteError(400, 'مکتب فعال برای ناهنجاری مالی معتبر نیست.');
+  }
   if (!normalizedAnomalyId) {
     throw new Error('finance_anomaly_id_required');
   }
 
-  const existing = await FinanceAnomalyCase.findOne({ anomalyId: normalizedAnomalyId });
+  const existing = await FinanceAnomalyCase.findOne({
+    schoolId: normalizedSchoolId,
+    anomalyId: normalizedAnomalyId
+  });
   if (existing) {
-    return hydrateFinanceAnomalyCase(existing, { ...snapshot, id: normalizedAnomalyId });
+    return hydrateFinanceAnomalyCase(existing, {
+      ...snapshot,
+      schoolId: normalizedSchoolId,
+      id: normalizedAnomalyId
+    });
   }
 
   const next = new FinanceAnomalyCase({
+    schoolId: normalizedSchoolId,
     anomalyId: normalizedAnomalyId,
     status: 'open'
   });
-  return hydrateFinanceAnomalyCase(next, { ...snapshot, id: normalizedAnomalyId });
+  return hydrateFinanceAnomalyCase(next, {
+    ...snapshot,
+    schoolId: normalizedSchoolId,
+    id: normalizedAnomalyId
+  });
 };
 
 const resolveFinanceAnomalyActionTitle = (action = '') => ({
@@ -5685,14 +5942,17 @@ const buildFinanceAuditSummary = (items = []) => {
   };
 };
 
-async function buildFinanceAuditTimeline({ scope = {}, limit = 80, q = '', kind = 'all', severity = 'all' } = {}) {
+async function buildFinanceAuditTimeline({ schoolId = '', scope = {}, limit = 80, q = '', kind = 'all', severity = 'all' } = {}) {
   const normalizedKind = normalizeAuditKind(kind);
   const normalizedSeverity = normalizeAuditSeverity(severity);
   const searchTerm = String(q || '').trim().toLowerCase();
   const safeLimit = Math.max(20, Math.min(Number(limit) || 80, 500));
   const queryLimit = Math.min(Math.max(safeLimit * 3, 120), 480);
 
-  const classFilter = scope?.classId ? { classId: scope.classId } : {};
+  const classFilter = {
+    ...(String(schoolId || '').trim() ? { schoolId: String(schoolId).trim() } : {}),
+    ...(scope?.classId ? { classId: scope.classId } : {})
+  };
   const activityFilter = {
     action: {
       $in: [
@@ -5703,7 +5963,8 @@ async function buildFinanceAuditTimeline({ scope = {}, limit = 80, q = '', kind 
         'finance_close_month',
         'finance_reopen_month'
       ]
-    }
+    },
+    ...(String(schoolId || '').trim() ? { 'meta.schoolId': String(schoolId).trim() } : {})
   };
 
   const [orders, payments, reliefs, activities, anomalyCases] = await Promise.all([
@@ -5752,7 +6013,7 @@ async function buildFinanceAuditTimeline({ scope = {}, limit = 80, q = '', kind 
         .limit(queryLimit)
         .lean(),
     populateFinanceAnomalyCaseQuery(
-      FinanceAnomalyCase.find(buildFinanceAnomalyCaseFilter({ scope }))
+      FinanceAnomalyCase.find(buildFinanceAnomalyCaseFilter({ schoolId, scope }))
         .sort({ updatedAt: -1, createdAt: -1 })
         .limit(queryLimit)
     ).lean()
@@ -6270,7 +6531,7 @@ router.post('/student/receipts', requireAuth, (req, res, next) => {
     if (String(bill.student) !== String(req.user.id)) {
       return res.status(403).json({ success: false, message: 'این بل مربوط به حساب شما نیست' });
     }
-    const draft = await parseReceiptSubmissionDraft(req);
+    const draft = await parseReceiptSubmissionDraft(req, bill);
     await ensureReceiptSubmissionAvailability({
       bill,
       amount: draft.amount,
@@ -6314,7 +6575,7 @@ router.post('/student/payments', requireAuth, (req, res, next) => {
     }
 
     const context = await loadStudentCanonicalPaymentContext(req);
-    const draft = await parseReceiptSubmissionDraft(req);
+    const draft = await parseReceiptSubmissionDraft(req, context.feeOrder);
     const item = await createCanonicalPaymentSubmissionRecord({
       req,
       membership: context.membership,
@@ -6355,7 +6616,7 @@ router.post('/parent/receipts', requireAuth, (req, res, next) => {
       return res.status(403).json({ success: false, message: 'این بل مربوط به متعلم وصل‌شده به حساب شما نیست' });
     }
 
-    const draft = await parseReceiptSubmissionDraft(req);
+    const draft = await parseReceiptSubmissionDraft(req, bill);
     await ensureReceiptSubmissionAvailability({
       bill,
       amount: draft.amount,
@@ -6404,7 +6665,7 @@ router.post('/parent/payments', requireAuth, (req, res, next) => {
     }
 
     const context = await loadParentCanonicalPaymentContext(req);
-    const draft = await parseReceiptSubmissionDraft(req);
+    const draft = await parseReceiptSubmissionDraft(req, context.feeOrder);
     const item = await createCanonicalPaymentSubmissionRecord({
       req,
       membership: context.membership,
@@ -6681,13 +6942,19 @@ router.get('/admin/reports/audit-timeline', requireAuth, requireRole(['admin']),
       severity = 'all',
       limit = 120
     } = req.query || {};
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
     const scope = await resolveFinanceScope({ classId, courseId });
     if (scope.error) return res.status(400).json({ success: false, message: scope.error });
+    if (scope.schoolClass?.schoolId && String(scope.schoolClass.schoolId) !== String(schoolContext.schoolId)) {
+      return res.status(403).json({ success: false, message: 'صنف انتخاب‌شده به مکتب فعال تعلق ندارد.' });
+    }
     if (normalizeScopeText(courseId) && !normalizeScopeText(classId) && scope.classId) {
       setLegacyScopeHeaders(res, `/api/finance/admin/reports/audit-timeline?classId=${scope.classId}`);
     }
 
     const timeline = await buildFinanceAuditTimeline({
+      schoolId: schoolContext.schoolId,
       scope,
       limit,
       q,
@@ -6717,14 +6984,22 @@ router.get('/admin/reports/anomalies', requireAuth, requireRole(['admin']), requ
       q = '',
       limit = 120
     } = req.query || {};
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) {
+      return res.status(400).json({ success: false, message: 'برای مشاهده ناهنجاری‌ها، مکتب فعال را انتخاب کنید.' });
+    }
     const scope = await resolveFinanceScope({ classId, courseId });
     if (scope.error) return res.status(400).json({ success: false, message: scope.error });
+    if (scope.schoolClass?.schoolId && String(scope.schoolClass.schoolId) !== String(schoolContext.schoolId)) {
+      return res.status(403).json({ success: false, message: 'صنف انتخاب‌شده به مکتب فعال تعلق ندارد.' });
+    }
     if (normalizeScopeText(courseId) && !normalizeScopeText(classId) && scope.classId) {
       setLegacyScopeHeaders(res, `/api/finance/admin/reports/anomalies?classId=${scope.classId}`);
     }
 
     const asOf = parseDateSafe(req.query?.asOf, new Date());
     const report = await buildFinanceAnomalyReport({
+      schoolId: schoolContext.schoolId,
       classId: scope.classId || '',
       academicYearId: String(req.query?.academicYearId || '').trim(),
       studentMembershipId: String(req.query?.studentMembershipId || '').trim(),
@@ -6753,6 +7028,7 @@ router.get('/admin/reports/anomalies', requireAuth, requireRole(['admin']), requ
     });
     const anomalyCases = await populateFinanceAnomalyCaseQuery(
       FinanceAnomalyCase.find(buildFinanceAnomalyCaseFilter({
+        schoolId: schoolContext.schoolId,
         scope,
         academicYearId: String(req.query?.academicYearId || '').trim(),
         studentMembershipId: String(req.query?.studentMembershipId || '').trim(),
@@ -6788,8 +7064,10 @@ router.post('/admin/anomalies/:id/assign', requireAuth, requireRole(['admin']), 
     const actorLevel = normalizeAnomalyAssignedLevel(await resolveAdminActorLevel(req.user.id), 'finance_manager');
     const note = String(req.body?.note || '').trim();
     const assignedLevel = normalizeAnomalyAssignedLevel(req.body?.assignedLevel, actorLevel);
-    const snapshot = req.body?.snapshot || {};
-    const item = await ensureFinanceAnomalyCase({ anomalyId: req.params.id, snapshot });
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const snapshot = { ...(req.body?.snapshot || {}), schoolId: schoolContext.schoolId };
+    const item = await ensureFinanceAnomalyCase({ schoolId: schoolContext.schoolId, anomalyId: req.params.id, snapshot });
     const now = new Date();
 
     if (item.status === 'resolved') {
@@ -6850,8 +7128,10 @@ router.post('/admin/anomalies/:id/snooze', requireAuth, requireRole(['admin']), 
     if (!snoozedUntil) {
       return res.status(400).json({ success: false, message: 'تاریخ تعویق ناهنجاری مالی معتبر نیست.' });
     }
-    const snapshot = req.body?.snapshot || {};
-    const item = await ensureFinanceAnomalyCase({ anomalyId: req.params.id, snapshot });
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const snapshot = { ...(req.body?.snapshot || {}), schoolId: schoolContext.schoolId };
+    const item = await ensureFinanceAnomalyCase({ schoolId: schoolContext.schoolId, anomalyId: req.params.id, snapshot });
     const now = new Date();
 
     if (item.status === 'resolved') {
@@ -6908,8 +7188,10 @@ router.post('/admin/anomalies/:id/snooze', requireAuth, requireRole(['admin']), 
 router.post('/admin/anomalies/:id/resolve', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const note = String(req.body?.note || '').trim();
-    const snapshot = req.body?.snapshot || {};
-    const item = await ensureFinanceAnomalyCase({ anomalyId: req.params.id, snapshot });
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const snapshot = { ...(req.body?.snapshot || {}), schoolId: schoolContext.schoolId };
+    const item = await ensureFinanceAnomalyCase({ schoolId: schoolContext.schoolId, anomalyId: req.params.id, snapshot });
     const now = new Date();
 
     item.status = 'resolved';
@@ -6963,6 +7245,23 @@ const buildBatchAdmissionOrderNumber = () => {
   const now = new Date();
   const monthKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
   return `AD-${monthKey}-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+};
+
+const resolveMonthCloseFinancialContext = async (req, payload = {}, monthKey = '') => {
+  const schoolContext = await resolveActiveSchool(req, { payload, allowSingleFallback: true });
+  if (!schoolContext.schoolId) throw createRouteError(400, 'برای عملیات دوره مالی، مکتب فعال را انتخاب کنید.');
+  const { startAt, endAt } = toMonthDateRange(monthKey);
+  const requestedFinancialYearId = String(payload.financialYearId || '').trim();
+  const financialYear = requestedFinancialYearId
+    ? await FinancialYear.findOne({ _id: requestedFinancialYearId, schoolId: schoolContext.schoolId })
+    : await FinancialYear.findOne({
+        schoolId: schoolContext.schoolId,
+        status: { $ne: 'archived' },
+        startDate: { $lte: endAt },
+        endDate: { $gte: startAt }
+      }).sort({ isActive: -1, createdAt: -1 });
+  if (!financialYear) throw createRouteError(400, 'برای این ماه، سال مالی معتبر در مکتب فعال پیدا نشد.');
+  return { schoolContext, financialYear, startAt, endAt };
 };
 
 const buildAdmissionCorrectionPaymentNumber = () => {
@@ -7306,7 +7605,7 @@ const correctPendingAdmissionReceipt = async ({ req, candidate = {}, note = '', 
       throw createRouteError(409, 'این نوع رسید در اصلاح گروهی پشتیبانی نمی‌شود.');
     }
     if (roundMoney(order.amountPaid) > 0) throw createRouteError(409, 'روی بل قبلاً پرداخت تأییدشده ثبت شده است.');
-    if (await isMonthClosed(order.issuedAt || payment.paidAt || new Date())) {
+    if (await isMonthClosed(order.issuedAt || payment.paidAt || new Date(), order)) {
       throw createRouteError(409, 'ماه مالی این بل بسته شده و اصلاح آن مجاز نیست.');
     }
     const otherActivePayment = await FeePayment.findOne({
@@ -7458,6 +7757,7 @@ const correctPendingAdmissionReceipt = async ({ req, candidate = {}, note = '', 
 
 const settleAdmissionAnomalyRecord = async ({
   req,
+  schoolId = '',
   anomalyId = '',
   snapshot = {},
   mode = '',
@@ -7471,12 +7771,23 @@ const settleAdmissionAnomalyRecord = async ({
       throw createRouteError(400, 'نوع رفع داخله معتبر نیست.');
     }
 
-    const item = await ensureFinanceAnomalyCase({ anomalyId, snapshot });
+    let normalizedSchoolId = String(schoolId || '').trim();
+    if (!normalizedSchoolId) {
+      const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+      normalizedSchoolId = String(schoolContext.schoolId || '').trim();
+    }
+    if (!normalizedSchoolId) throw createRouteError(400, 'مکتب فعال را انتخاب کنید.');
+    const scopedSnapshot = { ...snapshot, schoolId: normalizedSchoolId };
+    const item = await ensureFinanceAnomalyCase({
+      schoolId: normalizedSchoolId,
+      anomalyId,
+      snapshot: scopedSnapshot
+    });
     if (String(item.anomalyType || '').trim() !== 'admission_missing') {
       throw createRouteError(400, 'این گزینه فقط برای ناهنجاری بل داخله قابل استفاده است.');
     }
 
-    const membershipId = String(item.studentMembershipId || snapshot?.studentMembershipId || snapshot?.membershipId || '').trim();
+    const membershipId = String(item.studentMembershipId || scopedSnapshot?.studentMembershipId || scopedSnapshot?.membershipId || '').trim();
     if (!membershipId || !mongoose.Types.ObjectId.isValid(membershipId)) {
       throw createRouteError(400, 'عضویت مالی شاگرد برای ثبت داخله پیدا نشد.');
     }
@@ -7485,7 +7796,7 @@ const settleAdmissionAnomalyRecord = async ({
       .populate('student', 'name email')
       .populate('studentId', 'fullName admissionNo')
       .lean();
-    if (!membership?._id || !membership?.student) {
+    if (!membership?._id || !membership?.student || String(membership.schoolId || '') !== normalizedSchoolId) {
       throw createRouteError(404, 'عضویت مالی شاگرد معتبر پیدا نشد.');
     }
 
@@ -7711,13 +8022,21 @@ router.post('/admin/anomalies/settle-admission-batch', requireAuth, requireRole(
       return res.status(400).json({ success: false, message: 'برای رفع گروهی داخله، صنف معتبر انتخاب کنید.' });
     }
 
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) {
+      return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    }
     const scope = await resolveFinanceScope({ classId });
     if (scope.error || !scope.classId) {
       return res.status(400).json({ success: false, message: scope.error || 'صنف مالی معتبر پیدا نشد.' });
     }
+    if (scope.schoolClass?.schoolId && String(scope.schoolClass.schoolId) !== String(schoolContext.schoolId)) {
+      return res.status(403).json({ success: false, message: 'صنف انتخاب‌شده به مکتب فعال تعلق ندارد.' });
+    }
     const academicYearId = String(req.body?.academicYearId || '').trim();
     const note = String(req.body?.note || '').trim();
     const report = await buildFinanceAnomalyReport({
+      schoolId: schoolContext.schoolId,
       classId: scope.classId,
       academicYearId,
       asOf: new Date(),
@@ -7743,6 +8062,7 @@ router.post('/admin/anomalies/settle-admission-batch', requireAuth, requireRole(
         try {
           const result = await settleAdmissionAnomalyRecord({
             req,
+            schoolId: schoolContext.schoolId,
             anomalyId: snapshot.id,
             snapshot,
             mode,
@@ -7811,6 +8131,35 @@ router.post('/admin/anomalies/settle-admission-batch', requireAuth, requireRole(
       success: false,
       message: error?.message || 'ثبت گروهی داخله ممکن نشد',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+router.post('/admin/treasury/sync-payments', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    const financialYear = await resolveGovernmentSnapshotFinancialYear({
+      financialYearId: req.body?.financialYearId,
+      academicYearId: req.body?.academicYearId,
+      schoolId: schoolContext.schoolId
+    });
+    assertFinancialYearWritable(financialYear);
+    const result = await syncApprovedFeePaymentsToTreasury({
+      financialYearId: String(financialYear._id),
+      academicYearId: String(financialYear.academicYearId || '')
+    });
+    await logActivity({
+      req,
+      action: 'finance_sync_payments_to_treasury',
+      targetType: 'FinancialYear',
+      targetId: String(financialYear._id),
+      meta: result
+    });
+    return res.json({ success: true, ...result, message: 'همگام‌سازی پرداخت‌های تاییدشده با خزانه تکمیل شد.' });
+  } catch (error) {
+    return res.status(resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: resolveFinancialYearMessage(error, 'همگام‌سازی پرداخت‌ها با خزانه ناموفق بود.')
     });
   }
 });
@@ -8241,8 +8590,10 @@ router.post('/admin/anomalies/:id/note', requireAuth, requireRole(['admin']), re
     if (!note) {
       return res.status(400).json({ success: false, message: 'یادداشت ناهنجاری مالی نمی‌تواند خالی باشد.' });
     }
-    const snapshot = req.body?.snapshot || {};
-    const item = await ensureFinanceAnomalyCase({ anomalyId: req.params.id, snapshot });
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const snapshot = { ...(req.body?.snapshot || {}), schoolId: schoolContext.schoolId };
+    const item = await ensureFinanceAnomalyCase({ schoolId: schoolContext.schoolId, anomalyId: req.params.id, snapshot });
     const now = new Date();
 
     item.latestNote = note;
@@ -8298,13 +8649,19 @@ router.get('/admin/reports/audit-package.csv', requireAuth, requireRole(['admin'
       severity = 'all',
       limit = 500
     } = req.query || {};
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
     const scope = await resolveFinanceScope({ classId, courseId });
     if (scope.error) return res.status(400).json({ success: false, message: scope.error });
+    if (scope.schoolClass?.schoolId && String(scope.schoolClass.schoolId) !== String(schoolContext.schoolId)) {
+      return res.status(403).json({ success: false, message: 'صنف انتخاب‌شده به مکتب فعال تعلق ندارد.' });
+    }
     if (normalizeScopeText(courseId) && !normalizeScopeText(classId) && scope.classId) {
       setLegacyScopeHeaders(res, `/api/finance/admin/reports/audit-package.csv?classId=${scope.classId}`);
     }
 
     const timeline = await buildFinanceAuditTimeline({
+      schoolId: schoolContext.schoolId,
       scope,
       limit,
       q,
@@ -8413,11 +8770,26 @@ router.get('/admin/reports/export.csv', requireAuth, requireRole(['admin']), req
   }
 });
 
+async function loadSchoolOwnedMonthClose(req, monthCloseId, { lean = false } = {}) {
+  const schoolContext = await resolveActiveSchool(req, {
+    payload: { ...(req.query || {}), ...(req.body || {}) },
+    allowSingleFallback: true
+  });
+  if (!schoolContext.schoolId) {
+    throw createRouteError(400, 'برای ادامه، مکتب فعال را انتخاب کنید.');
+  }
+  const query = FinanceMonthClose.findOne({ _id: monthCloseId, schoolId: schoolContext.schoolId });
+  return lean ? query.lean() : query;
+}
+
 router.get('/admin/month-close', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const actorLevel = await resolveAdminActorLevel(req.user.id);
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    writeSchoolContextHeaders(res, schoolContext.schoolId);
     const items = await populateFinanceMonthCloseQuery(
-      FinanceMonthClose.find()
+      FinanceMonthClose.find({ schoolId: schoolContext.schoolId })
     )
       .sort({ monthKey: -1 })
       .limit(36);
@@ -8430,8 +8802,10 @@ router.get('/admin/month-close', requireAuth, requireRole(['admin']), requirePer
 router.get('/admin/month-close/:id', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const actorLevel = await resolveAdminActorLevel(req.user.id);
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
     const item = await populateFinanceMonthCloseQuery(
-      FinanceMonthClose.findById(req.params.id)
+      FinanceMonthClose.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId })
     );
     if (!item) {
       return res.status(404).json({ success: false, message: 'ماه مالی موردنظر پیدا نشد.' });
@@ -8450,65 +8824,25 @@ router.post('/admin/month-close', requireAuth, requireRole(['admin']), requirePe
       return res.status(400).json({ success: false, message: 'فرمت ماه باید YYYY-MM باشد' });
     }
     const requestNote = String(req.body?.note || '').trim();
-    const { startAt, endAt } = toMonthDateRange(monthKey);
-    let snapshotFallback = false;
-    let snapshot = null;
+    const { schoolContext, financialYear, startAt, endAt } = await resolveMonthCloseFinancialContext(req, req.body || {}, monthKey);
+    writeSchoolContextHeaders(res, schoolContext.schoolId);
     const anomalyCases = await populateFinanceAnomalyCaseQuery(
-      FinanceAnomalyCase.find({}).sort({ updatedAt: -1 }).limit(500)
+      FinanceAnomalyCase.find({
+        schoolId: schoolContext.schoolId,
+        academicYearId: String(financialYear.academicYearId || '')
+      }).sort({ updatedAt: -1 }).limit(500)
     ).lean();
-    try {
-      snapshot = await buildFinanceMonthCloseSnapshot(monthKey, { anomalyCases });
-    } catch {
-      snapshotFallback = true;
-      snapshot = {
-        generatedAt: new Date().toISOString(),
-        monthKey,
-        window: {
-          startAt: startAt.toISOString(),
-          endAt: endAt.toISOString()
-        },
-        totals: {
-          ordersIssuedCount: 0,
-          ordersIssuedAmount: 0,
-          approvedPaymentCount: 0,
-          approvedPaymentAmount: 0,
-          pendingPaymentCount: 0,
-          pendingPaymentAmount: 0,
-          standingDueAmount: 0,
-          standingPaidAmount: 0,
-          standingOutstandingAmount: 0,
-          overdueOrders: 0,
-          activeMemberships: 0,
-          activeReliefs: 0,
-          fixedReliefAmount: 0,
-          percentReliefs: 0,
-          fullReliefs: 0
-        },
-        aging: {
-          buckets: { current: 0, d1_30: 0, d31_60: 0, d61_plus: 0 },
-          totalRemaining: 0,
-          rows: []
-        },
-        cashflow: {
-          approvedTotal: 0,
-          approvedCount: 0,
-          pendingTotal: 0,
-          pendingCount: 0,
-          items: []
-        },
-        readiness: {
-          readyToApprove: true,
-          blockingIssues: [],
-          warningIssues: []
-        },
-        classes: [],
-        anomalies: {
-          summary: { total: 0, critical: 0, warning: 0, info: 0, actionRequired: 0, byType: {} },
-          items: []
-        }
-      };
-    }
-    const exists = await FinanceMonthClose.findOne({ monthKey });
+    const snapshot = await buildFinanceMonthCloseSnapshot(monthKey, {
+      schoolId: schoolContext.schoolId,
+      financialYearId: String(financialYear._id),
+      academicYearId: String(financialYear.academicYearId || ''),
+      anomalyCases
+    });
+    const exists = await FinanceMonthClose.findOne({
+      schoolId: schoolContext.schoolId,
+      financialYearId: financialYear._id,
+      monthKey
+    });
     if (exists && exists.status === 'closed') {
       return res.status(400).json({ success: false, message: 'این ماه قبلاً بسته شده است' });
     }
@@ -8519,6 +8853,9 @@ router.post('/admin/month-close', requireAuth, requireRole(['admin']), requirePe
     let item = exists;
     if (item) {
       item.status = 'pending_review';
+      item.schoolId = schoolContext.schoolId;
+      item.financialYearId = financialYear._id;
+      item.academicYearId = financialYear.academicYearId;
       item.approvalStage = MONTH_CLOSE_APPROVAL_STAGES.financeManager;
       item.requestedBy = req.user.id;
       item.requestedAt = new Date();
@@ -8551,6 +8888,9 @@ router.post('/admin/month-close', requireAuth, requireRole(['admin']), requirePe
       await item.save();
     } else {
       item = await FinanceMonthClose.create({
+        schoolId: schoolContext.schoolId,
+        financialYearId: financialYear._id,
+        academicYearId: financialYear.academicYearId,
         monthKey,
         status: 'pending_review',
         approvalStage: MONTH_CLOSE_APPROVAL_STAGES.financeManager,
@@ -8598,7 +8938,7 @@ router.post('/admin/month-close', requireAuth, requireRole(['admin']), requirePe
         monthKey,
         level: actorLevel,
         note: requestNote,
-        snapshotStatus: snapshotFallback ? 'fallback' : 'ready',
+        snapshotStatus: 'ready',
         totals: snapshot?.totals || {},
         readiness: snapshot?.readiness || {}
       }
@@ -8615,9 +8955,11 @@ router.post('/admin/month-close', requireAuth, requireRole(['admin']), requirePe
     });
   } catch (error) {
     const code = String(error?.message || '');
-    res.status(code === 'finance_month_key_invalid' ? 400 : 500).json({
+    res.status(Number(error?.status || error?.statusCode || (code === 'finance_month_key_invalid' ? 400 : 500))).json({
       success: false,
-      message: code === 'finance_month_key_invalid' ? 'فرمت ماه مالی معتبر نیست.' : 'خطا در بستن ماه مالی'
+      message: code === 'finance_month_key_invalid'
+        ? 'فرمت ماه مالی معتبر نیست.'
+        : (error?.messageDari || error?.message || 'خطا در بستن ماه مالی')
     });
   }
 });
@@ -8625,7 +8967,9 @@ router.post('/admin/month-close', requireAuth, requireRole(['admin']), requirePe
 router.post('/admin/month-close/:id/approve', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const actorLevel = await resolveAdminActorLevel(req.user.id);
-    const item = await FinanceMonthClose.findById(req.params.id);
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await FinanceMonthClose.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
     if (!item) {
       return res.status(404).json({ success: false, message: 'ماه مالی موردنظر پیدا نشد.' });
     }
@@ -8639,6 +8983,39 @@ router.post('/admin/month-close/:id/approve', requireAuth, requireRole(['admin']
     }
     if (actorAlreadyReviewedMonthClose(item.approvalTrail, req.user.id)) {
       return res.status(409).json({ success: false, message: 'این ماه مالی قبلاً توسط شما بازبینی شده است.' });
+    }
+
+    let freshSnapshot;
+    try {
+      const anomalyCases = await populateFinanceAnomalyCaseQuery(
+        FinanceAnomalyCase.find({
+          schoolId: item.schoolId,
+          academicYearId: String(item.academicYearId || '')
+        }).sort({ updatedAt: -1 }).limit(500)
+      ).lean();
+      freshSnapshot = await buildFinanceMonthCloseSnapshot(item.monthKey, {
+        schoolId: String(item.schoolId || ''),
+        financialYearId: String(item.financialYearId || ''),
+        academicYearId: String(item.academicYearId || ''),
+        anomalyCases
+      });
+    } catch (snapshotError) {
+      return res.status(503).json({
+        success: false,
+        code: 'finance_month_close_snapshot_failed',
+        message: 'محاسبه تازه وضعیت ماه مالی ناموفق شد؛ برای حفاظت از حساب‌ها تأیید متوقف گردید.'
+      });
+    }
+    item.snapshot = freshSnapshot;
+    if (freshSnapshot?.readiness?.readyToApprove !== true) {
+      await item.save();
+      return res.status(409).json({
+        success: false,
+        code: 'finance_month_close_blocked',
+        readiness: freshSnapshot.readiness,
+        item: serializeFinanceMonthClose(item, actorLevel),
+        message: 'تا رفع موانع مالی، تأیید و بستن این ماه مجاز نیست.'
+      });
     }
 
     const note = String(req.body?.note || '').trim();
@@ -8721,7 +9098,7 @@ router.post('/admin/month-close/:id/approve', requireAuth, requireRole(['admin']
 router.post('/admin/month-close/:id/reject', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const actorLevel = await resolveAdminActorLevel(req.user.id);
-    const item = await FinanceMonthClose.findById(req.params.id);
+    const item = await loadSchoolOwnedMonthClose(req, req.params.id);
     if (!item) {
       return res.status(404).json({ success: false, message: 'ماه مالی موردنظر پیدا نشد.' });
     }
@@ -8798,7 +9175,7 @@ router.post('/admin/month-close/:id/reject', requireAuth, requireRole(['admin'])
 
 router.get('/admin/month-close/:id/export.csv', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await FinanceMonthClose.findById(req.params.id).lean();
+    const item = await loadSchoolOwnedMonthClose(req, req.params.id, { lean: true });
     if (!item) {
       return res.status(404).json({ success: false, message: 'ماه مالی موردنظر پیدا نشد.' });
     }
@@ -8848,9 +9225,10 @@ router.get('/admin/month-close/:id/export.csv', requireAuth, requireRole(['admin
 
 router.get('/admin/month-close/:id/export.pdf', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const item = await populateFinanceMonthCloseQuery(
-      FinanceMonthClose.findById(req.params.id)
-    );
+    const owned = await loadSchoolOwnedMonthClose(req, req.params.id);
+    const item = owned
+      ? await populateFinanceMonthCloseQuery(FinanceMonthClose.findById(owned._id))
+      : null;
     if (!item) {
       return res.status(404).json({ success: false, message: 'ماه مالی موردنظر پیدا نشد.' });
     }
@@ -9709,7 +10087,7 @@ router.post('/admin/month-close/:id/reopen', requireAuth, requireRole(['admin'])
       return res.status(403).json({ success: false, message: 'فقط ریاست عمومی می‌تواند ماه مالی را دوباره باز کند.' });
     }
 
-    const item = await FinanceMonthClose.findById(req.params.id);
+    const item = await loadSchoolOwnedMonthClose(req, req.params.id);
     if (!item) {
       return res.status(404).json({ success: false, message: 'ماه مالی موردنظر پیدا نشد.' });
     }

@@ -82,6 +82,15 @@ const pdfMock = {
   }
 };
 
+const schoolContextMock = {
+  async resolveActiveSchool() {
+    return { schoolId: '507f191e810c19729de86299', school: { _id: '507f191e810c19729de86299' } };
+  },
+  writeSchoolContextHeaders(res, schoolId) {
+    res.set('X-School-Id', schoolId);
+  }
+};
+
 function loadRouter() {
   const routePath = path.join(__dirname, '..', 'routes', 'reportRoutes.js');
   const originalLoad = Module._load;
@@ -92,6 +101,7 @@ function loadRouter() {
     if (isRouteFile && request === '../services/reportEngineService') return serviceMock;
     if (isRouteFile && request === '../utils/activity') return activityMock;
     if (isRouteFile && request === '../services/sheetTemplatePdfService') return pdfMock;
+    if (isRouteFile && request === '../services/schoolContextService') return schoolContextMock;
     return originalLoad.apply(this, arguments);
   };
   try {

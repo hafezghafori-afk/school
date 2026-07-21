@@ -19,32 +19,60 @@ function normalizeId(value) {
 async function resolveFinancialSource(filters = {}) {
   const financialYearId = normalizeText(filters.financialYearId);
   const academicYearId = normalizeText(filters.academicYearId);
+  const schoolId = normalizeText(filters.schoolId);
   let financialYear = null;
   let academicYear = null;
 
+  if (!schoolId) {
+    const error = new Error('report_school_scope_required');
+    error.statusCode = 400;
+    throw error;
+  }
+
   if (financialYearId) {
-    financialYear = await FinancialYear.findById(financialYearId).populate('academicYearId', 'title code startDate endDate');
+    financialYear = await FinancialYear.findOne({ _id: financialYearId, schoolId })
+      .populate('academicYearId', 'title code startDate endDate schoolId');
     if (financialYear?.academicYearId?._id) {
       academicYear = financialYear.academicYearId;
     }
   }
 
   if (!academicYear && academicYearId) {
-    academicYear = await AcademicYear.findById(academicYearId).select('title code startDate endDate');
+    academicYear = await AcademicYear.findOne({ _id: academicYearId, schoolId })
+      .select('title code startDate endDate schoolId');
   }
 
   if (!financialYear && academicYear?._id) {
-    financialYear = await FinancialYear.findOne({ academicYearId: academicYear._id, status: { $ne: 'archived' } })
+    financialYear = await FinancialYear.findOne({ schoolId, academicYearId: academicYear._id, status: { $ne: 'archived' } })
       .sort({ isActive: -1, createdAt: -1 });
+  }
+
+  if (!financialYear && !academicYear) {
+    const error = new Error('report_financial_scope_required');
+    error.statusCode = 400;
+    throw error;
   }
 
   const source = financialYear || academicYear || {};
   return {
     financialYear,
     academicYear,
+    schoolId,
     baseStartDate: startOfDay(source.startDate),
     baseEndDate: endOfDay(source.endDate)
   };
+}
+
+function intersectRequestedRange(range = null, filters = {}) {
+  if (!range?.startDate || !range?.endDate) return range;
+  const requestedStart = filters.dateFrom ? startOfDay(new Date(filters.dateFrom)) : null;
+  const requestedEnd = filters.dateTo ? endOfDay(new Date(filters.dateTo)) : null;
+  const startDate = requestedStart && requestedStart > range.startDate ? requestedStart : range.startDate;
+  const endDate = requestedEnd && requestedEnd < range.endDate ? requestedEnd : range.endDate;
+  if (startDate > endDate) {
+    return { startDate: new Date(0), endDate: new Date(0) };
+  }
+  return { startDate, endDate };
 }
 
 function buildRangeMatch(field, range = null) {
@@ -101,15 +129,34 @@ function mergeGroupedEntries(payments = [], expenses = [], classMap = new Map())
   return [...grouped.values()].sort((left, right) => right.balance - left.balance);
 }
 
+function buildFeeTypeBreakdown(recognizedRows = []) {
+  const grouped = new Map();
+  for (const row of recognizedRows || []) {
+    for (const allocation of row.recognizedAllocations || []) {
+      const feeType = normalizeText(allocation.feeType).toLowerCase()
+        || normalizeText(row.payment?.feeType).toLowerCase()
+        || 'other';
+      const current = grouped.get(feeType) || { feeType, amount: 0, allocationCount: 0 };
+      current.amount += Number(allocation.amount || 0);
+      current.allocationCount += 1;
+      grouped.set(feeType, current);
+    }
+  }
+  return [...grouped.values()]
+    .map((item) => ({ ...item, amount: Number(item.amount.toFixed(2)) }))
+    .sort((left, right) => right.amount - left.amount);
+}
+
 async function buildQuarterlyGovernmentFinanceReport(filters = {}) {
   const context = await resolveFinancialSource(filters);
   const quarter = Math.max(1, Math.min(4, Number(filters.quarter) || 1));
-  const range = context.baseStartDate && context.baseEndDate
+  const baseRange = context.baseStartDate && context.baseEndDate
     ? getQuarterRange({ startDate: context.baseStartDate, endDate: context.baseEndDate }, quarter)
     : null;
+  const range = intersectRequestedRange(baseRange, filters);
 
-  const paymentFilter = { status: 'approved' };
-  const expenseFilter = { status: 'approved' };
+  const paymentFilter = { status: 'approved', schoolId: context.schoolId };
+  const expenseFilter = { status: 'approved', schoolId: context.schoolId };
 
   if (filters.classId) {
     expenseFilter.classId = filters.classId;
@@ -142,6 +189,7 @@ async function buildQuarterlyGovernmentFinanceReport(filters = {}) {
     ])
   ]);
   const recognizedPaymentRows = await recognizePayments(payments);
+  const feeTypeBreakdown = buildFeeTypeBreakdown(recognizedPaymentRows);
   const paymentMap = new Map();
   recognizedPaymentRows.forEach(({ payment: item, recognizedAmount }) => {
     if (recognizedAmount <= 0) return;
@@ -176,6 +224,7 @@ async function buildQuarterlyGovernmentFinanceReport(filters = {}) {
       paymentCount: rows.reduce((sum, item) => sum + Number(item.paymentCount || 0), 0),
       expenseCount: rows.reduce((sum, item) => sum + Number(item.expenseCount || 0), 0)
     },
+    feeTypeBreakdown,
     meta: {
       financialYearId: context.financialYear?._id ? String(context.financialYear._id) : '',
       academicYearId: context.academicYear?._id ? String(context.academicYear._id) : '',
@@ -188,7 +237,7 @@ async function buildQuarterlyGovernmentFinanceReport(filters = {}) {
 async function buildAnnualGovernmentFinanceReport(filters = {}) {
   const context = await resolveFinancialSource(filters);
   const source = context.baseStartDate && context.baseEndDate
-    ? { startDate: context.baseStartDate, endDate: context.baseEndDate }
+    ? intersectRequestedRange({ startDate: context.baseStartDate, endDate: context.baseEndDate }, filters)
     : null;
   const ranges = source ? listQuarterRanges(source) : [];
 
@@ -255,8 +304,8 @@ async function buildGovernmentBudgetVsActualReport(filters = {}) {
   const context = await resolveFinancialSource(filters);
   const financialYear = context.financialYear || null;
   const academicYear = context.academicYear || null;
-  const paymentFilter = { status: 'approved' };
-  const expenseFilter = { status: 'approved' };
+  const paymentFilter = { status: 'approved', schoolId: context.schoolId };
+  const expenseFilter = { status: 'approved', schoolId: context.schoolId };
   const classId = normalizeText(filters.classId);
 
   if (financialYear?._id) {
@@ -271,14 +320,12 @@ async function buildGovernmentBudgetVsActualReport(filters = {}) {
     expenseFilter.classId = classId;
   }
 
-  Object.assign(paymentFilter, buildRangeMatch('paidAt', {
+  const reportRange = intersectRequestedRange({
     startDate: context.baseStartDate,
     endDate: context.baseEndDate
-  }));
-  Object.assign(expenseFilter, buildRangeMatch('expenseDate', {
-    startDate: context.baseStartDate,
-    endDate: context.baseEndDate
-  }));
+  }, filters);
+  Object.assign(paymentFilter, buildRangeMatch('paidAt', reportRange));
+  Object.assign(expenseFilter, buildRangeMatch('expenseDate', reportRange));
 
   const [paymentRows, expenseSummaryRows, expenseCategoryRows, categoryRegistry, treasuryAnalytics] = await Promise.all([
     FeePayment.find(paymentFilter).select('amount feeOrderId allocations').lean(),
@@ -310,6 +357,7 @@ async function buildGovernmentBudgetVsActualReport(filters = {}) {
   ]);
 
   const recognizedPaymentRows = await recognizePayments(paymentRows);
+  const feeTypeBreakdown = buildFeeTypeBreakdown(recognizedPaymentRows);
   const actualIncome = recognizedPaymentRows.reduce((sum, row) => sum + Number(row.recognizedAmount || 0), 0);
   const actualExpense = Number(expenseSummaryRows[0]?.total || 0);
   const actualNet = Number((actualIncome - actualExpense).toFixed(2));
@@ -433,6 +481,7 @@ async function buildGovernmentBudgetVsActualReport(filters = {}) {
       budgetNote: budgetTargets.note || ''
     },
     summary,
+    feeTypeBreakdown,
     categories: categoryRows,
     alerts,
     treasury: {

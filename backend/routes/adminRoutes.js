@@ -2127,10 +2127,15 @@ router.get('/alerts', requireAuth, requireRole(['admin']), requirePermission('vi
     const now = Date.now();
     const previous24hStart = new Date(now - (48 * 60 * 60000));
     const current24hStart = new Date(now - (24 * 60 * 60000));
+    const overdueOrderFilter = {
+      status: { $in: ['new', 'partial', 'overdue'] },
+      outstandingAmount: { $gt: 0 },
+      dueDate: { $lt: new Date(now) }
+    };
 
     const [pendingFinanceReceipts, overdueBills, draftSchedules, pendingProfile, pendingAccessRequests, unreadContacts, latestLogs] = await Promise.all([
       FeePayment.countDocuments({ status: 'pending' }),
-      FeeOrder.countDocuments({ status: 'overdue' }),
+      FeeOrder.countDocuments(overdueOrderFilter),
       Schedule.countDocuments({ visibility: 'draft', date: { $gte: todayKey } }),
       ProfileUpdateRequest.countDocuments({ status: 'pending' }),
       AccessRequest.countDocuments({ status: 'pending' }),
@@ -2159,15 +2164,15 @@ router.get('/alerts', requireAuth, requireRole(['admin']), requirePermission('vi
       contactsPrevious24h
     ] = await Promise.all([
       resolveOldestTimestamp(FeePayment, { status: 'pending' }, { createdAt: 1 }),
-      resolveOldestTimestamp(FeeOrder, { status: 'overdue' }, { createdAt: 1 }),
+      resolveOldestTimestamp(FeeOrder, overdueOrderFilter, { dueDate: 1, createdAt: 1 }),
       resolveOldestTimestamp(Schedule, { visibility: 'draft', date: { $gte: todayKey } }, { date: 1, createdAt: 1 }),
       resolveOldestTimestamp(ProfileUpdateRequest, { status: 'pending' }, { createdAt: 1 }),
       resolveOldestTimestamp(AccessRequest, { status: 'pending' }, { createdAt: 1 }),
       resolveOldestTimestamp(ContactMessage, { status: 'new' }, { createdAt: 1 }),
       countInCreatedWindow(FeePayment, { status: 'pending' }, current24hStart, null),
       countInCreatedWindow(FeePayment, { status: 'pending' }, previous24hStart, current24hStart),
-      countInCreatedWindow(FeeOrder, { status: 'overdue' }, current24hStart, null),
-      countInCreatedWindow(FeeOrder, { status: 'overdue' }, previous24hStart, current24hStart),
+      countInCreatedWindow(FeeOrder, overdueOrderFilter, current24hStart, null),
+      countInCreatedWindow(FeeOrder, overdueOrderFilter, previous24hStart, current24hStart),
       countInCreatedWindow(Schedule, { visibility: 'draft', date: { $gte: todayKey } }, current24hStart, null),
       countInCreatedWindow(Schedule, { visibility: 'draft', date: { $gte: todayKey } }, previous24hStart, current24hStart),
       countInCreatedWindow(ProfileUpdateRequest, { status: 'pending' }, current24hStart, null),

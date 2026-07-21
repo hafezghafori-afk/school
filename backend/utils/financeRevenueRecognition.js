@@ -18,6 +18,7 @@ function getPaymentAllocations(payment = {}) {
   return allocations
     .map((item) => ({
       feeOrderId: normalizeId(item?.feeOrderId),
+      feeType: String(item?.feeType || '').trim().toLowerCase() || '',
       amount: roundMoney(item?.amount)
     }))
     .filter((item) => item.feeOrderId && item.amount > 0);
@@ -53,13 +54,22 @@ function getRecognizedPaymentBreakdown(payment = {}, statusByOrderId = new Map()
   const paymentAmount = roundMoney(payment?.amount);
   const allocations = getPaymentAllocations(payment);
   if (!allocations.length) {
-    return { recognizedAmount: paymentAmount, excludedVoidAmount: 0 };
+    return {
+      recognizedAmount: paymentAmount,
+      excludedVoidAmount: 0,
+      recognizedAllocations: paymentAmount > 0
+        ? [{ feeOrderId: normalizeId(payment?.feeOrderId), feeType: '', amount: paymentAmount }]
+        : []
+    };
   }
 
   let excludedVoidAmount = 0;
+  const recognizedAllocations = [];
   allocations.forEach((allocation) => {
     if (statusByOrderId.get(allocation.feeOrderId) === 'void') {
       excludedVoidAmount += allocation.amount;
+    } else {
+      recognizedAllocations.push(allocation);
     }
   });
 
@@ -68,7 +78,8 @@ function getRecognizedPaymentBreakdown(payment = {}, statusByOrderId = new Map()
 
   return {
     recognizedAmount,
-    excludedVoidAmount
+    excludedVoidAmount,
+    recognizedAllocations
   };
 }
 

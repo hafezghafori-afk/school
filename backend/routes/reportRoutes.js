@@ -15,6 +15,7 @@ const { buildReportPdfBuffer } = require('../services/sheetTemplatePdfService');
 const { renderReportPrintHtml } = require('../services/sheetTemplatePrintService');
 const { resolvePermissions } = require('../utils/permissions');
 const { logActivity } = require('../utils/activity');
+const { resolveActiveSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
 
 const router = express.Router();
 
@@ -223,7 +224,12 @@ async function resolveAuthorizedReportRequest(req) {
     throw new Error('report_forbidden');
   }
 
-  const requestSchoolId = req.headers?.['x-school-id'] || req.query?.schoolId || '';
+  const schoolContext = await resolveActiveSchool(req, {
+    payload: req.body?.filters || {},
+    allowSingleFallback: true
+  });
+  if (!schoolContext.schoolId) throw new Error('report_school_scope_required');
+  const requestSchoolId = schoolContext.schoolId;
   const baseReport = await runReport(reportKey, {
     ...(req.body?.filters || {}),
     ...(requestSchoolId && !req.body?.filters?.schoolId ? { schoolId: requestSchoolId } : {})
@@ -239,7 +245,12 @@ router.get('/reference-data', requireAuth, async (req, res) => {
     if (!catalog.length) {
       return res.status(403).json({ success: false, message: 'You do not have access to the report engine.' });
     }
-    const referenceData = await listReportReferenceData();
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) {
+      return res.status(400).json({ success: false, message: 'Select an active school first.' });
+    }
+    writeSchoolContextHeaders(res, schoolContext.schoolId);
+    const referenceData = await listReportReferenceData({ schoolId: schoolContext.schoolId });
     return res.json({ success: true, catalog, ...referenceData });
   } catch (error) {
     const code = String(error?.message || '');

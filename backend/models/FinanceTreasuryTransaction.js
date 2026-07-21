@@ -47,6 +47,12 @@ const financeTreasuryTransactionSchema = new mongoose.Schema({
     trim: true,
     index: true
   },
+  idempotencyKey: {
+    type: String,
+    default: undefined,
+    trim: true,
+    set: (value) => String(value || '').trim() || undefined
+  },
   transactionType: {
     type: String,
     enum: TREASURY_TRANSACTION_TYPES,
@@ -118,6 +124,10 @@ financeTreasuryTransactionSchema.pre('validate', function syncFinanceTreasuryTra
 financeTreasuryTransactionSchema.index({ financialYearId: 1, status: 1, transactionDate: -1 });
 financeTreasuryTransactionSchema.index({ accountId: 1, status: 1, transactionDate: -1 });
 financeTreasuryTransactionSchema.index({ transactionGroupKey: 1, transactionType: 1 });
+financeTreasuryTransactionSchema.index(
+  { schoolId: 1, idempotencyKey: 1, transactionType: 1 },
+  { unique: true, sparse: true }
+);
 financeTreasuryTransactionSchema.index(
   { sourceType: 1, transactionGroupKey: 1 },
   { unique: true, partialFilterExpression: { sourceType: 'fee_payment' } }

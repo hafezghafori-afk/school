@@ -185,5 +185,6 @@ expenseEntrySchema.index({ category: 1, status: 1, expenseDate: -1 });
 expenseEntrySchema.index({ financialYearId: 1, approvalStage: 1, createdAt: -1 });
 expenseEntrySchema.index({ treasuryAccountId: 1, status: 1, expenseDate: -1 });
 expenseEntrySchema.index({ procurementCommitmentId: 1, status: 1, expenseDate: -1 });
+expenseEntrySchema.index({ schoolId: 1, academicYearId: 1, status: 1, expenseDate: -1 });
 
 module.exports = mongoose.model('ExpenseEntry', expenseEntrySchema);

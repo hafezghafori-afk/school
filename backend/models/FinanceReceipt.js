@@ -71,7 +71,7 @@ const financeReceiptSchema = new mongoose.Schema({
       default: []
     }
   }
-}, { timestamps: true });
+}, { timestamps: true, optimisticConcurrency: true });
 
 financeReceiptSchema.pre('validate', async function syncFinanceReceiptState() {
   if (typeof this.referenceNo === 'string') this.referenceNo = this.referenceNo.trim();

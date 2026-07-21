@@ -49,6 +49,7 @@ function getFinanceAnomalyTarget(item = {}) {
 function buildFinanceAnomalyCaseSnapshot(item = {}) {
   const { targetType, targetId } = getFinanceAnomalyTarget(item);
   return {
+    schoolId: normalizeNullableId(item?.schoolId),
     anomalyId: normalizeText(item?.id),
     anomalyType: normalizeText(item?.anomalyType) || 'finance_signal',
     title: normalizeText(item?.title) || 'ناهنجاری مالی',
@@ -72,6 +73,7 @@ function buildFinanceAnomalyCaseSnapshot(item = {}) {
     dueDate: item?.dueDate || null,
     at: item?.at || null,
     currentSnapshot: {
+      schoolId: normalizeNullableId(item?.schoolId),
       id: normalizeText(item?.id),
       anomalyType: normalizeText(item?.anomalyType),
       title: normalizeText(item?.title),

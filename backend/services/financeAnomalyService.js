@@ -902,18 +902,29 @@ function formatReliefLite(doc) {
 }
 
 async function buildFinanceAnomalyReport({
+  schoolId = '',
   classId = '',
   academicYearId = '',
   studentMembershipId = '',
   asOf = new Date(),
   limit = 120
 } = {}) {
+  const sourceLimit = Math.min(5000, Math.max(500, Number(limit || 120) * 20));
   const membershipFilter = {};
   const orderFilter = { status: { $ne: 'void' } };
   const billFilter = { status: { $ne: 'void' } };
   const paymentFilter = { status: { $in: ['pending', 'approved'] } };
   const reliefFilter = { status: 'active', feeOrderId: null };
   const feePlanFilter = { isActive: true, lifecycleStatus: 'active' };
+
+  if (normalizeNullableId(schoolId)) {
+    membershipFilter.schoolId = schoolId;
+    orderFilter.schoolId = schoolId;
+    billFilter.schoolId = schoolId;
+    paymentFilter.schoolId = schoolId;
+    reliefFilter.schoolId = schoolId;
+    feePlanFilter.schoolId = schoolId;
+  }
 
   if (normalizeNullableId(studentMembershipId)) {
     membershipFilter._id = studentMembershipId;
@@ -946,6 +957,7 @@ async function buildFinanceAnomalyReport({
       .populate('classId', 'title code gradeLevel section')
       .populate('academicYearId', 'title code')
       .sort({ createdAt: -1 })
+      .limit(sourceLimit)
       .lean(),
     FeeOrder.find(orderFilter)
       .populate('student', 'name email')
@@ -953,6 +965,7 @@ async function buildFinanceAnomalyReport({
       .populate('classId', 'title code gradeLevel section')
       .populate('academicYearId', 'title code')
       .sort({ dueDate: -1, createdAt: -1 })
+      .limit(sourceLimit)
       .lean(),
     FinanceBill.find(billFilter)
       .populate('student', 'name email')
@@ -960,6 +973,7 @@ async function buildFinanceAnomalyReport({
       .populate('classId', 'title code gradeLevel section')
       .populate('academicYearId', 'title code')
       .sort({ dueDate: -1, createdAt: -1 })
+      .limit(sourceLimit)
       .lean(),
     FeePayment.find(paymentFilter)
       .populate('student', 'name email')
@@ -967,6 +981,7 @@ async function buildFinanceAnomalyReport({
       .populate('classId', 'title code gradeLevel section')
       .populate('academicYearId', 'title code')
       .sort({ paidAt: -1, createdAt: -1 })
+      .limit(sourceLimit)
       .lean(),
     FinanceRelief.find(reliefFilter)
       .populate('student', 'name email')
@@ -974,10 +989,12 @@ async function buildFinanceAnomalyReport({
       .populate('classId', 'title code gradeLevel section')
       .populate('academicYearId', 'title code')
       .sort({ endDate: 1, createdAt: -1 })
+      .limit(sourceLimit)
       .lean(),
     FinanceFeePlan.find(feePlanFilter)
       .select('title tuitionFee admissionFee examFee documentFee transportDefaultFee otherFee amount classId academicYearId effectiveFrom effectiveTo isDefault priority isActive lifecycleStatus currency')
       .sort({ isDefault: -1, priority: 1, createdAt: -1 })
+      .limit(sourceLimit)
       .lean()
   ]);
 
@@ -987,7 +1004,10 @@ async function buildFinanceAnomalyReport({
   const studentCoreIds = [...new Set(memberships
     .map((item) => normalizeNullableId(item?.studentId?._id || item?.studentId))
     .filter(Boolean))];
-  const studentAdmissionFilter = { status: { $ne: 'void' } };
+  const studentAdmissionFilter = {
+    status: { $ne: 'void' },
+    ...(normalizeNullableId(schoolId) ? { schoolId } : {})
+  };
   const studentAdmissionOr = [];
   if (studentUserIds.length) studentAdmissionOr.push({ student: { $in: studentUserIds } });
   if (studentCoreIds.length) studentAdmissionOr.push({ studentId: { $in: studentCoreIds } });
@@ -999,6 +1019,7 @@ async function buildFinanceAnomalyReport({
       .populate('classId', 'title code gradeLevel section')
       .populate('academicYearId', 'title code')
       .sort({ dueDate: -1, createdAt: -1 })
+      .limit(sourceLimit)
       .lean(),
     FinanceBill.find(studentAdmissionFilter)
       .populate('student', 'name email')
@@ -1006,6 +1027,7 @@ async function buildFinanceAnomalyReport({
       .populate('classId', 'title code gradeLevel section')
       .populate('academicYearId', 'title code')
       .sort({ dueDate: -1, createdAt: -1 })
+      .limit(sourceLimit)
       .lean()
   ]) : [[], []];
 
@@ -1118,7 +1140,10 @@ async function buildFinanceAnomalyReport({
       asOf,
       limit: Math.max(Number(limit) || 120, 50)
     });
-    allItems.push(...report.items);
+    allItems.push(...report.items.map((item) => ({
+      ...item,
+      schoolId: normalizeNullableId(schoolId || membership?.schoolId)
+    })));
   });
 
   const ordered = sortAnomalies(allItems).slice(0, Math.max(1, Number(limit) || 120));
@@ -1127,6 +1152,7 @@ async function buildFinanceAnomalyReport({
     summary: buildAnomalySummary(allItems),
     generatedAt: new Date().toISOString(),
     appliedFilters: {
+      schoolId: normalizeNullableId(schoolId),
       classId: normalizeNullableId(classId),
       academicYearId: normalizeNullableId(academicYearId),
       studentMembershipId: normalizeNullableId(studentMembershipId)

@@ -98,7 +98,7 @@ const feePaymentSchema = new mongoose.Schema({
     updatedAt: { type: Date, default: null },
     history: { type: [followUpHistorySchema], default: [] }
   }
-}, { timestamps: true });
+}, { timestamps: true, optimisticConcurrency: true });
 
 feePaymentSchema.pre('validate', async function syncFeePaymentState() {
   if (typeof this.paymentNumber === 'string') this.paymentNumber = this.paymentNumber.trim().toUpperCase();
@@ -162,5 +162,6 @@ feePaymentSchema.index({ studentMembershipId: 1, status: 1, paidAt: -1 });
 feePaymentSchema.index({ linkScope: 1, status: 1, paidAt: -1 });
 feePaymentSchema.index({ 'allocations.feeOrderId': 1, status: 1, paidAt: -1 });
 feePaymentSchema.index({ receivedBy: 1, paidAt: -1, status: 1 });
+feePaymentSchema.index({ schoolId: 1, academicYearId: 1, status: 1, paidAt: -1 });
 
 module.exports = mongoose.model('FeePayment', feePaymentSchema);

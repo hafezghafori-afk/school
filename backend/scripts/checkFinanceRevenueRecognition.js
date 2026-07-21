@@ -25,8 +25,8 @@ async function run() {
       _id: 'payment-mixed',
       amount: 1000,
       allocations: [
-        { feeOrderId: 'order-open', amount: 600 },
-        { feeOrderId: 'order-void', amount: 400 }
+        { feeOrderId: 'order-open', feeType: 'tuition', amount: 600 },
+        { feeOrderId: 'order-void', feeType: 'admission', amount: 400 }
       ]
     },
     {
@@ -50,6 +50,9 @@ async function run() {
     ]
   );
   assert.strictEqual(await sumRecognizedPayments(payments, { FeeOrderModel }), 800);
+  assert.deepStrictEqual(rows[0].recognizedAllocations, [
+    { feeOrderId: 'order-open', feeType: 'tuition', amount: 600 }
+  ]);
   console.log('check:finance-revenue-recognition PASS');
 }
 
