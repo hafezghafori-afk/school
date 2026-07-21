@@ -1,0 +1,74 @@
+/* Payment form layout override: keep existing labels/options unchanged and only reduce sizing. */
+.finance-page[data-active-section="payments"] .finance-payment-row-money {
+  grid-template-columns:
+    minmax(110px, 0.62fr)
+    minmax(105px, 0.52fr)
+    minmax(155px, 0.78fr)
+    minmax(210px, 1.08fr);
+  gap: 8px;
+  align-items: end;
+}
+
+.finance-page[data-active-section="payments"] .finance-payment-row-money > * {
+  min-width: 0;
+  align-self: end;
+}
+
+.finance-page[data-active-section="payments"] .finance-payment-row-money :is(input, select),
+.finance-page[data-active-section="payments"] .finance-payment-date-field .afghan-date-input {
+  height: 40px;
+  min-height: 40px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  font-size: 13px;
+}
+
+.finance-page[data-active-section="payments"] .finance-payment-date-field {
+  min-height: 40px;
+  gap: 4px;
+  align-self: end;
+}
+
+.finance-page[data-active-section="payments"] .finance-payment-date-field .afghan-date-field,
+.finance-page[data-active-section="payments"] .finance-payment-date-field .afghan-date-input-grid {
+  height: auto;
+  min-height: 40px;
+  gap: 5px;
+  align-items: center;
+}
+
+.finance-page[data-active-section="payments"] .finance-payment-date-field .afghan-date-equivalent {
+  margin: 0;
+  padding: 3px 6px;
+  min-height: 0;
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.finance-page[data-active-section="payments"] .finance-payment-row-money .finance-field > span,
+.finance-page[data-active-section="payments"] .finance-payment-row-money .finance-field-label {
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+@media (min-width: 1101px) {
+  .finance-page[data-active-section="payments"] .finance-payment-row-money {
+    grid-template-columns:
+      minmax(110px, 0.62fr)
+      minmax(105px, 0.52fr)
+      minmax(155px, 0.78fr)
+      minmax(210px, 1.08fr) !important;
+  }
+}
+
+@media (max-width: 1100px) {
+  .finance-page[data-active-section="payments"] .finance-payment-row-money {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .finance-page[data-active-section="payments"] .finance-payment-row-money {
+    grid-template-columns: 1fr;
+  }
+}
