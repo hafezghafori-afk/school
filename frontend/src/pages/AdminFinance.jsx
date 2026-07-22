@@ -2212,10 +2212,19 @@ export default function AdminFinance() {
       return;
     }
 
-    const openBills = (billsByStudentUserId.get(normalizedStudentId) || []).filter((item) => (
-      OPEN_ORDER_STATUSES.has(String(item?.status || '').trim())
-      && Number(item?.outstandingAmount || 0) > 0
-    ));
+    const openBills = (billsByStudentUserId.get(normalizedStudentId) || [])
+      .filter((item) => (
+        OPEN_ORDER_STATUSES.has(String(item?.status || '').trim())
+        && Number(item?.outstandingAmount || 0) > 0
+      ))
+      .sort((left, right) => {
+        const leftTime = new Date(left?.dueDate || left?.issuedAt || 0).getTime();
+        const rightTime = new Date(right?.dueDate || right?.issuedAt || 0).getTime();
+        const safeLeft = Number.isNaN(leftTime) ? Number.MAX_SAFE_INTEGER : leftTime;
+        const safeRight = Number.isNaN(rightTime) ? Number.MAX_SAFE_INTEGER : rightTime;
+        if (safeLeft !== safeRight) return safeLeft - safeRight;
+        return String(getFeeOrderRowId(left) || '').localeCompare(String(getFeeOrderRowId(right) || ''));
+      });
     const membershipStudent = financeMembershipStudents.find((item) => String(item?._id || '') === normalizedStudentId) || null;
     const firstClassId = openBills[0]?.schoolClass?.id || openBills[0]?.classId?._id || '';
     const firstAcademicYearId = openBills[0]?.academicYear?.id || membershipStudent?.academicYearId || currentAcademicYearId || '';

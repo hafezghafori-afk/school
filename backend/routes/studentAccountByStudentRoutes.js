@@ -1,17 +1,13 @@
 const express = require('express');
 const StudentMembership = require('../models/StudentMembership');
 const FeeOrder = require('../models/FeeOrder');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const SchoolClass = require('../models/SchoolClass');
+const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
 const {
   buildFeeBreakdownFromLineItems,
   deriveFinanceOrderStatus,
   normalizeFinanceLineItems
 } = require('../utils/financeLineItems');
-const {
-  solarMonthKey,
-  syncStudentMonthlyArrears
-} = require('../services/studentMonthlyArrearsService');
-
 const router = express.Router();
 
 const asId = (value) => String(value?._id || value?.id || value || '').trim();
@@ -21,6 +17,28 @@ const time = (value) => {
   const parsed = new Date(value || 0).getTime();
   return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed;
 };
+
+const solarMonthKey = (value = null) => {
+  const date = value instanceof Date ? value : new Date(value || 0);
+  if (Number.isNaN(date.getTime())) return '';
+  try {
+    const parts = new Intl.DateTimeFormat('en-u-ca-persian', {
+      year: 'numeric',
+      month: '2-digit'
+    }).formatToParts(date);
+    const year = Number(parts.find((item) => item.type === 'year')?.value || 0);
+    const month = Number(parts.find((item) => item.type === 'month')?.value || 0);
+    return year && month ? `${year}-${String(month).padStart(2, '0')}` : '';
+  } catch {
+    return '';
+  }
+};
+
+const requestSchoolId = (req) => asId(
+  req.headers?.['x-school-id']
+  || req.user?.schoolId
+  || req.user?.activeSchoolId
+);
 
 const formatAcademicYear = (value) => value ? {
   id: asId(value),
@@ -129,15 +147,29 @@ const tuitionAmounts = (order = {}) => (
     }), { gross: 0, discount: 0, penalty: 0, net: 0, paid: 0, outstanding: 0 })
 );
 
-router.get('/students/:studentId/open-account', requireAuth, requireRole(['admin']), async (req, res) => {
-  try {
-    const studentId = asId(req.params.studentId);
-    if (!studentId) {
-      return res.status(400).json({ success: false, message: 'شناسه شاگرد معتبر نیست.' });
-    }
+router.get(
+  '/students/:studentId/open-account',
+  requireAuth,
+  requireRole(['admin']),
+  requirePermission('manage_finance'),
+  async (req, res) => {
+    try {
+      const studentId = asId(req.params.studentId);
+      const schoolId = requestSchoolId(req);
+      if (!studentId) {
+        return res.status(400).json({ success: false, message: 'شناسه شاگرد معتبر نیست.' });
+      }
+      if (!schoolId) {
+        return res.status(400).json({ success: false, message: 'برای مشاهده حساب، مکتب فعال را انتخاب کنید.' });
+      }
 
-    const memberships = await StudentMembership.find({
-      $or: [{ student: studentId }, { studentId }]
+      const scopedClassIds = await SchoolClass.find({ schoolId }).distinct('_id');
+
+      const memberships = await StudentMembership.find({
+      $and: [
+        { $or: [{ student: studentId }, { studentId }] },
+        { $or: [{ schoolId }, { classId: { $in: scopedClassIds } }] }
+      ]
     })
       .populate('studentId')
       .populate('student', 'name email')
@@ -147,26 +179,9 @@ router.get('/students/:studentId/open-account', requireAuth, requireRole(['admin
       .populate('academicYear')
       .sort({ isCurrent: -1, enrolledAt: -1, createdAt: -1 });
 
-    if (!memberships.length) {
-      return res.status(404).json({ success: false, message: 'عضویت مالی این شاگرد پیدا نشد.' });
-    }
-
-    let arrearsSync = { created: 0, skipped: 0, memberships: [] };
-    try {
-      arrearsSync = await syncStudentMonthlyArrears({
-        memberships,
-        actorId: req.user?.id || req.user?._id || '',
-        now: new Date()
-      });
-    } catch (syncError) {
-      console.error('Student monthly arrears sync failed:', syncError);
-      arrearsSync = {
-        created: 0,
-        skipped: 0,
-        memberships: [],
-        warning: 'تکمیل خودکار بل‌های ماهانه ناموفق بود.'
-      };
-    }
+      if (!memberships.length) {
+        return res.status(404).json({ success: false, message: 'عضویت مالی این شاگرد پیدا نشد.' });
+      }
 
     const membershipIds = memberships.map((item) => item._id);
     const membershipMap = new Map(memberships.map((item) => [asId(item), item]));
@@ -211,13 +226,18 @@ router.get('/students/:studentId/open-account', requireAuth, requireRole(['admin
       0
     ));
 
-    return res.json({
+      return res.json({
       success: true,
       student: formatStudent(memberships[0]),
       membership: formatMembership(memberships[0]),
       memberships: memberships.map(formatMembership),
       items: displayOrders,
-      arrearsSync,
+      arrearsSync: {
+        created: 0,
+        skipped: 0,
+        memberships: [],
+        mode: 'read_only'
+      },
       summary: {
         studentFee: sum(currentOrders, 'gross'),
         pastArrears: sum(previousOpenOrders, 'outstanding'),
@@ -232,14 +252,15 @@ router.get('/students/:studentId/open-account', requireAuth, requireRole(['admin
         openMonths: new Set(payableOrders.map((item) => `${item.monthKey || item.periodLabel || item.dueDate || item.id}:${item.studentMembershipId}`)).size,
         oldestDueDate: payableOrders[0]?.dueDate || payableOrders[0]?.issuedAt || null,
         oldestMembershipId: payableOrders[0]?.studentMembershipId || null,
-        autoGeneratedOrders: Number(arrearsSync.created || 0),
+        autoGeneratedOrders: 0,
         paymentPolicy: 'oldest_due_first'
       }
-    });
-  } catch (error) {
-    console.error('Student account by student failed:', error);
-    return res.status(500).json({ success: false, message: 'دریافت حساب مالی شاگرد ناموفق بود.' });
+      });
+    } catch (error) {
+      console.error('Student account by student failed:', error);
+      return res.status(500).json({ success: false, message: 'دریافت حساب مالی شاگرد ناموفق بود.' });
+    }
   }
-});
+);
 
 module.exports = router;

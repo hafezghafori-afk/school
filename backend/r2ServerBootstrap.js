@@ -16,11 +16,9 @@ require.cache[settingsRoutesPath].exports = combinedSettingsRoutes;
 const studentFinanceRoutesPath = require.resolve('./routes/studentFinanceRoutes');
 const legacyStudentFinanceRoutes = require(studentFinanceRoutesPath);
 const studentAccountByStudentRoutes = require('./routes/studentAccountByStudentRoutes');
-const studentOpenAccountRoutes = require('./routes/studentOpenAccountRoutes');
 
 const combinedStudentFinanceRoutes = express.Router();
 combinedStudentFinanceRoutes.use(studentAccountByStudentRoutes);
-combinedStudentFinanceRoutes.use(studentOpenAccountRoutes);
 combinedStudentFinanceRoutes.use(legacyStudentFinanceRoutes);
 require.cache[studentFinanceRoutesPath].exports = combinedStudentFinanceRoutes;
 
