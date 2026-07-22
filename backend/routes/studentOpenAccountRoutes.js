@@ -1,7 +1,7 @@
 const express = require('express');
 const StudentMembership = require('../models/StudentMembership');
 const FeeOrder = require('../models/FeeOrder');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
 const {
   buildFeeBreakdownFromLineItems,
   deriveFinanceOrderStatus,
@@ -123,7 +123,7 @@ const getFeeBalance = (item, feeType) => roundMoney(
     .reduce((sum, entry) => sum + Number(entry?.balanceAmount || 0), 0)
 );
 
-router.get('/memberships/:membershipId/open-orders', requireAuth, async (req, res) => {
+router.get('/memberships/:membershipId/open-orders', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const currentMembership = await StudentMembership.findById(req.params.membershipId)
       .populate('studentId')
@@ -133,6 +133,12 @@ router.get('/memberships/:membershipId/open-orders', requireAuth, async (req, re
 
     if (!currentMembership) {
       return res.status(404).json({ success: false, message: 'عضویت مالی پیدا نشد.' });
+    }
+
+    const requestedSchoolId = asId(req.headers?.['x-school-id'] || req.user?.schoolId || req.user?.activeSchoolId);
+    const membershipSchoolId = asId(currentMembership.schoolId || currentMembership.classId?.schoolId);
+    if (!requestedSchoolId || !membershipSchoolId || requestedSchoolId !== membershipSchoolId) {
+      return res.status(404).json({ success: false, message: 'عضویت مالی در مکتب فعال پیدا نشد.' });
     }
 
     const userId = asId(currentMembership.student);
