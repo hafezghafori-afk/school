@@ -396,6 +396,48 @@ function inferPrimaryOrderType(lineItems = [], fallback = 'tuition') {
   return scopes[0] || normalizedFallback || 'tuition';
 }
 
+const FINANCE_TIME_ZONE = 'Asia/Kabul';
+
+function financeCalendarDayNumber(value, { timeZone = FINANCE_TIME_ZONE } = {}) {
+  if (value === null || value === undefined || value === '') return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).formatToParts(date);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const year = Number(values.year);
+    const month = Number(values.month);
+    const day = Number(values.day);
+    if (![year, month, day].every(Number.isFinite)) return null;
+    return (year * 10000) + (month * 100) + day;
+  } catch {
+    return null;
+  }
+}
+
+function compareFinanceCalendarDays(left, right, options = {}) {
+  const leftDay = financeCalendarDayNumber(left, options);
+  const rightDay = financeCalendarDayNumber(right, options);
+  if (leftDay === null || rightDay === null) return null;
+  if (leftDay === rightDay) return 0;
+  return leftDay < rightDay ? -1 : 1;
+}
+
+function isFinanceDueDatePast(dueDate, now = new Date(), options = {}) {
+  return compareFinanceCalendarDays(dueDate, now, options) === -1;
+}
+
+function isFinanceDueDateReached(dueDate, now = new Date(), options = {}) {
+  const comparison = compareFinanceCalendarDays(dueDate, now, options);
+  return comparison !== null && comparison <= 0;
+}
+
 function deriveFinanceOrderStatus({
   currentStatus = '',
   amountOriginal = 0,
@@ -415,15 +457,7 @@ function deriveFinanceOrderStatus({
   // A fully covered obligation is not a payment: no cash was received.
   if (grossAmount > 0 && payableAmount <= 0 && paidAmount <= 0) return 'waived';
   if (paidAmount > 0 && remainingAmount <= 0) return 'paid';
-  if (dueDate) {
-    const deadline = new Date(dueDate);
-    const referenceTime = now instanceof Date ? now : new Date(now);
-    if (!Number.isNaN(deadline.getTime())
-      && !Number.isNaN(referenceTime.getTime())
-      && deadline.getTime() < referenceTime.getTime()) {
-      return 'overdue';
-    }
-  }
+  if (dueDate && isFinanceDueDatePast(dueDate, now)) return 'overdue';
   if (paidAmount > 0) return 'partial';
   return 'new';
 }
@@ -466,6 +500,10 @@ module.exports = {
   getFinanceFeeScopeGrossAmount,
   getFinanceFeeScopePaidAmount,
   getFinanceFeeScopeBalanceAmount,
+  FINANCE_TIME_ZONE,
+  compareFinanceCalendarDays,
+  isFinanceDueDatePast,
+  isFinanceDueDateReached,
   deriveFinanceOrderStatus,
   applyFinanceOrderStatus,
   roundMoney

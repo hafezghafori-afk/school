@@ -7,6 +7,7 @@ const StudentProfile = require('../models/StudentProfile');
 const UserNotification = require('../models/UserNotification');
 const { logActivity } = require('../utils/activity');
 const { sendMail } = require('../utils/mailer');
+const { isFinanceMaintenanceActive } = require('./financeMaintenanceService');
 
 const FINANCE_REMINDER_ENABLED = String(process.env.FINANCE_REMINDER_AUTOMATION_ENABLED || 'false').toLowerCase() === 'true';
 const FINANCE_REMINDER_INTERVAL_MINUTES = Math.max(15, Number(process.env.FINANCE_REMINDER_INTERVAL_MIN || 360));
@@ -147,6 +148,9 @@ async function runFinanceReminderSweep(app, { force = false, req = null, actorUs
   }
   if (running) {
     return { ok: true, skipped: true, reason: 'already_running' };
+  }
+  if (await isFinanceMaintenanceActive()) {
+    return { ok: true, skipped: true, reason: 'finance_maintenance_active' };
   }
 
   running = true;

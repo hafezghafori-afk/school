@@ -45,9 +45,9 @@ const users = [
 ];
 
 const memberships = [
-  { _id: 'mem-1', student: IDS.student1, course: IDS.course1, classId: IDS.class1, status: 'active', isCurrent: true },
-  { _id: 'mem-2', student: IDS.student2, course: IDS.course1, classId: IDS.class1, status: 'active', isCurrent: true },
-  { _id: 'mem-3', student: IDS.student2, course: IDS.course1, classId: IDS.class1, status: 'dropped', isCurrent: false }
+  { _id: 'mem-1', schoolId: 'school-1', student: IDS.student1, course: IDS.course1, classId: IDS.class1, status: 'active', isCurrent: true },
+  { _id: 'mem-2', schoolId: 'school-1', student: IDS.student2, course: IDS.course1, classId: IDS.class1, status: 'active', isCurrent: true },
+  { _id: 'mem-3', schoolId: 'school-1', student: IDS.student2, course: IDS.course1, classId: IDS.class1, status: 'dropped', isCurrent: false }
 ];
 
 let billSerial = 4;
@@ -65,6 +65,7 @@ let treasuryTransactionSerial = 1;
 let procurementCommitmentSerial = 0;
 let governmentSnapshotSerial = 0;
 let membershipRecoveryScanCount = 0;
+const reportRunCalls = [];
 
 const feePlans = [];
 const canonicalFeeOrders = [];
@@ -272,6 +273,7 @@ const governmentSnapshots = [];
 const bills = [
   {
     _id: 'bill-1',
+    schoolId: 'school-1',
     billNumber: 'BL-202603-0001',
     student: IDS.student1,
     course: IDS.course1,
@@ -297,6 +299,7 @@ const bills = [
   },
   {
     _id: 'bill-2',
+    schoolId: 'school-1',
     billNumber: 'BL-202603-0002',
     student: IDS.student1,
     course: IDS.course1,
@@ -322,6 +325,7 @@ const bills = [
   },
   {
     _id: 'bill-3',
+    schoolId: 'school-1',
     billNumber: 'BL-202603-0003',
     student: IDS.student1,
     course: IDS.course1,
@@ -347,6 +351,7 @@ const bills = [
   },
   {
     _id: 'bill-4',
+    schoolId: 'school-1',
     billNumber: 'BL-202603-0004',
     student: IDS.student2,
     course: IDS.course1,
@@ -375,6 +380,7 @@ const bills = [
 const receipts = [
   {
     _id: 'receipt-1',
+    schoolId: 'school-1',
     bill: 'bill-2',
     student: IDS.student1,
     course: IDS.course1,
@@ -397,6 +403,7 @@ const receipts = [
   },
   {
     _id: 'receipt-2',
+    schoolId: 'school-1',
     bill: 'bill-3',
     student: IDS.student1,
     course: IDS.course1,
@@ -526,9 +533,16 @@ const asTimeValue = (value) => {
 };
 
 const matchCondition = (actualValue, expectedValue) => {
+  if (expectedValue === null) return actualValue == null;
   if (expectedValue && typeof expectedValue === 'object' && !Array.isArray(expectedValue) && !(expectedValue instanceof Date)) {
+    if ('$elemMatch' in expectedValue) {
+      return Array.isArray(actualValue)
+        && actualValue.some((entry) => matchesFilter(entry, expectedValue.$elemMatch));
+    }
     if ('$ne' in expectedValue) return asComparable(actualValue) !== String(expectedValue.$ne);
-    if ('$in' in expectedValue) return expectedValue.$in.some((value) => asComparable(actualValue) === String(value));
+    if ('$in' in expectedValue) return expectedValue.$in.some((value) => (
+      value === null ? actualValue == null : asComparable(actualValue) === String(value)
+    ));
     if ('$exists' in expectedValue) {
       const exists = actualValue !== undefined;
       return Boolean(expectedValue.$exists) === exists;
@@ -3019,6 +3033,7 @@ const EnrollmentMock = {
 const toCanonicalOrder = (bill) => ({
   _id: `fee-order-${bill._id}`,
   orderNumber: bill.billNumber,
+  schoolId: bill.schoolId,
   student: bill.student,
   studentId: null,
   studentMembershipId: null,
@@ -3080,6 +3095,7 @@ const toCanonicalPayment = (receipt) => {
   return {
     _id: `fee-payment-${receipt._id}`,
     paymentNumber: receipt._id,
+    schoolId: receipt.schoolId,
     feeOrderId: bill ? `fee-order-${bill._id}` : null,
     student: receipt.student,
     studentId: null,
@@ -3206,6 +3222,7 @@ const FeePaymentMock = {
 
 const reportEngineServiceMock = {
   async runReport(reportKey, filters = {}) {
+    reportRunCalls.push({ reportKey, filters: { ...filters } });
     if (reportKey === 'fee_collection_by_class') {
       const scopedBills = bills.filter((item) => !filters.classId || String(item.classId) === String(filters.classId));
       const totalDue = scopedBills.reduce((sum, item) => sum + Number(item.amountDue || 0), 0);
@@ -3612,6 +3629,8 @@ const classScopeMock = {
       courseId: IDS.course1,
       schoolClass: {
         _id: IDS.class1,
+        schoolId: 'school-1',
+        academicYearId: null,
         title: 'Class One Core',
         code: '10-A',
         gradeLevel: 10,
@@ -4953,6 +4972,11 @@ function loadFinanceRouter() {
     if (isFinanceRoute && request === '../models/FeePayment') return FeePaymentMock;
     if (isFinanceRoute && request === '../models/FinanceRelief') return FinanceReliefMock;
     if (isFinanceRoute && request === '../utils/studentMembershipLookup') return studentMembershipLookupMock;
+    if (isFinanceRoute && request === '../utils/financeNumberSequence') {
+      return {
+        nextFinanceDocumentNumber: async ({ prefix = 'FO' } = {}) => `${prefix}-TEST-${String(++billSerial).padStart(4, '0')}`
+      };
+    }
     if (isFinanceRoute && request === '../utils/classScope') return classScopeMock;
     if (isFinanceRoute && request === '../utils/studentFinanceSync') {
       return {
@@ -5502,12 +5526,29 @@ async function run() {
     await check('route smoke: grouped bill generation uses active memberships', async () => {
       const baselineCount = bills.length;
       membershipRecoveryScanCount = 0;
+      feePlans.push({
+        _id: 'fee-plan-grouped-term-7',
+        title: 'Class One 1405 Term 7',
+        planCode: 'TERM-7',
+        planType: 'standard',
+        priority: 1,
+        isDefault: true,
+        schoolId: 'school-1',
+        classId: IDS.class1,
+        course: IDS.course1,
+        academicYear: '1405',
+        term: '7',
+        billingFrequency: 'term',
+        tuitionFee: 640,
+        isActive: true,
+        lifecycleStatus: 'active'
+      });
       const response = await request(server, '/api/finance/admin/bills/generate', {
         method: 'POST',
         user: financeManagerUser,
         body: {
           classId: IDS.class1,
-          amount: 640,
+          amount: 999,
           dueDate: '2026-04-18',
           issuedAt: '2026-03-06',
           academicYear: '1405',
@@ -5516,6 +5557,7 @@ async function run() {
           periodLabel: ''
         }
       });
+      feePlans.pop();
       assertCase(response.status === 200, `expected 200, received ${response.status}: ${response.text}`);
       assertCase(response.data?.created === 2, `expected 2 created bills, received ${response.data?.created}`);
       assertCase(response.data?.skipped === 0, `expected 0 skipped bills, received ${response.data?.skipped}`);
@@ -5525,15 +5567,17 @@ async function run() {
       assertCase(createdStudentIds.join(',') === [IDS.student1, IDS.student2].sort().join(','), 'expected bills only for active current memberships');
       assertCase(createdBills.every((item) => item.term === '7'), 'expected generated bills to use requested term');
       assertCase(createdBills.every((item) => String(item.classId || '') === IDS.class1), 'expected generated bills to carry canonical classId');
+      assertCase(createdBills.every((item) => Number(item.amountOriginal || 0) === 640), 'expected grouped billing to ignore request amount and use the active plan');
       assertCase(createdBills.every((item) => Array.isArray(item.lineItems) && item.lineItems.length >= 1), 'expected generated bills to persist canonical line items');
       assertCase(createdBills.every((item) => String(item.issuanceKey || '').startsWith('grouped-billing:')), 'expected generated bills to carry atomic grouped issuance keys');
-      assertCase(membershipRecoveryScanCount > 0, 'expected generation to opt into membership recovery');
+      assertCase(membershipRecoveryScanCount === 0, 'expected generation not to create memberships as a billing side effect');
     });
 
     await check('route smoke: canonical billing preview applies discount and exemption registry rules', async () => {
       feePlans.push({
         _id: 'fee-plan-preview',
         title: 'Class One 1405 Canonical',
+        schoolId: 'school-1',
         course: IDS.course1,
         classId: IDS.class1,
         academicYear: '1405',
@@ -5544,10 +5588,12 @@ async function run() {
         tuitionFee: 600,
         admissionFee: 100,
         transportDefaultFee: 50,
-        isActive: true
+        isActive: true,
+        lifecycleStatus: 'active'
       });
       discountRegistry.push({
         _id: 'discount-preview-1',
+        schoolId: 'school-1',
         studentMembershipId: 'mem-1',
         feeOrderId: null,
         discountType: 'discount',
@@ -5559,6 +5605,7 @@ async function run() {
       });
       feeExemptions.push({
         _id: 'exemption-preview-1',
+        schoolId: 'school-1',
         studentMembershipId: 'mem-2',
         exemptionType: 'partial',
         scope: 'tuition',
@@ -5607,6 +5654,7 @@ async function run() {
       feePlans.push({
         _id: 'fee-plan-monthly-preview',
         title: 'Class One 1405 Monthly',
+        schoolId: 'school-1',
         course: IDS.course1,
         classId: IDS.class1,
         academicYear: '1405',
@@ -5614,7 +5662,8 @@ async function run() {
         billingFrequency: 'monthly',
         periodType: 'monthly',
         tuitionFee: 700,
-        isActive: true
+        isActive: true,
+        lifecycleStatus: 'active'
       });
 
       const response = await request(server, '/api/finance/admin/bills/preview', {
@@ -6247,6 +6296,9 @@ async function run() {
       const item = (response.data?.items || []).find((entry) => String(entry.classId || '') === IDS.class1);
       assertCase(Boolean(item), 'expected canonical class report row');
       assertCase(Number(item?.due || 0) >= 3400, 'expected aggregated due amount for class');
+      assertCase(response.headers['x-school-id'] === 'school-1', 'expected class report to expose its active-school scope');
+      const reportCall = [...reportRunCalls].reverse().find((entry) => entry.reportKey === 'fee_collection_by_class');
+      assertCase(reportCall?.filters?.schoolId === 'school-1', 'expected class report engine query to receive active schoolId');
     });
 
     await check('route smoke: class finance report accepts canonical class filter', async () => {
@@ -6263,6 +6315,7 @@ async function run() {
       });
       assertCase(classResponse.status === 200, `expected 200, received ${classResponse.status}`);
       assertCase((classResponse.data?.rows || []).every((entry) => String(entry.classId || '') === IDS.class1), 'expected class-scoped aging rows');
+      assertCase(classResponse.headers['x-school-id'] === 'school-1', 'expected aging report to expose its active-school scope');
 
       const courseResponse = await request(server, `/api/finance/admin/reports/aging?courseId=${IDS.course1}`, {
         user: financeManagerUser
@@ -6280,6 +6333,7 @@ async function run() {
       assertCase(classResponse.status === 200, `expected 200, received ${classResponse.status}`);
       assertCase(Array.isArray(classResponse.data?.items) && classResponse.data.items.length >= 1, 'expected class-scoped cashflow rows');
       assertCase(Number(classResponse.data?.total || 0) >= 300, 'expected scoped cashflow total');
+      assertCase(classResponse.headers['x-school-id'] === 'school-1', 'expected cashflow report to expose its active-school scope');
 
       const courseResponse = await request(server, `/api/finance/admin/reports/cashflow?courseId=${IDS.course1}&${queryWindow}`, {
         user: financeManagerUser

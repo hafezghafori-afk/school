@@ -13,12 +13,18 @@ const IDS = {
   exemption: '507f191e810c19729de86007',
   payment: '507f191e810c19729de86008',
   paymentDirect: '507f191e810c19729de86018',
-  school: '507f191e810c19729de86019'
+  school: '507f191e810c19729de86019',
+  otherSchool: '507f191e810c19729de86029'
 };
 const activityCalls = [];
 const financeActionCalls = [];
 const archivedDocuments = [];
 const discountListFilters = [];
+const orderListFilters = [];
+const paymentListFilters = [];
+const paymentReceiptFilters = [];
+const paymentPreviewPayloads = [];
+const paymentCreatePayloads = [];
 const discountRegistry = [
   {
     id: IDS.discount,
@@ -72,13 +78,16 @@ const serviceMock = {
       sessions: []
     };
   },
-  async listFeeOrders() {
+  async listFeeOrders(filters = {}) {
+    orderListFilters.push({ ...filters });
     return [{ id: IDS.order, orderNumber: 'BL-1406-0001' }];
   },
-  async listFeePayments() {
+  async listFeePayments(filters = {}) {
+    paymentListFilters.push({ ...filters });
     return [{ id: 'pay-1', paymentNumber: 'PAY-0001' }];
   },
-  async getFeePaymentReceipt(paymentId) {
+  async getFeePaymentReceipt(paymentId, filters = {}) {
+    paymentReceiptFilters.push({ ...filters });
     if (String(paymentId) !== IDS.payment) {
       throw new Error('student_finance_payment_not_found');
     }
@@ -148,6 +157,7 @@ const serviceMock = {
     };
   },
   async previewFeePaymentAllocation(payload = {}) {
+    paymentPreviewPayloads.push({ ...payload });
     if (String(payload.studentMembershipId || '') !== IDS.membership) {
       throw new Error('student_finance_membership_not_found');
     }
@@ -173,6 +183,7 @@ const serviceMock = {
     };
   },
   async createFeePayment(payload = {}) {
+    paymentCreatePayloads.push({ ...payload });
     if (String(payload.studentMembershipId || '') !== IDS.membership) {
       throw new Error('student_finance_membership_not_found');
     }
@@ -345,12 +356,12 @@ const financeAdminActionServiceMock = {
     financeActionCalls.push({ route: 'order-void', feeOrderId, body });
     return { item: { _id: feeOrderId }, message: 'Void handled canonically' };
   },
-  async approveFeePaymentAction({ feePaymentId, body = {} } = {}) {
-    financeActionCalls.push({ route: 'payment-approve', feePaymentId, body });
+  async approveFeePaymentAction({ req, feePaymentId, body = {} } = {}) {
+    financeActionCalls.push({ route: 'payment-approve', feePaymentId, body, activeSchoolId: req?.user?.schoolId || '' });
     return { message: 'Receipt approved', nextStage: 'completed', requiresFinalApproval: false };
   },
-  async rejectFeePaymentAction({ feePaymentId, body = {} } = {}) {
-    financeActionCalls.push({ route: 'payment-reject', feePaymentId, body });
+  async rejectFeePaymentAction({ req, feePaymentId, body = {} } = {}) {
+    financeActionCalls.push({ route: 'payment-reject', feePaymentId, body, activeSchoolId: req?.user?.schoolId || '' });
     return { message: 'Receipt rejected', nextStage: 'rejected' };
   },
   async updateFeePaymentFollowUpAction({ feePaymentId, body = {} } = {}) {
@@ -502,7 +513,7 @@ async function run() {
     cases.push(await request(server, '/api/student-finance/reference-data'));
     cases.push(await request(server, '/api/student-finance/reference-data', { user: { id: IDS.admin, role: 'admin', permissions: [] } }));
     cases.push(await request(server, '/api/student-finance/reference-data', { user: adminUser }));
-    cases.push(await request(server, '/api/student-finance/orders', { user: adminUser }));
+    cases.push(await request(server, '/api/student-finance/orders?view=open', { user: adminUser }));
     cases.push(await request(server, `/api/student-finance/payments/${IDS.payment}/receipt`, { user: adminUser }));
     cases.push(await request(server, '/api/student-finance/reports/daily-cashier?date=2026-03-20', { user: adminUser }));
     cases.push(await request(server, `/api/student-finance/memberships/${IDS.membership}/open-orders`, { user: adminUser }));
@@ -511,6 +522,7 @@ async function run() {
       user: adminUser,
       body: {
         studentMembershipId: IDS.membership,
+        schoolId: IDS.otherSchool,
         amount: 3000,
         allocationMode: 'auto_oldest_due'
       }
@@ -523,6 +535,7 @@ async function run() {
       user: adminUser,
       body: {
         studentMembershipId: IDS.membership,
+        schoolId: IDS.otherSchool,
         amount: 3000,
         paymentMethod: 'cash',
         allocationMode: 'auto_oldest_due',
@@ -623,14 +636,19 @@ async function run() {
     assertCase(cases[1].status === 403, 'Expected reference-data route to require permission.');
     assertCase(cases[2].status === 200 && Array.isArray(cases[2].data?.academicYears), 'Expected reference-data route to return academic years.');
     assertCase(cases[3].status === 200 && Array.isArray(cases[3].data?.items), 'Expected orders route to return items.');
+    assertCase(orderListFilters[0]?.view === 'open', 'Expected the open-order view to reach the canonical order query.');
     assertCase(cases[4].status === 200 && cases[4].data?.receipt?.paymentId === IDS.payment, 'Expected payment receipt route to return canonical print payload.');
+    assertCase(String(paymentReceiptFilters[0]?.schoolId || '') === IDS.school, 'Expected admin payment receipt reads to enforce the active request school.');
+    assertCase(paymentReceiptFilters[0]?.requireSchoolScope === true, 'Expected admin payment receipt reads to require an explicit active-school scope.');
     assertCase(cases[5].status === 200 && cases[5].data?.summary?.totalPayments === 2, 'Expected daily cashier report route to return summary totals.');
     assertCase(cases[6].status === 200 && Array.isArray(cases[6].data?.items) && cases[6].data?.items?.length === 2, 'Expected open-orders route to return canonical open fee orders.');
     assertCase(cases[7].status === 200 && Array.isArray(cases[7].data?.allocations) && cases[7].data?.allocations?.length === 2, 'Expected preview-allocation route to return allocation rows.');
+    assertCase(String(paymentPreviewPayloads[0]?.schoolId || '') === IDS.school, 'Expected preview-allocation to enforce the active request school.');
     assertCase(cases[8].status === 200 && Array.isArray(cases[8].data?.items) && cases[8].data?.items?.[0]?.id === IDS.discount, 'Expected discounts route to return canonical registry items.');
     assertCase(String(discountListFilters[0]?.registryOnly || '') === 'true', 'Expected discounts registry route to exclude bill-adjustment mirror records by default.');
     assertCase(cases[9].status === 200 && Array.isArray(cases[9].data?.items) && cases[9].data?.items?.[0]?.id === 'relief-1', 'Expected reliefs route to return canonical relief items.');
     assertCase(cases[10].status === 201 && cases[10].data?.item?.id === 'pay-created', 'Expected create payment route to return canonical payment item.');
+    assertCase(String(paymentCreatePayloads[0]?.schoolId || '') === IDS.school, 'Expected payment creation to enforce the active request school.');
     assertCase(Array.isArray(cases[10].data?.item?.allocations) && cases[10].data?.item?.allocations?.length === 2, 'Expected created payment to preserve allocations.');
     assertCase(cases[11].status === 201 && cases[11].data?.item?.discountType === 'discount', 'Expected discount create route to return created item.');
     assertCase(cases[12].status === 200 && cases[12].data?.item?.id === 'dis-new', 'Expected discount cancel route to return updated item.');
@@ -681,6 +699,20 @@ async function run() {
     assertCase(String(financeActionCalls[5]?.body?.note || '') === 'Direct canonical approval', 'Expected direct canonical approve action body to preserve note.');
     assertCase(String(financeActionCalls[6]?.body?.reason || '') === 'Receipt mismatch', 'Expected reject action body to preserve reason.');
     assertCase(String(financeActionCalls[7]?.body?.note || '') === 'Escalated for review', 'Expected follow-up action body to preserve note.');
+    assertCase(financeActionCalls.slice(4, 7).every((item) => item.activeSchoolId === IDS.school), 'Expected payment approve/reject actions to receive the authenticated active-school context.');
+
+    const scopedPaymentList = await request(server, `/api/student-finance/payments?view=inbox&status=approved&schoolId=${IDS.otherSchool}`, {
+      user: adminUser
+    });
+    assertCase(scopedPaymentList.status === 200, 'Expected active-school payment list read to succeed.');
+    assertCase(String(paymentListFilters.at(-1)?.schoolId || '') === IDS.school, 'Expected query schoolId to be ignored in favor of the authenticated active school.');
+    assertCase(paymentListFilters.at(-1)?.requireSchoolScope === true, 'Expected canonical payment list reads to require school scope.');
+    assertCase(paymentListFilters.at(-1)?.view === 'inbox', 'Expected the payment inbox view to reach the canonical payment query.');
+
+    const unscopedPaymentList = await request(server, `/api/student-finance/payments?schoolId=${IDS.otherSchool}`, {
+      user: { id: IDS.admin, role: 'admin', permissions: ['manage_finance'] }
+    });
+    assertCase(unscopedPaymentList.status === 400, 'Expected a query-only schoolId to be rejected when no authenticated/header school is active.');
 
     const activityBeforeDeduplication = activityCalls.length;
     const deduplicationResponse = await request(server, '/api/student-finance/discounts/deduplicate', {

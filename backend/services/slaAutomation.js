@@ -5,6 +5,7 @@ const User = require('../models/User');
 const UserNotification = require('../models/UserNotification');
 const { logActivity } = require('../utils/activity');
 const { normalizeAdminLevel } = require('../utils/permissions');
+const { isFinanceMaintenanceActive } = require('./financeMaintenanceService');
 
 const LEVEL_ORDER = ['finance_manager', 'finance_lead', 'general_president'];
 const OPEN_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'escalated']);
@@ -147,6 +148,9 @@ const processWorkflow = async ({ app, model, action, targetType, baseFilter }) =
 };
 
 async function runSlaEscalationSweep(app, { force = false } = {}) {
+  if (await isFinanceMaintenanceActive()) {
+    return { ok: true, skipped: true, reason: 'finance_maintenance_active' };
+  }
   if (!SLA_ENABLED && !force) {
     return { ok: true, skipped: true, reason: 'sla_disabled' };
   }

@@ -1,20 +1,14 @@
-﻿const fs = require('node:fs');
-const path = require('node:path');
-const { EJSON } = require('bson');
 const {
-  uploadsDir,
   backupRoot,
   parseArgs,
   ensureDir,
   getRegisteredModels,
   getMongoUri,
-  connectDatabase,
   disconnectDatabase,
-  copyDirectory,
   resolveBackupDirectory,
-  writeJsonFile,
   getDatabaseName
 } = require('./backupRestoreShared');
+const { createDatabaseBackup } = require('../services/databaseBackupService');
 
 function printPlan(backupDir, options, models) {
   console.log(`Backup directory: ${backupDir}`);
@@ -22,12 +16,12 @@ function printPlan(backupDir, options, models) {
   console.log(`Include database: ${options.includeDatabase ? 'yes' : 'no'}`);
   console.log(`Include uploads: ${options.includeUploads ? 'yes' : 'no'}`);
   if (options.includeDatabase) {
-    console.log(`Collections: ${models.map((item) => item.collectionName).join(', ')}`);
+    console.log(`Registered collections (preview only): ${models.map((item) => item.collectionName).join(', ')}`);
   }
 }
 
-async function run() {
-  const args = parseArgs();
+async function run(argv = process.argv.slice(2)) {
+  const args = parseArgs(argv);
   const includeDatabase = !args['uploads-only'];
   const includeUploads = !args['db-only'];
   const dryRun = Boolean(args['dry-run']);
@@ -41,61 +35,29 @@ async function run() {
   ensureDir(backupRoot);
   printPlan(backupDir, { includeDatabase, includeUploads }, models);
   if (dryRun) {
+    console.log('The actual v2 backup inventories every raw MongoDB collection, including collections without a Mongoose model.');
     console.log('Dry run complete.');
     return;
   }
 
-  ensureDir(backupDir);
-
-  const manifest = {
-    formatVersion: 1,
-    createdAt: new Date().toISOString(),
-    database: {
-      name: getDatabaseName(getMongoUri()),
-      included: includeDatabase,
-      collections: []
-    },
-    uploads: {
-      included: includeUploads,
-      copied: false,
-      source: path.relative(path.resolve(__dirname, '..'), uploadsDir).replace(/\\/g, '/')
-    }
-  };
-
   try {
-    if (includeDatabase) {
-      const dataDir = path.join(backupDir, 'database');
-      ensureDir(dataDir);
-      await connectDatabase();
-
-      for (const item of models) {
-        const docs = await item.model.find({}).lean().exec();
-        const filePath = path.join(dataDir, `${item.collectionName}.json`);
-        fs.writeFileSync(filePath, `${EJSON.stringify(docs, null, 2)}\n`, 'utf8');
-        manifest.database.collections.push({
-          model: item.name,
-          collection: item.collectionName,
-          count: docs.length,
-          file: `database/${item.collectionName}.json`
-        });
-        console.log(`BACKUP ${item.collectionName} (${docs.length})`);
-      }
-    }
-
-    if (includeUploads) {
-      const copied = copyDirectory(uploadsDir, path.join(backupDir, 'uploads'));
-      manifest.uploads.copied = copied;
-      console.log(copied ? 'BACKUP uploads' : 'SKIP uploads (not found)');
-    }
-
-    writeJsonFile(path.join(backupDir, 'manifest.json'), manifest);
-    console.log(`Backup completed: ${backupDir}`);
+    const backup = await createDatabaseBackup({
+      backupDir,
+      includeDatabase,
+      includeUploads,
+      log: (message) => console.log(message)
+    });
+    console.log(`Backup completed: ${backup.backupDir}`);
   } finally {
     await disconnectDatabase();
   }
 }
 
-run().catch((error) => {
-  console.error(error.message || error);
-  process.exit(1);
-});
+if (require.main === module) {
+  run().catch((error) => {
+    console.error(error.message || error);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { printPlan, run };

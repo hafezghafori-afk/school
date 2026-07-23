@@ -28,9 +28,11 @@ assert.strictEqual(classifyAutoMonthlyFeeOrder({ order: { ...autoOrder, issuance
 
 const read = (file) => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const accountRoute = read('routes/studentAccountByStudentRoutes.js');
+const accountService = read('services/studentOpenAccountService.js');
 assert.doesNotMatch(accountRoute, /syncStudentMonthlyArrears/);
 assert.match(accountRoute, /requirePermission\('manage_finance'\)/);
-assert.match(accountRoute, /mode: 'read_only'/);
+assert.doesNotMatch(accountService, /syncStudentMonthlyArrears/);
+assert.match(accountService, /mode: 'read_only'/);
 
 const mainEntry = read('../frontend/src/main.jsx');
 assert.doesNotMatch(mainEntry, /studentFinanceAccountDirect/);

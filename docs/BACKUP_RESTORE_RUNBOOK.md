@@ -1,136 +1,95 @@
-﻿# Backup and Restore Runbook
+# Backup and Restore Runbook
 
-Last update: 2026-03-07
+Last update: 2026-07-22
 Owner: Operations / admin
 
-## Scope
+## Scope and format
 
-This runbook covers application-level backup and restore for:
-- MongoDB content managed through the backend Mongoose models
-- uploaded files stored in `backend/uploads/`
+Application backups use manifest format v2 and contain:
 
-Backup output is written to `backend/backups/<timestamp>/`.
+- every raw MongoDB collection, including collections that have no Mongoose model;
+- collection options, indexes, views, document counts, and SHA-256 checksums;
+- MongoDB Extended JSON files so BSON values survive restore;
+- an upload-file inventory with each relative path, byte size, and SHA-256 checksum.
 
-## Backup Structure
+The transient `financemaintenancelocks` collection is deliberately excluded.
 
-Each backup directory contains:
-- `manifest.json`: backup metadata and collection inventory
-- `database/*.json`: one EJSON dump per MongoDB collection
-- `uploads/`: copied user-uploaded files when uploads are included
+## Create a backup
 
-The database dump uses MongoDB Extended JSON so ObjectIds and dates survive restore.
-
-## Pre-Backup Checks
+For an application-consistent backup, stop write traffic or enter the application's global maintenance window first. The finance-reset command does this automatically; the general backup command does not acquire a maintenance lock by itself.
 
 From `backend`:
 
-```bash
+```powershell
 npm run backup:plan
-npm run test:smoke
-npm run audit:security
+npm run backup:create -- --label=pre-release
 ```
 
-Recommended operator checks before a release backup:
-- Confirm `MONGO_URI` points to the intended environment.
-- Confirm enough disk space exists under `backend/backups/`.
-- Confirm no emergency data migration is running.
+Optional targets:
 
-## Create a Backup
-
-From `backend`:
-
-```bash
-npm run backup:create
+```powershell
+npm run backup:create -- --db-only --label=database-only
+npm run backup:create -- --uploads-only --label=uploads-only
+npm run backup:create -- --out=C:\durable-backups\school-2026-07-22
 ```
 
-Optional examples:
+`manifest.json` is written only after the backup completes. A backup without a v2 manifest whose `completed` value is `true` is not restorable by the safe restore command.
 
-```bash
-npm run backup:create -- --label pre-release
-npm run backup:create -- --db-only
-npm run backup:create -- --uploads-only
-npm run backup:create -- --out ./backups/manual-2026-03-07
+## Verify a backup without connecting to MongoDB
+
+```powershell
+npm run backup:restore -- --in=C:\durable-backups\school-2026-07-22 --dry-run
 ```
 
-Expected result:
-- The command prints each collection name and count.
-- `manifest.json` is written at the end.
-- If `backend/uploads/` exists, it is copied into the backup directory unless `--db-only` is used.
+The command verifies all requested checksums, counts, collection definitions, paths, and upload inventory. It prints the exact manifest SHA-256. Save that value for the staged restore command.
 
-## Restore Safety Rules
+Use `--db-only` or `--uploads-only` only when that is the intended recovery scope.
 
-Restore is destructive for the targeted collections and upload directory.
-Always do this first:
-1. Stop backend write traffic.
-2. Take a fresh backup of the current state.
-3. Validate the target backup directory with a dry run.
-4. Confirm the environment and timestamp twice.
+## Safe staged restore
 
-## Dry-Run Restore Validation
+The restore command never clears or overwrites the connected/live database and never replaces `backend/uploads`. It restores into:
 
-From `backend`:
+- a new empty MongoDB database whose name begins with `restore_stage_`;
+- a new absolute uploads directory outside the repository.
 
-```bash
-npm run backup:restore -- --in ./backups/<timestamp> --dry-run
+Example:
+
+```powershell
+npm run backup:restore -- `
+  --in=C:\durable-backups\school-2026-07-22 `
+  --target-database=restore_stage_school_20260722 `
+  --uploads-out=C:\durable-restores\school-uploads-20260722 `
+  --expected-manifest-sha256=SHA256_FROM_DRY_RUN `
+  --confirm=RESTORE_VERIFIED_BACKUP_TO_NEW_TARGET `
+  --force
 ```
 
-The dry run prints:
-- target backup directory
-- whether database and uploads are included
-- the collection list from `manifest.json`
-- whether `uploads/` exists in the backup
+Safety behavior:
 
-## Restore a Backup
+- a v1 or incomplete manifest is rejected;
+- a changed manifest or collection/upload file is rejected;
+- a database that is not empty is rejected;
+- the source/live database name is rejected as the target;
+- an existing uploads output path is rejected;
+- a partially written staging database is left quarantined for forensic review and must never be used for cutover; choose a fresh target name for the next attempt.
 
-From `backend`:
+## Validate and cut over
 
-```bash
-npm run backup:restore -- --in ./backups/<timestamp> --force
-```
+Do not cut over immediately. First:
 
-Optional examples:
+1. Start one isolated backend instance pointed to the staged database and staged uploads.
+2. Run backend smoke checks and finance integrity checks.
+3. Verify student history, open/overdue bills, receipts, reliefs, and attachment downloads.
+4. Stop all production write traffic.
+5. Take one more v2 backup of the current production state.
+6. Switch the production connection/storage configuration to the verified staged targets through the hosting platform's controlled deployment process.
+7. Keep the previous database and uploads unchanged until sign-off.
 
-```bash
-npm run backup:restore -- --in ./backups/<timestamp> --force --db-only
-npm run backup:restore -- --in ./backups/<timestamp> --force --uploads-only
-```
+There is intentionally no in-place `--force` restore path in this script. In-place collection-by-collection replacement is not atomic and can leave a live database partially restored if the process or network fails.
 
-Restore behavior:
-- targeted collections are cleared first
-- each collection dump is inserted from the backup manifest order
-- `backend/uploads/` is replaced when uploads are included
+## Retention
 
-## Post-Restore Validation
-
-After restore, run:
-
-From `backend`:
-
-```bash
-npm run test:smoke
-npm run check:operations
-```
-
-From `frontend`:
-
-```bash
-npm run test:smoke
-```
-
-Then perform a quick operator check:
-- admin login works
-- student dashboard loads
-- finance center loads pending receipts
-- one file-backed page can still open an uploaded attachment
-
-## Retention Guidance
-
-Recommended retention policy:
-- keep the latest daily backup for 7 days
-- keep the latest weekly backup for 4 weeks
-- keep the latest pre-release backup for each production release
-
-## Notes
-
-- Backup directories are ignored by git via `backend/.gitignore`.
-- This workflow is application-level; it does not replace infrastructure snapshots if your hosting platform also provides them.
+- Keep daily backups for at least 7 days.
+- Keep weekly backups for at least 4 weeks.
+- Keep each pre-release and pre-finance-reset backup until financial sign-off.
+- Store at least one copy outside the application host and repository.

@@ -3923,6 +3923,10 @@ async function runDueFinanceDeliveryCampaigns(app, { force = false } = {}) {
   if (automationRunning) {
     return { ok: true, skipped: true, reason: 'already_running' };
   }
+  const { isFinanceMaintenanceActive } = require('./financeMaintenanceService');
+  if (await isFinanceMaintenanceActive()) {
+    return { ok: true, skipped: true, reason: 'finance_maintenance_active' };
+  }
 
   automationRunning = true;
   try {

@@ -47,6 +47,7 @@ const {
   normalizeFinanceLineItems
 } = require('../utils/financeLineItems');
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
+const { buildPaymentOrderLinkFilter } = require('../utils/paymentClassScope');
 const {
   buildFinanceReliefPayloadFromDiscount,
   buildFinanceReliefPayloadFromExemption,
@@ -297,6 +298,7 @@ function formatFeeOrderLite(doc) {
   });
   return {
     id: String(item._id || item.id || ''),
+    studentMembershipId: normalizeNullableId(item.studentMembershipId),
     sourceBillId: normalizeNullableId(item.sourceBillId),
     orderNumber: formatFinanceCode(normalizeText(item.orderNumber)),
     title: normalizeText(item.title),
@@ -309,7 +311,9 @@ function formatFeeOrderLite(doc) {
     outstandingAmount: Math.max(0, roundMoney(amountDue - amountPaid)),
     lineItems,
     feeBreakdown: buildFeeBreakdownFromLineItems(lineItems),
-    dueDate: item.dueDate || null
+    dueDate: item.dueDate || null,
+    schoolClass: formatSchoolClass(item.classId),
+    academicYear: formatAcademicYear(item.academicYearId)
   };
 }
 
@@ -786,8 +790,12 @@ function formatFinanceRelief(doc) {
 
 async function resolveMembershipForFinanceRegistry(payload = {}) {
   const membershipId = normalizeNullableId(payload.studentMembershipId);
+  const schoolId = normalizeNullableId(payload.schoolId);
   if (membershipId) {
-    return StudentMembership.findById(membershipId)
+    return StudentMembership.findOne({
+      _id: membershipId,
+      ...(schoolId ? { schoolId } : {})
+    })
       .populate('studentId')
       .populate('student', 'name email')
       .populate({ path: 'classId', populate: { path: 'academicYearId' } })
@@ -806,6 +814,7 @@ async function resolveMembershipForFinanceRegistry(payload = {}) {
       : student
         ? { student }
         : { studentId }),
+    ...(schoolId ? { schoolId } : {}),
     classId,
     academicYearId,
     isCurrent: true,
@@ -817,6 +826,8 @@ async function resolveMembershipForFinanceRegistry(payload = {}) {
     .populate('academicYearId');
 }
 
+const OPEN_ORDER_STATUSES = Object.freeze(['new', 'partial', 'overdue']);
+
 function buildOrderQuery(filters = {}) {
   const query = {};
   if (normalizeNullableId(filters.schoolId)) query.schoolId = filters.schoolId;
@@ -827,7 +838,9 @@ function buildOrderQuery(filters = {}) {
   if (normalizeNullableId(filters.academicYearId)) query.academicYearId = filters.academicYearId;
   if (normalizeNullableId(filters.assessmentPeriodId)) query.assessmentPeriodId = filters.assessmentPeriodId;
   if (normalizeText(filters.linkScope)) query.linkScope = normalizeText(filters.linkScope);
-  if (normalizeText(filters.status)) query.status = normalizeText(filters.status);
+  const view = normalizeText(filters.view).toLowerCase();
+  if (view === 'open') query.status = { $in: [...OPEN_ORDER_STATUSES] };
+  else if (normalizeText(filters.status)) query.status = normalizeText(filters.status);
   return query;
 }
 
@@ -868,28 +881,107 @@ async function listFeeOrders(filters = {}) {
   return items.map(formatFeeOrder);
 }
 
-const OPEN_ORDER_STATUSES = ['new', 'partial', 'overdue'];
+function resolveMembershipSchoolId(membership = {}) {
+  return normalizeNullableId(membership?.schoolId)
+    || normalizeNullableId(membership?.classId?.schoolId)
+    || normalizeNullableId(membership?.academicYearId?.schoolId)
+    || '';
+}
 
-async function getOpenFeeOrderDocsForMembership(studentMembershipId = '') {
-  if (!normalizeNullableId(studentMembershipId)) return [];
-  return FeeOrder.find({
-    studentMembershipId,
-    status: { $in: OPEN_ORDER_STATUSES }
-  })
+function buildStudentSchoolOpenOrderQuery({ membership = null, schoolId = '' } = {}) {
+  const normalizedSchoolId = normalizeNullableId(schoolId);
+  if (!normalizedSchoolId) throw new Error('student_finance_school_scope_required');
+
+  const student = normalizeNullableId(membership?.student?._id || membership?.student);
+  const studentId = normalizeNullableId(membership?.studentId?._id || membership?.studentId);
+  const identityFilters = [
+    ...(student ? [{ student }] : []),
+    ...(studentId ? [{ studentId }] : [])
+  ];
+  if (!identityFilters.length) throw new Error('student_finance_membership_not_found');
+
+  return {
+    schoolId: normalizedSchoolId,
+    status: { $ne: 'void' },
+    $or: identityFilters
+  };
+}
+
+function buildCanonicalPaymentOrderSnapshot(doc = null) {
+  const item = toPlain(doc);
+  if (!item || normalizeText(item.status).toLowerCase() === 'void') return null;
+
+  const lineItems = normalizeFinanceLineItems({
+    lineItems: item.lineItems,
+    amountOriginal: item.amountOriginal,
+    adjustments: item.adjustments,
+    amountPaid: item.amountPaid,
+    paymentBreakdown: item.paymentBreakdown,
+    defaultType: item.orderType
+  });
+  const amountOriginal = roundMoney(lineItems.reduce((sum, entry) => sum + Number(entry?.grossAmount || 0), 0));
+  const amountDue = roundMoney(lineItems.reduce((sum, entry) => sum + Number(entry?.netAmount || 0), 0));
+  const amountPaid = roundMoney(lineItems.reduce((sum, entry) => sum + Number(entry?.paidAmount || 0), 0));
+  const outstandingAmount = roundMoney(lineItems.reduce((sum, entry) => sum + Number(entry?.balanceAmount || 0), 0));
+
+  return {
+    ...item,
+    lineItems,
+    amountOriginal,
+    amountDue,
+    amountPaid,
+    outstandingAmount,
+    status: deriveFinanceOrderStatus({
+      currentStatus: item.status,
+      amountOriginal,
+      amountDue,
+      amountPaid,
+      dueDate: item.dueDate
+    })
+  };
+}
+
+function withFeeOrderPopulates(query) {
+  return query
     .populate('studentId')
     .populate('student', 'name email')
     .populate('course', 'title kind')
     .populate('voidedBy', 'name orgRole adminLevel')
     .populate({ path: 'classId', populate: { path: 'academicYearId' } })
     .populate('academicYearId')
-    .populate('assessmentPeriodId')
-    .sort({ dueDate: 1, createdAt: 1 });
+    .populate('assessmentPeriodId');
+}
+
+function deriveOpenPaymentOrderSnapshots(items = []) {
+  return sortOpenOrdersForAllocation(
+    (Array.isArray(items) ? items : [])
+      .map(buildCanonicalPaymentOrderSnapshot)
+      .filter((item) => item && Number(item.outstandingAmount || 0) > 0)
+  );
+}
+
+async function getOpenFeeOrderDocsForMembership(studentMembershipId = '') {
+  if (!normalizeNullableId(studentMembershipId)) return [];
+  const items = await withFeeOrderPopulates(FeeOrder.find({
+    studentMembershipId,
+    status: { $ne: 'void' }
+  }));
+  return deriveOpenPaymentOrderSnapshots(items);
+}
+
+async function getOpenFeeOrderDocsForStudentSchool({ membership = null, schoolId = '' } = {}) {
+  const query = buildStudentSchoolOpenOrderQuery({ membership, schoolId });
+  const items = await withFeeOrderPopulates(FeeOrder.find(query));
+  return deriveOpenPaymentOrderSnapshots(items);
 }
 
 function buildOrderSortKey(order = {}) {
-  const dueAt = new Date(order?.dueDate || 0).getTime();
-  const createdAt = new Date(order?.createdAt || 0).getTime();
-  return [Number.isNaN(dueAt) ? Number.MAX_SAFE_INTEGER : dueAt, Number.isNaN(createdAt) ? Number.MAX_SAFE_INTEGER : createdAt];
+  const dueDate = normalizeDateValue(order?.dueDate);
+  const createdDate = normalizeDateValue(order?.createdAt || order?.issuedAt);
+  return [
+    dueDate ? dueDate.getTime() : Number.MAX_SAFE_INTEGER,
+    createdDate ? createdDate.getTime() : Number.MAX_SAFE_INTEGER
+  ];
 }
 
 function sortOpenOrdersForAllocation(items = []) {
@@ -960,6 +1052,10 @@ function resolvePaymentAllocations({ openOrders = [], payload = {} } = {}) {
   const requestedFeeType = LINE_ITEM_TYPES.includes(rawRequestedFeeType) ? rawRequestedFeeType : '';
   if (rawRequestedFeeType && !requestedFeeType) {
     throw new Error('student_finance_payment_fee_type_required');
+  }
+  if (selectedOrderIds.some((orderId) => !orderMap.has(String(orderId)))) {
+    // Do not reveal whether an unscoped id belongs to another student or school.
+    throw new Error('student_finance_payment_order_not_found');
   }
   let allocations = [];
 
@@ -1057,19 +1153,36 @@ function resolvePaymentAllocations({ openOrders = [], payload = {} } = {}) {
   };
 }
 
-async function listFeePayments(filters = {}) {
+async function buildPaymentQuery(filters = {}) {
+  const schoolId = normalizeNullableId(filters.schoolId);
   const query = {};
-  if (normalizeNullableId(filters.schoolId)) query.schoolId = filters.schoolId;
+  if (schoolId) query.schoolId = schoolId;
   if (normalizeNullableId(filters.feeOrderId)) query.feeOrderId = filters.feeOrderId;
   if (normalizeNullableId(filters.studentMembershipId)) query.studentMembershipId = filters.studentMembershipId;
   if (normalizeNullableId(filters.studentId)) query.studentId = filters.studentId;
   if (normalizeNullableId(filters.student)) query.student = filters.student;
   if (normalizeText(filters.linkScope)) query.linkScope = normalizeText(filters.linkScope);
-  if (normalizeNullableId(filters.academicYearId)) query.academicYearId = filters.academicYearId;
-  if (normalizeNullableId(filters.classId)) query.classId = filters.classId;
+  const requestedClassId = normalizeNullableId(filters.classId);
+  const requestedAcademicYearId = normalizeNullableId(filters.academicYearId);
+  if (requestedClassId) {
+    const classOwnershipFilter = { _id: requestedClassId };
+    if (schoolId) classOwnershipFilter.schoolId = schoolId;
+    const classBelongsToSchool = await SchoolClass.exists(classOwnershipFilter);
+    if (!classBelongsToSchool) return { ...query, _id: { $in: [] } };
+  }
+  if (requestedClassId || requestedAcademicYearId) {
+    const scopedOrderFilter = {};
+    if (requestedClassId) scopedOrderFilter.classId = requestedClassId;
+    if (requestedAcademicYearId) scopedOrderFilter.academicYearId = requestedAcademicYearId;
+    const scopedOrders = await FeeOrder.find(scopedOrderFilter).select('_id').lean();
+    const scopedOrderIds = scopedOrders.map((item) => item?._id).filter(Boolean);
+    Object.assign(query, buildPaymentOrderLinkFilter(scopedOrderIds));
+  }
   if (normalizeNullableId(filters.receivedBy)) query.receivedBy = filters.receivedBy;
   if (normalizeText(filters.paymentMethod)) query.paymentMethod = normalizeText(filters.paymentMethod);
-  if (normalizeText(filters.status)) query.status = normalizeText(filters.status);
+  const view = normalizeText(filters.view).toLowerCase();
+  if (view === 'inbox') query.status = 'pending';
+  else if (normalizeText(filters.status)) query.status = normalizeText(filters.status);
   if (normalizeText(filters.approvalStage)) query.approvalStage = normalizeText(filters.approvalStage);
 
   if (filters.date || filters.dateFrom || filters.dateTo) {
@@ -1088,6 +1201,16 @@ async function listFeePayments(filters = {}) {
     }
     if (!Object.keys(query.paidAt).length) delete query.paidAt;
   }
+
+  return query;
+}
+
+async function listFeePayments(filters = {}) {
+  const schoolId = normalizeNullableId(filters.schoolId);
+  if (filters.requireSchoolScope === true && !schoolId) {
+    throw new Error('student_finance_school_scope_required');
+  }
+  const query = await buildPaymentQuery(filters);
 
   const items = await FeePayment.find(query)
     .populate('studentId')
@@ -1258,6 +1381,7 @@ function formatReceiptPrintModel(item = {}, membership = null) {
 
 async function findDuplicateFeePaymentSubmission({
   studentMembershipId = '',
+  schoolId = '',
   amount = 0,
   paymentMethod = '',
   paidAt = null,
@@ -1265,12 +1389,14 @@ async function findDuplicateFeePaymentSubmission({
   allocations = []
 } = {}) {
   const membershipId = normalizeNullableId(studentMembershipId);
+  const normalizedSchoolId = normalizeNullableId(schoolId);
   if (!membershipId || !amount || !paidAt) return null;
 
   const normalizedReference = normalizeText(referenceNo);
   if (normalizedReference) {
     return FeePayment.findOne({
       studentMembershipId: membershipId,
+      ...(normalizedSchoolId ? { schoolId: normalizedSchoolId } : {}),
       referenceNo: normalizedReference,
       status: { $in: ['pending', 'approved'] }
     }).select('_id paymentNumber referenceNo paidAt status');
@@ -1287,6 +1413,7 @@ async function findDuplicateFeePaymentSubmission({
 
   const candidates = await FeePayment.find({
     studentMembershipId: membershipId,
+    ...(normalizedSchoolId ? { schoolId: normalizedSchoolId } : {}),
     amount: roundMoney(amount),
     paymentMethod: normalizeText(paymentMethod) || 'cash',
     paidAt: { $gte: range.start, $lt: range.end },
@@ -1304,8 +1431,15 @@ async function findDuplicateFeePaymentSubmission({
   }) || null;
 }
 
-async function getFeePaymentReceipt(paymentId = '') {
-  const item = await FeePayment.findById(paymentId)
+async function getFeePaymentReceipt(paymentId = '', filters = {}) {
+  const schoolId = normalizeNullableId(filters.schoolId);
+  if (filters.requireSchoolScope === true && !schoolId) {
+    throw new Error('student_finance_school_scope_required');
+  }
+  const item = await FeePayment.findOne({
+    _id: paymentId,
+    ...(schoolId ? { schoolId } : {})
+  })
     .populate('studentId')
     .populate('student', 'name email')
     .populate('feeOrderId')
@@ -1349,66 +1483,44 @@ async function getFeePaymentReceipt(paymentId = '') {
   };
 }
 
-async function getDailyCashierReport(filters = {}) {
-  const range = buildDayRange(filters.date || new Date());
-  if (!range) {
-    throw new Error('student_finance_payment_date_invalid');
-  }
+const DAILY_CASHIER_ROW_LIMIT = 100;
+const CASHIER_PAYMENT_METHODS = ['cash', 'bank_transfer', 'hawala', 'manual', 'gateway', 'other'];
 
-  const query = {
-    paidAt: { $gte: range.start, $lt: range.end }
-  };
-  if (normalizeText(filters.status)) query.status = normalizeText(filters.status);
-  if (normalizeText(filters.paymentMethod)) query.paymentMethod = normalizeText(filters.paymentMethod);
-  if (normalizeNullableId(filters.receivedBy)) query.receivedBy = normalizeNullableId(filters.receivedBy);
-  if (normalizeNullableId(filters.schoolId)) {
-    const classIds = await SchoolClass.find({ schoolId: normalizeNullableId(filters.schoolId) }).distinct('_id');
-    query.classId = { $in: classIds };
-  }
-
-  const items = await FeePayment.find(query)
-    .populate('studentId')
-    .populate('student', 'name email')
-    .populate('feeOrderId')
-    .populate('allocations.feeOrderId')
-    .populate('receivedBy', 'name orgRole adminLevel')
-    .populate({ path: 'classId', populate: { path: 'academicYearId' } })
-    .populate('academicYearId')
-    .sort({ paidAt: -1, createdAt: -1 })
-    .limit(100);
-
-  const formattedItems = buildPaymentReceiptDetails(items.map(formatFeePayment), [], null);
-  const recognizedRows = await recognizePayments(items);
-  const recognitionById = new Map(recognizedRows.map((row) => [
-    String(row.payment?._id || ''),
-    row
-  ]));
-  formattedItems.forEach((item) => {
-    const recognition = recognitionById.get(String(item?.id || ''));
-    item.recognizedAmount = Number(recognition?.recognizedAmount || 0);
-    item.excludedVoidAmount = Number(recognition?.excludedVoidAmount || 0);
+function buildDailyCashierAnalytics(recognizedRows = []) {
+  const rows = (Array.isArray(recognizedRows) ? recognizedRows : []).map((row) => {
+    const payment = toPlain(row?.payment) || {};
+    return {
+      id: String(payment._id || payment.id || ''),
+      status: normalizeText(payment.status),
+      paymentMethod: normalizeText(payment.paymentMethod),
+      receivedBy: formatActorLite(payment.receivedBy),
+      recognizedAmount: Number(row?.recognizedAmount || 0),
+      excludedVoidAmount: Number(row?.excludedVoidAmount || 0),
+      excludedMissingOrderAmount: Number(row?.excludedMissingOrderAmount || 0)
+    };
   });
-  const approvedItems = formattedItems.filter((item) => item?.status === 'approved');
+  const approvedRows = rows.filter((item) => item.status === 'approved');
   const recognizedAmount = (item) => Number(item?.recognizedAmount || 0);
   const summary = {
-    totalPayments: formattedItems.length,
-    totalCollected: roundMoney(approvedItems.reduce((sum, item) => sum + recognizedAmount(item), 0)),
-    approvedPayments: approvedItems.filter((item) => recognizedAmount(item) > 0).length,
-    pendingPayments: formattedItems.filter((item) => item?.status === 'pending').length,
-    rejectedPayments: formattedItems.filter((item) => item?.status === 'rejected').length,
-    approvedAmount: roundMoney(approvedItems.reduce((sum, item) => sum + recognizedAmount(item), 0)),
-    pendingAmount: roundMoney(formattedItems.filter((item) => item?.status === 'pending').reduce((sum, item) => sum + recognizedAmount(item), 0)),
+    totalPayments: rows.length,
+    totalCollected: roundMoney(approvedRows.reduce((sum, item) => sum + recognizedAmount(item), 0)),
+    approvedPayments: approvedRows.filter((item) => recognizedAmount(item) > 0).length,
+    pendingPayments: rows.filter((item) => item.status === 'pending').length,
+    rejectedPayments: rows.filter((item) => item.status === 'rejected').length,
+    approvedAmount: roundMoney(approvedRows.reduce((sum, item) => sum + recognizedAmount(item), 0)),
+    pendingAmount: roundMoney(rows.filter((item) => item.status === 'pending').reduce((sum, item) => sum + recognizedAmount(item), 0)),
     rejectedAmount: 0,
-    excludedVoidAmount: roundMoney(formattedItems.reduce((sum, item) => sum + Number(item?.excludedVoidAmount || 0), 0))
+    excludedVoidAmount: roundMoney(rows.reduce((sum, item) => sum + item.excludedVoidAmount, 0)),
+    excludedMissingOrderAmount: roundMoney(rows.reduce((sum, item) => sum + item.excludedMissingOrderAmount, 0))
   };
 
-  const methodTotals = ['cash', 'bank_transfer', 'hawala', 'manual', 'gateway', 'other'].map((method) => ({
+  const methodTotals = CASHIER_PAYMENT_METHODS.map((method) => ({
     method,
-    amount: roundMoney(approvedItems.filter((item) => item?.paymentMethod === method).reduce((sum, item) => sum + recognizedAmount(item), 0)),
-    count: approvedItems.filter((item) => item?.paymentMethod === method && recognizedAmount(item) > 0).length
+    amount: roundMoney(approvedRows.filter((item) => item.paymentMethod === method).reduce((sum, item) => sum + recognizedAmount(item), 0)),
+    count: approvedRows.filter((item) => item.paymentMethod === method && recognizedAmount(item) > 0).length
   })).filter((item) => item.count > 0 || item.amount > 0);
 
-  const cashierRows = Array.from(approvedItems.reduce((map, item) => {
+  const cashiers = Array.from(approvedRows.reduce((map, item) => {
     const key = String(item?.receivedBy?.id || 'compatibility');
     const current = map.get(key) || {
       id: key,
@@ -1424,12 +1536,67 @@ async function getDailyCashierReport(filters = {}) {
     .filter((item) => item.count > 0 || item.amount > 0)
     .sort((left, right) => Number(right.amount || 0) - Number(left.amount || 0));
 
+  return { summary, methodTotals, cashiers };
+}
+
+async function getDailyCashierReport(filters = {}) {
+  const schoolId = normalizeNullableId(filters.schoolId);
+  if (filters.requireSchoolScope === true && !schoolId) {
+    throw new Error('student_finance_school_scope_required');
+  }
+  const range = buildDayRange(filters.date || new Date());
+  if (!range) {
+    throw new Error('student_finance_payment_date_invalid');
+  }
+
+  const query = {
+    paidAt: { $gte: range.start, $lt: range.end }
+  };
+  if (normalizeText(filters.status)) query.status = normalizeText(filters.status);
+  if (normalizeText(filters.paymentMethod)) query.paymentMethod = normalizeText(filters.paymentMethod);
+  if (normalizeNullableId(filters.receivedBy)) query.receivedBy = normalizeNullableId(filters.receivedBy);
+  if (schoolId) query.schoolId = schoolId;
+
+  const rowQuery = FeePayment.find(query)
+    .populate('studentId')
+    .populate('student', 'name email')
+    .populate('feeOrderId')
+    .populate('allocations.feeOrderId')
+    .populate('receivedBy', 'name orgRole adminLevel')
+    .populate({ path: 'classId', populate: { path: 'academicYearId' } })
+    .populate('academicYearId')
+    .sort({ paidAt: -1, createdAt: -1 })
+    .limit(DAILY_CASHIER_ROW_LIMIT);
+
+  const totalsQuery = FeePayment.find(query)
+    .select('_id amount status paymentMethod receivedBy feeOrderId allocations')
+    .populate('receivedBy', 'name orgRole adminLevel')
+    .lean();
+
+  const [items, totalPaymentRows] = await Promise.all([rowQuery, totalsQuery]);
+
+  const formattedItems = buildPaymentReceiptDetails(items.map(formatFeePayment), [], null);
+  const recognizedRows = await recognizePayments(totalPaymentRows);
+  const recognitionById = new Map(recognizedRows.map((row) => [
+    String(row.payment?._id || ''),
+    row
+  ]));
+  formattedItems.forEach((item) => {
+    const recognition = recognitionById.get(String(item?.id || ''));
+    item.recognizedAmount = Number(recognition?.recognizedAmount || 0);
+    item.excludedVoidAmount = Number(recognition?.excludedVoidAmount || 0);
+    item.excludedMissingOrderAmount = Number(recognition?.excludedMissingOrderAmount || 0);
+  });
+  const { summary, methodTotals, cashiers } = buildDailyCashierAnalytics(recognizedRows);
+
   return {
     date: range.start.toISOString().slice(0, 10),
     summary,
     methodTotals,
-    cashiers: cashierRows,
+    cashiers,
     items: formattedItems,
+    rowLimit: DAILY_CASHIER_ROW_LIMIT,
+    rowsTruncated: totalPaymentRows.length > formattedItems.length,
     generatedAt: new Date().toISOString()
   };
 }
@@ -2094,12 +2261,21 @@ async function listOpenFeeOrdersForMembership(studentMembershipId = '') {
 }
 
 async function previewFeePaymentAllocation(payload = {}) {
+  const schoolId = normalizeNullableId(payload.schoolId);
+  if (!schoolId) {
+    throw new Error('student_finance_school_scope_required');
+  }
+
   const membership = await resolveMembershipForFinanceRegistry(payload);
   if (!membership) {
     throw new Error('student_finance_membership_not_found');
   }
+  const membershipSchoolId = resolveMembershipSchoolId(membership);
+  if (!membershipSchoolId || membershipSchoolId !== schoolId) {
+    throw new Error('student_finance_membership_not_found');
+  }
 
-  const openOrders = await getOpenFeeOrderDocsForMembership(membership._id);
+  const openOrders = await getOpenFeeOrderDocsForStudentSchool({ membership, schoolId });
   if (!openOrders.length) {
     throw new Error('student_finance_open_orders_not_found');
   }
@@ -2110,6 +2286,7 @@ async function previewFeePaymentAllocation(payload = {}) {
   const requestedFeeType = LINE_ITEM_TYPES.includes(rawRequestedFeeType) ? rawRequestedFeeType : '';
   return {
     membership: formatMembership(membership),
+    schoolId,
     amount,
     currency: normalizeText(payload.currency).toUpperCase() || 'AFN',
     allocationMode: resolved.allocationMode,
@@ -2128,13 +2305,16 @@ async function previewFeePaymentAllocation(payload = {}) {
 
 async function createFeePayment(payload = {}) {
   const preview = await previewFeePaymentAllocation(payload);
-  const membership = await resolveMembershipForFinanceRegistry({ studentMembershipId: preview.membership?.id });
+  const membership = await resolveMembershipForFinanceRegistry({
+    studentMembershipId: preview.membership?.id,
+    schoolId: preview.schoolId
+  });
   if (!membership) {
     throw new Error('student_finance_membership_not_found');
   }
 
   const loadPopulatedPayment = async (paymentId) => {
-    const populated = await FeePayment.findById(paymentId)
+    const populated = await FeePayment.findOne({ _id: paymentId, schoolId: preview.schoolId })
       .populate('studentId')
       .populate('student', 'name email')
       .populate('feeOrderId')
@@ -2149,6 +2329,7 @@ async function createFeePayment(payload = {}) {
   const paidAt = resolvePaymentDate(payload.paidAt);
   const duplicate = await findDuplicateFeePaymentSubmission({
     studentMembershipId: membership._id,
+    schoolId: preview.schoolId,
     amount: preview.amount,
     paymentMethod: payload.paymentMethod,
     paidAt,
@@ -2177,6 +2358,7 @@ async function createFeePayment(payload = {}) {
     student: membership.student?._id || membership.student || null,
     studentId: membership.studentId?._id || membership.studentId || null,
     studentMembershipId: membership._id,
+    schoolId: preview.schoolId,
     linkScope: deriveLinkScope({
       studentMembershipId: membership._id,
       classId: membership.classId?._id || membership.classId || null
@@ -2567,5 +2749,15 @@ module.exports = {
   listTransportFees,
   previewFeePaymentAllocation,
   seedStudentFinanceCanonical,
-  syncDiscountOpenBills
+  syncDiscountOpenBills,
+  __paymentAllocationTestUtils: Object.freeze({
+    buildCanonicalPaymentOrderSnapshot,
+    buildDailyCashierAnalytics,
+    buildOrderQuery,
+    buildOrderSortKey,
+    buildPaymentQuery,
+    buildStudentSchoolOpenOrderQuery,
+    resolvePaymentAllocations,
+    sortOpenOrdersForAllocation
+  })
 };

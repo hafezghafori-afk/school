@@ -44,10 +44,32 @@ const {
 
 const router = express.Router();
 
+function resolveRequestSchoolId(req = {}) {
+  if (req.user?.isDemo === true && req.user?.schoolId) {
+    return String(req.user.schoolId || '').trim();
+  }
+  return String(
+    req.headers?.['x-school-id']
+    || req.user?.activeSchoolId
+    || req.user?.schoolId
+    || req.user?.school_id
+    || ''
+  ).trim();
+}
+
 function withRequestSchoolScope(req, filters = {}) {
   return {
     ...(filters || {}),
-    schoolId: filters?.schoolId || req.headers?.['x-school-id'] || req.user?.schoolId || req.user?.activeSchoolId || ''
+    // Query/body schoolId is only user input. The authenticated active-school
+    // context is authoritative for every finance read and write.
+    schoolId: resolveRequestSchoolId(req)
+  };
+}
+
+function withPaymentSchoolScope(req, payload = {}) {
+  return {
+    ...(payload || {}),
+    schoolId: resolveRequestSchoolId(req)
   };
 }
 
@@ -59,6 +81,7 @@ function canAccessMembershipPayload(req, membership = null) {
 
 function mapPaymentErrorStatus(code = '') {
   const statusMap = {
+    student_finance_school_scope_required: 400,
     student_finance_membership_not_found: 400,
     student_finance_open_orders_not_found: 404,
     student_finance_payment_not_found: 404,
@@ -82,6 +105,7 @@ function mapPaymentErrorStatus(code = '') {
 
 function mapPaymentErrorMessage(code = '') {
   const messageMap = {
+    student_finance_school_scope_required: 'برای ثبت پرداخت، نخست مکتب فعال را انتخاب کنید.',
     student_finance_membership_not_found: 'عضویت مالی معتبر پیدا نشد.',
     student_finance_open_orders_not_found: 'برای این عضویت، بدهی باز پیدا نشد.',
     student_finance_payment_not_found: 'پرداخت مالی پیدا نشد.',
@@ -171,7 +195,17 @@ router.get('/orders', requireAuth, requireRole(['admin']), requirePermission('ma
 
 router.get('/payments', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const items = await listFeePayments(withRequestSchoolScope(req, req.query || {}));
+    const filters = {
+      ...withRequestSchoolScope(req, req.query || {}),
+      requireSchoolScope: true
+    };
+    if (!filters.schoolId) {
+      return res.status(400).json({
+        success: false,
+        message: mapPaymentErrorMessage('student_finance_school_scope_required')
+      });
+    }
+    const items = await listFeePayments(filters);
     res.json({ success: true, items });
   } catch (error) {
     res.status(500).json({ success: false, message: 'دریافت پرداخت‌های مالی ناموفق بود.' });
@@ -180,7 +214,17 @@ router.get('/payments', requireAuth, requireRole(['admin']), requirePermission('
 
 router.get('/payments/:id/receipt', requireAuth, async (req, res) => {
   try {
-    const data = await getFeePaymentReceipt(req.params.id);
+    const isAdmin = req.user?.role === 'admin';
+    const activeSchoolId = resolveRequestSchoolId(req);
+    if (isAdmin && !activeSchoolId) {
+      return res.status(400).json({
+        success: false,
+        message: mapPaymentErrorMessage('student_finance_school_scope_required')
+      });
+    }
+    const data = await getFeePaymentReceipt(req.params.id, isAdmin
+      ? { schoolId: activeSchoolId, requireSchoolScope: true }
+      : {});
     if (!canAccessMembershipPayload(req, data.membership) && req.user?.role !== 'admin') {
       return res.status(403).json({ success: false, message: 'دسترسی مجاز نیست.' });
     }
@@ -194,7 +238,17 @@ router.get('/payments/:id/receipt', requireAuth, async (req, res) => {
 
 router.get('/reports/daily-cashier', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const data = await getDailyCashierReport(withRequestSchoolScope(req, req.query || {}));
+    const filters = {
+      ...withRequestSchoolScope(req, req.query || {}),
+      requireSchoolScope: true
+    };
+    if (!filters.schoolId) {
+      return res.status(400).json({
+        success: false,
+        message: mapPaymentErrorMessage('student_finance_school_scope_required')
+      });
+    }
+    const data = await getDailyCashierReport(filters);
     return res.json({ success: true, ...data });
   } catch (error) {
     const code = String(error?.message || '');
@@ -219,7 +273,7 @@ router.get('/memberships/:membershipId/open-orders', requireAuth, async (req, re
 
 router.post('/payments/preview-allocation', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const data = await previewFeePaymentAllocation(req.body || {});
+    const data = await previewFeePaymentAllocation(withPaymentSchoolScope(req, req.body || {}));
     return res.json({ success: true, ...data });
   } catch (error) {
     const code = String(error?.message || '');
@@ -260,7 +314,7 @@ router.post('/payments/preview-allocation', requireAuth, requireRole(['admin']),
 router.post('/payments', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const item = await createFeePayment({
-      ...(req.body || {}),
+      ...withPaymentSchoolScope(req, req.body || {}),
       receivedBy: req.user?.id || ''
     });
     if (!item?.isDuplicate) {

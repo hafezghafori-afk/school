@@ -42,6 +42,12 @@ function run() {
   assert.match(monthCloseService, /approved_payments_missing_treasury/);
   const financeRoutes = read('routes/financeRoutes.js');
   assert.match(financeRoutes, /ExpenseEntry\.findOne\(\{ _id: req\.params\.id, schoolId: schoolContext\.schoolId \}\)/);
+  assert.match(financeRoutes, /resolveFinanceReportReadContext[\s\S]*syncMissingCourse: false/);
+  assert.match(financeRoutes, /paymentMatch = \{ schoolId: scope\.schoolId/);
+  assert.match(financeRoutes, /runReport\('fee_collection_by_class', \{[\s\S]*schoolId: scope\.schoolId/);
+  const integrityAudit = read('scripts/auditFinanceIntegrity.js');
+  assert.match(integrityAudit, /paymentMissingOrderLinks/);
+  assert.match(integrityAudit, /missingOrderIds/);
   const treasuryService = read('services/treasuryGovernanceService.js');
   assert.match(treasuryService, /manual:\$\{rawIdempotencyKey\}/);
   assert.match(treasuryService, /transfer:\$\{rawIdempotencyKey\}/);
