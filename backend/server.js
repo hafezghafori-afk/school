@@ -108,6 +108,7 @@ const examRoutes = require('./routes/examRoutes');
 const resultTableRoutes = require('./routes/resultTableRoutes');
 const promotionRoutes = require('./routes/promotionRoutes');
 const studentFinanceRoutes = require('./routes/studentFinanceRoutes');
+const { blockFinanceWritesDuringMaintenance } = require('./middleware/financeMaintenance');
 const timetableRoutes = require('./routes/timetableRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const sheetTemplateRoutes = require('./routes/sheetTemplateRoutes');
@@ -160,6 +161,10 @@ app.get('/api/health', (req, res) => {
 });
 
 app.use('/api', requireDatabase);
+// A ledger reset creates a full raw database backup. While its global lock is
+// active, freeze every API route so the backup and deletion plan cannot race
+// with non-finance changes (class, membership, academic-year, uploads, etc.).
+app.use('/api', blockFinanceWritesDuringMaintenance);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/courses', courseRoutes);

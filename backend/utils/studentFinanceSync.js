@@ -1,4 +1,6 @@
 const { deriveLinkScope } = require('./financeLinkScope');
+const mongoose = require('mongoose');
+const { isFinanceMaintenanceActive } = require('../services/financeMaintenanceService');
 const {
   normalizeFinanceLineItems,
   normalizeFinanceFeeType,
@@ -22,6 +24,11 @@ function normalizeDate(value) {
 
 function roundMoney(value) {
   return Math.max(0, Math.round((Number(value) || 0) * 100) / 100);
+}
+
+async function financeMirrorBlockedByMaintenance(dryRun = false) {
+  if (dryRun || mongoose.connection.readyState !== 1) return false;
+  return isFinanceMaintenanceActive();
 }
 
 function normalizeAdjustmentPayload(adjustment = {}) {
@@ -255,6 +262,7 @@ function buildFeeOrderPayloadFromBill(bill = {}) {
     orderType: inferPrimaryOrderType(normalizedLineItems, 'tuition'),
     source: 'finance_bill',
     sourceBillId: bill._id || null,
+    issuanceKey: normalizeText(bill.issuanceKey) || undefined,
     student: bill.student || null,
     studentId: bill.studentId || null,
     studentMembershipId: bill.studentMembershipId || null,
@@ -404,7 +412,7 @@ function buildDiscountPayload({ bill = {}, feeOrder = null, adjustment = {}, ind
 }
 
 function feeOrderChanged(existing = {}, payload = {}) {
-  const keys = ['title', 'student', 'studentId', 'studentMembershipId', 'linkScope', 'course', 'classId', 'academicYearId', 'periodType', 'periodLabel', 'currency', 'amountOriginal', 'amountDue', 'amountPaid', 'outstandingAmount', 'status', 'note'];
+  const keys = ['title', 'student', 'studentId', 'studentMembershipId', 'linkScope', 'course', 'classId', 'academicYearId', 'periodType', 'periodLabel', 'issuanceKey', 'currency', 'amountOriginal', 'amountDue', 'amountPaid', 'outstandingAmount', 'status', 'note'];
   return keys.some((key) => String(existing[key] || '') !== String(payload[key] || ''))
     || String(normalizeDate(existing.issuedAt)?.toISOString() || '') !== String(normalizeDate(payload.issuedAt)?.toISOString() || '')
     || String(normalizeDate(existing.dueDate)?.toISOString() || '') !== String(normalizeDate(payload.dueDate)?.toISOString() || '')
@@ -417,6 +425,40 @@ function feeOrderChanged(existing = {}, payload = {}) {
     || JSON.stringify(existing.paymentBreakdown || {}) !== JSON.stringify(payload.paymentBreakdown || {})
     || String(existing.voidReason || '') !== String(payload.voidReason || '')
     || String(existing.voidedBy || '') !== String(payload.voidedBy || '');
+}
+
+function preserveCanonicalFeeOrderPaymentState(payload = {}, existing = {}) {
+  if (!existing?._id || normalizeText(payload.status) === 'void') return payload;
+  const incomingBreakdown = normalizePaymentBreakdown(payload.paymentBreakdown);
+  const canonicalBreakdown = normalizePaymentBreakdown(existing.paymentBreakdown);
+  const paymentBreakdown = Object.keys(incomingBreakdown).reduce((result, key) => ({
+    ...result,
+    [key]: Math.max(roundMoney(incomingBreakdown[key]), roundMoney(canonicalBreakdown[key]))
+  }), {});
+  const breakdownPaid = roundMoney(Object.values(paymentBreakdown).reduce((sum, value) => sum + Number(value || 0), 0));
+  const amountPaid = Math.max(roundMoney(payload.amountPaid), roundMoney(existing.amountPaid), breakdownPaid);
+  const lineItems = normalizeFinanceLineItems({
+    lineItems: payload.lineItems,
+    amountOriginal: payload.amountOriginal,
+    adjustments: payload.adjustments,
+    amountPaid,
+    paymentBreakdown,
+    defaultType: payload.orderType || 'tuition'
+  });
+  const amountDue = roundMoney(lineItems.reduce((sum, item) => sum + Number(item?.netAmount || 0), 0));
+  return {
+    ...payload,
+    amountPaid,
+    paymentBreakdown,
+    lineItems,
+    amountDue,
+    outstandingAmount: roundMoney(Math.max(0, amountDue - amountPaid)),
+    paidAt: amountPaid > 0 ? (existing.paidAt || payload.paidAt || null) : null,
+    status: normalizeText(existing.status) === 'void' ? 'void' : payload.status,
+    voidReason: normalizeText(existing.status) === 'void' ? normalizeText(existing.voidReason) : payload.voidReason,
+    voidedBy: normalizeText(existing.status) === 'void' ? (existing.voidedBy || null) : payload.voidedBy,
+    voidedAt: normalizeText(existing.status) === 'void' ? normalizeDate(existing.voidedAt) : payload.voidedAt
+  };
 }
 
 function feePaymentChanged(existing = {}, payload = {}) {
@@ -442,7 +484,7 @@ async function syncFeeOrderFromFinanceBill(input, { dryRun = false } = {}) {
     return { created: false, updated: false, skipped: true, reason: 'bill_not_found', feeOrderId: null };
   }
 
-  const payload = buildFeeOrderPayloadFromBill(bill);
+  let payload = buildFeeOrderPayloadFromBill(bill);
   const existing = await FeeOrder.findOne({ sourceBillId: bill._id });
   if (!existing) {
     if (dryRun) {
@@ -451,6 +493,8 @@ async function syncFeeOrderFromFinanceBill(input, { dryRun = false } = {}) {
     const created = await FeeOrder.create(payload);
     return { created: true, updated: false, skipped: false, feeOrderId: created._id };
   }
+
+  payload = preserveCanonicalFeeOrderPaymentState(payload, existing);
 
   if (!feeOrderChanged(existing.toObject ? existing.toObject() : existing, payload)) {
     return { created: false, updated: false, skipped: true, reason: 'no_change', feeOrderId: existing._id };
@@ -558,6 +602,9 @@ async function syncFeePaymentFromFinanceReceipt(input, { dryRun = false } = {}) 
 }
 
 async function syncStudentFinanceFromFinanceBill(input, { dryRun = false } = {}) {
+  if (await financeMirrorBlockedByMaintenance(dryRun)) {
+    return { skipped: true, reason: 'finance_maintenance_active' };
+  }
   const reliefs = await applyActiveRegistryReliefsToFinanceBill(input, { dryRun });
   const source = reliefs?.bill || input;
   const order = await syncFeeOrderFromFinanceBill(source, { dryRun });
@@ -579,6 +626,9 @@ async function syncStudentFinanceFromFinanceBill(input, { dryRun = false } = {})
 }
 
 async function syncStudentFinanceFromFinanceReceipt(input, { dryRun = false } = {}) {
+  if (await financeMirrorBlockedByMaintenance(dryRun)) {
+    return { skipped: true, reason: 'finance_maintenance_active' };
+  }
   const receipt = await resolveFinanceReceipt(input);
   const order = receipt?.bill ? await syncFeeOrderFromFinanceBill(receipt.bill, { dryRun }) : { created: false, updated: false, skipped: true, reason: 'bill_not_found' };
   const payment = await syncFeePaymentFromFinanceReceipt(receipt, { dryRun });
@@ -596,5 +646,10 @@ module.exports = {
   syncFeeOrderFromFinanceBill,
   syncFeePaymentFromFinanceReceipt,
   syncStudentFinanceFromFinanceBill,
-  syncStudentFinanceFromFinanceReceipt
+  syncStudentFinanceFromFinanceReceipt,
+  __financeMirrorTestUtils: Object.freeze({
+    buildFeeOrderPayloadFromBill,
+    feeOrderChanged,
+    preserveCanonicalFeeOrderPaymentState
+  })
 };

@@ -21,7 +21,7 @@ function getPaymentAllocations(payment = {}) {
       feeType: String(item?.feeType || '').trim().toLowerCase() || '',
       amount: roundMoney(item?.amount)
     }))
-    .filter((item) => item.feeOrderId && item.amount > 0);
+    .filter((item) => item.amount > 0);
 }
 
 async function buildFeeOrderStatusMap(payments = [], { FeeOrderModel = FeeOrder } = {}) {
@@ -55,31 +55,62 @@ function getRecognizedPaymentBreakdown(payment = {}, statusByOrderId = new Map()
   const allocations = getPaymentAllocations(payment);
   if (!allocations.length) {
     return {
-      recognizedAmount: paymentAmount,
+      recognizedAmount: 0,
       excludedVoidAmount: 0,
-      recognizedAllocations: paymentAmount > 0
-        ? [{ feeOrderId: normalizeId(payment?.feeOrderId), feeType: '', amount: paymentAmount }]
-        : []
+      excludedMissingOrderAmount: paymentAmount,
+      recognizedAllocations: [],
+      invalidAllocations: paymentAmount > 0
+        ? [{ feeOrderId: '', feeType: '', amount: paymentAmount, reason: 'missing_fee_order' }]
+        : [],
+      recognitionWarnings: paymentAmount > 0 ? ['missing_fee_order'] : []
     };
   }
 
   let excludedVoidAmount = 0;
+  let excludedMissingOrderAmount = 0;
   const recognizedAllocations = [];
+  const invalidAllocations = [];
   allocations.forEach((allocation) => {
-    if (statusByOrderId.get(allocation.feeOrderId) === 'void') {
+    const orderStatus = allocation.feeOrderId
+      ? statusByOrderId.get(allocation.feeOrderId)
+      : '';
+    if (!orderStatus) {
+      excludedMissingOrderAmount += allocation.amount;
+      invalidAllocations.push({ ...allocation, reason: 'missing_fee_order' });
+    } else if (orderStatus === 'void') {
       excludedVoidAmount += allocation.amount;
     } else {
       recognizedAllocations.push(allocation);
     }
   });
 
+  const allocatedAmount = roundMoney(allocations.reduce((sum, allocation) => sum + allocation.amount, 0));
+  if (allocatedAmount < paymentAmount) {
+    const unlinkedAmount = roundMoney(paymentAmount - allocatedAmount);
+    excludedMissingOrderAmount += unlinkedAmount;
+    invalidAllocations.push({ feeOrderId: '', feeType: '', amount: unlinkedAmount, reason: 'unallocated_payment_amount' });
+  }
+
   excludedVoidAmount = Math.min(paymentAmount, roundMoney(excludedVoidAmount));
-  const recognizedAmount = roundMoney(paymentAmount - excludedVoidAmount);
+  excludedMissingOrderAmount = Math.min(
+    roundMoney(paymentAmount - excludedVoidAmount),
+    roundMoney(excludedMissingOrderAmount)
+  );
+  const recognizedAllocationAmount = roundMoney(
+    recognizedAllocations.reduce((sum, allocation) => sum + allocation.amount, 0)
+  );
+  const recognizedAmount = Math.min(
+    roundMoney(paymentAmount - excludedVoidAmount - excludedMissingOrderAmount),
+    recognizedAllocationAmount
+  );
 
   return {
     recognizedAmount,
     excludedVoidAmount,
-    recognizedAllocations
+    excludedMissingOrderAmount,
+    recognizedAllocations,
+    invalidAllocations,
+    recognitionWarnings: invalidAllocations.length ? ['missing_fee_order'] : []
   };
 }
 

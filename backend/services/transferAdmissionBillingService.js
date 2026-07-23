@@ -4,6 +4,7 @@ const FinanceBill = require('../models/FinanceBill');
 const FinanceFeePlan = require('../models/FinanceFeePlan');
 const { getFeePlanPrimaryAmount } = require('./financeFeePlanService');
 const { normalizeFinanceLineItems, roundMoney } = require('../utils/financeLineItems');
+const { nextFinanceDocumentNumber } = require('../utils/financeNumberSequence');
 const { syncStudentFinanceFromFinanceBill } = require('../utils/studentFinanceSync');
 
 const ADMISSION_PERIOD_LABEL = 'داخله تبدیلی';
@@ -34,6 +35,7 @@ const dateAppliesToPlan = (plan, effectiveAt) => {
 };
 
 async function resolveAdmissionFeePlan({
+  schoolId = '',
   classId = '',
   courseId = '',
   academicYearId = '',
@@ -41,6 +43,7 @@ async function resolveAdmissionFeePlan({
 } = {}) {
   const normalizedClassId = normalizeId(classId);
   const normalizedCourseId = normalizeId(courseId);
+  const normalizedSchoolId = normalizeId(schoolId);
   const normalizedAcademicYearId = normalizeId(academicYearId);
   const academicYear = normalizedAcademicYearId
     ? await AcademicYear.findById(normalizedAcademicYearId).select('title code').lean().catch(() => null)
@@ -53,7 +56,9 @@ async function resolveAdmissionFeePlan({
   const yearScopes = [
     normalizedAcademicYearId ? { academicYearId: normalizedAcademicYearId } : null,
     ...yearLabels.map((academicYearLabel) => ({ academicYear: academicYearLabel })),
-    { academicYearId: null, academicYear: { $in: ['', null] } }
+    !normalizedAcademicYearId && !yearLabels.length
+      ? { academicYearId: null, academicYear: { $in: ['', null] } }
+      : null
   ].filter(Boolean);
 
   for (const scope of scopes) {
@@ -63,6 +68,7 @@ async function resolveAdmissionFeePlan({
       // eslint-disable-next-line no-await-in-loop
       const candidates = await FinanceFeePlan.find({
         ...activePlanFilter(),
+        ...(normalizedSchoolId ? { schoolId: { $in: [normalizedSchoolId, null] } } : {}),
         ...scope,
         ...yearScope
       }).sort(planSort).limit(25);
@@ -127,13 +133,8 @@ function buildAdmissionDueDate(effectiveAt = new Date(), dueDay = 10) {
   return new Date(floor.getFullYear(), floor.getMonth() + 1, normalizedDueDay, 23, 59, 59, 999);
 }
 
-async function generateTransferBillNumber(attempt = 0) {
-  const now = new Date();
-  const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const serial = await FinanceBill.countDocuments({ createdAt: { $gte: monthStart, $lt: monthEnd } }) + 1 + attempt;
-  return `BL-${yearMonth}-${String(serial).padStart(4, '0')}`;
+async function generateTransferBillNumber() {
+  return nextFinanceDocumentNumber({ model: FinanceBill, field: 'billNumber', prefix: 'BL' });
 }
 
 async function issueTransferAdmissionBill({ membership, actorId = null, effectiveAt = null } = {}) {
@@ -165,6 +166,7 @@ async function issueTransferAdmissionBill({ membership, actorId = null, effectiv
 
   const billingDate = effectiveAt || membership.joinedAt || membership.enrolledAt || new Date();
   const { plan, academicYear } = await resolveAdmissionFeePlan({
+    schoolId: membership.schoolId,
     classId: membership.classId,
     courseId: membership.course,
     academicYearId: membership.academicYearId || membership.academicYear,
@@ -195,7 +197,8 @@ async function issueTransferAdmissionBill({ membership, actorId = null, effectiv
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const bill = new FinanceBill({
-      billNumber: await generateTransferBillNumber(attempt),
+      billNumber: await generateTransferBillNumber(),
+      schoolId: membership.schoolId || null,
       student: membership.student,
       studentId: membership.studentId || null,
       studentMembershipId: membership._id,

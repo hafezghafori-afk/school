@@ -941,6 +941,17 @@ const getFinanceBillMonthLabel = (item = {}) => {
   return item?.title || formatFinanceCode(item?.billNumber, 'باقیات');
 };
 
+const getArrearsTimingLabel = (dueDate = '') => {
+  const due = dueDate ? new Date(dueDate) : null;
+  if (!due || Number.isNaN(due.getTime())) return 'بدون تاریخ سررسید';
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+  if (dueDay < today) return 'سررسید گذشته';
+  if (due.getFullYear() === now.getFullYear() && due.getMonth() === now.getMonth()) return 'ماه جاری';
+  return 'آینده';
+};
+
 const buildFinanceItemsByStudentMap = (items = []) => {
   const grouped = new Map();
   (Array.isArray(items) ? items : []).forEach((item) => {
@@ -972,12 +983,16 @@ const getBillFeeScopeSummary = (bill = {}, feeType = 'tuition') => {
     .filter((item) => String(item?.feeType || '').trim() === normalizedFeeType);
   if (scopedLines.length) {
     return scopedLines.reduce((summary, item) => ({
+      gross: summary.gross + toSafeNumber(item?.grossAmount ?? item?.netAmount),
+      discount: summary.discount + toSafeNumber(item?.reductionAmount),
+      penalty: summary.penalty + toSafeNumber(item?.penaltyAmount),
+      net: summary.net + toSafeNumber(item?.netAmount),
       due: summary.due + toSafeNumber(item?.netAmount),
       paid: summary.paid + toSafeNumber(item?.paidAmount),
       outstanding: summary.outstanding + Math.max(0, toSafeNumber(
         item?.balanceAmount ?? (toSafeNumber(item?.netAmount) - toSafeNumber(item?.paidAmount))
       ))
-    }), { due: 0, paid: 0, outstanding: 0 });
+    }), { gross: 0, discount: 0, penalty: 0, net: 0, due: 0, paid: 0, outstanding: 0 });
   }
   const breakdownDue = Math.max(0, toSafeNumber(bill?.feeBreakdown?.[normalizedFeeType]));
   const scopedPayment = Math.max(0, toSafeNumber(bill?.paymentBreakdown?.[normalizedFeeType]));
@@ -990,17 +1005,31 @@ const getBillFeeScopeSummary = (bill = {}, feeType = 'tuition') => {
       : feeScopes.length === 1
         ? toSafeNumber(bill?.amountPaid)
         : 0;
+    const net = breakdownDue || toSafeNumber(bill?.amountDue);
+    const gross = feeScopes.length === 1
+      ? Math.max(net, toSafeNumber(bill?.amountOriginal))
+      : net;
     return {
-      due: breakdownDue || toSafeNumber(bill?.amountDue),
+      gross,
+      discount: Math.max(0, gross - net),
+      penalty: 0,
+      net,
+      due: net,
       paid,
-      outstanding: Math.max(0, (breakdownDue || toSafeNumber(bill?.amountDue)) - paid)
+      outstanding: Math.max(0, net - paid)
     };
   }
   if (String(bill?.orderType || '').trim() !== normalizedFeeType) {
-    return { due: 0, paid: 0, outstanding: 0 };
+    return { gross: 0, discount: 0, penalty: 0, net: 0, due: 0, paid: 0, outstanding: 0 };
   }
+  const net = toSafeNumber(bill?.amountDue);
+  const gross = Math.max(net, toSafeNumber(bill?.amountOriginal));
   return {
-    due: toSafeNumber(bill?.amountDue),
+    gross,
+    discount: Math.max(0, gross - net),
+    penalty: 0,
+    net,
+    due: net,
     paid: toSafeNumber(bill?.amountPaid),
     outstanding: Math.max(0, toSafeNumber(
       bill?.outstandingAmount ?? (toSafeNumber(bill?.amountDue) - toSafeNumber(bill?.amountPaid))
@@ -1023,11 +1052,15 @@ const buildStudentFinanceSnapshot = ({ bills = [], reliefs = [], studentId = '',
     acc[feeType] = scopedBills.reduce((summary, bill) => {
       const scoped = getBillFeeScopeSummary(bill, feeType);
       return {
+        gross: summary.gross + scoped.gross,
+        discount: summary.discount + scoped.discount,
+        penalty: summary.penalty + scoped.penalty,
+        net: summary.net + scoped.net,
         due: summary.due + scoped.due,
         paid: summary.paid + scoped.paid,
         outstanding: summary.outstanding + scoped.outstanding
       };
-    }, { due: 0, paid: 0, outstanding: 0 });
+    }, { gross: 0, discount: 0, penalty: 0, net: 0, due: 0, paid: 0, outstanding: 0 });
     return acc;
   }, {});
   const openOrders = scopedBills.filter((item) => OPEN_ORDER_STATUSES.has(String(item?.status || '').trim()));
@@ -1309,6 +1342,8 @@ export default function AdminFinance() {
     mirroredActiveReliefs: 0
   });
   const discountSubmitInFlightRef = useRef(false);
+  const fullOrdersLoadedRef = useRef(false);
+  const fullOrdersLoadInFlightRef = useRef(false);
   const [exemptions, setExemptions] = useState([]);
   const [reliefs, setReliefs] = useState([]);
   const [billingPreview, setBillingPreview] = useState(null);
@@ -1425,6 +1460,7 @@ export default function AdminFinance() {
   });
   const [classPaymentApprovalRefreshKey, setClassPaymentApprovalRefreshKey] = useState(0);
   const [message, setMessage] = useState('');
+  const [financeDataErrors, setFinanceDataErrors] = useState({ orders: '', payments: '' });
   const [busy, setBusy] = useState(false);
   const [activeSchoolContext, setActiveSchoolContext] = useState(null);
   const [receiptStatusFilter, setReceiptStatusFilter] = useState('pending');
@@ -1501,7 +1537,6 @@ export default function AdminFinance() {
 
   const [bulkForm, setBulkForm] = useState({
     classId: '',
-    amount: '',
     dueDate: '',
     academicYear: '',
     academicYearId: '',
@@ -1662,15 +1697,26 @@ export default function AdminFinance() {
         classTitle: item?.schoolClass?.title || item?.classId?.title || '',
         academicYearTitle: item?.academicYear?.title || item?.academicYearId?.title || '',
         dueDate: item?.dueDate || '',
+        amountOriginal: 0,
+        discountAmount: 0,
+        penaltyAmount: 0,
         amountDue: 0,
         amountPaid: 0,
         outstandingAmount: 0,
         count: 0,
         bills: []
       };
+      existing.amountOriginal += tuitionSummary.gross;
+      existing.discountAmount += tuitionSummary.discount;
+      existing.penaltyAmount += tuitionSummary.penalty;
       existing.amountDue += tuitionSummary.due;
       existing.amountPaid += tuitionSummary.paid;
       existing.outstandingAmount += tuitionSummary.outstanding;
+      const itemDueTime = new Date(item?.dueDate || 0).getTime();
+      const existingDueTime = new Date(existing.dueDate || 0).getTime();
+      if (!existing.dueDate || (!Number.isNaN(itemDueTime) && (Number.isNaN(existingDueTime) || itemDueTime < existingDueTime))) {
+        existing.dueDate = item?.dueDate || existing.dueDate;
+      }
       existing.count += 1;
       existing.bills.push(item);
       grouped.set(groupKey, existing);
@@ -2087,13 +2133,11 @@ export default function AdminFinance() {
     buildStudentFinanceSnapshot({
       bills,
       reliefs,
-      studentId: paymentDeskForm.studentId,
-      classId: paymentDeskForm.classId,
-      academicYearId: paymentDeskForm.academicYearId
+      studentId: paymentDeskForm.studentId
     })
-  ), [bills, reliefs, paymentDeskForm.studentId, paymentDeskForm.classId, paymentDeskForm.academicYearId]);
+  ), [bills, reliefs, paymentDeskForm.studentId]);
   const paymentDeskScopeSnapshot = paymentDeskFinanceSnapshot.byFeeType?.[paymentDeskForm.feeType]
-    || { due: 0, paid: 0, outstanding: 0 };
+    || { gross: 0, discount: 0, penalty: 0, net: 0, due: 0, paid: 0, outstanding: 0 };
   const reliefFocusStudentId = reliefFormMode === 'discount' ? discountForm.studentId : exemptionForm.studentId;
   const reliefFocusClassId = reliefFormMode === 'discount' ? discountForm.classId : exemptionForm.classId;
   const reliefFocusAcademicYearId = reliefFormMode === 'discount' ? discountForm.academicYearId : exemptionForm.academicYearId;
@@ -2278,7 +2322,6 @@ export default function AdminFinance() {
       ...bulkForm,
       classId,
       academicYearId: resolveBulkAcademicYearId(classId, bulkForm.academicYearId),
-      amount: String(bulkForm.amount || '').trim(),
       dueDate: String(bulkForm.dueDate || '').trim()
     };
   };
@@ -2291,7 +2334,7 @@ export default function AdminFinance() {
       return acc;
     }, {});
     if (reasons.zero_amount) {
-      return 'برای این صنف مبلغ قابل بل‌دهی صفر است؛ مبلغ فیس را وارد کنید یا برای صنف/سال انتخاب‌شده پلان فیس فعال بسازید.';
+      return 'برای این صنف مبلغ قابل بل‌دهی صفر است؛ مبلغ فیس را در پلان مالی فعال همان صنف و سال تعلیمی تنظیم کنید.';
     }
     if (reasons.not_debtor) {
       return 'گزینه فقط بدهکاران فعال است، اما برای این صنف بدهی باز پیدا نشد.';
@@ -2684,11 +2727,13 @@ export default function AdminFinance() {
   const loadAll = async () => {
     setBusy(true);
     try {
+      const requestedFullOrders = fullOrdersLoadedRef.current;
+      const ordersRequestUrl = `${API_BASE}/api/student-finance/orders${requestedFullOrders ? '' : '?view=open'}`;
       const safeFetchJson = async (url, fallback = { success: false }) => {
         try {
           return await fetchJson(url);
-        } catch {
-          return fallback;
+        } catch (error) {
+          return { ...fallback, _loadError: error?.message || 'دریافت اطلاعات از سرور ناموفق بود.' };
         }
       };
       const [
@@ -2719,7 +2764,7 @@ export default function AdminFinance() {
         safeFetchJson(`${API_BASE}/api/finance/admin/reference-data`, { success: false, students: [], classes: [], academicYears: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/student-memberships`, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/summary`, { success: false, summary: null, topDebtors: [] }),
-        safeFetchJson(`${API_BASE}/api/student-finance/orders`, { success: true, items: [] }),
+        safeFetchJson(ordersRequestUrl, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/student-finance/payments?view=inbox`, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/fee-plans`, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/month-close`, { success: true, items: [] }),
@@ -2753,13 +2798,21 @@ export default function AdminFinance() {
       const nextPendingReceipts = paymentsData?.success ? (paymentsData.items || []).map(toLegacyLikeReceiptRow) : [];
       const nextStudentMemberships = membershipData?.success ? (membershipData.items || []) : [];
       const nextMembershipStudents = buildFinanceMembershipStudentOptions(nextStudentMemberships);
+      const shouldApplyOrdersResult = requestedFullOrders || !fullOrdersLoadedRef.current;
+      setFinanceDataErrors({
+        orders: ordersData?.success ? '' : (ordersData?._loadError || ordersData?.message || 'دریافت بل‌ها و باقیات ناموفق بود.'),
+        payments: paymentsData?.success ? '' : (paymentsData?._loadError || paymentsData?.message || 'دریافت پرداخت‌ها و رسیدها ناموفق بود.')
+      });
+      if (!shouldApplyOrdersResult) {
+        setFinanceDataErrors((previous) => ({ ...previous, orders: '' }));
+      }
       setStudents(refData.students || []);
       setStudentMemberships(nextStudentMemberships);
       setClassOptions(nextClassOptions);
       setAcademicYears(nextAcademicYears);
       setSummary(summaryData.summary || null);
       setTopDebtors(summaryData.topDebtors || []);
-      setBills(nextBills);
+      if (shouldApplyOrdersResult) setBills(nextBills);
       setPendingReceipts(nextPendingReceipts);
       setFeePlans(feePlansData?.success ? (feePlansData.items || []) : []);
       setClosedMonths(monthsData?.success ? (monthsData.items || []) : []);
@@ -2895,15 +2948,16 @@ export default function AdminFinance() {
     const safeFetchJson = async (url, fallback = { success: false }) => {
       try {
         return await fetchJson(url);
-      } catch {
-        return fallback;
+      } catch (error) {
+        return { ...fallback, _loadError: error?.message || 'دریافت اطلاعات از سرور ناموفق بود.' };
       }
     };
 
     try {
+      const ordersRequestUrl = `${API_BASE}/api/student-finance/orders${fullOrdersLoadedRef.current ? '' : '?view=open'}`;
       const [summaryData, ordersData, paymentsData, byClassData, anomaliesData] = await Promise.all([
         safeFetchJson(`${API_BASE}/api/finance/admin/summary`, { success: false, summary: null, topDebtors: [] }),
-        safeFetchJson(`${API_BASE}/api/student-finance/orders`, { success: true, items: [] }),
+        safeFetchJson(ordersRequestUrl, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/student-finance/payments?view=inbox`, { success: true, items: [] }),
         includeClassReport
           ? safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/by-class'), { success: true, items: [] })
@@ -2920,6 +2974,11 @@ export default function AdminFinance() {
       if (ordersData?.success) {
         setBills((ordersData.items || []).map(toLegacyLikeBillRow));
       }
+      setFinanceDataErrors((prev) => ({
+        ...prev,
+        orders: ordersData?.success ? '' : (ordersData?._loadError || ordersData?.message || 'تازه‌سازی بل‌ها و باقیات ناموفق بود.'),
+        payments: paymentsData?.success ? '' : (paymentsData?._loadError || paymentsData?.message || 'تازه‌سازی پرداخت‌ها و رسیدها ناموفق بود.')
+      }));
       if (paymentsData?.success) {
         const nextPendingReceipts = (paymentsData.items || []).map(toLegacyLikeReceiptRow);
         setPendingReceipts(nextPendingReceipts);
@@ -2975,6 +3034,39 @@ export default function AdminFinance() {
     deliveryOpsRetryableFilter,
     deliveryRecoveryStateFilter
   ]);
+
+  useEffect(() => {
+    if (activeSection !== 'orders'
+      || fullOrdersLoadedRef.current
+      || fullOrdersLoadInFlightRef.current) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    fullOrdersLoadInFlightRef.current = true;
+    fetchJson(`${API_BASE}/api/student-finance/orders`, { signal: controller.signal })
+      .then((data) => {
+        if (!data?.success) throw new Error(data?.message || 'دریافت فهرست کامل بل‌ها ناموفق بود.');
+        fullOrdersLoadedRef.current = true;
+        setBills((data.items || []).map(toLegacyLikeBillRow));
+        setFinanceDataErrors((previous) => ({ ...previous, orders: '' }));
+      })
+      .catch((error) => {
+        if (error?.name === 'AbortError') return;
+        setFinanceDataErrors((previous) => ({
+          ...previous,
+          orders: error?.message || 'دریافت فهرست کامل بل‌ها ناموفق بود.'
+        }));
+      })
+      .finally(() => {
+        fullOrdersLoadInFlightRef.current = false;
+      });
+
+    return () => {
+      controller.abort();
+      fullOrdersLoadInFlightRef.current = false;
+    };
+  }, [activeSection]);
 
   useEffect(() => {
     loadCashierReport();
@@ -5933,21 +6025,26 @@ export default function AdminFinance() {
               <h3>صندوق باقیات ماهانه شاگرد</h3>
               <p className="muted">ماه‌های باقی‌دار شاگرد انتخاب‌شده در میز پرداخت را همراه با مبلغ، پرداخت‌شده و مهلت پرداخت ببینید.</p>
             </div>
-            {paymentDeskStudent ? (
+            {(paymentDeskMembershipStudent || paymentDeskStudent) ? (
               <div className="finance-chip-group">
                 <span className="finance-chip finance-chip-emerald">{paymentDeskMonthlyArrears.length} ماه</span>
                 <span className="finance-chip finance-chip-rose">{fmt(paymentDeskStudentTotalOutstanding)} AFN</span>
               </div>
             ) : null}
           </div>
+          {financeDataErrors.orders ? (
+            <div className="finance-data-error" role="alert">
+              اطلاعات بل‌ها و باقیات دریافت نشد: {financeDataErrors.orders}
+            </div>
+          ) : null}
           <div className="finance-summary finance-summary-compact">
-            <div><span>شاگرد</span><strong>{paymentDeskStudent?.fullName || paymentDeskStudent?.name || '-'}</strong></div>
-            <div><span>صنف</span><strong>{paymentDeskClass?.title || '-'}</strong></div>
-            <div><span>سال تعلیمی</span><strong>{paymentDeskAcademicYear?.title || '-'}</strong></div>
+            <div><span>شاگرد</span><strong>{paymentDeskMembershipStudent?.fullName || paymentDeskMembershipStudent?.name || paymentDeskStudent?.fullName || paymentDeskStudent?.name || '-'}</strong></div>
+            <div><span>صنف انتخاب‌شده</span><strong>{paymentDeskClass?.title || '-'}</strong></div>
+            <div><span>سال انتخاب‌شده</span><strong>{paymentDeskAcademicYear?.title || '-'}</strong></div>
             <div><span>کل باقیات</span><strong>{fmt(paymentDeskStudentTotalOutstanding)} AFN</strong></div>
           </div>
           <div className="finance-subcard-list">
-            {paymentDeskMonthlyArrears.map((item) => (
+            {!financeDataErrors.orders && paymentDeskMonthlyArrears.map((item) => (
               <div key={`student-arrears-${item.id}`} className="mini-row finance-arrears-month-row">
                 <div className="finance-arrears-month-head">
                   <span>
@@ -5959,34 +6056,42 @@ export default function AdminFinance() {
                       {item.count > 1 ? ` | ${item.count} بل` : ''}
                     </small>
                   </span>
-                  <strong>{fmt(item.outstandingAmount)} AFN</strong>
+                  <span className="finance-cell-stack">
+                    <strong>{fmt(item.outstandingAmount)} AFN</strong>
+                    <small>{getArrearsTimingLabel(item.dueDate)}</small>
+                  </span>
                 </div>
                 <div className="finance-arrears-breakdown">
-                  <span><b>اصل بل</b>{fmt(item.amountDue)} AFN</span>
+                  <span><b>مبلغ اصلی</b>{fmt(item.amountOriginal)} AFN</span>
+                  <span><b>تخفیف/معافیت</b>{fmt(item.discountAmount)} AFN</span>
+                  <span><b>فیس بعد از تخفیف</b>{fmt(item.amountDue)} AFN</span>
                   <span><b>پرداخت‌شده</b>{fmt(item.amountPaid)} AFN</span>
                   <span><b>باقی‌مانده</b>{fmt(item.outstandingAmount)} AFN</span>
                 </div>
-                {item.bills?.length > 1 ? (
+                {item.bills?.length ? (
                   <div className="finance-arrears-bill-list">
                     {item.bills.map((bill) => (
                       <div key={`arrears-bill-${getFeeOrderRowId(bill)}`} className="finance-arrears-bill-row">
-                        <span>{bill.title || formatFinanceCode(bill.billNumber, 'بل مالی')}</span>
+                        <span className="finance-cell-stack">
+                          <strong>{bill.title || getBillTypeLabel(bill) || 'بل مالی'}</strong>
+                          <small className="finance-latin-code">{formatFinanceCode(bill.billNumber, 'بدون شماره')}</small>
+                        </span>
                         <small>
                           {bill.dueDate ? toFaDate(bill.dueDate) : 'بدون مهلت'}
                           {' | '}
-                          پرداخت: {fmt(bill.amountPaid || 0)} AFN
+                          پرداخت فیس: {fmt(getBillFeeScopeSummary(bill, 'tuition').paid)} AFN
                         </small>
-                        <strong>{fmt(bill.outstandingAmount || 0)} AFN</strong>
+                        <strong>{fmt(getBillFeeScopeSummary(bill, 'tuition').outstanding)} AFN</strong>
                       </div>
                     ))}
                   </div>
                 ) : null}
               </div>
             ))}
-            {paymentDeskStudent && !paymentDeskMonthlyArrears.length ? (
+            {!financeDataErrors.orders && (paymentDeskMembershipStudent || paymentDeskStudent) && !paymentDeskMonthlyArrears.length ? (
               <p className="muted">برای این شاگرد باقیات ماهانه ثبت نشده است.</p>
             ) : null}
-            {!paymentDeskStudent ? (
+            {!financeDataErrors.orders && !(paymentDeskMembershipStudent || paymentDeskStudent) ? (
               <p className="muted">برای دیدن باقیات ماهانه، ابتدا شاگرد را در میز پرداخت انتخاب کنید.</p>
             ) : null}
           </div>
@@ -6315,7 +6420,7 @@ export default function AdminFinance() {
           <div className="finance-chip-group finance-payment-summary-chips">
             <span className="finance-chip">{paymentDeskClass?.title || 'صنف'}</span>
             <span className="finance-chip finance-chip-muted">{paymentDeskAcademicYear?.title || 'سال تعلیمی'}</span>
-            <span className="finance-chip finance-chip-emerald">{fmt(paymentDeskTotalOutstanding)} AFN مانده کل</span>
+            <span className="finance-chip finance-chip-emerald">{fmt(paymentDeskTotalOutstanding)} AFN مانده دامنه انتخاب‌شده</span>
             <span className="finance-chip">{paymentDeskOpenOrders.length} بدهی باز</span>
             {paymentDeskFinanceSnapshot.nextDueOrder?.dueDate && (
               <span className="finance-chip finance-chip-muted">مهلت بعدی: {toFaDate(paymentDeskFinanceSnapshot.nextDueOrder.dueDate)}</span>
@@ -6354,17 +6459,34 @@ export default function AdminFinance() {
               <div className="finance-card-head">
                 <div>
                   <h4>کارت مالی متعلم</h4>
+                  <p className="muted">جمع تمام عضویت‌ها، صنف‌ها و سال‌های تعلیمی همین شاگرد.</p>
                 </div>
                 <div className="finance-chip-group">
                   <span className="finance-chip finance-chip-emerald">{paymentDeskFinanceSnapshot.reliefCount} تسهیل فعال</span>
                   {!!paymentDeskFinanceSnapshot.fullReliefCount && <span className="finance-chip">کامل: {paymentDeskFinanceSnapshot.fullReliefCount}</span>}
                   {!!paymentDeskFinanceSnapshot.percentReliefCount && <span className="finance-chip finance-chip-muted">درصدی: {paymentDeskFinanceSnapshot.percentReliefCount}</span>}
+                  <Link className="finance-chip finance-chip-muted" to={`/admin-finance/profile/${encodeURIComponent(paymentDeskForm.studentId)}`}>
+                    تاریخچه کامل شاگرد
+                  </Link>
                 </div>
               </div>
+              {financeDataErrors.orders ? (
+                <div className="finance-data-error" role="alert">
+                  کارت مالی قابل محاسبه نیست: {financeDataErrors.orders}
+                </div>
+              ) : null}
               <div className="finance-kpi-grid finance-kpi-grid-dense">
                 <div className="finance-kpi-item">
-                  <span>اصل {FEE_LINE_TYPE_LABELS[paymentDeskForm.feeType] || 'تعهد'}</span>
-                  <strong>{fmt(paymentDeskScopeSnapshot.due)} AFN</strong>
+                  <span>مبلغ اصلی {FEE_LINE_TYPE_LABELS[paymentDeskForm.feeType] || 'تعهد'}</span>
+                  <strong>{fmt(paymentDeskScopeSnapshot.gross)} AFN</strong>
+                </div>
+                <div className="finance-kpi-item">
+                  <span>تخفیف/معافیت تطبیق‌شده</span>
+                  <strong>{fmt(paymentDeskScopeSnapshot.discount)} AFN</strong>
+                </div>
+                <div className="finance-kpi-item">
+                  <span>مبلغ خالص {FEE_LINE_TYPE_LABELS[paymentDeskForm.feeType] || 'تعهد'}</span>
+                  <strong>{fmt(paymentDeskScopeSnapshot.net)} AFN</strong>
                 </div>
                 <div className="finance-kpi-item">
                   <span>پرداخت {FEE_LINE_TYPE_LABELS[paymentDeskForm.feeType] || 'تعهد'}</span>
@@ -6373,10 +6495,6 @@ export default function AdminFinance() {
                 <div className="finance-kpi-item finance-kpi-item-accent">
                   <span>باقی {FEE_LINE_TYPE_LABELS[paymentDeskForm.feeType] || 'تعهد'}</span>
                   <strong>{fmt(paymentDeskScopeSnapshot.outstanding)} AFN</strong>
-                </div>
-                <div className="finance-kpi-item">
-                  <span>تسهیلات مبلغی</span>
-                  <strong>{fmt(paymentDeskFinanceSnapshot.fixedReliefAmount)} AFN</strong>
                 </div>
               </div>
               <div className="finance-subcard-list">
@@ -6553,7 +6671,7 @@ export default function AdminFinance() {
                 <option value="">سال تعلیمی عضویت‌ها</option>
                 {academicYears.map((item) => <option key={`bulk-year-${item.id}`} value={item.id}>{getAcademicYearOptionLabel(item)}</option>)}
               </select>
-              <input value={bulkForm.amount} onChange={(e) => setBulkForm((p) => ({ ...p, amount: e.target.value }))} placeholder="مبلغ فیس/شهریه (اختیاری)" />
+              <div className="finance-info-note">مبلغ فیس و داخله فقط از پلان مالی فعال همین صنف و سال تعلیمی گرفته می‌شود.</div>
             </div>
             <div className="finance-split-grid">
               <div className="finance-cell-stack">
@@ -7850,7 +7968,12 @@ export default function AdminFinance() {
           <span className="finance-chip finance-chip-rose">ردشده: {receiptInboxSummary.rejected}</span>
           <span className="finance-chip finance-chip-muted">ارجاع‌شده: {receiptInboxSummary.escalated}</span>
         </div>
-        {!filteredReceipts.length && <p className="muted">پرداختی با این فیلتر پیدا نشد.</p>}
+        {financeDataErrors.payments ? (
+          <div className="finance-data-error" role="alert">
+            دریافت پرداخت‌ها و رسیدها ناموفق بود: {financeDataErrors.payments}
+          </div>
+        ) : null}
+        {!financeDataErrors.payments && !filteredReceipts.length && <p className="muted">پرداختی با این فیلتر پیدا نشد.</p>}
         {!!filteredReceipts.length && (
           <div className="receipt-review-layout">
             <div className="finance-table receipts-table">
@@ -8183,7 +8306,12 @@ export default function AdminFinance() {
             </div>
           )}
         </div>
-        {!filteredBills.length && <p className="muted">برای این فیلتر، بلی پیدا نشد.</p>}
+        {financeDataErrors.orders ? (
+          <div className="finance-data-error" role="alert">
+            دریافت بل‌ها ناموفق بود: {financeDataErrors.orders}
+          </div>
+        ) : null}
+        {!financeDataErrors.orders && !filteredBills.length && <p className="muted">برای این فیلتر، بلی پیدا نشد.</p>}
         <div className="finance-orders-table-head"><span>سند</span><span>متعلم</span><span>صنف / دوره</span><span>مبلغ</span><span>مهلت پرداخت</span><span>وضعیت</span><span>عملیات</span></div>
         <div className="finance-table bills-table finance-orders-table">
           <div className="head"><span>شماره</span><span>شاگرد</span><span>صنف</span><span>وضعیت</span><span>باقیمانده</span><span>عملیات</span></div>

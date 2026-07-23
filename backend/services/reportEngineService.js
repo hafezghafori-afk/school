@@ -47,6 +47,11 @@ const EducationPlanWeekly = require('../models/EducationPlanWeekly');
 const PromotionTransaction = require('../models/PromotionTransaction');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
+const {
+  buildPaymentClassScope,
+  buildPaymentOrderLinkFilter,
+  groupPaymentAmountsByClass
+} = require('../utils/paymentClassScope');
 const { deriveFinanceOrderStatus } = require('../utils/financeLineItems');
 const {
   buildAnnualGovernmentFinanceReport,
@@ -462,43 +467,115 @@ function summarizeRecognizedPaymentsByFeeType(rows = []) {
   }
   return result;
 }
+
+function buildPaymentOrderReportScope(filters = {}) {
+  const query = {};
+  if (filters.academicYearId) query.academicYearId = filters.academicYearId;
+  if (filters.classId) query.classId = filters.classId;
+  if (filters.studentMembershipId) query.studentMembershipId = filters.studentMembershipId;
+  if (filters.studentId) query.studentId = filters.studentId;
+  if (filters.userId) query.student = filters.userId;
+  return query;
+}
+
+async function applyAllocatedOrderScopeToPaymentFilter(filters = {}, paymentFilter = {}) {
+  if (filters.schoolId) paymentFilter.schoolId = filters.schoolId;
+  const orderScope = buildPaymentOrderReportScope(filters);
+  if (!Object.keys(orderScope).length) return paymentFilter;
+  const scopedOrders = await FeeOrder.find(orderScope).select('_id').lean();
+  Object.assign(paymentFilter, buildPaymentOrderLinkFilter(scopedOrders.map((item) => item?._id).filter(Boolean)));
+  return paymentFilter;
+}
+
+function buildPopulatedPaymentOrderMap(payments = []) {
+  const result = new Map();
+  for (const payment of payments || []) {
+    const candidates = [
+      payment?.feeOrderId,
+      ...(Array.isArray(payment?.allocations) ? payment.allocations.map((item) => item?.feeOrderId) : [])
+    ];
+    candidates.forEach((order) => {
+      const orderId = getReferenceId(order);
+      if (orderId && order && typeof order === 'object') result.set(orderId, order);
+    });
+  }
+  return result;
+}
+
+function scopeRecognizedPaymentRows(rows = [], filters = {}, orderById = new Map()) {
+  const hasOrderScope = Object.keys(buildPaymentOrderReportScope(filters)).length > 0;
+  if (!hasOrderScope) return rows;
+  return (rows || []).map((row) => {
+    const allocationScope = buildPaymentClassScope({
+      ...row.payment,
+      allocations: row.recognizedAllocations
+    }, orderById);
+    const recognizedAllocations = allocationScope.allocations
+      .filter((allocation) => {
+        const order = allocation.order;
+        if (!order) return false;
+        if (filters.academicYearId && allocation.academicYearId !== String(filters.academicYearId)) return false;
+        if (filters.classId && allocation.classId !== String(filters.classId)) return false;
+        if (filters.studentMembershipId && getReferenceId(order.studentMembershipId) !== String(filters.studentMembershipId)) return false;
+        if (filters.studentId && getReferenceId(order.studentId) !== String(filters.studentId)) return false;
+        if (filters.userId && getReferenceId(order.student) !== String(filters.userId)) return false;
+        return true;
+      })
+      .map((allocation) => ({
+        feeOrderId: allocation.feeOrderId,
+        feeType: allocation.feeType,
+        amount: Number(allocation.amount || 0)
+      }));
+    return {
+      ...row,
+      recognizedAllocations,
+      recognizedAmount: Number(recognizedAllocations
+        .reduce((sum, allocation) => sum + Number(allocation.amount || 0), 0)
+        .toFixed(2))
+    };
+  });
+}
 async function buildFinanceOverviewReport(filters) {
   const definition = getReportDefinition('finance_overview');
   const orderFilter = { status: { $ne: 'void' } };
   const paymentFilter = { status: 'approved' };
   if (filters.academicYearId) {
     orderFilter.academicYearId = filters.academicYearId;
-    paymentFilter.academicYearId = filters.academicYearId;
   }
   if (filters.termId) orderFilter.assessmentPeriodId = filters.termId;
   if (filters.classId) {
     orderFilter.classId = filters.classId;
-    paymentFilter.classId = filters.classId;
   }
-  await Promise.all([
-    applySchoolClassScope(filters, orderFilter),
-    applySchoolClassScope(filters, paymentFilter)
-  ]);
+  await applySchoolClassScope(filters, orderFilter);
   if (filters.studentMembershipId) {
     orderFilter.studentMembershipId = filters.studentMembershipId;
-    paymentFilter.studentMembershipId = filters.studentMembershipId;
   }
   if (filters.studentId) {
     orderFilter.studentId = filters.studentId;
-    paymentFilter.studentId = filters.studentId;
   }
   if (filters.userId) {
     orderFilter.student = filters.userId;
-    paymentFilter.student = filters.userId;
   }
   Object.assign(orderFilter, buildDateRangeFilter('issuedAt', filters));
   Object.assign(paymentFilter, buildDateRangeFilter('paidAt', filters));
+  await applyAllocatedOrderScopeToPaymentFilter(filters, paymentFilter);
 
   const [orders, payments] = await Promise.all([
     FeeOrder.find(orderFilter).populate('student', 'name email grade').populate('studentId').populate('classId').populate('academicYearId').populate('assessmentPeriodId').sort({ issuedAt: -1, createdAt: -1 }),
-    FeePayment.find(paymentFilter).populate('student', 'name email grade').populate('studentId').populate('classId').populate('academicYearId').populate('feeOrderId', 'orderNumber title').sort({ paidAt: -1, createdAt: -1 })
+    FeePayment.find(paymentFilter)
+      .populate('student', 'name email grade')
+      .populate('studentId')
+      .populate('classId')
+      .populate('academicYearId')
+      .populate('feeOrderId', 'orderNumber title classId academicYearId studentMembershipId studentId student schoolId status')
+      .populate('allocations.feeOrderId', 'orderNumber title classId academicYearId studentMembershipId studentId student schoolId status')
+      .sort({ paidAt: -1, createdAt: -1 })
   ]);
-  const recognizedPaymentRows = await recognizePayments(payments);
+  const recognizedPaymentRows = scopeRecognizedPaymentRows(
+    await recognizePayments(payments),
+    filters,
+    buildPopulatedPaymentOrderMap(payments)
+  );
 
   const orderStatuses = orders.map((item) => deriveFinanceOrderStatus({
     currentStatus: item.status,
@@ -894,30 +971,35 @@ async function buildFeeCollectionByClassReport(filters) {
 
   if (filters.academicYearId) {
     orderFilter.academicYearId = filters.academicYearId;
-    paymentFilter.academicYearId = filters.academicYearId;
   }
   if (filters.classId) {
     orderFilter.classId = filters.classId;
-    paymentFilter.classId = filters.classId;
   }
-  await Promise.all([
-    applySchoolClassScope(filters, orderFilter),
-    applySchoolClassScope(filters, paymentFilter)
-  ]);
+  await applySchoolClassScope(filters, orderFilter);
 
   Object.assign(orderFilter, buildDateRangeFilter('issuedAt', filters));
   Object.assign(paymentFilter, buildDateRangeFilter('paidAt', filters));
+  await applyAllocatedOrderScopeToPaymentFilter(filters, paymentFilter);
   const reliefFilter = buildFinanceReliefFilter(filters, { activeOnly: true });
   await applySchoolClassScope(filters, reliefFilter);
 
   const [orders, payments, reliefs] = await Promise.all([
     FeeOrder.find(orderFilter).populate('classId', 'title code gradeLevel section').sort({ issuedAt: -1, createdAt: -1 }),
-    FeePayment.find(paymentFilter).populate('classId', 'title code gradeLevel section').populate({ path: 'feeOrderId', populate: { path: 'classId', select: 'title code gradeLevel section' } }).sort({ paidAt: -1, createdAt: -1 }),
+    FeePayment.find(paymentFilter)
+      .populate('classId', 'title code gradeLevel section')
+      .populate({ path: 'feeOrderId', select: 'classId academicYearId studentMembershipId studentId student schoolId status', populate: { path: 'classId', select: 'title code gradeLevel section' } })
+      .populate({ path: 'allocations.feeOrderId', select: 'classId academicYearId studentMembershipId studentId student schoolId status', populate: { path: 'classId', select: 'title code gradeLevel section' } })
+      .sort({ paidAt: -1, createdAt: -1 }),
     FinanceRelief.find(reliefFilter)
       .populate('classId', 'title code gradeLevel section')
       .sort({ createdAt: -1, startDate: -1 })
   ]);
-  const recognizedPaymentRows = await recognizePayments(payments);
+  const paymentOrderMap = buildPopulatedPaymentOrderMap(payments);
+  const recognizedPaymentRows = scopeRecognizedPaymentRows(
+    await recognizePayments(payments),
+    filters,
+    paymentOrderMap
+  );
 
   const grouped = new Map();
   const ensureGroup = (classDoc) => {
@@ -950,17 +1032,24 @@ async function buildFeeCollectionByClassReport(filters) {
     current.totalOutstanding += Number(item.outstandingAmount || 0);
   }
 
-  for (const { payment: item, recognizedAmount } of recognizedPaymentRows) {
+  for (const { payment: item, recognizedAmount, recognizedAllocations } of recognizedPaymentRows) {
     if (recognizedAmount <= 0) continue;
-    const current = ensureGroup(item.classId || item.feeOrderId?.classId);
-    current.paymentCount += 1;
-    if (item.status === 'approved') {
-      current.approvedPaymentCount += 1;
-      current.approvedAmount += Number(recognizedAmount || 0);
-    } else if (item.status === 'pending') {
-      current.pendingPaymentCount += 1;
-      current.pendingAmount += Number(recognizedAmount || 0);
-    }
+    const amountByClass = groupPaymentAmountsByClass(
+      { ...item, allocations: recognizedAllocations },
+      paymentOrderMap
+    );
+    amountByClass.forEach(({ amount, classDoc }) => {
+      if (amount <= 0) return;
+      const current = ensureGroup(classDoc);
+      current.paymentCount += 1;
+      if (item.status === 'approved') {
+        current.approvedPaymentCount += 1;
+        current.approvedAmount += amount;
+      } else if (item.status === 'pending') {
+        current.pendingPaymentCount += 1;
+        current.pendingAmount += amount;
+      }
+    });
   }
 
   for (const item of reliefs) {
@@ -989,7 +1078,7 @@ async function buildFeeCollectionByClassReport(filters) {
     totalOutstanding: Number(rows.reduce((sum, item) => sum + Number(item.totalOutstanding || 0), 0).toFixed(2)),
     approvedCollection: Number(rows.reduce((sum, item) => sum + Number(item.approvedAmount || 0), 0).toFixed(2)),
     pendingCollection: Number(rows.reduce((sum, item) => sum + Number(item.pendingAmount || 0), 0).toFixed(2)),
-    totalPayments: rows.reduce((sum, item) => sum + Number(item.paymentCount || 0), 0),
+    totalPayments: recognizedPaymentRows.filter((item) => Number(item.recognizedAmount || 0) > 0).length,
     totalReliefs: rows.reduce((sum, item) => sum + Number(item.reliefCount || 0), 0),
     totalFixedReliefAmount: Number(rows.reduce((sum, item) => sum + Number(item.fixedReliefAmount || 0), 0).toFixed(2)),
     fullReliefCount: rows.reduce((sum, item) => sum + Number(item.fullReliefCount || 0), 0),
@@ -1749,5 +1838,8 @@ module.exports = {
   listReportCatalog,
   listReportReferenceData,
   reportToCsv,
-  runReport
+  runReport,
+  __paymentClassScopeTestUtils: Object.freeze({
+    scopeRecognizedPaymentRows
+  })
 };

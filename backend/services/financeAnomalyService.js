@@ -16,6 +16,10 @@ const FinanceRelief = require('../models/FinanceRelief');
 const FinanceFeePlan = require('../models/FinanceFeePlan');
 const FinanceBill = require('../models/FinanceBill');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
+const {
+  buildPaymentClassScope,
+  buildPaymentOrderLinkFilter
+} = require('../utils/paymentClassScope');
 
 function toPlain(doc) {
   if (!doc) return null;
@@ -540,7 +544,7 @@ function buildMembershipFinanceAnomalies({
       if (!paidAt || differenceInDays(now, paidAt) < 7) return;
       const paymentNumber = normalizeText(payment?.paymentNumber) || 'پرداخت';
       anomalies.push({
-        id: `pending-payment-stalled-${normalizeNullableId(payment?.id || payment?._id || paymentNumber)}`,
+        id: `pending-payment-stalled-${normalizeNullableId(payment?.id || payment?._id || paymentNumber)}-${membershipId || 'student'}`,
         anomalyType: 'pending_payment_stalled',
         severity: 'warning',
         actionRequired: true,
@@ -869,6 +873,39 @@ function formatPaymentLite(doc) {
   };
 }
 
+function splitPaymentByAllocatedMembership(doc = {}) {
+  const item = toPlain(doc) || {};
+  const orderById = new Map();
+  [
+    item?.feeOrderId,
+    ...(Array.isArray(item?.allocations) ? item.allocations.map((allocation) => allocation?.feeOrderId) : [])
+  ].forEach((order) => {
+    const orderId = normalizeNullableId(order?._id || order);
+    if (orderId && order && typeof order === 'object') orderById.set(orderId, order);
+  });
+  const allocationScope = buildPaymentClassScope(item, orderById);
+  const groupedByMembership = allocationScope.allocations.reduce((map, allocation) => {
+    const order = allocation.order;
+    if (!order || normalizeText(order.status) === 'void') return map;
+    const membershipId = normalizeNullableId(order.studentMembershipId);
+    if (!membershipId) return map;
+    const current = map.get(membershipId) || { amount: 0, order };
+    current.amount = roundMoney(current.amount + Number(allocation.amount || 0));
+    map.set(membershipId, current);
+    return map;
+  }, new Map());
+
+  return Array.from(groupedByMembership.entries()).map(([membershipId, { amount, order }]) => ({
+    membershipId,
+    payment: formatPaymentLite({
+      ...item,
+      amount,
+      classId: order.classId || null,
+      academicYearId: order.academicYearId || null
+    })
+  }));
+}
+
 function formatReliefLite(doc) {
   const item = toPlain(doc);
   if (!item) return null;
@@ -930,14 +967,12 @@ async function buildFinanceAnomalyReport({
     membershipFilter._id = studentMembershipId;
     orderFilter.studentMembershipId = studentMembershipId;
     billFilter.studentMembershipId = studentMembershipId;
-    paymentFilter.studentMembershipId = studentMembershipId;
     reliefFilter.studentMembershipId = studentMembershipId;
   }
   if (normalizeNullableId(classId)) {
     membershipFilter.classId = classId;
     orderFilter.classId = classId;
     billFilter.classId = classId;
-    paymentFilter.classId = classId;
     reliefFilter.classId = classId;
     feePlanFilter.classId = classId;
   }
@@ -945,9 +980,18 @@ async function buildFinanceAnomalyReport({
     membershipFilter.academicYearId = academicYearId;
     orderFilter.academicYearId = academicYearId;
     billFilter.academicYearId = academicYearId;
-    paymentFilter.academicYearId = academicYearId;
     reliefFilter.academicYearId = academicYearId;
     feePlanFilter.academicYearId = academicYearId;
+  }
+
+  const paymentOrderScopeFilter = { status: { $ne: 'void' } };
+  if (normalizeNullableId(schoolId)) paymentOrderScopeFilter.schoolId = schoolId;
+  if (normalizeNullableId(studentMembershipId)) paymentOrderScopeFilter.studentMembershipId = studentMembershipId;
+  if (normalizeNullableId(classId)) paymentOrderScopeFilter.classId = classId;
+  if (normalizeNullableId(academicYearId)) paymentOrderScopeFilter.academicYearId = academicYearId;
+  if (normalizeNullableId(studentMembershipId) || normalizeNullableId(classId) || normalizeNullableId(academicYearId)) {
+    const scopedPaymentOrders = await FeeOrder.find(paymentOrderScopeFilter).select('_id').lean();
+    Object.assign(paymentFilter, buildPaymentOrderLinkFilter(scopedPaymentOrders.map((item) => item?._id).filter(Boolean)));
   }
 
   const [memberships, orders, bills, payments, reliefs, feePlans] = await Promise.all([
@@ -980,6 +1024,22 @@ async function buildFinanceAnomalyReport({
       .populate('studentId', 'fullName admissionNo')
       .populate('classId', 'title code gradeLevel section')
       .populate('academicYearId', 'title code')
+      .populate({
+        path: 'feeOrderId',
+        select: 'studentMembershipId classId academicYearId schoolId status',
+        populate: [
+          { path: 'classId', select: 'title code gradeLevel section' },
+          { path: 'academicYearId', select: 'title code' }
+        ]
+      })
+      .populate({
+        path: 'allocations.feeOrderId',
+        select: 'studentMembershipId classId academicYearId schoolId status',
+        populate: [
+          { path: 'classId', select: 'title code gradeLevel section' },
+          { path: 'academicYearId', select: 'title code' }
+        ]
+      })
       .sort({ paidAt: -1, createdAt: -1 })
       .limit(sourceLimit)
       .lean(),
@@ -1083,11 +1143,11 @@ async function buildFinanceAnomalyReport({
 
   const paymentMap = new Map();
   payments.forEach((item) => {
-    const membershipId = normalizeNullableId(item?.studentMembershipId);
-    if (!membershipId) return;
-    const current = paymentMap.get(membershipId) || [];
-    current.push(formatPaymentLite(item));
-    paymentMap.set(membershipId, current);
+    splitPaymentByAllocatedMembership(item).forEach(({ membershipId, payment }) => {
+      const current = paymentMap.get(membershipId) || [];
+      current.push(payment);
+      paymentMap.set(membershipId, current);
+    });
   });
 
   const reliefMap = new Map();
@@ -1164,5 +1224,8 @@ module.exports = {
   buildFinanceAnomalyReport,
   buildMembershipFinanceAnomalies,
   buildAnomalySummary,
-  formatAmountLabel
+  formatAmountLabel,
+  __paymentClassScopeTestUtils: Object.freeze({
+    splitPaymentByAllocatedMembership
+  })
 };

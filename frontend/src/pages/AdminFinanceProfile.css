@@ -1,18 +1,197 @@
 .admin-finance-profile-page {
-  background: var(--card-bg);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
-  max-width: 600px;
-  margin: 40px auto;
-  padding: 32px 24px;
+  width: min(1180px, calc(100% - 32px));
+  margin: 24px auto 56px;
   color: var(--paper);
   text-align: right;
 }
-.admin-finance-profile-page h2 {
-  color: var(--accent);
+
+.finance-profile-hero,
+.finance-profile-section,
+.finance-profile-identity,
+.finance-profile-kpis,
+.finance-profile-state,
+.finance-profile-error {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: var(--radius-lg);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-card);
+}
+
+.finance-profile-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 26px;
   margin-bottom: 18px;
 }
-.admin-finance-profile-page .muted {
+
+.finance-profile-hero h2,
+.finance-profile-section h3 {
+  margin: 0;
+  color: var(--accent);
+}
+
+.finance-profile-hero p,
+.finance-profile-section-head p {
+  margin: 7px 0 0;
   color: var(--text-muted);
-  margin-top: 18px;
+}
+
+.finance-profile-eyebrow {
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+}
+
+.finance-profile-back {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 12px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.finance-profile-identity,
+.finance-profile-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  padding: 16px;
+  margin-bottom: 18px;
+}
+
+.finance-profile-identity > div,
+.finance-profile-kpis > div {
+  display: grid;
+  gap: 7px;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.finance-profile-identity span,
+.finance-profile-kpis span,
+.finance-profile-order small,
+.finance-profile-compact-row small {
+  color: var(--text-muted);
+}
+
+.finance-profile-kpis .accent {
+  border: 1px solid rgba(34, 197, 94, 0.38);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.finance-profile-section {
+  padding: 20px;
+  margin-bottom: 18px;
+}
+
+.finance-profile-section-head,
+.finance-profile-row-head,
+.finance-profile-compact-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.finance-profile-section-head {
+  margin-bottom: 14px;
+}
+
+.finance-profile-section-head > span {
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.finance-profile-list,
+.finance-profile-compact-list {
+  display: grid;
+  gap: 10px;
+}
+
+.finance-profile-order,
+.finance-profile-compact-row {
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.finance-profile-row-head > span:first-child,
+.finance-profile-compact-row > span {
+  display: grid;
+  gap: 4px;
+}
+
+.finance-profile-status {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+.finance-profile-status.overdue {
+  background: rgba(244, 63, 94, 0.14);
+  color: #fb7185;
+}
+
+.finance-profile-order-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.finance-profile-order-grid span {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.07);
+}
+
+.finance-profile-compact-row.is-void {
+  opacity: 0.72;
+  border-style: dashed;
+}
+
+.finance-profile-state,
+.finance-profile-error,
+.finance-profile-empty {
+  padding: 18px;
+}
+
+.finance-profile-error {
+  margin: 12px 0;
+  border-color: rgba(244, 63, 94, 0.4);
+  background: rgba(244, 63, 94, 0.1);
+  color: #fecdd3;
+}
+
+.finance-profile-empty,
+.finance-profile-state {
+  color: var(--text-muted);
+}
+
+@media (max-width: 720px) {
+  .admin-finance-profile-page {
+    width: min(100% - 18px, 1180px);
+    margin-top: 10px;
+  }
+
+  .finance-profile-hero,
+  .finance-profile-section-head,
+  .finance-profile-compact-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .finance-profile-back {
+    text-align: center;
+  }
 }

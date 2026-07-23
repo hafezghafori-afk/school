@@ -29,6 +29,7 @@ const requiredBackendScripts = [
   'backup:create',
   'backup:plan',
   'backup:restore',
+  'check:database-restore',
   'check:operations',
   'release:preflight'
 ];

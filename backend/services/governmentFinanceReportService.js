@@ -1,12 +1,18 @@
 const AcademicYear = require('../models/AcademicYear');
 const ExpenseCategoryDefinition = require('../models/ExpenseCategoryDefinition');
 const ExpenseEntry = require('../models/ExpenseEntry');
+const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
 const FinancialYear = require('../models/FinancialYear');
 const SchoolClass = require('../models/SchoolClass');
 const { buildTreasuryAnalytics } = require('./treasuryGovernanceService');
 const { getQuarterRange, listQuarterRanges, startOfDay, endOfDay } = require('./financialPeriodService');
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
+const {
+  buildPaymentClassScope,
+  buildPaymentOrderLinkFilter,
+  groupPaymentAmountsByClass
+} = require('../utils/paymentClassScope');
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -147,6 +153,67 @@ function buildFeeTypeBreakdown(recognizedRows = []) {
     .sort((left, right) => right.amount - left.amount);
 }
 
+async function applyGovernmentPaymentOrderScope(paymentFilter = {}, {
+  schoolId = '',
+  academicYearId = '',
+  classId = ''
+} = {}) {
+  const orderFilter = { schoolId };
+  if (academicYearId) orderFilter.academicYearId = academicYearId;
+  if (classId) orderFilter.classId = classId;
+  const scopedOrders = await FeeOrder.find(orderFilter).select('_id').lean();
+  Object.assign(paymentFilter, buildPaymentOrderLinkFilter(scopedOrders.map((item) => item?._id).filter(Boolean)));
+  return paymentFilter;
+}
+
+function buildGovernmentPaymentOrderMap(payments = []) {
+  const result = new Map();
+  for (const payment of payments || []) {
+    const candidates = [
+      payment?.feeOrderId,
+      ...(Array.isArray(payment?.allocations) ? payment.allocations.map((item) => item?.feeOrderId) : [])
+    ];
+    candidates.forEach((order) => {
+      const orderId = normalizeId(order);
+      if (orderId && order && typeof order === 'object') result.set(orderId, order);
+    });
+  }
+  return result;
+}
+
+function scopeGovernmentPaymentRows(rows = [], orderById = new Map(), {
+  schoolId = '',
+  academicYearId = '',
+  classId = ''
+} = {}) {
+  return (rows || []).map((row) => {
+    const paymentScope = buildPaymentClassScope({
+      ...row.payment,
+      allocations: row.recognizedAllocations
+    }, orderById);
+    const recognizedAllocations = paymentScope.allocations
+      .filter((allocation) => {
+        if (!allocation.order) return false;
+        if (schoolId && allocation.schoolId !== String(schoolId)) return false;
+        if (academicYearId && allocation.academicYearId !== String(academicYearId)) return false;
+        if (classId && allocation.classId !== String(classId)) return false;
+        return true;
+      })
+      .map((allocation) => ({
+        feeOrderId: allocation.feeOrderId,
+        feeType: allocation.feeType,
+        amount: Number(allocation.amount || 0)
+      }));
+    return {
+      ...row,
+      recognizedAllocations,
+      recognizedAmount: Number(recognizedAllocations
+        .reduce((sum, allocation) => sum + Number(allocation.amount || 0), 0)
+        .toFixed(2))
+    };
+  });
+}
+
 async function buildQuarterlyGovernmentFinanceReport(filters = {}) {
   const context = await resolveFinancialSource(filters);
   const quarter = Math.max(1, Math.min(4, Number(filters.quarter) || 1));
@@ -165,17 +232,22 @@ async function buildQuarterlyGovernmentFinanceReport(filters = {}) {
     expenseFilter.financialYearId = context.financialYear._id;
   }
   if (context.academicYear?._id) {
-    paymentFilter.academicYearId = context.academicYear._id;
     expenseFilter.academicYearId = context.academicYear._id;
   }
 
   Object.assign(paymentFilter, buildRangeMatch('paidAt', range));
   Object.assign(expenseFilter, buildRangeMatch('expenseDate', range));
+  await applyGovernmentPaymentOrderScope(paymentFilter, {
+    schoolId: context.schoolId,
+    academicYearId: normalizeId(context.academicYear),
+    classId: normalizeText(filters.classId)
+  });
 
   const [payments, expenseRows] = await Promise.all([
     FeePayment.find(paymentFilter)
       .populate('classId', 'title code gradeLevel section')
-      .populate({ path: 'feeOrderId', select: 'classId', populate: { path: 'classId', select: 'title code gradeLevel section' } })
+      .populate({ path: 'feeOrderId', select: 'classId academicYearId schoolId status', populate: { path: 'classId', select: 'title code gradeLevel section' } })
+      .populate({ path: 'allocations.feeOrderId', select: 'classId academicYearId schoolId status', populate: { path: 'classId', select: 'title code gradeLevel section' } })
       .lean(),
     ExpenseEntry.aggregate([
       { $match: expenseFilter },
@@ -188,19 +260,32 @@ async function buildQuarterlyGovernmentFinanceReport(filters = {}) {
       }
     ])
   ]);
-  const recognizedPaymentRows = await recognizePayments(payments);
+  const paymentOrderMap = buildGovernmentPaymentOrderMap(payments);
+  const recognizedPaymentRows = scopeGovernmentPaymentRows(
+    await recognizePayments(payments),
+    paymentOrderMap,
+    {
+      schoolId: context.schoolId,
+      academicYearId: normalizeId(context.academicYear),
+      classId: normalizeText(filters.classId)
+    }
+  );
   const feeTypeBreakdown = buildFeeTypeBreakdown(recognizedPaymentRows);
   const paymentMap = new Map();
-  recognizedPaymentRows.forEach(({ payment: item, recognizedAmount }) => {
+  recognizedPaymentRows.forEach(({ payment: item, recognizedAmount, recognizedAllocations }) => {
     if (recognizedAmount <= 0) return;
-    const classRef = item.classId || item.feeOrderId?.classId || null;
-    const classId = normalizeId(classRef);
-    if (filters.classId && classId !== String(filters.classId)) return;
-    const key = classId || null;
-    const current = paymentMap.get(key) || { _id: key, total: 0, count: 0 };
-    current.total += Number(recognizedAmount || 0);
-    current.count += 1;
-    paymentMap.set(key, current);
+    const amountByClass = groupPaymentAmountsByClass(
+      { ...item, allocations: recognizedAllocations },
+      paymentOrderMap
+    );
+    amountByClass.forEach(({ classId: allocationClassId, amount }) => {
+      if (amount <= 0) return;
+      const key = allocationClassId || null;
+      const current = paymentMap.get(key) || { _id: key, total: 0, count: 0 };
+      current.total += amount;
+      current.count += 1;
+      paymentMap.set(key, current);
+    });
   });
   const paymentRows = [...paymentMap.values()];
 
@@ -221,7 +306,7 @@ async function buildQuarterlyGovernmentFinanceReport(filters = {}) {
       balance: Number((totalIncome - totalExpense).toFixed(2)),
       quarter,
       classCount: rows.length,
-      paymentCount: rows.reduce((sum, item) => sum + Number(item.paymentCount || 0), 0),
+      paymentCount: recognizedPaymentRows.filter((item) => Number(item.recognizedAmount || 0) > 0).length,
       expenseCount: rows.reduce((sum, item) => sum + Number(item.expenseCount || 0), 0)
     },
     feeTypeBreakdown,
@@ -312,11 +397,9 @@ async function buildGovernmentBudgetVsActualReport(filters = {}) {
     expenseFilter.financialYearId = financialYear._id;
   }
   if (academicYear?._id) {
-    paymentFilter.academicYearId = academicYear._id;
     expenseFilter.academicYearId = academicYear._id;
   }
   if (classId) {
-    paymentFilter.classId = classId;
     expenseFilter.classId = classId;
   }
 
@@ -326,9 +409,18 @@ async function buildGovernmentBudgetVsActualReport(filters = {}) {
   }, filters);
   Object.assign(paymentFilter, buildRangeMatch('paidAt', reportRange));
   Object.assign(expenseFilter, buildRangeMatch('expenseDate', reportRange));
+  await applyGovernmentPaymentOrderScope(paymentFilter, {
+    schoolId: context.schoolId,
+    academicYearId: normalizeId(academicYear),
+    classId
+  });
 
   const [paymentRows, expenseSummaryRows, expenseCategoryRows, categoryRegistry, treasuryAnalytics] = await Promise.all([
-    FeePayment.find(paymentFilter).select('amount feeOrderId allocations').lean(),
+    FeePayment.find(paymentFilter)
+      .select('amount feeOrderId allocations')
+      .populate('feeOrderId', 'classId academicYearId schoolId status')
+      .populate('allocations.feeOrderId', 'classId academicYearId schoolId status')
+      .lean(),
     ExpenseEntry.aggregate([
       { $match: expenseFilter },
       {
@@ -356,7 +448,15 @@ async function buildGovernmentBudgetVsActualReport(filters = {}) {
     })
   ]);
 
-  const recognizedPaymentRows = await recognizePayments(paymentRows);
+  const recognizedPaymentRows = scopeGovernmentPaymentRows(
+    await recognizePayments(paymentRows),
+    buildGovernmentPaymentOrderMap(paymentRows),
+    {
+      schoolId: context.schoolId,
+      academicYearId: normalizeId(academicYear),
+      classId
+    }
+  );
   const feeTypeBreakdown = buildFeeTypeBreakdown(recognizedPaymentRows);
   const actualIncome = recognizedPaymentRows.reduce((sum, row) => sum + Number(row.recognizedAmount || 0), 0);
   const actualExpense = Number(expenseSummaryRows[0]?.total || 0);
@@ -494,5 +594,8 @@ async function buildGovernmentBudgetVsActualReport(filters = {}) {
 module.exports = {
   buildAnnualGovernmentFinanceReport,
   buildGovernmentBudgetVsActualReport,
-  buildQuarterlyGovernmentFinanceReport
+  buildQuarterlyGovernmentFinanceReport,
+  __paymentClassScopeTestUtils: Object.freeze({
+    scopeGovernmentPaymentRows
+  })
 };

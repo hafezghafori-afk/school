@@ -216,13 +216,9 @@ function buildSelectedScopes({
   return scopes;
 }
 
-function buildPlanAmountsByScope(plan = null, scopes = [], amountOverride = 0) {
+function buildPlanAmountsByScope(plan = null, scopes = []) {
   const amounts = {};
   scopes.forEach((scope) => {
-    if (scope === 'tuition' && amountOverride > 0) {
-      amounts[scope] = roundMoney(amountOverride);
-      return;
-    }
     amounts[scope] = roundMoney(getFeePlanPrimaryAmount(plan, scope));
   });
   return amounts;
@@ -367,14 +363,21 @@ function summarizeExcludedReasons(excluded = []) {
 }
 
 function buildFeePlanFilter({
+  schoolId = '',
   courseId = '',
   classId = '',
   academicYearId = '',
   academicYear = '',
   term = '',
-  billingFrequency = ''
+  billingFrequency = '',
+  effectiveAt = null,
+  emptyTermOnly = false
 } = {}) {
-  const filter = { isActive: true };
+  const filter = {
+    isActive: true,
+    lifecycleStatus: { $in: ['active', null] }
+  };
+  if (schoolId) filter.schoolId = { $in: [schoolId, null] };
   if (courseId) filter.course = courseId;
   if (classId) filter.classId = classId;
   if (academicYearId) {
@@ -382,9 +385,20 @@ function buildFeePlanFilter({
   } else if (academicYear) {
     filter.academicYear = academicYear;
   }
-  if (term) filter.term = term;
+  if (term) {
+    filter.term = term;
+  } else if (emptyTermOnly) {
+    filter.term = { $in: ['', null] };
+  }
   if (billingFrequency) {
     filter.billingFrequency = normalizeBillingFrequency(billingFrequency);
+  }
+  const effectiveDate = asDate(effectiveAt);
+  if (effectiveDate) {
+    filter.$and = [
+      { $or: [{ effectiveFrom: null }, { effectiveFrom: { $lte: effectiveDate } }] },
+      { $or: [{ effectiveTo: null }, { effectiveTo: { $gte: effectiveDate } }] }
+    ];
   }
   return filter;
 }
@@ -412,7 +426,7 @@ async function buildAcademicYearLookupVariants(academicYearId = '', academicYear
     if (year?.code) push({ academicYear: year.code });
   }
 
-  push({});
+  if (!academicYearId && !academicYear) push({});
   return variants;
 }
 
@@ -581,31 +595,82 @@ function dedupeBillableMemberships(memberships = []) {
 
 async function resolveFeePlanForBilling({
   feePlanId = '',
+  schoolId = '',
   courseId = '',
   classId = '',
   academicYearId = '',
   academicYear = '',
   term = '',
-  billingFrequency = ''
+  billingFrequency = '',
+  effectiveAt = null
 } = {}) {
-  if (feePlanId) return FinanceFeePlan.findById(feePlanId);
-
   const sort = { isDefault: -1, priority: 1, updatedAt: -1, createdAt: -1 };
   const yearVariants = await buildAcademicYearLookupVariants(academicYearId, academicYear);
   const scopeVariants = await buildFeePlanScopeVariants({ classId, courseId });
+  const allowedClassIds = new Set(scopeVariants.map((item) => normalizeText(item.classId)).filter(Boolean));
+  const allowedCourseIds = new Set(scopeVariants.map((item) => normalizeText(item.courseId)).filter(Boolean));
+  const allowedAcademicYearIds = new Set(yearVariants.map((item) => normalizeText(item.academicYearId)).filter(Boolean));
+  const allowedAcademicYears = new Set(yearVariants.map((item) => normalizeText(item.academicYear).toLowerCase()).filter(Boolean));
+  const requestedTerm = normalizeText(term).toLowerCase();
+  const requestedFrequency = billingFrequency ? normalizeBillingFrequency(billingFrequency) : '';
+  const effectiveDate = asDate(effectiveAt);
+
+  const matchesRequest = (plan = null) => {
+    if (!plan || plan.isActive === false || normalizeText(plan.lifecycleStatus || 'active').toLowerCase() !== 'active') return false;
+    const planClassId = normalizeText(plan.classId);
+    const planCourseId = normalizeText(plan.course);
+    const planSchoolId = normalizeText(plan.schoolId);
+    if (schoolId && planSchoolId && planSchoolId !== normalizeText(schoolId)) return false;
+    if (schoolId && !planSchoolId && (!planClassId || !allowedClassIds.has(planClassId))) return false;
+    if (planClassId && !allowedClassIds.has(planClassId)) return false;
+    if (planCourseId && !allowedCourseIds.has(planCourseId)) return false;
+    if ((classId || courseId) && !planClassId && !planCourseId) return false;
+
+    if (academicYearId || academicYear) {
+      const planAcademicYearId = normalizeText(plan.academicYearId);
+      const planAcademicYear = normalizeText(plan.academicYear).toLowerCase();
+      if (planAcademicYearId) {
+        if (!allowedAcademicYearIds.has(planAcademicYearId)) return false;
+      } else if (planAcademicYear) {
+        if (!allowedAcademicYears.has(planAcademicYear)) return false;
+      } else {
+        return false;
+      }
+    }
+
+    const planTerm = normalizeText(plan.term).toLowerCase();
+    if (requestedTerm && planTerm && planTerm !== requestedTerm) return false;
+    if (requestedFrequency && normalizeBillingFrequency(plan.billingFrequency) !== requestedFrequency) return false;
+    if (effectiveDate) {
+      const effectiveFrom = asDate(plan.effectiveFrom);
+      const effectiveTo = asDate(plan.effectiveTo);
+      if (effectiveFrom && effectiveFrom.getTime() > effectiveDate.getTime()) return false;
+      if (effectiveTo && effectiveTo.getTime() < effectiveDate.getTime()) return false;
+    }
+    return true;
+  };
+
+  if (feePlanId) {
+    const selectedPlan = await FinanceFeePlan.findById(feePlanId);
+    return matchesRequest(selectedPlan) ? selectedPlan : null;
+  }
+
   const relaxedAttempts = [];
+  const termVariants = requestedTerm
+    ? [{ term, emptyTermOnly: false }, { term: '', emptyTermOnly: true }]
+    : [{ term: '', emptyTermOnly: false }];
   for (const scopeVariant of scopeVariants) {
     for (const yearVariant of yearVariants) {
-      relaxedAttempts.push(
-        buildFeePlanFilter({ ...scopeVariant, ...yearVariant, term, billingFrequency }),
-        buildFeePlanFilter({ ...scopeVariant, ...yearVariant, billingFrequency }),
-        buildFeePlanFilter({ ...scopeVariant, ...yearVariant }),
-        buildFeePlanFilter({ classId: scopeVariant.classId, ...yearVariant, term, billingFrequency }),
-        buildFeePlanFilter({ classId: scopeVariant.classId, ...yearVariant, billingFrequency }),
-        buildFeePlanFilter({ classId: scopeVariant.classId, ...yearVariant }),
-        buildFeePlanFilter({ courseId: scopeVariant.courseId, ...yearVariant, billingFrequency }),
-        buildFeePlanFilter({ courseId: scopeVariant.courseId, ...yearVariant })
-      );
+      for (const termVariant of termVariants) {
+        relaxedAttempts.push(buildFeePlanFilter({
+          schoolId,
+          ...scopeVariant,
+          ...yearVariant,
+          ...termVariant,
+          billingFrequency,
+          effectiveAt
+        }));
+      }
     }
   }
 
@@ -615,13 +680,14 @@ async function resolveFeePlanForBilling({
     if (seen.has(key)) continue;
     seen.add(key);
     const plan = await FinanceFeePlan.findOne(filter).sort(sort);
-    if (plan) return plan;
+    if (matchesRequest(plan)) return plan;
   }
 
   return null;
 }
 
 async function buildGroupedBillCandidates({
+  schoolId = '',
   courseId = '',
   classId = '',
   academicYear = '',
@@ -652,20 +718,18 @@ async function buildGroupedBillCandidates({
   let memberships = await listCourseMemberships({
     courseId,
     academicYearId,
-    academicYear
+    academicYear,
+    statuses: ['active', 'transferred_in'],
+    currentOnly: true
   });
 
   if (!memberships.length && classId) {
     memberships = await findClassMemberships({
       classId,
       academicYearId,
-      academicYear
-    });
-  }
-
-  if (!memberships.length && classId && (academicYearId || academicYear)) {
-    memberships = await findClassMemberships({
-      classId
+      academicYear,
+      statuses: ['active', 'transferred_in'],
+      currentOnly: true
     });
   }
 
@@ -680,11 +744,10 @@ async function buildGroupedBillCandidates({
       memberships = await findClassMemberships({
         classId,
         academicYearId,
-        academicYear
+        academicYear,
+        statuses: ['active', 'transferred_in'],
+        currentOnly: true
       });
-      if (!memberships.length && (academicYearId || academicYear)) {
-        memberships = await findClassMemberships({ classId });
-      }
     }
   }
 
@@ -697,14 +760,29 @@ async function buildGroupedBillCandidates({
     };
   }
 
-  memberships = dedupeBillableMemberships(memberships);
+  memberships = dedupeBillableMemberships(memberships).filter((membership) => (
+    !schoolId || !membership.schoolId || normalizeText(membership.schoolId) === normalizeText(schoolId)
+  ));
+  if (!memberships.length) {
+    return {
+      feePlan: null,
+      items: [],
+      excluded: [],
+      summary: { candidateCount: 0, billCount: 0, studentCount: 0, membershipCount: 0, excludedCount: 0, excludedReasons: {}, totalAmountDue: 0 }
+    };
+  }
   const membershipIds = memberships.map((item) => item._id);
   const firstMembershipAcademicYearId = memberships[0]?.academicYearId || memberships[0]?.academicYear || null;
   const effectiveAcademicYearId = academicYearId || firstMembershipAcademicYearId;
   const billingFrequency = normalizeBillingFrequency(periodType === 'monthly' ? 'monthly' : 'term');
 
   const membershipStudentIds = memberships.map((item) => item.student).filter(Boolean);
-  const admissionIdentityFilter = {
+  const admissionIdentityFilter = schoolId ? {
+    $or: [
+      { studentMembershipId: { $in: membershipIds }, schoolId: { $in: [schoolId, null] } },
+      { student: { $in: membershipStudentIds }, schoolId }
+    ]
+  } : {
     $or: [
       { studentMembershipId: { $in: membershipIds } },
       { student: { $in: membershipStudentIds } }
@@ -722,30 +800,36 @@ async function buildGroupedBillCandidates({
   ] = await Promise.all([
     resolveFeePlanForBilling({
       feePlanId,
+      schoolId,
       courseId,
       classId,
       academicYearId: effectiveAcademicYearId,
       academicYear,
       term,
-      billingFrequency
+      billingFrequency,
+      effectiveAt: dueDate
     }),
     effectiveAcademicYearId ? AcademicYear.findById(effectiveAcademicYearId).lean() : null,
     FinanceRelief.find({
+      ...(schoolId ? { schoolId: { $in: [schoolId, null] } } : {}),
       studentMembershipId: { $in: membershipIds },
       status: 'active',
       feeOrderId: null
     }),
     Discount.find({
+      ...(schoolId ? { schoolId: { $in: [schoolId, null] } } : {}),
       studentMembershipId: { $in: membershipIds },
       feeOrderId: null,
       status: 'active',
       source: { $in: ['manual', 'migration'] }
     }),
     FeeExemption.find({
+      ...(schoolId ? { schoolId: { $in: [schoolId, null] } } : {}),
       studentMembershipId: { $in: membershipIds },
       status: 'active'
     }),
     FinanceBill.find({
+      ...(schoolId ? { schoolId: { $in: [schoolId, null] } } : {}),
       studentMembershipId: { $in: membershipIds },
       status: { $in: ['new', 'partial', 'overdue'] }
     }).select('studentMembershipId'),
@@ -753,21 +837,17 @@ async function buildGroupedBillCandidates({
       ...admissionIdentityFilter,
       status: { $ne: 'void' },
       $and: [{ $or: [
-        { feeScopes: 'admission' },
-        { 'lineItems.feeType': 'admission' },
-        { periodLabel: /داخله|admission/i },
-        { note: /داخله|admission/i }
+        { 'feeBreakdown.admission': { $gt: 0 } },
+        { lineItems: { $elemMatch: { feeType: 'admission', grossAmount: { $gt: 0 } } } }
       ] }]
     }).select('student studentMembershipId schoolId'),
     FeeOrder.find({
       ...admissionIdentityFilter,
       status: { $ne: 'void' },
       $and: [{ $or: [
-        { orderType: 'admission' },
-        { 'lineItems.feeType': 'admission' },
-        { title: /داخله|admission/i },
-        { periodLabel: /داخله|admission/i },
-        { note: /داخله|admission/i }
+        { orderType: 'admission', amountOriginal: { $gt: 0 } },
+        { 'feeBreakdown.admission': { $gt: 0 } },
+        { lineItems: { $elemMatch: { feeType: 'admission', grossAmount: { $gt: 0 } } } }
       ] }]
     }).select('student studentMembershipId schoolId')
   ]);
@@ -874,8 +954,13 @@ async function buildGroupedBillCandidates({
       const admissionAlreadyIssued = admissionMembershipSet.has(membershipId)
         || admissionStudentSchoolSet.has(`${String(membership.student || '')}|${String(membership.schoolId || '')}`)
         || legacyAdmissionStudentSet.has(String(membership.student || ''));
-      const candidateScopes = selectedScopes.filter((scope) => scope !== 'admission' || !admissionAlreadyIssued);
-      const amountsByScope = buildPlanAmountsByScope(feePlan, candidateScopes, roundMoney(amount));
+      const requestedScopes = selectedScopes.filter((scope) => scope !== 'admission' || !admissionAlreadyIssued);
+      const plannedAmounts = buildPlanAmountsByScope(feePlan, requestedScopes);
+      const candidateScopes = requestedScopes.filter((scope) => roundMoney(plannedAmounts[scope]) > 0);
+      const amountsByScope = candidateScopes.reduce((result, scope) => {
+        result[scope] = roundMoney(plannedAmounts[scope]);
+        return result;
+      }, {});
       const amountOriginal = roundMoney(sumScopedAmount(amountsByScope, candidateScopes));
       if (amountOriginal <= 0) {
         excluded.push({
@@ -913,6 +998,7 @@ async function buildGroupedBillCandidates({
 
       items.push({
         student: String(membership.student || ''),
+        schoolId: membership.schoolId || schoolId || null,
         studentId: membership.studentId || null,
         studentMembershipId: membership._id,
         classId: membership.classId || classId || null,

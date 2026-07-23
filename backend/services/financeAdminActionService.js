@@ -202,6 +202,119 @@ function normalizeFeePaymentAllocations(payment = {}) {
     .filter((item) => item.feeOrderId && item.amount > 0);
 }
 
+function normalizeReferenceId(value = null) {
+  return String(value?._id || value || '').trim();
+}
+
+function releaseIssuanceKeyForVoid(document = null) {
+  const originalIssuanceKey = String(document?.issuanceKey || '').trim();
+  if (document) document.issuanceKey = undefined;
+  return originalIssuanceKey;
+}
+
+function resolveActiveFinanceSchoolId(req = {}) {
+  if (req.user?.isDemo === true && req.user?.schoolId) {
+    return normalizeReferenceId(req.user.schoolId);
+  }
+  return normalizeReferenceId(
+    req.headers?.['x-school-id']
+    || req.user?.activeSchoolId
+    || req.user?.schoolId
+    || req.user?.school_id
+    || ''
+  );
+}
+
+function requireActiveFinanceSchoolId(req = {}) {
+  const schoolId = resolveActiveFinanceSchoolId(req);
+  if (!schoolId) {
+    throw createActionError(400, 'An active school is required for this finance review');
+  }
+  return schoolId;
+}
+
+function assertDocumentInActiveSchool(document = null, activeSchoolId = '', label = 'Finance document') {
+  const documentSchoolId = normalizeReferenceId(document?.schoolId);
+  if (!document || !activeSchoolId || !documentSchoolId || documentSchoolId !== activeSchoolId) {
+    throw createActionError(404, `${label} was not found in the active school`);
+  }
+  return document;
+}
+
+function isSameStudentFinanceIdentity(payment = {}, order = {}) {
+  const paymentUserId = normalizeReferenceId(payment.student);
+  const orderUserId = normalizeReferenceId(order.student);
+  const paymentStudentId = normalizeReferenceId(payment.studentId);
+  const orderStudentId = normalizeReferenceId(order.studentId);
+
+  if (paymentUserId && orderUserId && paymentUserId === orderUserId) return true;
+  if (paymentStudentId && orderStudentId && paymentStudentId === orderStudentId) return true;
+
+  const paymentMembershipId = normalizeReferenceId(payment.studentMembershipId);
+  const orderMembershipId = normalizeReferenceId(order.studentMembershipId);
+  return Boolean(paymentMembershipId && orderMembershipId && paymentMembershipId === orderMembershipId);
+}
+
+async function assertCanonicalPaymentReviewScope({ req, payment = null } = {}) {
+  const activeSchoolId = requireActiveFinanceSchoolId(req);
+  assertDocumentInActiveSchool(payment, activeSchoolId, 'Canonical fee payment');
+
+  const allocations = normalizeFeePaymentAllocations(payment);
+  const orderIds = Array.from(new Set(
+    allocations.map((item) => normalizeReferenceId(item.feeOrderId)).filter(Boolean)
+  ));
+  const orders = orderIds.length
+    ? await FeeOrder.find({ _id: { $in: orderIds } })
+    : [];
+  if (orders.length !== orderIds.length) {
+    throw createActionError(404, 'One or more allocated fee orders were not found');
+  }
+  for (const order of orders) {
+    assertDocumentInActiveSchool(order, activeSchoolId, 'Allocated fee order');
+    if (!isSameStudentFinanceIdentity(payment, order)) {
+      throw createActionError(400, 'Allocated fee order does not belong to the same student');
+    }
+  }
+
+  let sourceReceipt = null;
+  let sourceBill = null;
+  if (payment?.sourceReceiptId) {
+    sourceReceipt = await FinanceReceipt.findById(payment.sourceReceiptId);
+    assertDocumentInActiveSchool(sourceReceipt, activeSchoolId, 'Linked finance receipt');
+    sourceBill = await FinanceBill.findById(sourceReceipt.bill);
+    assertDocumentInActiveSchool(sourceBill, activeSchoolId, 'Linked finance bill');
+    if (!isSameStudentFinanceIdentity(payment, sourceReceipt)
+      || !isSameStudentFinanceIdentity(payment, sourceBill)) {
+      throw createActionError(400, 'Linked receipt or bill does not belong to the same student');
+    }
+  }
+
+  return { activeSchoolId, allocations, orders, sourceReceipt, sourceBill };
+}
+
+async function assertReceiptReviewScope({ req, receipt = null } = {}) {
+  const activeSchoolId = requireActiveFinanceSchoolId(req);
+  assertDocumentInActiveSchool(receipt, activeSchoolId, 'Finance receipt');
+  const bill = await FinanceBill.findById(receipt.bill);
+  assertDocumentInActiveSchool(bill, activeSchoolId, 'Linked finance bill');
+  if (!isSameStudentFinanceIdentity(receipt, bill)) {
+    throw createActionError(400, 'Linked bill does not belong to the same student as the receipt');
+  }
+  return { activeSchoolId, bill };
+}
+
+async function hasApprovedPaymentForFeeOrder(feeOrderId = '') {
+  const normalizedOrderId = normalizeReferenceId(feeOrderId);
+  if (!normalizedOrderId) return false;
+  return Boolean(await FeePayment.exists({
+    status: 'approved',
+    $or: [
+      { feeOrderId: normalizedOrderId },
+      { 'allocations.feeOrderId': normalizedOrderId }
+    ]
+  }));
+}
+
 async function syncTreasuryForFeeOrderPayments(feeOrderId = '') {
   const normalizedOrderId = String(feeOrderId || '').trim();
   if (!normalizedOrderId) return 0;
@@ -665,11 +778,34 @@ async function voidBillAction({ req, billId = '', body = {} } = {}) {
     throw createActionError(400, 'Ø¨Ø±Ø§ÛŒ Ø¨Ø§Ø·Ù„â€ŒØ³Ø§Ø²ÛŒØŒ Ø«Ø¨Øª Ø¯Ù„ÛŒÙ„ Ø§Ù„Ø²Ø§Ù…ÛŒ Ø§Ø³Øª');
   }
 
+  const canonicalOrder = await FeeOrder.findOne({ sourceBillId: item._id }).select('_id amountPaid issuanceKey');
+  if (
+    Number(item.amountPaid || 0) > 0
+    || Number(canonicalOrder?.amountPaid || 0) > 0
+    || await hasApprovedPaymentForFeeOrder(canonicalOrder?._id)
+  ) {
+    throw createActionError(409, 'بل دارای پرداخت تأییدشده است؛ نخست باید سند برگشت/اصلاح پرداخت ثبت شود و ابطال مستقیم مجاز نیست.');
+  }
+
+  const originalIssuanceKey = releaseIssuanceKeyForVoid(item);
+  const originalCanonicalIssuanceKey = String(canonicalOrder?.issuanceKey || '').trim();
   item.status = 'void';
   item.voidReason = reason;
   item.voidedBy = req.user.id;
   item.voidedAt = new Date();
   await item.save();
+  await logActivity({
+    req,
+    action: 'finance_void_bill',
+    targetType: 'FinanceBill',
+    targetId: item._id.toString(),
+    meta: {
+      reason,
+      level: actorLevel,
+      originalIssuanceKey: originalIssuanceKey || null,
+      originalCanonicalIssuanceKey: originalCanonicalIssuanceKey || null
+    }
+  });
   await syncStudentFinanceFromFinanceBill(item._id);
   const syncedOrder = await FeeOrder.findOne({ sourceBillId: item._id }).select('_id');
   if (syncedOrder?._id) await syncTreasuryForFeeOrderPayments(syncedOrder._id);
@@ -683,14 +819,6 @@ async function voidBillAction({ req, billId = '', body = {} } = {}) {
     emailSubject: 'Ø§Ø¨Ø·Ø§Ù„ Ø¨Ù„'
   });
 
-  await logActivity({
-    req,
-    action: 'finance_void_bill',
-    targetType: 'FinanceBill',
-    targetId: item._id.toString(),
-    meta: { reason, level: actorLevel }
-  });
-
   return { item, message: 'Ø¨Ù„ Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø¨Ø§Ø·Ù„ Ø´Ø¯' };
 }
 
@@ -702,6 +830,10 @@ async function voidFeeOrderAction({ req, feeOrderId = '', body = {} } = {}) {
 
   const item = await FeeOrder.findById(feeOrderId);
   if (!item) throw createActionError(404, 'Canonical fee order was not found');
+
+  if (Number(item.amountPaid || 0) > 0 || await hasApprovedPaymentForFeeOrder(item._id)) {
+    throw createActionError(409, 'این تعهد دارای پرداخت تأییدشده است؛ ابطال مستقیم مجاز نیست و باید سند برگشت/اصلاح پرداخت ثبت شود.');
+  }
 
   if (item.sourceBillId) {
     const result = await voidBillAction({ req, billId: item.sourceBillId, body });
@@ -719,11 +851,23 @@ async function voidFeeOrderAction({ req, feeOrderId = '', body = {} } = {}) {
   const reason = String(body?.reason || '').trim();
   if (!reason) throw createActionError(400, 'Void reason is required');
 
+  const originalIssuanceKey = releaseIssuanceKeyForVoid(item);
   item.status = 'void';
   item.voidReason = reason;
   item.voidedBy = req.user.id;
   item.voidedAt = new Date();
   await item.save();
+  await logActivity({
+    req,
+    action: 'fee_order_void',
+    targetType: 'FeeOrder',
+    targetId: item._id.toString(),
+    meta: {
+      reason,
+      level: actorLevel,
+      originalIssuanceKey: originalIssuanceKey || null
+    }
+  });
   await syncTreasuryForFeeOrderPayments(item._id);
 
   await notifyStudent({
@@ -733,14 +877,6 @@ async function voidFeeOrderAction({ req, feeOrderId = '', body = {} } = {}) {
     title: 'Fee order voided',
     message: `Your fee order ${item.orderNumber} was voided. Reason: ${reason}`,
     emailSubject: 'Fee order voided'
-  });
-
-  await logActivity({
-    req,
-    action: 'fee_order_void',
-    targetType: 'FeeOrder',
-    targetId: item._id.toString(),
-    meta: { reason, level: actorLevel }
   });
 
   return { item, message: 'Canonical fee order voided successfully' };
@@ -755,6 +891,7 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
   ]);
 
   if (!receipt) throw createActionError(404, 'Receipt not found');
+  const receiptScope = await assertReceiptReviewScope({ req, receipt });
   if (!actor || actor.role !== 'admin') {
     throw createActionError(403, 'Only admins can review receipts');
   }
@@ -831,8 +968,7 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
     throw createActionError(400, 'Financial month is closed; final approval is blocked');
   }
 
-  const bill = await FinanceBill.findById(receipt.bill);
-  if (!bill) throw createActionError(404, 'Linked bill not found');
+  const bill = receiptScope.bill;
   await assertFinancePeriodWritable({
     schoolId: bill.schoolId,
     academicYearId: bill.academicYearId,
@@ -894,7 +1030,10 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
   }
   await syncStudentFinanceFromFinanceReceipt(receipt._id);
   await syncStudentFinanceFromFinanceBill(bill._id);
-  const syncedPayment = await FeePayment.findOne({ sourceReceiptId: receipt._id });
+  const syncedPayment = await FeePayment.findOne({
+    sourceReceiptId: receipt._id,
+    schoolId: receiptScope.activeSchoolId
+  });
   if (syncedPayment?.status === 'approved') {
     await syncApprovedFeePaymentToTreasury(syncedPayment);
   }
@@ -926,10 +1065,12 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
 async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {}) {
   const payment = await FeePayment.findById(feePaymentId);
   if (!payment) throw createActionError(404, 'Canonical fee payment was not found');
+  const reviewScope = await assertCanonicalPaymentReviewScope({ req, payment });
 
   if (payment.sourceReceiptId) {
     const result = await approveReceiptAction({ req, receiptId: payment.sourceReceiptId, body });
     const refreshed = await FeePayment.findById(feePaymentId);
+    assertDocumentInActiveSchool(refreshed, reviewScope.activeSchoolId, 'Canonical fee payment');
     if (refreshed?.status === 'approved') {
       await syncApprovedFeePaymentToTreasury(refreshed);
     }
@@ -1018,16 +1159,12 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
   }
 
   const approvalAmount = roundMoney(payment.amount);
-  const allocations = normalizeFeePaymentAllocations(payment);
+  const allocations = reviewScope.allocations;
   if (!allocations.length) {
     throw createActionError(400, 'No fee order allocations were found for this payment');
   }
 
-  const orderIds = Array.from(new Set(allocations.map((item) => String(item.feeOrderId || '')).filter(Boolean)));
-  const orders = await FeeOrder.find({ _id: { $in: orderIds } });
-  if (orders.length !== orderIds.length) {
-    throw createActionError(404, 'One or more allocated fee orders were not found');
-  }
+  const orders = reviewScope.orders;
 
   for (const order of orders) {
     await assertFinancePeriodWritable({
@@ -1042,12 +1179,20 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
   for (const allocation of allocations) {
     const order = orderMap.get(String(allocation.feeOrderId || ''));
     if (!order) throw createActionError(404, 'Allocated fee order was not found');
-    if (payment.studentMembershipId && order.studentMembershipId && String(order.studentMembershipId) !== String(payment.studentMembershipId)) {
-      throw createActionError(400, 'Allocated fee order does not belong to the same membership');
+    const paymentSchoolId = normalizeReferenceId(payment.schoolId);
+    const orderSchoolId = normalizeReferenceId(order.schoolId);
+    if (!paymentSchoolId || !orderSchoolId || paymentSchoolId !== orderSchoolId) {
+      throw createActionError(400, 'Allocated fee order does not belong to the active school');
+    }
+    if (!isSameStudentFinanceIdentity(payment, order)) {
+      throw createActionError(400, 'Allocated fee order does not belong to the same student');
     }
     if (order.status === 'void') {
       throw createActionError(400, 'Fee order is void; payment cannot be approved');
     }
+    // Rebuild line balances from the obligation and approved paid amount before
+    // validating this allocation; stored line/status snapshots may be stale.
+    recalculateBill(order);
     allocation.feeType = resolveApprovedPaymentFeeType({
       order,
       requestedFeeType: allocation.feeType,
@@ -1160,6 +1305,7 @@ async function rejectReceiptAction({ req, receiptId = '', body = {} } = {}) {
   ]);
 
   if (!receipt) throw createActionError(404, 'Receipt not found');
+  await assertReceiptReviewScope({ req, receipt });
   if (!actor || actor.role !== 'admin') {
     throw createActionError(403, 'Only admins can reject receipts');
   }
@@ -1223,10 +1369,12 @@ async function rejectReceiptAction({ req, receiptId = '', body = {} } = {}) {
 async function rejectFeePaymentAction({ req, feePaymentId = '', body = {} } = {}) {
   const payment = await FeePayment.findById(feePaymentId);
   if (!payment) throw createActionError(404, 'Canonical fee payment was not found');
+  const reviewScope = await assertCanonicalPaymentReviewScope({ req, payment });
 
   if (payment.sourceReceiptId) {
     const result = await rejectReceiptAction({ req, receiptId: payment.sourceReceiptId, body });
     const refreshed = await FeePayment.findById(feePaymentId);
+    assertDocumentInActiveSchool(refreshed, reviewScope.activeSchoolId, 'Canonical fee payment');
     return {
       ...result,
       item: refreshed || payment,
@@ -1426,6 +1574,14 @@ function wrapAction(action) {
 }
 
 module.exports = {
+  __financeVoidTestUtils: {
+    releaseIssuanceKeyForVoid
+  },
+  __financeSchoolScopeTestUtils: {
+    assertCanonicalPaymentReviewScope,
+    assertDocumentInActiveSchool,
+    resolveActiveFinanceSchoolId
+  },
   addBillAdjustmentAction: wrapAction(addBillAdjustmentAction),
   addFeeOrderAdjustmentAction: wrapAction(addFeeOrderAdjustmentAction),
   setBillInstallmentsAction: wrapAction(setBillInstallmentsAction),

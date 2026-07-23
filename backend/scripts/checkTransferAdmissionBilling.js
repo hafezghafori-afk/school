@@ -5,6 +5,7 @@ const bills = [];
 const feeOrders = [];
 const feePlans = [];
 let syncCount = 0;
+let documentSequence = 0;
 
 class MockQuery {
   constructor(factory) {
@@ -78,6 +79,14 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (isTransferService && request === '../models/FeeOrder') return FeeOrderMock;
   if (isTransferService && request === '../models/FinanceFeePlan') return FinanceFeePlanMock;
   if (isTransferService && request === '../models/AcademicYear') return AcademicYearMock;
+  if (isTransferService && request === '../utils/financeNumberSequence') {
+    return {
+      nextFinanceDocumentNumber: async () => {
+        documentSequence += 1;
+        return `BL-202607-${String(documentSequence).padStart(4, '0')}`;
+      }
+    };
+  }
   if (isTransferService && request === '../utils/studentFinanceSync') {
     return {
       syncStudentFinanceFromFinanceBill: async () => {
