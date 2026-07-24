@@ -216,6 +216,40 @@ function getFeeTypeLabel(feeType = '') {
   }[normalizeText(feeType)] || feeType || 'فیس');
 }
 
+function getFinanceDocumentPeriodKey(document = {}) {
+  const periodType = normalizeText(document?.periodType).toLowerCase();
+
+  const periodLabel = normalizeText(document?.periodLabel)
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+
+  if (periodLabel) {
+    return `${periodType || 'period'}:${periodLabel}`;
+  }
+
+  const linePeriodKey = (
+    Array.isArray(document?.lineItems)
+      ? document.lineItems
+      : []
+  )
+    .map((entry) => normalizeText(entry?.periodKey))
+    .find(Boolean);
+
+  if (linePeriodKey) {
+    return `${periodType || 'period'}:${linePeriodKey.toLowerCase()}`;
+  }
+
+  const dueDate = toDate(document?.dueDate);
+
+  if (dueDate) {
+    return `${periodType || 'date'}:${dueDate
+      .toISOString()
+      .slice(0, 7)}`;
+  }
+
+  return '';
+}
+
 function reliefAppliesToOrder(relief = {}, order = {}) {
   const scope = normalizeText(relief?.scope) || 'all';
   if (scope === 'all') return true;
@@ -647,29 +681,102 @@ function buildMembershipFinanceAnomalies({
           return;
         }
 
-        if (activeDocuments.length > 1) {
-          anomalies.push({
-            id: `fee-duplicate-${feeType}-${membershipId || normalizeNullableId(membershipItem?.id || membershipItem?._id || studentName)}`,
-            anomalyType: 'duplicate_fee_bill',
-            severity: 'warning',
-            actionRequired: true,
-            title: `بل تکراری ${feeLabel}`,
-            description: `${studentName} برای ${feeLabel} بیش از یک بل فعال دارد. تعداد سندهای فعال: ${activeDocuments.length.toLocaleString('fa-AF-u-ca-persian')}.`,
-            studentName,
-            studentUserId,
-            classTitle,
-            classId,
-            academicYearTitle,
-            academicYearId,
-            membershipId,
-            referenceNumber: activeDocuments.map((document) => normalizeText(document?.orderNumber || document?.billNumber || document?.title)).filter(Boolean).slice(0, 3).join('، '),
-            amount: totalIssuedAmount,
-            amountLabel: formatAmountLabel(totalIssuedAmount, currency),
-            status: normalizeText(membershipItem?.status),
-            at: activeDocuments[0]?.createdAt || activeDocuments[0]?.dueDate || null,
-            tags: ['membership', feeType, 'duplicate_bill']
-          });
-        }
+       const activeDocumentsByPeriod = new Map();
+
+activeDocuments.forEach((document) => {
+  const periodKey = getFinanceDocumentPeriodKey(document);
+
+  // سندی که دوره روشن ندارد، به‌صورت خودکار تکراری اعلام نشود.
+  if (!periodKey) return;
+
+  const periodDocuments =
+    activeDocumentsByPeriod.get(periodKey) || [];
+
+  periodDocuments.push(document);
+  activeDocumentsByPeriod.set(periodKey, periodDocuments);
+});
+
+activeDocumentsByPeriod.forEach(
+  (periodDocuments, periodKey) => {
+    if (periodDocuments.length <= 1) return;
+
+    const periodAmount = roundMoney(
+      periodDocuments.reduce(
+        (sum, document) =>
+          sum +
+          getFinanceDocumentAmountByType(
+            document,
+            feeType
+          ),
+        0
+      )
+    );
+
+    const displayedPeriod =
+      normalizeText(periodDocuments[0]?.periodLabel) ||
+      normalizeText(
+        periodDocuments[0]?.lineItems?.[0]?.periodKey
+      ) ||
+      periodKey;
+
+    const anomalyPeriodKey = encodeURIComponent(periodKey);
+
+    anomalies.push({
+      id: `fee-duplicate-${feeType}-${
+        membershipId ||
+        normalizeNullableId(
+          membershipItem?.id ||
+          membershipItem?._id ||
+          studentName
+        )
+      }-${anomalyPeriodKey}`,
+      anomalyType: 'duplicate_fee_bill',
+      severity: 'warning',
+      actionRequired: true,
+      title: `بل تکراری ${feeLabel}`,
+      description:
+        `${studentName} برای ${feeLabel} در دوره ` +
+        `${displayedPeriod} بیش از یک بل دارد. ` +
+        `تعداد سندها: ${periodDocuments.length.toLocaleString(
+          'fa-AF-u-ca-persian'
+        )}.`,
+      studentName,
+      studentUserId,
+      classTitle,
+      classId,
+      academicYearTitle,
+      academicYearId,
+      membershipId,
+      referenceNumber: periodDocuments
+        .map((document) =>
+          normalizeText(
+            document?.orderNumber ||
+            document?.billNumber ||
+            document?.title
+          )
+        )
+        .filter(Boolean)
+        .slice(0, 3)
+        .join('، '),
+      amount: periodAmount,
+      amountLabel: formatAmountLabel(
+        periodAmount,
+        currency
+      ),
+      status: normalizeText(membershipItem?.status),
+      at:
+        periodDocuments[0]?.createdAt ||
+        periodDocuments[0]?.dueDate ||
+        null,
+      tags: [
+        'membership',
+        feeType,
+        'duplicate_bill',
+        periodKey
+      ]
+    });
+  }
+);
 
         const hasManualOrUnplannedDocument = matchingDocuments.some((document) => !isPlanGeneratedFinanceDocument(document));
         if (hasManualOrUnplannedDocument && totalIssuedAmount > 0 && totalIssuedAmount + 0.009 < plannedAmount) {
@@ -753,12 +860,14 @@ function formatOrderLite(doc) {
     orderNumber: formatFinanceCode(normalizeText(item.orderNumber)),
     title: normalizeText(item.title),
     orderType: normalizeText(item.orderType),
+    periodType: normalizeText(item.periodType),
     periodLabel: normalizeText(item.periodLabel),
     note: normalizeText(item.note),
     lineItems: Array.isArray(item.lineItems) ? item.lineItems.map((entry) => ({
       feeType: normalizeText(entry?.feeType),
       label: normalizeText(entry?.label),
       sourcePlanId: normalizeNullableId(entry?.sourcePlanId?._id || entry?.sourcePlanId),
+      periodKey: normalizeText(entry?.periodKey),
       grossAmount: roundMoney(entry?.grossAmount),
       netAmount: roundMoney(entry?.netAmount),
       reductionAmount: roundMoney(entry?.reductionAmount),
@@ -804,12 +913,14 @@ function formatBillLite(doc) {
     billNumber: formatFinanceCode(normalizeText(item.billNumber)),
     title: normalizeText(item.periodLabel || item.billNumber),
     orderType: '',
+    periodType: normalizeText(item.periodType),
     periodLabel: normalizeText(item.periodLabel),
     note: normalizeText(item.note),
     lineItems: Array.isArray(item.lineItems) ? item.lineItems.map((entry) => ({
       feeType: normalizeText(entry?.feeType),
       label: normalizeText(entry?.label),
       sourcePlanId: normalizeNullableId(entry?.sourcePlanId?._id || entry?.sourcePlanId),
+      periodKey: normalizeText(entry?.periodKey),
       grossAmount: roundMoney(entry?.grossAmount),
       netAmount: roundMoney(entry?.netAmount),
       reductionAmount: roundMoney(entry?.reductionAmount),
