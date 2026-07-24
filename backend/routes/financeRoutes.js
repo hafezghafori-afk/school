@@ -10359,7 +10359,7 @@ router.get('/admin/student-memberships', requireAuth, requireRole(['admin']), re
     const memberships = await StudentMembership.find(filter)
       .populate('student', 'name email')
       .populate('studentId', 'fullName name admissionNo studentCode fatherName primaryPhone')
-      .populate('afghanStudentId','personalInfo contactInfo familyInfo asasNumber registrationId linkedUserId')
+      .populate(   'afghanStudentId',   'personalInfo contactInfo familyInfo asasNumber registrationId linkedUserId' )
       .populate('classId', 'title shift shiftId academicYearId')
       .populate('academicYearId', 'title')
       .sort({ createdAt: -1, updatedAt: -1 })
@@ -10384,7 +10384,6 @@ router.get('/admin/student-memberships', requireAuth, requireRole(['admin']), re
         ...item,
         studentId: item?.student?._id || null,
         studentCoreId: studentCore?._id || item?.studentId || null,
-        studentName: item?.student?.name || studentCore?.fullName || studentCore?.name || '',
         studentName: item?.student?.name  || studentCore?.fullName  || studentCore?.name  || [ afghanStudent?.personalInfo?.firstNameDari  || afghanStudent?.personalInfo?.firstName, afghanStudent?.personalInfo?.lastNameDari  || afghanStudent?.personalInfo?.lastName ].filter(Boolean).join(' ')  || '',
         studentEmail: item?.student?.email || '',
         asasNumber, admissionNo: asasNumber,
