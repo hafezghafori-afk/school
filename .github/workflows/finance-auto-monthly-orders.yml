@@ -1,0 +1,104 @@
+name: Finance Auto Monthly Orders Repair
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "نوع اجرا: ابتدا dry و سپس در صورت اطمینان apply"
+        required: true
+        default: "dry"
+        type: choice
+        options:
+          - dry
+          - apply
+
+      school_id:
+        description: "شناسه MongoDB مکتب، نه شناسه صنف"
+        required: true
+        type: string
+
+      actor_id:
+        description: "برای apply: شناسه MongoDB کاربر مدیر مالی یا ادمین"
+        required: false
+        type: string
+
+      confirmation:
+        description: "برای apply دقیقاً بنویس: AUTO_MONTHLY_FEE_VOID"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: finance-auto-monthly-orders
+  cancel-in-progress: false
+
+jobs:
+  repair-auto-monthly-orders:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      MONGO_URI: ${{ secrets.MONGO_URI }}
+      MODE: ${{ inputs.mode }}
+      SCHOOL_ID: ${{ inputs.school_id }}
+      ACTOR_ID: ${{ inputs.actor_id }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run finance repair
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "$MONGO_URI" ]; then
+            echo "MONGO_URI secret is missing."
+            exit 1
+          fi
+
+          if [ -z "$SCHOOL_ID" ]; then
+            echo "school_id is required."
+            exit 1
+          fi
+
+          if [ "$MODE" = "dry" ]; then
+            echo "Running dry-run. Database will not be changed."
+
+            npm run finance:auto-monthly-orders:dry -- \
+              --school-id="$SCHOOL_ID"
+          else
+            if [ -z "$ACTOR_ID" ]; then
+              echo "actor_id is required for apply."
+              exit 1
+            fi
+
+            if [ "$CONFIRMATION" != "AUTO_MONTHLY_FEE_VOID" ]; then
+              echo "Confirmation text is incorrect."
+              exit 1
+            fi
+
+            echo "Running apply mode."
+
+            npm run finance:auto-monthly-orders:apply -- \
+              --school-id="$SCHOOL_ID" \
+              --actor-id="$ACTOR_ID" \
+              --confirm="$CONFIRMATION"
+          fi
