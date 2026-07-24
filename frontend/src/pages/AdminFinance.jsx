@@ -288,12 +288,30 @@ const normalizeAcademicYearOptions = (refData = {}) => (
 );
 
 const getClassOptionLabel = (item = {}) => String(item?.uiLabel || item?.title || '').trim() || 'صنف';
-const getStudentOptionLabel = (item = {}) => (
-  [item?.fullName || item?.name || item?.email || '', item?.admissionNo ? `(${item.admissionNo})` : '']
-    .filter(Boolean)
-    .join(' ')
-    .trim() || 'متعلم'
-);
+const getStudentOptionLabel = (item = {}) => {
+  const asasNumber = String(
+    item?.asasNumber
+    || item?.admissionNo
+    || item?.studentCode
+    || ''
+  ).trim();
+
+  return (
+    [
+      item?.fullName
+        || item?.name
+        || item?.email
+        || '',
+      asasNumber
+        ? `(نمبر اساس: ${asasNumber})`
+        : ''
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .trim()
+    || 'متعلم'
+  );
+};
 const getAcademicYearOptionLabel = (item = {}) => (
   [item?.title, item?.code && item.code !== item.title ? `(${item.code})` : '', item?.isCurrent ? 'جاری' : '']
     .filter(Boolean)
@@ -305,22 +323,39 @@ const AFGHAN_SCHOOL_MONTHS = ['حمل', 'ثور', 'جوزا', 'سرطان', 'ا�
 const getFinanceStudentOptionLabel = (item = {}) => (
   [
     getStudentOptionLabel(item),
-    item?.fatherName ? `- پدر: ${item.fatherName}` : '',
-    item?.classTitle ? `- ${item.classTitle}` : '',
-    item?.academicYearTitle ? `- ${item.academicYearTitle}` : '',
-    item?.admissionNo ? `- ID: ${item.admissionNo}` : item?.studentCoreId ? `- ID: ${String(item.studentCoreId).slice(-6)}` : ''
+
+    item?.fatherName
+      ? `- پدر: ${item.fatherName}`
+      : '',
+
+    item?.classTitle
+      ? `- ${item.classTitle}`
+      : '',
+
+    item?.academicYearTitle
+      ? `- ${item.academicYearTitle}`
+      : ''
   ]
     .filter(Boolean)
     .join(' ')
     .trim()
 );
 
-const getFinanceStudentIdentityRows = (item = {}) => ([
-  ['نام پدر', item?.fatherName || '-'],
-  ['صنف', item?.classTitle || '-'],
-  ['سال', item?.academicYearTitle || '-'],
-  ['ID', item?.admissionNo || item?.studentCoreId || item?.membershipId || item?._id || '-']
-]);
+const getFinanceStudentIdentityRows = (item = {}) => {
+  const asasNumber = String(
+    item?.asasNumber
+    || item?.admissionNo
+    || item?.studentCode
+    || ''
+  ).trim();
+
+  return [
+    ['نام پدر', item?.fatherName || '-'],
+    ['صنف', item?.classTitle || '-'],
+    ['سال تعلیمی', item?.academicYearTitle || '-'],
+    ['نمبر اساس', asasNumber || 'ثبت نشده']
+  ];
+};
 
 const CURRENT_FINANCE_MEMBERSHIP_STATUSES = new Set(['active', 'pending', 'suspended', 'transferred_in']);
 
@@ -342,6 +377,7 @@ const buildFinanceMembershipStudentOptions = (items = []) => {
       const userId = toFinanceOptionId(item?.studentId || item?.student?._id) || studentCoreId;
       const classId = toFinanceOptionId(item?.classId);
       const academicYearId = toFinanceOptionId(item?.academicYearId || item?.academicYear);
+      const asasNumber = String( item?.asasNumber  || item?.admissionNo  || item?.studentCode  || '' ).trim();
       return {
         _id: userId,
         membershipId: toFinanceOptionId(item?._id || item?.id),
@@ -349,7 +385,7 @@ const buildFinanceMembershipStudentOptions = (items = []) => {
         name: item?.studentName || item?.student?.name || item?.fullName || '',
         fullName: item?.studentName || item?.student?.name || item?.fullName || '',
         email: item?.studentEmail || item?.student?.email || '',
-        admissionNo: item?.admissionNo || item?.studentCode || '',
+        asasNumber, admissionNo: asasNumber,
         fatherName: item?.fatherName || '',
         phone: item?.primaryPhone || '',
         classId,
@@ -6146,7 +6182,7 @@ export default function AdminFinance() {
               <input
                 value={manualStudentSearch}
                 onChange={(e) => setManualStudentSearch(e.target.value)}
-                placeholder="نام، ایمیل یا شناسه متعلم"
+               placeholder="نام، ایمیل یا نمبر اساس شاگرد"
               />
             </label>
             <select value={manualForm.studentId} onChange={(e) => applyManualMembershipStudent(e.target.value)} required>
