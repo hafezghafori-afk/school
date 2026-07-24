@@ -10359,7 +10359,7 @@ router.get('/admin/student-memberships', requireAuth, requireRole(['admin']), re
     const memberships = await StudentMembership.find(filter)
       .populate('student', 'name email')
       .populate('studentId', 'fullName name admissionNo studentCode fatherName primaryPhone')
-      .populate('afghanStudentId', 'personalInfo contactInfo familyInfo')
+      .populate('afghanStudentId','personalInfo contactInfo familyInfo asasNumber registrationId linkedUserId')
       .populate('classId', 'title shift shiftId academicYearId')
       .populate('academicYearId', 'title')
       .sort({ createdAt: -1, updatedAt: -1 })
@@ -10379,13 +10379,15 @@ router.get('/admin/student-memberships', requireAuth, requireRole(['admin']), re
       const studentCore = item?.studentId && typeof item.studentId === 'object' ? item.studentId : null;
       const afghanStudent = item?.afghanStudentId && typeof item.afghanStudentId === 'object' ? item.afghanStudentId : null;
       const profile = profileByStudentCoreId.get(String(studentCore?._id || item?.studentId || '')) || null;
+      const asasNumber = String( studentCore?.admissionNo || studentCore?.studentCode  || afghanStudent?.asasNumber  || afghanStudent?.registrationId  || '').trim();
       return {
         ...item,
         studentId: item?.student?._id || null,
         studentCoreId: studentCore?._id || item?.studentId || null,
         studentName: item?.student?.name || studentCore?.fullName || studentCore?.name || '',
+        studentName: item?.student?.name  || studentCore?.fullName  || studentCore?.name  || [ afghanStudent?.personalInfo?.firstNameDari  || afghanStudent?.personalInfo?.firstName, afghanStudent?.personalInfo?.lastNameDari  || afghanStudent?.personalInfo?.lastName ].filter(Boolean).join(' ')  || '',
         studentEmail: item?.student?.email || '',
-        admissionNo: studentCore?.admissionNo || studentCore?.studentCode || '',
+        asasNumber, admissionNo: asasNumber,
         fatherName: profile?.family?.fatherName || afghanStudent?.personalInfo?.fatherName || studentCore?.fatherName || '',
         primaryPhone: profile?.contact?.primaryPhone || studentCore?.primaryPhone || afghanStudent?.contactInfo?.mobile || afghanStudent?.contactInfo?.phone || '',
         classId: item?.classId?._id || item?.classId || null,
