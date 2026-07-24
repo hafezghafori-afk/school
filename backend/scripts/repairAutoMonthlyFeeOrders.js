@@ -1,5 +1,7 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
+require('../models/SchoolClass');
+require('../models/AcademicYear');
 const {
   auditAndVoidAutoMonthlyFeeOrders
 } = require('../services/autoMonthlyFeeOrderRepairService');
