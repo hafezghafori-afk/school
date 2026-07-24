@@ -1,6 +1,9 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
 
+require('../models/SchoolClass');
+require('../models/AcademicYear');
+
 const FinanceBill = require('../models/FinanceBill');
 const FeeOrder = require('../models/FeeOrder');
 const {
