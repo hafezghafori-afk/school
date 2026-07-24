@@ -6308,7 +6308,7 @@ export default function AdminFinance() {
                 value={paymentStudentSearch}
                 onChange={(e) => handlePaymentStudentSearchChange(e.target.value)}
                 onKeyDown={handlePaymentStudentSearchKeyDown}
-                placeholder="نام، ایمیل یا شناسه متعلم"
+                placeholder="نام، ایمیل یا نمبر اساس شاگرد"
                 autoFocus
                 style={{ flex: 1 }}
               />
@@ -7123,7 +7123,7 @@ export default function AdminFinance() {
               <input
                 value={discountStudentSearch}
                 onChange={(e) => setDiscountStudentSearch(e.target.value)}
-                placeholder="نام، ایمیل یا شناسه متعلم"
+                placeholder="نام، ایمیل یا نمبر اساس شاگرد"
               />
             </label>}
             {discountForm.targetScope === 'student' && highlightedDiscountStudentOptions.length > 0 && (
@@ -7240,7 +7240,7 @@ export default function AdminFinance() {
               <input
                 value={exemptionStudentSearch}
                 onChange={(e) => setExemptionStudentSearch(e.target.value)}
-                placeholder="نام، ایمیل یا شناسه متعلم"
+                placeholder="نام، ایمیل یا نمبر اساس شاگرد"
               />
             </label>
             <select value={exemptionForm.studentId} onChange={(e) => applyExemptionMembershipStudent(e.target.value)} required>
