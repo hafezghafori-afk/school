@@ -52,12 +52,23 @@ const fmt = (value) => {
   return number.toLocaleString('fa-AF-u-ca-persian');
 };
 
-const normalizeFinanceSearchTerm = (value = '') => String(value || '').trim().toLowerCase();
+const normalizeFinanceSearchTerm = (value = '') => String(value || '')
+  .normalize('NFKC')
+  .replace(/[\u064B-\u065F\u0670]/g, '')
+  .replace(/[يى]/g, 'ی')
+  .replace(/ك/g, 'ک')
+  .replace(/[ۀة]/g, 'ه')
+  .replace(/[أإآ]/g, 'ا')
+  .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+  .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+  .replace(/[\u200c\u200d\s]+/g, ' ')
+  .trim()
+  .toLowerCase();
 
 const includesFinanceSearch = (values, term) => {
   const normalizedTerm = normalizeFinanceSearchTerm(term);
   if (!normalizedTerm) return true;
-  return values.some((value) => String(value || '').toLowerCase().includes(normalizedTerm));
+  return values.some((value) => normalizeFinanceSearchTerm(value).includes(normalizedTerm));
 };
 
 const buildFinanceSearchBlob = (values = []) => (
@@ -1520,6 +1531,7 @@ export default function AdminFinance() {
   const [billingAdvancedOpen, setBillingAdvancedOpen] = useState(false);
   const [planVisibleCount, setPlanVisibleCount] = useState(5);
   const [billVisibleCount, setBillVisibleCount] = useState(5);
+  const [ordersCatalogLoading, setOrdersCatalogLoading] = useState(false);
   const [discountRegistryPage, setDiscountRegistryPage] = useState(1);
   const [discountRegistryPageSize, setDiscountRegistryPageSize] = useState(10);
   const [discountRegistryClassFilter, setDiscountRegistryClassFilter] = useState('all');
@@ -1929,7 +1941,12 @@ export default function AdminFinance() {
   ), [financeMembershipStudents]);
   const studentSearchBlobById = useMemo(() => (
     new Map(
-      indexedFinanceMembershipStudents.map((entry) => [String(entry?.student?._id || '').trim(), entry.searchBlob])
+      indexedFinanceMembershipStudents.flatMap((entry) => {
+        const keys = [entry?.student?._id, entry?.student?.studentCoreId]
+          .map((value) => String(value || '').trim())
+          .filter(Boolean);
+        return keys.map((key) => [key, entry.searchBlob]);
+      })
     )
   ), [indexedFinanceMembershipStudents]);
   const billsByStudentUserId = useMemo(() => buildFinanceItemsByStudentMap(bills), [bills]);
@@ -1963,12 +1980,9 @@ export default function AdminFinance() {
       selectedId: exemptionForm.studentId
     })
   ), [indexedFinanceMembershipStudents, activeSection, reliefFormMode, deferredExemptionStudentSearch, exemptionForm.studentId]);
-  const filteredBills = useMemo(() => (
+  const billScopeRows = useMemo(() => (
     bills.filter((bill) => (
-      (orderStatusFilter === 'all'
-        || (orderStatusFilter === 'official' && String(bill?.status || '').trim() !== 'void')
-        || String(bill?.status || '').trim() === orderStatusFilter)
-      && (orderFeeTypeFilter === 'all' || getBillFeeTypes(bill).includes(orderFeeTypeFilter))
+      (orderFeeTypeFilter === 'all' || getBillFeeTypes(bill).includes(orderFeeTypeFilter))
       && (orderClassFilter === 'all' || getFinanceRecordClassId(bill) === orderClassFilter)
       && includesFinanceSearch([
         bill?.billNumber,
@@ -1977,23 +1991,36 @@ export default function AdminFinance() {
         getBillTypeLabel(bill),
         bill?.student?.name,
         bill?.student?.fullName,
+        bill?.student?.email,
+        bill?.student?.userId,
+        bill?.student?.studentId,
+        studentSearchBlobById.get(String(bill?.student?.userId || '').trim()),
+        studentSearchBlobById.get(String(bill?.student?.studentId || '').trim()),
         bill?.classId?.title,
         bill?.schoolClass?.title,
         bill?.course?.title,
         bill?.status
       ], orderSearchTerm)
     ))
-  ), [bills, orderSearchTerm, orderStatusFilter, orderFeeTypeFilter, orderClassFilter]);
+  ), [bills, orderSearchTerm, orderFeeTypeFilter, orderClassFilter, studentSearchBlobById]);
+  const filteredBills = useMemo(() => (
+    billScopeRows.filter((bill) => (
+      orderStatusFilter === 'all'
+      || (orderStatusFilter === 'official' && String(bill?.status || '').trim() !== 'void')
+      || String(bill?.status || '').trim() === orderStatusFilter
+    ))
+  ), [billScopeRows, orderStatusFilter]);
   const orderRecordStats = useMemo(() => {
-    const officialBills = bills.filter((item) => String(item?.status || '').trim() !== 'void');
-    const voidBills = bills.filter((item) => String(item?.status || '').trim() === 'void');
+    const officialBills = billScopeRows.filter((item) => String(item?.status || '').trim() !== 'void');
+    const voidBills = billScopeRows.filter((item) => String(item?.status || '').trim() === 'void');
     return {
       officialCount: officialBills.length,
       voidCount: voidBills.length,
-      totalCount: bills.length,
+      totalCount: billScopeRows.length,
+      filteredCount: filteredBills.length,
       officialTypeSummary: summarizeBillTypes(officialBills)
     };
-  }, [bills]);
+  }, [billScopeRows, filteredBills.length]);
   const billIssuanceRows = useMemo(() => {
     const rows = new Map();
     (Array.isArray(studentMemberships) ? studentMemberships : [])
@@ -2013,6 +2040,11 @@ export default function AdminFinance() {
         });
         const officialBills = studentBills.filter((bill) => String(bill?.status || '').trim() !== 'void');
         const voidBills = studentBills.filter((bill) => String(bill?.status || '').trim() === 'void');
+        const billDetails = officialBills.map((bill) => ({
+          number: String(bill?.billNumber || '').trim(),
+          type: getBillTypeLabel(bill),
+          status: String(bill?.status || '').trim()
+        }));
         rows.set(key, {
           key,
           classId,
@@ -2023,7 +2055,8 @@ export default function AdminFinance() {
           billCount: officialBills.length,
           voidCount: voidBills.length,
           billTypeSummary: summarizeBillTypes(officialBills),
-          billNumbers: studentBills.map((bill) => bill.billNumber).filter(Boolean)
+          billNumbers: studentBills.map((bill) => bill.billNumber).filter(Boolean),
+          billDetails
         });
       });
     return [...rows.values()].filter((row) => (
@@ -3083,6 +3116,7 @@ export default function AdminFinance() {
 
     const controller = new AbortController();
     fullOrdersLoadInFlightRef.current = true;
+    setOrdersCatalogLoading(true);
     fetchJson(`${API_BASE}/api/student-finance/orders`, { signal: controller.signal })
       .then((data) => {
         if (!data?.success) throw new Error(data?.message || 'دریافت فهرست کامل بل‌ها ناموفق بود.');
@@ -3099,6 +3133,7 @@ export default function AdminFinance() {
       })
       .finally(() => {
         fullOrdersLoadInFlightRef.current = false;
+        setOrdersCatalogLoading(false);
       });
 
     return () => {
@@ -3106,6 +3141,10 @@ export default function AdminFinance() {
       fullOrdersLoadInFlightRef.current = false;
     };
   }, [activeSection]);
+
+  useEffect(() => {
+    setBillVisibleCount(5);
+  }, [orderSearchTerm, orderStatusFilter, orderFeeTypeFilter, orderClassFilter]);
 
   useEffect(() => {
     loadCashierReport();
@@ -8252,6 +8291,7 @@ export default function AdminFinance() {
               value={orderSearchTerm}
               onChange={(e) => setOrderSearchTerm(e.target.value)}
               placeholder="شماره بل، عنوان، نام شاگرد یا صنف"
+              data-testid="bill-search-input"
             />
           </label>
           <label className="finance-inline-filter">
@@ -8297,9 +8337,12 @@ export default function AdminFinance() {
             </select>
           </label>
         </div>
+        {ordersCatalogLoading && (
+          <p className="muted" role="status">در حال دریافت فهرست کامل بل‌ها برای جست‌وجو و فیلتر...</p>
+        )}
         <div className="finance-chip-group finance-order-record-summary" data-testid="bill-record-summary">
-          <span className="finance-chip finance-chip-emerald">{fmt(orderRecordStats.officialCount)} بل رسمی</span>
-          <span className="finance-chip">{fmt(filteredBills.length)} مطابق فیلتر</span>
+          <span className="finance-chip finance-chip-emerald">{fmt(orderRecordStats.officialCount)} بل رسمی در محدوده انتخاب‌شده</span>
+          <span className="finance-chip">{fmt(orderRecordStats.filteredCount)} بل مطابق همه فیلترها</span>
           {!!orderRecordStats.voidCount && (
             <span className="finance-chip finance-chip-muted">{fmt(orderRecordStats.voidCount)} بل باطل؛ در شمارش رسمی نیست</span>
           )}
@@ -8333,6 +8376,12 @@ export default function AdminFinance() {
                     <strong>{row.studentName}</strong>
                     <small>{row.admissionNo || 'بدون شماره ثبت'} · {row.classTitle}</small>
                     {row.billTypeSummary ? <small>بابت: {row.billTypeSummary}</small> : null}
+                    {!!row.billDetails?.length && (
+                      <small>
+                        بل‌ها: {row.billDetails.slice(0, 5).map((bill) => `${formatFinanceCode(bill.number, '---')} (${bill.type})`).join('، ')}
+                        {row.billDetails.length > 5 ? ` و ${fmt(row.billDetails.length - 5)} بل دیگر` : ''}
+                      </small>
+                    )}
                   </span>
                   <span className="finance-cell-stack finance-issuance-status-stack">
                     <span className={`finance-order-status ${row.issued ? 'paid' : 'void'}`}>
