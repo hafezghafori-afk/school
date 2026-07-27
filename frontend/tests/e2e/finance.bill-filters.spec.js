@@ -16,6 +16,8 @@ const orders = [
     orderNumber: 'BL-202603-0001',
     title: 'فیس ماه حمل',
     orderType: 'tuition',
+    periodType: 'monthly',
+    periodLabel: 'ماه حمل - 1406-01',
     status: 'new',
     amountDue: 1000,
     amountPaid: 0,
@@ -30,6 +32,8 @@ const orders = [
     orderNumber: 'BL-202603-0002',
     title: 'فیس ماه حمل',
     orderType: 'tuition',
+    periodType: 'monthly',
+    periodLabel: 'ماه حمل - 1406-01',
     status: 'partial',
     amountDue: 800,
     amountPaid: 200,
@@ -42,8 +46,10 @@ const orders = [
     id: 'order-3',
     studentMembershipId: 'mem-1',
     orderNumber: 'BL-202603-0003',
-    title: 'ترانسپورت ماه حمل',
+    title: 'ترانسپورت ماه ثور',
     orderType: 'transport',
+    periodType: 'monthly',
+    periodLabel: 'ماه ثور - 1406-02',
     status: 'partial',
     amountDue: 450,
     amountPaid: 150,
@@ -108,7 +114,7 @@ const memberships = [
   }
 ];
 
-test('bill search and class/type filters share one scoped result set', async ({ page }) => {
+test('bill issuance stays empty until search or class/month/type filters are applied', async ({ page }) => {
   test.setTimeout(60_000);
 
   await page.addInitScript((session) => {
@@ -162,10 +168,25 @@ test('bill search and class/type filters share one scoped result set', async ({ 
   const ordersCard = page.getByTestId('finance-orders-table-card');
   const orderRows = ordersCard.locator('.finance-orders-table .row');
   const summary = page.getByTestId('bill-record-summary');
+  const issuanceResults = page.getByTestId('bill-issuance-results');
+  const filterControls = ordersCard.locator('.finance-orders-filter-row :is(input, select)');
 
   await expect(orderRows).toHaveCount(3);
+  await expect(filterControls).toHaveCount(6);
+  const filterBoxes = await filterControls.evaluateAll((elements) => elements.map((element) => {
+    const box = element.getBoundingClientRect();
+    return { testId: element.getAttribute('data-testid'), tag: element.tagName, top: Math.round(box.top), height: Math.round(box.height) };
+  }));
+  expect(
+    Math.max(...filterBoxes.map((box) => box.top)) - Math.min(...filterBoxes.map((box) => box.top)),
+    JSON.stringify(filterBoxes)
+  ).toBeLessThanOrEqual(1);
+  expect(Math.max(...filterBoxes.map((box) => box.height)) - Math.min(...filterBoxes.map((box) => box.height))).toBeLessThanOrEqual(1);
   await expect(summary).toContainText(/۳|3/);
   await expect(summary).toContainText('بل رسمی در محدوده انتخاب‌شده');
+  await expect(issuanceResults.locator('.mini-row')).toHaveCount(0);
+  await expect(page.getByTestId('bill-issuance-guidance')).toBeVisible();
+  await expect(page.getByTestId('bill-month-filter').locator('option')).toContainText(['همه ماه‌ها', 'ثور ۱۴۰۶', 'حمل ۱۴۰۶']);
 
   await page.getByTestId('bill-search-input').fill('علي کریمی');
   await expect(orderRows).toHaveCount(1);
@@ -173,17 +194,22 @@ test('bill search and class/type filters share one scoped result set', async ({ 
   await expect(orderRows).toContainText('BL-202603-0002');
   await expect(orderRows.getByRole('button', { name: 'باطل' })).toBeVisible();
   await expect(summary).toContainText(/۱|1/);
+  await expect(issuanceResults.locator('.mini-row')).toHaveCount(1);
+  await expect(issuanceResults).toContainText('حمل ۱۴۰۶');
 
   await page.getByTestId('bill-search-input').clear();
   await page.getByTestId('bill-class-filter').selectOption('class-2');
   await expect(orderRows).toHaveCount(0);
   await expect(summary).toContainText(/۰|0/);
-  await expect(page.getByTestId('bill-issuance-results')).toContainText('Student Gamma');
-  await expect(page.getByTestId('bill-issuance-results')).toContainText('بل رسمی صادر نشده');
+  await expect(issuanceResults).toContainText('Student Gamma');
+  await expect(issuanceResults).toContainText('بل رسمی صادر نشده');
 
   await page.getByTestId('bill-class-filter').selectOption('class-1');
+  await page.getByTestId('bill-month-filter').selectOption('1406-02');
   await page.getByTestId('bill-fee-type-filter').selectOption('transport');
   await expect(orderRows).toHaveCount(1);
   await expect(orderRows).toContainText('BL-202603-0003');
-  await expect(page.getByTestId('bill-issuance-results').locator('.mini-row').filter({ hasText: 'Student Alpha' })).toContainText('BL-202603-0003');
+  const alphaIssuance = issuanceResults.locator('.mini-row').filter({ hasText: 'Student Alpha' });
+  await expect(alphaIssuance).toContainText('BL-202603-0003');
+  await expect(alphaIssuance).toContainText('ثور ۱۴۰۶');
 });

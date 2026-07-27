@@ -988,6 +988,38 @@ const getFinanceBillMonthLabel = (item = {}) => {
   return item?.title || formatFinanceCode(item?.billNumber, 'باقیات');
 };
 
+const getFinanceBillMonthFilterKey = (item = {}) => {
+  const explicitKey = String(item?.monthKey || item?.billingMonth || '').trim().replace('/', '-');
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(explicitKey)) return explicitKey;
+
+  const periodLabel = String(item?.periodLabel || '').trim();
+  const periodMatches = [...periodLabel.matchAll(/(?:^|\D)((?:13|14|20)\d{2})[-/](0?[1-9]|1[0-2])(?=\D|$)/g)];
+  if (periodMatches.length) {
+    const [, year, month] = periodMatches[periodMatches.length - 1];
+    return `${year}-${String(month).padStart(2, '0')}`;
+  }
+
+  if (String(item?.periodType || '').trim() === 'monthly' && periodLabel) {
+    return `period:${normalizeFinanceSearchTerm(periodLabel)}`;
+  }
+
+  return getMonthBucket(item?.dueDate || item?.issuedAt);
+};
+
+const formatFinanceBillMonthFilterLabel = (key = '', item = {}) => {
+  const normalizedKey = String(key || '').trim();
+  const numericMatch = normalizedKey.match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+  if (numericMatch) {
+    const year = Number(numericMatch[1]);
+    const monthIndex = Number(numericMatch[2]) - 1;
+    if (year >= 1300 && year <= 1499) {
+      return `${AFGHAN_SCHOOL_MONTHS[monthIndex] || numericMatch[2]} ${year.toLocaleString('fa-AF', { useGrouping: false })}`;
+    }
+    return toFaMonthKey(normalizedKey) || normalizedKey;
+  }
+  return String(item?.periodLabel || '').trim() || normalizedKey.replace(/^period:/, '') || 'ماه نامشخص';
+};
+
 const getArrearsTimingLabel = (dueDate = '') => {
   const due = dueDate ? new Date(dueDate) : null;
   if (!due || Number.isNaN(due.getTime())) return 'بدون تاریخ سررسید';
@@ -1553,6 +1585,7 @@ export default function AdminFinance() {
   const [orderStatusFilter, setOrderStatusFilter] = useState('official');
   const [orderFeeTypeFilter, setOrderFeeTypeFilter] = useState('all');
   const [orderClassFilter, setOrderClassFilter] = useState('all');
+  const [orderMonthFilter, setOrderMonthFilter] = useState('all');
   const [billIssuanceFilter, setBillIssuanceFilter] = useState('all');
   const [discountRegistrySearch, setDiscountRegistrySearch] = useState('');
   const [exemptionRegistrySearch, setExemptionRegistrySearch] = useState('');
@@ -1980,10 +2013,29 @@ export default function AdminFinance() {
       selectedId: exemptionForm.studentId
     })
   ), [indexedFinanceMembershipStudents, activeSection, reliefFormMode, deferredExemptionStudentSearch, exemptionForm.studentId]);
+  const billMonthOptions = useMemo(() => {
+    const monthMap = new Map();
+    bills.forEach((bill) => {
+      const key = getFinanceBillMonthFilterKey(bill);
+      if (!key || monthMap.has(key)) return;
+      monthMap.set(key, formatFinanceBillMonthFilterLabel(key, bill));
+    });
+    return [...monthMap.entries()]
+      .map(([key, label]) => ({ key, label }))
+      .sort((left, right) => String(right.key).localeCompare(String(left.key), 'fa'));
+  }, [bills]);
+  const hasBillIssuanceCriteria = Boolean(
+    normalizeFinanceSearchTerm(orderSearchTerm)
+    || orderClassFilter !== 'all'
+    || orderFeeTypeFilter !== 'all'
+    || orderMonthFilter !== 'all'
+    || billIssuanceFilter !== 'all'
+  );
   const billScopeRows = useMemo(() => (
     bills.filter((bill) => (
       (orderFeeTypeFilter === 'all' || getBillFeeTypes(bill).includes(orderFeeTypeFilter))
       && (orderClassFilter === 'all' || getFinanceRecordClassId(bill) === orderClassFilter)
+      && (orderMonthFilter === 'all' || getFinanceBillMonthFilterKey(bill) === orderMonthFilter)
       && includesFinanceSearch([
         bill?.billNumber,
         bill?.title,
@@ -2002,7 +2054,7 @@ export default function AdminFinance() {
         bill?.status
       ], orderSearchTerm)
     ))
-  ), [bills, orderSearchTerm, orderFeeTypeFilter, orderClassFilter, studentSearchBlobById]);
+  ), [bills, orderSearchTerm, orderFeeTypeFilter, orderClassFilter, orderMonthFilter, studentSearchBlobById]);
   const filteredBills = useMemo(() => (
     billScopeRows.filter((bill) => (
       orderStatusFilter === 'all'
@@ -2036,13 +2088,15 @@ export default function AdminFinance() {
           const billCoreId = toFinanceOptionId(bill?.student?.studentId);
           return getFinanceRecordClassId(bill) === classId
             && ((studentUserId && billUserId === studentUserId) || (studentCoreId && billCoreId === studentCoreId))
-            && (orderFeeTypeFilter === 'all' || getBillFeeTypes(bill).includes(orderFeeTypeFilter));
+            && (orderFeeTypeFilter === 'all' || getBillFeeTypes(bill).includes(orderFeeTypeFilter))
+            && (orderMonthFilter === 'all' || getFinanceBillMonthFilterKey(bill) === orderMonthFilter);
         });
         const officialBills = studentBills.filter((bill) => String(bill?.status || '').trim() !== 'void');
         const voidBills = studentBills.filter((bill) => String(bill?.status || '').trim() === 'void');
         const billDetails = officialBills.map((bill) => ({
           number: String(bill?.billNumber || '').trim(),
           type: getBillTypeLabel(bill),
+          monthLabel: formatFinanceBillMonthFilterLabel(getFinanceBillMonthFilterKey(bill), bill),
           status: String(bill?.status || '').trim()
         }));
         rows.set(key, {
@@ -2064,7 +2118,7 @@ export default function AdminFinance() {
       && (billIssuanceFilter === 'all' || (billIssuanceFilter === 'issued' ? row.issued : !row.issued))
       && includesFinanceSearch([row.studentName, row.admissionNo, row.classTitle, ...row.billNumbers], orderSearchTerm)
     ));
-  }, [studentMemberships, bills, classOptions, orderClassFilter, orderFeeTypeFilter, billIssuanceFilter, orderSearchTerm]);
+  }, [studentMemberships, bills, classOptions, orderClassFilter, orderFeeTypeFilter, orderMonthFilter, billIssuanceFilter, orderSearchTerm]);
   const orderWorkspaceStats = useMemo(() => {
     const now = new Date();
     const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -3144,7 +3198,7 @@ export default function AdminFinance() {
 
   useEffect(() => {
     setBillVisibleCount(5);
-  }, [orderSearchTerm, orderStatusFilter, orderFeeTypeFilter, orderClassFilter]);
+  }, [orderSearchTerm, orderStatusFilter, orderFeeTypeFilter, orderClassFilter, orderMonthFilter]);
 
   useEffect(() => {
     loadCashierReport();
@@ -8280,62 +8334,73 @@ export default function AdminFinance() {
       </div>
 
       <div className="finance-card finance-orders-table-card" data-finance-section="orders" data-testid="finance-orders-table-card">
-        <div className="finance-toolbar">
-          <div>
+        <div className="finance-toolbar finance-orders-filter-toolbar">
+          <div className="finance-orders-toolbar-intro">
             <h3>بل‌ها و تعهدات</h3>
-            <p className="muted">بل‌ها را با جستجو و فیلتر وضعیت مرور کنید و عملیات لازم را از همین‌جا انجام دهید.</p>
+            <p className="muted">بل‌ها را با جستجو و فلترهای صنف، ماه، نوع و وضعیت مرور کنید.</p>
           </div>
-          <label className="finance-inline-filter finance-inline-filter-wide">
-            <span>جستجو در بل‌ها</span>
-            <input
-              value={orderSearchTerm}
-              onChange={(e) => setOrderSearchTerm(e.target.value)}
-              placeholder="شماره بل، عنوان، نام شاگرد یا صنف"
-              data-testid="bill-search-input"
-            />
-          </label>
-          <label className="finance-inline-filter">
-            <span>وضعیت بل</span>
-            <select value={orderStatusFilter} onChange={(e) => setOrderStatusFilter(e.target.value)} data-testid="bill-status-filter">
-              <option value="official">بل‌های رسمی (بدون باطل)</option>
-              <option value="all">همه؛ رسمی و باطل</option>
-              <option value="new">جدید</option>
-              <option value="pending">در انتظار</option>
-              <option value="partial">پرداخت ناقص</option>
-              <option value="paid">پرداخت‌شده</option>
-              <option value="waived">معاف/پوشش کامل</option>
-              <option value="overdue">سررسید گذشته</option>
-              <option value="void">باطل</option>
-            </select>
-          </label>
-          <label className="finance-inline-filter">
-            <span>نوع بل</span>
-            <select value={orderFeeTypeFilter} onChange={(e) => setOrderFeeTypeFilter(e.target.value)} data-testid="bill-fee-type-filter">
-              <option value="all">همه انواع بل</option>
-              {MANUAL_BILL_FEE_TYPES.map((feeType) => (
-                <option key={`bill-fee-filter-${feeType}`} value={feeType}>{FEE_LINE_TYPE_LABELS[feeType] || feeType}</option>
-              ))}
-              <option value="service">خدمت</option>
-              <option value="penalty">جریمه</option>
-            </select>
-          </label>
-          <label className="finance-inline-filter">
-            <span>صنف</span>
-            <select value={orderClassFilter} onChange={(e) => setOrderClassFilter(e.target.value)} data-testid="bill-class-filter">
-              <option value="all">همه صنف‌ها</option>
-              {classOptions.map((item) => (
-                <option key={`bill-filter-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>
-              ))}
-            </select>
-          </label>
-          <label className="finance-inline-filter">
-            <span>وضعیت صدور</span>
-            <select value={billIssuanceFilter} onChange={(e) => setBillIssuanceFilter(e.target.value)} data-testid="bill-issuance-filter">
-              <option value="all">همه شاگردان</option>
-              <option value="issued">بل صادر شده</option>
-              <option value="not-issued">بل صادر نشده</option>
-            </select>
-          </label>
+          <div className="finance-orders-filter-row">
+            <label className="finance-inline-filter finance-orders-search-filter">
+              <span>جستجو در بل‌ها</span>
+              <input
+                value={orderSearchTerm}
+                onChange={(e) => setOrderSearchTerm(e.target.value)}
+                placeholder="شماره بل، نام شاگرد یا صنف"
+                data-testid="bill-search-input"
+              />
+            </label>
+            <label className="finance-inline-filter">
+              <span>وضعیت بل</span>
+              <select value={orderStatusFilter} onChange={(e) => setOrderStatusFilter(e.target.value)} data-testid="bill-status-filter">
+                <option value="official">رسمی (بدون باطل)</option>
+                <option value="all">همه بل‌ها</option>
+                <option value="new">جدید</option>
+                <option value="pending">در انتظار</option>
+                <option value="partial">پرداخت ناقص</option>
+                <option value="paid">پرداخت‌شده</option>
+                <option value="waived">معاف/کامل</option>
+                <option value="overdue">سررسید گذشته</option>
+                <option value="void">باطل</option>
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>نوع بل</span>
+              <select value={orderFeeTypeFilter} onChange={(e) => setOrderFeeTypeFilter(e.target.value)} data-testid="bill-fee-type-filter">
+                <option value="all">همه انواع</option>
+                {MANUAL_BILL_FEE_TYPES.map((feeType) => (
+                  <option key={`bill-fee-filter-${feeType}`} value={feeType}>{FEE_LINE_TYPE_LABELS[feeType] || feeType}</option>
+                ))}
+                <option value="service">خدمت</option>
+                <option value="penalty">جریمه</option>
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>صنف</span>
+              <select value={orderClassFilter} onChange={(e) => setOrderClassFilter(e.target.value)} data-testid="bill-class-filter">
+                <option value="all">همه صنف‌ها</option>
+                {classOptions.map((item) => (
+                  <option key={`bill-filter-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>
+                ))}
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>ماه بل</span>
+              <select value={orderMonthFilter} onChange={(e) => setOrderMonthFilter(e.target.value)} data-testid="bill-month-filter">
+                <option value="all">همه ماه‌ها</option>
+                {billMonthOptions.map((item) => (
+                  <option key={`bill-month-filter-${item.key}`} value={item.key}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>وضعیت صدور</span>
+              <select value={billIssuanceFilter} onChange={(e) => setBillIssuanceFilter(e.target.value)} data-testid="bill-issuance-filter">
+                <option value="all">همه شاگردان</option>
+                <option value="issued">صادر شده</option>
+                <option value="not-issued">صادر نشده</option>
+              </select>
+            </label>
+          </div>
         </div>
         {ordersCatalogLoading && (
           <p className="muted" role="status">در حال دریافت فهرست کامل بل‌ها برای جست‌وجو و فیلتر...</p>
@@ -8354,21 +8419,28 @@ export default function AdminFinance() {
           <div className="finance-card-head">
             <div>
               <h4>وضعیت صدور بل شاگردان</h4>
-              <p className="muted">بر اساس عضویت فعال شاگردان؛ بل باطل به‌عنوان «صادر شده» یا بل رسمی شمرده نمی‌شود.</p>
+              <p className="muted">برای نمایش شاگردان، نام، صنف، ماه، نوع بل یا وضعیت صدور را مشخص کنید.</p>
             </div>
-            <div className="finance-chip-group">
-              <span className="finance-chip">{billIssuanceRows.length} شاگرد</span>
-              <span className="finance-chip finance-chip-emerald">{billIssuanceRows.filter((row) => row.issued).length} صادر شده</span>
-              <span className="finance-chip finance-chip-muted">{billIssuanceRows.filter((row) => !row.issued).length} صادر نشده</span>
-              {!!billIssuanceRows.reduce((sum, row) => sum + Number(row.voidCount || 0), 0) && (
-                <span className="finance-chip finance-chip-muted">
-                  {fmt(billIssuanceRows.reduce((sum, row) => sum + Number(row.voidCount || 0), 0))} سند باطل جداگانه
-                </span>
-              )}
-            </div>
+            {hasBillIssuanceCriteria && (
+              <div className="finance-chip-group">
+                <span className="finance-chip">{billIssuanceRows.length} شاگرد</span>
+                <span className="finance-chip finance-chip-emerald">{billIssuanceRows.filter((row) => row.issued).length} صادر شده</span>
+                <span className="finance-chip finance-chip-muted">{billIssuanceRows.filter((row) => !row.issued).length} صادر نشده</span>
+                {!!billIssuanceRows.reduce((sum, row) => sum + Number(row.voidCount || 0), 0) && (
+                  <span className="finance-chip finance-chip-muted">
+                    {fmt(billIssuanceRows.reduce((sum, row) => sum + Number(row.voidCount || 0), 0))} سند باطل جداگانه
+                  </span>
+                )}
+              </div>
+            )}
           </div>
-          {!billIssuanceRows.length && <p className="muted">شاگردی مطابق این فیلتر پیدا نشد.</p>}
-          {!!billIssuanceRows.length && (
+          {!hasBillIssuanceCriteria && (
+            <p className="muted finance-issuance-guidance" data-testid="bill-issuance-guidance">
+              هنوز معیاری انتخاب نشده است؛ برای دیدن وضعیت صدور، از فلترهای بالا استفاده کنید.
+            </p>
+          )}
+          {hasBillIssuanceCriteria && !billIssuanceRows.length && <p className="muted">شاگردی مطابق این فلتر پیدا نشد.</p>}
+          {hasBillIssuanceCriteria && !!billIssuanceRows.length && (
             <div className="finance-issuance-list">
               {billIssuanceRows.slice(0, 100).map((row) => (
                 <div key={row.key} className="mini-row">
@@ -8378,7 +8450,7 @@ export default function AdminFinance() {
                     {row.billTypeSummary ? <small>بابت: {row.billTypeSummary}</small> : null}
                     {!!row.billDetails?.length && (
                       <small>
-                        بل‌ها: {row.billDetails.slice(0, 5).map((bill) => `${formatFinanceCode(bill.number, '---')} (${bill.type})`).join('، ')}
+                        بل‌ها: {row.billDetails.slice(0, 5).map((bill) => `${formatFinanceCode(bill.number, '---')} (${[bill.type, bill.monthLabel].filter(Boolean).join(' · ')})`).join('، ')}
                         {row.billDetails.length > 5 ? ` و ${fmt(row.billDetails.length - 5)} بل دیگر` : ''}
                       </small>
                     )}

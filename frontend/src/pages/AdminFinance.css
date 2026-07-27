@@ -1730,6 +1730,55 @@
   max-width: none;
 }
 
+.finance-orders-filter-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.finance-orders-toolbar-intro {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.finance-orders-filter-row {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.45fr) repeat(5, minmax(112px, 0.85fr));
+  gap: 8px;
+  align-items: end;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.finance-orders-filter-row .finance-inline-filter {
+  min-width: 0;
+  grid-template-rows: 15px 36px;
+  align-self: end;
+  gap: 4px;
+}
+
+.finance-orders-filter-row .finance-inline-filter span {
+  height: 15px;
+  line-height: 15px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.finance-orders-filter-row :is(input, select) {
+  box-sizing: border-box;
+  height: 36px;
+  min-height: 36px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.finance-orders-filter-row select {
+  text-overflow: ellipsis;
+}
+
 .finance-order-record-summary {
   margin: 12px 0;
 }
@@ -1740,6 +1789,13 @@
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.035);
+}
+
+.finance-issuance-guidance {
+  padding: 12px;
+  border: 1px dashed rgba(148, 163, 184, 0.28);
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.06);
 }
 
 .finance-issuance-list {
