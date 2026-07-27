@@ -14,6 +14,12 @@ function roundMoney(value) {
   return Math.max(0, Math.round((Number(value) || 0) * 100) / 100);
 }
 
+function normalizeAnomalyIds(values = []) {
+  return [...new Set((Array.isArray(values) ? values : [])
+    .map((value) => normalizeText(value))
+    .filter(Boolean))];
+}
+
 function toDate(value) {
   if (!value) return null;
   const date = new Date(value);
@@ -75,6 +81,7 @@ function buildFinanceAnomalyCaseSnapshot(item = {}) {
     currentSnapshot: {
       schoolId: normalizeNullableId(item?.schoolId),
       id: normalizeText(item?.id),
+      legacyAnomalyIds: normalizeAnomalyIds(item?.legacyAnomalyIds),
       anomalyType: normalizeText(item?.anomalyType),
       title: normalizeText(item?.title),
       description: normalizeText(item?.description),
@@ -137,7 +144,8 @@ function mergeFinanceAnomalyCases(items = [], cases = [], { asOf = new Date() } 
   );
 
   return (Array.isArray(items) ? items : []).map((item) => {
-    const anomalyCase = caseMap.get(normalizeText(item?.id)) || null;
+    const candidateIds = [normalizeText(item?.id), ...normalizeAnomalyIds(item?.legacyAnomalyIds)].filter(Boolean);
+    const anomalyCase = candidateIds.map((id) => caseMap.get(id)).find(Boolean) || null;
     const workflowStatus = resolveFinanceAnomalyWorkflowStatus(anomalyCase, asOf);
     const history = normalizeFinanceAnomalyHistory(anomalyCase?.history);
     const latestHistory = history[0] || null;

@@ -9,6 +9,7 @@ require('../models/FinanceRelief');
 require('../models/FinanceFeePlan');
 require('../models/FinanceBill');
 
+const crypto = require('crypto');
 const StudentMembership = require('../models/StudentMembership');
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
@@ -16,6 +17,10 @@ const FinanceRelief = require('../models/FinanceRelief');
 const FinanceFeePlan = require('../models/FinanceFeePlan');
 const FinanceBill = require('../models/FinanceBill');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
+const {
+  formatAfghanMonthYearLabel,
+  replaceIranianSolarMonthNames
+} = require('../utils/afghanDate');
 const {
   buildPaymentClassScope,
   buildPaymentOrderLinkFilter
@@ -216,38 +221,120 @@ function getFeeTypeLabel(feeType = '') {
   }[normalizeText(feeType)] || feeType || 'فیس');
 }
 
-function getFinanceDocumentPeriodKey(document = {}) {
-  const periodType = normalizeText(document?.periodType).toLowerCase();
-
-  const periodLabel = normalizeText(document?.periodLabel)
+function normalizeFinancePeriodToken(value = '') {
+  const persianDigits = '۰۱۲۳۴۵۶۷۸۹';
+  const arabicDigits = '٠١٢٣٤٥٦٧٨٩';
+  return replaceIranianSolarMonthNames(String(value || '').normalize('NFKC'))
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, '')
+    .replace(/[۰-۹]/g, (digit) => String(persianDigits.indexOf(digit)))
+    .replace(/[٠-٩]/g, (digit) => String(arabicDigits.indexOf(digit)))
     .replace(/\s+/g, ' ')
+    .trim()
     .toLowerCase();
+}
 
-  if (periodLabel) {
-    return `${periodType || 'period'}:${periodLabel}`;
-  }
+function getFinanceLineItemAmount(lineItem = {}) {
+  return roundMoney(lineItem?.grossAmount ?? lineItem?.netAmount ?? lineItem?.reductionAmount ?? 0);
+}
 
-  const linePeriodKey = (
-    Array.isArray(document?.lineItems)
-      ? document.lineItems
-      : []
-  )
-    .map((entry) => normalizeText(entry?.periodKey))
-    .find(Boolean);
+function getFinanceDocumentPeriodSlices(document = {}, feeType = '') {
+  const normalizedType = normalizeText(feeType);
+  if (!normalizedType) return [];
 
-  if (linePeriodKey) {
-    return `${periodType || 'period'}:${linePeriodKey.toLowerCase()}`;
-  }
-
+  const periodType = normalizeText(document?.periodType).toLowerCase() || 'period';
+  const matchingLines = (Array.isArray(document?.lineItems) ? document.lineItems : [])
+    .filter((entry) => normalizeText(entry?.feeType) === normalizedType);
+  const normalizedLinePeriods = matchingLines
+    .map((entry) => ({
+      entry,
+      rawKey: normalizeText(entry?.periodKey),
+      normalizedKey: normalizeFinancePeriodToken(entry?.periodKey)
+    }))
+    .filter((item) => item.normalizedKey);
+  const distinctLinePeriods = new Set(normalizedLinePeriods.map((item) => item.normalizedKey));
   const dueDate = toDate(document?.dueDate);
 
-  if (dueDate) {
-    return `${periodType || 'date'}:${dueDate
-      .toISOString()
-      .slice(0, 7)}`;
+  // A monthly due date is the canonical source for ordinary one-period documents.
+  // Multiple explicit line periods still represent separate obligations in one document.
+  if (periodType === 'monthly' && dueDate && distinctLinePeriods.size <= 1) {
+    const dateLabel = formatAfghanMonthYearLabel(dueDate);
+    const normalizedDateLabel = normalizeFinancePeriodToken(dateLabel);
+    if (normalizedDateLabel) {
+      return [{
+        key: `${periodType}:${normalizedDateLabel}`,
+        label: normalizeText(document?.periodLabel) || dateLabel,
+        amount: getFinanceDocumentAmountByType(document, normalizedType)
+      }];
+    }
   }
 
+  if (normalizedLinePeriods.length) {
+    const grouped = new Map();
+    normalizedLinePeriods.forEach(({ entry, rawKey, normalizedKey }) => {
+      const key = `${periodType}:${normalizedKey}`;
+      const current = grouped.get(key) || { key, label: rawKey || normalizedKey, amount: 0 };
+      current.amount = roundMoney(current.amount + getFinanceLineItemAmount(entry));
+      grouped.set(key, current);
+    });
+    return [...grouped.values()];
+  }
+
+  const periodLabel = normalizeText(document?.periodLabel);
+  const normalizedPeriodLabel = normalizeFinancePeriodToken(periodLabel);
+  if (normalizedPeriodLabel) {
+    return [{
+      key: `${periodType}:${normalizedPeriodLabel}`,
+      label: periodLabel,
+      amount: getFinanceDocumentAmountByType(document, normalizedType)
+    }];
+  }
+
+  // Term and custom documents without an explicit period are intentionally skipped;
+  // sharing only a due-date month is not enough evidence that they are duplicates.
+  return [];
+}
+
+function getLegacyFinanceDocumentPeriodKey(document = {}) {
+  const periodType = normalizeText(document?.periodType).toLowerCase();
+  const periodLabel = normalizeText(document?.periodLabel).replace(/\s+/g, ' ').toLowerCase();
+  if (periodLabel) return `${periodType || 'period'}:${periodLabel}`;
+
+  const linePeriodKey = (Array.isArray(document?.lineItems) ? document.lineItems : [])
+    .map((entry) => normalizeText(entry?.periodKey))
+    .find(Boolean);
+  if (linePeriodKey) return `${periodType || 'period'}:${linePeriodKey.toLowerCase()}`;
+
+  const dueDate = toDate(document?.dueDate);
+  if (dueDate) return `${periodType || 'date'}:${dueDate.toISOString().slice(0, 7)}`;
   return '';
+}
+
+function buildDuplicateFeeAnomalyIdentity({
+  feeType = '',
+  membershipKey = '',
+  periodKey = '',
+  legacyPeriodKeys = []
+} = {}) {
+  const normalizedFeeType = normalizeText(feeType) || 'fee';
+  const normalizedMembershipKey = normalizeNullableId(membershipKey) || 'unknown-membership';
+  const normalizedPeriodKey = normalizeFinancePeriodToken(periodKey);
+  const token = crypto
+    .createHash('sha256')
+    .update(`${normalizedFeeType}|${normalizedMembershipKey}|${normalizedPeriodKey}`)
+    .digest('base64url')
+    .slice(0, 22);
+  const legacyPrefix = `fee-duplicate-${normalizedFeeType}-${normalizedMembershipKey}-`;
+  const normalizedLegacyPeriodKeys = [...new Set([
+    ...(Array.isArray(legacyPeriodKeys) ? legacyPeriodKeys : []),
+    normalizedPeriodKey
+  ].map((key) => normalizeText(key)).filter(Boolean))];
+  return {
+    id: `fee-duplicate-${normalizedFeeType}-${token}`,
+    legacyAnomalyIds: [...new Set(normalizedLegacyPeriodKeys.flatMap((key) => [
+      `${legacyPrefix}${encodeURIComponent(key)}`,
+      `${legacyPrefix}${key}`
+    ]))]
+  };
 }
 
 function reliefAppliesToOrder(relief = {}, order = {}) {
@@ -681,102 +768,68 @@ function buildMembershipFinanceAnomalies({
           return;
         }
 
-       const activeDocumentsByPeriod = new Map();
+        const activeDocumentsByPeriod = new Map();
+        const legacyPeriodCounts = new Map();
+        activeDocuments.forEach((document) => {
+          const legacyPeriodKey = getLegacyFinanceDocumentPeriodKey(document);
+          if (legacyPeriodKey) {
+            legacyPeriodCounts.set(legacyPeriodKey, (legacyPeriodCounts.get(legacyPeriodKey) || 0) + 1);
+          }
+          getFinanceDocumentPeriodSlices(document, feeType).forEach((periodSlice) => {
+            const current = activeDocumentsByPeriod.get(periodSlice.key) || [];
+            current.push({ document, periodSlice });
+            activeDocumentsByPeriod.set(periodSlice.key, current);
+          });
+        });
 
-activeDocuments.forEach((document) => {
-  const periodKey = getFinanceDocumentPeriodKey(document);
+        activeDocumentsByPeriod.forEach((periodEntries, periodKey) => {
+          if (periodEntries.length <= 1) return;
 
-  // سندی که دوره روشن ندارد، به‌صورت خودکار تکراری اعلام نشود.
-  if (!periodKey) return;
+          const periodDocuments = periodEntries.map((entry) => entry.document);
+          const periodAmount = roundMoney(periodEntries.reduce(
+            (sum, entry) => sum + roundMoney(entry?.periodSlice?.amount),
+            0
+          ));
+          const displayedPeriod = normalizeText(periodEntries[0]?.periodSlice?.label) || periodKey;
+          const membershipKey = membershipId || normalizeNullableId(
+            membershipItem?.id || membershipItem?._id || studentName
+          );
+          const anomalyIdentity = buildDuplicateFeeAnomalyIdentity({
+            feeType,
+            membershipKey,
+            periodKey,
+            legacyPeriodKeys: periodDocuments
+              .map((document) => getLegacyFinanceDocumentPeriodKey(document))
+              .filter((key) => key && legacyPeriodCounts.get(key) > 1)
+          });
 
-  const periodDocuments =
-    activeDocumentsByPeriod.get(periodKey) || [];
-
-  periodDocuments.push(document);
-  activeDocumentsByPeriod.set(periodKey, periodDocuments);
-});
-
-activeDocumentsByPeriod.forEach(
-  (periodDocuments, periodKey) => {
-    if (periodDocuments.length <= 1) return;
-
-    const periodAmount = roundMoney(
-      periodDocuments.reduce(
-        (sum, document) =>
-          sum +
-          getFinanceDocumentAmountByType(
-            document,
-            feeType
-          ),
-        0
-      )
-    );
-
-    const displayedPeriod =
-      normalizeText(periodDocuments[0]?.periodLabel) ||
-      normalizeText(
-        periodDocuments[0]?.lineItems?.[0]?.periodKey
-      ) ||
-      periodKey;
-
-    const anomalyPeriodKey = encodeURIComponent(periodKey);
-
-    anomalies.push({
-      id: `fee-duplicate-${feeType}-${
-        membershipId ||
-        normalizeNullableId(
-          membershipItem?.id ||
-          membershipItem?._id ||
-          studentName
-        )
-      }-${anomalyPeriodKey}`,
-      anomalyType: 'duplicate_fee_bill',
-      severity: 'warning',
-      actionRequired: true,
-      title: `بل تکراری ${feeLabel}`,
-      description:
-        `${studentName} برای ${feeLabel} در دوره ` +
-        `${displayedPeriod} بیش از یک بل دارد. ` +
-        `تعداد سندها: ${periodDocuments.length.toLocaleString(
-          'fa-AF-u-ca-persian'
-        )}.`,
-      studentName,
-      studentUserId,
-      classTitle,
-      classId,
-      academicYearTitle,
-      academicYearId,
-      membershipId,
-      referenceNumber: periodDocuments
-        .map((document) =>
-          normalizeText(
-            document?.orderNumber ||
-            document?.billNumber ||
-            document?.title
-          )
-        )
-        .filter(Boolean)
-        .slice(0, 3)
-        .join('، '),
-      amount: periodAmount,
-      amountLabel: formatAmountLabel(
-        periodAmount,
-        currency
-      ),
-      status: normalizeText(membershipItem?.status),
-      at:
-        periodDocuments[0]?.createdAt ||
-        periodDocuments[0]?.dueDate ||
-        null,
-      tags: [
-        'membership',
-        feeType,
-        'duplicate_bill',
-        periodKey
-      ]
-    });
-  }
-);
+          anomalies.push({
+            id: anomalyIdentity.id,
+            legacyAnomalyIds: anomalyIdentity.legacyAnomalyIds,
+            anomalyType: 'duplicate_fee_bill',
+            severity: 'warning',
+            actionRequired: true,
+            title: `بل تکراری ${feeLabel}`,
+            description: `${studentName} برای ${feeLabel} در دوره ${displayedPeriod} بیش از یک بل دارد. تعداد سندها: ${periodDocuments.length.toLocaleString('fa-AF-u-ca-persian')}.`,
+            studentName,
+            studentUserId,
+            classTitle,
+            classId,
+            academicYearTitle,
+            academicYearId,
+            membershipId,
+            referenceNumber: periodDocuments
+              .map((document) => normalizeText(document?.orderNumber || document?.billNumber || document?.title))
+              .filter(Boolean)
+              .slice(0, 3)
+              .join('، '),
+            amount: periodAmount,
+            amountLabel: formatAmountLabel(periodAmount, currency),
+            status: normalizeText(membershipItem?.status),
+            at: periodDocuments[0]?.createdAt || periodDocuments[0]?.dueDate || null,
+            tags: ['membership', feeType, 'duplicate_bill', periodKey]
+          });
+        });
 
         const hasManualOrUnplannedDocument = matchingDocuments.some((document) => !isPlanGeneratedFinanceDocument(document));
         if (hasManualOrUnplannedDocument && totalIssuedAmount > 0 && totalIssuedAmount + 0.009 < plannedAmount) {
