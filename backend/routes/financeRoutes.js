@@ -5915,6 +5915,9 @@ const buildFinanceAnomalyTimelineItems = (cases = []) => {
 const ensureFinanceAnomalyCase = async ({ schoolId = '', anomalyId = '', snapshot = {} } = {}) => {
   const normalizedSchoolId = String(schoolId || snapshot?.schoolId || '').trim();
   const normalizedAnomalyId = String(anomalyId || snapshot?.id || '').trim();
+  const legacyAnomalyIds = [...new Set((Array.isArray(snapshot?.legacyAnomalyIds) ? snapshot.legacyAnomalyIds : [])
+    .map((entry) => String(entry || '').trim())
+    .filter((entry) => entry && entry !== normalizedAnomalyId))];
   if (!normalizedSchoolId) {
     throw createRouteError(400, 'مکتب فعال برای ناهنجاری مالی معتبر نیست.');
   }
@@ -5922,10 +5925,16 @@ const ensureFinanceAnomalyCase = async ({ schoolId = '', anomalyId = '', snapsho
     throw new Error('finance_anomaly_id_required');
   }
 
-  const existing = await FinanceAnomalyCase.findOne({
+  let existing = await FinanceAnomalyCase.findOne({
     schoolId: normalizedSchoolId,
     anomalyId: normalizedAnomalyId
   });
+  if (!existing && legacyAnomalyIds.length) {
+    existing = await FinanceAnomalyCase.findOne({
+      schoolId: normalizedSchoolId,
+      anomalyId: { $in: legacyAnomalyIds }
+    });
+  }
   if (existing) {
     return hydrateFinanceAnomalyCase(existing, {
       ...snapshot,
@@ -7204,7 +7213,10 @@ router.get('/admin/reports/anomalies', requireAuth, requireRole(['admin']), requ
         scope,
         academicYearId: String(req.query?.academicYearId || '').trim(),
         studentMembershipId: String(req.query?.studentMembershipId || '').trim(),
-        anomalyIds: filteredItems.map((item) => item?.id)
+        anomalyIds: filteredItems.flatMap((item) => [
+          item?.id,
+          ...(Array.isArray(item?.legacyAnomalyIds) ? item.legacyAnomalyIds : [])
+        ])
       }))
     ).lean();
     const items = mergeFinanceAnomalyCases(filteredItems, anomalyCases, { asOf });

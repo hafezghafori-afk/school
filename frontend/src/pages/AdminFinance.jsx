@@ -1300,6 +1300,9 @@ const buildAnomalyActionPayload = (item = {}, extras = {}) => ({
   ...extras,
   snapshot: {
     id: String(item?.id || '').trim(),
+    legacyAnomalyIds: Array.isArray(item?.legacyAnomalyIds)
+      ? item.legacyAnomalyIds.map((entry) => String(entry || '').trim()).filter(Boolean)
+      : [],
     anomalyType: String(item?.anomalyType || '').trim(),
     title: String(item?.title || '').trim(),
     description: String(item?.description || '').trim(),
@@ -5570,7 +5573,7 @@ export default function AdminFinance() {
     try {
       setBusy(true);
       const data = await postJson(
-        `${API_BASE}/api/finance/admin/anomalies/${selectedAnomaly.id}/note`,
+        `${API_BASE}/api/finance/admin/anomalies/${encodeURIComponent(selectedAnomaly.id)}/note`,
         buildAnomalyActionPayload(selectedAnomaly, { note: anomalyWorkflowForm.note })
       );
       setMessage(data.message || 'یادداشت ناهنجاری مالی ذخیره شد');
@@ -5586,7 +5589,7 @@ export default function AdminFinance() {
     try {
       setBusy(true);
       const data = await postJson(
-        `${API_BASE}/api/finance/admin/anomalies/${selectedAnomaly.id}/assign`,
+        `${API_BASE}/api/finance/admin/anomalies/${encodeURIComponent(selectedAnomaly.id)}/assign`,
         buildAnomalyActionPayload(selectedAnomaly, {
           assignedLevel: anomalyWorkflowForm.assignedLevel,
           note: anomalyWorkflowForm.note
@@ -5605,7 +5608,7 @@ export default function AdminFinance() {
     try {
       setBusy(true);
       const data = await postJson(
-        `${API_BASE}/api/finance/admin/anomalies/${selectedAnomaly.id}/snooze`,
+        `${API_BASE}/api/finance/admin/anomalies/${encodeURIComponent(selectedAnomaly.id)}/snooze`,
         buildAnomalyActionPayload(selectedAnomaly, {
           snoozedUntil: anomalyWorkflowForm.snoozedUntil,
           note: anomalyWorkflowForm.note
@@ -5624,7 +5627,7 @@ export default function AdminFinance() {
     try {
       setBusy(true);
       const data = await postJson(
-        `${API_BASE}/api/finance/admin/anomalies/${selectedAnomaly.id}/resolve`,
+        `${API_BASE}/api/finance/admin/anomalies/${encodeURIComponent(selectedAnomaly.id)}/resolve`,
         buildAnomalyActionPayload(selectedAnomaly, { note: anomalyWorkflowForm.note })
       );
       setMessage(data.message || 'ناهجاری مالی حل شد');
@@ -5640,7 +5643,7 @@ export default function AdminFinance() {
     try {
       setBusy(true);
       const data = await postJson(
-        `${API_BASE}/api/finance/admin/anomalies/${selectedAnomaly.id}/settle-admission`,
+        `${API_BASE}/api/finance/admin/anomalies/${encodeURIComponent(selectedAnomaly.id)}/settle-admission`,
         buildAnomalyActionPayload(selectedAnomaly, {
           mode,
           note: anomalyWorkflowForm.note
