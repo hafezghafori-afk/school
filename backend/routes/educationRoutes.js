@@ -6,8 +6,6 @@ const Course = require('../models/Course');
 const CourseJoinRequest = require('../models/CourseJoinRequest');
 const Schedule = require('../models/Schedule');
 const StudentMembership = require('../models/StudentMembership');
-const FinanceBill = require('../models/FinanceBill');
-const FeeOrder = require('../models/FeeOrder');
 const User = require('../models/User');
 const Enrollment = require('../models/Enrollment');
 const AfghanStudent = require('../models/AfghanStudent');
@@ -17,11 +15,17 @@ const SchoolClass = require('../models/SchoolClass');
 const Shift = require('../models/Shift');
 const InstructorSubject = require('../models/InstructorSubject');
 const TeacherAssignment = require('../models/TeacherAssignment');
+const { ensureTeacherAssignmentsFromLegacyMappings } = require('../services/timetableService');
 const UserNotification = require('../models/UserNotification');
-const { deactivateCurrentMemberships } = require('../utils/studentMembershipSync');
+const { buildConcurrentCurrentMembershipFilter } = require('../utils/studentMembershipIntegrity');
+const { ENDED_STUDENT_MEMBERSHIP_STATUSES } = require('../utils/studentMembershipStatus');
 const { findAccessibleCourses } = require('../utils/courseAccess');
 const { ensureAfghanStudentProfile } = require('../services/afghanStudentProfileService');
-const { issueTransferAdmissionBill } = require('../services/transferAdmissionBillingService');
+const {
+  SUPPORTED_ACTIONS: SUPPORTED_STUDENT_LIFECYCLE_ACTIONS,
+  executeStudentLifecycleAction,
+  getStudentLifecycleHistory
+} = require('../services/studentLifecycleService');
 const { requireAuth, requireRole, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const { logActivity } = require('../utils/activity');
 
@@ -30,6 +34,11 @@ const DEFAULT_SINGLE_SCHOOL_ID = '000000000000000000000001';
 
 const membershipAccessOptions = Object.freeze({});
 const CURRENT_STUDENT_MEMBERSHIP_STATUSES = Object.freeze(['active', 'pending', 'suspended', 'transferred_in']);
+const ALL_STUDENT_MEMBERSHIP_STATUSES = Object.freeze([
+  ...CURRENT_STUDENT_MEMBERSHIP_STATUSES,
+  ...ENDED_STUDENT_MEMBERSHIP_STATUSES
+]);
+const LIFECYCLE_ONLY_MEMBERSHIP_STATUSES = Object.freeze(['transferred_in', 'transferred_out', 'dropped', 'expelled', 'suspended', 'graduated']);
 const STUDENT_LIFECYCLE_MANAGE_PERMISSIONS = Object.freeze(['students.lifecycle.manage', 'students.transfers.manage', 'manage_memberships', 'manage_users']);
 
 const mustObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
@@ -541,7 +550,10 @@ const loadEducationStudentCatalog = async () => {
     AfghanStudent.find({ status: { $ne: 'deleted' } })
       .select('personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari personalInfo.fatherName contactInfo.email contactInfo.mobile contactInfo.phone familyInfo.fatherPhone academicInfo.currentGrade academicInfo.previousSchool notes status linkedUserId createdAt')
       .sort({ createdAt: -1 }),
-    Enrollment.find({ status: { $in: ['pending', 'approved'] } })
+    Enrollment.find({
+      registrationSource: 'online',
+      status: { $in: ['pending', 'approved'] }
+    })
       .select('studentName fatherName grade phone email previousSchool notes status linkedUserId createdAt approvedAt rejectionReason')
       .sort({ createdAt: -1 }),
     StudentMembership.find({
@@ -752,6 +764,112 @@ const populateInstructorSubjectMappings = (query) => query
   .populate('classId', 'title code gradeLevel section academicYearId legacyCourseId')
   .populate('course', 'title category');
 
+const populateCanonicalTeacherMaps = (query) => query
+  .populate('teacherUserId', 'name email role')
+  .populate('subjectId', 'name code grade')
+  .populate('academicYearId', 'title isActive status')
+  .populate({
+    path: 'classId',
+    select: 'title code gradeLevel section academicYearId legacyCourseId schoolId',
+    populate: { path: 'academicYearId', select: 'title isActive status' }
+  });
+
+const serializeCanonicalTeacherMap = (item) => {
+  const plain = item?.toObject ? item.toObject() : { ...(item || {}) };
+  const populatedClass = plain.classId && typeof plain.classId === 'object' ? plain.classId : null;
+  const schoolClass = populatedClass ? {
+    ...populatedClass,
+    id: populatedClass._id || null,
+    academicYear: populatedClass.academicYearId && typeof populatedClass.academicYearId === 'object'
+      ? populatedClass.academicYearId
+      : null
+  } : null;
+  return {
+    ...plain,
+    instructor: plain.teacherUserId || null,
+    subject: plain.subjectId || null,
+    academicYear: plain.academicYearId || schoolClass?.academicYear || null,
+    classId: populatedClass?._id || plain.classId || null,
+    courseId: plain.legacyCourseId || null,
+    course: null,
+    schoolClass,
+    isPrimary: Boolean(plain.isPrimary),
+    weeklyPeriods: Number(plain.weeklyPeriods || 1)
+  };
+};
+
+const resolveCanonicalTeacherMapInput = async (payload = {}, current = null) => {
+  const instructorId = normalizeText(payload.instructorId ?? current?.teacherUserId);
+  const subjectId = normalizeText(payload.subjectId ?? current?.subjectId);
+  const academicYearId = normalizeText(payload.academicYearId ?? current?.academicYearId);
+  const classId = normalizeText(payload.classId ?? current?.classId);
+
+  if (![instructorId, subjectId, academicYearId, classId].every(mustObjectId)) {
+    return { error: 'استاد، مضمون، سال تعلیمی و صنف معتبر الزامی است.' };
+  }
+
+  const classRef = await resolveClassReference({ classId, syncLegacy: false });
+  if (classRef.error || !classRef.schoolClass) {
+    return { error: 'صنف معتبر نیست.' };
+  }
+
+  const [instructor, subject, academicYear] = await Promise.all([
+    User.findById(instructorId).select('role status'),
+    Subject.findById(subjectId).select('_id isActive'),
+    AcademicYear.findById(academicYearId).select('_id schoolId')
+  ]);
+
+  if (!instructor || !['instructor', 'admin'].includes(instructor.role) || instructor.status === 'inactive') {
+    return { error: 'استاد معتبر نیست.' };
+  }
+  if (!subject) return { error: 'مضمون معتبر نیست.' };
+  if (!academicYear) return { error: 'سال تعلیمی معتبر نیست.' };
+
+  const classYearId = String(classRef.schoolClass.academicYearId?._id || classRef.schoolClass.academicYearId || '');
+  const classSchoolId = String(classRef.schoolClass.schoolId || '');
+  if (classYearId !== String(academicYear._id)) {
+    return { error: 'صنف مربوط به سال تعلیمی انتخاب‌شده نیست.' };
+  }
+  if (!classSchoolId || classSchoolId !== String(academicYear.schoolId || '')) {
+    return { error: 'صنف و سال تعلیمی مربوط به یک مکتب نیستند.' };
+  }
+
+  const requestedWeeklyPeriods = Number(payload.weeklyPeriods ?? current?.weeklyPeriods ?? 1);
+  const weeklyPeriods = Number.isFinite(requestedWeeklyPeriods)
+    ? Math.max(1, Math.min(30, Math.round(requestedWeeklyPeriods)))
+    : 1;
+
+  return {
+    data: {
+      schoolId: classRef.schoolClass.schoolId,
+      teacherUserId: instructor._id,
+      academicYearId: academicYear._id,
+      classId: classRef.schoolClass._id,
+      subjectId: subject._id,
+      weeklyPeriods,
+      isPrimary: parseBool(payload.isPrimary ?? current?.isPrimary, false),
+      note: normalizeText(payload.note ?? current?.note),
+      assignmentType: current?.assignmentType || 'subject',
+      status: 'active',
+      source: current?.source || 'manual',
+      legacyCourseId: current?.legacyCourseId || classRef.schoolClass.legacyCourseId || null
+    }
+  };
+};
+
+const findCanonicalTeacherMapDuplicate = (data = {}, excludeId = '') => {
+  const filter = {
+    schoolId: data.schoolId,
+    teacherUserId: data.teacherUserId,
+    academicYearId: data.academicYearId,
+    classId: data.classId,
+    subjectId: data.subjectId,
+    status: { $in: ['planned', 'active', 'pending'] }
+  };
+  if (mustObjectId(excludeId)) filter._id = { $ne: excludeId };
+  return TeacherAssignment.findOne(filter);
+};
+
 const buildLegacyCompatibleClassFilter = ({ classId = '', courseId = '' } = {}) => {
   const normalizedClassId = toNullableObjectId(classId);
   const normalizedCourseId = toNullableObjectId(courseId);
@@ -791,7 +909,10 @@ const enrollmentStatusToMembershipStatus = (value = '') => ({
   transferred: 'transferred',
   transferred_out: 'transferred_out',
   transfer_out: 'transferred_out',
-  graduated: 'graduated'
+  graduated: 'graduated',
+  suspended: 'suspended',
+  expelled: 'expelled',
+  inactive: 'inactive'
 }[String(value || '').trim().toLowerCase()] || '');
 
 const membershipStatusToEnrollmentStatus = (value = '') => ({
@@ -802,7 +923,10 @@ const membershipStatusToEnrollmentStatus = (value = '') => ({
   dropped: 'dropped',
   transferred: 'transferred',
   transferred_out: 'transferred_out',
-  graduated: 'graduated'
+  graduated: 'graduated',
+  suspended: 'suspended',
+  expelled: 'expelled',
+  inactive: 'inactive'
 }[String(value || '').trim().toLowerCase()] || 'approved');
 
 const normalizeEnrollmentStatus = (value, fallback = 'approved') => {
@@ -832,11 +956,17 @@ const serializeStudentEnrollment = (item, schoolClass = null) => ({
   rejectedReason: item.rejectedReason || '',
   source: item.source || 'system',
   isCurrent: !!item.isCurrent,
+  enrolledAt: item.enrolledAt || item.joinedAt || null,
   joinedAt: item.joinedAt || null,
+  endedAt: item.endedAt || item.leftAt || null,
   leftAt: item.leftAt || null,
+  endedReason: item.endedReason || '',
   createdAt: item.createdAt || null,
   updatedAt: item.updatedAt || null,
-  legacyOrder: item.legacyOrder || null
+  legacyOrder: item.legacyOrder || null,
+  previousMembershipId: item.previousMembershipId || null,
+  admissionType: item.admissionType || 'regular',
+  changeVersion: Number(item.changeVersion || 0)
 });
 
 const withManageContent = [
@@ -974,6 +1104,15 @@ const findActiveMembership = (studentId, courseId) => StudentMembership.findOne(
   isCurrent: true
 });
 
+const findOtherCurrentClassMembership = ({ schoolId = '', studentId, courseId, academicYearId = '' } = {}) => (
+  StudentMembership.findOne(buildConcurrentCurrentMembershipFilter({
+    schoolId,
+    studentId,
+    academicYearId,
+    excludeCourseId: courseId
+  })).sort({ updatedAt: -1, createdAt: -1 })
+);
+
 const activateInstructorMembership = async ({
   studentId,
   courseId,
@@ -989,6 +1128,19 @@ const activateInstructorMembership = async ({
     || classRef.schoolClass?.academicYearId
     || classRef.course.academicYearRef
     || null;
+
+  const conflictingMembership = await findOtherCurrentClassMembership({
+    schoolId: classRef.schoolClass?.schoolId,
+    studentId,
+    courseId,
+    academicYearId
+  });
+  if (conflictingMembership) {
+    const error = new Error('این شاگرد در همین سال تعلیمی عضویت فعال صنف دیگری دارد.');
+    error.code = 'CONCURRENT_CLASS_MEMBERSHIP';
+    error.status = 409;
+    throw error;
+  }
 
   let item = await StudentMembership.findOne({ student: studentId, course: courseId, isCurrent: true })
     .sort({ updatedAt: -1, createdAt: -1 });
@@ -1669,6 +1821,111 @@ router.delete('/academic-years/:id', ...withManageContent, async (req, res) => {
   }
 });
 
+// Canonical teacher-to-subject/class assignments used by education, timetable,
+// attendance and exam sheets. The old instructor-subject routes remain below
+// only for compatibility with legacy consumers.
+router.get('/teacher-maps', ...withEducationReferenceRead, async (req, res) => {
+  try {
+    await ensureTeacherAssignmentsFromLegacyMappings();
+    const { instructorId = '', subjectId = '', academicYearId = '', classId = '' } = req.query || {};
+    const filter = { status: { $in: ['planned', 'active', 'pending'] } };
+    if (mustObjectId(instructorId)) filter.teacherUserId = instructorId;
+    if (mustObjectId(subjectId)) filter.subjectId = subjectId;
+    if (mustObjectId(academicYearId)) filter.academicYearId = academicYearId;
+    if (mustObjectId(classId)) filter.classId = classId;
+
+    const items = await populateCanonicalTeacherMaps(TeacherAssignment.find(filter))
+      .sort({ isPrimary: -1, createdAt: -1 });
+    res.json({ success: true, items: items.map(serializeCanonicalTeacherMap) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'دریافت تخصیص‌های استاد ناموفق بود.' });
+  }
+});
+
+router.post('/teacher-maps', ...withManageContent, async (req, res) => {
+  try {
+    const resolved = await resolveCanonicalTeacherMapInput(req.body || {});
+    if (resolved.error) return res.status(400).json({ success: false, message: resolved.error });
+
+    const duplicate = await findCanonicalTeacherMapDuplicate(resolved.data);
+    if (duplicate) return duplicateError(res, 'این تخصیص از قبل ثبت شده است.');
+
+    const created = await TeacherAssignment.create(resolved.data);
+    await logActivity({
+      req,
+      action: 'create_teacher_assignment_from_education_center',
+      targetType: 'TeacherAssignment',
+      targetId: String(created._id),
+      meta: {
+        teacherUserId: String(created.teacherUserId),
+        subjectId: String(created.subjectId),
+        academicYearId: String(created.academicYearId),
+        classId: String(created.classId)
+      }
+    });
+
+    const item = await populateCanonicalTeacherMaps(TeacherAssignment.findById(created._id));
+    res.status(201).json({ success: true, item: serializeCanonicalTeacherMap(item) });
+  } catch (error) {
+    if (error?.code === 11000) return duplicateError(res, 'این تخصیص از قبل ثبت شده است.');
+    res.status(500).json({ success: false, message: 'ایجاد تخصیص استاد ناموفق بود.' });
+  }
+});
+
+router.put('/teacher-maps/:id', ...withManageContent, async (req, res) => {
+  try {
+    const current = await TeacherAssignment.findById(req.params.id);
+    if (!current) return res.status(404).json({ success: false, message: 'تخصیص استاد پیدا نشد.' });
+
+    const resolved = await resolveCanonicalTeacherMapInput(req.body || {}, current);
+    if (resolved.error) return res.status(400).json({ success: false, message: resolved.error });
+    const duplicate = await findCanonicalTeacherMapDuplicate(resolved.data, req.params.id);
+    if (duplicate) return duplicateError(res, 'این تخصیص از قبل ثبت شده است.');
+
+    current.set(resolved.data);
+    await current.save();
+    await logActivity({
+      req,
+      action: 'update_teacher_assignment_from_education_center',
+      targetType: 'TeacherAssignment',
+      targetId: String(current._id),
+      meta: {
+        teacherUserId: String(current.teacherUserId),
+        subjectId: String(current.subjectId),
+        academicYearId: String(current.academicYearId),
+        classId: String(current.classId)
+      }
+    });
+
+    const item = await populateCanonicalTeacherMaps(TeacherAssignment.findById(current._id));
+    res.json({ success: true, item: serializeCanonicalTeacherMap(item) });
+  } catch (error) {
+    if (error?.code === 11000) return duplicateError(res, 'این تخصیص از قبل ثبت شده است.');
+    res.status(500).json({ success: false, message: 'ویرایش تخصیص استاد ناموفق بود.' });
+  }
+});
+
+router.delete('/teacher-maps/:id', ...withManageContent, async (req, res) => {
+  try {
+    const item = await TeacherAssignment.findById(req.params.id);
+    if (!item) return res.status(404).json({ success: false, message: 'تخصیص استاد پیدا نشد.' });
+
+    item.status = 'ended';
+    item.endedAt = new Date();
+    await item.save();
+    await logActivity({
+      req,
+      action: 'end_teacher_assignment_from_education_center',
+      targetType: 'TeacherAssignment',
+      targetId: String(item._id),
+      meta: { endedAt: item.endedAt }
+    });
+    res.json({ success: true, message: 'تخصیص استاد ختم شد و سوابق قبلی آن محفوظ ماند.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'ختم تخصیص استاد ناموفق بود.' });
+  }
+});
+
 router.get('/instructor-subjects', ...withEducationReferenceRead, async (req, res) => {
   try {
     const { instructorId = '', subjectId = '', academicYearId = '', classId = '', courseId = '' } = req.query || {};
@@ -2050,12 +2307,6 @@ router.post('/instructor/join-requests/:id/approve', ...withInstructorManageCont
       return res.status(403).json({ success: false, message: 'Class is not assigned to this instructor' });
     }
 
-    item.status = 'approved';
-    item.rejectedReason = '';
-    item.reviewedBy = req.user?.id || null;
-    item.reviewedAt = new Date();
-    await item.save();
-
     await activateInstructorMembership({
       studentId: item.student?._id || item.student,
       courseId: item.course?._id || item.course,
@@ -2064,6 +2315,12 @@ router.post('/instructor/join-requests/:id/approve', ...withInstructorManageCont
       source: 'system',
       joinedAt: item.createdAt || new Date()
     });
+
+    item.status = 'approved';
+    item.rejectedReason = '';
+    item.reviewedBy = req.user?.id || null;
+    item.reviewedAt = new Date();
+    await item.save();
 
     await UserNotification.create({
       user: item.student?._id || item.student,
@@ -2080,7 +2337,10 @@ router.post('/instructor/join-requests/:id/approve', ...withInstructorManageCont
     });
 
     res.json({ success: true, message: 'Join request approved' });
-  } catch {
+  } catch (error) {
+    if (error?.code === 'CONCURRENT_CLASS_MEMBERSHIP') {
+      return res.status(409).json({ success: false, message: error.message });
+    }
     res.status(500).json({ success: false, message: 'Failed to approve join request' });
   }
 });
@@ -2196,12 +2456,6 @@ router.post('/instructor/course-students', ...withInstructorManageContent, async
 
     let item = null;
     if (pendingRequest) {
-      pendingRequest.status = 'approved';
-      pendingRequest.rejectedReason = '';
-      pendingRequest.reviewedBy = req.user?.id || null;
-      pendingRequest.reviewedAt = new Date();
-      await pendingRequest.save();
-
       item = await activateInstructorMembership({
         studentId,
         courseId: classRef.courseId,
@@ -2210,6 +2464,12 @@ router.post('/instructor/course-students', ...withInstructorManageContent, async
         source: 'system',
         joinedAt: pendingRequest.createdAt || new Date()
       });
+
+      pendingRequest.status = 'approved';
+      pendingRequest.rejectedReason = '';
+      pendingRequest.reviewedBy = req.user?.id || null;
+      pendingRequest.reviewedAt = new Date();
+      await pendingRequest.save();
     } else {
       item = await activateInstructorMembership({
         studentId,
@@ -2238,7 +2498,10 @@ router.post('/instructor/course-students', ...withInstructorManageContent, async
     const populated = item?._id ? await populateInstructorMemberships(StudentMembership.findById(item._id)) : null;
     const schoolClass = classRef.classId ? await loadSerializedSchoolClassById(classRef.classId) : null;
     res.status(201).json({ success: true, item: populated ? serializeStudentEnrollment(populated, schoolClass) : null, message: 'Student added to class' });
-  } catch {
+  } catch (error) {
+    if (error?.code === 'CONCURRENT_CLASS_MEMBERSHIP') {
+      return res.status(409).json({ success: false, message: error.message });
+    }
     res.status(500).json({ success: false, message: 'Failed to add student to class' });
   }
 });
@@ -2258,34 +2521,11 @@ router.delete('/instructor/course-students/:id', ...withInstructorManageContent,
       return res.status(403).json({ success: false, message: 'Class is not assigned to this instructor' });
     }
 
-    await deactivateCurrentMemberships({
-      studentId: item.student?._id || item.student,
-      courseId: item.course?._id || item.course,
-      actorId: req.user?.id || null,
-      note: 'removed_by_instructor',
-      status: 'dropped',
-      legacyOrderId: item.legacyOrder || null
+    return res.status(409).json({
+      success: false,
+      code: 'student_removal_requires_lifecycle_action',
+      message: 'ختم ثبت صنفی شاگرد باید توسط مدیریت و از بخش تغییر وضعیت تعلیمی شاگرد ثبت شود.'
     });
-
-    await UserNotification.create({
-      user: item.student?._id || item.student,
-      title: 'Removed from class',
-      message: 'Your membership in "' + (item.course?.title || 'class') + '" was deactivated by your instructor.',
-      type: 'course_request'
-    });
-
-    await logActivity({
-      req,
-      action: 'instructor_remove_student_from_course',
-      targetType: 'StudentMembership',
-      targetId: item._id.toString(),
-      meta: {
-        studentId: String(item.student?._id || item.student || ''),
-        courseId: String(item.course?._id || item.course || '')
-      }
-    });
-
-    res.json({ success: true, message: 'Student removed from class' });
   } catch {
     res.status(500).json({ success: false, message: 'Failed to remove student from class' });
   }
@@ -2349,7 +2589,7 @@ router.get('/student-enrollments', ...withManageMemberships, async (req, res) =>
     if (normalizedStatus) {
       filter.status = enrollmentStatusToMembershipStatus(normalizedStatus);
     } else {
-      filter.status = { $in: ['active', 'transferred_in', 'pending', 'rejected', 'transferred_out', 'dropped'] };
+      filter.status = { $in: ALL_STUDENT_MEMBERSHIP_STATUSES };
     }
     if (mustObjectId(studentId)) filter.student = studentId;
     if (classId) {
@@ -2388,6 +2628,14 @@ router.post('/student-enrollments', ...withManageMemberships, async (req, res) =
     const rejectedReason = normalizedStatus === 'rejected'
       ? (normalizeText(req.body?.rejectedReason) || 'rejected_by_admin')
       : '';
+
+    if (membershipStatus === 'transferred_in') {
+      return res.status(400).json({
+        success: false,
+        code: 'student_transfer_in_requires_lifecycle_endpoint',
+        message: 'تبدیلی آمد باید از بخش تغییر وضعیت تعلیمی شاگرد ثبت شود.'
+      });
+    }
 
     if (!studentIdInput || (!mustObjectId(classId) && !mustObjectId(courseId)) || !membershipStatus) {
       return res.status(400).json({ success: false, message: 'متعلم و صنف معتبر الزامی است.' });
@@ -2439,13 +2687,6 @@ router.post('/student-enrollments', ...withManageMemberships, async (req, res) =
     }
 
     if ((membershipStatus === 'active' || membershipStatus === 'pending') && !currentItem) {
-      await deactivateCurrentMemberships({
-        studentId,
-        courseId: nextCourseId,
-        actorId: req.user?.id || null,
-        note: 'student_enrollment_replaced',
-        status: 'dropped'
-      });
       item.joinedAt = new Date();
     }
 
@@ -2461,13 +2702,7 @@ router.post('/student-enrollments', ...withManageMemberships, async (req, res) =
     if (req.user?.id) item.createdBy = req.user.id;
 
     await item.save();
-    const admissionBilling = membershipStatus === 'transferred_in'
-      ? await issueTransferAdmissionBill({
-          membership: item,
-          actorId: req.user?.id || null,
-          effectiveAt: item.joinedAt || new Date()
-        })
-      : null;
+    const admissionBilling = null;
 
     const profileResult = await ensureAfghanStudentProfile({
       source: 'teaching_enrollment',
@@ -2527,21 +2762,15 @@ router.post('/student-enrollments', ...withManageMemberships, async (req, res) =
 router.post('/student-enrollments/lifecycle', ...withManageStudentLifecycle, async (req, res) => {
   try {
     const action = normalizeText(req.body?.action).toLowerCase();
-    const effectiveAt = req.body?.effectiveDate ? new Date(req.body.effectiveDate) : new Date();
-    const note = normalizeText(req.body?.note);
-    const previousSchool = normalizeText(req.body?.previousSchool);
-    const previousGrade = normalizeText(req.body?.previousGrade);
-
-    if (!['transfer_in', 'transfer_out', 'dropout'].includes(action)) {
-      return res.status(400).json({ success: false, message: 'نوع عملیات چرخه شاگرد معتبر نیست.' });
-    }
-    if (Number.isNaN(effectiveAt.getTime())) {
-      return res.status(400).json({ success: false, message: 'تاریخ اثر معتبر نیست.' });
+    if (!SUPPORTED_STUDENT_LIFECYCLE_ACTIONS.includes(action)) {
+      return res.status(400).json({ success: false, message: 'نوع تغییر وضعیت تعلیمی شاگرد معتبر نیست.' });
     }
 
-    let item = null;
-    let stoppedFutureBills = { bills: 0, orders: 0 };
-    let admissionBilling = null;
+    const lifecyclePayload = {
+      ...(req.body || {}),
+      action,
+      effectiveAt: req.body?.effectiveDate || req.body?.effectiveAt || new Date()
+    };
 
     if (action === 'transfer_in') {
       const studentIdInput = normalizeText(req.body?.studentId);
@@ -2550,155 +2779,86 @@ router.post('/student-enrollments/lifecycle', ...withManageStudentLifecycle, asy
       if (!studentIdInput || (!mustObjectId(classId) && !mustObjectId(courseId))) {
         return res.status(400).json({ success: false, message: 'برای تبدیلی آمد، شاگرد و صنف الزامی است.' });
       }
-
       const [resolvedStudent, classRef] = await Promise.all([
         resolveCanonicalStudentUser(studentIdInput),
         resolveClassReference({ classId, courseId })
       ]);
       if (resolvedStudent?.error) return res.status(400).json({ success: false, message: resolvedStudent.error });
       if (classRef.error) return res.status(400).json({ success: false, message: classRef.error });
-      if (!classRef.course) return res.status(400).json({ success: false, message: 'صنف معتبر نیست.' });
-
-      const nextCourseId = String(classRef.course._id);
-      const nextClassId = classRef.classId || '';
-      const nextAcademicYearId = classRef.schoolClass?.academicYearId?._id || classRef.schoolClass?.academicYearId || classRef.course.academicYearRef || null;
-
-      item = await StudentMembership.findOne({
-        student: resolvedStudent.studentId,
-        course: nextCourseId,
-        isCurrent: true
-      }).sort({ updatedAt: -1, createdAt: -1 });
-
-      if (!item) {
-        const otherCurrent = await StudentMembership.findOne({
-          student: resolvedStudent.studentId,
-          isCurrent: true,
-          status: { $in: CURRENT_STUDENT_MEMBERSHIP_STATUSES }
-        }).sort({ updatedAt: -1, createdAt: -1 });
-
-        if (otherCurrent && String(otherCurrent.course || '') !== String(nextCourseId)) {
-          return res.status(409).json({
-            success: false,
-            message: 'این شاگرد فعلاً عضویت فعال دیگری دارد؛ اول تبدیلی رفت یا ترک تحصیل را برای عضویت قبلی ثبت کنید.'
-          });
-        }
-
-        item = new StudentMembership({
-          student: resolvedStudent.studentId,
-          course: nextCourseId,
-          classId: nextClassId || null
-        });
+      if (!classRef.course || !classRef.classId) {
+        return res.status(400).json({ success: false, message: 'صنف معتبر نیست.' });
       }
-
-      item.student = resolvedStudent.studentId;
-      item.course = nextCourseId;
-      item.classId = nextClassId || null;
-      item.academicYear = nextAcademicYearId || null;
-      item.academicYearId = nextAcademicYearId || null;
-      item.status = 'transferred_in';
-      item.source = 'admin';
-      item.joinedAt = effectiveAt;
-      item.enrolledAt = effectiveAt;
-      item.note = [
-        note || 'تبدیلی آمد',
-        previousSchool ? `مکتب قبلی: ${previousSchool}` : '',
-        previousGrade ? `صنف قبلی: ${previousGrade}` : ''
-      ].filter(Boolean).join(' | ');
-      item.rejectedReason = '';
-      if (req.user?.id) item.createdBy = req.user.id;
-      await item.save();
-      admissionBilling = await issueTransferAdmissionBill({
-        membership: item,
-        actorId: req.user?.id || null,
-        effectiveAt
-      });
-    } else {
-      const membershipId = normalizeText(req.body?.membershipId);
-      if (!mustObjectId(membershipId)) {
-        return res.status(400).json({ success: false, message: 'برای این عملیات، عضویت شاگرد را انتخاب کنید.' });
-      }
-
-      item = await StudentMembership.findById(membershipId);
-      if (!item) return res.status(404).json({ success: false, message: 'عضویت شاگرد پیدا نشد.' });
-
-      item.status = action === 'transfer_out' ? 'transferred_out' : 'dropped';
-      item.endedAt = effectiveAt;
-      item.leftAt = effectiveAt;
-      item.endedReason = item.status;
-      item.note = note || (action === 'transfer_out' ? 'تبدیلی رفت' : 'ترک تحصیل');
-      if (req.user?.id) item.createdBy = req.user.id;
-      await item.save();
-
-      const nextMonthStart = new Date(effectiveAt.getFullYear(), effectiveAt.getMonth() + 1, 1);
-      const voidFields = {
-        status: 'void',
-        voidReason: action === 'transfer_out' ? 'شاگرد تبدیلی رفت.' : 'شاگرد ترک تحصیل کرد.',
-        voidedBy: req.user?.id || null,
-        voidedAt: new Date()
-      };
-      const [billUpdate, orderUpdate] = await Promise.all([
-        FinanceBill.updateMany(
-          { studentMembershipId: item._id, status: { $in: ['new', 'overdue'] }, dueDate: { $gte: nextMonthStart } },
-          { $set: voidFields }
-        ),
-        FeeOrder.updateMany(
-          { studentMembershipId: item._id, status: { $in: ['new', 'overdue'] }, dueDate: { $gte: nextMonthStart } },
-          { $set: voidFields }
-        )
-      ]);
-      stoppedFutureBills = {
-        bills: billUpdate?.modifiedCount || 0,
-        orders: orderUpdate?.modifiedCount || 0
-      };
+      lifecyclePayload.studentId = resolvedStudent.studentId;
+      lifecyclePayload.courseId = String(classRef.course._id);
+      lifecyclePayload.classId = classRef.classId;
+      lifecyclePayload.academicYearId = classRef.schoolClass?.academicYearId?._id
+        || classRef.schoolClass?.academicYearId
+        || classRef.course.academicYearRef
+        || null;
+      lifecyclePayload.schoolId = classRef.schoolClass?.schoolId || null;
+    } else if (!mustObjectId(req.body?.membershipId)) {
+      return res.status(400).json({ success: false, message: 'عضویت شاگرد را انتخاب کنید.' });
     }
 
-    await logActivity({
-      req,
-      action: `student_lifecycle_${action}`,
-      targetType: 'StudentMembership',
-      targetId: item._id.toString(),
-      meta: {
-        lifecycleAction: action,
-        effectiveAt: effectiveAt.toISOString(),
-        stoppedFutureBills,
-        admissionBilling: admissionBilling ? {
-          created: admissionBilling.created === true,
-          reason: admissionBilling.reason || '',
-          billId: String(admissionBilling.bill?._id || '')
-        } : null
+    const result = await executeStudentLifecycleAction(lifecyclePayload, {
+      actor: {
+        id: req.user?.id || null,
+        role: req.user?.role || '',
+        orgRole: req.user?.orgRole || ''
       },
-      reason: note
+      request: {
+        ip: req.ip || req.connection?.remoteAddress || '',
+        userAgent: req.headers?.['user-agent'] || '',
+        clientDevice: '',
+        httpMethod: req.method,
+        route: req.originalUrl || req.url || '',
+        reason: req.body?.reason || req.body?.note || ''
+      }
     });
 
-    const populated = await populateStudentEnrollments(StudentMembership.findById(item._id));
-    const schoolClass = item.classId ? await loadSerializedSchoolClassById(item.classId) : null;
+    const populated = await populateStudentEnrollments(StudentMembership.findById(result.membership._id));
+    const schoolClass = result.membership.classId
+      ? await loadSerializedSchoolClassById(result.membership.classId)
+      : null;
     return res.json({
       success: true,
-      stoppedFutureBills,
-      admissionBilling: admissionBilling ? {
-        created: admissionBilling.created === true,
-        reason: admissionBilling.reason || '',
-        billId: admissionBilling.bill?._id || null,
-        billNumber: admissionBilling.bill?.billNumber || '',
-        amount: Number(admissionBilling.bill?.amountOriginal || 0)
+      stoppedFutureBills: result.stoppedFutureBills,
+      admissionBilling: result.admissionBilling ? {
+        created: result.admissionBilling.created === true,
+        reason: result.admissionBilling.reason || '',
+        billId: result.admissionBilling.bill?._id || null,
+        billNumber: result.admissionBilling.bill?.billNumber || '',
+        amount: Number(result.admissionBilling.bill?.amountOriginal || 0)
       } : null,
+      lifecycleEventId: result.event?._id || null,
+      lifecycleDocument: {
+        type: result.documentType,
+        id: result.document?._id || null
+      },
       item: serializeStudentEnrollment(populated, schoolClass),
-      message: action === 'transfer_in'
-        ? admissionBilling?.created
-          ? `تبدیلی آمد ثبت شد و بل داخله ${admissionBilling.bill?.billNumber || ''} صادر گردید.`
-          : admissionBilling?.reason === 'admission_already_issued'
-            ? 'تبدیلی آمد ثبت شد؛ بل داخله قبلاً برای این عضویت صادر شده است.'
-            : admissionBilling?.reason === 'fee_plan_not_found'
-              ? 'تبدیلی آمد ثبت شد، اما پلان مالی فعال برای صدور بل داخله پیدا نشد.'
-              : admissionBilling?.reason === 'admission_fee_not_configured'
-                ? 'تبدیلی آمد ثبت شد، اما مبلغ داخله در پلان مالی تعیین نشده است.'
-                : 'تبدیلی آمد ثبت شد.'
-        : action === 'transfer_out'
-          ? 'تبدیلی رفت ثبت شد و بل‌های آینده متوقف شدند.'
-          : 'ترک تحصیل ثبت شد و بل‌های آینده متوقف شدند.'
+      message: 'تغییر وضعیت تعلیمی شاگرد به‌شکل یک‌پارچه ثبت شد.'
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: 'ثبت عملیات چرخه شاگرد ناموفق بود.' });
+    const status = Number(error?.status || 0) || (error?.code === 11000 ? 409 : 500);
+    return res.status(status).json({
+      success: false,
+      code: error?.code || '',
+      message: error?.message || 'ثبت تغییر وضعیت تعلیمی شاگرد موفق نبود.'
+    });
+  }
+});
+
+router.get('/student-enrollments/:membershipId/lifecycle-history', ...withManageStudentLifecycle, async (req, res) => {
+  try {
+    const data = await getStudentLifecycleHistory(req.params.membershipId);
+    if (!data) return res.status(404).json({ success: false, message: 'عضویت شاگرد پیدا نشد.' });
+    return res.json({ success: true, ...data });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({
+      success: false,
+      code: error?.code || '',
+      message: error?.message || 'دریافت سوانح تعلیمی شاگرد موفق نبود.'
+    });
   }
 });
 
@@ -2717,6 +2877,14 @@ router.put('/student-enrollments/:id', ...withManageMemberships, async (req, res
       ? normalizeEnrollmentStatus(req.body.status, '')
       : membershipStatusToEnrollmentStatus(item.status);
     const membershipStatus = enrollmentStatusToMembershipStatus(normalizedStatus);
+
+    if (LIFECYCLE_ONLY_MEMBERSHIP_STATUSES.includes(membershipStatus) && membershipStatus !== item.status) {
+      return res.status(400).json({
+        success: false,
+        code: 'student_status_change_requires_lifecycle_endpoint',
+        message: 'این تغییر باید از بخش تغییر وضعیت تعلیمی شاگرد ثبت شود.'
+      });
+    }
 
     if (!nextStudentRef || (!mustObjectId(nextClassIdInput) && !mustObjectId(nextCourseIdInput)) || !membershipStatus) {
       return res.status(400).json({ success: false, message: 'متعلم، صنف و وضعیت معتبر الزامی است.' });
@@ -2739,12 +2907,10 @@ router.put('/student-enrollments/:id', ...withManageMemberships, async (req, res
 
     const currentPeer = await StudentMembership.findOne({ student: nextStudentId, course: nextCourseId, isCurrent: true, _id: { $ne: item._id } });
     if (currentPeer && (membershipStatus === 'active' || membershipStatus === 'pending')) {
-      await deactivateCurrentMemberships({
-        studentId: nextStudentId,
-        courseId: nextCourseId,
-        actorId: req.user?.id || null,
-        note: 'student_enrollment_replaced',
-        status: 'dropped'
+      return res.status(409).json({
+        success: false,
+        code: 'student_current_membership_conflict',
+        message: 'ثبت صنفی فعال دیگر به‌شکل خودکار ختم نمی‌شود؛ نخست تغییر وضعیت تعلیمی شاگرد را ثبت کنید.'
       });
     }
 
@@ -2769,13 +2935,7 @@ router.put('/student-enrollments/:id', ...withManageMemberships, async (req, res
     if (req.user?.id) item.createdBy = req.user.id;
 
     await item.save();
-    const admissionBilling = membershipStatus === 'transferred_in'
-      ? await issueTransferAdmissionBill({
-          membership: item,
-          actorId: req.user?.id || null,
-          effectiveAt: item.joinedAt || new Date()
-        })
-      : null;
+    const admissionBilling = null;
 
     await logActivity({
       req,
@@ -2815,28 +2975,13 @@ router.delete('/student-enrollments/:id', ...withManageMemberships, async (req, 
   try {
     const item = await StudentMembership.findById(req.params.id);
     if (!item) return res.status(404).json({ success: false, message: 'Enrollment not found' });
-
-    if (item.isCurrent) {
-      await deactivateCurrentMemberships({
-        studentId: item.student,
-        courseId: item.course,
-        actorId: req.user?.id || null,
-        note: 'student_enrollment_deleted',
-        status: 'dropped',
-        legacyOrderId: item.legacyOrder || null
-      });
-    } else {
-      await item.deleteOne();
-    }
-
-    await logActivity({
-      req,
-      action: 'delete_student_enrollment',
-      targetType: 'StudentMembership',
-      targetId: item._id.toString(),
-      meta: { studentId: String(item.student || ''), courseId: String(item.course || '') }
+    return res.status(409).json({
+      success: false,
+      code: 'student_membership_history_cannot_be_deleted',
+      message: item.isCurrent
+        ? 'ثبت صنفی فعال حذف نمی‌شود؛ تبدیلی، ترک تحصیل یا منفکی را از بخش تغییر وضعیت تعلیمی شاگرد ثبت کنید.'
+        : 'تاریخچهٔ عضویت شاگرد قابل حذف نیست.'
     });
-    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to delete enrollment' });
   }

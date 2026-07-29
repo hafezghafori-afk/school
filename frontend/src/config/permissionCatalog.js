@@ -41,9 +41,9 @@ export const PERMISSION_GROUPS = [
       { key: 'students.documents.manage', label: 'اسناد شاگرد', legacy: ['manage_users'] },
       { key: 'students.guardians.manage', label: 'والد/سرپرست شاگرد', legacy: ['manage_users'] },
       { key: 'students.transfers.manage', label: 'انتقالات شاگرد', legacy: ['manage_users'] },
-      { key: 'students.lifecycle.view', label: 'مشاهده چرخه آموزشی شاگرد', legacy: ['manage_users', 'manage_memberships'] },
-      { key: 'students.lifecycle.manage', label: 'مدیریت تبدیلی/ترک تحصیل شاگرد', legacy: ['manage_users', 'manage_memberships'] },
-      { key: 'students.lifecycle.approve', label: 'تایید تغییرات چرخه آموزشی شاگرد', legacy: ['manage_users'] },
+      { key: 'students.lifecycle.view', label: 'مشاهده سوانح تعلیمی شاگرد', legacy: ['manage_users', 'manage_memberships'] },
+      { key: 'students.lifecycle.manage', label: 'مدیریت تبدیلی، ترک تحصیل و منفکی شاگرد', legacy: ['manage_users', 'manage_memberships'] },
+      { key: 'students.lifecycle.approve', label: 'تایید تغییرات وضعیت تعلیمی شاگرد', legacy: ['manage_users'] },
       { key: 'students.activity.view', label: 'گزارش فعالیت شاگرد', legacy: ['view_reports'] }
     ]
   },

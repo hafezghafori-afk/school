@@ -247,6 +247,14 @@ async function registerTimetableBrowserRoutes(page, state) {
       return;
     }
 
+    if (pathname === '/api/afghan-schools/active') {
+      await route.fulfill(json({
+        success: true,
+        data: { schoolId: 'school-1', schoolName: 'مکتب آزمایشی' }
+      }));
+      return;
+    }
+
     if (pathname === '/api/users/me/notifications') {
       await route.fulfill(json({ success: true, items: [] }));
       return;
@@ -279,7 +287,7 @@ async function registerTimetableBrowserRoutes(page, state) {
     }
 
     if (pathname.startsWith('/api/academic-years/school/')) {
-      await route.fulfill(json({ success: true, data: [state.academicYear] }));
+      await route.fulfill(json({ success: true, data: state.academicYears || [state.academicYear] }));
       return;
     }
 
@@ -294,7 +302,7 @@ async function registerTimetableBrowserRoutes(page, state) {
     }
 
     if (pathname.startsWith('/api/subjects/school/')) {
-      await route.fulfill(json({ success: true, data: [state.subject] }));
+      await route.fulfill(json({ success: true, data: state.subjects || [state.subject] }));
       return;
     }
 
@@ -326,7 +334,7 @@ async function registerTimetableBrowserRoutes(page, state) {
     }
 
     if (pathname.startsWith('/api/teacher-assignments/school/')) {
-      await route.fulfill(json({ success: true, data: [state.assignment] }));
+      await route.fulfill(json({ success: true, data: state.assignments || [state.assignment] }));
       return;
     }
 
@@ -452,9 +460,7 @@ test.describe('timetable browser workflow', () => {
     await registerTimetableBrowserRoutes(page, state);
 
     await page.goto('/timetable', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByText('Legacy + Canonical')).toBeVisible();
-    await expect(page.locator('a[href="/timetable/timetable-configurations/index"]').first()).toBeVisible();
-    await expect(page.locator('a[href="/timetable/generation"]').first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'جدول روزانه‌ی صنف‌ها' })).toBeVisible();
 
     await page.goto('/timetable/timetable-configurations/index', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: 'تنظیم تقسیم اوقات' })).toBeVisible();
@@ -462,10 +468,33 @@ test.describe('timetable browser workflow', () => {
 
     await page.goto('/timetable/teacher-timetable-configurations', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: 'معرفی صنف به استاد' })).toBeVisible();
-    // await expect(page.getByText('Teacher Ahmad')).toBeVisible(); // Commented out: English name not in Persian UI
-    await page.getByRole('button', { name: 'بررسی فشار کاری استادان' }).click();
-    // await expect.poll(() => state.workloadRequests).toBe(1); // Commented out: state not used in Persian UI
+    await expect(page.locator('.tt-assignment-item-card')).toHaveCount(1);
+    await expect(page.getByRole('combobox', { name: 'فیلتر سال تعلیمی' })).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'فیلتر استاد' })).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'فیلتر مضمون' })).toBeVisible();
+
+    const actionButtons = page.locator('.tt-assignment-action-row button');
+    await expect(actionButtons).toHaveCount(3);
+    const actionButtonBoxes = await actionButtons.evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().top));
+    expect(new Set(actionButtonBoxes.map((top) => Math.round(top))).size).toBe(1);
+
+    await page.getByRole('combobox', { name: 'فیلتر استاد' }).click();
+    await page.locator('.ui-select-option').filter({ hasText: 'Teacher Basir' }).click();
+    await expect(page.getByRole('heading', { name: 'تخصیصی مطابق فیلتر پیدا نشد' })).toBeVisible();
+    await page.getByRole('button', { name: 'پاک‌کردن فیلترها' }).click();
+    await expect(page.locator('.tt-assignment-item-card')).toHaveCount(1);
+
+    await page.getByRole('button', { name: 'فشار کاری استادان' }).click();
+    await expect.poll(() => state.workloadRequests).toBe(1);
     await expect(page.getByText('خلاصه بار درسی استادان')).toBeVisible();
+    await page.getByRole('button', { name: 'بستن فشار کاری' }).click();
+    await expect(page.getByText('خلاصه بار درسی استادان')).toBeHidden();
+
+    await page.getByRole('button', { name: 'حالت گروهی' }).click();
+    await expect(page.getByText('تنظیم گروهی تخصیص‌ها')).toBeVisible();
+    await page.getByRole('button', { name: 'افزودن تخصیص' }).click();
+    await expect(page.getByText('تنظیم گروهی تخصیص‌ها')).toBeHidden();
+    await expect(page.getByRole('heading', { name: 'افزودن تخصیص' })).toBeVisible();
 
     await page.goto('/timetable/teacher-availability', { waitUntil: 'domcontentloaded' });
     // Check for the always-visible Persian 'Next' button on the wizard page
@@ -508,6 +537,76 @@ test.describe('timetable browser workflow', () => {
     await expect(page.getByRole('heading', { name: 'Change Log' })).toBeVisible();
     await expect(page.getByText('Manual Edit')).toBeVisible();
     await expect(page.getByText('Change History (1)')).toBeVisible();
+
+    expect(state.unhandledRequests).toEqual([]);
+    expect(pageErrors).toEqual([]);
+  });
+
+  test('teacher assignment management filters and actions work together', async ({ page }) => {
+    const fixtures = createFixtures();
+    const state = {
+      ...fixtures,
+      academicYears: [
+        fixtures.academicYear,
+        { _id: 'year-1404', title: '1404', status: 'closed' }
+      ],
+      subjects: [
+        fixtures.subject,
+        { _id: 'subject-physics', name: 'Physics', code: 'PHY-10', category: 'core' }
+      ],
+      publishRequests: 0,
+      workloadRequests: 0,
+      unhandledRequests: []
+    };
+    const pageErrors = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+
+    await setupAdminWorkspace(page, {
+      permissions: ['manage_schedule', 'manage_content', 'manage_users']
+    });
+    await registerTimetableBrowserRoutes(page, state);
+    await page.goto('/timetable/teacher-timetable-configurations', { waitUntil: 'domcontentloaded' });
+
+    await expect(page.getByRole('heading', { name: 'معرفی صنف به استاد' })).toBeVisible();
+    await expect(page.locator('.tt-assignment-item-card')).toHaveCount(1);
+    await expect(page.getByRole('combobox', { name: 'فیلتر سال تعلیمی' })).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'فیلتر استاد' })).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'فیلتر مضمون' })).toBeVisible();
+
+    const actionButtons = page.locator('.tt-assignment-action-row button');
+    await expect(actionButtons).toHaveCount(3);
+    const buttonTops = await actionButtons.evaluateAll((buttons) => (
+      buttons.map((button) => Math.round(button.getBoundingClientRect().top))
+    ));
+    expect(new Set(buttonTops).size).toBe(1);
+
+    await page.getByRole('combobox', { name: 'فیلتر سال تعلیمی' }).click();
+    await page.locator('.ui-select-option').filter({ hasText: '1404' }).click();
+    await expect(page.getByRole('heading', { name: 'تخصیصی مطابق فیلتر پیدا نشد' })).toBeVisible();
+    await page.getByRole('button', { name: 'پاک‌کردن فیلترها' }).click();
+
+    await page.getByRole('combobox', { name: 'فیلتر مضمون' }).click();
+    await page.locator('.ui-select-option').filter({ hasText: 'Physics' }).click();
+    await expect(page.getByRole('heading', { name: 'تخصیصی مطابق فیلتر پیدا نشد' })).toBeVisible();
+    await page.getByRole('button', { name: 'پاک‌کردن فیلترها' }).click();
+
+    await page.getByRole('combobox', { name: 'فیلتر استاد' }).click();
+    await page.locator('.ui-select-option').filter({ hasText: 'Teacher Basir' }).click();
+    await expect(page.getByRole('heading', { name: 'تخصیصی مطابق فیلتر پیدا نشد' })).toBeVisible();
+    await page.getByRole('button', { name: 'پاک‌کردن فیلترها' }).click();
+    await expect(page.locator('.tt-assignment-item-card')).toHaveCount(1);
+
+    await page.getByRole('button', { name: 'فشار کاری استادان' }).click();
+    await expect.poll(() => state.workloadRequests).toBe(1);
+    await expect(page.getByText('خلاصه بار درسی استادان')).toBeVisible();
+    await page.getByRole('button', { name: 'بستن فشار کاری' }).click();
+    await expect(page.getByText('خلاصه بار درسی استادان')).toBeHidden();
+
+    await page.getByRole('button', { name: 'حالت گروهی' }).click();
+    await expect(page.getByText('تنظیم گروهی تخصیص‌ها')).toBeVisible();
+    await page.getByRole('button', { name: 'افزودن تخصیص' }).click();
+    await expect(page.getByText('تنظیم گروهی تخصیص‌ها')).toBeHidden();
+    await expect(page.getByRole('heading', { name: 'افزودن تخصیص' })).toBeVisible();
 
     expect(state.unhandledRequests).toEqual([]);
     expect(pageErrors).toEqual([]);

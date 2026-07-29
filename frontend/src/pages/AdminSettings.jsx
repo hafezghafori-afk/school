@@ -40,7 +40,7 @@ const ADMIN_QUICK_LINK_DEFAULTS = [
   { title: 'مرکز ارتباطات سیما', href: '/admin-communications', permission: 'manage_platform_requests', enabled: true },
   { title: 'ثبت‌نام‌ها', href: '/admin-enrollments', permission: 'manage_enrollments', enabled: true },
   { title: 'تبدیلی آمد', href: '/admin-education?section=enrollments&lifecycle=transfer-in', permission: 'students.transfers.manage', enabled: true },
-  { title: 'تبدیلی رفت / ترک تحصیل', href: '/admin-education?section=enrollments&lifecycle=end', permission: 'students.lifecycle.manage', enabled: true },
+  { title: 'تبدیلی، ترک تحصیل و منفکی', href: '/admin-education?section=enrollments&lifecycle=end', permission: 'students.lifecycle.manage', enabled: true },
   { title: 'ارتقای صنف', href: '/admin-promotions', permission: 'education.promotions.manage', enabled: true },
   { title: 'اثر مالی تغییرات آموزشی', href: '/admin-financial-memberships', permission: 'finance.lifecycle_effects.manage', enabled: true },
   { title: 'تنظیم شماره اساس و ریجیستر نمبر', href: '/admin-settings#student-ids', permission: 'manage_content', enabled: true },

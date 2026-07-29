@@ -12,6 +12,13 @@ const ResultTable = require('../models/ResultTable');
 const ResultTableRow = require('../models/ResultTableRow');
 const ExamSession = require('../models/ExamSession');
 const ExamResult = require('../models/ExamResult');
+const AcademicYear = require('../models/AcademicYear');
+const SchoolClass = require('../models/SchoolClass');
+const {
+  buildClassAggregateRows,
+  getClassAggregateReadiness
+} = require('./classAggregateResultService');
+const { OFFICIAL_RESULT_POLICY_VERSION, getMembershipLifecycleLabel } = require('../utils/officialResultPolicy');
 
 function toPlain(doc) {
   if (!doc) return null;
@@ -23,6 +30,12 @@ function toPlain(doc) {
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function nullableNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function formatTemplate(doc) {
@@ -97,13 +110,15 @@ function formatRow(doc) {
     serialNo: Number(item.serialNo || 0),
     rowType: normalizeText(item.rowType),
     displayName: normalizeText(item.displayName),
+    membershipStatus: normalizeText(item.membershipStatus),
+    membershipStatusLabel: normalizeText(item.membershipStatusLabel),
     resultStatus: normalizeText(item.resultStatus),
     groupLabel: normalizeText(item.groupLabel),
     rank: item.rank == null ? null : Number(item.rank),
-    obtainedMark: Number(item.obtainedMark || 0),
-    totalMark: Number(item.totalMark || 0),
-    percentage: Number(item.percentage || 0),
-    averageMark: Number(item.averageMark || 0),
+    obtainedMark: nullableNumber(item.obtainedMark),
+    totalMark: nullableNumber(item.totalMark),
+    percentage: nullableNumber(item.percentage),
+    averageMark: nullableNumber(item.averageMark),
     cells: item.cells || {},
     note: normalizeText(item.note)
   };
@@ -116,6 +131,10 @@ function formatTable(doc, rows = []) {
     id: String(item._id),
     title: normalizeText(item.title),
     code: normalizeText(item.code),
+    scopeType: normalizeText(item.scopeType) || 'session',
+    policyVersion: normalizeText(item.policyVersion),
+    version: Number(item.version || 1),
+    sourceSessionIds: Array.isArray(item.sourceSessionIds) ? item.sourceSessionIds.map((entry) => String(entry?._id || entry)) : [],
     templateType: normalizeText(item.templateType),
     orientation: normalizeText(item.orientation),
     status: normalizeText(item.status),
@@ -129,6 +148,16 @@ function formatTable(doc, rows = []) {
     template: formatTemplate(item.templateId),
     config: formatConfig(item.configId),
     session: formatSession(item.sessionId),
+    academicYear: item.academicYearId ? {
+      id: String(item.academicYearId?._id || item.academicYearId),
+      title: normalizeText(item.academicYearId?.title),
+      code: normalizeText(item.academicYearId?.code)
+    } : null,
+    schoolClass: item.classId ? {
+      id: String(item.classId?._id || item.classId),
+      title: normalizeText(item.classId?.title),
+      code: normalizeText(item.classId?.code)
+    } : null,
     rows: rows.map(formatRow).filter(Boolean)
   };
 }
@@ -345,13 +374,16 @@ function buildResultStats(results = []) {
     excused: 0,
     absent: 0,
     pending: 0,
+    notApplicable: 0,
     averagePercentage: 0
   };
 
   const recorded = [];
   results.forEach((result) => {
     const status = normalizeText(result.resultStatus);
-    if (Object.prototype.hasOwnProperty.call(stats, status)) {
+    if (status === 'not_applicable') {
+      stats.notApplicable += 1;
+    } else if (Object.prototype.hasOwnProperty.call(stats, status)) {
       stats[status] += 1;
     }
     if (typeof result.percentage === 'number' && !Number.isNaN(result.percentage)) {
@@ -398,22 +430,38 @@ function sortResults(items, sortMode) {
   return list;
 }
 async function listResultTableReferenceData() {
-  const [templates, configs, sessions] = await Promise.all([
+  const [templates, configs, sessions, academicYears, classes] = await Promise.all([
     TableTemplate.find({ isActive: true }).sort({ createdAt: 1 }),
     TableConfig.find({ isActive: true }).sort({ isDefault: -1, createdAt: 1 }),
-    ExamSession.find({ status: { $in: ['active', 'closed', 'published'] } })
+    ExamSession.find({ status: { $in: ['approved', 'closed', 'published'] } })
       .populate('examTypeId', 'title code')
       .populate('academicYearId', 'title code')
       .populate('assessmentPeriodId', 'title code')
       .populate('classId', 'title code')
       .populate('subjectId', 'name code')
-      .sort({ heldAt: -1, createdAt: -1 })
+      .sort({ heldAt: -1, createdAt: -1 }),
+    AcademicYear.find({}).sort({ isActive: -1, sequence: 1, createdAt: 1 }),
+    SchoolClass.find({ status: { $ne: 'archived' } }).populate('academicYearId', 'title code').sort({ gradeLevel: 1, section: 1, title: 1 })
   ]);
 
   return {
     templates: templates.map(formatTemplate),
     configs: configs.map(formatConfig),
-    sessions: sessions.map(formatSession)
+    sessions: sessions.map(formatSession),
+    academicYears: academicYears.map((item) => ({
+      id: String(item._id),
+      title: normalizeText(item.title),
+      code: normalizeText(item.code),
+      isActive: Boolean(item.isActive)
+    })),
+    classes: classes.map((item) => ({
+      id: String(item._id),
+      title: normalizeText(item.title),
+      code: normalizeText(item.code),
+      gradeLevel: item.gradeLevel,
+      academicYearId: String(item.academicYearId?._id || item.academicYearId || '')
+    })),
+    policyVersion: OFFICIAL_RESULT_POLICY_VERSION
   };
 }
 
@@ -450,7 +498,7 @@ async function createTableConfig(payload = {}) {
   return formatConfig(item);
 }
 
-async function resolveGenerationContext({ templateId, configId, sessionId }) {
+async function resolveGenerationContext({ templateId, configId, sessionId, scopeType = 'session' }) {
   const [template, config, session] = await Promise.all([
     TableTemplate.findById(templateId),
     configId ? TableConfig.findById(configId) : TableConfig.findOne({ isDefault: true }),
@@ -466,7 +514,7 @@ async function resolveGenerationContext({ templateId, configId, sessionId }) {
 
   if (!template) throw new Error('result_table_template_not_found');
   if (!config) throw new Error('result_table_config_not_found');
-  if (template.rowMode !== 'cover' && !session) throw new Error('result_table_session_required');
+  if (scopeType !== 'class_aggregate' && template.rowMode !== 'cover' && !session) throw new Error('result_table_session_required');
   return { template, config, session };
 }
 
@@ -483,6 +531,12 @@ function buildStudentRows(results, template) {
   const ordered = sortResults(results, normalizeText(template.sortMode));
   return ordered.map((result, index) => {
     const displayName = buildDisplayName(result);
+    const membershipState = result.membershipSnapshot?.status
+      ? result.membershipSnapshot
+      : (result.studentMembershipId || {});
+    const membershipStatus = normalizeText(membershipState.status);
+    const membershipStatusLabel = normalizeText(membershipState.statusLabel)
+      || getMembershipLifecycleLabel(membershipState);
     return {
       serialNo: index + 1,
       rowType: 'student',
@@ -491,6 +545,8 @@ function buildStudentRows(results, template) {
       studentId: result.studentId?._id || result.studentId || null,
       student: result.student?._id || result.student || null,
       displayName,
+      membershipStatus,
+      membershipStatusLabel,
       resultStatus: normalizeText(result.resultStatus),
       groupLabel: normalizeText(result.groupLabel),
       rank: result.rank == null ? null : Number(result.rank),
@@ -501,6 +557,8 @@ function buildStudentRows(results, template) {
       cells: {
         serialNo: index + 1,
         fullName: displayName,
+        membershipStatus,
+        membershipStatusLabel,
         obtainedMark: Number(result.obtainedMark || 0),
         totalMark: Number(result.totalMark || 0),
         percentage: Number(result.percentage || 0),
@@ -508,7 +566,8 @@ function buildStudentRows(results, template) {
         resultStatus: normalizeText(result.resultStatus),
         groupLabel: normalizeText(result.groupLabel),
         rank: result.rank == null ? '' : Number(result.rank)
-      }
+      },
+      note: membershipStatusLabel
     };
   });
 }
@@ -581,22 +640,83 @@ async function buildGeneratedRows({ template, session }) {
   return buildStudentRows(filtered, template);
 }
 
-async function generateResultTable({ templateId, configId = null, sessionId = null, note = '' } = {}, actorUserId = null) {
-  const { template, config, session } = await resolveGenerationContext({ templateId, configId, sessionId });
-  const rows = await buildGeneratedRows({ template, session });
+async function buildAggregateGeneratedRows({ template, academicYearId, classId }) {
+  if (template.rowMode === 'cover') {
+    const readiness = await getClassAggregateReadiness({ academicYearId, classId });
+    if (!readiness.ready) throw new Error('result_table_aggregate_not_ready');
+    return { readiness, rows: [] };
+  }
+  const bundle = await buildClassAggregateRows({ academicYearId, classId });
+  if (template.rowMode === 'summary') {
+    return { ...bundle, rows: buildSummaryRows(bundle.rows, { title: bundle.readiness.schoolClass.title }) };
+  }
+  const rows = template.rowMode === 'status_filtered'
+    ? bundle.rows.filter((item) => (template.statusFilters || []).includes(normalizeText(item.resultStatus)))
+    : bundle.rows;
+  rows.forEach((row, index) => {
+    row.serialNo = index + 1;
+    row.cells = { ...(row.cells || {}), serialNo: index + 1 };
+  });
+  return { ...bundle, rows };
+}
+
+async function generateResultTable({
+  templateId,
+  configId = null,
+  sessionId = null,
+  scopeType = 'session',
+  academicYearId = null,
+  classId = null,
+  note = ''
+} = {}, actorUserId = null) {
+  const normalizedScope = normalizeText(scopeType) === 'class_aggregate' ? 'class_aggregate' : 'session';
+  const effectiveSessionId = normalizedScope === 'session' ? sessionId : null;
+  const { template, config, session } = await resolveGenerationContext({
+    templateId,
+    configId,
+    sessionId: effectiveSessionId,
+    scopeType: normalizedScope
+  });
+  if (normalizedScope === 'session' && session && !['approved', 'published'].includes(normalizeText(session.status))) {
+    throw new Error('result_table_session_not_approved');
+  }
+  const aggregate = normalizedScope === 'class_aggregate'
+    ? await buildAggregateGeneratedRows({ template, academicYearId, classId })
+    : null;
+  const rows = aggregate?.rows || await buildGeneratedRows({ template, session });
   const statsSource = rows.filter((item) => item.rowType === 'student').map((item) => ({ resultStatus: item.resultStatus, percentage: item.percentage }));
   const logoUrl = await getEffectiveLogoUrl(config);
+  const tableVersionFilter = normalizedScope === 'class_aggregate'
+    ? {
+        scopeType: 'class_aggregate',
+        academicYearId,
+        classId,
+        templateId: template._id
+      }
+    : {
+        scopeType: 'session',
+        sessionId: session?._id,
+        templateId: template._id
+      };
+  const tableVersion = Number(await ResultTable.countDocuments(tableVersionFilter)) + 1;
+  const aggregateTitle = aggregate
+    ? `${template.title} - ${aggregate.readiness.schoolClass.title} - ${aggregate.readiness.academicYear.title}`
+    : '';
 
   const table = await ResultTable.create({
-    title: session ? `${template.title} - ${session.title}` : template.title,
+    title: aggregateTitle || (session ? `${template.title} - ${session.title}` : template.title),
     code: buildTableCode(template, session),
     templateId: template._id,
     configId: config?._id || null,
     sessionId: session?._id || null,
+    sourceSessionIds: aggregate?.readiness?.sourceSessionIds || [],
+    scopeType: normalizedScope,
+    policyVersion: aggregate ? OFFICIAL_RESULT_POLICY_VERSION : '',
+    version: tableVersion,
     examTypeId: session?.examTypeId?._id || session?.examTypeId || null,
-    academicYearId: session?.academicYearId?._id || session?.academicYearId || null,
+    academicYearId: aggregate?.readiness?.academicYear?.id || session?.academicYearId?._id || session?.academicYearId || null,
     assessmentPeriodId: session?.assessmentPeriodId?._id || session?.assessmentPeriodId || null,
-    classId: session?.classId?._id || session?.classId || null,
+    classId: aggregate?.readiness?.schoolClass?.id || session?.classId?._id || session?.classId || null,
     subjectId: session?.subjectId?._id || session?.subjectId || null,
     templateType: template.templateType,
     orientation: config?.orientation || template.defaultOrientation || 'landscape',
@@ -638,12 +758,16 @@ async function listResultTables(filters = {}) {
   if (filters.sessionId) query.sessionId = filters.sessionId;
   if (filters.templateId) query.templateId = filters.templateId;
   if (filters.classId) query.classId = filters.classId;
+  if (filters.academicYearId) query.academicYearId = filters.academicYearId;
+  if (filters.scopeType) query.scopeType = normalizeText(filters.scopeType);
   if (filters.assessmentPeriodId) query.assessmentPeriodId = filters.assessmentPeriodId;
   if (filters.status) query.status = normalizeText(filters.status);
 
   const items = await ResultTable.find(query)
     .populate('templateId')
     .populate('configId')
+    .populate('academicYearId', 'title code')
+    .populate('classId', 'title code')
     .populate({ path: 'sessionId', populate: ['examTypeId', 'academicYearId', 'assessmentPeriodId', 'classId', 'subjectId'] })
     .sort({ generatedAt: -1, createdAt: -1 });
 
@@ -654,6 +778,8 @@ async function getResultTable(tableId) {
   const table = await ResultTable.findById(tableId)
     .populate('templateId')
     .populate('configId')
+    .populate('academicYearId', 'title code')
+    .populate('classId', 'title code')
     .populate({ path: 'sessionId', populate: ['examTypeId', 'academicYearId', 'assessmentPeriodId', 'classId', 'subjectId'] });
   if (!table) return null;
 
@@ -665,6 +791,7 @@ module.exports = {
   createTableConfig,
   generateResultTable,
   getResultTable,
+  getClassAggregateReadiness,
   listResultTableReferenceData,
   listResultTables,
   listTableConfigs,

@@ -9,7 +9,8 @@ const STATUS_OPTIONS = [
   { value: 'present', label: 'حاضر' },
   { value: 'absent', label: 'غیرحاضر' },
   { value: 'sick', label: 'مریض' },
-  { value: 'leave', label: 'رخصتی' }
+  { value: 'leave', label: 'رخصتی' },
+  { value: 'suspended', label: 'محروم' }
 ];
 
 const STATUS_ALIASES = {
@@ -18,7 +19,8 @@ const STATUS_ALIASES = {
   sick: 'sick',
   leave: 'leave',
   late: 'sick',
-  excused: 'leave'
+  excused: 'leave',
+  suspended: 'suspended'
 };
 
 const getAuthHeaders = () => {
@@ -81,7 +83,9 @@ const buildEditableRow = (item = {}, selectedDate = '') => {
     originalStatus: normalizedStatus,
     originalNote: item.attendance?.note || '',
     recordedAt: item.attendance?.updatedAt || item.attendance?.createdAt || '',
-    attendanceDate: item.attendance?.date || selectedDate || ''
+    attendanceDate: item.attendance?.date || selectedDate || '',
+    lifecycleLocked: item.lifecycleLocked === true,
+    membership: item.membership || null
   };
 };
 
@@ -100,8 +104,10 @@ const buildEditableEmployeeRow = (item = {}, selectedDate = '') => {
 };
 
 const isRowDirty = (row) => (
-  String(row?.status || '') !== String(row?.originalStatus || '')
+  row?.lifecycleLocked !== true
+  && (String(row?.status || '') !== String(row?.originalStatus || '')
   || String(row?.note || '') !== String(row?.originalNote || '')
+  )
 );
 
 const uniqueStudentsFromItems = (items = []) => {
@@ -754,7 +760,9 @@ export default function AttendanceManager() {
   }, [view, scope]);
 
   const updateRow = (idx, patch) => {
-    setRows((prev) => prev.map((row, rowIdx) => (rowIdx === idx ? { ...row, ...patch } : row)));
+    setRows((prev) => prev.map((row, rowIdx) => (
+      rowIdx === idx && row.lifecycleLocked !== true ? { ...row, ...patch } : row
+    )));
   };
 
   const updateEmployeeRow = (idx, patch) => {
@@ -763,7 +771,9 @@ export default function AttendanceManager() {
 
   const applyBulkStatus = (status) => {
     const normalizedStatus = normalizeAttendanceStatus(status);
-    setRows((prev) => prev.map((row) => ({ ...row, status: normalizedStatus })));
+    setRows((prev) => prev.map((row) => (
+      row.lifecycleLocked === true ? row : { ...row, status: normalizedStatus }
+    )));
   };
 
   const applyEmployeeBulkStatus = (status) => {
@@ -772,7 +782,7 @@ export default function AttendanceManager() {
   };
 
   const handleSave = async (row, idx) => {
-    if ((!selectedClassId && !selectedCompatCourseId) || !date || !row.student?._id) return;
+    if (row.lifecycleLocked === true || (!selectedClassId && !selectedCompatCourseId) || !date || !row.student?._id) return;
     setSaving((prev) => ({ ...prev, [idx]: true }));
     setMessage('');
 
@@ -935,7 +945,8 @@ export default function AttendanceManager() {
       present: 0,
       absent: 0,
       sick: 0,
-      leave: 0
+      leave: 0,
+      suspended: 0
     };
 
     rows.forEach((row) => {
@@ -1240,6 +1251,10 @@ export default function AttendanceManager() {
                 <span>رخصتی</span>
                 <strong>{toFaNumber(dailySummary.leave)}</strong>
               </div>
+              <div className="attendance-summary-card warning">
+                <span>محروم</span>
+                <strong>{toFaNumber(dailySummary.suspended)}</strong>
+              </div>
             </div>
 
             {loadingEntry && <div className="attendance-empty">در حال دریافت جدول حاضری...</div>}
@@ -1284,6 +1299,7 @@ export default function AttendanceManager() {
                               className={`attendance-status-select status-${row.status}`}
                               value={row.status}
                               onChange={(e) => updateRow(idx, { status: e.target.value })}
+                              disabled={row.lifecycleLocked === true}
                             >
                               {STATUS_OPTIONS.map((option) => (
                                 <option key={option.value} value={option.value}>{option.label}</option>
@@ -1297,6 +1313,7 @@ export default function AttendanceManager() {
                               value={row.note}
                               placeholder="یادداشت اختیاری"
                               onChange={(e) => updateRow(idx, { note: e.target.value })}
+                              disabled={row.lifecycleLocked === true}
                             />
                           </td>
                           <td>
@@ -1310,7 +1327,7 @@ export default function AttendanceManager() {
                               className="save"
                               type="button"
                               onClick={() => handleSave(row, idx)}
-                              disabled={saving[idx] || !isRowDirty(row)}
+                              disabled={row.lifecycleLocked === true || saving[idx] || !isRowDirty(row)}
                             >
                               {saving[idx] ? '...' : (isRowDirty(row) ? 'ثبت' : 'ثبت‌شده')}
                             </button>
@@ -1620,7 +1637,7 @@ export default function AttendanceManager() {
                               value={row.status}
                               onChange={(e) => updateEmployeeRow(idx, { status: e.target.value })}
                             >
-                              {STATUS_OPTIONS.map((option) => (
+                              {STATUS_OPTIONS.filter((option) => option.value !== 'suspended').map((option) => (
                                 <option key={option.value} value={option.value}>{option.label}</option>
                               ))}
                             </select>

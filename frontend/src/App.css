@@ -41,6 +41,8 @@
 }
 
 :root {
+  --font-persian-ui: 'B Nazanin', 'B Mitra', 'B Zar', Tahoma, sans-serif;
+  --font-persian-display: 'B Zar', 'B Nazanin', 'B Mitra', Tahoma, sans-serif;
   --bg-1: #0f1b2d;
   --bg-2: #10273d;
   --accent: #f2b90c;
@@ -90,7 +92,7 @@ body {
 }
 
 .App {
-  font-family: 'B Nazanin', 'B Mitra', 'B Zar', Tahoma, sans-serif;
+  font-family: var(--font-persian-ui);
   background: radial-gradient(1200px 600px at 80% -20%, #1e3554 0%, transparent 60%),
     linear-gradient(135deg, var(--bg-1), var(--bg-2));
   min-height: 100vh;

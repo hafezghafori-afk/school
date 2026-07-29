@@ -10,6 +10,7 @@ const marginSchema = new mongoose.Schema({
 const columnSchema = new mongoose.Schema({
   key: { type: String, required: true, trim: true },
   label: { type: String, default: '', trim: true },
+  group: { type: String, default: '', trim: true },
   width: { type: Number, default: 16, min: 4, max: 80 },
   visible: { type: Boolean, default: true },
   order: { type: Number, default: 0, min: 0 }
@@ -88,6 +89,7 @@ sheetTemplateSchema.pre('validate', function syncSheetTemplateState() {
     .map((column, index) => ({
       key: String(column?.key || '').trim(),
       label: String(column?.label || '').trim(),
+      group: String(column?.group || '').trim(),
       width: Number(column?.width || 16),
       visible: column?.visible !== false,
       order: Number(column?.order ?? index)

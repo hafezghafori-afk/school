@@ -14,7 +14,7 @@
     radial-gradient(circle at left center, rgba(202, 138, 4, 0.14), transparent 28%),
     linear-gradient(180deg, #f7f6ef 0%, #edf4f8 100%);
   color: var(--report-ink);
-  font-family: "Segoe UI", Tahoma, sans-serif;
+  font-family: var(--font-persian-ui);
 }
 
 .student-report-shell {

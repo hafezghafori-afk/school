@@ -118,6 +118,51 @@ const buildStudentOptionList = ({
 
 const toSafeNumber = (value) => Number(value || 0) || 0;
 
+const getFeePlanBillPeriodType = (plan = {}) => (
+  String(plan?.billingFrequency || plan?.periodType || '').trim().toLowerCase() === 'monthly'
+    ? 'monthly'
+    : 'term'
+);
+
+const selectActiveFeePlanForScope = ({
+  plans = [],
+  classId = '',
+  academicYearId = '',
+  effectiveAt = ''
+} = {}) => {
+  const normalizedClassId = String(classId || '').trim();
+  const normalizedAcademicYearId = String(academicYearId || '').trim();
+  const effectiveDate = effectiveAt ? new Date(effectiveAt) : null;
+  const hasEffectiveDate = effectiveDate && !Number.isNaN(effectiveDate.getTime());
+  if (!normalizedClassId) return null;
+
+  return (Array.isArray(plans) ? plans : [])
+    .filter((plan) => {
+      const planClassId = String(plan?.classId?._id || plan?.classId || plan?.schoolClass?.id || plan?.schoolClass?._id || '').trim();
+      const planAcademicYearId = String(plan?.academicYearId?._id || plan?.academicYearId || plan?.academicYear?.id || plan?.academicYear?._id || '').trim();
+      const active = plan?.isActive !== false && String(plan?.lifecycleStatus || 'active').trim().toLowerCase() === 'active';
+      if (!active || planClassId !== normalizedClassId) return false;
+      if (normalizedAcademicYearId && planAcademicYearId && planAcademicYearId !== normalizedAcademicYearId) return false;
+      if (hasEffectiveDate) {
+        const effectiveFrom = plan?.effectiveFrom ? new Date(plan.effectiveFrom) : null;
+        const effectiveTo = plan?.effectiveTo ? new Date(plan.effectiveTo) : null;
+        if (effectiveFrom && !Number.isNaN(effectiveFrom.getTime()) && effectiveFrom > effectiveDate) return false;
+        if (effectiveTo && !Number.isNaN(effectiveTo.getTime()) && effectiveTo < effectiveDate) return false;
+      }
+      return true;
+    })
+    .sort((left, right) => {
+      const leftYearId = String(left?.academicYearId?._id || left?.academicYearId || left?.academicYear?.id || left?.academicYear?._id || '').trim();
+      const rightYearId = String(right?.academicYearId?._id || right?.academicYearId || right?.academicYear?.id || right?.academicYear?._id || '').trim();
+      const exactLeft = normalizedAcademicYearId && leftYearId === normalizedAcademicYearId ? 1 : 0;
+      const exactRight = normalizedAcademicYearId && rightYearId === normalizedAcademicYearId ? 1 : 0;
+      if (exactLeft !== exactRight) return exactRight - exactLeft;
+      const defaultDelta = (right?.isDefault === true ? 1 : 0) - (left?.isDefault === true ? 1 : 0);
+      if (defaultDelta !== 0) return defaultDelta;
+      return toSafeNumber(left?.priority ?? 100) - toSafeNumber(right?.priority ?? 100);
+    })[0] || null;
+};
+
 const getMonthBucket = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
@@ -1907,6 +1952,39 @@ export default function AdminFinance() {
       });
     return new Map(Array.from(grouped.entries()).map(([classId, studentIds]) => [classId, studentIds.size]));
   }, [studentMemberships]);
+  const currentFinanceClassByStudentId = useMemo(() => {
+    const grouped = new Map();
+    (Array.isArray(studentMemberships) ? studentMemberships : [])
+      .filter(isCurrentFinanceMembership)
+      .forEach((item) => {
+        const classId = toFinanceOptionId(item?.classId);
+        if (!classId) return;
+        const currentClass = {
+          classId,
+          classTitle: item?.classTitle || item?.class?.title || item?.schoolClass?.title || '---'
+        };
+        [
+          item?.studentId,
+          item?.student?._id,
+          item?.studentCoreId,
+          item?.afghanStudentId
+        ].map(toFinanceOptionId).filter(Boolean).forEach((studentId) => grouped.set(studentId, currentClass));
+      });
+    return grouped;
+  }, [studentMemberships]);
+  const getPreviousClassDebtLabel = (bill = {}) => {
+    const billClassId = getFinanceRecordClassId(bill);
+    if (!billClassId) return '';
+    const studentIds = [
+      bill?.student?.userId,
+      bill?.student?._id,
+      bill?.student?.studentId,
+      bill?.studentId
+    ].map(toFinanceOptionId).filter(Boolean);
+    const currentClass = studentIds.map((studentId) => currentFinanceClassByStudentId.get(studentId)).find(Boolean);
+    if (!currentClass || currentClass.classId === billClassId) return '';
+    return `قرض مربوط به صنف قبلی · صنف فعلی: ${currentClass.classTitle}`;
+  };
   const bulkAcademicYearsByClass = useMemo(() => {
     const grouped = new Map();
     (Array.isArray(studentMemberships) ? studentMemberships : [])
@@ -1935,24 +2013,13 @@ export default function AdminFinance() {
   const selectedManualFeePlan = useMemo(() => {
     const classId = String(manualForm.classId || '').trim();
     const academicYearId = String(manualForm.academicYearId || '').trim();
-    if (!classId) return null;
-    return (Array.isArray(feePlans) ? feePlans : [])
-      .filter((plan) => {
-        const planClassId = toFinanceOptionId(plan?.classId || plan?.schoolClass?.id || plan?.schoolClass?._id);
-        const planAcademicYearId = toFinanceOptionId(plan?.academicYearId || plan?.academicYear?.id || plan?.academicYear?._id);
-        const active = plan?.isActive !== false && String(plan?.lifecycleStatus || 'active') === 'active';
-        const sameYear = !academicYearId || !planAcademicYearId || planAcademicYearId === academicYearId;
-        return active && planClassId === classId && sameYear;
-      })
-      .sort((left, right) => {
-        const exactLeft = toFinanceOptionId(left?.academicYearId) === academicYearId ? 1 : 0;
-        const exactRight = toFinanceOptionId(right?.academicYearId) === academicYearId ? 1 : 0;
-        if (exactLeft !== exactRight) return exactRight - exactLeft;
-        const defaultDelta = (right?.isDefault === true ? 1 : 0) - (left?.isDefault === true ? 1 : 0);
-        if (defaultDelta !== 0) return defaultDelta;
-        return toSafeNumber(left?.priority ?? 100) - toSafeNumber(right?.priority ?? 100);
-      })[0] || null;
-  }, [feePlans, manualForm.academicYearId, manualForm.classId]);
+    return selectActiveFeePlanForScope({
+      plans: feePlans,
+      classId,
+      academicYearId,
+      effectiveAt: manualForm.dueDate
+    });
+  }, [feePlans, manualForm.academicYearId, manualForm.classId, manualForm.dueDate]);
   const selectedManualPlanAmount = useMemo(() => {
     if (!selectedManualFeePlan) return 0;
     const field = MANUAL_BILL_PLAN_FIELDS[manualForm.feeType] || 'tuitionFee';
@@ -2431,23 +2498,38 @@ export default function AdminFinance() {
 
   const applyBulkClassSelection = (classId = '') => {
     const normalizedClassId = String(classId || '').trim();
-    const classPlan = bulkFeePlanByClass.get(normalizedClassId);
-    const nextPeriodType = String(classPlan?.billingFrequency || '').trim() === 'monthly' ? 'monthly' : 'term';
+    const academicYearId = resolveBulkAcademicYearId(normalizedClassId, bulkForm.academicYearId);
+    const classPlan = selectActiveFeePlanForScope({
+      plans: feePlans,
+      classId: normalizedClassId,
+      academicYearId,
+      effectiveAt: bulkForm.dueDate
+    }) || bulkFeePlanByClass.get(normalizedClassId);
     setBulkForm((prev) => ({
       ...prev,
       classId: normalizedClassId,
-      academicYearId: resolveBulkAcademicYearId(normalizedClassId, prev.academicYearId),
-      periodType: classPlan ? nextPeriodType : prev.periodType
+      academicYearId,
+      periodType: classPlan ? getFeePlanBillPeriodType(classPlan) : prev.periodType
     }));
     setBillingPreview(null);
   };
 
   const buildBulkBillPayload = () => {
     const classId = String(bulkForm.classId || '').trim();
+    const academicYearId = resolveBulkAcademicYearId(classId, bulkForm.academicYearId);
+    const selectedPlan = selectActiveFeePlanForScope({
+      plans: feePlans,
+      classId,
+      academicYearId,
+      effectiveAt: bulkForm.dueDate
+    });
     return {
       ...bulkForm,
       classId,
-      academicYearId: resolveBulkAcademicYearId(classId, bulkForm.academicYearId),
+      academicYearId,
+      feePlanId: String(selectedPlan?._id || selectedPlan?.id || '').trim(),
+      periodType: selectedPlan ? getFeePlanBillPeriodType(selectedPlan) : bulkForm.periodType,
+      term: String(bulkForm.term || selectedPlan?.term || '').trim(),
       dueDate: String(bulkForm.dueDate || '').trim()
     };
   };
@@ -2510,6 +2592,12 @@ export default function AdminFinance() {
       academicYear: String(manualForm.academicYear || selectedAcademicYear?.title || selectedMembership?.academicYearTitle || '').trim(),
       amount: manualForm.amountSource === 'manual' ? String(manualForm.amount || '').trim() : '',
       feePlanId: manualForm.amountSource === 'plan' ? String(selectedManualFeePlan?._id || selectedManualFeePlan?.id || '').trim() : '',
+      periodType: manualForm.feeType === 'admission'
+        ? 'custom'
+        : manualForm.feeType === 'tuition' && manualForm.amountSource === 'plan' && selectedManualFeePlan
+          ? getFeePlanBillPeriodType(selectedManualFeePlan)
+          : 'term',
+      term: String(manualForm.term || selectedManualFeePlan?.term || '').trim(),
       dueDate: String(manualForm.dueDate || '').trim()
     };
   };
@@ -6207,6 +6295,7 @@ export default function AdminFinance() {
                         <span className="finance-cell-stack">
                           <strong>{bill.title || getBillTypeLabel(bill) || 'بل مالی'}</strong>
                           <small className="finance-latin-code">{formatFinanceCode(bill.billNumber, 'بدون شماره')}</small>
+                          {!!getPreviousClassDebtLabel(bill) && <small>{getPreviousClassDebtLabel(bill)}</small>}
                         </span>
                         <small>
                           {bill.dueDate ? toFaDate(bill.dueDate) : 'بدون مهلت'}
@@ -8487,6 +8576,7 @@ export default function AdminFinance() {
               <span className="finance-cell-stack">
                 <strong>{bill.classId?.title || bill.schoolClass?.title || bill.course?.title || '---'}</strong>
                 {!!bill.lineItems?.length && <small>{bill.lineItems.length} ردیف مالی</small>}
+                {!!getPreviousClassDebtLabel(bill) && <small>{getPreviousClassDebtLabel(bill)}</small>}
               </span>
               <span className="finance-cell-stack">
                 <strong>{fmt(getBillDisplayAmount(bill))} AFN</strong>

@@ -6,6 +6,7 @@ import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
 
 const COMPONENT_FIELDS = [
+  { key: 'attendanceScore', maxKey: 'attendanceMax', label: 'حاضری', derived: true },
   { key: 'writtenScore', maxKey: 'writtenMax', label: 'تحریری' },
   { key: 'oralScore', maxKey: 'oralMax', label: 'تقریری' },
   { key: 'classActivityScore', maxKey: 'classActivityMax', label: 'فعالیت صنفی' },
@@ -16,7 +17,8 @@ const STATUS_OPTIONS = [
   { value: 'recorded', label: 'ثبت‌شده' },
   { value: 'pending', label: 'در انتظار' },
   { value: 'absent', label: 'غایب' },
-  { value: 'excused', label: 'معذور' }
+  { value: 'excused', label: 'معذور' },
+  { value: 'not_applicable', label: 'شامل امتحان نبوده' }
 ];
 
 const STATUS_LABELS = STATUS_OPTIONS.reduce((acc, item) => {
@@ -24,8 +26,8 @@ const STATUS_LABELS = STATUS_OPTIONS.reduce((acc, item) => {
   return acc;
 }, {});
 
-const SCORE_BLOCKING_STATUSES = new Set(['absent', 'excused']);
-const SCORE_CLEARING_STATUSES = new Set(['pending', 'absent', 'excused']);
+const SCORE_BLOCKING_STATUSES = new Set(['absent', 'excused', 'not_applicable']);
+const SCORE_CLEARING_STATUSES = new Set(['pending', 'absent', 'excused', 'not_applicable']);
 
 const INITIAL_FILTERS = {
   academicYearId: '',
@@ -36,7 +38,9 @@ const INITIAL_FILTERS = {
   examTypeId: '',
   monthLabel: '',
   heldAt: '',
+  reviewerUserId: '',
   reviewedByName: '',
+  attendanceMax: '5',
   writtenMax: '25',
   oralMax: '25',
   classActivityMax: '25',
@@ -115,6 +119,17 @@ const isMonthlyExamType = (item = {}) => {
   return code === 'MONTHLY' || title.includes('ماهوار');
 };
 
+const getOfficialExamDefaults = (item = {}) => {
+  const code = String(item?.code || '').trim().toUpperCase();
+  if (code === 'FOUR_HALF_MONTH') {
+    return { attendanceMax: '5', writtenMax: '20', oralMax: '10', classActivityMax: '0', homeworkMax: '5' };
+  }
+  if (code === 'ANNUAL') {
+    return { attendanceMax: '5', writtenMax: '40', oralMax: '10', classActivityMax: '0', homeworkMax: '5' };
+  }
+  return null;
+};
+
 const buildSessionScopeFilters = (filters = {}, { isInstructorView = false } = {}) => ({
   sessionKind: 'subject_sheet',
   academicYearId: filters.academicYearId,
@@ -129,12 +144,15 @@ const buildRowState = (item = {}) => ({
   admissionNo: item?.row?.admissionNo || '',
   studentName: item?.row?.studentName || '',
   fatherName: item?.row?.fatherName || '',
+  attendanceScore: item?.row?.attendanceScore == null ? '' : String(item.row.attendanceScore),
   writtenScore: item?.row?.writtenScore == null ? '' : String(item.row.writtenScore),
   oralScore: item?.row?.oralScore == null ? '' : String(item.row.oralScore),
   classActivityScore: item?.row?.classActivityScore == null ? '' : String(item.row.classActivityScore),
   homeworkScore: item?.row?.homeworkScore == null ? '' : String(item.row.homeworkScore),
   totalInWords: item?.row?.totalInWords || '',
   note: sanitizeExamNote(item?.row?.note),
+  membershipStatus: item?.row?.membershipStatus || item?.membership?.status || '',
+  membershipStatusLabel: item?.row?.membershipStatusLabel || item?.membership?.statusLabel || '',
   markStatus: item?.row?.markStatus || 'pending',
   resultStatus: item?.row?.resultStatus || '',
   rank: item?.row?.rank ?? null
@@ -183,7 +201,8 @@ export default function GradeManager() {
     classes: [],
     subjects: [],
     examTypes: [],
-    teacherAssignments: []
+    teacherAssignments: [],
+    reviewers: []
   });
   const [filters, setFilters] = useState(INITIAL_FILTERS);
   const [sessions, setSessions] = useState([]);
@@ -196,9 +215,9 @@ export default function GradeManager() {
   const [loadingRefs, setLoadingRefs] = useState(true);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [loadingSheet, setLoadingSheet] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [revising, setRevising] = useState(false);
 
   const isInstructor = userRole() === 'instructor';
   const selectedSession = useMemo(
@@ -287,17 +306,30 @@ export default function GradeManager() {
   }, [referenceData.subjects, referenceData.classes, scopedAssignments, filters.academicYearId, filters.teacherId, filters.classId, isInstructor]);
 
   const scoreComponents = useMemo(() => ({
-    writtenMax: toSafeNumber(sheet?.scoreComponents?.writtenMax || filters.writtenMax),
-    oralMax: toSafeNumber(sheet?.scoreComponents?.oralMax || filters.oralMax),
-    classActivityMax: toSafeNumber(sheet?.scoreComponents?.classActivityMax || filters.classActivityMax),
-    homeworkMax: toSafeNumber(sheet?.scoreComponents?.homeworkMax || filters.homeworkMax)
-  }), [sheet?.scoreComponents, filters.writtenMax, filters.oralMax, filters.classActivityMax, filters.homeworkMax]);
+    attendanceMax: toSafeNumber(sheet?.scoreComponents?.attendanceMax ?? filters.attendanceMax),
+    writtenMax: toSafeNumber(sheet?.scoreComponents?.writtenMax ?? filters.writtenMax),
+    oralMax: toSafeNumber(sheet?.scoreComponents?.oralMax ?? filters.oralMax),
+    classActivityMax: toSafeNumber(sheet?.scoreComponents?.classActivityMax ?? filters.classActivityMax),
+    homeworkMax: toSafeNumber(sheet?.scoreComponents?.homeworkMax ?? filters.homeworkMax)
+  }), [sheet?.scoreComponents, filters.attendanceMax, filters.writtenMax, filters.oralMax, filters.classActivityMax, filters.homeworkMax]);
 
   const dirtyCount = useMemo(
     () => Object.values(dirtyIds).filter(Boolean).length,
     [dirtyIds]
   );
-  const sheetLocked = sheet?.isEditable === false;
+  const policyMismatch = sheet?.session?.scoringPolicy?.compatible === false;
+  const sheetLocked = sheet?.isEditable === false || policyMismatch;
+  const currentSessionStatus = String(sheet?.session?.status || selectedSession?.status || 'draft');
+  const nextWorkflowStatus = (() => {
+    if (['draft', 'active'].includes(currentSessionStatus)) return 'submitted';
+    if (!isInstructor && currentSessionStatus === 'submitted') return 'approved';
+    return '';
+  })();
+  const workflowActionLabel = {
+    submitted: 'ارسال برای تأیید',
+    approved: 'تأیید شقه',
+    published: 'نشر نهایی'
+  }[nextWorkflowStatus] || 'تکمیل شده';
 
   const applyMessage = (text, tone = 'muted') => {
     setMessage(text);
@@ -314,7 +346,8 @@ export default function GradeManager() {
         classes: data.classes || [],
         subjects: data.subjects || [],
         examTypes: data.examTypes || [],
-        teacherAssignments: data.teacherAssignments || []
+        teacherAssignments: data.teacherAssignments || [],
+        reviewers: data.reviewers || []
       });
 
       const activeYear = (data.academicYears || []).find((item) => item.isActive) || data.academicYears?.[0] || null;
@@ -325,6 +358,7 @@ export default function GradeManager() {
       const availableExamTypes = (data.examTypes || []).filter((item) => !isMonthlyExamType(item));
       const defaultExamType = availableExamTypes?.[0]
         || null;
+      const officialDefaults = getOfficialExamDefaults(defaultExamType);
       const defaultAssignment = (data.teacherAssignments || []).find((item) => (
         !isInstructor || String(item?.teacher?.id || '') === String(userId())
       )) || null;
@@ -349,7 +383,8 @@ export default function GradeManager() {
         teacherId: prev.teacherId || defaultTeacher?.id || '',
         classId: prev.classId || defaultAssignment?.schoolClass?.id || (!isInstructor && defaultTeacher ? '' : defaultClass?.id || '') || '',
         subjectId: prev.subjectId || defaultSubject?.id || '',
-        examTypeId: prev.examTypeId || defaultExamType?.id || ''
+        examTypeId: prev.examTypeId || defaultExamType?.id || '',
+        ...(officialDefaults || {})
       }));
     } catch {
       applyMessage('بارگیری معلومات مرجع امتحانات موفق نشد.', 'error');
@@ -398,7 +433,9 @@ export default function GradeManager() {
         ...prev,
         heldAt: toInputDate(data?.session?.heldAt),
         monthLabel: data?.session?.monthLabel || prev.monthLabel,
-        reviewedByName: data?.session?.reviewedByName || prev.reviewedByName,
+        reviewerUserId: data?.session?.reviewerUserId ?? '',
+        reviewedByName: data?.session?.reviewedByName ?? '',
+        attendanceMax: String(data?.scoreComponents?.attendanceMax ?? prev.attendanceMax),
         writtenMax: String(data?.scoreComponents?.writtenMax ?? prev.writtenMax),
         oralMax: String(data?.scoreComponents?.oralMax ?? prev.oralMax),
         classActivityMax: String(data?.scoreComponents?.classActivityMax ?? prev.classActivityMax),
@@ -428,17 +465,6 @@ export default function GradeManager() {
     loadSheet(selectedSessionId);
   }, [selectedSessionId]);
 
-  const findTeacherAssignmentId = () => {
-    const matches = scopedAssignments.filter((item) => {
-      const matchesYear = !filters.academicYearId || String(item?.academicYear?.id || '') === String(filters.academicYearId);
-      const matchesTeacher = isInstructor || !filters.teacherId || String(item?.teacher?.id || '') === String(filters.teacherId);
-      const matchesClass = !filters.classId || String(item?.schoolClass?.id || '') === String(filters.classId);
-      const matchesSubject = !filters.subjectId || String(item?.subject?.id || '') === String(filters.subjectId);
-      return matchesYear && matchesTeacher && matchesClass && matchesSubject;
-    });
-    return matches[0]?.id || '';
-  };
-
   const handleFilterChange = (event) => {
     const { name, value } = event.target;
     setFilters((prev) => {
@@ -459,78 +485,16 @@ export default function GradeManager() {
       if (name === 'classId') {
         next.subjectId = '';
       }
+      if (name === 'examTypeId') {
+        const selectedExamType = referenceData.examTypes.find((item) => String(item.id) === String(value));
+        Object.assign(next, getOfficialExamDefaults(selectedExamType) || {});
+      }
       return next;
     });
   };
 
   const handleSearch = () => {
     loadSessions(filters);
-  };
-
-  const handleOpenSheet = async () => {
-    if (!filters.academicYearId || !filters.assessmentPeriodId || !filters.teacherId || !filters.classId || !filters.subjectId || !filters.examTypeId) {
-      applyMessage('برای باز کردن شقه، سال تعلیمی، استاد، صنف، مضمون و نوع امتحان را تعیین کنید.', 'error');
-      return;
-    }
-
-    const teacherAssignmentId = findTeacherAssignmentId();
-    if (!teacherAssignmentId && isInstructor) {
-      applyMessage('برای این صنف و مضمون، استاد مسئول فعال ثبت نشده است.', 'error');
-      return;
-    }
-
-    const payload = {
-      sessionKind: 'subject_sheet',
-      academicYearId: filters.academicYearId,
-      assessmentPeriodId: filters.assessmentPeriodId,
-      classId: filters.classId,
-      subjectId: filters.subjectId,
-      examTypeId: filters.examTypeId,
-      monthLabel: filters.monthLabel,
-      reviewedByName: filters.reviewedByName,
-      heldAt: filters.heldAt || undefined,
-      status: 'active',
-      initializeRoster: true,
-      scoreComponents: {
-        writtenMax: toSafeNumber(filters.writtenMax),
-        oralMax: toSafeNumber(filters.oralMax),
-        classActivityMax: toSafeNumber(filters.classActivityMax),
-        homeworkMax: toSafeNumber(filters.homeworkMax)
-      }
-    };
-    if (teacherAssignmentId) {
-      payload.teacherAssignmentId = teacherAssignmentId;
-    }
-
-    setCreating(true);
-    try {
-      const preview = await fetchJson(`${API_BASE}/api/exams/sessions/bootstrap-preview`, {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      });
-
-      if (preview.existingSession?.id) {
-        setSelectedSessionId(preview.existingSession.id);
-        applyMessage('شقه موجود بود و بارگیری شد.', 'success');
-        await loadSessions(filters, preview.existingSession.id);
-        return;
-      }
-
-      const data = await fetchJson(`${API_BASE}/api/exams/sessions/bootstrap`, {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      });
-      const nextSessionId = data?.session?.id || '';
-      applyMessage('شقه مضمون ایجاد شد و roster شاگردان آماده گردید.', 'success');
-      await loadSessions(filters, nextSessionId);
-      if (nextSessionId) {
-        setSelectedSessionId(nextSessionId);
-      }
-    } catch (error) {
-      applyMessage('ایجاد یا بارگیری شقه موفق نشد.', 'error');
-    } finally {
-      setCreating(false);
-    }
   };
 
   const handleRowChange = (studentMembershipId, field, value) => {
@@ -561,6 +525,7 @@ export default function GradeManager() {
           markStatus: row.markStatus,
           note: row.note,
           scoreBreakdown: {
+            attendanceScore: row.attendanceScore,
             writtenScore: row.writtenScore,
             oralScore: row.oralScore,
             classActivityScore: row.classActivityScore,
@@ -585,9 +550,13 @@ export default function GradeManager() {
   };
 
   const handlePublish = async () => {
-    if (!selectedSessionId) return;
+    if (!selectedSessionId || !nextWorkflowStatus) return;
     if (dirtyCount) {
       applyMessage('نخست تغییرات ذخیره نشده را ثبت کن، سپس شقه را نشر کن.', 'error');
+      return;
+    }
+    if (['approved', 'published'].includes(nextWorkflowStatus) && !filters.reviewerUserId) {
+      applyMessage('برای تأیید یا نشر، استاد ممیز را از فهرست انتخاب کنید.', 'error');
       return;
     }
     setPublishing(true);
@@ -595,18 +564,44 @@ export default function GradeManager() {
       const data = await fetchJson(`${API_BASE}/api/exams/sessions/${selectedSessionId}/status`, {
         method: 'POST',
         body: JSON.stringify({
-          status: 'published',
-          reviewedByName: filters.reviewedByName,
+          status: nextWorkflowStatus,
+          reviewerUserId: filters.reviewerUserId || undefined,
           monthLabel: filters.monthLabel
         })
       });
-      applyMessage('شقه نهایی شد و نتیجه برای شاگردان قابل نمایش است.', 'success');
+      applyMessage(nextWorkflowStatus === 'submitted'
+        ? 'شقه برای بررسی و تأیید ارسال شد.'
+        : nextWorkflowStatus === 'approved'
+          ? 'شقه تأیید شد؛ نمرات اکنون وارد نتایج شده و برای شاگرد قابل مشاهده است.'
+          : 'شقه نهایی شد و نتیجه برای شاگردان قابل نمایش است.', 'success');
       await loadSessions(filters, data?.item?.id || selectedSessionId);
       await loadSheet(data?.item?.id || selectedSessionId);
     } catch {
-      applyMessage('نشر شقه موفق نشد. احتمالاً هنوز بعضی نمرات در انتظار هستند.', 'error');
+      applyMessage('تغییر مرحلهٔ شقه موفق نشد. نمرات در انتظار، ممیز یا ترتیب تأیید را بررسی کنید.', 'error');
     } finally {
       setPublishing(false);
+    }
+  };
+
+  const handleCreateRevision = async () => {
+    if (!selectedSessionId || isInstructor) return;
+    setRevising(true);
+    try {
+      const data = await fetchJson(`${API_BASE}/api/exams/sessions/${selectedSessionId}/revisions`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: 'اصلاح شقهٔ رسمی' })
+      });
+      const revisionId = data?.item?.id || '';
+      await loadSessions(filters, revisionId);
+      if (revisionId) {
+        setSelectedSessionId(revisionId);
+        await loadSheet(revisionId);
+      }
+      applyMessage(`نسخهٔ اصلاحی ${data?.summary?.version || ''} ایجاد شد.`, 'success');
+    } catch {
+      applyMessage('ایجاد نسخهٔ اصلاحی شقه موفق نشد.', 'error');
+    } finally {
+      setRevising(false);
     }
   };
 
@@ -654,24 +649,26 @@ export default function GradeManager() {
           <div>
             <h2>شقه مضمون و مدیریت نمرات</h2>
             <p>
-              این بخش شقه رسمی امتحان را می‌سازد؛ همین سشن‌ها در گزارش‌ها و مرکز ارتقای صنف استفاده می‌شوند.
-              کوییز و سوالات تمرینی مسیر جداگانه دارند و برای ارتقای صنف محاسبه نمی‌شوند.
+              شقه رسمی در مرکز مدیریت ساخته و به استاد تخصیص می‌شود؛ استاد نمرات را اینجا تکمیل و برای تأیید می‌فرستد.
+              شقهٔ تأییدشده وارد نتایج عمومی می‌شود و کوییزهای تمرینی در آن محاسبه نمی‌شوند.
             </p>
           </div>
           <div className="grade-manager-actions">
             <button type="button" className="secondary" onClick={handleSearch} disabled={loadingRefs || loadingSessions}>
               {loadingSessions ? 'در حال بارگیری...' : 'جستجوی شقه‌ها'}
             </button>
-            <button type="button" onClick={handleOpenSheet} disabled={creating || loadingRefs}>
-              {creating ? 'در حال آماده‌سازی...' : 'ایجاد یا بازکردن شقه'}
-            </button>
+            {!isInstructor ? (
+              <button type="button" onClick={() => { window.location.href = '/admin-sheet-templates'; }}>
+                مرکز مدیریت و تخصیص شقه‌ها
+              </button>
+            ) : null}
           </div>
         </header>
 
         <section className="grade-manager-filters">
           <div className="grade-flow-note">
             <strong>مسیر رسمی:</strong>
-            <span>سال و استاد را انتخاب کن؛ سیستم خودش فقط صنف‌ها و مضمون‌های مربوط همان استاد را نشان می‌دهد. سپس نوع امتحان را تعیین و شقه رسمی را بساز.</span>
+            <span>{isInstructor ? 'شقه‌هایی که مدیریت به شما تخصیص داده است در این صفحه ظاهر می‌شود؛ نمرات را ثبت و برای تأیید بفرستید.' : 'ساخت و تخصیص شقه فقط از مرکز مدیریت شقه‌ها انجام می‌شود؛ در این صفحه می‌توانید شقه‌های موجود را بررسی و تأیید کنید.'}</span>
           </div>
 
           <label>
@@ -736,7 +733,12 @@ export default function GradeManager() {
 
           <label>
             <span>ممیز</span>
-            <input name="reviewedByName" value={filters.reviewedByName} onChange={handleFilterChange} placeholder="نام ممیز" />
+            <select name="reviewerUserId" value={filters.reviewerUserId} onChange={handleFilterChange} disabled={loadingRefs || isInstructor}>
+              <option value="">انتخاب استاد ممیز</option>
+              {(referenceData.reviewers || []).map((item) => (
+                <option key={item.id} value={item.id}>{item.name || item.email || 'ممیز'}</option>
+              ))}
+            </select>
           </label>
         </section>
 
@@ -750,6 +752,7 @@ export default function GradeManager() {
                 name={field.maxKey}
                 value={filters[field.maxKey]}
                 onChange={handleFilterChange}
+                disabled
               />
             </label>
           ))}
@@ -760,7 +763,7 @@ export default function GradeManager() {
         <section className="grade-manager-shell">
           <aside className="grade-session-list">
             <div className="section-head">
-              <h3>شقه‌های ثبت‌شده</h3>
+              <h3>{isInstructor ? 'شقه‌های تخصیص‌شده به من' : 'شقه‌های ثبت‌شده'}</h3>
               <span>{toFaNumber(sessions.length)} شقه</span>
             </div>
             {!sessions.length && <div className="grade-empty">هنوز شقه‌ای در این بخش ثبت نشده است.</div>}
@@ -785,7 +788,7 @@ export default function GradeManager() {
           </aside>
 
           <section className="grade-sheet-panel">
-            {!selectedSessionId && <div className="grade-empty">برای شروع، یک شقه را از فهرست انتخاب کن یا شقه جدید بساز.</div>}
+            {!selectedSessionId && <div className="grade-empty">برای شروع، یک شقه را از فهرست انتخاب کنید.</div>}
 
             {selectedSessionId && (
               <>
@@ -801,6 +804,11 @@ export default function GradeManager() {
                     </p>
                   </div>
                   <div className="grade-sheet-toolbar">
+                    {!isInstructor && ['approved', 'published', 'closed'].includes(currentSessionStatus) && (
+                      <button type="button" className="secondary" onClick={handleCreateRevision} disabled={revising || loadingSheet}>
+                        {revising ? 'در حال ایجاد نسخه...' : 'ایجاد نسخهٔ اصلاحی'}
+                      </button>
+                    )}
                     <button type="button" className="secondary" onClick={() => handleExport('print')} disabled={!selectedSessionId}>
                       نسخه چاپی
                     </button>
@@ -810,8 +818,8 @@ export default function GradeManager() {
                     <button type="button" className="secondary" onClick={handleSaveChanges} disabled={!dirtyCount || saving || loadingSheet || sheetLocked}>
                       {saving ? 'در حال ذخیره...' : `ذخیره تغییرات${dirtyCount ? ` (${toFaNumber(dirtyCount)})` : ''}`}
                     </button>
-                    <button type="button" onClick={handlePublish} disabled={publishing || saving || loadingSheet || !selectedSessionId || sheetLocked}>
-                      {publishing ? 'در حال نشر...' : 'نشر نهایی'}
+                    <button type="button" onClick={handlePublish} disabled={publishing || saving || loadingSheet || !selectedSessionId || !nextWorkflowStatus || Boolean(dirtyCount) || policyMismatch}>
+                      {publishing ? 'در حال ثبت مرحله...' : workflowActionLabel}
                     </button>
                   </div>
                 </div>
@@ -823,7 +831,14 @@ export default function GradeManager() {
                   <span><strong>نوع امتحان:</strong> {sheet?.session?.examType?.title || selectedSession?.examType?.title || '---'}</span>
                   <span><strong>ماه:</strong> {sheet?.session?.monthLabel || selectedSession?.monthLabel || '---'}</span>
                   <span><strong>تاریخ:</strong> {toDisplayDate(sheet?.session?.heldAt || selectedSession?.heldAt)}</span>
+                  <span><strong>نسخه:</strong> {toFaNumber(sheet?.session?.version || selectedSession?.version || 1)}</span>
                 </div>
+
+                {policyMismatch && (
+                  <div className="grade-message error">
+                    این شقه با فارمت قدیمی ۱۰۰ نمره ثبت شده است. برای جلوگیری از تغییر نادرست نمرات، باید بازبینی و در فارمت رسمی ۴۰/۶۰ دوباره تنظیم شود.
+                  </div>
+                )}
 
                 <div className="grade-summary-strip">
                   <div>
@@ -860,6 +875,7 @@ export default function GradeManager() {
                             </th>
                           ))}
                           <th colSpan="2" className="group-heading">مجموعه نمره</th>
+                          <th rowSpan="2">فیصدی</th>
                           <th rowSpan="2">ملاحظات</th>
                         </tr>
                         <tr>
@@ -872,7 +888,7 @@ export default function GradeManager() {
                       <tbody>
                         {!rows.length && (
                           <tr>
-                            <td colSpan={10}>هنوز شاگردی برای این شقه موجود نیست.</td>
+                            <td colSpan={COMPONENT_FIELDS.length + 7}>هنوز شاگردی برای این شقه موجود نیست.</td>
                           </tr>
                         )}
                         {rows.map((row) => {
@@ -884,6 +900,7 @@ export default function GradeManager() {
                               <td className="student-cell">
                                 <strong>{row.studentName || '---'}</strong>
                                 {row.resultStatus && <span>{row.resultStatus}</span>}
+                                {row.membershipStatusLabel && <span>{row.membershipStatusLabel}</span>}
                               </td>
                               <td>{row.fatherName || '---'}</td>
                               {COMPONENT_FIELDS.map((field) => (
@@ -893,7 +910,8 @@ export default function GradeManager() {
                                     min="0"
                                     max={String(scoreComponents[field.maxKey] || 0)}
                                     value={row[field.key]}
-                                    disabled={rowBlocksScoreInput(row.markStatus) || sheetLocked}
+                                    disabled={field.derived || rowBlocksScoreInput(row.markStatus) || sheetLocked}
+                                    title={field.derived ? 'این نمره هنگام ارسال شقه از حاضری محاسبه می‌شود.' : undefined}
                                     className="score-input"
                                     onChange={(event) => handleRowChange(row.studentMembershipId, field.key, event.target.value)}
                                   />
@@ -901,6 +919,7 @@ export default function GradeManager() {
                               ))}
                               <td className="total-cell">{toFaNumber(total)}</td>
                               <td className="total-words-cell">{totalInWords || '---'}</td>
+                              <td className="total-cell">{row.markStatus === 'recorded' && Number(sheet?.session?.defaultMark?.totalMark || 0) > 0 ? `${toFaNumber(Number(((total / Number(sheet.session.defaultMark.totalMark)) * 100).toFixed(2)))}٪` : '---'}</td>
                               <td className="note-cell">
                                 <div className="grade-note-control">
                                   <select

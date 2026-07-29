@@ -1,4 +1,4 @@
-const ATTENDANCE_STATUSES = ['present', 'absent', 'sick', 'leave'];
+const ATTENDANCE_STATUSES = ['present', 'absent', 'sick', 'leave', 'suspended'];
 const LEGACY_STATUS_ALIASES = {
   late: 'sick',
   excused: 'leave'
@@ -139,6 +139,7 @@ function createStatusSummary(seed = {}) {
     absent: 0,
     sick: 0,
     leave: 0,
+    suspended: 0,
     totalRecords: 0,
     attendanceRate: 0,
     ...seed
@@ -155,12 +156,13 @@ function incrementStatus(summary, status, count = 1) {
 
 function finalizeStatusSummary(summary) {
   const totalRecords = ATTENDANCE_STATUSES.reduce((acc, status) => acc + Number(summary?.[status] || 0), 0);
-  const attendedCount = totalRecords - Number(summary?.absent || 0);
+  const evaluableRecords = Math.max(0, totalRecords - Number(summary?.suspended || 0));
+  const attendedCount = Math.max(0, evaluableRecords - Number(summary?.absent || 0));
 
   return {
     ...summary,
     totalRecords,
-    attendanceRate: totalRecords ? Number(((attendedCount / totalRecords) * 100).toFixed(1)) : 0
+    attendanceRate: evaluableRecords ? Number(((attendedCount / evaluableRecords) * 100).toFixed(1)) : 0
   };
 }
 

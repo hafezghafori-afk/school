@@ -10,7 +10,8 @@ const STATUS_OPTIONS = [
   { value: 'present', label: 'حاضر' },
   { value: 'absent', label: 'غیرحاضر' },
   { value: 'sick', label: 'مریض' },
-  { value: 'leave', label: 'رخصتی' }
+  { value: 'leave', label: 'رخصتی' },
+  { value: 'suspended', label: 'محروم' }
 ];
 
 const STATUS_ALIASES = {
@@ -19,7 +20,8 @@ const STATUS_ALIASES = {
   sick: 'sick',
   leave: 'leave',
   late: 'sick',
-  excused: 'leave'
+  excused: 'leave',
+  suspended: 'suspended'
 };
 
 const getAuthHeaders = () => {
@@ -168,6 +170,7 @@ export default function MyAttendance() {
       absent: 0,
       sick: 0,
       leave: 0,
+      suspended: 0,
       attendanceRate: 0
     };
 
@@ -176,8 +179,9 @@ export default function MyAttendance() {
       result[normalizedStatus] = Number(result[normalizedStatus] || 0) + 1;
     });
 
-    result.attendanceRate = result.total
-      ? Number(((Number(result.present || 0) / result.total) * 100).toFixed(1))
+    const evaluableTotal = Math.max(0, result.total - result.suspended);
+    result.attendanceRate = evaluableTotal
+      ? Number((((result.present + result.sick + result.leave) / evaluableTotal) * 100).toFixed(1))
       : 0;
 
     return result;
@@ -263,6 +267,10 @@ export default function MyAttendance() {
           <div className="myattendance-summary-card">
             <span>رخصتی</span>
             <strong>{summary.leave.toLocaleString('fa-AF-u-ca-persian')}</strong>
+          </div>
+          <div className="myattendance-summary-card">
+            <span>محروم</span>
+            <strong>{summary.suspended.toLocaleString('fa-AF-u-ca-persian')}</strong>
           </div>
         </div>
 

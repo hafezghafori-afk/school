@@ -8,7 +8,7 @@
   padding: 20px;
   position: relative;
   overflow: hidden;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: var(--font-persian-ui);
 }
 
 /* Animated Background */

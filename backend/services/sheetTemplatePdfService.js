@@ -5,6 +5,7 @@ const PDFDocument = require('pdfkit');
 const { execFile } = require('child_process');
 
 const SiteSettings = require('../models/SiteSettings');
+const { formatAfghanDate } = require('../utils/afghanDate');
 
 const PROJECT_ROOT = path.join(__dirname, '..', '..');
 const FONTS_DIR = path.join(PROJECT_ROOT, 'Fonts');
@@ -49,12 +50,6 @@ const FONT_DISPLAY_ALIASES = new Map([
 
 const faNumber = new Intl.NumberFormat('fa-AF-u-ca-persian', {
   maximumFractionDigits: 2
-});
-
-const faDate = new Intl.DateTimeFormat('fa-AF-u-ca-persian', {
-  year: 'numeric',
-  month: 'long',
-  day: 'numeric'
 });
 
 const ARABIC_SHAPING = {
@@ -104,6 +99,16 @@ const safeFontCache = new Map();
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeDariText(value) {
+  return normalizeText(value)
+    .normalize('NFKC')
+    .replace(/[يى]/gu, 'ی')
+    .replace(/ك/gu, 'ک')
+    .replace(/ۀ/gu, 'ه')
+    .replace(/هٔ/gu, 'ه')
+    .replace(/[\u200e\u200f]/gu, '');
 }
 
 function normalizeFontKey(value = '') {
@@ -189,13 +194,11 @@ function formatNumber(value) {
 
 function formatDateValue(value) {
   if (!value) return '';
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return normalizeText(value);
-  try {
-    return faDate.format(date);
-  } catch {
-    return date.toISOString().slice(0, 10);
-  }
+  return formatAfghanDate(value, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  }) || normalizeText(value);
 }
 
 function formatCellValue(value) {
@@ -249,6 +252,24 @@ function getDefaultTitleByType(type = '') {
   if (type === 'attendance_summary') return '\u0634\u0642\u0647 \u062E\u0644\u0627\u0635\u0647 \u062D\u0627\u0636\u0631\u06CC';
   if (type === 'finance') return '\u0634\u0642\u0647 \u0645\u0627\u0644\u06CC';
   return '\u0634\u0642\u0647';
+}
+
+function getShortExamTypeLabel(firstRow = {}, report = {}) {
+  const source = normalizeText(firstRow.examType)
+    || normalizeText(firstRow.sessionTitle)
+    || normalizeText(report?.report?.title);
+  const firstPart = source.split(/\s+(?:-|–|—|\|)\s+/u)[0] || '';
+  let examLabel = firstPart
+    .replace(/^شقه(?:ٔ)?\s*(?:امتحان(?:ات)?)?\s*/u, '')
+    .replace(/^امتحان(?:ات)?\s*/u, '')
+    .trim();
+
+  if (/چهار\s*نیم|چهارنیم/u.test(source)) examLabel = 'چهارنیم‌ماهه';
+  else if (/سالانه/u.test(source)) examLabel = 'سالانه';
+  else if (/ماهوار|ماهانه/u.test(source)) examLabel = 'ماهوار';
+  else if (examLabel.length > 30) examLabel = '';
+
+  return examLabel || 'امتحان';
 }
 
 function collectUniqueTextValues(rows = [], key = '') {
@@ -558,10 +579,88 @@ function writeText(doc, text, x, y, options = {}) {
   });
 }
 
+function drawExamOfficialHeader(doc, context, continuation = false) {
+  const { layout, siteSettings, logoPath, fontPath, signatures = [] } = context;
+  const box = pageMetrics(doc, layout);
+  const y = box.top;
+  const isPortrait = layout.orientation === 'portrait';
+  const signatureTabGap = 38;
+  const brandY = y;
+  const logoSize = isPortrait ? 52 : 76;
+  const logoTextGap = isPortrait ? 8 : 12;
+  const centerWidth = isPortrait ? 230 : 260;
+  const brandWidth = centerWidth + ((logoSize + logoTextGap) * 2);
+  const signatureWidth = Math.max(70, ((box.width - brandWidth) / 2) - 8);
+  const brandLeft = box.left + ((box.width - brandWidth) / 2);
+  const leftLogoX = brandLeft;
+  const centerX = leftLogoX + logoSize + logoTextGap;
+  const rightLogoX = centerX + centerWidth + logoTextGap;
+  const ministryLogoPath = layout.showLogo
+    ? resolveLocalAssetPath(siteSettings?.ministryLogoUrl || siteSettings?.governmentLogoUrl)
+    : '';
+  const schoolLogoPath = layout.showLogo
+    ? (resolveLocalAssetPath(siteSettings?.schoolLogoUrl || siteSettings?.logoUrl) || logoPath)
+    : '';
+
+  const drawLogo = (assetPath, x, label) => {
+    if (assetPath) {
+      try {
+        doc.image(assetPath, x, brandY, { fit: [logoSize, logoSize], align: 'center', valign: 'center' });
+        return;
+      } catch {
+        // Keep the official header printable even when an image file is unavailable.
+      }
+    }
+    doc.save();
+    doc.rect(x, brandY, logoSize, logoSize).stroke('#B8B8B8');
+    doc.restore();
+    setFont(doc, 7.5, fontPath);
+    doc.fillColor('#444444');
+    writeText(doc, label, x + 4, brandY + (logoSize / 2) - 5, { width: logoSize - 8, align: 'center' });
+  };
+
+  const drawTopSignatures = (items, x, align) => {
+    items.forEach((item, index) => {
+      const signatureY = y + (index * signatureTabGap);
+      setFont(doc, 8.4, fontPath);
+      doc.fillColor('#111111');
+      writeText(doc, item?.role || '', x, signatureY, { width: signatureWidth, align });
+    });
+  };
+  drawTopSignatures(signatures.slice(0, 2), box.right - signatureWidth, 'right');
+  drawTopSignatures(signatures.slice(2, 4), box.left, 'left');
+
+  drawLogo(ministryLogoPath, rightLogoX, 'لوگو وزارت');
+  drawLogo(schoolLogoPath, leftLogoX, 'لوگو مکتب');
+
+  const centerLines = [
+    ['امارت اسلامی افغانستان', 10],
+    ['وزارت معارف', 10],
+    [normalizeDariText(siteSettings?.educationDirectorate || siteSettings?.directorateName) || 'ریاست معارف شهر کابل', 9.5],
+    [normalizeDariText(siteSettings?.educationZone || siteSettings?.district) || 'آمریت معارف حوزه تعلیمی (     )', 9.5],
+    [normalizeDariText(siteSettings?.brandName || siteSettings?.schoolName || siteSettings?.name) || normalizeDariText(context.subtitle) || '', 10.5],
+    [continuation ? 'ادامه شقه امتحان' : 'شقه امتحان', 13]
+  ];
+  let lineY = brandY;
+  centerLines.forEach(([line, size], index) => {
+    if (!line) return;
+    setFont(doc, size, fontPath);
+    doc.fillColor('#111111');
+    writeText(doc, line, centerX, lineY, { width: centerWidth, align: 'center' });
+    lineY += index === centerLines.length - 2 ? 18 : 15;
+  });
+
+  return Math.max(brandY + logoSize, lineY, y + signatureTabGap + 14) + 4;
+}
+
 function drawHeader(doc, context, continuation = false) {
   const { layout, title, subtitle, siteSettings, logoPath, fontPath } = context;
   const box = pageMetrics(doc, layout);
   let y = box.top;
+
+  if (context.type === 'exam' && layout.showHeader) {
+    return drawExamOfficialHeader(doc, context, continuation);
+  }
 
   if (layout.showHeader) {
     doc.save();
@@ -621,6 +720,55 @@ function drawMetadataGrid(doc, context, startY) {
   if (!metadata.length) return startY;
 
   const box = pageMetrics(doc, layout);
+
+  if (context.type === 'exam') {
+    const requiredLabels = new Set(['امتحان', 'صنف', 'ممتحن', 'ممیز', 'مضمون', 'تاریخ']);
+    const detailMetadata = layout.orientation === 'landscape'
+      ? metadata
+      : metadata.filter(([label]) => requiredLabels.has(label));
+    const detailY = startY;
+    const weightsByLabel = {
+      'امتحان': 1.3,
+      'مضمون': 1.05,
+      'ممتحن': 1.55,
+      'ممیز': 1.25,
+      'صنف': 0.9,
+      'سال تعلیمی': 1,
+      'دوره': 1.1,
+      'تاریخ': 1.35
+    };
+    const gap = 10;
+    const inlineInset = 4;
+    const metadataLeft = box.left + inlineInset;
+    const metadataRight = box.right - inlineInset;
+    const availableWidth = (box.width - (inlineInset * 2)) - (Math.max(0, detailMetadata.length - 1) * gap);
+    const totalWeight = detailMetadata.reduce((sum, [label]) => sum + (weightsByLabel[label] || 1), 0) || 1;
+    let cursor = metadataRight;
+
+    detailMetadata.forEach(([label, value], index) => {
+      const width = index === detailMetadata.length - 1
+        ? Math.max(42, cursor - metadataLeft)
+        : availableWidth * ((weightsByLabel[label] || 1) / totalWeight);
+      const x = cursor - width;
+      setFont(doc, 8.2, fontPath);
+      doc.fillColor('#111111');
+      writeText(doc, `${label}: ${value}`, x + 2, detailY + 3, {
+        width: width - 4,
+        height: 22,
+        align: 'right',
+        ellipsis: true
+      });
+      if (index < detailMetadata.length - 1) {
+        doc.save();
+        doc.moveTo(x - (gap / 2), detailY + 2).lineTo(x - (gap / 2), detailY + 22).stroke('#D5D5D5');
+        doc.restore();
+      }
+      cursor = x - gap;
+    });
+
+    return detailY + 28;
+  }
+
   const columns = Math.min(3, metadata.length);
   const gap = 10;
   const itemWidth = (box.width - ((columns - 1) * gap)) / columns;
@@ -845,13 +993,22 @@ async function loadSiteSettings() {
 
 function drawSignatures(doc, context, startY) {
   const { layout, signatures, fontPath, siteSettings } = context;
+  const firstRow = Array.isArray(context.report?.rows) && context.report.rows.length
+    ? context.report.rows[0]
+    : {};
+  const effectiveSignatures = context.type === 'exam'
+    ? [
+      { role: 'امضای ممتحن', name: normalizeText(firstRow.teacherName) },
+      { role: 'امضای ممیز', name: normalizeText(firstRow.reviewedByName) }
+    ]
+    : signatures;
   const box = pageMetrics(doc, layout);
   const gap = 18;
   const itemWidth = (box.width - gap) / 2;
   const signatureImage = resolveLocalAssetPath(siteSettings?.signatureUrl);
   const stampImage = resolveLocalAssetPath(siteSettings?.stampUrl);
 
-  signatures.forEach((item, index) => {
+  effectiveSignatures.forEach((item, index) => {
     const x = box.left + (index * (itemWidth + gap));
     doc.save();
     doc.moveTo(x, startY).lineTo(x + itemWidth, startY).dash(4, { space: 3 }).stroke('#183933');
@@ -866,7 +1023,7 @@ function drawSignatures(doc, context, startY) {
       }
     }
 
-    if (stampImage && index === signatures.length - 1) {
+    if (stampImage && index === effectiveSignatures.length - 1) {
       try {
         doc.image(stampImage, x + itemWidth - 62, startY + 4, { fit: [52, 52] });
       } catch {
@@ -1057,12 +1214,11 @@ function buildMetadata(type, template = null, report = {}, siteSettings = null) 
     return [
       ['مضمون', normalizeText(firstRow.subject || '')],
       ['ممتحن', normalizeText(firstRow.teacherName || '')],
-      ['ممیز', normalizeText(firstRow.reviewedByName || siteSettings?.signatureName) || 'مدیر مکتب'],
+      ['ممیز', normalizeText(firstRow.reviewedByName || '')],
       ['صنف', normalizeText(firstRow.classTitle || '')],
-      ['جلسه امتحان', normalizeText(firstRow.sessionTitle || '')],
-      ['تاریخ', formatDateValue(firstRow.heldAt || filters.dateFrom)],
-      ['ماه', normalizeText(filters.month || template?.filters?.month)],
-      ['ترم', normalizeText(firstRow.term || '') || normalizeText(filters.termId)]
+      ['سال تعلیمی', normalizeText(firstRow.academicYear || '') || normalizeText(filters.academicYearId)],
+      ['دوره', normalizeText(firstRow.term || '') || normalizeText(filters.termId)],
+      ['تاریخ', formatDateValue(firstRow.heldAt || filters.dateFrom)]
     ];
   }
 
@@ -1075,8 +1231,10 @@ function buildSignatureBlocks(type, siteSettings = null, report = {}) {
 
   if (type === 'exam') {
     return [
-      { role: 'امضاء ممتحن', name: normalizeText(firstRow.teacherName || 'استاد مضمون') },
-      { role: 'امضاء ممیز', name: normalizeText(firstRow.reviewedByName || '') || schoolSignature }
+      { role: 'امضای نگران', name: '' },
+      { role: 'امضای سرمعلم', name: '' },
+      { role: 'امضای مدیر مکتب', name: '' },
+      { role: 'امضای عضو علمی و مسلکی', name: '' }
     ];
   }
 
@@ -1246,14 +1404,14 @@ function buildPdfMetadata(type, template = null, report = {}, siteSettings = nul
 
   if (type === 'exam') {
     return [
-      ['مضمون', normalizeText(firstRow.subject || '')],
-      ['ممتحن', normalizeText(firstRow.teacherName || '')],
-      ['ممیز', normalizeText(firstRow.reviewedByName || siteSettings?.signatureName) || 'مدیر مکتب'],
+      ['امتحان', getShortExamTypeLabel(firstRow, report)],
       ['صنف', normalizeText(firstRow.classTitle || '')],
-      ['جلسه امتحان', normalizeText(firstRow.sessionTitle || '')],
+      ['ممتحن', normalizeText(firstRow.teacherName || '')],
+      ['ممیز', normalizeText(firstRow.reviewedByName || '')],
+      ['مضمون', normalizeText(firstRow.subject || '')],
       ['تاریخ', formatDateValue(firstRow.heldAt || filters.dateFrom)],
-      ['ماه', normalizeText(filters.month || template?.filters?.month)],
-      ['ترم', normalizeText(firstRow.term || '') || normalizeText(filters.termId)]
+      ['دوره', normalizeText(firstRow.term || '') || normalizeText(filters.termId)],
+      ['سال تعلیمی', normalizeText(firstRow.academicYear || '') || normalizeText(filters.academicYearId)],
     ];
   }
 
@@ -1321,8 +1479,10 @@ function buildPdfSignatureBlocks(type, siteSettings = null, report = {}) {
 
   if (type === 'exam') {
     return [
-      { role: 'امضاء ممتحن', name: normalizeText(firstRow.teacherName || 'استاد مضمون') },
-      { role: 'امضاء ممیز', name: normalizeText(firstRow.reviewedByName || '') || schoolSignature }
+      { role: 'امضای نگران', name: '' },
+      { role: 'امضای سرمعلم', name: '' },
+      { role: 'امضای مدیر مکتب', name: '' },
+      { role: 'امضای عضو علمی و مسلکی', name: '' }
     ];
   }
 
@@ -1375,7 +1535,7 @@ function buildPdfFormalNote(type = '', report = {}) {
 
 function getNoRowsMessage(type = '') {
   if (type === 'exam') {
-    return 'برای این شقه امتحان هنوز نتیجه‌ای با فیلترهای انتخاب‌شده ثبت نشده است. لطفاً جلسه امتحان، صنف یا نتایج ثبت‌شده را بررسی کنید.';
+    return 'برای این شقه امتحان هنوز نتیجه‌ای ثبت نشده است. لطفاً صنف و نتایج ثبت‌شده را بررسی کنید.';
   }
   if (type === 'subjects') {
     return 'برای این صنف هنوز مضمون یا استاد ثبت‌شده برای نمایش در شقه موجود نیست.';
@@ -1412,7 +1572,7 @@ async function buildReportPdfBuffer({ report = {}, template = null } = {}) {
   const metadata = buildPdfMetadata(type, template, report, siteSettings)
     .filter(([, value]) => normalizeText(String(value || '')));
   const summaryItems = shouldRenderPdfSummary(type) ? buildSummaryEntries(report) : [];
-  const title = normalizeText(template?.title) || getDefaultTitleByType(type);
+  const title = type === 'exam' ? 'شقه امتحان' : (normalizeText(template?.title) || getDefaultTitleByType(type));
   const subtitle = normalizeText(template?.layout?.headerText) || normalizeText(siteSettings?.brandName) || 'لیسه خصوصی مدیر';
   const footerText = normalizeText(template?.layout?.footerText) || normalizeText(siteSettings?.footerNote);
   const signatures = buildPdfSignatureBlocks(type, siteSettings, report);

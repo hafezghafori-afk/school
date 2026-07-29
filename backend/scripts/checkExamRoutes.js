@@ -123,11 +123,37 @@ const serviceMock = {
       summary: { marks: 1, results: 1, ranked: 1 }
     };
   },
+  async createExamSessionRevision() {
+    return {
+      item: { id: IDS.session, title: 'Annual - Class 10 A (version 2)', version: 2, status: 'draft' },
+      summary: { clonedMarks: 1, clonedResults: 1, version: 2 }
+    };
+  },
   async updateExamSessionStatus(_, payload = {}) {
     return {
       id: IDS.session,
       status: payload.status || 'published',
       reviewedByName: payload.reviewedByName || 'Reviewer One'
+    };
+  },
+  async getExamSessionManagementState() {
+    return {
+      item: { id: IDS.session, title: 'Annual - Class 10 A', status: 'draft' },
+      summary: { markCount: 1, substantiveMarkCount: 0, resultCount: 1 },
+      permissions: { canEditMetadata: true, canEditStructure: true, canHardDelete: true, canArchive: true }
+    };
+  },
+  async updateExamSession(_, payload = {}) {
+    return {
+      item: { id: IDS.session, title: 'Annual - Class 10 A', status: 'draft', monthLabel: payload.monthLabel || 'حمل' },
+      management: { permissions: { canEditMetadata: true, canEditStructure: true, canHardDelete: true } }
+    };
+  },
+  async deleteExamSession() {
+    return {
+      deletedId: IDS.session,
+      title: 'Annual - Class 10 A',
+      summary: { deletedMarks: 1, deletedResults: 1 }
     };
   },
   async buildSessionSheetReport() {
@@ -292,9 +318,9 @@ async function run() {
     cases.push(await request(server, '/api/exams/reference-data', { user: instructorUser }));
     const activityStart = activityCalls.length;
     cases.push(await request(server, '/api/exams/types', { method: 'POST', user: adminUser, body: { title: 'Mock Type', code: 'MOCK' } }));
-    cases.push(await request(server, '/api/exams/sessions', { method: 'POST', user: instructorUser, body: { title: 'Annual Session' } }));
-    cases.push(await request(server, '/api/exams/sessions/bootstrap-preview', { method: 'POST', user: instructorUser, body: { title: 'Bootstrap Preview' } }));
-    cases.push(await request(server, '/api/exams/sessions/bootstrap', { method: 'POST', user: instructorUser, body: { title: 'Bootstrap Session' } }));
+    cases.push(await request(server, '/api/exams/sessions', { method: 'POST', user: adminUser, body: { title: 'Annual Session' } }));
+    cases.push(await request(server, '/api/exams/sessions/bootstrap-preview', { method: 'POST', user: adminUser, body: { title: 'Bootstrap Preview' } }));
+    cases.push(await request(server, '/api/exams/sessions/bootstrap', { method: 'POST', user: adminUser, body: { title: 'Bootstrap Session' } }));
     cases.push(await request(server, `/api/exams/sessions/${IDS.session}/roster-status`, { user: instructorUser }));
     cases.push(await request(server, `/api/exams/sessions/${IDS.session}/initialize-roster`, { method: 'POST', user: instructorUser }));
     cases.push(await request(server, `/api/exams/sessions/${IDS.session}/marks`, { user: instructorUser }));
@@ -305,6 +331,7 @@ async function run() {
     }));
     cases.push(await request(server, '/api/exams/marks/upsert', { method: 'POST', user: instructorUser, body: { sessionId: IDS.session, studentMembershipId: IDS.membership, obtainedMark: 88 } }));
     cases.push(await request(server, `/api/exams/sessions/${IDS.session}/recompute-results`, { method: 'POST', user: instructorUser }));
+    cases.push(await request(server, `/api/exams/sessions/${IDS.session}/revisions`, { method: 'POST', user: adminUser, body: { reason: 'Correction' } }));
     cases.push(await request(server, `/api/exams/sessions/${IDS.session}/status`, {
       method: 'POST',
       user: instructorUser,
@@ -315,6 +342,10 @@ async function run() {
     cases.push(await request(server, '/api/exams/my/results', { user: studentUser }));
     cases.push(await request(server, `/api/exams/students/${IDS.studentUser}/results`, { user: studentUser }));
     cases.push(await request(server, `/api/exams/sessions/${IDS.session}/marks`, { user: outsiderInstructor }));
+    cases.push(await request(server, '/api/exams/sessions/bootstrap', { method: 'POST', user: instructorUser, body: { title: 'Forbidden Instructor Bootstrap' } }));
+    cases.push(await request(server, `/api/exams/sessions/${IDS.session}/management-state`, { user: adminUser }));
+    cases.push(await request(server, `/api/exams/sessions/${IDS.session}`, { method: 'PATCH', user: adminUser, body: { monthLabel: 'حمل' } }));
+    cases.push(await request(server, `/api/exams/sessions/${IDS.session}`, { method: 'DELETE', user: adminUser }));
 
     assertCase(cases[0].status === 401, 'Expected reference-data route to require authentication.');
     assertCase(cases[1].status === 403, 'Expected reference-data route to require permission.');
@@ -329,13 +360,18 @@ async function run() {
     assertCase(cases[10].status === 200 && cases[10].data?.summary?.recordedMarks === 1, 'Expected batch marks route to return updated summary.');
     assertCase(cases[11].status === 200 && cases[11].data?.result?.resultStatus === 'passed', 'Expected exam mark upsert to return computed result.');
     assertCase(cases[12].status === 200 && cases[12].data?.summary?.ranked === 1, 'Expected recompute endpoint to return summary.');
-    assertCase(cases[13].status === 200 && cases[13].data?.item?.status === 'published', 'Expected session status route to publish the sheet.');
-    assertCase(cases[14].status === 200 && /<html/i.test(String(cases[14].text || '')), 'Expected print export to return html.');
-    assertCase(cases[15].status === 200 && cases[15].text === 'pdf', 'Expected PDF export to return mock buffer content.');
-    assertCase(cases[16].status === 200 && Array.isArray(cases[16].data?.items), 'Expected my results endpoint to return items.');
-    assertCase(cases[17].status === 200 && Array.isArray(cases[17].data?.items), 'Expected student results endpoint to return items.');
-    assertCase(cases[18].status === 403, 'Expected unrelated instructor to be blocked from another teacher session.');
-    assertCase(activityCalls.length === activityStart + 8, `Expected 8 exam activity logs, received ${activityCalls.length - activityStart}.`);
+    assertCase(cases[13].status === 201 && cases[13].data?.summary?.version === 2, 'Expected revision endpoint to create version 2.');
+    assertCase(cases[14].status === 200 && cases[14].data?.item?.status === 'published', 'Expected session status route to publish the sheet.');
+    assertCase(cases[15].status === 200 && /<html/i.test(String(cases[15].text || '')), 'Expected print export to return html.');
+    assertCase(cases[16].status === 200 && cases[16].text === 'pdf', 'Expected PDF export to return mock buffer content.');
+    assertCase(cases[17].status === 200 && Array.isArray(cases[17].data?.items), 'Expected my results endpoint to return items.');
+    assertCase(cases[18].status === 200 && Array.isArray(cases[18].data?.items), 'Expected student results endpoint to return items.');
+    assertCase(cases[19].status === 403, 'Expected unrelated instructor to be blocked from another teacher session.');
+    assertCase(cases[20].status === 403, 'Expected instructors to be blocked from creating centrally managed sheets.');
+    assertCase(cases[21].status === 200 && cases[21].data?.permissions?.canHardDelete === true, 'Expected management-state route to return safe actions.');
+    assertCase(cases[22].status === 200 && cases[22].data?.item?.monthLabel === 'حمل', 'Expected exam session update route to return edited data.');
+    assertCase(cases[23].status === 200 && cases[23].data?.deletedId === IDS.session, 'Expected safe draft deletion route to return the deleted session id.');
+    assertCase(activityCalls.length === activityStart + 11, `Expected 11 exam activity logs, received ${activityCalls.length - activityStart}.`);
     assertCase(activityCalls[activityStart]?.action === 'create_exam_type', 'Expected create_exam_type activity.');
     assertCase(activityCalls[activityStart + 1]?.action === 'create_exam_session', 'Expected create_exam_session activity.');
     assertCase(activityCalls[activityStart + 2]?.action === 'bootstrap_exam_session', 'Expected bootstrap_exam_session activity.');
@@ -343,7 +379,10 @@ async function run() {
     assertCase(activityCalls[activityStart + 4]?.action === 'save_exam_sheet_marks', 'Expected save_exam_sheet_marks activity.');
     assertCase(activityCalls[activityStart + 5]?.action === 'upsert_exam_mark', 'Expected upsert_exam_mark activity.');
     assertCase(activityCalls[activityStart + 6]?.action === 'recompute_exam_results', 'Expected recompute_exam_results activity.');
-    assertCase(activityCalls[activityStart + 7]?.action === 'update_exam_session_status', 'Expected update_exam_session_status activity.');
+    assertCase(activityCalls[activityStart + 7]?.action === 'create_exam_session_revision', 'Expected create_exam_session_revision activity.');
+    assertCase(activityCalls[activityStart + 8]?.action === 'update_exam_session_status', 'Expected update_exam_session_status activity.');
+    assertCase(activityCalls[activityStart + 9]?.action === 'update_exam_session', 'Expected update_exam_session activity.');
+    assertCase(activityCalls[activityStart + 10]?.action === 'delete_exam_session_draft', 'Expected delete_exam_session_draft activity.');
 
     console.log('check:exam-routes PASS');
   } finally {

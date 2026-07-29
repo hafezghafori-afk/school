@@ -47,6 +47,12 @@ const enrollmentSchema = new mongoose.Schema({
   },
   registrationId: { type: String, default: '' },
   asasNumber: { type: String, default: '' },
+  registrationSource: {
+    type: String,
+    enum: ['', 'online', 'manual'],
+    default: '',
+    index: true
+  },
   status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
   linkedStudentId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -76,6 +82,7 @@ const enrollmentSchema = new mongoose.Schema({
 enrollmentSchema.index({ linkedStudentId: 1 }, { sparse: true });
 enrollmentSchema.index({ linkedUserId: 1 }, { sparse: true });
 enrollmentSchema.index({ status: 1, createdAt: -1 });
+enrollmentSchema.index({ registrationSource: 1, status: 1, createdAt: -1 });
 enrollmentSchema.index({ 'academicContext.schoolId': 1, status: 1 });
 
 module.exports = mongoose.model('Enrollment', enrollmentSchema);

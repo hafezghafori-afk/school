@@ -4,6 +4,7 @@ const { requireAuth, requireRole, requirePermission } = require('../middleware/a
 const {
   createTableConfig,
   generateResultTable,
+  getClassAggregateReadiness,
   getResultTable,
   listResultTableReferenceData,
   listResultTables,
@@ -81,6 +82,19 @@ router.get('/', requireAuth, requireRole(['admin', 'instructor']), requirePermis
   }
 });
 
+router.get('/readiness', requireAuth, requireRole(['admin', 'instructor']), requirePermission('manage_content'), async (req, res) => {
+  try {
+    const data = await getClassAggregateReadiness({
+      academicYearId: req.query?.academicYearId,
+      classId: req.query?.classId
+    });
+    return res.json({ success: true, ...data });
+  } catch (error) {
+    const code = String(error?.message || '');
+    return res.status(getResultTableErrorStatus(code)).json({ success: false, message: code || 'Failed to check aggregate readiness.' });
+  }
+});
+
 router.post('/generate', requireAuth, requireRole(['admin', 'instructor']), requirePermission('manage_content'), async (req, res) => {
   try {
     if (!req.body?.templateId) {
@@ -97,6 +111,9 @@ router.post('/generate', requireAuth, requireRole(['admin', 'instructor']), requ
         templateId: String(req.body?.templateId || item?.template?.id || ''),
         configId: String(req.body?.configId || item?.config?.id || ''),
         sessionId: String(req.body?.sessionId || item?.session?.id || ''),
+        scopeType: String(req.body?.scopeType || item?.scopeType || 'session'),
+        academicYearId: String(req.body?.academicYearId || item?.academicYear?.id || ''),
+        classId: String(req.body?.classId || item?.schoolClass?.id || ''),
         rowCount: Number(item?.rowCount || item?.rows?.length || 0)
       }
     });

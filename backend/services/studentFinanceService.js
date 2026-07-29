@@ -26,6 +26,7 @@ const {
   syncStudentFinanceFromFinanceBill,
   syncStudentFinanceFromFinanceReceipt
 } = require('../utils/studentFinanceSync');
+const { suppressAutomaticFinanceBillSync } = require('../utils/financeSyncControl');
 const { deriveLinkScope } = require('../utils/financeLinkScope');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const {
@@ -517,6 +518,7 @@ async function syncDiscountOpenBills(discount = null) {
       }
     }
     refreshFinanceBillStatus(bill);
+    suppressAutomaticFinanceBillSync(bill);
     await bill.save();
     await syncStudentFinanceFromFinanceBill(bill).catch(() => null);
   }
@@ -610,6 +612,7 @@ async function syncExemptionOpenBills(exemption = null) {
       }
     }
     refreshFinanceBillStatus(bill);
+    suppressAutomaticFinanceBillSync(bill);
     await bill.save();
     await syncStudentFinanceFromFinanceBill(bill).catch(() => null);
   }

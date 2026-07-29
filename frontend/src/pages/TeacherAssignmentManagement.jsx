@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -63,6 +63,11 @@ const TeacherAssignmentManagement = () => {
   const [subjectVisibleCounts, setSubjectVisibleCounts] = useState({});
   const [workloadData, setWorkloadData] = useState(null);
   const [workloadYearId, setWorkloadYearId] = useState('');
+  const [filters, setFilters] = useState({
+    academicYearId: 'all',
+    teacherUserId: 'all',
+    subjectId: 'all'
+  });
   
   const [formData, setFormData] = useState({
     academicYearId: '',
@@ -187,16 +192,18 @@ const TeacherAssignmentManagement = () => {
       const data = await response.json();
       
       if (data.success) {
-        setAcademicYears(data.data.filter(year => year.status === 'active'));
+        setAcademicYears(Array.isArray(data.data) ? data.data : []);
       }
     } catch (error) {
       console.error('Error fetching academic years:', error);
     }
   };
 
-  const fetchWorkloadData = async () => {
+  const fetchWorkloadData = async (yearOverride = '') => {
     try {
-      const fallbackYearId = formData.academicYearId || workloadYearId || academicYears[0]?._id || '';
+      const filteredYearId = filters.academicYearId !== 'all' ? filters.academicYearId : '';
+      const activeYearId = academicYears.find((year) => year.status === 'active')?._id || academicYears[0]?._id || '';
+      const fallbackYearId = yearOverride || filteredYearId || formData.academicYearId || workloadYearId || activeYearId;
       if (!fallbackYearId) {
         toast.error('سال تعلیمی فعال برای بررسی بار درسی پیدا نشد.');
         return;
@@ -222,12 +229,103 @@ const TeacherAssignmentManagement = () => {
 
   useEffect(() => {
     if (!workloadYearId && academicYears.length > 0) {
-      setWorkloadYearId(String(academicYears[0]._id));
+      const activeYear = academicYears.find((year) => year.status === 'active') || academicYears[0];
+      setWorkloadYearId(String(activeYear._id));
     }
   }, [academicYears, workloadYearId]);
 
+  const filteredAssignments = useMemo(() => {
+    const getId = (value) => String(value?._id || value?.id || value || '').trim();
+    return assignments
+      .filter((assignment) => (
+        (filters.academicYearId === 'all' || getId(assignment.academicYearId) === filters.academicYearId)
+        && (filters.teacherUserId === 'all' || getId(assignment.teacherUserId) === filters.teacherUserId)
+        && (filters.subjectId === 'all' || getId(assignment.subjectId) === filters.subjectId)
+      ))
+      .sort((left, right) => {
+        const leftYear = String(left.academicYearId?.title || left.academicYearId?.name || '');
+        const rightYear = String(right.academicYearId?.title || right.academicYearId?.name || '');
+        if (leftYear !== rightYear) return rightYear.localeCompare(leftYear, 'fa');
+        const leftTeacher = String(left.teacherUserId?.name || '');
+        const rightTeacher = String(right.teacherUserId?.name || '');
+        return leftTeacher.localeCompare(rightTeacher, 'fa');
+      });
+  }, [assignments, filters]);
+
+  const hasActiveFilters = Object.values(filters).some((value) => value !== 'all');
+
+  const handleFilterChange = (field, value) => {
+    setFilters((current) => ({ ...current, [field]: value }));
+    if (field === 'academicYearId') {
+      setWorkloadData(null);
+      setWorkloadYearId(value === 'all' ? '' : value);
+    }
+  };
+
+  const handleWorkloadToggle = () => {
+    if (workloadData) {
+      setWorkloadData(null);
+      return;
+    }
+    fetchWorkloadData(filters.academicYearId === 'all' ? '' : filters.academicYearId);
+  };
+
+  const openNewAssignmentForm = () => {
+    const selectedYearId = filters.academicYearId !== 'all'
+      ? filters.academicYearId
+      : String(academicYears.find((year) => year.status === 'active')?._id || academicYears[0]?._id || '');
+    setBulkMode(false);
+    setEditingAssignment(null);
+    setSingleWizardStep(1);
+    resetForm({ academicYearId: selectedYearId });
+    setShowForm(true);
+  };
+
+  const toggleBulkMode = () => {
+    const nextBulkMode = !bulkMode;
+    setBulkMode(nextBulkMode);
+    setShowForm(false);
+    setEditingAssignment(null);
+    setSingleWizardStep(1);
+    if (nextBulkMode) {
+      const selectedYearId = filters.academicYearId !== 'all'
+        ? filters.academicYearId
+        : String(academicYears.find((year) => year.status === 'active')?._id || academicYears[0]?._id || '');
+      resetForm({ academicYearId: selectedYearId });
+    }
+  };
+
+  const validateSingleStep = (step) => {
+    if (step === 1 && (!formData.academicYearId || !formData.classId || !formData.subjectId || !formData.teacherUserId)) {
+      toast.error('لطفاً سال تعلیمی، صنف، مضمون و استاد را انتخاب کنید.');
+      return false;
+    }
+    if (step === 2 && (
+      Number(formData.weeklyPeriods) < 1
+      || Number(formData.maxPeriodsPerDay) < 1
+      || Number(formData.maxPeriodsPerWeek) < Number(formData.weeklyPeriods)
+    )) {
+      toast.error('ساعات و ظرفیت استاد را به‌صورت درست وارد کنید.');
+      return false;
+    }
+    return true;
+  };
+
+  const advanceSingleWizard = () => {
+    if (!validateSingleStep(singleWizardStep)) return;
+    setSingleWizardStep((current) => Math.min(3, current + 1));
+  };
+
+  const selectSingleWizardStep = (targetStep) => {
+    if (targetStep > 1 && !validateSingleStep(1)) return;
+    if (targetStep > 2 && !validateSingleStep(2)) return;
+    setSingleWizardStep(targetStep);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (!validateSingleStep(1) || !validateSingleStep(2)) return;
     
     try {
       const url = editingAssignment 
@@ -264,6 +362,7 @@ const TeacherAssignmentManagement = () => {
 
   const handleEdit = (assignment) => {
     const getId = (value) => String(value?._id || value?.id || value || '');
+    setBulkMode(false);
     setEditingAssignment(assignment);
     setFormData({
       academicYearId: getId(assignment.academicYearId),
@@ -293,7 +392,7 @@ const TeacherAssignmentManagement = () => {
   };
 
   const handleDelete = async (assignmentId) => {
-    if (!confirm('آیا مطمئن هستید که این تخصیص حذف شود؟')) return;
+    if (!confirm('آیا مطمئن هستید که این تخصیص ختم شود؟ سابقه آن در سیستم نگهداری می‌شود.')) return;
     
     try {
       const response = await fetch(`/api/teacher-assignments/${assignmentId}`, {
@@ -304,14 +403,14 @@ const TeacherAssignmentManagement = () => {
       const data = await response.json();
       
       if (data.success) {
-        toast.success('تخصیص استاد حذف شد.');
+        toast.success('تخصیص استاد ختم شد.');
         fetchAssignments();
       } else {
-        toast.error(data.message || 'حذف تخصیص استاد ناموفق بود.');
+        toast.error(data.message || 'ختم تخصیص استاد ناموفق بود.');
       }
     } catch (error) {
       console.error('Error deleting assignment:', error);
-      toast.error('حذف تخصیص استاد ناموفق بود.');
+      toast.error('ختم تخصیص استاد ناموفق بود.');
     }
   };
 
@@ -443,9 +542,18 @@ const TeacherAssignmentManagement = () => {
       const data = await response.json();
       
       if (data.success) {
-        toast.success(`${data.data.length} تخصیص استاد ایجاد شد.`);
-        setBulkMode(false);
-        setBulkAssignments([]);
+        const createdCount = Array.isArray(data.data) ? data.data.length : 0;
+        const errorCount = Array.isArray(data.errors) ? data.errors.length : 0;
+        if (createdCount > 0) {
+          toast.success(`${createdCount} تخصیص استاد ایجاد شد.`);
+        }
+        if (errorCount > 0) {
+          toast.error(`${errorCount} تخصیص ایجاد نشد؛ موارد تکراری یا ظرفیت استاد را بررسی کنید.`);
+        }
+        if (createdCount > 0 && errorCount === 0) {
+          setBulkMode(false);
+          setBulkAssignments([]);
+        }
         fetchAssignments();
       } else {
         toast.error(data.message || 'ایجاد تخصیص‌های گروهی ناموفق بود.');
@@ -473,12 +581,13 @@ const TeacherAssignmentManagement = () => {
 
   const handleBulkAssignmentUpdate = (teacherId, subjectId, field, value) => {
     const key = `${teacherId}-${subjectId}`;
+    const normalizedValue = Number.isFinite(Number(value)) ? Math.max(1, Number(value)) : 1;
     setBulkAssignments(prev => prev.map(a => 
-      `${a.teacherUserId}-${a.subjectId}` === key ? { ...a, [field]: value } : a
+      `${a.teacherUserId}-${a.subjectId}` === key ? { ...a, [field]: normalizedValue } : a
     ));
   };
 
-  const resetForm = () => {
+  const resetForm = (overrides = {}) => {
     setFormData({
       academicYearId: '',
       classId: '',
@@ -500,7 +609,8 @@ const TeacherAssignmentManagement = () => {
         needsPlayground: false,
         needsLibrary: false
       },
-      assignmentType: 'permanent'
+      assignmentType: 'permanent',
+      ...overrides
     });
   };
 
@@ -576,14 +686,14 @@ const TeacherAssignmentManagement = () => {
     return <div className="flex justify-center items-center h-64">در حال بارگذاری...</div>;
   }
 
-  const totalAssignments = assignments.length;
-  const mainTeacherAssignments = assignments.filter((item) => item.isMainTeacher).length;
-  const permanentAssignments = assignments.filter((item) => item.assignmentType === 'permanent').length;
-  const totalWeeklyPeriods = assignments.reduce((sum, item) => sum + (Number(item.weeklyPeriods) || 0), 0);
+  const totalAssignments = filteredAssignments.length;
+  const mainTeacherAssignments = filteredAssignments.filter((item) => item.isMainTeacher).length;
+  const permanentAssignments = filteredAssignments.filter((item) => item.assignmentType === 'permanent').length;
+  const totalWeeklyPeriods = filteredAssignments.reduce((sum, item) => sum + (Number(item.weeklyPeriods) || 0), 0);
 
   return (
     <div className="container mx-auto p-6 space-y-6 tt-shared-page tt-assignment-page" dir="rtl">
-      <div className="flex justify-between items-center tt-shared-header tt-assignment-hero">
+      <div className="tt-shared-header tt-assignment-hero">
         <div className="tt-assignment-hero-main">
           <h1 className="text-3xl font-bold text-gray-900 tt-shared-title">معرفی صنف به استاد</h1>
           <p className="text-gray-600 mt-2 tt-shared-subtitle">استاد را برای صنف و مضمون همراه با ساعات هفته‌وار تعیین کنید.</p>
@@ -606,41 +716,83 @@ const TeacherAssignmentManagement = () => {
             </div>
           </div>
         </div>
-        <div className="flex gap-2 tt-assignment-hero-actions">
-          <Button 
+      </div>
+
+      <section className="tt-assignment-command-bar" aria-label="فیلتر و عملیات تخصیص استاد">
+        <div className="tt-assignment-filter-area">
+          <div className="tt-assignment-filter-field">
+            <Label>سال تعلیمی</Label>
+            <Select value={filters.academicYearId} onValueChange={(value) => handleFilterChange('academicYearId', value)} aria-label="فیلتر سال تعلیمی">
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">همه سال‌ها</SelectItem>
+                {academicYears.map((year) => (
+                  <SelectItem key={year._id} value={String(year._id)}>{getYearLabel(year)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="tt-assignment-filter-field">
+            <Label>استاد</Label>
+            <Select value={filters.teacherUserId} onValueChange={(value) => handleFilterChange('teacherUserId', value)} aria-label="فیلتر استاد">
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">همه استادان</SelectItem>
+                {teachers.map((teacher) => (
+                  <SelectItem key={teacher._id} value={String(teacher._id)}>{getTeacherLabel(teacher)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="tt-assignment-filter-field">
+            <Label>مضمون</Label>
+            <Select value={filters.subjectId} onValueChange={(value) => handleFilterChange('subjectId', value)} aria-label="فیلتر مضمون">
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">همه مضامین</SelectItem>
+                {subjects.map((subject) => (
+                  <SelectItem key={subject._id} value={String(subject._id)}>{getSubjectLabel(subject)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Button
+            type="button"
             variant="outline"
-            onClick={fetchWorkloadData}
-            className="tt-assignment-ghost-btn"
-          >
-            <Users className="w-4 h-4 mr-2" />
-            بررسی فشار کاری استادان
-          </Button>
-          <Button 
-            variant="outline"
-            onClick={() => setBulkMode(!bulkMode)}
-            className="tt-assignment-ghost-btn"
-          >
-            {bulkMode ? 'حالت تکی' : 'حالت گروهی'}
-          </Button>
-          <Button 
+            className="tt-assignment-filter-reset"
+            disabled={!hasActiveFilters}
             onClick={() => {
-              setShowForm(true);
-              setSingleWizardStep(1);
+              setFilters({ academicYearId: 'all', teacherUserId: 'all', subjectId: 'all' });
+              setWorkloadData(null);
             }}
-            className="flex items-center gap-2 tt-assignment-primary-btn"
           >
+            پاک‌کردن فیلترها
+          </Button>
+        </div>
+
+        <div className="tt-assignment-action-row">
+          <Button variant="outline" onClick={handleWorkloadToggle} className="tt-assignment-ghost-btn">
+            <Users className="w-4 h-4" />
+            {workloadData ? 'بستن فشار کاری' : 'فشار کاری استادان'}
+          </Button>
+          <Button variant="outline" onClick={toggleBulkMode} className={`tt-assignment-ghost-btn ${bulkMode ? 'is-active' : ''}`}>
+            {bulkMode ? 'بستن حالت گروهی' : 'حالت گروهی'}
+          </Button>
+          <Button onClick={openNewAssignmentForm} className="tt-assignment-primary-btn">
             <Plus className="w-4 h-4" />
             افزودن تخصیص
           </Button>
         </div>
-      </div>
-
-      <div className="tt-assignment-feature-strip">
-        <span className="tt-assignment-feature-pill">هوشمند</span>
-        <span className="tt-assignment-feature-pill">گروهی</span>
-        <span className="tt-assignment-feature-pill">متعادل‌سازی بار</span>
-        <span className="tt-assignment-feature-caption">پیشنهاد: در حالت گروهی ابتدا استادان کم‌بار را برای مضامین اصلی انتخاب کنید.</span>
-      </div>
+      </section>
 
       {/* Workload Summary */}
       {workloadData && (
@@ -695,7 +847,7 @@ const TeacherAssignmentManagement = () => {
                     setFormData({...formData, academicYearId: value});
                     setBulkAssignments([]);
                     setSubjectVisibleCounts({});
-                    fetchWorkloadData();
+                    fetchWorkloadData(value);
                   }}
                 >
                   <SelectTrigger>
@@ -703,14 +855,14 @@ const TeacherAssignmentManagement = () => {
                   </SelectTrigger>
                   <SelectContent>
                     {academicYears.map((year) => (
-                      <SelectItem key={year._id} value={year._id}>
+                      <SelectItem key={year._id} value={String(year._id)}>
                             {getYearLabel(year)}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 {academicYears.length === 0 && (
-                  <p className="tt-assignment-inline-hint">سال تعلیمی فعال برای انتخاب موجود نیست.</p>
+                  <p className="tt-assignment-inline-hint">سال تعلیمی برای انتخاب موجود نیست.</p>
                 )}
               </div>
 
@@ -750,7 +902,7 @@ const TeacherAssignmentManagement = () => {
                   )}
 
                   {!bulkSubjectsLoading && bulkSubjects.length > 0 && bulkSubjectsSource === 'grade' && (
-                    <p className="tt-assignment-inline-hint">مضامین از نصاب صنف پیدا نشد؛ لیست فعلی بر اساس پایه/صنف نمایش داده شده است.</p>
+                    <p className="tt-assignment-inline-hint">مضامین از نصاب صنف پیدا نشد؛ فهرست فعلی بر اساس پایه/صنف نمایش داده شده است.</p>
                   )}
 
                   {bulkSubjects.map((subject) => {
@@ -917,9 +1069,9 @@ const TeacherAssignmentManagement = () => {
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4 tt-assignment-form">
               <div className="tt-assignment-wizard-steps" aria-label="مراحل ثبت تخصیص استاد">
-                <button type="button" className={`tt-assignment-wizard-step ${singleWizardStep === 1 ? 'is-active' : ''}`} onClick={() => setSingleWizardStep(1)}>۱. پایه</button>
-                <button type="button" className={`tt-assignment-wizard-step ${singleWizardStep === 2 ? 'is-active' : ''}`} onClick={() => setSingleWizardStep(2)}>۲. ظرفیت</button>
-                <button type="button" className={`tt-assignment-wizard-step ${singleWizardStep === 3 ? 'is-active' : ''}`} onClick={() => setSingleWizardStep(3)}>۳. نوع</button>
+                <button type="button" className={`tt-assignment-wizard-step ${singleWizardStep === 1 ? 'is-active' : ''}`} onClick={() => selectSingleWizardStep(1)}>۱. پایه</button>
+                <button type="button" className={`tt-assignment-wizard-step ${singleWizardStep === 2 ? 'is-active' : ''}`} onClick={() => selectSingleWizardStep(2)}>۲. ظرفیت</button>
+                <button type="button" className={`tt-assignment-wizard-step ${singleWizardStep === 3 ? 'is-active' : ''}`} onClick={() => selectSingleWizardStep(3)}>۳. نوع</button>
               </div>
 
               {singleWizardStep === 1 && (
@@ -1055,7 +1207,7 @@ const TeacherAssignmentManagement = () => {
                   قبلی
                 </Button>
                 {singleWizardStep < 3 ? (
-                  <Button type="button" className="tt-assignment-primary-btn" onClick={() => setSingleWizardStep((prev) => Math.min(3, prev + 1))}>
+                  <Button type="button" className="tt-assignment-primary-btn" onClick={advanceSingleWizard}>
                     بعدی
                   </Button>
                 ) : (
@@ -1072,9 +1224,16 @@ const TeacherAssignmentManagement = () => {
         </Card>
       )}
 
+      <div className="tt-assignment-results-heading">
+        <div>
+          <h2>فهرست تخصیص‌ها</h2>
+          <p>{hasActiveFilters ? `${filteredAssignments.length} مورد از ${assignments.length} تخصیص نمایش داده می‌شود.` : `${assignments.length} تخصیص فعال`}</p>
+        </div>
+      </div>
+
       {/* Assignments List */}
       <div className="tt-assignment-list-grid tt-assignment-wizard-list-grid">
-        {assignments.map((assignment, index) => (
+        {filteredAssignments.map((assignment, index) => (
           <Card
             key={assignment._id}
             className="hover:shadow-lg transition-shadow tt-assignment-item-card tt-assignment-wizard-item-card"
@@ -1120,13 +1279,16 @@ const TeacherAssignmentManagement = () => {
                   </div>
                 </div>
 
-                <div className="tt-assignment-card-badges">
+                <div className="tt-assignment-card-badges tt-assignment-card-warnings">
                   {isMissingValue(getClassLabel(assignment.classId)) && (
                     <Badge variant="outline" className="tt-assignment-missing-badge">صنف نامشخص</Badge>
                   )}
                   {isMissingValue(getYearLabel(assignment.academicYearId)) && (
                     <Badge variant="outline" className="tt-assignment-missing-badge">سال نامشخص</Badge>
                   )}
+                </div>
+
+                <div className="tt-assignment-card-actions">
                   <Button
                     size="sm"
                     variant="outline"
@@ -1143,7 +1305,7 @@ const TeacherAssignmentManagement = () => {
                     className="flex items-center gap-1 text-red-600 hover:text-red-700 tt-assignment-delete-btn"
                   >
                     <Trash2 className="w-3 h-3" />
-                    حذف
+                    ختم تخصیص
                   </Button>
                 </div>
               </div>
@@ -1152,12 +1314,27 @@ const TeacherAssignmentManagement = () => {
         ))}
       </div>
 
+      {assignments.length > 0 && filteredAssignments.length === 0 && (
+        <div className="text-center py-10 tt-assignment-empty-state">
+          <AlertCircle className="w-10 h-10 text-gray-400 mx-auto mb-3" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">تخصیصی مطابق فیلتر پیدا نشد</h3>
+          <p className="text-gray-600 mb-4">فیلترهای سال، استاد یا مضمون را تغییر دهید.</p>
+          <Button
+            variant="outline"
+            className="tt-assignment-ghost-btn"
+            onClick={() => setFilters({ academicYearId: 'all', teacherUserId: 'all', subjectId: 'all' })}
+          >
+            نمایش همه تخصیص‌ها
+          </Button>
+        </div>
+      )}
+
       {assignments.length === 0 && !loading && (
         <div className="text-center py-12 tt-assignment-empty-state">
           <UserCheck className="w-12 h-12 text-gray-400 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">هیچ تخصیصی پیدا نشد</h3>
           <p className="text-gray-600 mb-4">برای شروع ساخت تقسیم اوقات، استادان را به صنف‌ها و مضامین وصل کنید.</p>
-          <Button onClick={() => setShowForm(true)} className="tt-assignment-primary-btn">
+          <Button onClick={openNewAssignmentForm} className="tt-assignment-primary-btn">
             <Plus className="w-4 h-4 mr-2" />
             افزودن نخستین تخصیص
           </Button>

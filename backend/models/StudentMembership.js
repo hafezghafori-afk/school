@@ -1,16 +1,15 @@
 ﻿const mongoose = require('mongoose');
 const { applySchoolOwnership } = require('../utils/schoolOwnership');
+const {
+  buildConcurrentCurrentMembershipFilter
+} = require('../utils/studentMembershipIntegrity');
+const {
+  CURRENT_STUDENT_MEMBERSHIP_STATUSES,
+  ENDED_STUDENT_MEMBERSHIP_STATUSES
+} = require('../utils/studentMembershipStatus');
 
-const CURRENT_STATUSES = new Set(['active', 'pending', 'suspended', 'transferred_in']);
-const ENDED_STATUSES = new Set([
-  'transferred',
-  'transferred_out',
-  'graduated',
-  'dropped',
-  'expelled',
-  'inactive',
-  'rejected'
-]);
+const CURRENT_STATUSES = new Set(CURRENT_STUDENT_MEMBERSHIP_STATUSES);
+const ENDED_STATUSES = new Set(ENDED_STUDENT_MEMBERSHIP_STATUSES);
 
 const membershipSchema = new mongoose.Schema({
   student: {
@@ -83,6 +82,18 @@ const membershipSchema = new mongoose.Schema({
     enum: ['order', 'admin', 'import', 'system', 'migration', 'promotion'],
     default: 'system'
   },
+  previousMembershipId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'StudentMembership',
+    default: null,
+    index: true
+  },
+  admissionType: {
+    type: String,
+    enum: ['regular', 'transfer_in', 're_enrollment', 'promotion', 'import', 'migration'],
+    default: 'regular',
+    index: true
+  },
   enrolledAt: {
     type: Date,
     default: null
@@ -132,8 +143,13 @@ const membershipSchema = new mongoose.Schema({
     ref: 'StudentMembership',
     default: null,
     index: true
+  },
+  changeVersion: {
+    type: Number,
+    default: 0,
+    min: 0
   }
-}, { timestamps: true });
+}, { timestamps: true, optimisticConcurrency: true });
 
 membershipSchema.pre('validate', async function syncMembershipLifecycle() {
   if (!this.enrolledAt) {
@@ -199,7 +215,39 @@ membershipSchema.pre('validate', async function syncMembershipLifecycle() {
   if (!ENDED_STATUSES.has(this.status)) {
     this.endedReason = '';
   }
+  if (!this.admissionType) {
+    if (this.source === 'promotion') this.admissionType = 'promotion';
+    else if (this.source === 'import') this.admissionType = 'import';
+    else if (this.source === 'migration') this.admissionType = 'migration';
+    else if (this.status === 'transferred_in') this.admissionType = 'transfer_in';
+    else this.admissionType = 'regular';
+  }
   await applySchoolOwnership(this);
+});
+
+membershipSchema.pre('save', function incrementMembershipChangeVersion() {
+  if (!this.isNew && this.isModified()) {
+    this.changeVersion = Number(this.changeVersion || 0) + 1;
+  }
+});
+
+membershipSchema.pre('validate', async function preventConcurrentClassMemberships() {
+  if (!this.student || this.isCurrent !== true || !CURRENT_STATUSES.has(this.status)) return;
+
+  const conflictQuery = this.constructor.findOne(buildConcurrentCurrentMembershipFilter({
+    schoolId: this.schoolId,
+    studentId: this.student,
+    academicYearId: this.academicYearId || this.academicYear,
+    excludeMembershipId: this._id
+  })).select('_id classId course academicYear academicYearId');
+  if (this.$session()) conflictQuery.session(this.$session());
+  const conflict = await conflictQuery.lean();
+
+  if (!conflict) return;
+  this.invalidate(
+    'isCurrent',
+    'این شاگرد در همین سال تعلیمی عضویت فعال دیگری دارد؛ ابتدا تبدیل یا ختم عضویت قبلی را ثبت کنید.'
+  );
 });
 
 membershipSchema.index(

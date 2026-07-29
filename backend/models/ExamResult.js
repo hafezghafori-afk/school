@@ -10,13 +10,25 @@ const examResultSchema = new mongoose.Schema({
   studentMembershipId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentMembership', required: true, index: true },
   studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentCore', default: null, index: true },
   student: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+  membershipSnapshot: {
+    status: { type: String, default: '', trim: true },
+    statusLabel: { type: String, default: '', trim: true },
+    admissionType: { type: String, default: '', trim: true },
+    isCurrent: { type: Boolean, default: false },
+    enrolledAt: { type: Date, default: null },
+    endedAt: { type: Date, default: null },
+    endedReason: { type: String, default: '', trim: true },
+    capturedAt: { type: Date, default: null },
+    effectiveAt: { type: Date, default: null }
+  },
   markStatus: {
     type: String,
-    enum: ['recorded', 'absent', 'excused', 'pending'],
+    enum: ['recorded', 'absent', 'excused', 'pending', 'not_applicable'],
     default: 'recorded',
     index: true
   },
   scoreBreakdown: {
+    attendanceScore: { type: Number, default: null, min: 0 },
     writtenScore: { type: Number, default: null, min: 0 },
     oralScore: { type: Number, default: null, min: 0 },
     classActivityScore: { type: Number, default: null, min: 0 },
@@ -28,7 +40,7 @@ const examResultSchema = new mongoose.Schema({
   averageMark: { type: Number, default: 0, min: 0, max: 100 },
   resultStatus: {
     type: String,
-    enum: ['passed', 'failed', 'conditional', 'distinction', 'temporary', 'placement', 'excused', 'absent', 'pending'],
+    enum: ['passed', 'failed', 'conditional', 'distinction', 'temporary', 'placement', 'excused', 'absent', 'pending', 'not_applicable'],
     default: 'pending',
     index: true
   },
@@ -47,6 +59,7 @@ examResultSchema.pre('validate', function syncExamResultState() {
     this.rank = null;
     if (this.scoreBreakdown && typeof this.scoreBreakdown === 'object') {
       this.scoreBreakdown.writtenScore = null;
+      this.scoreBreakdown.attendanceScore = null;
       this.scoreBreakdown.oralScore = null;
       this.scoreBreakdown.classActivityScore = null;
       this.scoreBreakdown.homeworkScore = null;

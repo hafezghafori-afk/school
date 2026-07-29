@@ -63,6 +63,12 @@ const subjectSchema = new mongoose.Schema({
     min: 1,
     max: 10
   },
+  resultOrder: {
+    type: Number,
+    default: 0,
+    min: 0,
+    index: true
+  },
   isPractical: {
     type: Boolean,
     default: false

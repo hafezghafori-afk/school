@@ -34,6 +34,20 @@ const students = [
   { _id: IDS.student2, name: 'Student Beta', email: 'beta@example.com', grade: '10', role: 'student' }
 ];
 
+const memberships = students.map((student, index) => ({
+  _id: `mem-${index + 1}`,
+  student,
+  studentId: { _id: `core-${index + 1}`, admissionNo: `A-${index + 1}`, fullName: student.name },
+  course: IDS.course1,
+  classId: IDS.class1,
+  academicYearId: 'year-1',
+  status: 'active',
+  isCurrent: true,
+  enrolledAt: new Date('2026-03-01T00:00:00.000Z'),
+  endedAt: null,
+  createdAt: new Date('2026-03-01T00:00:00.000Z')
+}));
+
 const orders = [
   { _id: 'ord-1', user: students[0], course: IDS.course1, status: 'approved' },
   { _id: 'ord-2', user: students[1], course: IDS.course1, status: 'approved' }
@@ -98,6 +112,10 @@ class MockQuery {
   }
 
   limit() {
+    return this;
+  }
+
+  lean() {
     return this;
   }
 
@@ -248,6 +266,33 @@ const UserMock = {
   }
 };
 
+const StudentMembershipMock = {
+  find(filter = {}) {
+    return createQuery(() => memberships.filter((item) => !filter.course || String(item.course) === String(filter.course)));
+  },
+  findOne(filter = {}) {
+    return createQuery(() => memberships.find((item) => (
+      String(item.student?._id || item.student) === String(filter.student)
+      && String(item.course) === String(filter.course)
+    )) || null);
+  }
+};
+
+const StudentProfileMock = {
+  find() {
+    return createQuery(() => []);
+  }
+};
+
+const StudentSuspensionMock = {
+  find() {
+    return createQuery(() => []);
+  },
+  findOne() {
+    return createQuery(() => null);
+  }
+};
+
 const authMock = {
   requireAuth(req, res, next) {
     const raw = req.get('x-test-user');
@@ -293,6 +338,9 @@ function loadAttendanceRouter() {
     if (isAttendanceRoute && request === '../utils/courseAccess') return courseAccessMock;
     if (isAttendanceRoute && request === '../models/Course') return CourseMock;
     if (isAttendanceRoute && request === '../models/SchoolClass') return SchoolClassMock;
+    if (isAttendanceRoute && request === '../models/StudentMembership') return StudentMembershipMock;
+    if (isAttendanceRoute && request === '../models/StudentProfile') return StudentProfileMock;
+    if (isAttendanceRoute && request === '../models/StudentSuspension') return StudentSuspensionMock;
     if (isAttendanceRoute && request === '../models/User') return UserMock;
     if (isAttendanceRoute && request === '../middleware/auth') return authMock;
     if (isAttendanceRoute && request === '../utils/studentMembershipLookup') return studentMembershipLookupMock;

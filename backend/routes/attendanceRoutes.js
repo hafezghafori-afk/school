@@ -5,6 +5,7 @@ const EmployeeAttendance = require('../models/EmployeeAttendance');
 const Course = require('../models/Course');
 const SchoolClass = require('../models/SchoolClass');
 const StudentMembership = require('../models/StudentMembership');
+const StudentSuspension = require('../models/StudentSuspension');
 const StudentProfile = require('../models/StudentProfile');
 const AfghanTeacher = require('../models/AfghanTeacher');
 const User = require('../models/User');
@@ -29,6 +30,7 @@ const {
 const router = express.Router();
 
 const membershipAccessOptions = Object.freeze({});
+const normalizeText = (value = '') => String(value || '').trim();
 const normalizeEntityId = (value) => String(value || '').trim();
 const asObjectIdString = (value) => (mongoose.isValidObjectId(normalizeEntityId(value)) ? normalizeEntityId(value) : '');
 
@@ -151,7 +153,8 @@ const formatStatusLabel = (value) => ({
   sick: 'sick',
   leave: 'leave',
   late: 'sick',
-  excused: 'leave'
+  excused: 'leave',
+  suspended: 'suspended'
 }[value] || '');
 
 const EMPLOYEE_POSITION_LABELS = Object.freeze({
@@ -289,17 +292,63 @@ async function loadEmployeeDirectory() {
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fa'));
 }
 
-async function loadApprovedCourseStudents(courseId) {
+function buildMembershipOverlapFilter(fromValue, toValue = fromValue) {
+  const from = normalizeDay(fromValue);
+  const to = normalizeDay(toValue);
+  if (!from || !to) return {};
+  to.setHours(23, 59, 59, 999);
+  return {
+    $and: [
+      {
+        $or: [
+          { enrolledAt: { $lte: to } },
+          { enrolledAt: null, joinedAt: { $lte: to } },
+          { enrolledAt: { $exists: false }, joinedAt: { $lte: to } }
+        ]
+      },
+      {
+        $or: [
+          { endedAt: null },
+          { endedAt: { $exists: false } },
+          { endedAt: { $gt: from } }
+        ]
+      }
+    ]
+  };
+}
+
+function buildSuspensionAtDateFilter(membershipIds = [], dateValue = null) {
+  const date = normalizeDay(dateValue);
+  if (!date) return { _id: null };
+  const dayEnd = new Date(date);
+  dayEnd.setHours(23, 59, 59, 999);
+  return {
+    membershipId: { $in: membershipIds },
+    status: { $in: ['active', 'lifted', 'completed'] },
+    startsAt: { $lte: dayEnd },
+    $and: [
+      { $or: [{ endsAt: null }, { endsAt: { $gt: date } }] },
+      { $or: [{ liftedAt: null }, { liftedAt: { $gt: date } }] }
+    ]
+  };
+}
+
+async function loadApprovedCourseStudents(courseId, fromValue = new Date(), toValue = fromValue) {
   const memberships = await StudentMembership.find({
     course: courseId,
-    status: { $in: ['active', 'transferred_in', 'suspended'] },
-    isCurrent: true
+    ...buildMembershipOverlapFilter(fromValue, toValue)
   })
     .populate('student', 'name email grade')
     .populate('studentId', 'admissionNo fullName gender')
     .sort({ enrolledAt: 1, createdAt: 1 });
 
   if (!memberships.length) return [];
+
+  const sameDay = normalizeDay(fromValue)?.getTime() === normalizeDay(toValue)?.getTime();
+  const suspensions = sameDay
+    ? await StudentSuspension.find(buildSuspensionAtDateFilter(memberships.map((item) => item._id), fromValue)).lean()
+    : [];
+  const suspensionMap = new Map(suspensions.map((item) => [String(item.membershipId), item]));
 
   const studentCoreIds = [...new Set(
     memberships
@@ -325,6 +374,7 @@ async function loadApprovedCourseStudents(courseId) {
 
     const studentCore = membership?.studentId || null;
     const profile = profileMap.get(String(studentCore?._id || '')) || null;
+    const suspension = suspensionMap.get(String(membership._id)) || null;
     items.push({
       _id: studentUser?._id || null,
       name: studentUser?.name || studentCore?.fullName || '',
@@ -333,7 +383,16 @@ async function loadApprovedCourseStudents(courseId) {
       admissionNo: studentCore?.admissionNo || '',
       fatherName: profile?.family?.fatherName || '',
       grandfatherName: '',
-      gender: studentCore?.gender || ''
+      gender: studentCore?.gender || '',
+      membershipId: membership._id,
+      membershipStatus: membership.status || '',
+      isSuspended: Boolean(suspension),
+      suspension: suspension ? {
+        id: suspension._id,
+        startsAt: suspension.startsAt,
+        endsAt: suspension.endsAt,
+        reason: suspension.reason || ''
+      } : null
     });
     return items;
   }, []);
@@ -461,7 +520,7 @@ async function getCourseSummaryPayload(scopeInput = {}, query = {}) {
     throw createHttpError(400, range.error);
   }
 
-  const students = await loadApprovedCourseStudents(scope.courseId);
+  const students = await loadApprovedCourseStudents(scope.courseId, range.from, range.to);
   const records = await Attendance.find({
     course: scope.courseId,
     date: { $gte: range.from, $lte: range.to }
@@ -581,7 +640,7 @@ async function sendAttendanceByClassScope(req, res, scopeInput = {}, options = {
       return res.status(400).json({ success: false, message: 'Invalid attendance date.' });
     }
 
-    const students = await loadApprovedCourseStudents(scope.courseId);
+    const students = await loadApprovedCourseStudents(scope.courseId, date, date);
     const records = await Attendance.find({ course: scope.courseId, date });
     const recordMap = new Map(records.map((record) => [String(record.student), record]));
 
@@ -598,14 +657,27 @@ async function sendAttendanceByClassScope(req, res, scopeInput = {}, options = {
           grandfatherName: student.grandfatherName || '',
           gender: student.gender || ''
         } : null,
-        attendance: record ? {
+        attendance: student.isSuspended ? {
+          _id: record?._id || null,
+          status: 'suspended',
+          note: student.suspension?.reason || 'محروم',
+          createdAt: record?.createdAt || null,
+          updatedAt: record?.updatedAt || null,
+          date
+        } : record ? {
           _id: record._id,
           status: normalizeAttendanceStatus(record.status),
           note: record.note,
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,
           date: record.date
-        } : null
+        } : null,
+        lifecycleLocked: student.isSuspended === true,
+        membership: {
+          id: student.membershipId || null,
+          status: student.membershipStatus || '',
+          suspension: student.suspension || null
+        }
       };
     });
 
@@ -1153,29 +1225,31 @@ router.post('/upsert', requireAuth, requireRole(['admin', 'instructor']), requir
     if (!date || !normalizedStatus) {
       return res.status(400).json({ success: false, message: 'Status or date is invalid.' });
     }
-    const hasAccess = await hasStudentCourseAccess(studentId, scope.courseId, membershipAccessOptions);
-    if (!hasAccess) {
-      return res.status(400).json({ success: false, message: 'Student is not enrolled in this class.' });
+    const membership = await StudentMembership.findOne({
+      student: studentId,
+      course: scope.courseId,
+      ...buildMembershipOverlapFilter(date, date)
+    }).sort({ enrolledAt: -1, createdAt: -1 });
+    if (!membership) {
+      return res.status(400).json({ success: false, message: 'Student was not enrolled in this class on the selected date.' });
     }
-
-    const membershipLink = await resolveMembershipTransactionLink({
-      studentUserId: studentId,
-      courseId: scope.courseId,
-      statuses: ['active', 'transferred_in', 'suspended']
-    });
-    if (!membershipLink.membership) {
-      return res.status(400).json({ success: false, message: 'Active membership was not found for this attendance record.' });
-    }
+    const suspension = await StudentSuspension.findOne(
+      buildSuspensionAtDateFilter([membership._id], date)
+    ).lean();
+    const effectiveStatus = suspension ? 'suspended' : normalizedStatus;
+    const effectiveNote = suspension
+      ? normalizeText(suspension.reason) || 'محروم'
+      : note || '';
 
     const record = await Attendance.findOneAndUpdate(
       { student: studentId, course: scope.courseId, date },
       {
-        studentId: membershipLink.linkFields.studentId,
-        studentMembershipId: membershipLink.linkFields.studentMembershipId,
-        classId: membershipLink.linkFields.classId || scope.classId || null,
-        academicYearId: membershipLink.linkFields.academicYearId,
-        status: normalizedStatus,
-        note: note || '',
+        studentId: membership.studentId || null,
+        studentMembershipId: membership._id,
+        classId: membership.classId || scope.classId || null,
+        academicYearId: membership.academicYearId || membership.academicYear || null,
+        status: effectiveStatus,
+        note: effectiveNote,
         markedBy: req.user.id
       },
       { new: true, upsert: true, setDefaultsOnInsert: true }
@@ -1188,11 +1262,11 @@ router.post('/upsert', requireAuth, requireRole(['admin', 'instructor']), requir
       targetId: String(record?._id || ''),
       meta: {
         studentId: String(studentId || ''),
-        studentMembershipId: String(membershipLink.linkFields.studentMembershipId || ''),
+        studentMembershipId: String(membership._id || ''),
         classId: scope.classId || '',
         courseId: scope.courseId || '',
         date,
-        status: normalizedStatus,
+        status: effectiveStatus,
         legacyCourseScope: Boolean(normalizeEntityId(courseId) && !normalizeEntityId(classId))
       }
     });
@@ -1360,7 +1434,7 @@ async function sendWeeklyClassAttendance(req, res, scopeInput = {}, options = {}
       return res.status(400).json({ success: false, message: range.error });
     }
 
-    const students = await loadApprovedCourseStudents(scope.courseId);
+    const students = await loadApprovedCourseStudents(scope.courseId, range.start, range.end);
     const records = await Attendance.find({
       course: scope.courseId,
       date: { $gte: range.start, $lte: range.end }

@@ -11,6 +11,10 @@ const {
   applyFinanceOrderStatus
 } = require('./financeLineItems');
 const { formatFinanceCode } = require('./latinFinanceCode');
+const {
+  isFinanceVersionConflict,
+  suppressAutomaticFinanceBillSync
+} = require('./financeSyncControl');
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -224,6 +228,7 @@ async function applyActiveRegistryReliefsToFinanceBill(input, { dryRun = false }
   if (typeof bill.save !== 'function') bill = await FinanceBill.findById(bill._id);
   bill.adjustments = nextAdjustments;
   refreshFinanceBillStatus(bill);
+  suppressAutomaticFinanceBillSync(bill);
   await bill.save();
   return { updated: true, skipped: false, bill };
 }
@@ -484,29 +489,42 @@ async function syncFeeOrderFromFinanceBill(input, { dryRun = false } = {}) {
     return { created: false, updated: false, skipped: true, reason: 'bill_not_found', feeOrderId: null };
   }
 
-  let payload = buildFeeOrderPayloadFromBill(bill);
-  const existing = await FeeOrder.findOne({ sourceBillId: bill._id });
+  let existing = await FeeOrder.findOne({ sourceBillId: bill._id });
   if (!existing) {
     if (dryRun) {
       return { created: true, updated: false, skipped: false, feeOrderId: null };
     }
-    const created = await FeeOrder.create(payload);
-    return { created: true, updated: false, skipped: false, feeOrderId: created._id };
+    try {
+      const created = await FeeOrder.create(buildFeeOrderPayloadFromBill(bill));
+      return { created: true, updated: false, skipped: false, feeOrderId: created._id };
+    } catch (error) {
+      if (Number(error?.code) !== 11000) throw error;
+      existing = await FeeOrder.findOne({ sourceBillId: bill._id });
+      if (!existing) throw error;
+    }
   }
 
-  payload = preserveCanonicalFeeOrderPaymentState(payload, existing);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const payload = preserveCanonicalFeeOrderPaymentState(buildFeeOrderPayloadFromBill(bill), existing);
+    if (!feeOrderChanged(existing.toObject ? existing.toObject() : existing, payload)) {
+      return { created: false, updated: false, skipped: true, reason: 'no_change', feeOrderId: existing._id };
+    }
+    if (dryRun) {
+      return { created: false, updated: true, skipped: false, feeOrderId: existing._id };
+    }
 
-  if (!feeOrderChanged(existing.toObject ? existing.toObject() : existing, payload)) {
-    return { created: false, updated: false, skipped: true, reason: 'no_change', feeOrderId: existing._id };
+    Object.assign(existing, payload);
+    try {
+      await existing.save();
+      return { created: false, updated: true, skipped: false, feeOrderId: existing._id };
+    } catch (error) {
+      if (!isFinanceVersionConflict(error) || attempt > 0) throw error;
+      existing = await FeeOrder.findOne({ sourceBillId: bill._id });
+      if (!existing) throw error;
+    }
   }
 
-  if (dryRun) {
-    return { created: false, updated: true, skipped: false, feeOrderId: existing._id };
-  }
-
-  Object.assign(existing, payload);
-  await existing.save();
-  return { created: false, updated: true, skipped: false, feeOrderId: existing._id };
+  return { created: false, updated: false, skipped: true, reason: 'no_change', feeOrderId: existing._id };
 }
 
 async function syncDiscountsFromFinanceBill(input, { dryRun = false } = {}) {

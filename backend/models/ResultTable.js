@@ -11,6 +11,7 @@ const resultTableStatsSchema = new mongoose.Schema({
   excused: { type: Number, default: 0 },
   absent: { type: Number, default: 0 },
   pending: { type: Number, default: 0 },
+  notApplicable: { type: Number, default: 0 },
   averagePercentage: { type: Number, default: 0 }
 }, { _id: false });
 
@@ -20,6 +21,15 @@ const resultTableSchema = new mongoose.Schema({
   templateId: { type: mongoose.Schema.Types.ObjectId, ref: 'TableTemplate', required: true, index: true },
   configId: { type: mongoose.Schema.Types.ObjectId, ref: 'TableConfig', default: null, index: true },
   sessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'ExamSession', default: null, index: true },
+  sourceSessionIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'ExamSession' }],
+  scopeType: {
+    type: String,
+    enum: ['session', 'class_aggregate'],
+    default: 'session',
+    index: true
+  },
+  policyVersion: { type: String, default: '' },
+  version: { type: Number, default: 1, min: 1 },
   examTypeId: { type: mongoose.Schema.Types.ObjectId, ref: 'ExamType', default: null, index: true },
   academicYearId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicYear', default: null, index: true },
   assessmentPeriodId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicTerm', default: null, index: true },
@@ -66,5 +76,6 @@ resultTableSchema.pre('validate', function syncResultTableState() {
 
 resultTableSchema.index({ code: 1 }, { unique: true, sparse: true });
 resultTableSchema.index({ sessionId: 1, templateId: 1, generatedAt: -1 });
+resultTableSchema.index({ scopeType: 1, academicYearId: 1, classId: 1, version: -1 });
 
 module.exports = mongoose.model('ResultTable', resultTableSchema);

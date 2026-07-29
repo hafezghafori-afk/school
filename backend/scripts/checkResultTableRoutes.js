@@ -30,6 +30,16 @@ const serviceMock = {
   async listResultTables() {
     return [{ id: IDS.table, title: 'جدول نتایج - Annual', code: 'RESULTS_MAIN-ANNUAL', rowCount: 2, status: 'generated' }];
   },
+  async getClassAggregateReadiness() {
+    return {
+      ready: true,
+      policyVersion: 'af-school-results-v1',
+      academicYear: { id: 'year-1', title: '1406' },
+      schoolClass: { id: 'class-1', title: 'Class 10 A' },
+      subjects: [],
+      issues: []
+    };
+  },
   async generateResultTable() {
     return {
       id: IDS.table,
@@ -166,6 +176,7 @@ async function run() {
     cases.push(await request(server, '/api/result-tables/configs', { method: 'POST', user: adminUser, body: { name: 'Printer Config', code: 'PRINT', orientation: 'portrait' } }));
     cases.push(await request(server, '/api/result-tables/generate', { method: 'POST', user: instructorUser, body: { templateId: 'tpl-1', sessionId: 'ses-1' } }));
     cases.push(await request(server, '/api/result-tables', { user: instructorUser }));
+    cases.push(await request(server, '/api/result-tables/readiness?academicYearId=year-1&classId=class-1', { user: instructorUser }));
     cases.push(await request(server, `/api/result-tables/${IDS.table}`, { user: instructorUser }));
     cases.push(await request(server, `/api/result-tables/${IDS.table}/publish`, { method: 'POST', user: adminUser }));
 
@@ -175,8 +186,9 @@ async function run() {
     assertCase(cases[3].status === 200 && cases[3].data?.item?.name === 'Printer Config', 'Expected config create route to return created config.');
     assertCase(cases[4].status === 200 && cases[4].data?.item?.id === IDS.table, 'Expected generate route to return table payload.');
     assertCase(cases[5].status === 200 && Array.isArray(cases[5].data?.items), 'Expected list route to return generated tables.');
-    assertCase(cases[6].status === 200 && cases[6].data?.item?.id === IDS.table, 'Expected detail route to return table detail.');
-    assertCase(cases[7].status === 200 && cases[7].data?.item?.status === 'published', 'Expected publish route to return published table detail.');
+    assertCase(cases[6].status === 200 && cases[6].data?.ready === true, 'Expected readiness route to return aggregate readiness.');
+    assertCase(cases[7].status === 200 && cases[7].data?.item?.id === IDS.table, 'Expected detail route to return table detail.');
+    assertCase(cases[8].status === 200 && cases[8].data?.item?.status === 'published', 'Expected publish route to return published table detail.');
 
     const configLog = findActivity('result_table_config_create');
     const generateLog = findActivity('result_table_generate');

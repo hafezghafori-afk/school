@@ -20,7 +20,7 @@ const TEMPLATE_TYPES = [
   { id: 'attendance', title: 'شقه حاضری روزانه' },
   { id: 'attendance_summary', title: 'شقه خلاصه حاضری' },
   { id: 'subjects', title: 'شقه مضامین صنف' },
-  { id: 'exam', title: 'شقه امتحان' },
+  { id: 'exam', title: 'شقه امتحانات' },
   { id: 'finance', title: 'شقه مالی' }
 ];
 
@@ -52,12 +52,15 @@ const DEFAULT_COLUMNS_BY_TYPE = {
   ],
   exam: [
     { key: 'number', label: 'شماره', width: 7, visible: true },
-    { key: 'studentName', label: 'نام', width: 15, visible: true },
-    { key: 'fatherName', label: 'نام پدر', width: 15, visible: true },
+    { key: 'studentName', label: 'نام', group: 'شهرت شاگردان', width: 15, visible: true },
+    { key: 'fatherName', label: 'نام پدر', group: 'شهرت شاگردان', width: 15, visible: true },
+    { key: 'attendanceScore', label: 'حاضری', width: 8, visible: true },
     { key: 'writtenScore', label: 'تحریری', width: 9, visible: true },
     { key: 'oralScore', label: 'تقریری', width: 9, visible: true },
-    { key: 'obtainedMark', label: 'به عدد', width: 10, visible: true },
-    { key: 'totalInWords', label: 'به حروف', width: 14, visible: true },
+    { key: 'classActivityScore', label: 'فعالیت صنفی', width: 10, visible: true },
+    { key: 'homeworkScore', label: 'کارخانگی', width: 10, visible: true },
+    { key: 'obtainedMark', label: 'به عدد', group: 'مجموع نمره', width: 10, visible: true },
+    { key: 'totalInWords', label: 'به حروف', group: 'مجموع نمره', width: 14, visible: true },
     { key: 'note', label: 'ملاحظات', width: 12, visible: true }
   ],
   finance: [
@@ -78,8 +81,82 @@ const DEFAULT_LAYOUT = {
   orientation: 'portrait',
   showHeader: true,
   showFooter: true,
-  showLogo: true
+  showLogo: true,
+  headerText: '',
+  footerText: '',
+  margins: { top: 24, right: 24, bottom: 24, left: 24 }
 };
+
+const SCORE_COMPONENTS = [
+  { key: 'attendanceMax', label: 'حاضری' },
+  { key: 'writtenMax', label: 'تحریری' },
+  { key: 'oralMax', label: 'تقریری' },
+  { key: 'classActivityMax', label: 'فعالیت صنفی' },
+  { key: 'homeworkMax', label: 'کارخانگی' }
+];
+
+const ASSIGNED_SESSION_PAGE_SIZE = 10;
+
+const SESSION_STATUS_OPTIONS = [
+  { id: '', title: 'همه وضعیت‌ها' },
+  { id: 'draft', title: 'پیش‌نویس' },
+  { id: 'active', title: 'فعال' },
+  { id: 'submitted', title: 'فرستاده‌شده' },
+  { id: 'approved', title: 'تأییدشده' },
+  { id: 'closed', title: 'بسته' },
+  { id: 'published', title: 'نشرشده' },
+  { id: 'archived', title: 'آرشیف' }
+];
+
+const EMPTY_ASSIGNMENT = {
+  academicYearId: '',
+  assessmentPeriodId: '',
+  teacherId: '',
+  classId: '',
+  subjectId: '',
+  examTypeId: '',
+  reviewerUserId: '',
+  heldAt: '',
+  monthLabel: '',
+  attendanceMax: 5,
+  writtenMax: 20,
+  oralMax: 10,
+  classActivityMax: 0,
+  homeworkMax: 5
+};
+
+const EMPTY_SESSION_EDIT = {
+  id: '',
+  status: '',
+  academicYearId: '',
+  assessmentPeriodId: '',
+  teacherId: '',
+  teacherAssignmentId: '',
+  classId: '',
+  subjectId: '',
+  examTypeId: '',
+  sheetTemplateId: '',
+  reviewerUserId: '',
+  heldAt: '',
+  monthLabel: '',
+  note: '',
+  attendanceMax: 0,
+  writtenMax: 0,
+  oralMax: 0,
+  classActivityMax: 0,
+  homeworkMax: 0
+};
+
+function getExamScoringPreset(examType = {}) {
+  const code = String(examType?.code || '').trim().toUpperCase();
+  if (code === 'FOUR_HALF_MONTH') {
+    return { attendanceMax: 5, writtenMax: 20, oralMax: 10, classActivityMax: 0, homeworkMax: 5, totalMark: 40 };
+  }
+  if (code === 'ANNUAL') {
+    return { attendanceMax: 5, writtenMax: 40, oralMax: 10, classActivityMax: 0, homeworkMax: 5, totalMark: 60 };
+  }
+  return { attendanceMax: 0, writtenMax: 25, oralMax: 25, classActivityMax: 25, homeworkMax: 25, totalMark: Number(examType?.defaultTotalMark || 100) };
+}
 
 const EMPTY_FILTERS = {
   type: '',
@@ -113,7 +190,19 @@ function getTypeLabel(type = '') {
 }
 
 function getOptionId(option = {}) {
+  if (option == null) return '';
+  if (typeof option === 'string' || typeof option === 'number') return String(option);
   return option.id || option._id || '';
+}
+
+function getAcademicYearRefId(option = {}) {
+  return getOptionId(option?.academicYear) || getOptionId(option?.academicYearId);
+}
+
+function getAssignmentAcademicYearId(assignment = {}) {
+  return getAcademicYearRefId(assignment)
+    || getAcademicYearRefId(assignment?.schoolClass)
+    || getAcademicYearRefId(assignment?.assessmentPeriod);
 }
 
 function getOptionLabel(option = {}) {
@@ -175,6 +264,7 @@ function getTemplateColumns(template = null) {
     .map((column, index) => ({
       key: String(column?.key || '').trim(),
       label: String(column?.label || column?.key || '').trim(),
+      group: String(column?.group || '').trim(),
       width: Number(column?.width || 16),
       visible: column?.visible !== false,
       order: Number(column?.order ?? index)
@@ -192,8 +282,17 @@ function getTemplateLayout(template = null) {
     orientation: layout.orientation || DEFAULT_LAYOUT.orientation,
     showHeader: layout.showHeader !== false,
     showFooter: layout.showFooter !== false,
-    showLogo: layout.showLogo !== false
+    showLogo: layout.showLogo !== false,
+    headerText: layout.headerText || '',
+    footerText: layout.footerText || '',
+    margins: { ...DEFAULT_LAYOUT.margins, ...(layout.margins || {}) }
   };
+}
+
+function getSessionStatusLabel(status = '') {
+  return SESSION_STATUS_OPTIONS.find((item) => item.id === String(status || '').trim().toLowerCase())?.title
+    || status
+    || 'نامشخص';
 }
 
 export default function AdminSheetTemplates() {
@@ -202,6 +301,10 @@ export default function AdminSheetTemplates() {
   const [academicTerms, setAcademicTerms] = useState([]);
   const [classes, setClasses] = useState([]);
   const [examSessions, setExamSessions] = useState([]);
+  const [teacherAssignments, setTeacherAssignments] = useState([]);
+  const [examTypes, setExamTypes] = useState([]);
+  const [reviewers, setReviewers] = useState([]);
+  const [assignment, setAssignment] = useState(EMPTY_ASSIGNMENT);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [preview, setPreview] = useState(null);
@@ -210,12 +313,122 @@ export default function AdminSheetTemplates() {
   const [busyAction, setBusyAction] = useState('');
   const [draftColumns, setDraftColumns] = useState([]);
   const [draftLayout, setDraftLayout] = useState(DEFAULT_LAYOUT);
+  const [restoreColumnKey, setRestoreColumnKey] = useState('');
+  const [assignedSessionQuery, setAssignedSessionQuery] = useState('');
+  const [assignedSessionStatus, setAssignedSessionStatus] = useState('');
+  const [assignedSessionPage, setAssignedSessionPage] = useState(1);
+  const [editingSession, setEditingSession] = useState(null);
+  const [editingManagement, setEditingManagement] = useState(null);
+  const [sessionEdit, setSessionEdit] = useState(EMPTY_SESSION_EDIT);
 
   const templateTypes = useMemo(() => normalizeOptions(TEMPLATE_TYPES, ['title', 'id']), []);
   const yearOptions = useMemo(() => normalizeOptions(academicYears, ['title', 'code']), [academicYears]);
   const termOptions = useMemo(() => normalizeOptions(academicTerms, ['title', 'code']), [academicTerms]);
   const classOptions = useMemo(() => normalizeOptions(classes, ['title', 'code']), [classes]);
   const examSessionOptions = useMemo(() => normalizeOptions(examSessions, ['title', 'code']), [examSessions]);
+
+  const assignmentTerms = useMemo(() => academicTerms.filter((item) => (
+    !assignment.academicYearId || String(getAcademicYearRefId(item)) === String(assignment.academicYearId)
+  )), [academicTerms, assignment.academicYearId]);
+  const assignmentTeachers = useMemo(() => Array.from(new Map(
+    teacherAssignments
+      .filter((item) => !assignment.academicYearId || String(getAssignmentAcademicYearId(item)) === String(assignment.academicYearId))
+      .filter((item) => item?.teacher?.id)
+      .map((item) => [String(item.teacher.id), item.teacher])
+  ).values()), [teacherAssignments, assignment.academicYearId]);
+  const assignmentClasses = useMemo(() => Array.from(new Map(
+    teacherAssignments
+      .filter((item) => !assignment.academicYearId || String(getAssignmentAcademicYearId(item)) === String(assignment.academicYearId))
+      .filter((item) => !assignment.teacherId || String(item?.teacher?.id || '') === String(assignment.teacherId))
+      .filter((item) => item?.schoolClass?.id)
+      .map((item) => [String(item.schoolClass.id), item.schoolClass])
+  ).values()), [teacherAssignments, assignment.academicYearId, assignment.teacherId]);
+  const assignmentSubjects = useMemo(() => Array.from(new Map(
+    teacherAssignments
+      .filter((item) => !assignment.academicYearId || String(getAssignmentAcademicYearId(item)) === String(assignment.academicYearId))
+      .filter((item) => !assignment.teacherId || String(item?.teacher?.id || '') === String(assignment.teacherId))
+      .filter((item) => !assignment.classId || String(item?.schoolClass?.id || '') === String(assignment.classId))
+      .filter((item) => item?.subject?.id)
+      .map((item) => [String(item.subject.id), item.subject])
+  ).values()), [teacherAssignments, assignment.academicYearId, assignment.teacherId, assignment.classId]);
+  const selectedAssignmentRecord = useMemo(() => teacherAssignments.find((item) => (
+    String(getAssignmentAcademicYearId(item)) === String(assignment.academicYearId)
+    && String(item?.teacher?.id || '') === String(assignment.teacherId)
+    && String(item?.schoolClass?.id || '') === String(assignment.classId)
+    && String(item?.subject?.id || '') === String(assignment.subjectId)
+  )) || null, [teacherAssignments, assignment]);
+  const selectedExamType = useMemo(() => examTypes.find((item) => String(item.id) === String(assignment.examTypeId)) || null, [examTypes, assignment.examTypeId]);
+  const assignmentScoreTotal = SCORE_COMPONENTS.reduce((sum, item) => sum + Math.max(0, Number(assignment[item.key] || 0)), 0);
+  const expectedScoreTotal = getExamScoringPreset(selectedExamType).totalMark;
+  const editTerms = useMemo(() => academicTerms.filter((item) => (
+    !sessionEdit.academicYearId || String(getAcademicYearRefId(item)) === String(sessionEdit.academicYearId)
+  )), [academicTerms, sessionEdit.academicYearId]);
+  const editTeachers = useMemo(() => Array.from(new Map(
+    teacherAssignments
+      .filter((item) => !sessionEdit.academicYearId || String(getAssignmentAcademicYearId(item)) === String(sessionEdit.academicYearId))
+      .filter((item) => editingManagement?.permissions?.canEditStructure
+        || String(item?.schoolClass?.id || '') === String(sessionEdit.classId))
+      .filter((item) => editingManagement?.permissions?.canEditStructure
+        || String(item?.subject?.id || '') === String(sessionEdit.subjectId))
+      .filter((item) => item?.teacher?.id)
+      .map((item) => [String(item.teacher.id), item.teacher])
+  ).values()), [
+    editingManagement?.permissions?.canEditStructure,
+    sessionEdit.academicYearId,
+    sessionEdit.classId,
+    sessionEdit.subjectId,
+    teacherAssignments
+  ]);
+  const editClasses = useMemo(() => Array.from(new Map(
+    teacherAssignments
+      .filter((item) => !sessionEdit.academicYearId || String(getAssignmentAcademicYearId(item)) === String(sessionEdit.academicYearId))
+      .filter((item) => !sessionEdit.teacherId || String(item?.teacher?.id || '') === String(sessionEdit.teacherId))
+      .filter((item) => item?.schoolClass?.id)
+      .map((item) => [String(item.schoolClass.id), item.schoolClass])
+  ).values()), [teacherAssignments, sessionEdit.academicYearId, sessionEdit.teacherId]);
+  const editSubjects = useMemo(() => Array.from(new Map(
+    teacherAssignments
+      .filter((item) => !sessionEdit.academicYearId || String(getAssignmentAcademicYearId(item)) === String(sessionEdit.academicYearId))
+      .filter((item) => !sessionEdit.teacherId || String(item?.teacher?.id || '') === String(sessionEdit.teacherId))
+      .filter((item) => !sessionEdit.classId || String(item?.schoolClass?.id || '') === String(sessionEdit.classId))
+      .filter((item) => item?.subject?.id)
+      .map((item) => [String(item.subject.id), item.subject])
+  ).values()), [teacherAssignments, sessionEdit.academicYearId, sessionEdit.teacherId, sessionEdit.classId]);
+  const selectedEditAssignment = useMemo(() => teacherAssignments.find((item) => (
+    String(getAssignmentAcademicYearId(item)) === String(sessionEdit.academicYearId)
+    && String(item?.teacher?.id || '') === String(sessionEdit.teacherId)
+    && String(item?.schoolClass?.id || '') === String(sessionEdit.classId)
+    && String(item?.subject?.id || '') === String(sessionEdit.subjectId)
+  )) || null, [teacherAssignments, sessionEdit]);
+  const selectedEditExamType = useMemo(() => examTypes.find((item) => String(item.id) === String(sessionEdit.examTypeId)) || null, [examTypes, sessionEdit.examTypeId]);
+  const editScoreTotal = SCORE_COMPONENTS.reduce((sum, item) => sum + Math.max(0, Number(sessionEdit[item.key] || 0)), 0);
+  const expectedEditScoreTotal = getExamScoringPreset(selectedEditExamType).totalMark;
+  const filteredAssignedSessions = useMemo(() => {
+    const query = assignedSessionQuery.trim().toLowerCase();
+    return examSessions.filter((session) => {
+      if (assignment.teacherId && String(session?.teacherAssignment?.teacher?.id || '') !== String(assignment.teacherId)) return false;
+      if (assignedSessionStatus && String(session?.status || '') !== assignedSessionStatus) return false;
+      if (!query) return true;
+      const searchableText = [
+        session?.title,
+        session?.subject?.name,
+        session?.teacherAssignment?.teacher?.name,
+        session?.schoolClass?.title,
+        session?.examType?.title,
+        getSessionStatusLabel(session?.status)
+      ].filter(Boolean).join(' ').toLowerCase();
+      return searchableText.includes(query);
+    });
+  }, [assignedSessionQuery, assignedSessionStatus, assignment.teacherId, examSessions]);
+  const assignedSessionPageCount = Math.max(1, Math.ceil(filteredAssignedSessions.length / ASSIGNED_SESSION_PAGE_SIZE));
+  const pagedAssignedSessions = useMemo(() => {
+    const start = (assignedSessionPage - 1) * ASSIGNED_SESSION_PAGE_SIZE;
+    return filteredAssignedSessions.slice(start, start + ASSIGNED_SESSION_PAGE_SIZE);
+  }, [assignedSessionPage, filteredAssignedSessions]);
+  const assignedSessionRangeStart = filteredAssignedSessions.length
+    ? ((assignedSessionPage - 1) * ASSIGNED_SESSION_PAGE_SIZE) + 1
+    : 0;
+  const assignedSessionRangeEnd = Math.min(assignedSessionPage * ASSIGNED_SESSION_PAGE_SIZE, filteredAssignedSessions.length);
 
   const filteredTemplates = useMemo(() => {
     return items.filter((item) => !filters.type || item.type === filters.type);
@@ -225,16 +438,38 @@ export default function AdminSheetTemplates() {
     return items.find((item) => String(item.id) === String(selectedTemplateId)) || null;
   }, [items, selectedTemplateId]);
 
+  const restorableColumns = useMemo(() => {
+    const configuredKeys = new Set(draftColumns.map((column) => String(column?.key || '')));
+    return (DEFAULT_COLUMNS_BY_TYPE[selectedTemplate?.type] || [])
+      .filter((column) => !configuredKeys.has(column.key));
+  }, [draftColumns, selectedTemplate?.type]);
+
   useEffect(() => {
     setDraftColumns(getTemplateColumns(selectedTemplate));
     setDraftLayout(getTemplateLayout(selectedTemplate));
   }, [selectedTemplate]);
 
+  useEffect(() => {
+    setRestoreColumnKey((current) => (
+      restorableColumns.some((column) => column.key === current)
+        ? current
+        : restorableColumns[0]?.key || ''
+    ));
+  }, [restorableColumns]);
+
+  useEffect(() => {
+    setAssignedSessionPage(1);
+  }, [assignedSessionQuery, assignedSessionStatus, assignment.teacherId]);
+
+  useEffect(() => {
+    setAssignedSessionPage((current) => Math.min(current, assignedSessionPageCount));
+  }, [assignedSessionPageCount]);
+
   const filteredExamSessionOptions = useMemo(() => {
     return examSessionOptions.filter((item) => {
-      if (filters.academicYearId && item.academicYearId !== filters.academicYearId) return false;
-      if (filters.classId && item.classId !== filters.classId) return false;
-      if (filters.termId && item.termId !== filters.termId) return false;
+      if (filters.academicYearId && String(item?.academicYear?.id || item.academicYearId || '') !== String(filters.academicYearId)) return false;
+      if (filters.classId && String(item?.schoolClass?.id || item.classId || '') !== String(filters.classId)) return false;
+      if (filters.termId && String(item?.assessmentPeriod?.id || item.termId || '') !== String(filters.termId)) return false;
       return true;
     });
   }, [examSessionOptions, filters.academicYearId, filters.classId, filters.termId]);
@@ -249,11 +484,37 @@ export default function AdminSheetTemplates() {
   };
 
   const loadReference = async () => {
-    const data = await fetchJson('/api/reports/reference-data');
-    setAcademicYears(data.academicYears || []);
-    setAcademicTerms(data.academicTerms || []);
-    setClasses(data.classes || []);
-    setExamSessions(data.examSessions || []);
+    const [reportData, examData, sessionData] = await Promise.all([
+      fetchJson('/api/reports/reference-data'),
+      fetchJson('/api/exams/reference-data'),
+      fetchJson('/api/exams/sessions?sessionKind=subject_sheet')
+    ]);
+    const nextYears = examData.academicYears || reportData.academicYears || [];
+    const nextTerms = examData.assessmentPeriods || reportData.academicTerms || [];
+    setAcademicYears(nextYears);
+    setAcademicTerms(nextTerms);
+    setClasses(examData.classes || reportData.classes || []);
+    setTeacherAssignments(examData.teacherAssignments || []);
+    setExamTypes(examData.examTypes || []);
+    setReviewers(examData.reviewers || []);
+    setExamSessions(sessionData.items || reportData.examSessions || []);
+    const activeYear = nextYears.find((item) => item.isActive) || nextYears[0] || null;
+    const firstExamType = (examData.examTypes || [])[0] || null;
+    setAssignment((current) => {
+      const selectedYearId = nextYears.some((item) => String(getOptionId(item)) === String(current.academicYearId))
+        ? current.academicYearId
+        : getOptionId(activeYear);
+      const termsForYear = nextTerms.filter((item) => String(getAcademicYearRefId(item)) === String(selectedYearId));
+      const currentTermMatchesYear = termsForYear.some((item) => String(getOptionId(item)) === String(current.assessmentPeriodId));
+      const defaultTerm = termsForYear.find((item) => item.isActive) || termsForYear[0] || null;
+      return {
+        ...current,
+        academicYearId: selectedYearId || '',
+        assessmentPeriodId: currentTermMatchesYear ? current.assessmentPeriodId : getOptionId(defaultTerm),
+        examTypeId: current.examTypeId || firstExamType?.id || '',
+        ...(!current.examTypeId && firstExamType ? getExamScoringPreset(firstExamType) : {})
+      };
+    });
   };
 
   const loadTemplates = async () => {
@@ -300,6 +561,310 @@ export default function AdminSheetTemplates() {
       }
       return next;
     });
+  };
+
+  const updateAssignment = (event) => {
+    const { name, value } = event.target;
+    setAssignment((current) => {
+      const next = { ...current, [name]: value };
+      if (name === 'academicYearId') {
+        const nextTerm = academicTerms.find((item) => item.isActive && String(getAcademicYearRefId(item)) === String(value))
+          || academicTerms.find((item) => String(getAcademicYearRefId(item)) === String(value))
+          || null;
+        next.assessmentPeriodId = nextTerm?.id || '';
+        next.teacherId = '';
+        next.classId = '';
+        next.subjectId = '';
+      }
+      if (name === 'teacherId') {
+        next.classId = '';
+        next.subjectId = '';
+      }
+      if (name === 'classId') next.subjectId = '';
+      if (name === 'examTypeId') Object.assign(next, getExamScoringPreset(examTypes.find((item) => String(item.id) === String(value))));
+      return next;
+    });
+  };
+
+  const selectAssignedSession = (session) => {
+    const sessionId = session?.id || session?._id || '';
+    if (!sessionId) return;
+    if (session?.sheetTemplate?.id) setSelectedTemplateId(session.sheetTemplate.id);
+    setFilters((current) => ({
+      ...current,
+      type: 'exam',
+      academicYearId: session?.academicYear?.id || current.academicYearId,
+      classId: session?.schoolClass?.id || current.classId,
+      termId: session?.assessmentPeriod?.id || current.termId,
+      examId: sessionId
+    }));
+    setPreview(null);
+    showMessage(`${session?.title || 'شقه'} برای پیش‌نمایش انتخاب شد.`);
+  };
+
+  const openSessionEditor = async (session) => {
+    if (!session?.id) return;
+    try {
+      setBusyAction(`manage-session:${session.id}`);
+      const data = await fetchJson(`/api/exams/sessions/${session.id}/management-state`);
+      const item = data.item || session;
+      const components = item.defaultMark?.scoreComponents || {};
+      setEditingSession(item);
+      setEditingManagement(data);
+      setSessionEdit({
+        ...EMPTY_SESSION_EDIT,
+        id: item.id,
+        status: item.status,
+        academicYearId: item.academicYear?.id || '',
+        assessmentPeriodId: item.assessmentPeriod?.id || '',
+        teacherId: item.teacherAssignment?.teacher?.id || '',
+        teacherAssignmentId: item.teacherAssignment?.id || '',
+        classId: item.schoolClass?.id || '',
+        subjectId: item.subject?.id || '',
+        examTypeId: item.examType?.id || '',
+        sheetTemplateId: item.sheetTemplateId || item.sheetTemplate?.id || selectedTemplateId || '',
+        reviewerUserId: item.reviewerUserId || item.reviewer?.id || '',
+        heldAt: item.heldAt || '',
+        monthLabel: item.monthLabel || '',
+        note: item.note || '',
+        attendanceMax: Number(components.attendanceMax || 0),
+        writtenMax: Number(components.writtenMax || 0),
+        oralMax: Number(components.oralMax || 0),
+        classActivityMax: Number(components.classActivityMax || 0),
+        homeworkMax: Number(components.homeworkMax || 0)
+      });
+    } catch (error) {
+      showMessage(errorMessage(error, 'دریافت معلومات ویرایش شقه ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const closeSessionEditor = () => {
+    setEditingSession(null);
+    setEditingManagement(null);
+    setSessionEdit(EMPTY_SESSION_EDIT);
+  };
+
+  const updateSessionEdit = (event) => {
+    const { name, value } = event.target;
+    setSessionEdit((current) => {
+      const next = { ...current, [name]: value };
+      if (name === 'academicYearId') {
+        const nextTerm = academicTerms.find((item) => item.isActive && String(getAcademicYearRefId(item)) === String(value))
+          || academicTerms.find((item) => String(getAcademicYearRefId(item)) === String(value))
+          || null;
+        next.assessmentPeriodId = nextTerm?.id || '';
+        next.teacherId = '';
+        next.classId = '';
+        next.subjectId = '';
+      }
+      if (name === 'teacherId' && editingManagement?.permissions?.canEditStructure) {
+        next.classId = '';
+        next.subjectId = '';
+      }
+      if (name === 'classId') next.subjectId = '';
+      if (name === 'examTypeId') Object.assign(next, getExamScoringPreset(examTypes.find((item) => String(item.id) === String(value))));
+      return next;
+    });
+  };
+
+  const saveSessionEdit = async () => {
+    if (!sessionEdit.id || !editingManagement?.permissions?.canEditMetadata) return;
+    if (!sessionEdit.academicYearId || !sessionEdit.assessmentPeriodId || !sessionEdit.teacherId || !sessionEdit.classId || !sessionEdit.subjectId || !sessionEdit.examTypeId || !sessionEdit.heldAt) {
+      showMessage('سال، دوره، استاد، صنف، مضمون، نوع امتحان و تاریخ را تکمیل کنید.', 'error');
+      return;
+    }
+    if (!selectedEditAssignment?.id) {
+      showMessage('برای ترکیب انتخاب‌شده تخصیص فعالی در بخش «معرفی صنف به استاد» پیدا نشد.', 'error');
+      return;
+    }
+    if (editingManagement?.permissions?.canEditStructure && editScoreTotal !== expectedEditScoreTotal) {
+      showMessage(`مجموع اجزای نمره باید دقیقاً ${formatNumber(expectedEditScoreTotal)} باشد؛ مجموع فعلی ${formatNumber(editScoreTotal)} است.`, 'error');
+      return;
+    }
+
+    try {
+      setBusyAction('update-session');
+      const payload = {
+        teacherAssignmentId: selectedEditAssignment.id,
+        sheetTemplateId: sessionEdit.sheetTemplateId || selectedTemplateId,
+        reviewerUserId: sessionEdit.reviewerUserId || null,
+        heldAt: sessionEdit.heldAt,
+        monthLabel: sessionEdit.monthLabel,
+        note: sessionEdit.note
+      };
+      if (editingManagement?.permissions?.canEditStructure) {
+        Object.assign(payload, {
+          academicYearId: sessionEdit.academicYearId,
+          assessmentPeriodId: sessionEdit.assessmentPeriodId,
+          classId: sessionEdit.classId,
+          subjectId: sessionEdit.subjectId,
+          examTypeId: sessionEdit.examTypeId,
+          scoreComponents: SCORE_COMPONENTS.reduce((acc, component) => ({
+            ...acc,
+            [component.key]: Math.max(0, Number(sessionEdit[component.key] || 0))
+          }), {})
+        });
+      }
+      const data = await fetchJson(`/api/exams/sessions/${sessionEdit.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      setExamSessions((current) => current.map((item) => (
+        String(item.id) === String(sessionEdit.id) ? data.item : item
+      )));
+      closeSessionEditor();
+      showMessage('تخصیص و مشخصات شقه با موفقیت ویرایش شد. این تغییر همان تخصیص موجود «معرفی صنف به استاد» را استفاده می‌کند.');
+    } catch (error) {
+      showMessage(errorMessage(error, 'ویرایش شقه ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const deleteAssignedSession = async (session) => {
+    if (!session?.id) return;
+    try {
+      setBusyAction(`delete-session:${session.id}`);
+      const state = await fetchJson(`/api/exams/sessions/${session.id}/management-state`);
+      if (!state.permissions?.canHardDelete) {
+        showMessage('این شقه نمره یا وابستگی رسمی دارد و حذف کامل نمی‌شود؛ از آرشیف یا نسخهٔ اصلاحی استفاده کنید.', 'error');
+        return;
+      }
+      const confirmed = window.confirm(`شقه «${session.subject?.name || session.title}» و ردیف‌های موقت آن حذف شود؟ این عمل قابل برگشت نیست.`);
+      if (!confirmed) return;
+      await fetchJson(`/api/exams/sessions/${session.id}`, { method: 'DELETE' });
+      setExamSessions((current) => current.filter((item) => String(item.id) !== String(session.id)));
+      setFilters((current) => String(current.examId) === String(session.id) ? { ...current, examId: '' } : current);
+      setPreview(null);
+      showMessage('پیش‌نویس شقه و ردیف‌های موقت آن حذف شد.');
+    } catch (error) {
+      showMessage(errorMessage(error, 'حذف شقه ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const archiveAssignedSession = async (session) => {
+    if (!session?.id) return;
+    const reason = window.prompt('دلیل آرشیف این شقه را بنویسید:');
+    if (reason == null) return;
+    if (!String(reason).trim()) {
+      showMessage('برای آرشیف شقه، نوشتن دلیل الزامی است.', 'error');
+      return;
+    }
+    try {
+      setBusyAction(`archive-session:${session.id}`);
+      const data = await postJson(`/api/exams/sessions/${session.id}/status`, { status: 'archived', note: String(reason).trim() });
+      setExamSessions((current) => current.map((item) => String(item.id) === String(session.id) ? data.item : item));
+      showMessage('شقه آرشیف شد و در محاسبات جاری استفاده نمی‌شود.');
+    } catch (error) {
+      showMessage(errorMessage(error, 'آرشیف شقه ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const returnAssignedSessionForCorrection = async (session) => {
+    if (!session?.id || !window.confirm('این شقه برای اصلاح به حالت فعال برگردد؟')) return;
+    try {
+      setBusyAction(`return-session:${session.id}`);
+      const data = await postJson(`/api/exams/sessions/${session.id}/status`, { status: 'active', note: 'برگشت برای اصلاح توسط مدیریت' });
+      setExamSessions((current) => current.map((item) => String(item.id) === String(session.id) ? data.item : item));
+      showMessage('شقه برای اصلاح به حالت فعال برگشت.');
+    } catch (error) {
+      showMessage(errorMessage(error, 'برگشت شقه برای اصلاح ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const createAssignedSessionRevision = async (session) => {
+    if (!session?.id) return;
+    const reason = window.prompt('دلیل ساخت نسخهٔ اصلاحی را بنویسید:');
+    if (reason == null) return;
+    if (!String(reason).trim()) {
+      showMessage('دلیل ساخت نسخهٔ اصلاحی الزامی است.', 'error');
+      return;
+    }
+    try {
+      setBusyAction(`revise-session:${session.id}`);
+      const data = await postJson(`/api/exams/sessions/${session.id}/revisions`, { reason: String(reason).trim() });
+      await loadReference();
+      if (data.item?.id) selectAssignedSession(data.item);
+      showMessage(`نسخهٔ اصلاحی ${formatNumber(data.summary?.version || data.item?.version || 2)} ساخته شد.`);
+    } catch (error) {
+      showMessage(errorMessage(error, 'ساخت نسخهٔ اصلاحی ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const createAssignedExamSheet = async () => {
+    if (!selectedTemplate || selectedTemplate.type !== 'exam') {
+      showMessage('برای تخصیص به استاد، نخست فارمت شقهٔ امتحان را انتخاب کنید.', 'error');
+      return;
+    }
+    if (!assignment.academicYearId || !assignment.assessmentPeriodId || !assignment.teacherId || !assignment.classId || !assignment.subjectId || !assignment.examTypeId || !assignment.heldAt) {
+      showMessage('سال، دوره، استاد، صنف، مضمون، نوع امتحان و تاریخ را تکمیل کنید.', 'error');
+      return;
+    }
+    const selectedPeriod = academicTerms.find((item) => String(getOptionId(item)) === String(assignment.assessmentPeriodId)) || null;
+    if (!selectedPeriod) {
+      showMessage('دورهٔ انتخاب‌شده در مرکز آموزش پیدا نشد؛ فهرست دوره‌ها را بروزرسانی کنید.', 'error');
+      return;
+    }
+    if (String(getAcademicYearRefId(selectedPeriod)) !== String(assignment.academicYearId)) {
+      showMessage('دورهٔ انتخاب‌شده مربوط به این سال تعلیمی نیست؛ دورهٔ همان سال را انتخاب کنید.', 'error');
+      setAssignment((current) => ({ ...current, assessmentPeriodId: '' }));
+      return;
+    }
+    if (!selectedAssignmentRecord?.id) {
+      showMessage('برای استاد، صنف و مضمون انتخاب‌شده تخصیص فعال پیدا نشد.', 'error');
+      return;
+    }
+    if (assignmentScoreTotal !== expectedScoreTotal) {
+      showMessage(`مجموع اجزای نمره باید دقیقاً ${formatNumber(expectedScoreTotal)} باشد؛ مجموع فعلی ${formatNumber(assignmentScoreTotal)} است.`, 'error');
+      return;
+    }
+
+    const payload = {
+      sessionKind: 'subject_sheet',
+      academicYearId: assignment.academicYearId,
+      assessmentPeriodId: assignment.assessmentPeriodId,
+      teacherAssignmentId: selectedAssignmentRecord.id,
+      classId: assignment.classId,
+      subjectId: assignment.subjectId,
+      examTypeId: assignment.examTypeId,
+      sheetTemplateId: selectedTemplateId,
+      reviewerUserId: assignment.reviewerUserId || undefined,
+      heldAt: assignment.heldAt,
+      monthLabel: assignment.monthLabel,
+      status: 'draft',
+      initializeRoster: true,
+      scoreComponents: SCORE_COMPONENTS.reduce((acc, item) => ({ ...acc, [item.key]: Math.max(0, Number(assignment[item.key] || 0)) }), {})
+    };
+
+    try {
+      setBusyAction('assign-exam');
+      const previewData = await postJson('/api/exams/sessions/bootstrap-preview', payload);
+      if (previewData.existingSession?.id) {
+        selectAssignedSession(previewData.existingSession);
+        showMessage('این شقه قبلاً ساخته شده بود؛ همان شقه برای مدیریت باز شد.');
+        return;
+      }
+      const data = await postJson('/api/exams/sessions/bootstrap', payload);
+      const session = data.session || null;
+      await loadReference();
+      if (session?.id) selectAssignedSession(session);
+      showMessage('شقه به استاد تخصیص شد و در حساب استاد قابل مشاهده است.');
+    } catch (error) {
+      showMessage(errorMessage(error, 'ایجاد و تخصیص شقه ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
   };
 
   const selectTemplate = (template) => {
@@ -381,16 +946,39 @@ export default function AdminSheetTemplates() {
   };
 
   const removeColumn = (index) => {
+    const removedColumn = draftColumns[index];
     setDraftColumns((current) => current
       .filter((_, columnIndex) => columnIndex !== index)
       .map((column, order) => ({ ...column, order })));
+    showMessage(`ستون «${removedColumn?.label || removedColumn?.key || ''}» حذف شد؛ برای ثبت دایمی، «ذخیره قالب» را بزنید.`);
   };
 
   const addColumn = () => {
-    setDraftColumns((current) => ([
-      ...current,
-      { key: `custom_${current.length + 1}`, label: 'ستون جدید', width: 16, visible: true, order: current.length }
-    ]));
+    setDraftColumns((current) => {
+      const existingKeys = new Set(current.map((column) => String(column?.key || '')));
+      let sequence = 1;
+      while (existingKeys.has(`custom_${sequence}`)) sequence += 1;
+      const nextColumn = {
+        key: `custom_${sequence}`,
+        label: `ستون جدید ${formatNumber(sequence)}`,
+        group: '',
+        width: 12,
+        visible: true,
+        order: current.length
+      };
+      return [...current, nextColumn];
+    });
+    showMessage('ستون سفارشی اضافه شد؛ عنوان آن را تعیین و سپس «ذخیره قالب» را بزنید. این ستون در خروجی چاپی خالی است.');
+  };
+
+  const restoreColumn = () => {
+    const candidate = restorableColumns.find((column) => column.key === restoreColumnKey);
+    if (!candidate) {
+      showMessage('ستون حذف‌شده‌ای برای بازگرداندن وجود ندارد.');
+      return;
+    }
+    setDraftColumns((current) => [...current, { ...candidate, order: current.length }]);
+    showMessage(`ستون «${candidate.label}» بازگردانده شد؛ برای ثبت دایمی، «ذخیره قالب» را بزنید.`);
   };
 
   const updateLayout = (event) => {
@@ -415,6 +1003,7 @@ export default function AdminSheetTemplates() {
         .map((column, order) => ({
           key: String(column.key || '').trim(),
           label: String(column.label || '').trim(),
+          group: String(column.group || '').trim(),
           width: Number(column.width || 16),
           visible: column.visible !== false,
           order
@@ -431,7 +1020,10 @@ export default function AdminSheetTemplates() {
             orientation: draftLayout.orientation,
             showHeader: Boolean(draftLayout.showHeader),
             showFooter: Boolean(draftLayout.showFooter),
-            showLogo: Boolean(draftLayout.showLogo)
+            showLogo: Boolean(draftLayout.showLogo),
+            headerText: String(draftLayout.headerText || '').trim(),
+            footerText: String(draftLayout.footerText || '').trim(),
+            margins: { ...DEFAULT_LAYOUT.margins, ...(draftLayout.margins || {}) }
           }
         })
       });
@@ -448,14 +1040,14 @@ export default function AdminSheetTemplates() {
   };
 
   return (
-    <main className="admin-workspace-page" dir="rtl">
+    <main className="admin-workspace-page admin-sheet-template-center" dir="rtl">
       <div className="admin-workspace-shell">
         <section className="admin-workspace-hero">
-          <h1>فهرست شقه‌های آماده</h1>
+          <h1>مرکز مدیریت شقه‌ها</h1>
           <p>
-            شقه‌ها از قبل در سیستم آماده شده‌اند. فقط نوع شقه و فیلترهای لازم را انتخاب کنید، سپس پیش‌نمایش یا خروجی رسمی بگیرید.
+            فارمت رسمی را تنظیم کنید، شقه را به استاد تخصیص دهید و پس از تکمیل نمرات، آن را برای تأیید و نتایج مدیریت نمایید.
           </p>
-          <div className="admin-workspace-actions">
+          <div className="admin-workspace-actions admin-sheet-hero-actions">
             <button type="button" className="admin-workspace-button-ghost" onClick={loadAll} disabled={busyAction === 'load'}>
               بروزرسانی
             </button>
@@ -468,9 +1060,9 @@ export default function AdminSheetTemplates() {
         {message ? <div className={`admin-workspace-message ${messageTone === 'error' ? 'error' : ''}`}>{message}</div> : null}
 
         <section className="admin-workspace-grid">
-          <article className="admin-workspace-card" data-span="4">
-            <h2>فهرست شقه</h2>
-            <p className="admin-workspace-subtitle">نوع شقه را فیلتر کنید و یکی از قالب‌های آماده را انتخاب نمایید.</p>
+          <article className="admin-workspace-card" data-span="12">
+            <h2>۱. انتخاب فارمت رسمی</h2>
+            <p className="admin-workspace-subtitle">فارمت‌ها به شکل افقی نمایش داده می‌شوند؛ یک فارمت را برای تنظیم یا تخصیص انتخاب نمایید.</p>
 
             <div className="admin-workspace-form">
               <div className="admin-workspace-field">
@@ -501,10 +1093,212 @@ export default function AdminSheetTemplates() {
             </div>
           </article>
 
-          <article className="admin-workspace-card" data-span="8">
+          {selectedTemplate?.type === 'exam' ? (
+            <article className="admin-workspace-card admin-sheet-assignment-card" data-span="12">
+              <div className="admin-education-card-head">
+                <div>
+                <h2>۲. ساخت و تخصیص شقه امتحان به استاد</h2>
+                  <p className="admin-workspace-subtitle">مدیریت شقه را می‌سازد؛ استاد آن را در حساب خود تکمیل و برای تأیید می‌فرستد.</p>
+                </div>
+                <div className={`admin-workspace-badge ${assignmentScoreTotal === expectedScoreTotal ? 'good' : 'warning'}`}>
+                  مجموع نمره: {formatNumber(assignmentScoreTotal)} از {formatNumber(expectedScoreTotal)}
+                </div>
+              </div>
+
+              <div className="admin-sheet-assignment-grid">
+                <label className="admin-workspace-field">
+                  <span>سال تعلیمی</span>
+                  <select name="academicYearId" value={assignment.academicYearId} onChange={updateAssignment}>
+                    <option value="">انتخاب سال</option>
+                    {academicYears.map((item) => <option key={item.id} value={item.id}>{item.title || item.code}</option>)}
+                  </select>
+                </label>
+                <label className="admin-workspace-field">
+                  <span>دورهٔ تعلیمی</span>
+                  <select name="assessmentPeriodId" value={assignment.assessmentPeriodId} onChange={updateAssignment}>
+                    <option value="">{assignmentTerms.length ? 'انتخاب دوره' : 'برای این سال دوره‌ای تعریف نشده است'}</option>
+                    {assignmentTerms.map((item) => <option key={item.id} value={item.id}>{item.title || item.code}</option>)}
+                  </select>
+                </label>
+                <label className="admin-workspace-field">
+                  <span>استاد</span>
+                  <select name="teacherId" value={assignment.teacherId} onChange={updateAssignment}>
+                    <option value="">انتخاب استاد</option>
+                    {assignmentTeachers.map((item) => <option key={item.id} value={item.id}>{item.name || item.email}</option>)}
+                  </select>
+                </label>
+                <label className="admin-workspace-field">
+                  <span>صنف</span>
+                  <select name="classId" value={assignment.classId} onChange={updateAssignment}>
+                    <option value="">انتخاب صنف</option>
+                    {assignmentClasses.map((item) => <option key={item.id} value={item.id}>{item.title || item.code}</option>)}
+                  </select>
+                </label>
+                <label className="admin-workspace-field">
+                  <span>مضمون</span>
+                  <select name="subjectId" value={assignment.subjectId} onChange={updateAssignment}>
+                    <option value="">انتخاب مضمون</option>
+                    {assignmentSubjects.map((item) => <option key={item.id} value={item.id}>{item.name || item.title}</option>)}
+                  </select>
+                </label>
+                <label className="admin-workspace-field">
+                  <span>نوع امتحان</span>
+                  <select name="examTypeId" value={assignment.examTypeId} onChange={updateAssignment}>
+                    <option value="">انتخاب نوع امتحان</option>
+                    {examTypes.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+                  </select>
+                </label>
+                <label className="admin-workspace-field">
+                  <span>استاد ممیز</span>
+                  <select name="reviewerUserId" value={assignment.reviewerUserId} onChange={updateAssignment}>
+                    <option value="">هنگام تأیید تعیین شود</option>
+                    {reviewers.map((item) => <option key={item.id} value={item.id}>{item.name || item.email}</option>)}
+                  </select>
+                </label>
+                <label className="admin-workspace-field">
+                  <span>ماه</span>
+                  <input name="monthLabel" value={assignment.monthLabel} onChange={updateAssignment} placeholder="مثلاً سرطان" />
+                </label>
+                <label className="admin-workspace-field admin-sheet-date-field">
+                  <span>تاریخ امتحان</span>
+                  <AfghanDateInput name="heldAt" value={assignment.heldAt} onChange={(value) => setAssignment((current) => ({ ...current, heldAt: value }))} />
+                </label>
+              </div>
+
+              <div className="admin-sheet-score-strip">
+                {SCORE_COMPONENTS.map((component) => (
+                  <label key={component.key} className="admin-sheet-score-card">
+                    <span>{component.label}</span>
+                    <input type="number" min="0" name={component.key} value={assignment[component.key]} onChange={updateAssignment} />
+                  </label>
+                ))}
+              </div>
+
+              <div className="admin-workspace-actions admin-workspace-section-actions">
+                <button type="button" className="admin-workspace-button" onClick={createAssignedExamSheet} disabled={busyAction === 'assign-exam' || assignmentScoreTotal !== expectedScoreTotal}>
+                  {busyAction === 'assign-exam' ? 'در حال ساخت...' : 'ایجاد و تخصیص به استاد'}
+                </button>
+              </div>
+
+              <section className="admin-sheet-session-manager" aria-labelledby="assigned-sheets-heading">
+                <div className="admin-sheet-session-manager-head">
+                  <div>
+                    <h3 id="assigned-sheets-heading">شقه‌های تخصیص‌شده</h3>
+                    <p>
+                      {filteredAssignedSessions.length
+                        ? `نمایش ${formatNumber(assignedSessionRangeStart)} تا ${formatNumber(assignedSessionRangeEnd)} از ${formatNumber(filteredAssignedSessions.length)} شقه`
+                        : 'هیچ شقه‌ای برای نمایش وجود ندارد.'}
+                    </p>
+                    <div className="admin-sheet-assignment-source-note">
+                      <span>اینجا تخصیص تازهٔ صنف ساخته نمی‌شود؛ هر شقه به تخصیص فعال موجود در بخش «معرفی صنف به استاد» وصل است.</span>
+                      <a href="/timetable/teacher-timetable-configurations">بازکردن معرفی صنف به استاد</a>
+                    </div>
+                  </div>
+                  <div className="admin-sheet-session-tools">
+                    <label>
+                      <span>جست‌وجو</span>
+                      <input
+                        type="search"
+                        value={assignedSessionQuery}
+                        onChange={(event) => setAssignedSessionQuery(event.target.value)}
+                        placeholder="استاد، مضمون یا صنف"
+                        aria-label="جست‌وجوی شقه‌های تخصیص‌شده"
+                      />
+                    </label>
+                    <label>
+                      <span>وضعیت</span>
+                      <select
+                        value={assignedSessionStatus}
+                        onChange={(event) => setAssignedSessionStatus(event.target.value)}
+                        aria-label="فیلتر وضعیت شقه"
+                      >
+                        {SESSION_STATUS_OPTIONS.map((option) => (
+                          <option key={option.id || 'all'} value={option.id}>{option.title}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </div>
+
+                {pagedAssignedSessions.length ? (
+                  <div className="admin-sheet-session-strip" aria-label="شقه‌های تخصیص‌شده">
+                    {pagedAssignedSessions.map((session) => (
+                      <article key={session.id} className="admin-sheet-session-card" data-status={session.status || 'draft'}>
+                        <button type="button" className="admin-sheet-session-card__main" onClick={() => selectAssignedSession(session)}>
+                          <strong>{session.subject?.name || session.title}</strong>
+                          <span>{session.teacherAssignment?.teacher?.name || 'استاد تعیین نشده'}</span>
+                          <em>{session.schoolClass?.title || '---'} · {session.examType?.title || '---'} · {getSessionStatusLabel(session.status)}</em>
+                        </button>
+                        <div className="admin-sheet-session-card__actions">
+                          {['draft', 'active'].includes(String(session.status || '')) ? (
+                            <button
+                              type="button"
+                              className="admin-sheet-session-action"
+                              onClick={() => openSessionEditor(session)}
+                              disabled={busyAction === `manage-session:${session.id}`}
+                            >
+                              {busyAction === `manage-session:${session.id}` ? 'در حال بازکردن…' : 'ویرایش'}
+                            </button>
+                          ) : null}
+                          <details className="admin-sheet-session-more">
+                            <summary>بیشتر</summary>
+                            <div className="admin-sheet-session-more__menu">
+                              {String(session.status || '') === 'draft' ? (
+                                <button type="button" onClick={() => deleteAssignedSession(session)} disabled={busyAction === `delete-session:${session.id}`}>حذف پیش‌نویس</button>
+                              ) : null}
+                              {String(session.status || '') === 'submitted' ? (
+                                <button type="button" onClick={() => returnAssignedSessionForCorrection(session)} disabled={busyAction === `return-session:${session.id}`}>برگشت برای اصلاح</button>
+                              ) : null}
+                              {['approved', 'published', 'closed'].includes(String(session.status || '')) ? (
+                                <button type="button" onClick={() => createAssignedSessionRevision(session)} disabled={busyAction === `revise-session:${session.id}`}>ساخت نسخهٔ اصلاحی</button>
+                              ) : null}
+                              {String(session.status || '') !== 'archived' ? (
+                                <button type="button" onClick={() => archiveAssignedSession(session)} disabled={busyAction === `archive-session:${session.id}`}>آرشیف با دلیل</button>
+                              ) : null}
+                              {String(session.status || '') === 'archived' ? <span>این شقه آرشیف شده است.</span> : null}
+                            </div>
+                          </details>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="admin-workspace-empty">
+                    {examSessions.length ? 'شقه‌ای مطابق جست‌وجو یا وضعیت انتخاب‌شده پیدا نشد.' : 'هنوز شقه‌ای تخصیص نشده است.'}
+                  </div>
+                )}
+
+                {filteredAssignedSessions.length > ASSIGNED_SESSION_PAGE_SIZE ? (
+                  <div className="admin-workspace-actions admin-education-pagination">
+                    <button
+                      type="button"
+                      className="admin-workspace-button-ghost"
+                      onClick={() => setAssignedSessionPage((current) => Math.max(1, current - 1))}
+                      disabled={assignedSessionPage <= 1}
+                    >
+                      صفحه قبلی
+                    </button>
+                    <span className="admin-workspace-badge info">
+                      صفحه {formatNumber(assignedSessionPage)} از {formatNumber(assignedSessionPageCount)}
+                    </span>
+                    <button
+                      type="button"
+                      className="admin-workspace-button-ghost"
+                      onClick={() => setAssignedSessionPage((current) => Math.min(assignedSessionPageCount, current + 1))}
+                      disabled={assignedSessionPage >= assignedSessionPageCount}
+                    >
+                      صفحه بعدی
+                    </button>
+                  </div>
+                ) : null}
+              </section>
+            </article>
+          ) : null}
+
+          <article className="admin-workspace-card" data-span="12">
             <div className="admin-education-card-head">
               <div>
-                <h2>{selectedTemplate?.title || 'شقه انتخاب نشده'}</h2>
+                <h2>{selectedTemplate?.type === 'exam' ? '۳. تنظیم ظاهر و ستون‌های شقه' : selectedTemplate?.title || 'شقه انتخاب نشده'}</h2>
                 <p className="admin-workspace-subtitle">{getTemplateHint(selectedTemplate)}</p>
               </div>
               {selectedTemplate ? (
@@ -593,81 +1387,102 @@ export default function AdminSheetTemplates() {
                   <option value="landscape">A4 افقی</option>
                 </select>
               </div>
-              <label className="admin-workspace-field">
-                <span>هدر</span>
-                <input name="showHeader" type="checkbox" checked={Boolean(draftLayout.showHeader)} onChange={updateLayout} disabled={!selectedTemplate} />
-              </label>
-              <label className="admin-workspace-field">
-                <span>فوتر</span>
-                <input name="showFooter" type="checkbox" checked={Boolean(draftLayout.showFooter)} onChange={updateLayout} disabled={!selectedTemplate} />
-              </label>
-              <label className="admin-workspace-field">
-                <span>لوگو</span>
-                <input name="showLogo" type="checkbox" checked={Boolean(draftLayout.showLogo)} onChange={updateLayout} disabled={!selectedTemplate} />
-              </label>
+              <div className="admin-workspace-field">
+                <label htmlFor="sheet-layout-header-text">عنوان بالای شقه</label>
+                <input id="sheet-layout-header-text" name="headerText" value={draftLayout.headerText || ''} onChange={updateLayout} disabled={!selectedTemplate} placeholder="نام مکتب یا عنوان رسمی" />
+              </div>
+              <div className="admin-workspace-field">
+                <label htmlFor="sheet-layout-footer-text">متن پایین شقه</label>
+                <input id="sheet-layout-footer-text" name="footerText" value={draftLayout.footerText || ''} onChange={updateLayout} disabled={!selectedTemplate} placeholder="آدرس یا یادداشت رسمی" />
+              </div>
+              <div className="admin-sheet-layout-toggle-strip">
+                <label className="admin-sheet-layout-toggle">
+                  <input name="showHeader" type="checkbox" checked={Boolean(draftLayout.showHeader)} onChange={updateLayout} disabled={!selectedTemplate} />
+                  <span><strong>نمایش عنوان بالای شقه</strong><small>عنوان و مشخصات رسمی در بالای صفحه چاپ شود.</small></span>
+                </label>
+                <label className="admin-sheet-layout-toggle">
+                  <input name="showFooter" type="checkbox" checked={Boolean(draftLayout.showFooter)} onChange={updateLayout} disabled={!selectedTemplate} />
+                  <span><strong>نمایش متن پایین شقه</strong><small>متن فوتر در پایین نسخهٔ چاپی نشان داده شود.</small></span>
+                </label>
+                <label className="admin-sheet-layout-toggle">
+                  <input name="showLogo" type="checkbox" checked={Boolean(draftLayout.showLogo)} onChange={updateLayout} disabled={!selectedTemplate} />
+                  <span><strong>نمایش لوگوی مکتب</strong><small>لوگوی ثبت‌شدهٔ مکتب در سربرگ چاپ شود.</small></span>
+                </label>
+              </div>
             </div>
 
-            <div className="admin-workspace-table-wrap">
-              <table className="admin-workspace-table">
-                <thead>
-                  <tr>
-                    <th>کلید</th>
-                    <th>عنوان</th>
-                    <th>عرض</th>
-                    <th>نمایش</th>
-                    <th>ترتیب</th>
-                    <th>عملیات</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {draftColumns.map((column, index) => (
-                    <tr key={`${column.key}-${index}`}>
-                      <td><input value={column.key} onChange={(event) => updateColumn(index, { key: event.target.value })} disabled={!selectedTemplate} /></td>
-                      <td><input value={column.label} onChange={(event) => updateColumn(index, { label: event.target.value })} disabled={!selectedTemplate} /></td>
-                      <td><input type="number" min="4" max="80" value={column.width} onChange={(event) => updateColumn(index, { width: event.target.value })} disabled={!selectedTemplate} /></td>
-                      <td><input type="checkbox" checked={column.visible !== false} onChange={(event) => updateColumn(index, { visible: event.target.checked })} disabled={!selectedTemplate} /></td>
-                      <td>{index + 1}</td>
-                      <td>
-                        <div className="admin-workspace-actions">
-                          <button type="button" className="admin-workspace-button-ghost" onClick={() => moveColumn(index, 'up')} disabled={!selectedTemplate || index === 0}>بالا</button>
-                          <button type="button" className="admin-workspace-button-ghost" onClick={() => moveColumn(index, 'down')} disabled={!selectedTemplate || index === draftColumns.length - 1}>پایین</button>
-                          <button type="button" className="admin-workspace-button-ghost" onClick={() => removeColumn(index)} disabled={!selectedTemplate || draftColumns.length <= 1}>حذف</button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="admin-sheet-column-strip" aria-label="ستون‌های شقه">
+              {draftColumns.map((column, index) => (
+                <article className={`admin-sheet-column-card ${column.visible === false ? 'is-hidden' : ''}`} key={`${column.key}-${index}`}>
+                  <div className="admin-sheet-column-card__head">
+                    <strong>{index + 1}. {column.label || column.key}</strong>
+                    <label><input type="checkbox" checked={column.visible !== false} onChange={(event) => updateColumn(index, { visible: event.target.checked })} disabled={!selectedTemplate} /> نمایش</label>
+                  </div>
+                  <label><span>کلید معلومات</span><input value={column.key} readOnly /></label>
+                  <label><span>عنوان ستون</span><input value={column.label} onChange={(event) => updateColumn(index, { label: event.target.value })} disabled={!selectedTemplate} /></label>
+                  <label><span>عنوان گروه</span><input value={column.group || ''} onChange={(event) => updateColumn(index, { group: event.target.value })} disabled={!selectedTemplate} /></label>
+                  <label><span>عرض ستون</span><input type="number" min="4" max="80" value={column.width} onChange={(event) => updateColumn(index, { width: event.target.value })} disabled={!selectedTemplate} /></label>
+                  <div className="admin-workspace-actions">
+                    <button type="button" className="admin-workspace-button-ghost" onClick={() => moveColumn(index, 'up')} disabled={!selectedTemplate || index === 0}>قبلی</button>
+                    <button type="button" className="admin-workspace-button-ghost" onClick={() => moveColumn(index, 'down')} disabled={!selectedTemplate || index === draftColumns.length - 1}>بعدی</button>
+                    <button type="button" className="admin-workspace-button-ghost" onClick={() => removeColumn(index)} disabled={!selectedTemplate || draftColumns.length <= 1}>حذف</button>
+                  </div>
+                </article>
+              ))}
             </div>
 
-            <div className="admin-workspace-actions admin-workspace-section-actions">
-              <button type="button" className="admin-workspace-button-secondary" onClick={addColumn} disabled={!selectedTemplate}>
-                افزودن ستون
-              </button>
-              <button type="button" className="admin-workspace-button" onClick={saveTemplateSettings} disabled={busyAction === 'save-template' || !selectedTemplateId}>
-                ذخیره قالب
-              </button>
-              <button type="button" className="admin-workspace-button-ghost" onClick={resetTemplateDraft} disabled={!selectedTemplate}>
-                برگشت تنظیمات
-              </button>
-              <button type="button" className="admin-workspace-button" onClick={runPreview} disabled={busyAction === 'preview' || !selectedTemplateId}>
-                پیش‌نمایش
-              </button>
-              <button type="button" className="admin-workspace-button-secondary" onClick={() => exportFromTemplate('pdf')} disabled={busyAction === 'export:pdf' || !selectedTemplateId}>
-                PDF
-              </button>
-              <button type="button" className="admin-workspace-button-secondary" onClick={() => exportFromTemplate('xlsx')} disabled={busyAction === 'export:xlsx' || !selectedTemplateId}>
-                Excel
-              </button>
-              <button type="button" className="admin-workspace-button-ghost" onClick={() => exportFromTemplate('csv')} disabled={busyAction === 'export:csv' || !selectedTemplateId}>
-                CSV
-              </button>
-              <button type="button" className="admin-workspace-button-ghost" onClick={() => exportFromTemplate('print')} disabled={busyAction === 'export:print' || !selectedTemplateId}>
-                چاپ
-              </button>
-              <button type="button" className="admin-workspace-button-ghost" onClick={resetFilters}>
-                پاک کردن فیلتر
-              </button>
+            <div className="admin-sheet-command-bar" role="toolbar" aria-label="عملیات قالب و خروجی شقه">
+              <div className="admin-sheet-command-group" aria-label="مدیریت ستون‌ها">
+                <button type="button" className="admin-workspace-button-secondary" onClick={addColumn} disabled={!selectedTemplate} data-testid="sheet-add-column">
+                  افزودن ستون سفارشی
+                </button>
+                <select
+                  className="admin-sheet-restore-select"
+                  value={restoreColumnKey}
+                  onChange={(event) => setRestoreColumnKey(event.target.value)}
+                  disabled={!selectedTemplate || !restorableColumns.length}
+                  aria-label="ستون حذف‌شده برای بازگرداندن"
+                >
+                  <option value="">{restorableColumns.length ? 'انتخاب ستون' : 'ستونی حذف نشده است'}</option>
+                  {restorableColumns.map((column) => <option key={column.key} value={column.key}>{column.label}</option>)}
+                </select>
+                <button type="button" className="admin-workspace-button-secondary" onClick={restoreColumn} disabled={!selectedTemplate || !restoreColumnKey} data-testid="sheet-restore-column">
+                  بازگرداندن ستون
+                </button>
+              </div>
+
+              <div className="admin-sheet-command-group" aria-label="تنظیمات قالب">
+                <button type="button" className="admin-workspace-button" onClick={saveTemplateSettings} disabled={busyAction === 'save-template' || !selectedTemplateId} data-testid="sheet-save-template">
+                  {busyAction === 'save-template' ? 'در حال ذخیره…' : 'ذخیره قالب'}
+                </button>
+                <button type="button" className="admin-workspace-button-ghost" onClick={resetTemplateDraft} disabled={!selectedTemplate} data-testid="sheet-reset-template">
+                  برگشت تنظیمات
+                </button>
+              </div>
+
+              <div className="admin-sheet-command-group" aria-label="پیش‌نمایش و خروجی‌ها">
+                <button type="button" className="admin-workspace-button" onClick={runPreview} disabled={busyAction === 'preview' || !selectedTemplateId} data-testid="sheet-preview">
+                  {busyAction === 'preview' ? 'در حال نمایش…' : 'پیش‌نمایش'}
+                </button>
+                <button type="button" className="admin-workspace-button-secondary" onClick={() => exportFromTemplate('pdf')} disabled={busyAction === 'export:pdf' || !selectedTemplateId} data-testid="sheet-export-pdf">
+                  PDF
+                </button>
+                <button type="button" className="admin-workspace-button-secondary" onClick={() => exportFromTemplate('xlsx')} disabled={busyAction === 'export:xlsx' || !selectedTemplateId} data-testid="sheet-export-xlsx">
+                  Excel
+                </button>
+                <button type="button" className="admin-workspace-button-ghost" onClick={() => exportFromTemplate('csv')} disabled={busyAction === 'export:csv' || !selectedTemplateId} data-testid="sheet-export-csv">
+                  CSV
+                </button>
+                <button type="button" className="admin-workspace-button-ghost" onClick={() => exportFromTemplate('print')} disabled={busyAction === 'export:print' || !selectedTemplateId} data-testid="sheet-export-print">
+                  چاپ
+                </button>
+              </div>
+
+              <div className="admin-sheet-command-group" aria-label="عملیات فیلتر">
+                <button type="button" className="admin-workspace-button-ghost" onClick={resetFilters} data-testid="sheet-reset-filters">
+                  پاک کردن فیلتر
+                </button>
+              </div>
             </div>
           </article>
 
@@ -726,6 +1541,65 @@ export default function AdminSheetTemplates() {
             )}
           </article>
         </section>
+
+        {editingSession ? (
+          <div className="admin-sheet-session-modal" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeSessionEditor()}>
+            <section className="admin-sheet-session-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-exam-session-heading">
+              <div className="admin-sheet-session-dialog__head">
+                <div>
+                  <h2 id="edit-exam-session-heading">ویرایش تخصیص شقه</h2>
+                  <p>{editingSession.subject?.name || editingSession.title} · {getSessionStatusLabel(editingSession.status)}</p>
+                </div>
+                <button type="button" className="admin-workspace-button-ghost" onClick={closeSessionEditor}>بستن</button>
+              </div>
+
+              <div className="admin-sheet-session-policy-note">
+                <strong>ارتباط با معرفی صنف به استاد</strong>
+                <span>این فورم تخصیص تازه نمی‌سازد؛ فقط یکی از تخصیص‌های فعال موجود در بخش «معرفی صنف به استاد» را به شقه وصل می‌کند.</span>
+              </div>
+
+              {!editingManagement?.permissions?.canEditStructure ? (
+                <div className="admin-sheet-session-lock-note">
+                  نمره یا سند وابسته موجود است؛ سال، صنف، مضمون، نوع امتحان و اجزای نمره قفل‌اند. استاد، ممیز، تاریخ، ماه و یادداشت هنوز قابل ویرایش است.
+                </div>
+              ) : null}
+
+              <div className="admin-sheet-session-edit-grid">
+                <label><span>سال تعلیمی</span><select name="academicYearId" value={sessionEdit.academicYearId} onChange={updateSessionEdit} disabled={!editingManagement?.permissions?.canEditStructure}><option value="">انتخاب سال</option>{academicYears.map((item) => <option key={item.id} value={item.id}>{item.title || item.code}</option>)}</select></label>
+                <label><span>دوره</span><select name="assessmentPeriodId" value={sessionEdit.assessmentPeriodId} onChange={updateSessionEdit} disabled={!editingManagement?.permissions?.canEditStructure}><option value="">انتخاب دوره</option>{editTerms.map((item) => <option key={item.id} value={item.id}>{item.title || item.code}</option>)}</select></label>
+                <label><span>استاد</span><select name="teacherId" value={sessionEdit.teacherId} onChange={updateSessionEdit}><option value="">انتخاب استاد</option>{editTeachers.map((item) => <option key={item.id} value={item.id}>{item.name || item.email}</option>)}</select></label>
+                <label><span>صنف</span><select name="classId" value={sessionEdit.classId} onChange={updateSessionEdit} disabled={!editingManagement?.permissions?.canEditStructure}><option value="">انتخاب صنف</option>{editClasses.map((item) => <option key={item.id} value={item.id}>{item.title || item.code}</option>)}</select></label>
+                <label><span>مضمون</span><select name="subjectId" value={sessionEdit.subjectId} onChange={updateSessionEdit} disabled={!editingManagement?.permissions?.canEditStructure}><option value="">انتخاب مضمون</option>{editSubjects.map((item) => <option key={item.id} value={item.id}>{item.name || item.title}</option>)}</select></label>
+                <label><span>نوع امتحان</span><select name="examTypeId" value={sessionEdit.examTypeId} onChange={updateSessionEdit} disabled={!editingManagement?.permissions?.canEditStructure}><option value="">انتخاب نوع امتحان</option>{examTypes.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+                <label><span>فارمت شقه</span><select name="sheetTemplateId" value={sessionEdit.sheetTemplateId} onChange={updateSessionEdit}><option value="">فارمت پیش‌فرض</option>{items.filter((item) => item.type === 'exam' && item.isActive !== false).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+                <label><span>استاد ممیز</span><select name="reviewerUserId" value={sessionEdit.reviewerUserId} onChange={updateSessionEdit}><option value="">هنگام تأیید تعیین شود</option>{reviewers.map((item) => <option key={item.id} value={item.id}>{item.name || item.email}</option>)}</select></label>
+                <label><span>ماه</span><input name="monthLabel" value={sessionEdit.monthLabel} onChange={updateSessionEdit} placeholder="مثلاً سرطان" /></label>
+                <label className="admin-sheet-session-edit-date"><span>تاریخ امتحان</span><AfghanDateInput name="heldAt" value={sessionEdit.heldAt} onChange={(value) => setSessionEdit((current) => ({ ...current, heldAt: value }))} /></label>
+                <label className="admin-sheet-session-edit-note"><span>یادداشت</span><input name="note" value={sessionEdit.note} onChange={updateSessionEdit} placeholder="یادداشت مدیریتی" /></label>
+              </div>
+
+              <div className="admin-sheet-score-strip admin-sheet-session-edit-scores">
+                {SCORE_COMPONENTS.map((component) => (
+                  <label key={component.key} className="admin-sheet-score-card">
+                    <span>{component.label}</span>
+                    <input type="number" min="0" name={component.key} value={sessionEdit[component.key]} onChange={updateSessionEdit} disabled={!editingManagement?.permissions?.canEditStructure} />
+                  </label>
+                ))}
+              </div>
+
+              <div className={`admin-sheet-session-score-total ${editScoreTotal === expectedEditScoreTotal ? 'is-valid' : 'is-invalid'}`}>
+                مجموع نمره: {formatNumber(editScoreTotal)} از {formatNumber(expectedEditScoreTotal)}
+              </div>
+
+              <div className="admin-sheet-session-dialog__actions">
+                <button type="button" className="admin-workspace-button" onClick={saveSessionEdit} disabled={busyAction === 'update-session' || (editingManagement?.permissions?.canEditStructure && editScoreTotal !== expectedEditScoreTotal) || !selectedEditAssignment?.id}>
+                  {busyAction === 'update-session' ? 'در حال ذخیره…' : 'ذخیره تغییرات'}
+                </button>
+                <button type="button" className="admin-workspace-button-ghost" onClick={closeSessionEditor}>انصراف</button>
+              </div>
+            </section>
+          </div>
+        ) : null}
       </div>
     </main>
   );

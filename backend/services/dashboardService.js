@@ -19,6 +19,7 @@ const ProfileUpdateRequest = require('../models/ProfileUpdateRequest');
 const AccessRequest = require('../models/AccessRequest');
 const SchoolClass = require('../models/SchoolClass');
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
+const { ACTIVE_STUDENT_MEMBERSHIP_STATUSES } = require('../utils/studentMembershipStatus');
 
 function startOfDay(date = new Date()) {
   const value = new Date(date);
@@ -130,6 +131,14 @@ function isCountedAsAttended(value = '') {
   return normalized === 'present' || normalized === 'sick' || normalized === 'leave';
 }
 
+function computeAttendanceRate(rows = []) {
+  const eligibleRows = rows.filter((item) => normalizeAttendanceStatus(item?.status) !== 'suspended');
+  return asPercent(
+    eligibleRows.filter((item) => isCountedAsAttended(item.status)).length,
+    eligibleRows.length || 1
+  );
+}
+
 function compareMonthChange(current, previous) {
   const currentValue = Number(current || 0);
   const previousValue = Number(previous || 0);
@@ -139,29 +148,42 @@ function compareMonthChange(current, previous) {
 
 async function getOfficialPeopleCounts() {
   const [
-    totalStudents,
+    registeredStudentProfiles,
     totalInstructors,
     directoryStudentUsers,
     directoryInstructorUsers,
-    activeMembershipStudents
+    activeMembershipStudents,
+    pendingMembershipStudents,
+    suspendedMembershipStudents
   ] = await Promise.all([
     AfghanStudent.countDocuments({ status: 'active' }),
     AfghanTeacher.countDocuments({ status: 'active' }),
     User.countDocuments({ role: 'student', status: 'active' }),
     User.countDocuments({ role: 'instructor', status: 'active' }),
     StudentMembership.distinct('student', {
-      status: { $in: ['active', 'pending', 'suspended', 'transferred_in'] },
+      status: { $in: ACTIVE_STUDENT_MEMBERSHIP_STATUSES },
+      isCurrent: true
+    }),
+    StudentMembership.distinct('student', {
+      status: 'pending',
+      isCurrent: true
+    }),
+    StudentMembership.distinct('student', {
+      status: 'suspended',
       isCurrent: true
     })
   ]);
 
   return {
-    totalStudents,
+    totalStudents: activeMembershipStudents.length,
+    registeredStudentProfiles,
     totalInstructors,
     directoryStudentUsers,
     directoryInstructorUsers,
     activeMembershipStudents: activeMembershipStudents.length,
-    orphanStudentUsers: Math.max(0, directoryStudentUsers - totalStudents),
+    pendingMembershipStudents: pendingMembershipStudents.length,
+    suspendedMembershipStudents: suspendedMembershipStudents.length,
+    orphanStudentUsers: Math.max(0, directoryStudentUsers - registeredStudentProfiles),
     orphanInstructorUsers: Math.max(0, directoryInstructorUsers - totalInstructors)
   };
 }
@@ -249,7 +271,7 @@ async function getTeacherDashboard(userId) {
   const [classDocs, memberships, joinRequests, todaySchedule, attendanceRows, gradeRows, activeExamCount, upcomingHomework] = await Promise.all([
     classIds.length ? SchoolClass.find({ _id: { $in: classIds } }).select('title titleDari') : Promise.resolve([]),
     StudentMembership.find({
-      status: 'active',
+      status: { $in: ACTIVE_STUDENT_MEMBERSHIP_STATUSES },
       isCurrent: true,
       $or: [
         classIds.length ? { classId: { $in: classIds } } : null,
@@ -341,10 +363,7 @@ async function getTeacherDashboard(userId) {
     .sort((a, b) => b.value - a.value)
     .slice(0, 6);
 
-  const attendanceRate = asPercent(
-    attendanceRows.filter((item) => isCountedAsAttended(item.status)).length,
-    attendanceRows.length || 1
-  );
+  const attendanceRate = computeAttendanceRate(attendanceRows);
   const activeStudents = uniqueObjectIdStrings(memberships.map((item) => item.student)).length;
   const activeClasses = uniqueObjectIdStrings([...classIds, ...courseIds]).length;
 
@@ -477,10 +496,7 @@ async function getAdminDashboard() {
     const paidAt = row.payment?.paidAt ? new Date(row.payment.paidAt) : null;
     return row.recognizedAmount > 0 && paidAt && paidAt >= todayStart && paidAt <= todayEnd;
   });
-  const attendanceRate = asPercent(
-    attendanceRows.filter((item) => isCountedAsAttended(item.status)).length,
-    attendanceRows.length || 1
-  );
+  const attendanceRate = computeAttendanceRate(attendanceRows);
 
   const studentGrowth = buildRecentMonthBuckets(6).map((bucket) => ({
     label: bucket.label,
@@ -517,6 +533,9 @@ async function getAdminDashboard() {
         studentUsers: officialPeopleCounts.directoryStudentUsers,
         instructorUsers: officialPeopleCounts.directoryInstructorUsers,
         activeMembershipStudents: officialPeopleCounts.activeMembershipStudents,
+        pendingMembershipStudents: officialPeopleCounts.pendingMembershipStudents,
+        suspendedMembershipStudents: officialPeopleCounts.suspendedMembershipStudents,
+        registeredStudentProfiles: officialPeopleCounts.registeredStudentProfiles,
         orphanStudentUsers: officialPeopleCounts.orphanStudentUsers,
         orphanInstructorUsers: officialPeopleCounts.orphanInstructorUsers
       }
@@ -764,10 +783,7 @@ async function getParentDashboard(viewer = {}, options = {}) {
       : Promise.resolve([])
   ]);
 
-  const attendanceRate = asPercent(
-    attendanceRows.filter((item) => isCountedAsAttended(item.status)).length,
-    attendanceRows.length || 1
-  );
+  const attendanceRate = computeAttendanceRate(attendanceRows);
   const averageScore = grades.length
     ? Number((sumBy(grades, (item) => item.totalScore) / grades.length).toFixed(1))
     : 0;

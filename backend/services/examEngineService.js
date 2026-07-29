@@ -17,6 +17,7 @@ const Subject = require('../models/Subject');
 const TeacherAssignment = require('../models/TeacherAssignment');
 const StudentCore = require('../models/StudentCore');
 const StudentMembership = require('../models/StudentMembership');
+const StudentSuspension = require('../models/StudentSuspension');
 const StudentProfile = require('../models/StudentProfile');
 const User = require('../models/User');
 const ExamType = require('../models/ExamType');
@@ -25,6 +26,17 @@ const ExamDefaultMark = require('../models/ExamDefaultMark');
 const ExamMark = require('../models/ExamMark');
 const ExamResult = require('../models/ExamResult');
 const RankingRule = require('../models/RankingRule');
+const Attendance = require('../models/Attendance');
+const SheetTemplate = require('../models/SheetTemplate');
+const ResultTable = require('../models/ResultTable');
+const PromotionTransaction = require('../models/PromotionTransaction');
+const {
+  OFFICIAL_RESULT_POLICY_VERSION,
+  computeCompetitionRanks,
+  getMembershipLifecycleLabel,
+  getOfficialExamPolicy,
+  isMembershipEffectiveAt
+} = require('../utils/officialResultPolicy');
 
 function toPlain(doc) {
   if (!doc) return null;
@@ -41,6 +53,30 @@ function normalizeText(value) {
 function normalizeNullableId(value) {
   if (!value || !mongoose.isValidObjectId(value)) return null;
   return value;
+}
+
+function buildSheetTemplateSnapshot(template = null) {
+  const item = toPlain(template);
+  if (!item) return null;
+  return {
+    id: String(item._id || item.id || ''),
+    title: normalizeText(item.title),
+    code: normalizeText(item.code),
+    type: normalizeText(item.type) || 'exam',
+    version: Math.max(1, Number(item.version || 1)),
+    layout: item.layout && typeof item.layout === 'object' ? item.layout : {},
+    columns: Array.isArray(item.columns) ? item.columns.map((column, order) => ({
+      key: normalizeText(column?.key),
+      label: normalizeText(column?.label),
+      group: normalizeText(column?.group)
+        || (['studentName', 'fatherName'].includes(normalizeText(column?.key)) ? 'شهرت شاگردان' : '')
+        || (['obtainedMark', 'totalInWords'].includes(normalizeText(column?.key)) ? 'مجموع نمره' : ''),
+      width: Math.max(4, Number(column?.width || 16)),
+      visible: column?.visible !== false,
+      order: Number(column?.order ?? order)
+    })).filter((column) => column.key) : [],
+    options: item.options && typeof item.options === 'object' ? item.options : {}
+  };
 }
 
 function clampNumber(value, min, max, fallback = null) {
@@ -76,6 +112,7 @@ function normalizeCodeFragment(value = '') {
 }
 
 const SCORE_COMPONENT_FIELDS = Object.freeze([
+  { key: 'attendance', maxKey: 'attendanceMax', scoreKey: 'attendanceScore', label: 'حاضری' },
   { key: 'written', maxKey: 'writtenMax', scoreKey: 'writtenScore', label: 'تحریری' },
   { key: 'oral', maxKey: 'oralMax', scoreKey: 'oralScore', label: 'تقریری' },
   { key: 'classActivity', maxKey: 'classActivityMax', scoreKey: 'classActivityScore', label: 'فعالیت صنفی' },
@@ -84,7 +121,9 @@ const SCORE_COMPONENT_FIELDS = Object.freeze([
 
 const EXAM_MARK_STATUS_LABELS = Object.freeze({
   absent: 'غایب',
-  excused: 'معذور'
+  excused: 'معذور',
+  pending: 'در انتظار نمره',
+  not_applicable: 'شامل امتحان نبوده'
 });
 
 function sanitizeExamNote(value = '') {
@@ -95,6 +134,27 @@ function sanitizeExamNote(value = '') {
 function buildExamSheetNote(markStatus = '', note = '') {
   const statusLabel = EXAM_MARK_STATUS_LABELS[normalizeText(markStatus)] || '';
   return [statusLabel, sanitizeExamNote(note)].filter(Boolean).join(' - ');
+}
+
+function buildOfficialExamSheetNote(membershipSnapshot = {}, markStatus = '', note = '') {
+  const membershipStatus = normalizeText(membershipSnapshot?.status);
+  const membershipLabel = normalizeText(membershipSnapshot?.statusLabel)
+    || getMembershipLifecycleLabel(membershipSnapshot);
+  const lifecycleOverrides = new Set([
+    'transferred',
+    'transferred_out',
+    'graduated',
+    'dropped',
+    'expelled',
+    'suspended',
+    'inactive',
+    'rejected'
+  ]);
+  const primary = lifecycleOverrides.has(membershipStatus)
+    ? membershipLabel
+    : (EXAM_MARK_STATUS_LABELS[normalizeText(markStatus)] || '');
+  const customNote = sanitizeExamNote(note);
+  return [primary, customNote && customNote !== primary ? customNote : ''].filter(Boolean).join(' - ');
 }
 
 function getScoreComponents(source = {}) {
@@ -313,13 +373,16 @@ function formatRankingRule(doc) {
 function formatTeacherAssignment(doc) {
   const item = toPlain(doc);
   if (!item) return null;
+  const academicYear = formatAcademicYear(item.academicYearId)
+    || formatAcademicYear(item.classId?.academicYearId)
+    || formatAcademicYear(item.termId?.academicYearId);
   return {
     id: String(item._id),
     assignmentType: normalizeText(item.assignmentType),
     status: normalizeText(item.status),
     isPrimary: Boolean(item.isPrimary),
     startedAt: item.startedAt || null,
-    academicYear: formatAcademicYear(item.academicYearId),
+    academicYear,
     assessmentPeriod: formatAssessmentPeriod(item.termId),
     schoolClass: formatSchoolClass(item.classId),
     subject: formatSubject(item.subjectId),
@@ -375,16 +438,42 @@ function formatStudentProfile(doc) {
 function formatExamSession(doc) {
   const item = toPlain(doc);
   if (!item) return null;
+  const officialPolicy = getOfficialExamPolicy(item.examTypeId);
+  const sessionTotalMark = Number(item.defaultMarkId?.totalMark || item.examTypeId?.defaultTotalMark || 0);
+  const sessionPassMark = Number(item.defaultMarkId?.passMark || item.examTypeId?.defaultPassMark || 0);
+  const sessionComponents = getScoreComponents(item.defaultMarkId || {});
+  const scoringPolicyCompatible = officialPolicy
+    ? sessionTotalMark === officialPolicy.totalMark
+      && sessionPassMark === officialPolicy.passMark
+      && getScoreComponentTotal(sessionComponents) === officialPolicy.totalMark
+    : true;
   return {
     id: String(item._id),
     title: normalizeText(item.title),
     code: normalizeText(item.code),
     sessionKind: normalizeSessionKind(item.sessionKind),
     status: normalizeText(item.status),
+    version: Number(item.version || 1),
+    revisionRootSessionId: item.revisionRootSessionId ? String(item.revisionRootSessionId?._id || item.revisionRootSessionId) : '',
+    supersedesSessionId: item.supersedesSessionId ? String(item.supersedesSessionId?._id || item.supersedesSessionId) : '',
+    replacedBySessionId: item.replacedBySessionId ? String(item.replacedBySessionId?._id || item.replacedBySessionId) : '',
     heldAt: item.heldAt || null,
+    rosterFrozenAt: item.rosterFrozenAt || null,
     publishedAt: item.publishedAt || null,
     monthLabel: normalizeText(item.monthLabel),
     reviewedByName: normalizeText(item.reviewedByName),
+    createdAt: item.createdAt || null,
+    updatedAt: item.updatedAt || null,
+    reviewerUserId: (item.reviewerUserId?._id || item.reviewerUserId)
+      ? String(item.reviewerUserId?._id || item.reviewerUserId)
+      : '',
+    reviewer: item.reviewerUserId && item.reviewerUserId.name ? {
+      id: String(item.reviewerUserId._id),
+      name: normalizeText(item.reviewerUserId.name),
+      email: normalizeText(item.reviewerUserId.email)
+    } : null,
+    submittedAt: item.submittedAt || null,
+    approvedAt: item.approvedAt || null,
     note: normalizeText(item.note),
     examType: formatExamType(item.examTypeId),
     academicYear: formatAcademicYear(item.academicYearId),
@@ -392,8 +481,19 @@ function formatExamSession(doc) {
     schoolClass: formatSchoolClass(item.classId),
     subject: formatSubject(item.subjectId),
     teacherAssignment: formatTeacherAssignment(item.teacherAssignmentId),
+    sheetTemplate: buildSheetTemplateSnapshot(item.sheetTemplateSnapshot || item.sheetTemplateId),
+    sheetTemplateId: (item.sheetTemplateId?._id || item.sheetTemplateId)
+      ? String(item.sheetTemplateId?._id || item.sheetTemplateId)
+      : '',
+    sheetTemplateVersion: Math.max(1, Number(item.sheetTemplateVersion || item.sheetTemplateSnapshot?.version || 1)),
     defaultMark: formatDefaultMark(item.defaultMarkId),
-    rankingRule: formatRankingRule(item.rankingRuleId)
+    rankingRule: formatRankingRule(item.rankingRuleId),
+    scoringPolicy: officialPolicy ? {
+      version: OFFICIAL_RESULT_POLICY_VERSION,
+      totalMark: officialPolicy.totalMark,
+      passMark: officialPolicy.passMark,
+      compatible: scoringPolicyCompatible
+    } : null
   };
 }
 
@@ -424,6 +524,11 @@ function formatMembership(doc) {
   return {
     id: String(item._id),
     status: normalizeText(item.status),
+    statusLabel: getMembershipLifecycleLabel(item),
+    isCurrent: Boolean(item.isCurrent),
+    enrolledAt: item.enrolledAt || item.joinedAt || null,
+    endedAt: item.endedAt || item.leftAt || null,
+    endedReason: normalizeText(item.endedReason),
     studentId: item.studentId ? String(item.studentId._id || item.studentId) : '',
     studentUserId: item.student ? String(item.student._id || item.student) : '',
     studentCore: formatStudentCore(item.studentId),
@@ -433,8 +538,37 @@ function formatMembership(doc) {
       email: normalizeText(item.student.email)
     } : null,
     schoolClass: formatSchoolClass(item.classId),
-    academicYear: formatAcademicYear(item.academicYearId)
+    academicYear: formatAcademicYear(item.academicYearId || item.academicYear)
   };
+}
+
+function buildMembershipSnapshot(membership = {}, effectiveAt = null, { suspended = false } = {}) {
+  const date = toDateOrNull(effectiveAt);
+  const effective = isMembershipEffectiveAt(membership, date);
+  const endedAt = toDateOrNull(membership.endedAt || membership.leftAt);
+  let status = normalizeText(membership.status);
+  if (suspended) {
+    status = 'suspended';
+  } else if (effective && status === 'suspended') {
+    // The current membership may be suspended today while the examination date
+    // is outside the suspension interval. Preserve the state at the exam date.
+    status = normalizeText(membership.admissionType) === 'transfer_in' ? 'transferred_in' : 'active';
+  } else if (effective && endedAt && date && endedAt.getTime() > date.getTime()
+    && ['transferred', 'transferred_out', 'graduated', 'dropped', 'expelled', 'inactive'].includes(status)) {
+    status = normalizeText(membership.admissionType) === 'transfer_in' ? 'transferred_in' : 'active';
+  }
+  const snapshot = {
+    status,
+    admissionType: normalizeText(membership.admissionType),
+    isCurrent: effective,
+    enrolledAt: membership.enrolledAt || membership.joinedAt || null,
+    endedAt: membership.endedAt || membership.leftAt || null,
+    endedReason: normalizeText(membership.endedReason),
+    capturedAt: new Date(),
+    effectiveAt: date
+  };
+  snapshot.statusLabel = getMembershipLifecycleLabel(snapshot);
+  return snapshot;
 }
 
 function formatExamMark(doc) {
@@ -449,6 +583,7 @@ function formatExamMark(doc) {
     totalMark: Number(item.totalMark || 0),
     percentage: Number(item.percentage || 0),
     note: normalizeText(item.note),
+    membershipSnapshot: item.membershipSnapshot || null,
     enteredAt: item.enteredAt || item.updatedAt || item.createdAt || null,
     studentMembership: formatMembership(item.studentMembershipId),
     student: item.student ? {
@@ -474,6 +609,7 @@ function formatExamResult(doc) {
     groupLabel: normalizeText(item.groupLabel),
     rank: item.rank == null ? null : Number(item.rank),
     computedAt: item.computedAt || null,
+    membershipSnapshot: item.membershipSnapshot || null,
     session: formatExamSession(item.sessionId),
     examType: formatExamType(item.examTypeId),
     assessmentPeriod: formatAssessmentPeriod(item.assessmentPeriodId),
@@ -498,14 +634,24 @@ function buildSessionCode({ examType, academicYear, assessmentPeriod, schoolClas
   return parts.join('-').toUpperCase();
 }
 
-const ACTIVE_SESSION_MEMBERSHIP_STATUSES = Object.freeze(['active', 'transferred_in', 'suspended']);
-
 function buildSessionTitle({ refs, payload = {} }) {
   const sessionKind = normalizeSessionKind(payload.sessionKind);
   if (normalizeText(payload.title)) return normalizeText(payload.title);
   if (sessionKind === 'subject_sheet') {
+    const examCode = normalizeText(refs.examType?.code).toUpperCase();
+    const labelsByCode = {
+      ANNUAL: 'سالانه',
+      MONTHLY: 'ماهوار',
+      FOUR_HALF_MONTH: 'چهارنیم‌ماهه'
+    };
+    const normalizedExamTitle = normalizeText(refs.examType?.title)
+      .replace(/^شقه\s*(?:امتحان(?:ات)?)?\s*/u, '')
+      .replace(/^امتحان(?:ات)?\s*/u, '')
+      .trim();
+    const examLabel = labelsByCode[examCode] || normalizedExamTitle;
+    const sheetTitle = examLabel ? `شقه امتحان ${examLabel}` : 'شقه امتحانات';
     const parts = [
-      normalizeText(refs.examType?.title) || 'شقه مضمون',
+      sheetTitle,
       normalizeText(refs.subject?.name),
       normalizeText(refs.schoolClass?.title),
       normalizeText(payload.monthLabel)
@@ -517,7 +663,7 @@ function buildSessionTitle({ refs, payload = {} }) {
 
 function normalizeSessionStatus(value = '', fallback = 'draft') {
   const normalized = normalizeText(value);
-  return ['draft', 'active', 'closed', 'published', 'archived'].includes(normalized) ? normalized : fallback;
+  return ['draft', 'active', 'submitted', 'approved', 'closed', 'published', 'archived'].includes(normalized) ? normalized : fallback;
 }
 
 async function loadExamSessionWithRelations(sessionId) {
@@ -527,7 +673,9 @@ async function loadExamSessionWithRelations(sessionId) {
     .populate({ path: 'assessmentPeriodId', populate: { path: 'academicYearId' } })
     .populate({ path: 'classId', populate: { path: 'academicYearId' } })
     .populate('subjectId')
+    .populate('reviewerUserId', 'name email role orgRole status')
     .populate({ path: 'teacherAssignmentId', populate: [{ path: 'teacherUserId', select: 'name email' }, { path: 'academicYearId' }, { path: 'termId' }, { path: 'classId', populate: { path: 'academicYearId' } }, { path: 'subjectId' }] })
+    .populate('sheetTemplateId')
     .populate('defaultMarkId')
     .populate('rankingRuleId');
 }
@@ -551,7 +699,7 @@ async function findExistingSessionCandidate({ code = '', refs = {}, sessionKind 
       classId: refs.schoolClass._id,
       subjectId: refs.subject?._id || null,
       sessionKind: normalizeSessionKind(sessionKind),
-      status: { $in: ['draft', 'active', 'closed', 'published'] }
+      status: { $in: ['draft', 'active', 'submitted', 'approved', 'closed', 'published'] }
     };
     if (normalizeSessionKind(sessionKind) === 'subject_sheet' && normalizeText(monthLabel)) {
       scopeClause.monthLabel = normalizeText(monthLabel);
@@ -566,9 +714,7 @@ async function listEligibleMembershipsForSessionContext({ academicYearId = null,
   if (!academicYearId || !classId) return [];
   return StudentMembership.find({
     classId,
-    $or: [{ academicYearId }, { academicYear: academicYearId }],
-    status: { $in: ACTIVE_SESSION_MEMBERSHIP_STATUSES },
-    isCurrent: true
+    $or: [{ academicYearId }, { academicYear: academicYearId }]
   })
     .populate('studentId')
     .populate('student', 'name email')
@@ -583,7 +729,8 @@ function buildSessionRosterSummary({ memberships = [], marks = [], results = [],
     recordedMarks: 0,
     pendingMarks: 0,
     absentMarks: 0,
-    excusedMarks: 0
+    excusedMarks: 0,
+    notApplicableMarks: 0
   };
 
   marks.forEach((item) => {
@@ -592,6 +739,7 @@ function buildSessionRosterSummary({ memberships = [], marks = [], results = [],
     else if (status === 'pending') markStatusCounts.pendingMarks += 1;
     else if (status === 'absent') markStatusCounts.absentMarks += 1;
     else if (status === 'excused') markStatusCounts.excusedMarks += 1;
+    else if (status === 'not_applicable') markStatusCounts.notApplicableMarks += 1;
   });
 
   return {
@@ -638,10 +786,18 @@ function computeGroupLabel(rule, percentage) {
   return matched ? normalizeText(matched.label) : '';
 }
 
-function computeResultStatus({ examType, rankingRule, percentage, markStatus }) {
+function computeResultStatus({ examType, rankingRule, defaultMark, percentage, obtainedMark, markStatus }) {
   if (markStatus === 'excused') return 'excused';
   if (markStatus === 'absent') return 'absent';
   if (markStatus === 'pending') return 'pending';
+  if (markStatus === 'not_applicable') return 'not_applicable';
+
+  const officialPolicy = getOfficialExamPolicy(examType);
+  if (officialPolicy) {
+    return Number(obtainedMark || 0) >= Number(defaultMark?.passMark ?? officialPolicy.passMark)
+      ? 'passed'
+      : 'failed';
+  }
 
   const passMark = Number(rankingRule?.passMark ?? examType?.defaultPassMark ?? 50);
   const conditionalMark = Number(rankingRule?.conditionalMark ?? examType?.defaultConditionalMark ?? 40);
@@ -695,8 +851,8 @@ function buildReferencePayloads() {
   return {
     examTypes: [
       { title: 'ماهوار', code: 'MONTHLY', category: 'standard', defaultTotalMark: 100, defaultPassMark: 50, defaultConditionalMark: 40, isRankingEnabled: true, isActive: true },
-      { title: 'چهارونیم‌ماهه', code: 'FOUR_HALF_MONTH', category: 'standard', defaultTotalMark: 100, defaultPassMark: 50, defaultConditionalMark: 40, isRankingEnabled: true, isActive: true },
-      { title: 'سالانه', code: 'ANNUAL', category: 'standard', defaultTotalMark: 100, defaultPassMark: 50, defaultConditionalMark: 40, isRankingEnabled: true, isActive: true },
+      { title: 'چهارونیم‌ماهه', code: 'FOUR_HALF_MONTH', category: 'standard', defaultTotalMark: 40, defaultPassMark: 16, defaultConditionalMark: 16, isRankingEnabled: true, isActive: true },
+      { title: 'سالانه', code: 'ANNUAL', category: 'standard', defaultTotalMark: 60, defaultPassMark: 40, defaultConditionalMark: 40, isRankingEnabled: true, isActive: true },
       { title: 'مشروطی', code: 'CONDITIONAL', category: 'conditional', defaultTotalMark: 100, defaultPassMark: 50, defaultConditionalMark: 40, isRankingEnabled: true, isActive: true },
       { title: 'موقت', code: 'TEMPORARY', category: 'temporary', defaultTotalMark: 100, defaultPassMark: 50, defaultConditionalMark: 40, isRankingEnabled: true, isActive: true },
       { title: 'لیاقت', code: 'DISTINCTION', category: 'distinction', defaultTotalMark: 100, defaultPassMark: 50, defaultConditionalMark: 40, isRankingEnabled: true, isActive: true },
@@ -726,8 +882,6 @@ function buildReferencePayloads() {
 
 async function ensureExamTypesReady() {
   const reference = buildReferencePayloads();
-  const activeCount = await ExamType.countDocuments({ isActive: true });
-  if (activeCount > 0) return;
 
   for (const payload of reference.examTypes) {
     const existing = await ExamType.findOne({
@@ -738,8 +892,17 @@ async function ensureExamTypesReady() {
     });
 
     if (existing) {
-      Object.assign(existing, payload);
-      await existing.save();
+      if (getOfficialExamPolicy(payload.code)) {
+        const changed = Number(existing.defaultTotalMark) !== Number(payload.defaultTotalMark)
+          || Number(existing.defaultPassMark) !== Number(payload.defaultPassMark)
+          || Number(existing.defaultConditionalMark) !== Number(payload.defaultConditionalMark);
+        if (changed) {
+          existing.defaultTotalMark = payload.defaultTotalMark;
+          existing.defaultPassMark = payload.defaultPassMark;
+          existing.defaultConditionalMark = payload.defaultConditionalMark;
+          await existing.save();
+        }
+      }
       continue;
     }
 
@@ -856,7 +1019,7 @@ async function seedExamReferenceData({ dryRun = false } = {}) {
 async function listExamReferenceData() {
   await ensureExamTypesReady();
 
-  const [academicYears, assessmentPeriods, schoolClasses, subjects, teacherAssignments, examTypes, rankingRules] = await Promise.all([
+  const [academicYears, assessmentPeriods, schoolClasses, subjects, teacherAssignments, examTypes, rankingRules, reviewers] = await Promise.all([
     AcademicYear.find({}).sort({ isActive: -1, sequence: 1, createdAt: 1 }),
     AcademicTerm.find({}).populate('academicYearId').sort({ sequence: 1, createdAt: 1 }),
     SchoolClass.find({ status: { $ne: 'archived' } }).populate('academicYearId').sort({ gradeLevel: 1, section: 1, title: 1 }),
@@ -864,12 +1027,19 @@ async function listExamReferenceData() {
     TeacherAssignment.find({ status: 'active' })
       .populate('teacherUserId', 'name email')
       .populate('academicYearId')
-      .populate('termId')
+      .populate({ path: 'termId', populate: { path: 'academicYearId' } })
       .populate({ path: 'classId', populate: { path: 'academicYearId' } })
       .populate('subjectId')
       .sort({ createdAt: -1 }),
     ExamType.find({ isActive: true }).sort({ createdAt: 1 }),
-    RankingRule.find({ isActive: true }).sort({ isDefault: -1, createdAt: 1 })
+    RankingRule.find({ isActive: true }).sort({ isDefault: -1, createdAt: 1 }),
+    User.find({
+      status: 'active',
+      $or: [
+        { role: { $in: ['admin', 'instructor'] } },
+        { orgRole: { $in: ['academic_manager', 'head_teacher', 'school_manager'] } }
+      ]
+    }).select('name email role orgRole').sort({ name: 1 })
   ]);
 
   return {
@@ -879,7 +1049,15 @@ async function listExamReferenceData() {
     subjects: subjects.map(formatSubject),
     teacherAssignments: teacherAssignments.map(formatTeacherAssignment),
     examTypes: examTypes.map(formatExamType),
-    rankingRules: rankingRules.map(formatRankingRule)
+    rankingRules: rankingRules.map(formatRankingRule),
+    reviewers: reviewers.map((item) => ({
+      id: String(item._id),
+      name: normalizeText(item.name),
+      email: normalizeText(item.email),
+      role: normalizeText(item.role),
+      orgRole: normalizeText(item.orgRole)
+    })),
+    resultPolicyVersion: OFFICIAL_RESULT_POLICY_VERSION
   };
 }
 
@@ -914,6 +1092,7 @@ async function resolveSessionReferences(payload = {}, actor = null) {
   const subjectId = normalizeNullableId(payload.subjectId);
   const teacherAssignmentId = normalizeNullableId(payload.teacherAssignmentId);
   const rankingRuleId = normalizeNullableId(payload.rankingRuleId);
+  const sheetTemplateId = normalizeNullableId(payload.sheetTemplateId || payload.templateId);
 
   if (!examTypeId || !academicYearId || !assessmentPeriodId || !classId) {
     throw new Error('exam_session_missing_required_refs');
@@ -926,7 +1105,7 @@ async function resolveSessionReferences(payload = {}, actor = null) {
     ? TeacherAssignment.findById(teacherAssignmentId)
     : TeacherAssignment.findOne({ academicYearId, classId, ...(subjectId ? { subjectId } : {}), status: 'active' });
 
-  const [examType, academicYear, assessmentPeriod, schoolClass, subject, teacherAssignment, rankingRule] = await Promise.all([
+  const [examType, academicYear, assessmentPeriod, schoolClass, subject, teacherAssignment, rankingRule, sheetTemplate] = await Promise.all([
     ExamType.findById(examTypeId),
     AcademicYear.findById(academicYearId),
     AcademicTerm.findById(assessmentPeriodId).populate('academicYearId'),
@@ -935,10 +1114,13 @@ async function resolveSessionReferences(payload = {}, actor = null) {
     teacherAssignmentQuery
       .populate('teacherUserId', 'name email')
       .populate('academicYearId')
-      .populate('termId')
+      .populate({ path: 'termId', populate: { path: 'academicYearId' } })
       .populate({ path: 'classId', populate: { path: 'academicYearId' } })
       .populate('subjectId'),
-    rankingRuleId ? RankingRule.findById(rankingRuleId) : null
+    rankingRuleId ? RankingRule.findById(rankingRuleId) : null,
+    sheetTemplateId
+      ? SheetTemplate.findOne({ _id: sheetTemplateId, type: 'exam', isActive: true })
+      : SheetTemplate.findOne({ type: 'exam', isActive: true }).sort({ 'ownership.isDefault': -1, createdAt: 1 })
   ]);
 
   if (!examType || !academicYear || !assessmentPeriod || !schoolClass) {
@@ -960,6 +1142,26 @@ async function resolveSessionReferences(payload = {}, actor = null) {
   if (String(schoolClass.academicYearId?._id || schoolClass.academicYearId || '') !== String(academicYear._id)) {
     throw new Error('exam_class_year_mismatch');
   }
+  if (teacherAssignmentId && !teacherAssignment) {
+    throw new Error('exam_teacher_assignment_not_found');
+  }
+  if (teacherAssignment) {
+    if (normalizeText(teacherAssignment.status) !== 'active') {
+      throw new Error('exam_teacher_assignment_inactive');
+    }
+    if (String(teacherAssignment.academicYearId?._id || teacherAssignment.academicYearId || '') !== String(academicYear._id)) {
+      throw new Error('exam_teacher_assignment_year_mismatch');
+    }
+    if (String(teacherAssignment.classId?._id || teacherAssignment.classId || '') !== String(schoolClass._id)) {
+      throw new Error('exam_teacher_assignment_class_mismatch');
+    }
+    if (subject && String(teacherAssignment.subjectId?._id || teacherAssignment.subjectId || '') !== String(subject._id)) {
+      throw new Error('exam_teacher_assignment_subject_mismatch');
+    }
+  }
+  if (sheetTemplateId && !sheetTemplate) {
+    throw new Error('exam_sheet_template_not_found');
+  }
 
   const effectiveRankingRule = rankingRule || await findBestRankingRule({ academicYearId, assessmentPeriodId, classId, examTypeId });
   return {
@@ -970,13 +1172,64 @@ async function resolveSessionReferences(payload = {}, actor = null) {
     schoolClass,
     subject,
     teacherAssignment,
-    rankingRule: effectiveRankingRule
+    rankingRule: effectiveRankingRule,
+    sheetTemplate
   };
 }
+
+function getSessionScoringDefaults(examType, payload = {}) {
+  const officialPolicy = getOfficialExamPolicy(examType);
+  if (officialPolicy) {
+    const scoreComponents = buildScoreComponentsFromPayload(payload, officialPolicy.scoreComponents);
+    if (getScoreComponentTotal(scoreComponents) !== Number(officialPolicy.totalMark)) {
+      throw new Error('exam_score_component_total_mismatch');
+    }
+    return {
+      scoreComponents,
+      totalMark: officialPolicy.totalMark,
+      passMark: officialPolicy.passMark,
+      conditionalMark: officialPolicy.conditionalMark
+    };
+  }
+
+  const scoreComponents = buildScoreComponentsFromPayload(payload, {
+    attendanceMax: 0,
+    writtenMax: 25,
+    oralMax: 25,
+    classActivityMax: 25,
+    homeworkMax: 25
+  });
+  return {
+    scoreComponents,
+    totalMark: getScoreComponentTotal(scoreComponents)
+      || clampNumber(payload.totalMark, 1, 1000, Number(examType?.defaultTotalMark || 100)),
+    passMark: clampNumber(payload.passMark, 0, 1000, Number(examType?.defaultPassMark ?? 50)),
+    conditionalMark: clampNumber(payload.conditionalMark, 0, 1000, Number(examType?.defaultConditionalMark ?? 40))
+  };
+}
+
+async function resolveReviewerIdentity(reviewerUserId = null, reviewedByName = '') {
+  const normalizedId = normalizeNullableId(reviewerUserId);
+  if (!normalizedId) {
+    return { reviewerUserId: null, reviewedByName: normalizeText(reviewedByName) };
+  }
+  const reviewer = await User.findOne({
+    _id: normalizedId,
+    status: 'active',
+    $or: [
+      { role: { $in: ['admin', 'instructor'] } },
+      { orgRole: { $in: ['academic_manager', 'head_teacher', 'school_manager'] } }
+    ]
+  }).select('name');
+  if (!reviewer) throw new Error('exam_reviewer_not_found');
+  return { reviewerUserId: reviewer._id, reviewedByName: normalizeText(reviewer.name) };
+}
+
 async function previewExamSessionBootstrap(payload = {}, actor = null) {
   const refs = await resolveSessionReferences(payload, actor);
-  const scoreComponents = buildScoreComponentsFromPayload(payload, { writtenMax: 25, oralMax: 25, classActivityMax: 25, homeworkMax: 25 });
-  const totalMark = getScoreComponentTotal(scoreComponents) || clampNumber(payload.totalMark, 1, 1000, Number(refs.examType.defaultTotalMark || 100));
+  const scoring = getSessionScoringDefaults(refs.examType, payload);
+  const { scoreComponents, totalMark, passMark, conditionalMark } = scoring;
+  const reviewer = await resolveReviewerIdentity(payload.reviewerUserId, payload.reviewedByName);
   const code = normalizeText(payload.code).toUpperCase() || buildSessionCode({
     examType: refs.examType,
     academicYear: refs.academicYear,
@@ -1001,7 +1254,7 @@ async function previewExamSessionBootstrap(payload = {}, actor = null) {
   const warnings = [];
   if (!refs.teacherAssignment) warnings.push('no_teacher_assignment');
   if (!refs.subject) warnings.push('no_subject_selected');
-  if (!memberships.length) warnings.push('no_active_memberships');
+  if (!memberships.length) warnings.push('no_memberships_in_class_year');
   if (existingSession) warnings.push('existing_session_detected');
 
   return {
@@ -1016,7 +1269,8 @@ async function previewExamSessionBootstrap(payload = {}, actor = null) {
       heldAt: toDateOrNull(payload.heldAt),
       publishedAt: toDateOrNull(payload.publishedAt),
       monthLabel: normalizeText(payload.monthLabel),
-      reviewedByName: normalizeText(payload.reviewedByName),
+      reviewerUserId: reviewer.reviewerUserId ? String(reviewer.reviewerUserId) : '',
+      reviewedByName: reviewer.reviewedByName,
       note: normalizeText(payload.note),
       examType: formatExamType(refs.examType),
       academicYear: formatAcademicYear(refs.academicYear),
@@ -1024,12 +1278,13 @@ async function previewExamSessionBootstrap(payload = {}, actor = null) {
       schoolClass: formatSchoolClass(refs.schoolClass),
       subject: formatSubject(refs.subject),
       teacherAssignment: formatTeacherAssignment(refs.teacherAssignment),
+      sheetTemplate: buildSheetTemplateSnapshot(refs.sheetTemplate),
       rankingRule: formatRankingRule(refs.rankingRule),
       defaultMark: {
         totalMark,
         scoreComponents,
-        passMark: clampNumber(payload.passMark, 0, 1000, Number(refs.rankingRule?.passMark ?? refs.examType.defaultPassMark ?? 50)),
-        conditionalMark: clampNumber(payload.conditionalMark, 0, 1000, Number(refs.rankingRule?.conditionalMark ?? refs.examType.defaultConditionalMark ?? 40)),
+        passMark,
+        conditionalMark,
         weight: clampNumber(payload.weight, 0, 100, 1)
       }
     },
@@ -1039,8 +1294,13 @@ async function previewExamSessionBootstrap(payload = {}, actor = null) {
 }
 
 async function createExamSession(payload = {}, actorUserId = null, actorRole = '') {
+  if (normalizeText(actorRole) !== 'admin') {
+    throw new Error('exam_session_admin_creation_required');
+  }
   const refs = await resolveSessionReferences(payload, { id: actorUserId, role: actorRole });
-  const scoreComponents = buildScoreComponentsFromPayload(payload, { writtenMax: 25, oralMax: 25, classActivityMax: 25, homeworkMax: 25 });
+  const scoring = getSessionScoringDefaults(refs.examType, payload);
+  const { scoreComponents, totalMark, passMark, conditionalMark } = scoring;
+  const reviewer = await resolveReviewerIdentity(payload.reviewerUserId, payload.reviewedByName);
   const code = normalizeText(payload.code).toUpperCase() || buildSessionCode({
     examType: refs.examType,
     academicYear: refs.academicYear,
@@ -1070,19 +1330,19 @@ async function createExamSession(payload = {}, actorUserId = null, actorRole = '
     classId: refs.schoolClass._id,
     subjectId: refs.subject?._id || null,
     teacherAssignmentId: refs.teacherAssignment?._id || null,
+    sheetTemplateId: refs.sheetTemplate?._id || null,
+    sheetTemplateVersion: Math.max(1, Number(refs.sheetTemplate?.version || 1)),
+    sheetTemplateSnapshot: buildSheetTemplateSnapshot(refs.sheetTemplate),
     rankingRuleId: refs.rankingRule?._id || null,
     status: normalizeSessionStatus(payload.status, 'draft'),
     heldAt: toDateOrNull(payload.heldAt),
     publishedAt: toDateOrNull(payload.publishedAt),
     monthLabel: normalizeText(payload.monthLabel),
-    reviewedByName: normalizeText(payload.reviewedByName),
+    reviewerUserId: reviewer.reviewerUserId,
+    reviewedByName: reviewer.reviewedByName,
     createdBy: normalizeNullableId(actorUserId),
     note: normalizeText(payload.note)
   });
-
-  const totalMark = getScoreComponentTotal(scoreComponents) || clampNumber(payload.totalMark, 1, 1000, Number(refs.examType.defaultTotalMark || 100));
-  const passMark = clampNumber(payload.passMark, 0, 1000, Number(refs.rankingRule?.passMark ?? refs.examType.defaultPassMark ?? 50));
-  const conditionalMark = clampNumber(payload.conditionalMark, 0, 1000, Number(refs.rankingRule?.conditionalMark ?? refs.examType.defaultConditionalMark ?? 40));
 
   const defaultMark = await ExamDefaultMark.create({
     sessionId: session._id,
@@ -1106,10 +1366,13 @@ async function createExamSession(payload = {}, actorUserId = null, actorRole = '
   return formatExamSession(populated);
 }
 
-async function initializeSessionRoster(sessionId, actorUserId = null) {
+async function initializeSessionRoster(sessionId, actorUserId = null, options = {}) {
   const session = await loadExamSessionWithRelations(sessionId);
   if (!session) {
     throw new Error('exam_session_not_found');
+  }
+  if (session.rosterFrozenAt && options.allowFrozen !== true) {
+    throw new Error('exam_roster_frozen');
   }
 
   const memberships = await listEligibleMembershipsForSessionContext({
@@ -1120,27 +1383,50 @@ async function initializeSessionRoster(sessionId, actorUserId = null) {
   const existingIds = new Set(existingMarks.map((item) => String(item.studentMembershipId || '')).filter(Boolean));
   const defaultTotalMark = Number(session.defaultMarkId?.totalMark || session.examTypeId?.defaultTotalMark || 100);
   const now = new Date();
+  const effectiveAt = toDateOrNull(session.heldAt) || now;
+  const suspensionMembershipIds = memberships.map((membership) => membership._id).filter(Boolean);
+  const suspensions = suspensionMembershipIds.length
+    ? await StudentSuspension.find({
+        membershipId: { $in: suspensionMembershipIds },
+        status: { $ne: 'cancelled' },
+        startsAt: { $lte: effectiveAt },
+        $and: [
+          { $or: [{ endsAt: null }, { endsAt: { $gt: effectiveAt } }] },
+          { $or: [{ liftedAt: null }, { liftedAt: { $gt: effectiveAt } }] }
+        ]
+      }).select('membershipId').lean()
+    : [];
+  const suspendedMembershipIds = new Set(suspensions.map((item) => String(item.membershipId)));
 
   const payloads = memberships
     .filter((membership) => !existingIds.has(String(membership._id)))
-    .map((membership) => ({
-      sessionId: session._id,
-      examTypeId: session.examTypeId?._id || session.examTypeId,
-      academicYearId: session.academicYearId?._id || session.academicYearId,
-      assessmentPeriodId: session.assessmentPeriodId?._id || session.assessmentPeriodId,
-      classId: session.classId?._id || session.classId,
-      subjectId: session.subjectId?._id || session.subjectId || null,
-      studentMembershipId: membership._id,
-      studentId: membership.studentId?._id || membership.studentId || null,
-      student: membership.student?._id || membership.student || null,
-      markStatus: 'pending',
-      obtainedMark: 0,
-      totalMark: defaultTotalMark,
-      note: 'initialized_roster',
-      enteredBy: normalizeNullableId(actorUserId),
-      enteredAt: now,
-      updatedBy: normalizeNullableId(actorUserId)
-    }));
+    .filter(() => !(session.supersedesSessionId && existingMarks.length))
+    .map((membership) => {
+      const membershipSnapshot = buildMembershipSnapshot(membership, effectiveAt, {
+        suspended: suspendedMembershipIds.has(String(membership._id))
+      });
+      return {
+        sessionId: session._id,
+        examTypeId: session.examTypeId?._id || session.examTypeId,
+        academicYearId: session.academicYearId?._id || session.academicYearId,
+        assessmentPeriodId: session.assessmentPeriodId?._id || session.assessmentPeriodId,
+        classId: session.classId?._id || session.classId,
+        subjectId: session.subjectId?._id || session.subjectId || null,
+        studentMembershipId: membership._id,
+        studentId: membership.studentId?._id || membership.studentId || null,
+        student: membership.student?._id || membership.student || null,
+        membershipSnapshot,
+        markStatus: membershipSnapshot.status === 'suspended'
+          ? 'excused'
+          : (membershipSnapshot.isCurrent ? 'pending' : 'not_applicable'),
+        obtainedMark: 0,
+        totalMark: defaultTotalMark,
+        note: 'initialized_roster',
+        enteredBy: normalizeNullableId(actorUserId),
+        enteredAt: now,
+        updatedBy: normalizeNullableId(actorUserId)
+      };
+    });
 
   if (payloads.length) {
     try {
@@ -1151,7 +1437,13 @@ async function initializeSessionRoster(sessionId, actorUserId = null) {
     }
   }
 
-  const recompute = await recomputeSessionResults(session._id);
+  if (options.freeze === true && !session.rosterFrozenAt) {
+    session.rosterFrozenAt = now;
+    session.rosterFrozenBy = normalizeNullableId(actorUserId);
+    await session.save();
+  }
+
+  const recompute = await recomputeSessionResults(session._id, { allowLocked: true });
   const marks = await ExamMark.find({ sessionId: session._id }).select('studentMembershipId markStatus').lean();
   const results = await ExamResult.find({ sessionId: session._id }).select('studentMembershipId').lean();
 
@@ -1159,7 +1451,7 @@ async function initializeSessionRoster(sessionId, actorUserId = null) {
     session: formatExamSession(session),
     summary: buildSessionRosterSummary({ memberships, marks, results, createdMarks: payloads.length }),
     sampleMemberships: memberships.slice(0, 10).map(formatMembership),
-    warnings: memberships.length ? [] : ['no_active_memberships'],
+    warnings: memberships.length ? [] : ['no_memberships_in_class_year'],
     recompute: recompute.summary
   };
 }
@@ -1195,7 +1487,9 @@ async function bootstrapExamSession(payload = {}, actorUserId = null, actorRole 
   const session = await createExamSession(payload, actorUserId, actorRole);
   const roster = payload.initializeRoster === false
     ? null
-    : await initializeSessionRoster(session.id, actorUserId);
+    : await initializeSessionRoster(session.id, actorUserId, {
+        freeze: ['active', 'submitted'].includes(normalizeText(session.status))
+      });
 
   return {
     preview,
@@ -1241,6 +1535,7 @@ async function listExamSessions(filters = {}) {
     .populate({ path: 'classId', populate: { path: 'academicYearId' } })
     .populate('subjectId')
     .populate({ path: 'teacherAssignmentId', populate: [{ path: 'teacherUserId', select: 'name email' }, { path: 'academicYearId' }, { path: 'termId' }, { path: 'classId', populate: { path: 'academicYearId' } }, { path: 'subjectId' }] })
+    .populate('sheetTemplateId')
     .populate('defaultMarkId')
     .populate('rankingRuleId')
     .sort({ heldAt: -1, createdAt: -1, monthLabel: -1 });
@@ -1248,7 +1543,324 @@ async function listExamSessions(filters = {}) {
   return items.map(formatExamSession);
 }
 
-async function recomputeSessionResults(sessionId) {
+async function getExamSessionManagementState(sessionId) {
+  if (!normalizeNullableId(sessionId)) {
+    throw new Error('exam_session_not_found');
+  }
+  const session = await loadExamSessionWithRelations(sessionId);
+  if (!session) {
+    throw new Error('exam_session_not_found');
+  }
+
+  const [
+    markCount,
+    substantiveMarkCount,
+    resultCount,
+    resultTableCount,
+    promotionCount,
+    templateFilterCount,
+    dependentSessionCount
+  ] = await Promise.all([
+    ExamMark.countDocuments({ sessionId: session._id }),
+    ExamMark.countDocuments({
+      sessionId: session._id,
+      $or: [
+        { markStatus: 'recorded' },
+        { markStatus: { $in: ['absent', 'excused'] }, note: { $ne: 'initialized_roster' } }
+      ]
+    }),
+    ExamResult.countDocuments({ sessionId: session._id }),
+    ResultTable.countDocuments({ $or: [{ sessionId: session._id }, { sourceSessionIds: session._id }] }),
+    PromotionTransaction.countDocuments({ sessionId: session._id }),
+    SheetTemplate.countDocuments({ 'filters.examId': session._id }),
+    ExamSession.countDocuments({
+      _id: { $ne: session._id },
+      $or: [
+        { revisionRootSessionId: session._id },
+        { supersedesSessionId: session._id },
+        { replacedBySessionId: session._id }
+      ]
+    })
+  ]);
+
+  const status = normalizeSessionStatus(session.status, 'draft');
+  const editableStatus = ['draft', 'active'].includes(status);
+  const hasExternalReferences = resultTableCount > 0
+    || resultCount > 0
+    || promotionCount > 0
+    || templateFilterCount > 0
+    || dependentSessionCount > 0;
+  const canEditStructure = editableStatus && substantiveMarkCount === 0 && !hasExternalReferences;
+  const canHardDelete = status === 'draft' && substantiveMarkCount === 0 && !hasExternalReferences;
+  const canArchive = status !== 'archived' && promotionCount === 0;
+  const blockers = [];
+  if (!editableStatus) blockers.push('exam_session_locked');
+  if (substantiveMarkCount > 0) blockers.push('exam_session_has_recorded_marks');
+  if (resultCount > 0) blockers.push('exam_session_has_results');
+  if (resultTableCount > 0) blockers.push('exam_session_has_result_tables');
+  if (promotionCount > 0) blockers.push('exam_session_has_promotions');
+  if (templateFilterCount > 0) blockers.push('exam_session_used_by_template');
+  if (dependentSessionCount > 0) blockers.push('exam_session_has_revisions');
+
+  return {
+    item: formatExamSession(session),
+    summary: {
+      markCount,
+      substantiveMarkCount,
+      resultCount,
+      resultTableCount,
+      promotionCount,
+      templateFilterCount,
+      dependentSessionCount
+    },
+    permissions: {
+      canEditMetadata: editableStatus,
+      canEditStructure,
+      canHardDelete,
+      canArchive,
+      canCreateRevision: ['approved', 'published', 'closed'].includes(status),
+      canReturnForCorrection: status === 'submitted'
+    },
+    blockers
+  };
+}
+
+async function updateExamSession(sessionId, payload = {}, actorUserId = null, actorRole = '') {
+  if (normalizeText(actorRole) !== 'admin') {
+    throw new Error('exam_session_admin_approval_required');
+  }
+  const source = await loadExamSessionWithRelations(sessionId);
+  if (!source) {
+    throw new Error('exam_session_not_found');
+  }
+  const management = await getExamSessionManagementState(sessionId);
+  if (!management.permissions.canEditMetadata) {
+    throw new Error('exam_session_edit_locked');
+  }
+
+  const existingComponents = getScoreComponents(source.defaultMarkId || {});
+  const mergedPayload = {
+    sessionKind: source.sessionKind,
+    examTypeId: payload.examTypeId || source.examTypeId?._id || source.examTypeId,
+    academicYearId: payload.academicYearId || source.academicYearId?._id || source.academicYearId,
+    assessmentPeriodId: payload.assessmentPeriodId || source.assessmentPeriodId?._id || source.assessmentPeriodId,
+    classId: payload.classId || source.classId?._id || source.classId,
+    subjectId: payload.subjectId || source.subjectId?._id || source.subjectId,
+    teacherAssignmentId: payload.teacherAssignmentId !== undefined
+      ? payload.teacherAssignmentId
+      : (source.teacherAssignmentId?._id || source.teacherAssignmentId),
+    sheetTemplateId: payload.sheetTemplateId !== undefined
+      ? payload.sheetTemplateId
+      : (source.sheetTemplateId?._id || source.sheetTemplateId),
+    rankingRuleId: source.rankingRuleId?._id || source.rankingRuleId,
+    monthLabel: payload.monthLabel !== undefined ? payload.monthLabel : source.monthLabel,
+    scoreComponents: payload.scoreComponents || existingComponents
+  };
+  const refs = await resolveSessionReferences(mergedPayload, { id: actorUserId, role: actorRole });
+  if (!refs.teacherAssignment) {
+    throw new Error('exam_session_teacher_assignment_required');
+  }
+
+  const sourceIds = {
+    examTypeId: String(source.examTypeId?._id || source.examTypeId || ''),
+    academicYearId: String(source.academicYearId?._id || source.academicYearId || ''),
+    assessmentPeriodId: String(source.assessmentPeriodId?._id || source.assessmentPeriodId || ''),
+    classId: String(source.classId?._id || source.classId || ''),
+    subjectId: String(source.subjectId?._id || source.subjectId || '')
+  };
+  const nextIds = {
+    examTypeId: String(refs.examType?._id || ''),
+    academicYearId: String(refs.academicYear?._id || ''),
+    assessmentPeriodId: String(refs.assessmentPeriod?._id || ''),
+    classId: String(refs.schoolClass?._id || ''),
+    subjectId: String(refs.subject?._id || '')
+  };
+  const examTypeChanged = sourceIds.examTypeId !== nextIds.examTypeId;
+  const scoringWasRequested = payload.scoreComponents !== undefined || examTypeChanged;
+  const scoring = scoringWasRequested
+    ? getSessionScoringDefaults(refs.examType, mergedPayload)
+    : {
+        totalMark: Number(source.defaultMarkId?.totalMark || Object.values(existingComponents).reduce((sum, value) => sum + Number(value || 0), 0)),
+        scoreComponents: existingComponents,
+        passMark: Number(source.defaultMarkId?.passMark || 0),
+        conditionalMark: Number(source.defaultMarkId?.conditionalMark || 0)
+      };
+  const structuralChange = Object.keys(sourceIds).some((key) => sourceIds[key] !== nextIds[key])
+    || JSON.stringify(existingComponents) !== JSON.stringify(scoring.scoreComponents);
+  if (structuralChange && !management.permissions.canEditStructure) {
+    throw new Error('exam_session_structural_edit_blocked');
+  }
+
+  const monthChanged = normalizeText(source.monthLabel) !== normalizeText(mergedPayload.monthLabel);
+  const identityChange = structuralChange || monthChanged;
+  const nextCode = identityChange
+    ? buildSessionCode({
+      examType: refs.examType,
+      academicYear: refs.academicYear,
+      assessmentPeriod: refs.assessmentPeriod,
+      schoolClass: refs.schoolClass,
+      subject: refs.subject,
+      monthLabel: mergedPayload.monthLabel,
+      sessionKind: source.sessionKind
+    })
+    : normalizeText(source.code);
+  const duplicate = await findExistingSessionCandidate({
+    code: nextCode,
+    refs,
+    sessionKind: source.sessionKind,
+    monthLabel: mergedPayload.monthLabel
+  });
+  if (duplicate && String(duplicate._id) !== String(source._id)) {
+    throw new Error('exam_session_duplicate_scope');
+  }
+
+  const reviewerIdWasProvided = payload.reviewerUserId !== undefined;
+  const reviewer = await resolveReviewerIdentity(
+    reviewerIdWasProvided
+      ? payload.reviewerUserId
+      : (source.reviewerUserId?._id || source.reviewerUserId),
+    payload.reviewedByName !== undefined
+      ? payload.reviewedByName
+      : (reviewerIdWasProvided ? '' : source.reviewedByName)
+  );
+  const heldAt = payload.heldAt !== undefined ? toDateOrNull(payload.heldAt) : source.heldAt;
+  if (payload.heldAt && !heldAt) {
+    throw new Error('exam_session_invalid_date');
+  }
+
+  const dbSession = await mongoose.startSession();
+  try {
+    await dbSession.withTransaction(async () => {
+      const current = await ExamSession.findById(source._id).session(dbSession);
+      if (!current || !['draft', 'active'].includes(normalizeSessionStatus(current.status, 'draft'))) {
+        throw new Error('exam_session_edit_locked');
+      }
+
+      current.examTypeId = refs.examType._id;
+      current.academicYearId = refs.academicYear._id;
+      current.assessmentPeriodId = refs.assessmentPeriod._id;
+      current.classId = refs.schoolClass._id;
+      current.subjectId = refs.subject?._id || null;
+      current.teacherAssignmentId = refs.teacherAssignment._id;
+      if (payload.sheetTemplateId !== undefined || current.sheetTemplateId) {
+        current.sheetTemplateId = refs.sheetTemplate?._id || null;
+        current.sheetTemplateVersion = Math.max(1, Number(refs.sheetTemplate?.version || current.sheetTemplateVersion || 1));
+        current.sheetTemplateSnapshot = buildSheetTemplateSnapshot(refs.sheetTemplate) || current.sheetTemplateSnapshot;
+      }
+      current.heldAt = heldAt;
+      current.monthLabel = normalizeText(mergedPayload.monthLabel);
+      current.reviewerUserId = reviewer.reviewerUserId;
+      current.reviewedByName = reviewer.reviewedByName;
+      if (payload.note !== undefined) current.note = normalizeText(payload.note);
+      if (identityChange) {
+        current.code = nextCode;
+        current.title = buildSessionTitle({ refs, payload: { sessionKind: source.sessionKind, monthLabel: mergedPayload.monthLabel } });
+      }
+      if (structuralChange) {
+        current.rosterFrozenAt = null;
+        current.rosterFrozenBy = null;
+        await ExamMark.deleteMany({ sessionId: current._id }).session(dbSession);
+        await ExamResult.deleteMany({ sessionId: current._id }).session(dbSession);
+      }
+      await current.save({ session: dbSession });
+
+      await ExamDefaultMark.findOneAndUpdate(
+        { sessionId: current._id },
+        {
+          examTypeId: refs.examType._id,
+          academicYearId: refs.academicYear._id,
+          assessmentPeriodId: refs.assessmentPeriod._id,
+          classId: refs.schoolClass._id,
+          subjectId: refs.subject?._id || null,
+          totalMark: scoring.totalMark,
+          scoreComponents: scoring.scoreComponents,
+          passMark: scoring.passMark,
+          conditionalMark: scoring.conditionalMark
+        },
+        { new: true, runValidators: true, session: dbSession }
+      );
+    });
+  } finally {
+    await dbSession.endSession();
+  }
+
+  if (structuralChange) {
+    await initializeSessionRoster(source._id, actorUserId, {
+      freeze: normalizeSessionStatus(source.status, 'draft') === 'active'
+    });
+  }
+  const item = await loadExamSessionWithRelations(source._id);
+  return {
+    item: formatExamSession(item),
+    management: await getExamSessionManagementState(source._id)
+  };
+}
+
+async function deleteExamSession(sessionId, actorUserId = null, actorRole = '') {
+  if (normalizeText(actorRole) !== 'admin') {
+    throw new Error('exam_session_admin_approval_required');
+  }
+  const management = await getExamSessionManagementState(sessionId);
+  if (!management.permissions.canHardDelete) {
+    throw new Error('exam_session_delete_blocked');
+  }
+
+  const dbSession = await mongoose.startSession();
+  let deletedMarks = 0;
+  let deletedResults = 0;
+  try {
+    await dbSession.withTransaction(async () => {
+      const current = await ExamSession.findOne({ _id: sessionId, status: 'draft' }).session(dbSession);
+      if (!current) throw new Error('exam_session_delete_blocked');
+
+      const [substantiveMarkCount, resultCount, resultTableCount, promotionCount, templateFilterCount, dependentSessionCount] = await Promise.all([
+        ExamMark.countDocuments({
+          sessionId: current._id,
+          $or: [
+            { markStatus: 'recorded' },
+            { markStatus: { $in: ['absent', 'excused'] }, note: { $ne: 'initialized_roster' } }
+          ]
+        }).session(dbSession),
+        ExamResult.countDocuments({ sessionId: current._id }).session(dbSession),
+        ResultTable.countDocuments({ $or: [{ sessionId: current._id }, { sourceSessionIds: current._id }] }).session(dbSession),
+        PromotionTransaction.countDocuments({ sessionId: current._id }).session(dbSession),
+        SheetTemplate.countDocuments({ 'filters.examId': current._id }).session(dbSession),
+        ExamSession.countDocuments({
+          _id: { $ne: current._id },
+          $or: [
+            { revisionRootSessionId: current._id },
+            { supersedesSessionId: current._id },
+            { replacedBySessionId: current._id }
+          ]
+        }).session(dbSession)
+      ]);
+      if (substantiveMarkCount || resultCount || resultTableCount || promotionCount || templateFilterCount || dependentSessionCount) {
+        throw new Error('exam_session_delete_blocked');
+      }
+
+      const markDelete = await ExamMark.deleteMany({ sessionId: current._id }).session(dbSession);
+      const resultDelete = await ExamResult.deleteMany({ sessionId: current._id }).session(dbSession);
+      deletedMarks = Number(markDelete.deletedCount || 0);
+      deletedResults = Number(resultDelete.deletedCount || 0);
+      await ExamDefaultMark.deleteMany({ $or: [{ sessionId: current._id }, { _id: current.defaultMarkId }] }).session(dbSession);
+      const deletion = await ExamSession.deleteOne({ _id: current._id, status: 'draft' }).session(dbSession);
+      if (Number(deletion.deletedCount || 0) !== 1) {
+        throw new Error('exam_session_delete_blocked');
+      }
+    });
+  } finally {
+    await dbSession.endSession();
+  }
+
+  return {
+    deletedId: String(sessionId),
+    title: normalizeText(management.item?.title),
+    summary: { deletedMarks, deletedResults },
+    deletedBy: normalizeNullableId(actorUserId) ? String(actorUserId) : ''
+  };
+}
+
+async function recomputeSessionResults(sessionId, options = {}) {
   const session = await ExamSession.findById(sessionId)
     .populate('examTypeId')
     .populate('rankingRuleId')
@@ -1256,9 +1868,14 @@ async function recomputeSessionResults(sessionId) {
     .populate({ path: 'assessmentPeriodId', populate: { path: 'academicYearId' } })
     .populate({ path: 'classId', populate: { path: 'academicYearId' } })
     .populate('academicYearId')
-    .populate('subjectId');
+    .populate('subjectId')
+    .populate('sheetTemplateId');
   if (!session) {
     throw new Error('exam_session_not_found');
+  }
+  if (['submitted', 'approved', 'published', 'archived', 'closed'].includes(normalizeText(session.status))
+    && options.allowLocked !== true) {
+    throw new Error('exam_session_locked');
   }
 
   const rankingRule = session.rankingRuleId || await findBestRankingRule({
@@ -1279,18 +1896,22 @@ async function recomputeSessionResults(sessionId) {
   }
 
   const rankedMarks = marks.filter((mark) => mark.markStatus === 'recorded' && session.examTypeId?.isRankingEnabled !== false);
-  rankedMarks.sort((left, right) => Number(right.percentage || 0) - Number(left.percentage || 0));
-  const rankMap = new Map();
-  rankedMarks.forEach((mark, index) => {
-    rankMap.set(String(mark._id), index + 1);
-  });
+  const competitionRanks = computeCompetitionRanks(rankedMarks, (mark) => Number(mark.percentage || 0));
+  const rankMap = new Map(rankedMarks.map((mark) => [String(mark._id), competitionRanks.get(mark)]));
 
   for (const mark of marks) {
     const percentage = Number(mark.percentage || 0);
     const markStatus = normalizeText(mark.markStatus);
-    const resultStatus = computeResultStatus({ examType: session.examTypeId, rankingRule, percentage, markStatus });
+    const resultStatus = computeResultStatus({
+      examType: session.examTypeId,
+      rankingRule,
+      defaultMark: session.defaultMarkId,
+      percentage,
+      obtainedMark: mark.obtainedMark,
+      markStatus
+    });
     const rank = rankMap.get(String(mark._id)) || null;
-    const groupLabel = computeGroupLabel(rankingRule, percentage);
+    const groupLabel = markStatus === 'recorded' ? computeGroupLabel(rankingRule, percentage) : '';
 
     await ExamResult.findOneAndUpdate(
       { sessionId: session._id, studentMembershipId: mark.studentMembershipId?._id || mark.studentMembershipId },
@@ -1303,6 +1924,7 @@ async function recomputeSessionResults(sessionId) {
         studentMembershipId: mark.studentMembershipId?._id || mark.studentMembershipId,
         studentId: mark.studentId || mark.studentMembershipId?.studentId || null,
         student: mark.student || mark.studentMembershipId?.student || null,
+        membershipSnapshot: mark.membershipSnapshot || buildMembershipSnapshot(mark.studentMembershipId || {}, session.heldAt),
         markStatus,
         scoreBreakdown: getScoreBreakdown(mark),
         obtainedMark: mark.obtainedMark,
@@ -1313,7 +1935,8 @@ async function recomputeSessionResults(sessionId) {
         groupLabel,
         rank,
         rankingRuleId: rankingRule?._id || null,
-        computedAt: new Date()
+        computedAt: new Date(),
+        engineVersion: OFFICIAL_RESULT_POLICY_VERSION
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
@@ -1349,6 +1972,7 @@ async function loadSessionForMarkMutation(sessionId) {
     .populate({ path: 'assessmentPeriodId', populate: { path: 'academicYearId' } })
     .populate({ path: 'classId', populate: { path: 'academicYearId' } })
     .populate('subjectId')
+    .populate('sheetTemplateId')
     .populate({ path: 'teacherAssignmentId', populate: [{ path: 'teacherUserId', select: 'name email' }, { path: 'academicYearId' }, { path: 'termId' }, { path: 'classId', populate: { path: 'academicYearId' } }, { path: 'subjectId' }] });
 }
 
@@ -1374,18 +1998,29 @@ function assertMembershipMatchesSession(membership, session) {
 
 function normalizeMarkStatus(value = '', fallback = 'recorded') {
   const normalized = normalizeText(value);
-  return ['recorded', 'absent', 'excused', 'pending'].includes(normalized) ? normalized : fallback;
+  return ['recorded', 'absent', 'excused', 'pending', 'not_applicable'].includes(normalized) ? normalized : fallback;
 }
 
 function assertSessionEditable(session) {
   const status = normalizeText(session?.status);
-  if (['published', 'archived', 'closed'].includes(status)) {
+  if (['submitted', 'approved', 'published', 'archived', 'closed'].includes(status)) {
     throw new Error('exam_session_locked');
   }
 }
 
 async function persistExamMark({ session, membership, payload = {}, actorUserId = null } = {}) {
-  const markStatus = normalizeMarkStatus(payload.markStatus, 'recorded');
+  const markFilter = { sessionId: session._id, studentMembershipId: membership._id };
+  const existingMark = await ExamMark.findOne(markFilter).select('membershipSnapshot').lean();
+  if (session.rosterFrozenAt && !existingMark) {
+    throw new Error('exam_membership_not_in_frozen_roster');
+  }
+  const membershipSnapshot = normalizeText(existingMark?.membershipSnapshot?.status)
+    ? existingMark.membershipSnapshot
+    : buildMembershipSnapshot(membership, session.heldAt);
+  const requestedMarkStatus = normalizeMarkStatus(payload.markStatus, 'recorded');
+  const markStatus = membershipSnapshot.status === 'suspended'
+    ? 'excused'
+    : (membershipSnapshot.isCurrent === false ? 'not_applicable' : requestedMarkStatus);
   const scoreComponents = getScoreComponents(session.defaultMarkId);
   const hasBreakdown = isBreakdownConfigured(session.defaultMarkId);
   const totalMark = getScoreComponentTotal(scoreComponents)
@@ -1406,7 +2041,7 @@ async function persistExamMark({ session, membership, payload = {}, actorUserId 
   }
 
   const mark = await ExamMark.findOneAndUpdate(
-    { sessionId: session._id, studentMembershipId: membership._id },
+    markFilter,
     {
       examTypeId: session.examTypeId?._id || session.examTypeId,
       academicYearId: session.academicYearId?._id || session.academicYearId,
@@ -1416,6 +2051,7 @@ async function persistExamMark({ session, membership, payload = {}, actorUserId 
       studentMembershipId: membership._id,
       studentId: membership.studentId?._id || membership.studentId || null,
       student: membership.student?._id || membership.student || null,
+      membershipSnapshot,
       markStatus,
       scoreBreakdown,
       obtainedMark,
@@ -1477,7 +2113,14 @@ async function saveExamSheetMarks(sessionId, payload = {}, actorUserId = null) {
     throw new Error('exam_sheet_marks_required');
   }
 
-  await initializeSessionRoster(session._id, actorUserId);
+  if (!session.rosterFrozenAt) {
+    const initialized = await initializeSessionRoster(session._id, actorUserId, {
+      freeze: normalizeText(session.status) === 'active'
+    });
+    if (initialized?.session?.rosterFrozenAt) {
+      session.rosterFrozenAt = initialized.session.rosterFrozenAt;
+    }
+  }
 
   for (const entry of entries) {
     const membershipId = normalizeNullableId(entry?.studentMembershipId);
@@ -1506,30 +2149,249 @@ async function saveExamSheetMarks(sessionId, payload = {}, actorUserId = null) {
   };
 }
 
-async function updateExamSessionStatus(sessionId, payload = {}, actorUserId = null) {
+async function refreshSessionAttendanceScores(session, actorUserId = null) {
+  const scoreComponents = getScoreComponents(session.defaultMarkId);
+  const attendanceMax = Number(scoreComponents.attendanceMax || 0);
+  if (attendanceMax <= 0) return { updated: 0, missing: 0 };
+
+  const dateFrom = toDateOrNull(session.assessmentPeriodId?.startDate)
+    || toDateOrNull(session.academicYearId?.startDate)
+    || null;
+  const dateTo = toDateOrNull(session.heldAt)
+    || toDateOrNull(session.assessmentPeriodId?.endDate)
+    || new Date();
+  const marks = await ExamMark.find({ sessionId: session._id, markStatus: 'recorded' });
+  let updated = 0;
+  let missing = 0;
+
+  for (const mark of marks) {
+    const identityClauses = [];
+    if (mark.studentMembershipId) identityClauses.push({ studentMembershipId: mark.studentMembershipId });
+    if (mark.student) identityClauses.push({ student: mark.student });
+    if (!identityClauses.length) {
+      missing += 1;
+      continue;
+    }
+    const records = await Attendance.find({
+      $or: identityClauses,
+      date: {
+        ...(dateFrom ? { $gte: dateFrom } : {}),
+        ...(dateTo ? { $lte: dateTo } : {})
+      }
+    }).select('date status').lean();
+    if (!records.length) {
+      missing += 1;
+      continue;
+    }
+    const attendanceEligibleRecords = records.filter((item) => normalizeText(item.status) !== 'suspended');
+    if (!attendanceEligibleRecords.length) {
+      missing += 1;
+      continue;
+    }
+    const presentRecords = attendanceEligibleRecords.filter((item) => (
+      ['present', 'late', 'sick', 'leave', 'excused'].includes(normalizeText(item.status))
+    )).length;
+    const attendanceRate = Number(((presentRecords / attendanceEligibleRecords.length) * 100).toFixed(2));
+    const attendanceScore = Number(((attendanceRate / 100) * attendanceMax).toFixed(2));
+    mark.scoreBreakdown = {
+      ...getScoreBreakdown(mark),
+      attendanceScore
+    };
+    mark.attendanceSnapshot = {
+      presentRecords,
+      totalRecords: attendanceEligibleRecords.length,
+      attendanceRate,
+      dateFrom,
+      dateTo,
+      computedAt: new Date()
+    };
+    mark.updatedBy = normalizeNullableId(actorUserId);
+    await mark.save();
+    updated += 1;
+  }
+  return { updated, missing };
+}
+
+function cloneDocumentPayload(document, additionalExcluded = []) {
+  const payload = toPlain(document) || {};
+  ['_id', '__v', 'createdAt', 'updatedAt', ...additionalExcluded].forEach((key) => {
+    delete payload[key];
+  });
+  return payload;
+}
+
+async function createExamSessionRevision(sessionId, payload = {}, actorUserId = null, actorRole = '') {
+  if (normalizeText(actorRole) !== 'admin') {
+    throw new Error('exam_session_admin_approval_required');
+  }
+  const source = await loadSessionForMarkMutation(sessionId);
+  if (!source) {
+    throw new Error('exam_session_not_found');
+  }
+  if (!['approved', 'published', 'closed'].includes(normalizeText(source.status))) {
+    throw new Error('exam_revision_requires_locked_source');
+  }
+
+  const revisionRootSessionId = source.revisionRootSessionId?._id
+    || source.revisionRootSessionId
+    || source._id;
+  const latest = await ExamSession.findOne({
+    $or: [{ _id: revisionRootSessionId }, { revisionRootSessionId }]
+  }).sort({ version: -1 }).select('version').lean();
+  const nextVersion = Math.max(1, Number(latest?.version || source.version || 1)) + 1;
+  const sourceCode = normalizeText(source.code) || `EXAM-${String(revisionRootSessionId).slice(-8)}`;
+  const dbSession = await mongoose.startSession();
+  let revisionId = null;
+  let clonedMarks = 0;
+  let clonedResults = 0;
+
+  try {
+    await dbSession.withTransaction(async () => {
+      const [revision] = await ExamSession.create([{
+        title: `${normalizeText(source.title)} (نسخه ${nextVersion})`,
+        code: `${sourceCode}-V${nextVersion}`,
+        sessionKind: source.sessionKind,
+        examTypeId: source.examTypeId?._id || source.examTypeId,
+        academicYearId: source.academicYearId?._id || source.academicYearId,
+        assessmentPeriodId: source.assessmentPeriodId?._id || source.assessmentPeriodId,
+        classId: source.classId?._id || source.classId,
+        subjectId: source.subjectId?._id || source.subjectId || null,
+        teacherAssignmentId: source.teacherAssignmentId?._id || source.teacherAssignmentId || null,
+        sheetTemplateId: source.sheetTemplateId?._id || source.sheetTemplateId || null,
+        sheetTemplateVersion: Math.max(1, Number(source.sheetTemplateVersion || source.sheetTemplateSnapshot?.version || 1)),
+        sheetTemplateSnapshot: source.sheetTemplateSnapshot || buildSheetTemplateSnapshot(source.sheetTemplateId),
+        rankingRuleId: source.rankingRuleId?._id || source.rankingRuleId || null,
+        version: nextVersion,
+        revisionRootSessionId,
+        supersedesSessionId: source._id,
+        status: 'draft',
+        heldAt: source.heldAt || null,
+        monthLabel: normalizeText(source.monthLabel),
+        reviewedByName: '',
+        reviewerUserId: null,
+        createdBy: normalizeNullableId(actorUserId),
+        note: normalizeText(payload.reason || payload.note)
+          || `Correction revision of ${normalizeText(source.code) || String(source._id)}`
+      }], { session: dbSession });
+
+      if (source.defaultMarkId) {
+        const defaultMarkPayload = cloneDocumentPayload(source.defaultMarkId, ['sessionId']);
+        const [defaultMark] = await ExamDefaultMark.create([{
+          ...defaultMarkPayload,
+          sessionId: revision._id
+        }], { session: dbSession });
+        revision.defaultMarkId = defaultMark._id;
+        await revision.save({ session: dbSession });
+      }
+
+      const sourceMarks = await ExamMark.find({ sessionId: source._id }).lean().session(dbSession);
+      if (sourceMarks.length) {
+        await ExamMark.insertMany(sourceMarks.map((mark) => ({
+          ...cloneDocumentPayload(mark, ['sessionId']),
+          sessionId: revision._id,
+          enteredBy: normalizeNullableId(actorUserId),
+          updatedBy: normalizeNullableId(actorUserId),
+          enteredAt: new Date()
+        })), { session: dbSession, ordered: true });
+      }
+      clonedMarks = sourceMarks.length;
+
+      const sourceResults = await ExamResult.find({ sessionId: source._id }).lean().session(dbSession);
+      if (sourceResults.length) {
+        await ExamResult.insertMany(sourceResults.map((result) => ({
+          ...cloneDocumentPayload(result, ['sessionId']),
+          sessionId: revision._id,
+          computedAt: new Date()
+        })), { session: dbSession, ordered: true });
+      }
+      clonedResults = sourceResults.length;
+
+      source.replacedBySessionId = revision._id;
+      await source.save({ session: dbSession });
+      revisionId = revision._id;
+    });
+  } finally {
+    await dbSession.endSession();
+  }
+
+  const revision = await loadExamSessionWithRelations(revisionId);
+  return {
+    item: formatExamSession(revision),
+    summary: { clonedMarks, clonedResults, version: nextVersion }
+  };
+}
+
+async function updateExamSessionStatus(sessionId, payload = {}, actorUserId = null, actorRole = '') {
   const session = await loadSessionForMarkMutation(sessionId);
   if (!session) {
     throw new Error('exam_session_not_found');
   }
 
   const nextStatus = normalizeSessionStatus(payload.status, session.status);
-  if (nextStatus === 'published') {
-    const memberships = await listEligibleMembershipsForSessionContext({
-      academicYearId: session.academicYearId?._id || session.academicYearId,
-      classId: session.classId?._id || session.classId
-    });
+  const currentStatus = normalizeSessionStatus(session.status, 'draft');
+  const role = normalizeText(actorRole);
+  const allowedTransitions = {
+    draft: ['draft', 'active', 'submitted', 'archived'],
+    active: ['draft', 'active', 'submitted', 'archived'],
+    submitted: ['active', 'submitted', 'approved', 'archived'],
+    approved: ['submitted', 'approved', 'published', 'archived'],
+    closed: ['approved', 'published', 'archived'],
+    published: ['published', 'archived'],
+    archived: ['archived']
+  };
+  if (!(allowedTransitions[currentStatus] || []).includes(nextStatus)) {
+    throw new Error('exam_session_invalid_status_transition');
+  }
+  if (['approved', 'published', 'archived'].includes(nextStatus) && role !== 'admin') {
+    throw new Error('exam_session_admin_approval_required');
+  }
+  if (role === 'instructor' && !['draft', 'active', 'submitted'].includes(nextStatus)) {
+    throw new Error('exam_session_admin_approval_required');
+  }
+  if (nextStatus === 'archived') {
+    if (!normalizeText(payload.note)) {
+      throw new Error('exam_session_archive_reason_required');
+    }
+    const promotionCount = await PromotionTransaction.countDocuments({ sessionId: session._id });
+    if (promotionCount > 0) {
+      throw new Error('exam_session_has_promotions');
+    }
+  }
+
+  if (payload.reviewerUserId !== undefined || payload.reviewedByName !== undefined) {
+    const reviewer = await resolveReviewerIdentity(payload.reviewerUserId, payload.reviewedByName);
+    session.reviewerUserId = reviewer.reviewerUserId;
+    session.reviewedByName = reviewer.reviewedByName;
+  }
+
+  if (['active', 'submitted'].includes(nextStatus) && !session.rosterFrozenAt) {
+    const initialized = await initializeSessionRoster(session._id, actorUserId, { freeze: true });
+    session.rosterFrozenAt = initialized?.session?.rosterFrozenAt || new Date();
+    session.rosterFrozenBy = normalizeNullableId(actorUserId);
+  }
+
+  if (nextStatus === 'submitted' && !['submitted', 'approved', 'published'].includes(currentStatus)) {
+    const attendance = await refreshSessionAttendanceScores(session, actorUserId);
+    if (attendance.missing > 0) {
+      throw new Error('exam_session_attendance_incomplete');
+    }
+    await recomputeSessionResults(session._id);
+  }
+
+  if (['submitted', 'approved', 'published'].includes(nextStatus)) {
     const marks = await ExamMark.find({ sessionId: session._id }).select('studentMembershipId markStatus').lean();
     const results = await ExamResult.find({ sessionId: session._id }).select('studentMembershipId').lean();
+    const memberships = marks.map((mark) => ({ _id: mark.studentMembershipId }));
     const rosterSummary = buildSessionRosterSummary({ memberships, marks, results });
     if (!rosterSummary.totalMarks || rosterSummary.missingMarks > 0 || rosterSummary.pendingMarks > 0) {
       throw new Error('exam_session_pending_marks');
     }
   }
+  if (['approved', 'published'].includes(nextStatus) && !session.reviewerUserId && !normalizeText(session.reviewedByName)) {
+    throw new Error('exam_session_reviewer_required');
+  }
 
   session.status = nextStatus;
-  if (payload.reviewedByName !== undefined) {
-    session.reviewedByName = normalizeText(payload.reviewedByName);
-  }
   if (payload.monthLabel !== undefined) {
     session.monthLabel = normalizeText(payload.monthLabel);
   }
@@ -1538,6 +2400,14 @@ async function updateExamSessionStatus(sessionId, payload = {}, actorUserId = nu
   }
   if (nextStatus === 'published') {
     session.publishedAt = new Date();
+  }
+  if (nextStatus === 'submitted' && !session.submittedAt) {
+    session.submittedAt = new Date();
+    session.submittedBy = normalizeNullableId(actorUserId);
+  }
+  if (nextStatus === 'approved' && !session.approvedAt) {
+    session.approvedAt = new Date();
+    session.approvedBy = normalizeNullableId(actorUserId);
   }
   session.updatedBy = normalizeNullableId(actorUserId);
   await session.save();
@@ -1552,22 +2422,29 @@ async function buildSessionSheetDataset(sessionId) {
     throw new Error('exam_session_not_found');
   }
 
-  const memberships = await listEligibleMembershipsForSessionContext({
-    academicYearId: session.academicYearId?._id || session.academicYearId,
-    classId: session.classId?._id || session.classId
-  });
-  const studentIds = memberships
-    .map((item) => item.studentId?._id || item.studentId || null)
-    .filter(Boolean);
-
-  const [marks, results, profiles] = await Promise.all([
+  const [marks, results] = await Promise.all([
     ExamMark.find({ sessionId: session._id })
       .populate({ path: 'studentMembershipId', populate: [{ path: 'studentId' }, { path: 'student', select: 'name email' }, { path: 'classId', populate: { path: 'academicYearId' } }, { path: 'academicYearId' }] })
       .populate('student', 'name email')
       .sort({ createdAt: 1 }),
-    ExamResult.find({ sessionId: session._id }).sort({ rank: 1, percentage: -1, createdAt: 1 }),
-    StudentProfile.find({ studentId: { $in: studentIds } }).lean()
+    ExamResult.find({ sessionId: session._id }).sort({ rank: 1, percentage: -1, createdAt: 1 })
   ]);
+
+  // ExamMark is the immutable roster snapshot. Lifecycle changes after submission
+  // must never remove a pupil from an already-created subject sheet.
+  const snapshotMemberships = marks
+    .map((item) => item.studentMembershipId)
+    .filter((item) => item && item._id);
+  const memberships = snapshotMemberships.length
+    ? snapshotMemberships
+    : await listEligibleMembershipsForSessionContext({
+        academicYearId: session.academicYearId?._id || session.academicYearId,
+        classId: session.classId?._id || session.classId
+      });
+  const studentIds = memberships
+    .map((item) => item.studentId?._id || item.studentId || null)
+    .filter(Boolean);
+  const profiles = await StudentProfile.find({ studentId: { $in: studentIds } }).lean();
 
   const markMap = new Map(marks.map((item) => [String(item.studentMembershipId?._id || item.studentMembershipId), item]));
   const resultMap = new Map(results.map((item) => [String(item.studentMembershipId), item]));
@@ -1591,11 +2468,15 @@ async function buildSessionSheetDataset(sessionId) {
       const markStatus = normalizeText(mark?.markStatus) || 'pending';
       const recorded = markStatus === 'recorded';
       const note = sanitizeExamNote(mark?.note);
+      const membershipSnapshot = mark?.membershipSnapshot || result?.membershipSnapshot || null;
+      const membershipStatusLabel = normalizeText(membershipSnapshot?.statusLabel)
+        || getMembershipLifecycleLabel(membershipSnapshot || membership);
       const row = {
         rowNumber: index + 1,
         admissionNo: getStudentAdmissionNo(studentCore),
         studentName: getStudentDisplayName(studentCore, student),
         fatherName: normalizeText(profile?.family?.fatherName),
+        attendanceScore: scoreBreakdown.attendanceScore,
         writtenScore: scoreBreakdown.writtenScore,
         oralScore: scoreBreakdown.oralScore,
         classActivityScore: scoreBreakdown.classActivityScore,
@@ -1603,7 +2484,13 @@ async function buildSessionSheetDataset(sessionId) {
         obtainedMark: recorded ? Number(mark?.obtainedMark || 0) : 0,
         totalInWords: recorded ? numberToFaWords(mark?.obtainedMark || 0) : '',
         note,
-        officialNote: buildExamSheetNote(markStatus, note),
+        membershipStatus: normalizeText(membershipSnapshot?.status) || normalizeText(membership.status),
+        membershipStatusLabel,
+        officialNote: buildOfficialExamSheetNote(
+          { ...(membershipSnapshot || membership), statusLabel: membershipStatusLabel },
+          markStatus,
+          note
+        ),
         markStatus,
         percentage: Number(result?.percentage || mark?.percentage || 0),
         resultStatus: normalizeText(result?.resultStatus),
@@ -1653,6 +2540,7 @@ async function buildSessionSheetReport(sessionId) {
     admissionNo: item.row.admissionNo,
     studentName: item.row.studentName,
     fatherName: item.row.fatherName,
+    attendanceScore: item.row.attendanceScore == null ? '' : item.row.attendanceScore,
     writtenScore: item.row.writtenScore == null ? '' : item.row.writtenScore,
     oralScore: item.row.oralScore == null ? '' : item.row.oralScore,
     classActivityScore: item.row.classActivityScore == null ? '' : item.row.classActivityScore,
@@ -1674,6 +2562,50 @@ async function buildSessionSheetReport(sessionId) {
   const title = normalizeSessionKind(data.session.sessionKind) === 'subject_sheet'
     ? `شقه ${normalizeText(data.session.examType?.title || 'مضمون')}`
     : `شقه ${normalizeText(data.session.examType?.title || 'امتحان')}`;
+
+  const componentColumns = SCORE_COMPONENT_FIELDS
+    .filter((component) => Number(data.scoreComponents?.[component.maxKey] || 0) > 0)
+    .map((component) => ({
+      key: component.scoreKey,
+      label: `${component.label} از ${Number(data.scoreComponents?.[component.maxKey] || 0)}`,
+      width: component.key === 'classActivity' ? 10 : 9
+    }));
+  const baseColumns = [
+    { key: 'number', label: 'شماره', width: 7 },
+    { key: 'studentName', label: 'نام', width: 15, group: 'شهرت شاگردان' },
+    { key: 'fatherName', label: 'نام پدر', width: 15, group: 'شهرت شاگردان' },
+    ...componentColumns,
+    { key: 'obtainedMark', label: `به عدد از ${Number(data.session.defaultMark?.totalMark || 0)}`, width: 10, group: 'مجموع نمره' },
+    { key: 'totalInWords', label: 'به حروف', width: 14, group: 'مجموع نمره' },
+    { key: 'note', label: 'ملاحظات', width: 14 }
+  ];
+  const availableColumns = new Map(baseColumns.map((column) => [column.key, column]));
+  const assignedTemplate = data.session.sheetTemplate || null;
+  const configuredColumns = Array.isArray(assignedTemplate?.columns) && assignedTemplate.columns.length
+    ? assignedTemplate.columns
+        .filter((column) => column?.visible !== false && availableColumns.has(normalizeText(column?.key)))
+        .sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0))
+        .map((column) => ({
+          ...availableColumns.get(normalizeText(column.key)),
+          label: normalizeText(column.label) || availableColumns.get(normalizeText(column.key)).label,
+          group: normalizeText(column.group) || availableColumns.get(normalizeText(column.key)).group || '',
+          width: Math.max(4, Number(column.width || availableColumns.get(normalizeText(column.key)).width || 16))
+        }))
+    : baseColumns;
+  const template = assignedTemplate || {
+    type: 'exam',
+    title,
+    version: 1,
+    columns: baseColumns,
+    layout: {
+      orientation: 'portrait',
+      fontFamily: 'B Zar',
+      fontSize: 11,
+      showHeader: true,
+      showFooter: true,
+      showLogo: true
+    }
+  };
 
   return {
     session: data.session,
@@ -1700,32 +2632,10 @@ async function buildSessionSheetReport(sessionId) {
         conditionalMarks: data.items.filter((item) => String(item?.result?.resultStatus || '') === 'conditional').length,
         failedMarks: data.items.filter((item) => String(item?.result?.resultStatus || '') === 'failed').length
       },
-      columns: [
-        { key: 'number', label: 'شماره', width: 7 },
-        { key: 'studentName', label: 'نام', width: 15, group: 'شهرت متعلمین' },
-        { key: 'fatherName', label: 'نام پدر', width: 15, group: 'شهرت متعلمین' },
-        { key: 'writtenScore', label: 'تحریری', width: 9 },
-        { key: 'oralScore', label: 'تقریری', width: 9 },
-        { key: 'classActivityScore', label: 'فعالیت صنفی', width: 10 },
-        { key: 'homeworkScore', label: 'کارخانگی', width: 10 },
-        { key: 'obtainedMark', label: 'به عدد', width: 10, group: 'مجموعه نمره' },
-        { key: 'totalInWords', label: 'به حروف', width: 14, group: 'مجموعه نمره' },
-        { key: 'note', label: 'ملاحظات', width: 12 }
-      ],
+      columns: configuredColumns,
       rows: reportRows
     },
-    template: {
-      type: 'exam',
-      title,
-      layout: {
-        orientation: 'portrait',
-        fontFamily: 'B Zar',
-        fontSize: 11,
-        showHeader: true,
-        showFooter: true,
-        showLogo: true
-      }
-    }
+    template
   };
 }
 
@@ -1740,8 +2650,8 @@ async function listStudentExamResults(studentRef, options = {}) {
   if (user) query.push({ student: user._id });
   const filter = query.length === 1 ? query[0] : { $or: query };
   if (!options.includeUnpublished) {
-    const publishedSessionIds = await ExamSession.find({ status: 'published' }).distinct('_id');
-    filter.sessionId = { $in: publishedSessionIds };
+    const approvedSessionIds = await ExamSession.find({ status: { $in: ['approved', 'published'] } }).distinct('_id');
+    filter.sessionId = { $in: approvedSessionIds };
   }
 
   const items = await ExamResult.find(filter)
@@ -1768,8 +2678,11 @@ module.exports = {
   bootstrapExamSession,
   buildSessionSheetReport,
   createExamSession,
+  createExamSessionRevision,
   createExamType,
+  deleteExamSession,
   ensureExamSessionAccess,
+  getExamSessionManagementState,
   getSessionMarks,
   getSessionRosterStatus,
   initializeSessionRoster,
@@ -1781,6 +2694,7 @@ module.exports = {
   recomputeSessionResults,
   saveExamSheetMarks,
   seedExamReferenceData,
+  updateExamSession,
   updateExamSessionStatus,
   upsertExamMark
 };

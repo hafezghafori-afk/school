@@ -5266,6 +5266,98 @@ async function run() {
       assertCase(String(response.data?.message || '').includes('BL-202603-0001'), 'expected duplicate bill reference');
     });
 
+    await check('route smoke: monthly tuition cannot be duplicated after a class change', async () => {
+      bills.push({
+        _id: 'bill-monthly-previous-class',
+        schoolId: 'school-1',
+        billNumber: 'BL-202607-PREVIOUS',
+        student: IDS.student2,
+        course: '507f191e810c19729de860eb',
+        classId: '507f191e810c19729de86102',
+        academicYear: '1405',
+        term: '1',
+        periodType: 'monthly',
+        periodLabel: 'سرطان ۱۴۰۵',
+        feeScopes: ['tuition'],
+        lineItems: [{ feeType: 'tuition', amount: 550 }],
+        currency: 'AFN',
+        amountOriginal: 550,
+        amountDue: 550,
+        amountPaid: 0,
+        status: 'new',
+        issuedAt: new Date('2026-07-01T00:00:00.000Z'),
+        dueDate: new Date('2026-07-21T00:00:00.000Z')
+      });
+
+      try {
+        const response = await request(server, '/api/finance/admin/bills', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: {
+            studentId: IDS.student2,
+            classId: IDS.class1,
+            amount: 550,
+            feeType: 'tuition',
+            dueDate: '2026-07-21',
+            issuedAt: '2026-07-01',
+            academicYear: '1405',
+            term: '1',
+            periodType: 'monthly',
+            periodLabel: 'سرطان ۱۴۰۵'
+          }
+        });
+        assertCase(response.status === 409, `expected 409, received ${response.status}`);
+        assertCase(String(response.data?.message || '').includes('BL-202607-PREVIOUS'), 'expected previous-class bill reference');
+      } finally {
+        bills.pop();
+      }
+    });
+
+    await check('route smoke: manual plan billing derives monthly period when the form omits it', async () => {
+      const monthlyPlanId = '507f191e810c19729de86992';
+      feePlans.push({
+        _id: monthlyPlanId,
+        title: 'Class One Monthly Plan',
+        planCode: 'MONTHLY-ONE',
+        planType: 'standard',
+        priority: 1,
+        isDefault: true,
+        schoolId: 'school-1',
+        classId: IDS.class1,
+        course: IDS.course1,
+        academicYear: '1405',
+        term: 'ترم اول',
+        billingFrequency: 'monthly',
+        periodType: 'monthly',
+        tuitionFee: 725,
+        isActive: true,
+        lifecycleStatus: 'active'
+      });
+
+      try {
+        const response = await request(server, '/api/finance/admin/bills', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: {
+            studentId: IDS.student2,
+            classId: IDS.class1,
+            amountSource: 'plan',
+            feePlanId: monthlyPlanId,
+            feeType: 'tuition',
+            dueDate: '2026-08-21',
+            issuedAt: '2026-03-06',
+            academicYear: '1405'
+          }
+        });
+        assertCase(response.status === 201, `expected 201, received ${response.status}: ${response.text}`);
+        assertCase(String(response.data?.item?.periodType || '') === 'monthly', 'expected periodType to be derived from the monthly plan');
+        assertCase(String(response.data?.item?.term || '') === 'ترم اول', 'expected term to be derived from the selected plan');
+        assertCase(Number(response.data?.item?.amountOriginal || 0) === 725, 'expected tuition amount from the selected monthly plan');
+      } finally {
+        feePlans.pop();
+      }
+    });
+
     await check('route smoke: manual bill creation accepts a unique obligation', async () => {
       const response = await request(server, '/api/finance/admin/bills', {
         method: 'POST',
@@ -5674,14 +5766,14 @@ async function run() {
           dueDate: '2026-05-12',
           issuedAt: '2026-03-06',
           academicYear: '1405',
-          academicYearId: 'year-1405',
-          periodType: 'monthly'
+          academicYearId: 'year-1405'
         }
       });
 
       feePlans.pop();
 
       assertCase(response.status === 200, `expected 200, received ${response.status}: ${response.text}`);
+      assertCase(response.data?.periodType === 'monthly', 'expected grouped preview to derive monthly period from its fee plan');
       assertCase(response.data?.summary?.candidateCount === 2, `expected one monthly bill per active membership, received ${response.data?.summary?.candidateCount}`);
       assertCase(Number(response.data?.summary?.totalAmountDue || 0) === 1400, `expected selected month total 1400, received ${response.data?.summary?.totalAmountDue}`);
     });

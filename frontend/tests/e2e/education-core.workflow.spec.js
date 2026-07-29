@@ -370,13 +370,45 @@ test.describe('education core workflow', () => {
         status: 'approved',
         note: 'تایید نهایی',
         rejectedReason: ''
-      }
+      },
+      ...Array.from({ length: 8 }, (_, index) => {
+        const linkedClass = schoolClasses[index % schoolClasses.length];
+        const lifecycleStatuses = ['suspended', 'transferred_out', 'dropped', 'expelled', 'approved', 'pending', 'graduated', 'inactive'];
+        const status = lifecycleStatuses[index];
+        return {
+          _id: `enrollment-extra-${index + 1}`,
+          user: { _id: `student-extra-${index + 1}`, name: `متعلم اضافی ${index + 1}` },
+          classId: linkedClass.id,
+          schoolClass: linkedClass,
+          courseId: linkedClass.legacyCourseId,
+          course: { _id: linkedClass.legacyCourseId, title: linkedClass.legacyCourse.title },
+          status,
+          enrolledAt: '2026-03-01T08:00:00.000Z',
+          endedAt: ['transferred_out', 'dropped', 'expelled', 'graduated', 'inactive'].includes(status)
+            ? '2026-04-01T08:00:00.000Z'
+            : null,
+          endedReason: ['approved', 'pending', 'suspended'].includes(status) ? '' : status,
+          note: `سابقه تعلیمی ${index + 1}`,
+          rejectedReason: ''
+        };
+      })
     ];
 
     const resolveClassByAnyId = (payload = {}) => schoolClasses.find((item) => (
       String(item.id) === String(payload.classId || '') ||
       String(item.legacyCourseId) === String(payload.courseId || '')
     ));
+
+    await page.route('**/api/afghan-schools/active*', async (route) => {
+      await route.fulfill(json({
+        success: true,
+        data: { schoolId: 'school-1', schoolName: 'مکتب آزمایشی' }
+      }));
+    });
+
+    await page.route('**/api/academic-terms/academic-year/*', async (route) => {
+      await route.fulfill(json({ success: true, data: [] }));
+    });
 
     await page.route('**/api/education/school-classes', async (route) => {
       if (route.request().method() === 'POST') {
@@ -464,7 +496,7 @@ test.describe('education core workflow', () => {
       await route.fulfill(json({ success: true, instructors, students, studentCandidates, onlineRegistrationQueue }));
     });
 
-    await page.route('**/api/education/instructor-subjects', async (route) => {
+    await page.route('**/api/education/teacher-maps', async (route) => {
       if (route.request().method() === 'POST') {
         mappingCreates += 1;
         const body = route.request().postDataJSON();
@@ -483,6 +515,7 @@ test.describe('education core workflow', () => {
           },
           note: body.note || '',
           isPrimary: !!body.isPrimary,
+          weeklyPeriods: Number(body.weeklyPeriods || 1),
           createdAt: new Date().toISOString()
         };
         mappings = [item, ...mappings];
@@ -493,7 +526,26 @@ test.describe('education core workflow', () => {
       await route.fulfill(json({ success: true, items: mappings }));
     });
 
-    await page.route('**/api/education/student-enrollments*', async (route) => {
+    await page.route('**/api/education/student-enrollments**', async (route) => {
+      const requestUrl = new URL(route.request().url());
+      const historyMatch = requestUrl.pathname.match(/\/student-enrollments\/([^/]+)\/lifecycle-history$/);
+      if (route.request().method() === 'GET' && historyMatch) {
+        const membershipId = historyMatch[1];
+        const membership = enrollments.find((item) => String(item._id) === String(membershipId)) || null;
+        await route.fulfill(json({
+          success: true,
+          membership,
+          events: [{
+            _id: `event-${membershipId}`,
+            eventType: 'suspension',
+            effectiveAt: '2026-04-02T08:00:00.000Z',
+            note: 'محرومیت آزمایشی'
+          }],
+          documents: { transfers: [], dropouts: [], expulsions: [], suspensions: [{ _id: `suspension-${membershipId}` }] }
+        }));
+        return;
+      }
+
       if (route.request().method() === 'POST') {
         enrollmentCreates += 1;
         const body = route.request().postDataJSON();
@@ -612,10 +664,12 @@ test.describe('education core workflow', () => {
 
     await sectionNav.getByRole('button', { name: /تقسیم مضمون/ }).click();
     const mappingCard = page.locator('article.admin-workspace-card').filter({ has: page.getByRole('heading', { name: 'تقسیم مضمون به استاد' }) }).first();
+    await expect(mappingCard.getByRole('link', { name: 'مدیریت تفصیلی تخصیص‌ها' })).toHaveAttribute('href', '/timetable/teacher-timetable-configurations');
     await mappingCard.locator('select').nth(0).selectOption('teacher-1');
     await mappingCard.locator('select').nth(1).selectOption('subject-1');
     await mappingCard.locator('select').nth(2).selectOption('year-1');
     await mappingCard.locator('select').nth(3).selectOption('class-5');
+    await mappingCard.getByRole('spinbutton', { name: 'ساعت‌های هفته‌وار' }).fill('4');
     await mappingCard.getByRole('button', { name: 'ایجاد تقسیم' }).click();
 
     await expect.poll(() => mappingCreates).toBe(1);
@@ -626,6 +680,7 @@ test.describe('education core workflow', () => {
     const mappingRegistryList = mappingRegistryCard.locator('.admin-education-list');
     await expect(mappingRegistryList).toContainText('صنف نهم ب');
     await expect(mappingRegistryList).toContainText('استاد احمد');
+    await expect(mappingRegistryList).toContainText('۴ ساعت هفته‌وار');
     await expect(mappingRegistryList).toContainText('استاد فرید');
     await expect(mappingRegistryList).toContainText('صنف دهم الف');
     await expect(mappingRegistryList).toContainText('صنف هشتم الف');
@@ -646,33 +701,43 @@ test.describe('education core workflow', () => {
     await mappingRegistryCard.getByRole('button', { name: 'پاک‌کردن' }).click();
 
     await sectionNav.getByRole('button', { name: /ثبت.?نام متعلمین/ }).click();
-    const enrollmentCard = page.locator('article.admin-workspace-card').filter({ has: page.getByRole('heading', { name: 'ثبت‌نام متعلمین' }) }).first();
+    await page.locator('button.admin-registration-task-card').filter({ hasText: 'صندوق ثبت‌نام آنلاین' }).click();
     const onlineQueueCard = page.locator('article.admin-workspace-card').filter({ has: page.getByRole('heading', { name: 'صندوق ثبت‌نام آنلاین' }) }).first();
     await expect(onlineQueueCard).toContainText('متعلم آنلاین');
-    await onlineQueueCard.getByRole('button', { name: 'معرفی به صنف' }).click();
+    await onlineQueueCard.getByRole('button', { name: 'معرفی به صنف', exact: true }).click();
+    const enrollmentCard = page.locator('#admin-registration-workspace');
     await expect(enrollmentCard.locator('[data-role=\"selected-candidate-summary\"]')).toContainText('متعلم آنلاین');
     await enrollmentCard.locator('[data-role=\"enrollment-class-select\"]').selectOption('class-5');
     await enrollmentCard.locator('textarea').fill('ثبت مستقیم از پنل جدید');
     await enrollmentCard.getByRole('button', { name: 'ایجاد ثبت‌نام' }).click();
 
     await expect.poll(() => enrollmentCreates).toBe(1);
+    await page.locator('button.admin-registration-task-card').filter({ hasText: 'دفتر ثبت‌نام‌ها' }).click();
     const enrollmentRegistryCard = page
       .locator('article.admin-workspace-card')
-      .filter({ has: page.getByRole('heading', { name: 'دفتر ثبت‌نام‌ها' }) })
+      .filter({ has: page.getByRole('heading', { name: 'دفتر ثبت‌نام‌ها و سوانح تعلیمی شاگردان' }) })
       .first();
     const enrollmentRegistryTable = enrollmentRegistryCard.locator('table');
+    await expect(enrollmentRegistryTable.locator('tbody > tr')).toHaveCount(10);
     await expect(enrollmentRegistryTable).toContainText('متعلم آنلاین');
     await expect(enrollmentRegistryTable).toContainText('صنف نهم ب');
     await expect(enrollmentRegistryTable).toContainText('متعلم ب');
     await expect(enrollmentRegistryTable).toContainText('صنف هشتم الف');
     await expect(enrollmentRegistryTable).toContainText('صنف یازدهم ب');
     await expect(enrollmentRegistryTable).toContainText('صنف دهم الف');
-    await expect(enrollmentRegistryTable).not.toContainText('صنف ششم ج');
-    await expect(enrollmentRegistryCard.getByRole('button', { name: /بیشتر/ })).toBeVisible();
-    await enrollmentRegistryCard.getByRole('button', { name: /بیشتر/ }).click();
-    await expect(enrollmentRegistryTable).toContainText('صنف ششم ج');
-    await expect(enrollmentRegistryTable).toContainText('صنف نهم ب');
-    await expect(enrollmentRegistryTable).not.toContainText('Legacy Mirror 9B');
+    await expect(enrollmentRegistryCard.getByRole('button', { name: 'صفحه بعدی' })).toBeVisible();
+    await enrollmentRegistryCard.getByRole('button', { name: 'صفحه بعدی' }).click();
+    await expect(enrollmentRegistryTable).toContainText('متعلم اضافی 8');
+    await expect(enrollmentRegistryTable.locator('tbody > tr')).toHaveCount(3);
+    await enrollmentRegistryCard.getByRole('button', { name: 'صفحه قبلی' }).click();
+    await enrollmentRegistryCard.getByRole('button', { name: 'مشاهده سوانح' }).first().click();
+    await expect(enrollmentRegistryTable).toContainText('محرومیت آزمایشی');
+    await expect(enrollmentRegistryTable).toContainText('۱ تغییر | ۱ سند');
+    await enrollmentRegistryCard.getByRole('button', { name: 'بستن سوانح' }).click();
+    await enrollmentRegistryCard.getByLabel('فیلتر وضعیت ثبت‌نام').selectOption('suspended');
+    await expect(enrollmentRegistryTable).toContainText('متعلم اضافی 1');
+    await expect(enrollmentRegistryTable).toContainText('محروم');
+    await enrollmentRegistryCard.getByRole('button', { name: 'پاک‌کردن' }).click();
     await enrollmentRegistryCard.getByLabel('جستجو در دفتر ثبت‌نام‌ها').fill('اسناد ناقص');
     await enrollmentRegistryCard.getByRole('button', { name: 'جستجو' }).click();
     await enrollmentRegistryCard.getByLabel('فیلتر وضعیت ثبت‌نام').selectOption('rejected');

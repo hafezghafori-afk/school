@@ -13,13 +13,18 @@ import {
 const EMPTY_REFERENCE = {
   templates: [],
   configs: [],
-  sessions: []
+  sessions: [],
+  academicYears: [],
+  classes: []
 };
 
 const EMPTY_GENERATE_FORM = {
   templateId: '',
   configId: '',
+  scopeType: 'session',
   sessionId: '',
+  academicYearId: '',
+  classId: '',
   note: ''
 };
 
@@ -47,10 +52,16 @@ export default function AdminResultTables() {
   const [message, setMessage] = useState('');
   const [messageTone, setMessageTone] = useState('info');
   const [busyAction, setBusyAction] = useState('');
+  const [readiness, setReadiness] = useState(null);
 
   const templates = useMemo(() => normalizeOptions(reference.templates, ['title', 'code']), [reference.templates]);
   const configs = useMemo(() => normalizeOptions(reference.configs, ['name', 'code']), [reference.configs]);
   const sessions = useMemo(() => normalizeOptions(reference.sessions, ['title', 'code']), [reference.sessions]);
+  const academicYears = useMemo(() => normalizeOptions(reference.academicYears, ['title', 'code']), [reference.academicYears]);
+  const classes = useMemo(() => normalizeOptions(
+    (reference.classes || []).filter((item) => !generateForm.academicYearId || String(item.academicYearId || '') === String(generateForm.academicYearId)),
+    ['title', 'code']
+  ), [reference.classes, generateForm.academicYearId]);
   const previewRows = selectedTable?.rows?.slice(0, 20) || [];
 
   const showMessage = (text, tone = 'info') => {
@@ -63,7 +74,9 @@ export default function AdminResultTables() {
       ...current,
       templateId: current.templateId || referenceData.templates?.[0]?.id || '',
       configId: current.configId || referenceData.configs?.[0]?.id || '',
-      sessionId: current.sessionId || referenceData.sessions?.[0]?.id || ''
+      sessionId: current.sessionId || referenceData.sessions?.[0]?.id || '',
+      academicYearId: current.academicYearId || referenceData.academicYears?.find((item) => item.isActive)?.id || referenceData.academicYears?.[0]?.id || '',
+      classId: current.classId || ''
     }));
   };
 
@@ -76,7 +89,9 @@ export default function AdminResultTables() {
       setReference({
         templates: referenceData.templates || [],
         configs: referenceData.configs || [],
-        sessions: referenceData.sessions || []
+        sessions: referenceData.sessions || [],
+        academicYears: referenceData.academicYears || [],
+        classes: referenceData.classes || []
       });
       setTables(tableData.items || []);
       hydrateDefaults(referenceData);
@@ -104,7 +119,36 @@ export default function AdminResultTables() {
 
   const handleGenerateChange = (event) => {
     const { name, value } = event.target;
-    setGenerateForm((current) => ({ ...current, [name]: value }));
+    setGenerateForm((current) => ({
+      ...current,
+      [name]: value,
+      ...(name === 'academicYearId' ? { classId: '' } : {})
+    }));
+    if (['scopeType', 'academicYearId', 'classId'].includes(name)) setReadiness(null);
+  };
+
+  const checkReadiness = async () => {
+    try {
+      if (!generateForm.academicYearId || !generateForm.classId) {
+        throw new Error('سال تعلیمی و صنف را انتخاب کنید.');
+      }
+      setBusyAction('readiness');
+      const query = new URLSearchParams({
+        academicYearId: generateForm.academicYearId,
+        classId: generateForm.classId
+      });
+      const data = await fetchJson(`/api/result-tables/readiness?${query.toString()}`);
+      setReadiness(data);
+      showMessage(data.ready
+        ? 'تمام شقه‌های ۴۰ و ۶۰ نمره تأیید شده‌اند؛ نتیجه عمومی آماده تولید است.'
+        : 'نتیجه عمومی هنوز آماده نیست؛ موارد کنترل آمادگی را تکمیل کنید.', data.ready ? 'info' : 'error');
+      return data;
+    } catch (error) {
+      showMessage(errorMessage(error, 'کنترل آمادگی نتایج ناموفق بود.'), 'error');
+      return null;
+    } finally {
+      setBusyAction('');
+    }
   };
 
   const handleConfigChange = (event) => {
@@ -127,10 +171,16 @@ export default function AdminResultTables() {
   const generateTable = async () => {
     try {
       setBusyAction('generate');
+      if (generateForm.scopeType === 'class_aggregate' && readiness?.ready !== true) {
+        throw new Error('ابتدا کنترل آمادگی را اجرا کنید و تمام خطاهای شقه‌ها را رفع نمایید.');
+      }
       const payload = {
         templateId: generateForm.templateId,
         configId: generateForm.configId,
-        sessionId: generateForm.sessionId,
+        sessionId: generateForm.scopeType === 'session' ? generateForm.sessionId : undefined,
+        scopeType: generateForm.scopeType,
+        academicYearId: generateForm.academicYearId,
+        classId: generateForm.classId,
         note: generateForm.note
       };
       const data = await postJson('/api/result-tables/generate', payload);
@@ -202,6 +252,13 @@ export default function AdminResultTables() {
             <div className="admin-workspace-form">
               <div className="admin-workspace-form-grid">
                 <div className="admin-workspace-field">
+                  <label htmlFor="result-scope">نوع نتیجه</label>
+                  <select id="result-scope" name="scopeType" value={generateForm.scopeType} onChange={handleGenerateChange}>
+                    <option value="session">نتیجه یک شقه</option>
+                    <option value="class_aggregate">نتیجه عمومی صنف (۴۰ + ۶۰)</option>
+                  </select>
+                </div>
+                <div className="admin-workspace-field">
                   <label htmlFor="result-template">Template</label>
                   <select id="result-template" name="templateId" value={generateForm.templateId} onChange={handleGenerateChange}>
                     <option value="">انتخاب template</option>
@@ -219,22 +276,63 @@ export default function AdminResultTables() {
                     ))}
                   </select>
                 </div>
-                <div className="admin-workspace-field">
-                  <label htmlFor="result-session">Session</label>
-                  <select id="result-session" name="sessionId" value={generateForm.sessionId} onChange={handleGenerateChange}>
-                    <option value="">انتخاب session</option>
-                    {sessions.map((item) => (
-                      <option key={item.id} value={item.id}>{item.uiLabel}</option>
-                    ))}
-                  </select>
-                </div>
+                {generateForm.scopeType === 'session' ? (
+                  <div className="admin-workspace-field">
+                    <label htmlFor="result-session">Session</label>
+                    <select id="result-session" name="sessionId" value={generateForm.sessionId} onChange={handleGenerateChange}>
+                      <option value="">انتخاب session</option>
+                      {sessions.map((item) => (
+                        <option key={item.id} value={item.id}>{item.uiLabel}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <>
+                    <div className="admin-workspace-field">
+                      <label htmlFor="result-academic-year">سال تعلیمی</label>
+                      <select id="result-academic-year" name="academicYearId" value={generateForm.academicYearId} onChange={handleGenerateChange}>
+                        <option value="">انتخاب سال</option>
+                        {academicYears.map((item) => (
+                          <option key={item.id} value={item.id}>{item.uiLabel}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="admin-workspace-field">
+                      <label htmlFor="result-class">صنف</label>
+                      <select id="result-class" name="classId" value={generateForm.classId} onChange={handleGenerateChange}>
+                        <option value="">انتخاب صنف</option>
+                        {classes.map((item) => (
+                          <option key={item.id} value={item.id}>{item.uiLabel}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </>
+                )}
                 <div className="admin-workspace-field">
                   <label htmlFor="result-note">یادداشت</label>
                   <input id="result-note" name="note" value={generateForm.note} onChange={handleGenerateChange} placeholder="یادداشت اختیاری" />
                 </div>
               </div>
+              {generateForm.scopeType === 'class_aggregate' && readiness && (
+                <div className={`admin-workspace-message ${readiness.ready ? '' : 'error'}`}>
+                  <strong>{readiness.ready ? 'آماده تولید' : 'نیازمند تکمیل'}</strong>
+                  <span> — قاعده کامیابی: ۱۶/۴۰، ۴۰/۶۰ و ۵۵/۱۰۰</span>
+                  {!readiness.ready && (readiness.issues || []).length > 0 && (
+                    <ul>
+                      {readiness.issues.slice(0, 12).map((issue, index) => (
+                        <li key={`${issue.code}-${issue.subjectId || index}`}>{issue.code}{issue.count ? ` (${issue.count})` : ''}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
               <div className="admin-workspace-actions">
                 <button type="button" className="admin-workspace-button-ghost" onClick={() => loadAll()} disabled={!!busyAction}>بازخوانی</button>
+                {generateForm.scopeType === 'class_aggregate' && (
+                  <button type="button" className="admin-workspace-button-secondary" onClick={checkReadiness} disabled={busyAction === 'readiness'}>
+                    {busyAction === 'readiness' ? 'در حال کنترل...' : 'کنترل آمادگی شقه‌ها'}
+                  </button>
+                )}
                 <button type="button" className="admin-workspace-button" onClick={generateTable} disabled={busyAction === 'generate' || !generateForm.templateId}>generate</button>
               </div>
             </div>
@@ -283,6 +381,7 @@ export default function AdminResultTables() {
                 <div className="admin-workspace-badges">
                   <span className={`admin-workspace-badge ${tableStatusBadge(selectedTable.status)}`}>{selectedTable.status || '---'}</span>
                   <span className="admin-workspace-badge info">{selectedTable.templateType || 'template'}</span>
+                  <span className="admin-workspace-badge info">{selectedTable.scopeType || 'session'} v{selectedTable.version || 1}</span>
                 </div>
                 <div className="admin-workspace-meta">
                   <span>عنوان: {selectedTable.title || '---'}</span>
@@ -330,7 +429,7 @@ export default function AdminResultTables() {
                       <tr key={row.id}>
                         <td>{row.serialNo || '---'}</td>
                         <td>{row.displayName || '---'}</td>
-                        <td>{row.resultStatus || row.rowType || '---'}</td>
+                        <td>{row.resultStatus || row.rowType || '---'}{row.membershipStatusLabel ? ` — ${row.membershipStatusLabel}` : ''}</td>
                         <td>{row.percentage ?? '---'}</td>
                         <td>{row.rank ?? '---'}</td>
                       </tr>

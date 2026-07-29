@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import './AdminWorkspace.css';
 import { errorMessage, fetchJson, normalizeOptions, postJson, resolveActiveSchoolContext } from './adminWorkspaceUtils';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
@@ -8,9 +9,9 @@ const emptyClass = { id: '', title: '', code: '', gradeLevel: '', section: 'ال
 const emptySubject = { id: '', name: '', code: '', grade: '', note: '', isActive: true };
 const emptyYear = { id: '', title: '', startDate: '', endDate: '', note: '', isActive: false };
 const emptyTerm = { id: '', academicYearId: '', title: '', code: '', order: 1, type: 'term', startDate: '', endDate: '', note: '' };
-const emptyMap = { id: '', instructorId: '', subjectId: '', academicYearId: '', classId: '', note: '', isPrimary: false };
+const emptyMap = { id: '', instructorId: '', subjectId: '', academicYearId: '', classId: '', weeklyPeriods: 1, note: '', isPrimary: false };
 const emptyEnroll = { id: '', studentId: '', classId: '', status: 'approved', note: '', rejectedReason: '' };
-const emptyLifecycle = { action: 'transfer_out', studentId: '', classId: '', membershipId: '', effectiveDate: '', destinationSchool: '', reason: '', financialStatus: '', returnPossibility: '', note: '' };
+const emptyLifecycle = { action: 'transfer_out', studentId: '', classId: '', membershipId: '', effectiveDate: '', endsAt: '', destinationSchool: '', authorityReference: '', reason: '', financialStatus: '', returnPossibility: '', note: '' };
 
 const putJson = (path, body) => fetchJson(path, {
   method: 'PUT',
@@ -45,18 +46,42 @@ const SECTION_OPTIONS = [
   { value: 'ط', label: 'ط' }
 ];
 
-const ENROLLMENT_STATUS_OPTIONS = [
+const ENROLLMENT_EDIT_STATUS_OPTIONS = [
   { value: 'approved', label: 'تایید شده' },
-  { value: 'transferred_in', label: 'تبدیلی آمد' },
   { value: 'pending', label: 'در انتظار' },
   { value: 'rejected', label: 'رد شده' },
-  { value: 'transferred_out', label: 'تبدیلی رفت' },
-  { value: 'dropped', label: 'ترک تحصیل' }
 ];
 
+const MEMBERSHIP_STATUS_OPTIONS = [
+  ...ENROLLMENT_EDIT_STATUS_OPTIONS,
+  { value: 'transferred_in', label: 'تبدیلی آمده' },
+  { value: 'transferred_out', label: 'تبدیل به مکتب دیگر / تبدیلی رفته' },
+  { value: 'transferred', label: 'تبدیل شده' },
+  { value: 'dropped', label: 'ترک تحصیل' },
+  { value: 'expelled', label: 'منفک شده (اخراج رسمی)' },
+  { value: 'suspended', label: 'محروم' },
+  { value: 'graduated', label: 'فارغ شده' },
+  { value: 'inactive', label: 'غیرفعال' }
+];
+
+const LIFECYCLE_EVENT_LABELS = {
+  transfer_in: 'تبدیلی آمده',
+  transfer_out: 'تبدیلی رفته',
+  dropout: 'ترک تحصیل',
+  expulsion: 'منفکی رسمی (اخراج)',
+  suspension: 'محرومیت',
+  suspension_lifted: 'رفع محرومیت',
+  graduation: 'فراغت',
+  re_enrollment: 'ثبت‌نام مجدد'
+};
+
 const STUDENT_LIFECYCLE_ACTIONS = [
+  { value: 'transfer_in', label: 'تبدیلی آمد', needsStudent: true, needsClass: true },
   { value: 'transfer_out', label: 'تبدیلی رفت', needsMembership: true },
-  { value: 'dropout', label: 'ترک تحصیل', needsMembership: true }
+  { value: 'dropout', label: 'ترک تحصیل', needsMembership: true },
+  { value: 'expulsion', label: 'منفکی رسمی (اخراج)', needsMembership: true },
+  { value: 'suspension', label: 'محرومیت موقت', needsMembership: true },
+  { value: 'resume', label: 'رفع محرومیت', needsMembership: true }
 ];
 
 const LIFECYCLE_FINANCIAL_STATUS_OPTIONS = [
@@ -69,8 +94,8 @@ const LIFECYCLE_FINANCIAL_STATUS_OPTIONS = [
 
 const DROPOUT_RETURN_OPTIONS = [
   { value: '', label: 'امکان بازگشت' },
-  { value: 'yes', label: 'بلی' },
-  { value: 'no', label: 'نخیر' },
+  { value: 'possible', label: 'بلی' },
+  { value: 'unlikely', label: 'نخیر' },
   { value: 'unknown', label: 'نامعلوم' }
 ];
 
@@ -137,8 +162,25 @@ function optionMatchesSearch(item = {}, query = '') {
   ].filter(Boolean).some((value) => String(value).toLowerCase().includes(needle));
 }
 
-function getEnrollmentStatusLabel(value) {
-  return ENROLLMENT_STATUS_OPTIONS.find((item) => item.value === value)?.label || value || '---';
+function getEnrollmentStatusLabel(value, endedReason = '') {
+  if (
+    value === 'dropped'
+    && /منفک|اخراج|dismiss|separat|expuls/i.test(String(endedReason || ''))
+  ) {
+    return 'منفک شده (ثبت قدیمی؛ نیازمند بررسی)';
+  }
+  return MEMBERSHIP_STATUS_OPTIONS.find((item) => item.value === value)?.label || value || '---';
+}
+
+function getEnrollmentStatusTone(value) {
+  if (['approved', 'transferred_in', 'graduated'].includes(value)) return 'good';
+  if (['rejected', 'dropped', 'expelled', 'transferred_out', 'transferred'].includes(value)) return 'danger';
+  if (['pending', 'suspended'].includes(value)) return 'warn';
+  return 'info';
+}
+
+function getLifecycleEventLabel(value) {
+  return LIFECYCLE_EVENT_LABELS[String(value || '').trim()] || value || 'تغییر وضعیت';
 }
 
 function getTermTypeLabel(value) {
@@ -332,6 +374,9 @@ export default function AdminEducationCore() {
   const [enrollmentMode, setEnrollmentMode] = useState('quick'); // 'quick', 'bulk', 'detailed'
   const [activeRegistrationTask, setActiveRegistrationTask] = useState('');
   const [activeEnrollmentPanel, setActiveEnrollmentPanel] = useState('');
+  const [expandedLifecycleMembershipId, setExpandedLifecycleMembershipId] = useState('');
+  const [lifecycleHistoryByMembership, setLifecycleHistoryByMembership] = useState({});
+  const [lifecycleHistoryLoadingId, setLifecycleHistoryLoadingId] = useState('');
   const [bulkSelectedIds, setBulkSelectedIds] = useState([]);
   const [bulkClassId, setBulkClassId] = useState('');
   const [inlineClasses, setInlineClasses] = useState({});
@@ -414,7 +459,7 @@ export default function AdminEducationCore() {
     STUDENT_LIFECYCLE_ACTIONS.find((item) => item.value === lifecycleForm.action) || STUDENT_LIFECYCLE_ACTIONS[0]
   ), [lifecycleForm.action]);
   const activeLifecycleMemberships = useMemo(() => (
-    enrollments.filter((item) => ['approved', 'transferred_in', 'pending'].includes(String(item.status || '').trim()))
+    enrollments.filter((item) => ['approved', 'transferred_in', 'pending', 'suspended'].includes(String(item.status || '').trim()))
   ), [enrollments]);
   const selectedLifecycleStudent = useMemo(() => (
     studentOptions.find((item) => String(item.value || '') === String(lifecycleForm.studentId || '')) || null
@@ -442,6 +487,11 @@ export default function AdminEducationCore() {
   const lifecycleMembershipOptions = useMemo(() => {
     const needle = String(lifecycleMembershipSearch || '').trim().toLowerCase();
     return activeLifecycleMemberships.filter((item) => {
+      const status = String(item.status || '').trim();
+      const matchesAction = lifecycleForm.action === 'resume'
+        ? status === 'suspended'
+        : (lifecycleForm.action === 'suspension' ? status !== 'suspended' : true);
+      if (!matchesAction) return false;
       if (!needle) return true;
       return [
         item.user?.name,
@@ -449,11 +499,12 @@ export default function AdminEducationCore() {
         item.schoolClass?.title,
         item.course?.title,
         item.schoolClass?.academicYear?.title,
-        getEnrollmentStatusLabel(item.status),
+        getEnrollmentStatusLabel(item.status, item.endedReason),
+        item.endedReason,
         item.note
       ].filter(Boolean).some((value) => String(value).toLowerCase().includes(needle));
     });
-  }, [activeLifecycleMemberships, lifecycleMembershipSearch]);
+  }, [activeLifecycleMemberships, lifecycleMembershipSearch, lifecycleForm.action]);
   const filteredStudentOptions = useMemo(() => {
     const needle = String(candidateSearchQuery || '').trim().toLowerCase();
 
@@ -800,6 +851,7 @@ export default function AdminEducationCore() {
       subjectId: asId(item.subject),
       academicYearId: asId(item.academicYear) || asId(item.schoolClass?.academicYearId) || asId(item.schoolClass?.academicYear),
       classId: item.classId || asId(item.schoolClass),
+      weeklyPeriods: Number(item.weeklyPeriods || 1),
       note: item.note || '',
       isPrimary: !!item.isPrimary
     });
@@ -819,10 +871,39 @@ export default function AdminEducationCore() {
     });
   };
 
+  const toggleLifecycleHistory = async (item) => {
+    const membershipId = String(item?._id || '').trim();
+    if (!membershipId) return;
+    if (expandedLifecycleMembershipId === membershipId) {
+      setExpandedLifecycleMembershipId('');
+      return;
+    }
+
+    setExpandedLifecycleMembershipId(membershipId);
+    if (lifecycleHistoryByMembership[membershipId]) return;
+
+    try {
+      setLifecycleHistoryLoadingId(membershipId);
+      const data = await fetchJson(`/api/education/student-enrollments/${membershipId}/lifecycle-history`);
+      setLifecycleHistoryByMembership((current) => ({
+        ...current,
+        [membershipId]: data || null
+      }));
+    } catch (error) {
+      setExpandedLifecycleMembershipId('');
+      showMessage(errorMessage(error, 'دریافت سوانح تعلیمی شاگرد موفق نبود.'), 'error');
+    } finally {
+      setLifecycleHistoryLoadingId('');
+    }
+  };
+
   const loadEnrollmentCandidate = (item) => {
     if (!item) return;
     const sourceRef = item.sourceRef || item.value || item.id || item._id || '';
     setActiveSection('enrollments');
+    setActiveRegistrationTask('assign');
+    setActiveEnrollmentPanel('registration');
+    setEnrollmentMode('detailed');
     setEnrollForm({
       id: '',
       studentId: String(sourceRef),
@@ -867,9 +948,9 @@ export default function AdminEducationCore() {
         fetchJson('/api/education/subjects'),
         fetchJson('/api/education/academic-years'),
         fetchJson('/api/education/meta'),
-        fetchJson('/api/education/instructor-subjects'),
+        fetchJson('/api/education/teacher-maps'),
         canManageMemberships
-          ? fetchJson(`/api/education/student-enrollments${enrollFilter ? `?status=${encodeURIComponent(enrollFilter)}` : ''}`)
+          ? fetchJson('/api/education/student-enrollments')
           : Promise.resolve({ items: [] })
       ]);
 
@@ -918,7 +999,7 @@ export default function AdminEducationCore() {
 
   useEffect(() => {
     loadAll();
-  }, [enrollFilter, canManageMemberships]);
+  }, [canManageMemberships]);
 
   useEffect(() => {
     if (!visibleEducationSections.some((item) => item.key === activeSection)) {
@@ -1257,11 +1338,12 @@ export default function AdminEducationCore() {
         subjectId: mapForm.subjectId,
         academicYearId: mapForm.academicYearId,
         classId: mapForm.classId,
+        weeklyPeriods: Math.max(1, Number(mapForm.weeklyPeriods || 1)),
         note: mapForm.note,
         isPrimary: !!mapForm.isPrimary
       };
-      if (mapForm.id) await putJson(`/api/education/instructor-subjects/${mapForm.id}`, payload);
-      else await postJson('/api/education/instructor-subjects', payload);
+      if (mapForm.id) await putJson(`/api/education/teacher-maps/${mapForm.id}`, payload);
+      else await postJson('/api/education/teacher-maps', payload);
       setMapForm(emptyMap);
       setMapInstructorPickerSearch('');
       setMapSubjectPickerSearch('');
@@ -1296,8 +1378,12 @@ export default function AdminEducationCore() {
 
   const saveLifecycleAction = async () => {
     const action = lifecycleForm.action;
-    if (!lifecycleForm.membershipId) {
-      showMessage('برای تبدیلی رفت یا ترک تحصیل، عضویت شاگرد را انتخاب کنید.', 'error');
+    if (lifecycleAction.needsMembership && !lifecycleForm.membershipId) {
+      showMessage('برای تبدیلی رفت، ترک تحصیل یا منفکی رسمی، ثبت صنفی شاگرد را انتخاب کنید.', 'error');
+      return;
+    }
+    if (lifecycleAction.needsStudent && (!lifecycleForm.studentId || !lifecycleForm.classId)) {
+      showMessage('برای تبدیلی آمد، شاگرد و صنف جدید را انتخاب کنید.', 'error');
       return;
     }
     if (!lifecycleForm.effectiveDate) {
@@ -1308,11 +1394,11 @@ export default function AdminEducationCore() {
       showMessage('مکتب یا مرکز مقصد را برای تبدیلی رفت وارد کنید.', 'error');
       return;
     }
-    if (!String(lifecycleForm.reason || '').trim()) {
+    if (action !== 'resume' && !String(lifecycleForm.reason || '').trim()) {
       showMessage('علت عملیات را وارد کنید.', 'error');
       return;
     }
-    if (!lifecycleForm.financialStatus) {
+    if (['transfer_out', 'dropout', 'expulsion'].includes(action) && !lifecycleForm.financialStatus) {
       showMessage('وضعیت مالی شاگرد را انتخاب کنید.', 'error');
       return;
     }
@@ -1325,6 +1411,7 @@ export default function AdminEducationCore() {
       setBusyAction('lifecycle');
       const financialLabel = LIFECYCLE_FINANCIAL_STATUS_OPTIONS.find((item) => item.value === lifecycleForm.financialStatus)?.label || '';
       const returnLabel = DROPOUT_RETURN_OPTIONS.find((item) => item.value === lifecycleForm.returnPossibility)?.label || '';
+      const selectedMembership = activeLifecycleMemberships.find((item) => String(item._id) === String(lifecycleForm.membershipId)) || null;
       const noteParts = [
         action === 'transfer_out' && lifecycleForm.destinationSchool ? `مقصد: ${lifecycleForm.destinationSchool}` : '',
         lifecycleForm.reason ? `علت: ${lifecycleForm.reason}` : '',
@@ -1337,7 +1424,16 @@ export default function AdminEducationCore() {
         studentId: lifecycleForm.studentId,
         classId: lifecycleForm.classId,
         membershipId: lifecycleForm.membershipId,
+        expectedVersion: selectedMembership?.changeVersion,
         effectiveDate: lifecycleForm.effectiveDate,
+        endsAt: lifecycleForm.endsAt || undefined,
+        destinationSchool: lifecycleForm.destinationSchool,
+        previousSchool: lifecycleForm.previousSchool,
+        previousGrade: lifecycleForm.previousGrade,
+        authorityReference: lifecycleForm.authorityReference,
+        reason: lifecycleForm.reason,
+        financialStatus: lifecycleForm.financialStatus,
+        returnPossibility: lifecycleForm.returnPossibility,
         note: noteParts
       };
       const data = await postJson('/api/education/student-enrollments/lifecycle', payload);
@@ -1345,11 +1441,13 @@ export default function AdminEducationCore() {
       const stoppedText = Number(stopped.bills || 0) || Number(stopped.orders || 0)
         ? ` بل‌های آینده متوقف شد: ${Number(stopped.bills || 0).toLocaleString('fa-AF-u-ca-persian')} بل و ${Number(stopped.orders || 0).toLocaleString('fa-AF-u-ca-persian')} فیس.`
         : '';
-      showMessage(`${data?.message || 'عملیات چرخه شاگرد ثبت شد.'}${stoppedText}`, 'info');
+      showMessage(`${data?.message || 'تغییر وضعیت تعلیمی شاگرد ثبت شد.'}${stoppedText}`, 'info');
       setLifecycleForm({ ...emptyLifecycle, action });
+      setExpandedLifecycleMembershipId('');
+      setLifecycleHistoryByMembership({});
       await loadAll();
     } catch (error) {
-      showMessage(errorMessage(error, 'ثبت عملیات چرخه شاگرد ناموفق بود.'), 'error');
+      showMessage(errorMessage(error, 'ثبت تغییر وضعیت تعلیمی شاگرد موفق نبود.'), 'error');
     } finally {
       setBusyAction('');
     }
@@ -1406,7 +1504,7 @@ export default function AdminEducationCore() {
       if (kind === 'class') await deleteJson(`/api/education/school-classes/${id}`);
       if (kind === 'subject') await deleteJson(`/api/education/subjects/${id}`);
       if (kind === 'year') await deleteJson(`/api/education/academic-years/${id}`);
-      if (kind === 'map') await deleteJson(`/api/education/instructor-subjects/${id}`);
+      if (kind === 'map') await deleteJson(`/api/education/teacher-maps/${id}`);
       if (kind === 'enroll') await deleteJson(`/api/education/student-enrollments/${id}`);
       showMessage('رکورد با موفقیت حذف شد.');
       await loadAll();
@@ -1973,7 +2071,10 @@ export default function AdminEducationCore() {
     <>
       <article className="admin-workspace-card" data-span="5">
         <h2>تقسیم مضمون به استاد</h2>
-        <p className="admin-workspace-subtitle">اتصال استاد، مضمون، سال تعلیمی و صنف را از همین بخش مدیریت کنید.</p>
+        <p className="admin-workspace-subtitle">این بخش اکنون منبع اصلی تخصیص استاد برای شقه، امتحان، حاضری و تقسیم اوقات است.</p>
+        <div className="admin-workspace-actions">
+          <Link className="admin-workspace-button-ghost" to="/timetable/teacher-timetable-configurations">مدیریت تفصیلی تخصیص‌ها</Link>
+        </div>
         <div className="admin-workspace-form">
           <div className="admin-workspace-form-grid">
             <div className="admin-workspace-field">
@@ -2006,6 +2107,7 @@ export default function AdminEducationCore() {
             </div>
             <div className="admin-workspace-field"><label>سال تعلیمی</label><select value={mapForm.academicYearId} onChange={(event) => setMapForm((current) => ({ ...current, academicYearId: event.target.value }))}><option value="">انتخاب سال</option>{yearOptions.map((item) => <option key={asId(item)} value={asId(item)}>{item.uiLabel}</option>)}</select></div>
             <div className="admin-workspace-field"><label>صنف</label><select value={mapForm.classId} onChange={(event) => setMapForm((current) => ({ ...current, classId: event.target.value }))}><option value="">انتخاب صنف</option>{classOptions.map((item) => <option key={item.id || item._id} value={item.id || item._id}>{item.uiLabel}</option>)}</select></div>
+            <div className="admin-workspace-field"><label>ساعت‌های هفته‌وار</label><input aria-label="ساعت‌های هفته‌وار" type="number" min="1" max="30" value={mapForm.weeklyPeriods} onChange={(event) => setMapForm((current) => ({ ...current, weeklyPeriods: event.target.value }))} /></div>
           </div>
           <div className="admin-workspace-field"><label>یادداشت</label><textarea value={mapForm.note} onChange={(event) => setMapForm((current) => ({ ...current, note: event.target.value }))} /></div>
           <label className="admin-workspace-field"><span>استاد اصلی باشد</span><input type="checkbox" checked={!!mapForm.isPrimary} onChange={(event) => setMapForm((current) => ({ ...current, isPrimary: event.target.checked }))} /></label>
@@ -2071,7 +2173,7 @@ export default function AdminEducationCore() {
               >
                 <strong>{item.instructor?.name || 'استاد نامشخص'}</strong>
                 <span>{item.subject?.name || 'مضمون نامشخص'} | {item.schoolClass?.title || item.course?.title || 'صنف نامشخص'}</span>
-                <span>{item.academicYear?.title || item.schoolClass?.academicYear?.title || 'بدون سال تعلیمی'} | {item.isPrimary ? 'استاد اصلی' : 'استاد کمکی'}</span>
+                <span>{item.academicYear?.title || item.schoolClass?.academicYear?.title || 'بدون سال تعلیمی'} | {item.isPrimary ? 'استاد اصلی' : 'استاد کمکی'} | {Number(item.weeklyPeriods || 1).toLocaleString('fa-AF-u-ca-persian')} ساعت هفته‌وار</span>
               </button>
               <div className="admin-education-list-side">
                 <span className={`admin-workspace-badge ${item.isPrimary ? 'good' : 'info'}`}>{item.isPrimary ? 'اصلی' : 'کمکی'}</span>
@@ -2124,8 +2226,8 @@ export default function AdminEducationCore() {
             </button>
             {canManageStudentLifecycle ? (
               <button type="button" className={`admin-registration-task-card${activeRegistrationTask === 'lifecycle' ? ' active' : ''}`} onClick={() => openRegistrationTask('lifecycle')}>
-                <span>عملیات چرخه شاگرد</span>
-                <strong>تبدیلی رفت و ترک تحصیل</strong>
+                <span>تغییر وضعیت تعلیمی شاگرد</span>
+                <strong>تبدیلی، ترک تحصیل و منفکی رسمی</strong>
                 <em>تبدیلی آمد از فورم ثبت‌نام انجام می‌شود</em>
               </button>
             ) : null}
@@ -2141,8 +2243,8 @@ export default function AdminEducationCore() {
           <article className="admin-workspace-card admin-registration-panel-card open" data-span="12">
             <div className="admin-education-enrollment-pane-head">
               <div>
-                <h2>عملیات چرخه شاگرد</h2>
-                <p>تبدیلی رفت و ترک تحصیل از همین فورم ثبت می‌شود. تبدیلی آمد از فورم ثبت‌نام شاگرد انجام می‌شود تا ثبت دوگانه ساخته نشود.</p>
+                <h2>تغییر وضعیت تعلیمی شاگرد</h2>
+                <p>تبدیلی آمد و رفت، ترک تحصیل، منفکی و محرومیت از همین فورم و به‌شکل یک‌پارچه ثبت می‌شود.</p>
               </div>
               <span className="admin-workspace-badge info">آموزشی با اثر مالی</span>
             </div>
@@ -2162,6 +2264,16 @@ export default function AdminEducationCore() {
                     {STUDENT_LIFECYCLE_ACTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                   </select>
                 </div>
+                {lifecycleForm.action === 'suspension' ? (
+                  <div className="admin-workspace-field">
+                    <label>تاریخ پایان محرومیت</label>
+                    <AfghanDateInput
+                      value={lifecycleForm.endsAt}
+                      onChange={(value) => setLifecycleForm((current) => ({ ...current, endsAt: value }))}
+                      showGregorianEquivalent
+                    />
+                  </div>
+                ) : null}
 
                 {lifecycleAction.needsStudent ? (
                   <div className="admin-workspace-field">
@@ -2270,15 +2382,25 @@ export default function AdminEducationCore() {
                     />
                   </div>
                 ) : null}
-                <div className="admin-workspace-field">
+                {lifecycleForm.action !== 'resume' ? <div className="admin-workspace-field">
                   <label>علت *</label>
                   <input
                     value={lifecycleForm.reason}
                     onChange={(event) => setLifecycleForm((current) => ({ ...current, reason: event.target.value }))}
                     placeholder={lifecycleForm.action === 'dropout' ? 'مثلاً مالی، خانوادگی، مهاجرت، صحی...' : 'علت تبدیلی رفت'}
                   />
-                </div>
-                <div className="admin-workspace-field">
+                </div> : null}
+                {lifecycleForm.action === 'expulsion' ? (
+                  <div className="admin-workspace-field">
+                    <label>مرجع حکم/فیصله</label>
+                    <input
+                      value={lifecycleForm.authorityReference}
+                      onChange={(event) => setLifecycleForm((current) => ({ ...current, authorityReference: event.target.value }))}
+                      placeholder="شماره یا مرجع فیصله"
+                    />
+                  </div>
+                ) : null}
+                {['transfer_out', 'dropout', 'expulsion'].includes(lifecycleForm.action) ? <div className="admin-workspace-field">
                   <label>وضعیت مالی *</label>
                   <select
                     value={lifecycleForm.financialStatus}
@@ -2288,7 +2410,7 @@ export default function AdminEducationCore() {
                       .filter((item) => lifecycleForm.action === 'dropout' || item.value !== 'waived')
                       .map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                   </select>
-                </div>
+                </div> : null}
                 {lifecycleForm.action === 'dropout' ? (
                   <div className="admin-workspace-field">
                     <label>امکان بازگشت *</label>
@@ -2547,7 +2669,7 @@ export default function AdminEducationCore() {
                   <div className="admin-workspace-form">
                     <div className="admin-workspace-form-grid">
                       <div className="admin-workspace-field"><label>صنف</label><select data-role="enrollment-class-select" value={enrollForm.classId} onChange={(event) => setEnrollForm((current) => ({ ...current, classId: event.target.value }))}><option value="">انتخاب صنف</option>{classOptions.map((item) => <option key={item.id || item._id} value={item.id || item._id}>{item.uiLabel}</option>)}</select></div>
-                      <div className="admin-workspace-field"><label>وضعیت</label><select value={enrollForm.status} onChange={(event) => setEnrollForm((current) => ({ ...current, status: event.target.value }))}>{ENROLLMENT_STATUS_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div>
+                      <div className="admin-workspace-field"><label>وضعیت</label><select value={enrollForm.status} onChange={(event) => setEnrollForm((current) => ({ ...current, status: event.target.value }))}>{ENROLLMENT_EDIT_STATUS_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div>
                     </div>
                     <div className="admin-workspace-field"><label>یادداشت</label><textarea value={enrollForm.note} onChange={(event) => setEnrollForm((current) => ({ ...current, note: event.target.value }))} /></div>
                     {enrollForm.status === 'rejected' ? <div className="admin-workspace-field"><label>دلیل رد</label><input value={enrollForm.rejectedReason} onChange={(event) => setEnrollForm((current) => ({ ...current, rejectedReason: event.target.value }))} /></div> : null}
@@ -2675,15 +2797,15 @@ export default function AdminEducationCore() {
         <article className={`admin-workspace-card admin-registration-panel-card${activeEnrollmentPanel === 'ledger' ? ' open' : ''}`} data-span="12">
           <button type="button" className="admin-registration-panel-toggle" onClick={() => openEnrollmentPanel('ledger')} aria-expanded={activeEnrollmentPanel === 'ledger'}>
             <span>
-              <strong>دفتر ثبت‌نام‌ها / شاگردان ممبرشیپ</strong>
-              <em>شاگردان وصل‌شده به صنف، جستجو، فلتر و ویرایش</em>
+              <strong>دفتر ثبت‌نام‌ها / سوانح تعلیمی شاگردان</strong>
+              <em>فعال، تبدیلی، ترک تحصیل، منفک، محروم، فارغ و سایر وضعیت‌ها</em>
             </span>
             <b>{activeEnrollmentPanel === 'ledger' ? 'بستن' : 'بازکردن فورم'}</b>
           </button>
           {activeEnrollmentPanel === 'ledger' ? (
           <>
-          <h2>دفتر ثبت‌نام‌ها</h2>
-          <p className="admin-workspace-subtitle">ثبت‌نام‌ها را با جستجو، فلتر وضعیت، سال و صنف پیدا کنید؛ لیست در هر صفحه ۱۰ شاگرد را نشان می‌دهد.</p>
+          <h2>دفتر ثبت‌نام‌ها و سوانح تعلیمی شاگردان</h2>
+          <p className="admin-workspace-subtitle">همهٔ وضعیت‌ها را با جستجو، سال و صنف پیدا کنید؛ در هر صفحه تا ۱۰ شاگرد نمایش داده می‌شود و سوانح هر شاگرد قابل مشاهده است.</p>
           <div className="admin-education-list-toolbar">
             <div className="admin-education-search-group">
               <input
@@ -2700,7 +2822,7 @@ export default function AdminEducationCore() {
               />
               <select value={enrollFilter} onChange={(event) => setEnrollFilter(event.target.value)} aria-label="فیلتر وضعیت ثبت‌نام">
                 <option value="">همه وضعیت‌ها</option>
-                {ENROLLMENT_STATUS_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                {MEMBERSHIP_STATUS_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
               <select value={enrollYearFilter} onChange={(event) => setEnrollYearFilter(event.target.value)} aria-label="فیلتر سال ثبت‌نام">
                 <option value="">همه سال‌ها</option>
@@ -2719,23 +2841,76 @@ export default function AdminEducationCore() {
           </div>
           <div className="admin-workspace-table-wrap">
             <table className="admin-workspace-table">
-              <thead><tr><th>متعلم</th><th>صنف</th><th>سال تعلیمی</th><th>وضعیت</th><th>یادداشت</th><th>اقدام</th></tr></thead>
+              <thead><tr><th>متعلم</th><th>صنف</th><th>سال تعلیمی</th><th>وضعیت</th><th>تاریخ تغییر</th><th>علت / یادداشت</th><th>اقدام</th></tr></thead>
               <tbody>
-                {visibleEnrollments.length ? visibleEnrollments.map((item) => (
-                  <tr key={item._id}>
-                    <td>{item.user?.name || '---'}</td>
-                    <td>{item.schoolClass?.title || item.course?.title || '---'}</td>
-                    <td>{item.schoolClass?.academicYear?.title || '---'}</td>
-                    <td><span className={`admin-workspace-badge ${item.status === 'approved' ? 'good' : item.status === 'rejected' ? 'danger' : 'info'}`}>{getEnrollmentStatusLabel(item.status)}</span></td>
-                    <td>{item.note || item.rejectedReason || '---'}</td>
-                    <td>
-                      <div className="admin-workspace-inline-actions">
-                        <button type="button" className="admin-workspace-button-ghost" onClick={() => loadEnrollmentForEdit(item)}>ویرایش</button>
-                        <button type="button" className="admin-workspace-button-danger" onClick={() => removeItem('enroll', item._id)}>حذف</button>
-                      </div>
-                    </td>
-                  </tr>
-                )) : <tr><td colSpan="6"><div className="admin-workspace-empty">{(enrollSearchQuery || enrollYearFilter || enrollClassFilter || enrollFilter) ? 'نتیجه‌ای برای این جستجو پیدا نشد.' : 'هنوز ثبت‌نامی وجود ندارد.'}</div></td></tr>}
+                {visibleEnrollments.length ? visibleEnrollments.map((item) => {
+                  const membershipId = String(item._id || '');
+                  const isExpanded = expandedLifecycleMembershipId === membershipId;
+                  const history = lifecycleHistoryByMembership[membershipId] || null;
+                  const events = Array.isArray(history?.events) ? history.events : [];
+                  const documents = history?.documents || {};
+                  const documentCount = ['transfers', 'dropouts', 'expulsions', 'suspensions']
+                    .reduce((total, key) => total + (Array.isArray(documents[key]) ? documents[key].length : 0), 0);
+                  const canEditMembership = ['approved', 'pending', 'rejected'].includes(String(item.status || ''));
+                  const lifecycleDate = item.endedAt || item.leftAt || item.enrolledAt || item.joinedAt || item.createdAt;
+                  return (
+                    <React.Fragment key={membershipId}>
+                      <tr>
+                        <td>{item.user?.name || '---'}</td>
+                        <td>{item.schoolClass?.title || item.course?.title || '---'}</td>
+                        <td>{item.schoolClass?.academicYear?.title || item.academicYear?.title || '---'}</td>
+                        <td><span className={`admin-workspace-badge ${getEnrollmentStatusTone(item.status)}`}>{getEnrollmentStatusLabel(item.status, item.endedReason)}</span></td>
+                        <td>{lifecycleDate ? formatFaDate(lifecycleDate) : '---'}</td>
+                        <td>{item.endedReason || item.note || item.rejectedReason || '---'}</td>
+                        <td>
+                          <div className="admin-workspace-inline-actions">
+                            <button type="button" className="admin-workspace-button-ghost" onClick={() => toggleLifecycleHistory(item)}>
+                              {isExpanded ? 'بستن سوانح' : 'مشاهده سوانح'}
+                            </button>
+                            {canEditMembership ? (
+                              <button type="button" className="admin-workspace-button-ghost" onClick={() => loadEnrollmentForEdit(item)}>ویرایش</button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded ? (
+                        <tr className="admin-lifecycle-history-row">
+                          <td colSpan="7">
+                            {lifecycleHistoryLoadingId === membershipId ? (
+                              <div className="admin-workspace-empty">در حال دریافت سوانح...</div>
+                            ) : history ? (
+                              <div className="admin-lifecycle-history-panel">
+                                <div className="admin-lifecycle-history-head">
+                                  <strong>سوانح تعلیمی {item.user?.name || 'شاگرد'}</strong>
+                                  <span className="admin-workspace-badge muted">
+                                    {events.length.toLocaleString('fa-AF-u-ca-persian')} تغییر | {documentCount.toLocaleString('fa-AF-u-ca-persian')} سند
+                                  </span>
+                                </div>
+                                {events.length ? (
+                                  <div className="admin-lifecycle-history-list">
+                                    {events.map((event) => (
+                                      <div key={event._id || `${event.eventType}-${event.effectiveAt}`} className="admin-lifecycle-history-item">
+                                        <span className="admin-workspace-badge info">{getLifecycleEventLabel(event.eventType)}</span>
+                                        <strong>{event.effectiveAt ? formatFaDate(event.effectiveAt) : 'بدون تاریخ'}</strong>
+                                        <span>{event.note || event.afterState?.endedReason || event.beforeState?.endedReason || 'بدون یادداشت'}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="admin-workspace-empty">
+                                    برای این ثبت صنفی، تغییر جداگانه‌ای ثبت نشده است؛ وضعیت فعلی از سابقهٔ ثبت‌نام نمایش داده می‌شود.
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="admin-workspace-empty">سوانحی پیدا نشد.</div>
+                            )}
+                          </td>
+                        </tr>
+                      ) : null}
+                    </React.Fragment>
+                  );
+                }) : <tr><td colSpan="7"><div className="admin-workspace-empty">{(enrollSearchQuery || enrollYearFilter || enrollClassFilter || enrollFilter) ? 'نتیجه‌ای برای این جستجو پیدا نشد.' : 'هنوز ثبت‌نامی وجود ندارد.'}</div></td></tr>}
               </tbody>
             </table>
           </div>

@@ -1359,7 +1359,7 @@ const StudentManagement = () => {
     }
 
     printWindow.document.open();
-    printWindow.document.write('<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><title>در حال ساخت PDF</title></head><body style="font-family:Tahoma,sans-serif;padding:24px">در حال آماده‌سازی فورم PDF...</body></html>');
+    printWindow.document.write('<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><title>در حال ساخت PDF</title></head><body style="font-family:\'B Nazanin\',\'B Mitra\',sans-serif;padding:24px">در حال آماده‌سازی فورم PDF...</body></html>');
     printWindow.document.close();
 
     const fontFileToDataUrl = async (fontPath) => {
@@ -1416,7 +1416,7 @@ const StudentManagement = () => {
               font-display: block;
             }
             * { box-sizing: border-box; }
-            html, body, body * { font-family: 'B Nazanin PDF', Tahoma, Arial, sans-serif !important; }
+            html, body, body * { font-family: 'B Nazanin PDF', 'B Nazanin', 'B Mitra', sans-serif !important; }
             body {
               margin: 0;
               color: #111827;

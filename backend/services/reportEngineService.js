@@ -363,7 +363,7 @@ function normalizeAttendanceReportStatus(value = '') {
   const status = normalizeText(value).toLowerCase();
   if (status === 'late') return 'sick';
   if (status === 'excused') return 'leave';
-  if (['present', 'absent', 'sick', 'leave'].includes(status)) return status;
+  if (['present', 'absent', 'sick', 'leave', 'suspended'].includes(status)) return status;
   return '';
 }
 
@@ -373,6 +373,7 @@ function getAttendanceStatusLabel(value = '') {
   if (status === 'absent') return 'غیرحاضر';
   if (status === 'sick') return 'مریض';
   if (status === 'leave') return 'رخصتی';
+  if (status === 'suspended') return 'محروم';
   return normalizeText(value);
 }
 
@@ -1236,13 +1237,16 @@ async function buildAttendanceOverviewReport(filters) {
   const absent = items.filter((item) => normalizeAttendanceReportStatus(item.status) === 'absent').length;
   const sick = items.filter((item) => normalizeAttendanceReportStatus(item.status) === 'sick').length;
   const leave = items.filter((item) => normalizeAttendanceReportStatus(item.status) === 'leave').length;
+  const suspended = items.filter((item) => normalizeAttendanceReportStatus(item.status) === 'suspended').length;
+  const evaluableTotal = Math.max(0, total - suspended);
   const summary = {
     totalRecords: total,
     present,
     absent,
     sick,
     leave,
-    attendanceRate: total ? Number(((present / total) * 100).toFixed(2)) : 0
+    suspended,
+    attendanceRate: evaluableTotal ? Number(((present / evaluableTotal) * 100).toFixed(2)) : 0
   };
 
   const rows = items.map((item) => ({
@@ -1335,6 +1339,7 @@ async function buildAttendanceSummaryOverviewReport(filters) {
       leaveDays: 0,
       lateDays: 0,
       excusedDays: 0,
+      suspendedDays: 0,
       totalDays: 0,
       attendanceRate: 0,
       notesCount: 0,
@@ -1366,6 +1371,7 @@ async function buildAttendanceSummaryOverviewReport(filters) {
       leaveDays: 0,
       lateDays: 0,
       excusedDays: 0,
+      suspendedDays: 0,
       totalDays: 0,
       attendanceRate: 0,
       notesCount: 0,
@@ -1378,9 +1384,10 @@ async function buildAttendanceSummaryOverviewReport(filters) {
     if (status === 'absent') current.absentDays += 1;
     if (status === 'sick') current.sickDays += 1;
     if (status === 'leave') current.leaveDays += 1;
+    if (status === 'suspended') current.suspendedDays += 1;
     current.lateDays = current.sickDays;
     current.excusedDays = current.leaveDays;
-    current.totalDays += 1;
+    if (status !== 'suspended') current.totalDays += 1;
     if (normalizeText(item.note)) current.notesCount += 1;
     current.lastStatus = getAttendanceStatusLabel(item.status);
     current.lastSeenAt = item.date ? new Date(item.date).toISOString() : current.lastSeenAt;
@@ -1404,6 +1411,7 @@ async function buildAttendanceSummaryOverviewReport(filters) {
     totalLeaveDays: rows.reduce((sum, item) => sum + Number(item.leaveDays || 0), 0),
     totalLateDays: rows.reduce((sum, item) => sum + Number(item.lateDays || 0), 0),
     totalExcusedDays: rows.reduce((sum, item) => sum + Number(item.excusedDays || 0), 0),
+    totalSuspendedDays: rows.reduce((sum, item) => sum + Number(item.suspendedDays || 0), 0),
     averageAttendanceRate: rows.length
       ? Number((rows.reduce((sum, item) => sum + Number(item.attendanceRate || 0), 0) / rows.length).toFixed(2))
       : 0
@@ -1420,6 +1428,7 @@ async function buildAttendanceSummaryOverviewReport(filters) {
       { key: 'absentDays', label: 'غایب' },
       { key: 'sickDays', label: 'مریض' },
       { key: 'leaveDays', label: 'رخصتی' },
+      { key: 'suspendedDays', label: 'محروم' },
       { key: 'totalDays', label: 'مجموع روزها' },
       { key: 'attendanceRate', label: 'فیصدی حضور' },
       { key: 'notesCount', label: 'ملاحظات' },
@@ -1459,7 +1468,8 @@ async function buildClassOverviewReport(filters) {
 
   const summary = {
     totalMemberships: items.length,
-    active: items.filter((item) => item.status === 'active').length,
+    active: items.filter((item) => ['active', 'transferred_in'].includes(item.status)).length,
+    transferredIn: items.filter((item) => item.status === 'transferred_in').length,
     pending: items.filter((item) => item.status === 'pending').length,
     suspended: items.filter((item) => item.status === 'suspended').length,
     ended: items.filter((item) => !item.isCurrent).length,
