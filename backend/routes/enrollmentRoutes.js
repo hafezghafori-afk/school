@@ -9,6 +9,7 @@ const archiver = require('archiver');
 const QRCode = require('qrcode');
 const ExcelJS = require('exceljs');
 const Enrollment = require('../models/Enrollment');
+const { ENROLLMENT_SOURCES, inferEnrollmentSource } = require('../utils/enrollmentSource');
 const AfghanStudent = require('../models/AfghanStudent');
 const SchoolClass = require('../models/SchoolClass');
 const AfghanSchool = require('../models/AfghanSchool');
@@ -276,6 +277,9 @@ const ensureEnrollmentRowsForAfghanStudents = async () => {
       },
       registrationId: student.registrationId || '',
       asasNumber: student.asasNumber || '',
+      registrationSource: existing
+        ? inferEnrollmentSource(existing)
+        : ENROLLMENT_SOURCES.MANUAL,
       status: student.status === 'active' ? 'approved' : 'pending',
       linkedStudentId: student._id,
       linkedUserId: student.linkedUserId || null,
@@ -306,6 +310,7 @@ router.post('/', (req, res, next) => { upload.fields([{ name: 'idCard', maxCount
       studentName: body.studentName, fatherName: body.fatherName || '', nationalId: body.nationalId || body.tazkiraNumber || '', motherName: body.motherName || '', gender: body.gender || 'male', birthDate: body.birthDate || '', grade: body.grade || '', phone: body.phone || '', email: body.email || '', address: body.address || '', province: body.province || '', district: body.district || '', previousSchool: body.previousSchool || '', emergencyPhone: body.emergencyPhone || '', notes: body.notes || '',
       academicContext: { schoolId: body.schoolId || null, classId: body.classId || null, shiftId: body.shiftId || null, academicYearId: body.academicYearId || null, enrollmentDate: body.enrollmentDate || null },
       registrationId,
+      registrationSource: ENROLLMENT_SOURCES.ONLINE,
       documents: { idCardUrl: getFile('idCard'), birthCertUrl: getFile('birthCert'), reportCardUrl: getFile('reportCard'), photoUrl: getFile('photo') }
     });
     res.json({ success: true, enrollment, message: 'درخواست ثبت نام ارسال شد' });
@@ -315,13 +320,13 @@ router.post('/', (req, res, next) => { upload.fields([{ name: 'idCard', maxCount
 router.get('/admin', requireAuth, requireRole(['admin']), manageEnrollmentAccess, async (req, res) => {
   try {
     await ensureEnrollmentRowsForAfghanStudents();
-    const items = await Enrollment.find().sort({ createdAt: -1 });
+    const items = await Enrollment.find({ registrationSource: ENROLLMENT_SOURCES.ONLINE }).sort({ createdAt: -1 });
     res.json({ success: true, items });
   } catch {
     res.status(500).json({ success: false, message: 'خطا در دریافت ثبت نام‌ها' });
   }
 });
-router.get('/export.xlsx', requireAuth, requireRole(['admin']), requirePermission('view_reports'), async (req, res) => { try { const items = await Enrollment.find().sort({ createdAt: -1 }); const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('Enrollments'); ws.columns = [{ header: 'نام شاگرد', key: 'studentName', width: 20 }, { header: 'صنف', key: 'grade', width: 12 }, { header: 'شماره تماس', key: 'phone', width: 16 }, { header: 'ایمیل', key: 'email', width: 22 }, { header: 'وضعیت', key: 'status', width: 14 }, { header: 'تاریخ', key: 'createdAt', width: 18 }]; items.forEach(item => ws.addRow({ studentName: item.studentName, grade: item.grade || '', phone: item.phone || '', email: item.email || '', status: item.status, createdAt: item.createdAt ? new Date(item.createdAt).toLocaleDateString('fa-AF-u-ca-persian') : '' })); res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.setHeader('Content-Disposition', 'attachment; filename="enrollments.xlsx"'); await wb.xlsx.write(res); res.end(); } catch { res.status(500).json({ success: false, message: 'خطا در خروجی اکسل' }); } });
+router.get('/export.xlsx', requireAuth, requireRole(['admin']), requirePermission('view_reports'), async (req, res) => { try { const items = await Enrollment.find({ registrationSource: ENROLLMENT_SOURCES.ONLINE }).sort({ createdAt: -1 }); const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('Enrollments'); ws.columns = [{ header: 'نام شاگرد', key: 'studentName', width: 20 }, { header: 'صنف', key: 'grade', width: 12 }, { header: 'شماره تماس', key: 'phone', width: 16 }, { header: 'ایمیل', key: 'email', width: 22 }, { header: 'وضعیت', key: 'status', width: 14 }, { header: 'تاریخ', key: 'createdAt', width: 18 }]; items.forEach(item => ws.addRow({ studentName: item.studentName, grade: item.grade || '', phone: item.phone || '', email: item.email || '', status: item.status, createdAt: item.createdAt ? new Date(item.createdAt).toLocaleDateString('fa-AF-u-ca-persian') : '' })); res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.setHeader('Content-Disposition', 'attachment; filename="enrollments.xlsx"'); await wb.xlsx.write(res); res.end(); } catch { res.status(500).json({ success: false, message: 'خطا در خروجی اکسل' }); } });
 router.get('/:id', requireAuth, requireRole(['admin']), manageEnrollmentAccess, async (req, res) => { try { const item = await Enrollment.findById(req.params.id); if (!item) return res.status(404).json({ success: false, message: 'درخواست یافت نشد' }); res.json({ success: true, item }); } catch { res.status(500).json({ success: false, message: 'خطا در دریافت درخواست' }); } });
 router.get('/:id/files', requireAuth, requireRole(['admin']), manageEnrollmentAccess, async (req, res) => { try { const item = await Enrollment.findById(req.params.id); if (!item) return res.status(404).json({ success: false, message: 'درخواست یافت نشد' }); res.json({ success: true, files: [{ label: 'تذکره', url: item.documents?.idCardUrl || '' }, { label: 'سند تولد', url: item.documents?.birthCertUrl || '' }, { label: 'کارنامه', url: item.documents?.reportCardUrl || '' }, { label: 'عکس', url: item.documents?.photoUrl || '' }].filter(f => f.url) }); } catch { res.status(500).json({ success: false, message: 'خطا در دریافت فایل‌ها' }); } });
 router.get('/:id/zip', requireAuth, requireRole(['admin']), manageEnrollmentAccess, async (req, res) => { try { const item = await Enrollment.findById(req.params.id); if (!item) return res.status(404).json({ success: false, message: 'درخواست یافت نشد' }); res.setHeader('Content-Type', 'application/zip'); res.setHeader('Content-Disposition', `attachment; filename="enrollment-${item._id}.zip"`); const archive = archiver('zip', { zlib: { level: 9 } }); archive.on('error', () => res.status(500).end()); archive.pipe(res); [{ label: 'id-card', url: item.documents?.idCardUrl }, { label: 'birth-cert', url: item.documents?.birthCertUrl }, { label: 'report-card', url: item.documents?.reportCardUrl }, { label: 'photo', url: item.documents?.photoUrl }].forEach(file => { if (!file.url) return; const filePath = resolveFilePath(file.url); if (filePath && fs.existsSync(filePath)) archive.file(filePath, { name: `${file.label}${path.extname(filePath)}` }); }); archive.finalize(); } catch { res.status(500).json({ success: false, message: 'خطا در ساخت فایل زیپ' }); } });

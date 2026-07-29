@@ -774,7 +774,10 @@ async function buildGroupedBillCandidates({
   const membershipIds = memberships.map((item) => item._id);
   const firstMembershipAcademicYearId = memberships[0]?.academicYearId || memberships[0]?.academicYear || null;
   const effectiveAcademicYearId = academicYearId || firstMembershipAcademicYearId;
-  const billingFrequency = normalizeBillingFrequency(periodType === 'monthly' ? 'monthly' : 'term');
+  const requestedPeriodType = normalizeText(periodType).toLowerCase();
+  const billingFrequency = requestedPeriodType
+    ? normalizeBillingFrequency(requestedPeriodType === 'monthly' ? 'monthly' : 'term')
+    : '';
 
   const membershipStudentIds = memberships.map((item) => item.student).filter(Boolean);
   const admissionIdentityFilter = schoolId ? {
@@ -885,6 +888,8 @@ async function buildGroupedBillCandidates({
   });
 
   const effectiveBillingFrequency = normalizeBillingFrequency(feePlan?.billingFrequency || billingFrequency);
+  const effectivePeriodType = effectiveBillingFrequency === 'monthly' ? 'monthly' : 'term';
+  const effectiveTerm = normalizeText(term) || normalizeText(feePlan?.term);
   const debtorSet = new Set(openBills.map((item) => String(item.studentMembershipId || '')));
   const admissionMembershipSet = new Set(
     [...existingAdmissionBills, ...existingAdmissionOrders]
@@ -928,17 +933,17 @@ async function buildGroupedBillCandidates({
       ? buildMonthlyBillingPeriods({
         membership,
         feePlan,
-        academicYear: academicYearDoc,
-        dueDate,
-        periodLabel,
-        term
-      })
+          academicYear: academicYearDoc,
+          dueDate,
+          periodLabel,
+          term: effectiveTerm
+        })
       : [{
         dueDate: asDate(dueDate),
         periodStart: startOfMonth(dueDate || new Date()),
         periodEnd: endOfMonth(dueDate || new Date()),
         periodLabel,
-        term
+        term: effectiveTerm
       }];
 
     if (!periods.length) {
@@ -984,7 +989,7 @@ async function buildGroupedBillCandidates({
       const totals = summarizeAdjustments(adjustmentRows);
       const amountDue = roundMoney(Math.max(0, amountOriginal - totals.reductionTotal + totals.penaltyTotal));
       const resolvedPeriodLabel = normalizeText(period.periodLabel) || normalizeText(periodLabel);
-      const resolvedTerm = normalizeText(period.term) || normalizeText(term);
+      const resolvedTerm = normalizeText(period.term) || effectiveTerm;
       const lineItems = normalizeFinanceLineItems({
         feeBreakdown: amountsByScope,
         feeScopes: candidateScopes,
@@ -1006,7 +1011,7 @@ async function buildGroupedBillCandidates({
         academicYear: academicYear || '',
         course: courseId || membership.course || null,
         dueDate: period.dueDate || asDate(dueDate) || null,
-        periodType,
+        periodType: effectivePeriodType,
         periodLabel: resolvedPeriodLabel,
         term: resolvedTerm,
         currency: normalizeText(currency).toUpperCase() || 'AFN',
@@ -1025,11 +1030,15 @@ async function buildGroupedBillCandidates({
   }
 
   return {
+    periodType: effectivePeriodType,
     feePlan: feePlan ? {
       id: String(feePlan._id || ''),
       title: normalizeText(feePlan.title),
       planCode: normalizeText(feePlan.planCode).toUpperCase(),
       planType: normalizeText(feePlan.planType) || 'standard',
+      billingFrequency: effectiveBillingFrequency,
+      periodType: effectivePeriodType,
+      term: effectiveTerm,
       priority: Number(feePlan.priority || 0),
       isDefault: feePlan.isDefault === true
     } : null,

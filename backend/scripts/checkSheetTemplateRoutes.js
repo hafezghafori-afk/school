@@ -260,6 +260,53 @@ const TESTS = [
   },
 
   {
+    name: 'Exam sheet print uses the compact official layout',
+    check: () => {
+      const printServicePath = path.join(backendRoot, 'services', 'sheetTemplatePrintService.js');
+      const content = fs.readFileSync(printServicePath, 'utf-8');
+      const requiredMarkers = [
+        'return renderExamSheetPrintHtml',
+        'margin: 8mm',
+        'exam-sheet-meta-row',
+        'ممتحین',
+        'official-report-logo',
+        'official-report-single-row',
+        'شقه امتحان',
+        'getShortExamTypeLabel',
+        'normalizeDariText',
+        'lang="fa-AF"',
+        'formatAfghanDate',
+        'امضای نگران',
+        'امضای سرمعلم',
+        'امضای مدیر مکتب',
+        'امضای عضو علمی و مسلکی',
+        'امضای ممتحن',
+        'امضای ممیز',
+        'exam-sheet-bottom-signatures',
+        'exam-sheet-custom-footer'
+      ];
+      for (const marker of requiredMarkers) {
+        if (!content.includes(marker)) {
+          throw new Error(`Missing compact exam sheet layout marker: ${marker}`);
+        }
+      }
+      if (content.includes("['جلسه امتحان', metadataValue('جلسه امتحان')")) {
+        throw new Error('Long exam-session metadata must not be printed on the official sheet');
+      }
+      if (content.includes('عنوان جلسه امتحان')) {
+        throw new Error('The exam metadata label must be the compact «امتحان» label');
+      }
+      if (content.includes('حوزهٔ') || content.includes('شقهٔ')) {
+        throw new Error('Combining ezafe must not be used in the compact exam sheet because it enlarges the final glyph');
+      }
+      if (content.includes('class="exam-sheet-footer"')) {
+        throw new Error('The configurable exam footer must not use the globally hidden footer class');
+      }
+      return true;
+    }
+  },
+
+  {
     name: 'Template routes include proper permission checks',
     check: () => {
       const routesPath = path.join(backendRoot, 'routes', 'sheetTemplateRoutes.js');

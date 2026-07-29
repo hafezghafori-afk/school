@@ -18,6 +18,7 @@ const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
 const cache = require('../utils/simpleCache');
 const { requireAuth, requireRole, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const { requireWritableSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
+const { ENROLLMENT_SOURCES, inferEnrollmentSource } = require('../utils/enrollmentSource');
 const {
   assignStudentToClass,
   serializeTransferAdmissionBilling
@@ -158,6 +159,9 @@ const syncManualStudentEnrollment = async ({ student, studentData, req }) => {
     },
     registrationId: student.registrationId || studentData?.registrationId || '',
     asasNumber: student.asasNumber || studentData?.asasNumber || '',
+    registrationSource: existing
+      ? inferEnrollmentSource(existing)
+      : ENROLLMENT_SOURCES.MANUAL,
     status: 'approved',
     linkedStudentId: student._id,
     linkedUserId: student.linkedUserId || null,

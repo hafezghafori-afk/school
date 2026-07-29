@@ -2,6 +2,11 @@ const mongoose = require('mongoose');
 const { deriveLinkScope } = require('../utils/financeLinkScope');
 const { applySchoolOwnership } = require('../utils/schoolOwnership');
 const { formatAfghanMonthYearLabel, replaceIranianSolarMonthNames } = require('../utils/afghanDate');
+const { consumeAutomaticFinanceBillSyncSuppression } = require('../utils/financeSyncControl');
+const {
+  buildStudentMonthlyTuitionIssuanceKey,
+  getFinanceRecordFeeTypes
+} = require('../utils/studentBillingPeriodIntegrity');
 const {
   BREAKDOWN_KEYS,
   LINE_ITEM_TYPES,
@@ -152,6 +157,18 @@ financeBillSchema.pre('validate', async function syncFinanceBillState() {
     this.periodLabel = formatAfghanMonthYearLabel(this.dueDate);
   }
   await applySchoolOwnership(this);
+  if (this.isNew && this.periodType === 'monthly' && getFinanceRecordFeeTypes(this).includes('tuition')) {
+    this.issuanceKey = buildStudentMonthlyTuitionIssuanceKey({
+      schoolId: this.schoolId,
+      studentId: this.student,
+      academicYearId: this.academicYearId,
+      academicYear: this.academicYear,
+      periodType: this.periodType,
+      periodLabel: this.periodLabel,
+      dueDate: this.dueDate,
+      term: this.term
+    }) || this.issuanceKey;
+  }
 });
 
 financeBillSchema.index({ schoolId: 1, status: 1, dueDate: 1 });
@@ -164,6 +181,7 @@ financeBillSchema.index({ status: 1, dueDate: 1 });
 financeBillSchema.index({ issuanceKey: 1 }, { unique: true, sparse: true });
 
 financeBillSchema.post('save', function syncStudentFinanceCanonical(doc) {
+  if (consumeAutomaticFinanceBillSyncSuppression(doc)) return;
   setImmediate(() => {
     const { syncStudentFinanceFromFinanceBill } = require('../utils/studentFinanceSync');
     syncStudentFinanceFromFinanceBill(doc && doc._id ? doc._id : doc).catch(() => {});

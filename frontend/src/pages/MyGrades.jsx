@@ -5,6 +5,7 @@ import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
 
 const BREAKDOWN_FIELDS = [
+  { key: 'attendanceScore', label: 'حاضری' },
   { key: 'writtenScore', label: 'تحریری' },
   { key: 'oralScore', label: 'تقریری' },
   { key: 'classActivityScore', label: 'فعالیت صنفی' },
@@ -84,7 +85,7 @@ export default function MyGrades() {
 
         <h2>نتایج امتحانات من</h2>
         <p>
-          این صفحه نتایج منتشرشده را مستقیماً از شقه‌های مضمون و بخش امتحانات نمایش می‌دهد.
+          این صفحه نتایج تأییدشده را مستقیماً از شقه‌های مضمون و بخش امتحانات نمایش می‌دهد.
           {student?.fullName ? ` ${student.fullName}` : ''}
           {student?.admissionNo ? ` | نمبر اساس: ${student.admissionNo}` : ''}
         </p>
@@ -92,7 +93,7 @@ export default function MyGrades() {
         {loading && <div className="mygrades-empty">در حال دریافت...</div>}
         {message && <div className="mygrades-empty">{message}</div>}
         {!loading && !message && !items.length && (
-          <div className="mygrades-empty">هنوز نتیجه امتحانی برای حساب شما نشر نشده است.</div>
+          <div className="mygrades-empty">هنوز نتیجهٔ امتحانی تأییدشده‌ای برای حساب شما موجود نیست.</div>
         )}
 
         <div className="mygrades-list">
@@ -129,7 +130,7 @@ export default function MyGrades() {
               <div className="mygrades-total-row">
                 <span>نمره نهایی: {toScore(item.obtainedMark).toLocaleString('fa-AF-u-ca-persian')} / {toScore(item.totalMark).toLocaleString('fa-AF-u-ca-persian')}</span>
                 <span>ترم: {item.assessmentPeriod?.title || item.session?.assessmentPeriod?.title || '---'}</span>
-                <span>تاریخ نشر: {toDisplayDate(item.session?.publishedAt || item.computedAt)}</span>
+                <span>تاریخ نتیجه: {toDisplayDate(item.session?.approvedAt || item.session?.publishedAt || item.computedAt)}</span>
               </div>
             </article>
           ))}

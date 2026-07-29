@@ -1,6 +1,15 @@
 const assert = require('node:assert/strict');
-const { __financeMirrorTestUtils } = require('../utils/studentFinanceSync');
+const Module = require('node:module');
+const {
+  __financeMirrorTestUtils,
+  syncFeeOrderFromFinanceBill
+} = require('../utils/studentFinanceSync');
 const { __financeVoidTestUtils } = require('../services/financeAdminActionService');
+const {
+  consumeAutomaticFinanceBillSyncSuppression,
+  isFinanceVersionConflict,
+  suppressAutomaticFinanceBillSync
+} = require('../utils/financeSyncControl');
 
 const payload = {
   orderType: 'tuition',
@@ -74,4 +83,91 @@ assert.equal(
   'issuance-key release alone must be persisted to an existing canonical order'
 );
 
-console.log('PASS FinanceBill synchronization preserves payment state and releases voided issuance keys for reissue.');
+const syncControlledDocument = { $locals: {} };
+suppressAutomaticFinanceBillSync(syncControlledDocument);
+assert.equal(
+  consumeAutomaticFinanceBillSyncSuppression(syncControlledDocument),
+  true,
+  'an explicit synchronous mirror update must suppress the automatic post-save update once'
+);
+assert.equal(
+  consumeAutomaticFinanceBillSyncSuppression(syncControlledDocument),
+  false,
+  'automatic mirror suppression must be consumed so later saves can synchronize normally'
+);
+assert.equal(isFinanceVersionConflict({ name: 'VersionError' }), true);
+assert.equal(isFinanceVersionConflict({ code: 112 }), true);
+assert.equal(isFinanceVersionConflict({ code: 11000 }), false);
+assert.equal(__financeVoidTestUtils.isVoidedFinanceDocument({ status: 'void' }), true);
+assert.equal(__financeVoidTestUtils.isVoidedFinanceDocument({ status: 'paid' }), false);
+
+async function assertFeeOrderVersionConflictRetry() {
+  let findCount = 0;
+  let saveCount = 0;
+  const makeFeeOrder = ({ failWithVersionConflict = false } = {}) => ({
+    _id: '507f1f77bcf86cd799439014',
+    toObject() {
+      return { ...this, save: undefined, toObject: undefined };
+    },
+    async save() {
+      saveCount += 1;
+      if (failWithVersionConflict) {
+        const error = new Error('concurrent mirror update');
+        error.name = 'VersionError';
+        throw error;
+      }
+      return this;
+    }
+  });
+  const staleOrder = makeFeeOrder({ failWithVersionConflict: true });
+  const refreshedOrder = makeFeeOrder();
+  const FeeOrderMock = {
+    async findOne() {
+      findCount += 1;
+      return findCount === 1 ? staleOrder : refreshedOrder;
+    },
+    async create() {
+      throw new Error('create must not run when a canonical fee order exists');
+    }
+  };
+  const emptyModel = {};
+  const originalLoad = Module._load;
+  Module._load = function patchedLoad(request, parent, isMain) {
+    const parentFile = String(parent?.filename || '').replace(/\\/g, '/');
+    if (parentFile.endsWith('/utils/studentFinanceSync.js')) {
+      if (request === '../models/FeeOrder') return FeeOrderMock;
+      if (request.startsWith('../models/')) return emptyModel;
+    }
+    return originalLoad.apply(this, arguments);
+  };
+
+  try {
+    const result = await syncFeeOrderFromFinanceBill({
+      _id: '507f1f77bcf86cd799439013',
+      billNumber: 'BL-1405-0002',
+      student: '507f1f77bcf86cd799439021',
+      course: '507f1f77bcf86cd799439022',
+      amountOriginal: 500,
+      amountDue: 500,
+      amountPaid: 0,
+      dueDate: new Date('2026-07-30T00:00:00.000Z'),
+      lineItems: payload.lineItems,
+      status: 'void',
+      voidReason: 'Class changed'
+    });
+    assert.equal(result.updated, true, 'the refreshed canonical order must be saved after a version conflict');
+    assert.equal(findCount, 2, 'the canonical order must be refetched once after a version conflict');
+    assert.equal(saveCount, 2, 'the mirror update must retry only once');
+  } finally {
+    Module._load = originalLoad;
+  }
+}
+
+assertFeeOrderVersionConflictRetry()
+  .then(() => {
+    console.log('PASS FinanceBill synchronization is single-run, conflict-aware, and safe for repeated void requests.');
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });

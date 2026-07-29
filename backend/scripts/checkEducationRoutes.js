@@ -817,6 +817,46 @@ const activityMock = {
   }
 };
 
+const studentLifecycleServiceMock = {
+  SUPPORTED_ACTIONS: ['transfer_in', 'transfer_out', 'dropout', 'expulsion', 'suspension', 'resume'],
+  async getStudentLifecycleHistory(membershipId) {
+    const membership = membershipRecords.find((item) => String(item._id) === String(membershipId));
+    if (!membership) return null;
+    return {
+      membership: clone(membership),
+      events: [{
+        _id: 'lifecycle-history-event-1',
+        membershipId,
+        eventType: 'suspension',
+        effectiveAt: new Date('2026-03-05T08:00:00.000Z'),
+        note: 'temporary suspension'
+      }],
+      documents: { transfers: [], dropouts: [], expulsions: [], suspensions: [{ _id: 'suspension-1' }] }
+    };
+  },
+  async executeStudentLifecycleAction(payload = {}) {
+    const membership = membershipRecords.find((item) => String(item.student) === String(payload.studentId)) || membershipRecords[0];
+    if (payload.action === 'transfer_in') {
+      membership.status = 'transferred_in';
+      membership.isCurrent = true;
+      membership.classId = payload.classId;
+      membership.course = payload.courseId;
+    }
+    return {
+      membership,
+      event: { _id: 'lifecycle-event-1' },
+      document: { _id: 'student-transfer-1' },
+      documentType: 'StudentTransfer',
+      stoppedFutureBills: { bills: 0, orders: 0 },
+      admissionBilling: {
+        created: true,
+        reason: 'admission_bill_created',
+        bill: { _id: 'transfer-admission-bill-1', billNumber: 'BL-TEST-0001', amountOriginal: 600 }
+      }
+    };
+  }
+};
+
 function loadEducationRouter() {
   const routePath = path.join(__dirname, '..', 'routes', 'educationRoutes.js');
   const originalLoad = Module._load;
@@ -835,6 +875,9 @@ function loadEducationRouter() {
     if (isRoute && request === '../models/AcademicYear') return AcademicYearMock;
     if (isRoute && request === '../models/SchoolClass') return SchoolClassMock;
     if (isRoute && request === '../models/InstructorSubject') return InstructorSubjectMock;
+    if (isRoute && request === '../services/timetableService') {
+      return { ensureTeacherAssignmentsFromLegacyMappings: async () => undefined };
+    }
     if (isRoute && request === '../utils/studentMembershipSync') return syncMock;
     if (isRoute && request === '../utils/courseAccess') return courseAccessMock;
     if (isRoute && request === '../services/afghanStudentProfileService') {
@@ -854,6 +897,7 @@ function loadEducationRouter() {
         })
       };
     }
+    if (isRoute && request === '../services/studentLifecycleService') return studentLifecycleServiceMock;
     if (isRoute && request === '../middleware/auth') return authMock;
     if (isRoute && request === '../utils/activity') return activityMock;
 
@@ -1073,6 +1117,50 @@ async function run() {
       assertCase(approvedRow?.status === 'approved', 'Expected active membership to map to approved');
       assertCase(rejectedRow?.status === 'rejected', 'Expected rejected membership to map to rejected');
       assertCase(rejectedRow?.rejectedReason === 'capacity_full', 'Expected rejected reason to survive serialization');
+      assertCase(Boolean(rejectedRow?.endedAt), 'Expected ended membership date to survive serialization');
+    });
+
+    await check('student enrollment registry includes suspended lifecycle rows', async () => {
+      membershipRecords.push({
+        _id: 'mem-suspended',
+        student: IDS.student3,
+        course: IDS.course2,
+        classId: IDS.class2,
+        academicYear: IDS.year1,
+        academicYearId: IDS.year1,
+        status: 'suspended',
+        source: 'admin',
+        enrolledAt: new Date('2026-03-04T08:00:00.000Z'),
+        joinedAt: new Date('2026-03-04T08:00:00.000Z'),
+        endedAt: null,
+        leftAt: null,
+        endedReason: '',
+        note: 'disciplinary review',
+        rejectedReason: '',
+        isCurrent: true,
+        legacyOrder: null,
+        createdBy: IDS.admin1,
+        createdAt: new Date('2026-03-04T08:00:00.000Z'),
+        updatedAt: new Date('2026-03-05T08:00:00.000Z')
+      });
+      try {
+        const response = await request(server, '/api/education/student-enrollments', { user: adminUser });
+        assertCase(response.status === 200, 'Expected 200 for full lifecycle registry');
+        const suspendedRow = response.data.items.find((item) => String(item._id) === 'mem-suspended');
+        assertCase(suspendedRow?.status === 'suspended', 'Expected suspended membership in default registry');
+        assertCase(Boolean(suspendedRow?.enrolledAt), 'Expected lifecycle registry to expose enrollment date');
+      } finally {
+        const index = membershipRecords.findIndex((item) => String(item._id) === 'mem-suspended');
+        if (index >= 0) membershipRecords.splice(index, 1);
+      }
+    });
+
+    await check('student lifecycle history returns events and specialized documents', async () => {
+      const response = await request(server, '/api/education/student-enrollments/mem-1/lifecycle-history', { user: adminUser });
+      assertCase(response.status === 200, 'Expected 200 for lifecycle history');
+      assertCase(response.data?.membership?._id === 'mem-1', 'Expected lifecycle history membership');
+      assertCase(response.data?.events?.[0]?.eventType === 'suspension', 'Expected lifecycle event list');
+      assertCase(response.data?.documents?.suspensions?.length === 1, 'Expected specialized lifecycle documents');
     });
 
     await check('create enrollment writes direct membership record', async () => {
@@ -1195,6 +1283,20 @@ async function run() {
       assertCase(requestRecord?.status === 'approved', 'Expected pending request to be auto-approved');
     });
 
+    await check('instructor cannot activate the same student in a second class for the same year', async () => {
+      const response = await request(server, '/api/education/instructor/course-students', {
+        method: 'POST',
+        user: instructorUser,
+        body: {
+          classId: IDS.class1,
+          studentId: IDS.student3
+        }
+      });
+      assertCase(response.status === 409, 'Expected 409 for concurrent class membership, got ' + response.status + ' ' + JSON.stringify(response.data));
+      const activeMemberships = membershipRecords.filter((item) => String(item.student) === IDS.student3 && item.isCurrent);
+      assertCase(activeMemberships.length === 1, 'Expected student three to remain active in only one class');
+    });
+
     await check('student can open another canonical join request after separate activation', async () => {
       const response = await request(server, '/api/education/join-requests', {
         method: 'POST',
@@ -1220,27 +1322,28 @@ async function run() {
       assertCase(requestRecord?.rejectedReason === 'capacity_full', 'Expected reject reason to be stored');
     });
 
-    await check('instructor remove student deactivates active membership', async () => {
+    await check('instructor removal requires an official lifecycle action', async () => {
       const membership = membershipRecords.find((item) => String(item.student) === IDS.student3 && String(item.course) === IDS.course2 && item.isCurrent);
       const response = await request(server, '/api/education/instructor/course-students/' + membership._id, {
         method: 'DELETE',
         user: instructorUser
       });
-      assertCase(response.status === 200, 'Expected 200 on instructor remove student, got ' + response.status + ' ' + JSON.stringify(response.data));
+      assertCase(response.status === 409, 'Expected 409 on instructor remove student, got ' + response.status + ' ' + JSON.stringify(response.data));
       const stored = membershipRecords.find((item) => String(item._id) === String(membership._id));
-      assertCase(stored?.status === 'dropped', 'Expected membership to be dropped');
-      assertCase(stored?.isCurrent === false, 'Expected membership to be non-current after removal');
+      assertCase(stored?.status === 'active', 'Expected membership to remain active');
+      assertCase(stored?.isCurrent === true, 'Expected membership history to remain unchanged');
     });
 
-    await check('transfer-in enrollment update issues an admission bill', async () => {
-      const response = await request(server, '/api/education/student-enrollments/mem-1', {
-        method: 'PUT',
+    await check('transfer-in lifecycle action issues an admission bill', async () => {
+      const response = await request(server, '/api/education/student-enrollments/lifecycle', {
+        method: 'POST',
         user: adminUser,
         body: {
+          action: 'transfer_in',
           studentId: IDS.student1,
           classId: IDS.class1,
-          status: 'transferred_in',
-          note: 'transfer admission test'
+          effectiveDate: '2026-03-15',
+          reason: 'transfer admission test'
         }
       });
       assertCase(response.status === 200, 'Expected 200 on transfer-in update, got ' + response.status + ' ' + JSON.stringify(response.data));
@@ -1250,18 +1353,18 @@ async function run() {
       assertCase(stored?.status === 'transferred_in', 'Expected transferred-in membership status');
     });
 
-    await check('delete enrollment ends the current membership and preserves lifecycle history', async () => {
+    await check('delete enrollment is blocked to preserve lifecycle history', async () => {
       const response = await request(server, '/api/education/student-enrollments/mem-1', {
         method: 'DELETE',
         user: adminUser
       });
-      assertCase(response.status === 200, 'Expected 200 on delete, got ' + response.status + ' ' + JSON.stringify(response.data));
+      assertCase(response.status === 409, 'Expected 409 on delete, got ' + response.status + ' ' + JSON.stringify(response.data));
       const stored = membershipRecords.find((item) => String(item._id) === 'mem-1');
-      assertCase(stored && stored.status === 'dropped', 'Expected current membership to be dropped');
+      assertCase(stored && stored.status === 'transferred_in', 'Expected membership history to remain unchanged');
       const listResponse = await request(server, '/api/education/student-enrollments', { user: adminUser });
       const historyRow = listResponse.data.items.find((item) => String(item._id) === 'mem-1');
-      assertCase(historyRow?.status === 'dropped', 'Expected dropped membership to remain available as lifecycle history');
-      assertCase(historyRow?.isCurrent === false, 'Expected dropped lifecycle history to be non-current');
+      assertCase(historyRow?.status === 'transferred_in', 'Expected membership to remain available as lifecycle history');
+      assertCase(historyRow?.isCurrent === true, 'Expected lifecycle history to remain unmodified');
     });
   } finally {
     await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
@@ -1284,8 +1387,7 @@ async function run() {
     'student_join_request',
     'instructor_approve_join_request',
     'instructor_reject_join_request',
-    'instructor_add_student_to_course',
-    'instructor_remove_student_from_course'
+    'instructor_add_student_to_course'
   ];
   assertCase(requiredActions.every((action) => activityLog.some((item) => item.action === action)), 'Expected canonical education activity log coverage');
   assertCase(notifications.length >= 5, 'Expected instructor and student notifications for canonical education workflow');

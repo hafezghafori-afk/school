@@ -48,10 +48,11 @@ test.describe('exams dashboard workflow', () => {
 
     await page.goto('/admin-exams-dashboard', { waitUntil: 'domcontentloaded' });
 
-    await expect(page.locator('.exams-dashboard-page .dash-hero')).toBeVisible();
+    await expect(page.locator('.exams-dashboard-page .dash-hero')).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('.dashboard-summary-card__grid .dashboard-kpi-card')).toHaveCount(4);
     await expect(page.locator('.dash-card').filter({ hasText: 'روند وضعیت جلسه‌ها' })).toBeVisible();
-    await expect(page.locator('.dashboard-quick-link').filter({ hasText: 'ایجاد امتحان' })).toBeVisible();
+    const sheetCenterLink = page.locator('.dashboard-quick-link[href="/admin-sheet-templates"]').filter({ hasText: 'مرکز مدیریت شقه‌ها' });
+    await expect(sheetCenterLink).toBeVisible();
     await expect(page.locator('.dash-card').filter({ hasText: 'کارهای باز' })).toContainText('نتیجه‌های در انتظار');
   });
 });

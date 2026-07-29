@@ -96,7 +96,7 @@ export default function AdminExamsDashboard() {
   const quickActions = (
     <QuickActionRail
       actions={[
-        { to: '/grade-manager', label: 'ایجاد شقه امتحان', caption: 'سشن رسمی نمرات و ارتقا', tone: 'teal' },
+        { to: '/admin-sheet-templates', label: 'مرکز مدیریت شقه‌ها', caption: 'تنظیم فارمت و تخصیص شقه به استاد', tone: 'teal' },
         { to: '/quiz-builder', label: 'ایجاد کوییز', caption: 'سوالات تمرینی و آزمون کوتاه', tone: 'copper' },
         { to: '/admin-promotions', label: 'مرکز ارتقای صنف', caption: 'تصمیم بر اساس شقه‌ها', tone: 'slate' },
         { to: '/admin-reports', label: 'گزارش‌های آموزشی', caption: 'خروجی و مقایسه', tone: 'mint' },
@@ -125,7 +125,7 @@ export default function AdminExamsDashboard() {
         </div>
       </div>
       <div className="dash-hero-actions">
-        <Link className="dash-btn" to="/grade-manager">ایجاد شقه امتحان</Link>
+        <Link className="dash-btn" to="/admin-sheet-templates">مرکز مدیریت شقه‌ها</Link>
         <Link className="dash-btn ghost" to="/quiz-builder">ایجاد کوییز</Link>
       </div>
     </div>
@@ -145,7 +145,7 @@ export default function AdminExamsDashboard() {
         <div className="dashboard-summary-card__quick">
           <QuickActionRail
             actions={[
-              { to: '/grade-manager', label: 'شقه امتحان رسمی', caption: 'ساخت سشن، ثبت نمره، نشر نتیجه', tone: 'teal' },
+              { to: '/admin-sheet-templates', label: 'شقه امتحان رسمی', caption: 'تنظیم فارمت و تخصیص به استاد', tone: 'teal' },
               { to: '/quiz-builder', label: 'کوییز / آزمون کوتاه', caption: 'ساخت سوال و گزینه‌ها؛ شامل ارتقا نیست', tone: 'copper' },
               { to: '/admin-result-tables', label: 'جدول نتایج', caption: 'جدول و گزارش از سشن‌های رسمی', tone: 'mint' },
               { to: '/admin-promotions', label: 'ارتقای صنف', caption: 'محاسبه از شقه‌های رسمی همان سال', tone: 'slate' }

@@ -46,6 +46,7 @@ const {
   syncStudentFinanceFromFinanceBill,
   syncStudentFinanceFromFinanceReceipt
 } = require('../utils/studentFinanceSync');
+const { suppressAutomaticFinanceBillSync } = require('../utils/financeSyncControl');
 const {
   listCourseMemberships,
   findClassMemberships,
@@ -123,6 +124,12 @@ const {
   isPaymentFullyCoveredByClasses
 } = require('../utils/paymentClassScope');
 const { nextFinanceDocumentNumber } = require('../utils/financeNumberSequence');
+const {
+  buildStudentMonthlyTuitionIdentity,
+  getFinanceRecordFeeTypes,
+  isMonthlyTuitionRecord
+} = require('../utils/studentBillingPeriodIntegrity');
+const { buildConcurrentCurrentMembershipFilter } = require('../utils/studentMembershipIntegrity');
 const {
   addBillAdjustmentAction,
   setBillInstallmentsAction,
@@ -434,6 +441,7 @@ const findConflictingBill = async ({
   periodType = 'term',
   periodLabel = '',
   dueDate = null,
+  feeTypes = [],
   excludeBillId = ''
 } = {}) => {
   if (!studentId || !courseId) return null;
@@ -449,11 +457,27 @@ const findConflictingBill = async ({
     periodLabel,
     dueDate
   });
+  const protectMonthlyTuition = String(periodType || '').trim() === 'monthly'
+    && (Array.isArray(feeTypes) ? feeTypes : [feeTypes])
+      .map((item) => String(item || '').trim())
+      .includes('tuition');
+  const targetStudentMonthlyTuitionKey = protectMonthlyTuition
+    ? buildStudentMonthlyTuitionIdentity({
+        schoolId,
+        studentId,
+        academicYearId,
+        academicYear,
+        periodType,
+        periodLabel,
+        dueDate,
+        term
+      })
+    : '';
 
   const filter = {
     ...(schoolId ? { schoolId: { $in: [schoolId, null] } } : {}),
     student: studentId,
-    course: courseId,
+    ...(!protectMonthlyTuition ? { course: courseId } : {}),
     status: { $ne: 'void' }
   };
 
@@ -462,9 +486,23 @@ const findConflictingBill = async ({
   }
 
   const candidates = await FinanceBill.find(filter)
-    .select('billNumber schoolId student course academicYearId academicYear term periodType periodLabel dueDate status');
+    .select('billNumber schoolId student course academicYearId academicYear term periodType periodLabel dueDate feeScopes lineItems status');
 
-  return candidates.find((item) => getBillObligationKey(item) === targetKey) || null;
+  return candidates.find((item) => {
+    if (targetStudentMonthlyTuitionKey && isMonthlyTuitionRecord(item)) {
+      return buildStudentMonthlyTuitionIdentity({
+        schoolId: item.schoolId || schoolId,
+        studentId: item.student,
+        academicYearId: item.academicYearId,
+        academicYear: item.academicYear,
+        periodType: item.periodType,
+        periodLabel: item.periodLabel,
+        dueDate: item.dueDate,
+        term: item.term
+      }) === targetStudentMonthlyTuitionKey;
+    }
+    return !protectMonthlyTuition && getBillObligationKey(item) === targetKey;
+  }) || null;
 };
 
 const resolveFinanceAudienceUserIds = async ({ studentId, studentCoreId } = {}) => {
@@ -4887,13 +4925,14 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
     }
     const issueDateValue = parseDateSafe(issuedAt, new Date());
 
-    const normalizedPeriodType = normalizeBillPeriodType(periodType || (normalizedFeeType === 'admission' ? 'custom' : 'term'));
+    const hasExplicitPeriodType = Boolean(String(periodType || '').trim());
+    let normalizedPeriodType = normalizeBillPeriodType(periodType || (normalizedFeeType === 'admission' ? 'custom' : 'term'));
     const normalizedPeriodLabel = String(
       periodLabel || (normalizedFeeType === 'admission' ? MANUAL_BILL_FEE_LABELS.admission : '')
     ).trim();
     const normalizedAcademicYear = String(academicYear || '').trim();
     const normalizedAcademicYearId = String(academicYearId || '').trim();
-    const normalizedTerm = String(term || '').trim();
+    let normalizedTerm = String(term || '').trim();
     const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
     if (!schoolContext.schoolId) {
       return res.status(400).json({ success: false, message: 'برای ایجاد بل، مکتب فعال را انتخاب کنید.' });
@@ -4942,7 +4981,7 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
         academicYearId: linkFields.academicYearId || normalizedAcademicYearId,
         academicYear: normalizedAcademicYear,
         term: normalizedTerm,
-        billingFrequency: normalizedFeeType === 'tuition'
+        billingFrequency: normalizedFeeType === 'tuition' && hasExplicitPeriodType
           ? (normalizedPeriodType === 'monthly' ? 'monthly' : 'term')
           : '',
         effectiveAt: dueDateValue
@@ -4961,6 +5000,12 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       if (!planIsActive || !planMatchesScope) {
         return res.status(400).json({ success: false, message: 'پلان مالی فعال و مطابق این صنف/سال پیدا نشد.' });
       }
+      if (normalizedFeeType === 'tuition' && !hasExplicitPeriodType) {
+        normalizedPeriodType = String(selectedFeePlan.billingFrequency || selectedFeePlan.periodType || '').trim().toLowerCase() === 'monthly'
+          ? 'monthly'
+          : 'term';
+      }
+      if (!normalizedTerm) normalizedTerm = String(selectedFeePlan.term || '').trim();
       resolvedAmount = roundMoney(getFeePlanPrimaryAmount(selectedFeePlan, normalizedFeeType));
       if (resolvedAmount <= 0) {
         return res.status(400).json({
@@ -5000,7 +5045,8 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       term: normalizedTerm,
       periodType: normalizedPeriodType,
       periodLabel: normalizedPeriodLabel,
-      dueDate: dueDateValue
+      dueDate: dueDateValue,
+      feeTypes: [normalizedFeeType]
     });
     if (duplicateBill) {
       return res.status(409).json({
@@ -5046,6 +5092,7 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       createdBy: req.user.id
     });
     recalculateBill(bill);
+    suppressAutomaticFinanceBillSync(bill);
     await bill.save();
     await syncStudentFinanceFromFinanceBill(bill).catch(() => null);
 
@@ -5140,7 +5187,7 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
     if (!dueDateValue) return res.status(400).json({ success: false, message: 'تاریخ مهلت پرداخت معتبر نیست.' });
     const issueDateValue = parseDateSafe(issuedAt, new Date());
 
-    const normalizedPeriodType = normalizeBillPeriodType(periodType);
+    const normalizedPeriodType = String(periodType || '').trim() ? normalizeBillPeriodType(periodType) : '';
     const normalizedPeriodLabel = String(periodLabel || '').trim();
     const normalizedAcademicYear = String(academicYear || '').trim();
     const normalizedTerm = String(term || '').trim();
@@ -5191,6 +5238,7 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
       onlyDebtors,
       recoverMemberships: false
     });
+    const effectivePeriodType = preview.periodType || normalizedPeriodType || 'term';
 
     const items = [];
     let duplicateCount = 0;
@@ -5202,9 +5250,10 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
         academicYearId: candidate.academicYearId || academicYearId,
         academicYear: normalizedAcademicYear,
         term: candidate.term || normalizedTerm,
-        periodType: normalizedPeriodType,
+        periodType: effectivePeriodType,
         periodLabel: candidate.periodLabel || normalizedPeriodLabel,
-        dueDate: candidate.dueDate || dueDateValue
+        dueDate: candidate.dueDate || dueDateValue,
+        feeTypes: candidate.feeScopes
       });
       if (duplicate) duplicateCount += 1;
       items.push({
@@ -5218,6 +5267,7 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
         lineItems: candidate.lineItems,
         adjustments: candidate.adjustments,
         dueDate: candidate.dueDate || dueDateValue,
+        periodType: candidate.periodType || effectivePeriodType,
         periodLabel: candidate.periodLabel || normalizedPeriodLabel,
         term: candidate.term || normalizedTerm,
         duplicate: duplicate ? { id: String(duplicate._id || ''), billNumber: String(duplicate.billNumber || '') } : null
@@ -5226,6 +5276,7 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
 
     return res.json({
       success: true,
+      periodType: effectivePeriodType,
       feePlan: preview.feePlan,
       items,
       excluded: preview.excluded,
@@ -5269,7 +5320,7 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
     if (!dueDateValue) return res.status(400).json({ success: false, message: 'تاریخ مهلت پرداخت معتبر نیست.' });
     const issueDateValue = parseDateSafe(issuedAt, new Date());
 
-    const normalizedPeriodType = normalizeBillPeriodType(periodType);
+    const normalizedPeriodType = String(periodType || '').trim() ? normalizeBillPeriodType(periodType) : '';
     const normalizedPeriodLabel = String(periodLabel || '').trim();
     const normalizedAcademicYear = String(academicYear || '').trim();
     const normalizedTerm = String(term || '').trim();
@@ -5320,6 +5371,7 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       onlyDebtors,
       recoverMemberships: false
     });
+    const effectivePeriodType = preview.periodType || normalizedPeriodType || 'term';
 
     if (!preview.items.length) {
       return res.status(400).json({
@@ -5337,12 +5389,24 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
     const existingBills = await FinanceBill.find({
       schoolId: { $in: [schoolContext.schoolId, null] },
       student: { $in: preview.items.map((item) => item.student) },
-      course: scope.courseId,
       status: { $ne: 'void' }
     })
-      .select('schoolId student course academicYearId academicYear term periodType periodLabel dueDate')
+      .select('schoolId student course academicYearId academicYear term periodType periodLabel dueDate feeScopes lineItems')
       .lean();
     const existingObligationKeys = new Set(existingBills.map((item) => getBillObligationKey(item)));
+    const existingStudentMonthlyTuitionKeys = new Set(existingBills
+      .filter(isMonthlyTuitionRecord)
+      .map((item) => buildStudentMonthlyTuitionIdentity({
+        schoolId: item.schoolId || schoolContext.schoolId,
+        studentId: item.student,
+        academicYearId: item.academicYearId,
+        academicYear: item.academicYear,
+        periodType: item.periodType,
+        periodLabel: item.periodLabel,
+        dueDate: item.dueDate,
+        term: item.term
+      }))
+      .filter(Boolean));
     for (const candidate of preview.items) {
       const obligationKey = buildBillObligationKey({
         schoolId: schoolContext.schoolId,
@@ -5351,11 +5415,27 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
         academicYearId: candidate.academicYearId || academicYearId,
         academicYear: normalizedAcademicYear,
         term: candidate.term || normalizedTerm,
-        periodType: normalizedPeriodType,
+        periodType: effectivePeriodType,
         periodLabel: candidate.periodLabel || normalizedPeriodLabel,
         dueDate: candidate.dueDate || dueDateValue
       });
       if (existingObligationKeys.has(obligationKey)) {
+        skipped += 1;
+        continue;
+      }
+      const studentMonthlyTuitionKey = getFinanceRecordFeeTypes(candidate).includes('tuition')
+        ? buildStudentMonthlyTuitionIdentity({
+            schoolId: schoolContext.schoolId,
+            studentId: candidate.student,
+            academicYearId: candidate.academicYearId || academicYearId,
+            academicYear: normalizedAcademicYear,
+            periodType: effectivePeriodType,
+            periodLabel: candidate.periodLabel || normalizedPeriodLabel,
+            dueDate: candidate.dueDate || dueDateValue,
+            term: candidate.term || normalizedTerm
+          })
+        : '';
+      if (studentMonthlyTuitionKey && existingStudentMonthlyTuitionKeys.has(studentMonthlyTuitionKey)) {
         skipped += 1;
         continue;
       }
@@ -5367,7 +5447,7 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
         academicYearId: candidate.academicYearId,
         academicYear: normalizedAcademicYear,
         term: candidate.term || normalizedTerm,
-        periodType: normalizedPeriodType,
+        periodType: effectivePeriodType,
         periodLabel: candidate.periodLabel || normalizedPeriodLabel,
         dueDate: candidate.dueDate || dueDateValue
       });
@@ -5386,7 +5466,7 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
         amountDue: candidate.amountDue,
         dueDate: candidate.dueDate || dueDateValue,
         issuedAt: issueDateValue,
-        periodType: normalizedPeriodType,
+        periodType: effectivePeriodType,
         periodLabel: candidate.periodLabel || normalizedPeriodLabel,
         academicYear: normalizedAcademicYear,
         term: candidate.term || normalizedTerm,
@@ -5401,6 +5481,7 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       });
       recalculateBill(bill);
       try {
+        suppressAutomaticFinanceBillSync(bill);
         await bill.save();
       } catch (error) {
         const duplicateIssuanceKey = Number(error?.code) === 11000
@@ -5413,6 +5494,7 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       }
       await syncStudentFinanceFromFinanceBill(bill).catch(() => null);
       existingObligationKeys.add(obligationKey);
+      if (studentMonthlyTuitionKey) existingStudentMonthlyTuitionKeys.add(studentMonthlyTuitionKey);
       created += 1;
       createdIds.push(bill._id);
       createdNotifications.push({
@@ -5452,6 +5534,7 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       message: `صدور گروهی انجام شد: ${created} بل ایجاد شد، ${skipped} مورد رد یا تکراری بود.`,
       created,
       skipped,
+      periodType: effectivePeriodType,
       feePlan: preview.feePlan
     });
   } catch (error) {
@@ -5499,6 +5582,7 @@ router.put('/admin/bills/:id', requireAuth, requireRole(['admin']), requirePermi
       periodType: item.periodType,
       periodLabel: item.periodLabel,
       dueDate: item.dueDate,
+      feeTypes: getFinanceRecordFeeTypes(item),
       excludeBillId: item._id
     });
     if (duplicateBill) {
@@ -5518,6 +5602,7 @@ router.put('/admin/bills/:id', requireAuth, requireRole(['admin']), requirePermi
         message: `مبلغ بل نمی‌تواند از پرداخت تأییدشده (${roundMoney(confirmedPaid)} AFN) کمتر شود.`
       });
     }
+    suppressAutomaticFinanceBillSync(item);
     await item.save();
     await syncStudentFinanceFromFinanceBill(item).catch(() => null);
 
@@ -10479,15 +10564,17 @@ router.post('/admin/student-memberships', requireAuth, requireRole(['admin']), r
       return res.status(400).json({ success: false, message: 'برای این صنف کورس مرتبط تعریف نشده است.' });
     }
 
-    const existingMembership = await StudentMembership.findOne({
-      student: studentUser._id,
-      course: resolvedCourseId,
-      academicYear: resolvedAcademicYearId,
-      isCurrent: true
-    }).select('_id').lean();
+    const existingMembership = await StudentMembership.findOne(buildConcurrentCurrentMembershipFilter({
+      schoolId: schoolClass.schoolId,
+      studentId: studentUser._id,
+      academicYearId: resolvedAcademicYearId
+    })).select('_id course classId').lean();
 
     if (existingMembership?._id) {
-      return res.status(409).json({ success: false, message: 'برای این شاگرد در این سال تعلیمی عضویت فعال موجود است.' });
+      return res.status(409).json({
+        success: false,
+        message: 'این شاگرد در همین سال تعلیمی عضویت فعال دارد؛ برای تغییر صنف از عملیات تبدیل صنف استفاده کنید.'
+      });
     }
 
     const newMembership = new StudentMembership({
@@ -10525,6 +10612,9 @@ router.post('/admin/student-memberships', requireAuth, requireRole(['admin']), r
       }
     });
   } catch (err) {
+    if (err?.name === 'ValidationError' && err?.errors?.isCurrent) {
+      return res.status(409).json({ success: false, message: err.errors.isCurrent.message });
+    }
     return res.status(500).json({ success: false, message: 'خطا در ثبت عضویت جدید', error: err.message });
   }
 });
@@ -10624,7 +10714,7 @@ router.put('/admin/student-memberships/:id', requireAuth, requireRole(['admin'])
       }
     });
   } catch (err) {
-    if (err?.code === 11000) {
+    if (err?.code === 11000 || (err?.name === 'ValidationError' && err?.errors?.isCurrent)) {
       return res.status(409).json({ success: false, message: 'برای این شاگرد در این سال تعلیمی عضویت فعال موجود است.' });
     }
     return res.status(500).json({ success: false, message: 'خطا در ویرایش عضویت', error: err.message });

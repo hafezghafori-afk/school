@@ -854,3 +854,202 @@
     grid-template-columns: repeat(4, minmax(220px, 1fr));
   }
 }
+
+/* Compact management layout */
+.tt-assignment-page {
+  background: #f5f7fb;
+}
+
+.tt-assignment-hero {
+  display: block;
+  border: 1px solid #dbe4ee;
+  border-radius: 1rem;
+  background: #ffffff;
+  box-shadow: 0 6px 18px rgba(15, 44, 74, 0.06);
+}
+
+.tt-assignment-hero-main {
+  width: 100%;
+}
+
+.tt-assignment-kpis {
+  width: 100%;
+}
+
+.tt-assignment-kpi {
+  border-color: #e1e8f0;
+  background: #f8fafc;
+  box-shadow: none;
+}
+
+.tt-assignment-command-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 1rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 1rem;
+  background: #ffffff;
+  padding: 1rem;
+  box-shadow: 0 6px 18px rgba(15, 44, 74, 0.05);
+}
+
+.tt-assignment-filter-area {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr)) auto;
+  align-items: end;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.tt-assignment-filter-field {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.tt-assignment-filter-field label {
+  color: #334155;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.tt-assignment-filter-reset {
+  height: 2.5rem;
+  white-space: nowrap;
+}
+
+.tt-assignment-action-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(145px, 1fr));
+  gap: 0.55rem;
+}
+
+.tt-assignment-action-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  height: 2.5rem;
+  white-space: nowrap;
+}
+
+.tt-assignment-ghost-btn.is-active {
+  border-color: #0f766e;
+  background: #ecfdf5;
+  color: #0f766e;
+}
+
+.tt-assignment-primary-btn {
+  background: #0f766e;
+  box-shadow: none;
+}
+
+.tt-assignment-primary-btn:hover {
+  background: #0b635d;
+  transform: none;
+  filter: none;
+}
+
+.tt-assignment-results-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: -0.4rem;
+}
+
+.tt-assignment-results-heading h2 {
+  margin: 0;
+  color: #172b4d;
+  font-size: 1.08rem;
+  font-weight: 800;
+}
+
+.tt-assignment-results-heading p {
+  margin: 0.2rem 0 0;
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.tt-assignment-panel,
+.tt-assignment-item-card,
+.tt-assignment-empty-state,
+.tt-assignment-subject-card,
+.tt-assignment-teacher-choice {
+  border-color: #dbe4ee;
+  background: #ffffff;
+}
+
+.tt-assignment-wizard-card,
+.tt-assignment-wizard-item-card {
+  border: 1px solid #dbe4ee;
+  background: #ffffff;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.tt-assignment-wizard-item-card {
+  border-inline-start: 4px solid #0f766e;
+}
+
+.tt-assignment-wizard-item-card:hover {
+  border-color: #b8c8d8;
+  border-inline-start-color: #0f766e;
+  box-shadow: 0 8px 22px rgba(15, 44, 74, 0.09);
+}
+
+.tt-assignment-list-grid,
+.tt-assignment-wizard-list-grid {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 0.85rem;
+}
+
+.tt-assignment-card-warnings:empty {
+  display: none;
+}
+
+.tt-assignment-card-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  border-top: 1px solid #e5ebf2;
+  padding-top: 0.65rem;
+}
+
+.tt-assignment-card-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+@media (max-width: 1180px) {
+  .tt-assignment-command-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .tt-assignment-action-row {
+    width: 100%;
+  }
+}
+
+@media (max-width: 760px) {
+  .tt-assignment-filter-area {
+    grid-template-columns: 1fr;
+  }
+
+  .tt-assignment-filter-reset {
+    width: 100%;
+  }
+
+  .tt-assignment-action-row {
+    grid-template-columns: 1fr;
+  }
+
+  .tt-assignment-card-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+}

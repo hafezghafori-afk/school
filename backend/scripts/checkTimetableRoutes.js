@@ -147,7 +147,7 @@ async function request(server, targetPath, { method = 'GET', user = null, body }
 async function run() {
   const server = await createServer();
   const adminUser = { id: IDS.admin, role: 'admin', permissions: ['manage_schedule'] };
-  const instructorUser = { id: IDS.instructor, role: 'instructor', permissions: ['manage_content'] };
+  const instructorUser = { id: IDS.instructor, role: 'instructor', permissions: ['manage_content', 'manage_schedule'] };
   try {
     const cases = [];
     cases.push(await request(server, '/api/timetables/reference-data'));

@@ -150,9 +150,10 @@ router.get('/school/:schoolId', requireAuth, checkRole(['admin', 'principal', 't
   try {
     await ensureTeacherAssignmentsFromLegacyMappings();
     const { schoolId } = req.params;
-    const { academicYearId, classId, teacherId } = req.query;
+    const { academicYearId, classId, teacherId, includeEnded } = req.query;
     
     let query = schoolId === 'default-school-id' ? {} : { schoolId };
+    if (includeEnded !== 'true') query.status = { $in: ACTIVE_ASSIGNMENT_STATUSES };
     if (academicYearId) query.academicYearId = academicYearId;
     if (classId) query.classId = classId;
     if (teacherId) query.teacherUserId = teacherId;
@@ -201,7 +202,8 @@ router.post('/school/:schoolId', requireAuth, checkRole(['admin', 'principal', '
       academicYearId: assignmentData.academicYearId,
       classId: assignmentData.classId,
       subjectId: assignmentData.subjectId,
-      teacherUserId: assignmentData.teacherUserId
+      teacherUserId: assignmentData.teacherUserId,
+      status: { $in: ACTIVE_ASSIGNMENT_STATUSES }
     });
 
     if (existing) {
@@ -293,10 +295,10 @@ router.put('/:id', requireAuth, checkRole(['admin', 'principal', 'timetable_mana
   }
 });
 
-// Delete teacher assignment
+// End a teacher assignment while preserving its history
 router.delete('/:id', requireAuth, checkRole(['admin', 'principal']), async (req, res) => {
   try {
-    const assignment = await TeacherAssignment.findByIdAndDelete(req.params.id);
+    const assignment = await TeacherAssignment.findById(req.params.id);
 
     if (!assignment) {
       return res.status(404).json({
@@ -305,9 +307,15 @@ router.delete('/:id', requireAuth, checkRole(['admin', 'principal']), async (req
       });
     }
 
+    assignment.status = 'ended';
+    assignment.endedAt = new Date();
+    assignment.updatedBy = req.user.id;
+    await assignment.save();
+
     res.json({
       success: true,
-      message: 'Teacher assignment deleted successfully'
+      message: 'تخصیص استاد ختم شد و سابقه آن نگهداری گردید.',
+      data: assignment
     });
   } catch (error) {
     console.error('Error deleting teacher assignment:', error);
@@ -326,7 +334,7 @@ router.get('/teacher/:teacherId', requireAuth, async (req, res) => {
     const { teacherId } = req.params;
     const { academicYearId } = req.query;
 
-    let query = { teacherUserId: teacherId };
+    let query = { teacherUserId: teacherId, status: { $in: ACTIVE_ASSIGNMENT_STATUSES } };
     if (academicYearId) query.academicYearId = academicYearId;
 
     const assignments = await TeacherAssignment.find(query)
@@ -367,7 +375,7 @@ router.get('/class/:classId', requireAuth, async (req, res) => {
     const { classId } = req.params;
     const { academicYearId } = req.query;
 
-    let query = { classId };
+    let query = { classId, status: { $in: ACTIVE_ASSIGNMENT_STATUSES } };
     if (academicYearId) query.academicYearId = academicYearId;
 
     const assignments = await TeacherAssignment.find(query)
@@ -406,7 +414,8 @@ router.get('/available-teachers/:schoolId', requireAuth, async (req, res) => {
     const currentAssignments = await TeacherAssignment.find({
       ...assignmentFilter,
       academicYearId,
-      subjectId
+      subjectId,
+      status: { $in: ACTIVE_ASSIGNMENT_STATUSES }
     })
       .populate('teacherUserId', 'name email');
 
@@ -461,7 +470,8 @@ router.post('/bulk', requireAuth, checkRole(['admin', 'principal', 'timetable_ma
           academicYearId: assignmentData.academicYearId,
           classId: assignmentData.classId,
           subjectId: assignmentData.subjectId,
-          teacherUserId: assignmentData.teacherUserId
+          teacherUserId: assignmentData.teacherUserId,
+          status: { $in: ACTIVE_ASSIGNMENT_STATUSES }
         });
 
         if (!existing) {
@@ -552,7 +562,7 @@ router.get('/workload/:schoolId', requireAuth, checkRole(['admin', 'principal', 
     const assignments = await TeacherAssignment.find({
       ...(schoolId === 'default-school-id' ? {} : { schoolId }),
       academicYearId,
-      status: 'active'
+      status: { $in: ACTIVE_ASSIGNMENT_STATUSES }
     })
       .populate('teacherUserId', 'name email')
       .populate('subjectId', 'name category')

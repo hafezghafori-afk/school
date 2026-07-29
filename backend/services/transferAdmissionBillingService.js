@@ -6,10 +6,12 @@ const { getFeePlanPrimaryAmount } = require('./financeFeePlanService');
 const { normalizeFinanceLineItems, roundMoney } = require('../utils/financeLineItems');
 const { nextFinanceDocumentNumber } = require('../utils/financeNumberSequence');
 const { syncStudentFinanceFromFinanceBill } = require('../utils/studentFinanceSync');
+const { suppressAutomaticFinanceBillSync } = require('../utils/financeSyncControl');
 
 const ADMISSION_PERIOD_LABEL = 'داخله تبدیلی';
 
 const normalizeId = (value) => String(value?._id || value || '').trim();
+const withSession = (query, session = null) => (session ? query.session(session) : query);
 
 const isDuplicateKeyError = (error) => Number(error?.code) === 11000;
 
@@ -39,14 +41,15 @@ async function resolveAdmissionFeePlan({
   classId = '',
   courseId = '',
   academicYearId = '',
-  effectiveAt = new Date()
+  effectiveAt = new Date(),
+  session = null
 } = {}) {
   const normalizedClassId = normalizeId(classId);
   const normalizedCourseId = normalizeId(courseId);
   const normalizedSchoolId = normalizeId(schoolId);
   const normalizedAcademicYearId = normalizeId(academicYearId);
   const academicYear = normalizedAcademicYearId
-    ? await AcademicYear.findById(normalizedAcademicYearId).select('title code').lean().catch(() => null)
+    ? await withSession(AcademicYear.findById(normalizedAcademicYearId).select('title code'), session).lean().catch(() => null)
     : null;
   const yearLabels = [academicYear?.title, academicYear?.code].map((item) => String(item || '').trim()).filter(Boolean);
   const scopes = [
@@ -66,12 +69,12 @@ async function resolveAdmissionFeePlan({
       // Plans are deliberately resolved from the same year or an explicit yearless default.
       // This prevents a transfer from receiving the admission amount of a previous school year.
       // eslint-disable-next-line no-await-in-loop
-      const candidates = await FinanceFeePlan.find({
+      const candidates = await withSession(FinanceFeePlan.find({
         ...activePlanFilter(),
         ...(normalizedSchoolId ? { schoolId: { $in: [normalizedSchoolId, null] } } : {}),
         ...scope,
         ...yearScope
-      }).sort(planSort).limit(25);
+      }).sort(planSort).limit(25), session);
       const plan = candidates.find((item) => dateAppliesToPlan(item, effectiveAt));
       if (plan) return { plan, academicYear };
     }
@@ -99,23 +102,23 @@ function buildAdmissionIdentityFilter({ membershipId = '', studentId = '', class
   };
 }
 
-async function findExistingAdmissionObligation(scope = {}) {
+async function findExistingAdmissionObligation(scope = {}, { session = null } = {}) {
   const identityFilter = buildAdmissionIdentityFilter(scope);
   const [bill, order] = await Promise.all([
-    FinanceBill.findOne({
+    withSession(FinanceBill.findOne({
       ...identityFilter,
       $or: [
         { feeScopes: 'admission' },
         { 'lineItems.feeType': 'admission' }
       ]
-    }).sort({ createdAt: -1 }),
-    FeeOrder.findOne({
+    }).sort({ createdAt: -1 }), session),
+    withSession(FeeOrder.findOne({
       ...identityFilter,
       $or: [
         { orderType: 'admission' },
         { 'lineItems.feeType': 'admission' }
       ]
-    }).sort({ createdAt: -1 })
+    }).sort({ createdAt: -1 }), session)
   ]);
   if (bill) return { kind: 'bill', item: bill };
   if (order) return { kind: 'order', item: order };
@@ -137,7 +140,7 @@ async function generateTransferBillNumber() {
   return nextFinanceDocumentNumber({ model: FinanceBill, field: 'billNumber', prefix: 'BL' });
 }
 
-async function issueTransferAdmissionBill({ membership, actorId = null, effectiveAt = null } = {}) {
+async function issueTransferAdmissionBill({ membership, actorId = null, effectiveAt = null, session = null } = {}) {
   if (!membership?._id || !membership?.student || !membership?.course || !membership?.classId) {
     return { created: false, reason: 'membership_scope_missing', bill: null, plan: null };
   }
@@ -149,11 +152,11 @@ async function issueTransferAdmissionBill({ membership, actorId = null, effectiv
     academicYearId: membership.academicYearId || membership.academicYear
   };
   const issuanceKey = `transfer-admission:${membership._id}`;
-  const keyedBill = await FinanceBill.findOne({ issuanceKey });
+  const keyedBill = await withSession(FinanceBill.findOne({ issuanceKey }), session);
   if (keyedBill) {
     return { created: false, reason: 'admission_already_issued', bill: keyedBill, plan: null };
   }
-  const existing = await findExistingAdmissionObligation(scope);
+  const existing = await findExistingAdmissionObligation(scope, { session });
   if (existing) {
     return {
       created: false,
@@ -170,7 +173,8 @@ async function issueTransferAdmissionBill({ membership, actorId = null, effectiv
     classId: membership.classId,
     courseId: membership.course,
     academicYearId: membership.academicYearId || membership.academicYear,
-    effectiveAt: billingDate
+    effectiveAt: billingDate,
+    session
   });
   if (!plan) {
     return { created: false, reason: 'fee_plan_not_found', bill: null, plan: null };
@@ -228,7 +232,7 @@ async function issueTransferAdmissionBill({ membership, actorId = null, effectiv
     try {
       // A second check narrows the race window when two enrollment requests arrive together.
       // eslint-disable-next-line no-await-in-loop
-      const concurrentExisting = await findExistingAdmissionObligation(scope);
+      const concurrentExisting = await findExistingAdmissionObligation(scope, { session });
       if (concurrentExisting) {
         return {
           created: false,
@@ -239,15 +243,20 @@ async function issueTransferAdmissionBill({ membership, actorId = null, effectiv
         };
       }
       // eslint-disable-next-line no-await-in-loop
-      await bill.save();
-      // eslint-disable-next-line no-await-in-loop
-      await syncStudentFinanceFromFinanceBill(bill).catch(() => null);
+      suppressAutomaticFinanceBillSync(bill);
+      await bill.save(session ? { session } : undefined);
+      // The legacy finance projection cannot read uncommitted data. The lifecycle
+      // service refreshes it after the surrounding transaction commits.
+      if (!session) {
+        // eslint-disable-next-line no-await-in-loop
+        await syncStudentFinanceFromFinanceBill(bill).catch(() => null);
+      }
       return { created: true, reason: 'admission_bill_created', bill, plan };
     } catch (error) {
       if (isDuplicateKeyError(error) && (error?.keyPattern?.issuanceKey || error?.keyValue?.issuanceKey)) {
         // The unique issuance key is the final guard against two simultaneous transfer requests.
         // eslint-disable-next-line no-await-in-loop
-        const existingByKey = await FinanceBill.findOne({ issuanceKey });
+        const existingByKey = await withSession(FinanceBill.findOne({ issuanceKey }), session);
         if (existingByKey) {
           return { created: false, reason: 'admission_already_issued', bill: existingByKey, plan };
         }

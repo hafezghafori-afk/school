@@ -67,6 +67,7 @@ const SCHEDULE_WIDGET_FILTER_OPTIONS = [
 const SCHEDULE_AUTO_REFRESH_MS = 60000;
 const ADMIN_SCHEDULE_ROUTE = '/timetable/editor';
 const ADMIN_SCHEDULE_VIEW_ROUTE = '/timetable/viewer';
+const ADMIN_TEACHER_ASSIGNMENTS_ROUTE = '/timetable/teacher-timetable-configurations';
 
 const DEFAULT_WIZARD_SHIFTS = [
   { name: 'صبح', code: 'morning', startTime: '07:30', endTime: '12:00', enabled: true },
@@ -216,8 +217,8 @@ const PERMISSION_LABELS = {
   manage_enrollments: 'مدیریت ثبت‌نام‌ها',
   manage_memberships: 'مدیریت ممبرشیپ آموزشی',
   'students.transfers.manage': 'تبدیلی شاگرد',
-  'students.lifecycle.manage': 'تبدیلی/ترک تحصیل شاگرد',
-  'students.lifecycle.approve': 'تایید چرخه آموزشی شاگرد',
+  'students.lifecycle.manage': 'تبدیلی، ترک تحصیل و منفکی شاگرد',
+  'students.lifecycle.approve': 'تایید تغییر وضعیت تعلیمی شاگرد',
   'education.promotions.manage': 'ارتقای صنف',
   manage_finance: 'مدیریت مالی',
   'finance.lifecycle_effects.manage': 'اثر مالی تغییرات آموزشی',
@@ -433,7 +434,7 @@ const QUICK_LINK_ITEMS = [
   { to: '/admin-users', label: 'کاربران', permission: 'manage_users' },
   { to: '/admin-enrollments', label: 'ثبت‌نام‌ها', permission: 'manage_enrollments' },
   { to: '/admin-education?section=enrollments&lifecycle=transfer-in', label: 'تبدیلی آمد', permission: 'students.transfers.manage' },
-  { to: '/admin-education?section=enrollments&lifecycle=end', label: 'تبدیلی رفت / ترک تحصیل', permission: 'students.lifecycle.manage' },
+  { to: '/admin-education?section=enrollments&lifecycle=end', label: 'تبدیلی، ترک تحصیل و منفکی', permission: 'students.lifecycle.manage' },
   { to: '/admin-promotions', label: 'ارتقای صنف', permission: 'education.promotions.manage' },
   { to: '/admin-financial-memberships', label: 'اثر مالی تغییرات آموزشی', permission: 'finance.lifecycle_effects.manage' },
   { to: '/admin-settings#student-ids', label: 'تنظیم شماره اساس و ریجیستر نمبر', permission: 'manage_content' },
@@ -447,13 +448,14 @@ const QUICK_LINK_ITEMS = [
   { to: '/admin-news', label: 'اخبار', permission: 'manage_content' },
   { to: '/admin-gallery', label: 'گالری', permission: 'manage_content' },
   { to: '/admin-communications', label: 'مرکز ارتباطات سیما', permission: 'manage_platform_requests' },
-  { to: ADMIN_SCHEDULE_VIEW_ROUTE, label: 'تقسیم اوقات', permission: 'view_schedule' }
+  { to: ADMIN_SCHEDULE_VIEW_ROUTE, label: 'تقسیم اوقات', permission: 'view_schedule' },
+  { to: ADMIN_TEACHER_ASSIGNMENTS_ROUTE, label: 'تخصیص استاد', permission: 'timetable.teacher_assignments.manage' }
 ];
 
 const REQUIRED_QUICK_LINK_ITEMS = [
   { to: '/admin-exams-dashboard', label: 'داشبورد امتحانات', permission: 'manage_content' },
   { to: '/admin-education?section=enrollments&lifecycle=transfer-in', label: 'تبدیلی آمد', permission: 'students.transfers.manage' },
-  { to: '/admin-education?section=enrollments&lifecycle=end', label: 'تبدیلی رفت / ترک تحصیل', permission: 'students.lifecycle.manage' },
+  { to: '/admin-education?section=enrollments&lifecycle=end', label: 'تبدیلی، ترک تحصیل و منفکی', permission: 'students.lifecycle.manage' },
   { to: '/admin-promotions', label: 'ارتقای صنف', permission: 'education.promotions.manage' },
   { to: '/admin-financial-memberships', label: 'اثر مالی تغییرات آموزشی', permission: 'finance.lifecycle_effects.manage' },
   { to: '/admin-settings#student-ids', label: 'تنظیم شماره اساس و ریجیستر نمبر', permission: 'manage_content' }
@@ -855,6 +857,7 @@ export default function AdminPanel() {
   const canViewReports = effectivePermissions.includes('view_reports');
   const canViewDashboardStats = canViewReports || canManageFinance;
   const canManageSchedule = effectivePermissions.includes('manage_schedule');
+  const canManageTeacherAssignments = permissionAllows('timetable.teacher_assignments.manage', effectivePermissions);
   const canManageEnrollments = permissionAllows('manage_enrollments', effectivePermissions);
   const canManageMemberships = permissionAllows('manage_memberships', effectivePermissions);
   const canViewSchedule = permissionAllows('view_schedule', effectivePermissions);
@@ -3295,7 +3298,13 @@ export default function AdminPanel() {
         <meta charset="utf-8" />
         <title>گزارش ماتریس دسترسی مدیریتی</title>
         <style>
-          body { font-family: Tahoma, Arial, sans-serif; color: #0f172a; margin: 20px; }
+          @font-face {
+            font-family: 'B Nazanin Print';
+            src: url('/fonts/B_Nazanin.ttf') format('truetype');
+            font-weight: 400;
+            font-style: normal;
+          }
+          body { font-family: 'B Nazanin Print', 'B Nazanin', 'B Mitra', sans-serif; color: #0f172a; margin: 20px; }
           h1 { font-size: 20px; margin: 0 0 10px; }
           .meta { margin: 0 0 12px; font-size: 13px; line-height: 1.9; }
           table { width: 100%; border-collapse: collapse; margin-top: 10px; }
@@ -3391,6 +3400,7 @@ export default function AdminPanel() {
     ...(canManageEnrollments ? [{ to: '/admin-enrollments', label: 'ثبت‌نام‌ها', caption: 'بررسی و تایید درخواست‌ها', tone: 'mint' }] : []),
     ...(canManageMemberships ? [{ to: '/admin-education?section=enrollments', label: 'ممبرشیپ آموزشی', caption: 'وصل شاگرد به صنف', tone: 'mint' }] : []),
     ...(canViewSchedule ? [{ to: canManageSchedule ? ADMIN_SCHEDULE_ROUTE : ADMIN_SCHEDULE_VIEW_ROUTE, label: 'تقسیم اوقات', caption: canManageSchedule ? 'ویرایش و نشر برنامه' : 'مشاهده برنامه رسمی', tone: 'slate' }] : []),
+    ...(canManageTeacherAssignments ? [{ to: ADMIN_TEACHER_ASSIGNMENTS_ROUTE, label: 'تخصیص استاد', caption: 'وصل استاد به صنف و مضمون', tone: 'slate' }] : []),
     ...(canManageFinance ? [{ to: '/admin-finance', label: 'مرکز مالی', caption: 'پرداخت و صندوق', tone: 'copper' }] : []),
     ...(canManageFinance ? [{ to: '/admin-government-finance', label: 'مالی دولت', caption: 'گزارش و آرشیف رسمی', tone: 'teal' }] : []),
     ...(canManageContent ? [{ to: '/admin-education', label: 'مرکز آموزش', caption: 'سال تعلیمی، صنف و مضمون', tone: 'mint' }] : []),
@@ -3404,6 +3414,7 @@ export default function AdminPanel() {
     ...(canManageContent ? [{ to: '/admin-education', label: 'مرکز آموزش', caption: 'سال تعلیمی، صنف و مضمون', tone: 'mint' }] : []),
     ...(canManageUsers ? [{ to: '/admin-users', label: 'کاربران', caption: 'حساب‌ها، نقش‌ها و دسترسی', tone: 'slate' }] : []),
     ...(canViewSchedule ? [{ to: canManageSchedule ? ADMIN_SCHEDULE_ROUTE : ADMIN_SCHEDULE_VIEW_ROUTE, label: 'تقسیم اوقات', caption: canManageSchedule ? 'ویرایش و نشر برنامه' : 'مشاهده برنامه رسمی', tone: 'slate' }] : []),
+    ...(canManageTeacherAssignments ? [{ to: ADMIN_TEACHER_ASSIGNMENTS_ROUTE, label: 'تخصیص استاد', caption: 'وصل استاد به صنف و مضمون', tone: 'slate' }] : []),
     ...(canManagePlatformRequests ? [{ to: '/admin-communications', label: 'مرکز ارتباطات سیما', caption: 'دمو، تماس، پیشنهاد و شکایت', tone: 'teal' }] : []),
     ...(canViewReports ? [{ to: '/admin-reports', label: 'گزارش‌ها', caption: 'خروجی و تحلیل', tone: 'teal' }] : [])
   ];
@@ -3557,7 +3568,7 @@ export default function AdminPanel() {
     },
     {
       key: 'transfer-out',
-      title: 'تبدیلی رفت / ترک تحصیل',
+      title: 'تبدیلی، ترک تحصیل و منفکی',
       group: 'ثبت‌نام و شاگردان',
       subtitle: 'خروج، انتقال یا ختم عضویت آموزشی',
       count: 0,
@@ -3634,6 +3645,14 @@ export default function AdminPanel() {
       subtitle: 'برنامه امروز، نشر و بررسی تداخل‌ها',
       count: todayScheduleSummary.total,
       to: canViewSchedule ? (canManageSchedule ? ADMIN_SCHEDULE_ROUTE : ADMIN_SCHEDULE_VIEW_ROUTE) : ''
+    },
+    {
+      key: 'teacher-assignments',
+      title: 'تخصیص استاد',
+      group: 'آموزش و برنامه',
+      subtitle: 'تعیین استاد برای صنف، مضمون و سال تعلیمی',
+      count: activeSchoolContext?.scopeSummary?.teacherAssignments?.count || 0,
+      to: canManageTeacherAssignments ? ADMIN_TEACHER_ASSIGNMENTS_ROUTE : ''
     },
     {
       key: 'schedule-reports',

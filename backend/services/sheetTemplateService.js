@@ -43,6 +43,7 @@ function toPlain(doc) {
 function formatTemplate(doc) {
   const item = toPlain(doc);
   if (!item) return null;
+  const defaultColumnMap = new Map(getDefaultColumnsForType(normalizeText(item.type)).map((column) => [column.key, column]));
 
   return {
     id: String(item._id),
@@ -52,7 +53,10 @@ function formatTemplate(doc) {
     version: Number(item.version || 1),
     scope: item.scope || {},
     layout: item.layout || {},
-    columns: Array.isArray(item.columns) ? item.columns : [],
+    columns: Array.isArray(item.columns) ? item.columns.map((column) => ({
+      ...column,
+      group: normalizeText(column?.group) || normalizeText(defaultColumnMap.get(normalizeText(column?.key))?.group)
+    })) : [],
     filters: item.filters || {},
     options: item.options || {},
     ownership: item.ownership || {},
@@ -108,13 +112,14 @@ function buildExamDefaultColumns() {
     { key: 'number', label: 'شماره', width: 7, visible: true, order: 0 },
     { key: 'studentName', label: 'نام', width: 15, visible: true, order: 1, group: 'شهرت متعلمین' },
     { key: 'fatherName', label: 'نام پدر', width: 15, visible: true, order: 2, group: 'شهرت متعلمین' },
-    { key: 'writtenScore', label: 'تحریری', width: 9, visible: true, order: 3 },
-    { key: 'oralScore', label: 'تقریری', width: 9, visible: true, order: 4 },
-    { key: 'classActivityScore', label: 'فعالیت صنفی', width: 10, visible: true, order: 5 },
-    { key: 'homeworkScore', label: 'کارخانگی', width: 10, visible: true, order: 6 },
-    { key: 'obtainedMark', label: 'به عدد', width: 10, visible: true, order: 7, group: 'مجموعه نمره' },
-    { key: 'totalInWords', label: 'به حروف', width: 14, visible: true, order: 8, group: 'مجموعه نمره' },
-    { key: 'note', label: 'ملاحظات', width: 12, visible: true, order: 9 }
+    { key: 'attendanceScore', label: 'حاضری', width: 8, visible: true, order: 3 },
+    { key: 'writtenScore', label: 'تحریری', width: 9, visible: true, order: 4 },
+    { key: 'oralScore', label: 'تقریری', width: 9, visible: true, order: 5 },
+    { key: 'classActivityScore', label: 'فعالیت صنفی', width: 10, visible: true, order: 6 },
+    { key: 'homeworkScore', label: 'کارخانگی', width: 10, visible: true, order: 7 },
+    { key: 'obtainedMark', label: 'به عدد', width: 10, visible: true, order: 8, group: 'مجموعه نمره' },
+    { key: 'totalInWords', label: 'به حروف', width: 14, visible: true, order: 9, group: 'مجموعه نمره' },
+    { key: 'note', label: 'ملاحظات', width: 12, visible: true, order: 10 }
   ];
 }
 
@@ -177,13 +182,14 @@ function getDefaultColumnsForType(type = '') {
       { key: 'number', label: 'شماره', width: 7, visible: true, order: 0 },
       { key: 'studentName', label: 'نام', width: 15, visible: true, order: 1, group: 'شهرت متعلمین' },
       { key: 'fatherName', label: 'نام پدر', width: 15, visible: true, order: 2, group: 'شهرت متعلمین' },
-      { key: 'writtenScore', label: 'تحریری', width: 9, visible: true, order: 3 },
-      { key: 'oralScore', label: 'تقریری', width: 9, visible: true, order: 4 },
-      { key: 'classActivityScore', label: 'فعالیت صنفی', width: 10, visible: true, order: 5 },
-      { key: 'homeworkScore', label: 'کارخانگی', width: 10, visible: true, order: 6 },
-      { key: 'obtainedMark', label: 'به عدد', width: 10, visible: true, order: 7, group: 'مجموعه نمره' },
-      { key: 'totalInWords', label: 'به حروف', width: 14, visible: true, order: 8, group: 'مجموعه نمره' },
-      { key: 'note', label: 'ملاحظات', width: 12, visible: true, order: 9 }
+      { key: 'attendanceScore', label: 'حاضری', width: 8, visible: true, order: 3 },
+      { key: 'writtenScore', label: 'تحریری', width: 9, visible: true, order: 4 },
+      { key: 'oralScore', label: 'تقریری', width: 9, visible: true, order: 5 },
+      { key: 'classActivityScore', label: 'فعالیت صنفی', width: 10, visible: true, order: 6 },
+      { key: 'homeworkScore', label: 'کارخانگی', width: 10, visible: true, order: 7 },
+      { key: 'obtainedMark', label: 'به عدد', width: 10, visible: true, order: 8, group: 'مجموعه نمره' },
+      { key: 'totalInWords', label: 'به حروف', width: 14, visible: true, order: 9, group: 'مجموعه نمره' },
+      { key: 'note', label: 'ملاحظات', width: 12, visible: true, order: 10 }
     ];
   }
 
@@ -224,10 +230,10 @@ function getPreparedSheetTemplateSeeds() {
       note: 'قالب آماده مضامین و استادان صنف'
     },
     {
-      title: 'شقه امتحان ماهوار',
+      title: 'شقه امتحانات',
       code: 'EXAM-MONTHLY-READY',
       type: 'exam',
-      note: 'قالب رسمی آماده برای شقه امتحان ماهوار'
+      note: 'قالب رسمی آماده برای شقه امتحانات'
     },
     {
       title: 'شقه مالی شاگردان',
@@ -256,9 +262,24 @@ async function ensurePreparedSheetTemplates() {
   const seeds = getPreparedSheetTemplateSeeds();
   await Promise.all(seeds.map((payload) => SheetTemplate.findOneAndUpdate(
     { code: payload.code },
-    { $set: payload },
+    // Prepared templates are defaults, not a reset mechanism.  Once an
+    // administrator customizes a template, listing templates must not erase
+    // those choices.
+    { $setOnInsert: payload },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   )));
+
+  // Rename only untouched legacy text. Administrator customizations remain intact.
+  await Promise.all([
+    SheetTemplate.updateMany(
+      { code: 'EXAM-MONTHLY-READY', title: 'شقه امتحان ماهوار' },
+      { $set: { title: 'شقه امتحانات' } }
+    ),
+    SheetTemplate.updateMany(
+      { code: 'EXAM-MONTHLY-READY', note: 'قالب رسمی آماده برای شقه امتحان ماهوار' },
+      { $set: { note: 'قالب رسمی آماده برای شقه امتحانات' } }
+    )
+  ]);
 }
 
 function applyTemplateColumns(report = {}, template = {}) {
@@ -267,25 +288,23 @@ function applyTemplateColumns(report = {}, template = {}) {
     ? template.columns
     : fallbackColumns;
 
+  const fallbackColumnMap = new Map(fallbackColumns.map((column) => [normalizeText(column?.key), column]));
   const visibleColumns = configuredColumns
     .filter((column) => column?.visible !== false)
     .sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0))
     .map((column) => ({
       key: normalizeText(column?.key),
       label: normalizeText(column?.label) || normalizeText(column?.key),
-      group: normalizeText(column?.group),
+      group: normalizeText(column?.group) || normalizeText(fallbackColumnMap.get(normalizeText(column?.key))?.group),
       width: Number(column?.width || 16)
     }))
     .filter((column) => column.key);
 
   const rows = Array.isArray(report.rows) ? report.rows : [];
-  const shapedRows = rows.map((row) => {
-    const next = {};
-    visibleColumns.forEach((column) => {
-      next[column.key] = row?.[column.key] ?? '';
-    });
-    return next;
-  });
+  // Keep non-table metadata (teacher, class, reviewer, dates) on each row.
+  // Exporters still read only `visibleColumns`, while headers/signatures can
+  // continue to use the contextual values.
+  const shapedRows = rows.map((row) => ({ ...(row || {}) }));
 
   return {
     ...report,
@@ -372,10 +391,17 @@ async function updateSheetTemplate(templateId, payload = {}) {
   const item = await SheetTemplate.findById(templateId);
   if (!item) throw new Error('sheet_template_not_found');
 
+  const changesPrintableDesign = Boolean(
+    (payload.layout && typeof payload.layout === 'object')
+    || Array.isArray(payload.columns)
+    || (payload.options && typeof payload.options === 'object')
+  );
+
   if (payload.title !== undefined) item.title = normalizeText(payload.title);
   if (payload.code !== undefined) item.code = normalizeTemplateCode(payload.code);
   if (payload.type !== undefined) item.type = normalizeText(payload.type);
   if (payload.version !== undefined) item.version = Number(payload.version || 1);
+  else if (changesPrintableDesign) item.version = Math.max(1, Number(item.version || 1)) + 1;
   if (payload.scope && typeof payload.scope === 'object') {
     item.scope = {
       ...item.scope,

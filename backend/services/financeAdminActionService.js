@@ -27,6 +27,10 @@ const { syncStudentFinanceFromFinanceBill, syncStudentFinanceFromFinanceReceipt 
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const { syncApprovedFeePaymentToTreasury } = require('./treasuryGovernanceService');
 const { assertFinancePeriodWritable, isFinanceMonthClosed } = require('./financePeriodGuardService');
+const {
+  isFinanceVersionConflict,
+  suppressAutomaticFinanceBillSync
+} = require('../utils/financeSyncControl');
 
 const FINANCE_FOUR_EYES_ENABLED = String(process.env.FINANCE_FOUR_EYES_ENABLED || 'false').toLowerCase() !== 'false';
 
@@ -210,6 +214,21 @@ function releaseIssuanceKeyForVoid(document = null) {
   const originalIssuanceKey = String(document?.issuanceKey || '').trim();
   if (document) document.issuanceKey = undefined;
   return originalIssuanceKey;
+}
+
+function isVoidedFinanceDocument(document = null) {
+  return String(document?.status || '').trim().toLowerCase() === 'void';
+}
+
+async function buildAlreadyVoidedBillResult(item) {
+  await syncStudentFinanceFromFinanceBill(item._id);
+  const syncedOrder = await FeeOrder.findOne({ sourceBillId: item._id }).select('_id');
+  if (syncedOrder?._id) await syncTreasuryForFeeOrderPayments(syncedOrder._id);
+  return {
+    item,
+    alreadyVoided: true,
+    message: '\u0627\u06cc\u0646 \u0628\u0644 \u0642\u0628\u0644\u0627\u064b \u0628\u0627\u0637\u0644 \u0634\u062f\u0647 \u0627\u0633\u062a.'
+  };
 }
 
 function resolveActiveFinanceSchoolId(req = {}) {
@@ -541,6 +560,7 @@ async function addBillAdjustmentAction({ req, billId = '', body = {} } = {}) {
     createdBy: req.user.id
   });
   recalculateBill(item);
+  suppressAutomaticFinanceBillSync(item);
   await item.save();
   await syncStudentFinanceFromFinanceBill(item._id);
   const syncedOrder = await FeeOrder.findOne({ sourceBillId: item._id }).select('_id');
@@ -676,6 +696,7 @@ async function setBillInstallmentsAction({ req, billId = '', body = {} } = {}) {
   item.installments = installments;
   applyPaymentToInstallments(item, item.amountPaid, item.paidAt || new Date());
   recalculateBill(item);
+  suppressAutomaticFinanceBillSync(item);
   await item.save();
   await syncStudentFinanceFromFinanceBill(item._id);
 
@@ -769,6 +790,9 @@ async function voidBillAction({ req, billId = '', body = {} } = {}) {
   }
 
   const item = await FinanceBill.findById(billId);
+  if (item && isVoidedFinanceDocument(item)) {
+    return buildAlreadyVoidedBillResult(item);
+  }
   if (!item) throw createActionError(404, 'Ø¨Ù„ ÛŒØ§ÙØª Ù†Ø´Ø¯');
   if (await isMonthClosed(item.issuedAt, item)) {
     throw createActionError(400, 'Ù…Ø§Ù‡ Ù…Ø§Ù„ÛŒ Ø¨Ø³ØªÙ‡ Ø´Ø¯Ù‡ Ø§Ø³Øª Ùˆ Ø¨Ø§Ø·Ù„â€ŒØ³Ø§Ø²ÛŒ Ù…Ø¬Ø§Ø² Ù†ÛŒØ³Øª');
@@ -793,7 +817,15 @@ async function voidBillAction({ req, billId = '', body = {} } = {}) {
   item.voidReason = reason;
   item.voidedBy = req.user.id;
   item.voidedAt = new Date();
-  await item.save();
+  suppressAutomaticFinanceBillSync(item);
+  try {
+    await item.save();
+  } catch (error) {
+    if (!isFinanceVersionConflict(error)) throw error;
+    const refreshed = await FinanceBill.findById(billId);
+    if (!isVoidedFinanceDocument(refreshed)) throw error;
+    return buildAlreadyVoidedBillResult(refreshed);
+  }
   await logActivity({
     req,
     action: 'finance_void_bill',
@@ -829,6 +861,9 @@ async function voidFeeOrderAction({ req, feeOrderId = '', body = {} } = {}) {
   }
 
   const item = await FeeOrder.findById(feeOrderId);
+  if (item && isVoidedFinanceDocument(item) && !item.sourceBillId) {
+    return { item, alreadyVoided: true, message: 'This fee order was already voided.' };
+  }
   if (!item) throw createActionError(404, 'Canonical fee order was not found');
 
   if (Number(item.amountPaid || 0) > 0 || await hasApprovedPaymentForFeeOrder(item._id)) {
@@ -856,7 +891,14 @@ async function voidFeeOrderAction({ req, feeOrderId = '', body = {} } = {}) {
   item.voidReason = reason;
   item.voidedBy = req.user.id;
   item.voidedAt = new Date();
-  await item.save();
+  try {
+    await item.save();
+  } catch (error) {
+    if (!isFinanceVersionConflict(error)) throw error;
+    const refreshed = await FeeOrder.findById(feeOrderId);
+    if (!isVoidedFinanceDocument(refreshed)) throw error;
+    return { item: refreshed, alreadyVoided: true, message: 'This fee order was already voided.' };
+  }
   await logActivity({
     req,
     action: 'fee_order_void',
@@ -1006,6 +1048,7 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
   addScopedPayment(bill, approvalFeeType, approvalAmount);
   applyPaymentToInstallments(bill, approvalAmount, receipt.paidAt || new Date());
   recalculateBill(bill);
+  suppressAutomaticFinanceBillSync(bill);
   if (supportsMongoTransactions()) {
     const session = await mongoose.startSession();
     try {
@@ -1565,16 +1608,27 @@ async function updateFeePaymentFollowUpAction({ req, feePaymentId = '', body = {
 
 function wrapAction(action) {
   return async function wrappedAction(args = {}) {
-    const result = await action(args);
-    if (result && typeof result.message === 'string') {
-      result.message = repairDisplayText(result.message);
+    try {
+      const result = await action(args);
+      if (result && typeof result.message === 'string') {
+        result.message = repairDisplayText(result.message);
+      }
+      return result;
+    } catch (error) {
+      if (isFinanceVersionConflict(error)) {
+        throw createActionError(
+          409,
+          '\u0633\u0646\u062f \u0645\u0627\u0644\u06cc \u0647\u0645\u200c\u0632\u0645\u0627\u0646 \u062a\u063a\u06cc\u06cc\u0631 \u06a9\u0631\u062f\u0647 \u0627\u0633\u062a\u061b \u0635\u0641\u062d\u0647 \u0631\u0627 \u062a\u0627\u0632\u0647 \u06a9\u0646\u06cc\u062f \u0648 \u0648\u0636\u0639\u06cc\u062a \u0622\u0646 \u0631\u0627 \u062f\u0648\u0628\u0627\u0631\u0647 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f.'
+        );
+      }
+      throw error;
     }
-    return result;
   };
 }
 
 module.exports = {
   __financeVoidTestUtils: {
+    isVoidedFinanceDocument,
     releaseIssuanceKeyForVoid
   },
   __financeSchoolScopeTestUtils: {

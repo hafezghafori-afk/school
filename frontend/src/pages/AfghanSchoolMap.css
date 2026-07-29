@@ -1,6 +1,6 @@
 .afghan-map {
   padding: 20px;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: var(--font-persian-ui);
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   min-height: 100vh;
   direction: rtl;
@@ -491,7 +491,7 @@
 
 /* Leaflet Map Customization */
 .leaflet-container {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: var(--font-persian-ui);
 }
 
 .leaflet-popup-content-wrapper {

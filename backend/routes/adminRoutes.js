@@ -691,6 +691,7 @@ const ensureRegisteredStudentsInUserDirectory = async () => {
     .lean();
 
   const approvedOnlineEnrollments = await Enrollment.find({
+    registrationSource: 'online',
     status: 'approved',
     $or: [
       { linkedUserId: null },

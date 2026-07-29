@@ -54,6 +54,22 @@
   gap: 10px;
 }
 
+.admin-sheet-hero-actions {
+  align-items: center;
+  flex-wrap: nowrap;
+  width: fit-content;
+}
+
+.admin-sheet-hero-actions .admin-workspace-button,
+.admin-sheet-hero-actions .admin-workspace-button-ghost {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 104px;
+  padding: 9px 16px;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
 .admin-workspace-button,
 .admin-workspace-button-secondary,
 .admin-workspace-button-ghost,
@@ -276,6 +292,40 @@
   background: #fbfdfd;
 }
 
+.admin-workspace-table .admin-lifecycle-history-row td {
+  background: #f1f8f7 !important;
+  padding: 16px;
+}
+
+.admin-lifecycle-history-panel,
+.admin-lifecycle-history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-lifecycle-history-head,
+.admin-lifecycle-history-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.admin-lifecycle-history-head {
+  justify-content: space-between;
+}
+
+.admin-lifecycle-history-item {
+  padding: 10px 12px;
+  border: 1px solid #dbeae7;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.admin-lifecycle-history-item > span:last-child {
+  flex: 1 1 260px;
+}
+
 /* Drag-and-drop styling for column reordering */
 .admin-workspace-table tbody tr[draggable="true"] {
   cursor: grab;
@@ -322,6 +372,16 @@
 .admin-workspace-badge.info {
   background: #dbeafe;
   color: #1d4ed8;
+}
+
+.admin-workspace-badge.warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.admin-workspace-badge.danger {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .admin-workspace-badge.muted {
@@ -1195,6 +1255,655 @@
   margin-top: 12px;
   display: flex;
   justify-content: center;
+}
+
+/* Sheet template center: horizontal, compact management flow. */
+.admin-sheet-template-center .admin-workspace-template-list,
+.admin-sheet-template-center .admin-sheet-session-strip,
+.admin-sheet-template-center .admin-sheet-column-strip {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: x proximity;
+  padding: 4px 2px 12px;
+  scrollbar-width: thin;
+}
+
+.admin-sheet-template-center .admin-workspace-template-item {
+  flex: 0 0 min(280px, 82vw);
+  scroll-snap-align: start;
+}
+
+.admin-sheet-assignment-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(132px, 1fr));
+  gap: 9px;
+  align-items: start;
+}
+
+.admin-sheet-assignment-grid > .admin-workspace-field {
+  grid-template-rows: auto 38px;
+  align-content: start;
+  gap: 4px;
+}
+
+.admin-sheet-assignment-grid > .admin-workspace-field > input,
+.admin-sheet-assignment-grid > .admin-workspace-field > select,
+.admin-sheet-assignment-grid > .admin-workspace-field > .afghan-date-field {
+  min-height: 38px;
+  height: 38px;
+}
+
+.admin-sheet-assignment-grid > .admin-workspace-field > input,
+.admin-sheet-assignment-grid > .admin-workspace-field > select {
+  border-radius: 10px;
+  padding: 6px 8px;
+  font-size: 0.88rem;
+}
+
+.admin-sheet-assignment-grid .afghan-date-input {
+  min-height: 38px;
+  height: 38px;
+  padding-inline: 7px;
+  font-size: 0.86rem;
+}
+
+.admin-sheet-date-field {
+  grid-column: span 2;
+}
+
+.admin-sheet-score-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 9px;
+  margin-top: 11px;
+}
+
+.admin-sheet-score-card,
+.admin-sheet-column-card {
+  border: 1px solid #d7e7e4;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #fff, #f7fbfa);
+}
+
+.admin-sheet-score-card {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+  color: #173c35;
+}
+
+.admin-sheet-score-card input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid #cddedb;
+  border-radius: 10px;
+  padding: 5px 8px;
+  font: inherit;
+  text-align: center;
+}
+
+.admin-sheet-assignment-grid .admin-workspace-field small {
+  color: #607873;
+  font-size: 0.78rem;
+  line-height: 1.65;
+}
+
+.admin-sheet-layout-toggle-strip {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.admin-sheet-layout-toggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid #d7e7e4;
+  border-radius: 15px;
+  background: #f8fcfb;
+  cursor: pointer;
+}
+
+.admin-sheet-layout-toggle input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  accent-color: #167a6c;
+}
+
+.admin-sheet-layout-toggle span {
+  display: grid;
+  gap: 4px;
+  color: #173c35;
+}
+
+.admin-sheet-layout-toggle small {
+  color: #607873;
+  font-size: 0.8rem;
+  line-height: 1.65;
+}
+
+.admin-sheet-session-card {
+  flex: 0 0 min(270px, 82vw);
+  position: relative;
+  display: grid;
+  gap: 6px;
+  scroll-snap-align: start;
+  border: 1px solid #d7e7e4;
+  border-radius: 16px;
+  padding: 9px;
+  text-align: right;
+  color: #173c35;
+  background: #fff;
+}
+
+.admin-sheet-session-card__main {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 10px;
+  padding: 3px 4px 7px;
+  text-align: right;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.admin-sheet-session-card__main:hover,
+.admin-sheet-session-card__main:focus-visible {
+  background: #f1f8f6;
+}
+
+.admin-sheet-session-card__main strong,
+.admin-sheet-session-card__main span,
+.admin-sheet-session-card__main em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-sheet-session-card span,
+.admin-sheet-session-card em {
+  color: #607873;
+  font-style: normal;
+}
+
+.admin-sheet-assignment-source-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  max-width: 760px;
+  color: #607873;
+  font-size: 0.82rem;
+}
+
+.admin-sheet-assignment-source-note a {
+  color: #167a6c;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.admin-sheet-assignment-source-note a:hover,
+.admin-sheet-assignment-source-note a:focus-visible {
+  text-decoration: underline;
+}
+
+.admin-sheet-session-card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  border-top: 1px solid #e4efed;
+  padding-top: 7px;
+}
+
+.admin-sheet-session-action,
+.admin-sheet-session-more summary,
+.admin-sheet-session-more__menu button {
+  width: auto;
+  min-height: 32px;
+  border: 1px solid #c9deda;
+  border-radius: 9px;
+  padding: 5px 10px;
+  color: #17695e;
+  background: #f8fcfb;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.admin-sheet-session-more {
+  position: relative;
+}
+
+.admin-sheet-session-more summary {
+  display: list-item;
+  list-style-position: inside;
+  user-select: none;
+}
+
+.admin-sheet-session-more__menu {
+  position: absolute;
+  inset-inline-end: 0;
+  top: calc(100% + 5px);
+  z-index: 25;
+  display: grid;
+  gap: 5px;
+  width: max-content;
+  min-width: 180px;
+  max-width: min(260px, 80vw);
+  border: 1px solid #c9deda;
+  border-radius: 12px;
+  padding: 7px;
+  background: #fff;
+  box-shadow: 0 14px 32px rgb(21 77 68 / 16%);
+}
+
+.admin-sheet-session-more__menu button {
+  width: 100%;
+  text-align: right;
+}
+
+.admin-sheet-session-more__menu span {
+  padding: 6px;
+  line-height: 1.65;
+}
+
+.admin-sheet-session-manager {
+  display: grid;
+  gap: 10px;
+  margin-top: 13px;
+  padding-top: 13px;
+  border-top: 1px solid #d7e7e4;
+}
+
+.admin-sheet-session-manager-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-sheet-session-manager-head h3,
+.admin-sheet-session-manager-head p {
+  margin: 0;
+}
+
+.admin-sheet-session-manager-head h3 {
+  color: #173c35;
+  font-size: 1rem;
+}
+
+.admin-sheet-session-manager-head p {
+  margin-top: 3px;
+  color: #607873;
+  font-size: 0.82rem;
+}
+
+.admin-sheet-session-tools {
+  display: grid;
+  grid-template-columns: minmax(210px, 1fr) minmax(145px, 0.65fr);
+  gap: 8px;
+  width: min(470px, 100%);
+}
+
+.admin-sheet-session-tools label {
+  display: grid;
+  gap: 4px;
+  color: #536d68;
+  font-size: 0.78rem;
+}
+
+.admin-sheet-session-tools input,
+.admin-sheet-session-tools select {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid #cddedb;
+  border-radius: 10px;
+  padding: 5px 8px;
+  background: #fff;
+  color: #173c35;
+  font: inherit;
+}
+
+.admin-sheet-template-center .admin-sheet-session-manager .admin-sheet-session-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 9px;
+  overflow: visible;
+  scroll-snap-type: none;
+  padding: 0;
+}
+
+.admin-sheet-session-manager .admin-sheet-session-card {
+  flex: initial;
+  min-width: 0;
+  width: 100%;
+  gap: 4px;
+  padding: 8px;
+  border-radius: 12px;
+  font-size: 0.88rem;
+}
+
+.admin-sheet-session-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(11 43 38 / 48%);
+  backdrop-filter: blur(3px);
+}
+
+.admin-sheet-session-dialog {
+  display: grid;
+  gap: 14px;
+  width: min(980px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  border: 1px solid #c9deda;
+  border-radius: 20px;
+  padding: 18px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgb(7 39 34 / 24%);
+}
+
+.admin-sheet-session-dialog__head,
+.admin-sheet-session-dialog__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-sheet-session-dialog__head h2,
+.admin-sheet-session-dialog__head p {
+  margin: 0;
+}
+
+.admin-sheet-session-dialog__head h2 {
+  color: #173c35;
+  font-size: 1.2rem;
+}
+
+.admin-sheet-session-dialog__head p {
+  margin-top: 4px;
+  color: #607873;
+}
+
+.admin-sheet-session-dialog__head button,
+.admin-sheet-session-dialog__actions button {
+  width: auto;
+}
+
+.admin-sheet-session-policy-note,
+.admin-sheet-session-lock-note {
+  display: grid;
+  gap: 4px;
+  border-radius: 12px;
+  padding: 10px 12px;
+  line-height: 1.65;
+}
+
+.admin-sheet-session-policy-note {
+  border: 1px solid #cce6df;
+  color: #245d54;
+  background: #f1faf7;
+}
+
+.admin-sheet-session-lock-note {
+  border: 1px solid #ead8ae;
+  color: #72561a;
+  background: #fff9e9;
+}
+
+.admin-sheet-session-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.admin-sheet-session-edit-grid label {
+  display: grid;
+  gap: 5px;
+  color: #536d68;
+  font-size: 0.82rem;
+}
+
+.admin-sheet-session-edit-grid input,
+.admin-sheet-session-edit-grid select {
+  width: 100%;
+  min-height: 39px;
+  border: 1px solid #cddedb;
+  border-radius: 10px;
+  padding: 6px 9px;
+  color: #173c35;
+  background: #fff;
+  font: inherit;
+}
+
+.admin-sheet-session-edit-grid :disabled,
+.admin-sheet-session-edit-scores :disabled {
+  color: #6e817d;
+  background: #eef4f2;
+  cursor: not-allowed;
+}
+
+.admin-sheet-session-edit-date,
+.admin-sheet-session-edit-note {
+  grid-column: span 2;
+}
+
+.admin-sheet-session-edit-scores {
+  margin-top: 0;
+}
+
+.admin-sheet-session-score-total {
+  justify-self: end;
+  border-radius: 999px;
+  padding: 6px 11px;
+  font-weight: 700;
+}
+
+.admin-sheet-session-score-total.is-valid {
+  color: #156759;
+  background: #e8f7f2;
+}
+
+.admin-sheet-session-score-total.is-invalid {
+  color: #9a3f30;
+  background: #fff0ed;
+}
+
+.admin-sheet-session-dialog__actions {
+  justify-content: flex-end;
+}
+
+.admin-sheet-session-manager .admin-education-pagination {
+  justify-content: center;
+  margin-top: 0;
+}
+
+.admin-sheet-column-card {
+  flex: 0 0 min(310px, 86vw);
+  display: grid;
+  gap: 10px;
+  scroll-snap-align: start;
+  padding: 14px;
+}
+
+.admin-sheet-column-card.is-hidden {
+  opacity: 0.62;
+}
+
+.admin-sheet-column-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.admin-sheet-column-card label {
+  display: grid;
+  gap: 6px;
+  color: #536d68;
+  font-size: 0.88rem;
+}
+
+.admin-sheet-column-card__head label {
+  display: flex;
+  align-items: center;
+}
+
+.admin-sheet-column-card input:not([type='checkbox']) {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid #cddedb;
+  border-radius: 11px;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.admin-sheet-command-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  width: 100%;
+  margin-top: 14px;
+  padding: 9px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+  border: 1px solid #d7e7e4;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fbfefd, #f3f9f7);
+}
+
+.admin-sheet-command-group {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 7px;
+}
+
+.admin-sheet-command-group + .admin-sheet-command-group {
+  padding-inline-start: 8px;
+  border-inline-start: 1px solid #cddedb;
+}
+
+.admin-sheet-command-bar button,
+.admin-sheet-command-bar select {
+  flex: 0 0 auto;
+  min-height: 38px;
+  height: 38px;
+  white-space: nowrap;
+  font-size: 0.84rem;
+}
+
+.admin-sheet-command-bar button {
+  width: auto;
+  max-width: none;
+  padding: 8px 11px;
+}
+
+.admin-sheet-restore-select {
+  width: 150px;
+  min-height: 42px;
+  border: 1px solid #cddedb;
+  border-radius: 11px;
+  padding: 6px 9px;
+  font: inherit;
+  background: #fff;
+  color: #173c35;
+}
+
+.admin-sheet-restore-select:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1180px) {
+  .admin-sheet-assignment-grid {
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .admin-sheet-assignment-grid,
+  .admin-sheet-score-strip,
+  .admin-sheet-layout-toggle-strip {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .admin-sheet-session-manager-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-sheet-session-tools {
+    width: 100%;
+  }
+
+  .admin-sheet-session-edit-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .admin-sheet-assignment-grid,
+  .admin-sheet-score-strip,
+  .admin-sheet-layout-toggle-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-sheet-date-field {
+    grid-column: span 1;
+  }
+
+  .admin-sheet-session-tools {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-sheet-session-modal {
+    align-items: end;
+    padding: 8px;
+  }
+
+  .admin-sheet-session-dialog {
+    max-height: calc(100vh - 16px);
+    border-radius: 16px;
+    padding: 13px;
+  }
+
+  .admin-sheet-session-dialog__head,
+  .admin-sheet-session-dialog__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-sheet-session-edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-sheet-session-edit-date,
+  .admin-sheet-session-edit-note {
+    grid-column: span 1;
+  }
+
+  .admin-sheet-session-dialog__actions button {
+    width: 100%;
+  }
 }
 
 .admin-education-pagination {

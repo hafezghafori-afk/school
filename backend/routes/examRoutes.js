@@ -8,8 +8,11 @@ const {
   bootstrapExamSession,
   buildSessionSheetReport,
   createExamSession,
+  createExamSessionRevision,
   createExamType,
+  deleteExamSession,
   ensureExamSessionAccess,
+  getExamSessionManagementState,
   getSessionMarks,
   getSessionRosterStatus,
   initializeSessionRoster,
@@ -20,6 +23,7 @@ const {
   previewExamSessionBootstrap,
   recomputeSessionResults,
   saveExamSheetMarks,
+  updateExamSession,
   updateExamSessionStatus,
   upsertExamMark
 } = require('../services/examEngineService');
@@ -35,7 +39,10 @@ function getExamErrorStatus(code = '', fallback = 500) {
   if (code === 'exam_session_not_found') return 404;
   if (code === 'exam_session_forbidden') return 403;
   if (code === 'exam_teacher_assignment_forbidden') return 403;
+  if (code === 'exam_session_admin_approval_required') return 403;
+  if (code === 'exam_session_admin_creation_required') return 403;
   if (code === 'exam_session_duplicate_scope') return 409;
+  if (['exam_session_delete_blocked', 'exam_session_edit_locked', 'exam_session_structural_edit_blocked'].includes(code)) return 409;
   if (code.startsWith('exam_')) return 400;
   return fallback;
 }
@@ -102,9 +109,15 @@ router.get('/sessions', requireAuth, requireRole(['admin', 'instructor']), requi
   }
 });
 
-router.post('/sessions', requireAuth, requireRole(['admin', 'instructor']), requirePermission('manage_content'), async (req, res) => {
+router.post('/sessions', requireAuth, requireRole(['admin']), requirePermission('manage_content'), async (req, res) => {
   try {
-    const item = await createExamSession(req.body || {}, req.user?.id || null, req.user?.role || '');
+    // A plain create is always a draft. Activation must pass through the status
+    // transition (or bootstrap) so the roster is frozen atomically with it.
+    const item = await createExamSession(
+      { ...(req.body || {}), status: 'draft' },
+      req.user?.id || null,
+      req.user?.role || ''
+    );
     await logActivity({
       req,
       action: 'create_exam_session',
@@ -125,7 +138,7 @@ router.post('/sessions', requireAuth, requireRole(['admin', 'instructor']), requ
   }
 });
 
-router.post('/sessions/bootstrap-preview', requireAuth, requireRole(['admin', 'instructor']), requirePermission('manage_content'), async (req, res) => {
+router.post('/sessions/bootstrap-preview', requireAuth, requireRole(['admin']), requirePermission('manage_content'), async (req, res) => {
   try {
     const data = await previewExamSessionBootstrap(req.body || {}, { id: req.user?.id || null, role: req.user?.role || '' });
     res.json({ success: true, ...data });
@@ -136,7 +149,7 @@ router.post('/sessions/bootstrap-preview', requireAuth, requireRole(['admin', 'i
   }
 });
 
-router.post('/sessions/bootstrap', requireAuth, requireRole(['admin', 'instructor']), requirePermission('manage_content'), async (req, res) => {
+router.post('/sessions/bootstrap', requireAuth, requireRole(['admin']), requirePermission('manage_content'), async (req, res) => {
   try {
     const data = await bootstrapExamSession(req.body || {}, req.user?.id || null, req.user?.role || '');
     await logActivity({
@@ -156,6 +169,72 @@ router.post('/sessions/bootstrap', requireAuth, requireRole(['admin', 'instructo
     const code = String(error?.message || '');
     const status = getExamErrorStatus(code, 500);
     res.status(status).json({ success: false, message: code || 'Failed to bootstrap the exam session.' });
+  }
+});
+
+router.get('/sessions/:sessionId/management-state', requireAuth, requireRole(['admin']), requirePermission('manage_content'), async (req, res) => {
+  try {
+    await assertSessionAccess(req, req.params.sessionId);
+    const data = await getExamSessionManagementState(req.params.sessionId);
+    return res.json({ success: true, ...data });
+  } catch (error) {
+    const code = String(error?.message || '');
+    return res.status(getExamErrorStatus(code, 500)).json({ success: false, message: code || 'Failed to load exam session management state.' });
+  }
+});
+
+router.patch('/sessions/:sessionId', requireAuth, requireRole(['admin']), requirePermission('manage_content'), async (req, res) => {
+  try {
+    await assertSessionAccess(req, req.params.sessionId);
+    const data = await updateExamSession(
+      req.params.sessionId,
+      req.body || {},
+      req.user?.id || null,
+      req.user?.role || ''
+    );
+    await logActivity({
+      req,
+      action: 'update_exam_session',
+      targetType: 'ExamSession',
+      targetId: String(data?.item?.id || req.params.sessionId || ''),
+      meta: {
+        sessionId: String(data?.item?.id || req.params.sessionId || ''),
+        teacherAssignmentId: String(data?.item?.teacherAssignment?.id || req.body?.teacherAssignmentId || ''),
+        status: String(data?.item?.status || ''),
+        structuralEdit: Boolean(data?.management?.permissions?.canEditStructure)
+      }
+    });
+    return res.json({ success: true, ...data });
+  } catch (error) {
+    const code = String(error?.message || '');
+    return res.status(getExamErrorStatus(code, 500)).json({ success: false, message: code || 'Failed to update exam session.' });
+  }
+});
+
+router.delete('/sessions/:sessionId', requireAuth, requireRole(['admin']), requirePermission('manage_content'), async (req, res) => {
+  try {
+    await assertSessionAccess(req, req.params.sessionId);
+    const data = await deleteExamSession(
+      req.params.sessionId,
+      req.user?.id || null,
+      req.user?.role || ''
+    );
+    await logActivity({
+      req,
+      action: 'delete_exam_session_draft',
+      targetType: 'ExamSession',
+      targetId: String(data?.deletedId || req.params.sessionId || ''),
+      meta: {
+        sessionId: String(data?.deletedId || req.params.sessionId || ''),
+        title: String(data?.title || ''),
+        deletedMarks: Number(data?.summary?.deletedMarks || 0),
+        deletedResults: Number(data?.summary?.deletedResults || 0)
+      }
+    });
+    return res.json({ success: true, ...data });
+  } catch (error) {
+    const code = String(error?.message || '');
+    return res.status(getExamErrorStatus(code, 500)).json({ success: false, message: code || 'Failed to delete exam session.' });
   }
 });
 
@@ -279,10 +358,42 @@ router.post('/sessions/:sessionId/recompute-results', requireAuth, requireRole([
   }
 });
 
+router.post('/sessions/:sessionId/revisions', requireAuth, requireRole(['admin']), requirePermission('manage_content'), async (req, res) => {
+  try {
+    await assertSessionAccess(req, req.params.sessionId);
+    const data = await createExamSessionRevision(
+      req.params.sessionId,
+      req.body || {},
+      req.user?.id || null,
+      req.user?.role || ''
+    );
+    await logActivity({
+      req,
+      action: 'create_exam_session_revision',
+      targetType: 'ExamSession',
+      targetId: String(data?.item?.id || ''),
+      meta: {
+        supersedesSessionId: String(req.params.sessionId || ''),
+        version: Number(data?.summary?.version || 0),
+        clonedMarks: Number(data?.summary?.clonedMarks || 0)
+      }
+    });
+    res.status(201).json({ success: true, ...data });
+  } catch (error) {
+    const code = String(error?.message || '');
+    res.status(getExamErrorStatus(code, 500)).json({ success: false, message: code || 'Failed to create exam revision.' });
+  }
+});
+
 router.post('/sessions/:sessionId/status', requireAuth, requireRole(['admin', 'instructor']), requirePermission('manage_content'), async (req, res) => {
   try {
     await assertSessionAccess(req, req.params.sessionId);
-    const item = await updateExamSessionStatus(req.params.sessionId, req.body || {}, req.user?.id || null);
+    const item = await updateExamSessionStatus(
+      req.params.sessionId,
+      req.body || {},
+      req.user?.id || null,
+      req.user?.role || ''
+    );
     await logActivity({
       req,
       action: 'update_exam_session_status',
@@ -291,7 +402,8 @@ router.post('/sessions/:sessionId/status', requireAuth, requireRole(['admin', 'i
       meta: {
         sessionId: String(item?.id || req.params.sessionId || ''),
         status: String(item?.status || req.body?.status || ''),
-        reviewedByName: String(item?.reviewedByName || req.body?.reviewedByName || '')
+        reviewerUserId: String(item?.reviewerUserId || req.body?.reviewerUserId || ''),
+        reviewedByName: String(item?.reviewedByName || '')
       }
     });
     res.json({ success: true, item });

@@ -10,17 +10,37 @@ const examMarkSchema = new mongoose.Schema({
   studentMembershipId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentMembership', required: true, index: true },
   studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentCore', default: null, index: true },
   student: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+  membershipSnapshot: {
+    status: { type: String, default: '', trim: true },
+    statusLabel: { type: String, default: '', trim: true },
+    admissionType: { type: String, default: '', trim: true },
+    isCurrent: { type: Boolean, default: false },
+    enrolledAt: { type: Date, default: null },
+    endedAt: { type: Date, default: null },
+    endedReason: { type: String, default: '', trim: true },
+    capturedAt: { type: Date, default: null },
+    effectiveAt: { type: Date, default: null }
+  },
   markStatus: {
     type: String,
-    enum: ['recorded', 'absent', 'excused', 'pending'],
+    enum: ['recorded', 'absent', 'excused', 'pending', 'not_applicable'],
     default: 'recorded',
     index: true
   },
   scoreBreakdown: {
+    attendanceScore: { type: Number, default: null, min: 0 },
     writtenScore: { type: Number, default: null, min: 0 },
     oralScore: { type: Number, default: null, min: 0 },
     classActivityScore: { type: Number, default: null, min: 0 },
     homeworkScore: { type: Number, default: null, min: 0 }
+  },
+  attendanceSnapshot: {
+    presentRecords: { type: Number, default: 0, min: 0 },
+    totalRecords: { type: Number, default: 0, min: 0 },
+    attendanceRate: { type: Number, default: null, min: 0, max: 100 },
+    dateFrom: { type: Date, default: null },
+    dateTo: { type: Date, default: null },
+    computedAt: { type: Date, default: null }
   },
   obtainedMark: { type: Number, default: 0, min: 0 },
   totalMark: { type: Number, default: 100, min: 1 },
@@ -33,8 +53,11 @@ const examMarkSchema = new mongoose.Schema({
 
 examMarkSchema.pre('validate', function syncExamMarkState() {
   if (typeof this.note === 'string') this.note = this.note.trim();
+  if (this.membershipSnapshot && !this.membershipSnapshot.capturedAt) {
+    this.membershipSnapshot.capturedAt = new Date();
+  }
   const scoreBreakdown = this.scoreBreakdown || {};
-  const breakdownKeys = ['writtenScore', 'oralScore', 'classActivityScore', 'homeworkScore'];
+  const breakdownKeys = ['attendanceScore', 'writtenScore', 'oralScore', 'classActivityScore', 'homeworkScore'];
   const hasBreakdown = breakdownKeys.some((key) => scoreBreakdown[key] !== null && scoreBreakdown[key] !== undefined && scoreBreakdown[key] !== '');
   if (hasBreakdown) {
     this.obtainedMark = breakdownKeys.reduce((sum, key) => {

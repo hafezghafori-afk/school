@@ -9,6 +9,7 @@ const examDefaultMarkSchema = new mongoose.Schema({
   subjectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Subject', default: null, index: true },
   totalMark: { type: Number, default: 100, min: 1 },
   scoreComponents: {
+    attendanceMax: { type: Number, default: 0, min: 0 },
     writtenMax: { type: Number, default: 0, min: 0 },
     oralMax: { type: Number, default: 0, min: 0 },
     classActivityMax: { type: Number, default: 0, min: 0 },
@@ -24,7 +25,7 @@ const examDefaultMarkSchema = new mongoose.Schema({
 examDefaultMarkSchema.pre('validate', function syncExamDefaultMarkState() {
   if (typeof this.note === 'string') this.note = this.note.trim();
   const scoreComponents = this.scoreComponents || {};
-  const componentTotal = ['writtenMax', 'oralMax', 'classActivityMax', 'homeworkMax']
+  const componentTotal = ['attendanceMax', 'writtenMax', 'oralMax', 'classActivityMax', 'homeworkMax']
     .reduce((sum, key) => sum + Math.max(0, Number(scoreComponents[key] || 0)), 0);
   if (componentTotal > 0) {
     this.totalMark = componentTotal;

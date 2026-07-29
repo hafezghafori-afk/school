@@ -8,7 +8,7 @@ const attendanceSchema = new mongoose.Schema({
   classId: { type: mongoose.Schema.Types.ObjectId, ref: 'SchoolClass', default: null, index: true },
   academicYearId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicYear', default: null, index: true },
   date: { type: Date, required: true },
-  status: { type: String, enum: ['present', 'absent', 'sick', 'leave', 'late', 'excused'], required: true },
+  status: { type: String, enum: ['present', 'absent', 'sick', 'leave', 'late', 'excused', 'suspended'], required: true },
   note: { type: String, default: '' },
   markedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { timestamps: true });

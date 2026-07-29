@@ -15,18 +15,32 @@ const examSessionSchema = new mongoose.Schema({
   classId: { type: mongoose.Schema.Types.ObjectId, ref: 'SchoolClass', required: true, index: true },
   subjectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Subject', default: null, index: true },
   teacherAssignmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'TeacherAssignment', default: null, index: true },
+  sheetTemplateId: { type: mongoose.Schema.Types.ObjectId, ref: 'SheetTemplate', default: null, index: true },
+  sheetTemplateVersion: { type: Number, default: 1, min: 1 },
+  sheetTemplateSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
   defaultMarkId: { type: mongoose.Schema.Types.ObjectId, ref: 'ExamDefaultMark', default: null },
   rankingRuleId: { type: mongoose.Schema.Types.ObjectId, ref: 'RankingRule', default: null },
+  version: { type: Number, default: 1, min: 1 },
+  revisionRootSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'ExamSession', default: null, index: true },
+  supersedesSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'ExamSession', default: null, index: true },
+  replacedBySessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'ExamSession', default: null },
   status: {
     type: String,
-    enum: ['draft', 'active', 'closed', 'published', 'archived'],
+    enum: ['draft', 'active', 'submitted', 'approved', 'closed', 'published', 'archived'],
     default: 'draft',
     index: true
   },
   heldAt: { type: Date, default: null },
+  rosterFrozenAt: { type: Date, default: null },
+  rosterFrozenBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   publishedAt: { type: Date, default: null },
   monthLabel: { type: String, default: '' },
   reviewedByName: { type: String, default: '' },
+  reviewerUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+  submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  submittedAt: { type: Date, default: null },
+  approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  approvedAt: { type: Date, default: null },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   note: { type: String, default: '' }
 }, { timestamps: true });
@@ -47,5 +61,9 @@ examSessionSchema.pre('validate', function syncExamSessionState() {
 
 examSessionSchema.index({ code: 1 }, { unique: true, sparse: true });
 examSessionSchema.index({ academicYearId: 1, assessmentPeriodId: 1, classId: 1, subjectId: 1, examTypeId: 1, status: 1 });
+examSessionSchema.index(
+  { revisionRootSessionId: 1, version: 1 },
+  { unique: true, partialFilterExpression: { revisionRootSessionId: { $type: 'objectId' } } }
+);
 
 module.exports = mongoose.model('ExamSession', examSessionSchema);

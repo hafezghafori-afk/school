@@ -6,6 +6,8 @@ const Course = require('../models/Course');
 const User = require('../models/User');
 const StudentMembership = require('../models/StudentMembership');
 const { issueTransferAdmissionBill } = require('./transferAdmissionBillingService');
+const { reconcileClosedMembershipBilling } = require('./membershipBillingReconciliationService');
+const { ACTIVE_STUDENT_MEMBERSHIP_STATUSES } = require('../utils/studentMembershipStatus');
 
 const CURRENT_MEMBERSHIP_STATUSES = ['active', 'pending', 'suspended', 'transferred_in'];
 
@@ -178,7 +180,7 @@ const updateClassCurrentStudentCount = async (classId) => {
   const count = await StudentMembership.countDocuments({
     classId,
     isCurrent: true,
-    status: { $in: CURRENT_MEMBERSHIP_STATUSES }
+    status: { $in: ACTIVE_STUDENT_MEMBERSHIP_STATUSES }
   });
   await SchoolClass.updateOne({ _id: classId }, { $set: { currentStudents: count } });
   return count;
@@ -199,7 +201,10 @@ const assignStudentToClass = async ({ student, payload = {}, actorId = null, sou
     student: user._id,
     isCurrent: true,
     classId: { $ne: schoolClass._id }
-  }).select('classId');
+  }).select('_id classId');
+
+  const academicYearId = extractAcademicYearId(payload, schoolClass);
+  const joinedAt = extractEnrollmentDate(payload);
 
   await StudentMembership.updateMany(
     { student: user._id, isCurrent: true, classId: { $ne: schoolClass._id } },
@@ -213,9 +218,18 @@ const assignStudentToClass = async ({ student, payload = {}, actorId = null, sou
       }
     }
   );
-
-  const academicYearId = extractAcademicYearId(payload, schoolClass);
-  const joinedAt = extractEnrollmentDate(payload);
+  const billingReconciliation = await reconcileClosedMembershipBilling({
+    membershipIds: previousMemberships.map((item) => item._id),
+    effectiveAt: joinedAt,
+    actorId,
+    voidEffectivePeriod: ['correction', 'placement_correction'].includes(String(payload?.reassignmentMode || '').trim()),
+    reason: 'تغییر صنف شاگرد'
+  }).catch((error) => ({
+    error: String(error?.message || error || 'billing_reconciliation_failed'),
+    voidedBills: 0,
+    voidedOrders: 0,
+    reviewRequired: 0
+  }));
   const transferAssignment = isTransferAssignment({ student, payload });
 
   const membership = await StudentMembership.findOneAndUpdate(
@@ -272,6 +286,8 @@ const assignStudentToClass = async ({ student, payload = {}, actorId = null, sou
     membership.$locals = membership.$locals || {};
     membership.$locals.transferAdmissionBilling = admissionBilling;
   }
+  membership.$locals = membership.$locals || {};
+  membership.$locals.classReassignmentBilling = billingReconciliation;
 
   return membership;
 };
