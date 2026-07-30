@@ -395,6 +395,56 @@ function buildTableHtml(report = {}) {
   `;
 }
 
+function buildExamTableHtml(columns = [], rows = [], { blankWhenEmpty = false } = {}) {
+  const visibleColumns = (Array.isArray(columns) ? columns : []).filter((column) => column?.visible !== false && normalizeText(column?.key));
+  if (!visibleColumns.length) {
+    return '<div class="exam-sheet-empty">ستونی برای نمایش در تنظیمات شقه انتخاب نشده است.</div>';
+  }
+
+  const hasGroups = visibleColumns.some((column) => normalizeText(column?.group));
+  const topCells = [];
+  if (hasGroups) {
+    visibleColumns.forEach((column) => {
+      const group = normalizeText(column?.group);
+      const previous = topCells[topCells.length - 1];
+      if (group && previous?.group === group) {
+        previous.count += 1;
+      } else {
+        topCells.push({ group, count: 1, label: getColumnLabel(column), key: normalizeText(column?.key) });
+      }
+    });
+  }
+
+  const headerClass = (column) => {
+    const key = normalizeText(column?.key);
+    return ['studentName', 'fatherName'].includes(key) ? 'is-identity-heading' : 'is-compact-heading';
+  };
+  const head = hasGroups
+    ? `<tr>${topCells.map((cell) => cell.group
+      ? `<th colspan="${cell.count}" class="group-heading">${escapeHtml(cell.group)}</th>`
+      : `<th rowspan="2" class="${headerClass(cell)}">${escapeHtml(cell.label)}</th>`).join('')}</tr><tr>${visibleColumns
+        .filter((column) => normalizeText(column?.group))
+        .map((column) => `<th class="${headerClass(column)}">${escapeHtml(getColumnLabel(column))}</th>`).join('')}</tr>`
+    : `<tr>${visibleColumns.map((column) => `<th class="${headerClass(column)}">${escapeHtml(getColumnLabel(column))}</th>`).join('')}</tr>`;
+
+  const rowMarkup = (Array.isArray(rows) ? rows : []).map((row) => `<tr>${visibleColumns.map((column) => {
+    const key = normalizeText(column?.key);
+    const cellClass = ['studentName', 'fatherName'].includes(key) ? 'name-cell' : '';
+    return `<td class="${cellClass}">${escapeHtml(formatCellValue(row?.[key])) || '&nbsp;'}</td>`;
+  }).join('')}</tr>`).join('');
+  const body = rowMarkup || (blankWhenEmpty
+    ? `<tr class="blank-row">${visibleColumns.map(() => '<td>&nbsp;</td>').join('')}</tr>`
+    : `<tr><td colspan="${visibleColumns.length}">داده‌ای برای نمایش موجود نیست.</td></tr>`);
+
+  return `
+    <table class="exam-sheet-table">
+      <colgroup>${buildColumnMarkup(visibleColumns)}</colgroup>
+      <thead>${head}</thead>
+      <tbody>${body}</tbody>
+    </table>
+  `;
+}
+
 function buildSignatureBlocks(type, siteSettings = null, report = {}) {
   const firstRow = Array.isArray(report?.rows) && report.rows.length ? report.rows[0] : {};
   const schoolSignature = normalizeText(siteSettings?.signatureName) || 'مدیر مکتب';
@@ -444,7 +494,7 @@ function buildFormalNote(type = '', report = {}) {
   if (type === 'exam') {
     const firstRow = Array.isArray(report?.rows) && report.rows.length ? report.rows[0] : {};
     const summary = report?.summary || {};
-    return `قرار شرح فوق نمرات امتحان ${normalizeText(report?.report?.title || '') || 'ماهوار'} مضمون (${normalizeText(firstRow.subject || '')}) از صنف (${normalizeText(firstRow.classTitle || '')}) به تعداد دانه (${String(summary.totalStudents || 0)}) شاگرد ثبت گردیده است که شامل کامیاب (${String(summary.passedMarks || 0)})، مشروط (${String(summary.conditionalMarks || 0)})، معذور (${String(summary.excusedMarks || 0)}) و غایب (${String(summary.absentMarks || 0)}) می‌باشد. درج این شقه بدون قلم‌خوردگی و تراشیدگی صحیح است.`;
+    return `قرار شرح فوق نمرات امتحان ${normalizeText(report?.report?.title || '') || 'ماهوار'} مضمون (${normalizeText(firstRow.subject || '')}) از صنف (${normalizeText(firstRow.classTitle || '')}) به تعداد (${String(summary.totalStudents || 0)}) شاگرد ثبت گردیده است که شامل کامیاب (${String(summary.passedMarks || 0)})، مشروط (${String(summary.conditionalMarks || 0)})، معذور (${String(summary.excusedMarks || 0)}) و غایب (${String(summary.absentMarks || 0)}) می‌باشد. درج این شقه بدون قلم‌خوردگی و تراشیدگی صحیح است.`;
   }
   if (type === 'subjects') {
     return 'این شقه مضامین به اساس مضامین و تعیینات ثبت‌شده برای صنف ترتیب و جهت تایید ارایه گردید.';
@@ -740,6 +790,15 @@ function renderExamSheetPrintHtml({ report = {}, subtitle = '', metadata = [], s
       ['سال تعلیمی', metadataValue('سال تعلیمی')]
     ] : [])
   ];
+  const configuredColumns = (Array.isArray(report?.columns) ? report.columns : [])
+    .filter((column) => column?.visible !== false && normalizeText(column?.key));
+  const portraitSplitIndex = Math.ceil(rows.length / 2);
+  const examTableMarkup = resolvedLayout.orientation === 'portrait' && rows.length > 0
+    ? `<div class="exam-sheet-table-grid exam-sheet-table-grid--split">
+        <div class="exam-sheet-table-panel">${buildExamTableHtml(configuredColumns, rows.slice(0, portraitSplitIndex))}</div>
+        <div class="exam-sheet-table-panel">${buildExamTableHtml(configuredColumns, rows.slice(portraitSplitIndex), { blankWhenEmpty: true })}</div>
+      </div>`
+    : buildExamTableHtml(configuredColumns, rows);
   return `<!doctype html>
 <html lang="fa-AF" dir="rtl">
   <head>
@@ -771,6 +830,16 @@ function renderExamSheetPrintHtml({ report = {}, subtitle = '', metadata = [], s
       .exam-sheet-table th { font-weight: 700; background: #fff; }
       .exam-sheet-table .group-heading { font-size: 10.5pt; }
       .exam-sheet-table td.name-cell { text-align: right; padding-right: 4px; }
+      .exam-sheet-table-grid { width: 100%; }
+      .exam-sheet-table-grid--split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; direction: rtl; align-items: start; }
+      .exam-sheet-table-panel { min-width: 0; }
+      .exam-sheet-empty { border: 1px solid #111; padding: 12px; text-align: center; }
+      .exam-sheet-table-grid--split .exam-sheet-table th,
+      .exam-sheet-table-grid--split .exam-sheet-table td { padding: 1px; font-size: 7pt; line-height: 1.05; height: 17px; overflow: hidden; }
+      .exam-sheet-table-grid--split .exam-sheet-table .group-heading { height: 18px; font-size: 7.4pt; }
+      .exam-sheet-table-grid--split .exam-sheet-table .is-compact-heading { height: 48px; font-size: 6.6pt; line-height: 1; overflow-wrap: anywhere; }
+      .exam-sheet-table-grid--split .exam-sheet-table .is-identity-heading { font-size: 7.2pt; }
+      .exam-sheet-table-grid--split .exam-sheet-table td.name-cell { padding-inline: 2px; white-space: nowrap; text-overflow: ellipsis; }
       .exam-sheet-note { margin-top: 7px; font-size: 10.5pt; line-height: 1.45; text-align: right; }
       .exam-sheet-bottom-signatures { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 64px; margin-top: 12px; font-size: 10pt; page-break-inside: avoid; }
       .exam-sheet-bottom-signature { min-height: 48px; border-top: 1px solid #111; padding-top: 6px; text-align: center; }
@@ -874,59 +943,7 @@ function renderExamSheetPrintHtml({ report = {}, subtitle = '', metadata = [], s
         </div>
       </section>
 
-      <table class="exam-sheet-table">
-        <colgroup>
-          <col style="width:6%" />
-          <col style="width:15%" />
-          <col style="width:15%" />
-          <col style="width:7%" />
-          <col style="width:8%" />
-          <col style="width:8%" />
-          <col style="width:10%" />
-          <col style="width:9%" />
-          <col style="width:9%" />
-          <col style="width:12%" />
-          <col style="width:12%" />
-        </colgroup>
-        <thead>
-          <tr>
-            <th rowspan="2">شماره</th>
-            <th colspan="2" class="group-heading">شهرت متعلمین</th>
-            <th rowspan="2">حاضری</th>
-            <th rowspan="2">تحریری</th>
-            <th rowspan="2">تقریری</th>
-            <th rowspan="2">فعالیت صنفی</th>
-            <th rowspan="2">کارخانگی</th>
-            <th colspan="2" class="group-heading">مجموعه نمره</th>
-            <th rowspan="2">ملاحظات</th>
-          </tr>
-          <tr>
-            <th>نام</th>
-            <th>نام پدر</th>
-            <th>به عدد</th>
-            <th>به حروف</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.length ? rows.map((row) => `
-            <tr>
-              <td>${escapeHtml(formatCellValue(row.number))}</td>
-              <td class="name-cell">${escapeHtml(formatCellValue(row.studentName))}</td>
-              <td class="name-cell">${escapeHtml(formatCellValue(row.fatherName))}</td>
-              <td>${escapeHtml(formatCellValue(row.attendanceScore))}</td>
-              <td>${escapeHtml(formatCellValue(row.writtenScore))}</td>
-              <td>${escapeHtml(formatCellValue(row.oralScore))}</td>
-              <td>${escapeHtml(formatCellValue(row.classActivityScore))}</td>
-              <td>${escapeHtml(formatCellValue(row.homeworkScore))}</td>
-              <td>${escapeHtml(formatCellValue(row.obtainedMark))}</td>
-              <td>${escapeHtml(formatCellValue(row.totalInWords))}</td>
-              <td>${escapeHtml(formatCellValue(row.note))}</td>
-            </tr>
-          `).join('') : `
-            <tr><td colspan="11">داده‌ای برای نمایش موجود نیست.</td></tr>
-          `}
-        </tbody>
-      </table>
+      ${examTableMarkup}
 
       ${formalNote ? `<div class="exam-sheet-note">${escapeHtml(formalNote)}</div>` : ''}
 

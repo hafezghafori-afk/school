@@ -8,6 +8,7 @@ require('../models/TeacherAssignment');
 require('../models/StudentCore');
 require('../models/StudentMembership');
 require('../models/StudentProfile');
+require('../models/AfghanStudent');
 require('../models/User');
 
 const AcademicYear = require('../models/AcademicYear');
@@ -126,6 +127,17 @@ const EXAM_MARK_STATUS_LABELS = Object.freeze({
   not_applicable: 'شامل امتحان نبوده'
 });
 
+const OFFICIAL_MEMBERSHIP_NOTE_STATUSES = new Set([
+  'transferred',
+  'transferred_out',
+  'graduated',
+  'dropped',
+  'expelled',
+  'suspended',
+  'inactive',
+  'rejected'
+]);
+
 function sanitizeExamNote(value = '') {
   const note = normalizeText(value);
   return note === 'initialized_roster' ? '' : note;
@@ -140,19 +152,10 @@ function buildOfficialExamSheetNote(membershipSnapshot = {}, markStatus = '', no
   const membershipStatus = normalizeText(membershipSnapshot?.status);
   const membershipLabel = normalizeText(membershipSnapshot?.statusLabel)
     || getMembershipLifecycleLabel(membershipSnapshot);
-  const lifecycleOverrides = new Set([
-    'transferred',
-    'transferred_out',
-    'graduated',
-    'dropped',
-    'expelled',
-    'suspended',
-    'inactive',
-    'rejected'
-  ]);
-  const primary = lifecycleOverrides.has(membershipStatus)
+  const normalizedMarkStatus = normalizeText(markStatus);
+  const primary = OFFICIAL_MEMBERSHIP_NOTE_STATUSES.has(membershipStatus)
     ? membershipLabel
-    : (EXAM_MARK_STATUS_LABELS[normalizeText(markStatus)] || '');
+    : (normalizedMarkStatus === 'pending' ? '' : (EXAM_MARK_STATUS_LABELS[normalizedMarkStatus] || ''));
   const customNote = sanitizeExamNote(note);
   return [primary, customNote && customNote !== primary ? customNote : ''].filter(Boolean).join(' - ');
 }
@@ -447,6 +450,16 @@ function formatExamSession(doc) {
       && sessionPassMark === officialPolicy.passMark
       && getScoreComponentTotal(sessionComponents) === officialPolicy.totalMark
     : true;
+  const populatedTemplate = item.sheetTemplateId
+    && typeof item.sheetTemplateId === 'object'
+    && (
+      normalizeText(item.sheetTemplateId.title)
+      || Array.isArray(item.sheetTemplateId.columns)
+      || (item.sheetTemplateId.layout && typeof item.sheetTemplateId.layout === 'object')
+    )
+    ? item.sheetTemplateId
+    : null;
+  const effectiveTemplate = populatedTemplate || item.sheetTemplateSnapshot || item.sheetTemplateId;
   return {
     id: String(item._id),
     title: normalizeText(item.title),
@@ -481,11 +494,11 @@ function formatExamSession(doc) {
     schoolClass: formatSchoolClass(item.classId),
     subject: formatSubject(item.subjectId),
     teacherAssignment: formatTeacherAssignment(item.teacherAssignmentId),
-    sheetTemplate: buildSheetTemplateSnapshot(item.sheetTemplateSnapshot || item.sheetTemplateId),
+    sheetTemplate: buildSheetTemplateSnapshot(effectiveTemplate),
     sheetTemplateId: (item.sheetTemplateId?._id || item.sheetTemplateId)
       ? String(item.sheetTemplateId?._id || item.sheetTemplateId)
       : '',
-    sheetTemplateVersion: Math.max(1, Number(item.sheetTemplateVersion || item.sheetTemplateSnapshot?.version || 1)),
+    sheetTemplateVersion: Math.max(1, Number(populatedTemplate?.version || item.sheetTemplateVersion || item.sheetTemplateSnapshot?.version || 1)),
     defaultMark: formatDefaultMark(item.defaultMarkId),
     rankingRule: formatRankingRule(item.rankingRuleId),
     scoringPolicy: officialPolicy ? {
@@ -717,6 +730,7 @@ async function listEligibleMembershipsForSessionContext({ academicYearId = null,
     $or: [{ academicYearId }, { academicYear: academicYearId }]
   })
     .populate('studentId')
+    .populate('afghanStudentId', 'personalInfo.fatherName')
     .populate('student', 'name email')
     .populate({ path: 'classId', populate: { path: 'academicYearId' } })
     .populate('academicYearId')
@@ -1400,7 +1414,7 @@ async function initializeSessionRoster(sessionId, actorUserId = null, options = 
 
   const payloads = memberships
     .filter((membership) => !existingIds.has(String(membership._id)))
-    .filter(() => !(session.supersedesSessionId && existingMarks.length))
+    .filter(() => options.allowRevisionAdditions === true || !(session.supersedesSessionId && existingMarks.length))
     .map((membership) => {
       const membershipSnapshot = buildMembershipSnapshot(membership, effectiveAt, {
         suspended: suspendedMembershipIds.has(String(membership._id))
@@ -1454,6 +1468,24 @@ async function initializeSessionRoster(sessionId, actorUserId = null, options = 
     warnings: memberships.length ? [] : ['no_memberships_in_class_year'],
     recompute: recompute.summary
   };
+}
+
+async function syncSessionRoster(sessionId, actorUserId = null, actorRole = '') {
+  if (normalizeText(actorRole) !== 'admin') {
+    throw new Error('exam_session_admin_approval_required');
+  }
+  const session = await loadExamSessionWithRelations(sessionId);
+  if (!session) {
+    throw new Error('exam_session_not_found');
+  }
+  if (!['draft', 'active'].includes(normalizeSessionStatus(session.status, 'draft'))) {
+    throw new Error('exam_roster_sync_locked');
+  }
+
+  return initializeSessionRoster(session._id, actorUserId, {
+    allowFrozen: true,
+    allowRevisionAdditions: true
+  });
 }
 
 async function getSessionRosterStatus(sessionId) {
@@ -2424,7 +2456,7 @@ async function buildSessionSheetDataset(sessionId) {
 
   const [marks, results] = await Promise.all([
     ExamMark.find({ sessionId: session._id })
-      .populate({ path: 'studentMembershipId', populate: [{ path: 'studentId' }, { path: 'student', select: 'name email' }, { path: 'classId', populate: { path: 'academicYearId' } }, { path: 'academicYearId' }] })
+      .populate({ path: 'studentMembershipId', populate: [{ path: 'studentId' }, { path: 'afghanStudentId', select: 'personalInfo.fatherName' }, { path: 'student', select: 'name email' }, { path: 'classId', populate: { path: 'academicYearId' } }, { path: 'academicYearId' }] })
       .populate('student', 'name email')
       .sort({ createdAt: 1 }),
     ExamResult.find({ sessionId: session._id }).sort({ rank: 1, percentage: -1, createdAt: 1 })
@@ -2469,13 +2501,21 @@ async function buildSessionSheetDataset(sessionId) {
       const recorded = markStatus === 'recorded';
       const note = sanitizeExamNote(mark?.note);
       const membershipSnapshot = mark?.membershipSnapshot || result?.membershipSnapshot || null;
-      const membershipStatusLabel = normalizeText(membershipSnapshot?.statusLabel)
-        || getMembershipLifecycleLabel(membershipSnapshot || membership);
+      const currentMembershipStatus = normalizeText(membership?.status);
+      const officialMembershipState = OFFICIAL_MEMBERSHIP_NOTE_STATUSES.has(currentMembershipStatus)
+        ? membership
+        : (membershipSnapshot || membership);
+      const officialMembershipSnapshot = toPlain(officialMembershipState) || {};
+      const membershipStatusLabel = normalizeText(officialMembershipState?.statusLabel)
+        || getMembershipLifecycleLabel(officialMembershipState);
       const row = {
         rowNumber: index + 1,
         admissionNo: getStudentAdmissionNo(studentCore),
         studentName: getStudentDisplayName(studentCore, student),
-        fatherName: normalizeText(profile?.family?.fatherName),
+        fatherName: normalizeText(
+          profile?.family?.fatherName
+          || membership?.afghanStudentId?.personalInfo?.fatherName
+        ),
         attendanceScore: scoreBreakdown.attendanceScore,
         writtenScore: scoreBreakdown.writtenScore,
         oralScore: scoreBreakdown.oralScore,
@@ -2484,10 +2524,10 @@ async function buildSessionSheetDataset(sessionId) {
         obtainedMark: recorded ? Number(mark?.obtainedMark || 0) : 0,
         totalInWords: recorded ? numberToFaWords(mark?.obtainedMark || 0) : '',
         note,
-        membershipStatus: normalizeText(membershipSnapshot?.status) || normalizeText(membership.status),
+        membershipStatus: normalizeText(officialMembershipState?.status),
         membershipStatusLabel,
         officialNote: buildOfficialExamSheetNote(
-          { ...(membershipSnapshot || membership), statusLabel: membershipStatusLabel },
+          { ...officialMembershipSnapshot, statusLabel: membershipStatusLabel },
           markStatus,
           note
         ),
@@ -2694,6 +2734,7 @@ module.exports = {
   recomputeSessionResults,
   saveExamSheetMarks,
   seedExamReferenceData,
+  syncSessionRoster,
   updateExamSession,
   updateExamSessionStatus,
   upsertExamMark

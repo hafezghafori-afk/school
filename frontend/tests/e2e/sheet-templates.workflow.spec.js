@@ -197,6 +197,15 @@ async function mockSheetCenter(page, state = {}) {
       await route.fulfill(json({ success: true, item: { ...session, id: `${sessionId}-revision`, status: 'draft', version: 2 }, summary: { version: 2 } }));
       return;
     }
+    if (request.method() === 'POST' && action === 'sync-roster') {
+      state.rosterSyncSessionId = sessionId;
+      await route.fulfill(json({
+        success: true,
+        session,
+        summary: { eligibleMemberships: 12, totalMarks: 12, existingMarks: 2, createdMarks: 10 }
+      }));
+      return;
+    }
     await route.fallback();
   });
 }
@@ -337,9 +346,14 @@ test.describe('sheet templates workflow', () => {
     await assignmentCard.locator('select[name="subjectId"]').selectOption('subject-1');
     await assignmentCard.locator('select[name="reviewerUserId"]').selectOption('reviewer-1');
 
-    await assignmentCard.locator('input[name="attendanceMax"]').fill('4');
+    await expect(assignmentCard.locator('input[name="attendanceMax"]')).toHaveCount(0);
+    await assignmentCard.locator('input[name="classActivityMax"]').fill('4');
     await assignmentCard.locator('input[name="writtenMax"]').fill('21');
     await expect(assignmentCard.getByText(/مجموع نمره:.*۴۰.*از.*۴۰/)).toBeVisible();
+
+    await assignmentCard.getByRole('button', { name: 'ایجاد و تخصیص به استاد' }).click();
+    await expect(page.getByText('این موارد هنوز تکمیل نشده‌اند: تاریخ امتحان.')).toBeVisible();
+    expect(state.bootstrapPayload).toBeFalsy();
 
     await assignmentCard.locator('.afghan-date-year').fill('1405');
     await assignmentCard.locator('.afghan-date-month').selectOption('4');
@@ -361,10 +375,10 @@ test.describe('sheet templates workflow', () => {
       status: 'draft',
       initializeRoster: true,
       scoreComponents: {
-        attendanceMax: 4,
+        attendanceMax: 0,
         writtenMax: 21,
         oralMax: 10,
-        classActivityMax: 0,
+        classActivityMax: 4,
         homeworkMax: 5
       }
     });
@@ -438,7 +452,11 @@ test.describe('sheet templates workflow', () => {
     await page.goto('/admin-sheet-templates', { waitUntil: 'domcontentloaded' });
     const manager = page.locator('.admin-sheet-session-manager');
     await expect(manager.locator('.admin-sheet-session-card')).toHaveCount(1, { timeout: 20_000 });
-    await expect(manager.getByText(/معرفی صنف به استاد/)).toBeVisible();
+    await expect(manager.getByRole('link', { name: 'بازکردن معرفی صنف به استاد' })).toBeVisible();
+
+    await manager.getByRole('button', { name: 'همگام‌سازی شاگردان' }).click();
+    await expect.poll(() => state.rosterSyncSessionId).toBe('session-edit-1');
+    await expect(page.getByText('۱۰ شاگرد جدید به شقه اضافه شد؛ نمرات و ردیف‌های قبلی تغییر نکرد.')).toBeVisible();
 
     await manager.getByRole('button', { name: 'ویرایش' }).click();
     const dialog = page.getByRole('dialog', { name: 'ویرایش تخصیص شقه' });

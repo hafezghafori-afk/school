@@ -1460,6 +1460,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 6px;
   border-top: 1px solid #e4efed;
   padding-top: 7px;

@@ -353,6 +353,19 @@ async function registerTimetableBrowserRoutes(page, state) {
       return;
     }
 
+    if (pathname.startsWith('/api/curriculum-rules/class/')) {
+      const classId = pathname.split('/').pop();
+      const academicYearId = url.searchParams.get('academicYearId') || '';
+      const scopeKey = `${academicYearId}:${classId}`;
+      state.curriculumClassRequests = state.curriculumClassRequests || [];
+      state.curriculumClassRequests.push({ academicYearId, classId });
+      await route.fulfill(json({
+        success: true,
+        data: state.curriculumRulesByScope?.[scopeKey] ?? [state.curriculumRule]
+      }));
+      return;
+    }
+
     if (pathname.startsWith('/api/curriculum-rules/school/')) {
       await route.fulfill(json({ success: true, data: [state.curriculumRule] }));
       return;
@@ -610,5 +623,85 @@ test.describe('timetable browser workflow', () => {
 
     expect(state.unhandledRequests).toEqual([]);
     expect(pageErrors).toEqual([]);
+  });
+
+  test('assignment subject choices follow the selected academic year and class in create and edit forms', async ({ page }) => {
+    const fixtures = createFixtures();
+    const physics = { _id: 'subject-physics', name: 'Physics', code: 'PHY-10', category: 'core' };
+    const history = { _id: 'subject-history', name: 'History', code: 'HIS-10', category: 'core' };
+    const state = {
+      ...fixtures,
+      academicYears: [
+        fixtures.academicYear,
+        { _id: 'year-1404', title: '1404', status: 'closed' }
+      ],
+      subjects: [fixtures.subject, physics, history],
+      curriculumRulesByScope: {
+        'year-1405:class-10a': [fixtures.curriculumRule],
+        'year-1404:class-10a': [
+          {
+            ...fixtures.curriculumRule,
+            _id: 'rule-physics-1404',
+            academicYearId: { _id: 'year-1404', title: '1404' },
+            subjectId: physics
+          }
+        ]
+      },
+      curriculumClassRequests: [],
+      publishRequests: 0,
+      workloadRequests: 0,
+      unhandledRequests: []
+    };
+
+    await setupAdminWorkspace(page, {
+      permissions: ['manage_schedule', 'manage_content', 'manage_users']
+    });
+    await registerTimetableBrowserRoutes(page, state);
+    await page.goto('/timetable/teacher-timetable-configurations', { waitUntil: 'domcontentloaded' });
+
+    await page.getByRole('button', { name: 'افزودن تخصیص' }).click();
+    let form = page.locator('.tt-assignment-form');
+    let formSelects = form.getByRole('combobox');
+    await expect(formSelects).toHaveCount(4);
+
+    await formSelects.nth(1).click();
+    await page.locator('.ui-select-menu .ui-select-option').filter({ hasText: 'Class 10-A' }).click();
+    await expect.poll(() => state.curriculumClassRequests.some((item) => (
+      item.academicYearId === 'year-1405' && item.classId === 'class-10a'
+    ))).toBe(true);
+
+    await expect(formSelects.nth(2)).toBeEnabled();
+    await formSelects.nth(2).click();
+    let subjectOptions = page.locator('.ui-select-menu .ui-select-option');
+    await expect(subjectOptions).toHaveCount(1);
+    await expect(subjectOptions.first()).toContainText('Mathematics');
+    await expect(subjectOptions.filter({ hasText: 'Physics' })).toHaveCount(0);
+    await expect(subjectOptions.filter({ hasText: 'History' })).toHaveCount(0);
+    await subjectOptions.first().click();
+
+    await formSelects.nth(0).click();
+    await page.locator('.ui-select-menu .ui-select-option').filter({ hasText: '1404' }).click();
+    await expect.poll(() => state.curriculumClassRequests.some((item) => (
+      item.academicYearId === 'year-1404' && item.classId === 'class-10a'
+    ))).toBe(true);
+    await expect(formSelects.nth(2)).toBeEnabled();
+    await expect(formSelects.nth(2)).toContainText('انتخاب مضمون');
+    await formSelects.nth(2).click();
+    subjectOptions = page.locator('.ui-select-menu .ui-select-option');
+    await expect(subjectOptions).toHaveCount(1);
+    await expect(subjectOptions.first()).toContainText('Physics');
+    await expect(subjectOptions.filter({ hasText: 'Mathematics' })).toHaveCount(0);
+
+    await form.getByRole('button', { name: 'انصراف' }).click();
+    await page.locator('.tt-assignment-card-actions').getByRole('button', { name: 'ویرایش' }).click();
+    form = page.locator('.tt-assignment-form');
+    formSelects = form.getByRole('combobox');
+    await expect(formSelects.nth(2)).toBeEnabled();
+    await formSelects.nth(2).click();
+    subjectOptions = page.locator('.ui-select-menu .ui-select-option');
+    await expect(subjectOptions).toHaveCount(1);
+    await expect(subjectOptions.first()).toContainText('Mathematics');
+
+    expect(state.unhandledRequests).toEqual([]);
   });
 });
