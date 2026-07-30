@@ -61,6 +61,7 @@ examSessionSchema.pre('validate', function syncExamSessionState() {
 
 examSessionSchema.index({ code: 1 }, { unique: true, sparse: true });
 examSessionSchema.index({ academicYearId: 1, assessmentPeriodId: 1, classId: 1, subjectId: 1, examTypeId: 1, status: 1 });
+examSessionSchema.index({ sessionKind: 1, status: 1, submittedAt: 1, createdAt: 1 });
 examSessionSchema.index(
   { revisionRootSessionId: 1, version: 1 },
   { unique: true, partialFilterExpression: { revisionRootSessionId: { $type: 'objectId' } } }

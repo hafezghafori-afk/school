@@ -586,7 +586,7 @@ async function getAdminDashboard() {
 }
 
 async function getExamsDashboard() {
-  const [sessions, results] = await Promise.all([
+  const [sessions, results, submittedSessions] = await Promise.all([
     ExamSession.find({})
       .sort({ createdAt: -1 })
       .limit(18)
@@ -594,7 +594,8 @@ async function getExamsDashboard() {
     ExamResult.find({})
       .sort({ createdAt: -1 })
       .limit(500)
-      .select('sessionId resultStatus percentage createdAt')
+      .select('sessionId resultStatus percentage createdAt'),
+    ExamSession.countDocuments({ status: 'submitted' })
   ]);
 
   const activeSessions = sessions.filter((item) => item.status === 'active').length;
@@ -623,23 +624,28 @@ async function getExamsDashboard() {
     generatedAt: new Date().toISOString(),
     summary: {
       activeSessions,
+      submittedSessions,
       publishedSessions,
       draftSessions,
       averageMark,
       passRate,
       pendingResults
     },
-    statusTrend: ['draft', 'active', 'closed', 'published', 'archived'].map((status) => ({
+    statusTrend: ['draft', 'active', 'submitted', 'approved', 'closed', 'published', 'archived'].map((status) => ({
       label: status === 'draft'
         ? 'پیش‌نویس'
         : status === 'active'
           ? 'فعال'
+          : status === 'submitted'
+            ? 'منتظر تأیید'
+            : status === 'approved'
+              ? 'تأییدشده'
           : status === 'closed'
             ? 'بسته'
             : status === 'published'
               ? 'منتشرشده'
               : 'آرشیف',
-      value: sessions.filter((item) => item.status === status).length,
+      value: status === 'submitted' ? submittedSessions : sessions.filter((item) => item.status === status).length,
       meta: 'جلسه'
     })),
     recentSessions: [...recentSessionStatsMap.entries()]
@@ -664,6 +670,12 @@ async function getExamsDashboard() {
       }
     ],
     tasks: [
+      {
+        id: 'exam-submitted-sessions',
+        label: 'شقه‌های ارسال‌شده برای تأیید',
+        meta: `${submittedSessions.toLocaleString('fa-AF-u-ca-persian')} شقه`,
+        tone: submittedSessions ? 'rose' : 'slate'
+      },
       {
         id: 'exam-active-sessions',
         label: 'جلسه‌های فعال',

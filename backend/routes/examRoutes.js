@@ -103,8 +103,16 @@ router.get('/sessions', requireAuth, requireRole(['admin', 'instructor']), requi
     } else if (String(req.query?.mine || '').toLowerCase() === 'true') {
       filters.teacherUserId = req.user?.id || null;
     }
-    const items = await listExamSessions(filters);
-    res.json({ success: true, items });
+    const result = await listExamSessions(filters);
+    if (Array.isArray(result)) {
+      return res.json({ success: true, items: result });
+    }
+    return res.json({
+      success: true,
+      items: result?.items || [],
+      pagination: result?.pagination || null,
+      counts: result?.counts || {}
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to load exam sessions.' });
   }

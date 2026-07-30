@@ -51,6 +51,7 @@ export default function AdminExamsDashboard() {
 
   const summary = dashboard?.summary || {
     activeSessions: 0,
+    submittedSessions: 0,
     publishedSessions: 0,
     draftSessions: 0,
     averageMark: 0,
@@ -85,10 +86,10 @@ export default function AdminExamsDashboard() {
     />,
     <KpiRingCard
       key="pending"
-      label="نتیجه‌های در انتظار"
-      value={toFaNumber(summary.pendingResults)}
-      hint="نیازمند پیگیری"
-      progress={Math.min(100, Number(summary.pendingResults || 0) * 10)}
+      label="شقه‌های منتظر تأیید"
+      value={toFaNumber(summary.submittedSessions)}
+      hint={`${toFaNumber(summary.pendingResults)} نتیجه در انتظار`}
+      progress={Math.min(100, Number(summary.submittedSessions || 0) * 20)}
       tone="rose"
     />
   ]), [summary]);
@@ -96,6 +97,7 @@ export default function AdminExamsDashboard() {
   const quickActions = (
     <QuickActionRail
       actions={[
+        { to: '/grade-manager?status=submitted', label: 'تأیید شقه‌های استاد', caption: 'بررسی شقه‌های ارسال‌شده و ثبت تأیید مدیر', tone: 'rose' },
         { to: '/admin-sheet-templates', label: 'مرکز مدیریت شقه‌ها', caption: 'تنظیم فارمت و تخصیص شقه به استاد', tone: 'teal' },
         { to: '/quiz-builder', label: 'ایجاد کوییز', caption: 'سوالات تمرینی و آزمون کوتاه', tone: 'copper' },
         { to: '/admin-promotions', label: 'مرکز ارتقای صنف', caption: 'تصمیم بر اساس شقه‌ها', tone: 'slate' },
@@ -125,6 +127,7 @@ export default function AdminExamsDashboard() {
         </div>
       </div>
       <div className="dash-hero-actions">
+        <Link className="dash-btn" to="/grade-manager?status=submitted">تأیید شقه‌های استاد</Link>
         <Link className="dash-btn" to="/admin-sheet-templates">مرکز مدیریت شقه‌ها</Link>
         <Link className="dash-btn ghost" to="/quiz-builder">ایجاد کوییز</Link>
       </div>
@@ -145,6 +148,7 @@ export default function AdminExamsDashboard() {
         <div className="dashboard-summary-card__quick">
           <QuickActionRail
             actions={[
+              { to: '/grade-manager?status=submitted', label: 'صف تأیید شقه‌ها', caption: 'شقه‌های ارسال‌شده از حساب استاد', tone: 'rose' },
               { to: '/admin-sheet-templates', label: 'شقه امتحان رسمی', caption: 'تنظیم فارمت و تخصیص به استاد', tone: 'teal' },
               { to: '/quiz-builder', label: 'کوییز / آزمون کوتاه', caption: 'ساخت سوال و گزینه‌ها؛ شامل ارتقا نیست', tone: 'copper' },
               { to: '/admin-result-tables', label: 'جدول نتایج', caption: 'جدول و گزارش از سشن‌های رسمی', tone: 'mint' },
@@ -204,8 +208,8 @@ export default function AdminExamsDashboard() {
             meta: item.tone === 'rose' ? 'فوری' : item.tone === 'copper' ? 'نیازمند پیگیری' : 'آماده'
           }))}
           emptyText="کار باز مهمی برای امتحانات دیده نشد."
-          actionLabel="باز کردن شقه نمرات"
-          actionTo="/grade-manager"
+          actionLabel="بررسی و تأیید شقه‌ها"
+          actionTo="/grade-manager?status=submitted"
         />
       </div>
 

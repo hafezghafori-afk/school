@@ -10,6 +10,7 @@ require('../models/StudentMembership');
 require('../models/StudentProfile');
 require('../models/AfghanStudent');
 require('../models/User');
+require('../models/Enrollment');
 
 const AcademicYear = require('../models/AcademicYear');
 const AcademicTerm = require('../models/AcademicTerm');
@@ -20,6 +21,7 @@ const StudentCore = require('../models/StudentCore');
 const StudentMembership = require('../models/StudentMembership');
 const StudentSuspension = require('../models/StudentSuspension');
 const StudentProfile = require('../models/StudentProfile');
+const Enrollment = require('../models/Enrollment');
 const User = require('../models/User');
 const ExamType = require('../models/ExamType');
 const ExamSession = require('../models/ExamSession');
@@ -49,6 +51,10 @@ function toPlain(doc) {
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function escapeRegex(value = '') {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function normalizeNullableId(value) {
@@ -170,6 +176,25 @@ function getScoreComponents(source = {}) {
   }, {});
 }
 
+function normalizeOfficialScoreComponents(examType = null, source = {}) {
+  const components = getScoreComponents(source);
+  if (!getOfficialExamPolicy(examType)) return components;
+  const attendanceMax = Math.max(0, Number(components.attendanceMax || 0));
+  if (attendanceMax <= 0) return components;
+  return {
+    ...components,
+    attendanceMax: 0,
+    classActivityMax: Math.max(0, Number(components.classActivityMax || 0)) + attendanceMax
+  };
+}
+
+function getSessionScoreComponents(session = {}) {
+  return normalizeOfficialScoreComponents(
+    session?.examTypeId || session?.examType,
+    session?.defaultMarkId || session?.defaultMark || session
+  );
+}
+
 function getScoreComponentTotal(source = {}) {
   return SCORE_COMPONENT_FIELDS.reduce((sum, item) => sum + Math.max(0, Number(source?.[item.maxKey] || 0)), 0);
 }
@@ -195,6 +220,27 @@ function getScoreBreakdown(source = {}) {
     acc[item.scoreKey] = value === null || value === undefined || value === '' ? null : Number(value);
     return acc;
   }, {});
+}
+
+function getSessionScoreBreakdown(session = {}, source = {}) {
+  const breakdown = getScoreBreakdown(source);
+  if (!getOfficialExamPolicy(session?.examTypeId || session?.examType)) return breakdown;
+  const storedComponents = getScoreComponents(session?.defaultMarkId || session?.defaultMark || {});
+  if (Number(storedComponents.attendanceMax || 0) <= 0) return breakdown;
+  const attendanceScore = breakdown.attendanceScore;
+  if (attendanceScore === null || attendanceScore === undefined) {
+    return { ...breakdown, attendanceScore: null };
+  }
+  return {
+    ...breakdown,
+    attendanceScore: null,
+    classActivityScore: Number(breakdown.classActivityScore || 0) + Number(attendanceScore || 0)
+  };
+}
+
+function isCurrentGradeableMembership(membership = {}) {
+  const status = normalizeText(membership?.status);
+  return membership?.isCurrent !== false && ['active', 'transferred_in'].includes(status);
 }
 
 function buildScoreBreakdownFromPayload(payload = {}, maxes = {}) {
@@ -499,7 +545,10 @@ function formatExamSession(doc) {
       ? String(item.sheetTemplateId?._id || item.sheetTemplateId)
       : '',
     sheetTemplateVersion: Math.max(1, Number(populatedTemplate?.version || item.sheetTemplateVersion || item.sheetTemplateSnapshot?.version || 1)),
-    defaultMark: formatDefaultMark(item.defaultMarkId),
+    defaultMark: item.defaultMarkId ? {
+      ...formatDefaultMark(item.defaultMarkId),
+      scoreComponents: sessionComponents
+    } : null,
     rankingRule: formatRankingRule(item.rankingRuleId),
     scoringPolicy: officialPolicy ? {
       version: OFFICIAL_RESULT_POLICY_VERSION,
@@ -555,9 +604,9 @@ function formatMembership(doc) {
   };
 }
 
-function buildMembershipSnapshot(membership = {}, effectiveAt = null, { suspended = false } = {}) {
+function buildMembershipSnapshot(membership = {}, effectiveAt = null, { suspended = false, forceCurrent = false } = {}) {
   const date = toDateOrNull(effectiveAt);
-  const effective = isMembershipEffectiveAt(membership, date);
+  const effective = forceCurrent || isMembershipEffectiveAt(membership, date);
   const endedAt = toDateOrNull(membership.endedAt || membership.leftAt);
   let status = normalizeText(membership.status);
   if (suspended) {
@@ -584,10 +633,10 @@ function buildMembershipSnapshot(membership = {}, effectiveAt = null, { suspende
   return snapshot;
 }
 
-function formatExamMark(doc) {
+function formatExamMark(doc, session = null) {
   const item = toPlain(doc);
   if (!item) return null;
-  const scoreBreakdown = getScoreBreakdown(item);
+  const scoreBreakdown = session ? getSessionScoreBreakdown(session, item) : getScoreBreakdown(item);
   return {
     id: String(item._id),
     markStatus: normalizeText(item.markStatus),
@@ -613,7 +662,7 @@ function formatExamResult(doc) {
   return {
     id: String(item._id),
     markStatus: normalizeText(item.markStatus),
-    scoreBreakdown: getScoreBreakdown(item),
+    scoreBreakdown: getSessionScoreBreakdown(item.sessionId, item),
     obtainedMark: Number(item.obtainedMark || 0),
     totalMark: Number(item.totalMark || 0),
     percentage: Number(item.percentage || 0),
@@ -1194,7 +1243,10 @@ async function resolveSessionReferences(payload = {}, actor = null) {
 function getSessionScoringDefaults(examType, payload = {}) {
   const officialPolicy = getOfficialExamPolicy(examType);
   if (officialPolicy) {
-    const scoreComponents = buildScoreComponentsFromPayload(payload, officialPolicy.scoreComponents);
+    const scoreComponents = normalizeOfficialScoreComponents(
+      examType,
+      buildScoreComponentsFromPayload(payload, officialPolicy.scoreComponents)
+    );
     if (getScoreComponentTotal(scoreComponents) !== Number(officialPolicy.totalMark)) {
       throw new Error('exam_score_component_total_mismatch');
     }
@@ -1417,7 +1469,8 @@ async function initializeSessionRoster(sessionId, actorUserId = null, options = 
     .filter(() => options.allowRevisionAdditions === true || !(session.supersedesSessionId && existingMarks.length))
     .map((membership) => {
       const membershipSnapshot = buildMembershipSnapshot(membership, effectiveAt, {
-        suspended: suspendedMembershipIds.has(String(membership._id))
+        suspended: suspendedMembershipIds.has(String(membership._id)),
+        forceCurrent: isCurrentGradeableMembership(membership)
       });
       return {
         sessionId: session._id,
@@ -1531,8 +1584,12 @@ async function bootstrapExamSession(payload = {}, actorUserId = null, actorRole 
 }
 
 async function listExamSessions(filters = {}) {
-
   const query = {};
+  const requestedPagination = filters.page !== undefined
+    || filters.limit !== undefined
+    || normalizeText(filters.paginated).toLowerCase() === 'true';
+  const requestedPage = Math.max(1, Number.parseInt(filters.page, 10) || 1);
+  const requestedLimit = Math.min(100, Math.max(5, Number.parseInt(filters.limit, 10) || 20));
   if (normalizeNullableId(filters.academicYearId)) query.academicYearId = filters.academicYearId;
   if (normalizeNullableId(filters.assessmentPeriodId)) query.assessmentPeriodId = filters.assessmentPeriodId;
   if (normalizeNullableId(filters.classId)) query.classId = filters.classId;
@@ -1543,24 +1600,108 @@ async function listExamSessions(filters = {}) {
   if (normalizeText(filters.monthLabel)) query.monthLabel = normalizeText(filters.monthLabel);
   if (normalizeText(filters.sessionKind)) query.sessionKind = normalizeSessionKind(filters.sessionKind);
 
+  const submittedFrom = normalizeText(filters.submittedFrom);
+  const submittedTo = normalizeText(filters.submittedTo);
+  if (submittedFrom || submittedTo) {
+    const submittedAt = {};
+    const fromDate = submittedFrom ? new Date(`${submittedFrom}T00:00:00.000Z`) : null;
+    const toDate = submittedTo ? new Date(`${submittedTo}T00:00:00.000Z`) : null;
+    if (fromDate && !Number.isNaN(fromDate.getTime())) submittedAt.$gte = fromDate;
+    if (toDate && !Number.isNaN(toDate.getTime())) {
+      toDate.setUTCDate(toDate.getUTCDate() + 1);
+      submittedAt.$lt = toDate;
+    }
+    if (Object.keys(submittedAt).length) query.submittedAt = submittedAt;
+  }
+
   if (normalizeNullableId(filters.teacherUserId)) {
     const assignmentIds = await TeacherAssignment.find({ teacherUserId: filters.teacherUserId }).distinct('_id');
     if (!assignmentIds.length) {
-      return [];
+      return requestedPagination
+        ? {
+            items: [],
+            pagination: { page: 1, limit: requestedLimit, total: 0, pages: 0, hasNext: false, hasPrevious: false },
+            counts: { submitted: 0 }
+          }
+        : [];
     }
 
     if (query.teacherAssignmentId) {
       const requestedAssignmentId = String(query.teacherAssignmentId);
       const isOwnedAssignment = assignmentIds.some((item) => String(item) === requestedAssignmentId);
       if (!isOwnedAssignment) {
-        return [];
+        return requestedPagination
+          ? {
+              items: [],
+              pagination: { page: 1, limit: requestedLimit, total: 0, pages: 0, hasNext: false, hasPrevious: false },
+              counts: { submitted: 0 }
+            }
+          : [];
       }
     } else {
       query.teacherAssignmentId = { $in: assignmentIds };
     }
   }
 
-  const items = await ExamSession.find(query)
+  const searchText = normalizeText(filters.q);
+  if (searchText) {
+    const searchPattern = new RegExp(escapeRegex(searchText), 'i');
+    const [yearIds, periodIds, classIds, subjectIds, examTypeIds, teacherUserIds] = await Promise.all([
+      AcademicYear.find({ $or: [{ title: searchPattern }, { code: searchPattern }] }).distinct('_id'),
+      AcademicTerm.find({ $or: [{ title: searchPattern }, { code: searchPattern }] }).distinct('_id'),
+      SchoolClass.find({ $or: [{ title: searchPattern }, { code: searchPattern }] }).distinct('_id'),
+      Subject.find({ $or: [{ name: searchPattern }, { code: searchPattern }] }).distinct('_id'),
+      ExamType.find({ $or: [{ title: searchPattern }, { code: searchPattern }] }).distinct('_id'),
+      User.find({ $or: [{ name: searchPattern }, { email: searchPattern }] }).distinct('_id')
+    ]);
+    const matchingAssignmentIds = teacherUserIds.length
+      ? await TeacherAssignment.find({ teacherUserId: { $in: teacherUserIds } }).distinct('_id')
+      : [];
+    query.$or = [
+      { title: searchPattern },
+      { code: searchPattern },
+      { monthLabel: searchPattern },
+      ...(yearIds.length ? [{ academicYearId: { $in: yearIds } }] : []),
+      ...(periodIds.length ? [{ assessmentPeriodId: { $in: periodIds } }] : []),
+      ...(classIds.length ? [{ classId: { $in: classIds } }] : []),
+      ...(subjectIds.length ? [{ subjectId: { $in: subjectIds } }] : []),
+      ...(examTypeIds.length ? [{ examTypeId: { $in: examTypeIds } }] : []),
+      ...(matchingAssignmentIds.length ? [{ teacherAssignmentId: { $in: matchingAssignmentIds } }] : [])
+    ];
+  }
+
+  const sortMode = normalizeText(filters.sort).toLowerCase();
+  const sort = sortMode === 'newest'
+    ? { submittedAt: -1, createdAt: -1 }
+    : sortMode === 'exam_date_asc'
+      ? { heldAt: 1, createdAt: 1 }
+      : sortMode === 'exam_date_desc'
+        ? { heldAt: -1, createdAt: -1 }
+        : normalizeText(filters.status) === 'submitted'
+          ? { submittedAt: 1, createdAt: 1 }
+          : { heldAt: -1, createdAt: -1, monthLabel: -1 };
+
+  let pagination = null;
+  if (requestedPagination) {
+    const submittedQuery = { ...query, status: 'submitted' };
+    const total = await ExamSession.countDocuments(query);
+    const submittedTotal = normalizeText(filters.status) === 'submitted'
+      ? total
+      : await ExamSession.countDocuments(submittedQuery);
+    const pages = total > 0 ? Math.ceil(total / requestedLimit) : 0;
+    const page = pages > 0 ? Math.min(requestedPage, pages) : 1;
+    pagination = {
+      page,
+      limit: requestedLimit,
+      total,
+      pages,
+      hasNext: page < pages,
+      hasPrevious: page > 1,
+      submittedTotal
+    };
+  }
+
+  let itemsQuery = ExamSession.find(query)
     .populate('examTypeId')
     .populate('academicYearId')
     .populate({ path: 'assessmentPeriodId', populate: { path: 'academicYearId' } })
@@ -1570,7 +1711,23 @@ async function listExamSessions(filters = {}) {
     .populate('sheetTemplateId')
     .populate('defaultMarkId')
     .populate('rankingRuleId')
-    .sort({ heldAt: -1, createdAt: -1, monthLabel: -1 });
+    .sort(sort);
+
+  if (pagination) {
+    itemsQuery = itemsQuery
+      .skip((pagination.page - 1) * pagination.limit)
+      .limit(pagination.limit);
+  }
+
+  const items = await itemsQuery;
+
+  if (pagination) {
+    return {
+      items: items.map(formatExamSession),
+      pagination,
+      counts: { submitted: pagination.submittedTotal }
+    };
+  }
 
   return items.map(formatExamSession);
 }
@@ -1958,7 +2115,7 @@ async function recomputeSessionResults(sessionId, options = {}) {
         student: mark.student || mark.studentMembershipId?.student || null,
         membershipSnapshot: mark.membershipSnapshot || buildMembershipSnapshot(mark.studentMembershipId || {}, session.heldAt),
         markStatus,
-        scoreBreakdown: getScoreBreakdown(mark),
+        scoreBreakdown: getSessionScoreBreakdown(session, mark),
         obtainedMark: mark.obtainedMark,
         totalMark: mark.totalMark,
         percentage,
@@ -2046,15 +2203,19 @@ async function persistExamMark({ session, membership, payload = {}, actorUserId 
   if (session.rosterFrozenAt && !existingMark) {
     throw new Error('exam_membership_not_in_frozen_roster');
   }
-  const membershipSnapshot = normalizeText(existingMark?.membershipSnapshot?.status)
+  const refreshCurrentSnapshot = isCurrentGradeableMembership(membership)
+    && existingMark?.membershipSnapshot?.isCurrent === false;
+  const membershipSnapshot = normalizeText(existingMark?.membershipSnapshot?.status) && !refreshCurrentSnapshot
     ? existingMark.membershipSnapshot
-    : buildMembershipSnapshot(membership, session.heldAt);
+    : buildMembershipSnapshot(membership, session.heldAt, {
+        forceCurrent: isCurrentGradeableMembership(membership)
+      });
   const requestedMarkStatus = normalizeMarkStatus(payload.markStatus, 'recorded');
   const markStatus = membershipSnapshot.status === 'suspended'
     ? 'excused'
     : (membershipSnapshot.isCurrent === false ? 'not_applicable' : requestedMarkStatus);
-  const scoreComponents = getScoreComponents(session.defaultMarkId);
-  const hasBreakdown = isBreakdownConfigured(session.defaultMarkId);
+  const scoreComponents = getSessionScoreComponents(session);
+  const hasBreakdown = getScoreComponentTotal(scoreComponents) > 0;
   const totalMark = getScoreComponentTotal(scoreComponents)
     || clampNumber(payload.totalMark, 1, 1000, Number(session.defaultMarkId?.totalMark || session.examTypeId?.defaultTotalMark || 100));
   const scoreBreakdown = markStatus === 'recorded' && hasBreakdown
@@ -2127,7 +2288,7 @@ async function upsertExamMark(payload = {}, actorUserId = null) {
     .populate('subjectId');
 
   return {
-    mark: formatExamMark(mark),
+    mark: formatExamMark(mark, session),
     result: formatExamResult(result),
     summary: recompute.summary
   };
@@ -2182,7 +2343,7 @@ async function saveExamSheetMarks(sessionId, payload = {}, actorUserId = null) {
 }
 
 async function refreshSessionAttendanceScores(session, actorUserId = null) {
-  const scoreComponents = getScoreComponents(session.defaultMarkId);
+  const scoreComponents = getSessionScoreComponents(session);
   const attendanceMax = Number(scoreComponents.attendanceMax || 0);
   if (attendanceMax <= 0) return { updated: 0, missing: 0 };
 
@@ -2448,6 +2609,71 @@ async function updateExamSessionStatus(sessionId, payload = {}, actorUserId = nu
   return formatExamSession(populated);
 }
 
+async function repairEditableRosterPlaceholders(session = {}, marks = [], results = []) {
+  if (!['draft', 'active'].includes(normalizeText(session?.status))) return 0;
+  const resultMap = new Map(results.map((item) => [String(item.studentMembershipId || ''), item]));
+  const repairs = marks.filter((mark) => {
+    const membership = mark.studentMembershipId;
+    return normalizeText(mark.markStatus) === 'not_applicable'
+      && normalizeText(mark.note) === 'initialized_roster'
+      && isCurrentGradeableMembership(membership);
+  });
+
+  await Promise.all(repairs.map(async (mark) => {
+    const membership = mark.studentMembershipId;
+    const membershipId = String(membership?._id || membership || '');
+    const membershipSnapshot = buildMembershipSnapshot(membership, session.heldAt, { forceCurrent: true });
+    const clearedBreakdown = emptyScoreBreakdown();
+    await Promise.all([
+      ExamMark.updateOne(
+        { _id: mark._id, markStatus: 'not_applicable', note: 'initialized_roster' },
+        {
+          $set: {
+            membershipSnapshot,
+            markStatus: 'pending',
+            scoreBreakdown: clearedBreakdown,
+            obtainedMark: 0,
+            percentage: 0
+          }
+        }
+      ),
+      ExamResult.updateOne(
+        { sessionId: session._id, studentMembershipId: membership?._id || membership },
+        {
+          $set: {
+            membershipSnapshot,
+            markStatus: 'pending',
+            scoreBreakdown: clearedBreakdown,
+            obtainedMark: 0,
+            percentage: 0,
+            averageMark: 0,
+            resultStatus: 'pending',
+            rank: null
+          }
+        }
+      )
+    ]);
+    mark.membershipSnapshot = membershipSnapshot;
+    mark.markStatus = 'pending';
+    mark.scoreBreakdown = clearedBreakdown;
+    mark.obtainedMark = 0;
+    mark.percentage = 0;
+    const result = resultMap.get(membershipId);
+    if (result) {
+      result.membershipSnapshot = membershipSnapshot;
+      result.markStatus = 'pending';
+      result.scoreBreakdown = clearedBreakdown;
+      result.obtainedMark = 0;
+      result.percentage = 0;
+      result.averageMark = 0;
+      result.resultStatus = 'pending';
+      result.rank = null;
+    }
+  }));
+
+  return repairs.length;
+}
+
 async function buildSessionSheetDataset(sessionId) {
   const session = await loadExamSessionWithRelations(sessionId);
   if (!session) {
@@ -2461,6 +2687,7 @@ async function buildSessionSheetDataset(sessionId) {
       .sort({ createdAt: 1 }),
     ExamResult.find({ sessionId: session._id }).sort({ rank: 1, percentage: -1, createdAt: 1 })
   ]);
+  await repairEditableRosterPlaceholders(session, marks, results);
 
   // ExamMark is the immutable roster snapshot. Lifecycle changes after submission
   // must never remove a pupil from an already-created subject sheet.
@@ -2476,12 +2703,40 @@ async function buildSessionSheetDataset(sessionId) {
   const studentIds = memberships
     .map((item) => item.studentId?._id || item.studentId || null)
     .filter(Boolean);
-  const profiles = await StudentProfile.find({ studentId: { $in: studentIds } }).lean();
+  const userIds = memberships
+    .map((item) => item.student?._id || item.student || null)
+    .filter(Boolean);
+  const afghanStudentIds = memberships
+    .map((item) => item.afghanStudentId?._id || item.afghanStudentId || null)
+    .filter(Boolean);
+  const enrollmentIdentityFilters = [
+    ...(userIds.length ? [{ linkedUserId: { $in: userIds } }] : []),
+    ...(afghanStudentIds.length ? [{ linkedStudentId: { $in: afghanStudentIds } }] : [])
+  ];
+  const [profiles, enrollments] = await Promise.all([
+    StudentProfile.find({ studentId: { $in: studentIds } }).lean(),
+    Enrollment.find(enrollmentIdentityFilters.length
+      ? { status: 'approved', $or: enrollmentIdentityFilters }
+      : { _id: null })
+      .sort({ approvedAt: -1, createdAt: -1 })
+      .select('linkedUserId linkedStudentId fatherName')
+      .lean()
+  ]);
 
   const markMap = new Map(marks.map((item) => [String(item.studentMembershipId?._id || item.studentMembershipId), item]));
   const resultMap = new Map(results.map((item) => [String(item.studentMembershipId), item]));
   const profileMap = new Map(profiles.map((item) => [String(item.studentId), item]));
-  const scoreComponents = getScoreComponents(session.defaultMarkId);
+  const enrollmentByUser = new Map();
+  const enrollmentByAfghanStudent = new Map();
+  enrollments.forEach((item) => {
+    if (item.linkedUserId && !enrollmentByUser.has(String(item.linkedUserId))) {
+      enrollmentByUser.set(String(item.linkedUserId), item);
+    }
+    if (item.linkedStudentId && !enrollmentByAfghanStudent.has(String(item.linkedStudentId))) {
+      enrollmentByAfghanStudent.set(String(item.linkedStudentId), item);
+    }
+  });
+  const scoreComponents = getSessionScoreComponents(session);
 
   return {
     session,
@@ -2496,7 +2751,10 @@ async function buildSessionSheetDataset(sessionId) {
       const studentCore = membership.studentId || null;
       const student = membership.student || null;
       const profile = profileMap.get(String(studentCore?._id || studentCore || '')) || null;
-      const scoreBreakdown = getScoreBreakdown(mark);
+      const enrollment = enrollmentByUser.get(String(student?._id || student || ''))
+        || enrollmentByAfghanStudent.get(String(membership.afghanStudentId?._id || membership.afghanStudentId || ''))
+        || null;
+      const scoreBreakdown = getSessionScoreBreakdown(session, mark);
       const markStatus = normalizeText(mark?.markStatus) || 'pending';
       const recorded = markStatus === 'recorded';
       const note = sanitizeExamNote(mark?.note);
@@ -2515,6 +2773,7 @@ async function buildSessionSheetDataset(sessionId) {
         fatherName: normalizeText(
           profile?.family?.fatherName
           || membership?.afghanStudentId?.personalInfo?.fatherName
+          || enrollment?.fatherName
         ),
         attendanceScore: scoreBreakdown.attendanceScore,
         writtenScore: scoreBreakdown.writtenScore,
@@ -2549,7 +2808,7 @@ async function buildSessionSheetDataset(sessionId) {
         membership: formatMembership(membership),
         studentCore: formatStudentCore(studentCore),
         studentProfile: formatStudentProfile(profile),
-        mark: formatExamMark(mark),
+        mark: formatExamMark(mark, session),
         result: formatExamResult(result),
         row
       };
