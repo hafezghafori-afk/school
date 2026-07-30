@@ -14,8 +14,12 @@ const fourHalf = getOfficialExamPolicy('FOUR_HALF_MONTH');
 const annual = getOfficialExamPolicy('annual');
 assert.strictEqual(fourHalf.totalMark, 40);
 assert.strictEqual(fourHalf.passMark, 16);
+assert.strictEqual(fourHalf.scoreComponents.attendanceMax, 0);
+assert.strictEqual(fourHalf.scoreComponents.classActivityMax, 5);
 assert.strictEqual(annual.totalMark, 60);
 assert.strictEqual(annual.passMark, 40);
+assert.strictEqual(annual.scoreComponents.attendanceMax, 0);
+assert.strictEqual(annual.scoreComponents.classActivityMax, 5);
 assert.strictEqual(GENERAL_RESULT_POLICY.passMark, 55);
 assert.ok(OFFICIAL_RESULT_POLICY_VERSION);
 

@@ -23,11 +23,11 @@ const OFFICIAL_EXAM_POLICIES = Object.freeze({
     passMark: 16,
     conditionalMark: 16,
     scoreComponents: Object.freeze({
-      attendanceMax: 5,
+      attendanceMax: 0,
       homeworkMax: 5,
       oralMax: 10,
       writtenMax: 20,
-      classActivityMax: 0
+      classActivityMax: 5
     })
   }),
   [OFFICIAL_EXAM_CODES.ANNUAL]: Object.freeze({
@@ -37,11 +37,11 @@ const OFFICIAL_EXAM_POLICIES = Object.freeze({
     passMark: 40,
     conditionalMark: 40,
     scoreComponents: Object.freeze({
-      attendanceMax: 5,
+      attendanceMax: 0,
       homeworkMax: 5,
       oralMax: 10,
       writtenMax: 40,
-      classActivityMax: 0
+      classActivityMax: 5
     })
   })
 });

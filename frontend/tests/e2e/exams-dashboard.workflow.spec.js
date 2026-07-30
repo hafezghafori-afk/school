@@ -22,6 +22,7 @@ test.describe('exams dashboard workflow', () => {
         generatedAt: '2026-03-26T11:20:00.000Z',
         summary: {
           activeSessions: 4,
+          submittedSessions: 2,
           publishedSessions: 3,
           draftSessions: 1,
           averageMark: 81,
@@ -53,6 +54,8 @@ test.describe('exams dashboard workflow', () => {
     await expect(page.locator('.dash-card').filter({ hasText: 'روند وضعیت جلسه‌ها' })).toBeVisible();
     const sheetCenterLink = page.locator('.dashboard-quick-link[href="/admin-sheet-templates"]').filter({ hasText: 'مرکز مدیریت شقه‌ها' });
     await expect(sheetCenterLink).toBeVisible();
+    await expect(page.locator('a[href="/grade-manager?status=submitted"]').first()).toBeVisible();
+    await expect(page.locator('.dashboard-summary-card__grid')).toContainText('شقه‌های منتظر تأیید');
     await expect(page.locator('.dash-card').filter({ hasText: 'کارهای باز' })).toContainText('نتیجه‌های در انتظار');
   });
 });

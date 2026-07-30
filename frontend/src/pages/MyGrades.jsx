@@ -5,7 +5,6 @@ import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
 
 const BREAKDOWN_FIELDS = [
-  { key: 'attendanceScore', label: 'حاضری' },
   { key: 'writtenScore', label: 'تحریری' },
   { key: 'oralScore', label: 'تقریری' },
   { key: 'classActivityScore', label: 'فعالیت صنفی' },
@@ -37,6 +36,7 @@ const statusLabel = (value = '') => {
   if (value === 'distinction') return 'ممتاز';
   if (value === 'absent') return 'غایب';
   if (value === 'excused') return 'معذور';
+  if (value === 'not_applicable') return 'شامل امتحان نبوده';
   if (value === 'pending') return 'در انتظار';
   return value || '---';
 };

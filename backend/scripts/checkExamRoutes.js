@@ -30,8 +30,16 @@ const serviceMock = {
   async createExamType(payload) {
     return { id: 'type-2', title: payload.title, code: payload.code || 'NEW' };
   },
-  async listExamSessions() {
-    return [{ id: IDS.session, title: 'Annual - Class 10 A', code: 'ANNUAL-1406-T1-10A' }];
+  async listExamSessions(filters = {}) {
+    const items = [{ id: IDS.session, title: 'Annual - Class 10 A', code: 'ANNUAL-1406-T1-10A' }];
+    if (String(filters.paginated || '').toLowerCase() === 'true') {
+      return {
+        items,
+        pagination: { page: 1, limit: 20, total: 101, pages: 6, hasNext: true, hasPrevious: false },
+        counts: { submitted: 101 }
+      };
+    }
+    return items;
   },
   async createExamSession(payload) {
     return { id: IDS.session, title: payload.title || 'Annual - Class 10 A', code: payload.code || 'ANNUAL-1406-T1-10A' };
@@ -324,6 +332,7 @@ async function run() {
     cases.push(await request(server, '/api/exams/reference-data'));
     cases.push(await request(server, '/api/exams/reference-data', { user: { id: IDS.admin, role: 'admin', permissions: [] } }));
     cases.push(await request(server, '/api/exams/reference-data', { user: instructorUser }));
+    const paginatedSessions = await request(server, '/api/exams/sessions?status=submitted&page=1&limit=20&paginated=true', { user: adminUser });
     const activityStart = activityCalls.length;
     cases.push(await request(server, '/api/exams/types', { method: 'POST', user: adminUser, body: { title: 'Mock Type', code: 'MOCK' } }));
     cases.push(await request(server, '/api/exams/sessions', { method: 'POST', user: adminUser, body: { title: 'Annual Session' } }));
@@ -359,6 +368,12 @@ async function run() {
     assertCase(cases[0].status === 401, 'Expected reference-data route to require authentication.');
     assertCase(cases[1].status === 403, 'Expected reference-data route to require permission.');
     assertCase(cases[2].status === 200 && Array.isArray(cases[2].data?.examTypes), 'Expected reference-data route to return exam types.');
+    assertCase(
+      paginatedSessions.status === 200
+        && paginatedSessions.data?.pagination?.total === 101
+        && paginatedSessions.data?.counts?.submitted === 101,
+      'Expected paginated session route to return queue metadata.'
+    );
     assertCase(cases[3].status === 200 && cases[3].data?.item?.title === 'Mock Type', 'Expected exam type creation to return payload.');
     assertCase(cases[4].status === 200 && cases[4].data?.item?.id === IDS.session, 'Expected exam session creation to return session payload.');
     assertCase(cases[5].status === 200 && cases[5].data?.canBootstrap === true, 'Expected bootstrap preview to return preview data.');

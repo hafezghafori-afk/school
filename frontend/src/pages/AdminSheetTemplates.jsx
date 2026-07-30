@@ -1298,6 +1298,15 @@ export default function AdminSheetTemplates() {
                               {busyAction === `manage-session:${session.id}` ? 'در حال بازکردن…' : 'ویرایش'}
                             </button>
                           ) : null}
+                          {String(session.status || '') === 'submitted' ? (
+                            <button
+                              type="button"
+                              className="admin-sheet-session-action"
+                              onClick={() => { window.location.href = `/grade-manager?status=submitted&session=${encodeURIComponent(session.id)}`; }}
+                            >
+                              بررسی و تأیید
+                            </button>
+                          ) : null}
                           <details className="admin-sheet-session-more">
                             <summary>بیشتر</summary>
                             <div className="admin-sheet-session-more__menu">

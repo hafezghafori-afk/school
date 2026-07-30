@@ -122,6 +122,219 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.grade-approval-inbox {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  border: 1px solid #fdba74;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #fff7ed, #fffbeb);
+}
+
+.grade-approval-inbox__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.grade-approval-inbox h3,
+.grade-approval-inbox p {
+  margin: 0;
+}
+
+.grade-approval-inbox h3 {
+  color: #9a3412;
+}
+
+.grade-approval-inbox p {
+  margin-top: 6px;
+  color: #7c2d12;
+  line-height: 1.7;
+}
+
+.grade-approval-inbox__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.grade-approval-inbox__actions button {
+  white-space: nowrap;
+  border: 1px solid #fdba74;
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: #fff;
+  color: #9a3412;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.grade-approval-inbox__actions button.active {
+  border-color: #c2410c;
+  background: #c2410c;
+  color: #fff;
+}
+
+.grade-approval-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.grade-approval-summary > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid rgba(194, 65, 12, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.grade-approval-summary span {
+  color: #9a3412;
+  font-size: 12px;
+}
+
+.grade-approval-summary strong {
+  color: #431407;
+  font-size: 17px;
+}
+
+.grade-approval-filters {
+  display: grid;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  grid-template-columns: repeat(20, minmax(0, 1fr));
+  grid-template-areas:
+    "search search search search search year year year period period period teacher teacher teacher sort sort sort actions actions actions"
+    "class class class class subject subject subject subject exam exam exam exam from from from from to to to to";
+  gap: 12px;
+}
+
+.grade-approval-filters label {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-width: 0;
+  min-height: 88px;
+  padding: 12px 13px;
+  border: 1px solid rgba(194, 65, 12, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 5px 14px rgba(124, 45, 18, 0.05);
+}
+
+.grade-approval-filters label > span {
+  color: #7c2d12;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.grade-approval-filters :is(input, select) {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid #fdba74;
+  border-radius: 10px;
+  background: #fff;
+  color: #0f172a;
+  padding: 9px 10px;
+  font: inherit;
+  min-height: 42px;
+}
+
+.grade-approval-search {
+  grid-area: search;
+}
+
+.grade-queue-filter-year {
+  grid-area: year;
+}
+
+.grade-queue-filter-period {
+  grid-area: period;
+}
+
+.grade-queue-filter-teacher {
+  grid-area: teacher;
+}
+
+.grade-queue-filter-class {
+  grid-area: class;
+}
+
+.grade-queue-filter-subject {
+  grid-area: subject;
+}
+
+.grade-queue-filter-exam {
+  grid-area: exam;
+}
+
+.grade-queue-filter-from {
+  grid-area: from;
+}
+
+.grade-queue-filter-to {
+  grid-area: to;
+}
+
+.grade-queue-filter-sort {
+  grid-area: sort;
+}
+
+.grade-approval-filter-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  gap: 8px;
+  min-height: 88px;
+  padding: 12px;
+  border: 1px solid rgba(194, 65, 12, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.grade-approval-filter-actions button {
+  flex: 1;
+  padding-inline: 8px;
+}
+
+.grade-approval-filter-actions button,
+.grade-queue-pagination button,
+.grade-correction-panel button {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 13px;
+  background: #9a3412;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.grade-approval-filter-actions button.secondary,
+.grade-correction-panel button.secondary {
+  border: 1px solid #fdba74;
+  background: #fff;
+  color: #9a3412;
+}
+
+.grade-approval-filter-actions button:disabled,
+.grade-queue-pagination button:disabled,
+.grade-correction-panel button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .grade-manager-filters label,
 .grade-manager-component-config label {
   display: grid;
@@ -179,6 +392,10 @@
   align-items: start;
 }
 
+.grade-manager-shell.admin-queue-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .grade-session-list,
 .grade-sheet-panel {
   border: 1px solid #e2e8f0;
@@ -210,6 +427,130 @@
 .grade-session-list {
   display: grid;
   gap: 12px;
+}
+
+.grade-queue-loading {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.grade-approval-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #dbe3ec;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.grade-approval-table {
+  width: 100%;
+  min-width: 940px;
+  border-collapse: collapse;
+}
+
+.grade-approval-table th,
+.grade-approval-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: right;
+  color: #334155;
+  vertical-align: middle;
+}
+
+.grade-approval-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 12px;
+}
+
+.grade-approval-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.grade-approval-table tbody tr.active td {
+  background: #ecfdf5;
+}
+
+.grade-approval-table tbody tr.warning:not(.active) td {
+  background: #fffbeb;
+}
+
+.grade-approval-table tbody tr.urgent:not(.active) td {
+  background: #fff1f2;
+}
+
+.grade-queue-title {
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: #0f766e;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.grade-queue-open {
+  border: 1px solid #99f6e4;
+  border-radius: 9px;
+  padding: 7px 10px;
+  background: #f0fdfa;
+  color: #0f766e;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.grade-waiting-badge {
+  display: inline-flex;
+  min-width: 64px;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.grade-waiting-badge.warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.grade-waiting-badge.urgent {
+  background: #ffe4e6;
+  color: #be123c;
+}
+
+.grade-queue-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.grade-queue-pagination button {
+  min-width: 40px;
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.grade-queue-pagination button.active {
+  background: #0f766e;
+  color: #fff;
+}
+
+.grade-queue-pagination span {
+  margin-inline-start: 8px;
+  color: #64748b;
+  font-size: 13px;
 }
 
 .grade-session-card {
@@ -288,6 +629,16 @@
   color: #1d4ed8;
 }
 
+.status-pill.submitted {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.status-pill.approved {
+  background: #ccfbf1;
+  color: #0f766e;
+}
+
 .status-pill.closed {
   background: #fef3c7;
   color: #92400e;
@@ -302,6 +653,99 @@
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.grade-queue-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.grade-queue-stepper span {
+  min-width: 60px;
+  color: #475569;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.grade-queue-stepper button {
+  padding: 7px 10px;
+}
+
+.grade-reviewer-select {
+  display: grid;
+  gap: 5px;
+  min-width: 190px;
+}
+
+.grade-reviewer-select span {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.grade-reviewer-select select {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  color: #0f172a;
+  padding: 9px 10px;
+  font: inherit;
+}
+
+.grade-sheet-toolbar button.return-correction {
+  border: 1px solid #fecaca;
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.grade-correction-panel {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 15px;
+  border: 1px solid #fecaca;
+  border-radius: 15px;
+  background: #fff1f2;
+}
+
+.grade-correction-panel > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.grade-correction-panel strong {
+  color: #9f1239;
+}
+
+.grade-correction-panel span {
+  color: #881337;
+  line-height: 1.7;
+}
+
+.grade-correction-panel textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #fda4af;
+  border-radius: 10px;
+  background: #fff;
+  color: #0f172a;
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.grade-correction-panel > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .grade-summary-strip {
@@ -335,6 +779,23 @@
 
 .grade-sheet-official-meta strong {
   color: #10231f;
+  white-space: nowrap;
+}
+
+.grade-review-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: -6px 0 18px;
+  padding: 12px 14px;
+  border: 1px solid #fda4af;
+  border-radius: 13px;
+  background: #fff1f2;
+  color: #881337;
+  line-height: 1.7;
+}
+
+.grade-review-note strong {
   white-space: nowrap;
 }
 
@@ -419,6 +880,25 @@
   text-align: right;
 }
 
+.grade-sheet-table .serial-column {
+  min-width: 92px;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.grade-sheet-table th.serial-column,
+.grade-sheet-table th.father-name-column {
+  background: #e2e8f0 !important;
+  color: #0f172a !important;
+  opacity: 1;
+}
+
+.grade-sheet-table td.serial-column,
+.grade-sheet-table td.father-name-column {
+  color: #0f172a !important;
+  opacity: 1;
+}
+
 .grade-sheet-table .student-cell strong {
   display: block;
   color: #0f172a;
@@ -454,6 +934,17 @@
   background: #f8fafc;
 }
 
+.grade-system-status {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fff1f2;
+  color: #9f1239;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
 .grade-sheet-table .score-input:not(:disabled) {
   border-color: #94a3b8;
   background: #fffdf7;
@@ -483,6 +974,16 @@
   .grade-manager-component-config {
     grid-template-columns: 1fr 1fr;
   }
+
+  .grade-approval-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: none;
+  }
+
+  .grade-approval-filters > * {
+    grid-area: auto;
+    grid-column: auto;
+  }
 }
 
 @media (max-width: 720px) {
@@ -492,8 +993,28 @@
   }
 
   .grade-manager-hero,
-  .grade-sheet-head {
+  .grade-sheet-head,
+  .grade-approval-inbox__head {
     flex-direction: column;
+  }
+
+  .grade-approval-summary,
+  .grade-approval-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .grade-approval-search {
+    grid-column: auto;
+  }
+
+  .grade-approval-filter-actions,
+  .grade-sheet-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .grade-reviewer-select {
+    min-width: 0;
   }
 
   .grade-manager-component-config {
