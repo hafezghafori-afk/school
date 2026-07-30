@@ -40,7 +40,7 @@ const INITIAL_FILTERS = {
   heldAt: '',
   reviewerUserId: '',
   reviewedByName: '',
-  attendanceMax: '5',
+  attendanceMax: '0',
   writtenMax: '25',
   oralMax: '25',
   classActivityMax: '25',
@@ -122,10 +122,10 @@ const isMonthlyExamType = (item = {}) => {
 const getOfficialExamDefaults = (item = {}) => {
   const code = String(item?.code || '').trim().toUpperCase();
   if (code === 'FOUR_HALF_MONTH') {
-    return { attendanceMax: '5', writtenMax: '20', oralMax: '10', classActivityMax: '0', homeworkMax: '5' };
+    return { attendanceMax: '0', writtenMax: '20', oralMax: '10', classActivityMax: '5', homeworkMax: '5' };
   }
   if (code === 'ANNUAL') {
-    return { attendanceMax: '5', writtenMax: '40', oralMax: '10', classActivityMax: '0', homeworkMax: '5' };
+    return { attendanceMax: '0', writtenMax: '40', oralMax: '10', classActivityMax: '5', homeworkMax: '5' };
   }
   return null;
 };
@@ -158,7 +158,7 @@ const buildRowState = (item = {}) => ({
   rank: item?.row?.rank ?? null
 });
 
-const computeRowTotal = (row = {}) => COMPONENT_FIELDS.reduce((sum, field) => sum + toSafeNumber(row[field.key]), 0);
+const computeRowTotal = (row = {}, fields = COMPONENT_FIELDS) => fields.reduce((sum, field) => sum + toSafeNumber(row[field.key]), 0);
 
 const rowBlocksScoreInput = (status = '') => SCORE_BLOCKING_STATUSES.has(String(status || '').trim());
 const rowNeedsScoreReset = (status = '') => SCORE_CLEARING_STATUSES.has(String(status || '').trim());
@@ -312,6 +312,9 @@ export default function GradeManager() {
     classActivityMax: toSafeNumber(sheet?.scoreComponents?.classActivityMax ?? filters.classActivityMax),
     homeworkMax: toSafeNumber(sheet?.scoreComponents?.homeworkMax ?? filters.homeworkMax)
   }), [sheet?.scoreComponents, filters.attendanceMax, filters.writtenMax, filters.oralMax, filters.classActivityMax, filters.homeworkMax]);
+  const activeComponentFields = useMemo(() => COMPONENT_FIELDS.filter((field) => (
+    Number(scoreComponents[field.maxKey] || 0) > 0
+  )), [scoreComponents]);
 
   const dirtyCount = useMemo(
     () => Object.values(dirtyIds).filter(Boolean).length,
@@ -868,7 +871,7 @@ export default function GradeManager() {
                         <tr>
                           <th rowSpan="2">شماره</th>
                           <th colSpan="2" className="group-heading">شهرت متعلمین</th>
-                          {COMPONENT_FIELDS.map((field) => (
+                          {activeComponentFields.map((field) => (
                             <th key={field.key} rowSpan="2">
                               {field.label}
                               <small>{toFaNumber(scoreComponents[field.maxKey])}</small>
@@ -888,11 +891,11 @@ export default function GradeManager() {
                       <tbody>
                         {!rows.length && (
                           <tr>
-                            <td colSpan={COMPONENT_FIELDS.length + 7}>هنوز شاگردی برای این شقه موجود نیست.</td>
+                            <td colSpan={activeComponentFields.length + 7}>هنوز شاگردی برای این شقه موجود نیست.</td>
                           </tr>
                         )}
                         {rows.map((row) => {
-                          const total = computeRowTotal(row);
+                          const total = computeRowTotal(row, activeComponentFields);
                           const totalInWords = row.markStatus === 'recorded' ? numberToFaWords(total) : '';
                           return (
                             <tr key={row.studentMembershipId}>
@@ -903,7 +906,7 @@ export default function GradeManager() {
                                 {row.membershipStatusLabel && <span>{row.membershipStatusLabel}</span>}
                               </td>
                               <td>{row.fatherName || '---'}</td>
-                              {COMPONENT_FIELDS.map((field) => (
+                              {activeComponentFields.map((field) => (
                                 <td key={field.key}>
                                   <input
                                     type="number"

@@ -283,7 +283,10 @@ const TESTS = [
         'امضای ممتحن',
         'امضای ممیز',
         'exam-sheet-bottom-signatures',
-        'exam-sheet-custom-footer'
+        'exam-sheet-custom-footer',
+        'buildExamTableHtml',
+        'configuredColumns',
+        'exam-sheet-table-grid--split'
       ];
       for (const marker of requiredMarkers) {
         if (!content.includes(marker)) {

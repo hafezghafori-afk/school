@@ -60,6 +60,9 @@ const TeacherAssignmentManagement = () => {
   const [bulkSubjects, setBulkSubjects] = useState([]);
   const [bulkSubjectsLoading, setBulkSubjectsLoading] = useState(false);
   const [bulkSubjectsSource, setBulkSubjectsSource] = useState('curriculum');
+  const [singleSubjects, setSingleSubjects] = useState([]);
+  const [singleSubjectsLoading, setSingleSubjectsLoading] = useState(false);
+  const [singleSubjectsSource, setSingleSubjectsSource] = useState('curriculum');
   const [subjectVisibleCounts, setSubjectVisibleCounts] = useState({});
   const [workloadData, setWorkloadData] = useState(null);
   const [workloadYearId, setWorkloadYearId] = useState('');
@@ -391,6 +394,29 @@ const TeacherAssignmentManagement = () => {
     setSingleWizardStep(1);
   };
 
+  const handleSingleYearChange = (academicYearId) => {
+    setFormData((current) => {
+      const selectedClassItem = classes.find((item) => String(item._id) === String(current.classId));
+      const classYearId = String(selectedClassItem?.academicYearId?._id || selectedClassItem?.academicYearId || '').trim();
+      const classMatchesYear = !classYearId || classYearId === String(academicYearId);
+
+      return {
+        ...current,
+        academicYearId,
+        classId: classMatchesYear ? current.classId : '',
+        subjectId: ''
+      };
+    });
+  };
+
+  const handleSingleClassChange = (classId) => {
+    setFormData((current) => ({
+      ...current,
+      classId,
+      subjectId: ''
+    }));
+  };
+
   const handleDelete = async (assignmentId) => {
     if (!confirm('آیا مطمئن هستید که این تخصیص ختم شود؟ سابقه آن در سیستم نگهداری می‌شود.')) return;
     
@@ -515,6 +541,112 @@ const TeacherAssignmentManagement = () => {
     }
     fetchBulkSubjectsByClass(selectedClass, formData.academicYearId);
   }, [selectedClass, formData.academicYearId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const classId = String(formData.classId || '').trim();
+    const academicYearId = String(formData.academicYearId || '').trim();
+
+    if (!showForm || bulkMode || !classId || !academicYearId) {
+      setSingleSubjects([]);
+      setSingleSubjectsLoading(false);
+      setSingleSubjectsSource('curriculum');
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const loadSingleSubjects = async () => {
+      setSingleSubjects([]);
+      setSingleSubjectsLoading(true);
+      setSingleSubjectsSource('curriculum');
+
+      try {
+        const query = `?academicYearId=${encodeURIComponent(academicYearId)}`;
+        const response = await fetch(`/api/curriculum-rules/class/${classId}${query}`, { headers: { ...getAuthHeaders() } });
+        const data = await response.json();
+        if (cancelled) return;
+
+        if (!data.success) {
+          setSingleSubjects([]);
+          return;
+        }
+
+        const matchingSubjects = [];
+        const seen = new Set();
+        for (const rule of data.data || []) {
+          const subject = rule?.subjectId;
+          const subjectId = String(subject?._id || subject || '').trim();
+          if (!subjectId || seen.has(subjectId)) continue;
+
+          const resolvedSubject = typeof subject === 'object' && subject
+            ? subject
+            : subjects.find((item) => String(item._id) === subjectId);
+          if (!resolvedSubject) continue;
+
+          seen.add(subjectId);
+          matchingSubjects.push(resolvedSubject);
+        }
+
+        const editingClassId = String(editingAssignment?.classId?._id || editingAssignment?.classId || '').trim();
+        const editingYearId = String(editingAssignment?.academicYearId?._id || editingAssignment?.academicYearId || '').trim();
+        const editingSubject = editingAssignment?.subjectId;
+        const editingSubjectId = String(editingSubject?._id || editingSubject || '').trim();
+        const editingSubjectOption = editingClassId === classId && editingYearId === academicYearId && editingSubjectId
+          ? (typeof editingSubject === 'object' && editingSubject
+              ? editingSubject
+              : subjects.find((item) => String(item._id) === editingSubjectId))
+          : null;
+        const includeEditingSubject = (items) => (
+          editingSubjectOption && !items.some((item) => String(item?._id) === editingSubjectId)
+            ? [...items, editingSubjectOption]
+            : items
+        );
+
+        if (matchingSubjects.length > 0) {
+          setSingleSubjects(includeEditingSubject(matchingSubjects));
+          return;
+        }
+
+        const classInfo = classes.find((item) => String(item._id) === classId);
+        const gradeLevel = Number(classInfo?.gradeLevel) || 0;
+        const gradeSubjects = subjects.filter((item) => {
+          const grades = Array.isArray(item?.gradeLevels)
+            ? item.gradeLevels.map((value) => Number(value)).filter((value) => Number.isFinite(value))
+            : [];
+          if (gradeLevel > 0 && grades.length > 0) return grades.includes(gradeLevel);
+
+          const legacyGrade = Number(String(item?.grade || '').replace(/[^0-9]/g, ''));
+          return gradeLevel > 0 && Number.isFinite(legacyGrade) && legacyGrade > 0 && legacyGrade === gradeLevel;
+        });
+
+        if (gradeSubjects.length > 0) {
+          setSingleSubjects(includeEditingSubject(gradeSubjects));
+          setSingleSubjectsSource('grade');
+          return;
+        }
+
+        if (editingSubjectOption) {
+          setSingleSubjects([editingSubjectOption]);
+          setSingleSubjectsSource('assignment');
+          return;
+        }
+
+        setSingleSubjects([]);
+      } catch (error) {
+        if (cancelled) return;
+        console.error('Error fetching subjects for assignment form:', error);
+        setSingleSubjects([]);
+      } finally {
+        if (!cancelled) setSingleSubjectsLoading(false);
+      }
+    };
+
+    loadSingleSubjects();
+    return () => {
+      cancelled = true;
+    };
+  }, [showForm, bulkMode, formData.classId, formData.academicYearId, subjects, classes, editingAssignment]);
 
   const handleBulkSubmit = async () => {
     if (!selectedClass || !formData.academicYearId || bulkAssignments.length === 0) {
@@ -681,6 +813,13 @@ const TeacherAssignmentManagement = () => {
   };
 
   const isMissingValue = (value) => String(value || '').trim() === '---';
+
+  const singleFormClasses = formData.academicYearId
+    ? classes.filter((classItem) => {
+        const classYearId = String(classItem?.academicYearId?._id || classItem?.academicYearId || '').trim();
+        return !classYearId || classYearId === String(formData.academicYearId);
+      })
+    : classes;
 
   if (loading) {
     return <div className="flex justify-center items-center h-64">در حال بارگذاری...</div>;
@@ -1080,7 +1219,7 @@ const TeacherAssignmentManagement = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                     <div>
                       <Label htmlFor="academicYearId">سال تعلیمی</Label>
-                      <Select value={formData.academicYearId} onValueChange={(value) => setFormData({ ...formData, academicYearId: value })}>
+                      <Select value={formData.academicYearId} onValueChange={handleSingleYearChange}>
                         <SelectTrigger>
                           <SelectValue placeholder="انتخاب سال تعلیمی" />
                         </SelectTrigger>
@@ -1095,32 +1234,58 @@ const TeacherAssignmentManagement = () => {
 
                     <div>
                       <Label htmlFor="classId">صنف</Label>
-                      <Select value={formData.classId} onValueChange={(value) => setFormData({ ...formData, classId: value })}>
+                      <Select value={formData.classId} onValueChange={handleSingleClassChange} disabled={!formData.academicYearId}>
                         <SelectTrigger>
                           <SelectValue placeholder="انتخاب صنف" />
                         </SelectTrigger>
                         <SelectContent>
-                          {classes.map((classItem) => (
+                          {singleFormClasses.map((classItem) => (
                             <SelectItem key={classItem._id} value={classItem._id}>{getClassLabel(classItem)}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                      {classes.length === 0 && <p className="tt-assignment-inline-hint">در حال حاضر صنفی برای انتخاب موجود نیست.</p>}
+                      {!formData.academicYearId && <p className="tt-assignment-inline-hint">ابتدا سال تعلیمی را انتخاب کنید.</p>}
+                      {formData.academicYearId && singleFormClasses.length === 0 && <p className="tt-assignment-inline-hint">برای سال تعلیمی انتخاب‌شده صنفی موجود نیست.</p>}
                     </div>
 
                     <div>
                       <Label htmlFor="subjectId">مضمون</Label>
-                      <Select value={formData.subjectId} onValueChange={(value) => setFormData({ ...formData, subjectId: value })}>
+                      <Select
+                        value={formData.subjectId}
+                        onValueChange={(value) => setFormData((current) => ({ ...current, subjectId: value }))}
+                        disabled={!formData.academicYearId || !formData.classId || singleSubjectsLoading || singleSubjects.length === 0}
+                      >
                         <SelectTrigger>
-                          <SelectValue placeholder="انتخاب مضمون" />
+                          <SelectValue placeholder={
+                            !formData.academicYearId
+                              ? 'ابتدا سال تعلیمی را انتخاب کنید'
+                              : !formData.classId
+                                ? 'ابتدا صنف را انتخاب کنید'
+                                : singleSubjectsLoading
+                                  ? 'در حال دریافت مضامین...'
+                                  : singleSubjects.length === 0
+                                    ? 'مضمونی یافت نشد'
+                                    : 'انتخاب مضمون'
+                          } />
                         </SelectTrigger>
                         <SelectContent>
-                          {subjects.map((subject) => (
+                          {singleSubjects.map((subject) => (
                             <SelectItem key={subject._id} value={subject._id}>{getSubjectLabel(subject)} {subject.code ? `(${subject.code})` : ''}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                      {subjects.length === 0 && <p className="tt-assignment-inline-hint">در حال حاضر مضمونی برای انتخاب موجود نیست.</p>}
+                      {formData.academicYearId && formData.classId && singleSubjectsLoading && (
+                        <p className="tt-assignment-inline-hint">در حال دریافت مضامین همین صنف و سال تعلیمی...</p>
+                      )}
+                      {formData.academicYearId && formData.classId && !singleSubjectsLoading && singleSubjects.length === 0 && (
+                        <p className="tt-assignment-inline-hint">برای این صنف در سال تعلیمی انتخاب‌شده، مضمونی در نصاب ثبت نشده است.</p>
+                      )}
+                      {!singleSubjectsLoading && singleSubjects.length > 0 && singleSubjectsSource === 'grade' && (
+                        <p className="tt-assignment-inline-hint">نصاب این صنف ثبت نشده؛ مضامین مربوط به پایهٔ همین صنف نمایش داده شده‌اند.</p>
+                      )}
+                      {!singleSubjectsLoading && singleSubjectsSource === 'assignment' && (
+                        <p className="tt-assignment-inline-hint">مضمون فعلی این تخصیص برای امکان ویرایش نمایش داده شده است.</p>
+                      )}
                     </div>
 
                     <div>

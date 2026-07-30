@@ -112,14 +112,13 @@ function buildExamDefaultColumns() {
     { key: 'number', label: 'شماره', width: 7, visible: true, order: 0 },
     { key: 'studentName', label: 'نام', width: 15, visible: true, order: 1, group: 'شهرت متعلمین' },
     { key: 'fatherName', label: 'نام پدر', width: 15, visible: true, order: 2, group: 'شهرت متعلمین' },
-    { key: 'attendanceScore', label: 'حاضری', width: 8, visible: true, order: 3 },
-    { key: 'writtenScore', label: 'تحریری', width: 9, visible: true, order: 4 },
-    { key: 'oralScore', label: 'تقریری', width: 9, visible: true, order: 5 },
-    { key: 'classActivityScore', label: 'فعالیت صنفی', width: 10, visible: true, order: 6 },
-    { key: 'homeworkScore', label: 'کارخانگی', width: 10, visible: true, order: 7 },
-    { key: 'obtainedMark', label: 'به عدد', width: 10, visible: true, order: 8, group: 'مجموعه نمره' },
-    { key: 'totalInWords', label: 'به حروف', width: 14, visible: true, order: 9, group: 'مجموعه نمره' },
-    { key: 'note', label: 'ملاحظات', width: 12, visible: true, order: 10 }
+    { key: 'writtenScore', label: 'تحریری', width: 9, visible: true, order: 3 },
+    { key: 'oralScore', label: 'تقریری', width: 9, visible: true, order: 4 },
+    { key: 'classActivityScore', label: 'فعالیت صنفی', width: 10, visible: true, order: 5 },
+    { key: 'homeworkScore', label: 'کارخانگی', width: 10, visible: true, order: 6 },
+    { key: 'obtainedMark', label: 'به عدد', width: 10, visible: true, order: 7, group: 'مجموعه نمره' },
+    { key: 'totalInWords', label: 'به حروف', width: 14, visible: true, order: 8, group: 'مجموعه نمره' },
+    { key: 'note', label: 'ملاحظات', width: 12, visible: true, order: 9 }
   ];
 }
 
@@ -182,14 +181,13 @@ function getDefaultColumnsForType(type = '') {
       { key: 'number', label: 'شماره', width: 7, visible: true, order: 0 },
       { key: 'studentName', label: 'نام', width: 15, visible: true, order: 1, group: 'شهرت متعلمین' },
       { key: 'fatherName', label: 'نام پدر', width: 15, visible: true, order: 2, group: 'شهرت متعلمین' },
-      { key: 'attendanceScore', label: 'حاضری', width: 8, visible: true, order: 3 },
-      { key: 'writtenScore', label: 'تحریری', width: 9, visible: true, order: 4 },
-      { key: 'oralScore', label: 'تقریری', width: 9, visible: true, order: 5 },
-      { key: 'classActivityScore', label: 'فعالیت صنفی', width: 10, visible: true, order: 6 },
-      { key: 'homeworkScore', label: 'کارخانگی', width: 10, visible: true, order: 7 },
-      { key: 'obtainedMark', label: 'به عدد', width: 10, visible: true, order: 8, group: 'مجموعه نمره' },
-      { key: 'totalInWords', label: 'به حروف', width: 14, visible: true, order: 9, group: 'مجموعه نمره' },
-      { key: 'note', label: 'ملاحظات', width: 12, visible: true, order: 10 }
+      { key: 'writtenScore', label: 'تحریری', width: 9, visible: true, order: 3 },
+      { key: 'oralScore', label: 'تقریری', width: 9, visible: true, order: 4 },
+      { key: 'classActivityScore', label: 'فعالیت صنفی', width: 10, visible: true, order: 5 },
+      { key: 'homeworkScore', label: 'کارخانگی', width: 10, visible: true, order: 6 },
+      { key: 'obtainedMark', label: 'به عدد', width: 10, visible: true, order: 7, group: 'مجموعه نمره' },
+      { key: 'totalInWords', label: 'به حروف', width: 14, visible: true, order: 8, group: 'مجموعه نمره' },
+      { key: 'note', label: 'ملاحظات', width: 12, visible: true, order: 9 }
     ];
   }
 

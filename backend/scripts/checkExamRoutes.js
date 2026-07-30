@@ -81,6 +81,14 @@ const serviceMock = {
       recompute: { marks: 1, results: 1, ranked: 1 }
     };
   },
+  async syncSessionRoster(sessionId) {
+    return {
+      session: { id: sessionId || IDS.session, title: 'Annual - Class 10 A', status: 'active' },
+      summary: { eligibleMemberships: 11, totalMarks: 11, existingMarks: 1, createdMarks: 10 },
+      warnings: [],
+      recompute: { marks: 11, results: 11, ranked: 1 }
+    };
+  },
   async getSessionRosterStatus(sessionId) {
     return {
       session: { id: sessionId || IDS.session, title: 'Annual - Class 10 A' },
@@ -346,6 +354,7 @@ async function run() {
     cases.push(await request(server, `/api/exams/sessions/${IDS.session}/management-state`, { user: adminUser }));
     cases.push(await request(server, `/api/exams/sessions/${IDS.session}`, { method: 'PATCH', user: adminUser, body: { monthLabel: 'حمل' } }));
     cases.push(await request(server, `/api/exams/sessions/${IDS.session}`, { method: 'DELETE', user: adminUser }));
+    cases.push(await request(server, `/api/exams/sessions/${IDS.session}/sync-roster`, { method: 'POST', user: adminUser }));
 
     assertCase(cases[0].status === 401, 'Expected reference-data route to require authentication.');
     assertCase(cases[1].status === 403, 'Expected reference-data route to require permission.');
@@ -371,7 +380,8 @@ async function run() {
     assertCase(cases[21].status === 200 && cases[21].data?.permissions?.canHardDelete === true, 'Expected management-state route to return safe actions.');
     assertCase(cases[22].status === 200 && cases[22].data?.item?.monthLabel === 'حمل', 'Expected exam session update route to return edited data.');
     assertCase(cases[23].status === 200 && cases[23].data?.deletedId === IDS.session, 'Expected safe draft deletion route to return the deleted session id.');
-    assertCase(activityCalls.length === activityStart + 11, `Expected 11 exam activity logs, received ${activityCalls.length - activityStart}.`);
+    assertCase(cases[24].status === 200 && cases[24].data?.summary?.createdMarks === 10, 'Expected roster sync route to add only missing memberships.');
+    assertCase(activityCalls.length === activityStart + 12, `Expected 12 exam activity logs, received ${activityCalls.length - activityStart}.`);
     assertCase(activityCalls[activityStart]?.action === 'create_exam_type', 'Expected create_exam_type activity.');
     assertCase(activityCalls[activityStart + 1]?.action === 'create_exam_session', 'Expected create_exam_session activity.');
     assertCase(activityCalls[activityStart + 2]?.action === 'bootstrap_exam_session', 'Expected bootstrap_exam_session activity.');
@@ -383,6 +393,7 @@ async function run() {
     assertCase(activityCalls[activityStart + 8]?.action === 'update_exam_session_status', 'Expected update_exam_session_status activity.');
     assertCase(activityCalls[activityStart + 9]?.action === 'update_exam_session', 'Expected update_exam_session activity.');
     assertCase(activityCalls[activityStart + 10]?.action === 'delete_exam_session_draft', 'Expected delete_exam_session_draft activity.');
+    assertCase(activityCalls[activityStart + 11]?.action === 'sync_exam_session_roster', 'Expected sync_exam_session_roster activity.');
 
     console.log('check:exam-routes PASS');
   } finally {

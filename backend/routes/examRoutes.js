@@ -23,6 +23,7 @@ const {
   previewExamSessionBootstrap,
   recomputeSessionResults,
   saveExamSheetMarks,
+  syncSessionRoster,
   updateExamSession,
   updateExamSessionStatus,
   upsertExamMark
@@ -42,7 +43,7 @@ function getExamErrorStatus(code = '', fallback = 500) {
   if (code === 'exam_session_admin_approval_required') return 403;
   if (code === 'exam_session_admin_creation_required') return 403;
   if (code === 'exam_session_duplicate_scope') return 409;
-  if (['exam_session_delete_blocked', 'exam_session_edit_locked', 'exam_session_structural_edit_blocked'].includes(code)) return 409;
+  if (['exam_session_delete_blocked', 'exam_session_edit_locked', 'exam_session_structural_edit_blocked', 'exam_roster_sync_locked'].includes(code)) return 409;
   if (code.startsWith('exam_')) return 400;
   return fallback;
 }
@@ -258,6 +259,32 @@ router.post('/sessions/:sessionId/initialize-roster', requireAuth, requireRole([
     const code = String(error?.message || '');
     const status = getExamErrorStatus(code, 500);
     res.status(status).json({ success: false, message: code || 'Failed to initialize the exam session roster.' });
+  }
+});
+
+router.post('/sessions/:sessionId/sync-roster', requireAuth, requireRole(['admin']), requirePermission('manage_content'), async (req, res) => {
+  try {
+    await assertSessionAccess(req, req.params.sessionId);
+    const data = await syncSessionRoster(
+      req.params.sessionId,
+      req.user?.id || null,
+      req.user?.role || ''
+    );
+    await logActivity({
+      req,
+      action: 'sync_exam_session_roster',
+      targetType: 'ExamSession',
+      targetId: String(data?.session?.id || req.params.sessionId || ''),
+      meta: {
+        eligibleMemberships: Number(data?.summary?.eligibleMemberships || 0),
+        addedMemberships: Number(data?.summary?.createdMarks || 0),
+        existingMemberships: Number(data?.summary?.existingMarks || 0)
+      }
+    });
+    return res.json({ success: true, ...data });
+  } catch (error) {
+    const code = String(error?.message || '');
+    return res.status(getExamErrorStatus(code, 500)).json({ success: false, message: code || 'Failed to sync the exam session roster.' });
   }
 });
 

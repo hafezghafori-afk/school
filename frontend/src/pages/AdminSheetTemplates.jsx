@@ -54,7 +54,6 @@ const DEFAULT_COLUMNS_BY_TYPE = {
     { key: 'number', label: 'شماره', width: 7, visible: true },
     { key: 'studentName', label: 'نام', group: 'شهرت شاگردان', width: 15, visible: true },
     { key: 'fatherName', label: 'نام پدر', group: 'شهرت شاگردان', width: 15, visible: true },
-    { key: 'attendanceScore', label: 'حاضری', width: 8, visible: true },
     { key: 'writtenScore', label: 'تحریری', width: 9, visible: true },
     { key: 'oralScore', label: 'تقریری', width: 9, visible: true },
     { key: 'classActivityScore', label: 'فعالیت صنفی', width: 10, visible: true },
@@ -88,11 +87,20 @@ const DEFAULT_LAYOUT = {
 };
 
 const SCORE_COMPONENTS = [
-  { key: 'attendanceMax', label: 'حاضری' },
   { key: 'writtenMax', label: 'تحریری' },
   { key: 'oralMax', label: 'تقریری' },
   { key: 'classActivityMax', label: 'فعالیت صنفی' },
   { key: 'homeworkMax', label: 'کارخانگی' }
+];
+
+const REQUIRED_ASSIGNMENT_FIELDS = [
+  { key: 'academicYearId', label: 'سال تعلیمی' },
+  { key: 'assessmentPeriodId', label: 'دورهٔ تعلیمی' },
+  { key: 'teacherId', label: 'استاد' },
+  { key: 'classId', label: 'صنف' },
+  { key: 'subjectId', label: 'مضمون' },
+  { key: 'examTypeId', label: 'نوع امتحان' },
+  { key: 'heldAt', label: 'تاریخ امتحان' }
 ];
 
 const ASSIGNED_SESSION_PAGE_SIZE = 10;
@@ -118,10 +126,10 @@ const EMPTY_ASSIGNMENT = {
   reviewerUserId: '',
   heldAt: '',
   monthLabel: '',
-  attendanceMax: 5,
+  attendanceMax: 0,
   writtenMax: 20,
   oralMax: 10,
-  classActivityMax: 0,
+  classActivityMax: 5,
   homeworkMax: 5
 };
 
@@ -150,12 +158,26 @@ const EMPTY_SESSION_EDIT = {
 function getExamScoringPreset(examType = {}) {
   const code = String(examType?.code || '').trim().toUpperCase();
   if (code === 'FOUR_HALF_MONTH') {
-    return { attendanceMax: 5, writtenMax: 20, oralMax: 10, classActivityMax: 0, homeworkMax: 5, totalMark: 40 };
+    return { attendanceMax: 0, writtenMax: 20, oralMax: 10, classActivityMax: 5, homeworkMax: 5, totalMark: 40 };
   }
   if (code === 'ANNUAL') {
-    return { attendanceMax: 5, writtenMax: 40, oralMax: 10, classActivityMax: 0, homeworkMax: 5, totalMark: 60 };
+    return { attendanceMax: 0, writtenMax: 40, oralMax: 10, classActivityMax: 5, homeworkMax: 5, totalMark: 60 };
   }
   return { attendanceMax: 0, writtenMax: 25, oralMax: 25, classActivityMax: 25, homeworkMax: 25, totalMark: Number(examType?.defaultTotalMark || 100) };
+}
+
+function buildExamScoreComponents(source = {}, { preserveAttendance = false } = {}) {
+  return {
+    attendanceMax: preserveAttendance ? Math.max(0, Number(source.attendanceMax || 0)) : 0,
+    ...SCORE_COMPONENTS.reduce((acc, component) => ({
+      ...acc,
+      [component.key]: Math.max(0, Number(source[component.key] || 0))
+    }), {})
+  };
+}
+
+function getMissingAssignmentFields(source = {}) {
+  return REQUIRED_ASSIGNMENT_FIELDS.filter((field) => !String(source[field.key] || '').trim());
 }
 
 const EMPTY_FILTERS = {
@@ -269,7 +291,7 @@ function getTemplateColumns(template = null) {
       visible: column?.visible !== false,
       order: Number(column?.order ?? index)
     }))
-    .filter((column) => column.key)
+    .filter((column) => column.key && !(template?.type === 'exam' && column.key === 'attendanceScore'))
     .sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
 }
 
@@ -358,7 +380,7 @@ export default function AdminSheetTemplates() {
     && String(item?.subject?.id || '') === String(assignment.subjectId)
   )) || null, [teacherAssignments, assignment]);
   const selectedExamType = useMemo(() => examTypes.find((item) => String(item.id) === String(assignment.examTypeId)) || null, [examTypes, assignment.examTypeId]);
-  const assignmentScoreTotal = SCORE_COMPONENTS.reduce((sum, item) => sum + Math.max(0, Number(assignment[item.key] || 0)), 0);
+  const assignmentScoreTotal = Object.values(buildExamScoreComponents(assignment)).reduce((sum, value) => sum + value, 0);
   const expectedScoreTotal = getExamScoringPreset(selectedExamType).totalMark;
   const editTerms = useMemo(() => academicTerms.filter((item) => (
     !sessionEdit.academicYearId || String(getAcademicYearRefId(item)) === String(sessionEdit.academicYearId)
@@ -401,7 +423,7 @@ export default function AdminSheetTemplates() {
     && String(item?.subject?.id || '') === String(sessionEdit.subjectId)
   )) || null, [teacherAssignments, sessionEdit]);
   const selectedEditExamType = useMemo(() => examTypes.find((item) => String(item.id) === String(sessionEdit.examTypeId)) || null, [examTypes, sessionEdit.examTypeId]);
-  const editScoreTotal = SCORE_COMPONENTS.reduce((sum, item) => sum + Math.max(0, Number(sessionEdit[item.key] || 0)), 0);
+  const editScoreTotal = Object.values(buildExamScoreComponents(sessionEdit, { preserveAttendance: true })).reduce((sum, value) => sum + value, 0);
   const expectedEditScoreTotal = getExamScoringPreset(selectedEditExamType).totalMark;
   const filteredAssignedSessions = useMemo(() => {
     const query = assignedSessionQuery.trim().toLowerCase();
@@ -671,8 +693,9 @@ export default function AdminSheetTemplates() {
 
   const saveSessionEdit = async () => {
     if (!sessionEdit.id || !editingManagement?.permissions?.canEditMetadata) return;
-    if (!sessionEdit.academicYearId || !sessionEdit.assessmentPeriodId || !sessionEdit.teacherId || !sessionEdit.classId || !sessionEdit.subjectId || !sessionEdit.examTypeId || !sessionEdit.heldAt) {
-      showMessage('سال، دوره، استاد، صنف، مضمون، نوع امتحان و تاریخ را تکمیل کنید.', 'error');
+    const missingFields = getMissingAssignmentFields(sessionEdit);
+    if (missingFields.length) {
+      showMessage(`این موارد هنوز تکمیل نشده‌اند: ${missingFields.map((field) => field.label).join('، ')}.`, 'error');
       return;
     }
     if (!selectedEditAssignment?.id) {
@@ -701,10 +724,7 @@ export default function AdminSheetTemplates() {
           classId: sessionEdit.classId,
           subjectId: sessionEdit.subjectId,
           examTypeId: sessionEdit.examTypeId,
-          scoreComponents: SCORE_COMPONENTS.reduce((acc, component) => ({
-            ...acc,
-            [component.key]: Math.max(0, Number(sessionEdit[component.key] || 0))
-          }), {})
+          scoreComponents: buildExamScoreComponents(sessionEdit, { preserveAttendance: true })
         });
       }
       const data = await fetchJson(`/api/exams/sessions/${sessionEdit.id}`, {
@@ -802,13 +822,42 @@ export default function AdminSheetTemplates() {
     }
   };
 
+  const syncAssignedSessionRoster = async (session) => {
+    if (!session?.id) return;
+    if (!['draft', 'active'].includes(String(session.status || ''))) {
+      showMessage('فهرست شاگردان شقهٔ نهایی‌شده قابل همگام‌سازی مستقیم نیست؛ نخست نسخهٔ اصلاحی بسازید.', 'error');
+      return;
+    }
+    try {
+      setBusyAction(`sync-roster:${session.id}`);
+      const data = await postJson(`/api/exams/sessions/${session.id}/sync-roster`, {});
+      if (data.session?.id) {
+        setExamSessions((current) => current.map((item) => (
+          String(item.id) === String(session.id) ? { ...item, ...data.session } : item
+        )));
+      }
+      setPreview(null);
+      const added = Number(data.summary?.createdMarks || 0);
+      if (added > 0) {
+        showMessage(`${formatNumber(added)} شاگرد جدید به شقه اضافه شد؛ نمرات و ردیف‌های قبلی تغییر نکرد.`);
+      } else {
+        showMessage('فهرست شقه به‌روز است و شاگرد جدیدی برای افزودن پیدا نشد.');
+      }
+    } catch (error) {
+      showMessage(errorMessage(error, 'همگام‌سازی شاگردان شقه ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
   const createAssignedExamSheet = async () => {
     if (!selectedTemplate || selectedTemplate.type !== 'exam') {
       showMessage('برای تخصیص به استاد، نخست فارمت شقهٔ امتحان را انتخاب کنید.', 'error');
       return;
     }
-    if (!assignment.academicYearId || !assignment.assessmentPeriodId || !assignment.teacherId || !assignment.classId || !assignment.subjectId || !assignment.examTypeId || !assignment.heldAt) {
-      showMessage('سال، دوره، استاد، صنف، مضمون، نوع امتحان و تاریخ را تکمیل کنید.', 'error');
+    const missingFields = getMissingAssignmentFields(assignment);
+    if (missingFields.length) {
+      showMessage(`این موارد هنوز تکمیل نشده‌اند: ${missingFields.map((field) => field.label).join('، ')}.`, 'error');
       return;
     }
     const selectedPeriod = academicTerms.find((item) => String(getOptionId(item)) === String(assignment.assessmentPeriodId)) || null;
@@ -844,7 +893,7 @@ export default function AdminSheetTemplates() {
       monthLabel: assignment.monthLabel,
       status: 'draft',
       initializeRoster: true,
-      scoreComponents: SCORE_COMPONENTS.reduce((acc, item) => ({ ...acc, [item.key]: Math.max(0, Number(assignment[item.key] || 0)) }), {})
+      scoreComponents: buildExamScoreComponents(assignment)
     };
 
     try {
@@ -1108,42 +1157,42 @@ export default function AdminSheetTemplates() {
               <div className="admin-sheet-assignment-grid">
                 <label className="admin-workspace-field">
                   <span>سال تعلیمی</span>
-                  <select name="academicYearId" value={assignment.academicYearId} onChange={updateAssignment}>
+                  <select name="academicYearId" value={assignment.academicYearId} onChange={updateAssignment} required>
                     <option value="">انتخاب سال</option>
                     {academicYears.map((item) => <option key={item.id} value={item.id}>{item.title || item.code}</option>)}
                   </select>
                 </label>
                 <label className="admin-workspace-field">
                   <span>دورهٔ تعلیمی</span>
-                  <select name="assessmentPeriodId" value={assignment.assessmentPeriodId} onChange={updateAssignment}>
+                  <select name="assessmentPeriodId" value={assignment.assessmentPeriodId} onChange={updateAssignment} required>
                     <option value="">{assignmentTerms.length ? 'انتخاب دوره' : 'برای این سال دوره‌ای تعریف نشده است'}</option>
                     {assignmentTerms.map((item) => <option key={item.id} value={item.id}>{item.title || item.code}</option>)}
                   </select>
                 </label>
                 <label className="admin-workspace-field">
                   <span>استاد</span>
-                  <select name="teacherId" value={assignment.teacherId} onChange={updateAssignment}>
+                  <select name="teacherId" value={assignment.teacherId} onChange={updateAssignment} required>
                     <option value="">انتخاب استاد</option>
                     {assignmentTeachers.map((item) => <option key={item.id} value={item.id}>{item.name || item.email}</option>)}
                   </select>
                 </label>
                 <label className="admin-workspace-field">
                   <span>صنف</span>
-                  <select name="classId" value={assignment.classId} onChange={updateAssignment}>
+                  <select name="classId" value={assignment.classId} onChange={updateAssignment} required>
                     <option value="">انتخاب صنف</option>
                     {assignmentClasses.map((item) => <option key={item.id} value={item.id}>{item.title || item.code}</option>)}
                   </select>
                 </label>
                 <label className="admin-workspace-field">
                   <span>مضمون</span>
-                  <select name="subjectId" value={assignment.subjectId} onChange={updateAssignment}>
+                  <select name="subjectId" value={assignment.subjectId} onChange={updateAssignment} required>
                     <option value="">انتخاب مضمون</option>
                     {assignmentSubjects.map((item) => <option key={item.id} value={item.id}>{item.name || item.title}</option>)}
                   </select>
                 </label>
                 <label className="admin-workspace-field">
                   <span>نوع امتحان</span>
-                  <select name="examTypeId" value={assignment.examTypeId} onChange={updateAssignment}>
+                  <select name="examTypeId" value={assignment.examTypeId} onChange={updateAssignment} required>
                     <option value="">انتخاب نوع امتحان</option>
                     {examTypes.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
                   </select>
@@ -1161,7 +1210,7 @@ export default function AdminSheetTemplates() {
                 </label>
                 <label className="admin-workspace-field admin-sheet-date-field">
                   <span>تاریخ امتحان</span>
-                  <AfghanDateInput name="heldAt" value={assignment.heldAt} onChange={(value) => setAssignment((current) => ({ ...current, heldAt: value }))} />
+                  <AfghanDateInput name="heldAt" value={assignment.heldAt} onChange={(value) => setAssignment((current) => ({ ...current, heldAt: value }))} required showGregorianEquivalent />
                 </label>
               </div>
 
@@ -1230,6 +1279,15 @@ export default function AdminSheetTemplates() {
                           <em>{session.schoolClass?.title || '---'} · {session.examType?.title || '---'} · {getSessionStatusLabel(session.status)}</em>
                         </button>
                         <div className="admin-sheet-session-card__actions">
+                          <button
+                            type="button"
+                            className="admin-sheet-session-action"
+                            onClick={() => syncAssignedSessionRoster(session)}
+                            disabled={busyAction === `sync-roster:${session.id}` || !['draft', 'active'].includes(String(session.status || ''))}
+                            title={['draft', 'active'].includes(String(session.status || '')) ? 'افزودن شاگردان جدید صنف بدون تغییر نمرات قبلی' : 'برای شقهٔ نهایی‌شده نخست نسخهٔ اصلاحی بسازید'}
+                          >
+                            {busyAction === `sync-roster:${session.id}` ? 'در حال همگام‌سازی…' : 'همگام‌سازی شاگردان'}
+                          </button>
                           {['draft', 'active'].includes(String(session.status || '')) ? (
                             <button
                               type="button"
