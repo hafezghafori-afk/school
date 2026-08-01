@@ -2961,13 +2961,26 @@ async function listStudentExamResults(studentRef, options = {}) {
     .populate('subjectId')
     .sort({ computedAt: -1, createdAt: -1 });
 
+  const membershipIdentityFilters = [];
+  if (studentCore) membershipIdentityFilters.push({ studentId: studentCore._id });
+  if (user) membershipIdentityFilters.push({ student: user._id });
+  const identityMembership = membershipIdentityFilters.length
+    ? await StudentMembership.findOne(membershipIdentityFilters.length === 1
+      ? membershipIdentityFilters[0]
+      : { $or: membershipIdentityFilters })
+      .sort({ isCurrent: -1, enrolledAt: -1 })
+      .populate('afghanStudentId', 'asasNumber')
+      .lean()
+    : null;
+
   return {
     student: {
       studentId: studentCore ? String(studentCore._id) : '',
       userId: user ? String(user._id) : '',
       fullName: getStudentDisplayName(studentCore, user),
       email: normalizeText(studentCore?.email) || normalizeText(user?.email),
-      admissionNo: getStudentAdmissionNo(studentCore)
+      admissionNo: getStudentAdmissionNo(studentCore),
+      asasNumber: normalizeText(identityMembership?.afghanStudentId?.asasNumber)
     },
     items: items.map(formatExamResult)
   };

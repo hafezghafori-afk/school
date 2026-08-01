@@ -1385,7 +1385,7 @@ router.post('/school-classes', ...withManageContent, async (req, res) => {
     await logActivity({ req, action: 'create_school_class', targetType: 'SchoolClass', targetId: item._id.toString(), meta: { title: item.title } });
     res.status(201).json({ success: true, item: serializeSchoolClass(populated) });
   } catch (error) {
-    if (error?.code === 11000) return duplicateError(res, 'صنفی با همین ترکیب سال تعلیمی، پایه و بخش از قبل ثبت شده است.');
+    if (error?.code === 11000) return duplicateError(res, 'صنفی با همین ترکیب سال تعلیمی، پایه، بخش، نوع شاگردان و نوبت از قبل ثبت شده است.');
     res.status(500).json({ success: false, message: 'ایجاد صنف ناموفق بود.' });
   }
 });
@@ -1423,7 +1423,20 @@ router.put('/school-classes/:id', ...withManageContent, async (req, res) => {
       }
     }
 
-    const shiftId = await ensureShiftIdForSchoolClass({ schoolId, shiftName: shift });
+    // Changing an unrelated field (for example the class observer) must not
+    // silently replace the class shift reference. Some older databases may
+    // contain more than one Shift document for the same school/name; resolving
+    // it again can therefore collide with another otherwise-identical class.
+    const currentSchoolId = String(item.schoolId?._id || item.schoolId || '');
+    const currentShift = normalizeShiftName(item.shift);
+    const preserveCurrentShiftId = Boolean(
+      item.shiftId
+      && currentSchoolId === String(schoolId || '')
+      && currentShift === shift
+    );
+    const shiftId = preserveCurrentShiftId
+      ? item.shiftId
+      : await ensureShiftIdForSchoolClass({ schoolId, shiftName: shift });
     const titles = buildSchoolClassTitles({
       title: nextTitle,
       gradeLevel,
@@ -1456,7 +1469,7 @@ router.put('/school-classes/:id', ...withManageContent, async (req, res) => {
     await logActivity({ req, action: 'update_school_class', targetType: 'SchoolClass', targetId: item._id.toString(), meta: { title: item.title } });
     res.json({ success: true, item: serializeSchoolClass(populated) });
   } catch (error) {
-    if (error?.code === 11000) return duplicateError(res, 'صنفی با همین ترکیب سال تعلیمی، پایه و بخش از قبل ثبت شده است.');
+    if (error?.code === 11000) return duplicateError(res, 'ویرایش ممکن نیست؛ صنف دیگری با همین سال تعلیمی، پایه، بخش، نوع شاگردان و نوبت ثبت شده است.');
     res.status(500).json({ success: false, message: 'ویرایش صنف ناموفق بود.' });
   }
 });

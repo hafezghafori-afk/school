@@ -5,7 +5,7 @@ import { errorMessage, fetchJson, normalizeOptions, postJson, resolveActiveSchoo
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
 
-const emptyClass = { id: '', title: '', code: '', gradeLevel: '', section: 'الف', academicYearId: '', shift: 'morning', room: '', status: 'active', note: '' };
+const emptyClass = { id: '', title: '', code: '', gradeLevel: '', section: 'الف', academicYearId: '', homeroomTeacherUserId: '', shift: 'morning', room: '', status: 'active', note: '' };
 const emptySubject = { id: '', name: '', code: '', grade: '', note: '', isActive: true };
 const emptyYear = { id: '', title: '', startDate: '', endDate: '', note: '', isActive: false };
 const emptyTerm = { id: '', academicYearId: '', title: '', code: '', order: 1, type: 'term', startDate: '', endDate: '', note: '' };
@@ -585,6 +585,7 @@ export default function AdminEducationCore() {
         item.gradeLevel,
         item.section,
         item.academicYear?.title,
+        item.homeroomTeacher?.name,
         item.shift,
         item.room,
         item.note
@@ -807,6 +808,7 @@ export default function AdminEducationCore() {
       gradeLevel: String(item.gradeLevel || inferGradeFromClassInput(item.code, item.title) || ''),
       section: normalizeClassSection(item.section, item.code, item.title),
       academicYearId: asId(item.academicYearId),
+      homeroomTeacherUserId: asId(item.homeroomTeacherUserId || item.homeroomTeacher),
       shift: item.shift || 'morning',
       room: item.room || '',
       status: item.status || 'active',
@@ -1088,6 +1090,7 @@ export default function AdminEducationCore() {
         gradeLevel: normalizedGradeLevel,
         section: normalizeClassSection(classForm.section, classForm.code, classForm.title),
         academicYearId: classForm.academicYearId,
+        homeroomTeacherUserId: classForm.homeroomTeacherUserId,
         shift: classForm.shift,
         room: classForm.room,
         status: classForm.status,
@@ -1887,6 +1890,7 @@ export default function AdminEducationCore() {
             <div className="admin-workspace-field"><label>پایه</label><input type="number" min="1" max="12" value={classForm.gradeLevel} onChange={(event) => setClassForm((current) => ({ ...current, gradeLevel: event.target.value }))} /></div>
             <div className="admin-workspace-field"><label>بخش</label><select value={classForm.section} onChange={(event) => setClassForm((current) => ({ ...current, section: event.target.value }))}>{SECTION_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div>
             <div className="admin-workspace-field"><label>سال تعلیمی</label><select value={classForm.academicYearId} onChange={(event) => setClassForm((current) => ({ ...current, academicYearId: event.target.value }))}><option value="">انتخاب سال</option>{yearOptions.map((item) => <option key={asId(item)} value={asId(item)}>{item.uiLabel}</option>)}</select></div>
+            <div className="admin-workspace-field"><label>نگران صنف</label><select value={classForm.homeroomTeacherUserId} onChange={(event) => setClassForm((current) => ({ ...current, homeroomTeacherUserId: event.target.value }))}><option value="">بدون نگران</option>{instructorOptions.map((item) => <option key={asId(item)} value={asId(item)}>{item.uiLabel}</option>)}</select></div>
             <div className="admin-workspace-field"><label>شیفت</label><select value={classForm.shift} onChange={(event) => setClassForm((current) => ({ ...current, shift: event.target.value }))}>{SHIFT_OPTIONS.map((item) => <option key={item.value || 'none'} value={item.value}>{item.label}</option>)}</select></div>
             <div className="admin-workspace-field"><label>اتاق</label><input value={classForm.room} onChange={(event) => setClassForm((current) => ({ ...current, room: event.target.value }))} /></div>
             <div className="admin-workspace-field"><label>وضعیت</label><select value={classForm.status} onChange={(event) => setClassForm((current) => ({ ...current, status: event.target.value }))}>{CLASS_STATUS_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div>
@@ -1932,6 +1936,7 @@ export default function AdminEducationCore() {
                 <strong>{item.title}</strong>
                 <span>{item.code || '---'} | پایه {item.gradeLevel || '---'} | {item.section || 'بدون بخش'}</span>
                 <span>{item.academicYear?.title || 'بدون سال تعلیمی'} | {SHIFT_OPTIONS.find((entry) => entry.value === item.shift)?.label || 'شیفت نامشخص'}</span>
+                <span>نگران صنف: {item.homeroomTeacher?.name || 'تعیین نشده'}</span>
               </button>
               <div className="admin-education-list-side">
                 <span className={`admin-workspace-badge ${item.legacyCourseId ? 'info' : 'muted'}`}>{item.legacyCourseId ? 'همگام شده' : 'در انتظار'}</span>

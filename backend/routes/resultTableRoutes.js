@@ -8,11 +8,18 @@ const {
   getResultTable,
   listResultTableReferenceData,
   listResultTables,
+  listMyPublishedResultTables,
   listTableConfigs,
   listTableTemplates,
   publishResultTable
 } = require('../services/resultTableService');
 const { logActivity } = require('../utils/activity');
+const { renderResultTablePrintHtml } = require('../services/resultTablePrintService');
+const {
+  buildResultTableCsv,
+  buildResultTablePdfBuffer,
+  buildResultTableXlsxBuffer
+} = require('../services/resultTableExportService');
 
 const router = express.Router();
 
@@ -124,6 +131,15 @@ router.post('/generate', requireAuth, requireRole(['admin', 'instructor']), requ
   }
 });
 
+router.get('/my/published', requireAuth, async (req, res) => {
+  try {
+    const items = await listMyPublishedResultTables(req.user?.id || '');
+    return res.json({ success: true, items });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'دریافت نتیجهٔ عمومی نشرشده ناموفق بود.' });
+  }
+});
+
 router.post('/:tableId/publish', requireAuth, requireRole(['admin']), requirePermission('manage_content'), async (req, res) => {
   try {
     const item = await publishResultTable(req.params.tableId);
@@ -143,6 +159,80 @@ router.post('/:tableId/publish', requireAuth, requireRole(['admin']), requirePer
   } catch (error) {
     const code = String(error?.message || '');
     return res.status(getResultTableErrorStatus(code)).json({ success: false, message: code || 'Failed to publish the result table.' });
+  }
+});
+
+function exportFilename(item, extension) {
+  const code = String(item?.code || item?.id || 'result-table')
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'result-table';
+  return `${code}.${extension}`;
+}
+
+async function loadExportTable(req, res) {
+  const item = await getResultTable(req.params.tableId);
+  if (!item) {
+    res.status(404).json({ success: false, message: 'جدول نتیجه پیدا نشد.' });
+    return null;
+  }
+  return item;
+}
+
+router.get('/:tableId/export.pdf', requireAuth, requireRole(['admin', 'instructor']), requirePermission('manage_content'), async (req, res) => {
+  try {
+    const item = await loadExportTable(req, res);
+    if (!item) return undefined;
+    const buffer = await buildResultTablePdfBuffer(item);
+    const filename = exportFilename(item, 'pdf');
+    await logActivity({ req, action: 'result_table_export_pdf', targetType: 'result_table', targetId: item.id, meta: { filename, rowCount: item.rowCount } });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.status(200).send(buffer);
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'ساخت فایل PDF جدول نتیجه ناموفق بود.' });
+  }
+});
+
+router.get('/:tableId/export.xlsx', requireAuth, requireRole(['admin', 'instructor']), requirePermission('manage_content'), async (req, res) => {
+  try {
+    const item = await loadExportTable(req, res);
+    if (!item) return undefined;
+    const buffer = await buildResultTableXlsxBuffer(item);
+    const filename = exportFilename(item, 'xlsx');
+    await logActivity({ req, action: 'result_table_export_xlsx', targetType: 'result_table', targetId: item.id, meta: { filename, rowCount: item.rowCount } });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.status(200).send(buffer);
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'ساخت فایل اکسل جدول نتیجه ناموفق بود.' });
+  }
+});
+
+router.get('/:tableId/export.csv', requireAuth, requireRole(['admin', 'instructor']), requirePermission('manage_content'), async (req, res) => {
+  try {
+    const item = await loadExportTable(req, res);
+    if (!item) return undefined;
+    const csv = buildResultTableCsv(item);
+    const filename = exportFilename(item, 'csv');
+    await logActivity({ req, action: 'result_table_export_csv', targetType: 'result_table', targetId: item.id, meta: { filename, rowCount: item.rowCount } });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.status(200).send(csv);
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'ساخت فایل CSV جدول نتیجه ناموفق بود.' });
+  }
+});
+
+router.get('/:tableId/export.print', requireAuth, requireRole(['admin', 'instructor']), requirePermission('manage_content'), async (req, res) => {
+  try {
+    const item = await loadExportTable(req, res);
+    if (!item) return undefined;
+    const html = renderResultTablePrintHtml(item, { autoPrint: req.query?.auto === '1' });
+    await logActivity({ req, action: 'result_table_export_print', targetType: 'result_table', targetId: item.id, meta: { rowCount: item.rowCount } });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.status(200).send(html);
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'ساخت نسخهٔ چاپی جدول نتیجه ناموفق بود.' });
   }
 });
 

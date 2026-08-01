@@ -1,13 +1,22 @@
 const mongoose = require('mongoose');
 
+require('../models/User');
+require('../models/StudentCore');
+require('../models/AfghanStudent');
+require('../models/ExamType');
+require('../models/ExamDefaultMark');
+
 const AcademicYear = require('../models/AcademicYear');
 const SchoolClass = require('../models/SchoolClass');
 const Subject = require('../models/Subject');
 const TeacherAssignment = require('../models/TeacherAssignment');
 const StudentMembership = require('../models/StudentMembership');
+const StudentProfile = require('../models/StudentProfile');
+const Attendance = require('../models/Attendance');
 const ExamSession = require('../models/ExamSession');
 const ExamMark = require('../models/ExamMark');
 const ExamResult = require('../models/ExamResult');
+const { formatAfghanStoredDateLabel } = require('../utils/afghanDate');
 const {
   GENERAL_RESULT_POLICY,
   OFFICIAL_EXAM_CODES,
@@ -15,6 +24,7 @@ const {
   combineOfficialSubjectScores,
   computeCompetitionRanks,
   computeGeneralResult,
+  computePercentage,
   getMembershipLifecycleLabel,
   getOfficialExamPolicy,
   normalizeExamTypeCode
@@ -22,6 +32,44 @@ const {
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function latinIdentityText(value) {
+  const normalized = normalizeText(value);
+  return /[A-Za-z]/.test(normalized) ? normalized : '';
+}
+
+const AFGHAN_PROVINCE_LABELS = Object.freeze({
+  kabul: 'کابل', herat: 'هرات', kandahar: 'قندهار', balkh: 'بلخ', nangarhar: 'ننگرهار',
+  badakhshan: 'بدخشان', takhar: 'تخار', samangan: 'سمنگان', kunduz: 'کندز', baghlan: 'بغلان',
+  farah: 'فراه', nimroz: 'نیمروز', helmand: 'هلمند', ghor: 'غور', daykundi: 'دایکندی',
+  uruzgan: 'ارزگان', zabul: 'زابل', paktika: 'پکتیکا', khost: 'خوست', paktia: 'پکتیا',
+  logar: 'لوگر', parwan: 'پروان', kapisa: 'کاپیسا', panjshir: 'پنجشیر', badghis: 'بادغیس',
+  faryab: 'فاریاب', jowzjan: 'جوزجان', saripul: 'سرپل', bamyan: 'بامیان', ghazni: 'غزنی',
+  wardak: 'میدان وردک', laghman: 'لغمان', kunar: 'کنر', nuristan: 'نورستان'
+});
+
+function localizedProvince(value) {
+  const normalized = normalizeText(value);
+  return AFGHAN_PROVINCE_LABELS[normalized.toLowerCase()] || normalized;
+}
+
+function dateParts(value, calendar = 'gregorian') {
+  if (!value) return { year: '', month: '', day: '' };
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return { year: '', month: '', day: '' };
+  const locale = calendar === 'solar' ? 'en-US-u-ca-persian' : 'en-CA';
+  try {
+    const parts = new Intl.DateTimeFormat(locale, {
+      timeZone: 'UTC', year: 'numeric', month: 'numeric', day: 'numeric'
+    }).formatToParts(date);
+    const read = (type) => parts.find((item) => item.type === type)?.value || '';
+    return { year: read('year'), month: read('month'), day: read('day') };
+  } catch {
+    return calendar === 'gregorian'
+      ? { year: String(date.getUTCFullYear()), month: String(date.getUTCMonth() + 1), day: String(date.getUTCDate()) }
+      : { year: '', month: '', day: '' };
+  }
 }
 
 function normalizeId(value) {
@@ -38,6 +86,87 @@ function displayName(membership = {}) {
     || normalizeText(membership.studentId?.fullName)
     || normalizeText(membership.student?.name)
     || '---';
+}
+
+function pickStudentPhoto(membership = {}) {
+  const documents = Array.isArray(membership.afghanStudentId?.documents)
+    ? membership.afghanStudentId.documents
+    : [];
+  return normalizeText(documents.find((item) => normalizeText(item?.type) === 'photo')?.url)
+    || normalizeText(membership.student?.avatarUrl);
+}
+
+function buildIdentitySnapshot(membership = {}, profile = null) {
+  const core = membership.studentId || {};
+  const legacy = membership.afghanStudentId || {};
+  const personal = legacy.personalInfo || {};
+  const identification = legacy.identification || {};
+  const englishGivenName = latinIdentityText(personal.firstName);
+  const englishFamilyName = latinIdentityText(personal.lastName);
+  const englishName = [englishGivenName, englishFamilyName].filter(Boolean).join(' ');
+  const dariName = [personal.firstNameDari, personal.lastNameDari].map(normalizeText).filter(Boolean).join(' ');
+  const birthDate = personal.birthDate || core.dateOfBirth || null;
+  const solarBirthDate = dateParts(birthDate, 'solar');
+  const gregorianBirthDate = dateParts(birthDate, 'gregorian');
+  return {
+    fullName: dariName || displayName(membership),
+    fullNameEnglish: englishName,
+    givenName: normalizeText(core.givenName) || normalizeText(personal.firstNameDari),
+    familyName: normalizeText(core.familyName) || normalizeText(personal.lastNameDari),
+    givenNameEnglish: englishGivenName,
+    familyNameEnglish: englishFamilyName,
+    fatherName: normalizeText(personal.fatherName) || normalizeText(profile?.family?.fatherName),
+    fatherNameEnglish: latinIdentityText(personal.fatherNameEnglish),
+    grandfatherName: normalizeText(personal.grandfatherName),
+    admissionNo: normalizeText(core.admissionNo) || normalizeText(legacy.registrationId),
+    asasNumber: normalizeText(legacy.asasNumber),
+    tazkiraNumber: normalizeText(identification.tazkiraNumber),
+    dateOfBirth: birthDate || '',
+    dateOfBirthSolar: birthDate ? formatAfghanStoredDateLabel(birthDate) : '',
+    dateOfBirthSolarParts: solarBirthDate,
+    dateOfBirthGregorian: [gregorianBirthDate.year, gregorianBirthDate.month, gregorianBirthDate.day].filter(Boolean).join('/'),
+    dateOfBirthGregorianParts: gregorianBirthDate,
+    birthPlace: normalizeText(personal.birthPlace),
+    domicile: [legacy.contactInfo?.village, legacy.contactInfo?.district, localizedProvince(legacy.contactInfo?.province)]
+      .map(normalizeText).filter(Boolean).join('، '),
+    address: normalizeText(legacy.contactInfo?.address) || normalizeText(profile?.contact?.address),
+    gender: normalizeText(personal.gender) || normalizeText(core.gender),
+    photoUrl: pickStudentPhoto(membership)
+  };
+}
+
+function emptyAttendanceSnapshot() {
+  return {
+    totalDays: 0,
+    present: 0,
+    absent: 0,
+    sick: 0,
+    leave: 0,
+    late: 0,
+    excused: 0,
+    suspended: 0
+  };
+}
+
+function buildStageSummary(subjects = [], key, possiblePerSubject) {
+  const applicable = subjects.filter((subject) => subject.applicable);
+  const scores = applicable.map((subject) => subject[key]).filter((value) => (
+    value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
+  ));
+  const obtained = scores.length
+    ? Number(scores.reduce((sum, value) => sum + Number(value), 0).toFixed(2))
+    : null;
+  const possible = applicable.length * possiblePerSubject;
+  const complete = applicable.length > 0 && scores.length === applicable.length;
+  return {
+    obtained,
+    possible,
+    average: scores.length ? Number((obtained / scores.length).toFixed(2)) : null,
+    percentage: complete ? computePercentage(obtained, possible) : null,
+    complete,
+    recordedSubjects: scores.length,
+    subjectCount: applicable.length
+  };
 }
 
 function formatSubject(subject = {}) {
@@ -79,6 +208,64 @@ function membershipExistedAtFreeze(membership = {}, session = {}) {
   return joined.getTime() <= freeze.getTime();
 }
 
+const READINESS_ACTIONS = Object.freeze({
+  assignments: '/timetable/teacher-timetable-configurations',
+  sheets: '/admin-sheet-templates',
+  marks: '/grade-manager'
+});
+
+const SESSION_STATUS_LABELS = Object.freeze({
+  draft: 'پیش‌نویس',
+  active: 'فعال',
+  submitted: 'فرستاده‌شده برای تأیید',
+  approved: 'تأییدشده',
+  closed: 'بسته‌شده',
+  published: 'نشرشده',
+  archived: 'آرشیف‌شده'
+});
+
+function readinessIssue(code, subject, details = {}) {
+  const subjectId = idText(subject);
+  const subjectName = formatSubject(subject).name;
+  const messages = {
+    subject_teacher_missing: `برای مضمون ${subjectName} استاد تعیین نشده است.`,
+    four_half_missing: `شقهٔ چهارنیم‌ماههٔ مضمون ${subjectName} ساخته نشده است.`,
+    annual_missing: `شقهٔ سالانهٔ مضمون ${subjectName} ساخته نشده است.`,
+    four_half_not_approved: `شقهٔ چهارنیم‌ماههٔ مضمون ${subjectName} هنوز تأیید مدیریت نشده است.`,
+    annual_not_approved: `شقهٔ سالانهٔ مضمون ${subjectName} هنوز تأیید مدیریت نشده است.`,
+    four_half_duplicate: `برای مضمون ${subjectName} بیش از یک شقهٔ چهارنیم‌ماههٔ تأییدشده وجود دارد.`,
+    annual_duplicate: `برای مضمون ${subjectName} بیش از یک شقهٔ سالانهٔ تأییدشده وجود دارد.`,
+    pending_marks: `در شقه‌های مضمون ${subjectName} هنوز نمرهٔ ناتکمیل وجود دارد.`,
+    roster_snapshot_incomplete: `فهرست تثبیت‌شدهٔ شاگردان در مضمون ${subjectName} کامل نیست.`
+  };
+  const actionByCode = {
+    subject_teacher_missing: READINESS_ACTIONS.assignments,
+    four_half_missing: READINESS_ACTIONS.sheets,
+    annual_missing: READINESS_ACTIONS.sheets,
+    four_half_not_approved: READINESS_ACTIONS.marks,
+    annual_not_approved: READINESS_ACTIONS.marks,
+    four_half_duplicate: READINESS_ACTIONS.sheets,
+    annual_duplicate: READINESS_ACTIONS.sheets,
+    pending_marks: READINESS_ACTIONS.marks,
+    roster_snapshot_incomplete: READINESS_ACTIONS.marks
+  };
+  return {
+    code,
+    subjectId,
+    subjectName,
+    message: messages[code] || code,
+    actionUrl: actionByCode[code] || '',
+    ...details
+  };
+}
+
+function summarizeCandidateSessions(sessions = []) {
+  return sessions.map((session) => ({
+    ...formatSourceSession(session),
+    statusLabel: SESSION_STATUS_LABELS[normalizeText(session.status)] || normalizeText(session.status) || 'نامشخص'
+  }));
+}
+
 async function loadReadinessSource({ academicYearId, classId }) {
   const yearId = normalizeId(academicYearId);
   const schoolClassId = normalizeId(classId);
@@ -86,7 +273,9 @@ async function loadReadinessSource({ academicYearId, classId }) {
 
   const [academicYear, schoolClass, assignments, sessions, memberships] = await Promise.all([
     AcademicYear.findById(yearId).lean(),
-    SchoolClass.findById(schoolClassId).lean(),
+    SchoolClass.findById(schoolClassId)
+      .populate('homeroomTeacherUserId', 'name email')
+      .lean(),
     TeacherAssignment.find({ academicYearId: yearId, classId: schoolClassId, status: 'active', subjectId: { $ne: null } })
       .populate('subjectId')
       .populate('teacherUserId', 'name email')
@@ -164,14 +353,30 @@ async function getClassAggregateReadiness({ academicYearId, classId } = {}) {
     const candidates = source.officialSessions.filter((item) => idText(item.subjectId) === subjectId);
     const byCode = (code) => candidates.filter((item) => normalizeExamTypeCode(item.examTypeId) === code);
     const eligibleByCode = (code) => byCode(code).filter((item) => approvedStatuses.has(normalizeText(item.status)));
+    const fourHalfCandidates = byCode(OFFICIAL_EXAM_CODES.FOUR_HALF);
+    const annualCandidates = byCode(OFFICIAL_EXAM_CODES.ANNUAL);
     const fourHalf = eligibleByCode(OFFICIAL_EXAM_CODES.FOUR_HALF);
     const annual = eligibleByCode(OFFICIAL_EXAM_CODES.ANNUAL);
 
-    if (!assignments.length) issues.push({ code: 'subject_teacher_missing', subjectId });
-    if (fourHalf.length === 0) issues.push({ code: 'four_half_missing', subjectId });
-    if (annual.length === 0) issues.push({ code: 'annual_missing', subjectId });
-    if (fourHalf.length > 1) issues.push({ code: 'four_half_duplicate', subjectId, count: fourHalf.length });
-    if (annual.length > 1) issues.push({ code: 'annual_duplicate', subjectId, count: annual.length });
+    if (!assignments.length) issues.push(readinessIssue('subject_teacher_missing', subject));
+    if (fourHalfCandidates.length === 0) {
+      issues.push(readinessIssue('four_half_missing', subject));
+    } else if (fourHalf.length === 0) {
+      issues.push(readinessIssue('four_half_not_approved', subject, {
+        sessionId: idText(fourHalfCandidates[0]),
+        sessionStatuses: fourHalfCandidates.map((item) => normalizeText(item.status))
+      }));
+    }
+    if (annualCandidates.length === 0) {
+      issues.push(readinessIssue('annual_missing', subject));
+    } else if (annual.length === 0) {
+      issues.push(readinessIssue('annual_not_approved', subject, {
+        sessionId: idText(annualCandidates[0]),
+        sessionStatuses: annualCandidates.map((item) => normalizeText(item.status))
+      }));
+    }
+    if (fourHalf.length > 1) issues.push(readinessIssue('four_half_duplicate', subject, { count: fourHalf.length }));
+    if (annual.length > 1) issues.push(readinessIssue('annual_duplicate', subject, { count: annual.length }));
 
     const selected = [fourHalf[0], annual[0]].filter(Boolean);
     const policyMismatches = selected.filter((session) => {
@@ -186,6 +391,9 @@ async function getClassAggregateReadiness({ academicYearId, classId } = {}) {
     policyMismatches.forEach((session) => issues.push({
       code: `${normalizeExamTypeCode(session.examTypeId).toLowerCase()}_policy_mismatch`,
       subjectId,
+      subjectName: formatSubject(subject).name,
+      message: `ساختار نمره‌دهی شقهٔ مضمون ${formatSubject(subject).name} با قاعدهٔ رسمی مطابقت ندارد.`,
+      actionUrl: READINESS_ACTIONS.sheets,
       sessionId: idText(session)
     }));
     let pendingMarks = 0;
@@ -200,8 +408,8 @@ async function getClassAggregateReadiness({ academicYearId, classId } = {}) {
         .filter((membership) => membershipExistedAtFreeze(membership, session))
         .filter((membership) => !resultIds.has(idText(membership))).length;
     });
-    if (pendingMarks > 0) issues.push({ code: 'pending_marks', subjectId, count: pendingMarks });
-    if (missingRosterRows > 0) issues.push({ code: 'roster_snapshot_incomplete', subjectId, count: missingRosterRows });
+    if (pendingMarks > 0) issues.push(readinessIssue('pending_marks', subject, { count: pendingMarks }));
+    if (missingRosterRows > 0) issues.push(readinessIssue('roster_snapshot_incomplete', subject, { count: missingRosterRows }));
 
     return {
       ...formatSubject(subject),
@@ -210,6 +418,8 @@ async function getClassAggregateReadiness({ academicYearId, classId } = {}) {
         teacherId: idText(item.teacherUserId),
         teacherName: normalizeText(item.teacherUserId?.name)
       })),
+      fourHalfCandidates: summarizeCandidateSessions(fourHalfCandidates),
+      annualCandidates: summarizeCandidateSessions(annualCandidates),
       fourHalfSessions: fourHalf.map(formatSourceSession),
       annualSessions: annual.map(formatSourceSession),
       pendingMarks,
@@ -224,7 +434,19 @@ async function getClassAggregateReadiness({ academicYearId, classId } = {}) {
     };
   });
 
-  if (!subjects.length) issues.push({ code: 'subjects_missing' });
+  if (!subjects.length) issues.push({
+    code: 'subjects_missing',
+    subjectId: '',
+    subjectName: '',
+    message: 'برای این صنف هیچ مضمون فعالی تعیین نشده است.',
+    actionUrl: READINESS_ACTIONS.assignments
+  });
+  const requiredSessionCount = subjects.length * 2;
+  const approvedSessionCount = subjects.reduce((sum, subject) => (
+    sum + Math.min(1, subject.fourHalfSessions.length) + Math.min(1, subject.annualSessions.length)
+  ), 0);
+  const assignedSubjectCount = subjects.filter((subject) => subject.teacherAssignments.length > 0).length;
+  const completedSubjectCount = subjects.filter((subject) => subject.ready).length;
   return {
     ready: subjects.length > 0 && subjects.every((item) => item.ready),
     policyVersion: OFFICIAL_RESULT_POLICY_VERSION,
@@ -232,15 +454,40 @@ async function getClassAggregateReadiness({ academicYearId, classId } = {}) {
     academicYear: {
       id: idText(source.academicYear),
       title: normalizeText(source.academicYear.title),
-      code: normalizeText(source.academicYear.code)
+      code: normalizeText(source.academicYear.code),
+      calendarType: normalizeText(source.academicYear.calendarType),
+      startDate: source.academicYear.startDate || null,
+      endDate: source.academicYear.endDate || null,
+      startDateLocal: normalizeText(source.academicYear.startDateLocal),
+      endDateLocal: normalizeText(source.academicYear.endDateLocal)
     },
     schoolClass: {
       id: idText(source.schoolClass),
       title: normalizeText(source.schoolClass.title),
-      code: normalizeText(source.schoolClass.code)
+      titleDari: normalizeText(source.schoolClass.titleDari),
+      code: normalizeText(source.schoolClass.code),
+      gradeLevel: Number(source.schoolClass.gradeLevel || 0),
+      section: normalizeText(source.schoolClass.section),
+      homeroomTeacherUserId: idText(source.schoolClass.homeroomTeacherUserId),
+      homeroomTeacher: source.schoolClass.homeroomTeacherUserId ? {
+        id: idText(source.schoolClass.homeroomTeacherUserId),
+        name: normalizeText(source.schoolClass.homeroomTeacherUserId.name),
+        email: normalizeText(source.schoolClass.homeroomTeacherUserId.email)
+      } : null,
+      schoolId: idText(source.schoolClass.schoolId)
     },
     membershipCount: source.memberships.length,
     sourceSessionIds: sourceSessionIds.map(idText),
+    progress: {
+      subjectCount: subjects.length,
+      assignedSubjectCount,
+      requiredSessionCount,
+      approvedSessionCount,
+      completedSubjectCount,
+      percentage: requiredSessionCount > 0
+        ? Math.round((approvedSessionCount / requiredSessionCount) * 100)
+        : 0
+    },
     subjects,
     issues
   };
@@ -290,10 +537,18 @@ async function buildClassAggregateRows({ academicYearId, classId } = {}) {
       $or: [{ academicYearId: normalizeId(academicYearId) }, { academicYear: normalizeId(academicYearId) }]
     })
       .populate('studentId')
-      .populate('student', 'name email')
+      .populate('afghanStudentId')
+      .populate('student', 'name email avatarUrl')
       .sort({ enrolledAt: 1, joinedAt: 1, createdAt: 1, _id: 1 }),
     ExamResult.find({ sessionId: { $in: readiness.sourceSessionIds } })
-      .populate({ path: 'studentMembershipId', populate: [{ path: 'studentId' }, { path: 'student', select: 'name email' }] })
+      .populate({
+        path: 'studentMembershipId',
+        populate: [
+          { path: 'studentId' },
+          { path: 'afghanStudentId' },
+          { path: 'student', select: 'name email avatarUrl' }
+        ]
+      })
       .lean()
   ]);
 
@@ -312,6 +567,31 @@ async function buildClassAggregateRows({ academicYearId, classId } = {}) {
     const key = idText(result.studentMembershipId);
     if (!resultsByMembership.has(key)) resultsByMembership.set(key, []);
     resultsByMembership.get(key).push(result);
+  });
+
+  const membershipIds = [...membershipMap.keys()].filter(Boolean);
+  const studentCoreIds = [...new Set([...membershipMap.values()].map((item) => idText(item.studentId)).filter(Boolean))];
+  const [profiles, attendanceRecords] = await Promise.all([
+    studentCoreIds.length ? StudentProfile.find({ studentId: { $in: studentCoreIds } }).lean() : [],
+    membershipIds.length
+      ? Attendance.find({
+          $or: [
+            { studentMembershipId: { $in: membershipIds } },
+            { classId: normalizeId(classId), academicYearId: normalizeId(academicYearId) }
+          ]
+        }).select('student studentMembershipId status date').lean()
+      : []
+  ]);
+  const profileMap = new Map(profiles.map((profile) => [idText(profile.studentId), profile]));
+  const membershipByUserId = new Map([...membershipMap.values()].map((item) => [idText(item.student), idText(item)]));
+  const attendanceMap = new Map(membershipIds.map((membershipId) => [membershipId, emptyAttendanceSnapshot()]));
+  attendanceRecords.forEach((record) => {
+    const membershipId = idText(record.studentMembershipId) || membershipByUserId.get(idText(record.student));
+    if (!membershipId || !attendanceMap.has(membershipId)) return;
+    const summary = attendanceMap.get(membershipId);
+    const status = normalizeText(record.status);
+    summary.totalDays += 1;
+    if (Object.prototype.hasOwnProperty.call(summary, status)) summary[status] += 1;
   });
 
   const subjectContexts = readiness.subjects.map((subject) => ({
@@ -341,6 +621,9 @@ async function buildClassAggregateRows({ academicYearId, classId } = {}) {
         annual: annualScore.score,
         annualStatus: annualScore.status,
         total: combined.obtainedMark,
+        fourHalfPassed: combined.fourHalfPassed,
+        annualPassed: combined.annualPassed,
+        generalPassed: combined.generalPassed,
         passed: combined.passed,
         complete: combined.complete,
         applicable
@@ -366,13 +649,20 @@ async function buildClassAggregateRows({ academicYearId, classId } = {}) {
     const membershipStatus = normalizeText(membershipState.status);
     const membershipStatusLabel = normalizeText(membershipState.statusLabel)
       || getMembershipLifecycleLabel(membershipState);
+    const identity = buildIdentitySnapshot(membership, profileMap.get(idText(membership.studentId)) || null);
+    const attendance = attendanceMap.get(membershipId) || emptyAttendanceSnapshot();
+    const stageTotals = {
+      fourHalf: buildStageSummary(applicableSubjects, 'fourHalf', 40),
+      annual: buildStageSummary(applicableSubjects, 'annual', 60),
+      general: buildStageSummary(applicableSubjects, 'total', 100)
+    };
     return {
       rowType: 'student',
       sourceExamResultIds,
       studentMembershipId: membership._id,
       studentId: membership.studentId?._id || membership.studentId || null,
       student: membership.student?._id || membership.student || null,
-      displayName: displayName(membership),
+      displayName: identity.fullName || displayName(membership),
       membershipStatus,
       membershipStatusLabel,
       resultStatus: general.resultStatus,
@@ -380,17 +670,21 @@ async function buildClassAggregateRows({ academicYearId, classId } = {}) {
       rank: null,
       obtainedMark: general.totalObtained,
       totalMark: general.totalPossible,
-      percentage: general.average,
-      averageMark: general.average,
+      percentage: stageTotals.general.percentage,
+      averageMark: stageTotals.general.percentage,
       cells: {
-        fullName: displayName(membership),
-        admissionNo: normalizeText(membership.studentId?.admissionNo),
+        fullName: identity.fullName || displayName(membership),
+        admissionNo: identity.admissionNo,
+        identity,
+        attendance,
+        stageTotals,
         membershipStatus,
         membershipStatusLabel,
         subjects,
         totalObtained: general.totalObtained,
         totalPossible: general.totalPossible,
         average: general.average,
+        percentage: stageTotals.general.percentage,
         failedSubjects: general.failedSubjects,
         resultStatus: general.resultStatus
       },

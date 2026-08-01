@@ -23,6 +23,22 @@ const tableConfigSchema = new mongoose.Schema({
     default: 'site'
   },
   logoUrl: { type: String, default: '' },
+  secondaryLogoUrl: { type: String, default: '' },
+  ministryTitle: { type: String, default: 'وزارت معارف' },
+  directorateTitle: { type: String, default: 'ریاست معارف شهر کابل' },
+  districtTitle: { type: String, default: '' },
+  schoolTitle: { type: String, default: '' },
+  studentsPerPage: { type: Number, default: 3, min: 1, max: 10 },
+  signatureLabels: {
+    type: [String],
+    default: () => [
+      'تأیید مکتب',
+      'تأیید آمریت حوزه/ولسوالی',
+      'عضو مسلکی نتایج',
+      'تأیید مدیریت عمومی نتایج',
+      'تأیید ریاست معارف'
+    ]
+  },
   headerText: { type: String, default: '' },
   footerText: { type: String, default: '' },
   showHeader: { type: Boolean, default: true },
@@ -41,9 +57,17 @@ tableConfigSchema.pre('validate', function syncTableConfigState() {
   if (typeof this.code === 'string') this.code = this.code.trim().toUpperCase();
   if (typeof this.fontFamily === 'string') this.fontFamily = this.fontFamily.trim();
   if (typeof this.logoUrl === 'string') this.logoUrl = this.logoUrl.trim();
+  if (typeof this.secondaryLogoUrl === 'string') this.secondaryLogoUrl = this.secondaryLogoUrl.trim();
+  if (typeof this.ministryTitle === 'string') this.ministryTitle = this.ministryTitle.trim();
+  if (typeof this.directorateTitle === 'string') this.directorateTitle = this.directorateTitle.trim();
+  if (typeof this.districtTitle === 'string') this.districtTitle = this.districtTitle.trim();
+  if (typeof this.schoolTitle === 'string') this.schoolTitle = this.schoolTitle.trim();
   if (typeof this.headerText === 'string') this.headerText = this.headerText.trim();
   if (typeof this.footerText === 'string') this.footerText = this.footerText.trim();
   if (typeof this.note === 'string') this.note = this.note.trim();
+  this.signatureLabels = Array.isArray(this.signatureLabels)
+    ? this.signatureLabels.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 6)
+    : [];
   if (!this.name && this.code) {
     this.name = this.code;
   }

@@ -168,11 +168,12 @@ const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedY
   return {
     schoolId: currentSchool,
     personalInfo: {
-      firstName: trimValue(formData.firstName),
-      lastName: trimValue(formData.lastName),
+      firstName: trimValue(formData.firstNameEnglish) || trimValue(formData.firstName),
+      lastName: trimValue(formData.lastNameEnglish) || trimValue(formData.lastName),
       firstNameDari: trimValue(formData.firstName),
       lastNameDari: trimValue(formData.lastName),
       fatherName: trimValue(formData.fatherName),
+      fatherNameEnglish: trimValue(formData.fatherNameEnglish),
       grandfatherName: trimValue(formData.grandfatherName),
       gender: formData.gender,
       birthDate: formData.birthDate,
@@ -262,7 +263,10 @@ const createEmptyForm = (academicYearId = '') => ({
   registrationType: 'new',
   firstName: '',
   lastName: '',
+  firstNameEnglish: '',
+  lastNameEnglish: '',
   fatherName: '',
+  fatherNameEnglish: '',
   grandfatherName: '',
   nationalId: '',
   birthDate: '',
@@ -712,9 +716,21 @@ const StudentRegistration = () => {
               {errors.lastName && <span className="text-red-500">{errors.lastName}</span>}
             </div>
             <div className="form-group">
+              <label htmlFor="firstNameEnglish">نام به انگلیسی</label>
+              <input id="firstNameEnglish" dir="ltr" value={formData.firstNameEnglish} onChange={e => handleInputChange('firstNameEnglish', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label htmlFor="lastNameEnglish">تخلص به انگلیسی</label>
+              <input id="lastNameEnglish" dir="ltr" value={formData.lastNameEnglish} onChange={e => handleInputChange('lastNameEnglish', e.target.value)} />
+            </div>
+            <div className="form-group">
               <label htmlFor="fatherName">نام پدر *</label>
               <input id="fatherName" value={formData.fatherName} onChange={e => handleInputChange('fatherName', e.target.value)} required className={errors.fatherName ? 'border-red-500' : ''} />
               {errors.fatherName && <span className="text-red-500">{errors.fatherName}</span>}
+            </div>
+            <div className="form-group">
+              <label htmlFor="fatherNameEnglish">نام پدر به انگلیسی</label>
+              <input id="fatherNameEnglish" dir="ltr" value={formData.fatherNameEnglish} onChange={e => handleInputChange('fatherNameEnglish', e.target.value)} />
             </div>
             <div className="form-group">
               <label htmlFor="grandfatherName">نام پدرکلان</label>

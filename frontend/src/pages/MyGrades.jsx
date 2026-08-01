@@ -44,6 +44,7 @@ const statusLabel = (value = '') => {
 export default function MyGrades() {
   const [student, setStudent] = useState(null);
   const [items, setItems] = useState([]);
+  const [generalResults, setGeneralResults] = useState([]);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -51,21 +52,26 @@ export default function MyGrades() {
     setLoading(true);
     setMessage('');
     try {
-      const response = await fetch(`${API_BASE}/api/exams/my/results`, {
-        headers: { ...getAuthHeaders() }
-      });
+      const [response, generalResponse] = await Promise.all([
+        fetch(`${API_BASE}/api/exams/my/results`, { headers: { ...getAuthHeaders() } }),
+        fetch(`${API_BASE}/api/result-tables/my/published`, { headers: { ...getAuthHeaders() } }).catch(() => null)
+      ]);
       const data = await response.json().catch(() => ({}));
+      const generalData = generalResponse ? await generalResponse.json().catch(() => ({})) : {};
       if (!response.ok || data?.success === false) {
         setMessage(data?.message || 'خطا در دریافت نتایج امتحانات');
         setItems([]);
+        setGeneralResults([]);
         setStudent(null);
         return;
       }
       setStudent(data.student || null);
       setItems(data.items || []);
+      setGeneralResults(generalResponse?.ok && generalData?.success !== false ? (generalData.items || []) : []);
     } catch {
       setMessage('خطا در ارتباط با سرور');
       setItems([]);
+      setGeneralResults([]);
       setStudent(null);
     } finally {
       setLoading(false);
@@ -87,13 +93,53 @@ export default function MyGrades() {
         <p>
           این صفحه نتایج تأییدشده را مستقیماً از شقه‌های مضمون و بخش امتحانات نمایش می‌دهد.
           {student?.fullName ? ` ${student.fullName}` : ''}
-          {student?.admissionNo ? ` | نمبر اساس: ${student.admissionNo}` : ''}
+          {student?.asasNumber ? ` | نمبر اساس: ${student.asasNumber}` : ''}
         </p>
 
         {loading && <div className="mygrades-empty">در حال دریافت...</div>}
         {message && <div className="mygrades-empty">{message}</div>}
-        {!loading && !message && !items.length && (
+        {!loading && !message && !items.length && !generalResults.length && (
           <div className="mygrades-empty">هنوز نتیجهٔ امتحانی تأییدشده‌ای برای حساب شما موجود نیست.</div>
+        )}
+
+        {generalResults.length > 0 && (
+          <section className="mygrades-general-results">
+            <div className="mygrades-general-title">
+              <div>
+                <h3>نتیجهٔ عمومی نشرشده</h3>
+                <p>این نتیجه پس از تأیید مدیریت از مجموع چهارنیم‌ماهه و سالانه ساخته شده و قابل ویرایش مستقیم نیست.</p>
+              </div>
+              <span className="badge dark">۱۶/۴۰، ۴۰/۶۰ و ۵۵/۱۰۰</span>
+            </div>
+            {generalResults.map((result) => (
+              <article key={`${result.id}-${result.version}`} className="mygrades-general-card">
+                <div className="mygrades-head">
+                  <div>
+                    <strong>{result.schoolClass?.title || result.title}</strong>
+                    <div className="meta">سال تعلیمی: {result.academicYear?.title || '---'} | نسخه: {Number(result.version || 1).toLocaleString('fa-AF-u-ca-persian')}</div>
+                  </div>
+                  <div className="mygrades-badges">
+                    <span className="badge">نتیجه: {statusLabel(result.resultStatus)}</span>
+                    <span className="badge accent">فیصدی: {toScore(result.percentage ?? result.average).toLocaleString('fa-AF-u-ca-persian')}٪</span>
+                    {result.rank != null && <span className="badge warning">درجه: {Number(result.rank).toLocaleString('fa-AF-u-ca-persian')}</span>}
+                  </div>
+                </div>
+                <div className="mygrades-general-subjects">
+                  {(result.subjects || []).map((subject) => (
+                    <div key={subject.subjectId || subject.subjectCode}>
+                      <b>{subject.subjectName || subject.subjectCode || 'مضمون'}</b>
+                      <span>چهارنیم‌ماهه: {subject.fourHalf ?? '---'} / ۴۰</span>
+                      <span>سالانه: {subject.annual ?? '---'} / ۶۰</span>
+                      <strong>مجموع: {subject.total ?? '---'} / ۱۰۰</strong>
+                    </div>
+                  ))}
+                </div>
+                {result.membershipStatusLabel && !['active', 'transferred_in'].includes(result.membershipStatus) && (
+                  <div className="mygrades-general-note">وضعیت شاگرد: {result.membershipStatusLabel}</div>
+                )}
+              </article>
+            ))}
+          </section>
         )}
 
         <div className="mygrades-list">
@@ -113,7 +159,7 @@ export default function MyGrades() {
                 <div className="mygrades-badges">
                   <span className="badge">حالت: {statusLabel(item.resultStatus)}</span>
                   <span className="badge accent">نمره: {toScore(item.obtainedMark).toLocaleString('fa-AF-u-ca-persian')}</span>
-                  <span className="badge dark">فیصدی: {toScore(item.percentage).toLocaleString('fa-AF-u-ca-persian')}%</span>
+                  <span className="badge dark">فیصدی: {toScore(item.percentage).toLocaleString('fa-AF-u-ca-persian')}٪</span>
                   {item.rank != null && <span className="badge warning">رتبه: {Number(item.rank).toLocaleString('fa-AF-u-ca-persian')}</span>}
                 </div>
               </div>

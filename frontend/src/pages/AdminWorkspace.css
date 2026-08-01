@@ -1257,6 +1257,129 @@
   justify-content: center;
 }
 
+.result-readiness-panel {
+  margin-top: 16px;
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 16px;
+  background: #f8fafc;
+}
+
+.result-readiness-summary,
+.result-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.result-readiness-summary > div:first-child,
+.result-list-header > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.result-readiness-progress {
+  min-width: 250px;
+  display: grid;
+  gap: 6px;
+}
+
+.result-readiness-progress progress {
+  width: 100%;
+  height: 10px;
+  accent-color: #0f766e;
+}
+
+.admin-workspace-table td small,
+.admin-workspace-table th small {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.result-action-link {
+  display: inline-flex;
+  max-width: 260px;
+  white-space: normal;
+  line-height: 1.45;
+  text-decoration: none;
+}
+
+.admin-workspace-card details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.admin-workspace-card details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-workspace-card details > summary h2 {
+  margin: 0;
+}
+
+.result-export-actions {
+  flex-wrap: wrap;
+}
+
+.result-score-triplet {
+  direction: ltr;
+  display: inline-block;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-official-preview th,
+.result-official-preview td {
+  min-width: 72px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.result-official-preview th:nth-child(2),
+.result-official-preview td:nth-child(2) {
+  min-width: 150px;
+}
+
+.result-official-preview .result-preview-student-end td {
+  border-bottom: 2px solid var(--admin-workspace-text, #0f172a);
+}
+
+.result-list-header .admin-workspace-field {
+  min-width: 280px;
+}
+
+.result-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+@media (max-width: 760px) {
+  .result-readiness-summary,
+  .result-list-header,
+  .admin-workspace-card details > summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .result-readiness-progress,
+  .result-list-header .admin-workspace-field {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
 /* Sheet template center: horizontal, compact management flow. */
 .admin-sheet-template-center .admin-workspace-template-list,
 .admin-sheet-template-center .admin-sheet-session-strip,
