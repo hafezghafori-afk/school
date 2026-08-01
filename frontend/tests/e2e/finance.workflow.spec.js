@@ -315,6 +315,7 @@ test.describe('finance workflow', () => {
   test('admin finance workflow shows preview, approval trail, and operational actions', async ({ page }) => {
     test.setTimeout(420000);
     let approveCalls = 0;
+    let paymentsListUrl = '';
     let reminderCalls = 0;
     let exportCalls = 0;
     let auditExportCalls = 0;
@@ -477,8 +478,8 @@ test.describe('finance workflow', () => {
           paidAt: '2026-03-07T00:00:00.000Z',
           fileUrl: 'uploads/finance-receipts/receipt-2.pdf',
           note: '',
-          status: 'pending',
-          approvalStage: 'finance_lead_review',
+          status: 'approved',
+          approvalStage: 'completed',
           approvalTrail: []
         }
       ],
@@ -506,6 +507,10 @@ test.describe('finance workflow', () => {
           schoolClass: {
             id: 'class-2',
             title: 'Class Two Core'
+          },
+          academicYear: {
+            id: 'year-1',
+            title: '1406'
           },
           feeOrder: {
             id: 'order-4',
@@ -548,7 +553,53 @@ test.describe('finance workflow', () => {
             remainingBeforePayment: 350,
             remainingAfterPayment: 0
           }
-        }
+        },
+        ...Array.from({ length: 8 }, (_, index) => ({
+          id: `payment-history-${index + 1}`,
+          paymentNumber: `PAY-HISTORY-${index + 1}`,
+          source: 'gateway',
+          sourceReceiptId: '',
+          amount: 100 + index,
+          currency: 'AFN',
+          paymentMethod: 'online_gateway',
+          referenceNo: `GW-${index + 1}`,
+          status: index % 2 === 0 ? 'approved' : 'rejected',
+          approvalStage: index % 2 === 0 ? 'completed' : 'rejected',
+          paidAt: `2026-02-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`,
+          fileUrl: '',
+          note: 'Historical payment',
+          receivedBy: null,
+          student: {
+            userId: `history-student-${index + 1}`,
+            fullName: `Historical Student ${index + 1}`,
+            email: `history-${index + 1}@example.com`
+          },
+          schoolClass: {
+            id: 'class-1',
+            title: 'Class One Core'
+          },
+          academicYear: {
+            id: 'year-2',
+            title: '1405'
+          },
+          feeOrder: {
+            id: `history-order-${index + 1}`,
+            sourceBillId: '',
+            orderNumber: `HISTORY-${index + 1}`,
+            title: 'Historical fee',
+            amountDue: 100 + index,
+            amountPaid: 100 + index,
+            status: 'paid'
+          },
+          receiptDetails: {
+            title: 'Historical fee',
+            paymentNumber: `PAY-HISTORY-${index + 1}`,
+            orderNumber: `HISTORY-${index + 1}`,
+            academicYearTitle: '1405',
+            currency: 'AFN',
+            allocations: []
+          }
+        }))
       ]
     };
 
@@ -1540,6 +1591,10 @@ test.describe('finance workflow', () => {
         id: item.bill?._id === 'bill-2' ? 'class-1' : 'class-1',
         title: 'Class One Core'
       },
+      academicYear: {
+        id: 'year-1',
+        title: '1406'
+      },
       feeOrder: {
         id: item.bill?._id === 'bill-2' ? 'order-2' : 'order-1',
         sourceBillId: item.bill?._id || '',
@@ -1647,7 +1702,8 @@ test.describe('finance workflow', () => {
             { classId: 'class-2', courseId: 'course-2', title: 'Class Two Core', uiLabel: 'Class Two Core (11-B)' }
           ],
           academicYears: [
-            { _id: 'year-1', id: 'year-1', title: '1406', code: '1406', isCurrent: true, isActive: true }
+            { _id: 'year-1', id: 'year-1', title: '1406', code: '1406', isCurrent: true, isActive: true },
+            { _id: 'year-2', id: 'year-2', title: '1405', code: '1405', isCurrent: false, isActive: false }
           ],
           currentAcademicYearId: 'year-1'
         })
@@ -1690,6 +1746,7 @@ test.describe('finance workflow', () => {
     });
 
     await page.route('**/api/student-finance/payments?*', async (route) => {
+      paymentsListUrl = route.request().url();
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -3354,6 +3411,7 @@ test.describe('finance workflow', () => {
     await financeTabs.nth(1).click();
 
     await expect(page.locator('.finance-page h2')).toBeVisible();
+    await expect.poll(() => paymentsListUrl).toContain('view=all');
     await expect(page.locator('.receipt-inspector')).toContainText('Student Alpha');
     await expect(page.locator('.receipt-file-link')).toContainText('نمایش فایل رسید');
     await expect(page.locator('.receipt-inspector .receipt-note-box .trail-item')).toHaveCount(1);
@@ -3365,8 +3423,33 @@ test.describe('finance workflow', () => {
     await expect.poll(() => page.evaluate(() => window.__printCalls)).toBe(1);
     await expect(page.getByTestId('printable-receipt-sheet')).toContainText('رسید رسمی پرداخت فیس');
 
-    await expect(page.locator('.receipt-inbox-summary')).toContainText(/3|۳/);
+    await expect(page.locator('.receipt-inbox-summary')).toContainText(/11|۱۱/);
+    await expect(page.locator('.finance-table.receipts-table .row')).toHaveCount(10);
+    await expect(page.getByTestId('receipt-page-summary')).toContainText(/1|۱/);
+    await expect(page.getByTestId('receipt-page-summary')).toContainText(/10|۱۰/);
+    await expect(page.getByTestId('receipt-page-summary')).toContainText(/11|۱۱/);
+    await page.getByTestId('receipt-pagination').getByRole('button', { name: 'بعدی' }).click();
+    await expect(page.locator('.finance-table.receipts-table .row')).toHaveCount(1);
+    await expect(page.getByTestId('receipt-pagination')).toContainText(/2|۲/);
+    await page.getByTestId('receipt-pagination').getByRole('button', { name: 'قبلی' }).click();
+    await expect(page.locator('.finance-table.receipts-table .row')).toHaveCount(10);
+
     const receiptFilters = page.locator('#pending-receipts .finance-inline-filter select');
+    await receiptFilters.nth(1).selectOption('approved');
+    await expect(page.locator('.finance-table.receipts-table .row')).toHaveCount(5);
+    await expect(page.locator('.finance-table.receipts-table .row').first()).toContainText('تاییدشده');
+    await receiptFilters.nth(1).selectOption('all');
+
+    await page.getByTestId('receipt-academic-year-filter').selectOption('year-2');
+    await expect(page.locator('.finance-table.receipts-table .row')).toHaveCount(8);
+    await expect(page.locator('.finance-table.receipts-table .row').first()).toContainText('Historical Student');
+    await page.getByTestId('receipt-class-filter').selectOption('class-2');
+    await expect(page.locator('.finance-table.receipts-table .row')).toHaveCount(0);
+    await page.getByTestId('receipt-academic-year-filter').selectOption('all');
+    await expect(page.locator('.finance-table.receipts-table .row')).toHaveCount(1);
+    await expect(page.locator('.finance-table.receipts-table .row')).toContainText('Student Beta');
+    await page.getByTestId('receipt-class-filter').selectOption('all');
+
     await receiptFilters.nth(2).selectOption('guardian_upload');
     await expect(page.locator('.finance-table.receipts-table .row')).toHaveCount(1);
     await expect(page.locator('.finance-table.receipts-table .row')).toContainText('Student Beta');

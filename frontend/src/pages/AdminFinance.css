@@ -1221,6 +1221,13 @@
   font-weight: 700;
 }
 
+.receipt-page-summary {
+  margin: 10px 0 4px;
+  color: rgba(238, 245, 255, 0.78);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .finance-flag-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

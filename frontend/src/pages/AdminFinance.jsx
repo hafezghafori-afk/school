@@ -117,6 +117,7 @@ const buildStudentOptionList = ({
 };
 
 const toSafeNumber = (value) => Number(value || 0) || 0;
+const RECEIPT_PAGE_SIZE = 10;
 
 const getFeePlanBillPeriodType = (plan = {}) => (
   String(plan?.billingFrequency || plan?.periodType || '').trim().toLowerCase() === 'monthly'
@@ -1590,10 +1591,13 @@ export default function AdminFinance() {
   const [financeDataErrors, setFinanceDataErrors] = useState({ orders: '', payments: '' });
   const [busy, setBusy] = useState(false);
   const [activeSchoolContext, setActiveSchoolContext] = useState(null);
-  const [receiptStatusFilter, setReceiptStatusFilter] = useState('pending');
+  const [receiptStatusFilter, setReceiptStatusFilter] = useState('all');
   const [receiptStageFilter, setReceiptStageFilter] = useState('all');
   const [receiptSourceFilter, setReceiptSourceFilter] = useState('all');
   const [receiptFollowUpFilter, setReceiptFollowUpFilter] = useState('all');
+  const [receiptAcademicYearFilter, setReceiptAcademicYearFilter] = useState('all');
+  const [receiptClassFilter, setReceiptClassFilter] = useState('all');
+  const [receiptPage, setReceiptPage] = useState(1);
   const [selectedReceiptId, setSelectedReceiptId] = useState('');
   const [selectedReceiptDetail, setSelectedReceiptDetail] = useState(null);
   const [receiptFollowUpForm, setReceiptFollowUpForm] = useState({
@@ -1894,7 +1898,7 @@ export default function AdminFinance() {
     {
       key: 'payments',
       label: FINANCE_SECTION_LABELS.payments,
-      hint: `${pendingReceipts.length} رسید باز`
+      hint: `${pendingReceipts.length} رسید`
     },
     {
       key: 'orders',
@@ -2979,7 +2983,7 @@ export default function AdminFinance() {
         safeFetchJson(`${API_BASE}/api/finance/admin/student-memberships`, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/summary`, { success: false, summary: null, topDebtors: [] }),
         safeFetchJson(ordersRequestUrl, { success: true, items: [] }),
-        safeFetchJson(`${API_BASE}/api/student-finance/payments?view=inbox`, { success: true, items: [] }),
+        safeFetchJson(`${API_BASE}/api/student-finance/payments?view=all`, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/fee-plans`, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/month-close`, { success: true, items: [] }),
         safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/aging'), { success: true, items: [] }),
@@ -3172,7 +3176,7 @@ export default function AdminFinance() {
       const [summaryData, ordersData, paymentsData, byClassData, anomaliesData] = await Promise.all([
         safeFetchJson(`${API_BASE}/api/finance/admin/summary`, { success: false, summary: null, topDebtors: [] }),
         safeFetchJson(ordersRequestUrl, { success: true, items: [] }),
-        safeFetchJson(`${API_BASE}/api/student-finance/payments?view=inbox`, { success: true, items: [] }),
+        safeFetchJson(`${API_BASE}/api/student-finance/payments?view=all`, { success: true, items: [] }),
         includeClassReport
           ? safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/by-class'), { success: true, items: [] })
           : Promise.resolve(null),
@@ -3576,17 +3580,6 @@ export default function AdminFinance() {
     };
   }, [selectedMonthCloseId, closedMonths]);
 
-  useEffect(() => {
-    if (!pendingReceipts.length) {
-      if (selectedReceiptId) setSelectedReceiptId('');
-      setSelectedReceiptDetail(null);
-      return;
-    }
-    if (!selectedReceiptId || !pendingReceipts.some((item) => item._id === selectedReceiptId)) {
-      setSelectedReceiptId(pendingReceipts[0]._id);
-    }
-  }, [pendingReceipts, selectedReceiptId]);
-
   const receiptInboxSummary = useMemo(() => ({
     total: pendingReceipts.length,
     pending: pendingReceipts.filter((item) => item.status === 'pending').length,
@@ -3609,6 +3602,12 @@ export default function AdminFinance() {
       && (receiptFollowUpFilter === 'all'
         ? true
         : getReceiptFollowUpStatus(item) === receiptFollowUpFilter)
+      && (receiptAcademicYearFilter === 'all'
+        ? true
+        : String(item?.academicYear?.id || item?.academicYear?._id || '').trim() === receiptAcademicYearFilter)
+      && (receiptClassFilter === 'all'
+        ? true
+        : String(item?.classId?._id || item?.classId?.id || '').trim() === receiptClassFilter)
       && includesFinanceSearch([
         item?.student?.name,
         item?.student?.fullName,
@@ -3620,7 +3619,55 @@ export default function AdminFinance() {
         PAYMENT_SOURCE_UI_LABELS[item?.sourceKey] || item?.sourceKey || ''
       ], receiptSearchTerm)
     ))
-  ), [pendingReceipts, receiptStatusFilter, receiptSourceFilter, receiptStageFilter, receiptFollowUpFilter, receiptSearchTerm]);
+  ), [
+    pendingReceipts,
+    receiptStatusFilter,
+    receiptSourceFilter,
+    receiptStageFilter,
+    receiptFollowUpFilter,
+    receiptAcademicYearFilter,
+    receiptClassFilter,
+    receiptSearchTerm
+  ]);
+
+  const receiptTotalPages = Math.max(1, Math.ceil(filteredReceipts.length / RECEIPT_PAGE_SIZE));
+  const effectiveReceiptPage = Math.min(Math.max(1, receiptPage), receiptTotalPages);
+  const paginatedReceipts = useMemo(() => {
+    const start = (effectiveReceiptPage - 1) * RECEIPT_PAGE_SIZE;
+    return filteredReceipts.slice(start, start + RECEIPT_PAGE_SIZE);
+  }, [filteredReceipts, effectiveReceiptPage]);
+  const receiptPageStart = filteredReceipts.length
+    ? ((effectiveReceiptPage - 1) * RECEIPT_PAGE_SIZE) + 1
+    : 0;
+  const receiptPageEnd = Math.min(effectiveReceiptPage * RECEIPT_PAGE_SIZE, filteredReceipts.length);
+
+  useEffect(() => {
+    setReceiptPage(1);
+  }, [
+    receiptStatusFilter,
+    receiptSourceFilter,
+    receiptStageFilter,
+    receiptFollowUpFilter,
+    receiptAcademicYearFilter,
+    receiptClassFilter,
+    receiptSearchTerm
+  ]);
+
+  useEffect(() => {
+    setReceiptPage((current) => Math.min(Math.max(1, current), receiptTotalPages));
+  }, [receiptTotalPages]);
+
+  useEffect(() => {
+    if (!paginatedReceipts.length) {
+      if (selectedReceiptId) setSelectedReceiptId('');
+      setSelectedReceiptDetail(null);
+      return;
+    }
+    if (!selectedReceiptId || !paginatedReceipts.some((item) => item._id === selectedReceiptId)) {
+      setSelectedReceiptId(paginatedReceipts[0]._id);
+      setSelectedReceiptDetail(null);
+    }
+  }, [paginatedReceipts, selectedReceiptId]);
 
   const selectedReportClass = useMemo(() => (
     classOptions.find((item) => item.classId === reportClassId) || null
@@ -4014,9 +4061,9 @@ export default function AdminFinance() {
   }, [selectedAnomaly?.id, selectedAnomaly?.anomalyType, selectedAnomaly?.classId]);
 
   const selectedReceiptBase = useMemo(() => {
-    if (!filteredReceipts.length) return null;
-    return filteredReceipts.find((item) => item._id === selectedReceiptId) || filteredReceipts[0];
-  }, [filteredReceipts, selectedReceiptId]);
+    if (!paginatedReceipts.length) return null;
+    return paginatedReceipts.find((item) => item._id === selectedReceiptId) || paginatedReceipts[0];
+  }, [paginatedReceipts, selectedReceiptId]);
 
   const selectedReceipt = useMemo(() => {
     if (!selectedReceiptBase) return null;
@@ -4409,6 +4456,9 @@ export default function AdminFinance() {
         setReceiptStageFilter('all');
         setReceiptSourceFilter('all');
         setReceiptFollowUpFilter('all');
+        setReceiptAcademicYearFilter('all');
+        setReceiptClassFilter('all');
+        setReceiptPage(1);
       }
       setPaymentPreview(null);
       setPaymentDeskForm((prev) => ({
@@ -7846,8 +7896,8 @@ export default function AdminFinance() {
       <div id="pending-receipts" className="finance-card" data-finance-section="payments">
         <div className="finance-toolbar">
           <div>
-            <h3>رسیدهای در انتظار تایید</h3>
-            <p className="muted">فایل رسید، مرحله فعلی و ردپای تایید را از همین بخش بررسی کنید.</p>
+            <h3>تمام رسیدهای پرداخت</h3>
+            <p className="muted">رسیدهای در انتظار، تاییدشده و ردشده را همراه با فایل، مرحله و ردپای تایید بررسی کنید.</p>
           </div>
           <label className="finance-inline-filter finance-inline-filter-wide">
             <span>جستجو در رسیدها</span>
@@ -7891,6 +7941,32 @@ export default function AdminFinance() {
               <option value="all">همه</option>
               {FOLLOW_UP_STATUS_OPTIONS.map((item) => (
                 <option key={item.value} value={item.value}>{item.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="finance-inline-filter">
+            <span>سال تعلیمی</span>
+            <select
+              value={receiptAcademicYearFilter}
+              onChange={(e) => setReceiptAcademicYearFilter(e.target.value)}
+              data-testid="receipt-academic-year-filter"
+            >
+              <option value="all">همه سال‌ها</option>
+              {academicYears.map((item) => (
+                <option key={`receipt-year-${item.id}`} value={item.id}>{getAcademicYearOptionLabel(item)}</option>
+              ))}
+            </select>
+          </label>
+          <label className="finance-inline-filter">
+            <span>صنف</span>
+            <select
+              value={receiptClassFilter}
+              onChange={(e) => setReceiptClassFilter(e.target.value)}
+              data-testid="receipt-class-filter"
+            >
+              <option value="all">همه صنف‌ها</option>
+              {classOptions.map((item) => (
+                <option key={`receipt-class-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>
               ))}
             </select>
           </label>
@@ -8189,6 +8265,11 @@ export default function AdminFinance() {
           <span className="finance-chip finance-chip-rose">ردشده: {receiptInboxSummary.rejected}</span>
           <span className="finance-chip finance-chip-muted">ارجاع‌شده: {receiptInboxSummary.escalated}</span>
         </div>
+        {!financeDataErrors.payments && filteredReceipts.length ? (
+          <div className="receipt-page-summary" data-testid="receipt-page-summary">
+            نمایش {fmt(receiptPageStart)} تا {fmt(receiptPageEnd)} از {fmt(filteredReceipts.length)} رسید
+          </div>
+        ) : null}
         {financeDataErrors.payments ? (
           <div className="finance-data-error" role="alert">
             دریافت پرداخت‌ها و رسیدها ناموفق بود: {financeDataErrors.payments}
@@ -8199,7 +8280,7 @@ export default function AdminFinance() {
           <div className="receipt-review-layout">
             <div className="finance-table receipts-table">
               <div className="head"><span>متعلم</span><span>سند / منبع</span><span>مبلغ</span><span>وضعیت</span><span>مرحله / پیگیری</span><span>عملیات</span></div>
-              {filteredReceipts.map((item) => {
+              {paginatedReceipts.map((item) => {
                 const stage = normalizeReceiptStage(item.approvalStage || '');
                 const canReview = canReviewReceipt(item);
                 return (
@@ -8420,6 +8501,27 @@ export default function AdminFinance() {
             )}
           </div>
         )}
+        {!financeDataErrors.payments && filteredReceipts.length ? (
+          <div className="finance-pagination" data-testid="receipt-pagination">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setReceiptPage((current) => Math.max(1, current - 1))}
+              disabled={effectiveReceiptPage <= 1}
+            >
+              قبلی
+            </button>
+            <span>صفحه {fmt(effectiveReceiptPage)} از {fmt(receiptTotalPages)}</span>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setReceiptPage((current) => Math.min(receiptTotalPages, current + 1))}
+              disabled={effectiveReceiptPage >= receiptTotalPages}
+            >
+              بعدی
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="finance-card finance-orders-table-card" data-finance-section="orders" data-testid="finance-orders-table-card">
