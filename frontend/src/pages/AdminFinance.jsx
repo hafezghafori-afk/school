@@ -1472,6 +1472,7 @@ export default function AdminFinance() {
   const discountSubmitInFlightRef = useRef(false);
   const fullOrdersLoadedRef = useRef(false);
   const fullOrdersLoadInFlightRef = useRef(false);
+  const paymentWorkspaceRefreshIdRef = useRef(0);
   const [exemptions, setExemptions] = useState([]);
   const [reliefs, setReliefs] = useState([]);
   const [billingPreview, setBillingPreview] = useState(null);
@@ -2943,6 +2944,7 @@ export default function AdminFinance() {
   };
 
   const loadAll = async () => {
+    const paymentWorkspaceRefreshId = ++paymentWorkspaceRefreshIdRef.current;
     setBusy(true);
     try {
       const requestedFullOrders = fullOrdersLoadedRef.current;
@@ -2951,7 +2953,11 @@ export default function AdminFinance() {
         try {
           return await fetchJson(url);
         } catch (error) {
-          return { ...fallback, _loadError: error?.message || 'دریافت اطلاعات از سرور ناموفق بود.' };
+          return {
+            ...fallback,
+            success: false,
+            _loadError: error?.message || 'دریافت اطلاعات از سرور ناموفق بود.'
+          };
         }
       };
       const [
@@ -3017,35 +3023,45 @@ export default function AdminFinance() {
       const nextStudentMemberships = membershipData?.success ? (membershipData.items || []) : [];
       const nextMembershipStudents = buildFinanceMembershipStudentOptions(nextStudentMemberships);
       const shouldApplyOrdersResult = requestedFullOrders || !fullOrdersLoadedRef.current;
-      setFinanceDataErrors({
-        orders: ordersData?.success ? '' : (ordersData?._loadError || ordersData?.message || 'دریافت بل‌ها و باقیات ناموفق بود.'),
-        payments: paymentsData?.success ? '' : (paymentsData?._loadError || paymentsData?.message || 'دریافت پرداخت‌ها و رسیدها ناموفق بود.')
-      });
-      if (!shouldApplyOrdersResult) {
-        setFinanceDataErrors((previous) => ({ ...previous, orders: '' }));
+      const shouldApplyPaymentWorkspace = paymentWorkspaceRefreshId === paymentWorkspaceRefreshIdRef.current;
+      if (shouldApplyPaymentWorkspace) {
+        setFinanceDataErrors({
+          orders: ordersData?.success ? '' : (ordersData?._loadError || ordersData?.message || 'دریافت بل‌ها و باقیات ناموفق بود.'),
+          payments: paymentsData?.success ? '' : (paymentsData?._loadError || paymentsData?.message || 'دریافت پرداخت‌ها و رسیدها ناموفق بود.')
+        });
+        if (!shouldApplyOrdersResult) {
+          setFinanceDataErrors((previous) => ({ ...previous, orders: '' }));
+        }
       }
       setStudents(refData.students || []);
       setStudentMemberships(nextStudentMemberships);
       setClassOptions(nextClassOptions);
       setAcademicYears(nextAcademicYears);
-      setSummary(summaryData.summary || null);
-      setTopDebtors(summaryData.topDebtors || []);
-      if (shouldApplyOrdersResult) setBills(nextBills);
-      setPendingReceipts(nextPendingReceipts);
+      if (shouldApplyPaymentWorkspace && summaryData?.success) {
+        setSummary(summaryData.summary || null);
+        setTopDebtors(summaryData.topDebtors || []);
+      }
+      if (shouldApplyPaymentWorkspace && shouldApplyOrdersResult && ordersData?.success) setBills(nextBills);
+      if (shouldApplyPaymentWorkspace && paymentsData?.success) setPendingReceipts(nextPendingReceipts);
       setFeePlans(feePlansData?.success ? (feePlansData.items || []) : []);
       setClosedMonths(monthsData?.success ? (monthsData.items || []) : []);
       setAging(agingData?.success ? agingData : null);
       setCashflowReport(cashflowData?.success ? cashflowData : null);
       setCashflow(cashflowData?.success ? (cashflowData.items || []) : []);
-      setByClass(byClassData?.success ? (byClassData.items || []) : []);
-      setDiscountAnalytics(discountsData?.success ? discountsData : null);
-      setDiscountTotals(discountsData?.success ? (discountsData.items || []) : []);
-        setDiscountRegistry(discountRegistryData?.success ? (discountRegistryData.items || []) : []);
-        setDiscountDuplicateSummary(discountRegistryData?.success && discountRegistryData?.duplicateSummary
-          ? discountRegistryData.duplicateSummary
-          : { scanned: 0, duplicateGroups: 0, duplicateRecords: 0, affectedStudents: 0, affectedClasses: 0, mirroredDiscountRecords: 0, mirroredActiveReliefs: 0 });
-        setReliefs(reliefsData?.success ? (reliefsData.items || []) : []);
-        setExemptions(exemptionsData?.success ? (exemptionsData.items || []) : []);
+      if (shouldApplyPaymentWorkspace && byClassData?.success) setByClass(byClassData.items || []);
+      if (shouldApplyPaymentWorkspace) {
+        if (discountsData?.success) {
+          setDiscountAnalytics(discountsData);
+          setDiscountTotals(discountsData.items || []);
+        }
+        if (discountRegistryData?.success) {
+          setDiscountRegistry(discountRegistryData.items || []);
+          setDiscountDuplicateSummary(discountRegistryData.duplicateSummary
+            || { scanned: 0, duplicateGroups: 0, duplicateRecords: 0, affectedStudents: 0, affectedClasses: 0, mirroredDiscountRecords: 0, mirroredActiveReliefs: 0 });
+        }
+        if (reliefsData?.success) setReliefs(reliefsData.items || []);
+        if (exemptionsData?.success) setExemptions(exemptionsData.items || []);
+      }
         setDeliveryProviderConfigs(deliveryProviderData?.success ? (deliveryProviderData.items || []) : []);
         setDeliveryCampaigns(deliveryCampaignData?.success ? (deliveryCampaignData.items || []) : []);
         setDeliveryTemplates(deliveryTemplateData?.success ? (deliveryTemplateData.items || []) : []);
@@ -3056,8 +3072,10 @@ export default function AdminFinance() {
       setDocumentArchiveItems(documentArchiveData?.success ? (documentArchiveData.items || []) : []);
       setAuditTimeline(auditTimelineData?.success ? (auditTimelineData.items || []) : []);
       setAuditTimelineSummary(auditTimelineData?.success ? (auditTimelineData.summary || null) : null);
-      setAnomalies(anomaliesData?.success ? (anomaliesData.items || []) : []);
-      setAnomalySummary(anomaliesData?.success ? (anomaliesData.summary || null) : null);
+      if (shouldApplyPaymentWorkspace && anomaliesData?.success) {
+        setAnomalies(anomaliesData.items || []);
+        setAnomalySummary(anomaliesData.summary || null);
+      }
 
       // Finance operation forms must follow current memberships, not every student user in the system.
       if (nextMembershipStudents.length === 1) {
@@ -3142,8 +3160,12 @@ export default function AdminFinance() {
       if ((defaultMonthKey || monthKey) && !deliveryCampaignForm.monthKey) {
         setDeliveryCampaignForm((prev) => ({ ...prev, monthKey: prev.monthKey || defaultMonthKey || monthKey }));
       }
-      if (!selectedReceiptId && nextPendingReceipts[0]?._id) {
-        setSelectedReceiptId(nextPendingReceipts[0]._id);
+      if (shouldApplyPaymentWorkspace && paymentsData?.success) {
+        setSelectedReceiptId((current) => (
+          nextPendingReceipts.some((item) => String(item?._id || '') === String(current || ''))
+            ? current
+            : (nextPendingReceipts[0]?._id || '')
+        ));
       }
       if (!selectedAuditEntryId && auditTimelineData?.success && auditTimelineData.items?.[0]?.id) {
         setSelectedAuditEntryId(auditTimelineData.items[0].id);
@@ -3155,55 +3177,95 @@ export default function AdminFinance() {
     } catch {
       setMessage('خطا در ارتباط با سرور');
     } finally {
-      setBusy(false);
+      if (paymentWorkspaceRefreshId === paymentWorkspaceRefreshIdRef.current) {
+        setBusy(false);
+      }
     }
   };
 
-  const refreshFinanceOperationalData = async ({
+  const refreshPaymentWorkspace = async ({
     includeClassReport = false,
-    includeAnomalies = false
+    includeAnomalies = false,
+    includeRegistries = false,
+    invalidatePreview = true
   } = {}) => {
+    const refreshId = ++paymentWorkspaceRefreshIdRef.current;
+    setBusy(true);
+    if (invalidatePreview) setPaymentPreview(null);
+
     const safeFetchJson = async (url, fallback = { success: false }) => {
       try {
         return await fetchJson(url);
       } catch (error) {
-        return { ...fallback, _loadError: error?.message || 'دریافت اطلاعات از سرور ناموفق بود.' };
+        return {
+          ...fallback,
+          success: false,
+          _loadError: error?.message || 'دریافت اطلاعات از سرور ناموفق بود.'
+        };
       }
     };
 
     try {
-      const ordersRequestUrl = `${API_BASE}/api/student-finance/orders${fullOrdersLoadedRef.current ? '' : '?view=open'}`;
-      const [summaryData, ordersData, paymentsData, byClassData, anomaliesData] = await Promise.all([
+      const requestedFullOrders = fullOrdersLoadedRef.current;
+      const ordersRequestUrl = `${API_BASE}/api/student-finance/orders${requestedFullOrders ? '' : '?view=open'}`;
+      const [
+        summaryData,
+        ordersData,
+        paymentsData,
+        byClassData,
+        anomaliesData,
+        discountAnalyticsData,
+        discountRegistryData,
+        reliefsData,
+        exemptionsData
+      ] = await Promise.all([
         safeFetchJson(`${API_BASE}/api/finance/admin/summary`, { success: false, summary: null, topDebtors: [] }),
-        safeFetchJson(ordersRequestUrl, { success: true, items: [] }),
-        safeFetchJson(`${API_BASE}/api/student-finance/payments?view=all`, { success: true, items: [] }),
+        safeFetchJson(ordersRequestUrl, { success: false, items: [] }),
+        safeFetchJson(`${API_BASE}/api/student-finance/payments?view=all`, { success: false, items: [] }),
         includeClassReport
-          ? safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/by-class'), { success: true, items: [] })
+          ? safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/by-class'), { success: false, items: [] })
           : Promise.resolve(null),
         includeAnomalies
-          ? safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/anomalies'), { success: true, items: [], summary: null })
+          ? safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/anomalies'), { success: false, items: [], summary: null })
+          : Promise.resolve(null),
+        includeRegistries
+          ? safeFetchJson(`${API_BASE}/api/finance/admin/reports/discounts`, { success: false, items: [] })
+          : Promise.resolve(null),
+        includeRegistries
+          ? safeFetchJson(`${API_BASE}/api/student-finance/discounts?status=active&registryOnly=true&discountType=discount`, { success: false, items: [], duplicateSummary: null })
+          : Promise.resolve(null),
+        includeRegistries
+          ? safeFetchJson(`${API_BASE}/api/student-finance/reliefs?status=active&registryOnly=true`, { success: false, items: [] })
+          : Promise.resolve(null),
+        includeRegistries
+          ? safeFetchJson(`${API_BASE}/api/student-finance/exemptions?status=active`, { success: false, items: [] })
           : Promise.resolve(null)
       ]);
+
+      if (refreshId !== paymentWorkspaceRefreshIdRef.current) return false;
 
       if (summaryData?.success) {
         setSummary(summaryData.summary || null);
         setTopDebtors(summaryData.topDebtors || []);
       }
-      if (ordersData?.success) {
+      const shouldApplyOrdersResult = requestedFullOrders || !fullOrdersLoadedRef.current;
+      if (ordersData?.success && shouldApplyOrdersResult) {
         setBills((ordersData.items || []).map(toLegacyLikeBillRow));
       }
       setFinanceDataErrors((prev) => ({
         ...prev,
-        orders: ordersData?.success ? '' : (ordersData?._loadError || ordersData?.message || 'تازه‌سازی بل‌ها و باقیات ناموفق بود.'),
+        orders: ordersData?.success || !shouldApplyOrdersResult ? '' : (ordersData?._loadError || ordersData?.message || 'تازه‌سازی بل‌ها و باقیات ناموفق بود.'),
         payments: paymentsData?.success ? '' : (paymentsData?._loadError || paymentsData?.message || 'تازه‌سازی پرداخت‌ها و رسیدها ناموفق بود.')
       }));
       if (paymentsData?.success) {
         const nextPendingReceipts = (paymentsData.items || []).map(toLegacyLikeReceiptRow);
         setPendingReceipts(nextPendingReceipts);
         setSelectedReceiptDetail(null);
-        if (!selectedReceiptId && nextPendingReceipts[0]?._id) {
-          setSelectedReceiptId(nextPendingReceipts[0]._id);
-        }
+        setSelectedReceiptId((current) => (
+          nextPendingReceipts.some((item) => String(item?._id || '') === String(current || ''))
+            ? current
+            : (nextPendingReceipts[0]?._id || '')
+        ));
       }
       if (byClassData?.success) {
         setByClass(byClassData.items || []);
@@ -3212,8 +3274,22 @@ export default function AdminFinance() {
         setAnomalies(anomaliesData.items || []);
         setAnomalySummary(anomaliesData.summary || null);
       }
+      if (discountAnalyticsData?.success) {
+        setDiscountAnalytics(discountAnalyticsData);
+        setDiscountTotals(discountAnalyticsData.items || []);
+      }
+      if (discountRegistryData?.success) {
+        setDiscountRegistry(discountRegistryData.items || []);
+        setDiscountDuplicateSummary(discountRegistryData.duplicateSummary
+          || { scanned: 0, duplicateGroups: 0, duplicateRecords: 0, affectedStudents: 0, affectedClasses: 0, mirroredDiscountRecords: 0, mirroredActiveReliefs: 0 });
+      }
+      if (reliefsData?.success) setReliefs(reliefsData.items || []);
+      if (exemptionsData?.success) setExemptions(exemptionsData.items || []);
+      return true;
     } finally {
-      setBusy(false);
+      if (refreshId === paymentWorkspaceRefreshIdRef.current) {
+        setBusy(false);
+      }
     }
   };
 
@@ -3261,17 +3337,20 @@ export default function AdminFinance() {
     }
 
     const controller = new AbortController();
+    const refreshId = paymentWorkspaceRefreshIdRef.current;
     fullOrdersLoadInFlightRef.current = true;
     setOrdersCatalogLoading(true);
     fetchJson(`${API_BASE}/api/student-finance/orders`, { signal: controller.signal })
       .then((data) => {
         if (!data?.success) throw new Error(data?.message || 'دریافت فهرست کامل بل‌ها ناموفق بود.');
+        if (refreshId !== paymentWorkspaceRefreshIdRef.current) return;
         fullOrdersLoadedRef.current = true;
         setBills((data.items || []).map(toLegacyLikeBillRow));
         setFinanceDataErrors((previous) => ({ ...previous, orders: '' }));
       })
       .catch((error) => {
         if (error?.name === 'AbortError') return;
+        if (refreshId !== paymentWorkspaceRefreshIdRef.current) return;
         setFinanceDataErrors((previous) => ({
           ...previous,
           orders: error?.message || 'دریافت فهرست کامل بل‌ها ناموفق بود.'
@@ -3286,6 +3365,13 @@ export default function AdminFinance() {
       controller.abort();
       fullOrdersLoadInFlightRef.current = false;
     };
+  }, [activeSection]);
+
+  useEffect(() => {
+    if (activeSection !== 'payments') return undefined;
+    void refreshPaymentWorkspace({ includeRegistries: true });
+    return undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSection]);
 
   useEffect(() => {
@@ -4196,6 +4282,10 @@ export default function AdminFinance() {
     });
   }, [paymentDeskOpenOrders]);
 
+  useEffect(() => {
+    setPaymentPreview(null);
+  }, [bills]);
+
   const postJson = async (url, body) => {
     const data = await fetchJson(url, {
       method: 'POST',
@@ -4325,7 +4415,7 @@ export default function AdminFinance() {
       }
       const data = await postJson(`${API_BASE}/api/finance/admin/bills`, payload);
       setMessage(data.message || 'بل ایجاد شد');
-      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4345,7 +4435,7 @@ export default function AdminFinance() {
       const data = await postJson(`${API_BASE}/api/finance/admin/bills/generate`, payload);
       setBillingPreview(null);
       setMessage(data.message || 'بل گروهی ایجاد شد');
-      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4475,7 +4565,7 @@ export default function AdminFinance() {
         schedulePrint('receipt', '.finance-receipt-print-sheet');
       }
       setDeskPaymentSubmitMode('save');
-      await refreshFinanceOperationalData();
+      await refreshPaymentWorkspace();
     } catch (err) {
       setMessage(err.message);
       setDeskPaymentSubmitMode('save');
@@ -4711,10 +4801,11 @@ export default function AdminFinance() {
         endDate: '',
         reason: ''
       }));
-      await loadAll();
-      if (createdDiscount.discountType === 'discount') {
-        setDiscountRegistry((prev) => [createdDiscount, ...prev.filter((item) => item.id !== createdDiscount.id)]);
-      }
+      await refreshPaymentWorkspace({
+        includeClassReport: true,
+        includeAnomalies: true,
+        includeRegistries: true
+      });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4731,8 +4822,11 @@ export default function AdminFinance() {
       const data = await postJson(`${API_BASE}/api/student-finance/discounts/${discountId}/cancel`, { reason });
       setDiscountRegistry((prev) => prev.filter((item) => item.id !== discountId));
       setMessage(data.message || 'تخفیف لغو شد');
-      await loadAll();
-      setDiscountRegistry((prev) => prev.filter((item) => item.id !== discountId));
+      await refreshPaymentWorkspace({
+        includeClassReport: true,
+        includeAnomalies: true,
+        includeRegistries: true
+      });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4806,8 +4900,11 @@ export default function AdminFinance() {
         reason: '',
         note: ''
       }));
-      await loadAll();
-      setExemptions((prev) => [createdExemption, ...prev.filter((item) => item.id !== createdExemption.id)]);
+      await refreshPaymentWorkspace({
+        includeClassReport: true,
+        includeAnomalies: true,
+        includeRegistries: true
+      });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4822,8 +4919,11 @@ export default function AdminFinance() {
       const data = await postJson(`${API_BASE}/api/student-finance/exemptions/${exemptionId}/cancel`, { cancelReason });
       setExemptions((prev) => prev.filter((item) => item.id !== exemptionId));
       setMessage(data.message || 'معافیت لغو شد');
-      await loadAll();
-      setExemptions((prev) => prev.filter((item) => item.id !== exemptionId));
+      await refreshPaymentWorkspace({
+        includeClassReport: true,
+        includeAnomalies: true,
+        includeRegistries: true
+      });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4853,7 +4953,7 @@ export default function AdminFinance() {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/student-finance/payments/${id}/approve`, {});
       setMessage(data.message || 'رسید تایید شد');
-      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4867,7 +4967,7 @@ export default function AdminFinance() {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/student-finance/payments/${id}/reject`, { reason });
       setMessage(data.message || 'رسید رد شد');
-      await refreshFinanceOperationalData({ includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4916,7 +5016,7 @@ export default function AdminFinance() {
         || `${approved} رسید تأیید نهایی شد${failed ? ` و ${failed} مورد برای بررسی باقی ماند` : ''}.`
       );
       setClassPaymentApprovalRefreshKey((value) => value + 1);
-      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4958,7 +5058,7 @@ export default function AdminFinance() {
         || `${corrected} رسید اصلاح شد${failed ? ` و ${failed} مورد نیازمند بررسی باقی ماند` : ''}.`
       );
       setAdmissionReceiptCorrectionRefreshKey((value) => value + 1);
-      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4993,7 +5093,7 @@ export default function AdminFinance() {
       });
       setMessage(data?.message || `${Number(data?.summary?.repaired || 0)} پرداخت تفکیک شد.`);
       setPaymentScopeRepairRefreshKey((value) => value + 1);
-      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -5014,7 +5114,7 @@ export default function AdminFinance() {
         note: receiptFollowUpForm.note
       });
       setMessage(data.message || 'پیگیری پرداخت به‌روزرسانی شد');
-      await refreshFinanceOperationalData({ includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -5079,7 +5179,7 @@ export default function AdminFinance() {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/student-finance/orders/${billId}/discount`, { type, amount, reason });
       setMessage(data.message || 'تعدیل ثبت شد');
-      await loadAll();
+      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true, includeRegistries: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -5095,7 +5195,7 @@ export default function AdminFinance() {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/student-finance/orders/${billId}/installments`, { count, startDate, stepDays: 30 });
       setMessage(data.message || 'قسط‌بندی ثبت شد');
-      await loadAll();
+      await refreshPaymentWorkspace();
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -5109,7 +5209,7 @@ export default function AdminFinance() {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/student-finance/orders/${billId}/void`, { reason });
       setMessage(data.message || 'بل باطل شد');
-      await loadAll();
+      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -5808,7 +5908,7 @@ export default function AdminFinance() {
         buildAnomalyActionPayload(selectedAnomaly, { note: anomalyWorkflowForm.note })
       );
       setMessage(data.message || 'یادداشت ناهنجاری مالی ذخیره شد');
-      await refreshFinanceOperationalData({ includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -5827,7 +5927,7 @@ export default function AdminFinance() {
         })
       );
       setMessage(data.message || 'ناهجاری مالی ارجاع شد');
-      await refreshFinanceOperationalData({ includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -5846,7 +5946,7 @@ export default function AdminFinance() {
         })
       );
       setMessage(data.message || 'ناهجاری مالی معطل شد');
-      await refreshFinanceOperationalData({ includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -5862,7 +5962,7 @@ export default function AdminFinance() {
         buildAnomalyActionPayload(selectedAnomaly, { note: anomalyWorkflowForm.note })
       );
       setMessage(data.message || 'ناهجاری مالی حل شد');
-      await refreshFinanceOperationalData({ includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -5881,7 +5981,7 @@ export default function AdminFinance() {
         })
       );
       setMessage(data.message || 'داخله ثبت شد و ناهنجاری مالی حل شد');
-      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -5926,7 +6026,7 @@ export default function AdminFinance() {
         .join('، ');
       setMessage(`${data.message || 'ثبت گروهی داخله انجام شد'}${failed && failureNames ? ` موارد خطادار: ${failureNames}` : ''}`);
       setAdmissionBatchRefreshKey((value) => value + 1);
-      await refreshFinanceOperationalData({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
