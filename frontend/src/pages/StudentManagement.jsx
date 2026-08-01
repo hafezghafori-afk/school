@@ -30,6 +30,10 @@ import { getAuthHeaders, repairDisplayText } from './adminWorkspaceUtils';
 import './StudentManagement.css';
 
 const getText = (value, fallback = '') => repairDisplayText(value || fallback);
+const getLatinText = (value) => {
+  const normalized = getText(value);
+  return /[A-Za-z]/.test(normalized) ? normalized : '';
+};
 
 const provinceOptions = [
   { value: 'kabul', label: 'کابل' },
@@ -171,9 +175,12 @@ const normalizeAfghanStudent = (student = {}) => {
   return {
     ...student,
     profileId: student._id || '',
-    firstName: getText(personalInfo.firstName),
-    lastName: getText(personalInfo.lastName),
+    firstName: getText(personalInfo.firstNameDari || personalInfo.firstName),
+    lastName: getText(personalInfo.lastNameDari || personalInfo.lastName),
+    firstNameEnglish: getLatinText(personalInfo.firstName),
+    lastNameEnglish: getLatinText(personalInfo.lastName),
     fatherName: getText(personalInfo.fatherName),
+    fatherNameEnglish: getLatinText(personalInfo.fatherNameEnglish),
     grandfatherName: getText(personalInfo.grandfatherName),
     birthPlace: getText(personalInfo.birthPlace),
     nationality: getText(personalInfo.nationality || 'Afghan'),
@@ -629,7 +636,10 @@ const StudentManagement = () => {
     registrationType: 'new',
     firstName: '',
     lastName: '',
+    firstNameEnglish: '',
+    lastNameEnglish: '',
     fatherName: '',
+    fatherNameEnglish: '',
     grandfatherName: '',
     birthDate: '',
     birthPlace: '',
@@ -989,7 +999,10 @@ const StudentManagement = () => {
       registrationType,
       firstName: student.firstName || '',
       lastName: student.lastName || '',
+      firstNameEnglish: student.firstNameEnglish || '',
+      lastNameEnglish: student.lastNameEnglish || '',
       fatherName: student.fatherName || '',
+      fatherNameEnglish: student.fatherNameEnglish || '',
       grandfatherName: student.grandfatherName || '',
       birthDate: student.birthDate || '',
       birthPlace: student.birthPlace || '',
@@ -1098,11 +1111,12 @@ const StudentManagement = () => {
     setActionLoading(profileId);
     try {
       const payload = {
-        'personalInfo.firstName': editForm.firstName.trim(),
-        'personalInfo.lastName': editForm.lastName.trim(),
+        'personalInfo.firstName': editForm.firstNameEnglish.trim() || editForm.firstName.trim(),
+        'personalInfo.lastName': editForm.lastNameEnglish.trim() || editForm.lastName.trim(),
         'personalInfo.firstNameDari': editForm.firstName.trim(),
         'personalInfo.lastNameDari': editForm.lastName.trim(),
         'personalInfo.fatherName': editForm.fatherName.trim(),
+        'personalInfo.fatherNameEnglish': editForm.fatherNameEnglish.trim(),
         'personalInfo.grandfatherName': editForm.grandfatherName.trim(),
         'personalInfo.gender': editForm.gender,
         'identification.tazkiraNumber': editForm.nationalId.trim(),
@@ -1214,11 +1228,12 @@ const StudentManagement = () => {
       const emergencyRelation = editForm.guardianRelation.trim() || 'سرپرست';
       const emergencyPhone = editForm.emergencyPhone.trim() || editForm.guardianPhone.trim() || editForm.fatherPhone.trim() || editForm.phone.trim();
       const payload = {};
-      setRequiredPayloadValue(payload, 'personalInfo.firstName', editForm.firstName);
-      setRequiredPayloadValue(payload, 'personalInfo.lastName', editForm.lastName);
+      setRequiredPayloadValue(payload, 'personalInfo.firstName', editForm.firstNameEnglish.trim() || editForm.firstName);
+      setRequiredPayloadValue(payload, 'personalInfo.lastName', editForm.lastNameEnglish.trim() || editForm.lastName);
       setRequiredPayloadValue(payload, 'personalInfo.firstNameDari', editForm.firstName);
       setRequiredPayloadValue(payload, 'personalInfo.lastNameDari', editForm.lastName);
       setRequiredPayloadValue(payload, 'personalInfo.fatherName', editForm.fatherName);
+      setOptionalPayloadValue(payload, 'personalInfo.fatherNameEnglish', editForm.fatherNameEnglish);
       setOptionalPayloadValue(payload, 'personalInfo.grandfatherName', editForm.grandfatherName);
       setRequiredPayloadValue(payload, 'personalInfo.gender', editForm.gender);
       setRequiredPayloadValue(payload, 'personalInfo.birthDate', editForm.birthDate);
@@ -1862,8 +1877,17 @@ const StudentManagement = () => {
               <label className="required"><span>تخلص</span>
                 <input value={editForm.lastName} onChange={(event) => handleEditFormChange('lastName', event.target.value)} />
               </label>
+              <label><span>نام به انگلیسی</span>
+                <input dir="ltr" value={editForm.firstNameEnglish} onChange={(event) => handleEditFormChange('firstNameEnglish', event.target.value)} />
+              </label>
+              <label><span>تخلص به انگلیسی</span>
+                <input dir="ltr" value={editForm.lastNameEnglish} onChange={(event) => handleEditFormChange('lastNameEnglish', event.target.value)} />
+              </label>
               <label className="required"><span>نام پدر</span>
                 <input value={editForm.fatherName} onChange={(event) => handleEditFormChange('fatherName', event.target.value)} />
+              </label>
+              <label><span>نام پدر به انگلیسی</span>
+                <input dir="ltr" value={editForm.fatherNameEnglish} onChange={(event) => handleEditFormChange('fatherNameEnglish', event.target.value)} />
               </label>
               <label>
                 <span>نام پدرکلان</span>

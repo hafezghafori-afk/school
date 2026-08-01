@@ -5,6 +5,7 @@ const {
   combineOfficialSubjectScores,
   computeCompetitionRanks,
   computeGeneralResult,
+  computePercentage,
   getInitialMarkStatus,
   getMembershipLifecycleLabel,
   getOfficialExamPolicy
@@ -22,14 +23,28 @@ assert.strictEqual(annual.scoreComponents.attendanceMax, 0);
 assert.strictEqual(annual.scoreComponents.classActivityMax, 5);
 assert.strictEqual(GENERAL_RESULT_POLICY.passMark, 55);
 assert.ok(OFFICIAL_RESULT_POLICY_VERSION);
+assert.strictEqual(computePercentage(707, 18 * 40), 98.19);
+assert.strictEqual(computePercentage(923, 18 * 60), 85.46);
+assert.strictEqual(computePercentage(707 + 923, 18 * 100), 90.56);
+assert.strictEqual(computePercentage(null, 720), null);
 
-assert.deepStrictEqual(combineOfficialSubjectScores({ fourHalf: 16, annual: 39 }), {
-  obtainedMark: 55,
-  totalMark: 100,
-  percentage: 55,
-  passed: true,
-  complete: true
-});
+const annualThresholdFailure = combineOfficialSubjectScores({ fourHalf: 16, annual: 39 });
+assert.strictEqual(annualThresholdFailure.obtainedMark, 55);
+assert.strictEqual(annualThresholdFailure.fourHalfPassed, true);
+assert.strictEqual(annualThresholdFailure.annualPassed, false);
+assert.strictEqual(annualThresholdFailure.generalPassed, true);
+assert.strictEqual(annualThresholdFailure.passed, false);
+
+const fourHalfThresholdFailure = combineOfficialSubjectScores({ fourHalf: 15, annual: 40 });
+assert.strictEqual(fourHalfThresholdFailure.obtainedMark, 55);
+assert.strictEqual(fourHalfThresholdFailure.fourHalfPassed, false);
+assert.strictEqual(fourHalfThresholdFailure.annualPassed, true);
+assert.strictEqual(fourHalfThresholdFailure.generalPassed, true);
+assert.strictEqual(fourHalfThresholdFailure.passed, false);
+
+const exactThresholdPass = combineOfficialSubjectScores({ fourHalf: 16, annual: 40 });
+assert.strictEqual(exactThresholdPass.obtainedMark, 56);
+assert.strictEqual(exactThresholdPass.passed, true);
 assert.strictEqual(combineOfficialSubjectScores({ fourHalf: null, annual: 40 }).complete, false);
 
 const passed = computeGeneralResult([

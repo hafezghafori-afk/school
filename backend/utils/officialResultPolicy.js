@@ -80,6 +80,15 @@ function normalizeExamTypeCode(value = '') {
   return EXAM_CODE_ALIASES[normalized] || normalized;
 }
 
+function computePercentage(obtained, possible) {
+  if (obtained === null || obtained === undefined || obtained === ''
+    || possible === null || possible === undefined || possible === '') return null;
+  const obtainedNumber = Number(obtained);
+  const possibleNumber = Number(possible);
+  if (!Number.isFinite(obtainedNumber) || !Number.isFinite(possibleNumber) || possibleNumber <= 0) return null;
+  return Number(((obtainedNumber / possibleNumber) * 100).toFixed(2));
+}
+
 function getOfficialExamPolicy(examType = '') {
   return OFFICIAL_EXAM_POLICIES[normalizeExamTypeCode(examType)] || null;
 }
@@ -148,6 +157,9 @@ function combineOfficialSubjectScores({ fourHalf = null, annual = null } = {}) {
       obtainedMark: null,
       totalMark: GENERAL_RESULT_POLICY.totalMark,
       percentage: null,
+      fourHalfPassed: null,
+      annualPassed: null,
+      generalPassed: null,
       passed: null,
       complete: false
     };
@@ -159,16 +171,25 @@ function combineOfficialSubjectScores({ fourHalf = null, annual = null } = {}) {
       obtainedMark: null,
       totalMark: GENERAL_RESULT_POLICY.totalMark,
       percentage: null,
+      fourHalfPassed: null,
+      annualPassed: null,
+      generalPassed: null,
       passed: null,
       complete: false
     };
   }
   const obtainedMark = Number((fourHalfScore + annualScore).toFixed(2));
+  const fourHalfPassed = fourHalfScore >= OFFICIAL_EXAM_POLICIES[OFFICIAL_EXAM_CODES.FOUR_HALF].passMark;
+  const annualPassed = annualScore >= OFFICIAL_EXAM_POLICIES[OFFICIAL_EXAM_CODES.ANNUAL].passMark;
+  const generalPassed = obtainedMark >= GENERAL_RESULT_POLICY.passMark;
   return {
     obtainedMark,
     totalMark: GENERAL_RESULT_POLICY.totalMark,
     percentage: obtainedMark,
-    passed: obtainedMark >= GENERAL_RESULT_POLICY.passMark,
+    fourHalfPassed,
+    annualPassed,
+    generalPassed,
+    passed: fourHalfPassed && annualPassed && generalPassed,
     complete: true
   };
 }
@@ -216,6 +237,7 @@ module.exports = {
   combineOfficialSubjectScores,
   computeCompetitionRanks,
   computeGeneralResult,
+  computePercentage,
   getInitialMarkStatus,
   getMembershipLifecycleLabel,
   getOfficialExamPolicy,

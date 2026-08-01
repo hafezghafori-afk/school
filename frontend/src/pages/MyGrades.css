@@ -167,6 +167,79 @@
   box-shadow: 0 10px 18px rgba(15, 23, 42, 0.18);
 }
 
+.mygrades-general-results {
+  display: grid;
+  gap: 14px;
+  margin: 18px 0 24px;
+  padding: 16px;
+  border: 1px solid #99f6e4;
+  border-radius: 18px;
+  background: #f0fdfa;
+}
+
+.mygrades-general-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.mygrades-general-title h3,
+.mygrades-general-title p {
+  margin: 0;
+}
+
+.mygrades-general-title p {
+  margin-top: 4px;
+  color: #475569;
+  font-size: 13px;
+}
+
+.mygrades-general-title > .badge {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #0f172a;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.mygrades-general-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.mygrades-general-subjects {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.mygrades-general-subjects > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.mygrades-general-subjects span {
+  color: #475569;
+  font-size: 13px;
+}
+
+.mygrades-general-note {
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-weight: 700;
+}
+
 @media (max-width: 900px) {
   .mygrades-breakdown {
     grid-template-columns: 1fr 1fr;
@@ -176,6 +249,11 @@
 @media (max-width: 640px) {
   .mygrades-breakdown {
     grid-template-columns: 1fr;
+  }
+
+  .mygrades-general-title {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

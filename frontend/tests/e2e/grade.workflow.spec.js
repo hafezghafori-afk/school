@@ -318,6 +318,23 @@ test.describe('grade workflow', () => {
       }]
     })));
 
+    await page.route('**/api/result-tables/my/published', async (route) => route.fulfill(json({
+      success: true,
+      items: [{
+        id: 'table-1',
+        title: 'نتیجه عمومی صنف دهم',
+        version: 1,
+        resultStatus: 'passed',
+        average: 88,
+        rank: 2,
+        academicYear: { title: '۱۴۰۵' },
+        schoolClass: { title: 'صنف دهم الف' },
+        membershipStatus: 'active',
+        membershipStatusLabel: 'فعال',
+        subjects: [{ subjectId: 'subject-1', subjectName: 'ریاضی', fourHalf: 34, annual: 54, total: 88 }]
+      }]
+    })));
+
     await page.goto('/my-grades', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: 'نتایج امتحانات من' })).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('.mygrades-breakdown > div')).toHaveCount(4);
@@ -327,5 +344,8 @@ test.describe('grade workflow', () => {
     await expect(page.locator('.mygrades-item')).toContainText('حالت: کامیاب');
     await expect(page.locator('.mygrades-total-row')).toContainText(/۳۴.*۴۰/);
     await expect(page.locator('.mygrades-total-row')).toContainText('تاریخ نتیجه');
+    await expect(page.locator('.mygrades-general-results')).toContainText('نتیجهٔ عمومی نشرشده');
+    await expect(page.locator('.mygrades-general-results')).toContainText('ریاضی');
+    await expect(page.locator('.mygrades-general-results')).toContainText(/34.*۴۰/);
   });
 });

@@ -13,7 +13,7 @@ function json(body, status = 200, headers = {}) {
   };
 }
 
-function buildClassItem({ id, title, code, gradeLevel, section, academicYearId, academicYearTitle, legacyCourseId, legacyCourseTitle }) {
+function buildClassItem({ id, title, code, gradeLevel, section, academicYearId, academicYearTitle, legacyCourseId, legacyCourseTitle, homeroomTeacher = null }) {
   return {
     id,
     title,
@@ -26,6 +26,8 @@ function buildClassItem({ id, title, code, gradeLevel, section, academicYearId, 
     room: 'A-1',
     status: 'active',
     note: '',
+    homeroomTeacherUserId: homeroomTeacher?.id || '',
+    homeroomTeacher,
     legacyCourseId,
     legacyCourse: {
       _id: legacyCourseId,
@@ -45,6 +47,7 @@ test.describe('education core workflow', () => {
     test.setTimeout(90000);
 
     let classCreates = 0;
+    let lastClassCreateBody = null;
     let subjectCreates = 0;
     let subjectUpdates = 0;
     let subjectDeletes = 0;
@@ -414,6 +417,7 @@ test.describe('education core workflow', () => {
       if (route.request().method() === 'POST') {
         classCreates += 1;
         const body = route.request().postDataJSON();
+        lastClassCreateBody = body;
         const nextIndex = schoolClasses.length + 1;
         const item = buildClassItem({
           id: `class-${nextIndex}`,
@@ -424,7 +428,8 @@ test.describe('education core workflow', () => {
           academicYearId: body.academicYearId,
           academicYearTitle: academicYears.find((entry) => entry.id === body.academicYearId)?.title || '1406',
           legacyCourseId: `course-${nextIndex}`,
-          legacyCourseTitle: `Legacy Mirror ${body.code || nextIndex}`
+          legacyCourseTitle: `Legacy Mirror ${body.code || nextIndex}`,
+          homeroomTeacher: instructors.find((entry) => entry.id === body.homeroomTeacherUserId) || null
         });
         schoolClasses.push(item);
         await route.fulfill(json({ success: true, item }, 201));
@@ -605,9 +610,11 @@ test.describe('education core workflow', () => {
     await classCard.locator('input').nth(2).fill('9');
     await classCard.locator('select').nth(0).selectOption({ label: 'ب' });
     await classCard.locator('select').nth(1).selectOption('year-1');
+    await classCard.locator('select').nth(2).selectOption('teacher-1');
     await classCard.getByRole('button', { name: 'ایجاد صنف' }).click();
 
     await expect.poll(() => classCreates).toBe(1);
+    expect(lastClassCreateBody?.homeroomTeacherUserId).toBe('teacher-1');
     const classRegistryCard = page
       .locator('article.admin-workspace-card')
       .filter({ has: page.getByRole('heading', { name: 'دفتر صنف‌ها' }) })
@@ -620,6 +627,7 @@ test.describe('education core workflow', () => {
     await expect(classRegistryCard.getByRole('button', { name: /بیشتر/ })).toBeVisible();
     await classRegistryCard.getByRole('button', { name: /بیشتر/ }).click();
     await expect(classRegistryCard).toContainText('صنف نهم ب');
+    await expect(classRegistryCard).toContainText('نگران صنف: استاد احمد');
     await classRegistryCard.getByLabel('جستجو در دفتر صنف‌ها').fill('9B');
     await classRegistryCard.getByRole('button', { name: 'جستجو' }).click();
     await expect(classRegistryCard).toContainText('صنف نهم ب');

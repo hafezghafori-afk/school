@@ -6,6 +6,7 @@ require('../models/StudentMembership');
 require('../models/User');
 
 const SiteSettings = require('../models/SiteSettings');
+const School = require('../models/School');
 const TableTemplate = require('../models/TableTemplate');
 const TableConfig = require('../models/TableConfig');
 const ResultTable = require('../models/ResultTable');
@@ -14,6 +15,7 @@ const ExamSession = require('../models/ExamSession');
 const ExamResult = require('../models/ExamResult');
 const AcademicYear = require('../models/AcademicYear');
 const SchoolClass = require('../models/SchoolClass');
+const StudentCore = require('../models/StudentCore');
 const {
   buildClassAggregateRows,
   getClassAggregateReadiness
@@ -70,6 +72,13 @@ function formatConfig(doc) {
     orientation: normalizeText(item.orientation),
     logoMode: normalizeText(item.logoMode),
     logoUrl: normalizeText(item.logoUrl),
+    secondaryLogoUrl: normalizeText(item.secondaryLogoUrl),
+    ministryTitle: normalizeText(item.ministryTitle),
+    directorateTitle: normalizeText(item.directorateTitle),
+    districtTitle: normalizeText(item.districtTitle),
+    schoolTitle: normalizeText(item.schoolTitle),
+    studentsPerPage: Number(item.studentsPerPage || 3),
+    signatureLabels: Array.isArray(item.signatureLabels) ? item.signatureLabels.map(normalizeText).filter(Boolean) : [],
     headerText: normalizeText(item.headerText),
     footerText: normalizeText(item.footerText),
     showHeader: Boolean(item.showHeader),
@@ -140,6 +149,7 @@ function formatTable(doc, rows = []) {
     status: normalizeText(item.status),
     rowCount: Number(item.rowCount || 0),
     stats: item.stats || {},
+    metadata: item.metadata || {},
     headerText: normalizeText(item.headerText),
     footerText: normalizeText(item.footerText),
     logoUrl: normalizeText(item.logoUrl),
@@ -163,6 +173,16 @@ function formatTable(doc, rows = []) {
 }
 function buildTemplateSeedData() {
   return [
+    {
+      title: 'جدول رسمی نتایج عمومی صنف',
+      code: 'RESULTS_CLASS_OFFICIAL',
+      templateType: 'results',
+      rowMode: 'full_results',
+      visibleColumns: ['serialNo', 'identity', 'subjects', 'stageTotals', 'attendance', 'resultStatus', 'rank', 'membershipStatusLabel'],
+      sortMode: 'rank',
+      defaultOrientation: 'landscape',
+      note: 'قالب رسمی نتیجهٔ عمومی با نمرات چهارنیم‌ماهه، سالانه و مجموع.'
+    },
     {
       title: 'جدول نتایج',
       code: 'RESULTS_MAIN',
@@ -247,14 +267,26 @@ function buildTemplateSeedData() {
 
 function buildDefaultConfigSeed() {
   return {
-    name: 'Default Result Table Config',
+    name: 'تنظیم رسمی جدول نتایج',
     code: 'DEFAULT-RESULT-TABLE',
     fontFamily: 'Tahoma',
-    fontSize: 12,
+    fontSize: 10,
     orientation: 'landscape',
     logoMode: 'site',
-    headerText: 'مکتب - سیستم نتایج',
-    footerText: 'این جدول از موتور مشترک نتایج تولید شده است.',
+    headerText: 'جدول نتایج عمومی شاگردان',
+    footerText: 'این جدول از شقه‌های تأییدشدهٔ چهارنیم‌ماهه و سالانه ساخته شده است.',
+    ministryTitle: 'وزارت معارف',
+    directorateTitle: 'ریاست معارف شهر کابل',
+    districtTitle: '',
+    schoolTitle: '',
+    studentsPerPage: 3,
+    signatureLabels: [
+      'تأیید مکتب',
+      'تأیید آمریت حوزه/ولسوالی',
+      'عضو مسلکی نتایج',
+      'تأیید مدیریت عمومی نتایج',
+      'تأیید ریاست معارف'
+    ],
     showHeader: true,
     showFooter: true,
     showLogo: true,
@@ -340,6 +372,12 @@ async function seedResultTableReferenceData({ dryRun = false } = {}) {
       normalizeText(existingConfig.logoMode) !== payload.logoMode ||
       normalizeText(existingConfig.headerText) !== payload.headerText ||
       normalizeText(existingConfig.footerText) !== payload.footerText ||
+      normalizeText(existingConfig.ministryTitle) !== payload.ministryTitle ||
+      normalizeText(existingConfig.directorateTitle) !== payload.directorateTitle ||
+      normalizeText(existingConfig.districtTitle) !== payload.districtTitle ||
+      normalizeText(existingConfig.schoolTitle) !== payload.schoolTitle ||
+      Number(existingConfig.studentsPerPage || 0) !== Number(payload.studentsPerPage || 0) ||
+      JSON.stringify(existingConfig.signatureLabels || []) !== JSON.stringify(payload.signatureLabels || []) ||
       Boolean(existingConfig.isDefault) !== Boolean(payload.isDefault);
 
     if (changed) {
@@ -358,8 +396,109 @@ async function getEffectiveLogoUrl(configDoc) {
   const config = toPlain(configDoc);
   if (!config || config.logoMode === 'none' || config.showLogo === false) return '';
   if (config.logoMode === 'custom' && normalizeText(config.logoUrl)) return normalizeText(config.logoUrl);
-  const settings = await SiteSettings.findOne({}).select('logoUrl').lean();
-  return normalizeText(settings?.logoUrl);
+  const settings = await SiteSettings.findOne({}).select('logoUrl schoolLogoUrl').lean();
+  return normalizeText(settings?.schoolLogoUrl) || normalizeText(settings?.logoUrl);
+}
+
+function buildStageStatistics(rows = [], stage = 'general') {
+  const studentRows = rows.filter((row) => row.rowType === 'student');
+  const stageKey = stage === 'fourHalf' ? 'fourHalf' : stage === 'annual' ? 'annual' : 'general';
+  const scoreKey = stage === 'fourHalf' ? 'fourHalf' : stage === 'annual' ? 'annual' : 'total';
+  const passKey = stage === 'fourHalf' ? 'fourHalfPassed' : stage === 'annual' ? 'annualPassed' : 'passed';
+  const statusKey = stage === 'fourHalf' ? 'fourHalfStatus' : 'annualStatus';
+  const participated = studentRows.filter((row) => Number(row.cells?.stageTotals?.[stageKey]?.recordedSubjects || 0) > 0);
+  const passed = participated.filter((row) => {
+    const subjects = (row.cells?.subjects || []).filter((item) => item.applicable && Number.isFinite(Number(item[scoreKey])));
+    return subjects.length > 0 && subjects.every((item) => item[passKey] === true);
+  });
+  const conditional = stage === 'general'
+    ? studentRows.filter((row) => row.resultStatus === 'conditional')
+    : [];
+  const absent = studentRows.filter((row) => (row.cells?.subjects || []).some((item) => item[statusKey] === 'absent'));
+  const excused = studentRows.filter((row) => (row.cells?.subjects || []).some((item) => item[statusKey] === 'excused'));
+  const deprived = studentRows.filter((row) => row.membershipStatus === 'suspended');
+  return {
+    enrolled: studentRows.length,
+    participated: participated.length,
+    passed: passed.length,
+    failed: Math.max(0, participated.length - passed.length - conditional.length),
+    conditional: conditional.length,
+    absent: absent.length,
+    excused: excused.length,
+    deprived: deprived.length
+  };
+}
+
+async function buildOfficialSnapshotMetadata({ config, readiness, rows }) {
+  const configItem = toPlain(config) || {};
+  const schoolId = readiness?.schoolClass?.schoolId || null;
+  const [settings, school] = await Promise.all([
+    SiteSettings.findOne({}).select('logoUrl schoolLogoUrl ministryLogoUrl brandName').lean(),
+    schoolId ? School.findById(schoolId).lean() : null
+  ]);
+  const logoDisabled = configItem.logoMode === 'none' || configItem.showLogo === false;
+  const schoolLogoUrl = logoDisabled ? '' : (
+    configItem.logoMode === 'custom' && normalizeText(configItem.logoUrl)
+      ? normalizeText(configItem.logoUrl)
+      : normalizeText(settings?.schoolLogoUrl) || normalizeText(settings?.logoUrl)
+  );
+  const ministryLogoUrl = logoDisabled ? '' : (
+    normalizeText(configItem.secondaryLogoUrl) || normalizeText(settings?.ministryLogoUrl)
+  );
+  const schoolName = normalizeText(configItem.schoolTitle)
+    || normalizeText(school?.nameDari)
+    || normalizeText(school?.name)
+    || normalizeText(settings?.brandName)
+    || 'مکتب';
+
+  return {
+    layoutKind: 'official_class_results',
+    studentsPerPage: 3,
+    officialHeader: {
+      countryTitle: 'امارت اسلامی افغانستان',
+      ministryTitle: normalizeText(configItem.ministryTitle) || 'وزارت معارف',
+      directorateTitle: normalizeText(configItem.directorateTitle) || 'ریاست معارف شهر کابل',
+      districtTitle: normalizeText(configItem.districtTitle) || normalizeText(school?.district),
+      schoolTitle: schoolName,
+      schoolCode: normalizeText(school?.schoolCode) || normalizeText(school?.ministryCode),
+      schoolLogoUrl,
+      ministryLogoUrl
+    },
+    signatures: Array.isArray(configItem.signatureLabels) && configItem.signatureLabels.length
+      ? configItem.signatureLabels.map(normalizeText).filter(Boolean)
+      : [
+          'تأیید مکتب',
+          'تأیید آمریت حوزه/ولسوالی',
+          'عضو مسلکی نتایج',
+          'تأیید مدیریت عمومی نتایج',
+          'تأیید ریاست معارف'
+        ],
+    academicYear: readiness?.academicYear || null,
+    schoolClass: readiness?.schoolClass || null,
+    observerName: normalizeText(readiness?.schoolClass?.homeroomTeacher?.name),
+    subjects: (readiness?.subjects || []).map((subject) => ({
+      id: subject.id,
+      code: subject.code,
+      name: subject.name,
+      teacherAssignments: subject.teacherAssignments || []
+    })),
+    sourceSessionIds: readiness?.sourceSessionIds || [],
+    readinessProgress: readiness?.progress || {},
+    stageStatistics: {
+      fourHalf: buildStageStatistics(rows, 'fourHalf'),
+      annual: buildStageStatistics(rows, 'annual'),
+      general: buildStageStatistics(rows, 'general')
+    },
+    policy: {
+      version: OFFICIAL_RESULT_POLICY_VERSION,
+      fourHalfPassMark: 16,
+      fourHalfTotalMark: 40,
+      annualPassMark: 40,
+      annualTotalMark: 60,
+      generalPassMark: 55,
+      generalTotalMark: 100
+    }
+  };
 }
 
 function buildResultStats(results = []) {
@@ -484,6 +623,15 @@ async function createTableConfig(payload = {}) {
     orientation: normalizeText(payload.orientation) === 'portrait' ? 'portrait' : 'landscape',
     logoMode: ['site', 'custom', 'none'].includes(normalizeText(payload.logoMode)) ? normalizeText(payload.logoMode) : 'site',
     logoUrl: normalizeText(payload.logoUrl),
+    secondaryLogoUrl: normalizeText(payload.secondaryLogoUrl),
+    ministryTitle: normalizeText(payload.ministryTitle) || 'وزارت معارف',
+    directorateTitle: normalizeText(payload.directorateTitle) || 'ریاست معارف شهر کابل',
+    districtTitle: normalizeText(payload.districtTitle),
+    schoolTitle: normalizeText(payload.schoolTitle),
+    studentsPerPage: Math.min(10, Math.max(1, Number(payload.studentsPerPage || 3))),
+    signatureLabels: Array.isArray(payload.signatureLabels)
+      ? payload.signatureLabels.map(normalizeText).filter(Boolean)
+      : ['امضای مدیر مکتب', 'امضای سرمعلم', 'امضای عضو علمی و مسلکی'],
     headerText: normalizeText(payload.headerText),
     footerText: normalizeText(payload.footerText),
     showHeader: payload.showHeader !== false,
@@ -685,7 +833,10 @@ async function generateResultTable({
     : null;
   const rows = aggregate?.rows || await buildGeneratedRows({ template, session });
   const statsSource = rows.filter((item) => item.rowType === 'student').map((item) => ({ resultStatus: item.resultStatus, percentage: item.percentage }));
-  const logoUrl = await getEffectiveLogoUrl(config);
+  const metadata = aggregate
+    ? await buildOfficialSnapshotMetadata({ config, readiness: aggregate.readiness, rows })
+    : {};
+  const logoUrl = normalizeText(metadata?.officialHeader?.schoolLogoUrl) || await getEffectiveLogoUrl(config);
   const tableVersionFilter = normalizedScope === 'class_aggregate'
     ? {
         scopeType: 'class_aggregate',
@@ -723,6 +874,7 @@ async function generateResultTable({
     status: 'generated',
     rowCount: rows.length,
     stats: buildResultStats(statsSource),
+    metadata,
     headerText: config?.headerText || '',
     footerText: config?.footerText || '',
     logoUrl,
@@ -787,6 +939,55 @@ async function getResultTable(tableId) {
   return formatTable(table, rows);
 }
 
+async function listMyPublishedResultTables(userId) {
+  const normalizedUserId = normalizeText(userId);
+  if (!normalizedUserId) return [];
+  const studentCore = await StudentCore.findOne({ userId: normalizedUserId }).select('_id').lean();
+  const identityFilters = [{ student: normalizedUserId }];
+  if (studentCore?._id) identityFilters.push({ studentId: studentCore._id });
+  const rows = await ResultTableRow.find({ rowType: 'student', $or: identityFilters })
+    .populate({
+      path: 'tableId',
+      match: { status: 'published', scopeType: 'class_aggregate' },
+      populate: [
+        { path: 'academicYearId', select: 'title code' },
+        { path: 'classId', select: 'title titleDari code gradeLevel section' }
+      ]
+    })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  return rows.filter((row) => row.tableId).map((row) => ({
+    id: String(row.tableId._id),
+    title: normalizeText(row.tableId.title),
+    code: normalizeText(row.tableId.code),
+    version: Number(row.tableId.version || 1),
+    publishedAt: row.tableId.publishedAt || null,
+    academicYear: row.tableId.academicYearId ? {
+      id: String(row.tableId.academicYearId._id || row.tableId.academicYearId),
+      title: normalizeText(row.tableId.academicYearId.title),
+      code: normalizeText(row.tableId.academicYearId.code)
+    } : null,
+    schoolClass: row.tableId.classId ? {
+      id: String(row.tableId.classId._id || row.tableId.classId),
+      title: normalizeText(row.tableId.classId.titleDari) || normalizeText(row.tableId.classId.title),
+      code: normalizeText(row.tableId.classId.code)
+    } : null,
+    resultStatus: normalizeText(row.resultStatus),
+    rank: row.rank == null ? null : Number(row.rank),
+    totalObtained: nullableNumber(row.cells?.totalObtained),
+    totalPossible: nullableNumber(row.cells?.totalPossible),
+    average: nullableNumber(row.cells?.average),
+    percentage: nullableNumber(row.cells?.percentage ?? row.cells?.stageTotals?.general?.percentage ?? row.cells?.average),
+    failedSubjects: nullableNumber(row.cells?.failedSubjects),
+    membershipStatus: normalizeText(row.membershipStatus),
+    membershipStatusLabel: normalizeText(row.membershipStatusLabel),
+    subjects: Array.isArray(row.cells?.subjects) ? row.cells.subjects : [],
+    stageTotals: row.cells?.stageTotals || {},
+    attendance: row.cells?.attendance || {}
+  }));
+}
+
 module.exports = {
   createTableConfig,
   generateResultTable,
@@ -794,6 +995,7 @@ module.exports = {
   getClassAggregateReadiness,
   listResultTableReferenceData,
   listResultTables,
+  listMyPublishedResultTables,
   listTableConfigs,
   listTableTemplates,
   publishResultTable,

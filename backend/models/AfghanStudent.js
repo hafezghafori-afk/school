@@ -44,6 +44,11 @@ const afghanStudentSchema = new mongoose.Schema({
       trim: true,
       maxlength: 100
     },
+    fatherNameEnglish: {
+      type: String,
+      trim: true,
+      maxlength: 100
+    },
     grandfatherName: {
       type: String,
       trim: true,

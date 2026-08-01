@@ -49,6 +49,7 @@ const resultTableSchema = new mongoose.Schema({
   },
   rowCount: { type: Number, default: 0, min: 0 },
   stats: { type: resultTableStatsSchema, default: () => ({}) },
+  metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
   headerText: { type: String, default: '' },
   footerText: { type: String, default: '' },
   logoUrl: { type: String, default: '' },

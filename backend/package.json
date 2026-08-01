@@ -93,6 +93,7 @@
     "backfill:phase5-result-table-reference": "node ./scripts/backfillPhase5ResultTableReference.js",
     "backfill:phase5-result-table-reference:dry": "node ./scripts/backfillPhase5ResultTableReference.js --dry-run",
     "check:result-table-routes": "node ./scripts/checkResultTableRoutes.js",
+    "check:result-table-exports": "node ./scripts/checkResultTableExports.js",
     "backfill:phase6-promotion-reference": "node ./scripts/backfillPhase6PromotionReference.js",
     "backfill:phase6-promotion-reference:dry": "node ./scripts/backfillPhase6PromotionReference.js --dry-run",
     "check:promotion-routes": "node ./scripts/checkPromotionRoutes.js",

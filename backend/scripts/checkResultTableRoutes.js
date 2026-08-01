@@ -70,6 +70,9 @@ const serviceMock = {
       status: 'published',
       rows: [{ id: 'row-1', displayName: 'Alpha Student' }]
     };
+  },
+  async listMyPublishedResultTables() {
+    return [{ id: IDS.table, title: 'نتیجه عمومی', resultStatus: 'passed', average: 88 }];
   }
 };
 
@@ -105,6 +108,16 @@ const activityMock = {
   }
 };
 
+const exportMock = {
+  buildResultTableCsv() { return '\uFEFFname,result\r\nAlpha,passed'; },
+  async buildResultTablePdfBuffer() { return Buffer.from('%PDF-1.4 test'); },
+  async buildResultTableXlsxBuffer() { return Buffer.from('xlsx-test'); }
+};
+
+const printMock = {
+  renderResultTablePrintHtml() { return '<!doctype html><html lang="fa"><body>جدول نتایج</body></html>'; }
+};
+
 function loadRouter() {
   const routePath = path.join(__dirname, '..', 'routes', 'resultTableRoutes.js');
   const originalLoad = Module._load;
@@ -114,6 +127,8 @@ function loadRouter() {
     const isRouteFile = parentFile.endsWith('/routes/resultTableRoutes.js');
     if (isRouteFile && request === '../middleware/auth') return authMock;
     if (isRouteFile && request === '../services/resultTableService') return serviceMock;
+    if (isRouteFile && request === '../services/resultTableExportService') return exportMock;
+    if (isRouteFile && request === '../services/resultTablePrintService') return printMock;
     if (isRouteFile && request === '../utils/activity') return activityMock;
     return originalLoad.apply(this, arguments);
   };
@@ -178,6 +193,12 @@ async function run() {
     cases.push(await request(server, '/api/result-tables', { user: instructorUser }));
     cases.push(await request(server, '/api/result-tables/readiness?academicYearId=year-1&classId=class-1', { user: instructorUser }));
     cases.push(await request(server, `/api/result-tables/${IDS.table}`, { user: instructorUser }));
+    cases.push(await request(server, '/api/result-tables/my/published'));
+    cases.push(await request(server, '/api/result-tables/my/published', { user: { id: IDS.instructor, role: 'student', permissions: [] } }));
+    cases.push(await request(server, `/api/result-tables/${IDS.table}/export.pdf`, { user: instructorUser }));
+    cases.push(await request(server, `/api/result-tables/${IDS.table}/export.xlsx`, { user: instructorUser }));
+    cases.push(await request(server, `/api/result-tables/${IDS.table}/export.csv`, { user: instructorUser }));
+    cases.push(await request(server, `/api/result-tables/${IDS.table}/export.print`, { user: instructorUser }));
     cases.push(await request(server, `/api/result-tables/${IDS.table}/publish`, { method: 'POST', user: adminUser }));
 
     assertCase(cases[0].status === 401, 'Expected reference-data route to require auth.');
@@ -188,7 +209,13 @@ async function run() {
     assertCase(cases[5].status === 200 && Array.isArray(cases[5].data?.items), 'Expected list route to return generated tables.');
     assertCase(cases[6].status === 200 && cases[6].data?.ready === true, 'Expected readiness route to return aggregate readiness.');
     assertCase(cases[7].status === 200 && cases[7].data?.item?.id === IDS.table, 'Expected detail route to return table detail.');
-    assertCase(cases[8].status === 200 && cases[8].data?.item?.status === 'published', 'Expected publish route to return published table detail.');
+    assertCase(cases[8].status === 401, 'Expected published student result route to require authentication.');
+    assertCase(cases[9].status === 200 && cases[9].data?.items?.[0]?.average === 88, 'Expected student to receive only their published aggregate result.');
+    assertCase(cases[10].status === 200 && cases[10].text.startsWith('%PDF-1.4'), 'Expected PDF export route to return a PDF buffer.');
+    assertCase(cases[11].status === 200 && cases[11].text === 'xlsx-test', 'Expected Excel export route to return a workbook buffer.');
+    assertCase(cases[12].status === 200 && cases[12].text.includes('Alpha,passed'), 'Expected CSV export route to return snapshot rows.');
+    assertCase(cases[13].status === 200 && cases[13].text.includes('جدول نتایج'), 'Expected print export route to return printable HTML.');
+    assertCase(cases[14].status === 200 && cases[14].data?.item?.status === 'published', 'Expected publish route to return published table detail.');
 
     const configLog = findActivity('result_table_config_create');
     const generateLog = findActivity('result_table_generate');
