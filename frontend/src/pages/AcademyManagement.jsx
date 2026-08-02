@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './AcademyManagement.css';
 import { API_BASE } from '../config/api';
+import { getStudentAsasNumber, studentMatchesSearch } from '../utils/studentSearch';
 
 const emptyStudent = {
   firstName: '',
@@ -255,22 +256,20 @@ export default function AcademyManagement() {
   );
 
   const filteredStudents = useMemo(
-    () => students.filter((item) => includesSearch([item.fullName, item.studentCode, item.phone, item.fatherName], searchTerm)),
+    () => students.filter((item) => studentMatchesSearch(item, searchTerm)),
     [students, searchTerm]
   );
 
   const filteredRegistrations = useMemo(
-    () => registrations.filter((item) => includesSearch([
-      item.studentId?.fullName,
-      item.studentId?.studentCode,
+    () => registrations.filter((item) => studentMatchesSearch(item.studentId || item, searchTerm, [
       item.courseId?.name,
       item.classId?.name
-    ], searchTerm)),
+    ])),
     [registrations, searchTerm]
   );
 
   const filteredInvoices = useMemo(
-    () => invoices.filter((item) => includesSearch([item.invoiceNumber, item.studentId?.fullName, item.courseName, item.className], searchTerm)),
+    () => invoices.filter((item) => studentMatchesSearch(item.studentId || item, searchTerm, [item.invoiceNumber, item.courseName, item.className])),
     [invoices, searchTerm]
   );
 
@@ -415,7 +414,7 @@ export default function AcademyManagement() {
         <input
           value={searchTerm}
           onChange={(event) => setSearchTerm(event.target.value)}
-          placeholder="جستجو در شاگرد، بل، کورس، صنف یا مصرف"
+          placeholder="جستجو با نام یا نمبر اساس شاگرد، بل، کورس، صنف یا مصرف"
         />
       </div>
 
@@ -610,7 +609,7 @@ export default function AcademyManagement() {
                 <Field label="شاگرد">
                   <select required value={registrationForm.studentId} onChange={(e) => setRegistrationForm({ ...registrationForm, studentId: e.target.value })}>
                     <option value="">انتخاب شاگرد</option>
-                    {students.map((item) => <option key={item._id} value={item._id}>{item.fullName} - {item.studentCode}</option>)}
+                    {students.map((item) => <option key={item._id} value={item._id}>{item.fullName} - {getStudentAsasNumber(item)}</option>)}
                   </select>
                 </Field>
                 <Field label="کورس">

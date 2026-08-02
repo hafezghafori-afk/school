@@ -29,6 +29,11 @@ const students = [
   { _id: IDS.student2, name: 'Student Beta', email: 'beta@example.com', grade: '10', role: 'student' }
 ];
 
+const studentCores = [
+  { _id: 'student-core-1', userId: IDS.student1, admissionNo: '1405001', fullName: 'Student Alpha', email: 'alpha@example.com' },
+  { _id: 'student-core-2', userId: IDS.student2, admissionNo: '1405002', fullName: 'Student Beta', email: 'beta@example.com' }
+];
+
 const orders = [
   { _id: 'ord-1', user: IDS.student1, course: IDS.course1, status: 'approved' },
   { _id: 'ord-2', user: IDS.student2, course: IDS.course1, status: 'approved' }
@@ -324,6 +329,13 @@ const UserMock = {
   }
 };
 
+const StudentCoreMock = {
+  find(filter = {}) {
+    const ids = Array.isArray(filter?.userId?.$in) ? filter.userId.$in.map(String) : [];
+    return createQuery(() => studentCores.filter((item) => ids.includes(String(item.userId))));
+  }
+};
+
 class FakePDFDocument {
   constructor() {
     this.response = null;
@@ -405,6 +417,7 @@ function loadGradeRouter() {
     if (isGradeRoute && request === '../utils/classScope') return classScopeMock;
     if (isGradeRoute && request === '../models/Course') return CourseMock;
     if (isGradeRoute && request === '../models/User') return UserMock;
+    if (isGradeRoute && request === '../models/StudentCore') return StudentCoreMock;
     if (isGradeRoute && request === '../middleware/auth') return authMock;
     if (isGradeRoute && request === '../utils/activity') {
       return {
@@ -585,6 +598,7 @@ async function run() {
       assertCase(response.data?.classId === IDS.class1, 'expected canonical classId in roster payload');
       assertCase(response.data?.courseId === IDS.course1, 'expected compatibility courseId in roster payload');
       assertCase(response.data?.schoolClass?.title === 'Class One Core', 'expected schoolClass payload');
+      assertCase(response.data?.items?.[0]?.student?.admissionNo === '1405001', 'expected student base number in grade roster payload');
     });
 
     await check('route smoke: upsert requires attachment upload', async () => {

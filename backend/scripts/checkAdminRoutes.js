@@ -29,7 +29,9 @@ const IDS = {
   schedule: '507f191e810c19729de86016',
   settings: '507f191e810c19729de86017',
   log1: '507f191e810c19729de86018',
-  log2: '507f191e810c19729de86019'
+  log2: '507f191e810c19729de86019',
+  studentCore: '507f191e810c19729de86020',
+  afghanStudent: '507f191e810c19729de86021'
 };
 
 const users = [
@@ -77,7 +79,34 @@ const afghanTeachers = [
   }
 ];
 
-const afghanStudents = [];
+const studentCores = [
+  {
+    _id: IDS.studentCore,
+    userId: IDS.student,
+    admissionNo: '1405001',
+    fullName: 'Alpha Student',
+    email: 'alpha.student@example.com',
+    phone: '0700000000'
+  }
+];
+
+const afghanStudents = [
+  {
+    _id: IDS.afghanStudent,
+    linkedUserId: IDS.student,
+    asasNumber: '1405001',
+    registrationId: 'REG-ALPHA-001',
+    status: 'active',
+    personalInfo: {
+      firstName: 'Alpha',
+      lastName: 'Student',
+      fatherName: 'Parent Alpha'
+    },
+    identification: {
+      tazkiraNumber: 'TAZ-ALPHA-001'
+    }
+  }
+];
 
 const courses = [
   {
@@ -445,6 +474,7 @@ const populateValue = (field, item) => {
   if (field === 'user' && next.user) next.user = clone(users.find((entry) => String(entry._id) === String(next.user)) || next.user);
   if (field === 'course' && next.course) next.course = clone(courses.find((entry) => String(entry._id) === String(next.course)) || next.course);
   if (field === 'student' && next.student) next.student = clone(users.find((entry) => String(entry._id) === String(next.student)) || next.student);
+  if (field === 'studentId' && next.studentId) next.studentId = clone(studentCores.find((entry) => String(entry._id) === String(next.studentId)) || next.studentId);
   if (field === 'requester' && next.requester) next.requester = clone(users.find((entry) => String(entry._id) === String(next.requester)) || next.requester);
   if (field === 'instructor' && next.instructor) next.instructor = clone(users.find((entry) => String(entry._id) === String(next.instructor)) || next.instructor);
   if (field === 'createdBy' && next.createdBy) next.createdBy = clone(users.find((entry) => String(entry._id) === String(next.createdBy)) || next.createdBy);
@@ -671,6 +701,7 @@ function loadRouters() {
     '../models/User': UserMock,
     '../models/AfghanSchool': createModelMock([]),
     '../models/AfghanStudent': createModelMock(afghanStudents),
+    '../models/StudentCore': createModelMock(studentCores),
     '../models/AfghanTeacher': createModelMock(afghanTeachers),
     '../models/Course': createModelMock(courses),
     '../models/Order': createModelMock(orders),
@@ -939,6 +970,15 @@ async function run() {
       assertCase(payload.logs?.length >= 1, 'expected activity log result');
       assertCase(payload.enrollments?.length === 1, 'expected enrollment result');
       assertCase(payload.settings?.length === 1, 'expected settings result');
+    });
+
+    await check('route smoke: global search finds student by Persian-digit base number', async () => {
+      const response = await request(server, '/api/admin/search?q=%DB%B1%DB%B4%DB%B0%DB%B5%DB%B0%DB%B0%DB%B1', { user: adminUser });
+      assertCase(response.status === 200, `expected 200, received ${response.status}`);
+      const payload = response.data || {};
+      assertCase(payload.users?.some((item) => String(item._id) === IDS.student), 'expected linked student user by base number');
+      assertCase(payload.memberships?.some((item) => String(item.student?._id || item.student) === IDS.student), 'expected student membership by base number');
+      assertCase(payload.financeBills?.some((item) => String(item.student?._id || item.student) === IDS.student), 'expected student finance bill by base number');
     });
 
     await check('route smoke: admin log export returns csv attachment', async () => {

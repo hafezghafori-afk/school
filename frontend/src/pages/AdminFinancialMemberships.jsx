@@ -12,6 +12,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import { getStudentAsasNumber, studentMatchesSearch } from '../utils/studentSearch';
 import { readStoredSchoolId } from './adminWorkspaceUtils';
 import './AdminFinancialMemberships.css';
 
@@ -53,7 +54,7 @@ const getMembershipStudentName = (membership = {}, students = []) => {
 
 const getMembershipAdmissionNo = (membership = {}, students = []) => {
   const student = students.find((item) => String(item._id) === String(membership.studentId)) || {};
-  return membership.admissionNo || student.admissionNo || '-';
+  return getStudentAsasNumber({ ...student, ...membership }) || '-';
 };
 
 const getMembershipClassTitle = (membership = {}, classes = []) => {
@@ -266,9 +267,7 @@ export default function AdminFinancialMemberships() {
   const filteredMemberships = useMemo(() => {
     return memberships.filter((m) => {
       const student = students.find((s) => s._id === m.studentId) || {};
-      const searchName = getMembershipStudentName(m, students);
-      const admissionNo = getMembershipAdmissionNo(m, students);
-      const matchesSearch = !filters.search || searchName.toLowerCase().includes(filters.search.toLowerCase()) || admissionNo.toLowerCase().includes(filters.search.toLowerCase());
+      const matchesSearch = studentMatchesSearch({ ...student, ...m }, filters.search, [getMembershipStudentName(m, students)]);
       const matchesYear = !filters.year || m.academicYearId === filters.year;
       const matchesClass = !filters.classId || m.classId === filters.classId;
       const matchesStatus = !filters.status || m.status === filters.status;
@@ -353,7 +352,7 @@ export default function AdminFinancialMemberships() {
       <div className="afm-filter-bar">
         <input
           className="afm-filter-input"
-          placeholder="جستجوی نام یا شماره شاگرد..."
+          placeholder="جستجوی نام، نام پدر یا نمبر اساس شاگرد..."
           value={filters.search}
           onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
         />
@@ -515,7 +514,7 @@ export default function AdminFinancialMemberships() {
                     <label>جستجوی شاگرد</label>
                     <input
                       className="afm-filter-input"
-                      placeholder="نام یا شماره شاگرد..."
+                      placeholder="نام، نام پدر یا نمبر اساس شاگرد..."
                       value={filters.modalStudentSearch || ''}
                       onChange={e => setFilters(f => ({ ...f, modalStudentSearch: e.target.value }))}
                     />
@@ -537,12 +536,11 @@ export default function AdminFinancialMemberships() {
                     <select required value={form.studentId} onChange={e => handleFormChange('studentId', e.target.value)} disabled={Boolean(editingMembershipId)}>
                       <option value="">انتخاب شاگرد</option>
                       {students.filter(s => {
-                        const search = (filters.modalStudentSearch || '').toLowerCase();
-                        const matchesSearch = !search || (s.fullName || s.name || '').toLowerCase().includes(search) || (s.admissionNo || '').toLowerCase().includes(search);
+                        const matchesSearch = studentMatchesSearch(s, filters.modalStudentSearch);
                         const matchesRegType = !filters.modalRegistrationType || s.registrationType === filters.modalRegistrationType;
                         return matchesSearch && matchesRegType;
                       }).map(s => (
-                        <option key={s._id} value={s._id}>{s.fullName || s.name} {s.admissionNo ? `(${s.admissionNo})` : ''} {s.registrationType === 'online' ? 'آنلاین' : 'مدیریت'}</option>
+                        <option key={s._id} value={s._id}>{s.fullName || s.name} {getStudentAsasNumber(s) ? `(نمبر اساس: ${getStudentAsasNumber(s)})` : ''} {s.registrationType === 'online' ? 'آنلاین' : 'مدیریت'}</option>
                       ))}
                     </select>
                   </div>

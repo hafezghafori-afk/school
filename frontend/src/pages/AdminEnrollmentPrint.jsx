@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import useSiteSettings from '../hooks/useSiteSettings';
 import { normalizeBrandName, normalizeBrandSubtitle } from '../utils/brand';
 import { formatAfghanStoredDateLabel } from '../utils/afghanDate';
-import { getPrintLogoUrls } from '../utils/printLogos';
+import { getOfficialPrintLogoImageClass, getPrintLogoUrls } from '../utils/printLogos';
 import './AdminEnrollmentPrint.css';
 
 import { API_BASE } from '../config/api';
@@ -64,7 +64,7 @@ export default function AdminEnrollmentPrint() {
     <section className="admin-print-page">
       <header className="print-letterhead">
         <div className="print-official-logo print-official-logo-left">
-          {schoolLogoUrl ? <img src={schoolLogoUrl} alt="لوگوی مکتب" /> : <span>لوگو مکتب</span>}
+          {schoolLogoUrl ? <img className={getOfficialPrintLogoImageClass(schoolLogoUrl)} src={schoolLogoUrl} alt="لوگوی مکتب" /> : <span>لوگو مکتب</span>}
         </div>
         <div className="print-brand">
           <div>
@@ -73,7 +73,7 @@ export default function AdminEnrollmentPrint() {
           </div>
         </div>
         <div className="print-official-logo print-official-logo-right">
-          {ministryLogoUrl ? <img src={ministryLogoUrl} alt="لوگوی وزارت معارف" /> : <span>لوگو وزارت</span>}
+          {ministryLogoUrl ? <img className={getOfficialPrintLogoImageClass(ministryLogoUrl)} src={ministryLogoUrl} alt="لوگوی وزارت معارف" /> : <span>لوگو وزارت</span>}
         </div>
       </header>
 

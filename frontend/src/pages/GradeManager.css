@@ -657,6 +657,21 @@
   justify-content: flex-end;
 }
 
+.grade-student-search {
+  min-width: min(260px, 100%);
+  padding: 9px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  color: #0f172a;
+  font: inherit;
+}
+
+.grade-student-search:focus {
+  border-color: #0f766e;
+  outline: 2px solid rgba(15, 118, 110, 0.14);
+}
+
 .grade-queue-stepper {
   display: inline-flex;
   align-items: center;

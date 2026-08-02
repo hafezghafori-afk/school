@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const User = require('../models/User');
 const AfghanSchool = require('../models/AfghanSchool');
 const AfghanStudent = require('../models/AfghanStudent');
+const StudentCore = require('../models/StudentCore');
 const AfghanTeacher = require('../models/AfghanTeacher');
 const Course = require('../models/Course');
 const ActivityLog = require('../models/ActivityLog');
@@ -41,6 +42,7 @@ const {
 const { requireAuth, requireRole, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const { runSlaEscalationSweep, LEVEL_TIMEOUT_MINUTES } = require('../services/slaAutomation');
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
+const { normalizeStudentSearchText } = require('../utils/studentSearch');
 
 const router = express.Router();
 const CLIENT_ACTIVITY_ACTIONS = new Set([
@@ -455,8 +457,18 @@ const membershipStatusToCompatibilityStatus = (value = '') => ({
 
 const serializeMembershipAccessRecord = (item = {}) => ({
   _id: item._id || null,
-  user: item.student || null,
-  student: item.student || null,
+  user: item.student ? {
+    ...(typeof item.student.toObject === 'function' ? item.student.toObject() : item.student),
+    fullName: item.studentId?.fullName || item.student?.name || '',
+    admissionNo: item.studentId?.admissionNo || ''
+  } : null,
+  student: item.student ? {
+    ...(typeof item.student.toObject === 'function' ? item.student.toObject() : item.student),
+    fullName: item.studentId?.fullName || item.student?.name || '',
+    admissionNo: item.studentId?.admissionNo || ''
+  } : null,
+  studentCoreId: item.studentId?._id || item.studentId || null,
+  admissionNo: item.studentId?.admissionNo || '',
   course: item.course || null,
   status: membershipStatusToCompatibilityStatus(item.status),
   membershipStatus: item.status || '',
@@ -1301,7 +1313,11 @@ const sortAlertsByPriority = (items = []) => [...items].sort((a, b) => {
 const serializeFinanceSearchOrder = (item = {}) => ({
   _id: item?._id || null,
   billNumber: item?.orderNumber || item?.title || '',
-  student: item?.student || null,
+  student: item?.student ? {
+    ...item.student,
+    fullName: item?.studentId?.fullName || item?.student?.name || '',
+    admissionNo: item?.studentId?.admissionNo || ''
+  } : null,
   course: item?.course || null,
   schoolClass: item?.classId || null,
   status: item?.status || '',
@@ -1324,7 +1340,11 @@ const serializeFinanceSearchPayment = (item = {}) => ({
         billNumber: item.feeOrderId.orderNumber || ''
       }
     : null,
-  student: item?.student || null,
+  student: item?.student ? {
+    ...item.student,
+    fullName: item?.studentId?.fullName || item?.student?.name || '',
+    admissionNo: item?.studentId?.admissionNo || ''
+  } : null,
   course: item?.feeOrderId?.course || null,
   schoolClass: item?.classId || item?.feeOrderId?.classId || null,
   amount: Number(item?.amount || 0),
@@ -2306,13 +2326,38 @@ router.get('/search', requireAuth, requireRole(['admin']), requirePermission('vi
       });
     }
 
-    const escapedQuery = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const normalizedQuery = normalizeStudentSearchText(q);
+    const escapedQuery = normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const rx = new RegExp(escapedQuery, 'i');
-    const numericQuery = Number(q);
+    const numericQuery = Number(normalizedQuery);
     const exactNumber = Number.isFinite(numericQuery) ? numericQuery : null;
 
+    const [matchedStudentCores, matchedAfghanStudents] = await Promise.all([
+      StudentCore.find({ $or: [{ admissionNo: rx }, { fullName: rx }, { email: rx }, { phone: rx }] })
+        .select('_id userId admissionNo fullName')
+        .limit(30),
+      AfghanStudent.find({
+        status: { $ne: 'deleted' },
+        $or: [
+          { asasNumber: rx },
+          { registrationId: rx },
+          { 'personalInfo.firstName': rx },
+          { 'personalInfo.lastName': rx },
+          { 'personalInfo.firstNameDari': rx },
+          { 'personalInfo.lastNameDari': rx },
+          { 'personalInfo.fatherName': rx },
+          { 'identification.tazkiraNumber': rx }
+        ]
+      }).select('_id linkedUserId asasNumber registrationId').limit(30)
+    ]);
+    const matchedStudentCoreIds = matchedStudentCores.map((item) => item._id);
+    const identityUserIds = [
+      ...matchedStudentCores.map((item) => item.userId),
+      ...matchedAfghanStudents.map((item) => item.linkedUserId)
+    ].filter(Boolean);
+
     const [users, courses, subjects] = await Promise.all([
-      User.find({ $or: [{ name: rx }, { email: rx }] }).select('name email role orgRole status adminLevel').limit(20),
+      User.find({ $or: [{ name: rx }, { email: rx }, ...(identityUserIds.length ? [{ _id: { $in: identityUserIds } }] : [])] }).select('name email role orgRole status adminLevel').limit(20),
       Course.find({ $or: [{ title: rx }, { description: rx }, { category: rx }, { tags: rx }] })
         .select('title category level tags schoolClassRef')
         .sort({ createdAt: -1 })
@@ -2336,11 +2381,13 @@ router.get('/search', requireAuth, requireRole(['admin']), requirePermission('vi
         { currency: rx },
         { voidReason: rx },
         ...(matchedUserIds.length ? [{ student: { $in: matchedUserIds } }] : []),
+        ...(matchedStudentCoreIds.length ? [{ studentId: { $in: matchedStudentCoreIds } }] : []),
         ...(matchedCourseIds.length ? [{ course: { $in: matchedCourseIds } }] : []),
         ...(exactNumber == null ? [] : [{ amountOriginal: exactNumber }, { amountDue: exactNumber }, { amountPaid: exactNumber }])
       ]
     })
       .populate('student', 'name email')
+      .populate('studentId', 'fullName admissionNo')
       .populate('course', 'title')
       .populate('classId', 'title code gradeLevel section')
       .sort({ createdAt: -1 })
@@ -2356,9 +2403,10 @@ router.get('/search', requireAuth, requireRole(['admin']), requirePermission('vi
           { note: rx },
           { rejectedReason: rx },
           ...(matchedUserIds.length ? [{ student: { $in: matchedUserIds } }] : []),
+          ...(matchedStudentCoreIds.length ? [{ studentId: { $in: matchedStudentCoreIds } }] : []),
           ...(matchedCourseIds.length ? [{ course: { $in: matchedCourseIds } }] : [])
         ]
-      }).populate('student', 'name email').populate('course', 'title').sort({ createdAt: -1 }).limit(20),
+      }).populate('student', 'name email').populate('studentId', 'fullName admissionNo').populate('course', 'title').sort({ createdAt: -1 }).limit(20),
       FeePayment.find({
         $or: [
           { referenceNo: rx },
@@ -2369,11 +2417,13 @@ router.get('/search', requireAuth, requireRole(['admin']), requirePermission('vi
           { approvalStage: rx },
           { paymentMethod: rx },
           ...(matchedUserIds.length ? [{ student: { $in: matchedUserIds } }] : []),
+          ...(matchedStudentCoreIds.length ? [{ studentId: { $in: matchedStudentCoreIds } }] : []),
           ...(matchedFeeOrderIds.length ? [{ feeOrderId: { $in: matchedFeeOrderIds } }] : []),
           ...(exactNumber == null ? [] : [{ amount: exactNumber }])
         ]
       })
         .populate('student', 'name email')
+        .populate('studentId', 'fullName admissionNo')
         .populate({
           path: 'feeOrderId',
           select: 'orderNumber course classId',
@@ -2424,7 +2474,7 @@ router.get('/search', requireAuth, requireRole(['admin']), requirePermission('vi
           { ip: rx }
         ]
       }).sort({ createdAt: -1 }).limit(20),
-      Enrollment.find({ $or: [{ studentName: rx }, { fatherName: rx }, { phone: rx }, { email: rx }] }).sort({ createdAt: -1 }).limit(20),
+      Enrollment.find({ $or: [{ studentName: rx }, { fatherName: rx }, { phone: rx }, { email: rx }, { asasNumber: rx }, { registrationId: rx }, { nationalId: rx }] }).sort({ createdAt: -1 }).limit(20),
       Schedule.find({
         $or: [
           { subject: rx },

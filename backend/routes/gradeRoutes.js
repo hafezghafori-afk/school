@@ -6,6 +6,7 @@ const PDFDocument = require('pdfkit');
 const Grade = require('../models/Grade');
 const Course = require('../models/Course');
 const User = require('../models/User');
+const StudentCore = require('../models/StudentCore');
 const { findCourseStudents, hasStudentCourseAccess } = require('../utils/courseAccess');
 const { findClassMemberships, resolveMembershipTransactionLink } = require('../utils/studentMembershipLookup');
 const { normalizeText, resolveClassCourseReference, serializeSchoolClassLite } = require('../utils/classScope');
@@ -167,12 +168,15 @@ const serializeGradeItem = (grade) => ({
   schoolClass: serializeSchoolClassLite(grade?.classId || null)
 });
 
-const mapStudentIdentity = (student) => (
+const mapStudentIdentity = (student, studentCore = null) => (
   student ? {
     _id: student._id,
-    name: student.name,
-    email: student.email,
-    grade: student.grade
+    name: student.name || studentCore?.fullName || '',
+    fullName: studentCore?.fullName || student.name || '',
+    email: student.email || studentCore?.email || '',
+    grade: student.grade,
+    admissionNo: studentCore?.admissionNo || '',
+    asasNumber: studentCore?.admissionNo || ''
   } : null
 );
 
@@ -187,9 +191,16 @@ async function listGradeRosterByClassId(classId = '') {
   ));
   if (!studentIds.length) return [];
 
-  const students = await User.find({ _id: { $in: studentIds } }).select('name email grade');
+  const [students, studentCores] = await Promise.all([
+    User.find({ _id: { $in: studentIds } }).select('name email grade'),
+    StudentCore.find({ userId: { $in: studentIds } }).select('userId admissionNo fullName email')
+  ]);
   const studentMap = new Map(students.map((item) => [String(item._id), item]));
-  return studentIds.map((id) => studentMap.get(String(id))).filter(Boolean);
+  const studentCoreMap = new Map(studentCores.map((item) => [String(item.userId), item]));
+  return studentIds.map((id) => {
+    const student = studentMap.get(String(id));
+    return student ? mapStudentIdentity(student, studentCoreMap.get(String(id)) || null) : null;
+  }).filter(Boolean);
 }
 
 async function resolveGradeScopePayload({ classId = '', courseId = '' } = {}) {
@@ -233,7 +244,7 @@ async function handleGradeRosterRequest(req, res, scopeInput = {}, options = {})
     const items = students.map((student) => {
       const grade = gradeMap.get(String(student?._id)) || null;
       return {
-        student: mapStudentIdentity(student),
+        student,
         grade: grade ? serializeGradeItem(grade) : null
       };
     });

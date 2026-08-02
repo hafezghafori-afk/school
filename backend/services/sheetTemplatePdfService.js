@@ -605,9 +605,24 @@ function drawExamOfficialHeader(doc, context, continuation = false) {
   const drawLogo = (assetPath, x, label) => {
     if (assetPath) {
       try {
-        doc.image(assetPath, x, brandY, { fit: [logoSize, logoSize], align: 'center', valign: 'center' });
+        const trimWideWhitespace = /iman[_\s-]*logo|(?:^|[/\\_-])school-logo(?:[/\\_.-]|$)/i.test(String(assetPath || ''));
+        const visualSize = trimWideWhitespace ? logoSize * 1.58 : logoSize;
+        const visualOffset = (visualSize - logoSize) / 2;
+        doc.save();
+        doc.rect(x, brandY, logoSize, logoSize).clip();
+        doc.image(assetPath, x - visualOffset, brandY - visualOffset, {
+          fit: [visualSize, visualSize],
+          align: 'center',
+          valign: 'center'
+        });
+        doc.restore();
         return;
       } catch {
+        try {
+          doc.restore();
+        } catch {
+          // The document may already be outside the clipped image state.
+        }
         // Keep the official header printable even when an image file is unavailable.
       }
     }

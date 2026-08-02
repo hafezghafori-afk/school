@@ -22,6 +22,7 @@ const ActivityLog = require('../models/ActivityLog');
 const { serializeUserIdentity } = require('../utils/userRole');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const { deriveFinanceOrderStatus } = require('../utils/financeLineItems');
+const { normalizeStudentSearchText, studentMatchesSearch } = require('../utils/studentSearch');
 
 function toPlain(doc) {
   if (!doc) return null;
@@ -635,7 +636,7 @@ async function ensureStudentProfile(studentCoreId) {
 }
 
 async function listStudentProfiles({ query = '' } = {}) {
-  const search = normalizeText(query).toLowerCase();
+  const search = normalizeStudentSearchText(query);
   const studentUsers = await User.find({ role: 'student' })
     .select('name email role orgRole status grade subject bio avatarUrl createdAt updatedAt lastLoginAt')
     .sort({ name: 1, createdAt: 1 });
@@ -718,14 +719,10 @@ async function listStudentProfiles({ query = '' } = {}) {
     })
     .filter((item) => {
       if (!search) return true;
-      const haystack = [
-        item.fullName,
-        item.email,
-        item.admissionNo,
+      return studentMatchesSearch(item, search, [
         item.currentMembership?.schoolClass?.title,
         item.currentMembership?.academicYear?.label
-      ].filter(Boolean).join(' ').toLowerCase();
-      return haystack.includes(search);
+      ]);
     })
     .sort((left, right) => left.fullName.localeCompare(right.fullName, 'en', { sensitivity: 'base' }));
 

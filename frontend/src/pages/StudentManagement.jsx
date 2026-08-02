@@ -1608,7 +1608,7 @@ const StudentManagement = () => {
                 data-testid="student-search-input"
                 value={filters.search}
                 onChange={(event) => setFilters({ ...filters, search: event.target.value })}
-                placeholder="نام، تذکره، تلفن یا ایمیل"
+                placeholder="نام، نام پدر، نمبر اساس، تذکره، تلفن یا ایمیل"
               />
             </div>
           </label>
@@ -2273,7 +2273,7 @@ const StudentManagement = () => {
                 <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-3 h-3" />
                 <Input
                   id="search"
-                  placeholder="جستجو بر اساس نام یا شماره..."
+                  placeholder="جستجو بر اساس نام، نام پدر یا نمبر اساس..."
                   value={filters.search}
                   onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
                   className="pl-8"

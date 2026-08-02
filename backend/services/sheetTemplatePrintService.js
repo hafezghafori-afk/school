@@ -542,10 +542,16 @@ function buildOfficialReportCss(layout = {}) {
         width: 82px;
         height: 82px;
         object-fit: contain;
+        object-position: center;
         justify-self: center;
         border: 1px solid #b8b8b8;
         padding: 4px;
         background: #fff;
+        transform-origin: center;
+      }
+      .official-report-logo.trim-wide-whitespace {
+        clip-path: inset(18% 27%);
+        transform: scale(1.58);
       }
       .official-report-logo--empty {
         display: grid;
@@ -668,8 +674,11 @@ function buildOfficialReportCss(layout = {}) {
 
 function buildOfficialLogoMarkup(src = '', label = 'لوگو', assetBaseUrl = '') {
   const assetSrc = toPrintableImageSrc(src, assetBaseUrl);
+  const trimWhitespaceClass = /iman[_\s-]*logo|(?:^|[/_-])school-logo(?:[/_.-]|$)/i.test(String(src || ''))
+    ? ' trim-wide-whitespace'
+    : '';
   return assetSrc
-    ? `<img class="official-report-logo" src="${escapeHtml(assetSrc)}" alt="${escapeHtml(label)}" />`
+    ? `<img class="official-report-logo${trimWhitespaceClass}" src="${escapeHtml(assetSrc)}" alt="${escapeHtml(label)}" />`
     : `<div class="official-report-logo official-report-logo--empty">${escapeHtml(label)}</div>`;
 }
 
@@ -900,6 +909,7 @@ function renderExamSheetPrintHtml({ report = {}, subtitle = '', metadata = [], s
       .official-report-logo-wrap {
         display: grid;
         place-items: center;
+        overflow: hidden;
       }
       .official-report-logo-wrap--right { grid-area: right; }
       .official-report-logo-wrap--left { grid-area: left; }

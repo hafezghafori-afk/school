@@ -4,6 +4,7 @@ import './StudentReport.css';
 import { API_BASE } from '../config/api';
 import useExpandableList from '../hooks/useExpandableList';
 import { formatFinanceCode } from '../utils/latinFinanceCode';
+import { getStudentAsasNumber, studentMatchesSearch } from '../utils/studentSearch';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -44,7 +45,8 @@ async function fetchJson(path, options = {}) {
 function buildStudentLabel(item = {}) {
   const classTitle = item.currentMembership?.schoolClass?.title || '';
   const yearTitle = item.currentMembership?.academicYear?.label || '';
-  return [item.fullName, classTitle, yearTitle].filter(Boolean).join(' - ');
+  const asasNumber = getStudentAsasNumber(item);
+  return [item.fullName, asasNumber ? `نمبر اساس: ${asasNumber}` : '', classTitle, yearTitle].filter(Boolean).join(' - ');
 }
 
 const ACTIVITY_PREVIEW_COUNT = 3;
@@ -73,18 +75,7 @@ export default function StudentReport() {
   });
 
   const filteredStudents = useMemo(() => {
-    const query = String(filterText || '').trim().toLowerCase();
-    if (!query) return students;
-    return students.filter((item) => {
-      const haystack = [
-        item.fullName,
-        item.email,
-        item.admissionNo,
-        item.currentMembership?.schoolClass?.title,
-        item.currentMembership?.academicYear?.label
-      ].filter(Boolean).join(' ').toLowerCase();
-      return haystack.includes(query);
-    });
+    return students.filter((item) => studentMatchesSearch(item, filterText));
   }, [filterText, students]);
 
   const selectedStudent = useMemo(() => (
@@ -325,7 +316,7 @@ export default function StudentReport() {
             <input
               value={filterText}
               onChange={(event) => setFilterText(event.target.value)}
-              placeholder="نام، ایمیل، کد شاگرد، صنف یا سال تعلیمی"
+              placeholder="نام، نام پدر، نمبر اساس، ایمیل، صنف یا سال تعلیمی"
             />
           </label>
           <label className="student-report-field student-report-select-field">

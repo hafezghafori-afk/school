@@ -1211,13 +1211,12 @@ export default function AdminUsers() {
           userId: String(item?.userId || ''),
           name: String(item?.fullName || '').trim(),
           email: String(item?.email || '').trim(),
-          meta: String(
-            item?.currentMembership?.schoolClass?.title
-            || item?.currentMembership?.academicYear?.label
-            || item?.currentMembership?.academicYear?.name
-            || item?.admissionNo
-            || ''
-          ).trim(),
+          admissionNo: String(item?.admissionNo || '').trim(),
+          meta: [
+            item?.currentMembership?.schoolClass?.title,
+            item?.currentMembership?.academicYear?.label || item?.currentMembership?.academicYear?.name,
+            item?.admissionNo ? `نمبر اساس: ${item.admissionNo}` : ''
+          ].filter(Boolean).join(' | '),
           grade: String(
             item?.currentMembership?.schoolClass?.title
             || item?.currentMembership?.academicYear?.label
@@ -2277,7 +2276,7 @@ export default function AdminUsers() {
                     <input
                       id="guardian-link-student-query"
                       type="text"
-                      placeholder="نام، ایمیل یا صنف شاگرد را بنویسید"
+                      placeholder="نام، ایمیل، صنف یا نمبر اساس شاگرد را بنویسید"
                       value={guardianLinkForm.studentQuery}
                       onChange={(e) => setGuardianLinkForm((prev) => ({
                         ...prev,

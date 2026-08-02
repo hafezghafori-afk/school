@@ -4,6 +4,7 @@ import './AdminContent.css';
 
 import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
+import { studentMatchesSearch } from '../utils/studentSearch';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -75,12 +76,9 @@ export default function AdminEnrollments() {
   }, [status, query]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
     return items.filter(item => {
       if (status !== 'all' && item.status !== status) return false;
-      if (!q) return true;
-      const blob = `${item.studentName || ''} ${item.email || ''} ${item.phone || ''} ${item.grade || ''}`.toLowerCase();
-      return blob.includes(q);
+      return studentMatchesSearch(item, query);
     });
   }, [items, status, query]);
 
@@ -273,7 +271,7 @@ export default function AdminEnrollments() {
       <div className="admin-content-filters">
         <input
           type="text"
-          placeholder="جستجو..."
+          placeholder="جستجو با نام، نام پدر یا نمبر اساس شاگرد..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />

@@ -4,6 +4,7 @@ import './GradeManager.css';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
+import { studentMatchesSearch } from '../utils/studentSearch';
 
 const COMPONENT_FIELDS = [
   { key: 'writtenScore', maxKey: 'writtenMax', label: 'تحریری' },
@@ -284,6 +285,7 @@ export default function GradeManager() {
   const [submittedCount, setSubmittedCount] = useState(0);
   const [sheet, setSheet] = useState(null);
   const [rows, setRows] = useState([]);
+  const [studentSearch, setStudentSearch] = useState('');
   const [dirtyIds, setDirtyIds] = useState({});
   const [message, setMessage] = useState('');
   const [messageTone, setMessageTone] = useState('muted');
@@ -301,6 +303,10 @@ export default function GradeManager() {
   const selectedSession = useMemo(
     () => sessions.find((item) => String(item.id) === String(selectedSessionId)) || null,
     [sessions, selectedSessionId]
+  );
+  const filteredRows = useMemo(
+    () => rows.filter((row) => studentMatchesSearch(row, studentSearch)),
+    [rows, studentSearch]
   );
   const displayedSessions = useMemo(() => (
     sessionStatusFilter === 'submitted'
@@ -1292,6 +1298,14 @@ export default function GradeManager() {
                     </p>
                   </div>
                   <div className="grade-sheet-toolbar">
+                    <input
+                      className="grade-student-search"
+                      type="search"
+                      value={studentSearch}
+                      onChange={(event) => setStudentSearch(event.target.value)}
+                      placeholder="نام، نام پدر یا نمبر اساس شاگرد"
+                      aria-label="جستجوی شاگرد در شقه"
+                    />
                     {!isInstructor && (
                       <div className="grade-queue-stepper" aria-label="مرور شقه‌ها">
                         <button type="button" className="secondary" onClick={() => handleStepSession(-1)} disabled={selectedSessionIndex <= 0 || loadingSheet}>قبلی</button>
@@ -1423,12 +1437,12 @@ export default function GradeManager() {
                         </tr>
                       </thead>
                       <tbody>
-                        {!rows.length && (
+                        {!filteredRows.length && (
                           <tr>
                             <td colSpan={activeComponentFields.length + 7}>هنوز شاگردی برای این شقه موجود نیست.</td>
                           </tr>
                         )}
-                        {rows.map((row) => {
+                        {filteredRows.map((row) => {
                           const total = computeRowTotal(row, activeComponentFields);
                           const totalInWords = row.markStatus === 'recorded' ? numberToFaWords(total) : '';
                           const systemManaged = rowHasSystemStatus(row);
