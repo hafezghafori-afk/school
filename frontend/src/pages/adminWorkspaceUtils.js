@@ -1,5 +1,6 @@
 import { API_BASE } from '../config/api';
 import { formatAfghanDateTime } from '../utils/afghanDate';
+import { localizeSystemMessage } from '../utils/systemMessage';
 
 export const DEFAULT_SCHOOL_ID = 'default-school-id';
 export const LEGACY_SINGLE_SCHOOL_ID = '000000000000000000000001';
@@ -151,7 +152,7 @@ export function repairDisplayText(value) {
 
 function extractErrorMessage(response, data) {
   const code = data?.message || '';
-  return repairDisplayText(ERROR_MESSAGE_MAP[code] || code || `Request failed (${response.status})`);
+  return localizeSystemMessage(repairDisplayText(ERROR_MESSAGE_MAP[code] || code || `Request failed (${response.status})`));
 }
 
 export async function fetchJson(path, options = {}) {
@@ -314,5 +315,5 @@ export function normalizeOptions(items = [], labelKeys = []) {
 }
 
 export function errorMessage(error, fallback = 'عملیات ناموفق بود.') {
-  return repairDisplayText(error?.message || fallback);
+  return localizeSystemMessage(repairDisplayText(error?.message || fallback));
 }

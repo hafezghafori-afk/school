@@ -247,15 +247,15 @@ function resolveActiveFinanceSchoolId(req = {}) {
 function requireActiveFinanceSchoolId(req = {}) {
   const schoolId = resolveActiveFinanceSchoolId(req);
   if (!schoolId) {
-    throw createActionError(400, 'An active school is required for this finance review');
+    throw createActionError(400, 'برای بررسی امور مالی، انتخاب مکتب فعال الزامی است.');
   }
   return schoolId;
 }
 
-function assertDocumentInActiveSchool(document = null, activeSchoolId = '', label = 'Finance document') {
+function assertDocumentInActiveSchool(document = null, activeSchoolId = '', label = 'سند مالی') {
   const documentSchoolId = normalizeReferenceId(document?.schoolId);
   if (!document || !activeSchoolId || !documentSchoolId || documentSchoolId !== activeSchoolId) {
-    throw createActionError(404, `${label} was not found in the active school`);
+    throw createActionError(404, `${label} در مکتب فعال پیدا نشد.`);
   }
   return document;
 }
@@ -276,7 +276,7 @@ function isSameStudentFinanceIdentity(payment = {}, order = {}) {
 
 async function assertCanonicalPaymentReviewScope({ req, payment = null } = {}) {
   const activeSchoolId = requireActiveFinanceSchoolId(req);
-  assertDocumentInActiveSchool(payment, activeSchoolId, 'Canonical fee payment');
+  assertDocumentInActiveSchool(payment, activeSchoolId, 'پرداخت فیس');
 
   const allocations = normalizeFeePaymentAllocations(payment);
   const orderIds = Array.from(new Set(
@@ -286,12 +286,12 @@ async function assertCanonicalPaymentReviewScope({ req, payment = null } = {}) {
     ? await FeeOrder.find({ _id: { $in: orderIds } })
     : [];
   if (orders.length !== orderIds.length) {
-    throw createActionError(404, 'One or more allocated fee orders were not found');
+    throw createActionError(404, 'یک یا چند بل تخصیص‌یافته پیدا نشد.');
   }
   for (const order of orders) {
-    assertDocumentInActiveSchool(order, activeSchoolId, 'Allocated fee order');
+    assertDocumentInActiveSchool(order, activeSchoolId, 'بل تخصیص‌یافته');
     if (!isSameStudentFinanceIdentity(payment, order)) {
-      throw createActionError(400, 'Allocated fee order does not belong to the same student');
+      throw createActionError(400, 'بل تخصیص‌یافته مربوط به همین شاگرد نیست.');
     }
   }
 
@@ -299,12 +299,12 @@ async function assertCanonicalPaymentReviewScope({ req, payment = null } = {}) {
   let sourceBill = null;
   if (payment?.sourceReceiptId) {
     sourceReceipt = await FinanceReceipt.findById(payment.sourceReceiptId);
-    assertDocumentInActiveSchool(sourceReceipt, activeSchoolId, 'Linked finance receipt');
+    assertDocumentInActiveSchool(sourceReceipt, activeSchoolId, 'رسید مالی مرتبط');
     sourceBill = await FinanceBill.findById(sourceReceipt.bill);
-    assertDocumentInActiveSchool(sourceBill, activeSchoolId, 'Linked finance bill');
+    assertDocumentInActiveSchool(sourceBill, activeSchoolId, 'بل مالی مرتبط');
     if (!isSameStudentFinanceIdentity(payment, sourceReceipt)
       || !isSameStudentFinanceIdentity(payment, sourceBill)) {
-      throw createActionError(400, 'Linked receipt or bill does not belong to the same student');
+      throw createActionError(400, 'رسید یا بل مرتبط مربوط به همین شاگرد نیست.');
     }
   }
 
@@ -313,11 +313,11 @@ async function assertCanonicalPaymentReviewScope({ req, payment = null } = {}) {
 
 async function assertReceiptReviewScope({ req, receipt = null } = {}) {
   const activeSchoolId = requireActiveFinanceSchoolId(req);
-  assertDocumentInActiveSchool(receipt, activeSchoolId, 'Finance receipt');
+  assertDocumentInActiveSchool(receipt, activeSchoolId, 'رسید مالی');
   const bill = await FinanceBill.findById(receipt.bill);
-  assertDocumentInActiveSchool(bill, activeSchoolId, 'Linked finance bill');
+  assertDocumentInActiveSchool(bill, activeSchoolId, 'بل مالی مرتبط');
   if (!isSameStudentFinanceIdentity(receipt, bill)) {
-    throw createActionError(400, 'Linked bill does not belong to the same student as the receipt');
+    throw createActionError(400, 'بل مرتبط مربوط به شاگرد همین رسید نیست.');
   }
   return { activeSchoolId, bill };
 }
@@ -443,6 +443,13 @@ function getRequiredLevelForStage(stage = '') {
   if (normalized === RECEIPT_STAGES.financeLead) return 'finance_lead';
   if (normalized === RECEIPT_STAGES.generalPresident) return 'general_president';
   return 'finance_manager';
+}
+
+function getFinanceReviewLevelLabel(level = '') {
+  const normalized = normalizeAdminLevel(level || '');
+  if (normalized === 'general_president') return 'ریاست عمومی';
+  if (normalized === 'finance_lead') return 'آمریت مالی';
+  return 'مدیر مالی';
 }
 
 function canReviewReceiptStage(adminLevel = '', stage = '') {
@@ -579,7 +586,7 @@ async function addBillAdjustmentAction({ req, billId = '', body = {} } = {}) {
 
 async function addFeeOrderAdjustmentAction({ req, feeOrderId = '', body = {} } = {}) {
   const item = await FeeOrder.findById(feeOrderId);
-  if (!item) throw createActionError(404, 'Canonical fee order was not found');
+  if (!item) throw createActionError(404, 'بل مالی پیدا نشد.');
 
   if (item.sourceBillId) {
     const result = await addBillAdjustmentAction({ req, billId: item.sourceBillId, body });
@@ -591,9 +598,9 @@ async function addFeeOrderAdjustmentAction({ req, feeOrderId = '', body = {} } =
     };
   }
 
-  if (item.status === 'void') throw createActionError(400, 'Void fee order cannot be adjusted');
+  if (item.status === 'void') throw createActionError(400, 'بل باطل‌شده قابل تعدیل نیست.');
   if (await isMonthClosed(item.issuedAt, item)) {
-    throw createActionError(400, 'Financial month is closed and canonical fee order adjustments are blocked');
+    throw createActionError(400, 'ماه مالی بسته شده است و تعدیل بل مجاز نیست.');
   }
 
   const type = ['discount', 'waiver', 'penalty', 'manual'].includes(body?.type) ? body.type : 'discount';
@@ -606,7 +613,7 @@ async function addFeeOrderAdjustmentAction({ req, feeOrderId = '', body = {} } =
     throw createActionError(400, 'تخفیف عادی فقط روی فیس/شهریه قابل اعمال است و این بل ردیف فیس ندارد.');
   }
   const effectiveAmount = type === 'discount' ? Math.min(amount, tuitionGross) : amount;
-  if (!amount) throw createActionError(400, 'Adjustment amount is required');
+  if (!amount) throw createActionError(400, 'مبلغ تعدیل الزامی است.');
 
   item.adjustments = Array.isArray(item.adjustments) ? item.adjustments : [];
   item.adjustments.push({
@@ -645,7 +652,7 @@ async function addFeeOrderAdjustmentAction({ req, feeOrderId = '', body = {} } =
     meta: { type, scope, amount: effectiveAmount }
   });
 
-  return { item, message: 'Canonical fee order adjustment saved' };
+  return { item, message: 'تعدیل بل مالی ثبت شد.' };
 }
 
 async function setBillInstallmentsAction({ req, billId = '', body = {} } = {}) {
@@ -713,7 +720,7 @@ async function setBillInstallmentsAction({ req, billId = '', body = {} } = {}) {
 
 async function setFeeOrderInstallmentsAction({ req, feeOrderId = '', body = {} } = {}) {
   const item = await FeeOrder.findById(feeOrderId);
-  if (!item) throw createActionError(404, 'Canonical fee order was not found');
+  if (!item) throw createActionError(404, 'بل مالی پیدا نشد.');
 
   if (item.sourceBillId) {
     const result = await setBillInstallmentsAction({ req, billId: item.sourceBillId, body });
@@ -725,9 +732,9 @@ async function setFeeOrderInstallmentsAction({ req, feeOrderId = '', body = {} }
     };
   }
 
-  if (item.status === 'void') throw createActionError(400, 'Void fee order cannot be installmentized');
+  if (item.status === 'void') throw createActionError(400, 'بل باطل‌شده قابل قسط‌بندی نیست.');
   if (await isMonthClosed(item.issuedAt, item)) {
-    throw createActionError(400, 'Financial month is closed and canonical installments are blocked');
+    throw createActionError(400, 'ماه مالی بسته شده است و قسط‌بندی مجاز نیست.');
   }
 
   let installments = [];
@@ -746,7 +753,7 @@ async function setFeeOrderInstallmentsAction({ req, feeOrderId = '', body = {} }
     const startDate = parseDateSafe(body?.startDate, item.dueDate);
     const stepDays = Math.max(1, Number(body?.stepDays) || 30);
     if (!count || !startDate) {
-      throw createActionError(400, 'Installment configuration is invalid');
+      throw createActionError(400, 'تنظیمات قسط‌بندی معتبر نیست.');
     }
     const perInstallment = Math.round((item.amountDue / count) * 100) / 100;
     let remain = item.amountDue;
@@ -764,7 +771,7 @@ async function setFeeOrderInstallmentsAction({ req, feeOrderId = '', body = {} }
   }
 
   if (!installments.length) {
-    throw createActionError(400, 'At least one valid installment is required');
+    throw createActionError(400, 'حداقل یک قسط معتبر الزامی است.');
   }
 
   item.installments = installments;
@@ -780,7 +787,7 @@ async function setFeeOrderInstallmentsAction({ req, feeOrderId = '', body = {} }
     meta: { count: installments.length }
   });
 
-  return { item, message: 'Canonical fee order installments saved' };
+  return { item, message: 'قسط‌بندی بل مالی ثبت شد.' };
 }
 
 async function voidBillAction({ req, billId = '', body = {} } = {}) {
@@ -857,14 +864,14 @@ async function voidBillAction({ req, billId = '', body = {} } = {}) {
 async function voidFeeOrderAction({ req, feeOrderId = '', body = {} } = {}) {
   const actorLevel = await resolveAdminActorLevel(req.user.id);
   if (!['finance_lead', 'general_president'].includes(actorLevel)) {
-    throw createActionError(403, 'Only finance leadership can void canonical fee orders');
+    throw createActionError(403, 'باطل‌سازی بل فقط برای آمریت مالی یا ریاست عمومی مجاز است.');
   }
 
   const item = await FeeOrder.findById(feeOrderId);
   if (item && isVoidedFinanceDocument(item) && !item.sourceBillId) {
-    return { item, alreadyVoided: true, message: 'This fee order was already voided.' };
+    return { item, alreadyVoided: true, message: 'این بل قبلاً باطل شده است.' };
   }
-  if (!item) throw createActionError(404, 'Canonical fee order was not found');
+  if (!item) throw createActionError(404, 'بل مالی پیدا نشد.');
 
   if (Number(item.amountPaid || 0) > 0 || await hasApprovedPaymentForFeeOrder(item._id)) {
     throw createActionError(409, 'این تعهد دارای پرداخت تأییدشده است؛ ابطال مستقیم مجاز نیست و باید سند برگشت/اصلاح پرداخت ثبت شود.');
@@ -881,10 +888,10 @@ async function voidFeeOrderAction({ req, feeOrderId = '', body = {} } = {}) {
   }
 
   if (await isMonthClosed(item.issuedAt, item)) {
-    throw createActionError(400, 'Financial month is closed and canonical fee order void is blocked');
+    throw createActionError(400, 'ماه مالی بسته شده است و باطل‌سازی بل مجاز نیست.');
   }
   const reason = String(body?.reason || '').trim();
-  if (!reason) throw createActionError(400, 'Void reason is required');
+  if (!reason) throw createActionError(400, 'برای باطل‌سازی بل، نوشتن دلیل الزامی است.');
 
   const originalIssuanceKey = releaseIssuanceKeyForVoid(item);
   item.status = 'void';
@@ -897,7 +904,7 @@ async function voidFeeOrderAction({ req, feeOrderId = '', body = {} } = {}) {
     if (!isFinanceVersionConflict(error)) throw error;
     const refreshed = await FeeOrder.findById(feeOrderId);
     if (!isVoidedFinanceDocument(refreshed)) throw error;
-    return { item: refreshed, alreadyVoided: true, message: 'This fee order was already voided.' };
+    return { item: refreshed, alreadyVoided: true, message: 'این بل قبلاً باطل شده است.' };
   }
   await logActivity({
     req,
@@ -916,12 +923,12 @@ async function voidFeeOrderAction({ req, feeOrderId = '', body = {} } = {}) {
     req,
     studentId: item.student,
     studentCoreId: item.studentId,
-    title: 'Fee order voided',
-    message: `Your fee order ${item.orderNumber} was voided. Reason: ${reason}`,
-    emailSubject: 'Fee order voided'
+    title: 'بل مالی باطل شد',
+    message: `بل شماره ${formatFinanceCode(item.orderNumber || '')} باطل شد. دلیل: ${reason}`,
+    emailSubject: 'باطل‌شدن بل مالی'
   });
 
-  return { item, message: 'Canonical fee order voided successfully' };
+  return { item, message: 'بل مالی با موفقیت باطل شد.' };
 }
 
 async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
@@ -932,22 +939,22 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
     User.findById(req.user.id).select('name role orgRole adminLevel')
   ]);
 
-  if (!receipt) throw createActionError(404, 'Receipt not found');
+  if (!receipt) throw createActionError(404, 'رسید پیدا نشد.');
   const receiptScope = await assertReceiptReviewScope({ req, receipt });
   if (!actor || actor.role !== 'admin') {
-    throw createActionError(403, 'Only admins can review receipts');
+    throw createActionError(403, 'فقط مدیران اجازه بررسی رسیدها را دارند.');
   }
   if (receipt.status !== 'pending') {
-    throw createActionError(400, 'This receipt has already been reviewed');
+    throw createActionError(400, 'این رسید قبلاً بررسی شده است.');
   }
 
   const actorLevel = resolveAdminOrgRole(actor);
   const currentStage = normalizeReceiptStage(receipt.approvalStage || '');
   if (!canReviewReceiptStage(actorLevel, currentStage)) {
-    throw createActionError(403, `Receipt is waiting for ${getRequiredLevelForStage(currentStage)} review`);
+    throw createActionError(403, `این رسید در انتظار بررسی ${getFinanceReviewLevelLabel(getRequiredLevelForStage(currentStage))} است.`);
   }
   if (FINANCE_FOUR_EYES_ENABLED && actorAlreadyReviewed(receipt.approvalTrail, req.user.id)) {
-    throw createActionError(400, 'Four-eyes policy is active: the same admin cannot approve the same receipt in multiple stages.');
+    throw createActionError(400, 'اصل تأیید دوگانه فعال است؛ یک مدیر نمی‌تواند همین رسید را در چند مرحله تأیید کند.');
   }
 
   const reviewNote = String(body?.note || '').trim();
@@ -969,7 +976,7 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
 
   const nextStage = getNextReceiptStage(actorLevel, currentStage);
   if (!nextStage) {
-    throw createActionError(400, 'No next approval stage is defined for this level');
+    throw createActionError(400, 'مرحله بعدی تأیید برای این سطح تعریف نشده است.');
   }
 
   if (nextStage !== RECEIPT_STAGES.completed) {
@@ -982,8 +989,8 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
     await notifyAdmins({
       req,
       admins: nextAdmins,
-      title: 'Receipt moved to next review stage',
-      message: `Receipt for "${receipt.student?.name || 'Student'}" moved to the next stage.`,
+      title: 'رسید به مرحله بعدی بررسی فرستاده شد',
+      message: `رسید ${receipt.student?.name || 'شاگرد'} برای بررسی ${getFinanceReviewLevelLabel(nextLevel)} فرستاده شد.`,
       type: 'finance'
     });
 
@@ -1007,7 +1014,7 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
   }
 
   if (await isMonthClosed(receipt.paidAt || new Date(), receipt)) {
-    throw createActionError(400, 'Financial month is closed; final approval is blocked');
+    throw createActionError(400, 'ماه مالی بسته شده است و تأیید نهایی مجاز نیست.');
   }
 
   const bill = receiptScope.bill;
@@ -1017,10 +1024,10 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
     dateValue: receipt.paidAt || bill.issuedAt || new Date()
   });
   if (bill.status === 'void') {
-    throw createActionError(400, 'Bill is void; receipt cannot be approved');
+    throw createActionError(400, 'بل باطل است و رسید آن قابل تأیید نیست.');
   }
   if (await isMonthClosed(bill.issuedAt, bill)) {
-    throw createActionError(400, 'Bill month is closed; changes are blocked');
+    throw createActionError(400, 'ماه مربوط به بل بسته شده است و تغییر مجاز نیست.');
   }
 
   const approvalAmount = roundMoney(receipt.amount);
@@ -1085,9 +1092,9 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
     req,
     studentId: bill.student,
     studentCoreId: bill.studentId,
-    title: 'Payment receipt approved',
-    message: `Your receipt for bill ${bill.billNumber} was approved.`,
-    emailSubject: 'Payment receipt approved'
+    title: 'رسید پرداخت تأیید شد',
+    message: `رسید پرداخت بل شماره ${formatFinanceCode(bill.billNumber || '')} تأیید شد.`,
+    emailSubject: 'تأیید رسید پرداخت'
   });
 
   await logActivity({
@@ -1099,7 +1106,7 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
   });
 
   return {
-    message: 'Receipt fully approved',
+    message: 'رسید پرداخت به‌صورت نهایی تأیید شد.',
     billStatus: bill.status,
     nextStage: RECEIPT_STAGES.completed
   };
@@ -1107,13 +1114,13 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
 
 async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {}) {
   const payment = await FeePayment.findById(feePaymentId);
-  if (!payment) throw createActionError(404, 'Canonical fee payment was not found');
+  if (!payment) throw createActionError(404, 'پرداخت فیس پیدا نشد.');
   const reviewScope = await assertCanonicalPaymentReviewScope({ req, payment });
 
   if (payment.sourceReceiptId) {
     const result = await approveReceiptAction({ req, receiptId: payment.sourceReceiptId, body });
     const refreshed = await FeePayment.findById(feePaymentId);
-    assertDocumentInActiveSchool(refreshed, reviewScope.activeSchoolId, 'Canonical fee payment');
+    assertDocumentInActiveSchool(refreshed, reviewScope.activeSchoolId, 'پرداخت فیس');
     if (refreshed?.status === 'approved') {
       await syncApprovedFeePaymentToTreasury(refreshed);
     }
@@ -1126,19 +1133,19 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
 
   const actor = await User.findById(req.user.id).select('name role orgRole adminLevel');
   if (!actor || actor.role !== 'admin') {
-    throw createActionError(403, 'Only admins can review canonical fee payments');
+    throw createActionError(403, 'فقط مدیران اجازه بررسی پرداخت‌های فیس را دارند.');
   }
   if (payment.status !== 'pending') {
-    throw createActionError(400, 'This canonical fee payment has already been reviewed');
+    throw createActionError(400, 'این پرداخت فیس قبلاً بررسی شده است.');
   }
 
   const actorLevel = resolveAdminOrgRole(actor);
   const currentStage = normalizeReceiptStage(payment.approvalStage || '');
   if (!canReviewReceiptStage(actorLevel, currentStage)) {
-    throw createActionError(403, `Canonical fee payment is waiting for ${getRequiredLevelForStage(currentStage)} review`);
+    throw createActionError(403, `این پرداخت در انتظار بررسی ${getFinanceReviewLevelLabel(getRequiredLevelForStage(currentStage))} است.`);
   }
   if (FINANCE_FOUR_EYES_ENABLED && actorAlreadyReviewed(payment.approvalTrail, req.user.id)) {
-    throw createActionError(400, 'Four-eyes policy is active: the same admin cannot approve the same payment in multiple stages.');
+    throw createActionError(400, 'اصل تأیید دوگانه فعال است؛ یک مدیر نمی‌تواند همین پرداخت را در چند مرحله تأیید کند.');
   }
 
   const reviewNote = String(body?.note || '').trim();
@@ -1159,7 +1166,7 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
 
   const nextStage = getNextReceiptStage(actorLevel, currentStage);
   if (!nextStage) {
-    throw createActionError(400, 'No next approval stage is defined for this payment');
+    throw createActionError(400, 'مرحله بعدی تأیید برای این پرداخت تعریف نشده است.');
   }
 
   if (nextStage !== RECEIPT_STAGES.completed) {
@@ -1171,8 +1178,8 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
     await notifyAdmins({
       req,
       admins: nextAdmins,
-      title: 'Canonical payment moved to next review stage',
-      message: `Payment ${payment.paymentNumber} moved to the next stage.`,
+      title: 'پرداخت به مرحله بعدی بررسی فرستاده شد',
+      message: `پرداخت شماره ${formatFinanceCode(payment.paymentNumber || '')} برای بررسی ${getFinanceReviewLevelLabel(nextLevel)} فرستاده شد.`,
       type: 'finance'
     });
 
@@ -1198,13 +1205,13 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
     dateValue: payment.paidAt || new Date()
   });
   if (await isMonthClosed(payment.paidAt || new Date(), payment)) {
-    throw createActionError(400, 'Financial month is closed; final approval is blocked');
+    throw createActionError(400, 'ماه مالی بسته شده است و تأیید نهایی مجاز نیست.');
   }
 
   const approvalAmount = roundMoney(payment.amount);
   const allocations = reviewScope.allocations;
   if (!allocations.length) {
-    throw createActionError(400, 'No fee order allocations were found for this payment');
+    throw createActionError(400, 'هیچ بل تخصیص‌یافته‌ای برای این پرداخت پیدا نشد.');
   }
 
   const orders = reviewScope.orders;
@@ -1221,17 +1228,17 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
   const updatedOrders = [];
   for (const allocation of allocations) {
     const order = orderMap.get(String(allocation.feeOrderId || ''));
-    if (!order) throw createActionError(404, 'Allocated fee order was not found');
+    if (!order) throw createActionError(404, 'بل تخصیص‌یافته پیدا نشد.');
     const paymentSchoolId = normalizeReferenceId(payment.schoolId);
     const orderSchoolId = normalizeReferenceId(order.schoolId);
     if (!paymentSchoolId || !orderSchoolId || paymentSchoolId !== orderSchoolId) {
-      throw createActionError(400, 'Allocated fee order does not belong to the active school');
+      throw createActionError(400, 'بل تخصیص‌یافته مربوط به مکتب فعال نیست.');
     }
     if (!isSameStudentFinanceIdentity(payment, order)) {
-      throw createActionError(400, 'Allocated fee order does not belong to the same student');
+      throw createActionError(400, 'بل تخصیص‌یافته مربوط به همین شاگرد نیست.');
     }
     if (order.status === 'void') {
-      throw createActionError(400, 'Fee order is void; payment cannot be approved');
+      throw createActionError(400, 'بل باطل است و پرداخت آن قابل تأیید نیست.');
     }
     // Rebuild line balances from the obligation and approved paid amount before
     // validating this allocation; stored line/status snapshots may be stale.
@@ -1246,10 +1253,10 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
     }
     const remainingBeforeApproval = getFinanceFeeScopeBalanceAmount(order, allocation.feeType);
     if (remainingBeforeApproval <= 0) {
-      throw createActionError(400, 'One of the allocated fee orders is already settled');
+      throw createActionError(400, 'یکی از بل‌های تخصیص‌یافته قبلاً به‌طور کامل پرداخت شده است.');
     }
     if (allocation.amount > remainingBeforeApproval) {
-      throw createActionError(400, `Payment allocation exceeds remaining balance. Remaining: ${remainingBeforeApproval}`);
+      throw createActionError(400, `مبلغ تخصیص از باقی‌مانده بل بیشتر است. باقی‌مانده فعلی: ${remainingBeforeApproval}`);
     }
   }
 
@@ -1313,9 +1320,9 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
     req,
     studentId: payment.student,
     studentCoreId: payment.studentId,
-    title: 'Canonical payment approved',
-    message: `Your payment ${payment.paymentNumber} was approved.`,
-    emailSubject: 'Canonical payment approved'
+    title: 'پرداخت فیس تأیید شد',
+    message: `پرداخت شماره ${formatFinanceCode(payment.paymentNumber || '')} تأیید شد.`,
+    emailSubject: 'تأیید پرداخت فیس'
   }));
 
   await logActivity({
@@ -1335,7 +1342,7 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
     item: payment,
     feeOrder: updatedOrders[0] || null,
     feeOrders: updatedOrders,
-    message: 'Canonical fee payment fully approved',
+    message: 'پرداخت فیس به‌صورت نهایی تأیید شد.',
     billStatus: updatedOrders[0]?.status || 'approved',
     nextStage: RECEIPT_STAGES.completed
   };
@@ -1347,25 +1354,25 @@ async function rejectReceiptAction({ req, receiptId = '', body = {} } = {}) {
     User.findById(req.user.id).select('name role orgRole adminLevel')
   ]);
 
-  if (!receipt) throw createActionError(404, 'Receipt not found');
+  if (!receipt) throw createActionError(404, 'رسید پیدا نشد.');
   await assertReceiptReviewScope({ req, receipt });
   if (!actor || actor.role !== 'admin') {
-    throw createActionError(403, 'Only admins can reject receipts');
+    throw createActionError(403, 'فقط مدیران اجازه رد رسیدها را دارند.');
   }
   if (receipt.status !== 'pending') {
-    throw createActionError(400, 'This receipt has already been reviewed');
+    throw createActionError(400, 'این رسید قبلاً بررسی شده است.');
   }
 
   const actorLevel = resolveAdminOrgRole(actor);
   const currentStage = normalizeReceiptStage(receipt.approvalStage || '');
   if (!canReviewReceiptStage(actorLevel, currentStage)) {
-    throw createActionError(403, `Receipt is waiting for ${getRequiredLevelForStage(currentStage)} review`);
+    throw createActionError(403, `این رسید در انتظار بررسی ${getFinanceReviewLevelLabel(getRequiredLevelForStage(currentStage))} است.`);
   }
   if (FINANCE_FOUR_EYES_ENABLED && actorAlreadyReviewed(receipt.approvalTrail, req.user.id)) {
-    throw createActionError(400, 'Four-eyes policy is active: the same admin cannot re-review the same receipt in later stages.');
+    throw createActionError(400, 'اصل تأیید دوگانه فعال است؛ یک مدیر نمی‌تواند همین رسید را در مرحله بعد دوباره بررسی کند.');
   }
 
-  const reason = String(body?.reason || '').trim() || 'Rejected by finance management';
+  const reason = String(body?.reason || '').trim() || 'ردشده توسط مدیریت مالی';
   const now = new Date();
 
   receipt.status = 'rejected';
@@ -1390,9 +1397,9 @@ async function rejectReceiptAction({ req, receiptId = '', body = {} } = {}) {
     req,
     studentId: receipt.student,
     studentCoreId: receipt.studentId,
-    title: 'Payment receipt rejected',
-    message: `Your receipt was rejected. Reason: ${reason}`,
-    emailSubject: 'Payment receipt rejected'
+    title: 'رسید پرداخت رد شد',
+    message: `رسید پرداخت رد شد. دلیل: ${reason}`,
+    emailSubject: 'رد رسید پرداخت'
   });
 
   await logActivity({
@@ -1404,20 +1411,20 @@ async function rejectReceiptAction({ req, receiptId = '', body = {} } = {}) {
   });
 
   return {
-    message: 'Receipt rejected',
+    message: 'رسید پرداخت رد شد.',
     nextStage: RECEIPT_STAGES.rejected
   };
 }
 
 async function rejectFeePaymentAction({ req, feePaymentId = '', body = {} } = {}) {
   const payment = await FeePayment.findById(feePaymentId);
-  if (!payment) throw createActionError(404, 'Canonical fee payment was not found');
+  if (!payment) throw createActionError(404, 'پرداخت فیس پیدا نشد.');
   const reviewScope = await assertCanonicalPaymentReviewScope({ req, payment });
 
   if (payment.sourceReceiptId) {
     const result = await rejectReceiptAction({ req, receiptId: payment.sourceReceiptId, body });
     const refreshed = await FeePayment.findById(feePaymentId);
-    assertDocumentInActiveSchool(refreshed, reviewScope.activeSchoolId, 'Canonical fee payment');
+    assertDocumentInActiveSchool(refreshed, reviewScope.activeSchoolId, 'پرداخت فیس');
     return {
       ...result,
       item: refreshed || payment,
@@ -1427,22 +1434,22 @@ async function rejectFeePaymentAction({ req, feePaymentId = '', body = {} } = {}
 
   const actor = await User.findById(req.user.id).select('name role orgRole adminLevel');
   if (!actor || actor.role !== 'admin') {
-    throw createActionError(403, 'Only admins can reject canonical fee payments');
+    throw createActionError(403, 'فقط مدیران اجازه رد پرداخت‌های فیس را دارند.');
   }
   if (payment.status !== 'pending') {
-    throw createActionError(400, 'This canonical fee payment has already been reviewed');
+    throw createActionError(400, 'این پرداخت فیس قبلاً بررسی شده است.');
   }
 
   const actorLevel = resolveAdminOrgRole(actor);
   const currentStage = normalizeReceiptStage(payment.approvalStage || '');
   if (!canReviewReceiptStage(actorLevel, currentStage)) {
-    throw createActionError(403, `Canonical fee payment is waiting for ${getRequiredLevelForStage(currentStage)} review`);
+    throw createActionError(403, `این پرداخت در انتظار بررسی ${getFinanceReviewLevelLabel(getRequiredLevelForStage(currentStage))} است.`);
   }
   if (FINANCE_FOUR_EYES_ENABLED && actorAlreadyReviewed(payment.approvalTrail, req.user.id)) {
-    throw createActionError(400, 'Four-eyes policy is active: the same admin cannot re-review the same payment in later stages.');
+    throw createActionError(400, 'اصل تأیید دوگانه فعال است؛ یک مدیر نمی‌تواند همین پرداخت را در مرحله بعد دوباره بررسی کند.');
   }
 
-  const reason = String(body?.reason || '').trim() || 'Rejected by finance management';
+  const reason = String(body?.reason || '').trim() || 'ردشده توسط مدیریت مالی';
   const now = new Date();
   payment.status = 'rejected';
   payment.approvalStage = RECEIPT_STAGES.rejected;
@@ -1465,9 +1472,9 @@ async function rejectFeePaymentAction({ req, feePaymentId = '', body = {} } = {}
     req,
     studentId: payment.student,
     studentCoreId: payment.studentId,
-    title: 'Canonical payment rejected',
-    message: `Your payment ${payment.paymentNumber} was rejected. Reason: ${reason}`,
-    emailSubject: 'Canonical payment rejected'
+    title: 'پرداخت فیس رد شد',
+    message: `پرداخت شماره ${formatFinanceCode(payment.paymentNumber || '')} رد شد. دلیل: ${reason}`,
+    emailSubject: 'رد پرداخت فیس'
   });
 
   await logActivity({
@@ -1480,7 +1487,7 @@ async function rejectFeePaymentAction({ req, feePaymentId = '', body = {} } = {}
 
   return {
     item: payment,
-    message: 'Canonical fee payment rejected',
+    message: 'پرداخت فیس رد شد.',
     nextStage: RECEIPT_STAGES.rejected
   };
 }
@@ -1493,9 +1500,9 @@ async function updateReceiptFollowUpAction({ req, receiptId = '', body = {} } = 
     User.findById(req.user.id).select('role orgRole adminLevel')
   ]);
 
-  if (!receipt) throw createActionError(404, 'Receipt not found');
+  if (!receipt) throw createActionError(404, 'رسید پیدا نشد.');
   if (!actor || actor.role !== 'admin') {
-    throw createActionError(403, 'Only admins can update receipt follow-up');
+    throw createActionError(403, 'فقط مدیران اجازه به‌روزرسانی پیگیری رسید را دارند.');
   }
 
   const defaultLevel = getRequiredLevelForStage(receipt.approvalStage || '');
@@ -1527,8 +1534,8 @@ async function updateReceiptFollowUpAction({ req, receiptId = '', body = {} } = 
   await notifyAdmins({
     req,
     admins,
-    title: 'Finance receipt follow-up updated',
-    message: `Follow-up for ${receipt.student?.name || 'Student'} in ${receipt.course?.title || '---'} was assigned to ${assignedLevel}.`,
+    title: 'پیگیری رسید مالی به‌روزرسانی شد',
+    message: `پیگیری رسید ${receipt.student?.name || 'شاگرد'} در ${receipt.course?.title || 'صنف نامشخص'} به ${getFinanceReviewLevelLabel(assignedLevel)} سپرده شد.`,
     type: 'finance'
   });
 
@@ -1540,12 +1547,12 @@ async function updateReceiptFollowUpAction({ req, receiptId = '', body = {} } = 
     meta: { assignedLevel, status }
   });
 
-  return { followUp: receipt.followUp, message: 'Receipt follow-up updated' };
+  return { followUp: receipt.followUp, message: 'پیگیری رسید مالی به‌روزرسانی شد.' };
 }
 
 async function updateFeePaymentFollowUpAction({ req, feePaymentId = '', body = {} } = {}) {
   const payment = await FeePayment.findById(feePaymentId);
-  if (!payment) throw createActionError(404, 'Canonical fee payment was not found');
+  if (!payment) throw createActionError(404, 'پرداخت فیس پیدا نشد.');
 
   if (payment.sourceReceiptId) {
     const result = await updateReceiptFollowUpAction({ req, receiptId: payment.sourceReceiptId, body });
@@ -1559,7 +1566,7 @@ async function updateFeePaymentFollowUpAction({ req, feePaymentId = '', body = {
 
   const actor = await User.findById(req.user.id).select('role orgRole adminLevel');
   if (!actor || actor.role !== 'admin') {
-    throw createActionError(403, 'Only admins can update payment follow-up');
+    throw createActionError(403, 'فقط مدیران اجازه به‌روزرسانی پیگیری پرداخت را دارند.');
   }
 
   const defaultLevel = getRequiredLevelForStage(payment.approvalStage || '');
@@ -1590,8 +1597,8 @@ async function updateFeePaymentFollowUpAction({ req, feePaymentId = '', body = {
   await notifyAdmins({
     req,
     admins,
-    title: 'Canonical payment follow-up updated',
-    message: `Follow-up for payment ${payment.paymentNumber || 'payment'} was assigned to ${assignedLevel}.`,
+    title: 'پیگیری پرداخت فیس به‌روزرسانی شد',
+    message: `پیگیری پرداخت شماره ${formatFinanceCode(payment.paymentNumber || '')} به ${getFinanceReviewLevelLabel(assignedLevel)} سپرده شد.`,
     type: 'finance'
   });
 
@@ -1603,7 +1610,7 @@ async function updateFeePaymentFollowUpAction({ req, feePaymentId = '', body = {
     meta: { assignedLevel, status }
   });
 
-  return { followUp: payment.followUp, message: 'Canonical payment follow-up updated' };
+  return { followUp: payment.followUp, message: 'پیگیری پرداخت فیس به‌روزرسانی شد.' };
 }
 
 function wrapAction(action) {

@@ -90,6 +90,8 @@
     "results:official-policy:apply": "node ./scripts/migrateOfficialResultPolicy.js --apply",
     "student-lifecycle:migrate:dry": "node ./scripts/migrateStudentLifecycleArchitecture.js",
     "student-lifecycle:migrate:apply": "node ./scripts/migrateStudentLifecycleArchitecture.js --apply",
+    "student-reactivation:repair:dry": "node ./scripts/repairInvalidStudentReactivations.js",
+    "student-reactivation:repair:apply": "node ./scripts/repairInvalidStudentReactivations.js --apply",
     "backfill:phase5-result-table-reference": "node ./scripts/backfillPhase5ResultTableReference.js",
     "backfill:phase5-result-table-reference:dry": "node ./scripts/backfillPhase5ResultTableReference.js --dry-run",
     "check:result-table-routes": "node ./scripts/checkResultTableRoutes.js",

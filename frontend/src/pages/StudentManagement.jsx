@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -13,7 +14,6 @@ import {
   Plus, 
   Eye, 
   Edit, 
-  Trash2, 
   Download,
   RefreshCw,
   Calendar,
@@ -341,29 +341,6 @@ const resolveOptionId = (items = [], value = '', fields = []) => {
   return byText ? makeKey(byText._id || byText.id) : '';
 };
 
-const resolveShiftId = ({ student = {}, shifts = [], classes = [], classIdValue = '' } = {}) => {
-  const direct = makeKey(student.shiftId?._id || student.shiftIdValue || student.academicInfo?.shiftId || student.shiftId || '');
-  if (direct && shifts.some((item) => makeKey(item._id || item.id) === direct)) return direct;
-
-  const classItem = classes.find((item) => makeKey(item._id || item.id) === makeKey(classIdValue || student.classId?._id || student.classIdValue));
-  const classShiftId = makeKey(classItem?.shiftId);
-  if (classShiftId && shifts.some((item) => makeKey(item._id || item.id) === classShiftId)) return classShiftId;
-
-  const candidates = [
-    student.shiftId?.name,
-    student.shiftId?.title,
-    student.currentShift,
-    student.academicInfo?.currentShift,
-    classItem?.shift,
-    student.shiftName
-  ];
-  for (const candidate of candidates) {
-    const resolved = resolveOptionId(shifts, candidate, ['name', 'code', 'title', 'nameDari', 'namePashto']);
-    if (resolved) return resolved;
-  }
-  return direct;
-};
-
 const normalizeShiftCode = (value = '') => {
   const normalized = normalizeLookupText(value);
   if (!normalized) return '';
@@ -387,6 +364,15 @@ const studentKeys = (student = {}) => [
   student.studentIdentifier,
   student.nationalId
 ].map(makeKey).filter(Boolean);
+
+const studentWorkspaceRef = (student = {}) => makeKey(
+  student.studentCoreId
+  || student.linkedUserId
+  || student.userId
+  || student.profileId
+  || student._id
+  || student.id
+);
 
 const addSourceTag = (student, tag) => {
   if (!tag) return;
@@ -505,6 +491,42 @@ const mergeEducationEnrollments = (rows, enrollments = []) => {
   return rows;
 };
 
+const membershipStatusToStudentStatus = (value = '') => ({
+  approved: 'active',
+  active: 'active',
+  transferred_in: 'transferred_in',
+  pending: 'pending',
+  suspended: 'suspended',
+  transferred: 'transferred',
+  transferred_out: 'transferred_out',
+  dropped: 'dropped',
+  expelled: 'expelled',
+  graduated: 'graduated',
+  inactive: 'inactive',
+  rejected: 'rejected'
+}[String(value || '').trim().toLowerCase()] || '');
+
+const membershipDateValue = (item = {}) => new Date(
+  item.updatedAt || item.endedAt || item.leftAt || item.enrolledAt || item.joinedAt || item.createdAt || 0
+).getTime() || 0;
+
+const applyCanonicalEducationStatus = (rows = []) => rows.map((row) => {
+  const memberships = Array.isArray(row.educationEnrollments) ? row.educationEnrollments : [];
+  if (!memberships.length) return row;
+  const ordered = [...memberships].sort((left, right) => membershipDateValue(right) - membershipDateValue(left));
+  const current = ordered.find((item) => item?.isCurrent === true);
+  const authoritative = current || ordered[0] || null;
+  const educationStatus = membershipStatusToStudentStatus(authoritative?.status);
+  if (!educationStatus) return row;
+  return {
+    ...row,
+    status: educationStatus,
+    educationStatus,
+    hasCurrentEducationMembership: Boolean(current),
+    latestEducationMembership: authoritative
+  };
+});
+
 const applyFallback = (row, field, value) => {
   const nextValue = getText(value);
   if (!nextValue) return;
@@ -616,6 +638,7 @@ const updateStudentRowFromProfile = (rows, updatedProfile) => {
 };
 
 const StudentManagement = () => {
+  const navigate = useNavigate();
   const toast = useToast();
   const [students, setStudents] = useState([]);
   const [filteredStudents, setFilteredStudents] = useState([]);
@@ -703,10 +726,16 @@ const StudentManagement = () => {
 
   const cleanStatusOptions = [
     { value: 'active', label: 'فعال', color: 'student-status active' },
+    { value: 'transferred_in', label: 'تبدیلی آمده', color: 'student-status active' },
+    { value: 'pending', label: 'در انتظار', color: 'student-status pending' },
     { value: 'inactive', label: 'غیرفعال', color: 'student-status inactive' },
     { value: 'graduated', label: 'فارغ‌التحصیل', color: 'student-status graduated' },
-    { value: 'transferred', label: 'انتقال‌شده', color: 'student-status transferred' },
-    { value: 'suspended', label: 'معلق', color: 'student-status suspended' }
+    { value: 'transferred', label: 'تبدیلی داخلی', color: 'student-status transferred' },
+    { value: 'transferred_out', label: 'تبدیلی رفته', color: 'student-status transferred' },
+    { value: 'dropped', label: 'ترک تحصیل', color: 'student-status dropped' },
+    { value: 'expelled', label: 'منفک‌شده', color: 'student-status expelled' },
+    { value: 'suspended', label: 'محروم', color: 'student-status suspended' },
+    { value: 'rejected', label: 'ردشده', color: 'student-status inactive' }
   ];
 
   const statusOptions = [
@@ -759,7 +788,7 @@ const StudentManagement = () => {
         const withFinance = mergeFinancialMemberships(normalized, financeData.items || []);
         const withEducation = mergeEducationEnrollments(withFinance, educationData.items || []);
         const withOnlineEnrollments = mergeOnlineEnrollmentRecords(withEducation, onlineEnrollmentData.items || []);
-        setStudents(withOnlineEnrollments);
+        setStudents(applyCanonicalEducationStatus(withOnlineEnrollments));
       } else {
         // اگر API ناموفق بود، از داده‌های نمونه استفاده کن
         const mockData = [
@@ -956,108 +985,22 @@ const StudentManagement = () => {
     setFilteredStudents(filtered);
   };
 
-  const handleDelete = async (studentId) => {
-    if (!confirm('آیا از حذف این شاگرد مطمئن هستید؟')) return;
-
-    setActionLoading(studentId);
-    try {
-      const response = await fetch(`/api/afghan-students/${studentId}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders()
-      });
-
-      const data = await response.json();
-      
-      if (data.success) {
-        toast.success('شاگرد با موفقیت حذف شد.');
-        fetchStudents();
-      } else {
-        toast.error(data.message || 'حذف شاگرد ناموفق بود.');
-      }
-    } catch (error) {
-      console.error('Error deleting student:', error);
-      toast.error('حذف شاگرد ناموفق بود.');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   const handleViewDetails = (student) => {
-    setSelectedStudent(student);
-    setShowDetails(true);
+    const reference = studentWorkspaceRef(student);
+    if (!reference) {
+      toast.error('شناسهٔ پروندهٔ شاگرد پیدا نشد.');
+      return;
+    }
+    navigate(`/student-management/${reference}`);
   };
 
   const handleEdit = (student) => {
-    const profileId = makeKey(student?.profileId || (student?.sourceTags?.includes('profile') ? student?._id : ''));
-    const classIdValue = makeKey(student.classId?._id || student.classIdValue || '');
-    const selectedClass = classes.find((item) => makeKey(item._id || item.id) === classIdValue) || {};
-    const shiftIdValue = resolveShiftId({ student, shifts, classes, classIdValue });
-    const academicYearIdValue = makeKey(student.academicYearId?._id || student.academicYearIdValue || '');
-    const registrationType = student.enrollmentType === 'transfer' || student.previousSchool ? 'transfer' : 'new';
-    setSelectedStudent({ ...student, profileId });
-    setEditForm({
-      registrationType,
-      firstName: student.firstName || '',
-      lastName: student.lastName || '',
-      firstNameEnglish: student.firstNameEnglish || '',
-      lastNameEnglish: student.lastNameEnglish || '',
-      fatherName: student.fatherName || '',
-      fatherNameEnglish: student.fatherNameEnglish || '',
-      grandfatherName: student.grandfatherName || '',
-      birthDate: student.birthDate || '',
-      birthPlace: student.birthPlace || '',
-      nationality: student.nationality || 'Afghan',
-      nationalId: readStudentTazkira(student),
-      studentIdentifier: readStudentAsasNumber(student),
-      tazkiraVolume: student.tazkiraVolume || '',
-      tazkiraPage: student.tazkiraPage || '',
-      birthCertificateNumber: student.birthCertificateNumber || '',
-      gender: student.gender || '',
-      phone: student.phone || '',
-      email: student.email || '',
-      address: student.address || '',
-      city: student.city || student.birthPlace || '',
-      village: student.village || '',
-      province: normalizeProvinceValue(student.province || ''),
-      emergencyContact: student.emergencyContact || '',
-      emergencyRelation: student.emergencyRelation || '',
-      emergencyPhone: student.emergencyPhone || '',
-      academicYearId: academicYearIdValue || makeKey(selectedClass.academicYearId || selectedClass.academicYear?._id || ''),
-      classId: classIdValue,
-      shiftId: shiftIdValue,
-      currentGrade: student.currentGrade || classIdValue || '',
-      currentSection: student.currentSection || student.classId?.title || '',
-      currentShift: student.currentShift || student.shiftId?.name || selectedClass.shift || shiftIdValue || '',
-      enrollmentDate: student.enrollmentDate || '',
-      enrollmentType: registrationType,
-      previousSchool: student.previousSchool || '',
-      previousSchoolType: student.previousSchoolType || '',
-      previousGrade: student.previousGrade || '',
-      transferReason: student.transferReason || '',
-      fatherPhone: student.fatherPhone || '',
-      fatherOccupation: student.fatherOccupation || '',
-      motherName: student.motherName || '',
-      motherPhone: student.motherPhone || '',
-      motherOccupation: student.motherOccupation || '',
-      guardianName: student.guardianName || '',
-      guardianRelation: student.guardianRelation || '',
-      guardianPhone: student.guardianPhone || '',
-      familySize: student.familySize || '',
-      bloodType: student.bloodType || '',
-      hasMedicalConditions: Boolean(student.hasMedicalConditions),
-      medicalConditions: student.medicalConditions || '',
-      allergies: student.allergies || '',
-      transportation: student.transportation || '',
-      lunchProgram: student.lunchProgram || '',
-      specialNeeds: student.specialNeeds || '',
-      notes: student.generalNotes || '',
-      generalNotes: student.generalNotes || '',
-      academicNotes: student.academicNotes || '',
-      behavioralNotes: student.behavioralNotes || '',
-      status: student.status || 'active'
-    });
-    setEditFeedback({ type: '', message: '' });
-    setShowEdit(true);
+    const reference = studentWorkspaceRef(student);
+    if (!reference) {
+      toast.error('شناسهٔ پروندهٔ شاگرد پیدا نشد.');
+      return;
+    }
+    navigate(`/student-management/${reference}?tab=identity`);
   };
 
   const handleEditFormChange = (field, value) => {
@@ -1544,10 +1487,16 @@ const StudentManagement = () => {
   );
   const statusLabelMap = {
     active: 'فعال',
+    transferred_in: 'تبدیلی آمده',
+    pending: 'در انتظار',
     inactive: 'غیرفعال',
     graduated: 'فارغ‌التحصیل',
-    transferred: 'انتقال‌شده',
-    suspended: 'معلق'
+    transferred: 'تبدیلی داخلی',
+    transferred_out: 'تبدیلی رفته',
+    dropped: 'ترک تحصیل',
+    expelled: 'منفک‌شده',
+    suspended: 'محروم',
+    rejected: 'ردشده'
   };
   const genderLabelMap = {
     male: 'پسر',
@@ -1800,14 +1749,8 @@ const StudentManagement = () => {
                           <button type="button" title="مدیریت ثبت تدریسی" onClick={() => window.location.href = '/admin-education?section=enrollments'}>
                             <BookOpen size={15} />
                           </button>
-                          <button
-                            type="button"
-                            className="danger"
-                            title="حذف"
-                            disabled={actionLoading === student._id}
-                            onClick={() => handleDelete(student._id)}
-                          >
-                            <Trash2 size={15} />
+                          <button type="button" title="تغییر وضعیت تعلیمی" onClick={() => navigate(`/student-management/${studentWorkspaceRef(student)}?tab=lifecycle`)}>
+                            <RefreshCw size={15} />
                           </button>
                         </div>
                       </td>
@@ -2146,7 +2089,7 @@ const StudentManagement = () => {
                 <div className="student-detail-actions">
                   <button type="button" className="student-btn subtle" onClick={() => window.location.href = '/student-registration'}>تغییر مشخصات اصلی</button>
                   <button type="button" className="student-btn subtle" onClick={() => window.location.href = '/admin-education?section=enrollments'}>تغییر صنف/ثبت تدریسی</button>
-                  <button type="button" className="student-btn subtle" onClick={() => window.location.href = '/admin-financial-memberships'}>مدیریت مالی</button>
+                  <button type="button" className="student-btn subtle" onClick={() => navigate(`/student-management/${studentWorkspaceRef(selectedStudent)}?tab=finance`)}>گزارش مالی فقط‌خواندنی</button>
                 </div>
               </article>
               <article>

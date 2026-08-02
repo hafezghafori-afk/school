@@ -6,10 +6,8 @@ const Course = require('../models/Course');
 const User = require('../models/User');
 const StudentMembership = require('../models/StudentMembership');
 const { issueTransferAdmissionBill } = require('./transferAdmissionBillingService');
-const { reconcileClosedMembershipBilling } = require('./membershipBillingReconciliationService');
 const { ACTIVE_STUDENT_MEMBERSHIP_STATUSES } = require('../utils/studentMembershipStatus');
-
-const CURRENT_MEMBERSHIP_STATUSES = ['active', 'pending', 'suspended', 'transferred_in'];
+const { inspectRegularEnrollmentEligibility } = require('../utils/studentMembershipEligibility');
 
 const extractClassId = (payload = {}) => (
   payload.classId
@@ -197,69 +195,43 @@ const assignStudentToClass = async ({ student, payload = {}, actorId = null, sou
   const course = await syncCourseForSchoolClass(schoolClass);
   if (!user?._id || !course?._id) return null;
 
-  const previousMemberships = await StudentMembership.find({
-    student: user._id,
-    isCurrent: true,
-    classId: { $ne: schoolClass._id }
-  }).select('_id classId');
-
   const academicYearId = extractAcademicYearId(payload, schoolClass);
   const joinedAt = extractEnrollmentDate(payload);
-
-  await StudentMembership.updateMany(
-    { student: user._id, isCurrent: true, classId: { $ne: schoolClass._id } },
-    {
-      $set: {
-        status: 'transferred_out',
-        isCurrent: false,
-        leftAt: new Date(),
-        endedAt: new Date(),
-        endedReason: 'class_reassignment'
-      }
-    }
-  );
-  const billingReconciliation = await reconcileClosedMembershipBilling({
-    membershipIds: previousMemberships.map((item) => item._id),
-    effectiveAt: joinedAt,
-    actorId,
-    voidEffectivePeriod: ['correction', 'placement_correction'].includes(String(payload?.reassignmentMode || '').trim()),
-    reason: 'تغییر صنف شاگرد'
-  }).catch((error) => ({
-    error: String(error?.message || error || 'billing_reconciliation_failed'),
-    voidedBills: 0,
-    voidedOrders: 0,
-    reviewRequired: 0
-  }));
   const transferAssignment = isTransferAssignment({ student, payload });
+  const eligibility = await inspectRegularEnrollmentEligibility({
+    studentId: user._id,
+    courseId: course._id,
+    classId: schoolClass._id
+  });
+  const createdMembership = !eligibility.currentMembership;
+  const membership = eligibility.currentMembership || new StudentMembership({
+    student: user._id,
+    afghanStudentId: student._id || null,
+    course: course._id,
+    schoolId: schoolClass.schoolId || null,
+    classId: schoolClass._id,
+    academicYear: academicYearId || null,
+    academicYearId: academicYearId || null,
+    status: transferAssignment ? 'transferred_in' : 'active',
+    admissionType: transferAssignment ? 'transfer_in' : 'regular',
+    source,
+    enrolledAt: joinedAt,
+    joinedAt,
+    createdBy: actorId || null,
+    note: note || (source === 'admin'
+      ? 'معرفی از فورم ثبت شاگرد توسط دفتر/مدیریت تدریسی'
+      : 'معرفی پس از تایید ثبت‌نام آنلاین')
+  });
 
-  const membership = await StudentMembership.findOneAndUpdate(
-    {
-      student: user._id,
-      course: course._id,
-      academicYear: academicYearId || null,
-      isCurrent: true
-    },
-    {
-      $set: {
-        student: user._id,
-        afghanStudentId: student._id || null,
-        course: course._id,
-        classId: schoolClass._id,
-        academicYear: academicYearId || null,
-        academicYearId: academicYearId || null,
-        status: transferAssignment ? 'transferred_in' : 'active',
-        source,
-        enrolledAt: joinedAt,
-        joinedAt,
-        createdBy: actorId || null,
-        note: note || (source === 'admin'
-          ? 'معرفی خودکار از فورم ثبت شاگرد توسط دفتر/مدیریت تدریسی'
-          : 'معرفی خودکار پس از تایید ثبت‌نام آنلاین'),
-        isCurrent: true
-      }
-    },
-    { new: true, upsert: true, setDefaultsOnInsert: true }
-  );
+  if (!createdMembership) {
+    membership.afghanStudentId = membership.afghanStudentId || student._id || null;
+    membership.schoolId = membership.schoolId || schoolClass.schoolId || null;
+    membership.academicYear = membership.academicYear || academicYearId || null;
+    membership.academicYearId = membership.academicYearId || academicYearId || null;
+    if (actorId && !membership.createdBy) membership.createdBy = actorId;
+    if (note) membership.note = note;
+  }
+  await membership.save();
 
   student.academicInfo = {
     ...(student.academicInfo || {}),
@@ -275,9 +247,8 @@ const assignStudentToClass = async ({ student, payload = {}, actorId = null, sou
   await student.save();
 
   await updateClassCurrentStudentCount(schoolClass._id);
-  await Promise.all(previousMemberships.map((item) => updateClassCurrentStudentCount(item.classId)));
 
-  if (transferAssignment) {
+  if (createdMembership && transferAssignment) {
     const admissionBilling = await issueTransferAdmissionBill({
       membership,
       actorId,
@@ -286,8 +257,6 @@ const assignStudentToClass = async ({ student, payload = {}, actorId = null, sou
     membership.$locals = membership.$locals || {};
     membership.$locals.transferAdmissionBilling = admissionBilling;
   }
-  membership.$locals = membership.$locals || {};
-  membership.$locals.classReassignmentBilling = billingReconciliation;
 
   return membership;
 };

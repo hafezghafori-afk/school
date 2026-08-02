@@ -19,6 +19,10 @@ const { ensureTeacherAssignmentsFromLegacyMappings } = require('../services/time
 const UserNotification = require('../models/UserNotification');
 const { buildConcurrentCurrentMembershipFilter } = require('../utils/studentMembershipIntegrity');
 const { ENDED_STUDENT_MEMBERSHIP_STATUSES } = require('../utils/studentMembershipStatus');
+const {
+  RE_ENROLLMENT_REQUIRED_STATUSES,
+  inspectRegularEnrollmentEligibility
+} = require('../utils/studentMembershipEligibility');
 const { findAccessibleCourses } = require('../utils/courseAccess');
 const { ensureAfghanStudentProfile } = require('../services/afghanStudentProfileService');
 const {
@@ -45,6 +49,53 @@ const mustObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || 
 const asObjectIdOrNull = (value) => (mustObjectId(value) ? value : null);
 const normalizeText = (value) => String(value || '').trim();
 const toNullableObjectId = (value) => (mustObjectId(value) ? String(value) : '');
+
+const requireLifecycleApproval = requirePermission('students.lifecycle.approve');
+const STUDENT_LIFECYCLE_ERROR_MESSAGES = Object.freeze({
+  student_lifecycle_action_invalid: 'نوع تغییر وضعیت تعلیمی شاگرد معتبر نیست.',
+  student_lifecycle_effective_date_invalid: 'تاریخ اثر عملیات معتبر نیست.',
+  student_lifecycle_financial_status_required: 'وضعیت مالی شاگرد را مشخص کنید.',
+  student_transfer_destination_required: 'مکتب یا مرکز مقصد را وارد کنید.',
+  student_membership_required: 'عضویت شاگرد را انتخاب کنید.',
+  student_membership_not_found: 'عضویت شاگرد پیدا نشد.',
+  student_membership_already_ended: 'این عضویت قبلاً پایان یافته است.',
+  student_membership_not_current: 'این عضویت فعلی شاگرد نیست.',
+  student_current_membership_conflict: 'شاگرد در حال حاضر عضویت فعال دیگری دارد.',
+  student_lifecycle_version_invalid: 'نسخهٔ عضویت معتبر نیست.',
+  student_lifecycle_version_conflict: 'معلومات عضویت در جای دیگری تغییر کرده است؛ صفحه را تازه کنید.',
+  student_dropout_reason_required: 'نوشتن علت ترک تحصیل الزامی است.',
+  student_expulsion_reason_required: 'نوشتن علت منفکی رسمی الزامی است.',
+  student_suspension_reason_required: 'نوشتن علت محرومیت الزامی است.',
+  student_suspension_period_invalid: 'تاریخ پایان محرومیت باید بعد از تاریخ آغاز باشد.',
+  student_suspension_already_active: 'برای این شاگرد محرومیت فعال موجود است.',
+  student_active_suspension_not_found: 'محرومیت فعال برای این شاگرد پیدا نشد.',
+  student_re_enrollment_reason_required: 'نوشتن علت ثبت‌نام مجدد الزامی است.',
+  student_previous_membership_required: 'عضویت قبلی شاگرد پیدا نشد.',
+  student_re_enrollment_authority_reference_required: 'برای بازگشت شاگرد منفک‌شده، شماره یا مرجع حکم الزامی است.',
+  student_re_enrollment_requires_ended_membership: 'ثبت‌نام مجدد فقط از یک عضویت پایان‌یافته ممکن است.',
+  student_re_enrollment_scope_required: 'صنف جدید برای ثبت‌نام مجدد الزامی است.',
+  student_class_transfer_scope_required: 'صنف جدید برای تبدیلی داخلی الزامی است.',
+  student_class_transfer_same_class: 'صنف جدید باید با صنف فعلی متفاوت باشد.',
+  student_lifecycle_transactions_required: 'برای ثبت یک‌پارچهٔ تغییرات تعلیمی شاگرد، دیتابیس باید در حالت Replica Set یا Mongos فعال باشد.'
+});
+const lifecycleErrorMessage = (error, fallback) => (
+  STUDENT_LIFECYCLE_ERROR_MESSAGES[String(error?.code || error?.message || '')]
+  || (/[\u0600-\u06ff]/.test(String(error?.message || '')) ? String(error.message) : fallback)
+);
+const requireExpulsionReEnrollmentApproval = async (req, res, next) => {
+  if (normalizeText(req.body?.action).toLowerCase() !== 're_enrollment' || !mustObjectId(req.body?.membershipId)) {
+    return next();
+  }
+  try {
+    const previousMembership = await StudentMembership.findById(req.body.membershipId).select('status endedReason');
+    const wasExpelled = previousMembership
+      && (String(previousMembership.status || '') === 'expelled' || String(previousMembership.endedReason || '') === 'expulsion');
+    if (!wasExpelled) return next();
+    return requireLifecycleApproval(req, res, next);
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'بررسی صلاحیت ثبت‌نام مجدد ناموفق بود.' });
+  }
+};
 
 const SECTION_ALIASES = Object.freeze({
   a: 'الف',
@@ -369,7 +420,7 @@ const resolveClassReference = async ({ classId = '', courseId = '', syncLegacy =
 
   if (normalizedClassId) {
     schoolClass = await SchoolClass.findById(normalizedClassId);
-    if (!schoolClass) return { error: 'Class is invalid' };
+    if (!schoolClass) return { error: 'صنف معتبر نیست.' };
     if (schoolClass.legacyCourseId) {
       course = await Course.findById(schoolClass.legacyCourseId).select('_id academicYearRef schoolClassRef title category');
     }
@@ -380,10 +431,10 @@ const resolveClassReference = async ({ classId = '', courseId = '', syncLegacy =
 
   if (normalizedCourseId) {
     const linkedCourse = await Course.findById(normalizedCourseId).select('_id academicYearRef schoolClassRef title category');
-    if (!linkedCourse) return { error: 'Class is invalid' };
+    if (!linkedCourse) return { error: 'صنف معتبر نیست.' };
     if (!course) course = linkedCourse;
     if (course && String(course._id || '') !== String(linkedCourse._id || '')) {
-      return { error: 'classId and courseId do not match' };
+      return { error: 'شناسهٔ صنف و مضمون باهم مطابقت ندارند.' };
     }
     if (!schoolClass) {
       const schoolClassQuery = linkedCourse.schoolClassRef
@@ -544,8 +595,31 @@ const buildOnlineQueueItem = (item) => ({
   sourceLabel: 'ثبت‌نام آنلاین'
 });
 
+const ENROLLMENT_BLOCK_LABELS = Object.freeze({
+  transferred: 'تبدیل‌شده',
+  transferred_out: 'تبدیل‌شده به مکتب دیگر',
+  graduated: 'فارغ‌شده',
+  dropped: 'ترک‌تحصیل‌شده',
+  expelled: 'منفک‌شده',
+  inactive: 'غیرفعال'
+});
+
+const annotateEnrollmentCandidate = (candidate, membership = null) => {
+  const status = normalizeText(membership?.status).toLowerCase();
+  const requiresOfficialReturn = RE_ENROLLMENT_REQUIRED_STATUSES.includes(status);
+  return {
+    ...candidate,
+    enrollmentEligible: !requiresOfficialReturn,
+    enrollmentBlockCode: requiresOfficialReturn ? 'student_re_enrollment_requires_lifecycle' : '',
+    enrollmentBlockReason: requiresOfficialReturn
+      ? `آخرین وضعیت شاگرد «${ENROLLMENT_BLOCK_LABELS[status] || status}» است؛ بازگشت فقط از بخش ثبت‌نام مجدد امکان دارد.`
+      : '',
+    latestMembershipStatus: status || ''
+  };
+};
+
 const loadEducationStudentCatalog = async () => {
-  const [canonicalStudents, afghanStudents, onlineRegistrations, currentMemberships] = await Promise.all([
+  const [canonicalStudents, afghanStudents, onlineRegistrations, memberships] = await Promise.all([
     User.find({ role: 'student' }).select('name email grade').sort({ name: 1 }),
     AfghanStudent.find({ status: { $ne: 'deleted' } })
       .select('personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari personalInfo.fatherName contactInfo.email contactInfo.mobile contactInfo.phone familyInfo.fatherPhone academicInfo.currentGrade academicInfo.previousSchool notes status linkedUserId createdAt')
@@ -556,17 +630,25 @@ const loadEducationStudentCatalog = async () => {
     })
       .select('studentName fatherName grade phone email previousSchool notes status linkedUserId createdAt approvedAt rejectionReason')
       .sort({ createdAt: -1 }),
-    StudentMembership.find({
-      isCurrent: true,
-      status: { $in: CURRENT_STUDENT_MEMBERSHIP_STATUSES }
-    }).select('student')
+    StudentMembership.find({})
+      .select('student afghanStudentId status isCurrent endedReason endedAt leftAt updatedAt createdAt')
+      .sort({ updatedAt: -1, createdAt: -1 })
   ]);
 
   const memberUserIds = new Set(
-    currentMemberships
+    memberships
+      .filter((item) => item?.isCurrent && CURRENT_STUDENT_MEMBERSHIP_STATUSES.includes(String(item?.status || '')))
       .map((item) => String(item?.student || '').trim())
       .filter(Boolean)
   );
+  const latestMembershipByUserId = new Map();
+  const latestMembershipByAfghanStudentId = new Map();
+  memberships.forEach((item) => {
+    const userId = String(item?.student || '').trim();
+    const afghanStudentId = String(item?.afghanStudentId || '').trim();
+    if (userId && !latestMembershipByUserId.has(userId)) latestMembershipByUserId.set(userId, item);
+    if (afghanStudentId && !latestMembershipByAfghanStudentId.has(afghanStudentId)) latestMembershipByAfghanStudentId.set(afghanStudentId, item);
+  });
   const canonicalUserIdByEmail = new Map();
   canonicalStudents.forEach((item) => {
     const email = normalizeText(item?.email).toLowerCase();
@@ -583,7 +665,10 @@ const loadEducationStudentCatalog = async () => {
   const byCanonicalUser = new Map();
   canonicalStudents.forEach((item) => {
     if (memberUserIds.has(String(item?._id || ''))) return;
-    const candidate = buildStudentCandidateFromUser(item);
+    const candidate = annotateEnrollmentCandidate(
+      buildStudentCandidateFromUser(item),
+      latestMembershipByUserId.get(String(item?._id || '')) || null
+    );
     if (candidate.value) byCanonicalUser.set(String(candidate.value), candidate);
   });
 
@@ -593,14 +678,22 @@ const loadEducationStudentCatalog = async () => {
     const linkedId = item?.linkedUserId ? String(item.linkedUserId) : '';
     if (candidateHasCurrentMembership(item)) return;
     if (linkedId && byCanonicalUser.has(linkedId)) return;
-    studentCandidates.push(buildStudentCandidateFromAfghanStudent(item));
+    studentCandidates.push(annotateEnrollmentCandidate(
+      buildStudentCandidateFromAfghanStudent(item),
+      latestMembershipByAfghanStudentId.get(String(item?._id || ''))
+        || latestMembershipByUserId.get(linkedId)
+        || null
+    ));
   });
 
   onlineRegistrations.forEach((item) => {
     const linkedId = item?.linkedUserId ? String(item.linkedUserId) : '';
     if (candidateHasCurrentMembership(item)) return;
     if (linkedId && byCanonicalUser.has(linkedId)) return;
-    studentCandidates.push(buildStudentCandidateFromEnrollment(item));
+    studentCandidates.push(annotateEnrollmentCandidate(
+      buildStudentCandidateFromEnrollment(item),
+      latestMembershipByUserId.get(linkedId) || null
+    ));
   });
 
   return {
@@ -608,7 +701,10 @@ const loadEducationStudentCatalog = async () => {
     studentCandidates,
     onlineRegistrationQueue: onlineRegistrations
       .filter((item) => !candidateHasCurrentMembership(item))
-      .map(buildOnlineQueueItem)
+      .map((item) => annotateEnrollmentCandidate(
+        buildOnlineQueueItem(item),
+        latestMembershipByUserId.get(String(item?.linkedUserId || '')) || null
+      ))
   };
 };
 
@@ -1129,6 +1225,12 @@ const activateInstructorMembership = async ({
     || classRef.course.academicYearRef
     || null;
 
+  const eligibility = await inspectRegularEnrollmentEligibility({
+    studentId,
+    courseId,
+    classId: classRef.classId || null
+  });
+
   const conflictingMembership = await findOtherCurrentClassMembership({
     schoolId: classRef.schoolClass?.schoolId,
     studentId,
@@ -1142,22 +1244,22 @@ const activateInstructorMembership = async ({
     throw error;
   }
 
-  let item = await StudentMembership.findOne({ student: studentId, course: courseId, isCurrent: true })
-    .sort({ updatedAt: -1, createdAt: -1 });
+  let item = eligibility.currentMembership;
+  if (item && item.status === 'suspended') {
+    const error = new Error('شاگرد محروم را فقط از بخش تغییر وضعیت تعلیمی می‌توان دوباره فعال کرد.');
+    error.code = 'student_resume_requires_lifecycle';
+    error.status = 409;
+    throw error;
+  }
 
   if (!item) {
-    const latest = await StudentMembership.findOne({ student: studentId, course: courseId })
-      .sort({ updatedAt: -1, createdAt: -1 });
-    item = latest || new StudentMembership({
+    item = new StudentMembership({
       student: studentId,
       course: courseId,
       classId: classRef.classId || null,
+      admissionType: 'regular',
       joinedAt: joinedAt || new Date()
     });
-  }
-
-  if (!item.isCurrent) {
-    item.joinedAt = joinedAt || new Date();
   }
 
   item.student = studentId;
@@ -1165,7 +1267,7 @@ const activateInstructorMembership = async ({
   item.classId = classRef.classId || null;
   item.academicYear = academicYearId || null;
   item.academicYearId = academicYearId || null;
-  item.status = 'active';
+  item.status = item.status === 'transferred_in' ? 'transferred_in' : 'active';
   item.source = source;
   item.note = normalizeText(note);
   item.rejectedReason = '';
@@ -1982,13 +2084,13 @@ router.post('/instructor-subjects', ...withManageContent, async (req, res) => {
       return res.status(400).json({ success: false, message: 'استاد و مضمون معتبر الزامی است.' });
     }
     if (requestedAcademicYearId && !mustObjectId(requestedAcademicYearId)) {
-      return res.status(400).json({ success: false, message: 'Invalid academic year' });
+      return res.status(400).json({ success: false, message: 'سال تعلیمی معتبر نیست.' });
     }
     if (classId && !mustObjectId(classId)) {
-      return res.status(400).json({ success: false, message: 'Invalid class' });
+      return res.status(400).json({ success: false, message: 'صنف معتبر نیست.' });
     }
     if (courseId && !mustObjectId(courseId)) {
-      return res.status(400).json({ success: false, message: 'Invalid class' });
+      return res.status(400).json({ success: false, message: 'صنف معتبر نیست.' });
     }
 
     const classRef = await resolveClassReference({ classId, courseId });
@@ -2007,7 +2109,7 @@ router.post('/instructor-subjects', ...withManageContent, async (req, res) => {
     if (!subject) return res.status(400).json({ success: false, message: 'مضمون معتبر نیست.' });
     if (resolvedAcademicYearId && !academicYear) return res.status(400).json({ success: false, message: 'سال تعلیمی معتبر نیست.' });
     if ((classId || courseId) && (!classRef.classId || !classRef.course)) {
-      return res.status(400).json({ success: false, message: 'Class is invalid' });
+      return res.status(400).json({ success: false, message: 'صنف معتبر نیست.' });
     }
 
     const existing = await findInstructorSubjectDuplicate({
@@ -2075,13 +2177,13 @@ router.put('/instructor-subjects/:id', ...withManageContent, async (req, res) =>
       return res.status(400).json({ success: false, message: 'استاد و مضمون معتبر الزامی است.' });
     }
     if (requestedAcademicYearId && !mustObjectId(requestedAcademicYearId)) {
-      return res.status(400).json({ success: false, message: 'Invalid academic year' });
+      return res.status(400).json({ success: false, message: 'سال تعلیمی معتبر نیست.' });
     }
     if (classId && !mustObjectId(classId)) {
-      return res.status(400).json({ success: false, message: 'Invalid class' });
+      return res.status(400).json({ success: false, message: 'صنف معتبر نیست.' });
     }
     if (courseId && !mustObjectId(courseId)) {
-      return res.status(400).json({ success: false, message: 'Invalid class' });
+      return res.status(400).json({ success: false, message: 'صنف معتبر نیست.' });
     }
 
     const classRef = await resolveClassReference({ classId, courseId });
@@ -2100,7 +2202,7 @@ router.put('/instructor-subjects/:id', ...withManageContent, async (req, res) =>
     if (!subject) return res.status(400).json({ success: false, message: 'مضمون معتبر نیست.' });
     if (resolvedAcademicYearId && !academicYear) return res.status(400).json({ success: false, message: 'سال تعلیمی معتبر نیست.' });
     if ((classId || courseId || current.classId || current.course) && (!classRef.classId || !classRef.course)) {
-      return res.status(400).json({ success: false, message: 'Class is invalid' });
+      return res.status(400).json({ success: false, message: 'صنف معتبر نیست.' });
     }
 
     const duplicate = await findInstructorSubjectDuplicate({
@@ -2186,7 +2288,7 @@ router.get('/my-courses', requireAuth, async (req, res) => {
       }, lookups)))
     });
   } catch {
-    res.status(500).json({ success: false, message: 'Failed to load courses' });
+    res.status(500).json({ success: false, message: 'دریافت فهرست صنف‌ها ناموفق بود.' });
   }
 });
 
@@ -2257,7 +2359,7 @@ router.post('/join-requests', requireAuth, async (req, res) => {
     if (error?.code === 11000) {
       return res.status(400).json({ success: false, message: 'A pending join request already exists for this class' });
     }
-    res.status(500).json({ success: false, message: 'Failed to submit join request' });
+    res.status(500).json({ success: false, message: 'ثبت درخواست شمول ناموفق بود.' });
   }
 });
 
@@ -2278,7 +2380,7 @@ router.get('/instructor/courses', ...withInstructorManageContent, async (req, re
       }, lookups)))
     });
   } catch {
-    res.status(500).json({ success: false, message: 'Failed to load instructor courses' });
+    res.status(500).json({ success: false, message: 'دریافت صنف‌های استاد ناموفق بود.' });
   }
 });
 
@@ -2303,7 +2405,7 @@ router.get('/instructor/join-requests', ...withInstructorManageContent, async (r
       items: items.map((item) => serializeJoinRequest(item, findSchoolClassForItem({ course: item.course }, lookups)))
     });
   } catch {
-    res.status(500).json({ success: false, message: 'Failed to load join requests' });
+    res.status(500).json({ success: false, message: 'دریافت درخواست‌های شمول ناموفق بود.' });
   }
 });
 
@@ -2351,10 +2453,10 @@ router.post('/instructor/join-requests/:id/approve', ...withInstructorManageCont
 
     res.json({ success: true, message: 'Join request approved' });
   } catch (error) {
-    if (error?.code === 'CONCURRENT_CLASS_MEMBERSHIP') {
-      return res.status(409).json({ success: false, message: error.message });
+    if (error?.status || ['CONCURRENT_CLASS_MEMBERSHIP', 'student_class_transfer_requires_lifecycle', 'student_re_enrollment_requires_lifecycle', 'student_resume_requires_lifecycle'].includes(error?.code)) {
+      return res.status(Number(error?.status || 409)).json({ success: false, code: error?.code || '', message: error.message });
     }
-    res.status(500).json({ success: false, message: 'Failed to approve join request' });
+    res.status(500).json({ success: false, message: 'تأیید درخواست شمول ناموفق بود.' });
   }
 });
 
@@ -2395,7 +2497,7 @@ router.post('/instructor/join-requests/:id/reject', ...withInstructorManageConte
 
     res.json({ success: true, message: 'Join request rejected' });
   } catch {
-    res.status(500).json({ success: false, message: 'Failed to reject join request' });
+    res.status(500).json({ success: false, message: 'رد درخواست شمول ناموفق بود.' });
   }
 });
 
@@ -2431,7 +2533,7 @@ router.get('/instructor/course-students', ...withInstructorManageContent, async 
       items: items.map((item) => serializeStudentEnrollment(item, findSchoolClassForItem(item, lookups)))
     });
   } catch {
-    res.status(500).json({ success: false, message: 'Failed to load course students' });
+    res.status(500).json({ success: false, message: 'دریافت فهرست شاگردان صنف ناموفق بود.' });
   }
 });
 
@@ -2447,7 +2549,7 @@ router.post('/instructor/course-students', ...withInstructorManageContent, async
     const classRef = await resolveClassReference({ classId, courseId });
     if (classRef.error) return res.status(400).json({ success: false, message: classRef.error });
     if (!classRef.course) {
-      return res.status(400).json({ success: false, message: 'Class is invalid' });
+      return res.status(400).json({ success: false, message: 'صنف معتبر نیست.' });
     }
 
     const allowed = await isCourseAllowedForInstructor(req.user, classRef.courseId);
@@ -2512,10 +2614,10 @@ router.post('/instructor/course-students', ...withInstructorManageContent, async
     const schoolClass = classRef.classId ? await loadSerializedSchoolClassById(classRef.classId) : null;
     res.status(201).json({ success: true, item: populated ? serializeStudentEnrollment(populated, schoolClass) : null, message: 'Student added to class' });
   } catch (error) {
-    if (error?.code === 'CONCURRENT_CLASS_MEMBERSHIP') {
-      return res.status(409).json({ success: false, message: error.message });
+    if (error?.status || ['CONCURRENT_CLASS_MEMBERSHIP', 'student_class_transfer_requires_lifecycle', 'student_re_enrollment_requires_lifecycle', 'student_resume_requires_lifecycle'].includes(error?.code)) {
+      return res.status(Number(error?.status || 409)).json({ success: false, code: error?.code || '', message: error.message });
     }
-    res.status(500).json({ success: false, message: 'Failed to add student to class' });
+    res.status(500).json({ success: false, message: 'معرفی شاگرد به صنف ناموفق بود.' });
   }
 });
 
@@ -2540,7 +2642,7 @@ router.delete('/instructor/course-students/:id', ...withInstructorManageContent,
       message: 'ختم ثبت صنفی شاگرد باید توسط مدیریت و از بخش تغییر وضعیت تعلیمی شاگرد ثبت شود.'
     });
   } catch {
-    res.status(500).json({ success: false, message: 'Failed to remove student from class' });
+    res.status(500).json({ success: false, message: 'برداشتن شاگرد از صنف ناموفق بود.' });
   }
 });
 
@@ -2590,7 +2692,7 @@ router.get('/course-access-status/:identifier', requireAuth, async (req, res) =>
       hasPendingRequest: status === 'pending'
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Failed to load course access status' });
+    res.status(500).json({ success: false, message: 'دریافت وضعیت دسترسی صنف ناموفق بود.' });
   }
 });
 
@@ -2626,7 +2728,7 @@ router.get('/student-enrollments', ...withManageMemberships, async (req, res) =>
       items: items.map((item) => serializeStudentEnrollment(item, findSchoolClassForItem(item, lookups)))
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Failed to load enrollments' });
+    res.status(500).json({ success: false, message: 'دریافت عضویت‌های شاگردان ناموفق بود.' });
   }
 });
 
@@ -2642,11 +2744,11 @@ router.post('/student-enrollments', ...withManageMemberships, async (req, res) =
       ? (normalizeText(req.body?.rejectedReason) || 'rejected_by_admin')
       : '';
 
-    if (membershipStatus === 'transferred_in') {
+    if (!['active', 'pending', 'rejected'].includes(membershipStatus)) {
       return res.status(400).json({
         success: false,
-        code: 'student_transfer_in_requires_lifecycle_endpoint',
-        message: 'تبدیلی آمد باید از بخش تغییر وضعیت تعلیمی شاگرد ثبت شود.'
+        code: 'student_status_change_requires_lifecycle_endpoint',
+        message: 'این وضعیت فقط از بخش تغییر وضعیت تعلیمی شاگرد ثبت می‌شود.'
       });
     }
 
@@ -2669,8 +2771,26 @@ router.post('/student-enrollments', ...withManageMemberships, async (req, res) =
     const nextClassId = classRef.classId || '';
     const nextAcademicYearId = classRef.schoolClass?.academicYearId?._id || classRef.schoolClass?.academicYearId || classRef.course.academicYearRef || null;
 
-    const currentItem = await StudentMembership.findOne({ student: studentId, course: nextCourseId, isCurrent: true })
-      .sort({ updatedAt: -1, createdAt: -1 });
+    const eligibility = await inspectRegularEnrollmentEligibility({
+      studentId,
+      courseId: nextCourseId,
+      classId: nextClassId
+    });
+    const currentItem = eligibility.currentMembership;
+    if (currentItem?.status === 'suspended' && membershipStatus !== 'suspended') {
+      return res.status(409).json({
+        success: false,
+        code: 'student_resume_requires_lifecycle',
+        message: 'شاگرد محروم را فقط از بخش تغییر وضعیت تعلیمی می‌توان دوباره فعال کرد.'
+      });
+    }
+    if (currentItem && currentItem.status !== 'pending' && membershipStatus !== currentItem.status) {
+      return res.status(409).json({
+        success: false,
+        code: 'student_status_change_requires_lifecycle_endpoint',
+        message: 'وضعیت عضویت جاری فقط از بخش تغییر وضعیت تعلیمی شاگرد تغییر می‌کند.'
+      });
+    }
     const currentStudentMembership = currentItem || await StudentMembership.findOne({
       student: studentId,
       isCurrent: true,
@@ -2708,7 +2828,8 @@ router.post('/student-enrollments', ...withManageMemberships, async (req, res) =
     item.classId = nextClassId || null;
     item.academicYear = nextAcademicYearId || null;
     item.academicYearId = nextAcademicYearId || null;
-    item.status = membershipStatus;
+    item.status = currentItem?.status === 'transferred_in' ? 'transferred_in' : membershipStatus;
+    item.admissionType = item.admissionType || 'regular';
     item.source = 'admin';
     item.note = note;
     item.rejectedReason = rejectedReason;
@@ -2768,11 +2889,17 @@ router.post('/student-enrollments', ...withManageMemberships, async (req, res) =
         : 'ثبت‌نام متعلم ذخیره شد.'
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'ذخیره ثبت‌نام متعلم ناموفق بود.' });
+    res.status(Number(error?.status || 500)).json({
+      success: false,
+      code: error?.code || '',
+      message: /[\u0600-\u06ff]/.test(String(error?.message || ''))
+        ? error.message
+        : 'ذخیره ثبت‌نام شاگرد ناموفق بود.'
+    });
   }
 });
 
-router.post('/student-enrollments/lifecycle', ...withManageStudentLifecycle, async (req, res) => {
+router.post('/student-enrollments/lifecycle', ...withManageStudentLifecycle, requireExpulsionReEnrollmentApproval, async (req, res) => {
   try {
     const action = normalizeText(req.body?.action).toLowerCase();
     if (!SUPPORTED_STUDENT_LIFECYCLE_ACTIONS.includes(action)) {
@@ -2802,6 +2929,30 @@ router.post('/student-enrollments/lifecycle', ...withManageStudentLifecycle, asy
         return res.status(400).json({ success: false, message: 'صنف معتبر نیست.' });
       }
       lifecyclePayload.studentId = resolvedStudent.studentId;
+      lifecyclePayload.courseId = String(classRef.course._id);
+      lifecyclePayload.classId = classRef.classId;
+      lifecyclePayload.academicYearId = classRef.schoolClass?.academicYearId?._id
+        || classRef.schoolClass?.academicYearId
+        || classRef.course.academicYearRef
+        || null;
+      lifecyclePayload.schoolId = classRef.schoolClass?.schoolId || null;
+    } else if (['class_transfer', 're_enrollment'].includes(action)) {
+      const membershipId = normalizeText(req.body?.membershipId);
+      const classId = normalizeText(req.body?.classId);
+      const courseId = normalizeText(req.body?.courseId);
+      if (!mustObjectId(membershipId) || (!mustObjectId(classId) && !mustObjectId(courseId))) {
+        return res.status(400).json({
+          success: false,
+          message: action === 'class_transfer'
+            ? 'عضویت فعلی و صنف جدید برای تبدیلی داخلی الزامی است.'
+            : 'عضویت قبلی و صنف جدید برای ثبت‌نام مجدد الزامی است.'
+        });
+      }
+      const classRef = await resolveClassReference({ classId, courseId });
+      if (classRef.error) return res.status(400).json({ success: false, message: classRef.error });
+      if (!classRef.course || !classRef.classId) {
+        return res.status(400).json({ success: false, message: 'صنف جدید معتبر نیست.' });
+      }
       lifecyclePayload.courseId = String(classRef.course._id);
       lifecyclePayload.classId = classRef.classId;
       lifecyclePayload.academicYearId = classRef.schoolClass?.academicYearId?._id
@@ -2856,7 +3007,7 @@ router.post('/student-enrollments/lifecycle', ...withManageStudentLifecycle, asy
     return res.status(status).json({
       success: false,
       code: error?.code || '',
-      message: error?.message || 'ثبت تغییر وضعیت تعلیمی شاگرد موفق نبود.'
+      message: lifecycleErrorMessage(error, 'ثبت تغییر وضعیت تعلیمی شاگرد موفق نبود.')
     });
   }
 });
@@ -2870,7 +3021,7 @@ router.get('/student-enrollments/:membershipId/lifecycle-history', ...withManage
     return res.status(Number(error?.status || 500)).json({
       success: false,
       code: error?.code || '',
-      message: error?.message || 'دریافت سوانح تعلیمی شاگرد موفق نبود.'
+      message: lifecycleErrorMessage(error, 'دریافت سوانح تعلیمی شاگرد موفق نبود.')
     });
   }
 });
@@ -2917,6 +3068,48 @@ router.put('/student-enrollments/:id', ...withManageMemberships, async (req, res
     const nextCourseId = String(classRef.course._id);
     const nextClassId = classRef.classId || '';
     const nextAcademicYearId = classRef.schoolClass?.academicYearId?._id || classRef.schoolClass?.academicYearId || classRef.course.academicYearRef || null;
+
+    if (String(item.student || '') !== String(nextStudentId)) {
+      return res.status(400).json({
+        success: false,
+        code: 'student_membership_student_cannot_change',
+        message: 'شاگردِ یک عضویت قابل تغییر نیست؛ برای شاگرد دیگر عضویت جداگانه بسازید.'
+      });
+    }
+    if (
+      String(item.course || '') !== String(nextCourseId)
+      || (String(item.classId || '') && String(item.classId || '') !== String(nextClassId || ''))
+    ) {
+      return res.status(409).json({
+        success: false,
+        code: 'student_class_transfer_requires_lifecycle',
+        message: 'تبدیلی صنف فقط از بخش تغییر وضعیت تعلیمی شاگرد ثبت می‌شود.'
+      });
+    }
+    if (
+      RE_ENROLLMENT_REQUIRED_STATUSES.includes(String(item.status || ''))
+      && ['active', 'pending', 'transferred_in'].includes(membershipStatus)
+    ) {
+      return res.status(409).json({
+        success: false,
+        code: 'student_re_enrollment_requires_lifecycle',
+        message: 'بازگشت این شاگرد فقط از بخش ثبت‌نام مجدد و با سند رسمی امکان دارد.'
+      });
+    }
+    if (item.status === 'suspended' && membershipStatus !== 'suspended') {
+      return res.status(409).json({
+        success: false,
+        code: 'student_resume_requires_lifecycle',
+        message: 'رفع محرومیت فقط از بخش تغییر وضعیت تعلیمی شاگرد ثبت می‌شود.'
+      });
+    }
+    if (item.isCurrent && item.status !== 'pending' && membershipStatus !== item.status) {
+      return res.status(409).json({
+        success: false,
+        code: 'student_status_change_requires_lifecycle_endpoint',
+        message: 'وضعیت عضویت جاری فقط از بخش تغییر وضعیت تعلیمی شاگرد تغییر می‌کند.'
+      });
+    }
 
     const currentPeer = await StudentMembership.findOne({ student: nextStudentId, course: nextCourseId, isCurrent: true, _id: { $ne: item._id } });
     if (currentPeer && (membershipStatus === 'active' || membershipStatus === 'pending')) {
@@ -2980,7 +3173,13 @@ router.put('/student-enrollments/:id', ...withManageMemberships, async (req, res
         : 'ثبت‌نام متعلم به‌روزرسانی شد.'
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'ویرایش ثبت‌نام متعلم ناموفق بود.' });
+    res.status(Number(error?.status || 500)).json({
+      success: false,
+      code: error?.code || '',
+      message: /[\u0600-\u06ff]/.test(String(error?.message || ''))
+        ? error.message
+        : 'ویرایش ثبت‌نام شاگرد ناموفق بود.'
+    });
   }
 });
 
@@ -2996,7 +3195,7 @@ router.delete('/student-enrollments/:id', ...withManageMemberships, async (req, 
         : 'تاریخچهٔ عضویت شاگرد قابل حذف نیست.'
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Failed to delete enrollment' });
+    res.status(500).json({ success: false, message: 'حذف عضویت شاگرد ناموفق بود.' });
   }
 });
 

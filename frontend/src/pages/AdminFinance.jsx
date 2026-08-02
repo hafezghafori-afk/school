@@ -3,10 +3,17 @@ import { Link } from 'react-router-dom';
 import './AdminFinance.css';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
-import { formatAfghanDate, formatAfghanDateTime, toGregorianDateInputValue } from '../utils/afghanDate';
+import {
+  afghanSolarToGregorianInput,
+  formatAfghanDate,
+  formatAfghanDateTime,
+  gregorianToAfghanSolar,
+  toGregorianDateInputValue
+} from '../utils/afghanDate';
 import { formatFinanceCode, toEnglishAlphaNumeric } from '../utils/latinFinanceCode';
 import useSiteSettings from '../hooks/useSiteSettings';
 import { getPrintLogoUrls } from '../utils/printLogos';
+import { localizeSystemMessage } from '../utils/systemMessage';
 import { readStoredSchoolId, resolveActiveSchoolContext } from './adminWorkspaceUtils';
 
 const getAuthHeaders = () => {
@@ -70,6 +77,67 @@ const includesFinanceSearch = (values, term) => {
   if (!normalizedTerm) return true;
   return values.some((value) => normalizeFinanceSearchTerm(value).includes(normalizedTerm));
 };
+
+const getDefaultFinanceDashboardRange = () => {
+  const today = new Date();
+  const solar = gregorianToAfghanSolar(today);
+  if (!solar) {
+    return {
+      from: toGregorianDateInputValue(new Date(today.getFullYear(), today.getMonth(), 1)),
+      to: toGregorianDateInputValue(new Date(today.getFullYear(), today.getMonth() + 1, 0))
+    };
+  }
+  const nextMonth = solar.jm === 12
+    ? { year: solar.jy + 1, month: 1 }
+    : { year: solar.jy, month: solar.jm + 1 };
+  const from = afghanSolarToGregorianInput(solar.jy, solar.jm, 1);
+  const nextStart = afghanSolarToGregorianInput(nextMonth.year, nextMonth.month, 1);
+  const nextStartDate = new Date(`${nextStart}T00:00:00`);
+  nextStartDate.setDate(nextStartDate.getDate() - 1);
+  return { from, to: toGregorianDateInputValue(nextStartDate) };
+};
+
+const FINANCE_DONUT_COLORS = ['#22c55e', '#f97316', '#38bdf8', '#a78bfa', '#f43f5e', '#facc15'];
+
+function FinanceDonutCard({ title, subtitle, rows = [] }) {
+  const normalizedRows = (Array.isArray(rows) ? rows : []).filter((row) => Number(row?.value || 0) > 0);
+  let cursor = 0;
+  const stops = normalizedRows.map((row, index) => {
+    const start = cursor;
+    cursor += Number(row?.percent || 0);
+    return `${FINANCE_DONUT_COLORS[index % FINANCE_DONUT_COLORS.length]} ${start}% ${cursor}%`;
+  });
+  const total = normalizedRows.reduce((sum, row) => sum + Number(row?.value || 0), 0);
+  return (
+    <div className="finance-card finance-donut-card">
+      <div className="finance-card-head">
+        <div>
+          <h3>{title}</h3>
+          <p className="muted">{subtitle}</p>
+        </div>
+      </div>
+      <div className="finance-donut-layout">
+        <div
+          className="finance-donut"
+          style={{ background: stops.length ? `conic-gradient(${stops.join(', ')})` : 'rgba(148, 163, 184, 0.18)' }}
+          aria-label={title}
+        >
+          <span><strong>{fmt(total)}</strong><small>AFN</small></span>
+        </div>
+        <div className="finance-donut-legend">
+          {normalizedRows.map((row, index) => (
+            <div key={`${title}-${row.key || index}`}>
+              <i style={{ background: FINANCE_DONUT_COLORS[index % FINANCE_DONUT_COLORS.length] }} />
+              <span>{row.label}</span>
+              <strong>{fmt(row.value)} <small>({fmt(row.percent)}%)</small></strong>
+            </div>
+          ))}
+          {!normalizedRows.length && <p className="muted">برای این بازه هنوز رقم ثبت نشده است.</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const buildFinanceSearchBlob = (values = []) => (
   values
@@ -223,35 +291,62 @@ const buildFinanceTrendSeries = (items = [], mode = 'daily') => {
   return sorted.slice(-6);
 };
 
-const buildFinanceLineChartPaths = (series = [], width = 520, height = 220, padding = 20) => {
+const buildFinanceFlowTrendSeries = (items = [], mode = 'daily') => {
+  const keys = ['income', 'expense', 'net'];
+  const seriesByKey = keys.reduce((result, key) => ({
+    ...result,
+    [key]: buildFinanceTrendSeries(
+      (Array.isArray(items) ? items : []).map((item) => ({
+        date: item?.date,
+        monthKey: item?.monthKey,
+        total: toSafeNumber(item?.[key])
+      })),
+      mode
+    )
+  }), {});
+  const buckets = new Map();
+  keys.forEach((key) => {
+    seriesByKey[key].forEach((item) => {
+      const row = buckets.get(item.bucket) || {
+        bucket: item.bucket,
+        label: item.label,
+        income: 0,
+        expense: 0,
+        net: 0
+      };
+      row[key] = toSafeNumber(item.total);
+      buckets.set(item.bucket, row);
+    });
+  });
+  return Array.from(buckets.values()).sort((left, right) => String(left.bucket).localeCompare(String(right.bucket)));
+};
+
+const buildFinanceMultiLineChart = (series = [], width = 520, height = 220, padding = 20) => {
   if (!Array.isArray(series) || !series.length) {
-    return { linePath: '', areaPath: '', points: [] };
+    return { paths: {}, points: {}, zeroY: height - padding };
   }
-  const max = Math.max(...series.map((item) => toSafeNumber(item?.total)), 1);
+  const values = series.flatMap((item) => ['income', 'expense', 'net'].map((key) => toSafeNumber(item?.[key])));
+  const min = Math.min(0, ...values);
+  const max = Math.max(1, ...values);
+  const range = Math.max(1, max - min);
   const innerWidth = width - padding * 2;
   const innerHeight = height - padding * 2;
   const step = series.length > 1 ? innerWidth / (series.length - 1) : 0;
-  const points = series.map((item, index) => {
-    const x = padding + step * index;
-    const y = padding + innerHeight - ((toSafeNumber(item?.total) / max) * innerHeight);
-    return {
+  const toY = (value) => padding + ((max - toSafeNumber(value)) / range) * innerHeight;
+  const paths = {};
+  const points = {};
+  ['income', 'expense', 'net'].forEach((key) => {
+    points[key] = series.map((item, index) => ({
       ...item,
-      x,
-      y
-    };
+      value: toSafeNumber(item?.[key]),
+      x: padding + step * index,
+      y: toY(item?.[key])
+    }));
+    paths[key] = points[key]
+      .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+      .join(' ');
   });
-  const linePath = points
-    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
-    .join(' ');
-  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(2)} ${(height - padding).toFixed(2)} L ${points[0].x.toFixed(2)} ${(height - padding).toFixed(2)} Z`;
-  return { linePath, areaPath, points };
-};
-
-const getFinanceDeltaPercent = (current, previous) => {
-  const safeCurrent = toSafeNumber(current);
-  const safePrevious = toSafeNumber(previous);
-  if (!safePrevious) return safeCurrent > 0 ? 100 : 0;
-  return Number((((safeCurrent - safePrevious) / safePrevious) * 100).toFixed(1));
+  return { paths, points, zeroY: toY(0) };
 };
 
 const escapeCsvValue = (value) => {
@@ -1447,7 +1542,9 @@ const waitForPrintableImages = async (selector = '.finance-print-sheet') => {
 export default function AdminFinance() {
   const { settings: siteSettings } = useSiteSettings();
   const [summary, setSummary] = useState(null);
-  const [topDebtors, setTopDebtors] = useState([]);
+  const [financeOverview, setFinanceOverview] = useState(null);
+  const [financeOverviewLoading, setFinanceOverviewLoading] = useState(false);
+  const [financeOverviewRange, setFinanceOverviewRange] = useState(getDefaultFinanceDashboardRange);
   const [students, setStudents] = useState([]);
   const [studentMemberships, setStudentMemberships] = useState([]);
   const [classOptions, setClassOptions] = useState([]);
@@ -1455,10 +1552,6 @@ export default function AdminFinance() {
   const [feePlans, setFeePlans] = useState([]);
   const [bills, setBills] = useState([]);
   const [pendingReceipts, setPendingReceipts] = useState([]);
-  const [aging, setAging] = useState(null);
-  const [cashflow, setCashflow] = useState([]);
-  const [byClass, setByClass] = useState([]);
-  const [discountTotals, setDiscountTotals] = useState([]);
   const [discountRegistry, setDiscountRegistry] = useState([]);
   const [discountDuplicateSummary, setDiscountDuplicateSummary] = useState({
     scanned: 0,
@@ -1588,7 +1681,8 @@ export default function AdminFinance() {
     error: ''
   });
   const [classPaymentApprovalRefreshKey, setClassPaymentApprovalRefreshKey] = useState(0);
-  const [message, setMessage] = useState('');
+  const [message, setMessageState] = useState('');
+  const setMessage = (value = '') => setMessageState(localizeSystemMessage(value));
   const [financeDataErrors, setFinanceDataErrors] = useState({ orders: '', payments: '' });
   const [busy, setBusy] = useState(false);
   const [activeSchoolContext, setActiveSchoolContext] = useState(null);
@@ -1626,6 +1720,9 @@ export default function AdminFinance() {
   const [paymentAdvancedOpen, setPaymentAdvancedOpen] = useState(false);
   const [reliefFormMode, setReliefFormMode] = useState('discount');
   const [incomeTrendRange, setIncomeTrendRange] = useState('daily');
+  const [debtorDelayFilter, setDebtorDelayFilter] = useState('all');
+  const [debtorSearchTerm, setDebtorSearchTerm] = useState('');
+  const [debtorPage, setDebtorPage] = useState(1);
   const [manualStudentSearch, setManualStudentSearch] = useState('');
   const [paymentStudentSearch, setPaymentStudentSearch] = useState('');
   const [discountStudentSearch, setDiscountStudentSearch] = useState('');
@@ -1750,6 +1847,8 @@ export default function AdminFinance() {
     manualAllocations: {}
   });
   const [paymentPreview, setPaymentPreview] = useState(null);
+  const [advanceBillingPreview, setAdvanceBillingPreview] = useState(null);
+  const [advanceBillingPayload, setAdvanceBillingPayload] = useState(null);
 
   const paymentDeskStudent = useMemo(
     () => students.find((item) => String(item?._id || '') === String(paymentDeskForm.studentId || '')) || null,
@@ -1919,14 +2018,14 @@ export default function AdminFinance() {
     {
       key: 'reports',
       label: FINANCE_SECTION_LABELS.reports,
-      hint: `${byClass.length} ردیف تحلیلی`
+      hint: `${financeOverview?.byClass?.length || 0} ردیف تحلیلی`
     },
     {
       key: 'settings',
       label: FINANCE_SECTION_LABELS.settings,
       hint: `${feePlans.length} پلان فیس`
     }
-  ]), [summary?.pendingReceipts, pendingReceipts.length, openBillsCount, activeFinanceReliefCount, anomalies.length, anomalySummary?.total, byClass.length, feePlans.length]);
+  ]), [summary?.pendingReceipts, pendingReceipts.length, openBillsCount, activeFinanceReliefCount, anomalies.length, anomalySummary?.total, financeOverview?.byClass?.length, feePlans.length]);
   const indexedStudents = useMemo(() => (
     students.map((student) => ({
       student,
@@ -2478,6 +2577,20 @@ export default function AdminFinance() {
     });
   };
 
+  const openDebtorInPaymentDesk = (row = {}) => {
+    const match = financeMembershipStudents.find((item) => (
+      String(item?._id || '') === String(row?.studentUserId || '')
+      || String(item?.studentCoreId || '') === String(row?.studentCoreId || row?.studentId || '')
+    ));
+    if (!match?._id) {
+      setMessage('عضویت مالی فعال این شاگرد برای باز کردن میز پرداخت پیدا نشد.');
+      return;
+    }
+    handlePaymentDeskStudentChange(match._id);
+    setPaymentStudentSearch(match.name || match.fullName || row?.name || '');
+    setActiveSection('payments');
+  };
+
   const applyManualMembershipStudent = (studentId = '') => {
     const normalizedStudentId = String(studentId || '').trim();
     const membershipStudent = financeMembershipStudents.find((item) => String(item?._id || '') === normalizedStudentId) || null;
@@ -2781,84 +2894,118 @@ export default function AdminFinance() {
   const [cashierReportDate, setCashierReportDate] = useState(defaultCashierDate);
   const [cashierReport, setCashierReport] = useState(null);
   const [reportClassId, setReportClassId] = useState('');
-  const [cashflowReport, setCashflowReport] = useState(null);
-  const [discountAnalytics, setDiscountAnalytics] = useState(null);
+  const [reportAcademicYearId, setReportAcademicYearId] = useState('');
   const [auditTimeline, setAuditTimeline] = useState([]);
   const [auditTimelineSummary, setAuditTimelineSummary] = useState(null);
   const [auditTimelineSearch, setAuditTimelineSearch] = useState('');
   const [auditTimelineKindFilter, setAuditTimelineKindFilter] = useState('all');
   const [auditTimelineSeverityFilter, setAuditTimelineSeverityFilter] = useState('all');
   const [selectedAuditEntryId, setSelectedAuditEntryId] = useState('');
-  const financeHeadlineStats = useMemo(() => {
-    const activeBills = bills.filter((item) => String(item?.status || '').trim() !== 'void');
-    const totalDue = activeBills.reduce((sum, item) => sum + toSafeNumber(item?.amountDue), 0);
-    const totalPaid = activeBills.reduce((sum, item) => sum + toSafeNumber(item?.amountPaid), 0);
-    const outstanding = activeBills.reduce((sum, item) => sum + toSafeNumber(item?.outstandingAmount ?? Math.max(0, toSafeNumber(item?.amountDue) - toSafeNumber(item?.amountPaid))), 0);
-    const todayPayments = cashierReport?.summary?.totalPayments || cashierReport?.items?.length || 0;
-    const todayReceipts = cashierReport?.items?.length || 0;
-    const todayCash = (cashierReport?.methodTotals || [])
-      .filter((item) => String(item?.method || '').trim() === 'cash')
-      .reduce((sum, item) => sum + toSafeNumber(item?.amount), 0);
-    return {
-      totalDue,
-      totalPaid,
-      outstanding,
-      todayPayments,
-      todayReceipts,
-      todayCash
-    };
-  }, [bills, cashierReport]);
-  const cashflowDisplayRows = useMemo(() => {
-    if (Array.isArray(cashflow) && cashflow.length) return cashflow;
-    const registeredRows = cashflowReport?.registeredItems;
-    return Array.isArray(registeredRows) ? registeredRows : [];
-  }, [cashflow, cashflowReport?.registeredItems]);
-  const incomeTrendUsesRegisteredFallback = !cashflow.length && cashflowDisplayRows.length > 0;
-  const incomeTrendSeries = useMemo(() => (
-    buildFinanceTrendSeries(cashflowDisplayRows, incomeTrendRange)
-  ), [cashflowDisplayRows, incomeTrendRange]);
-  const incomeTrendChart = useMemo(() => (
-    buildFinanceLineChartPaths(incomeTrendSeries)
-  ), [incomeTrendSeries]);
-  const monthlyIncomeSeries = useMemo(() => (
-    buildFinanceTrendSeries(cashflowDisplayRows, 'monthly')
-  ), [cashflowDisplayRows]);
-  const monthlyComparison = useMemo(() => {
-    const currentMonth = toSafeNumber(summary?.monthCollection || monthlyIncomeSeries[monthlyIncomeSeries.length - 1]?.total || 0);
-    const previousMonth = toSafeNumber(monthlyIncomeSeries[monthlyIncomeSeries.length - 2]?.total || 0);
-    const deltaAmount = currentMonth - previousMonth;
-    const deltaPercent = getFinanceDeltaPercent(currentMonth, previousMonth);
-    return {
-      currentMonth,
-      previousMonth,
-      deltaAmount,
-      deltaPercent
-    };
-  }, [summary?.monthCollection, monthlyIncomeSeries]);
-  const paidVsDueRows = useMemo(() => (
-    (Array.isArray(byClass) ? byClass : []).slice(0, 5).map((row) => {
-      const due = toSafeNumber(row?.due);
-      const paid = toSafeNumber(row?.paid);
-      return {
-        key: row?.classId || row?.courseId || row?.course,
-        label: row?.schoolClass?.title || row?.course || 'صنف',
-        due,
-        paid,
-        outstanding: Math.max(0, due - paid),
-        collectionRate: due > 0 ? Math.round((paid / due) * 100) : 0
-      };
-    })
-  ), [byClass]);
-  const paidVsDueMax = useMemo(() => (
-    Math.max(...paidVsDueRows.map((row) => row.due), 1)
-  ), [paidVsDueRows]);
+  const financeFlowTrendSeries = useMemo(() => (
+    buildFinanceFlowTrendSeries(financeOverview?.series?.daily || [], incomeTrendRange)
+  ), [financeOverview?.series?.daily, incomeTrendRange]);
+  const financeFlowTrendChart = useMemo(() => (
+    buildFinanceMultiLineChart(financeFlowTrendSeries)
+  ), [financeFlowTrendSeries]);
+  const overviewDebtors = useMemo(() => (
+    Array.isArray(financeOverview?.topDebtors) ? financeOverview.topDebtors : []
+  ), [financeOverview?.topDebtors]);
+  const filteredOverviewDebtors = useMemo(() => overviewDebtors.filter((row) => {
+    if (!includesFinanceSearch([row?.name, row?.classTitle, row?.studentId], debtorSearchTerm)) return false;
+    const lateDays = Number(row?.maxLateDays || 0);
+    if (debtorDelayFilter === '1') return lateDays >= 1;
+    if (debtorDelayFilter === '30') return lateDays >= 30;
+    if (debtorDelayFilter === '60') return lateDays >= 60;
+    return true;
+  }), [overviewDebtors, debtorDelayFilter, debtorSearchTerm]);
+  const debtorPageCount = Math.max(1, Math.ceil(filteredOverviewDebtors.length / 10));
+  const paginatedOverviewDebtors = useMemo(() => (
+    filteredOverviewDebtors.slice((debtorPage - 1) * 10, debtorPage * 10)
+  ), [filteredOverviewDebtors, debtorPage]);
   const problemStudents = useMemo(() => (
-    topDebtors.slice(0, 4).map((row, index) => ({
-      id: row?.studentId || row?.name || `debtor-${index}`,
-      name: row?.name || 'متعلم',
-      amount: toSafeNumber(row?.amount)
-    }))
-  ), [topDebtors]);
+    overviewDebtors
+      .filter((row) => Number(row?.maxLateDays || 0) > 0)
+      .sort((left, right) => {
+        const delayDelta = Number(right?.maxLateDays || 0) - Number(left?.maxLateDays || 0);
+        return delayDelta || Number(right?.amount || 0) - Number(left?.amount || 0);
+      })
+      .slice(0, 5)
+  ), [overviewDebtors]);
+  const problemStudentSummary = useMemo(() => ({
+    count: overviewDebtors.filter((row) => Number(row?.maxLateDays || 0) > 0).length,
+    amount: overviewDebtors
+      .filter((row) => Number(row?.maxLateDays || 0) > 0)
+      .reduce((sum, row) => sum + Number(row?.amount || 0), 0),
+    overdueOrders: overviewDebtors.reduce((sum, row) => sum + Number(row?.overdueOrderCount || 0), 0),
+    critical: overviewDebtors.filter((row) => row?.risk === 'critical').length
+  }), [overviewDebtors]);
+  const financeOverviewKpis = financeOverview?.kpis || {};
+  const financeSmartCards = [
+    {
+      key: 'issued',
+      label: 'بل‌های صادرشده',
+      value: financeOverviewKpis?.issuedBills?.amount,
+      meta: `${fmt(financeOverviewKpis?.issuedBills?.count || 0)} بل · ${fmt(financeOverviewKpis?.issuedBills?.studentCount || 0)} شاگرد`,
+      tone: 'sky',
+      section: 'orders'
+    },
+    {
+      key: 'revenue',
+      label: 'عواید تاییدشده',
+      value: financeOverviewKpis?.approvedRevenue?.amount,
+      meta: `${fmt(financeOverviewKpis?.approvedRevenue?.count || 0)} پرداخت`,
+      tone: 'emerald',
+      section: 'payments'
+    },
+    {
+      key: 'outstanding',
+      label: 'مجموع باقیات',
+      value: financeOverviewKpis?.outstanding?.amount,
+      meta: `${fmt(financeOverviewKpis?.outstanding?.count || 0)} بل باز`,
+      tone: 'rose',
+      section: 'reports'
+    },
+    {
+      key: 'reliefs',
+      label: 'تخفیف و معافیت',
+      value: financeOverviewKpis?.reliefs?.amount,
+      meta: `${fmt(financeOverviewKpis?.reliefs?.count || 0)} بل دارای تسهیلات`,
+      tone: 'amber',
+      section: 'discounts'
+    },
+    {
+      key: 'expenses',
+      label: 'مصارف تاییدشده',
+      value: financeOverviewKpis?.expenses?.amount,
+      meta: `${fmt(financeOverviewKpis?.expenses?.count || 0)} سند مصرف`,
+      tone: 'violet',
+      section: 'reports'
+    },
+    {
+      key: 'net',
+      label: 'خالص عواید',
+      value: financeOverviewKpis?.netCash?.amount,
+      meta: 'عواید منهای مصارف تاییدشده',
+      tone: Number(financeOverviewKpis?.netCash?.amount || 0) >= 0 ? 'cyan' : 'rose',
+      section: 'reports'
+    },
+    {
+      key: 'pending',
+      label: 'رسیدهای در انتظار',
+      value: financeOverviewKpis?.pendingReceipts?.amount,
+      meta: `${fmt(financeOverviewKpis?.pendingReceipts?.count || 0)} رسید`,
+      tone: 'slate',
+      section: 'payments'
+    },
+    {
+      key: 'overdue',
+      label: 'باقیات سررسید گذشته',
+      value: financeOverviewKpis?.overdue?.amount,
+      meta: `${fmt(financeOverviewKpis?.overdue?.count || 0)} بل`,
+      tone: 'orange',
+      section: 'reports'
+    }
+  ];
 
   const fetchJson = async (url, options = {}) => {
     const res = await fetch(url, {
@@ -2885,6 +3032,20 @@ export default function AdminFinance() {
     if (reportClassId) {
       url.searchParams.set('classId', reportClassId);
     }
+    if (reportAcademicYearId) {
+      url.searchParams.set('academicYearId', reportAcademicYearId);
+    }
+    return url.toString();
+  };
+
+  const buildFinanceOverviewUrl = () => {
+    const url = new URL(`${API_BASE}/api/finance/admin/dashboard/overview`, window.location.origin);
+    if (financeOverviewRange.from) url.searchParams.set('from', financeOverviewRange.from);
+    if (financeOverviewRange.to) url.searchParams.set('to', financeOverviewRange.to);
+    if (reportClassId) url.searchParams.set('classId', reportClassId);
+    if (reportAcademicYearId) url.searchParams.set('academicYearId', reportAcademicYearId);
+    url.searchParams.set('recentLimit', '10');
+    url.searchParams.set('debtorLimit', '200');
     return url.toString();
   };
 
@@ -2964,14 +3125,11 @@ export default function AdminFinance() {
         refData,
         membershipData,
         summaryData,
+        overviewData,
         ordersData,
         paymentsData,
         feePlansData,
         monthsData,
-        agingData,
-        cashflowData,
-        byClassData,
-        discountsData,
         discountRegistryData,
         reliefsData,
         exemptionsData,
@@ -2988,14 +3146,11 @@ export default function AdminFinance() {
         safeFetchJson(`${API_BASE}/api/finance/admin/reference-data`, { success: false, students: [], classes: [], academicYears: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/student-memberships`, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/summary`, { success: false, summary: null, topDebtors: [] }),
+        safeFetchJson(buildFinanceOverviewUrl(), { success: false, overview: null }),
         safeFetchJson(ordersRequestUrl, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/student-finance/payments?view=all`, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/fee-plans`, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/month-close`, { success: true, items: [] }),
-        safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/aging'), { success: true, items: [] }),
-        safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/cashflow'), { success: true, items: [] }),
-        safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/by-class'), { success: true, items: [] }),
-        safeFetchJson(`${API_BASE}/api/finance/admin/reports/discounts`, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/student-finance/discounts?status=active&registryOnly=true&discountType=discount`, { success: true, items: [], duplicateSummary: null }),
         safeFetchJson(`${API_BASE}/api/student-finance/reliefs?status=active&registryOnly=true`, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/student-finance/exemptions?status=active`, { success: true, items: [] }),
@@ -3039,21 +3194,15 @@ export default function AdminFinance() {
       setAcademicYears(nextAcademicYears);
       if (shouldApplyPaymentWorkspace && summaryData?.success) {
         setSummary(summaryData.summary || null);
-        setTopDebtors(summaryData.topDebtors || []);
+      }
+      if (shouldApplyPaymentWorkspace && overviewData?.success) {
+        setFinanceOverview(overviewData.overview || null);
       }
       if (shouldApplyPaymentWorkspace && shouldApplyOrdersResult && ordersData?.success) setBills(nextBills);
       if (shouldApplyPaymentWorkspace && paymentsData?.success) setPendingReceipts(nextPendingReceipts);
       setFeePlans(feePlansData?.success ? (feePlansData.items || []) : []);
       setClosedMonths(monthsData?.success ? (monthsData.items || []) : []);
-      setAging(agingData?.success ? agingData : null);
-      setCashflowReport(cashflowData?.success ? cashflowData : null);
-      setCashflow(cashflowData?.success ? (cashflowData.items || []) : []);
-      if (shouldApplyPaymentWorkspace && byClassData?.success) setByClass(byClassData.items || []);
       if (shouldApplyPaymentWorkspace) {
-        if (discountsData?.success) {
-          setDiscountAnalytics(discountsData);
-          setDiscountTotals(discountsData.items || []);
-        }
         if (discountRegistryData?.success) {
           setDiscountRegistry(discountRegistryData.items || []);
           setDiscountDuplicateSummary(discountRegistryData.duplicateSummary
@@ -3184,7 +3333,6 @@ export default function AdminFinance() {
   };
 
   const refreshPaymentWorkspace = async ({
-    includeClassReport = false,
     includeAnomalies = false,
     includeRegistries = false,
     invalidatePreview = true
@@ -3210,26 +3358,20 @@ export default function AdminFinance() {
       const ordersRequestUrl = `${API_BASE}/api/student-finance/orders${requestedFullOrders ? '' : '?view=open'}`;
       const [
         summaryData,
+        overviewData,
         ordersData,
         paymentsData,
-        byClassData,
         anomaliesData,
-        discountAnalyticsData,
         discountRegistryData,
         reliefsData,
         exemptionsData
       ] = await Promise.all([
         safeFetchJson(`${API_BASE}/api/finance/admin/summary`, { success: false, summary: null, topDebtors: [] }),
+        safeFetchJson(buildFinanceOverviewUrl(), { success: false, overview: null }),
         safeFetchJson(ordersRequestUrl, { success: false, items: [] }),
         safeFetchJson(`${API_BASE}/api/student-finance/payments?view=all`, { success: false, items: [] }),
-        includeClassReport
-          ? safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/by-class'), { success: false, items: [] })
-          : Promise.resolve(null),
         includeAnomalies
           ? safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/anomalies'), { success: false, items: [], summary: null })
-          : Promise.resolve(null),
-        includeRegistries
-          ? safeFetchJson(`${API_BASE}/api/finance/admin/reports/discounts`, { success: false, items: [] })
           : Promise.resolve(null),
         includeRegistries
           ? safeFetchJson(`${API_BASE}/api/student-finance/discounts?status=active&registryOnly=true&discountType=discount`, { success: false, items: [], duplicateSummary: null })
@@ -3246,7 +3388,9 @@ export default function AdminFinance() {
 
       if (summaryData?.success) {
         setSummary(summaryData.summary || null);
-        setTopDebtors(summaryData.topDebtors || []);
+      }
+      if (overviewData?.success) {
+        setFinanceOverview(overviewData.overview || null);
       }
       const shouldApplyOrdersResult = requestedFullOrders || !fullOrdersLoadedRef.current;
       if (ordersData?.success && shouldApplyOrdersResult) {
@@ -3267,16 +3411,9 @@ export default function AdminFinance() {
             : (nextPendingReceipts[0]?._id || '')
         ));
       }
-      if (byClassData?.success) {
-        setByClass(byClassData.items || []);
-      }
       if (anomaliesData?.success) {
         setAnomalies(anomaliesData.items || []);
         setAnomalySummary(anomaliesData.summary || null);
-      }
-      if (discountAnalyticsData?.success) {
-        setDiscountAnalytics(discountAnalyticsData);
-        setDiscountTotals(discountAnalyticsData.items || []);
       }
       if (discountRegistryData?.success) {
         setDiscountRegistry(discountRegistryData.items || []);
@@ -3321,6 +3458,7 @@ export default function AdminFinance() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     reportClassId,
+    reportAcademicYearId,
     deliveryRetryChannelFilter,
     deliveryOpsStatusFilter,
     deliveryOpsProviderFilter,
@@ -3328,6 +3466,25 @@ export default function AdminFinance() {
     deliveryOpsRetryableFilter,
     deliveryRecoveryStateFilter
   ]);
+
+  useEffect(() => {
+    let mounted = true;
+    setFinanceOverviewLoading(true);
+    fetchJson(buildFinanceOverviewUrl())
+      .then((data) => {
+        if (mounted && data?.success) setFinanceOverview(data.overview || null);
+      })
+      .catch((error) => {
+        if (mounted) setMessage(error?.message || 'تازه‌سازی داشبورد مالی ناموفق بود.');
+      })
+      .finally(() => {
+        if (mounted) setFinanceOverviewLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [financeOverviewRange.from, financeOverviewRange.to, reportClassId, reportAcademicYearId]);
 
   useEffect(() => {
     if (activeSection !== 'orders'
@@ -3377,6 +3534,14 @@ export default function AdminFinance() {
   useEffect(() => {
     setBillVisibleCount(5);
   }, [orderSearchTerm, orderStatusFilter, orderFeeTypeFilter, orderClassFilter, orderMonthFilter]);
+
+  useEffect(() => {
+    setDebtorPage(1);
+  }, [debtorDelayFilter, debtorSearchTerm, reportClassId, reportAcademicYearId]);
+
+  useEffect(() => {
+    if (debtorPage > debtorPageCount) setDebtorPage(debtorPageCount);
+  }, [debtorPage, debtorPageCount]);
 
   useEffect(() => {
     loadCashierReport();
@@ -3758,32 +3923,6 @@ export default function AdminFinance() {
   const selectedReportClass = useMemo(() => (
     classOptions.find((item) => item.classId === reportClassId) || null
   ), [classOptions, reportClassId]);
-
-  const visibleAging = useMemo(() => {
-    if (!aging || !reportClassId || !Array.isArray(aging?.rows)) return aging;
-    const rows = aging.rows.filter((row) => String(row?.classId || '').trim() === reportClassId);
-    const buckets = { current: 0, d1_30: 0, d31_60: 0, d61_plus: 0 };
-    rows.forEach((row) => {
-      const remaining = toSafeNumber(row?.remaining);
-      const lateDays = toSafeNumber(row?.lateDays);
-      if (lateDays <= 0) buckets.current += remaining;
-      else if (lateDays <= 30) buckets.d1_30 += remaining;
-      else if (lateDays <= 60) buckets.d31_60 += remaining;
-      else buckets.d61_plus += remaining;
-    });
-    return {
-      ...aging,
-      rows,
-      buckets,
-      totalRemaining: rows.reduce((sum, row) => sum + toSafeNumber(row?.remaining), 0)
-    };
-  }, [aging, reportClassId]);
-
-  const visibleByClass = useMemo(() => (
-    reportClassId
-      ? byClass.filter((row) => String(row?.classId || row?.schoolClass?._id || row?.schoolClass?.id || '').trim() === reportClassId)
-      : byClass
-  ), [byClass, reportClassId]);
 
   const filteredAuditTimeline = useMemo(() => (
     auditTimeline.filter((item) => (
@@ -4211,14 +4350,20 @@ export default function AdminFinance() {
   const selectedReceiptPrintModel = useMemo(() => {
     if (!selectedReceipt) return null;
     const details = selectedReceipt.receiptDetails || {};
-    const allocations = Array.isArray(details.allocations) ? details.allocations : [];
-    const billNumber = details.billNumber
+    const allocations = Array.isArray(details.allocations) && details.allocations.length
+      ? details.allocations
+      : (Array.isArray(selectedReceipt.allocations) ? selectedReceipt.allocations : []);
+    const isMultiBill = allocations.length > 1;
+    const billNumber = (isMultiBill ? (details.paymentNumber || selectedReceipt.paymentNumber || selectedReceipt.id) : '')
+      || details.billNumber
       || selectedReceipt.bill?.billNumber
       || allocations.find((item) => item?.orderNumber)?.orderNumber
       || selectedReceipt.paymentNumber
       || selectedReceipt.id
       || '';
-    const purpose = details.title || 'پرداخت فیس';
+    const purpose = (isMultiBill ? `پرداخت یک‌جای ${allocations.length} بل فیس` : details.title)
+      || allocations[0]?.title
+      || 'پرداخت فیس';
     return {
       title: details.title || selectedReceipt.bill?.billNumber || 'رسید مالی',
       billNumber: toEnglishAlphaNumeric(billNumber),
@@ -4232,12 +4377,14 @@ export default function AdminFinance() {
       currencyLabel: String(details.currency || 'AFN').trim().toUpperCase() === 'AFN' ? 'افغانی' : details.currency,
       paymentMethod: selectedReceipt.paymentMethod || '-',
       referenceNo: selectedReceipt.referenceNo || '-',
+      status: selectedReceipt.status || 'pending',
       paidAt: selectedReceipt.paidAt || null,
       note: selectedReceipt.note || '',
       receivedBy: selectedReceipt.receivedBy?.name || 'ثبت سیستمی',
       remainingBeforePayment: details.remainingBeforePayment,
       remainingAfterPayment: details.remainingAfterPayment,
-      allocations
+      allocations,
+      isMultiBill
     };
   }, [selectedReceipt]);
 
@@ -4286,6 +4433,11 @@ export default function AdminFinance() {
     setPaymentPreview(null);
   }, [bills]);
 
+  useEffect(() => {
+    setAdvanceBillingPreview(null);
+    setAdvanceBillingPayload(null);
+  }, [paymentDeskForm.studentId, paymentDeskForm.classId, paymentDeskForm.academicYearId]);
+
   const postJson = async (url, body) => {
     const data = await fetchJson(url, {
       method: 'POST',
@@ -4296,6 +4448,69 @@ export default function AdminFinance() {
       throw new Error(data?.message || 'عملیات ناموفق بود');
     }
     return data;
+  };
+
+  const previewAdvanceStudentBilling = async (monthCount) => {
+    const membershipId = String(paymentDeskMembershipStudent?.membershipId || '').trim();
+    if (!membershipId || !paymentDeskForm.classId || !paymentDeskForm.academicYearId) {
+      setMessage('ابتدا شاگرد، صنف و سال تعلیمی را در میز پرداخت انتخاب کنید.');
+      return;
+    }
+    const payload = {
+      classId: paymentDeskForm.classId,
+      academicYearId: paymentDeskForm.academicYearId,
+      studentMembershipId: membershipId,
+      dueDate: paymentDeskForm.paidAt || toInputDate(new Date()),
+      periodType: 'monthly',
+      includeFutureMonths: true,
+      futureMonthCount: Math.max(1, Math.min(12, Number(monthCount || 1))),
+      includeAdmission: false,
+      includeTransport: false,
+      onlyDebtors: false,
+      currency: 'AFN'
+    };
+    setBusy(true);
+    try {
+      const data = await postJson(`${API_BASE}/api/finance/admin/bills/preview`, payload);
+      setAdvanceBillingPayload(payload);
+      setAdvanceBillingPreview(data);
+      setMessage(data?.summary?.candidateCount
+        ? `پیش‌نمایش آماده شد: ${fmt(data.summary.candidateCount)} بل به مبلغ ${fmt(data.summary.totalAmountDue || 0)} افغانی.`
+        : 'برای این بازه بل جدید قابل صدور پیدا نشد؛ ماه‌ها ممکن است قبلاً صادر شده باشند.');
+    } catch (error) {
+      setAdvanceBillingPreview(null);
+      setAdvanceBillingPayload(null);
+      setMessage(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const generateAdvanceStudentBilling = async () => {
+    if (!advanceBillingPayload || !advanceBillingPreview?.summary?.candidateCount) return;
+    setBusy(true);
+    try {
+      const data = await postJson(`${API_BASE}/api/finance/admin/bills/generate`, advanceBillingPayload);
+      setMessage(data.message || 'بل‌های ماه‌های انتخاب‌شده صادر شد. اکنون مبلغ را پیش‌نمایش و میان بل‌ها تخصیص دهید.');
+      setAdvanceBillingPreview(null);
+      setAdvanceBillingPayload(null);
+      await refreshPaymentWorkspace({ includeAnomalies: true });
+      const createdFeeOrderIds = Array.isArray(data?.createdFeeOrderIds) ? data.createdFeeOrderIds.map(String) : [];
+      if (createdFeeOrderIds.length) {
+        setPaymentDeskForm((previous) => ({
+          ...previous,
+          amount: String(data?.createdAmount || ''),
+          allocationMode: 'auto_selected',
+          selectedFeeOrderIds: createdFeeOrderIds,
+          manualAllocations: {}
+        }));
+        setMessage(`${data.message || 'بل‌ها صادر شد.'} مبلغ و بل‌های جدید برای پیش‌نمایش پرداخت انتخاب شدند.`);
+      }
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const requestDeliveryTemplatePreview = async (payload = {}) => {
@@ -4415,7 +4630,7 @@ export default function AdminFinance() {
       }
       const data = await postJson(`${API_BASE}/api/finance/admin/bills`, payload);
       setMessage(data.message || 'بل ایجاد شد');
-      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4435,7 +4650,7 @@ export default function AdminFinance() {
       const data = await postJson(`${API_BASE}/api/finance/admin/bills/generate`, payload);
       setBillingPreview(null);
       setMessage(data.message || 'بل گروهی ایجاد شد');
-      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -4802,7 +5017,6 @@ export default function AdminFinance() {
         reason: ''
       }));
       await refreshPaymentWorkspace({
-        includeClassReport: true,
         includeAnomalies: true,
         includeRegistries: true
       });
@@ -4823,7 +5037,6 @@ export default function AdminFinance() {
       setDiscountRegistry((prev) => prev.filter((item) => item.id !== discountId));
       setMessage(data.message || 'تخفیف لغو شد');
       await refreshPaymentWorkspace({
-        includeClassReport: true,
         includeAnomalies: true,
         includeRegistries: true
       });
@@ -4901,7 +5114,6 @@ export default function AdminFinance() {
         note: ''
       }));
       await refreshPaymentWorkspace({
-        includeClassReport: true,
         includeAnomalies: true,
         includeRegistries: true
       });
@@ -4920,7 +5132,6 @@ export default function AdminFinance() {
       setExemptions((prev) => prev.filter((item) => item.id !== exemptionId));
       setMessage(data.message || 'معافیت لغو شد');
       await refreshPaymentWorkspace({
-        includeClassReport: true,
         includeAnomalies: true,
         includeRegistries: true
       });
@@ -4953,7 +5164,7 @@ export default function AdminFinance() {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/student-finance/payments/${id}/approve`, {});
       setMessage(data.message || 'رسید تایید شد');
-      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -5016,7 +5227,7 @@ export default function AdminFinance() {
         || `${approved} رسید تأیید نهایی شد${failed ? ` و ${failed} مورد برای بررسی باقی ماند` : ''}.`
       );
       setClassPaymentApprovalRefreshKey((value) => value + 1);
-      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -5058,7 +5269,7 @@ export default function AdminFinance() {
         || `${corrected} رسید اصلاح شد${failed ? ` و ${failed} مورد نیازمند بررسی باقی ماند` : ''}.`
       );
       setAdmissionReceiptCorrectionRefreshKey((value) => value + 1);
-      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -5093,7 +5304,7 @@ export default function AdminFinance() {
       });
       setMessage(data?.message || `${Number(data?.summary?.repaired || 0)} پرداخت تفکیک شد.`);
       setPaymentScopeRepairRefreshKey((value) => value + 1);
-      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -5179,7 +5390,7 @@ export default function AdminFinance() {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/student-finance/orders/${billId}/discount`, { type, amount, reason });
       setMessage(data.message || 'تعدیل ثبت شد');
-      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true, includeRegistries: true });
+      await refreshPaymentWorkspace({ includeAnomalies: true, includeRegistries: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -5209,7 +5420,7 @@ export default function AdminFinance() {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/student-finance/orders/${billId}/void`, { reason });
       setMessage(data.message || 'بل باطل شد');
-      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -5981,7 +6192,7 @@ export default function AdminFinance() {
         })
       );
       setMessage(data.message || 'داخله ثبت شد و ناهنجاری مالی حل شد');
-      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -6026,7 +6237,7 @@ export default function AdminFinance() {
         .join('، ');
       setMessage(`${data.message || 'ثبت گروهی داخله انجام شد'}${failed && failureNames ? ` موارد خطادار: ${failureNames}` : ''}`);
       setAdmissionBatchRefreshKey((value) => value + 1);
-      await refreshPaymentWorkspace({ includeClassReport: true, includeAnomalies: true });
+      await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
       setBusy(false);
@@ -6181,118 +6392,182 @@ export default function AdminFinance() {
         )}
       </div>
 
+      <div className="finance-card finance-overview-filter" data-finance-section="overview reports">
+        <div>
+          <span className="finance-eyebrow">گزارش هوشمند مالی</span>
+          <strong>یک بازه، یک منبع ارقام</strong>
+          <p className="muted">بل، پرداخت، تخفیف، مصرف و خزانه در همین بازه با هم محاسبه می‌شوند.</p>
+        </div>
+        <label>
+          <span>از تاریخ</span>
+          <AfghanDateInput
+            value={financeOverviewRange.from}
+            onChange={(value) => setFinanceOverviewRange((previous) => ({ ...previous, from: value }))}
+            showGregorianEquivalent
+          />
+        </label>
+        <label>
+          <span>تا تاریخ</span>
+          <AfghanDateInput
+            value={financeOverviewRange.to}
+            onChange={(value) => setFinanceOverviewRange((previous) => ({ ...previous, to: value }))}
+            showGregorianEquivalent
+          />
+        </label>
+        <label>
+          <span>سال تعلیمی</span>
+          <select value={reportAcademicYearId} onChange={(event) => setReportAcademicYearId(event.target.value)}>
+            <option value="">همه سال‌ها</option>
+            {academicYears.map((item) => (
+              <option key={`finance-report-year-${item.id}`} value={item.id}>{item.title}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>صنف</span>
+          <select value={reportClassId} onChange={(event) => setReportClassId(event.target.value)}>
+            <option value="">همه صنف‌ها</option>
+            {classOptions.map((item) => (
+              <option key={`finance-report-class-${item.classId}`} value={item.classId}>{item.title}</option>
+            ))}
+          </select>
+        </label>
+        <div className="finance-overview-filter-actions">
+          <button type="button" className="secondary" onClick={() => void loadAll()} disabled={busy || financeOverviewLoading}>
+            {financeOverviewLoading ? 'در حال تازه‌سازی…' : 'تازه‌سازی'}
+          </button>
+          <button type="button" className="secondary" onClick={() => schedulePrint('overview')}>چاپ / پی‌دی‌اف</button>
+        </div>
+      </div>
+
+      <div className="finance-smart-kpi-grid" data-finance-section="overview">
+        {financeSmartCards.map((item) => (
+          <button
+            key={`finance-smart-${item.key}`}
+            type="button"
+            className={`finance-smart-kpi finance-smart-kpi-${item.tone}`}
+            onClick={() => setActiveSection(item.section)}
+          >
+            <span>{item.label}</span>
+            <strong>{fmt(item.value || 0)} <small>AFN</small></strong>
+            <small>{item.meta}</small>
+          </button>
+        ))}
+      </div>
+
       <div className="finance-summary" data-finance-section="overview">
-        <div><span>رسیدهای در انتظار</span><strong>{summary?.pendingReceipts || 0}</strong></div>
-        <div><span>بل‌های سررسید گذشته</span><strong>{summary?.overdueBills || 0}</strong></div>
-        <div><span>وصول امروز</span><strong>{fmt(summary?.todayCollection)} AFN</strong></div>
-        <div><span>وصول ماه</span><strong>{fmt(summary?.monthCollection)} AFN</strong></div>
-        <div><span>تسهیلات فعال</span><strong>{summary?.activeReliefs || activeFinanceReliefCount}</strong></div>
-        <div><span>تسهیلات ثابت</span><strong>{fmt(summary?.fixedReliefAmount || 0)} AFN</strong></div>
-        <div><span>نرخ وصول</span><strong>{summary?.collectionRate || 0}%</strong></div>
+        <div><span>رسیدهای در انتظار</span><strong>{financeOverviewKpis?.pendingReceipts?.count ?? summary?.pendingReceipts ?? 0}</strong></div>
+        <div><span>بل‌های سررسید گذشته</span><strong>{financeOverviewKpis?.overdue?.count ?? summary?.overdueBills ?? 0}</strong></div>
+        <div><span>نرخ وصول کل</span><strong>{fmt(financeOverviewKpis?.rates?.collection || summary?.collectionRate || 0)}%</strong></div>
+        <div><span>نرخ باقیات</span><strong>{fmt(financeOverviewKpis?.rates?.outstanding || 0)}%</strong></div>
+        <div><span>نرخ تخفیف</span><strong>{fmt(financeOverviewKpis?.rates?.relief || 0)}%</strong></div>
+        <div><span>نسبت مصرف به عاید</span><strong>{fmt(financeOverviewKpis?.rates?.expenseToIncome || 0)}%</strong></div>
+        <div><span>خالص خزانه</span><strong>{fmt(financeOverviewKpis?.treasury?.net || 0)} AFN</strong></div>
         <div><span>مرحله مدیر مالی</span><strong>{summary?.receiptWorkflow?.financeManager || 0}</strong></div>
         <div><span>مرحله ریاست عمومی</span><strong>{(summary?.receiptWorkflow?.generalPresident || 0) + (summary?.receiptWorkflow?.financeLead || 0)}</strong></div>
       </div>
 
+      <div className="finance-grid finance-dashboard-grid" data-finance-section="overview reports">
+        <FinanceDonutCard
+          title="وضعیت تعهدات مالی"
+          subtitle="پرداخت، باقیات، تخفیف و جریمه تا پایان بازه انتخاب‌شده"
+          rows={financeOverview?.distributions?.obligations || []}
+        />
+        <FinanceDonutCard
+          title="عواید در برابر مصارف"
+          subtitle="فقط پرداخت‌ها و مصارف تاییدشده در بازه انتخاب‌شده"
+          rows={financeOverview?.distributions?.incomeExpense || []}
+        />
+        <FinanceDonutCard
+          title="روش‌های پرداخت"
+          subtitle="سهم هر روش از پرداخت‌های تاییدشده"
+          rows={financeOverview?.distributions?.paymentMethods || []}
+        />
+        <FinanceDonutCard
+          title="عمر باقیات"
+          subtitle="باقیات جاری، ۳۰ روز، ۶۰ روز و بیشتر"
+          rows={financeOverview?.distributions?.aging || []}
+        />
+      </div>
+
+      <div className="finance-grid finance-recent-finance-grid" data-finance-section="overview reports">
+        <div className="finance-card">
+          <div className="finance-card-head">
+            <div><h3>آخرین بل‌ها</h3><p className="muted">۱۰ بل اخیر در بازه انتخاب‌شده</p></div>
+            <button type="button" className="secondary" onClick={() => setActiveSection('orders')}>همه بل‌ها</button>
+          </div>
+          <div className="finance-subcard-list">
+            {(financeOverview?.recent?.bills || []).map((item) => (
+              <div key={`overview-recent-bill-${item.id}`} className="mini-row">
+                <span className="finance-cell-stack"><strong>{item.studentName}</strong><small>{item.title} · {item.classTitle}</small></span>
+                <span className="finance-cell-stack"><strong>{fmt(item.amount)} AFN</strong><small>باقیات: {fmt(item.outstanding)} · {toFaDate(item.occurredAt)}</small></span>
+              </div>
+            ))}
+            {!financeOverview?.recent?.bills?.length && <p className="muted">در این بازه بل تازه‌ای صادر نشده است.</p>}
+          </div>
+        </div>
+        <div className="finance-card">
+          <div className="finance-card-head">
+            <div><h3>آخرین پرداخت‌ها</h3><p className="muted">فقط پرداخت‌های تاییدشده</p></div>
+            <button type="button" className="secondary" onClick={() => setActiveSection('payments')}>همه پرداخت‌ها</button>
+          </div>
+          <div className="finance-subcard-list">
+            {(financeOverview?.recent?.payments || []).map((item) => (
+              <div key={`overview-recent-payment-${item.id}`} className="mini-row">
+                <span className="finance-cell-stack"><strong>{item.studentName}</strong><small>{item.classTitle} · {PAYMENT_METHOD_UI_LABELS[item.paymentMethod] || item.paymentMethod}</small></span>
+                <span className="finance-cell-stack"><strong>{fmt(item.amount)} AFN</strong><small>{toFaDate(item.occurredAt)}</small></span>
+              </div>
+            ))}
+            {!financeOverview?.recent?.payments?.length && <p className="muted">در این بازه پرداخت تاییدشده ثبت نشده است.</p>}
+          </div>
+        </div>
+        <div className="finance-card">
+          <div className="finance-card-head">
+            <div><h3>آخرین مصارف</h3><p className="muted">مصارف تاییدشده متصل به گزارش</p></div>
+            <Link className="secondary" to="/admin-government-finance">مرکز مصارف</Link>
+          </div>
+          <div className="finance-subcard-list">
+            {(financeOverview?.recent?.expenses || []).map((item) => (
+              <div key={`overview-recent-expense-${item.id}`} className="mini-row">
+                <span className="finance-cell-stack"><strong>{item.title}</strong><small>{item.vendorName || item.referenceNo || 'بدون مرجع'}</small></span>
+                <span className="finance-cell-stack"><strong>{fmt(item.amount)} AFN</strong><small>{toFaDate(item.occurredAt)}</small></span>
+              </div>
+            ))}
+            {!financeOverview?.recent?.expenses?.length && <p className="muted">در این بازه مصرف تاییدشده ثبت نشده است.</p>}
+          </div>
+        </div>
+      </div>
+
       <div className="finance-grid finance-dashboard-grid" data-finance-section="overview">
-        <div className="finance-card finance-kpi-card">
+        <div className="finance-card finance-smart-problem-card">
           <div className="finance-card-head">
             <div>
-              <h3>وضعیت فیس شاگردان</h3>
-              <p className="muted">نمای فوری تعهدات مالی شاگردان بر اساس بل‌های ثبت‌شده.</p>
+              <h3>شاگردان نیازمند پیگیری</h3>
+              <p className="muted">اولویت‌بندی خودکار بر اساس مدت تاخیر، تعداد بل سررسید گذشته و مبلغ باقیات.</p>
             </div>
-            <span className="finance-chip finance-chip-emerald">{openBillsCount} بدهی باز</span>
+            <span className="finance-chip finance-chip-rose">{fmt(problemStudentSummary.critical)} مورد بحرانی</span>
           </div>
-          <div className="finance-kpi-grid">
-            <div className="finance-kpi-item">
-              <span>کل بدهی</span>
-              <strong>{fmt(financeHeadlineStats.totalDue)} AFN</strong>
-            </div>
-            <div className="finance-kpi-item">
-              <span>کل پرداخت‌شده</span>
-              <strong>{fmt(financeHeadlineStats.totalPaid)} AFN</strong>
-            </div>
-            <div className="finance-kpi-item finance-kpi-item-accent">
-              <span>باقی‌مانده</span>
-              <strong>{fmt(financeHeadlineStats.outstanding)} AFN</strong>
-            </div>
-          </div>
-          <div className="finance-kpi-card-footer">
-            <button type="button" className="secondary" onClick={() => setActiveSection('orders')}>باز کردن بل‌ها و تعهدات</button>
-          </div>
-        </div>
-
-        <div className="finance-card finance-kpi-card">
-          <div className="finance-card-head">
-            <div>
-              <h3>وضعیت امروز</h3>
-              <p className="muted">فعالیت روز جاری صندوق و ثبت رسیدها در یک نگاه.</p>
-            </div>
-            <span className="finance-chip">{toFaDate(cashierReportDate)}</span>
-          </div>
-          <div className="finance-kpi-grid">
-            <div className="finance-kpi-item">
-              <span>پرداخت‌های امروز</span>
-              <strong>{financeHeadlineStats.todayPayments}</strong>
-            </div>
-            <div className="finance-kpi-item">
-              <span>تعداد رسیدها</span>
-              <strong>{financeHeadlineStats.todayReceipts}</strong>
-            </div>
-            <div className="finance-kpi-item finance-kpi-item-accent">
-              <span>مجموع نقدی</span>
-              <strong>{fmt(financeHeadlineStats.todayCash)} AFN</strong>
-            </div>
-          </div>
-          <div className="finance-kpi-card-footer">
-            <button type="button" className="secondary" onClick={() => setActiveSection('payments')}>باز کردن میز پرداخت</button>
-          </div>
-        </div>
-
-        <div className="finance-card finance-kpi-card">
-          <div className="finance-card-head">
-            <div>
-              <h3>وضعیت ماه</h3>
-              <p className="muted">درآمد این ماه و مقایسه با ماه گذشته.</p>
-            </div>
-            <span className={`finance-chip ${monthlyComparison.deltaAmount >= 0 ? 'finance-chip-emerald' : 'finance-chip-rose'}`}>
-              {monthlyComparison.deltaAmount >= 0 ? 'رشد' : 'افت'} {fmt(Math.abs(monthlyComparison.deltaAmount))} AFN
-            </span>
-          </div>
-          <div className="finance-kpi-grid">
-            <div className="finance-kpi-item">
-              <span>درآمد این ماه</span>
-              <strong>{fmt(monthlyComparison.currentMonth)} AFN</strong>
-            </div>
-            <div className="finance-kpi-item">
-              <span>ماه قبل</span>
-              <strong>{fmt(monthlyComparison.previousMonth)} AFN</strong>
-            </div>
-            <div className="finance-kpi-item finance-kpi-item-accent">
-              <span>مقایسه ماهانه</span>
-              <strong>{fmt(Math.abs(monthlyComparison.deltaPercent))}% {monthlyComparison.deltaAmount >= 0 ? 'بیشتر' : 'کمتر'}</strong>
-            </div>
-          </div>
-          <div className="finance-kpi-card-footer">
-            <button type="button" className="secondary" onClick={() => setActiveSection('reports')}>باز کردن گزارش‌های ماهانه</button>
-          </div>
-        </div>
-
-        <div className="finance-card finance-kpi-card">
-          <div className="finance-card-head">
-            <div>
-              <h3>شاگردان مشکل‌دار</h3>
-              <p className="muted">شاگردانی که بیشترین بدهی یا بل سررسید گذشته دارند.</p>
-            </div>
-            <span className="finance-chip finance-chip-rose">{summary?.overdueBills || 0} بل سررسید گذشته</span>
+          <div className="finance-kpi-grid finance-kpi-grid-dense">
+            <div className="finance-kpi-item"><span>شاگرد نیازمند پیگیری</span><strong>{fmt(problemStudentSummary.count)}</strong></div>
+            <div className="finance-kpi-item"><span>مجموع باقیات</span><strong>{fmt(problemStudentSummary.amount)} AFN</strong></div>
+            <div className="finance-kpi-item"><span>بل سررسید گذشته</span><strong>{fmt(problemStudentSummary.overdueOrders)}</strong></div>
+            <div className="finance-kpi-item finance-kpi-item-accent"><span>بحرانی ۶۰+ روز</span><strong>{fmt(problemStudentSummary.critical)}</strong></div>
           </div>
           <div className="finance-problem-list">
             {problemStudents.map((row) => (
-              <div key={row.id} className="finance-problem-row">
-                <strong>{row.name}</strong>
-                <span>{fmt(row.amount)} AFN</span>
+              <div key={row.studentId || row.name} className="finance-problem-row">
+                <span className="finance-cell-stack">
+                  <strong>{row.name}</strong>
+                  <small>{row.classTitle} · {fmt(row.overdueOrderCount)} بل · {fmt(row.maxLateDays)} روز تاخیر</small>
+                </span>
+                <span className="finance-cell-stack">
+                  <strong>{fmt(row.amount)} AFN</strong>
+                  <span className={`finance-risk-badge ${row.risk}`}>{row.risk === 'critical' ? 'بحرانی' : row.risk === 'high' ? 'زیاد' : 'پیگیری'}</span>
+                </span>
+                <button type="button" className="secondary" onClick={() => openDebtorInPaymentDesk(row)}>میز پرداخت</button>
               </div>
             ))}
-            {!problemStudents.length && <p className="muted">فعلاً شاگرد بدهکار شاخصی ثبت نشده است.</p>}
+            {!problemStudents.length && <p className="muted">در بازه انتخاب‌شده شاگرد دارای باقیات سررسید گذشته وجود ندارد.</p>}
           </div>
           <div className="finance-kpi-card-footer">
             <button type="button" className="secondary" onClick={() => setActiveSection('reports')}>مشاهده گزارش بدهکاران</button>
@@ -6304,87 +6579,45 @@ export default function AdminFinance() {
         <div className="finance-card finance-chart-card finance-chart-card-wide" data-testid="income-trend-card">
           <div className="finance-card-head">
             <div>
-              <h3>نمودار درآمد</h3>
-              <p className="muted">نمای روزانه، هفته‌ای یا ماهانه‌ی وصول مالی بر پایه جریان نقدی ثبت‌شده.</p>
-              {incomeTrendUsesRegisteredFallback ? (
-                <span className="finance-chip finance-chip-amber">شامل پرداخت‌های در انتظار تایید</span>
-              ) : null}
+              <h3>نمودار هوشمند عواید، مصارف و خالص</h3>
+              <p className="muted">مقایسه پرداخت‌ها و مصارف تاییدشده؛ خط خالص تفاوت واقعی عواید و مصارف را نشان می‌دهد.</p>
             </div>
-            <div className="finance-layout-toggle" role="group" aria-label="بازه زمانی نمودار درآمد">
+            <div className="finance-layout-toggle" role="group" aria-label="بازه زمانی نمودار عواید و مصارف">
               <button type="button" className={incomeTrendRange === 'daily' ? 'secondary is-active' : 'secondary'} onClick={() => setIncomeTrendRange('daily')}>روزانه</button>
               <button type="button" className={incomeTrendRange === 'weekly' ? 'secondary is-active' : 'secondary'} onClick={() => setIncomeTrendRange('weekly')}>هفته‌ای</button>
               <button type="button" className={incomeTrendRange === 'monthly' ? 'secondary is-active' : 'secondary'} onClick={() => setIncomeTrendRange('monthly')}>ماهانه</button>
             </div>
           </div>
-          {incomeTrendSeries.length ? (
+          <div className="finance-flow-chart-summary">
+            <span><i className="income" />عواید: <strong>{fmt(financeOverviewKpis?.approvedRevenue?.amount || 0)} AFN</strong></span>
+            <span><i className="expense" />مصارف: <strong>{fmt(financeOverviewKpis?.expenses?.amount || 0)} AFN</strong></span>
+            <span><i className="net" />خالص: <strong>{fmt(financeOverviewKpis?.netCash?.amount || 0)} AFN</strong></span>
+          </div>
+          {financeFlowTrendSeries.length ? (
             <div className="finance-line-chart">
-              <svg viewBox="0 0 520 220" className="finance-line-chart-svg" role="img" aria-label="نمودار درآمد">
-                <defs>
-                  <linearGradient id="financeIncomeFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="rgba(56, 189, 248, 0.34)" />
-                    <stop offset="100%" stopColor="rgba(56, 189, 248, 0.02)" />
-                  </linearGradient>
-                </defs>
+              <svg viewBox="0 0 520 220" className="finance-line-chart-svg" role="img" aria-label="نمودار عواید، مصارف و خالص">
                 {[0, 1, 2, 3].map((step) => {
                   const y = 20 + ((180 / 3) * step);
                   return <line key={`income-grid-${step}`} x1="20" y1={y} x2="500" y2={y} className="finance-line-grid" />;
                 })}
-                <path d={incomeTrendChart.areaPath} className="finance-line-fill" />
-                <path d={incomeTrendChart.linePath} className="finance-line-path" />
-                {incomeTrendChart.points.map((point) => (
-                  <circle key={`income-point-${point.bucket}`} cx={point.x} cy={point.y} r="4.5" className="finance-line-point" />
-                ))}
+                <line x1="20" y1={financeFlowTrendChart.zeroY} x2="500" y2={financeFlowTrendChart.zeroY} className="finance-zero-line" />
+                <path d={financeFlowTrendChart.paths.income} className="finance-flow-line income" />
+                <path d={financeFlowTrendChart.paths.expense} className="finance-flow-line expense" />
+                <path d={financeFlowTrendChart.paths.net} className="finance-flow-line net" />
               </svg>
               <div className="finance-line-chart-legend">
-                {incomeTrendSeries.slice(-6).map((item) => (
+                {financeFlowTrendSeries.slice(-6).map((item) => (
                   <div key={`income-legend-${item.bucket}`} className="finance-line-legend-item">
                     <span>{item.label}</span>
-                    <strong>{fmt(item.total)} AFN</strong>
+                    <small>عاید {fmt(item.income)} · مصرف {fmt(item.expense)}</small>
+                    <strong className={Number(item.net || 0) < 0 ? 'finance-negative' : ''}>خالص {fmt(item.net)} AFN</strong>
                   </div>
                 ))}
               </div>
             </div>
           ) : (
-            <p className="muted finance-chart-empty">
-              {cashflowReport?.pendingTotal
-                ? 'پرداخت‌ها ثبت شده‌اند، اما برای این بازه هنوز پرداخت تاییدشده در نمودار رسمی وجود ندارد.'
-                : 'برای نمودار درآمد هنوز داده کافی ثبت نشده است.'}
-            </p>
+            <p className="muted finance-chart-empty">برای بازه انتخاب‌شده عاید یا مصرف تاییدشده‌ای ثبت نشده است.</p>
           )}
-        </div>
-
-        <div className="finance-card finance-chart-card" data-testid="paid-vs-due-card">
-          <div className="finance-card-head">
-            <div>
-              <h3>پرداخت در برابر بدهی</h3>
-              <p className="muted">مقایسه وصول و تعهد هر صنف برای تشخیص شکاف پرداخت.</p>
-            </div>
-            <span className="finance-chip finance-chip-muted">{paidVsDueRows.length} صنف</span>
-          </div>
-          <div className="finance-compare-list">
-            {paidVsDueRows.map((row) => (
-              <div key={row.key} className="finance-compare-row">
-                <div className="finance-compare-head">
-                  <strong>{row.label}</strong>
-                  <span>{row.collectionRate}% وصول</span>
-                </div>
-                <div className="finance-compare-bars">
-                  <div className="finance-compare-track">
-                    <span className="finance-compare-bar finance-compare-bar-due" style={{ width: `${(row.due / paidVsDueMax) * 100}%` }} />
-                  </div>
-                  <div className="finance-compare-track">
-                    <span className="finance-compare-bar finance-compare-bar-paid" style={{ width: `${(row.paid / paidVsDueMax) * 100}%` }} />
-                  </div>
-                </div>
-                <div className="finance-compare-meta">
-                  <span>بدهی: {fmt(row.due)} AFN</span>
-                  <span>پرداخت: {fmt(row.paid)} AFN</span>
-                  <span>باقی‌مانده: {fmt(row.outstanding)} AFN</span>
-                </div>
-              </div>
-            ))}
-            {!paidVsDueRows.length && <p className="muted finance-chart-empty">برای مقایسه پرداخت و بدهی هنوز داده‌ای موجود نیست.</p>}
-          </div>
         </div>
       </div>
 
@@ -6732,6 +6965,40 @@ export default function AdminFinance() {
               ))}
             </div>
           )}
+          <div className="finance-advance-payment-panel" data-testid="advance-month-payment-panel">
+            <div>
+              <strong>پرداخت چندماهه یا یک‌جای سال</strong>
+              <small>ابتدا بل ماه‌های موردنظر را پیش‌نمایش کنید؛ بل‌های تکراری دوباره ساخته نمی‌شوند.</small>
+            </div>
+            <div className="finance-advance-payment-actions">
+              {[1, 3, 6, 9, 12].map((count) => (
+                <button
+                  key={`advance-month-${count}`}
+                  type="button"
+                  className="secondary"
+                  disabled={busy || !paymentDeskMembershipStudent}
+                  onClick={() => previewAdvanceStudentBilling(count)}
+                >
+                  {count === 12 ? 'تا پایان سال' : `${fmt(count)} ماه`}
+                </button>
+              ))}
+            </div>
+            {advanceBillingPreview ? (
+              <div className="finance-advance-preview">
+                <span>
+                  قابل صدور: <strong>{fmt(advanceBillingPreview?.summary?.candidateCount || 0)} بل</strong>
+                  {' · '}
+                  مبلغ: <strong>{fmt(advanceBillingPreview?.summary?.totalAmountDue || 0)} AFN</strong>
+                  {' · '}
+                  تکراری: <strong>{fmt(advanceBillingPreview?.summary?.duplicateCount || 0)}</strong>
+                </span>
+                <div>
+                  <button type="button" className="secondary" onClick={() => { setAdvanceBillingPreview(null); setAdvanceBillingPayload(null); }}>لغو پیش‌نمایش</button>
+                  <button type="button" onClick={generateAdvanceStudentBilling} disabled={busy || !advanceBillingPreview?.summary?.candidateCount}>تایید صدور بل‌ها</button>
+                </div>
+              </div>
+            ) : null}
+          </div>
           <div className="finance-payment-section-title">
             <span>مشخصات پرداخت</span>
             <small>مبلغ، نوع پرداخت و تاریخ</small>
@@ -8817,37 +9084,53 @@ export default function AdminFinance() {
       </div>
 
       <div className="finance-grid" data-finance-section="overview reports">
-        <div className="finance-card" data-finance-section="overview reports" data-testid="aging-report-card">
-          <h3>گزارش بل‌های سررسید گذشته</h3>
-          <p>جاری: {fmt(visibleAging?.buckets?.current || 0)} | 1-30: {fmt(visibleAging?.buckets?.d1_30 || 0)} | 31-60: {fmt(visibleAging?.buckets?.d31_60 || 0)} | 60+: {fmt(visibleAging?.buckets?.d61_plus || 0)}</p>
-          <p>مجموع سررسید گذشته: {fmt(visibleAging?.totalRemaining || 0)} AFN</p>
-          <p className="muted">تسهیلات فعال: {visibleAging?.reliefSummary?.activeCount || aging?.reliefSummary?.activeCount || 0} | ثابت: {fmt(visibleAging?.reliefSummary?.fixedAmount || aging?.reliefSummary?.fixedAmount || 0)} AFN</p>
-        </div>
-        <div className="finance-card" data-finance-section="overview reports" data-testid="by-class-report-card">
-          <h3>وصول به تفکیک صنف</h3>
-          {visibleByClass.slice(0, 6).map((row) => (
-            <div key={row.classId || row.courseId || row.course} className="mini-row">
-              <span className="finance-cell-stack">
-                <strong>{row.schoolClass?.title || row.course}</strong>
-                {!!row.reliefCount && <small>{row.reliefCount} تسهیل | {fmt(row.fixedReliefAmount || 0)} AFN</small>}
-              </span>
-              <span>{fmt(row.paid)} / {fmt(row.due)}</span>
+        <div className="finance-card finance-smart-debtors-card" data-finance-section="overview reports" data-testid="top-debtors-card">
+          <div className="finance-card-head">
+            <div>
+              <h3>بدهکاران اصلی</h3>
+              <p className="muted">فهرست هوشمند باقیات با ۱۰ شاگرد در هر صفحه؛ فیلتر سال و صنف از بالای داشبورد اعمال می‌شود.</p>
             </div>
-          ))}
-        </div>
-        <div className="finance-card" data-finance-section="overview reports" data-testid="top-debtors-card">
-          <h3>بدهکاران اصلی</h3>
-          {topDebtors.slice(0, 6).map((row) => (
-            <div key={row.studentId || row.name} className="mini-row">
-              <span>{row.name}</span>
-              <span>{fmt(row.amount)} AFN</span>
+            <div className="finance-chip-group">
+              <span className="finance-chip">{fmt(filteredOverviewDebtors.length)} شاگرد</span>
+              <span className="finance-chip finance-chip-rose">{fmt(filteredOverviewDebtors.reduce((sum, row) => sum + Number(row?.amount || 0), 0))} AFN</span>
             </div>
-          ))}
+          </div>
+          <div className="finance-debtor-controls">
+            <label><span>جستجو</span><input value={debtorSearchTerm} onChange={(event) => setDebtorSearchTerm(event.target.value)} placeholder="نام شاگرد یا صنف" /></label>
+            <label>
+              <span>مدت تاخیر</span>
+              <select value={debtorDelayFilter} onChange={(event) => setDebtorDelayFilter(event.target.value)}>
+                <option value="all">همه باقیات</option>
+                <option value="1">سررسید گذشته</option>
+                <option value="30">۳۰ روز و بیشتر</option>
+                <option value="60">۶۰ روز و بیشتر</option>
+              </select>
+            </label>
+          </div>
+          <div className="finance-smart-debtor-list">
+            {paginatedOverviewDebtors.map((row) => (
+              <div key={`smart-debtor-${row.studentId || row.name}`} className="finance-smart-debtor-row">
+                <span className="finance-cell-stack">
+                  <strong>{row.name}</strong>
+                  <small>{row.classTitle} · {fmt(row.orderCount)} بل باز</small>
+                </span>
+                <span className="finance-cell-stack"><strong>{fmt(row.amount)} AFN</strong><small>{fmt(row.overdueOrderCount)} بل سررسید گذشته</small></span>
+                <span className={`finance-risk-badge ${row.risk}`}>{row.maxLateDays ? `${fmt(row.maxLateDays)} روز تاخیر` : 'جاری'}</span>
+                <button type="button" className="secondary" onClick={() => openDebtorInPaymentDesk(row)}>باز کردن میز پرداخت</button>
+              </div>
+            ))}
+            {!paginatedOverviewDebtors.length && <p className="muted">بدهکاری مطابق این فیلتر پیدا نشد.</p>}
+          </div>
+          <div className="finance-pagination">
+            <button type="button" className="secondary" onClick={() => setDebtorPage((page) => Math.max(1, page - 1))} disabled={debtorPage <= 1}>صفحه قبلی</button>
+            <span>صفحه {fmt(debtorPage)} از {fmt(debtorPageCount)} · نمایش {fmt(filteredOverviewDebtors.length ? ((debtorPage - 1) * 10) + 1 : 0)} تا {fmt(Math.min(debtorPage * 10, filteredOverviewDebtors.length))}</span>
+            <button type="button" className="secondary" onClick={() => setDebtorPage((page) => Math.min(debtorPageCount, page + 1))} disabled={debtorPage >= debtorPageCount}>صفحه بعدی</button>
+          </div>
         </div>
       </div>
 
-      <div className="finance-grid" data-finance-section="overview reports settings discounts">
-        <div className="finance-card" data-finance-section="overview settings">
+      <div className="finance-grid" data-finance-section="reports settings">
+        <div className="finance-card" data-finance-section="reports settings">
           <h3>ماه‌های بسته شده</h3>
           {closedMonths.slice(0, 8).map((item) => (
             <div key={item._id} className="mini-row">
@@ -8855,27 +9138,6 @@ export default function AdminFinance() {
               <span>{item.closedBy?.name || 'ادمین'}</span>
             </div>
           ))}
-        </div>
-        <div className="finance-card" data-finance-section="overview reports">
-          <h3>جریان نقدی روزانه</h3>
-          {cashflowDisplayRows.slice(-7).map((row) => (
-            <div key={row.date} className="mini-row">
-              <span>{toFaDate(row.date)}</span>
-              <span>{fmt(row.total)}</span>
-            </div>
-          ))}
-          <p className="muted">در انتظار: {fmt(cashflowReport?.pendingTotal || 0)} AFN | تسهیلات دوره: {cashflowReport?.reliefSummary?.activeCount || 0}</p>
-        </div>
-        <div className="finance-card" data-finance-section="overview reports discounts">
-          <h3>جمع تخفیف‌ها</h3>
-          {discountTotals.map((row) => (
-            <div key={row._id} className="mini-row">
-              <span>{row._id}</span>
-              <span>{fmt(row.total)}</span>
-            </div>
-          ))}
-          <p className="muted">تسهیلات فعال: {discountAnalytics?.summary?.activeReliefs || activeFinanceReliefCount} | بورسیه فعال: {discountAnalytics?.summary?.activeScholarships || 0}</p>
-          <p className="muted">تعداد پلان‌های فیس: {feePlans.length}</p>
         </div>
       </div>
 
@@ -9250,6 +9512,22 @@ export default function AdminFinance() {
               <div className="mini-row">
                 <span>در انتظار تایید</span>
                 <span>{fmt(monthCloseSnapshot?.totals?.pendingPaymentCount || 0)} / {fmt(monthCloseSnapshot?.totals?.pendingPaymentAmount || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>مصارف تاییدشده ماه</span>
+                <span>{fmt(monthCloseSnapshot?.totals?.approvedExpenseCount || 0)} / {fmt(monthCloseSnapshot?.totals?.approvedExpenseAmount || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>مصارف در انتظار</span>
+                <span>{fmt(monthCloseSnapshot?.totals?.pendingExpenseCount || 0)} / {fmt(monthCloseSnapshot?.totals?.pendingExpenseAmount || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>خالص نقد ماه</span>
+                <span>{fmt(monthCloseSnapshot?.totals?.netCashAmount || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>خالص ثبت خزانه</span>
+                <span>{fmt(monthCloseSnapshot?.totals?.treasuryNetAmount || 0)} AFN</span>
               </div>
               <div className="mini-row">
                 <span>یادداشت بستن ماه</span>
@@ -11186,6 +11464,70 @@ export default function AdminFinance() {
           </div>
         )}
       </div>
+      {printMode === 'overview' && financeOverview && (
+        <div className="finance-print-sheet" data-testid="printable-finance-overview">
+          <div className="finance-print-school-header">
+            <div className="finance-print-logo-box">
+              {printLogoUrls.schoolLogoUrl ? <img src={printLogoUrls.schoolLogoUrl} alt="لوگوی مکتب" /> : <span>لوگوی مکتب</span>}
+            </div>
+            <div className="finance-print-school-center">
+              <span>امارت اسلامی افغانستان</span>
+              <span>وزارت معارف</span>
+              <strong>{activeSchoolPrintInfo.title}</strong>
+            </div>
+            <div className="finance-print-logo-box">
+              {printLogoUrls.ministryLogoUrl ? <img src={printLogoUrls.ministryLogoUrl} alt="لوگوی وزارت معارف" /> : <span>لوگوی وزارت</span>}
+            </div>
+          </div>
+          <h3>گزارش مالی بازه انتخاب‌شده</h3>
+          <p className="muted">
+            از {toFaDate(financeOverview?.period?.startAt)} تا {toFaDate(financeOverview?.period?.endAt)}
+            {reportClassId ? ` · صنف: ${classOptions.find((item) => String(item.classId) === String(reportClassId))?.title || '-'}` : ' · همه صنف‌ها'}
+          </p>
+          <div className="receipt-meta-grid">
+            <div><span>تعداد بل صادرشده</span><strong>{fmt(financeOverviewKpis?.issuedBills?.count || 0)}</strong></div>
+            <div><span>تعداد شاگرد</span><strong>{fmt(financeOverviewKpis?.issuedBills?.studentCount || 0)}</strong></div>
+            <div><span>مبلغ ناخالص بل‌ها</span><strong>{fmt(financeOverviewKpis?.issuedBills?.grossAmount || 0)} AFN</strong></div>
+            <div><span>مبلغ پس از تخفیف</span><strong>{fmt(financeOverviewKpis?.issuedBills?.amount || 0)} AFN</strong></div>
+            <div><span>عواید تاییدشده</span><strong>{fmt(financeOverviewKpis?.approvedRevenue?.amount || 0)} AFN</strong></div>
+            <div><span>تخفیف و معافیت</span><strong>{fmt(financeOverviewKpis?.reliefs?.amount || 0)} AFN</strong></div>
+            <div><span>مصارف تاییدشده</span><strong>{fmt(financeOverviewKpis?.expenses?.amount || 0)} AFN</strong></div>
+            <div><span>باقیات پایان بازه</span><strong>{fmt(financeOverviewKpis?.outstanding?.amount || 0)} AFN</strong></div>
+            <div><span>خالص عواید</span><strong>{fmt(financeOverviewKpis?.netCash?.amount || 0)} AFN</strong></div>
+            <div><span>نرخ وصول</span><strong>{fmt(financeOverviewKpis?.rates?.collection || 0)}%</strong></div>
+            <div><span>رسید در انتظار</span><strong>{fmt(financeOverviewKpis?.pendingReceipts?.count || 0)}</strong></div>
+          </div>
+          <div className="receipt-trail">
+            <h4>تفکیک بر اساس صنف</h4>
+            <div className="trail-list">
+              {(financeOverview?.byClass || []).slice(0, 20).map((item) => (
+                <div key={`overview-print-class-${item.classId || item.title}`} className="mini-row">
+                  <span>{item.title}</span>
+                  <span>تعهد: {fmt(item.due)} · پرداخت: {fmt(item.paid)} · باقیات: {fmt(item.outstanding)} AFN</span>
+                </div>
+              ))}
+              {!financeOverview?.byClass?.length && <p className="muted">رقم صنفی ثبت نشده است.</p>}
+            </div>
+          </div>
+          <div className="receipt-trail">
+            <h4>تفکیک روش پرداخت</h4>
+            <div className="trail-list">
+              {(financeOverview?.distributions?.paymentMethods || []).map((item) => (
+                <div key={`overview-print-method-${item.key}`} className="mini-row">
+                  <span>{item.label}</span>
+                  <span>{fmt(item.value)} AFN · {fmt(item.percent)}%</span>
+                </div>
+              ))}
+              {!financeOverview?.distributions?.paymentMethods?.length && <p className="muted">پرداخت تاییدشده ثبت نشده است.</p>}
+            </div>
+          </div>
+          <div className="finance-print-signatures">
+            <div><span>ترتیب‌کننده</span><strong>امضا: __________________</strong></div>
+            <div><span>مدیر مالی</span><strong>امضا: __________________</strong></div>
+            <div><span>مدیر مکتب</span><strong>امضا و مهر: __________________</strong></div>
+          </div>
+        </div>
+      )}
       {printMode === 'receipt' && selectedReceiptPrintModel && (
         <div className="finance-print-sheet finance-receipt-print-sheet" data-testid="printable-receipt-sheet">
           {[
@@ -11212,7 +11554,7 @@ export default function AdminFinance() {
                   <strong>{activeSchoolPrintInfo.title}</strong>
                 </div>
                 <div>
-                  <span>شماره بل:</span>
+                  <span>{selectedReceiptPrintModel.isMultiBill ? 'شماره سند:' : 'شماره بل:'}</span>
                   <strong className="finance-latin-code">{selectedReceiptPrintModel.billNumber || '-'}</strong>
                 </div>
                 <div>
@@ -11231,6 +11573,26 @@ export default function AdminFinance() {
                   <span>مبلغ پرداختی:</span>
                   <strong>{fmt(selectedReceiptPrintModel.amount)} {selectedReceiptPrintModel.currencyLabel || 'افغانی'}</strong>
                 </div>
+                <div>
+                  <span>روش پرداخت:</span>
+                  <strong>{PAYMENT_METHOD_UI_LABELS[selectedReceiptPrintModel.paymentMethod] || selectedReceiptPrintModel.paymentMethod || '-'}</strong>
+                </div>
+                <div>
+                  <span>وضعیت:</span>
+                  <strong>{PAYMENT_STATUS_UI_LABELS[selectedReceiptPrintModel.status] || selectedReceiptPrintModel.status || '-'}</strong>
+                </div>
+                {selectedReceiptPrintModel.referenceNo !== '-' && (
+                  <div>
+                    <span>شماره مرجع:</span>
+                    <strong className="finance-latin-code">{selectedReceiptPrintModel.referenceNo}</strong>
+                  </div>
+                )}
+                {Number.isFinite(Number(selectedReceiptPrintModel.remainingAfterPayment)) && (
+                  <div>
+                    <span>باقی‌مانده پس از پرداخت:</span>
+                    <strong>{fmt(selectedReceiptPrintModel.remainingAfterPayment)} {selectedReceiptPrintModel.currencyLabel || 'افغانی'}</strong>
+                  </div>
+                )}
                 <div className="finance-receipt-field-wide">
                   <span>بابت:</span>
                   <strong>{selectedReceiptPrintModel.purpose}</strong>
@@ -11242,6 +11604,20 @@ export default function AdminFinance() {
                   </div>
                 )}
               </div>
+              {!!selectedReceiptPrintModel.allocations.length && (
+                <div className="finance-receipt-allocation-block">
+                  <span>تفکیک بل‌های پرداخت‌شده:</span>
+                  <div className="finance-receipt-allocation-list">
+                    {selectedReceiptPrintModel.allocations.map((allocation, index) => (
+                      <div key={`${copy.key}-receipt-allocation-${index}`}>
+                        <strong>{allocation.title || `بل ${index + 1}`}</strong>
+                        <small className="finance-latin-code">{formatFinanceCode(allocation.orderNumber, '-')}</small>
+                        <b>{fmt(allocation.amount)} {selectedReceiptPrintModel.currencyLabel || 'افغانی'}</b>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="finance-receipt-signatures">
                 <div>
                   <span>مسوول مالی</span>

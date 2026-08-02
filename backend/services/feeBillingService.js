@@ -5,12 +5,9 @@ const AcademicYear = require('../models/AcademicYear');
 const Discount = require('../models/Discount');
 const FeeExemption = require('../models/FeeExemption');
 const FinanceRelief = require('../models/FinanceRelief');
-const AfghanStudent = require('../models/AfghanStudent');
 const SchoolClass = require('../models/SchoolClass');
 const Course = require('../models/Course');
-const Enrollment = require('../models/Enrollment');
 const { findClassMemberships, listCourseMemberships } = require('../utils/studentMembershipLookup');
-const { assignStudentToClass } = require('./studentClassAssignmentService');
 const {
   getFeePlanPrimaryAmount,
   normalizeBillingFrequency,
@@ -125,7 +122,8 @@ function buildMonthlyBillingPeriods({
   dueDate = null,
   periodLabel = '',
   term = '',
-  includeFutureMonths = false
+  includeFutureMonths = false,
+  futureMonthCount = 0
 } = {}) {
   const requestedDueDate = asDate(dueDate) || new Date();
   const coverageStart = maxDate(
@@ -180,8 +178,10 @@ function buildMonthlyBillingPeriods({
   }
 
   const periods = [];
-  let bounds = solarMonthBounds(coverageStart);
-  while (bounds.start.getTime() <= coverageEnd.getTime()) {
+  const requestedMonth = solarMonthBounds(requestedDueDate);
+  let bounds = solarMonthBounds(maxDate(coverageStart, requestedMonth.start));
+  const requestedLimit = Math.max(0, Math.min(24, Number(futureMonthCount || 0) || 0));
+  while (bounds.start.getTime() <= coverageEnd.getTime() && (!requestedLimit || periods.length < requestedLimit)) {
     const period = buildPeriod(bounds);
     if (!period) {
       bounds = solarMonthBounds(addDays(bounds.end, 1));
@@ -504,77 +504,11 @@ async function recoverClassMembershipsFromRegisteredStudents({
   classId = '',
   academicYearId = null
 } = {}) {
-  if (!classId) return [];
-
-  const schoolClass = await SchoolClass.findById(classId).lean();
-  if (!schoolClass?._id || !schoolClass?.schoolId) return [];
-
-  const memberships = [];
-  const seenStudents = new Set();
-  const syncStudent = async (student, payload = {}) => {
-    const key = normalizeText(student?._id);
-    if (!key || seenStudents.has(key)) return;
-    seenStudents.add(key);
-    try {
-      const membership = await assignStudentToClass({
-        student,
-        payload: {
-          classId: schoolClass._id,
-          academicYearId: academicYearId || payload.academicYearId || schoolClass.academicYearId || null,
-          enrollmentDate: payload.enrollmentDate || student?.academicInfo?.enrollmentDate || new Date()
-        },
-        source: 'system',
-        note: 'Auto-synced from registration records before grouped billing.'
-      });
-      if (membership?._id) memberships.push(membership);
-    } catch {
-      // Keep billing recovery best-effort; invalid student rows should not block valid classmates.
-    }
-  };
-
-  const enrollmentRows = await Enrollment.find({
-    status: 'approved',
-    'academicContext.classId': schoolClass._id
-  }).select('linkedStudentId academicContext.academicYearId academicContext.enrollmentDate').limit(500);
-
-  const linkedStudentIds = enrollmentRows.map((item) => item.linkedStudentId).filter(Boolean);
-  const linkedStudents = linkedStudentIds.length
-    ? await AfghanStudent.find({ _id: { $in: linkedStudentIds }, status: { $ne: 'deleted' } }).limit(500)
-    : [];
-  const studentById = new Map(linkedStudents.map((student) => [normalizeText(student._id), student]));
-  for (const enrollment of enrollmentRows) {
-    const student = studentById.get(normalizeText(enrollment.linkedStudentId));
-    if (student) {
-      await syncStudent(student, {
-        academicYearId: enrollment.academicContext?.academicYearId,
-        enrollmentDate: enrollment.academicContext?.enrollmentDate
-      });
-    }
-  }
-
-  if (!schoolClass.gradeLevel) return memberships;
-
-  const exactQuery = {
-    status: 'active',
-    'academicInfo.currentSchool': schoolClass.schoolId,
-    'academicInfo.currentGrade': `grade${schoolClass.gradeLevel}`
-  };
-  if (schoolClass.section) exactQuery['academicInfo.currentSection'] = schoolClass.section;
-  if (schoolClass.shift) exactQuery['academicInfo.currentShift'] = schoolClass.shift;
-
-  let students = await AfghanStudent.find(exactQuery).limit(500);
-  if (!students.length && (schoolClass.section || schoolClass.shift)) {
-    students = await AfghanStudent.find({
-      status: 'active',
-      'academicInfo.currentSchool': schoolClass.schoolId,
-      'academicInfo.currentGrade': `grade${schoolClass.gradeLevel}`
-    }).limit(500);
-  }
-
-  for (const student of students) {
-    await syncStudent(student);
-  }
-  return memberships;
+  // بخش مالی مصرف‌کنندهٔ عضویت تعلیمی است و اجازه ندارد از روی
+  // معلومات قدیمی ثبت‌نام، عضویت تازه بسازد یا عضویت پایان‌یافته را فعال کند.
+  void classId;
+  void academicYearId;
+  return [];
 }
 
 function dedupeBillableMemberships(memberships = []) {
@@ -705,6 +639,9 @@ async function buildGroupedBillCandidates({
   includeDocument = false,
   includeOther = false,
   onlyDebtors = false,
+  studentMembershipId = '',
+  includeFutureMonths = false,
+  futureMonthCount = 0,
   recoverMemberships = false
 } = {}) {
   const selectedScopes = buildSelectedScopes({
@@ -733,8 +670,8 @@ async function buildGroupedBillCandidates({
     });
   }
 
-  // Preview requests must remain read-only. Membership recovery can create
-  // canonical memberships, so callers must opt in only during generation.
+  // این گزینه برای سازگاری مسیرهای قدیمی حفظ شده است؛ بازیابی مالی اکنون
+  // فقط باعث بازخوانی عضویت‌های رسمی می‌شود و هیچ عضویتی ایجاد نمی‌کند.
   if (classId && normalizeBool(recoverMemberships)) {
     const recoveredMemberships = await recoverClassMembershipsFromRegisteredStudents({
       classId,
@@ -763,6 +700,11 @@ async function buildGroupedBillCandidates({
   memberships = dedupeBillableMemberships(memberships).filter((membership) => (
     !schoolId || !membership.schoolId || normalizeText(membership.schoolId) === normalizeText(schoolId)
   ));
+  if (normalizeText(studentMembershipId)) {
+    memberships = memberships.filter((membership) => (
+      normalizeText(membership?._id) === normalizeText(studentMembershipId)
+    ));
+  }
   if (!memberships.length) {
     return {
       feePlan: null,
@@ -936,7 +878,9 @@ async function buildGroupedBillCandidates({
           academicYear: academicYearDoc,
           dueDate,
           periodLabel,
-          term: effectiveTerm
+          term: effectiveTerm,
+          includeFutureMonths: normalizeBool(includeFutureMonths),
+          futureMonthCount
         })
       : [{
         dueDate: asDate(dueDate),

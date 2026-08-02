@@ -319,6 +319,21 @@
   background: rgba(239, 68, 68, 0.16);
 }
 
+.student-status.pending {
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.16);
+}
+
+.student-status.dropped {
+  color: #fed7aa;
+  background: rgba(249, 115, 22, 0.16);
+}
+
+.student-status.expelled {
+  color: #fecaca;
+  background: rgba(185, 28, 28, 0.2);
+}
+
 .student-source-tags {
   display: flex;
   flex-wrap: wrap;

@@ -8,7 +8,7 @@ const studentLifecycleEventSchema = new mongoose.Schema({
   previousMembershipId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentMembership', default: null },
   eventType: {
     type: String,
-    enum: ['transfer_in', 'transfer_out', 'dropout', 'expulsion', 'suspension', 'suspension_lifted', 'graduation', 're_enrollment'],
+    enum: ['transfer_in', 'transfer_out', 'class_transfer', 'dropout', 'expulsion', 'suspension', 'suspension_lifted', 'graduation', 're_enrollment'],
     required: true,
     index: true
   },

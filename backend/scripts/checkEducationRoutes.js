@@ -817,8 +817,14 @@ const activityMock = {
   }
 };
 
+const TeacherAssignmentMock = {
+  find() {
+    return new MockQuery(() => []);
+  }
+};
+
 const studentLifecycleServiceMock = {
-  SUPPORTED_ACTIONS: ['transfer_in', 'transfer_out', 'dropout', 'expulsion', 'suspension', 'resume'],
+  SUPPORTED_ACTIONS: ['transfer_in', 'transfer_out', 'class_transfer', 'dropout', 'expulsion', 'suspension', 'resume', 're_enrollment'],
   async getStudentLifecycleHistory(membershipId) {
     const membership = membershipRecords.find((item) => String(item._id) === String(membershipId));
     if (!membership) return null;
@@ -842,6 +848,34 @@ const studentLifecycleServiceMock = {
       membership.classId = payload.classId;
       membership.course = payload.courseId;
     }
+    if (payload.action === 're_enrollment') {
+      const previousMembership = membershipRecords.find((item) => String(item._id) === String(payload.membershipId));
+      const nextMembership = {
+        ...clone(previousMembership),
+        _id: 'mem-re-enrolled',
+        course: payload.courseId,
+        classId: payload.classId,
+        academicYear: payload.academicYearId,
+        academicYearId: payload.academicYearId,
+        previousMembershipId: previousMembership?._id || null,
+        admissionType: 're_enrollment',
+        status: 'active',
+        isCurrent: true,
+        joinedAt: new Date(payload.effectiveAt),
+        enrolledAt: new Date(payload.effectiveAt),
+        endedAt: null,
+        leftAt: null
+      };
+      membershipRecords.push(nextMembership);
+      return {
+        membership: nextMembership,
+        event: { _id: 'lifecycle-re-enrollment-event-1' },
+        document: { _id: 'student-re-enrollment-1' },
+        documentType: 'StudentReEnrollment',
+        stoppedFutureBills: { bills: 0, orders: 0 },
+        admissionBilling: null
+      };
+    }
     return {
       membership,
       event: { _id: 'lifecycle-event-1' },
@@ -854,6 +888,34 @@ const studentLifecycleServiceMock = {
         bill: { _id: 'transfer-admission-bill-1', billNumber: 'BL-TEST-0001', amountOriginal: 600 }
       }
     };
+  }
+};
+
+const studentMembershipEligibilityMock = {
+  RE_ENROLLMENT_REQUIRED_STATUSES: ['transferred', 'transferred_out', 'graduated', 'dropped', 'expelled', 'inactive'],
+  async inspectRegularEnrollmentEligibility({ studentId, courseId = '', classId = '' } = {}) {
+    const current = membershipRecords.find((item) => String(item.student) === String(studentId) && item.isCurrent === true) || null;
+    if (current) {
+      const sameCourse = !courseId || String(current.course || '') === String(courseId);
+      const sameClass = !classId || !current.classId || String(current.classId) === String(classId);
+      if (!sameCourse || !sameClass) {
+        const error = new Error('تبدیلی صنف باید از بخش تغییر وضعیت تعلیمی ثبت شود.');
+        error.code = 'student_class_transfer_requires_lifecycle';
+        error.status = 409;
+        throw error;
+      }
+      return { eligible: true, currentMembership: makeMembershipDoc(current), latestMembership: current };
+    }
+    const latest = [...membershipRecords]
+      .filter((item) => String(item.student) === String(studentId))
+      .sort((left, right) => new Date(right.updatedAt || right.createdAt || 0) - new Date(left.updatedAt || left.createdAt || 0))[0] || null;
+    if (latest && studentMembershipEligibilityMock.RE_ENROLLMENT_REQUIRED_STATUSES.includes(String(latest.status || ''))) {
+      const error = new Error('بازگشت فقط از بخش ثبت‌نام مجدد امکان دارد.');
+      error.code = 'student_re_enrollment_requires_lifecycle';
+      error.status = 409;
+      throw error;
+    }
+    return { eligible: true, currentMembership: null, latestMembership: latest };
   }
 };
 
@@ -874,6 +936,7 @@ function loadEducationRouter() {
     if (isRoute && request === '../models/Subject') return SubjectMock;
     if (isRoute && request === '../models/AcademicYear') return AcademicYearMock;
     if (isRoute && request === '../models/SchoolClass') return SchoolClassMock;
+    if (isRoute && request === '../models/TeacherAssignment') return TeacherAssignmentMock;
     if (isRoute && request === '../models/InstructorSubject') return InstructorSubjectMock;
     if (isRoute && request === '../services/timetableService') {
       return { ensureTeacherAssignmentsFromLegacyMappings: async () => undefined };
@@ -898,6 +961,7 @@ function loadEducationRouter() {
       };
     }
     if (isRoute && request === '../services/studentLifecycleService') return studentLifecycleServiceMock;
+    if (isRoute && request === '../utils/studentMembershipEligibility') return studentMembershipEligibilityMock;
     if (isRoute && request === '../middleware/auth') return authMock;
     if (isRoute && request === '../utils/activity') return activityMock;
 
@@ -942,7 +1006,8 @@ async function request(server, targetPath, { method = 'GET', user = null, body }
   const response = await fetch('http://127.0.0.1:' + address.port + targetPath, {
     method,
     headers,
-    body: payload
+    body: payload,
+    signal: AbortSignal.timeout(5000)
   });
 
   const text = await response.text();
@@ -1181,7 +1246,7 @@ async function run() {
       assertCase(stored.source === 'admin', 'Expected admin as source');
     });
 
-    await check('update enrollment can reject an existing membership', async () => {
+    await check('active enrollment status cannot be changed outside lifecycle workflow', async () => {
       const created = membershipRecords.find((item) => String(item.student) === IDS.student2 && String(item.course) === IDS.course1 && item.isCurrent);
       const response = await request(server, '/api/education/student-enrollments/' + created._id, {
         method: 'PUT',
@@ -1194,12 +1259,10 @@ async function run() {
           rejectedReason: 'documents_missing'
         }
       });
-      assertCase(response.status === 200, 'Expected 200 on update, got ' + response.status + ' ' + JSON.stringify(response.data));
-      assertCase(response.data?.item?.status === 'rejected', 'Expected rejected response status');
+      assertCase(response.status === 409, 'Expected 409 on direct status change, got ' + response.status + ' ' + JSON.stringify(response.data));
       const stored = membershipRecords.find((item) => String(item._id) === String(created._id));
-      assertCase(stored && stored.status === 'rejected', 'Expected stored status to be rejected');
-      assertCase(stored.isCurrent === false, 'Expected rejected membership to be non-current');
-      assertCase(stored.rejectedReason === 'documents_missing', 'Expected rejected reason to be stored');
+      assertCase(stored && stored.status === 'active', 'Expected current membership to remain active');
+      assertCase(stored.isCurrent === true, 'Expected current membership to remain current');
     });
 
     await check('student join request accepts classId and stores canonical course request', async () => {
@@ -1351,6 +1414,68 @@ async function run() {
       assertCase(response.data?.admissionBilling?.billNumber === 'BL-TEST-0001', 'Expected the admission bill number');
       const stored = membershipRecords.find((item) => String(item._id) === 'mem-1');
       assertCase(stored?.status === 'transferred_in', 'Expected transferred-in membership status');
+    });
+
+    await check('re-enrollment creates a new membership linked to ended history', async () => {
+      membershipRecords.push({
+        _id: '507f191e810c19729de86399',
+        student: IDS.student2,
+        course: IDS.course2,
+        classId: IDS.class2,
+        academicYear: IDS.year1,
+        academicYearId: IDS.year1,
+        status: 'dropped',
+        endedReason: 'dropout',
+        isCurrent: false,
+        changeVersion: 1,
+        joinedAt: new Date('2026-02-01T08:00:00.000Z'),
+        endedAt: new Date('2026-03-01T08:00:00.000Z'),
+        leftAt: new Date('2026-03-01T08:00:00.000Z')
+      });
+      const response = await request(server, '/api/education/student-enrollments/lifecycle', {
+        method: 'POST',
+        user: adminUser,
+        body: {
+          action: 're_enrollment',
+          membershipId: '507f191e810c19729de86399',
+          classId: IDS.class1,
+          effectiveDate: '2026-04-01',
+          reason: 'approved return'
+        }
+      });
+      assertCase(response.status === 200, 'Expected 200 on re-enrollment, got ' + response.status + ' ' + JSON.stringify(response.data));
+      const previous = membershipRecords.find((item) => String(item._id) === '507f191e810c19729de86399');
+      const created = membershipRecords.find((item) => String(item._id) === 'mem-re-enrolled');
+      assertCase(previous?.status === 'dropped' && previous?.isCurrent === false, 'Expected ended membership history to stay unchanged');
+      assertCase(created?.status === 'active' && created?.previousMembershipId === '507f191e810c19729de86399', 'Expected a linked active re-enrollment membership');
+    });
+
+    await check('expelled student re-enrollment requires lifecycle approval permission', async () => {
+      membershipRecords.push({
+        _id: '507f191e810c19729de86398',
+        student: IDS.student3,
+        course: IDS.course2,
+        classId: IDS.class2,
+        academicYear: IDS.year1,
+        academicYearId: IDS.year1,
+        status: 'expelled',
+        endedReason: 'expulsion',
+        isCurrent: false,
+        changeVersion: 1
+      });
+      const response = await request(server, '/api/education/student-enrollments/lifecycle', {
+        method: 'POST',
+        user: adminUser,
+        body: {
+          action: 're_enrollment',
+          membershipId: '507f191e810c19729de86398',
+          classId: IDS.class1,
+          effectiveDate: '2026-04-02',
+          reason: 'return request',
+          authorityReference: 'AUTH-100'
+        }
+      });
+      assertCase(response.status === 403, 'Expected 403 without students.lifecycle.approve, got ' + response.status);
     });
 
     await check('delete enrollment is blocked to preserve lifecycle history', async () => {

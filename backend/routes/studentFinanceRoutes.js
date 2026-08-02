@@ -679,7 +679,7 @@ router.get('/memberships/:membershipId/overview', requireAuth, async (req, res) 
   try {
     const data = await getMembershipFinanceOverview(req.params.membershipId);
     if (!data) {
-      return res.status(404).json({ success: false, message: 'Membership finance overview was not found.' });
+      return res.status(404).json({ success: false, message: 'خلاصه مالی عضویت شاگرد پیدا نشد.' });
     }
     if (!canAccessMembershipPayload(req, data.membership)) {
       return res.status(403).json({ success: false, message: 'دسترسی مجاز نیست.' });
@@ -694,7 +694,7 @@ router.get('/memberships/:membershipId/statement', requireAuth, async (req, res)
   try {
     const data = await getMembershipFinanceStatement(req.params.membershipId);
     if (!data) {
-      return res.status(404).json({ success: false, message: 'Membership finance statement was not found.' });
+      return res.status(404).json({ success: false, message: 'صورت‌حساب مالی عضویت شاگرد پیدا نشد.' });
     }
     if (!canAccessMembershipPayload(req, data.membership)) {
       return res.status(403).json({ success: false, message: 'دسترسی مجاز نیست.' });
@@ -709,7 +709,7 @@ router.get('/memberships/:membershipId/statement-pack', requireAuth, async (req,
   try {
     const data = await getMembershipFinanceStatement(req.params.membershipId);
     if (!data) {
-      return res.status(404).json({ success: false, message: 'Membership finance statement was not found.' });
+      return res.status(404).json({ success: false, message: 'صورت‌حساب مالی عضویت شاگرد پیدا نشد.' });
     }
     if (!canAccessMembershipPayload(req, data.membership)) {
       return res.status(403).json({ success: false, message: 'Ø¯Ø³ØªØ±Ø³ÛŒ Ù…Ø¬Ø§Ø² Ù†ÛŒØ³Øª.' });
@@ -748,7 +748,7 @@ router.get('/memberships/:membershipId/statement-pack.pdf', requireAuth, async (
   try {
     const data = await getMembershipFinanceStatement(req.params.membershipId);
     if (!data) {
-      return res.status(404).json({ success: false, message: 'Membership finance statement was not found.' });
+      return res.status(404).json({ success: false, message: 'صورت‌حساب مالی عضویت شاگرد پیدا نشد.' });
     }
     if (!canAccessMembershipPayload(req, data.membership)) {
       return res.status(403).json({ success: false, message: 'دسترسی مجاز نیست.' });
@@ -763,7 +763,7 @@ router.get('/memberships/:membershipId/statement-pack.pdf', requireAuth, async (
     });
     const pdfBuffer = await buildStatementPackPdfBuffer({
       title: 'بسته رسمی استیتمنت مالی متعلم',
-      subtitle: 'Official student finance statement pack',
+      subtitle: 'بسته رسمی صورت‌حساب مالی شاگرد',
       subjectName: data.membership?.student?.fullName || data.membership?.student?.name || 'متعلم',
       classTitle: data.membership?.schoolClass?.title || '-',
       academicYearTitle: data.membership?.academicYear?.title || '-',
@@ -790,7 +790,7 @@ router.get('/memberships/:membershipId/statement-pack.pdf', requireAuth, async (
       documentType: 'student_statement',
       filename,
       buffer: pdfBuffer,
-      title: 'Student finance statement pack',
+      title: 'بسته صورت‌حساب مالی شاگرد',
       subjectName: data.membership?.student?.fullName || data.membership?.student?.name || 'Student',
       membershipLabel: membershipId,
       studentMembershipId: membershipId,
@@ -830,14 +830,14 @@ router.get('/eligibility', requireAuth, async (req, res) => {
   try {
     const studentMembershipId = String(req.query?.studentMembershipId || '').trim();
     if (!studentMembershipId) {
-      return res.status(400).json({ success: false, message: 'studentMembershipId is required.' });
+      return res.status(400).json({ success: false, message: 'انتخاب عضویت شاگرد الزامی است.' });
     }
     const data = await getExamEligibility({
       studentMembershipId,
       sessionId: req.query?.sessionId || ''
     });
     if (!data) {
-      return res.status(404).json({ success: false, message: 'Eligibility context was not found.' });
+      return res.status(404).json({ success: false, message: 'اطلاعات لازم برای بررسی شرایط شاگرد پیدا نشد.' });
     }
     if (!canAccessMembershipPayload(req, data.membership)) {
       return res.status(403).json({ success: false, message: 'دسترسی مجاز نیست.' });

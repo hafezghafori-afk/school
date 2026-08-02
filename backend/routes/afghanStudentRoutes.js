@@ -19,6 +19,7 @@ const cache = require('../utils/simpleCache');
 const { requireAuth, requireRole, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const { requireWritableSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
 const { ENROLLMENT_SOURCES, inferEnrollmentSource } = require('../utils/enrollmentSource');
+const { assertSafeStudentInput } = require('../utils/studentInputSafety');
 const {
   assignStudentToClass,
   serializeTransferAdmissionBilling
@@ -304,7 +305,7 @@ router.get('/dashboard', requireAuth, requireRole(['admin', 'principal', 'teache
     const cacheKey = `student_dashboard_${schoolId || 'all'}_${grade || 'all'}_${province || 'all'}`;
     const cachedData = cache.get(cacheKey);
     if (cachedData) {
-      return ok(res, cachedData, 'Student dashboard statistics retrieved successfully (cached)');
+      return ok(res, cachedData, 'آمار داشبورد شاگردان از حافظه موقت دریافت شد.');
     }
 
     const students = await AfghanStudent.find(query).lean();
@@ -337,10 +338,10 @@ router.get('/dashboard', requireAuth, requireRole(['admin', 'principal', 'teache
 
     cache.set(cacheKey, stats);
 
-    return ok(res, stats, 'Student dashboard statistics retrieved successfully');
+    return ok(res, stats, 'آمار داشبورد شاگردان دریافت شد.');
   } catch (error) {
     console.error('Student Dashboard Error:', error);
-    return fail(res, 'Failed to retrieve student dashboard statistics', 500);
+    return fail(res, 'دریافت آمار داشبورد شاگردان ناموفق بود.', 500);
   }
 });
 
@@ -415,7 +416,7 @@ router.get('/', requireAuth, requireRole(['admin', 'principal', 'teacher', 'regi
     }, 'Students retrieved successfully');
   } catch (error) {
     console.error('Get Students Error:', error);
-    return fail(res, 'Failed to retrieve students', 500);
+    return fail(res, 'دریافت فهرست شاگردان ناموفق بود.', 500);
   }
 });
 
@@ -433,13 +434,13 @@ router.get('/:id', requireAuth, requireRole(['admin', 'principal', 'teacher', 'r
       .lean();
 
     if (!student) {
-      return fail(res, 'Student not found', 404);
+      return fail(res, 'شاگرد پیدا نشد.', 404);
     }
 
-    return ok(res, student, 'Student retrieved successfully');
+    return ok(res, student, 'مشخصات شاگرد دریافت شد.');
   } catch (error) {
     console.error('Get Student Error:', error);
-    return fail(res, 'Failed to retrieve student', 500);
+    return fail(res, 'دریافت مشخصات شاگرد ناموفق بود.', 500);
   }
 });
 
@@ -469,13 +470,13 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
       'identification.tazkiraNumber': studentData.identification.tazkiraNumber 
     });
     if (existingStudent) {
-      return fail(res, 'Tazkira number already exists', 400);
+      return fail(res, 'شماره تذکره قبلاً ثبت شده است.', 400);
     }
 
     // Validate school exists
     const school = await AfghanSchool.findById(studentData.academicInfo.currentSchool);
     if (!school) {
-      return fail(res, 'School not found', 400);
+      return fail(res, 'مکتب پیدا نشد.', 400);
     }
 
     if (!studentData.asasNumber) {
@@ -535,12 +536,12 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
       return fail(res, error.messageDari || 'اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید.', error.statusCode || 400);
     }
     if (error.code === 11000) {
-      return fail(res, 'Tazkira number already exists', 400);
+      return fail(res, 'شماره تذکره قبلاً ثبت شده است.', 400);
     }
     if (error?.name === 'ValidationError') {
       return fail(res, formatStudentUpdateError(error), 400);
     }
-    return fail(res, 'Failed to create student', 500);
+    return fail(res, 'ایجاد شاگرد ناموفق بود.', 500);
   }
 });
 
@@ -562,7 +563,7 @@ router.post('/:id/documents', requireAuth, requireRole(['admin', 'principal', 'r
     try {
       const student = await AfghanStudent.findById(req.params.id);
       if (!student) {
-        return fail(res, 'Student not found', 404);
+        return fail(res, 'شاگرد پیدا نشد.', 404);
       }
 
       const documents = Object.entries(req.files || {}).flatMap(([field, files]) => {
@@ -604,10 +605,10 @@ router.post('/:id/documents', requireAuth, requireRole(['admin', 'principal', 'r
         { new: true }
       );
 
-      return ok(res, { documents: student.documents }, 'Student documents uploaded successfully');
+      return ok(res, { documents: student.documents }, 'اسناد شاگرد با موفقیت بارگذاری شد.');
     } catch (error) {
       console.error('Upload Student Documents Error:', error);
-      return fail(res, 'Failed to upload student documents', 500);
+      return fail(res, 'بارگذاری اسناد شاگرد ناموفق بود.', 500);
     }
   });
 });
@@ -615,6 +616,7 @@ router.post('/:id/documents', requireAuth, requireRole(['admin', 'principal', 'r
 // PUT /api/afghan-students/:id - Update student
 router.put('/:id', requireAuth, requireRole(['admin', 'principal', 'registration_manager']), requireAnyPermission(['manage_content', 'manage_users', 'manage_enrollments']), async (req, res) => {
   try {
+    assertSafeStudentInput(req.body || {});
     const rawStudentData = {
       ...req.body,
       lastUpdatedBy: req.user?.id || 'system'
@@ -625,13 +627,27 @@ router.put('/:id', requireAuth, requireRole(['admin', 'principal', 'registration
     if (studentData.academicInfo?.currentSchool) {
       const school = await AfghanSchool.findById(studentData.academicInfo.currentSchool);
       if (!school) {
-        return fail(res, 'School not found', 400);
+        return fail(res, 'مکتب پیدا نشد.', 400);
       }
     }
 
     const student = await AfghanStudent.findById(req.params.id);
     if (!student) {
-      return fail(res, 'Student not found', 404);
+      return fail(res, 'شاگرد پیدا نشد.', 404);
+    }
+
+    const currentClassId = String(student.academicInfo?.currentClassId || student.academicInfo?.classId || '').trim();
+    const requestedClassId = String(
+      studentData.academicInfo?.currentClassId
+      || studentData.academicInfo?.classId
+      || currentClassId
+    ).trim();
+    if (requestedClassId && currentClassId && requestedClassId !== currentClassId) {
+      return fail(
+        res,
+        'تغییر صنف از فورم مشخصات مجاز نیست؛ تبدیلی صنف را از بخش تغییر وضعیت تعلیمی ثبت کنید.',
+        409
+      );
     }
 
     Object.entries(rawStudentData).forEach(([key, value]) => {
@@ -639,20 +655,16 @@ router.put('/:id', requireAuth, requireRole(['admin', 'principal', 'registration
     });
     await student.save();
 
-    await assignStudentToClass({
-      student,
-      payload: rawStudentData,
-      actorId: req.user?.id || null,
-      source: 'admin'
-    });
-
     const refreshedStudent = await populateAfghanStudentQuery(AfghanStudent.findById(student._id));
     await syncManualStudentEnrollment({ student: refreshedStudent, studentData: refreshedStudent.toObject(), req });
     await syncRelatedStudentIdentity(refreshedStudent);
 
-    return ok(res, { data: refreshedStudent.toObject() }, 'Student updated successfully');
+    return ok(res, { data: refreshedStudent.toObject() }, 'مشخصات شاگرد با موفقیت به‌روزرسانی شد.');
   } catch (error) {
     console.error('Update Student Error:', error);
+    if (error?.code === 'student_profile_system_message_placeholder_rejected') {
+      return fail(res, 'متن پیام سیستمی را نمی‌توان به‌عنوان مشخصات شاگرد ذخیره کرد؛ صفحه را تازه کنید و دوباره تلاش نمایید.', 400);
+    }
     const status = error?.code === 11000 || error?.name === 'ValidationError' || error?.name === 'CastError' ? 400 : 500;
     return fail(res, formatStudentUpdateError(error), status);
   }
@@ -661,10 +673,27 @@ router.put('/:id', requireAuth, requireRole(['admin', 'principal', 'registration
 // DELETE /api/afghan-students/:id - Delete student
 router.delete('/:id', requireAuth, requireRole(['admin', 'principal']), requireAnyPermission(['manage_content', 'manage_users', 'manage_enrollments']), async (req, res) => {
   try {
-    const student = await AfghanStudent.findByIdAndDelete(req.params.id);
+    const student = await AfghanStudent.findById(req.params.id);
     if (!student) {
-      return fail(res, 'Student not found', 404);
+      return fail(res, 'شاگرد پیدا نشد.', 404);
     }
+
+    const membershipFilter = {
+      $or: [
+        { afghanStudentId: student._id },
+        ...(student.linkedUserId ? [{ student: student.linkedUserId }] : [])
+      ]
+    };
+    const membershipCount = await StudentMembership.countDocuments(membershipFilter);
+    if (membershipCount > 0) {
+      return res.status(409).json({
+        success: false,
+        code: 'student_with_membership_cannot_be_deleted',
+        message: 'پروندهٔ شاگرد دارای سابقهٔ تعلیمی حذف نمی‌شود؛ تبدیلی، ترک تحصیل یا منفکی را از بخش تغییر وضعیت تعلیمی ثبت کنید.'
+      });
+    }
+
+    await AfghanStudent.deleteOne({ _id: student._id });
 
     await Enrollment.findOneAndDelete({
       $or: [
@@ -674,26 +703,10 @@ router.delete('/:id', requireAuth, requireRole(['admin', 'principal']), requireA
       ]
     });
 
-    if (student.linkedUserId) {
-      await StudentMembership.updateMany(
-        { student: student.linkedUserId, isCurrent: true },
-        {
-          $set: {
-            status: 'inactive',
-            isCurrent: false,
-            endedReason: 'student_deleted',
-            endedAt: new Date(),
-            leftAt: new Date(),
-            note: 'بسته‌شده به‌صورت خودکار پس از حذف شاگرد از مرکز آموزش'
-          }
-        }
-      );
-    }
-
-    return ok(res, student, 'Student deleted successfully');
+    return ok(res, student, 'شاگرد با موفقیت حذف شد.');
   } catch (error) {
     console.error('Delete Student Error:', error);
-    return fail(res, 'Failed to delete student', 500);
+    return fail(res, 'حذف شاگرد ناموفق بود.', 500);
   }
 });
 
@@ -703,11 +716,11 @@ router.post('/bulk', requireAuth, requireRole(['admin', 'principal']), requirePe
     const { students } = req.body;
     
     if (!Array.isArray(students) || students.length === 0) {
-      return fail(res, 'Students array is required and cannot be empty', 400);
+      return fail(res, 'فهرست شاگردان الزامی است و نمی‌تواند خالی باشد.', 400);
     }
 
     if (students.length > 100) {
-      return fail(res, 'Cannot create more than 100 students at once', 400);
+      return fail(res, 'ایجاد بیشتر از ۱۰۰ شاگرد در یک مرحله مجاز نیست.', 400);
     }
 
     const results = {
@@ -777,10 +790,10 @@ router.post('/bulk', requireAuth, requireRole(['admin', 'principal']), requirePe
       }
     }
 
-    return ok(res, results, 'Bulk student creation completed');
+    return ok(res, results, 'ایجاد گروهی شاگردان تکمیل شد.');
   } catch (error) {
     console.error('Bulk Create Students Error:', error);
-    return fail(res, 'Failed to create students in bulk', 500);
+    return fail(res, 'ایجاد گروهی شاگردان ناموفق بود.', 500);
   }
 });
 
@@ -860,10 +873,10 @@ router.get('/attendance/:schoolId', requireAuth, requireRole(['admin', 'principa
     attendanceStats.byGender.female.average = attendanceStats.byGender.female.total > 0 ? 
       Math.round(attendanceStats.byGender.female.average / attendanceStats.byGender.female.total) : 0;
 
-    return ok(res, attendanceStats, 'Attendance statistics retrieved successfully');
+    return ok(res, attendanceStats, 'آمار حاضری شاگرد دریافت شد.');
   } catch (error) {
     console.error('Attendance Stats Error:', error);
-    return fail(res, 'Failed to retrieve attendance statistics', 500);
+    return fail(res, 'دریافت آمار حاضری ناموفق بود.', 500);
   }
 });
 
@@ -873,12 +886,12 @@ router.post('/:id/update-attendance', requireAuth, requireRole(['admin', 'princi
     const { presentDays, totalDays } = req.body;
     
     if (presentDays > totalDays) {
-      return fail(res, 'Present days cannot exceed total days', 400);
+      return fail(res, 'تعداد روزهای حاضر نمی‌تواند از مجموع روزها بیشتر باشد.', 400);
     }
 
     const student = await AfghanStudent.findById(req.params.id);
     if (!student) {
-      return fail(res, 'Student not found', 404);
+      return fail(res, 'شاگرد پیدا نشد.', 404);
     }
 
     student.academicInfo.attendanceRecord = {
@@ -891,10 +904,10 @@ router.post('/:id/update-attendance', requireAuth, requireRole(['admin', 'princi
     student.lastUpdatedBy = req.user?.id || 'system';
     await student.save();
 
-    return ok(res, student.academicInfo.attendanceRecord, 'Attendance updated successfully');
+    return ok(res, student.academicInfo.attendanceRecord, 'معلومات حاضری با موفقیت به‌روزرسانی شد.');
   } catch (error) {
     console.error('Update Attendance Error:', error);
-    return fail(res, 'Failed to update attendance', 500);
+    return fail(res, 'به‌روزرسانی حاضری ناموفق بود.', 500);
   }
 });
 
@@ -1010,10 +1023,10 @@ router.get('/performance/:schoolId', requireAuth, requireRole(['admin', 'princip
     performanceStats.topPerformers.sort((a, b) => b.gpa - a.gpa);
     performanceStats.needsImprovement.sort((a, b) => a.gpa - a.gpa);
 
-    return ok(res, performanceStats, 'Performance statistics retrieved successfully');
+    return ok(res, performanceStats, 'آمار عملکرد تعلیمی دریافت شد.');
   } catch (error) {
     console.error('Performance Stats Error:', error);
-    return fail(res, 'Failed to retrieve performance statistics', 500);
+    return fail(res, 'دریافت آمار عملکرد تعلیمی ناموفق بود.', 500);
   }
 });
 

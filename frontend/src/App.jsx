@@ -97,6 +97,7 @@ const ParentDashboard = lazy(() => import('./pages/ParentDashboard'));
 const StudentRegistration = lazy(() => import('./pages/StudentRegistration'));
 const OnlineRegistrations = lazy(() => import('./pages/OnlineRegistrations'));
 const StudentManagement = lazy(() => import('./pages/StudentManagement'));
+const StudentProfileWorkspace = lazy(() => import('./pages/StudentProfileWorkspace'));
 
 const routePrefetchers = {
   courses: () => import('./pages/CourseList'),
@@ -1101,7 +1102,7 @@ function AppShell() {
     path === '/instructor-report' ||
     path === '/student-registration' ||
     path === '/online-registrations' ||
-    path === '/student-management'
+    /^\/student-management(?:\/|$)/.test(path)
   );
 
   const usesPublicRedesign = path === '/'
@@ -1113,7 +1114,12 @@ function AppShell() {
     || path.startsWith('/news/')
     || path.startsWith('/schools/');
   const hideMainNav = isDashboardArea || usesPublicRedesign;
-  const useCompactAdminApiHealth = role === 'admin' && (path === '/dashboard' || path.startsWith('/admin') || path.startsWith('/timetable'));
+  const useCompactAdminApiHealth = role === 'admin' && (
+    path === '/dashboard'
+    || path.startsWith('/admin')
+    || path.startsWith('/timetable')
+    || /^\/student-management(?:\/|$)/.test(path)
+  );
   const apiHealthCheckedLabel = useMemo(() => {
     return formatAfghanTime(apiHealth.checkedAt, { hour: '2-digit', minute: '2-digit' });
   }, [apiHealth.checkedAt]);
@@ -3443,6 +3449,7 @@ function AppShell() {
             <Route path="/student-registration" element={adminRoute(['students.register', 'users.manage'], <StudentRegistration />, 'دسترسی ثبت دانش‌آموز برای این حساب فعال نیست.')} />
             <Route path="/online-registrations" element={adminRoute(['enrollments.online.manage', 'enrollments.manage'], <OnlineRegistrations />, 'دسترسی مدیریت ثبت‌نام‌های آنلاین برای این حساب فعال نیست.')} />
             <Route path="/student-management" element={adminRoute(['students.manage', 'users.manage'], <StudentManagement />, 'دسترسی مدیریت دانش‌آموزان برای این حساب فعال نیست.')} />
+            <Route path="/student-management/:studentRef" element={adminRoute(['students.manage', 'users.manage'], <StudentProfileWorkspace />, 'دسترسی پروندهٔ شاگرد برای این حساب فعال نیست.')} />
             <Route path="/quiz/:courseId" element={protectedRoute(['student', 'instructor', 'admin'], 'quiz.take', <Quiz />, 'دسترسی آزمون برای این حساب فعال نیست.')} />
             <Route path="/dashboard" element={authed ? <RoleDashboard /> : <Login />} />
             <Route path="*" element={<MenuContent settings={settings} />} />
