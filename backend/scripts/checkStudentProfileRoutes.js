@@ -236,6 +236,13 @@ const authMock = {
       }
       return res.status(403).json({ success: false, message: 'Forbidden by permission.' });
     };
+  },
+  requireAnyPermission(permissionList = []) {
+    return (req, res, next) => {
+      const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+      if (permissionList.some((permission) => permissions.includes(permission))) return next();
+      return res.status(403).json({ success: false, message: 'Forbidden by permission.' });
+    };
   }
 };
 

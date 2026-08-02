@@ -159,6 +159,7 @@ const {
   buildFinanceMonthCloseSnapshot,
   toMonthDateRange
 } = require('../services/financeCloseService');
+const { buildFinanceDashboardOverview } = require('../services/financeDashboardService');
 const {
   assertFinancePeriodWritable,
   isFinanceMonthClosed
@@ -4706,6 +4707,37 @@ router.delete('/admin/fee-plans/:id', requireAuth, requireRole(['admin']), requi
   }
 });
 
+router.get('/admin/dashboard/overview', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: false });
+    const schoolId = schoolContext.schoolId || '';
+    if (!schoolId) {
+      return res.status(400).json({ success: false, message: 'برای نمایش داشبورد مالی، مکتب فعال را انتخاب کنید.' });
+    }
+    writeSchoolContextHeaders(res, schoolId);
+    const schoolClassIds = await SchoolClass.find({ schoolId }).distinct('_id');
+    const overview = await buildFinanceDashboardOverview({
+      schoolId,
+      schoolClassIds,
+      academicYearId: String(req.query?.academicYearId || '').trim(),
+      classId: String(req.query?.classId || '').trim(),
+      from: String(req.query?.from || '').trim(),
+      to: String(req.query?.to || '').trim(),
+      recentLimit: req.query?.recentLimit || req.query?.limit,
+      debtorLimit: req.query?.debtorLimit
+    });
+    return res.json({ success: true, overview });
+  } catch (error) {
+    if (error?.message === 'finance_dashboard_range_invalid') {
+      return res.status(400).json({ success: false, message: 'بازه زمانی گزارش مالی معتبر نیست.' });
+    }
+    return res.status(error?.statusCode || 500).json({
+      success: false,
+      message: error?.statusCode ? error.message : 'دریافت داشبورد هوشمند مالی ناموفق بود.'
+    });
+  }
+});
+
 router.get('/admin/summary', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: false });
@@ -5176,7 +5208,10 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
       includeExam,
       includeDocument,
       includeOther,
-      onlyDebtors
+      onlyDebtors,
+      studentMembershipId,
+      includeFutureMonths,
+      futureMonthCount
     } = req.body || {};
 
     if ((!classId && !inputCourseId) || !dueDate) {
@@ -5236,6 +5271,9 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
       includeDocument,
       includeOther,
       onlyDebtors,
+      studentMembershipId,
+      includeFutureMonths,
+      futureMonthCount,
       recoverMemberships: false
     });
     const effectivePeriodType = preview.periodType || normalizedPeriodType || 'term';
@@ -5311,7 +5349,10 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       includeExam,
       includeDocument,
       includeOther,
-      onlyDebtors
+      onlyDebtors,
+      studentMembershipId,
+      includeFutureMonths,
+      futureMonthCount
     } = req.body || {};
     if ((!classId && !inputCourseId) || !dueDate) {
       return res.status(400).json({ success: false, message: 'شناسه صنف و مهلت پرداخت الزامی است.' });
@@ -5369,6 +5410,9 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       includeDocument,
       includeOther,
       onlyDebtors,
+      studentMembershipId,
+      includeFutureMonths,
+      futureMonthCount,
       recoverMemberships: false
     });
     const effectivePeriodType = preview.periodType || normalizedPeriodType || 'term';
@@ -5383,8 +5427,10 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
     }
 
     let created = 0;
+    let createdAmount = 0;
     let skipped = preview.excluded.length;
     const createdIds = [];
+    const createdFeeOrderIds = [];
     const createdNotifications = [];
     const existingBills = await FinanceBill.find({
       schoolId: { $in: [schoolContext.schoolId, null] },
@@ -5492,7 +5538,12 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
         }
         throw error;
       }
-      await syncStudentFinanceFromFinanceBill(bill).catch(() => null);
+      const syncResult = await syncStudentFinanceFromFinanceBill(bill).catch(() => null);
+      const feeOrderId = syncResult?.order?.feeOrderId;
+      if (feeOrderId) {
+        createdFeeOrderIds.push(String(feeOrderId));
+        createdAmount = roundMoney(createdAmount + Number(candidate.amountDue || 0));
+      }
       existingObligationKeys.add(obligationKey);
       if (studentMonthlyTuitionKey) existingStudentMonthlyTuitionKeys.add(studentMonthlyTuitionKey);
       created += 1;
@@ -5533,6 +5584,8 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       success: true,
       message: `صدور گروهی انجام شد: ${created} بل ایجاد شد، ${skipped} مورد رد یا تکراری بود.`,
       created,
+      createdAmount,
+      createdFeeOrderIds,
       skipped,
       periodType: effectivePeriodType,
       feePlan: preview.feePlan
@@ -9469,6 +9522,14 @@ router.get('/admin/month-close/:id/export.csv', requireAuth, requireRole(['admin
       ['ApprovedPaymentAmount', snapshot?.totals?.approvedPaymentAmount || 0],
       ['PendingPaymentCount', snapshot?.totals?.pendingPaymentCount || 0],
       ['PendingPaymentAmount', snapshot?.totals?.pendingPaymentAmount || 0],
+      ['ApprovedExpenseCount', snapshot?.totals?.approvedExpenseCount || 0],
+      ['ApprovedExpenseAmount', snapshot?.totals?.approvedExpenseAmount || 0],
+      ['PendingExpenseCount', snapshot?.totals?.pendingExpenseCount || 0],
+      ['PendingExpenseAmount', snapshot?.totals?.pendingExpenseAmount || 0],
+      ['NetCashAmount', snapshot?.totals?.netCashAmount || 0],
+      ['TreasuryInflowAmount', snapshot?.totals?.treasuryInflowAmount || 0],
+      ['TreasuryOutflowAmount', snapshot?.totals?.treasuryOutflowAmount || 0],
+      ['TreasuryNetAmount', snapshot?.totals?.treasuryNetAmount || 0],
       ['StandingOutstandingAmount', snapshot?.totals?.standingOutstandingAmount || 0],
       ['OverdueOrders', snapshot?.totals?.overdueOrders || 0],
       ['CriticalAnomalies', snapshot?.anomalies?.summary?.critical || 0],
@@ -10233,7 +10294,7 @@ router.post('/admin/documents/batch-statements.zip', requireAuth, requireRole(['
       academicYearTitle = academicYearTitle || String(statementData.membership?.academicYear?.title || '').trim();
 
       const pdfBuffer = await buildStatementPackPdfBuffer({
-        title: 'Official student finance statement pack',
+        title: 'بسته رسمی صورت‌حساب مالی شاگرد',
         subtitle: monthKey ? `Batch export for ${monthKey}` : 'Batch export for active class members',
         subjectName,
         classTitle: statementData.membership?.schoolClass?.title || '-',
@@ -10261,7 +10322,7 @@ router.post('/admin/documents/batch-statements.zip', requireAuth, requireRole(['
         documentType: 'student_statement',
         filename: childFilename,
         buffer: pdfBuffer,
-        title: 'Student finance statement pack',
+        title: 'بسته صورت‌حساب مالی شاگرد',
         subjectName,
         membershipLabel: childMembershipId,
         studentMembershipId: childMembershipId,
@@ -10321,7 +10382,7 @@ router.post('/admin/documents/batch-statements.zip', requireAuth, requireRole(['
       filename: zipFilename,
       contentType: 'application/zip',
       buffer: zipBuffer,
-      title: 'Finance batch statement pack',
+      title: 'بسته گروهی صورت‌حساب‌های مالی',
       subjectName: classTitle || 'Class statement pack',
       batchLabel,
       classId,

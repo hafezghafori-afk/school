@@ -3,12 +3,14 @@ const mongoose = require('mongoose');
 const ActivityLog = require('../models/ActivityLog');
 const FeeOrder = require('../models/FeeOrder');
 const FinanceBill = require('../models/FinanceBill');
+const AfghanStudent = require('../models/AfghanStudent');
 const SchoolClass = require('../models/SchoolClass');
 const StudentMembership = require('../models/StudentMembership');
 const StudentTransfer = require('../models/StudentTransfer');
 const StudentDropout = require('../models/StudentDropout');
 const StudentExpulsion = require('../models/StudentExpulsion');
 const StudentSuspension = require('../models/StudentSuspension');
+const StudentReEnrollment = require('../models/StudentReEnrollment');
 const StudentLifecycleEvent = require('../models/StudentLifecycleEvent');
 const { issueTransferAdmissionBill } = require('./transferAdmissionBillingService');
 const { syncStudentFinanceFromFinanceBill } = require('../utils/studentFinanceSync');
@@ -20,10 +22,12 @@ const {
 const SUPPORTED_ACTIONS = Object.freeze([
   'transfer_in',
   'transfer_out',
+  'class_transfer',
   'dropout',
   'expulsion',
   'suspension',
-  'resume'
+  'resume',
+  're_enrollment'
 ]);
 
 const normalizeText = (value = '') => String(value || '').trim();
@@ -109,8 +113,58 @@ async function updateClassActiveCount(classId, session) {
   );
 }
 
+async function syncAfghanStudentLifecycleProjection(membership, action, session) {
+  const afghanStudentId = normalizeId(membership?.afghanStudentId);
+  const linkedUserId = normalizeId(membership?.student);
+  const identityFilters = [];
+  if (afghanStudentId) identityFilters.push({ _id: afghanStudentId });
+  if (linkedUserId) identityFilters.push({ linkedUserId });
+  if (!identityFilters.length) return;
+
+  const endActions = ['transfer_out', 'dropout', 'expulsion'];
+  const statusByAction = {
+    transfer_in: 'active',
+    transfer_out: 'transferred',
+    class_transfer: 'active',
+    dropout: 'dropped',
+    expulsion: 'inactive',
+    suspension: 'suspended',
+    resume: 'active',
+    re_enrollment: 'active'
+  };
+  const update = {
+    $set: {
+      status: statusByAction[action] || 'active'
+    }
+  };
+
+  if (endActions.includes(action)) {
+    update.$set['academicInfo.classId'] = null;
+    update.$set['academicInfo.currentClassId'] = null;
+    update.$set['academicInfo.shiftId'] = null;
+  } else if (['transfer_in', 'class_transfer', 're_enrollment'].includes(action)) {
+    const schoolClass = normalizeId(membership?.classId)
+      ? await SchoolClass.findById(membership.classId).session(session)
+      : null;
+    update.$set['academicInfo.classId'] = membership.classId || null;
+    update.$set['academicInfo.currentClassId'] = membership.classId || null;
+    update.$set['academicInfo.academicYearId'] = membership.academicYearId || membership.academicYear || null;
+    if (schoolClass?.schoolId) update.$set['academicInfo.currentSchool'] = schoolClass.schoolId;
+    if (schoolClass?.gradeLevel) update.$set['academicInfo.currentGrade'] = `grade${schoolClass.gradeLevel}`;
+    if (schoolClass?.section) update.$set['academicInfo.currentSection'] = schoolClass.section;
+    if (schoolClass?.shift) update.$set['academicInfo.currentShift'] = schoolClass.shift;
+    if (schoolClass?.shiftId) update.$set['academicInfo.shiftId'] = schoolClass.shiftId;
+  }
+
+  await AfghanStudent.updateMany(
+    identityFilters.length === 1 ? identityFilters[0] : { $or: identityFilters },
+    update,
+    { session }
+  );
+}
+
 async function stopFutureBills(membership, action, effectiveAt, actorId, session) {
-  if (!['transfer_out', 'dropout', 'expulsion'].includes(action)) {
+  if (!['transfer_out', 'class_transfer', 'dropout', 'expulsion'].includes(action)) {
     return { bills: 0, orders: 0 };
   }
   const nextMonthStart = new Date(effectiveAt.getFullYear(), effectiveAt.getMonth() + 1, 1);
@@ -146,14 +200,15 @@ async function createSpecializedDocument({ action, membership, previousMembershi
     note: normalizeText(payload.note)
   };
 
-  if (action === 'transfer_in' || action === 'transfer_out') {
+  if (['transfer_in', 'transfer_out', 'class_transfer'].includes(action)) {
+    const isInternal = action === 'class_transfer';
     const [document] = await StudentTransfer.create([{
       ...common,
-      direction: action === 'transfer_in' ? 'in' : 'out',
-      sourceMembershipId: action === 'transfer_in' ? previousMembership?._id || null : membership._id,
-      targetMembershipId: action === 'transfer_in' ? membership._id : null,
-      sourceClassId: action === 'transfer_in' ? previousMembership?.classId || null : membership.classId || null,
-      targetClassId: action === 'transfer_in' ? membership.classId || null : null,
+      direction: isInternal ? 'internal' : (action === 'transfer_in' ? 'in' : 'out'),
+      sourceMembershipId: action === 'transfer_out' ? membership._id : previousMembership?._id || null,
+      targetMembershipId: action === 'transfer_out' ? null : membership._id,
+      sourceClassId: action === 'transfer_out' ? membership.classId || null : previousMembership?.classId || null,
+      targetClassId: action === 'transfer_out' ? null : membership.classId || null,
       previousSchool: normalizeText(payload.previousSchool),
       previousGrade: normalizeText(payload.previousGrade),
       destinationSchool: normalizeText(payload.destinationSchool),
@@ -220,6 +275,30 @@ async function createSpecializedDocument({ action, membership, previousMembershi
     if (normalizeText(payload.note)) document.note = normalizeText(payload.note);
     await document.save({ session });
     return { document, documentType: 'StudentSuspension' };
+  }
+
+  if (action === 're_enrollment') {
+    const reason = normalizeText(payload.reason) || normalizeText(payload.note);
+    if (!reason) throw lifecycleError('student_re_enrollment_reason_required', 400);
+    if (!previousMembership?._id) throw lifecycleError('student_previous_membership_required', 400);
+    if (normalizeText(previousMembership.status) === 'expelled' && !normalizeText(payload.authorityReference)) {
+      throw lifecycleError('student_re_enrollment_authority_reference_required', 400);
+    }
+    const [document] = await StudentReEnrollment.create([{
+      ...common,
+      previousMembershipId: previousMembership._id,
+      targetMembershipId: membership._id,
+      sourceStatus: normalizeText(previousMembership.status),
+      targetClassId: membership.classId,
+      academicYearId: membership.academicYearId || membership.academicYear || null,
+      effectiveAt,
+      reason,
+      authorityReference: normalizeText(payload.authorityReference),
+      approvedBy: actorId || null,
+      approvedAt: new Date(),
+      createdBy: actorId || null
+    }], { session });
+    return { document, documentType: 'StudentReEnrollment' };
   }
 
   throw lifecycleError('student_lifecycle_action_invalid', 400);
@@ -290,6 +369,7 @@ async function applyLifecycleAction(payload = {}, context = {}, session) {
   let membership;
   let previousMembership = null;
   let admissionBilling = null;
+  let sourceBeforeState = null;
 
   if (action === 'transfer_in') {
     const student = normalizeId(payload.studentId || payload.student);
@@ -338,6 +418,89 @@ async function applyLifecycleAction(payload = {}, context = {}, session) {
       membership.joinedAt = membership.joinedAt || effectiveAt;
       membership.note = normalizeText(payload.note) || membership.note;
     }
+  } else if (action === 'class_transfer') {
+    previousMembership = await loadMembershipForUpdate(payload.membershipId, session);
+    assertExpectedVersion(previousMembership, payload.expectedVersion);
+    if (previousMembership.isCurrent !== true) throw lifecycleError('student_membership_not_current', 409);
+    sourceBeforeState = snapshotMembership(previousMembership);
+
+    const course = normalizeId(payload.courseId || payload.course);
+    const classId = normalizeId(payload.classId);
+    const academicYearId = normalizeId(payload.academicYearId || payload.academicYear);
+    if (!course || !classId) throw lifecycleError('student_class_transfer_scope_required', 400);
+    if (String(previousMembership.classId || '') === String(classId)) throw lifecycleError('student_class_transfer_same_class', 409);
+
+    const conflict = await StudentMembership.findOne({
+      _id: { $ne: previousMembership._id },
+      student: previousMembership.student,
+      isCurrent: true,
+      status: { $in: CURRENT_STUDENT_MEMBERSHIP_STATUSES }
+    }).session(session);
+    if (conflict) throw lifecycleError('student_current_membership_conflict', 409);
+
+    const oldStatus = previousMembership.status;
+    previousMembership.status = 'transferred';
+    previousMembership.endedReason = 'class_transfer';
+    previousMembership.endedAt = effectiveAt;
+    previousMembership.leftAt = effectiveAt;
+    previousMembership.note = normalizeText(payload.note) || normalizeText(payload.reason) || previousMembership.note;
+    await previousMembership.save({ session });
+
+    membership = new StudentMembership({
+      student: previousMembership.student,
+      studentId: previousMembership.studentId || normalizeId(payload.studentCoreId),
+      afghanStudentId: previousMembership.afghanStudentId || null,
+      schoolId: normalizeId(payload.schoolId) || previousMembership.schoolId || null,
+      course,
+      classId,
+      academicYear: academicYearId,
+      academicYearId,
+      previousMembershipId: previousMembership._id,
+      admissionType: 'class_transfer',
+      status: oldStatus === 'transferred_in' ? 'transferred_in' : 'active',
+      source: 'admin',
+      enrolledAt: effectiveAt,
+      joinedAt: effectiveAt,
+      createdBy: actorId,
+      note: normalizeText(payload.note) || normalizeText(payload.reason)
+    });
+  } else if (action === 're_enrollment') {
+    previousMembership = await loadMembershipForUpdate(payload.membershipId || payload.previousMembershipId, session);
+    assertExpectedVersion(previousMembership, payload.expectedVersion);
+    if (previousMembership.isCurrent === true || !['transferred', 'transferred_out', 'dropped', 'expelled', 'inactive'].includes(normalizeText(previousMembership.status))) {
+      throw lifecycleError('student_re_enrollment_requires_ended_membership', 409);
+    }
+
+    const course = normalizeId(payload.courseId || payload.course);
+    const classId = normalizeId(payload.classId);
+    const academicYearId = normalizeId(payload.academicYearId || payload.academicYear);
+    if (!course || !classId) throw lifecycleError('student_re_enrollment_scope_required', 400);
+
+    const conflict = await StudentMembership.findOne({
+      student: previousMembership.student,
+      isCurrent: true,
+      status: { $in: CURRENT_STUDENT_MEMBERSHIP_STATUSES }
+    }).session(session);
+    if (conflict) throw lifecycleError('student_current_membership_conflict', 409);
+
+    membership = new StudentMembership({
+      student: previousMembership.student,
+      studentId: previousMembership.studentId || normalizeId(payload.studentCoreId),
+      afghanStudentId: previousMembership.afghanStudentId || null,
+      schoolId: normalizeId(payload.schoolId) || previousMembership.schoolId || null,
+      course,
+      classId,
+      academicYear: academicYearId,
+      academicYearId,
+      previousMembershipId: previousMembership._id,
+      admissionType: 're_enrollment',
+      status: 'active',
+      source: 'admin',
+      enrolledAt: effectiveAt,
+      joinedAt: effectiveAt,
+      createdBy: actorId,
+      note: normalizeText(payload.note) || normalizeText(payload.reason)
+    });
   } else {
     membership = await loadMembershipForUpdate(payload.membershipId, session);
     assertExpectedVersion(membership, payload.expectedVersion);
@@ -346,7 +509,7 @@ async function applyLifecycleAction(payload = {}, context = {}, session) {
       : null;
   }
 
-  const beforeState = snapshotMembership(membership);
+  const beforeState = sourceBeforeState || snapshotMembership(['class_transfer', 're_enrollment'].includes(action) ? previousMembership : membership);
   if (['transfer_out', 'dropout', 'expulsion'].includes(action) && membership.isCurrent !== true) {
     throw lifecycleError('student_membership_already_ended', 409);
   }
@@ -383,10 +546,16 @@ async function applyLifecycleAction(payload = {}, context = {}, session) {
     membership.status = 'suspended';
   } else if (action === 'resume') {
     membership.status = membership.admissionType === 'transfer_in' ? 'transferred_in' : 'active';
+  } else if (action === 're_enrollment') {
+    membership.status = 'active';
+    membership.admissionType = 're_enrollment';
+  } else if (action === 'class_transfer') {
+    membership.admissionType = 'class_transfer';
   }
   membership.note = normalizeText(payload.note) || membership.note;
   if (actorId) membership.createdBy = actorId;
   await membership.save({ session });
+  await syncAfghanStudentLifecycleProjection(membership, action, session);
 
   if (action === 'transfer_in') {
     admissionBilling = await issueTransferAdmissionBill({
@@ -396,11 +565,13 @@ async function applyLifecycleAction(payload = {}, context = {}, session) {
       session
     });
   }
-  const stoppedFutureBills = await stopFutureBills(membership, action, effectiveAt, actorId, session);
+  const billingSourceMembership = action === 'class_transfer' ? previousMembership : membership;
+  const stoppedFutureBills = await stopFutureBills(billingSourceMembership, action, effectiveAt, actorId, session);
   const financialEffects = {
     ...stoppedFutureBills,
     admissionBillCreated: admissionBilling?.created === true,
-    admissionBillId: String(admissionBilling?.bill?._id || '')
+    admissionBillId: String(admissionBilling?.bill?._id || ''),
+    ...(['class_transfer', 're_enrollment'].includes(action) ? { billingStartsAt: effectiveAt.toISOString() } : {})
   };
   const event = await createLifecycleEvent({
     action,
@@ -459,7 +630,7 @@ async function executeStudentLifecycleAction(payload = {}, context = {}) {
       throw lifecycleError(
         'student_lifecycle_transactions_required',
         503,
-        'MongoDB replica set or mongos is required for atomic student lifecycle operations.'
+        'برای ثبت یک‌پارچه تغییرات تعلیمی شاگرد، دیتابیس باید در حالت Replica Set یا Mongos فعال باشد.'
       );
     }
     throw error;
@@ -478,19 +649,24 @@ async function getStudentLifecycleHistory(membershipId) {
   if (!normalizedId) throw lifecycleError('student_membership_required', 400);
   const membership = await StudentMembership.findById(normalizedId).lean();
   if (!membership) return null;
-  const [events, transfers, dropouts, expulsions, suspensions] = await Promise.all([
-    StudentLifecycleEvent.find({ membershipId: normalizedId }).sort({ effectiveAt: -1, createdAt: -1 }).lean(),
+  const [events, transfers, dropouts, expulsions, suspensions, reEnrollments] = await Promise.all([
+    StudentLifecycleEvent.find({
+      $or: [{ membershipId: normalizedId }, { previousMembershipId: normalizedId }]
+    }).sort({ effectiveAt: -1, createdAt: -1 }).lean(),
     StudentTransfer.find({
       $or: [{ sourceMembershipId: normalizedId }, { targetMembershipId: normalizedId }]
     }).sort({ effectiveAt: -1, createdAt: -1 }).lean(),
     StudentDropout.find({ membershipId: normalizedId }).sort({ effectiveAt: -1, createdAt: -1 }).lean(),
     StudentExpulsion.find({ membershipId: normalizedId }).sort({ effectiveAt: -1, createdAt: -1 }).lean(),
-    StudentSuspension.find({ membershipId: normalizedId }).sort({ startsAt: -1, createdAt: -1 }).lean()
+    StudentSuspension.find({ membershipId: normalizedId }).sort({ startsAt: -1, createdAt: -1 }).lean(),
+    StudentReEnrollment.find({
+      $or: [{ previousMembershipId: normalizedId }, { targetMembershipId: normalizedId }]
+    }).sort({ effectiveAt: -1, createdAt: -1 }).lean()
   ]);
   return {
     membership: snapshotMembership(membership),
     events,
-    documents: { transfers, dropouts, expulsions, suspensions }
+    documents: { transfers, dropouts, expulsions, suspensions, reEnrollments }
   };
 }
 

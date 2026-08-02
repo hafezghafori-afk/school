@@ -2,6 +2,7 @@ require('../models/StudentMembership');
 require('../models/FeeOrder');
 require('../models/FeePayment');
 require('../models/FinanceRelief');
+require('../models/ExpenseEntry');
 require('../models/SchoolClass');
 require('../models/AcademicYear');
 
@@ -9,6 +10,7 @@ const StudentMembership = require('../models/StudentMembership');
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
 const FinanceRelief = require('../models/FinanceRelief');
+const ExpenseEntry = require('../models/ExpenseEntry');
 const FinanceTreasuryTransaction = require('../models/FinanceTreasuryTransaction');
 const { buildFinanceAnomalyReport } = require('./financeAnomalyService');
 const {
@@ -218,6 +220,26 @@ function buildFinanceMonthCloseReadiness({ totals = {}, anomalies = {} } = {}) {
     });
   }
 
+  const pendingExpenseCount = Number(totals?.pendingExpenseCount || 0) || 0;
+  if (pendingExpenseCount > 0) {
+    blockingIssues.push({
+      code: 'pending_expenses',
+      label: 'مصارف پیش‌نویس یا در انتظار تایید',
+      count: pendingExpenseCount,
+      amount: roundMoney(totals?.pendingExpenseAmount || 0)
+    });
+  }
+
+  const unassignedTreasuryExpenseCount = Number(totals?.unassignedTreasuryExpenseCount || 0) || 0;
+  if (unassignedTreasuryExpenseCount > 0) {
+    blockingIssues.push({
+      code: 'approved_expenses_missing_treasury',
+      label: 'مصارف تاییدشده که به حساب خزانه وصل نشده‌اند',
+      count: unassignedTreasuryExpenseCount,
+      amount: roundMoney(totals?.unassignedTreasuryExpenseAmount || 0)
+    });
+  }
+
   const actionRequiredAnomalies = Number(anomalies?.summary?.actionRequired || 0) || 0;
   if (actionRequiredAnomalies > 0) {
     blockingIssues.push({
@@ -261,7 +283,7 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
   if (!academicYearId) throw new Error('finance_academic_year_scope_required');
   const scopeFilter = { schoolId, academicYearId };
 
-  const [ordersBeforeClose, ordersIssuedInMonth, approvedPayments, pendingPayments, reliefs, activeMemberships, anomalyReport] = await Promise.all([
+  const [ordersBeforeClose, ordersIssuedInMonth, approvedPayments, pendingPayments, reliefs, activeMemberships, anomalyReport, approvedExpenses, pendingExpenses, treasuryRows] = await Promise.all([
     FeeOrder.find({
       ...scopeFilter,
       status: { $ne: 'void' },
@@ -305,7 +327,22 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
       ],
       status: { $in: CURRENT_MEMBERSHIP_STATUSES }
     }),
-    buildFinanceAnomalyReport({ schoolId, academicYearId, asOf: endAt, limit: 30 })
+    buildFinanceAnomalyReport({ schoolId, academicYearId, asOf: endAt, limit: 30 }),
+    ExpenseEntry.find({
+      ...scopeFilter,
+      status: 'approved',
+      expenseDate: { $gte: startAt, $lte: endAt }
+    }).select('amount treasuryAccountId procurementCommitmentId expenseDate category subCategory').lean(),
+    ExpenseEntry.find({
+      ...scopeFilter,
+      status: { $in: ['draft', 'pending_review'] },
+      expenseDate: { $gte: startAt, $lte: endAt }
+    }).select('amount treasuryAccountId expenseDate status category subCategory').lean(),
+    FinanceTreasuryTransaction.find({
+      ...scopeFilter,
+      status: 'posted',
+      transactionDate: { $gte: startAt, $lte: endAt }
+    }).select('amount direction transactionType sourceType transactionDate').lean()
   ]);
   const [approvedRecognition, pendingRecognition] = await Promise.all([
     recognizePayments(approvedPayments),
@@ -338,6 +375,9 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
   const postedTreasuryGroupSet = new Set(postedTreasuryGroups.map((item) => normalizeText(item.transactionGroupKey)));
   const missingTreasuryPayments = recognizedApprovedPayments.filter((payment) => (
     !postedTreasuryGroupSet.has(`fee-payment:${normalizeNullableId(payment?._id)}`)
+  ));
+  const unassignedTreasuryExpenses = approvedExpenses.filter((item) => (
+    !item?.treasuryAccountId && !item?.procurementCommitmentId
   ));
   const mergedAnomalies = mergeFinanceAnomalyCases(anomalyReport?.items || [], anomalyCases, { asOf: endAt });
   const anomalySummary = {
@@ -378,6 +418,14 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
     pendingPaymentAmount: roundMoney(recognizedPendingPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
     missingTreasuryPaymentCount: missingTreasuryPayments.length,
     missingTreasuryPaymentAmount: roundMoney(missingTreasuryPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
+    approvedExpenseCount: approvedExpenses.length,
+    approvedExpenseAmount: roundMoney(approvedExpenses.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
+    pendingExpenseCount: pendingExpenses.length,
+    pendingExpenseAmount: roundMoney(pendingExpenses.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
+    unassignedTreasuryExpenseCount: unassignedTreasuryExpenses.length,
+    unassignedTreasuryExpenseAmount: roundMoney(unassignedTreasuryExpenses.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
+    treasuryInflowAmount: roundMoney(treasuryRows.filter((item) => item?.direction === 'in').reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
+    treasuryOutflowAmount: roundMoney(treasuryRows.filter((item) => item?.direction === 'out').reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
     standingDueAmount: roundMoney(ordersBeforeClose.reduce((sum, item) => sum + Number(item?.amountDue || 0), 0)),
     standingPaidAmount: roundMoney(ordersBeforeClose.reduce((sum, item) => sum + Number(item?.amountPaid || 0), 0)),
     standingOutstandingAmount: roundMoney(ordersBeforeClose.reduce((sum, item) => sum + Number(item?.outstandingAmount || 0), 0)),
@@ -385,6 +433,8 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
     activeMemberships,
     ...reliefSummary
   };
+  totals.netCashAmount = roundMoney(totals.approvedPaymentAmount - totals.approvedExpenseAmount);
+  totals.treasuryNetAmount = roundMoney(totals.treasuryInflowAmount - totals.treasuryOutflowAmount);
 
   const anomalies = {
     summary: anomalySummary,
@@ -408,6 +458,12 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
       approvedCount: recognizedApprovedPayments.length,
       pendingTotal: roundMoney(recognizedPendingPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
       pendingCount: recognizedPendingPayments.length,
+      approvedExpenseTotal: totals.approvedExpenseAmount,
+      approvedExpenseCount: totals.approvedExpenseCount,
+      netCashAmount: totals.netCashAmount,
+      treasuryInflowAmount: totals.treasuryInflowAmount,
+      treasuryOutflowAmount: totals.treasuryOutflowAmount,
+      treasuryNetAmount: totals.treasuryNetAmount,
       items: buildCashflowItems(recognizedApprovedPayments).slice(-31)
     },
     readiness: buildFinanceMonthCloseReadiness({ totals, anomalies }),

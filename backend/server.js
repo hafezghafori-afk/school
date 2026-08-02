@@ -8,6 +8,7 @@ const jwt = require('jsonwebtoken');
 require('dotenv').config();
 const { getCorsOptions, getJwtSecret } = require('./utils/env');
 const { ensureResultTableReferenceData } = require('./services/resultTableService');
+const { dariResponseMessages } = require('./middleware/dariResponseMessages');
 
 const app = express();
 const server = http.createServer(app);
@@ -25,6 +26,7 @@ const logger = (req, res, next) => {
 app.use(cors(corsOptions));
 app.use(express.json());
 app.use(logger);
+app.use('/api', dariResponseMessages);
 
 const rateLimitStore = new Map();
 const rateLimit = (key, limit, windowMs) => {

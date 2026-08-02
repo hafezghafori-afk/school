@@ -448,6 +448,11 @@ async function buildMonthClosePdfBuffer(item = {}, options = {}) {
       { label: 'Approved Payment Amount', value: formatMoney(totals.approvedPaymentAmount || 0) },
       { label: 'Pending Payment Count', value: formatNumber(totals.pendingPaymentCount || 0) },
       { label: 'Pending Payment Amount', value: formatMoney(totals.pendingPaymentAmount || 0) },
+      { label: 'Approved Expense Count', value: formatNumber(totals.approvedExpenseCount || 0) },
+      { label: 'Approved Expense Amount', value: formatMoney(totals.approvedExpenseAmount || 0) },
+      { label: 'Pending Expense Count', value: formatNumber(totals.pendingExpenseCount || 0) },
+      { label: 'Net Cash', value: formatMoney(totals.netCashAmount || 0) },
+      { label: 'Treasury Net', value: formatMoney(totals.treasuryNetAmount || 0) },
       { label: 'Standing Outstanding', value: formatMoney(totals.standingOutstandingAmount || 0) },
       { label: 'Overdue Orders', value: formatNumber(totals.overdueOrders || 0) },
       { label: 'Active Memberships', value: formatNumber(totals.activeMemberships || 0) },
@@ -488,7 +493,11 @@ async function buildMonthClosePdfBuffer(item = {}, options = {}) {
       { label: 'Approved Total', value: formatMoney(cashflow.approvedTotal || 0) },
       { label: 'Approved Count', value: formatNumber(cashflow.approvedCount || 0) },
       { label: 'Pending Total', value: formatMoney(cashflow.pendingTotal || 0) },
-      { label: 'Pending Count', value: formatNumber(cashflow.pendingCount || 0) }
+      { label: 'Pending Count', value: formatNumber(cashflow.pendingCount || 0) },
+      { label: 'Approved Expenses', value: formatMoney(cashflow.approvedExpenseTotal || 0) },
+      { label: 'Net Cash', value: formatMoney(cashflow.netCashAmount || 0) },
+      { label: 'Treasury Inflow', value: formatMoney(cashflow.treasuryInflowAmount || 0) },
+      { label: 'Treasury Outflow', value: formatMoney(cashflow.treasuryOutflowAmount || 0) }
     ]);
     drawItemList(
       doc,

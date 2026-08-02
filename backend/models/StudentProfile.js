@@ -40,7 +40,17 @@ const studentDocumentSchema = new mongoose.Schema({
   },
   title: { type: String, default: '' },
   fileUrl: { type: String, default: '' },
+  storageProvider: {
+    type: String,
+    enum: ['legacy', 'local_private', 'r2_private'],
+    default: 'legacy'
+  },
+  storageKey: { type: String, default: '' },
+  originalName: { type: String, default: '' },
+  mimeType: { type: String, default: '' },
+  size: { type: Number, default: 0, min: 0 },
   note: { type: String, default: '' },
+  isPrimary: { type: Boolean, default: false },
   uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   uploadedAt: { type: Date, default: Date.now }
 }, { _id: true });
@@ -111,20 +121,28 @@ const studentProfileSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-function trimNestedStrings(node) {
+function trimNestedStrings(node, seen = new WeakSet()) {
   if (!node) return;
+  if (
+    node instanceof Date
+    || node instanceof mongoose.Types.ObjectId
+    || Buffer.isBuffer(node)
+    || node?._bsontype
+  ) return;
   if (Array.isArray(node)) {
-    node.forEach((item) => trimNestedStrings(item));
+    node.forEach((item) => trimNestedStrings(item, seen));
     return;
   }
   if (typeof node !== 'object') return;
+  if (seen.has(node)) return;
+  seen.add(node);
 
   Object.keys(node).forEach((key) => {
     if (typeof node[key] === 'string') {
       node[key] = node[key].trim();
       return;
     }
-    trimNestedStrings(node[key]);
+    trimNestedStrings(node[key], seen);
   });
 }
 

@@ -4,13 +4,20 @@ const User = require('../models/User');
 require('../models/AcademicYear');
 require('../models/Course');
 require('../models/SchoolClass');
+require('../models/Subject');
+require('../models/ExamType');
+require('../models/AcademicTerm');
 const StudentCore = require('../models/StudentCore');
 const StudentProfile = require('../models/StudentProfile');
 const StudentMembership = require('../models/StudentMembership');
+const StudentLifecycleEvent = require('../models/StudentLifecycleEvent');
+const AfghanStudent = require('../models/AfghanStudent');
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
 const Grade = require('../models/Grade');
 const Result = require('../models/Result');
+const Attendance = require('../models/Attendance');
+const ExamResult = require('../models/ExamResult');
 const ActivityLog = require('../models/ActivityLog');
 const { serializeUserIdentity } = require('../utils/userRole');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
@@ -70,7 +77,8 @@ function formatAcademicYear(yearDoc) {
     id: String(year._id),
     code: normalizeText(year.code),
     name: normalizeText(year.name),
-    label: normalizeText(year.label) || normalizeText(year.name) || normalizeText(year.code),
+    title: normalizeText(year.title),
+    label: normalizeText(year.label) || normalizeText(year.title) || normalizeText(year.name) || normalizeText(year.code),
     status: normalizeText(year.status),
     isActive: Boolean(year.isActive),
     startsAt: year.startsAt || null,
@@ -148,15 +156,27 @@ function formatGuardianLink(guardianDoc = {}) {
   };
 }
 
-function formatIdentity(studentCoreDoc, userDoc) {
+function formatIdentity(studentCoreDoc, userDoc, afghanStudentDoc = null) {
   const studentCore = toPlain(studentCoreDoc) || {};
   const user = formatUser(userDoc);
-  const fullName = normalizeText(studentCore.fullName) || normalizeText(studentCore.preferredName) || normalizeText(user?.name);
+  const afghanStudent = toPlain(afghanStudentDoc) || {};
+  const personalInfo = afghanStudent.personalInfo || {};
+  const identification = afghanStudent.identification || {};
+  const afghanFullName = [
+    normalizeText(personalInfo.firstNameDari || personalInfo.firstName),
+    normalizeText(personalInfo.lastNameDari || personalInfo.lastName)
+  ].filter(Boolean).join(' ');
+  const fullName = normalizeText(studentCore.fullName)
+    || normalizeText(studentCore.preferredName)
+    || normalizeText(user?.name)
+    || afghanFullName;
 
   return {
     id: String(studentCore._id),
     userId: studentCore.userId ? String(studentCore.userId) : (user ? user.id : ''),
     admissionNo: normalizeText(studentCore.admissionNo),
+    asasNumber: normalizeText(afghanStudent.asasNumber) || normalizeText(studentCore.admissionNo),
+    tazkiraNumber: normalizeText(identification.tazkiraNumber),
     fullName,
     preferredName: normalizeText(studentCore.preferredName) || fullName,
     givenName: normalizeText(studentCore.givenName),
@@ -164,9 +184,12 @@ function formatIdentity(studentCoreDoc, userDoc) {
     email: normalizeText(studentCore.email) || normalizeText(user?.email),
     phone: normalizeText(studentCore.phone),
     gender: normalizeText(studentCore.gender),
-    dateOfBirth: normalizeText(studentCore.dateOfBirth),
+    dateOfBirth: normalizeText(studentCore.dateOfBirth) || (personalInfo.birthDate || null),
     status: normalizeText(studentCore.status) || normalizeText(user?.status),
     note: normalizeText(studentCore.note),
+    avatarUrl: normalizeText(user?.avatarUrl)
+      || normalizeText((afghanStudent.documents || []).find((item) => item?.type === 'photo')?.url),
+    afghanStudentId: afghanStudent._id ? String(afghanStudent._id) : '',
     user
   };
 }
@@ -179,6 +202,9 @@ function formatMembership(membershipDoc) {
     id: String(membership._id),
     status: normalizeText(membership.status),
     source: normalizeText(membership.source),
+    admissionType: normalizeText(membership.admissionType),
+    previousMembershipId: membership.previousMembershipId ? String(membership.previousMembershipId) : '',
+    changeVersion: Number(membership.changeVersion || 0),
     isCurrent: Boolean(membership.isCurrent),
     enrolledAt: membership.enrolledAt || membership.joinedAt || null,
     endedAt: membership.endedAt || membership.leftAt || null,
@@ -341,7 +367,7 @@ function buildProfileTimeline(profile) {
     timeline.push({
       id: String(remark._id),
       type: 'remark',
-      title: normalizeText(remark.title) || 'Remark',
+      title: normalizeText(remark.title) || 'ملاحظه',
       note: normalizeText(remark.text),
       meta: normalizeText(remark.type),
       at: remark.createdAt || null
@@ -352,8 +378,8 @@ function buildProfileTimeline(profile) {
     timeline.push({
       id: String(transfer._id),
       type: 'transfer',
-      title: 'Transfer',
-      note: [normalizeText(transfer.fromLabel), normalizeText(transfer.toLabel)].filter(Boolean).join(' -> '),
+      title: 'تبدیلی',
+      note: [normalizeText(transfer.fromLabel), normalizeText(transfer.toLabel)].filter(Boolean).join(' ← '),
       meta: normalizeText(transfer.direction),
       at: transfer.transferredAt || null
     });
@@ -363,7 +389,7 @@ function buildProfileTimeline(profile) {
     timeline.push({
       id: String(document._id),
       type: 'document',
-      title: normalizeText(document.title) || 'Document',
+      title: normalizeText(document.title) || 'سند',
       note: normalizeText(document.note),
       meta: normalizeText(document.kind),
       at: document.uploadedAt || null
@@ -519,28 +545,85 @@ async function ensureStudentCoreFromUser(userDoc) {
 async function resolveStudentCore(studentRef) {
   const normalizedRef = normalizeText(studentRef);
   if (!normalizedRef || !mongoose.isValidObjectId(normalizedRef)) {
-    return { studentCore: null, user: null };
+    return { studentCore: null, user: null, afghanStudent: null };
   }
 
   let studentCore = await StudentCore.findById(normalizedRef);
   let user = null;
+  let afghanStudent = await AfghanStudent.findById(normalizedRef);
 
   if (!studentCore) {
     studentCore = await StudentCore.findOne({ userId: normalizedRef });
   }
 
+  if (afghanStudent && !studentCore) {
+    if (afghanStudent.linkedUserId) {
+      user = await User.findById(afghanStudent.linkedUserId);
+      studentCore = user ? await ensureStudentCoreFromUser(user) : null;
+    }
+    if (!studentCore) {
+      const linkedMembership = await StudentMembership.findOne({ afghanStudentId: afghanStudent._id })
+        .sort({ isCurrent: -1, updatedAt: -1, createdAt: -1 });
+      if (linkedMembership?.studentId) studentCore = await StudentCore.findById(linkedMembership.studentId);
+      if (!user && linkedMembership?.student) user = await User.findById(linkedMembership.student);
+      if (!studentCore && user) studentCore = await ensureStudentCoreFromUser(user);
+    }
+    if (!studentCore) {
+      const admissionNo = normalizeText(afghanStudent.asasNumber);
+      studentCore = admissionNo ? await StudentCore.findOne({ admissionNo }) : null;
+      if (!studentCore) {
+        const personalInfo = afghanStudent.personalInfo || {};
+        const fullName = [
+          normalizeText(personalInfo.firstNameDari || personalInfo.firstName),
+          normalizeText(personalInfo.lastNameDari || personalInfo.lastName)
+        ].filter(Boolean).join(' ');
+        studentCore = await StudentCore.create({
+          userId: afghanStudent.linkedUserId || null,
+          admissionNo: admissionNo || undefined,
+          fullName,
+          preferredName: fullName,
+          gender: ['male', 'female', 'other'].includes(normalizeText(personalInfo.gender)) ? normalizeText(personalInfo.gender) : '',
+          dateOfBirth: personalInfo.birthDate ? String(personalInfo.birthDate).slice(0, 10) : '',
+          status: normalizeText(afghanStudent.status) === 'inactive' ? 'inactive' : 'active'
+        });
+      }
+    }
+  }
+
   if (studentCore) {
-    user = studentCore.userId ? await User.findById(studentCore.userId) : null;
-    return { studentCore, user };
+    if (!user) user = studentCore.userId ? await User.findById(studentCore.userId) : null;
+    if (!afghanStudent) {
+      const afghanStudentRefs = [
+        ...(user?._id ? [{ linkedUserId: user._id }] : []),
+        ...(studentCore.admissionNo ? [{ asasNumber: studentCore.admissionNo }] : [])
+      ];
+      afghanStudent = afghanStudentRefs.length ? await AfghanStudent.findOne({ $or: afghanStudentRefs }) : null;
+    }
+    return { studentCore, user, afghanStudent };
   }
 
   user = await User.findById(normalizedRef);
   if (!user || String(user.role) !== 'student') {
-    return { studentCore: null, user: null };
+    return { studentCore: null, user: null, afghanStudent: null };
   }
 
   studentCore = await ensureStudentCoreFromUser(user);
-  return { studentCore, user };
+  afghanStudent = await AfghanStudent.findOne({ linkedUserId: user._id });
+  return { studentCore, user, afghanStudent };
+}
+
+function buildAttendanceSummary(items = []) {
+  const total = items.length;
+  const present = items.filter((item) => ['present', 'late'].includes(normalizeText(item.status))).length;
+  const absent = items.filter((item) => normalizeText(item.status) === 'absent').length;
+  const excused = items.filter((item) => ['sick', 'leave', 'excused', 'suspended'].includes(normalizeText(item.status))).length;
+  return {
+    total,
+    present,
+    absent,
+    excused,
+    attendanceRate: total > 0 ? Number(((present / total) * 100).toFixed(2)) : 0
+  };
 }
 
 async function ensureStudentProfile(studentCoreId) {
@@ -599,8 +682,8 @@ async function listStudentProfiles({ query = '' } = {}) {
       { student: { $in: userIds } }
     ]
   })
-    .populate({ path: 'classId', select: 'title code gradeLevel section shift room status academicYearId', populate: { path: 'academicYearId', select: 'name label code status isActive startsAt endsAt' } })
-    .populate('academicYearId', 'name label code status isActive startsAt endsAt')
+    .populate({ path: 'classId', select: 'title code gradeLevel section shift room status academicYearId', populate: { path: 'academicYearId', select: 'title name label code status isActive startsAt endsAt' } })
+    .populate('academicYearId', 'title name label code status isActive startsAt endsAt')
     .sort({ createdAt: -1 });
 
   const membershipByKey = new Map();
@@ -650,7 +733,7 @@ async function listStudentProfiles({ query = '' } = {}) {
 }
 
 async function getStudentProfile(studentRef) {
-  const { studentCore, user } = await resolveStudentCore(studentRef);
+  const { studentCore, user, afghanStudent } = await resolveStudentCore(studentRef);
   if (!studentCore) {
     return null;
   }
@@ -661,12 +744,13 @@ async function getStudentProfile(studentRef) {
   const memberships = await StudentMembership.find({
     $or: [
       { studentId: studentCore._id },
-      ...(user ? [{ student: user._id }] : [])
+      ...(user ? [{ student: user._id }] : []),
+      ...(afghanStudent?._id ? [{ afghanStudentId: afghanStudent._id }] : [])
     ]
   })
-    .populate({ path: 'classId', select: 'title code gradeLevel section shift room status academicYearId', populate: { path: 'academicYearId', select: 'name label code status isActive startsAt endsAt' } })
+    .populate({ path: 'classId', select: 'title code gradeLevel section shift room status academicYearId', populate: { path: 'academicYearId', select: 'title name label code status isActive startsAt endsAt' } })
     .populate('course', 'title category level kind')
-    .populate('academicYearId', 'name label code status isActive startsAt endsAt')
+    .populate('academicYearId', 'title name label code status isActive startsAt endsAt')
     .sort({ isCurrent: -1, enrolledAt: -1, createdAt: -1 });
 
   const membershipIds = memberships.map((membership) => membership._id);
@@ -676,11 +760,11 @@ async function getStudentProfile(studentRef) {
     membershipIds
   });
 
-  const [bills, receipts, grades, quizResults, logs] = await Promise.all([
+  const [bills, receipts, grades, quizResults, logs, lifecycleEvents, attendanceRecords, examResults] = await Promise.all([
     FeeOrder.find({ ...referenceFilter, status: { $ne: 'void' } })
       .populate('course', 'title category level kind')
-      .populate({ path: 'classId', select: 'title code gradeLevel section shift room status academicYearId', populate: { path: 'academicYearId', select: 'name label code status isActive startsAt endsAt' } })
-      .populate('academicYearId', 'name label code status isActive startsAt endsAt')
+      .populate({ path: 'classId', select: 'title code gradeLevel section shift room status academicYearId', populate: { path: 'academicYearId', select: 'title name label code status isActive startsAt endsAt' } })
+      .populate('academicYearId', 'title name label code status isActive startsAt endsAt')
       .sort({ issuedAt: -1, createdAt: -1 })
       .limit(50),
     FeePayment.find(referenceFilter)
@@ -689,18 +773,18 @@ async function getStudentProfile(studentRef) {
         select: 'orderNumber course classId academicYearId amountDue amountPaid status',
         populate: [
           { path: 'course', select: 'title category level kind' },
-          { path: 'classId', select: 'title code gradeLevel section shift room status academicYearId', populate: { path: 'academicYearId', select: 'name label code status isActive startsAt endsAt' } },
-          { path: 'academicYearId', select: 'name label code status isActive startsAt endsAt' }
+          { path: 'classId', select: 'title code gradeLevel section shift room status academicYearId', populate: { path: 'academicYearId', select: 'title name label code status isActive startsAt endsAt' } },
+          { path: 'academicYearId', select: 'title name label code status isActive startsAt endsAt' }
         ]
       })
-      .populate({ path: 'classId', select: 'title code gradeLevel section shift room status academicYearId', populate: { path: 'academicYearId', select: 'name label code status isActive startsAt endsAt' } })
-      .populate('academicYearId', 'name label code status isActive startsAt endsAt')
+      .populate({ path: 'classId', select: 'title code gradeLevel section shift room status academicYearId', populate: { path: 'academicYearId', select: 'title name label code status isActive startsAt endsAt' } })
+      .populate('academicYearId', 'title name label code status isActive startsAt endsAt')
       .sort({ paidAt: -1, createdAt: -1 })
       .limit(50),
     Grade.find(referenceFilter)
       .populate('course', 'title category level kind')
-      .populate({ path: 'classId', select: 'title code gradeLevel section shift room status academicYearId', populate: { path: 'academicYearId', select: 'name label code status isActive startsAt endsAt' } })
-      .populate('academicYearId', 'name label code status isActive startsAt endsAt')
+      .populate({ path: 'classId', select: 'title code gradeLevel section shift room status academicYearId', populate: { path: 'academicYearId', select: 'title name label code status isActive startsAt endsAt' } })
+      .populate('academicYearId', 'title name label code status isActive startsAt endsAt')
       .sort({ updatedAt: -1, createdAt: -1 })
       .limit(50),
     user
@@ -708,7 +792,43 @@ async function getStudentProfile(studentRef) {
       : [],
     user
       ? ActivityLog.find({ targetUser: user._id }).sort({ createdAt: -1 }).limit(40)
-      : []
+      : [],
+    StudentLifecycleEvent.find({
+      $or: [
+        { studentId: studentCore._id },
+        ...(user?._id ? [{ student: user._id }] : []),
+        ...(membershipIds.length ? [{ membershipId: { $in: membershipIds } }, { previousMembershipId: { $in: membershipIds } }] : [])
+      ]
+    })
+      .populate('createdBy', 'name email role orgRole')
+      .sort({ effectiveAt: -1, createdAt: -1 })
+      .limit(100)
+      .lean(),
+    Attendance.find({
+      $or: [
+        ...(membershipIds.length ? [{ studentMembershipId: { $in: membershipIds } }] : []),
+        { studentId: studentCore._id },
+        ...(user?._id ? [{ student: user._id }] : [])
+      ]
+    })
+      .populate('course', 'title category level kind')
+      .sort({ date: -1, createdAt: -1 })
+      .limit(120)
+      .lean(),
+    ExamResult.find({
+      $or: [
+        ...(membershipIds.length ? [{ studentMembershipId: { $in: membershipIds } }] : []),
+        { studentId: studentCore._id },
+        ...(user?._id ? [{ student: user._id }] : [])
+      ]
+    })
+      .populate('subjectId', 'name code grade')
+      .populate('examTypeId', 'title code totalMarks')
+      .populate('assessmentPeriodId', 'title code')
+      .populate('classId', 'title code gradeLevel section')
+      .sort({ computedAt: -1, createdAt: -1 })
+      .limit(120)
+      .lean()
   ]);
 
   const membershipItems = memberships.map(formatMembership).filter(Boolean);
@@ -717,12 +837,25 @@ async function getStudentProfile(studentRef) {
   const gradeItems = grades.map(formatGrade).filter(Boolean);
   const quizItems = quizResults.map(formatQuizResult).filter(Boolean);
   const activityItems = logs.map(formatActivityLog).filter(Boolean);
+  const lifecycleItems = lifecycleEvents.map((event) => ({
+    id: String(event._id),
+    eventType: normalizeText(event.eventType),
+    membershipId: event.membershipId ? String(event.membershipId) : '',
+    previousMembershipId: event.previousMembershipId ? String(event.previousMembershipId) : '',
+    effectiveAt: event.effectiveAt || null,
+    note: normalizeText(event.note),
+    documentType: normalizeText(event.documentType),
+    documentId: event.documentId ? String(event.documentId) : '',
+    financialEffects: event.financialEffects || {},
+    createdBy: event.createdBy ? formatUser(event.createdBy) : null,
+    createdAt: event.createdAt || null
+  }));
   const profile = toPlain(profileDoc) || {};
   const currentMembership = membershipItems.find((item) => item.isCurrent) || membershipItems[0] || null;
 
   return {
     identity: {
-      ...formatIdentity(studentCore, user),
+      ...formatIdentity(studentCore, user, afghanStudent),
       currentMembership
     },
     profile: {
@@ -756,12 +889,21 @@ async function getStudentProfile(studentRef) {
         kind: normalizeText(document.kind),
         title: normalizeText(document.title),
         fileUrl: normalizeText(document.fileUrl),
+        downloadUrl: `/api/student-profiles/${studentCore._id}/documents/${document._id}/file`,
+        storageProvider: normalizeText(document.storageProvider) || 'legacy',
+        originalName: normalizeText(document.originalName),
+        mimeType: normalizeText(document.mimeType),
+        size: Number(document.size || 0),
         note: normalizeText(document.note),
+        isPrimary: Boolean(document.isPrimary),
         uploadedBy: document.uploadedBy ? String(document.uploadedBy) : '',
         uploadedAt: document.uploadedAt || null
       }))
     },
     memberships: membershipItems,
+    lifecycle: {
+      events: lifecycleItems
+    },
     finance: {
       summary: buildFinanceSummary(financeBills, financeReceipts),
       bills: financeBills,
@@ -770,12 +912,47 @@ async function getStudentProfile(studentRef) {
     results: {
       summary: buildResultSummary(gradeItems, quizItems),
       grades: gradeItems,
-      quizResults: quizItems
+      quizResults: quizItems,
+      examResults: examResults.map((item) => ({
+        id: String(item._id),
+        subject: item.subjectId ? { id: String(item.subjectId._id || item.subjectId), name: normalizeText(item.subjectId.name), code: normalizeText(item.subjectId.code) } : null,
+        examType: item.examTypeId ? { id: String(item.examTypeId._id || item.examTypeId), title: normalizeText(item.examTypeId.title), code: normalizeText(item.examTypeId.code) } : null,
+        period: item.assessmentPeriodId ? { id: String(item.assessmentPeriodId._id || item.assessmentPeriodId), title: normalizeText(item.assessmentPeriodId.title) } : null,
+        schoolClass: item.classId ? { id: String(item.classId._id || item.classId), title: normalizeText(item.classId.title) } : null,
+        markStatus: normalizeText(item.markStatus),
+        obtainedMark: Number(item.obtainedMark || 0),
+        totalMark: Number(item.totalMark || 0),
+        percentage: Number(item.percentage || 0),
+        resultStatus: normalizeText(item.resultStatus),
+        rank: item.rank || null,
+        computedAt: item.computedAt || item.createdAt || null
+      }))
+    },
+    attendance: {
+      summary: buildAttendanceSummary(attendanceRecords),
+      records: attendanceRecords.map((item) => ({
+        id: String(item._id),
+        membershipId: item.studentMembershipId ? String(item.studentMembershipId) : '',
+        date: item.date || null,
+        status: normalizeText(item.status),
+        note: normalizeText(item.note),
+        course: formatCourse(item.course)
+      }))
     },
     activity: {
       logs: activityItems
     },
-    timeline: buildProfileTimeline(profile),
+    timeline: [
+      ...buildProfileTimeline(profile),
+      ...lifecycleItems.map((event) => ({
+        id: event.id,
+        type: 'lifecycle',
+        title: event.eventType,
+        note: event.note,
+        meta: event.documentType,
+        at: event.effectiveAt || event.createdAt
+      }))
+    ].sort(sortByDateDesc).slice(0, 50),
     summary: {
       membershipCount: membershipItems.length,
       activeMembershipCount: membershipItems.filter((item) => item.isCurrent).length,
@@ -792,9 +969,26 @@ async function getStudentProfile(studentRef) {
 }
 
 async function updateStudentProfileBasics(studentRef, payload = {}) {
-  const { studentCore } = await resolveStudentCore(studentRef);
+  const { studentCore, user, afghanStudent } = await resolveStudentCore(studentRef);
   if (!studentCore) {
     return null;
+  }
+
+  const identity = payload.identity && typeof payload.identity === 'object' ? payload.identity : {};
+  const identityFields = ['admissionNo', 'fullName', 'preferredName', 'givenName', 'familyName', 'email', 'phone', 'dateOfBirth', 'note'];
+  identityFields.forEach((field) => {
+    if (Object.prototype.hasOwnProperty.call(identity, field)) studentCore[field] = normalizeText(identity[field]);
+  });
+  if (Object.prototype.hasOwnProperty.call(identity, 'gender')) {
+    studentCore.gender = ['male', 'female', 'other'].includes(normalizeText(identity.gender)) ? normalizeText(identity.gender) : '';
+  }
+  await studentCore.save();
+
+  if (user?._id) {
+    const userUpdate = {};
+    if (Object.prototype.hasOwnProperty.call(identity, 'fullName') && normalizeText(identity.fullName)) userUpdate.name = normalizeText(identity.fullName);
+    if (Object.prototype.hasOwnProperty.call(identity, 'email') && normalizeText(identity.email)) userUpdate.email = normalizeText(identity.email);
+    if (Object.keys(userUpdate).length) await User.updateOne({ _id: user._id }, { $set: userUpdate });
   }
 
   const profile = await ensureStudentProfile(studentCore._id);
@@ -803,6 +997,37 @@ async function updateStudentProfileBasics(studentRef, payload = {}) {
   profile.background = sanitizeBackgroundInput(payload.background || profile.background);
   profile.notes = sanitizeNotesInput(payload.notes || profile.notes);
   await profile.save();
+
+  if (afghanStudent?._id) {
+    const fullName = normalizeText(identity.fullName);
+    const fullNameParts = fullName.split(/\s+/).filter(Boolean);
+    const givenName = normalizeText(identity.givenName) || fullNameParts[0] || '';
+    const familyName = normalizeText(identity.familyName) || fullNameParts.slice(1).join(' ');
+    const update = {};
+    if (Object.prototype.hasOwnProperty.call(identity, 'admissionNo')) update.asasNumber = normalizeText(identity.admissionNo);
+    if (givenName) {
+      update['personalInfo.firstName'] = givenName;
+      update['personalInfo.firstNameDari'] = givenName;
+    }
+    if (familyName) {
+      update['personalInfo.lastName'] = familyName;
+      update['personalInfo.lastNameDari'] = familyName;
+    }
+    if (Object.prototype.hasOwnProperty.call(identity, 'gender')) update['personalInfo.gender'] = studentCore.gender;
+    if (Object.prototype.hasOwnProperty.call(identity, 'dateOfBirth') && normalizeText(identity.dateOfBirth)) update['personalInfo.birthDate'] = normalizeText(identity.dateOfBirth);
+    if (Object.prototype.hasOwnProperty.call(profile.family || {}, 'fatherName')) update['personalInfo.fatherName'] = normalizeText(profile.family.fatherName);
+    if (Object.prototype.hasOwnProperty.call(profile.family || {}, 'motherName')) update['familyInfo.motherName'] = normalizeText(profile.family.motherName);
+    if (Object.prototype.hasOwnProperty.call(profile.family || {}, 'guardianName')) update['familyInfo.guardianName'] = normalizeText(profile.family.guardianName);
+    if (Object.prototype.hasOwnProperty.call(profile.family || {}, 'guardianRelation')) update['familyInfo.guardianRelation'] = normalizeText(profile.family.guardianRelation) || undefined;
+    if (Object.prototype.hasOwnProperty.call(profile.contact || {}, 'primaryPhone')) {
+      update['contactInfo.phone'] = normalizeText(profile.contact.primaryPhone);
+      update['contactInfo.mobile'] = normalizeText(profile.contact.primaryPhone);
+    }
+    if (Object.prototype.hasOwnProperty.call(profile.contact || {}, 'email')) update['contactInfo.email'] = normalizeText(profile.contact.email);
+    if (Object.prototype.hasOwnProperty.call(profile.contact || {}, 'address')) update['contactInfo.address'] = normalizeText(profile.contact.address);
+    Object.keys(update).forEach((key) => update[key] === undefined && delete update[key]);
+    if (Object.keys(update).length) await AfghanStudent.updateOne({ _id: afghanStudent._id }, { $set: update });
+  }
 
   return getStudentProfile(String(studentCore._id));
 }
@@ -1050,29 +1275,75 @@ async function addStudentTransfer(studentRef, payload = {}) {
 }
 
 async function addStudentDocument(studentRef, payload = {}, actorUserId = null) {
-  const { studentCore } = await resolveStudentCore(studentRef);
+  const { studentCore, user } = await resolveStudentCore(studentRef);
   if (!studentCore) {
     return null;
   }
 
   const profile = await ensureStudentProfile(studentCore._id);
   profile.documents = Array.isArray(profile.documents) ? profile.documents : [];
+  const kind = ['id_card', 'birth_certificate', 'report_card', 'photo', 'other'].includes(normalizeText(payload.kind))
+    ? normalizeText(payload.kind)
+    : 'other';
+  const isPrimary = kind === 'photo' && payload.isPrimary !== false;
+  if (isPrimary) {
+    profile.documents.forEach((item) => {
+      if (item?.kind === 'photo') item.isPrimary = false;
+    });
+  }
   profile.documents.unshift({
-    kind: ['id_card', 'birth_certificate', 'report_card', 'photo', 'other'].includes(normalizeText(payload.kind)) ? normalizeText(payload.kind) : 'other',
+    kind,
     title: normalizeText(payload.title),
     fileUrl: normalizeText(payload.fileUrl),
+    storageProvider: ['legacy', 'local_private', 'r2_private'].includes(normalizeText(payload.storageProvider))
+      ? normalizeText(payload.storageProvider)
+      : 'legacy',
+    storageKey: normalizeText(payload.storageKey),
+    originalName: normalizeText(payload.originalName),
+    mimeType: normalizeText(payload.mimeType),
+    size: Math.max(0, Number(payload.size || 0)),
     note: normalizeText(payload.note),
+    isPrimary,
     uploadedBy: normalizeNullableId(actorUserId)
   });
   await profile.save();
 
+  if (isPrimary && user?._id && normalizeText(payload.fileUrl) && normalizeText(payload.storageProvider) !== 'r2_private') {
+    await User.updateOne({ _id: user._id }, { $set: { avatarUrl: normalizeText(payload.fileUrl) } });
+  }
+
   return getStudentProfile(String(studentCore._id));
+}
+
+async function getStudentDocument(studentRef, documentRef) {
+  const { studentCore } = await resolveStudentCore(studentRef);
+  if (!studentCore || !mongoose.isValidObjectId(documentRef)) return null;
+
+  const profile = await StudentProfile.findOne({ studentId: studentCore._id });
+  const document = profile?.documents?.id(documentRef);
+  if (!document) return null;
+
+  return {
+    studentCoreId: String(studentCore._id),
+    document: {
+      id: String(document._id),
+      kind: normalizeText(document.kind),
+      title: normalizeText(document.title),
+      fileUrl: normalizeText(document.fileUrl),
+      storageProvider: normalizeText(document.storageProvider) || 'legacy',
+      storageKey: normalizeText(document.storageKey),
+      originalName: normalizeText(document.originalName),
+      mimeType: normalizeText(document.mimeType),
+      size: Number(document.size || 0)
+    }
+  };
 }
 
 module.exports = {
   addStudentDocument,
   addStudentRemark,
   addStudentTransfer,
+  getStudentDocument,
   getStudentProfile,
   linkGuardianToStudent,
   listGuardianCandidates,

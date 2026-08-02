@@ -90,7 +90,7 @@ const membershipSchema = new mongoose.Schema({
   },
   admissionType: {
     type: String,
-    enum: ['regular', 'transfer_in', 're_enrollment', 'promotion', 'import', 'migration'],
+    enum: ['regular', 'transfer_in', 'class_transfer', 're_enrollment', 'promotion', 'import', 'migration'],
     default: 'regular',
     index: true
   },

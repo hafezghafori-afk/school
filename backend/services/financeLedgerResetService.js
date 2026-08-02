@@ -614,7 +614,7 @@ async function collectFinanceLedgerResetPlan({ schoolId = '', allSchools = false
     warnings: legacyOrders.length ? [{
       code: 'legacy_enrollment_orders_preserved',
       count: legacyOrders.length,
-      message: 'Legacy enrollment orders are preserved because they also carry admission/enrollment workflow state.'
+      message: 'اسناد ثبت‌نام قبلی نگهداری شدند، زیرا وضعیت روند داخله و ثبت‌نام را نیز ثبت می‌کنند.'
     }] : [],
     preserved: [
       'financefeeplans',

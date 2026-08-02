@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { io } from 'socket.io-client';
 import { API_BASE as DEFAULT_API_BASE } from '../config/api';
 import { formatAfghanDateTime } from '../utils/afghanDate';
+import { localizeSystemMessage } from '../utils/systemMessage';
 import './NotificationBell.css';
 
 const SOUND_PREF_KEY = 'school_notify_sound_enabled_v1';
@@ -25,8 +26,8 @@ const toFaDateTime = (value) => {
 
 const normalizeItem = (item) => ({
   _id: item?._id || `${Date.now()}-${Math.random()}`,
-  title: item?.title || '\u0627\u0639\u0644\u0627\u0646',
-  message: item?.message || '',
+  title: localizeSystemMessage(item?.title || '\u0627\u0639\u0644\u0627\u0646'),
+  message: localizeSystemMessage(item?.message || ''),
   type: item?.type || 'system',
   category: item?.category || '',
   eventKey: item?.eventKey || '',
