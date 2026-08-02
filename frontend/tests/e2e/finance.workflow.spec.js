@@ -3421,7 +3421,12 @@ test.describe('finance workflow', () => {
     await expect(page.locator('.receipt-inspector')).toContainText('Finance Manager');
     await page.getByTestId('print-selected-receipt').click();
     await expect.poll(() => page.evaluate(() => window.__printCalls)).toBe(1);
-    await expect(page.getByTestId('printable-receipt-sheet')).toContainText('رسید رسمی پرداخت فیس');
+    const printableReceipt = page.getByTestId('printable-receipt-sheet');
+    await expect(printableReceipt).toContainText('رسید پرداخت فیس شاگرد');
+    await expect(printableReceipt.locator('.finance-receipt-print-copy')).toHaveCount(2);
+    await expect(printableReceipt.locator('[data-receipt-copy="student"]')).toContainText('نسخه شاگرد');
+    await expect(printableReceipt.locator('[data-receipt-copy="school"]')).toContainText('نسخه مکتب');
+    await expect(printableReceipt.locator('.finance-receipt-cut-line')).toContainText('محل برش');
 
     await expect(page.locator('.receipt-inbox-summary')).toContainText(/11|۱۱/);
     await expect(page.locator('.finance-table.receipts-table .row')).toHaveCount(10);

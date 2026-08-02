@@ -1280,6 +1280,10 @@
   margin-top: 0;
 }
 
+.finance-receipt-cut-line {
+  display: none;
+}
+
 .finance-receipt-print-kicker,
 .finance-receipt-copy-label {
   text-align: center;
@@ -3714,65 +3718,128 @@
   }
 
   .finance-receipt-print-sheet {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    gap: 14mm;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) 5mm minmax(0, 1fr);
+    gap: 0;
     width: 100%;
     max-width: 186mm;
+    height: 273mm;
     min-height: 273mm;
+    max-height: 273mm;
     margin: 0 auto;
     direction: rtl;
+    overflow: hidden;
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   .finance-receipt-print-sheet .finance-receipt-print-copy {
-    min-height: auto;
+    min-width: 0;
+    min-height: 0;
+    height: 134mm;
+    box-sizing: border-box;
+    padding: 2.2mm 2.6mm;
+    border: 0.25mm solid #111;
     break-inside: avoid;
     page-break-inside: avoid;
-    font-size: 9.5pt;
-    gap: 4px;
+    font-size: 8.5pt;
+    line-height: 1.2;
+    gap: 2px;
+    overflow: hidden;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-cut-line {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 5mm;
+    color: #555;
+    font-size: 7pt;
+    line-height: 1;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-cut-line::before {
+    position: absolute;
+    right: 0;
+    left: 0;
+    top: 50%;
+    border-top: 0.25mm dashed #777;
+    content: '';
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-cut-line span {
+    position: relative;
+    z-index: 1;
+    padding: 0 3mm;
+    background: #fff;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-letterhead {
+    grid-template-columns: 15mm minmax(0, 1fr) 15mm;
+    gap: 2mm;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-letterhead .finance-print-logo-box {
+    width: 13mm;
+    height: 13mm;
+    padding: 0.5mm;
+    font-size: 6pt;
   }
 
   .finance-receipt-print-sheet .finance-receipt-print-kicker,
   .finance-receipt-print-sheet .finance-receipt-copy-label {
-    line-height: 1.35;
+    line-height: 1.15;
   }
 
   .finance-receipt-print-sheet .finance-receipt-print-copy h3 {
-    font-size: 12.5pt;
-    line-height: 1.35;
+    font-size: 11pt;
+    line-height: 1.15;
   }
 
   .finance-receipt-print-sheet .finance-receipt-fields {
-    margin-top: 2px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: 1px;
   }
 
   .finance-receipt-print-sheet .finance-receipt-fields > div {
-    min-height: 6.5mm;
+    grid-template-columns: 36% minmax(0, 1fr);
+    min-height: 5.3mm;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-fields > .finance-receipt-field-wide {
+    grid-column: 1 / -1;
+    grid-template-columns: 18% minmax(0, 1fr);
   }
 
   .finance-receipt-print-sheet .finance-receipt-fields span,
   .finance-receipt-print-sheet .finance-receipt-fields strong {
-    padding: 2px 5px;
+    padding: 1px 3px;
   }
 
   .finance-receipt-print-sheet .finance-receipt-allocation-block {
-    gap: 2px;
-    font-size: 8.5pt;
+    gap: 1px;
+    font-size: 7.4pt;
+    line-height: 1.1;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-allocation-list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .finance-receipt-print-sheet .finance-receipt-allocation-list > div {
-    padding: 2px 4px;
+    gap: 0 2px;
+    padding: 1px 2px;
   }
 
   .finance-receipt-print-sheet .finance-receipt-signatures {
-    margin-top: 7px;
-    gap: 12px;
+    margin-top: 2px;
+    gap: 6mm;
   }
 
   .finance-receipt-print-sheet .finance-receipt-signatures > div {
-    min-height: 27px;
-    gap: 8px;
+    min-height: 6mm;
+    gap: 2px;
   }
 
   .finance-print-sheet:not(.finance-receipt-print-sheet) {

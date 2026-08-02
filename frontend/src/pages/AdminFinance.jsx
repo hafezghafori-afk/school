@@ -11532,9 +11532,10 @@ export default function AdminFinance() {
         <div className="finance-print-sheet finance-receipt-print-sheet" data-testid="printable-receipt-sheet">
           {[
             { key: 'student', label: 'نسخه شاگرد' },
-            { key: 'school', label: 'نسخه آرشیف مکتب' }
-          ].map((copy) => (
-            <section key={`receipt-copy-${copy.key}`} className="finance-receipt-print-copy">
+            { key: 'school', label: 'نسخه مکتب' }
+          ].map((copy, copyIndex) => (
+            <React.Fragment key={`receipt-copy-${copy.key}`}>
+            <section className="finance-receipt-print-copy" data-receipt-copy={copy.key}>
               <div className="finance-receipt-copy-label">{copy.label}</div>
               <div className="finance-receipt-letterhead">
                 <div className="finance-print-logo-box">
@@ -11629,6 +11630,12 @@ export default function AdminFinance() {
                 </div>
               </div>
             </section>
+            {copyIndex === 0 && (
+              <div className="finance-receipt-cut-line" aria-hidden="true">
+                <span>محل برش</span>
+              </div>
+            )}
+            </React.Fragment>
           ))}
         </div>
       )}
