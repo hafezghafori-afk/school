@@ -2,7 +2,6 @@ require('../models/AcademicYear');
 require('../models/AcademicTerm');
 require('../models/Course');
 require('../models/SchoolClass');
-require('../models/StudentCore');
 require('../models/StudentMembership');
 require('../models/User');
 require('../models/ExamSession');
@@ -11,7 +10,10 @@ const AcademicYear = require('../models/AcademicYear');
 const AcademicTerm = require('../models/AcademicTerm');
 const Course = require('../models/Course');
 const SchoolClass = require('../models/SchoolClass');
+const AfghanStudent = require('../models/AfghanStudent');
+const StudentCore = require('../models/StudentCore');
 const StudentMembership = require('../models/StudentMembership');
+const StudentProfile = require('../models/StudentProfile');
 const ExamSession = require('../models/ExamSession');
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
@@ -136,11 +138,17 @@ function formatCourse(doc) {
 function formatStudentIdentityFromMembership(item = {}) {
   const studentCore = toPlain(item.studentId);
   const user = toPlain(item.student);
+  const afghanStudent = toPlain(item.afghanStudentId);
+  const asasNumber = normalizeText(afghanStudent?.asasNumber)
+    || normalizeText(studentCore?.admissionNo);
   return {
     studentId: studentCore ? String(studentCore._id || '') : '',
     userId: user ? String(user._id || '') : normalizeNullableId(item.student),
     fullName: normalizeText(studentCore?.fullName) || normalizeText(user?.name),
-    email: normalizeText(studentCore?.email) || normalizeText(user?.email)
+    email: normalizeText(studentCore?.email) || normalizeText(user?.email),
+    fatherName: normalizeText(afghanStudent?.personalInfo?.fatherName),
+    asasNumber,
+    admissionNo: normalizeText(studentCore?.admissionNo) || asasNumber
   };
 }
 
@@ -306,6 +314,7 @@ function formatFeeOrderLite(doc) {
     orderType: normalizeText(item.orderType),
     status,
     currency: normalizeText(item.currency),
+    amountOriginal,
     amountDue,
     amountPaid,
     paymentBreakdown: item.paymentBreakdown || {},
@@ -1284,6 +1293,39 @@ function buildPaymentReceiptDetails(payments = [], orders = [], membership = nul
       || item?.feeOrder
       || primaryAllocation?.feeOrder
       || null;
+    const receiptOrderMap = new Map();
+    for (const allocation of normalizedAllocations) {
+      const allocationOrder = allocation?.feeOrder;
+      const allocationOrderId = String(allocationOrder?.id || allocation?.feeOrderId || '');
+      if (allocationOrder && allocationOrderId) receiptOrderMap.set(allocationOrderId, allocationOrder);
+    }
+    if (order?.id) receiptOrderMap.set(String(order.id), order);
+    const receiptOrders = [...receiptOrderMap.values()];
+    const getOrderDiscountAmount = (receiptOrder = null) => {
+      if (!receiptOrder) return 0;
+      if (Array.isArray(receiptOrder.lineItems) && receiptOrder.lineItems.length) {
+        return roundMoney(receiptOrder.lineItems.reduce(
+          (sum, lineItem) => sum + Number(lineItem?.reductionAmount || 0),
+          0
+        ));
+      }
+      return Math.max(
+        0,
+        roundMoney(Number(receiptOrder.amountOriginal || 0) - Number(receiptOrder.amountDue || 0))
+      );
+    };
+    const grossAmount = receiptOrders.length
+      ? roundMoney(receiptOrders.reduce((sum, receiptOrder) => sum + Number(receiptOrder?.amountOriginal || 0), 0))
+      : null;
+    const discountAmount = receiptOrders.length
+      ? roundMoney(receiptOrders.reduce((sum, receiptOrder) => sum + getOrderDiscountAmount(receiptOrder), 0))
+      : null;
+    const netAmount = receiptOrders.length
+      ? roundMoney(receiptOrders.reduce((sum, receiptOrder) => sum + Number(receiptOrder?.amountDue || 0), 0))
+      : null;
+    const currentOutstandingAmount = receiptOrders.length
+      ? roundMoney(receiptOrders.reduce((sum, receiptOrder) => sum + Number(receiptOrder?.outstandingAmount || 0), 0))
+      : null;
     const bucket = approvedByOrder.get(String(order?.id || primaryAllocation?.feeOrderId || item?.feeOrderId || '')) || [];
     let remainingBeforePayment = null;
     let remainingAfterPayment = null;
@@ -1308,9 +1350,25 @@ function buildPaymentReceiptDetails(payments = [], orders = [], membership = nul
         orderNumber: formatFinanceCode(order?.orderNumber || ''),
         orderType: order?.orderType || '',
         studentName: membership?.student?.fullName || item?.student?.fullName || '',
-        classTitle: membership?.schoolClass?.title || item?.schoolClass?.title || '',
-        academicYearTitle: membership?.academicYear?.title || item?.academicYear?.title || '',
+        fatherName: membership?.student?.fatherName || item?.student?.fatherName || '',
+        asasNumber: membership?.student?.asasNumber
+          || membership?.student?.admissionNo
+          || item?.student?.asasNumber
+          || item?.student?.admissionNo
+          || '',
+        classTitle: membership?.schoolClass?.title
+          || item?.schoolClass?.title
+          || order?.schoolClass?.title
+          || '',
+        academicYearTitle: membership?.academicYear?.title
+          || item?.academicYear?.title
+          || order?.academicYear?.title
+          || order?.schoolClass?.academicYear?.title
+          || '',
         amount: Number(item?.amount || 0),
+        grossAmount,
+        discountAmount,
+        netAmount,
         currency: item?.currency || order?.currency || 'AFN',
         paidAt: item?.paidAt || null,
         paymentMethod: item?.paymentMethod || '',
@@ -1324,10 +1382,14 @@ function buildPaymentReceiptDetails(payments = [], orders = [], membership = nul
           title: allocation?.title || allocation?.feeOrder?.title || '',
           orderNumber: formatFinanceCode(allocation?.orderNumber || allocation?.feeOrder?.orderNumber || ''),
           amount: Number(allocation?.amount || 0),
+          grossAmount: Number(allocation?.feeOrder?.amountOriginal || 0),
+          discountAmount: getOrderDiscountAmount(allocation?.feeOrder),
+          netAmount: Number(allocation?.feeOrder?.amountDue || 0),
           outstandingAmount: Number(allocation?.feeOrder?.outstandingAmount || 0)
         })),
         remainingBeforePayment,
-        remainingAfterPayment
+        remainingAfterPayment,
+        currentOutstandingAmount
       }
     };
   });
@@ -1364,9 +1426,19 @@ function formatReceiptPrintModel(item = {}, membership = null) {
     title: receipt.title || item?.paymentNumber || '',
     orderNumber: formatFinanceCode(receipt.orderNumber || ''),
     studentName: receipt.studentName || membership?.student?.fullName || item?.student?.fullName || '',
+    fatherName: receipt.fatherName || membership?.student?.fatherName || item?.student?.fatherName || '',
+    asasNumber: receipt.asasNumber
+      || membership?.student?.asasNumber
+      || membership?.student?.admissionNo
+      || item?.student?.asasNumber
+      || item?.student?.admissionNo
+      || '',
     classTitle: receipt.classTitle || membership?.schoolClass?.title || item?.schoolClass?.title || '',
     academicYearTitle: receipt.academicYearTitle || membership?.academicYear?.title || item?.academicYear?.title || '',
     amount: Number(receipt.amount || item?.amount || 0),
+    grossAmount: receipt.grossAmount,
+    discountAmount: receipt.discountAmount,
+    netAmount: receipt.netAmount,
     currency: receipt.currency || item?.currency || 'AFN',
     paidAt: receipt.paidAt || item?.paidAt || null,
     paymentMethod: receipt.paymentMethod || item?.paymentMethod || '',
@@ -1377,6 +1449,7 @@ function formatReceiptPrintModel(item = {}, membership = null) {
     fileUrl: receipt.fileUrl || item?.fileUrl || '',
     remainingBeforePayment: receipt.remainingBeforePayment,
     remainingAfterPayment: receipt.remainingAfterPayment,
+    currentOutstandingAmount: receipt.currentOutstandingAmount,
     allocations: Array.isArray(receipt.allocations) ? receipt.allocations : [],
     receivedBy: item?.receivedBy || null
   };
@@ -1445,8 +1518,20 @@ async function getFeePaymentReceipt(paymentId = '', filters = {}) {
   })
     .populate('studentId')
     .populate('student', 'name email')
-    .populate('feeOrderId')
-    .populate('allocations.feeOrderId')
+    .populate({
+      path: 'feeOrderId',
+      populate: [
+        { path: 'classId', populate: { path: 'academicYearId' } },
+        { path: 'academicYearId' }
+      ]
+    })
+    .populate({
+      path: 'allocations.feeOrderId',
+      populate: [
+        { path: 'classId', populate: { path: 'academicYearId' } },
+        { path: 'academicYearId' }
+      ]
+    })
     .populate('receivedBy', 'name orgRole adminLevel')
     .populate('reviewedBy', 'name orgRole adminLevel')
     .populate('approvalTrail.by', 'name orgRole adminLevel')
@@ -1472,16 +1557,85 @@ async function getFeePaymentReceipt(paymentId = '', filters = {}) {
     membership = await StudentMembership.findById(item.studentMembershipId)
       .populate('studentId')
       .populate('student', 'name email')
+      .populate('afghanStudentId', 'personalInfo.fatherName asasNumber')
       .populate({ path: 'classId', populate: { path: 'academicYearId' } })
       .populate('academicYearId');
   }
 
+  const formattedMembership = membership ? formatMembership(membership) : null;
   const formattedPayment = formatFeePayment(item);
-  const [withDetails] = buildPaymentReceiptDetails([formattedPayment], [], membership ? formatMembership(membership) : null);
+  const firstAllocatedOrder = formattedPayment?.allocations?.find((allocation) => allocation?.feeOrder)?.feeOrder || null;
+  const fallbackOrder = formattedPayment?.feeOrder || firstAllocatedOrder;
+  formattedPayment.schoolClass = formattedPayment.schoolClass || fallbackOrder?.schoolClass || null;
+  formattedPayment.academicYear = formattedPayment.academicYear
+    || fallbackOrder?.academicYear
+    || formattedPayment.schoolClass?.academicYear
+    || null;
+
+  let studentCore = toPlain(item.studentId);
+  const populatedUser = toPlain(item.student);
+  let userId = normalizeNullableId(populatedUser?._id || item.student);
+  if (!studentCore && userId) {
+    studentCore = await StudentCore.findOne({ userId })
+      .select('_id userId admissionNo fullName email')
+      .lean();
+  }
+  if (!userId && studentCore?.userId) userId = normalizeNullableId(studentCore.userId);
+
+  const [studentProfile, afghanStudent] = await Promise.all([
+    studentCore?._id
+      ? StudentProfile.findOne({ studentId: studentCore._id }).select('family.fatherName').lean()
+      : null,
+    userId
+      ? AfghanStudent.findOne({ linkedUserId: userId })
+        .select('personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari personalInfo.fatherName asasNumber registrationId linkedUserId')
+        .sort({ updatedAt: -1 })
+        .lean()
+      : null
+  ]);
+  const afghanFullName = [
+    afghanStudent?.personalInfo?.firstNameDari || afghanStudent?.personalInfo?.firstName,
+    afghanStudent?.personalInfo?.lastNameDari || afghanStudent?.personalInfo?.lastName
+  ].map(normalizeText).filter(Boolean).join(' ');
+  const identityFallback = {
+    studentId: normalizeNullableId(studentCore?._id),
+    userId,
+    fullName: normalizeText(studentCore?.fullName) || afghanFullName || normalizeText(populatedUser?.name),
+    email: normalizeText(studentCore?.email) || normalizeText(populatedUser?.email),
+    fatherName: normalizeText(afghanStudent?.personalInfo?.fatherName)
+      || normalizeText(studentProfile?.family?.fatherName),
+    asasNumber: normalizeText(afghanStudent?.asasNumber)
+      || normalizeText(studentCore?.admissionNo)
+      || normalizeText(afghanStudent?.registrationId),
+    admissionNo: normalizeText(studentCore?.admissionNo)
+      || normalizeText(afghanStudent?.asasNumber)
+      || normalizeText(afghanStudent?.registrationId)
+  };
+  const mergeStudentIdentity = (current = {}) => ({
+    ...current,
+    studentId: current?.studentId || identityFallback.studentId,
+    userId: current?.userId || identityFallback.userId,
+    fullName: current?.fullName || identityFallback.fullName,
+    email: current?.email || identityFallback.email,
+    fatherName: current?.fatherName || identityFallback.fatherName,
+    asasNumber: current?.asasNumber || current?.admissionNo || identityFallback.asasNumber,
+    admissionNo: current?.admissionNo || current?.asasNumber || identityFallback.admissionNo
+  });
+  formattedPayment.student = mergeStudentIdentity(formattedPayment.student);
+  if (formattedMembership) {
+    formattedMembership.student = mergeStudentIdentity(formattedMembership.student);
+    formattedMembership.schoolClass = formattedMembership.schoolClass || formattedPayment.schoolClass;
+    formattedMembership.academicYear = formattedMembership.academicYear
+      || formattedPayment.academicYear
+      || formattedMembership.schoolClass?.academicYear
+      || null;
+  }
+
+  const [withDetails] = buildPaymentReceiptDetails([formattedPayment], [], formattedMembership);
   return {
     item: withDetails,
-    membership: membership ? formatMembership(membership) : null,
-    receipt: formatReceiptPrintModel(withDetails, membership ? formatMembership(membership) : null),
+    membership: formattedMembership,
+    receipt: formatReceiptPrintModel(withDetails, formattedMembership),
     generatedAt: new Date().toISOString()
   };
 }

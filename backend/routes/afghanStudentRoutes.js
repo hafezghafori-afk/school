@@ -20,6 +20,7 @@ const { requireAuth, requireRole, requirePermission, requireAnyPermission } = re
 const { requireWritableSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
 const { ENROLLMENT_SOURCES, inferEnrollmentSource } = require('../utils/enrollmentSource');
 const { assertSafeStudentInput } = require('../utils/studentInputSafety');
+const { normalizeStudentSearchText } = require('../utils/studentSearch');
 const {
   assignStudentToClass,
   serializeTransferAdmissionBilling
@@ -378,12 +379,21 @@ router.get('/', requireAuth, requireRole(['admin', 'principal', 'teacher', 'regi
     }
 
     if (search) {
+      const normalizedSearch = normalizeStudentSearchText(search);
+      const escapedSearch = normalizedSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchCondition = { $regex: escapedSearch, $options: 'i' };
       query.$or = [
-        { 'personalInfo.firstName': { $regex: search, $options: 'i' } },
-        { 'personalInfo.lastName': { $regex: search, $options: 'i' } },
-        { 'personalInfo.firstNameDari': { $regex: search, $options: 'i' } },
-        { 'personalInfo.lastNameDari': { $regex: search, $options: 'i' } },
-        { 'identification.tazkiraNumber': { $regex: search, $options: 'i' } }
+        { 'personalInfo.firstName': searchCondition },
+        { 'personalInfo.lastName': searchCondition },
+        { 'personalInfo.firstNameDari': searchCondition },
+        { 'personalInfo.lastNameDari': searchCondition },
+        { 'personalInfo.fatherName': searchCondition },
+        { 'identification.tazkiraNumber': searchCondition },
+        { 'contactInfo.phone': searchCondition },
+        { 'contactInfo.mobile': searchCondition },
+        { 'contactInfo.email': searchCondition },
+        { asasNumber: searchCondition },
+        { registrationId: searchCondition }
       ];
     }
 

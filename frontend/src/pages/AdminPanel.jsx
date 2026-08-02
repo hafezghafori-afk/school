@@ -3926,7 +3926,7 @@ export default function AdminPanel() {
                         onSearchToolSubmit();
                       }
                     }}
-                    placeholder="نام، ایمیل، پیام، خبر..."
+                    placeholder="نام یا نمبر اساس شاگرد، ایمیل، پیام، خبر..."
                   />
                   <button type="button" onClick={onSearchToolSubmit}>
                     {searching ? 'در حال جستجو...' : 'جستجو'}
@@ -4182,7 +4182,7 @@ export default function AdminPanel() {
                             onSearchToolSubmit();
                           }
                         }}
-                        placeholder="نام، ایمیل، پیام، خبر..."
+                        placeholder="نام یا نمبر اساس شاگرد، ایمیل، پیام، خبر..."
                       />
                       <button type="button" className="admin-btn" onClick={onSearchToolSubmit}>
                         {searching ? 'در حال جستجو...' : 'جستجو'}

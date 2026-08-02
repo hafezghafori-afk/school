@@ -1622,17 +1622,24 @@ test.describe('finance workflow', () => {
         orderNumber: item.bill?.billNumber || '',
         academicYearTitle: '1406',
         currency: 'AFN',
+        grossAmount: Number(item.bill?.amountDue || 0) + 100,
+        discountAmount: 100,
+        netAmount: Number(item.bill?.amountDue || 0),
         allocations: [
           {
             feeOrderId: item.bill?._id === 'bill-2' ? 'order-2' : 'order-1',
             title: item.bill?.billNumber || '',
             orderNumber: item.bill?.billNumber || '',
             amount: item.amount,
+            grossAmount: Number(item.bill?.amountDue || 0) + 100,
+            discountAmount: 100,
+            netAmount: Number(item.bill?.amountDue || 0),
             outstandingAmount: Math.max(0, Number(item.bill?.amountDue || 0) - Number(item.bill?.amountPaid || 0))
           }
         ],
         remainingBeforePayment: Math.max(0, Number(item.bill?.amountDue || 0) - Number(item.bill?.amountPaid || 0)),
-        remainingAfterPayment: Math.max(0, Number(item.bill?.amountDue || 0) - Number(item.bill?.amountPaid || 0) - Number(item.amount || 0))
+        remainingAfterPayment: Math.max(0, Number(item.bill?.amountDue || 0) - Number(item.bill?.amountPaid || 0) - Number(item.amount || 0)),
+        currentOutstandingAmount: Math.max(0, Number(item.bill?.amountDue || 0) - Number(item.bill?.amountPaid || 0))
       }
     })),
       ...financeState.canonicalPayments
@@ -1765,14 +1772,29 @@ test.describe('finance workflow', () => {
         contentType: 'application/json',
         body: JSON.stringify({
           success: true,
-          item,
           membership: {
             id: 'mem-1',
-            student: { fullName: item?.student?.fullName || item?.student?.name || 'Student Alpha' },
+            student: {
+              fullName: item?.student?.fullName || item?.student?.name || 'Student Alpha',
+              fatherName: 'Mohammad Karim',
+              asasNumber: 'ASAS-1406-001'
+            },
             schoolClass: { title: item?.schoolClass?.title || 'Class One Core' },
             academicYear: { title: item?.receiptDetails?.academicYearTitle || '1406' }
           },
-          receipt: item?.receiptDetails || {},
+          receipt: {
+            ...(item?.receiptDetails || {}),
+            fatherName: 'Mohammad Karim',
+            asasNumber: 'ASAS-1406-001'
+          },
+          item: {
+            ...item,
+            receiptDetails: {
+              ...(item?.receiptDetails || {}),
+              fatherName: 'Mohammad Karim',
+              asasNumber: 'ASAS-1406-001'
+            }
+          },
           generatedAt: '2026-03-07T09:00:00.000Z'
         })
       });
@@ -3427,6 +3449,17 @@ test.describe('finance workflow', () => {
     await expect(printableReceipt.locator('[data-receipt-copy="student"]')).toContainText('نسخه شاگرد');
     await expect(printableReceipt.locator('[data-receipt-copy="school"]')).toContainText('نسخه مکتب');
     await expect(printableReceipt.locator('.finance-receipt-cut-line')).toContainText('محل برش');
+    await expect(printableReceipt.getByText('نام پدر:')).toHaveCount(2);
+    await expect(printableReceipt.getByText('Mohammad Karim')).toHaveCount(2);
+    await expect(printableReceipt.getByText('نمبر اساس:')).toHaveCount(2);
+    await expect(printableReceipt.getByText('ASAS-1406-001')).toHaveCount(2);
+    await expect(printableReceipt.getByText('مشخصات شاگرد')).toHaveCount(2);
+    await expect(printableReceipt.getByText('مشخصات پرداخت')).toHaveCount(2);
+    await expect(printableReceipt.getByText('مبلغ اصلی بل')).toHaveCount(2);
+    await expect(printableReceipt.getByText('تخفیف و معافیت')).toHaveCount(2);
+    await expect(printableReceipt.getByText('باقیات فعلی')).toHaveCount(2);
+    await expect(printableReceipt.getByText('1406')).toHaveCount(2);
+    await expect(printableReceipt.getByText('مدیر مالی')).toHaveCount(2);
 
     await expect(page.locator('.receipt-inbox-summary')).toContainText(/11|۱۱/);
     await expect(page.locator('.finance-table.receipts-table .row')).toHaveCount(10);

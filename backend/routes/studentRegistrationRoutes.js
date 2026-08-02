@@ -14,6 +14,7 @@ const cache = require('../utils/simpleCache');
 const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
 const { requireWritableSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
 const { assignStudentToClass } = require('../services/studentClassAssignmentService');
+const { normalizeStudentSearchText } = require('../utils/studentSearch');
 
 const router = express.Router();
 const auditWrite = (payload) => logActivity(payload);
@@ -335,7 +336,7 @@ router.get('/school/:schoolId', requireAuth, requireRole(['admin', 'principal', 
     const { schoolId } = req.params;
     const { academicYearId, classId, shiftId, gender, status, page = 1, limit = 50 } = req.query;
 
-    let query = { 
+    let query = {
       'academicInfo.currentSchool': schoolId,
       status: { $ne: 'deleted' }
     };
@@ -577,17 +578,22 @@ router.get('/search/:schoolId', requireAuth, requireRole(['admin', 'principal', 
       });
     }
 
+    const normalizedSearch = normalizeStudentSearchText(q);
+    const escapedSearch = normalizedSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const searchCondition = { $regex: escapedSearch, $options: 'i' };
     let query = {
       'academicInfo.currentSchool': schoolId,
       status: { $ne: 'deleted' },
       $or: [
-        { 'personalInfo.firstName': { $regex: q, $options: 'i' } },
-        { 'personalInfo.lastName': { $regex: q, $options: 'i' } },
-        { 'personalInfo.firstNameDari': { $regex: q, $options: 'i' } },
-        { 'personalInfo.lastNameDari': { $regex: q, $options: 'i' } },
-        { 'identification.tazkiraNumber': { $regex: q, $options: 'i' } },
-        { 'contactInfo.phone': { $regex: q, $options: 'i' } },
-        { 'contactInfo.email': { $regex: q, $options: 'i' } }
+        { 'personalInfo.firstName': searchCondition },
+        { 'personalInfo.lastName': searchCondition },
+        { 'personalInfo.firstNameDari': searchCondition },
+        { 'personalInfo.lastNameDari': searchCondition },
+        { 'identification.tazkiraNumber': searchCondition },
+        { 'contactInfo.phone': searchCondition },
+        { 'contactInfo.email': searchCondition },
+        { asasNumber: searchCondition },
+        { registrationId: searchCondition }
       ]
     };
 

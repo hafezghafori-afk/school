@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { API_BASE } from '../config/api';
 import { formatAfghanDateTime, formatAfghanStoredDateLabel } from '../utils/afghanDate';
+import { studentMatchesSearch } from '../utils/studentSearch';
 import './OnlineRegistrations.css';
 
 const STATUS_META = {
@@ -34,8 +35,6 @@ const toAfghanDateTime = (value = '') => {
 
 const toAfghanDate = (value = '') => formatAfghanStoredDateLabel(value) || value || '---';
 
-const normalizeComparable = (value = '') => String(value || '').trim().toLowerCase();
-
 const getStatusMeta = (status = '') => STATUS_META[String(status || '').trim().toLowerCase()] || {
   label: status || 'نامشخص',
   tone: 'muted'
@@ -61,20 +60,8 @@ export default function OnlineRegistrations() {
   ), [registrations]);
 
   const filteredRegistrations = useMemo(() => {
-    const needle = normalizeComparable(filters.search);
     return registrations.filter((item) => {
-      const matchesSearch = !needle || [
-        item.studentName,
-        item.fatherName,
-        item.phone,
-        item.email,
-        item.grade,
-        item.address,
-        item.notes,
-        item.rejectionReason
-      ]
-        .filter(Boolean)
-        .some((value) => normalizeComparable(value).includes(needle));
+      const matchesSearch = studentMatchesSearch(item, filters.search);
 
       const matchesStatus = filters.status === 'all' || String(item.status || '') === String(filters.status);
       const matchesGrade = filters.grade === 'all' || String(item.grade || '') === String(filters.grade);
@@ -322,7 +309,7 @@ export default function OnlineRegistrations() {
             <span>جستجو</span>
             <input
               type="text"
-              placeholder="نام، نام پدر، شماره تماس، ایمیل یا پایه"
+              placeholder="نام، نام پدر، نمبر اساس، شماره تماس، ایمیل یا پایه"
               value={filters.search}
               onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
             />

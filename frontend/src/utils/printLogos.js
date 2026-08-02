@@ -50,3 +50,10 @@ export const getPrintLogoUrls = (settings = {}) => {
     ministryLogoUrl: toAssetUrl(settings?.ministryLogoUrl || stored.ministryLogoUrl || '')
   };
 };
+
+export const getOfficialPrintLogoImageClass = (value = '') => {
+  const source = String(value || '').trim();
+  return /iman[_\s-]*logo|(?:^|[/_-])school-logo(?:[/_.-]|$)/i.test(source)
+    ? 'official-print-logo-image official-print-logo-image--trim-wide-whitespace'
+    : 'official-print-logo-image';
+};

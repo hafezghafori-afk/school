@@ -12,6 +12,7 @@ import {
   postJson,
   toLocaleDateTime
 } from './adminWorkspaceUtils';
+import { studentMatchesSearch } from '../utils/studentSearch';
 
 const EMPTY_REFERENCE = { templates: [], configs: [], sessions: [], academicYears: [], classes: [] };
 const EMPTY_GENERATE_FORM = {
@@ -72,6 +73,7 @@ export default function AdminResultTables() {
   const [busyAction, setBusyAction] = useState('');
   const [tableQuery, setTableQuery] = useState('');
   const [tablePage, setTablePage] = useState(1);
+  const [previewStudentQuery, setPreviewStudentQuery] = useState('');
 
   const templates = useMemo(() => normalizeOptions(reference.templates, ['title', 'code']), [reference.templates]);
   const configs = useMemo(() => normalizeOptions(reference.configs, ['name', 'code']), [reference.configs]);
@@ -87,7 +89,11 @@ export default function AdminResultTables() {
   }, [tables, tableQuery]);
   const tablePageCount = Math.max(1, Math.ceil(filteredTables.length / 10));
   const pagedTables = filteredTables.slice((tablePage - 1) * 10, tablePage * 10);
-  const previewRows = selectedTable?.rows?.slice(0, 10) || [];
+  const previewRows = useMemo(() => (
+    (selectedTable?.rows || [])
+      .filter((row) => studentMatchesSearch(row, previewStudentQuery, [row?.displayName, row?.cells?.identity]))
+      .slice(0, 10)
+  ), [previewStudentQuery, selectedTable?.rows]);
   const previewSubjects = selectedTable?.metadata?.subjects || previewRows[0]?.cells?.subjects?.map((item) => ({ id: item.subjectId, name: item.subjectName })) || [];
 
   const showMessage = (value, tone = 'info') => {
@@ -321,6 +327,16 @@ export default function AdminResultTables() {
 
           <article className="admin-workspace-card" data-span="7">
             <h2>پیش‌نمایش ساختار رسمی سه‌ردیفی</h2>
+            <div className="admin-workspace-field">
+              <label htmlFor="result-preview-student-search">جستجوی شاگرد در نسخه</label>
+              <input
+                id="result-preview-student-search"
+                type="search"
+                value={previewStudentQuery}
+                onChange={(event) => setPreviewStudentQuery(event.target.value)}
+                placeholder="نام، نام پدر یا نمبر اساس شاگرد"
+              />
+            </div>
             {previewRows.length ? <div className="admin-workspace-table-wrap"><table className="admin-workspace-table result-official-preview"><thead><tr><th>شماره</th><th>شهرت شاگرد</th><th>مرحله</th>{previewSubjects.map((subject) => <th key={subject.id || subject.code}>{subject.name}</th>)}<th>مجموع</th><th>فیصدی</th><th>نتیجه</th><th>درجه</th><th>ملاحظات</th></tr></thead><tbody>
               {previewRows.map((row) => {
                 const scores = new Map((row.cells?.subjects || []).map((item) => [String(item.subjectId || item.subjectCode || ''), item]));

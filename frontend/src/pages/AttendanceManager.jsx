@@ -4,6 +4,7 @@ import './AttendanceManager.css';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, formatAfghanDateTime, toGregorianDateInputValue } from '../utils/afghanDate';
+import { studentMatchesSearch } from '../utils/studentSearch';
 
 const STATUS_OPTIONS = [
   { value: 'present', label: 'حاضر' },
@@ -256,6 +257,7 @@ export default function AttendanceManager() {
   const [date, setDate] = useState(todayInputValue());
   const [range, setRange] = useState({ from: shiftInputDate(-29), to: todayInputValue() });
   const [rows, setRows] = useState([]);
+  const [studentSearch, setStudentSearch] = useState('');
   const [studentOptions, setStudentOptions] = useState([]);
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [classReport, setClassReport] = useState(null);
@@ -285,6 +287,17 @@ export default function AttendanceManager() {
     () => findCourseBySelection(courses, courseId),
     [courses, courseId]
   );
+  const visibleStudentRows = useMemo(() => (
+    rows
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => studentMatchesSearch(row?.student || row, studentSearch))
+  ), [rows, studentSearch]);
+  const visibleStudentOptions = useMemo(() => {
+    const matches = studentOptions.filter((student) => studentMatchesSearch(student, studentSearch));
+    if (!selectedStudentId || matches.some((student) => String(student?._id) === String(selectedStudentId))) return matches;
+    const selected = studentOptions.find((student) => String(student?._id) === String(selectedStudentId));
+    return selected ? [selected, ...matches] : matches;
+  }, [selectedStudentId, studentOptions, studentSearch]);
   const selectedClassId = getCourseClassId(selectedCourse);
   const selectedCompatCourseId = getCourseCompatId(selectedCourse);
   const selectedCourseLabel = getCourseLabel(selectedCourse) || 'صنف انتخاب نشده';
@@ -1048,6 +1061,16 @@ export default function AttendanceManager() {
                   </select>
                 </label>
 
+                <label>
+                  <span>جستجوی شاگرد</span>
+                  <input
+                    type="search"
+                    value={studentSearch}
+                    onChange={(event) => setStudentSearch(event.target.value)}
+                    placeholder="نام، نام پدر یا نمبر اساس"
+                  />
+                </label>
+
                 {view === 'entry' ? (
                   <label>
                     <span>تاریخ حضور</span>
@@ -1077,8 +1100,8 @@ export default function AttendanceManager() {
                     <span>شاگرد</span>
                     <select value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)}>
                       <option value="">انتخاب شاگرد</option>
-                      {studentOptions.map((student) => (
-                        <option key={student._id} value={student._id}>{student.name}</option>
+                      {visibleStudentOptions.map((student) => (
+                        <option key={student._id} value={student._id}>{student.name}{student.admissionNo ? ` - ${student.admissionNo}` : ''}</option>
                       ))}
                     </select>
                   </label>
@@ -1281,8 +1304,8 @@ export default function AttendanceManager() {
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((row, idx) => (
-                        <tr key={row.student?._id || idx} className={isRowDirty(row) ? 'is-dirty' : ''}>
+                      {visibleStudentRows.map(({ row, index: rowIndex }, idx) => (
+                        <tr key={row.student?._id || rowIndex} className={isRowDirty(row) ? 'is-dirty' : ''}>
                           <td>{toFaNumber(idx + 1)}</td>
                           <td>{row.student?.admissionNo || '---'}</td>
                           <td>
@@ -1298,7 +1321,7 @@ export default function AttendanceManager() {
                             <select
                               className={`attendance-status-select status-${row.status}`}
                               value={row.status}
-                              onChange={(e) => updateRow(idx, { status: e.target.value })}
+                              onChange={(e) => updateRow(rowIndex, { status: e.target.value })}
                               disabled={row.lifecycleLocked === true}
                             >
                               {STATUS_OPTIONS.map((option) => (
@@ -1312,7 +1335,7 @@ export default function AttendanceManager() {
                               type="text"
                               value={row.note}
                               placeholder="یادداشت اختیاری"
-                              onChange={(e) => updateRow(idx, { note: e.target.value })}
+                              onChange={(e) => updateRow(rowIndex, { note: e.target.value })}
                               disabled={row.lifecycleLocked === true}
                             />
                           </td>
@@ -1326,10 +1349,10 @@ export default function AttendanceManager() {
                             <button
                               className="save"
                               type="button"
-                              onClick={() => handleSave(row, idx)}
-                              disabled={row.lifecycleLocked === true || saving[idx] || !isRowDirty(row)}
+                              onClick={() => handleSave(row, rowIndex)}
+                              disabled={row.lifecycleLocked === true || saving[rowIndex] || !isRowDirty(row)}
                             >
-                              {saving[idx] ? '...' : (isRowDirty(row) ? 'ثبت' : 'ثبت‌شده')}
+                              {saving[rowIndex] ? '...' : (isRowDirty(row) ? 'ثبت' : 'ثبت‌شده')}
                             </button>
                           </td>
                         </tr>

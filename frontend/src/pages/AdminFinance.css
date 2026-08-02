@@ -1226,6 +1226,13 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
+  object-position: center;
+  transform-origin: center;
+}
+
+.finance-print-logo-box img.official-print-logo-image--trim-wide-whitespace {
+  clip-path: inset(18% 27%);
+  transform: scale(1.58);
 }
 
 .finance-receipt-letterhead {
@@ -1296,45 +1303,107 @@
   font-size: 15pt;
 }
 
-.finance-receipt-fields {
+.finance-receipt-letterhead-center small {
+  display: block;
+  margin-top: 2px;
+  color: #222;
+  font-size: 8pt;
+  line-height: 1.35;
+}
+
+.finance-receipt-document-meta,
+.finance-receipt-summary-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0;
-  margin-top: 6px;
   border-top: 1px solid #111;
   border-right: 1px solid #111;
 }
 
-.finance-receipt-fields > div {
+.finance-receipt-document-meta > div,
+.finance-receipt-summary-grid > div {
   display: grid;
-  grid-template-columns: 34% minmax(0, 1fr);
-  align-items: stretch;
-  min-height: 9.5mm;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px 6px;
+  border-bottom: 1px solid #111;
+  border-left: 1px solid #111;
+  text-align: center;
+}
+
+.finance-receipt-document-meta span,
+.finance-receipt-summary-grid span {
+  font-size: 8pt;
+  font-weight: 700;
+}
+
+.finance-receipt-document-meta strong,
+.finance-receipt-summary-grid strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.finance-receipt-main-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.finance-receipt-info-panel {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  border-top: 1px solid #111;
+  border-right: 1px solid #111;
+}
+
+.finance-receipt-info-panel h4 {
+  margin: 0;
+  padding: 4px 6px;
+  border-bottom: 1px solid #111;
+  border-left: 1px solid #111;
+  background: #f1f1f1;
+  text-align: center;
+  font-size: 9pt;
+}
+
+.finance-receipt-info-panel > div {
+  display: grid;
+  grid-template-columns: 37% minmax(0, 1fr);
+  min-height: 7mm;
   border-bottom: 1px solid #111;
 }
 
-.finance-receipt-field-wide {
-  grid-column: auto;
+.finance-receipt-info-panel span,
+.finance-receipt-info-panel strong {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 3px 5px;
+  border-left: 1px solid #111;
+  overflow-wrap: anywhere;
 }
 
-.finance-receipt-fields span,
+.finance-receipt-info-panel span,
 .finance-receipt-signatures span {
   color: #111;
   font-weight: 700;
 }
 
-.finance-receipt-fields span,
-.finance-receipt-fields strong {
-  display: flex;
+.finance-receipt-purpose-line,
+.finance-receipt-note-line {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px;
   align-items: center;
-  padding: 4px 7px;
-  border-left: 1px solid #111;
+  min-height: 7mm;
+  padding: 3px 6px;
+  border: 1px solid #111;
 }
 
-.finance-receipt-fields strong {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-weight: 700;
+.finance-receipt-purpose-line span,
+.finance-receipt-note-line span {
+  font-weight: 800;
 }
 
 .finance-latin-code {
@@ -1354,9 +1423,16 @@
 
 .finance-receipt-signatures > div {
   display: grid;
-  gap: 18px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px 12px;
+  align-items: end;
   min-height: 42px;
   border-bottom: 1px solid #111;
+}
+
+.finance-receipt-signatures > div > b {
+  grid-column: 1 / -1;
+  font-weight: 700;
 }
 
 .finance-receipt-allocation-block {
@@ -1395,6 +1471,13 @@
 
 .finance-receipt-allocation-list small {
   grid-column: 1;
+}
+
+.finance-receipt-allocation-list .finance-receipt-allocation-totals {
+  grid-column: 1 / -1;
+  color: #222;
+  line-height: 1.25;
+  white-space: normal;
 }
 
 .finance-receipt-allocation-list b {
@@ -3797,24 +3880,63 @@
     line-height: 1.15;
   }
 
-  .finance-receipt-print-sheet .finance-receipt-fields {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .finance-receipt-print-sheet .finance-receipt-letterhead-center small {
+    max-width: 100%;
     margin-top: 1px;
+    overflow: hidden;
+    font-size: 6.3pt;
+    line-height: 1.1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .finance-receipt-print-sheet .finance-receipt-fields > div {
-    grid-template-columns: 36% minmax(0, 1fr);
-    min-height: 5.3mm;
+  .finance-receipt-print-sheet .finance-receipt-document-meta > div,
+  .finance-receipt-print-sheet .finance-receipt-summary-grid > div {
+    gap: 0;
+    padding: 1px 2px;
   }
 
-  .finance-receipt-print-sheet .finance-receipt-fields > .finance-receipt-field-wide {
-    grid-column: 1 / -1;
-    grid-template-columns: 18% minmax(0, 1fr);
+  .finance-receipt-print-sheet .finance-receipt-document-meta span,
+  .finance-receipt-print-sheet .finance-receipt-summary-grid span {
+    font-size: 7pt;
+    line-height: 1.05;
   }
 
-  .finance-receipt-print-sheet .finance-receipt-fields span,
-  .finance-receipt-print-sheet .finance-receipt-fields strong {
+  .finance-receipt-print-sheet .finance-receipt-document-meta strong,
+  .finance-receipt-print-sheet .finance-receipt-summary-grid strong {
+    font-size: 7.8pt;
+    line-height: 1.1;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-main-grid {
+    gap: 1.6mm;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-info-panel h4 {
     padding: 1px 3px;
+    font-size: 8pt;
+    line-height: 1.1;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-info-panel > div {
+    grid-template-columns: 35% minmax(0, 1fr);
+    min-height: 4.6mm;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-info-panel span,
+  .finance-receipt-print-sheet .finance-receipt-info-panel strong {
+    padding: 1px 3px;
+    font-size: 8pt;
+    line-height: 1.05;
+  }
+
+  .finance-receipt-print-sheet .finance-receipt-purpose-line,
+  .finance-receipt-print-sheet .finance-receipt-note-line {
+    min-height: 4.6mm;
+    gap: 4px;
+    padding: 1px 3px;
+    font-size: 7.8pt;
+    line-height: 1.05;
   }
 
   .finance-receipt-print-sheet .finance-receipt-allocation-block {
@@ -3832,14 +3954,22 @@
     padding: 1px 2px;
   }
 
+  .finance-receipt-print-sheet .finance-receipt-allocation-list b,
+  .finance-receipt-print-sheet .finance-receipt-allocation-totals {
+    font-size: 6.6pt;
+    line-height: 1.05;
+  }
+
   .finance-receipt-print-sheet .finance-receipt-signatures {
     margin-top: 2px;
     gap: 6mm;
   }
 
   .finance-receipt-print-sheet .finance-receipt-signatures > div {
-    min-height: 6mm;
-    gap: 2px;
+    min-height: 7mm;
+    gap: 1px 5px;
+    font-size: 7.8pt;
+    line-height: 1.1;
   }
 
   .finance-print-sheet:not(.finance-receipt-print-sheet) {

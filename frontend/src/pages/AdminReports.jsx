@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import './AdminWorkspace.css';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import { studentMatchesSearch } from '../utils/studentSearch';
 
 import {
   downloadBlob,
@@ -625,6 +626,7 @@ export default function AdminReports() {
   const [message, setMessage] = useState('');
   const [messageTone, setMessageTone] = useState('info');
   const [busyAction, setBusyAction] = useState('');
+  const [studentSearch, setStudentSearch] = useState('');
 
   const catalog = useMemo(
     () => normalizeOptions(reference.catalog, ['title', 'key']).map((item) => ({
@@ -639,6 +641,12 @@ export default function AdminReports() {
   const examSessions = useMemo(() => normalizeOptions(reference.examSessions, ['title', 'code']), [reference.examSessions]);
   const classes = useMemo(() => normalizeOptions(reference.classes, ['title', 'code']), [reference.classes]);
   const students = useMemo(() => normalizeOptions(reference.students, ['fullName', 'admissionNo']), [reference.students]);
+  const visibleStudents = useMemo(() => {
+    const matches = students.filter((item) => studentMatchesSearch(item, studentSearch));
+    if (!form.studentId || matches.some((item) => String(item.id) === String(form.studentId))) return matches;
+    const selected = students.find((item) => String(item.id) === String(form.studentId));
+    return selected ? [selected, ...matches] : matches;
+  }, [form.studentId, studentSearch, students]);
   const teachers = useMemo(() => normalizeOptions(reference.teachers, ['name', 'email']), [reference.teachers]);
   const sheetTemplates = useMemo(() => normalizeOptions(reference.sheetTemplates, ['title', 'code']), [reference.sheetTemplates]);
   const compatibleTemplates = useMemo(() => {
@@ -853,9 +861,16 @@ export default function AdminReports() {
                 </div>
                 <div className="admin-workspace-field">
                   <label htmlFor="report-student">متعلم</label>
+                  <input
+                    id="report-student-search"
+                    type="search"
+                    value={studentSearch}
+                    onChange={(event) => setStudentSearch(event.target.value)}
+                    placeholder="جستجو با نام یا نمبر اساس متعلم"
+                  />
                   <select id="report-student" name="studentId" value={form.studentId} onChange={handleChange}>
                     <option value="">همه</option>
-                    {students.map((item) => (
+                    {visibleStudents.map((item) => (
                       <option key={item.id} value={item.id}>{item.uiLabel}</option>
                     ))}
                   </select>

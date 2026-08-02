@@ -214,6 +214,8 @@ function buildTopDebtors(orders = [], limit = 10, asOf = new Date()) {
       studentCoreId: normalizeText(order?.studentId),
       studentUserId: normalizeText(order?.student),
       name: orderStudentName(order),
+      asasNumber: String(order?.studentId?.admissionNo || '').trim(),
+      admissionNo: String(order?.studentId?.admissionNo || '').trim(),
       classTitle: classTitle(order),
       amount: 0,
       orderCount: 0,

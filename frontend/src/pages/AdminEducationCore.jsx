@@ -4,6 +4,7 @@ import './AdminWorkspace.css';
 import { errorMessage, fetchJson, normalizeOptions, postJson, resolveActiveSchoolContext } from './adminWorkspaceUtils';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
+import { getStudentAsasNumber, studentMatchesSearch } from '../utils/studentSearch';
 
 const emptyClass = { id: '', title: '', code: '', gradeLevel: '', section: 'الف', academicYearId: '', homeroomTeacherUserId: '', shift: 'morning', room: '', status: 'active', note: '' };
 const emptySubject = { id: '', name: '', code: '', grade: '', note: '', isActive: true };
@@ -442,13 +443,16 @@ export default function AdminEducationCore() {
   ), [subjectOptions, mapSubjectPickerSearch, mapForm.subjectId]);
   const studentOptions = useMemo(() => students.map((item) => {
     const value = String(item.value || item.id || item._id || '');
+    const asasNumber = getStudentAsasNumber(item);
     const gradeLabel = item.grade ? `پایه ${item.grade}` : '';
     const sourceLabel = item.sourceLabel || getStudentCandidateSourceLabel(item.sourceType);
     const previousSchoolLabel = item.previousSchool ? `مکتب قبلی: ${item.previousSchool}` : '';
     return {
       ...item,
       value,
-      uiLabel: [item.name, gradeLabel, sourceLabel, previousSchoolLabel].filter(Boolean).join(' | ')
+      asasNumber,
+      admissionNo: item.admissionNo || asasNumber,
+      uiLabel: [item.name, asasNumber ? `نمبر اساس: ${asasNumber}` : '', gradeLabel, sourceLabel, previousSchoolLabel].filter(Boolean).join(' | ')
     };
   }), [students]);
   const candidateGradeOptions = useMemo(() => (
@@ -471,19 +475,8 @@ export default function AdminEducationCore() {
     studentOptions.find((item) => String(item.value || '') === String(lifecycleForm.studentId || '')) || null
   ), [studentOptions, lifecycleForm.studentId]);
   const lifecycleStudentOptions = useMemo(() => {
-    const needle = String(lifecycleStudentSearch || '').trim().toLowerCase();
     return studentOptions.filter((item) => {
-      const matchesQuery = !needle || [
-        item.name,
-        item.fatherName,
-        item.phone,
-        item.email,
-        item.grade,
-        item.sourceLabel,
-        item.previousSchool,
-        item.previousGrade,
-        item.uiLabel
-      ].filter(Boolean).some((value) => String(value).toLowerCase().includes(needle));
+      const matchesQuery = studentMatchesSearch(item, lifecycleStudentSearch);
       const sourceType = String(item.sourceType || '').trim();
       const matchesSource = !lifecycleStudentSourceFilter
         || (lifecycleStudentSourceFilter === 'transfer' ? !!item.isTransferCandidate || !!item.previousSchool || !!item.previousGrade : sourceType === lifecycleStudentSourceFilter);
@@ -491,7 +484,6 @@ export default function AdminEducationCore() {
     });
   }, [studentOptions, lifecycleStudentSearch, lifecycleStudentSourceFilter]);
   const lifecycleMembershipOptions = useMemo(() => {
-    const needle = String(lifecycleMembershipSearch || '').trim().toLowerCase();
     const membershipPool = lifecycleForm.action === 're_enrollment'
       ? endedLifecycleMemberships
       : activeLifecycleMemberships;
@@ -501,35 +493,14 @@ export default function AdminEducationCore() {
         ? status === 'suspended'
         : (lifecycleForm.action === 'suspension' ? status !== 'suspended' : true);
       if (!matchesAction) return false;
-      if (!needle) return true;
-      return [
-        item.user?.name,
-        item.user?.email,
-        item.schoolClass?.title,
-        item.course?.title,
-        item.schoolClass?.academicYear?.title,
-        getEnrollmentStatusLabel(item.status, item.endedReason),
-        item.endedReason,
-        item.note
-      ].filter(Boolean).some((value) => String(value).toLowerCase().includes(needle));
+      return studentMatchesSearch(item, lifecycleMembershipSearch, [
+        getEnrollmentStatusLabel(item.status, item.endedReason)
+      ]);
     });
   }, [activeLifecycleMemberships, endedLifecycleMemberships, lifecycleMembershipSearch, lifecycleForm.action]);
   const filteredStudentOptions = useMemo(() => {
-    const needle = String(candidateSearchQuery || '').trim().toLowerCase();
-
     return studentOptions.filter((item) => {
-      const matchesQuery = !needle || [
-        item.name,
-        item.fatherName,
-        item.phone,
-        item.email,
-        item.nationalId,
-        item.uiLabel,
-        item.sourceLabel,
-        item.grade
-      ]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(needle));
+      const matchesQuery = studentMatchesSearch(item, candidateSearchQuery);
       const matchesSource = !candidateSourceFilter || String(item.sourceType || '') === String(candidateSourceFilter);
       const matchesGrade = !candidateGradeFilter || String(item.grade || '') === String(candidateGradeFilter);
       return matchesQuery && matchesSource && matchesGrade;
@@ -546,20 +517,7 @@ export default function AdminEducationCore() {
       : enrollmentSelectOptions.slice(0, ENROLLMENT_CANDIDATE_VISIBLE_LIMIT)
   ), [enrollmentSelectOptions, showAllEnrollmentCandidates]);
   const filteredOnlineRegistrationQueue = useMemo(() => {
-    const needle = String(onlineSearchQuery || '').trim().toLowerCase();
-
-    return onlineRegistrationQueue.filter((item) => {
-      return [
-        item.name,
-        item.fatherName,
-        item.phone,
-        item.email,
-        item.nationalId,
-        item.grade,
-      ]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(needle));
-    });
+    return onlineRegistrationQueue.filter((item) => studentMatchesSearch(item, onlineSearchQuery));
   }, [onlineRegistrationQueue, onlineSearchQuery]);
 
   const visibleOnlineRegistrationQueue = useMemo(() => (
@@ -656,20 +614,12 @@ export default function AdminEducationCore() {
     showAllMaps ? filteredMaps : filteredMaps.slice(0, MAP_REGISTRY_VISIBLE_LIMIT)
   ), [filteredMaps, showAllMaps]);
   const filteredEnrollments = useMemo(() => {
-    const needle = String(enrollSearchQuery || '').trim().toLowerCase();
     return enrollments.filter((item) => {
       const yearTitle = item.schoolClass?.academicYear?.title || '';
-      const matchesQuery = !needle || [
-        item.user?.name,
-        item.schoolClass?.title,
-        item.course?.title,
+      const matchesQuery = studentMatchesSearch(item, enrollSearchQuery, [
         getEnrollmentStatusLabel(item.status),
-        item.note,
-        item.rejectedReason,
         yearTitle
-      ]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(needle));
+      ]);
       const enrollmentClassId = item.classId || asId(item.schoolClass);
       const enrollmentYearId = asId(item.schoolClass?.academicYearId) || asId(item.schoolClass?.academicYear);
       const matchesClass = !enrollClassFilter || String(enrollmentClassId) === String(enrollClassFilter);
@@ -2316,7 +2266,7 @@ export default function AdminEducationCore() {
                     <input
                       value={lifecycleStudentSearch}
                       onChange={(event) => setLifecycleStudentSearch(event.target.value)}
-                      placeholder="نام، نام پدر، تلفن، ایمیل یا مکتب قبلی"
+                      placeholder="نام، نام پدر، نمبر اساس، تلفن، ایمیل یا مکتب قبلی"
                     />
                   </div>
                 ) : null}
@@ -2377,7 +2327,7 @@ export default function AdminEducationCore() {
                     <input
                       value={lifecycleMembershipSearch}
                       onChange={(event) => setLifecycleMembershipSearch(event.target.value)}
-                      placeholder="نام شاگرد، صنف، سال یا وضعیت"
+                      placeholder="نام، نمبر اساس، صنف، سال یا وضعیت شاگرد"
                     />
                   </div>
                 ) : null}
@@ -2389,7 +2339,12 @@ export default function AdminEducationCore() {
                       <option value="">{lifecycleForm.action === 're_enrollment' ? 'انتخاب عضویت پایان‌یافته' : 'انتخاب عضویت فعال'}</option>
                       {lifecycleMembershipOptions.map((item) => (
                         <option key={item._id} value={item._id}>
-                          {[item.user?.name, item.schoolClass?.title || item.course?.title, item.schoolClass?.academicYear?.title].filter(Boolean).join(' | ')}
+                          {[
+                            item.user?.name,
+                            getStudentAsasNumber(item.user || item) ? `نمبر اساس: ${getStudentAsasNumber(item.user || item)}` : '',
+                            item.schoolClass?.title || item.course?.title,
+                            item.schoolClass?.academicYear?.title
+                          ].filter(Boolean).join(' | ')}
                         </option>
                       ))}
                     </select>
@@ -2558,8 +2513,8 @@ export default function AdminEducationCore() {
                       applyCandidateSearch();
                     }
                   }}
-                  placeholder="جستجو در متعلم یا درخواست"
-                  aria-label="جستجو در متعلم یا درخواست"
+                  placeholder="جستجو با نام، نام پدر یا نمبر اساس متعلم"
+                  aria-label="جستجو با نام، نام پدر یا نمبر اساس متعلم"
                 />
                 <select value={candidateSourceFilter} onChange={(event) => setCandidateSourceFilter(event.target.value)} aria-label="فلتر منبع متعلم">
                   <option value="">همه منبع‌ها</option>
@@ -2764,8 +2719,8 @@ export default function AdminEducationCore() {
                   applyOnlineSearch();
                 }
               }}
-              placeholder="جستجو در درخواست‌های آنلاین"
-              aria-label="جستجو در درخواست‌های آنلاین"
+              placeholder="جستجو در درخواست‌های آنلاین با نام یا نمبر اساس"
+              aria-label="جستجو در درخواست‌های آنلاین با نام یا نمبر اساس"
             />
             <button type="button" className="admin-workspace-button-ghost" onClick={applyOnlineSearch}>جستجو</button>
             {onlineSearchQuery ? (
@@ -2858,7 +2813,7 @@ export default function AdminEducationCore() {
                     applyEnrollmentSearch();
                   }
                 }}
-                placeholder="جستجو در متعلم، صنف، وضعیت یا یادداشت"
+                placeholder="جستجو در متعلم، نمبر اساس، صنف، وضعیت یا یادداشت"
                 aria-label="جستجو در دفتر ثبت‌نام‌ها"
               />
               <select value={enrollFilter} onChange={(event) => setEnrollFilter(event.target.value)} aria-label="فیلتر وضعیت ثبت‌نام">

@@ -12,8 +12,9 @@ import {
 } from '../utils/afghanDate';
 import { formatFinanceCode, toEnglishAlphaNumeric } from '../utils/latinFinanceCode';
 import useSiteSettings from '../hooks/useSiteSettings';
-import { getPrintLogoUrls } from '../utils/printLogos';
+import { getOfficialPrintLogoImageClass, getPrintLogoUrls } from '../utils/printLogos';
 import { localizeSystemMessage } from '../utils/systemMessage';
+import { buildStudentSearchBlob as buildSharedStudentSearchBlob } from '../utils/studentSearch';
 import { readStoredSchoolId, resolveActiveSchoolContext } from './adminWorkspaceUtils';
 
 const getAuthHeaders = () => {
@@ -146,20 +147,7 @@ const buildFinanceSearchBlob = (values = []) => (
     .join(' | ')
 );
 
-const buildStudentSearchBlob = (student = {}) => buildFinanceSearchBlob([
-  student?.name,
-  student?.fullName,
-  student?.email,
-  student?._id,
-  student?.studentId,
-  student?.admissionNo,
-  student?.phone,
-  student?.primaryPhone,
-  student?.alternatePhone,
-  student?.guardianName,
-  student?.guardianPhone,
-  student?.fatherName
-]);
+const buildStudentSearchBlob = (student = {}) => buildSharedStudentSearchBlob(student);
 
 const buildStudentOptionList = ({
   indexedStudents = [],
@@ -1449,14 +1437,29 @@ const toLegacyLikeReceiptRow = (payment = {}) => {
       studentId: String(payment?.student?.studentId || '').trim(),
       name: getStudentDisplayName(payment?.student),
       fullName: String(payment?.student?.fullName || '').trim(),
-      email: String(payment?.student?.email || '').trim()
+      email: String(payment?.student?.email || '').trim(),
+      fatherName: String(payment?.student?.fatherName || '').trim(),
+      asasNumber: String(payment?.student?.asasNumber || '').trim(),
+      admissionNo: String(payment?.student?.admissionNo || '').trim()
     },
     classId: payment?.schoolClass?.id ? { _id: payment.schoolClass.id, title: classTitle } : null,
-    academicYear: payment?.academicYear?.id ? { id: payment.academicYear.id, title: String(payment?.academicYear?.title || '').trim() } : null,
+    academicYear: (() => {
+      const academicYear = payment?.academicYear
+        || payment?.feeOrder?.academicYear
+        || payment?.schoolClass?.academicYear
+        || payment?.feeOrder?.schoolClass?.academicYear
+        || null;
+      if (!academicYear) return null;
+      return {
+        id: String(academicYear?.id || '').trim(),
+        title: String(academicYear?.title || '').trim()
+      };
+    })(),
     course: classTitle !== '---' ? { title: classTitle } : null,
     bill: {
       _id: String(payment?.feeOrderId || payment?.feeOrder?.id || payment?.feeOrder?.sourceBillId || '').trim(),
       billNumber: formatFinanceCode(payment?.feeOrder?.orderNumber, '---'),
+      amountOriginal: Number(payment?.feeOrder?.amountOriginal || 0),
       amountDue: Number(payment?.feeOrder?.amountDue || 0),
       amountPaid: Number(payment?.feeOrder?.amountPaid || 0),
       status: String(payment?.feeOrder?.status || '').trim() || '-'
@@ -1477,6 +1480,55 @@ const toLegacyLikeReceiptRow = (payment = {}) => {
     receivedBy: payment?.receivedBy || null,
     allocations: Array.isArray(payment?.allocations) ? payment.allocations : [],
     receiptDetails: payment?.receiptDetails || null
+  };
+};
+
+const toDetailedReceiptRow = (data = {}) => {
+  const row = toLegacyLikeReceiptRow(data?.item || {});
+  const receipt = data?.receipt || {};
+  const membership = data?.membership || {};
+  const membershipStudent = membership?.student || {};
+  const student = {
+    ...row.student,
+    fullName: receipt.studentName || membershipStudent.fullName || row.student?.fullName || row.student?.name || '',
+    fatherName: receipt.fatherName || membershipStudent.fatherName || row.student?.fatherName || '',
+    asasNumber: receipt.asasNumber
+      || membershipStudent.asasNumber
+      || membershipStudent.admissionNo
+      || row.student?.asasNumber
+      || row.student?.admissionNo
+      || '',
+    admissionNo: receipt.asasNumber
+      || membershipStudent.admissionNo
+      || membershipStudent.asasNumber
+      || row.student?.admissionNo
+      || row.student?.asasNumber
+      || ''
+  };
+  const academicYearTitle = String(
+    receipt.academicYearTitle
+    || membership?.academicYear?.title
+    || row.academicYear?.title
+    || ''
+  ).trim();
+  const classTitle = String(receipt.classTitle || membership?.schoolClass?.title || row.classId?.title || '').trim();
+  return {
+    ...row,
+    student,
+    classId: row.classId || (classTitle ? { _id: String(membership?.schoolClass?.id || ''), title: classTitle } : null),
+    course: row.course || (classTitle ? { title: classTitle } : null),
+    academicYear: row.academicYear || (academicYearTitle
+      ? { id: String(membership?.academicYear?.id || ''), title: academicYearTitle }
+      : null),
+    receiptDetails: {
+      ...(row.receiptDetails || {}),
+      ...receipt,
+      studentName: receipt.studentName || student.fullName,
+      fatherName: receipt.fatherName || student.fatherName,
+      asasNumber: receipt.asasNumber || student.asasNumber,
+      classTitle: receipt.classTitle || classTitle,
+      academicYearTitle: receipt.academicYearTitle || academicYearTitle
+    }
   };
 };
 
@@ -2146,7 +2198,7 @@ export default function AdminFinance() {
   const studentSearchBlobById = useMemo(() => (
     new Map(
       indexedFinanceMembershipStudents.flatMap((entry) => {
-        const keys = [entry?.student?._id, entry?.student?.studentCoreId]
+        const keys = [entry?.student?._id, entry?.student?.studentCoreId, entry?.student?.membershipId]
           .map((value) => String(value || '').trim())
           .filter(Boolean);
         return keys.map((key) => [key, entry.searchBlob]);
@@ -2275,7 +2327,7 @@ export default function AdminFinance() {
           classId,
           classTitle: membership?.classTitle || membership?.class?.title || membership?.schoolClass?.title || classOptions.find((item) => item.classId === classId)?.title || '---',
           studentName: membership?.studentName || membership?.student?.name || membership?.fullName || '---',
-          admissionNo: membership?.admissionNo || membership?.studentCode || '',
+          admissionNo: membership?.asasNumber || membership?.admissionNo || membership?.studentCode || '',
           issued: officialBills.length > 0,
           billCount: officialBills.length,
           voidCount: voidBills.length,
@@ -2325,13 +2377,18 @@ export default function AdminFinance() {
       && includesFinanceSearch([
         item?.student?.fullName,
         item?.student?.name,
+        item?.student?.asasNumber,
+        item?.student?.admissionNo,
+        studentSearchBlobById.get(String(item?.studentMembershipId || '').trim()),
+        studentSearchBlobById.get(String(item?.student?.userId || item?.student || '').trim()),
+        studentSearchBlobById.get(String(item?.student?.studentId || item?.studentId || '').trim()),
         item?.schoolClass?.title,
         item?.academicYear?.title,
         item?.reason,
         item?.discountType
       ], discountRegistrySearch)
     ))
-  ), [discountRegistry, discountRegistryClassFilter, discountRegistrySearch]);
+  ), [discountRegistry, discountRegistryClassFilter, discountRegistrySearch, studentSearchBlobById]);
   const discountRegistryByClass = useMemo(() => {
     const groups = new Map();
     filteredDiscountRegistry.forEach((item) => {
@@ -2376,13 +2433,18 @@ export default function AdminFinance() {
     exemptions.filter((item) => includesFinanceSearch([
       item?.student?.fullName,
       item?.student?.name,
+      item?.student?.asasNumber,
+      item?.student?.admissionNo,
+      studentSearchBlobById.get(String(item?.studentMembershipId || '').trim()),
+      studentSearchBlobById.get(String(item?.student?.userId || item?.student || '').trim()),
+      studentSearchBlobById.get(String(item?.student?.studentId || item?.studentId || '').trim()),
       item?.schoolClass?.title,
       item?.academicYear?.title,
       item?.reason,
       item?.scope,
       item?.exemptionType
     ], exemptionRegistrySearch))
-  ), [exemptions, exemptionRegistrySearch]);
+  ), [exemptions, exemptionRegistrySearch, studentSearchBlobById]);
   const exemptionRegistryTotalPages = Math.max(1, Math.ceil(filteredExemptionRegistry.length / Math.max(1, Number(exemptionRegistryPageSize) || 10)));
   const pagedExemptionRegistry = useMemo(() => {
     const pageSize = Math.max(1, Number(exemptionRegistryPageSize) || 10);
@@ -2399,6 +2461,11 @@ export default function AdminFinance() {
       && includesFinanceSearch([
         item?.student?.fullName,
         item?.student?.name,
+        item?.student?.asasNumber,
+        item?.student?.admissionNo,
+        studentSearchBlobById.get(String(item?.studentMembershipId || '').trim()),
+        studentSearchBlobById.get(String(item?.student?.userId || item?.student || '').trim()),
+        studentSearchBlobById.get(String(item?.student?.studentId || item?.studentId || '').trim()),
         item?.schoolClass?.title,
         item?.academicYear?.title,
         item?.reason,
@@ -2409,7 +2476,7 @@ export default function AdminFinance() {
         item?.sourceModel
       ], reliefRegistrySearch)
     ))
-  ), [reliefs, reliefRegistrySearch, reliefRegistryTypeFilter]);
+  ), [reliefs, reliefRegistrySearch, reliefRegistryTypeFilter, studentSearchBlobById]);
   const reliefRegistryTotalPages = Math.max(1, Math.ceil(filteredReliefRegistry.length / Math.max(1, Number(reliefRegistryPageSize) || 10)));
   const pagedReliefRegistry = useMemo(() => {
     const pageSize = Math.max(1, Number(reliefRegistryPageSize) || 10);
@@ -2911,13 +2978,21 @@ export default function AdminFinance() {
     Array.isArray(financeOverview?.topDebtors) ? financeOverview.topDebtors : []
   ), [financeOverview?.topDebtors]);
   const filteredOverviewDebtors = useMemo(() => overviewDebtors.filter((row) => {
-    if (!includesFinanceSearch([row?.name, row?.classTitle, row?.studentId], debtorSearchTerm)) return false;
+    if (!includesFinanceSearch([
+      row?.name,
+      row?.classTitle,
+      row?.studentId,
+      row?.asasNumber,
+      row?.admissionNo,
+      studentSearchBlobById.get(String(row?.studentUserId || '').trim()),
+      studentSearchBlobById.get(String(row?.studentCoreId || row?.studentId || '').trim())
+    ], debtorSearchTerm)) return false;
     const lateDays = Number(row?.maxLateDays || 0);
     if (debtorDelayFilter === '1') return lateDays >= 1;
     if (debtorDelayFilter === '30') return lateDays >= 30;
     if (debtorDelayFilter === '60') return lateDays >= 60;
     return true;
-  }), [overviewDebtors, debtorDelayFilter, debtorSearchTerm]);
+  }), [overviewDebtors, debtorDelayFilter, debtorSearchTerm, studentSearchBlobById]);
   const debtorPageCount = Math.max(1, Math.ceil(filteredOverviewDebtors.length / 10));
   const paginatedOverviewDebtors = useMemo(() => (
     filteredOverviewDebtors.slice((debtorPage - 1) * 10, debtorPage * 10)
@@ -3330,6 +3405,14 @@ export default function AdminFinance() {
         setBusy(false);
       }
     }
+  };
+
+  const fetchReceiptDetailRow = async (paymentId) => {
+    const data = await fetchJson(`${API_BASE}/api/student-finance/payments/${paymentId}/receipt`);
+    if (!data?.success || !data?.item) {
+      throw new Error(data?.message || 'جزئیات رسید پرداخت دریافت نشد.');
+    }
+    return toDetailedReceiptRow(data);
   };
 
   const refreshPaymentWorkspace = async ({
@@ -3862,6 +3945,13 @@ export default function AdminFinance() {
       && includesFinanceSearch([
         item?.student?.name,
         item?.student?.fullName,
+        item?.student?.asasNumber,
+        item?.student?.admissionNo,
+        item?.asasNumber,
+        item?.admissionNo,
+        studentSearchBlobById.get(String(item?.student?.userId || item?.student || '').trim()),
+        studentSearchBlobById.get(String(item?.student?.studentId || item?.studentId || '').trim()),
+        studentSearchBlobById.get(String(item?.studentMembershipId || '').trim()),
         item?.bill?.billNumber,
         item?.paymentNumber,
         item?.referenceNo,
@@ -3878,7 +3968,8 @@ export default function AdminFinance() {
     receiptFollowUpFilter,
     receiptAcademicYearFilter,
     receiptClassFilter,
-    receiptSearchTerm
+    receiptSearchTerm,
+    studentSearchBlobById
   ]);
 
   const receiptTotalPages = Math.max(1, Math.ceil(filteredReceipts.length / RECEIPT_PAGE_SIZE));
@@ -3941,6 +4032,11 @@ export default function AdminFinance() {
         item?.title,
         item?.description,
         item?.studentName,
+        item?.asasNumber,
+        item?.admissionNo,
+        studentSearchBlobById.get(String(item?.studentUserId || '').trim()),
+        studentSearchBlobById.get(String(item?.studentCoreId || item?.studentId || '').trim()),
+        studentSearchBlobById.get(String(item?.studentMembershipId || '').trim()),
         item?.classTitle,
         item?.academicYearTitle,
         item?.referenceNumber,
@@ -3954,7 +4050,7 @@ export default function AdminFinance() {
       ], auditTimelineSearch)
       )
     ))
-  ), [auditTimeline, reportClassId, selectedReportClass, auditTimelineKindFilter, auditTimelineSeverityFilter, auditTimelineSearch]);
+  ), [auditTimeline, reportClassId, selectedReportClass, auditTimelineKindFilter, auditTimelineSeverityFilter, auditTimelineSearch, studentSearchBlobById]);
 
   const auditTimelineStats = useMemo(() => ({
     total: filteredAuditTimeline.length,
@@ -4160,7 +4256,6 @@ export default function AdminFinance() {
     || effectiveDeliveryTemplateBody
   );
   const visibleAnomalies = useMemo(() => {
-    const normalizedSearch = String(anomalySearchTerm || '').trim().toLowerCase();
     const selectedAnomalyClass = classOptions.find((item) => String(item?.classId || '') === String(anomalyClassFilter)) || null;
     return (anomalyClassFilter
       ? anomalies.filter((item) => (
@@ -4171,17 +4266,21 @@ export default function AdminFinance() {
     ).filter((item) => {
       if (anomalyTypeFilter !== 'all' && String(item?.anomalyType || '').trim() !== anomalyTypeFilter) return false;
       if (anomalyWorkflowStatusFilter !== 'all' && String(item?.workflowStatus || 'open').trim() !== anomalyWorkflowStatusFilter) return false;
-      if (!normalizedSearch) return true;
-      return [
+      return includesFinanceSearch([
         item?.studentName,
+        item?.asasNumber,
+        item?.admissionNo,
+        studentSearchBlobById.get(String(item?.studentUserId || '').trim()),
+        studentSearchBlobById.get(String(item?.studentCoreId || item?.studentId || '').trim()),
+        studentSearchBlobById.get(String(item?.studentMembershipId || '').trim()),
         item?.classTitle,
         item?.referenceNumber,
         item?.secondaryReference,
         item?.title,
         item?.description
-      ].some((value) => String(value || '').toLowerCase().includes(normalizedSearch));
+      ], anomalySearchTerm);
     });
-  }, [anomalies, anomalyClassFilter, classOptions, anomalyTypeFilter, anomalyWorkflowStatusFilter, anomalySearchTerm]);
+  }, [anomalies, anomalyClassFilter, classOptions, anomalyTypeFilter, anomalyWorkflowStatusFilter, anomalySearchTerm, studentSearchBlobById]);
   const anomalyTypeOptions = useMemo(() => (
     Object.entries(FINANCE_ANOMALY_UI_LABELS)
       .filter(([type]) => anomalies.some((item) => String(item?.anomalyType || '').trim() === type))
@@ -4216,12 +4315,10 @@ export default function AdminFinance() {
     }
     const loadReceiptDetail = async () => {
       try {
-        const data = await fetchJson(`${API_BASE}/api/student-finance/payments/${selectedReceiptId}/receipt`);
+        const detailRow = await fetchReceiptDetailRow(selectedReceiptId);
         if (!active) return;
-        if (data?.success && data?.item) {
-          setSelectedReceiptDetail(toLegacyLikeReceiptRow(data.item));
-          return;
-        }
+        setSelectedReceiptDetail(detailRow);
+        return;
       } catch {
         // Fall back to the row already present in the pending list.
       }
@@ -4364,15 +4461,34 @@ export default function AdminFinance() {
     const purpose = (isMultiBill ? `پرداخت یک‌جای ${allocations.length} بل فیس` : details.title)
       || allocations[0]?.title
       || 'پرداخت فیس';
+    const toOptionalAmount = (value) => {
+      if (value === null || value === undefined || value === '') return null;
+      const amount = Number(value);
+      return Number.isFinite(amount) ? amount : null;
+    };
     return {
       title: details.title || selectedReceipt.bill?.billNumber || 'رسید مالی',
       billNumber: toEnglishAlphaNumeric(billNumber),
       purpose,
       paymentNumber: formatFinanceCode(details.paymentNumber || selectedReceipt.id, ''),
-      studentName: selectedReceipt.student?.name || '---',
-      classTitle: selectedReceipt.classId?.title || selectedReceipt.course?.title || '---',
-      academicYearTitle: details.academicYearTitle || '-',
+      studentName: details.studentName || selectedReceipt.student?.fullName || selectedReceipt.student?.name || '---',
+      fatherName: details.fatherName || selectedReceipt.student?.fatherName || 'ثبت نشده',
+      asasNumber: String(
+        details.asasNumber
+        || details.admissionNo
+        || selectedReceipt.student?.asasNumber
+        || selectedReceipt.student?.admissionNo
+        || selectedReceipt.student?.studentCode
+        || ''
+      ).trim() || 'ثبت نشده',
+      classTitle: details.classTitle || selectedReceipt.classId?.title || selectedReceipt.course?.title || '---',
+      academicYearTitle: details.academicYearTitle
+        || selectedReceipt.academicYear?.title
+        || '-',
       amount: Number(selectedReceipt.amount || 0),
+      grossAmount: toOptionalAmount(details.grossAmount ?? selectedReceipt.bill?.amountOriginal),
+      discountAmount: toOptionalAmount(details.discountAmount),
+      netAmount: toOptionalAmount(details.netAmount ?? selectedReceipt.bill?.amountDue),
       currency: details.currency || 'AFN',
       currencyLabel: String(details.currency || 'AFN').trim().toUpperCase() === 'AFN' ? 'افغانی' : details.currency,
       paymentMethod: selectedReceipt.paymentMethod || '-',
@@ -4381,8 +4497,14 @@ export default function AdminFinance() {
       paidAt: selectedReceipt.paidAt || null,
       note: selectedReceipt.note || '',
       receivedBy: selectedReceipt.receivedBy?.name || 'ثبت سیستمی',
-      remainingBeforePayment: details.remainingBeforePayment,
-      remainingAfterPayment: details.remainingAfterPayment,
+      remainingBeforePayment: toOptionalAmount(details.remainingBeforePayment),
+      remainingAfterPayment: toOptionalAmount(details.remainingAfterPayment),
+      currentOutstandingAmount: toOptionalAmount(
+        details.currentOutstandingAmount
+        ?? (allocations.length
+          ? allocations.reduce((sum, allocation) => sum + Number(allocation?.outstandingAmount || 0), 0)
+          : details.remainingAfterPayment)
+      ),
       allocations,
       isMultiBill
     };
@@ -4777,6 +4899,12 @@ export default function AdminFinance() {
       }));
       if (deskPaymentSubmitMode === 'save_print' && createdReceipt?._id) {
         setActiveSection('payments');
+        try {
+          const detailedReceipt = await fetchReceiptDetailRow(createdReceipt._id);
+          setSelectedReceiptDetail(detailedReceipt);
+        } catch {
+          // The newly created row is still printable if the detail request is temporarily unavailable.
+        }
         schedulePrint('receipt', '.finance-receipt-print-sheet');
       }
       setDeskPaymentSubmitMode('save');
@@ -5332,9 +5460,15 @@ export default function AdminFinance() {
     }
   };
 
-  const printSelectedReceipt = () => {
-    if (!selectedReceiptPrintModel) return;
-    schedulePrint('receipt', '.finance-receipt-print-sheet');
+  const printSelectedReceipt = async () => {
+    if (!selectedReceipt?._id) return;
+    try {
+      const detailedReceipt = await fetchReceiptDetailRow(selectedReceipt._id);
+      setSelectedReceiptDetail(detailedReceipt);
+      schedulePrint('receipt', '.finance-receipt-print-sheet');
+    } catch (err) {
+      setMessage(err.message || 'جزئیات رسید برای چاپ دریافت نشد.');
+    }
   };
 
   const printCashierReport = () => {
@@ -8008,7 +8142,7 @@ export default function AdminFinance() {
               <input
                 value={reliefRegistrySearch}
                 onChange={(e) => setReliefRegistrySearch(e.target.value)}
-                placeholder="نام متعلم، صنف، سال، دلیل، نوع یا دامنه"
+                placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل، نوع یا دامنه"
               />
             </label>
             <label className="finance-inline-filter">
@@ -8097,7 +8231,7 @@ export default function AdminFinance() {
             <input
               value={discountRegistrySearch}
               onChange={(e) => setDiscountRegistrySearch(e.target.value)}
-              placeholder="نام متعلم، صنف، سال، دلیل یا نوع تخفیف"
+              placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل یا نوع تخفیف"
             />
           </label>
           <div className="finance-split-grid">
@@ -8200,7 +8334,7 @@ export default function AdminFinance() {
             <input
               value={exemptionRegistrySearch}
               onChange={(e) => setExemptionRegistrySearch(e.target.value)}
-              placeholder="نام متعلم، صنف، سال، دلیل یا دامنه معافیت"
+              placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل یا دامنه معافیت"
             />
           </label>
           <label className="finance-inline-filter">
@@ -8271,7 +8405,7 @@ export default function AdminFinance() {
             <input
               value={receiptSearchTerm}
               onChange={(e) => setReceiptSearchTerm(e.target.value)}
-              placeholder="نام شاگرد، شماره بل، مرجع یا روش پرداخت"
+              placeholder="نام یا نمبر اساس شاگرد، شماره بل، مرجع یا روش پرداخت"
             />
           </label>
           <label className="finance-inline-filter">
@@ -8903,7 +9037,7 @@ export default function AdminFinance() {
               <input
                 value={orderSearchTerm}
                 onChange={(e) => setOrderSearchTerm(e.target.value)}
-                placeholder="شماره بل، نام شاگرد یا صنف"
+                placeholder="شماره بل، نام یا نمبر اساس شاگرد، یا صنف"
                 data-testid="bill-search-input"
               />
             </label>
@@ -9096,7 +9230,7 @@ export default function AdminFinance() {
             </div>
           </div>
           <div className="finance-debtor-controls">
-            <label><span>جستجو</span><input value={debtorSearchTerm} onChange={(event) => setDebtorSearchTerm(event.target.value)} placeholder="نام شاگرد یا صنف" /></label>
+            <label><span>جستجو</span><input value={debtorSearchTerm} onChange={(event) => setDebtorSearchTerm(event.target.value)} placeholder="نام یا نمبر اساس شاگرد، یا صنف" /></label>
             <label>
               <span>مدت تاخیر</span>
               <select value={debtorDelayFilter} onChange={(event) => setDebtorDelayFilter(event.target.value)}>
@@ -9205,7 +9339,7 @@ export default function AdminFinance() {
                 type="search"
                 value={anomalySearchTerm}
                 onChange={(e) => setAnomalySearchTerm(e.target.value)}
-                placeholder="نام شاگرد، صنف یا مرجع"
+                placeholder="نام یا نمبر اساس شاگرد، صنف یا مرجع"
                 data-testid="anomaly-search"
               />
             </label>
@@ -11334,7 +11468,7 @@ export default function AdminFinance() {
             <input
               value={auditTimelineSearch}
               onChange={(e) => setAuditTimelineSearch(e.target.value)}
-              placeholder="شماره بل، پرداخت، متعلم، صنف، اقدام‌کننده یا توضیح"
+              placeholder="شماره بل، پرداخت، نام یا نمبر اساس متعلم، صنف، اقدام‌کننده یا توضیح"
               data-testid="audit-timeline-search"
             />
           </label>
@@ -11468,7 +11602,7 @@ export default function AdminFinance() {
         <div className="finance-print-sheet" data-testid="printable-finance-overview">
           <div className="finance-print-school-header">
             <div className="finance-print-logo-box">
-              {printLogoUrls.schoolLogoUrl ? <img src={printLogoUrls.schoolLogoUrl} alt="لوگوی مکتب" /> : <span>لوگوی مکتب</span>}
+              {printLogoUrls.schoolLogoUrl ? <img className={getOfficialPrintLogoImageClass(printLogoUrls.schoolLogoUrl)} src={printLogoUrls.schoolLogoUrl} alt="لوگوی مکتب" /> : <span>لوگوی مکتب</span>}
             </div>
             <div className="finance-print-school-center">
               <span>امارت اسلامی افغانستان</span>
@@ -11476,7 +11610,7 @@ export default function AdminFinance() {
               <strong>{activeSchoolPrintInfo.title}</strong>
             </div>
             <div className="finance-print-logo-box">
-              {printLogoUrls.ministryLogoUrl ? <img src={printLogoUrls.ministryLogoUrl} alt="لوگوی وزارت معارف" /> : <span>لوگوی وزارت</span>}
+              {printLogoUrls.ministryLogoUrl ? <img className={getOfficialPrintLogoImageClass(printLogoUrls.ministryLogoUrl)} src={printLogoUrls.ministryLogoUrl} alt="لوگوی وزارت معارف" /> : <span>لوگوی وزارت</span>}
             </div>
           </div>
           <h3>گزارش مالی بازه انتخاب‌شده</h3>
@@ -11539,72 +11673,67 @@ export default function AdminFinance() {
               <div className="finance-receipt-copy-label">{copy.label}</div>
               <div className="finance-receipt-letterhead">
                 <div className="finance-print-logo-box">
-                  {printLogoUrls.schoolLogoUrl ? <img src={printLogoUrls.schoolLogoUrl} alt="لوگوی مکتب" /> : <span>لوگو مکتب</span>}
+                  {printLogoUrls.schoolLogoUrl ? <img className={getOfficialPrintLogoImageClass(printLogoUrls.schoolLogoUrl)} src={printLogoUrls.schoolLogoUrl} alt="لوگوی مکتب" /> : <span>لوگو مکتب</span>}
                 </div>
                 <div className="finance-receipt-letterhead-center">
                   <div className="finance-receipt-print-kicker">{activeSchoolPrintInfo.title}</div>
                   <h3>رسید پرداخت فیس شاگرد</h3>
+                  {!!activeSchoolPrintInfo.subtitle && <small>{activeSchoolPrintInfo.subtitle}</small>}
                 </div>
                 <div className="finance-print-logo-box">
-                  {printLogoUrls.ministryLogoUrl ? <img src={printLogoUrls.ministryLogoUrl} alt="لوگوی وزارت معارف" /> : <span>لوگو وزارت</span>}
+                  {printLogoUrls.ministryLogoUrl ? <img className={getOfficialPrintLogoImageClass(printLogoUrls.ministryLogoUrl)} src={printLogoUrls.ministryLogoUrl} alt="لوگوی وزارت معارف" /> : <span>لوگو وزارت</span>}
                 </div>
               </div>
-              <div className="finance-receipt-fields">
+              <div className="finance-receipt-document-meta">
+                <div><span>شماره رسید</span><strong className="finance-latin-code">{selectedReceiptPrintModel.paymentNumber || '-'}</strong></div>
+                <div><span>تاریخ</span><strong>{toFaDate(selectedReceiptPrintModel.paidAt)}</strong></div>
+                <div><span>سال تعلیمی</span><strong>{selectedReceiptPrintModel.academicYearTitle || '-'}</strong></div>
+                <div><span>وضعیت</span><strong>{PAYMENT_STATUS_UI_LABELS[selectedReceiptPrintModel.status] || selectedReceiptPrintModel.status || '-'}</strong></div>
+              </div>
+              <div className="finance-receipt-main-grid">
+                <section className="finance-receipt-info-panel finance-receipt-student-panel">
+                  <h4>مشخصات شاگرد</h4>
+                  <div><span>نام شاگرد:</span><strong>{selectedReceiptPrintModel.studentName}</strong></div>
+                  <div><span>نام پدر:</span><strong>{selectedReceiptPrintModel.fatherName}</strong></div>
+                  <div><span>نمبر اساس:</span><strong className="finance-latin-code">{selectedReceiptPrintModel.asasNumber}</strong></div>
+                  <div><span>صنف:</span><strong>{selectedReceiptPrintModel.classTitle}</strong></div>
+                </section>
+                <section className="finance-receipt-info-panel finance-receipt-payment-panel">
+                  <h4>مشخصات پرداخت</h4>
+                  <div>
+                    <span>{selectedReceiptPrintModel.isMultiBill ? 'شماره سند:' : 'شماره بل:'}</span>
+                    <strong className="finance-latin-code">{selectedReceiptPrintModel.billNumber || '-'}</strong>
+                  </div>
+                  <div><span>مبلغ پرداختی:</span><strong>{fmt(selectedReceiptPrintModel.amount)} {selectedReceiptPrintModel.currencyLabel || 'افغانی'}</strong></div>
+                  <div><span>روش پرداخت:</span><strong>{PAYMENT_METHOD_UI_LABELS[selectedReceiptPrintModel.paymentMethod] || selectedReceiptPrintModel.paymentMethod || '-'}</strong></div>
+                  <div><span>شماره مرجع:</span><strong className="finance-latin-code">{selectedReceiptPrintModel.referenceNo || '-'}</strong></div>
+                </section>
+              </div>
+              <div className="finance-receipt-purpose-line">
+                <span>بابت:</span>
+                <strong>{selectedReceiptPrintModel.purpose}</strong>
+              </div>
+              <div className="finance-receipt-summary-grid">
                 <div>
-                  <span>نام مکتب:</span>
-                  <strong>{activeSchoolPrintInfo.title}</strong>
+                  <span>مبلغ اصلی بل</span>
+                  <strong>{selectedReceiptPrintModel.grossAmount === null ? '-' : `${fmt(selectedReceiptPrintModel.grossAmount)} ${selectedReceiptPrintModel.currencyLabel || 'افغانی'}`}</strong>
                 </div>
                 <div>
-                  <span>{selectedReceiptPrintModel.isMultiBill ? 'شماره سند:' : 'شماره بل:'}</span>
-                  <strong className="finance-latin-code">{selectedReceiptPrintModel.billNumber || '-'}</strong>
+                  <span>تخفیف و معافیت</span>
+                  <strong>{selectedReceiptPrintModel.discountAmount === null ? '-' : `${fmt(selectedReceiptPrintModel.discountAmount)} ${selectedReceiptPrintModel.currencyLabel || 'افغانی'}`}</strong>
                 </div>
                 <div>
-                  <span>تاریخ:</span>
-                  <strong>{toFaDate(selectedReceiptPrintModel.paidAt)}</strong>
-                </div>
-                <div>
-                  <span>نام شاگرد:</span>
-                  <strong>{selectedReceiptPrintModel.studentName}</strong>
-                </div>
-                <div>
-                  <span>صنف:</span>
-                  <strong>{selectedReceiptPrintModel.classTitle}</strong>
-                </div>
-                <div>
-                  <span>مبلغ پرداختی:</span>
+                  <span>پرداخت فعلی</span>
                   <strong>{fmt(selectedReceiptPrintModel.amount)} {selectedReceiptPrintModel.currencyLabel || 'افغانی'}</strong>
                 </div>
                 <div>
-                  <span>روش پرداخت:</span>
-                  <strong>{PAYMENT_METHOD_UI_LABELS[selectedReceiptPrintModel.paymentMethod] || selectedReceiptPrintModel.paymentMethod || '-'}</strong>
+                  <span>باقیات فعلی</span>
+                  <strong>{selectedReceiptPrintModel.currentOutstandingAmount === null ? '-' : `${fmt(selectedReceiptPrintModel.currentOutstandingAmount)} ${selectedReceiptPrintModel.currencyLabel || 'افغانی'}`}</strong>
                 </div>
-                <div>
-                  <span>وضعیت:</span>
-                  <strong>{PAYMENT_STATUS_UI_LABELS[selectedReceiptPrintModel.status] || selectedReceiptPrintModel.status || '-'}</strong>
-                </div>
-                {selectedReceiptPrintModel.referenceNo !== '-' && (
-                  <div>
-                    <span>شماره مرجع:</span>
-                    <strong className="finance-latin-code">{selectedReceiptPrintModel.referenceNo}</strong>
-                  </div>
-                )}
-                {Number.isFinite(Number(selectedReceiptPrintModel.remainingAfterPayment)) && (
-                  <div>
-                    <span>باقی‌مانده پس از پرداخت:</span>
-                    <strong>{fmt(selectedReceiptPrintModel.remainingAfterPayment)} {selectedReceiptPrintModel.currencyLabel || 'افغانی'}</strong>
-                  </div>
-                )}
-                <div className="finance-receipt-field-wide">
-                  <span>بابت:</span>
-                  <strong>{selectedReceiptPrintModel.purpose}</strong>
-                </div>
-                {!!selectedReceiptPrintModel.note && (
-                  <div className="finance-receipt-field-wide">
-                    <span>یادداشت:</span>
-                    <strong>{selectedReceiptPrintModel.note}</strong>
-                  </div>
-                )}
               </div>
+              {!!selectedReceiptPrintModel.note && (
+                <div className="finance-receipt-note-line"><span>یادداشت:</span><strong>{selectedReceiptPrintModel.note}</strong></div>
+              )}
               {!!selectedReceiptPrintModel.allocations.length && (
                 <div className="finance-receipt-allocation-block">
                   <span>تفکیک بل‌های پرداخت‌شده:</span>
@@ -11613,7 +11742,12 @@ export default function AdminFinance() {
                       <div key={`${copy.key}-receipt-allocation-${index}`}>
                         <strong>{allocation.title || `بل ${index + 1}`}</strong>
                         <small className="finance-latin-code">{formatFinanceCode(allocation.orderNumber, '-')}</small>
-                        <b>{fmt(allocation.amount)} {selectedReceiptPrintModel.currencyLabel || 'افغانی'}</b>
+                        <b>پرداخت: {fmt(allocation.amount)} {selectedReceiptPrintModel.currencyLabel || 'افغانی'}</b>
+                        <small className="finance-receipt-allocation-totals">
+                          اصل: {allocation.grossAmount === null || allocation.grossAmount === undefined ? '-' : fmt(allocation.grossAmount)}
+                          {' · '}تخفیف: {allocation.discountAmount === null || allocation.discountAmount === undefined ? '-' : fmt(allocation.discountAmount)}
+                          {' · '}باقیات: {allocation.outstandingAmount === null || allocation.outstandingAmount === undefined ? '-' : fmt(allocation.outstandingAmount)}
+                        </small>
                       </div>
                     ))}
                   </div>
@@ -11621,12 +11755,13 @@ export default function AdminFinance() {
               )}
               <div className="finance-receipt-signatures">
                 <div>
-                  <span>مسوول مالی</span>
+                  <span>ثبت‌کننده پرداخت</span>
                   <strong>{selectedReceiptPrintModel.receivedBy || ' '}</strong>
                 </div>
                 <div>
-                  <span>امضا و مهر مکتب</span>
-                  <strong> </strong>
+                  <span>مدیر مالی</span>
+                  <strong>نام: __________________</strong>
+                  <b>امضا و مهر: __________________</b>
                 </div>
               </div>
             </section>
@@ -11643,7 +11778,7 @@ export default function AdminFinance() {
         <div className="finance-print-sheet" data-testid="printable-cashier-report-sheet">
           <div className="finance-print-school-header">
             <div className="finance-print-logo-box">
-              {printLogoUrls.schoolLogoUrl ? <img src={printLogoUrls.schoolLogoUrl} alt="لوگوی مکتب" /> : <span>لوگو مکتب</span>}
+              {printLogoUrls.schoolLogoUrl ? <img className={getOfficialPrintLogoImageClass(printLogoUrls.schoolLogoUrl)} src={printLogoUrls.schoolLogoUrl} alt="لوگوی مکتب" /> : <span>لوگو مکتب</span>}
             </div>
             <div className="finance-print-school-center">
               <span>امارت اسلامی افغانستان</span>
@@ -11653,7 +11788,7 @@ export default function AdminFinance() {
               <strong>{activeSchoolPrintInfo.title}</strong>
             </div>
             <div className="finance-print-logo-box">
-              {printLogoUrls.ministryLogoUrl ? <img src={printLogoUrls.ministryLogoUrl} alt="لوگوی وزارت معارف" /> : <span>لوگو وزارت</span>}
+              {printLogoUrls.ministryLogoUrl ? <img className={getOfficialPrintLogoImageClass(printLogoUrls.ministryLogoUrl)} src={printLogoUrls.ministryLogoUrl} alt="لوگوی وزارت معارف" /> : <span>لوگو وزارت</span>}
             </div>
           </div>
           <h3>گزارش صندوق روزانه</h3>

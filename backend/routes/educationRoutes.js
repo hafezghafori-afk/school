@@ -9,6 +9,7 @@ const StudentMembership = require('../models/StudentMembership');
 const User = require('../models/User');
 const Enrollment = require('../models/Enrollment');
 const AfghanStudent = require('../models/AfghanStudent');
+const StudentCore = require('../models/StudentCore');
 const Subject = require('../models/Subject');
 const AcademicYear = require('../models/AcademicYear');
 const SchoolClass = require('../models/SchoolClass');
@@ -519,13 +520,18 @@ const buildPlaceholderStudentEmail = async ({ sourceType = 'candidate', sourceId
   return `${seed}.${Date.now()}@students.local`;
 };
 
-const buildStudentCandidateFromUser = (item) => ({
+const buildStudentCandidateFromUser = (item, studentCore = null, afghanStudent = null) => ({
   _id: item?._id || null,
   id: item?._id || null,
   value: item?._id ? String(item._id) : '',
   name: item?.name || '',
   email: item?.email || '',
-  phone: '',
+  phone: studentCore?.phone || afghanStudent?.contactInfo?.mobile || afghanStudent?.contactInfo?.phone || '',
+  fatherName: afghanStudent?.personalInfo?.fatherName || '',
+  asasNumber: studentCore?.admissionNo || afghanStudent?.asasNumber || afghanStudent?.registrationId || '',
+  admissionNo: studentCore?.admissionNo || afghanStudent?.asasNumber || afghanStudent?.registrationId || '',
+  registrationId: afghanStudent?.registrationId || '',
+  nationalId: afghanStudent?.identification?.tazkiraNumber || '',
   grade: normalizeStudentGrade(item?.grade),
   sourceType: 'user',
   sourceLabel: 'ثبت‌شده در سیستم',
@@ -542,6 +548,10 @@ const buildStudentCandidateFromEnrollment = (item) => ({
   phone: item?.phone || '',
   grade: normalizeStudentGrade(item?.grade),
   fatherName: item?.fatherName || '',
+  asasNumber: item?.asasNumber || item?.registrationId || '',
+  admissionNo: item?.asasNumber || item?.registrationId || '',
+  registrationId: item?.registrationId || '',
+  nationalId: item?.nationalId || '',
   note: item?.notes || '',
   previousSchool: item?.previousSchool || '',
   previousGrade: '',
@@ -565,6 +575,10 @@ const buildStudentCandidateFromAfghanStudent = (item) => {
     phone: item?.contactInfo?.mobile || item?.contactInfo?.phone || item?.familyInfo?.fatherPhone || '',
     grade: normalizeStudentGrade(item?.academicInfo?.currentGrade),
     fatherName: item?.personalInfo?.fatherName || '',
+    asasNumber: item?.asasNumber || item?.registrationId || '',
+    admissionNo: item?.asasNumber || item?.registrationId || '',
+    registrationId: item?.registrationId || '',
+    nationalId: item?.identification?.tazkiraNumber || '',
     note: item?.notes || '',
     previousSchool: item?.academicInfo?.previousSchool?.name || '',
     previousGrade: item?.academicInfo?.previousSchool?.lastGrade || '',
@@ -586,6 +600,10 @@ const buildOnlineQueueItem = (item) => ({
   grade: normalizeStudentGrade(item?.grade),
   phone: item?.phone || '',
   email: item?.email || '',
+  asasNumber: item?.asasNumber || item?.registrationId || '',
+  admissionNo: item?.asasNumber || item?.registrationId || '',
+  registrationId: item?.registrationId || '',
+  nationalId: item?.nationalId || '',
   status: item?.status || 'pending',
   note: item?.notes || '',
   createdAt: item?.createdAt || null,
@@ -619,16 +637,17 @@ const annotateEnrollmentCandidate = (candidate, membership = null) => {
 };
 
 const loadEducationStudentCatalog = async () => {
-  const [canonicalStudents, afghanStudents, onlineRegistrations, memberships] = await Promise.all([
+  const [canonicalStudents, studentCores, afghanStudents, onlineRegistrations, memberships] = await Promise.all([
     User.find({ role: 'student' }).select('name email grade').sort({ name: 1 }),
+    StudentCore.find({ status: { $ne: 'archived' } }).select('userId fullName admissionNo phone email'),
     AfghanStudent.find({ status: { $ne: 'deleted' } })
-      .select('personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari personalInfo.fatherName contactInfo.email contactInfo.mobile contactInfo.phone familyInfo.fatherPhone academicInfo.currentGrade academicInfo.previousSchool notes status linkedUserId createdAt')
+      .select('personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari personalInfo.fatherName identification.tazkiraNumber contactInfo.email contactInfo.mobile contactInfo.phone familyInfo.fatherPhone academicInfo.currentGrade academicInfo.previousSchool notes status linkedUserId registrationId asasNumber createdAt')
       .sort({ createdAt: -1 }),
     Enrollment.find({
       registrationSource: 'online',
       status: { $in: ['pending', 'approved'] }
     })
-      .select('studentName fatherName grade phone email previousSchool notes status linkedUserId createdAt approvedAt rejectionReason')
+      .select('studentName fatherName nationalId grade phone email previousSchool notes status linkedUserId registrationId asasNumber createdAt approvedAt rejectionReason')
       .sort({ createdAt: -1 }),
     StudentMembership.find({})
       .select('student afghanStudentId status isCurrent endedReason endedAt leftAt updatedAt createdAt')
@@ -650,6 +669,12 @@ const loadEducationStudentCatalog = async () => {
     if (afghanStudentId && !latestMembershipByAfghanStudentId.has(afghanStudentId)) latestMembershipByAfghanStudentId.set(afghanStudentId, item);
   });
   const canonicalUserIdByEmail = new Map();
+  const studentCoreByUserId = new Map(
+    studentCores.filter((item) => item?.userId).map((item) => [String(item.userId), item])
+  );
+  const afghanStudentByUserId = new Map(
+    afghanStudents.filter((item) => item?.linkedUserId).map((item) => [String(item.linkedUserId), item])
+  );
   canonicalStudents.forEach((item) => {
     const email = normalizeText(item?.email).toLowerCase();
     if (email && item?._id) canonicalUserIdByEmail.set(email, String(item._id));
@@ -666,7 +691,11 @@ const loadEducationStudentCatalog = async () => {
   canonicalStudents.forEach((item) => {
     if (memberUserIds.has(String(item?._id || ''))) return;
     const candidate = annotateEnrollmentCandidate(
-      buildStudentCandidateFromUser(item),
+      buildStudentCandidateFromUser(
+        item,
+        studentCoreByUserId.get(String(item?._id || '')) || null,
+        afghanStudentByUserId.get(String(item?._id || '')) || null
+      ),
       latestMembershipByUserId.get(String(item?._id || '')) || null
     );
     if (candidate.value) byCanonicalUser.set(String(candidate.value), candidate);
@@ -697,7 +726,11 @@ const loadEducationStudentCatalog = async () => {
   });
 
   return {
-    students: canonicalStudents,
+    students: canonicalStudents.map((item) => buildStudentCandidateFromUser(
+      item,
+      studentCoreByUserId.get(String(item?._id || '')) || null,
+      afghanStudentByUserId.get(String(item?._id || '')) || null
+    )),
     studentCandidates,
     onlineRegistrationQueue: onlineRegistrations
       .filter((item) => !candidateHasCurrentMembership(item))
@@ -1033,37 +1066,62 @@ const normalizeEnrollmentStatus = (value, fallback = 'approved') => {
 
 const populateStudentEnrollments = (query) => query
   .populate('student', 'name email grade')
+  .populate('studentId', 'fullName admissionNo email phone')
+  .populate('afghanStudentId', 'personalInfo.fatherName identification.tazkiraNumber asasNumber registrationId contactInfo.mobile contactInfo.phone')
   .populate('course', 'title category academicYearRef')
   .populate('classId', 'title code gradeLevel section academicYearId legacyCourseId')
   .populate('academicYear', 'title isActive')
   .populate('academicYearId', 'title isActive');
 
-const serializeStudentEnrollment = (item, schoolClass = null) => ({
-  _id: item._id,
-  user: item.student || null,
-  afghanStudentId: item.afghanStudentId || null,
-  course: item.course || null,
-  courseId: item.course?._id || item.course || null,
-  classId: schoolClass?.id || schoolClass?._id || item.classId?._id || item.classId || null,
-  schoolClass: schoolClass || null,
-  academicYear: schoolClass?.academicYear || item.academicYear || item.academicYearId || null,
-  status: membershipStatusToEnrollmentStatus(item.status),
-  note: item.note || '',
-  rejectedReason: item.rejectedReason || '',
-  source: item.source || 'system',
-  isCurrent: !!item.isCurrent,
-  enrolledAt: item.enrolledAt || item.joinedAt || null,
-  joinedAt: item.joinedAt || null,
-  endedAt: item.endedAt || item.leftAt || null,
-  leftAt: item.leftAt || null,
-  endedReason: item.endedReason || '',
-  createdAt: item.createdAt || null,
-  updatedAt: item.updatedAt || null,
-  legacyOrder: item.legacyOrder || null,
-  previousMembershipId: item.previousMembershipId || null,
-  admissionType: item.admissionType || 'regular',
-  changeVersion: Number(item.changeVersion || 0)
-});
+const serializeStudentEnrollment = (item, schoolClass = null) => {
+  const studentCore = item?.studentId && typeof item.studentId === 'object' ? item.studentId : null;
+  const afghanStudent = item?.afghanStudentId && typeof item.afghanStudentId === 'object' ? item.afghanStudentId : null;
+  const asasNumber = normalizeText(
+    studentCore?.admissionNo || afghanStudent?.asasNumber || afghanStudent?.registrationId
+  );
+  const user = item?.student
+    ? {
+      ...(typeof item.student.toObject === 'function' ? item.student.toObject() : item.student),
+      fullName: studentCore?.fullName || item.student?.name || '',
+      asasNumber,
+      admissionNo: asasNumber,
+      fatherName: afghanStudent?.personalInfo?.fatherName || ''
+    }
+    : null;
+
+  return {
+    _id: item._id,
+    user,
+    studentCoreId: studentCore?._id || item.studentId || null,
+    afghanStudentId: afghanStudent?._id || item.afghanStudentId || null,
+    asasNumber,
+    admissionNo: asasNumber,
+    fatherName: afghanStudent?.personalInfo?.fatherName || '',
+    nationalId: afghanStudent?.identification?.tazkiraNumber || '',
+    phone: studentCore?.phone || afghanStudent?.contactInfo?.mobile || afghanStudent?.contactInfo?.phone || '',
+    course: item.course || null,
+    courseId: item.course?._id || item.course || null,
+    classId: schoolClass?.id || schoolClass?._id || item.classId?._id || item.classId || null,
+    schoolClass: schoolClass || null,
+    academicYear: schoolClass?.academicYear || item.academicYear || item.academicYearId || null,
+    status: membershipStatusToEnrollmentStatus(item.status),
+    note: item.note || '',
+    rejectedReason: item.rejectedReason || '',
+    source: item.source || 'system',
+    isCurrent: !!item.isCurrent,
+    enrolledAt: item.enrolledAt || item.joinedAt || null,
+    joinedAt: item.joinedAt || null,
+    endedAt: item.endedAt || item.leftAt || null,
+    leftAt: item.leftAt || null,
+    endedReason: item.endedReason || '',
+    createdAt: item.createdAt || null,
+    updatedAt: item.updatedAt || null,
+    legacyOrder: item.legacyOrder || null,
+    previousMembershipId: item.previousMembershipId || null,
+    admissionType: item.admissionType || 'regular',
+    changeVersion: Number(item.changeVersion || 0)
+  };
+};
 
 const withManageContent = [
   requireAuth,

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { API_BASE } from '../config/api';
+import { studentMatchesSearch } from '../utils/studentSearch';
 import './AcademySupplies.css';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -34,8 +35,6 @@ const emptySale = {
 
 const fmt = (value) => Number(value || 0).toLocaleString('fa-AF');
 const text = (value, fallback = '-') => String(value || '').trim() || fallback;
-const normalize = (value) => String(value || '').trim().toLowerCase();
-
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -146,12 +145,10 @@ export default function AcademySupplies() {
   const currency = selectedPrice?.currency || prices[0]?.currency || 'AFN';
 
   const filteredRows = useMemo(() => {
-    const term = normalize(search);
     return (report.rows || []).filter((row) => {
       const student = row.student || {};
       const sale = row.sale || {};
-      const matchesTerm = !term || [student.studentCode, student.fullName, student.fatherName, student.className]
-        .some((value) => normalize(value).includes(term));
+      const matchesTerm = studentMatchesSearch(student, search);
       const matchesStatus =
         statusFilter === 'all'
         || (statusFilter === 'bookTaken' && row.bookTaken)
@@ -410,7 +407,7 @@ export default function AcademySupplies() {
             <div className="academy-supply-report-head">
               <h2>گزارش داخلی شاگردان</h2>
               <div>
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="جستجو نام، آی‌دی، نام پدر یا صنف" />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="جستجو نام، نمبر اساس/آی‌دی، نام پدر یا صنف" />
                 <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
                   <option value="all">همه</option>
                   <option value="bookTaken">کتاب گرفته</option>

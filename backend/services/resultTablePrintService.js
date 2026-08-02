@@ -101,7 +101,9 @@ function chunks(items, size) {
 function logoHtml(url, alt) {
   const rawSource = text(url);
   const source = printableAsset(url);
-  const trimWhitespaceClass = /iman[_\s-]*logo/i.test(rawSource) ? ' trim-wide-whitespace' : '';
+  const trimWhitespaceClass = /iman[_\s-]*logo|(?:^|[/_-])school-logo(?:[/_.-]|$)/i.test(rawSource)
+    ? ' trim-wide-whitespace'
+    : '';
   return source
     ? `<img class="official-logo${trimWhitespaceClass}" src="${escapeHtml(source)}" alt="${escapeHtml(alt)}" />`
     : '<div class="official-logo placeholder"></div>';
