@@ -657,6 +657,78 @@
   box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.08) inset;
 }
 
+/* Academic lifecycle status badge - shows whether a student behind a bill or
+   debt row is still enrolled, so a withdrawn/transferred/expelled student
+   never looks identical to an active one in finance lists. */
+.finance-status-badge {
+  display: inline-flex;
+  width: max-content;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(148, 163, 184, 0.1);
+  color: #cbd5e1;
+  padding: 3px 8px;
+  font-size: 10.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.finance-status-badge.active {
+  border-color: rgba(16, 185, 129, 0.32);
+  background: rgba(16, 185, 129, 0.12);
+  color: #6ee7b7;
+}
+
+.finance-status-badge.pending {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.12);
+  color: #fde68a;
+}
+
+.finance-status-badge.suspended {
+  border-color: rgba(249, 115, 22, 0.32);
+  background: rgba(249, 115, 22, 0.13);
+  color: #fed7aa;
+}
+
+.finance-status-badge.transferred {
+  border-color: rgba(56, 189, 248, 0.32);
+  background: rgba(56, 189, 248, 0.13);
+  color: #7dd3fc;
+}
+
+.finance-status-badge.dropped,
+.finance-status-badge.expelled {
+  border-color: rgba(244, 63, 94, 0.32);
+  background: rgba(244, 63, 94, 0.13);
+  color: #fecdd3;
+}
+
+.finance-status-badge.graduated {
+  border-color: rgba(168, 85, 247, 0.32);
+  background: rgba(168, 85, 247, 0.13);
+  color: #e9d5ff;
+}
+
+.finance-status-badge.inactive,
+.finance-status-badge.unknown {
+  opacity: 0.75;
+}
+
+/* Legacy/dormant arrears card - visually separates departed-student debt
+   from the normal active-debtor follow-up list (proposal item #3). */
+.finance-legacy-arrears-card {
+  border-color: rgba(245, 158, 11, 0.22);
+}
+
+.finance-inline-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .finance-chart-card-wide {
   grid-column: span 2;
 }

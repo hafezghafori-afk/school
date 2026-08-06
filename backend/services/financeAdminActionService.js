@@ -26,7 +26,11 @@ const {
   normalizePaymentBreakdown,
   normalizeFinanceLineItems
 } = require('../utils/financeLineItems');
-const { syncStudentFinanceFromFinanceBill, syncStudentFinanceFromFinanceReceipt } = require('../utils/studentFinanceSync');
+const {
+  syncStudentFinanceFromFinanceBill,
+  syncStudentFinanceFromFinanceReceipt,
+  syncFinanceBillPaymentFromFeeOrder
+} = require('../utils/studentFinanceSync');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const {
   syncApprovedFeePaymentToTreasury,
@@ -799,8 +803,8 @@ async function setFeeOrderInstallmentsAction({ req, feeOrderId = '', body = {} }
 
 async function voidBillAction({ req, billId = '', body = {} } = {}) {
   const actorLevel = await resolveAdminActorLevel(req.user.id);
-  if (!['finance_lead', 'general_president'].includes(actorLevel)) {
-    throw createActionError(403, '\u0628\u0627\u0637\u0644\u200c\u0633\u0627\u0632\u06cc \u0628\u0644 \u0641\u0642\u0637 \u0628\u0631\u0627\u06cc \u0622\u0645\u0631\u06cc\u062a \u0645\u0627\u0644\u06cc \u06cc\u0627 \u0631\u06cc\u0627\u0633\u062a \u0639\u0645\u0648\u0645\u06cc \u0645\u062c\u0627\u0632 \u0627\u0633\u062a');
+  if (!['finance_manager', 'finance_lead', 'general_president'].includes(actorLevel)) {
+    throw createActionError(403, '\u0628\u0627\u0637\u0644\u200c\u0633\u0627\u0632\u06cc \u0628\u0644 \u0641\u0642\u0637 \u0628\u0631\u0627\u06cc \u0645\u062f\u06cc\u0631\u06cc\u062a \u0645\u0627\u0644\u06cc\u060c \u0622\u0645\u0631\u06cc\u062a \u0645\u0627\u0644\u06cc \u06cc\u0627 \u0631\u06cc\u0627\u0633\u062a \u0639\u0645\u0648\u0645\u06cc \u0645\u062c\u0627\u0632 \u0627\u0633\u062a.');
   }
 
   const item = await FinanceBill.findById(billId);
@@ -870,8 +874,8 @@ async function voidBillAction({ req, billId = '', body = {} } = {}) {
 
 async function voidFeeOrderAction({ req, feeOrderId = '', body = {} } = {}) {
   const actorLevel = await resolveAdminActorLevel(req.user.id);
-  if (!['finance_lead', 'general_president'].includes(actorLevel)) {
-    throw createActionError(403, 'باطل‌سازی بل فقط برای آمریت مالی یا ریاست عمومی مجاز است.');
+  if (!['finance_manager', 'finance_lead', 'general_president'].includes(actorLevel)) {
+    throw createActionError(403, 'باطل‌سازی بل فقط برای مدیریت مالی، آمریت مالی یا ریاست عمومی مجاز است.');
   }
 
   const item = await FeeOrder.findById(feeOrderId);
@@ -1323,6 +1327,18 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
   }
   await syncApprovedFeePaymentToTreasury(payment);
 
+  // Best-effort, never blocks/fails the already-committed approval: keeps
+  // the source FinanceBill's amountPaid from going stale relative to this
+  // canonical FeeOrder, which is what ensureReceiptSubmissionAvailability
+  // (financeRoutes.js) trusts when deciding how much more can still be
+  // collected on that bill. See syncFinanceBillPaymentFromFeeOrder for why.
+  for (const order of updatedOrders) {
+    // eslint-disable-next-line no-await-in-loop
+    await syncFinanceBillPaymentFromFeeOrder(order).catch((error) => {
+      console.error('[finance][sync-bill-from-order]', error?.message || error);
+    });
+  }
+
   scheduleFinanceBackgroundTask('payment-approved-notification', () => notifyStudent({
     req,
     studentId: payment.student,
@@ -1687,8 +1703,8 @@ async function approveRefundAction({ req, refundId = '', body = {} } = {}) {
   if (!actor || actor.role !== 'admin') throw createActionError(403, 'فقط مدیران اجازه بررسی بازپرداخت را دارند.');
 
   const actorLevel = resolveAdminOrgRole(actor);
-  if (!['finance_lead', 'general_president'].includes(actorLevel)) {
-    throw createActionError(403, 'تایید بازپرداخت فقط برای آمریت مالی یا ریاست عمومی مجاز است.');
+  if (!['finance_manager', 'finance_lead', 'general_president'].includes(actorLevel)) {
+    throw createActionError(403, 'تایید بازپرداخت فقط برای مدیریت مالی، آمریت مالی یا ریاست عمومی مجاز است.');
   }
   if (refund.status !== 'pending_review') {
     throw createActionError(400, 'این درخواست بازپرداخت قبلاً بررسی شده است.');
@@ -1733,8 +1749,8 @@ async function rejectRefundAction({ req, refundId = '', body = {} } = {}) {
   if (!actor || actor.role !== 'admin') throw createActionError(403, 'فقط مدیران اجازه بررسی بازپرداخت را دارند.');
 
   const actorLevel = resolveAdminOrgRole(actor);
-  if (!['finance_lead', 'general_president'].includes(actorLevel)) {
-    throw createActionError(403, 'رد بازپرداخت فقط برای آمریت مالی یا ریاست عمومی مجاز است.');
+  if (!['finance_manager', 'finance_lead', 'general_president'].includes(actorLevel)) {
+    throw createActionError(403, 'رد بازپرداخت فقط برای مدیریت مالی، آمریت مالی یا ریاست عمومی مجاز است.');
   }
   if (refund.status !== 'pending_review') {
     throw createActionError(400, 'این درخواست بازپرداخت قبلاً بررسی شده است.');

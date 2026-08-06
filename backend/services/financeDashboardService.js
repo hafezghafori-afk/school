@@ -5,6 +5,7 @@ const FinanceTreasuryTransaction = require('../models/FinanceTreasuryTransaction
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
 const { sumPaidRefunds } = require('../utils/financeRefundRecognition');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
+const { loadCurrentMembershipStatusMap, attachLifecycleBadge, hasStudentLeft } = require('../utils/financeStudentLifecycleStatus');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -204,7 +205,15 @@ function buildClassRows(orders = []) {
     .sort((left, right) => right.outstanding - left.outstanding);
 }
 
-function buildTopDebtors(orders = [], limit = 10, asOf = new Date()) {
+// Splits debtors into "active" (still-enrolled, follow up normally) and
+// "departed" (student has left - see hasStudentLeft in
+// financeStudentLifecycleStatus.js - their balance is legacy/dormant arrears
+// that needs a deliberate decision: refund, transfer to the new school, or
+// write off) instead of one undifferentiated list, per the finance-lifecycle
+// proposal's item #3. The departed total is computed over the *full* set
+// before slicing so the dashboard KPI never undercounts because of the list
+// page size.
+function buildDebtorGroups(orders = [], limit = 10, asOf = new Date(), statusMap = null) {
   const map = new Map();
   orders.forEach((order) => {
     const outstanding = roundMoney(order?.outstandingAmount);
@@ -221,7 +230,14 @@ function buildTopDebtors(orders = [], limit = 10, asOf = new Date()) {
       amount: 0,
       orderCount: 0,
       overdueOrderCount: 0,
-      maxLateDays: 0
+      maxLateDays: 0,
+      // Split by whether the order has any money on it yet, so the UI can
+      // route each order to the right action: an order with nothing paid
+      // can be voided/written off directly; one with a partial/full payment
+      // needs a refund case instead (voidFeeOrderAction itself rejects
+      // voiding a paid order - see financeAdminActionService.js).
+      unpaidOrderIds: [],
+      refundableOrderIds: []
     };
     row.amount += outstanding;
     row.orderCount += 1;
@@ -229,16 +245,33 @@ function buildTopDebtors(orders = [], limit = 10, asOf = new Date()) {
     const lateDays = Math.max(0, Math.floor((asOf.getTime() - dueDate.getTime()) / DAY_MS));
     if (lateDays > 0) row.overdueOrderCount += 1;
     row.maxLateDays = Math.max(row.maxLateDays, lateDays);
+    const orderId = normalizeText(order?._id);
+    if (orderId) {
+      if (Number(order?.amountPaid || 0) > 0) row.refundableOrderIds.push(orderId);
+      else row.unpaidOrderIds.push(orderId);
+    }
     map.set(studentId, row);
   });
-  return Array.from(map.values())
-    .map((row) => ({
+
+  const allRows = Array.from(map.values())
+    .map((row) => attachLifecycleBadge({
       ...row,
       amount: roundMoney(row.amount),
       risk: row.maxLateDays >= 60 ? 'critical' : row.maxLateDays >= 30 ? 'high' : row.maxLateDays > 0 ? 'watch' : 'current'
-    }))
-    .sort((left, right) => right.amount - left.amount)
-    .slice(0, limit);
+    }, row.studentUserId, statusMap))
+    .sort((left, right) => right.amount - left.amount);
+
+  const departedRows = allRows.filter((row) => hasStudentLeft(row.lifecycleStatus));
+  const activeRows = allRows.filter((row) => !hasStudentLeft(row.lifecycleStatus));
+
+  return {
+    topDebtors: activeRows.slice(0, limit),
+    departedDebtors: departedRows.slice(0, limit),
+    legacyArrears: {
+      count: departedRows.length,
+      amount: roundMoney(departedRows.reduce((sum, row) => sum + Number(row.amount || 0), 0))
+    }
+  };
 }
 
 async function buildFinanceDashboardOverview(options = {}) {
@@ -323,6 +356,17 @@ async function buildFinanceDashboardOverview(options = {}) {
     .filter((row) => Number(row?.recognizedAmount || 0) > 0)
     .map((row) => ({ ...row.payment, amount: roundMoney(row.recognizedAmount) }));
 
+  // Single source of truth for "is this student still enrolled" across the
+  // finance dashboard: pulled from StudentMembership, which is what
+  // studentLifecycleService updates when the academic manager records a
+  // transfer/dropout/expulsion/suspension. See financeStudentLifecycleStatus.js.
+  const lifecycleStatusMap = await loadCurrentMembershipStatusMap([
+    ...standingOrders.map((item) => item?.student),
+    ...periodOrders.map((item) => item?.student),
+    ...approvedPayments.map((item) => item?.student),
+    ...pendingPayments.map((item) => item?.student)
+  ]);
+
   const standingAdjustments = adjustmentTotals(standingOrders);
   const periodAdjustments = adjustmentTotals(periodOrders);
   const standingDue = roundMoney(standingOrders.reduce((sum, item) => sum + Number(item?.amountDue || 0), 0));
@@ -371,6 +415,7 @@ async function buildFinanceDashboardOverview(options = {}) {
     { key: 'expense', label: 'مصارف تاییدشده', value: approvedExpense }
   ];
   const incomeExpenseTotal = incomeExpenseDistribution.reduce((sum, row) => sum + row.value, 0);
+  const debtorGroups = buildDebtorGroups(standingOrders, debtorLimit, asOf, lifecycleStatusMap);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -391,6 +436,11 @@ async function buildFinanceDashboardOverview(options = {}) {
       pendingReceipts: { count: pendingPayments.length, amount: pendingIncome },
       overdue: { count: overdueOrders.length, amount: roundMoney(overdueOrders.reduce((sum, item) => sum + Number(item?.outstandingAmount || 0), 0)) },
       pendingExpenses: { count: pendingExpenses.length, amount: pendingExpense },
+      // Legacy/dormant arrears: open balance belonging to students who have
+      // already left (dropped/expelled/transferred/inactive). Kept separate
+      // from `outstanding` above so "total owed" doesn't quietly mix in debt
+      // nobody is actively collecting from anymore.
+      legacyArrears: debtorGroups.legacyArrears,
       standing: { due: standingDue, paid: standingPaid, outstanding: standingOutstanding },
       treasury: { inflow: treasuryInflow, outflow: treasuryOutflow, net: roundMoney(treasuryInflow - treasuryOutflow) },
       rates: {
@@ -411,9 +461,10 @@ async function buildFinanceDashboardOverview(options = {}) {
       daily: buildDailySeries(approvedPayments, approvedExpenses)
     },
     byClass: buildClassRows(standingOrders),
-    topDebtors: buildTopDebtors(standingOrders, debtorLimit, asOf),
+    topDebtors: debtorGroups.topDebtors,
+    departedDebtors: debtorGroups.departedDebtors,
     recent: {
-      bills: periodOrders.slice(0, recentLimit).map((item) => ({
+      bills: periodOrders.slice(0, recentLimit).map((item) => attachLifecycleBadge({
         id: normalizeText(item?._id),
         number: formatFinanceCode(item?.orderNumber || ''),
         title: item?.title || item?.periodLabel || 'بل مالی',
@@ -423,8 +474,8 @@ async function buildFinanceDashboardOverview(options = {}) {
         outstanding: roundMoney(item?.outstandingAmount),
         status: item?.status || '',
         occurredAt: item?.issuedAt || null
-      })),
-      payments: approvedPayments.slice(0, recentLimit).map((item) => ({
+      }, item?.student, lifecycleStatusMap)),
+      payments: approvedPayments.slice(0, recentLimit).map((item) => attachLifecycleBadge({
         id: normalizeText(item?._id),
         number: formatFinanceCode(item?.paymentNumber || ''),
         studentName: paymentStudentName(item),
@@ -433,7 +484,7 @@ async function buildFinanceDashboardOverview(options = {}) {
         paymentMethod: item?.paymentMethod || '',
         status: item?.status || '',
         occurredAt: item?.paidAt || null
-      })),
+      }, item?.student, lifecycleStatusMap)),
       expenses: approvedExpenses.slice(0, recentLimit).map((item) => ({
         id: normalizeText(item?._id),
         title: item?.subCategory || item?.category || 'مصرف',

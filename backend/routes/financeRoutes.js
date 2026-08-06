@@ -47,6 +47,7 @@ const {
   syncStudentFinanceFromFinanceReceipt
 } = require('../utils/studentFinanceSync');
 const { suppressAutomaticFinanceBillSync } = require('../utils/financeSyncControl');
+const { hasStudentLeft, getStudentStatusBadge } = require('../utils/financeStudentLifecycleStatus');
 const {
   listCourseMemberships,
   findClassMemberships,
@@ -1206,6 +1207,13 @@ const canReviewExpenseStage = (adminLevel = '', stage = '') => {
   const normalizedStage = normalizeExpenseApprovalStage(stage);
   if (!OPEN_EXPENSE_APPROVAL_STAGES.includes(normalizedStage)) return false;
   if (level === 'general_president') return true;
+  // finance_manager can review at any open stage, including the
+  // finance_lead_review stage - orgs that don't staff a separate finance_lead
+  // role (finance_manager handles everything up to general_president) would
+  // otherwise get permanently stuck at that stage. actorAlreadyReviewedExpense
+  // + FINANCE_FOUR_EYES_ENABLED still block the same person reviewing twice,
+  // so this doesn't remove the two-person check, only the unfillable rung.
+  if (level === 'finance_manager') return true;
   return getRequiredLevelForExpenseStage(normalizedStage) === level;
 };
 
@@ -1214,6 +1222,7 @@ const getNextExpenseStage = (adminLevel = '', currentStage = '') => {
   const stage = normalizeExpenseApprovalStage(currentStage);
   if (level === 'general_president') return EXPENSE_APPROVAL_STAGES.completed;
   if (level === 'finance_manager' && stage === EXPENSE_APPROVAL_STAGES.financeManager) return EXPENSE_APPROVAL_STAGES.financeLead;
+  if (level === 'finance_manager' && stage === EXPENSE_APPROVAL_STAGES.financeLead) return EXPENSE_APPROVAL_STAGES.generalPresident;
   if (level === 'finance_lead' && stage === EXPENSE_APPROVAL_STAGES.financeLead) return EXPENSE_APPROVAL_STAGES.generalPresident;
   return '';
 };
@@ -1272,6 +1281,10 @@ const canReviewMonthCloseStage = (adminLevel = '', stage = '') => {
   const normalizedStage = normalizeMonthCloseApprovalStage(stage);
   if (!OPEN_MONTH_CLOSE_APPROVAL_STAGES.includes(normalizedStage)) return false;
   if (level === 'general_president') return true;
+  // See canReviewExpenseStage above: finance_manager covers the unfillable
+  // finance_lead rung; actorAlreadyReviewedMonthClose still blocks the same
+  // person reviewing twice.
+  if (level === 'finance_manager') return true;
   return getRequiredLevelForMonthCloseStage(normalizedStage) === level;
 };
 
@@ -1280,6 +1293,7 @@ const getNextMonthCloseStage = (adminLevel = '', currentStage = '') => {
   const stage = normalizeMonthCloseApprovalStage(currentStage);
   if (level === 'general_president') return MONTH_CLOSE_APPROVAL_STAGES.completed;
   if (level === 'finance_manager' && stage === MONTH_CLOSE_APPROVAL_STAGES.financeManager) return MONTH_CLOSE_APPROVAL_STAGES.financeLead;
+  if (level === 'finance_manager' && stage === MONTH_CLOSE_APPROVAL_STAGES.financeLead) return MONTH_CLOSE_APPROVAL_STAGES.generalPresident;
   if (level === 'finance_lead' && stage === MONTH_CLOSE_APPROVAL_STAGES.financeLead) return MONTH_CLOSE_APPROVAL_STAGES.generalPresident;
   return '';
 };
@@ -1743,6 +1757,10 @@ const canReviewBudgetStage = (adminLevel = '', stage = '') => {
   const normalizedStage = normalizeBudgetApprovalStage(stage);
   if (!OPEN_BUDGET_APPROVAL_STAGES.includes(normalizedStage)) return false;
   if (level === 'general_president') return true;
+  // See canReviewExpenseStage above: finance_manager covers the unfillable
+  // finance_lead rung; actorAlreadyReviewedBudget still blocks the same
+  // person reviewing twice.
+  if (level === 'finance_manager') return true;
   return getRequiredLevelForBudgetStage(normalizedStage) === level;
 };
 
@@ -1751,6 +1769,7 @@ const getNextBudgetStage = (adminLevel = '', currentStage = '') => {
   const stage = normalizeBudgetApprovalStage(currentStage);
   if (level === 'general_president') return BUDGET_APPROVAL_STAGES.approved;
   if (level === 'finance_manager' && stage === BUDGET_APPROVAL_STAGES.financeManager) return BUDGET_APPROVAL_STAGES.financeLead;
+  if (level === 'finance_manager' && stage === BUDGET_APPROVAL_STAGES.financeLead) return BUDGET_APPROVAL_STAGES.generalPresident;
   if (level === 'finance_lead' && stage === BUDGET_APPROVAL_STAGES.financeLead) return BUDGET_APPROVAL_STAGES.generalPresident;
   return '';
 };
@@ -5068,6 +5087,16 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       return res.status(400).json({ success: false, message: 'عضویت مالی برای این دانش‌آموز در این کلاس و سال تعلیمی یافت نشد.' });
     }
 
+    // Soft guard (proposal item #6): a bill can still be issued on purpose
+    // (e.g. settling arrears after a transfer), but the person issuing it
+    // should see clearly that the student is no longer active - matches the
+    // status badges shown on the finance dashboard.
+    let studentStatusWarning = '';
+    if (membership?.status && hasStudentLeft(membership.status)) {
+      const badge = getStudentStatusBadge(membership.status);
+      studentStatusWarning = `توجه: این شاگرد در وضعیت «${badge.label}» است و دیگر ثبت‌نام تعلیمی فعال ندارد؛ از صدور این بل مطمئن شوید.`;
+    }
+
     let selectedFeePlan = null;
     let resolvedAmount = 0;
     if (normalizedAmountSource === 'plan') {
@@ -5225,7 +5254,12 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       .populate('student', 'name email grade')
       .populate('course', 'title category')
       .populate('classId', 'title code gradeLevel section');
-    res.status(201).json({ success: true, item, message: 'بل با موفقیت ایجاد شد.' });
+    res.status(201).json({
+      success: true,
+      item,
+      message: 'بل با موفقیت ایجاد شد.',
+      ...(studentStatusWarning ? { studentStatusWarning } : {})
+    });
   } catch (error) {
     if (Number(error?.code) === 11000) {
       const duplicateFields = Object.keys(error?.keyPattern || {});

@@ -15,6 +15,7 @@ const StudentLifecycleEvent = require('../models/StudentLifecycleEvent');
 const { issueTransferAdmissionBill } = require('./transferAdmissionBillingService');
 const { syncStudentFinanceFromFinanceBill } = require('../utils/studentFinanceSync');
 const { createFinanceRefundCase } = require('../utils/financeRefundCase');
+const { notifyFinanceOfLifecycleChange, broadcastFinanceLifecycleChange } = require('../utils/financeLifecycleNotifications');
 const {
   ACTIVE_STUDENT_MEMBERSHIP_STATUSES,
   CURRENT_STUDENT_MEMBERSHIP_STATUSES
@@ -168,7 +169,16 @@ async function reconcileFutureBillingForEndedMembership(membership, action, effe
   if (!['transfer_out', 'class_transfer', 'dropout', 'expulsion'].includes(action)) {
     return { bills: 0, orders: 0, refundCasesCreated: 0 };
   }
-  const nextMonthStart = new Date(effectiveAt.getFullYear(), effectiveAt.getMonth() + 1, 1);
+  // Starts from the FIRST of the departure month, not the month after it.
+  // A student who leaves on day 6 of the month still had a bill due later
+  // that same month - excluding it (as this used to, with nextMonthStart)
+  // meant a same-month bill with money already on it never got flagged for
+  // refund review, and an unpaid same-month bill never got voided either;
+  // it just sat there as if the student were still enrolled. Months before
+  // the departure month are still left untouched on purpose - that's
+  // legitimate pre-departure arrears/payment, not this student's departure
+  // affecting billing.
+  const currentMonthStart = new Date(effectiveAt.getFullYear(), effectiveAt.getMonth(), 1);
   const voidFields = {
     status: 'void',
     voidReason: action,
@@ -178,16 +188,20 @@ async function reconcileFutureBillingForEndedMembership(membership, action, effe
   const voidFilter = {
     studentMembershipId: membership._id,
     status: { $in: ['new', 'overdue'] },
-    dueDate: { $gte: nextMonthStart }
+    dueDate: { $gte: currentMonthStart }
   };
   // Bills/orders in the same post-departure window can't be voided here
   // because money was already collected on them (status is 'partial' or
   // 'paid', not 'new'/'overdue'). Those need a refund case instead of a
   // silent void, otherwise the payment just sits there looking legitimate.
+  // Note: for a bill spanning the departure date itself (e.g. due mid-month,
+  // student left day 6), the refund case is created for the FULL amount
+  // paid so far - proration for days actually attended is a judgment call
+  // left to the human reviewing the refund case, not automated here.
   const protectedFilter = {
     studentMembershipId: membership._id,
     status: { $in: ['partial', 'paid'] },
-    dueDate: { $gte: nextMonthStart },
+    dueDate: { $gte: currentMonthStart },
     amountPaid: { $gt: 0 }
   };
 
@@ -198,7 +212,7 @@ async function reconcileFutureBillingForEndedMembership(membership, action, effe
     FeeOrder.find(protectedFilter).session(session)
   ]);
 
-  const refundReasonNote = `${action} مؤثر از ${effectiveAt.toISOString().slice(0, 10)}؛ این سند به دوره‌ای بعد از ختم عضویت تعلق دارد و باید بازپرداخت یا بررسی شود.`;
+  const refundReasonNote = `${action} مؤثر از ${effectiveAt.toISOString().slice(0, 10)}؛ این سند به همان ماه یا بعد از ختم عضویت تعلق دارد و باید بازپرداخت یا بررسی شود (در صورتی که سررسید این سند وسط ماه محرومیت/منفکی باشد، مبلغ متناسب با روزهای حضور را دستی محاسبه کنید).`;
   const protectedDocuments = [
     ...protectedBills.map((bill) => ({ doc: bill, key: 'bill' })),
     ...protectedOrders.map((order) => ({ doc: order, key: 'feeOrder' }))
@@ -685,6 +699,23 @@ async function executeStudentLifecycleAction(payload = {}, context = {}) {
   if (result?.admissionBilling?.bill) {
     await syncStudentFinanceFromFinanceBill(result.admissionBilling.bill).catch(() => null);
   }
+
+  // Best-effort: runs after commit so a notification failure never rolls
+  // back (or blocks) a lifecycle change that has already been recorded.
+  notifyFinanceOfLifecycleChange({
+    app: context.app,
+    membership: result?.membership,
+    action: result?.action,
+    effectiveAt: result?.effectiveAt,
+    stoppedFutureBills: result?.stoppedFutureBills
+  });
+  broadcastFinanceLifecycleChange({
+    app: context.app,
+    membership: result?.membership,
+    action: result?.action,
+    effectiveAt: result?.effectiveAt
+  });
+
   return result;
 }
 

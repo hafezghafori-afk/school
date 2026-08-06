@@ -67,6 +67,10 @@ function canReviewProcurementStage(adminLevel = '', stage = '') {
   const normalizedStage = normalizeProcurementApprovalStage(stage);
   if (!OPEN_PROCUREMENT_APPROVAL_STAGES.includes(normalizedStage)) return false;
   if (level === 'general_president') return true;
+  // See canReviewExpenseStage in financeRoutes.js: finance_manager covers
+  // the unfillable finance_lead rung; the caller's own actorAlreadyReviewed
+  // check still blocks the same person reviewing twice.
+  if (level === 'finance_manager') return true;
   return getRequiredLevelForProcurementStage(normalizedStage) === level;
 }
 
@@ -75,6 +79,7 @@ function getNextProcurementStage(adminLevel = '', currentStage = '') {
   const stage = normalizeProcurementApprovalStage(currentStage);
   if (level === 'general_president') return PROCUREMENT_APPROVAL_STAGES.approved;
   if (level === 'finance_manager' && stage === PROCUREMENT_APPROVAL_STAGES.financeManager) return PROCUREMENT_APPROVAL_STAGES.financeLead;
+  if (level === 'finance_manager' && stage === PROCUREMENT_APPROVAL_STAGES.financeLead) return PROCUREMENT_APPROVAL_STAGES.generalPresident;
   if (level === 'finance_lead' && stage === PROCUREMENT_APPROVAL_STAGES.financeLead) return PROCUREMENT_APPROVAL_STAGES.generalPresident;
   return '';
 }
