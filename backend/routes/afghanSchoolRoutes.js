@@ -76,72 +76,77 @@ function currentMembershipSchoolFilter(schoolObjectId, classIds = []) {
   };
 }
 
+// Note: MongoDB's countDocuments/find/distinct all return an empty result
+// (never throw) against a collection that doesn't exist yet, so the
+// collectionExists() pre-checks this function used to do before every query
+// were pure overhead, not a real safety net. Removed, and the two
+// independent lookups are run in parallel instead of sequentially.
 async function countActiveStudentsForSchool(db, schoolObjectId, classIds = []) {
   const studentKeys = new Set();
-  if (await collectionExists(db, 'afghanstudents')) {
-    const afghanStudentIds = await db.collection('afghanstudents').distinct('_id', {
+  const [afghanStudentIds, memberships] = await Promise.all([
+    db.collection('afghanstudents').distinct('_id', {
       status: { $ne: 'deleted' },
       'academicInfo.currentSchool': schoolValueFilter(schoolObjectId)
-    });
-    afghanStudentIds.forEach((id) => studentKeys.add(`afghan:${String(id)}`));
-  }
-
-  if (await collectionExists(db, 'studentmemberships')) {
-    const memberships = await db.collection('studentmemberships')
+    }),
+    db.collection('studentmemberships')
       .find(currentMembershipSchoolFilter(schoolObjectId, classIds))
       .project({ afghanStudentId: 1, studentId: 1, student: 1 })
-      .toArray();
-    memberships.forEach((item) => {
-      const afghanStudentId = item?.afghanStudentId ? String(item.afghanStudentId) : '';
-      const studentCoreId = item?.studentId ? String(item.studentId) : '';
-      const userId = item?.student ? String(item.student) : '';
-      if (afghanStudentId) studentKeys.add(`afghan:${afghanStudentId}`);
-      else if (studentCoreId) studentKeys.add(`core:${studentCoreId}`);
-      else if (userId) studentKeys.add(`user:${userId}`);
-      else if (item?._id) studentKeys.add(`membership:${String(item._id)}`);
-    });
-  }
+      .toArray()
+  ]);
+  afghanStudentIds.forEach((id) => studentKeys.add(`afghan:${String(id)}`));
+  memberships.forEach((item) => {
+    const afghanStudentId = item?.afghanStudentId ? String(item.afghanStudentId) : '';
+    const studentCoreId = item?.studentId ? String(item.studentId) : '';
+    const userId = item?.student ? String(item.student) : '';
+    if (afghanStudentId) studentKeys.add(`afghan:${afghanStudentId}`);
+    else if (studentCoreId) studentKeys.add(`core:${studentCoreId}`);
+    else if (userId) studentKeys.add(`user:${userId}`);
+    else if (item?._id) studentKeys.add(`membership:${String(item._id)}`);
+  });
 
   return studentKeys.size;
 }
 
+// This runs on every /api/afghan-schools/active call, which the frontend
+// hits on essentially every page load. It used to run ~20 collectionExists
+// checks plus ~20 counts SEQUENTIALLY (each collectionExists is its own
+// listCollections round trip) - 40+ serial round trips to MongoDB Atlas,
+// which is exactly the kind of thing that turns into many seconds of
+// latency once each round trip costs even 100-200ms. Same fix as above:
+// drop the existence pre-checks (unnecessary - see the note there) and run
+// every count concurrently.
 async function countSchoolScope(schoolId = '') {
   if (!schoolId || !mongoose.Types.ObjectId.isValid(String(schoolId))) return {};
   const schoolObjectId = new mongoose.Types.ObjectId(String(schoolId));
   const db = mongoose.connection.db;
-  const summary = {};
   const [academicYearIds, classIds] = await Promise.all([
     db.collection('academicyears').distinct('_id', { schoolId: schoolValueFilter(schoolObjectId) }),
     db.collection('schoolclasses').distinct('_id', { schoolId: schoolValueFilter(schoolObjectId) })
   ]);
-  for (const item of SCHOOL_SCOPE_SUMMARY) {
-    const exists = await collectionExists(db, item.collection);
-    let count = 0;
-    if (exists && item.key === 'students') {
-      count = await countActiveStudentsForSchool(db, schoolObjectId, classIds);
-    } else if (exists && item.key === 'studentMemberships') {
-      count = await db.collection(item.collection).countDocuments(currentMembershipSchoolFilter(schoolObjectId, classIds));
-    } else if (exists) {
-      count = await db.collection(item.collection).countDocuments({ [item.field]: schoolValueFilter(schoolObjectId) });
-    }
-    summary[item.key] = {
-      label: item.label,
-      count
-    };
-  }
-  const sheetTemplateExists = await collectionExists(db, 'sheettemplates');
-  summary.sheetTemplates = {
-    label: 'شقه‌ها',
-    count: sheetTemplateExists
-      ? await db.collection('sheettemplates').countDocuments({
-        $or: [
-          { 'scope.academicYearId': { $in: academicYearIds } },
-          { 'scope.classId': { $in: classIds } },
-          { 'scope.sectionId': { $in: classIds } }
-        ]
-      })
-      : 0
-  };
+
+  const [entries, sheetTemplateCount] = await Promise.all([
+    Promise.all(SCHOOL_SCOPE_SUMMARY.map(async (item) => {
+      let count;
+      if (item.key === 'students') {
+        count = await countActiveStudentsForSchool(db, schoolObjectId, classIds);
+      } else if (item.key === 'studentMemberships') {
+        count = await db.collection(item.collection).countDocuments(currentMembershipSchoolFilter(schoolObjectId, classIds));
+      } else {
+        count = await db.collection(item.collection).countDocuments({ [item.field]: schoolValueFilter(schoolObjectId) });
+      }
+      return [item.key, { label: item.label, count }];
+    })),
+    db.collection('sheettemplates').countDocuments({
+      $or: [
+        { 'scope.academicYearId': { $in: academicYearIds } },
+        { 'scope.classId': { $in: classIds } },
+        { 'scope.sectionId': { $in: classIds } }
+      ]
+    })
+  ]);
+
+  const summary = Object.fromEntries(entries);
+  summary.sheetTemplates = { label: 'شقه‌ها', count: sheetTemplateCount };
   return summary;
 }
 

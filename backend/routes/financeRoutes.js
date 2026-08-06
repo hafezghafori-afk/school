@@ -48,6 +48,7 @@ const {
 } = require('../utils/studentFinanceSync');
 const { suppressAutomaticFinanceBillSync } = require('../utils/financeSyncControl');
 const { hasStudentLeft, getStudentStatusBadge } = require('../utils/financeStudentLifecycleStatus');
+const { withReportCache, buildCacheKey, invalidateAll: invalidateFinanceReportCache } = require('../utils/financeReportCache');
 const {
   listCourseMemberships,
   findClassMemberships,
@@ -2417,11 +2418,15 @@ router.get('/admin/treasury/analytics', requireAuth, requireRole(['admin']), req
       academicYearId: req.query?.academicYearId,
       schoolId: schoolContext.schoolId
     });
-    const analytics = await buildTreasuryAnalytics({
+    const analyticsParams = {
       financialYearId: String(financialYear._id),
       academicYearId: String(financialYear.academicYearId || ''),
       accountId: String(req.query?.accountId || '').trim()
-    });
+    };
+    const analytics = await withReportCache(
+      buildCacheKey('treasury-analytics', analyticsParams),
+      () => buildTreasuryAnalytics(analyticsParams)
+    );
     return res.json({
       success: true,
       analytics
@@ -2589,6 +2594,7 @@ router.post('/admin/treasury/transactions', requireAuth, requireRole(['admin']),
       }
     });
 
+    invalidateFinanceReportCache();
     return res.status(201).json({
       success: true,
       item,
@@ -2645,6 +2651,7 @@ router.post('/admin/treasury/transfers', requireAuth, requireRole(['admin']), re
       }
     });
 
+    invalidateFinanceReportCache();
     return res.status(201).json({
       success: true,
       ...result,
@@ -4062,6 +4069,7 @@ router.post('/admin/expenses/:id/review', requireAuth, requireRole(['admin']), r
       }
     });
 
+    invalidateFinanceReportCache();
     return res.json({
       success: true,
       item: serializeExpenseEntry(saved),
@@ -4781,17 +4789,22 @@ router.get('/admin/dashboard/overview', requireAuth, requireRole(['admin']), req
       return res.status(400).json({ success: false, message: 'برای نمایش داشبورد مالی، مکتب فعال را انتخاب کنید.' });
     }
     writeSchoolContextHeaders(res, schoolId);
-    const schoolClassIds = await SchoolClass.find({ schoolId }).distinct('_id');
-    const overview = await buildFinanceDashboardOverview({
+    const overviewParams = {
       schoolId,
-      schoolClassIds,
       academicYearId: String(req.query?.academicYearId || '').trim(),
       classId: String(req.query?.classId || '').trim(),
       from: String(req.query?.from || '').trim(),
       to: String(req.query?.to || '').trim(),
       recentLimit: req.query?.recentLimit || req.query?.limit,
       debtorLimit: req.query?.debtorLimit
-    });
+    };
+    const overview = await withReportCache(
+      buildCacheKey('dashboard-overview', overviewParams),
+      async () => {
+        const schoolClassIds = await SchoolClass.find({ schoolId }).distinct('_id');
+        return buildFinanceDashboardOverview({ ...overviewParams, schoolClassIds });
+      }
+    );
     return res.json({ success: true, overview });
   } catch (error) {
     if (error?.message === 'finance_dashboard_range_invalid') {
@@ -5254,6 +5267,7 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       .populate('student', 'name email grade')
       .populate('course', 'title category')
       .populate('classId', 'title code gradeLevel section');
+    invalidateFinanceReportCache();
     res.status(201).json({
       success: true,
       item,
@@ -7375,14 +7389,17 @@ router.get('/admin/reports/audit-timeline', requireAuth, requireRole(['admin']),
       setLegacyScopeHeaders(res, `/api/finance/admin/reports/audit-timeline?classId=${scope.classId}`);
     }
 
-    const timeline = await buildFinanceAuditTimeline({
-      schoolId: schoolContext.schoolId,
-      scope,
-      limit,
-      q,
-      kind,
-      severity
-    });
+    const timeline = await withReportCache(
+      buildCacheKey('audit-timeline', { schoolId: schoolContext.schoolId, classId: scope.classId || '', limit, q, kind, severity }),
+      () => buildFinanceAuditTimeline({
+        schoolId: schoolContext.schoolId,
+        scope,
+        limit,
+        q,
+        kind,
+        severity
+      })
+    );
 
     res.json({
       success: true,
@@ -7420,60 +7437,86 @@ router.get('/admin/reports/anomalies', requireAuth, requireRole(['admin']), requ
     }
 
     const asOf = parseDateSafe(req.query?.asOf, new Date());
-    const report = await buildFinanceAnomalyReport({
+    const anomalyParams = {
       schoolId: schoolContext.schoolId,
       classId: scope.classId || '',
       academicYearId: String(req.query?.academicYearId || '').trim(),
       studentMembershipId: String(req.query?.studentMembershipId || '').trim(),
-      asOf,
-      limit
-    });
+      // asOf defaults to "now", which would defeat caching entirely (a new
+      // key every request) - bucket it to the minute so requests within the
+      // same minute still share a cache entry.
+      asOf: new Date(Math.floor(asOf.getTime() / 60000) * 60000).toISOString(),
+      limit,
+      q,
+      severity,
+      type
+    };
+    const payload = await withReportCache(
+      buildCacheKey('anomalies-report', anomalyParams),
+      async () => {
+        const report = await buildFinanceAnomalyReport({
+          schoolId: schoolContext.schoolId,
+          classId: scope.classId || '',
+          academicYearId: anomalyParams.academicYearId,
+          studentMembershipId: anomalyParams.studentMembershipId,
+          asOf,
+          limit
+        });
 
-    const searchTerm = String(q || '').trim().toLowerCase();
-    const normalizedSeverity = String(severity || 'all').trim().toLowerCase();
-    const normalizedType = String(type || 'all').trim();
-    const filteredItems = (Array.isArray(report?.items) ? report.items : []).filter((item) => {
-      if (normalizedSeverity !== 'all' && String(item?.severity || '').trim().toLowerCase() !== normalizedSeverity) return false;
-      if (normalizedType !== 'all' && String(item?.anomalyType || '').trim() !== normalizedType) return false;
-      if (!searchTerm) return true;
-      const haystack = [
-        item?.title,
-        item?.description,
-        item?.studentName,
-        item?.classTitle,
-        item?.academicYearTitle,
-        item?.referenceNumber,
-        item?.secondaryReference,
-        ...(Array.isArray(item?.tags) ? item.tags : [])
-      ].map((entry) => String(entry || '').toLowerCase());
-      return haystack.some((entry) => entry.includes(searchTerm));
-    });
-    const anomalyCases = await populateFinanceAnomalyCaseQuery(
-      FinanceAnomalyCase.find(buildFinanceAnomalyCaseFilter({
-        schoolId: schoolContext.schoolId,
-        scope,
-        academicYearId: String(req.query?.academicYearId || '').trim(),
-        studentMembershipId: String(req.query?.studentMembershipId || '').trim(),
-        anomalyIds: filteredItems.flatMap((item) => [
-          item?.id,
-          ...(Array.isArray(item?.legacyAnomalyIds) ? item.legacyAnomalyIds : [])
-        ])
-      }))
-    ).lean();
-    const items = mergeFinanceAnomalyCases(filteredItems, anomalyCases, { asOf });
+        const searchTerm = String(q || '').trim().toLowerCase();
+        const normalizedSeverity = String(severity || 'all').trim().toLowerCase();
+        const normalizedType = String(type || 'all').trim();
+        const filteredItems = (Array.isArray(report?.items) ? report.items : []).filter((item) => {
+          if (normalizedSeverity !== 'all' && String(item?.severity || '').trim().toLowerCase() !== normalizedSeverity) return false;
+          if (normalizedType !== 'all' && String(item?.anomalyType || '').trim() !== normalizedType) return false;
+          if (!searchTerm) return true;
+          const haystack = [
+            item?.title,
+            item?.description,
+            item?.studentName,
+            item?.classTitle,
+            item?.academicYearTitle,
+            item?.referenceNumber,
+            item?.secondaryReference,
+            ...(Array.isArray(item?.tags) ? item.tags : [])
+          ].map((entry) => String(entry || '').toLowerCase());
+          return haystack.some((entry) => entry.includes(searchTerm));
+        });
+        const anomalyCases = await populateFinanceAnomalyCaseQuery(
+          FinanceAnomalyCase.find(buildFinanceAnomalyCaseFilter({
+            schoolId: schoolContext.schoolId,
+            scope,
+            academicYearId: anomalyParams.academicYearId,
+            studentMembershipId: anomalyParams.studentMembershipId,
+            anomalyIds: filteredItems.flatMap((item) => [
+              item?.id,
+              ...(Array.isArray(item?.legacyAnomalyIds) ? item.legacyAnomalyIds : [])
+            ])
+          }))
+        ).lean();
+        const items = mergeFinanceAnomalyCases(filteredItems, anomalyCases, { asOf });
+
+        return {
+          items,
+          summary: buildFinanceAnomalySummary(items),
+          appliedFilters: {
+            ...(report?.appliedFilters || {}),
+            q: String(q || '').trim(),
+            severity: normalizedSeverity,
+            type: normalizedType,
+            limit: Math.max(1, Math.min(Number(limit) || 120, 500))
+          },
+          generatedAt: report?.generatedAt || new Date().toISOString()
+        };
+      }
+    );
 
     return res.json({
       success: true,
-      items,
-      summary: buildFinanceAnomalySummary(items),
-      appliedFilters: {
-        ...(report?.appliedFilters || {}),
-        q: String(q || '').trim(),
-        severity: normalizedSeverity,
-        type: normalizedType,
-        limit: Math.max(1, Math.min(Number(limit) || 120, 500))
-      },
-      generatedAt: report?.generatedAt || new Date().toISOString()
+      items: payload.items,
+      summary: payload.summary,
+      appliedFilters: payload.appliedFilters,
+      generatedAt: payload.generatedAt
     });
   } catch (error) {
     const code = String(error?.message || '');
