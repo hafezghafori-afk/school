@@ -1002,6 +1002,9 @@ async function updateStudentProfileBasics(studentRef, payload = {}) {
     const familyName = normalizeText(identity.familyName) || fullNameParts.slice(1).join(' ');
     const update = {};
     if (Object.prototype.hasOwnProperty.call(identity, 'admissionNo')) update.asasNumber = normalizeText(identity.admissionNo);
+    if (Object.prototype.hasOwnProperty.call(identity, 'tazkiraNumber') && normalizeText(identity.tazkiraNumber)) {
+      update['identification.tazkiraNumber'] = normalizeText(identity.tazkiraNumber);
+    }
     if (givenName) {
       update['personalInfo.firstName'] = givenName;
       update['personalInfo.firstNameDari'] = givenName;
@@ -1023,7 +1026,19 @@ async function updateStudentProfileBasics(studentRef, payload = {}) {
     if (Object.prototype.hasOwnProperty.call(profile.contact || {}, 'email')) update['contactInfo.email'] = normalizeText(profile.contact.email);
     if (Object.prototype.hasOwnProperty.call(profile.contact || {}, 'address')) update['contactInfo.address'] = normalizeText(profile.contact.address);
     Object.keys(update).forEach((key) => update[key] === undefined && delete update[key]);
-    if (Object.keys(update).length) await AfghanStudent.updateOne({ _id: afghanStudent._id }, { $set: update });
+    if (Object.keys(update).length) {
+      try {
+        await AfghanStudent.updateOne({ _id: afghanStudent._id }, { $set: update });
+      } catch (error) {
+        if (Number(error?.code) === 11000 && Object.prototype.hasOwnProperty.call(update, 'identification.tazkiraNumber')) {
+          const duplicateError = new Error('شماره تذکره قبلاً برای شاگرد دیگری ثبت شده است.');
+          duplicateError.status = 409;
+          duplicateError.code = 'student_profile_tazkira_duplicate';
+          throw duplicateError;
+        }
+        throw error;
+      }
+    }
   }
 
   return getStudentProfile(String(studentCore._id));
