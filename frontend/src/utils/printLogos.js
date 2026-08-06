@@ -34,7 +34,8 @@ export const storePrintLogos = (settings = {}) => {
   const stored = readStoredPrintLogos();
   const payload = {
     schoolLogoUrl: settings?.schoolLogoUrl || settings?.logoUrl || stored.schoolLogoUrl || '',
-    ministryLogoUrl: settings?.ministryLogoUrl || stored.ministryLogoUrl || ''
+    ministryLogoUrl: settings?.ministryLogoUrl || stored.ministryLogoUrl || '',
+    departmentLogoUrl: settings?.departmentLogoUrl || stored.departmentLogoUrl || ''
   };
   try {
     window.localStorage.setItem(PRINT_LOGOS_STORAGE_KEY, JSON.stringify(payload));
@@ -47,7 +48,8 @@ export const getPrintLogoUrls = (settings = {}) => {
   const stored = readStoredPrintLogos();
   return {
     schoolLogoUrl: toAssetUrl(settings?.schoolLogoUrl || settings?.logoUrl || stored.schoolLogoUrl || ''),
-    ministryLogoUrl: toAssetUrl(settings?.ministryLogoUrl || stored.ministryLogoUrl || '')
+    ministryLogoUrl: toAssetUrl(settings?.ministryLogoUrl || stored.ministryLogoUrl || ''),
+    departmentLogoUrl: toAssetUrl(settings?.departmentLogoUrl || stored.departmentLogoUrl || '')
   };
 };
 
