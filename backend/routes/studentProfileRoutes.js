@@ -130,7 +130,9 @@ router.put('/:studentRef', requireAuth, requireRole(['admin']), requirePermissio
     const status = Number(error?.status || 500);
     const message = error?.code === 'student_profile_system_message_placeholder_rejected'
       ? 'متن پیام سیستمی را نمی‌توان به‌عنوان مشخصات شاگرد ذخیره کرد؛ صفحه را تازه کنید و دوباره تلاش نمایید.'
-      : 'به‌روزرسانی پروفایل شاگرد ناموفق بود.';
+      : error?.code === 'student_profile_tazkira_duplicate'
+        ? error.message
+        : 'به‌روزرسانی پروفایل شاگرد ناموفق بود.';
     return res.status(status).json({ success: false, code: error?.code || '', message });
   }
 });

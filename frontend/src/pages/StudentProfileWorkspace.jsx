@@ -134,7 +134,8 @@ export default function StudentProfileWorkspace() {
           fullName: item.identity?.fullName || '', preferredName: item.identity?.preferredName || '',
           givenName: item.identity?.givenName || '', familyName: item.identity?.familyName || '',
           email: item.identity?.email || '', phone: item.identity?.phone || '', gender: item.identity?.gender || '',
-          dateOfBirth: item.identity?.dateOfBirth ? String(item.identity.dateOfBirth).slice(0, 10) : '', note: item.identity?.note || ''
+          dateOfBirth: item.identity?.dateOfBirth ? String(item.identity.dateOfBirth).slice(0, 10) : '', note: item.identity?.note || '',
+          tazkiraNumber: item.identity?.tazkiraNumber || ''
         },
         family: { fatherName: '', motherName: '', guardianName: '', guardianRelation: '', ...(item.profile?.family || {}) },
         contact: { primaryPhone: '', alternatePhone: '', email: '', address: '', ...(item.profile?.contact || {}) },
@@ -353,11 +354,11 @@ export default function StudentProfileWorkspace() {
         </div>
       </section> : null}
 
-      {activeTab === 'identity' && profileForm ? <section className="student-profile-section"><article className="student-profile-card"><div className="student-profile-section-head"><div><h2>مشخصات رسمی و شخصی</h2><p>شماره تذکره از فورم اصلی شاگرد خوانده می‌شود و در اینجا فقط نمایش داده می‌شود.</p></div><button className="student-profile-button primary" onClick={saveProfile} disabled={busy === 'profile'}>{busy === 'profile' ? 'در حال ذخیره...' : 'ذخیره مشخصات'}</button></div><div className="student-profile-form-grid">
+      {activeTab === 'identity' && profileForm ? <section className="student-profile-section"><article className="student-profile-card"><div className="student-profile-section-head"><div><h2>مشخصات رسمی و شخصی</h2><p>هر تغییری اینجا مستقیماً روی پروندهٔ اصلی شاگرد ذخیره می‌شود.</p></div><button className="student-profile-button primary" onClick={saveProfile} disabled={busy === 'profile'}>{busy === 'profile' ? 'در حال ذخیره...' : 'ذخیره مشخصات'}</button></div><div className="student-profile-form-grid">
         {[['fullName','نام مکمل'],['preferredName','نام مورد استفاده'],['givenName','نام'],['familyName','تخلص'],['admissionNo','شماره اساس'],['email','ایمیل'],['phone','شماره تماس']].map(([key,label]) => <label key={key}><span>{label}</span><input value={profileForm.identity[key] || ''} onChange={(e) => updateFormSection('identity', key, e.target.value)} /></label>)}
         <label><span>جنسیت</span><select value={profileForm.identity.gender || ''} onChange={(e) => updateFormSection('identity','gender',e.target.value)}><option value="">انتخاب</option><option value="male">ذکور</option><option value="female">اناث</option><option value="other">دیگر</option></select></label>
         <label><span>تاریخ تولد</span><AfghanDateInput value={profileForm.identity.dateOfBirth || ''} onChange={(value) => updateFormSection('identity','dateOfBirth',value)} showGregorianEquivalent /></label>
-        <label><span>شماره تذکره</span><input value={identity.tazkiraNumber || ''} readOnly /></label>
+        <label><span>شماره تذکره</span><input value={profileForm.identity.tazkiraNumber || ''} onChange={(e) => updateFormSection('identity','tazkiraNumber',e.target.value)} /></label>
       </div></article></section> : null}
 
       {activeTab === 'family' && profileForm ? <section className="student-profile-section"><article className="student-profile-card"><div className="student-profile-section-head"><div><h2>خانواده، سرپرست و تماس</h2><p>معلومات ارتباطی و حالات ضروری شاگرد.</p></div><button className="student-profile-button primary" onClick={saveProfile} disabled={busy === 'profile'}>ذخیره معلومات</button></div><div className="student-profile-form-grid">
