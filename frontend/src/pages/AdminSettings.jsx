@@ -252,7 +252,7 @@ export default function AdminSettings() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
-  const [officialLogoFiles, setOfficialLogoFiles] = useState({ schoolLogo: null, ministryLogo: null });
+  const [officialLogoFiles, setOfficialLogoFiles] = useState({ schoolLogo: null, ministryLogo: null, departmentLogo: null });
   const [websiteProfile, setWebsiteProfile] = useState(null);
   const [websiteLanguage, setWebsiteLanguage] = useState('fa');
   const [websiteBusy, setWebsiteBusy] = useState(false);
@@ -332,7 +332,8 @@ export default function AdminSettings() {
     const nextWebsiteProfile = normalizeWebsiteProfile({
       ...websiteProfile,
       schoolLogoUrl: nextSettings.schoolLogoUrl || nextSettings.logoUrl || websiteProfile.schoolLogoUrl || '',
-      ministryLogoUrl: nextSettings.ministryLogoUrl || websiteProfile.ministryLogoUrl || ''
+      ministryLogoUrl: nextSettings.ministryLogoUrl || websiteProfile.ministryLogoUrl || '',
+      departmentLogoUrl: nextSettings.departmentLogoUrl || websiteProfile.departmentLogoUrl || ''
     });
     const websiteRes = await fetch(`${API_BASE}/api/school-websites/admin/${websiteProfile.schoolId}`, {
       method: 'PUT',
@@ -356,7 +357,7 @@ export default function AdminSettings() {
     setMessage('');
     try {
       let settingsToSave = settings;
-      if (officialLogoFiles.schoolLogo || officialLogoFiles.ministryLogo) {
+      if (officialLogoFiles.schoolLogo || officialLogoFiles.ministryLogo || officialLogoFiles.departmentLogo) {
         const uploadedSettings = await uploadOfficialLogos({ keepSaving: true, quiet: true });
         if (!uploadedSettings) return;
         settingsToSave = uploadedSettings;
@@ -392,8 +393,8 @@ export default function AdminSettings() {
   };
 
   const uploadOfficialLogos = async ({ keepSaving = false, quiet = false } = {}) => {
-    if (!officialLogoFiles.schoolLogo && !officialLogoFiles.ministryLogo) {
-      setMessage('اول لوگوی مکتب یا لوگوی وزارت معارف را انتخاب کنید.');
+    if (!officialLogoFiles.schoolLogo && !officialLogoFiles.ministryLogo && !officialLogoFiles.departmentLogo) {
+      setMessage('اول لوگوی مکتب، لوگوی وزارت معارف یا لوگوی آمریت معارف را انتخاب کنید.');
       return null;
     }
     if (!keepSaving) setSaving(true);
@@ -402,6 +403,7 @@ export default function AdminSettings() {
       const formData = new FormData();
       if (officialLogoFiles.schoolLogo) formData.append('schoolLogo', officialLogoFiles.schoolLogo);
       if (officialLogoFiles.ministryLogo) formData.append('ministryLogo', officialLogoFiles.ministryLogo);
+      if (officialLogoFiles.departmentLogo) formData.append('departmentLogo', officialLogoFiles.departmentLogo);
       const res = await fetch(`${API_BASE}/api/settings/assets`, {
         method: 'PUT',
         headers: { ...getAuthHeaders() },
@@ -420,7 +422,7 @@ export default function AdminSettings() {
       };
       setSettings(normalized);
       storePrintLogos(normalized);
-      setOfficialLogoFiles({ schoolLogo: null, ministryLogo: null });
+      setOfficialLogoFiles({ schoolLogo: null, ministryLogo: null, departmentLogo: null });
       await syncWebsiteLogosFromSettings(normalized);
       if (!quiet) setMessage('لوگوهای رسمی فرم‌ها و گزارش‌ها ذخیره شد.');
       return normalized;
@@ -804,7 +806,8 @@ export default function AdminSettings() {
         <div className="settings-logo-upload-grid">
           {[
             { key: 'schoolLogo', title: 'لوگوی مکتب', src: getPrintLogoUrls(settings).schoolLogoUrl },
-            { key: 'ministryLogo', title: 'لوگوی وزارت معارف', src: getPrintLogoUrls(settings).ministryLogoUrl }
+            { key: 'ministryLogo', title: 'لوگوی وزارت معارف', src: getPrintLogoUrls(settings).ministryLogoUrl },
+            { key: 'departmentLogo', title: 'لوگوی آمریت معارف', src: getPrintLogoUrls(settings).departmentLogoUrl }
           ].map((item) => (
             <div key={item.key} className="settings-logo-upload-card">
               <div className="settings-logo-preview">
@@ -864,7 +867,8 @@ export default function AdminSettings() {
         <div className="settings-logo-upload-grid">
           {[
             { key: 'schoolLogo', title: 'لوگوی مکتب', src: getPrintLogoUrls(settings).schoolLogoUrl },
-            { key: 'ministryLogo', title: 'لوگوی وزارت معارف', src: getPrintLogoUrls(settings).ministryLogoUrl }
+            { key: 'ministryLogo', title: 'لوگوی وزارت معارف', src: getPrintLogoUrls(settings).ministryLogoUrl },
+            { key: 'departmentLogo', title: 'لوگوی آمریت معارف', src: getPrintLogoUrls(settings).departmentLogoUrl }
           ].map((item) => (
             <div key={item.key} className="settings-logo-upload-card">
               <div className="settings-logo-preview">

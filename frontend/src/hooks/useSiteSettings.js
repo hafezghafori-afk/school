@@ -103,15 +103,20 @@ export default function useSiteSettings() {
   const fetchSettings = async () => {
     setLoading(true);
     try {
-      const [settingsResponse, profileResponse] = await Promise.all([
+      // The active-school lookup used to run AFTER the other two requests
+      // resolved instead of alongside them, so the page title/logo showed
+      // the generic app name for as long as both round trips took, back to
+      // back, instead of just the slower of the two. Every page load hits
+      // this, not just the public site.
+      const [settingsResponse, profileResponse, activeSchoolResponse] = await Promise.all([
         fetch(`${API_BASE}/api/settings/public`),
         shouldLoadSchoolProfile
           ? fetch(`${API_BASE}/api/school-websites/public?slug=${encodeURIComponent(schoolSlug)}&lang=${encodeURIComponent(language)}`)
-          : Promise.resolve(null)
+          : Promise.resolve(null),
+        fetch(`${API_BASE}/api/afghan-schools/active`, {
+          headers: { ...getAuthHeaders() }
+        }).catch(() => null)
       ]);
-      const activeSchoolResponse = await fetch(`${API_BASE}/api/afghan-schools/active`, {
-        headers: { ...getAuthHeaders() }
-      }).catch(() => null);
       const data = await settingsResponse.json();
       const profileData = profileResponse ? await profileResponse.json().catch(() => ({})) : {};
       const activeSchoolData = activeSchoolResponse ? await activeSchoolResponse.json().catch(() => ({})) : {};

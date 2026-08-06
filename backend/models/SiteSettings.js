@@ -48,6 +48,7 @@ const siteSettingsSchema = new mongoose.Schema({
   logoUrl: { type: String, default: '' },
   schoolLogoUrl: { type: String, default: '' },
   ministryLogoUrl: { type: String, default: '' },
+  departmentLogoUrl: { type: String, default: '' },
   hoursLabel: { type: String, default: 'راه‌اندازی سیستم' },
   hoursText: { type: String, default: 'دمو، تنظیم، آموزش و پشتیبانی' },
   contactLabel: { type: String, default: 'مشوره فروش' },

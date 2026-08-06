@@ -337,6 +337,7 @@ const serializeProfile = (profile, lang = 'fa', school = null) => {
     logoUrl: schoolLogoUrl,
     schoolLogoUrl,
     ministryLogoUrl: profile.ministryLogoUrl || '',
+    departmentLogoUrl: profile.departmentLogoUrl || '',
     heroImageUrl: profile.heroImageUrl || '',
     brandName: officialSchoolName || pickText(profile.brandName, language, 'مکتب'),
     brandSubtitle: pickText(profile.brandSubtitle, language, ''),
@@ -476,7 +477,7 @@ router.put('/admin/:schoolId', requireAuth, requireRole(['admin']), requirePermi
     const profile = await ensureProfileForSchool(school);
     const allowed = [
       'siteStatus', 'primaryLanguage', 'enabledLanguages', 'primaryColor', 'schoolLogoUrl', 'ministryLogoUrl',
-      'heroImageUrl', 'brandName', 'brandSubtitle', 'homeHeroBadge', 'homeHeroTitle', 'homeHeroText',
+      'departmentLogoUrl', 'heroImageUrl', 'brandName', 'brandSubtitle', 'homeHeroBadge', 'homeHeroTitle', 'homeHeroText',
       'aboutTitle', 'aboutBody', 'missionTitle', 'missionBody', 'visionTitle', 'visionBody',
       'contactTitle', 'contactText', 'contactPhone', 'contactEmail', 'contactAddress',
       'features', 'stats', 'menuItems', 'footerLinks', 'socialLinks', 'footerNote', 'metadata'

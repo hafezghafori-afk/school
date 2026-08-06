@@ -24,6 +24,7 @@ const schoolWebsiteProfileSchema = new mongoose.Schema({
   primaryColor: { type: String, default: '#0f766e' },
   schoolLogoUrl: { type: String, default: '' },
   ministryLogoUrl: { type: String, default: '' },
+  departmentLogoUrl: { type: String, default: '' },
   heroImageUrl: { type: String, default: '' },
   brandName: { type: localizedTextSchema, default: () => ({}) },
   brandSubtitle: { type: localizedTextSchema, default: () => ({}) },

@@ -221,6 +221,7 @@ const defaultSettings = () => ({
   logoUrl: '',
   schoolLogoUrl: '',
   ministryLogoUrl: '',
+  departmentLogoUrl: '',
   hoursLabel: 'راه‌اندازی سیستم',
   hoursText: 'دمو، تنظیم، آموزش و پشتیبانی',
   contactLabel: 'مشوره فروش',
@@ -819,6 +820,7 @@ router.put('/assets', requireAuth, requireRole(['admin']), requirePermission('ma
   assetUpload.fields([
     { name: 'schoolLogo', maxCount: 1 },
     { name: 'ministryLogo', maxCount: 1 },
+    { name: 'departmentLogo', maxCount: 1 },
     { name: 'signature', maxCount: 1 },
     { name: 'stamp', maxCount: 1 }
   ])(req, res, (err) => {
@@ -834,6 +836,9 @@ router.put('/assets', requireAuth, requireRole(['admin']), requirePermission('ma
     }
     if (req.files?.ministryLogo?.[0]?.filename) {
       settings.ministryLogoUrl = `uploads/site/${req.files.ministryLogo[0].filename}`;
+    }
+    if (req.files?.departmentLogo?.[0]?.filename) {
+      settings.departmentLogoUrl = `uploads/site/${req.files.departmentLogo[0].filename}`;
     }
     if (req.files?.signature?.[0]?.filename) {
       settings.signatureUrl = `uploads/site/${req.files.signature[0].filename}`;
