@@ -3023,6 +3023,7 @@ router.post('/student-enrollments/lifecycle', ...withManageStudentLifecycle, req
     }
 
     const result = await executeStudentLifecycleAction(lifecyclePayload, {
+      app: req.app,
       actor: {
         id: req.user?.id || null,
         role: req.user?.role || '',

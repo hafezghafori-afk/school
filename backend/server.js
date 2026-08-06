@@ -8,6 +8,7 @@ const jwt = require('jsonwebtoken');
 require('dotenv').config();
 const { getCorsOptions, getJwtSecret } = require('./utils/env');
 const { ensureResultTableReferenceData } = require('./services/resultTableService');
+const { repairFinanceBillPaymentMirrors } = require('./utils/studentFinanceSync');
 const { dariResponseMessages } = require('./middleware/dariResponseMessages');
 
 const app = express();
@@ -75,6 +76,29 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/school_db')
     const resultTableReferenceSummary = await ensureResultTableReferenceData();
     if (resultTableReferenceSummary.templatesCreated || resultTableReferenceSummary.configsCreated) {
       console.log('Result table reference data initialized', resultTableReferenceSummary);
+    }
+    // Self-heals FinanceBill records left stale by a payment approved
+    // against their canonical FeeOrder mirror (see
+    // syncFinanceBillPaymentFromFeeOrder in utils/studentFinanceSync.js for
+    // why this happens). Only ever raises a bill's recorded payment, never
+    // lowers one, so it's safe to run on every deploy - once a database is
+    // fully synced this is a fast no-op. Set
+    // AUTO_FINANCE_BILL_REPAIR_ENABLED=false to disable if ever needed.
+    if (String(process.env.AUTO_FINANCE_BILL_REPAIR_ENABLED || 'true').toLowerCase() !== 'false') {
+      try {
+        const repairSummary = await repairFinanceBillPaymentMirrors();
+        if (repairSummary.changed) {
+          console.log(`Finance bill payment mirror repair: fixed ${repairSummary.changed} of ${repairSummary.checked} bill(s)`, repairSummary.fixes.map((fix) => ({
+            orderNumber: fix.orderNumber,
+            from: fix.from,
+            to: fix.to
+          })));
+        } else {
+          console.log(`Finance bill payment mirror repair: checked ${repairSummary.checked} bill(s), all in sync`);
+        }
+      } catch (error) {
+        console.error('Finance bill payment mirror repair failed (server will continue starting):', error);
+      }
     }
   })
   .catch((err) => console.error('Database connection error:', err));

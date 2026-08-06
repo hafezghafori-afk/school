@@ -619,6 +619,87 @@ async function syncFeePaymentFromFinanceReceipt(input, { dryRun = false } = {}) 
   return { created: false, updated: true, skipped: false, feePaymentId: existing._id };
 }
 
+/**
+ * Mirrors payment state FORWARD from a canonical FeeOrder onto its source
+ * FinanceBill (order.sourceBillId) - the opposite direction of
+ * syncFeeOrderFromFinanceBill above. Needed because approveFeePaymentAction
+ * (financeAdminActionService.js) only ever writes the approved amount onto
+ * FeeOrder; a FinanceBill created via manual bill issuance (POST
+ * /admin/bills) never otherwise learns that payment happened, so its own
+ * amountPaid/status silently goes stale.
+ *
+ * That staleness is not just cosmetic: ensureReceiptSubmissionAvailability
+ * (financeRoutes.js) computes "how much can still be paid" straight off
+ * FinanceBill.amountPaid, so a stale FinanceBill can let a second receipt be
+ * submitted/approved for money that was already collected through the
+ * canonical FeeOrder path - a real over-collection risk, not just a display
+ * bug.
+ *
+ * Only ever raises FinanceBill's recorded payment (max-merge per fee type,
+ * same protective pattern as preserveCanonicalFeeOrderPaymentState above) -
+ * never lowers it - so this is safe to call best-effort/repeatedly and safe
+ * to run as a one-off repair over historical records.
+ */
+async function syncFinanceBillPaymentFromFeeOrder(order, { session = null, dryRun = false } = {}) {
+  const sourceBillId = order?.sourceBillId?._id || order?.sourceBillId;
+  if (!sourceBillId) return { skipped: true, reason: 'no_source_bill' };
+  const { FinanceBill } = await getModels();
+  const bill = await FinanceBill.findById(sourceBillId).session(session);
+  if (!bill || bill.status === 'void') {
+    return { skipped: true, reason: 'bill_not_found_or_void' };
+  }
+
+  const incomingBreakdown = normalizePaymentBreakdown(order.paymentBreakdown);
+  const currentBreakdown = normalizePaymentBreakdown(bill.paymentBreakdown);
+  const mergedBreakdown = Object.keys(incomingBreakdown).reduce((result, key) => ({
+    ...result,
+    [key]: Math.max(roundMoney(incomingBreakdown[key]), roundMoney(currentBreakdown[key]))
+  }), {});
+  const mergedPaid = roundMoney(Object.values(mergedBreakdown).reduce((sum, value) => sum + Number(value || 0), 0));
+  const priorPaid = roundMoney(bill.amountPaid);
+  if (mergedPaid <= priorPaid) {
+    return { skipped: true, reason: 'no_change', billId: bill._id };
+  }
+  if (dryRun) {
+    return { skipped: false, updated: true, billId: bill._id, from: priorPaid, to: mergedPaid };
+  }
+
+  bill.amountPaid = mergedPaid;
+  bill.paymentBreakdown = mergedBreakdown;
+  if (!bill.paidAt && mergedPaid > 0) {
+    bill.paidAt = normalizeDate(order.paidAt) || new Date();
+  }
+  await bill.save({ session });
+  return { skipped: false, updated: true, billId: bill._id, from: priorPaid, to: mergedPaid };
+}
+
+/**
+ * Sweeps every FeeOrder that has a source FinanceBill and repairs any stale
+ * FinanceBill.amountPaid found (see syncFinanceBillPaymentFromFeeOrder for
+ * why staleness happens and why this is safe to run repeatedly - it never
+ * lowers a payment, so a fully-synced database makes every call a no-op).
+ * Used both by the one-off CLI script (scripts/repairFinanceBillPaymentMirror.js)
+ * and by the auto-repair step that runs on every server boot (server.js), so
+ * a production database with months of history self-heals on each deploy
+ * without anyone needing to run a script by hand.
+ */
+async function repairFinanceBillPaymentMirrors({ dryRun = false } = {}) {
+  const { FeeOrder } = await getModels();
+  const orders = await FeeOrder.find({ sourceBillId: { $ne: null } })
+    .select('orderNumber student sourceBillId amountPaid paymentBreakdown paidAt')
+    .populate('student', 'name');
+
+  const fixes = [];
+  for (const order of orders) {
+    // eslint-disable-next-line no-await-in-loop
+    const result = await syncFinanceBillPaymentFromFeeOrder(order, { dryRun });
+    if (!result.skipped) {
+      fixes.push({ orderNumber: order.orderNumber, student: order.student, ...result });
+    }
+  }
+  return { checked: orders.length, changed: fixes.length, fixes };
+}
+
 async function syncStudentFinanceFromFinanceBill(input, { dryRun = false } = {}) {
   if (await financeMirrorBlockedByMaintenance(dryRun)) {
     return { skipped: true, reason: 'finance_maintenance_active' };
@@ -663,6 +744,8 @@ module.exports = {
   syncDiscountsFromFinanceBill,
   syncFeeOrderFromFinanceBill,
   syncFeePaymentFromFinanceReceipt,
+  syncFinanceBillPaymentFromFeeOrder,
+  repairFinanceBillPaymentMirrors,
   syncStudentFinanceFromFinanceBill,
   syncStudentFinanceFromFinanceReceipt,
   __financeMirrorTestUtils: Object.freeze({

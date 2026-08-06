@@ -63,6 +63,7 @@ const {
 } = require('../utils/financeReliefSync');
 const { buildMembershipFinanceAnomalies } = require('./financeAnomalyService');
 const { assertFinancePeriodWritable } = require('./financePeriodGuardService');
+const { loadCurrentMembershipStatusMap, attachLifecycleBadge } = require('../utils/financeStudentLifecycleStatus');
 
 function toPlain(doc) {
   if (!doc) return null;
@@ -891,7 +892,12 @@ async function listFeeOrders(filters = {}) {
     .populate('academicYearId')
     .populate('assessmentPeriodId')
     .sort({ dueDate: -1, createdAt: -1 });
-  return items.map(formatFeeOrder);
+  // Same lifecycleStatus/lifecycleStatusLabel/lifecycleStatusTone badge shown
+  // on the finance dashboard (financeDashboardService.js), now on the main
+  // bills table too - so a withdrawn/transferred/expelled student's open
+  // bill doesn't look identical to an active student's.
+  const statusMap = await loadCurrentMembershipStatusMap(items.map((item) => item.student));
+  return items.map((item) => attachLifecycleBadge(formatFeeOrder(item), item.student, statusMap));
 }
 
 function resolveMembershipSchoolId(membership = {}) {

@@ -1,5 +1,6 @@
 import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { io } from 'socket.io-client';
 import './AdminFinance.css';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
@@ -97,6 +98,16 @@ const getDefaultFinanceDashboardRange = () => {
   nextStartDate.setDate(nextStartDate.getDate() - 1);
   return { from, to: toGregorianDateInputValue(nextStartDate) };
 };
+
+// Shows whether the student behind a finance row is still enrolled -
+// backed by financeDashboardService's lifecycleStatus/lifecycleStatusLabel/
+// lifecycleStatusTone fields (see backend/utils/financeStudentLifecycleStatus.js).
+// A student marked منفک/تبدیل/محروم by the academic manager no longer looks
+// identical to an active one in bill lists, debtor lists, and payment lists.
+function FinanceStudentStatusBadge({ label, tone }) {
+  if (!label) return null;
+  return <span className={`finance-status-badge ${tone || 'unknown'}`}>{label}</span>;
+}
 
 const FINANCE_DONUT_COLORS = ['#22c55e', '#f97316', '#38bdf8', '#a78bfa', '#f43f5e', '#facc15'];
 
@@ -1472,7 +1483,10 @@ const toLegacyLikeBillRow = (order = {}) => {
     adjustments: Array.isArray(order?.adjustments) ? order.adjustments : [],
     installments: Array.isArray(order?.installments) ? order.installments : [],
     voidReason: String(order?.voidReason || '').trim(),
-    voidedAt: order?.voidedAt || null
+    voidedAt: order?.voidedAt || null,
+    lifecycleStatus: String(order?.lifecycleStatus || '').trim(),
+    lifecycleStatusLabel: String(order?.lifecycleStatusLabel || '').trim(),
+    lifecycleStatusTone: String(order?.lifecycleStatusTone || '').trim()
   };
 };
 
@@ -2765,6 +2779,72 @@ export default function AdminFinance() {
     setActiveSection('payments');
   };
 
+  // Write-off entry point for the "بدهی راکد شاگردان خارج‌شده" card. Reuses
+  // the existing, permission-gated void action (finance_lead/general_president
+  // only, and it itself rejects voiding an order with any payment on it -
+  // see voidFeeOrderAction in backend/services/financeAdminActionService.js)
+  // rather than inventing a parallel write-off mechanism. The void reason is
+  // tagged [dormant_writeoff:<status>] so these stay distinguishable from
+  // ordinary corrections in reports/audit logs.
+  const markDebtorDormant = async (row = {}) => {
+    const orderIds = Array.isArray(row?.unpaidOrderIds) ? row.unpaidOrderIds : [];
+    if (!orderIds.length) {
+      setMessage('این شاگرد بدهی بدون‌پرداخت ندارد؛ برای بدهی‌هایی که رویشان پول نشسته از «بررسی بازپرداخت» استفاده کنید.');
+      return;
+    }
+    const reason = window.prompt(
+      `دلیل راکد اعلام‌کردن بدهی «${row?.name || 'شاگرد'}» (وضعیت: ${row?.lifecycleStatusLabel || '---'}):`,
+      'شاگرد از مکتب خارج شده و پیگیری این بدهی عملی نیست'
+    ) || '';
+    if (!reason.trim()) return;
+    const tag = `[dormant_writeoff:${row?.lifecycleStatus || 'unknown'}] ${reason.trim()}`;
+    try {
+      setBusy(true);
+      let succeeded = 0;
+      let failed = 0;
+      for (const orderId of orderIds) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await postJson(`${API_BASE}/api/student-finance/orders/${orderId}/void`, { reason: tag });
+          succeeded += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      setMessage(
+        failed
+          ? `${succeeded} بل راکد اعلام شد؛ ${failed} بل ثبت نشد (مثلاً ماه مالی بسته است یا سطح دسترسی کافی نیست - باطل‌سازی فقط برای آمریت مالی یا ریاست عمومی مجاز است).`
+          : `${succeeded} بل با موفقیت راکد اعلام شد.`
+      );
+      await refreshPaymentWorkspace({ includeAnomalies: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Prefills the manual-refund form with this debtor's largest paid-but-open
+  // bill instead of just dropping the user on an empty "پرداخت‌ها" tab.
+  const openDepartedDebtorRefund = (row = {}) => {
+    const refundableIds = new Set(Array.isArray(row?.refundableOrderIds) ? row.refundableOrderIds : []);
+    if (!refundableIds.size) {
+      setMessage('بدهی این شاگرد پرداختی ندارد که قابل بازپرداخت باشد؛ برای این نوع بدهی از «راکد اعلام کردن» استفاده کنید.');
+      setActiveSection('payments');
+      return;
+    }
+    const picked = bills
+      .filter((bill) => refundableIds.has(String(bill?._id || '')))
+      .sort((a, b) => Number(b?.amountPaid || 0) - Number(a?.amountPaid || 0))[0] || null;
+    if (picked?._id) {
+      setManualRefundForm({
+        feeOrderId: String(picked._id),
+        amount: '',
+        reason: 'membership_ended',
+        reasonNote: `${row?.name || 'شاگرد'} در وضعیت «${row?.lifecycleStatusLabel || '---'}» است؛ بدهی راکد بابت بل ${formatFinanceCode(picked.billNumber, '---')}.`
+      });
+    }
+    setActiveSection('payments');
+  };
+
   const applyManualMembershipStudent = (studentId = '') => {
     const normalizedStudentId = String(studentId || '').trim();
     const membershipStudent = financeMembershipStudents.find((item) => String(item?._id || '') === normalizedStudentId) || null;
@@ -3084,6 +3164,22 @@ export default function AdminFinance() {
   const overviewDebtors = useMemo(() => (
     Array.isArray(financeOverview?.topDebtors) ? financeOverview.topDebtors : []
   ), [financeOverview?.topDebtors]);
+  // Legacy/dormant arrears: open balance of students who have already left
+  // (منفک/تبدیل/محروم/...) - kept as a separate list from overviewDebtors so
+  // it never mixes into the "follow up normally" active-debtor list. See
+  // buildDebtorGroups in backend/services/financeDashboardService.js.
+  const departedDebtors = useMemo(() => (
+    Array.isArray(financeOverview?.departedDebtors) ? financeOverview.departedDebtors : []
+  ), [financeOverview?.departedDebtors]);
+  const filteredDepartedDebtors = useMemo(() => departedDebtors.filter((row) => includesFinanceSearch([
+    row?.name,
+    row?.classTitle,
+    row?.studentId,
+    row?.asasNumber,
+    row?.admissionNo,
+    studentSearchBlobById.get(String(row?.studentUserId || '').trim()),
+    studentSearchBlobById.get(String(row?.studentCoreId || row?.studentId || '').trim())
+  ], debtorSearchTerm)), [departedDebtors, debtorSearchTerm, studentSearchBlobById]);
   const filteredOverviewDebtors = useMemo(() => overviewDebtors.filter((row) => {
     if (!includesFinanceSearch([
       row?.name,
@@ -3195,6 +3291,14 @@ export default function AdminFinance() {
       meta: `${fmt(openRefundItems.length)} مورد`,
       tone: 'rose',
       section: 'payments'
+    },
+    {
+      key: 'legacyArrears',
+      label: 'بدهی راکد خارج‌شدگان',
+      value: financeOverviewKpis?.legacyArrears?.amount,
+      meta: `${fmt(financeOverviewKpis?.legacyArrears?.count || 0)} شاگرد منفک/تبدیل/محروم`,
+      tone: 'amber',
+      section: 'overview'
     }
   ];
 
@@ -3699,6 +3803,29 @@ export default function AdminFinance() {
     deliveryOpsRetryableFilter,
     deliveryRecoveryStateFilter
   ]);
+
+  // Without this, the finance dashboard only reloads on mount or after its
+  // own mutations - a status change recorded from the academic lifecycle
+  // screen (a separate page/component with no shared client cache) stays
+  // invisible here until the user manually refreshes. The backend broadcasts
+  // finance:lifecycle-changed after every transfer/dropout/expulsion/
+  // suspension/resume/... (see broadcastFinanceLifecycleChange in
+  // backend/utils/financeLifecycleNotifications.js).
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return () => {};
+    const socket = io(API_BASE, { auth: { token } });
+    let debounceTimer = null;
+    socket.on('finance:lifecycle-changed', () => {
+      window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => { loadAll(); }, 600);
+    });
+    return () => {
+      window.clearTimeout(debounceTimer);
+      socket.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -5074,7 +5201,7 @@ export default function AdminFinance() {
         return;
       }
       const data = await postJson(`${API_BASE}/api/finance/admin/bills`, payload);
-      setMessage(data.message || 'بل ایجاد شد');
+      setMessage([data.message || 'بل ایجاد شد', data.studentStatusWarning].filter(Boolean).join(' — '));
       await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
@@ -7211,7 +7338,7 @@ export default function AdminFinance() {
           <div className="finance-subcard-list">
             {(financeOverview?.recent?.bills || []).map((item) => (
               <div key={`overview-recent-bill-${item.id}`} className="mini-row">
-                <span className="finance-cell-stack"><strong>{item.studentName}</strong><small>{item.title} · {item.classTitle}</small></span>
+                <span className="finance-cell-stack"><strong>{item.studentName} <FinanceStudentStatusBadge label={item.lifecycleStatusLabel} tone={item.lifecycleStatusTone} /></strong><small>{item.title} · {item.classTitle}</small></span>
                 <span className="finance-cell-stack"><strong>{fmt(item.amount)} AFN</strong><small>باقیات: {fmt(item.outstanding)} · {toFaDate(item.occurredAt)}</small></span>
               </div>
             ))}
@@ -7226,7 +7353,7 @@ export default function AdminFinance() {
           <div className="finance-subcard-list">
             {(financeOverview?.recent?.payments || []).map((item) => (
               <div key={`overview-recent-payment-${item.id}`} className="mini-row">
-                <span className="finance-cell-stack"><strong>{item.studentName}</strong><small>{item.classTitle} · {PAYMENT_METHOD_UI_LABELS[item.paymentMethod] || item.paymentMethod}</small></span>
+                <span className="finance-cell-stack"><strong>{item.studentName} <FinanceStudentStatusBadge label={item.lifecycleStatusLabel} tone={item.lifecycleStatusTone} /></strong><small>{item.classTitle} · {PAYMENT_METHOD_UI_LABELS[item.paymentMethod] || item.paymentMethod}</small></span>
                 <span className="finance-cell-stack"><strong>{fmt(item.amount)} AFN</strong><small>{toFaDate(item.occurredAt)}</small></span>
               </div>
             ))}
@@ -10411,7 +10538,10 @@ export default function AdminFinance() {
                 {!!bill.periodLabel && <small>دوره: {bill.periodLabel}</small>}
                 {!!bill.feeLineSummary && <small>{bill.feeLineSummary}</small>}
               </span>
-              <span>{bill.student?.name || '---'}</span>
+              <span className="finance-cell-stack">
+                <span>{bill.student?.name || '---'}</span>
+                <FinanceStudentStatusBadge label={bill.lifecycleStatusLabel} tone={bill.lifecycleStatusTone} />
+              </span>
               <span className="finance-cell-stack">
                 <strong>{bill.classId?.title || bill.schoolClass?.title || bill.course?.title || '---'}</strong>
                 {!!bill.lineItems?.length && <small>{bill.lineItems.length} ردیف مالی</small>}
@@ -10481,7 +10611,7 @@ export default function AdminFinance() {
             {paginatedOverviewDebtors.map((row) => (
               <div key={`smart-debtor-${row.studentId || row.name}`} className="finance-smart-debtor-row">
                 <span className="finance-cell-stack">
-                  <strong>{row.name}</strong>
+                  <strong>{row.name} <FinanceStudentStatusBadge label={row.lifecycleStatusLabel} tone={row.lifecycleStatusTone} /></strong>
                   <small>{row.classTitle} · {fmt(row.orderCount)} بل باز</small>
                 </span>
                 <span className="finance-cell-stack"><strong>{fmt(row.amount)} AFN</strong><small>{fmt(row.overdueOrderCount)} بل سررسید گذشته</small></span>
@@ -10495,6 +10625,52 @@ export default function AdminFinance() {
             <button type="button" className="secondary" onClick={() => setDebtorPage((page) => Math.max(1, page - 1))} disabled={debtorPage <= 1}>صفحه قبلی</button>
             <span>صفحه {fmt(debtorPage)} از {fmt(debtorPageCount)} · نمایش {fmt(filteredOverviewDebtors.length ? ((debtorPage - 1) * 10) + 1 : 0)} تا {fmt(Math.min(debtorPage * 10, filteredOverviewDebtors.length))}</span>
             <button type="button" className="secondary" onClick={() => setDebtorPage((page) => Math.min(debtorPageCount, page + 1))} disabled={debtorPage >= debtorPageCount}>صفحه بعدی</button>
+          </div>
+        </div>
+
+        <div className="finance-card finance-smart-debtors-card finance-legacy-arrears-card" data-finance-section="overview reports" data-testid="legacy-arrears-card">
+          <div className="finance-card-head">
+            <div>
+              <h3>بدهی راکد شاگردان خارج‌شده</h3>
+              <p className="muted">شاگردانی که منفک، تبدیل یا محروم شده‌اند اما هنوز بدهی باز دارند؛ جدا از پیگیری عادی — برای هرکدام بازپرداخت، انتقال بدهی، یا راکد اعلام کردن با تأیید مدیر مالی تصمیم بگیرید.</p>
+            </div>
+            <div className="finance-chip-group">
+              <span className="finance-chip">{fmt(filteredDepartedDebtors.length)} شاگرد</span>
+              <span className="finance-chip finance-chip-amber">{fmt(financeOverviewKpis?.legacyArrears?.amount || 0)} AFN</span>
+            </div>
+          </div>
+          <div className="finance-smart-debtor-list">
+            {filteredDepartedDebtors.map((row) => (
+              <div key={`legacy-debtor-${row.studentId || row.name}`} className="finance-smart-debtor-row">
+                <span className="finance-cell-stack">
+                  <strong>{row.name} <FinanceStudentStatusBadge label={row.lifecycleStatusLabel} tone={row.lifecycleStatusTone} /></strong>
+                  <small>{row.classTitle} · {fmt(row.orderCount)} بل باز</small>
+                </span>
+                <span className="finance-cell-stack"><strong>{fmt(row.amount)} AFN</strong><small>{fmt(row.overdueOrderCount)} بل سررسید گذشته</small></span>
+                <div className="finance-inline-actions">
+                  <button type="button" className="secondary" onClick={() => openDebtorInPaymentDesk(row)}>باز کردن میز پرداخت</button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => openDepartedDebtorRefund(row)}
+                    disabled={!row?.refundableOrderIds?.length}
+                    title={row?.refundableOrderIds?.length ? '' : 'بدهی این شاگرد پرداختی ندارد که قابل بازپرداخت باشد'}
+                  >
+                    بررسی بازپرداخت
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary danger"
+                    onClick={() => markDebtorDormant(row)}
+                    disabled={busy || !row?.unpaidOrderIds?.length}
+                    title={row?.unpaidOrderIds?.length ? '' : 'بدهی این شاگرد فقط شامل بل‌های دارای پرداخت است'}
+                  >
+                    راکد اعلام کردن
+                  </button>
+                </div>
+              </div>
+            ))}
+            {!filteredDepartedDebtors.length && <p className="muted">بدهی راکدی برای شاگردان خارج‌شده پیدا نشد.</p>}
           </div>
         </div>
       </div>
