@@ -36,6 +36,8 @@ function buildReport(students = [], sales = [], prices = []) {
       uniformTaken: !!sale?.uniformTaken,
       bookPrice: sale?.bookPrice || classPrice.bookPrice || 0,
       uniformPrice: sale?.uniformPrice || classPrice.uniformPrice || 0,
+      bookDiscount: sale?.bookDiscount || 0,
+      uniformDiscount: sale?.uniformDiscount || 0,
       totalAmount: sale?.totalAmount || 0
     };
   });
@@ -51,6 +53,7 @@ function buildReport(students = [], sales = [], prices = []) {
       uniformMissing: 0,
       bookTotal: 0,
       uniformTotal: 0,
+      totalDiscount: 0,
       totalAmount: 0
     };
     current.students += 1;
@@ -60,6 +63,7 @@ function buildReport(students = [], sales = [], prices = []) {
     current.uniformMissing += row.uniformTaken ? 0 : 1;
     current.bookTotal += row.bookTaken ? toNumber(row.bookPrice) : 0;
     current.uniformTotal += row.uniformTaken ? toNumber(row.uniformPrice) : 0;
+    current.totalDiscount += toNumber(row.bookDiscount) + toNumber(row.uniformDiscount);
     current.totalAmount += toNumber(row.totalAmount);
     byClassMap.set(key, current);
   });
@@ -72,6 +76,7 @@ function buildReport(students = [], sales = [], prices = []) {
       uniformMissing: rows.filter((row) => !row.uniformTaken).length,
       bookTotal: rows.reduce((sum, row) => sum + (row.bookTaken ? toNumber(row.bookPrice) : 0), 0),
       uniformTotal: rows.reduce((sum, row) => sum + (row.uniformTaken ? toNumber(row.uniformPrice) : 0), 0),
+      totalDiscount: rows.reduce((sum, row) => sum + toNumber(row.bookDiscount) + toNumber(row.uniformDiscount), 0),
       totalAmount: rows.reduce((sum, row) => sum + toNumber(row.totalAmount), 0)
     },
     byClass: Array.from(byClassMap.values()).sort((a, b) => a.className.localeCompare(b.className)),
@@ -174,6 +179,8 @@ router.post('/sales', async (req, res) => {
           uniformTaken,
           bookPrice: bookTaken ? toNumber(req.body.bookPrice || classPrice?.bookPrice) : 0,
           uniformPrice: uniformTaken ? toNumber(req.body.uniformPrice || classPrice?.uniformPrice) : 0,
+          bookDiscount: bookTaken ? toNumber(req.body.bookDiscount) : 0,
+          uniformDiscount: uniformTaken ? toNumber(req.body.uniformDiscount) : 0,
           bookDate: bookTaken ? String(req.body.bookDate || todayKey()).trim() : '',
           uniformDate: uniformTaken ? String(req.body.uniformDate || todayKey()).trim() : '',
           uniformSize: uniformTaken ? String(req.body.uniformSize || '').trim() : '',

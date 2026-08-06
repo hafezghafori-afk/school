@@ -14,6 +14,7 @@ const StudentReEnrollment = require('../models/StudentReEnrollment');
 const StudentLifecycleEvent = require('../models/StudentLifecycleEvent');
 const { issueTransferAdmissionBill } = require('./transferAdmissionBillingService');
 const { syncStudentFinanceFromFinanceBill } = require('../utils/studentFinanceSync');
+const { createFinanceRefundCase } = require('../utils/financeRefundCase');
 const {
   ACTIVE_STUDENT_MEMBERSHIP_STATUSES,
   CURRENT_STUDENT_MEMBERSHIP_STATUSES
@@ -163,9 +164,9 @@ async function syncAfghanStudentLifecycleProjection(membership, action, session)
   );
 }
 
-async function stopFutureBills(membership, action, effectiveAt, actorId, session) {
+async function reconcileFutureBillingForEndedMembership(membership, action, effectiveAt, actorId, session) {
   if (!['transfer_out', 'class_transfer', 'dropout', 'expulsion'].includes(action)) {
-    return { bills: 0, orders: 0 };
+    return { bills: 0, orders: 0, refundCasesCreated: 0 };
   }
   const nextMonthStart = new Date(effectiveAt.getFullYear(), effectiveAt.getMonth() + 1, 1);
   const voidFields = {
@@ -174,18 +175,61 @@ async function stopFutureBills(membership, action, effectiveAt, actorId, session
     voidedBy: actorId || null,
     voidedAt: new Date()
   };
-  const filter = {
+  const voidFilter = {
     studentMembershipId: membership._id,
     status: { $in: ['new', 'overdue'] },
     dueDate: { $gte: nextMonthStart }
   };
-  const [billUpdate, orderUpdate] = await Promise.all([
-    FinanceBill.updateMany(filter, { $set: voidFields }, { session }),
-    FeeOrder.updateMany(filter, { $set: voidFields }, { session })
+  // Bills/orders in the same post-departure window can't be voided here
+  // because money was already collected on them (status is 'partial' or
+  // 'paid', not 'new'/'overdue'). Those need a refund case instead of a
+  // silent void, otherwise the payment just sits there looking legitimate.
+  const protectedFilter = {
+    studentMembershipId: membership._id,
+    status: { $in: ['partial', 'paid'] },
+    dueDate: { $gte: nextMonthStart },
+    amountPaid: { $gt: 0 }
+  };
+
+  const [billUpdate, orderUpdate, protectedBills, protectedOrders] = await Promise.all([
+    FinanceBill.updateMany(voidFilter, { $set: voidFields }, { session }),
+    FeeOrder.updateMany(voidFilter, { $set: voidFields }, { session }),
+    FinanceBill.find(protectedFilter).session(session),
+    FeeOrder.find(protectedFilter).session(session)
   ]);
+
+  const refundReasonNote = `${action} مؤثر از ${effectiveAt.toISOString().slice(0, 10)}؛ این سند به دوره‌ای بعد از ختم عضویت تعلق دارد و باید بازپرداخت یا بررسی شود.`;
+  const protectedDocuments = [
+    ...protectedBills.map((bill) => ({ doc: bill, key: 'bill' })),
+    ...protectedOrders.map((order) => ({ doc: order, key: 'feeOrder' }))
+  ];
+
+  let refundCasesCreated = 0;
+  for (const { doc, key } of protectedDocuments) {
+    // eslint-disable-next-line no-await-in-loop
+    const created = await createFinanceRefundCase({
+      student: doc.student || membership.student,
+      studentId: doc.studentId || membership.studentId || null,
+      studentMembershipId: membership._id,
+      [key]: doc._id,
+      schoolId: doc.schoolId || membership.schoolId || null,
+      classId: doc.classId || membership.classId || null,
+      academicYearId: doc.academicYearId || membership.academicYearId || membership.academicYear || null,
+      currency: doc.currency || 'AFN',
+      amount: doc.amountPaid,
+      reason: 'membership_ended',
+      reasonNote: refundReasonNote,
+      detectionSource: 'auto_lifecycle',
+      createdBy: actorId,
+      session
+    });
+    if (created) refundCasesCreated += 1;
+  }
+
   return {
     bills: Number(billUpdate?.modifiedCount || 0),
-    orders: Number(orderUpdate?.modifiedCount || 0)
+    orders: Number(orderUpdate?.modifiedCount || 0),
+    refundCasesCreated
   };
 }
 
@@ -566,7 +610,7 @@ async function applyLifecycleAction(payload = {}, context = {}, session) {
     });
   }
   const billingSourceMembership = action === 'class_transfer' ? previousMembership : membership;
-  const stoppedFutureBills = await stopFutureBills(billingSourceMembership, action, effectiveAt, actorId, session);
+  const stoppedFutureBills = await reconcileFutureBillingForEndedMembership(billingSourceMembership, action, effectiveAt, actorId, session);
   const financialEffects = {
     ...stoppedFutureBills,
     admissionBillCreated: admissionBilling?.created === true,

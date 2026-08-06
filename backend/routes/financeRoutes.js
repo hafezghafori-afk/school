@@ -157,6 +157,7 @@ const {
 } = require('../services/financeAnomalyService');
 const {
   buildFinanceMonthCloseSnapshot,
+  buildFinanceMonthlyTrend,
   toMonthDateRange
 } = require('../services/financeCloseService');
 const { buildFinanceDashboardOverview } = require('../services/financeDashboardService');
@@ -2055,14 +2056,17 @@ const serializeFinancialYearBudgetApproval = (value = null) => {
 
 const normalizeGovernmentSnapshotType = (value = '') => {
   const normalized = String(value || '').trim().toLowerCase();
-  return normalized === 'annual' ? 'annual' : 'quarterly';
+  if (normalized === 'annual') return 'annual';
+  if (normalized === 'monthly') return 'monthly';
+  return 'quarterly';
 };
 
-const resolveGovernmentReportKey = (reportType = '') => (
-  normalizeGovernmentSnapshotType(reportType) === 'annual'
-    ? 'government_finance_annual'
-    : 'government_finance_quarterly'
-);
+const resolveGovernmentReportKey = (reportType = '') => {
+  const normalized = normalizeGovernmentSnapshotType(reportType);
+  if (normalized === 'annual') return 'government_finance_annual';
+  if (normalized === 'monthly') return 'government_finance_monthly';
+  return 'government_finance_quarterly';
+};
 
 const resolveFinancialYearErrorStatus = (error) => {
   if (Number.isFinite(Number(error?.statusCode)) && Number(error?.statusCode) > 0) {
@@ -4169,6 +4173,40 @@ router.post('/admin/expenses/:id/void', requireAuth, requireRole(['admin']), req
   }
 });
 
+router.delete('/admin/expenses/:id', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await ExpenseEntry.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
+    if (!item) return res.status(404).json({ success: false, message: 'رکورد مصرف پیدا نشد.' });
+
+    // Only a draft has zero financial footprint - it was never submitted,
+    // never counted in any KPI/report, and never touched the treasury.
+    // Anything past that must be voided (keeps the audit trail), not
+    // deleted.
+    if (item.status !== 'draft') {
+      return res.status(409).json({
+        success: false,
+        message: 'فقط مصارف پیش‌نویس قابل حذف‌اند. برای مصارف ارسال‌شده/تاییدشده از «باطل‌سازی» استفاده کنید.'
+      });
+    }
+
+    await ExpenseEntry.deleteOne({ _id: item._id });
+
+    await logActivity({
+      req,
+      action: 'finance_delete_expense_entry',
+      targetType: 'ExpenseEntry',
+      targetId: item._id.toString(),
+      meta: { amount: Number(item.amount || 0), category: item.category || '' }
+    });
+
+    return res.json({ success: true, message: 'مصرف پیش‌نویس حذف شد.' });
+  } catch {
+    return res.status(500).json({ success: false, message: 'حذف مصرف ناموفق بود.' });
+  }
+});
+
 router.get('/admin/government-snapshots', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
@@ -4179,12 +4217,14 @@ router.get('/admin/government-snapshots', requireAuth, requireRole(['admin']), r
     const classId = String(req.query?.classId || '').trim();
     const reportType = String(req.query?.reportType || '').trim().toLowerCase();
     const quarter = Math.max(0, Math.min(4, Number(req.query?.quarter) || 0));
+    const month = Math.max(0, Math.min(12, Number(req.query?.month) || 0));
 
     if (financialYearId) filter.financialYearId = financialYearId;
     if (academicYearId) filter.academicYearId = academicYearId;
     if (classId) filter.classId = classId;
     if (reportType) filter.reportType = normalizeGovernmentSnapshotType(reportType);
     if (quarter) filter.quarter = quarter;
+    if (month) filter.month = month;
 
     const items = await GovernmentFinanceSnapshot.find(filter)
       .populate('financialYearId', 'title code status isActive isClosed')
@@ -4209,6 +4249,9 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
     const quarter = reportType === 'quarterly'
       ? Math.max(1, Math.min(4, Number(payload.quarter) || 1))
       : null;
+    const month = reportType === 'monthly'
+      ? Math.max(1, Math.min(12, Number(payload.month) || 1))
+      : null;
     const classId = String(payload.classId || '').trim() || null;
     const schoolContext = await resolveActiveSchool(req, { payload, allowSingleFallback: true });
 
@@ -4223,10 +4266,12 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
       financialYearId: String(financialYear._id),
       academicYearId: String(financialYear.academicYearId || ''),
       classId: classId || '',
-      quarter: quarter || undefined
+      quarter: quarter || undefined,
+      monthNumber: month || undefined
     };
     if (!classId) delete filters.classId;
     if (!quarter) delete filters.quarter;
+    if (!month) delete filters.monthNumber;
 
     const reportKey = resolveGovernmentReportKey(reportType);
     const isOfficial = parseBooleanInput(payload.isOfficial, true);
@@ -4286,6 +4331,7 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
       financialYearId: financialYear._id,
       reportType,
       quarter: quarter || null,
+      month: month || null,
       classId: classId || null
     }).sort({ version: -1 });
 
@@ -4308,6 +4354,7 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
       academicYearId: financialYear.academicYearId,
       reportType,
       quarter: quarter || null,
+      month: month || null,
       classId: classId || null,
       reportKey,
       title: report?.report?.title || reportKey,
@@ -4734,6 +4781,28 @@ router.get('/admin/dashboard/overview', requireAuth, requireRole(['admin']), req
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error?.statusCode ? error.message : 'دریافت داشبورد هوشمند مالی ناموفق بود.'
+    });
+  }
+});
+
+router.get('/admin/dashboard/monthly-trend', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: false });
+    const schoolId = schoolContext.schoolId || '';
+    if (!schoolId) {
+      return res.status(400).json({ success: false, message: 'برای نمایش روند ماهانه، مکتب فعال را انتخاب کنید.' });
+    }
+    writeSchoolContextHeaders(res, schoolId);
+    const months = await buildFinanceMonthlyTrend({
+      schoolId,
+      academicYearId: String(req.query?.academicYearId || '').trim(),
+      months: req.query?.months
+    });
+    return res.json({ success: true, months });
+  } catch (error) {
+    return res.status(error?.statusCode || 500).json({
+      success: false,
+      message: error?.statusCode ? error.message : 'دریافت روند ماهانه مالی ناموفق بود.'
     });
   }
 });

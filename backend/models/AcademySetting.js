@@ -9,6 +9,7 @@ const academySettingSchema = new mongoose.Schema({
   email: { type: String, default: '', trim: true },
   currency: { type: String, default: 'AFN', trim: true },
   invoicePrefix: { type: String, default: 'ACD', trim: true, uppercase: true },
+  studentCodePrefix: { type: String, default: 'AST', trim: true, uppercase: true },
   invoiceFooter: { type: String, default: 'تشکر از پرداخت شما', trim: true },
   receiptSize: { type: String, enum: ['a4', 'half', 'small'], default: 'half' },
   isActive: { type: Boolean, default: true },
@@ -23,6 +24,7 @@ academySettingSchema.pre('validate', function normalizeAcademySetting() {
   this.email = String(this.email || '').trim();
   this.currency = String(this.currency || 'AFN').trim().toUpperCase() || 'AFN';
   this.invoicePrefix = String(this.invoicePrefix || 'ACD').trim().toUpperCase() || 'ACD';
+  this.studentCodePrefix = String(this.studentCodePrefix || 'AST').trim().toUpperCase() || 'AST';
   this.invoiceFooter = String(this.invoiceFooter || '').trim();
 });
 

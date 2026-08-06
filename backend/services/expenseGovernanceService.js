@@ -105,9 +105,13 @@ function normalizeText(value = '') {
 }
 
 function normalizeKey(value = '', fallback = 'other') {
+  // \p{L}/\p{N} (Unicode letter/number) instead of a plain a-z0-9 range -
+  // a Dari/Pashto-only label (no Latin characters at all) used to strip to
+  // nothing and silently fall back to 'other' for every category, which is
+  // why every new category collided with the pre-seeded 'other' category.
   const normalized = normalizeText(value)
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/[^\p{L}\p{N}]+/gu, '_')
     .replace(/^_+|_+$/g, '');
   return normalized || fallback;
 }

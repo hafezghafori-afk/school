@@ -168,8 +168,9 @@ router.get('/students', async (req, res) => {
 
 router.post('/students', async (req, res) => {
   try {
+    const settings = await getSettings();
     const studentCode = String(req.body.studentCode || '').trim().toUpperCase()
-      || await nextSequence('academy_student', 'AST');
+      || await nextSequence('academy_student', settings.studentCodePrefix || 'AST');
     const item = await AcademyStudent.create({ ...req.body, studentCode, createdBy: userId(req), updatedBy: userId(req) });
     res.status(201).json({ success: true, item, message: 'شاگرد آموزشگاه ثبت شد.' });
   } catch (error) {
@@ -335,6 +336,8 @@ router.post('/payments', async (req, res) => {
       previousBalance,
       remainingBalance,
       currency: settings.currency || 'AFN',
+      paymentMethod: payment.paymentMethod,
+      referenceNo: payment.referenceNo,
       issuedAt: payment.paidAt,
       receivedBy: userId(req),
       note: req.body.note || ''

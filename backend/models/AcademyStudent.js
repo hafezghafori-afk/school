@@ -7,6 +7,7 @@ const academyStudentSchema = new mongoose.Schema({
   lastName: { type: String, default: '', trim: true },
   fullName: { type: String, default: '', trim: true, index: true },
   fatherName: { type: String, default: '', trim: true },
+  tazkiraNumber: { type: String, default: '', trim: true, index: true },
   gender: { type: String, enum: ['', 'male', 'female', 'other'], default: '' },
   dateOfBirth: { type: String, default: '', trim: true },
   phone: { type: String, default: '', trim: true },
@@ -25,6 +26,7 @@ academyStudentSchema.pre('validate', function normalizeAcademyStudent() {
   this.lastName = String(this.lastName || '').trim();
   this.fullName = String(this.fullName || '').trim() || [this.firstName, this.lastName].filter(Boolean).join(' ').trim();
   this.fatherName = String(this.fatherName || '').trim();
+  this.tazkiraNumber = String(this.tazkiraNumber || '').trim();
   this.dateOfBirth = String(this.dateOfBirth || '').trim();
   this.phone = String(this.phone || '').trim();
   this.guardianPhone = String(this.guardianPhone || '').trim();
@@ -33,6 +35,14 @@ academyStudentSchema.pre('validate', function normalizeAcademyStudent() {
   this.note = String(this.note || '').trim();
 });
 
+// Note: tazkiraNumber is intentionally not added to this text index. It is
+// never actually queried with $text anywhere in academyRoutes.js - all
+// student search in this module runs client-side via studentMatchesSearch
+// (see AcademyManagement.jsx), which already picks up every primitive field
+// including tazkiraNumber automatically. Changing an existing text index's
+// field list requires MongoDB to drop and recreate it (only one text index
+// per collection is allowed), which is not worth the migration risk for an
+// index nothing reads from.
 academyStudentSchema.index({ fullName: 'text', fatherName: 'text', phone: 'text', studentCode: 'text' });
 
 module.exports = academyConnection.model('AcademyStudent', academyStudentSchema);

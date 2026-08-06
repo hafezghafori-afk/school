@@ -3,10 +3,16 @@ const mongoose = require('mongoose');
 const COLOR_TONES = ['teal', 'copper', 'slate', 'rose', 'mint', 'sand'];
 
 function slugifyKey(value = '', fallback = 'other') {
+  // \p{L}/\p{N} (Unicode letter/number), not a plain a-z0-9 range - a
+  // Dari/Pashto-only label has no Latin characters, so the old regex
+  // stripped it to nothing and every such category silently collapsed to
+  // the same fallback key here, even after the route layer already built a
+  // correct, distinct key (this pre-validate hook re-slugifies and
+  // overwrites it right before saving).
   const normalized = String(value || '')
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/[^\p{L}\p{N}]+/gu, '_')
     .replace(/^_+|_+$/g, '');
   return normalized || fallback;
 }

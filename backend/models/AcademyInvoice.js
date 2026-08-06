@@ -14,6 +14,8 @@ const academyInvoiceSchema = new mongoose.Schema({
   previousBalance: { type: Number, default: 0, min: 0 },
   remainingBalance: { type: Number, default: 0, min: 0 },
   currency: { type: String, default: 'AFN', trim: true },
+  paymentMethod: { type: String, default: 'cash', trim: true },
+  referenceNo: { type: String, default: '', trim: true },
   issuedAt: { type: Date, default: Date.now, index: true },
   receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   note: { type: String, default: '', trim: true }
@@ -29,6 +31,8 @@ academyInvoiceSchema.pre('validate', function normalizeAcademyInvoice() {
   this.previousBalance = Math.max(0, Number(this.previousBalance || 0));
   this.remainingBalance = Math.max(0, Number(this.remainingBalance || 0));
   this.currency = String(this.currency || 'AFN').trim().toUpperCase() || 'AFN';
+  this.paymentMethod = String(this.paymentMethod || 'cash').trim();
+  this.referenceNo = String(this.referenceNo || '').trim();
   this.note = String(this.note || '').trim();
 });
 

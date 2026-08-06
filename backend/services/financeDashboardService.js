@@ -3,6 +3,7 @@ const FeePayment = require('../models/FeePayment');
 const ExpenseEntry = require('../models/ExpenseEntry');
 const FinanceTreasuryTransaction = require('../models/FinanceTreasuryTransaction');
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
+const { sumPaidRefunds } = require('../utils/financeRefundRecognition');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -262,7 +263,7 @@ async function buildFinanceDashboardOverview(options = {}) {
     transactionDate: { $gte: startAt, $lte: endAt }
   });
 
-  const [standingOrders, periodOrders, approvedRaw, pendingRaw, approvedExpenses, pendingExpenses, treasuryRows] = await Promise.all([
+  const [standingOrders, periodOrders, approvedRaw, pendingRaw, approvedExpenses, pendingExpenses, treasuryRows, refundSummary] = await Promise.all([
     FeeOrder.find(orderStandingFilter)
       .select('orderNumber title student studentId classId amountOriginal amountDue amountPaid outstandingAmount adjustments status issuedAt dueDate periodLabel')
       .populate('student', 'name')
@@ -291,7 +292,7 @@ async function buildFinanceDashboardOverview(options = {}) {
       .sort({ paidAt: -1 })
       .lean(),
     ExpenseEntry.find(mergeFilter(expensePeriodFilter, { status: 'approved' }))
-      .select('category subCategory amount expenseDate paymentMethod vendorName referenceNo treasuryAccountId status')
+      .select('category subCategory amount expenseDate paymentMethod vendorName referenceNo treasuryAccountId procurementCommitmentId status')
       .sort({ expenseDate: -1 })
       .lean(),
     ExpenseEntry.find(mergeFilter(expensePeriodFilter, { status: { $in: ['draft', 'pending_review'] } }))
@@ -301,7 +302,14 @@ async function buildFinanceDashboardOverview(options = {}) {
     FinanceTreasuryTransaction.find(treasuryPeriodFilter)
       .select('transactionType direction amount transactionDate sourceType referenceNo status')
       .sort({ transactionDate: -1 })
-      .lean()
+      .lean(),
+    sumPaidRefunds({
+      schoolId: options?.schoolId,
+      classId: options?.classId,
+      academicYearId: options?.academicYearId,
+      startAt,
+      endAt
+    })
   ]);
 
   const [approvedRecognition, pendingRecognition] = await Promise.all([
@@ -324,10 +332,24 @@ async function buildFinanceDashboardOverview(options = {}) {
   const periodBilled = roundMoney(periodOrders.reduce((sum, item) => sum + Number(item?.amountDue || 0), 0));
   const approvedIncome = roundMoney(approvedPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0));
   const pendingIncome = roundMoney(pendingPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0));
+  const paidRefunds = roundMoney(refundSummary?.total || 0);
+  const netIncome = roundMoney(approvedIncome - paidRefunds);
   const approvedExpense = roundMoney(approvedExpenses.reduce((sum, item) => sum + Number(item?.amount || 0), 0));
   const pendingExpense = roundMoney(pendingExpenses.reduce((sum, item) => sum + Number(item?.amount || 0), 0));
   const treasuryInflow = roundMoney(treasuryRows.filter((item) => item?.direction === 'in').reduce((sum, item) => sum + Number(item?.amount || 0), 0));
-  const treasuryOutflow = roundMoney(treasuryRows.filter((item) => item?.direction === 'out').reduce((sum, item) => sum + Number(item?.amount || 0), 0));
+  // Approving an expense that is linked to a treasury account debits that
+  // account immediately (see accumulateAccountMetrics in
+  // treasuryGovernanceService.js) - no separate withdrawal transaction is
+  // posted for it. Procurement-settled expenses are the one exception: their
+  // cash effect is booked later, via a dedicated procurement_settlement
+  // transaction, so counting them here too would double the outflow.
+  const expenseTreasuryOutflow = roundMoney(approvedExpenses
+    .filter((item) => item?.treasuryAccountId && !item?.procurementCommitmentId)
+    .reduce((sum, item) => sum + Number(item?.amount || 0), 0));
+  const treasuryOutflow = roundMoney(
+    treasuryRows.filter((item) => item?.direction === 'out').reduce((sum, item) => sum + Number(item?.amount || 0), 0)
+    + expenseTreasuryOutflow
+  );
   const overdueOrders = standingOrders.filter((item) => {
     const dueDate = asDate(item?.dueDate || item?.issuedAt, asOf);
     return Number(item?.outstandingAmount || 0) > 0 && dueDate.getTime() < asOf.getTime();
@@ -345,6 +367,7 @@ async function buildFinanceDashboardOverview(options = {}) {
   const obligationTotal = obligationDistribution.reduce((sum, row) => sum + row.value, 0);
   const incomeExpenseDistribution = [
     { key: 'income', label: 'عواید تاییدشده', value: approvedIncome },
+    { key: 'refunds', label: 'بازپرداخت‌ها', value: paidRefunds },
     { key: 'expense', label: 'مصارف تاییدشده', value: approvedExpense }
   ];
   const incomeExpenseTotal = incomeExpenseDistribution.reduce((sum, row) => sum + row.value, 0);
@@ -359,10 +382,12 @@ async function buildFinanceDashboardOverview(options = {}) {
     kpis: {
       issuedBills: { count: periodOrders.length, studentCount: distinctStudents.size, amount: periodBilled, grossAmount: periodGross },
       approvedRevenue: { count: approvedPayments.length, amount: approvedIncome },
+      refunds: { count: refundSummary?.count || 0, amount: paidRefunds },
+      netRevenue: { amount: netIncome },
       outstanding: { count: standingOrders.filter((item) => Number(item?.outstandingAmount || 0) > 0).length, amount: standingOutstanding },
       reliefs: { count: periodOrders.filter((item) => (item?.adjustments || []).some((adjustment) => adjustment?.type !== 'penalty')).length, amount: roundMoney(periodAdjustments.relief) },
       expenses: { count: approvedExpenses.length, amount: approvedExpense },
-      netCash: { amount: roundMoney(approvedIncome - approvedExpense), treasuryAmount: roundMoney(treasuryInflow - treasuryOutflow) },
+      netCash: { amount: roundMoney(netIncome - approvedExpense), treasuryAmount: roundMoney(treasuryInflow - treasuryOutflow) },
       pendingReceipts: { count: pendingPayments.length, amount: pendingIncome },
       overdue: { count: overdueOrders.length, amount: roundMoney(overdueOrders.reduce((sum, item) => sum + Number(item?.outstandingAmount || 0), 0)) },
       pendingExpenses: { count: pendingExpenses.length, amount: pendingExpense },
@@ -373,7 +398,7 @@ async function buildFinanceDashboardOverview(options = {}) {
         periodCollection: safePercent(approvedIncome, periodBilled),
         outstanding: safePercent(standingOutstanding, standingDue),
         relief: safePercent(periodAdjustments.relief, periodGross),
-        expenseToIncome: safePercent(approvedExpense, approvedIncome)
+        expenseToIncome: safePercent(approvedExpense, netIncome)
       }
     },
     distributions: {

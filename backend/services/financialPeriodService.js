@@ -53,6 +53,29 @@ function listQuarterRanges(source = {}) {
     .filter(Boolean);
 }
 
+function getMonthRange(source = {}, month = 1) {
+  const { startDate, endDate } = normalizePeriodSource(source);
+  if (!startDate || !endDate) return null;
+  const normalizedMonth = Math.max(1, Math.min(12, Number(month) || 1));
+
+  const monthStart = addMonths(startDate, normalizedMonth - 1);
+  if (monthStart > endDate) return null;
+  const monthEndCandidate = new Date(addMonths(startDate, normalizedMonth) - 1);
+  const monthEnd = monthEndCandidate > endDate ? endDate : monthEndCandidate;
+
+  return {
+    month: normalizedMonth,
+    startDate: startOfDay(monthStart),
+    endDate: endOfDay(monthEnd)
+  };
+}
+
+function listMonthRanges(source = {}) {
+  return Array.from({ length: 12 }, (_, index) => index + 1)
+    .map((month) => getMonthRange(source, month))
+    .filter(Boolean);
+}
+
 function resolveQuarterForDate(source = {}, value = null) {
   const date = toDate(value);
   if (!date) return null;
@@ -64,7 +87,9 @@ function resolveQuarterForDate(source = {}, value = null) {
 module.exports = {
   addMonths,
   endOfDay,
+  getMonthRange,
   getQuarterRange,
+  listMonthRanges,
   listQuarterRanges,
   resolveQuarterForDate,
   startOfDay,

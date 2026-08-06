@@ -1,11 +1,13 @@
 const mongoose = require('mongoose');
 const FinanceBill = require('../models/FinanceBill');
 const FinanceReceipt = require('../models/FinanceReceipt');
+const FinanceRefund = require('../models/FinanceRefund');
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
 const Discount = require('../models/Discount');
 const StudentCore = require('../models/StudentCore');
 const StudentProfile = require('../models/StudentProfile');
+const FinancialYear = require('../models/FinancialYear');
 const User = require('../models/User');
 const UserNotification = require('../models/UserNotification');
 const { logActivity } = require('../utils/activity');
@@ -13,6 +15,7 @@ const { sendMail } = require('../utils/mailer');
 const { normalizeAdminLevel } = require('../utils/permissions');
 const { resolveAdminOrgRole } = require('../utils/userRole');
 const { roundMoney, getBillRemainingAmount } = require('../utils/financeReceiptValidation');
+const { createFinanceRefundCase, findOpenRefundForDocument } = require('../utils/financeRefundCase');
 const {
   LINE_ITEM_TYPES,
   applyFinanceOrderStatus,
@@ -25,7 +28,11 @@ const {
 } = require('../utils/financeLineItems');
 const { syncStudentFinanceFromFinanceBill, syncStudentFinanceFromFinanceReceipt } = require('../utils/studentFinanceSync');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
-const { syncApprovedFeePaymentToTreasury } = require('./treasuryGovernanceService');
+const {
+  syncApprovedFeePaymentToTreasury,
+  createTreasuryManualTransaction,
+  resolveTreasuryAccountSelection
+} = require('./treasuryGovernanceService');
 const { assertFinancePeriodWritable, isFinanceMonthClosed } = require('./financePeriodGuardService');
 const {
   isFinanceVersionConflict,
@@ -1613,6 +1620,240 @@ async function updateFeePaymentFollowUpAction({ req, feePaymentId = '', body = {
   return { followUp: payment.followUp, message: 'پیگیری پرداخت فیس به‌روزرسانی شد.' };
 }
 
+const REFUND_REASONS = ['membership_ended', 'overpayment', 'billing_error', 'other'];
+const REFUND_METHODS = ['cash', 'bank_transfer', 'hawala', 'credit_next_bill', 'other'];
+const REFUND_STATUSES_FOR_FILTER = ['pending_review', 'approved', 'rejected', 'paid'];
+
+async function createRefundCaseAction({ req, body = {} } = {}) {
+  const actorLevel = await resolveAdminActorLevel(req.user.id);
+  if (!actorLevel) throw createActionError(403, 'فقط مدیران مالی اجازه ثبت درخواست بازپرداخت را دارند.');
+
+  const billId = String(body?.billId || '').trim();
+  const feeOrderId = String(body?.feeOrderId || '').trim();
+  if (!billId && !feeOrderId) throw createActionError(400, 'بل یا بدهی مالی مبدأ این بازپرداخت مشخص نیست.');
+
+  const sourceDoc = billId ? await FinanceBill.findById(billId) : await FeeOrder.findById(feeOrderId);
+  if (!sourceDoc) throw createActionError(404, 'سند مالی مبدأ پیدا نشد.');
+
+  const existing = await findOpenRefundForDocument({ bill: billId || null, feeOrder: feeOrderId || null });
+  if (existing) throw createActionError(409, `برای این سند از قبل درخواست بازپرداخت ${existing.refundNumber} باز است.`);
+
+  const amountPaid = roundMoney(sourceDoc.amountPaid);
+  if (amountPaid <= 0) throw createActionError(400, 'این سند هیچ مبلغ پرداخت‌شده‌ای ندارد که قابل بازپرداخت باشد.');
+
+  const requestedAmount = body?.amount !== undefined && body?.amount !== null && body?.amount !== ''
+    ? roundMoney(body.amount)
+    : amountPaid;
+  if (requestedAmount <= 0 || requestedAmount > amountPaid) {
+    throw createActionError(400, `مبلغ بازپرداخت باید بین ۱ تا ${amountPaid} باشد.`);
+  }
+
+  const reason = REFUND_REASONS.includes(String(body?.reason || '').trim()) ? String(body.reason).trim() : 'other';
+
+  const item = await createFinanceRefundCase({
+    student: sourceDoc.student,
+    studentId: sourceDoc.studentId || null,
+    studentMembershipId: sourceDoc.studentMembershipId || null,
+    bill: billId || null,
+    feeOrder: feeOrderId || null,
+    schoolId: sourceDoc.schoolId || null,
+    classId: sourceDoc.classId || null,
+    academicYearId: sourceDoc.academicYearId || null,
+    currency: sourceDoc.currency || 'AFN',
+    amount: requestedAmount,
+    reason,
+    reasonNote: String(body?.reasonNote || '').trim(),
+    detectionSource: 'manual',
+    createdBy: req.user.id
+  });
+
+  await logActivity({
+    req,
+    action: 'finance_create_refund_case',
+    targetType: 'FinanceRefund',
+    targetId: item._id.toString(),
+    meta: { billId, feeOrderId, amount: item.amount, reason }
+  });
+
+  return { item, message: 'درخواست بازپرداخت ثبت شد.' };
+}
+
+async function approveRefundAction({ req, refundId = '', body = {} } = {}) {
+  const [refund, actor] = await Promise.all([
+    FinanceRefund.findById(refundId),
+    User.findById(req.user.id).select('name role orgRole adminLevel')
+  ]);
+  if (!refund) throw createActionError(404, 'درخواست بازپرداخت پیدا نشد.');
+  if (!actor || actor.role !== 'admin') throw createActionError(403, 'فقط مدیران اجازه بررسی بازپرداخت را دارند.');
+
+  const actorLevel = resolveAdminOrgRole(actor);
+  if (!['finance_lead', 'general_president'].includes(actorLevel)) {
+    throw createActionError(403, 'تایید بازپرداخت فقط برای آمریت مالی یا ریاست عمومی مجاز است.');
+  }
+  if (refund.status !== 'pending_review') {
+    throw createActionError(400, 'این درخواست بازپرداخت قبلاً بررسی شده است.');
+  }
+
+  const note = String(body?.note || '').trim();
+  const now = new Date();
+  refund.status = 'approved';
+  refund.reviewedBy = req.user.id;
+  refund.reviewedAt = now;
+  refund.reviewNote = note;
+  refund.approvalTrail = Array.isArray(refund.approvalTrail) ? refund.approvalTrail : [];
+  refund.approvalTrail.push({ action: 'approve', by: req.user.id, at: now, note, reason: '' });
+  await refund.save();
+
+  await notifyStudent({
+    req,
+    studentId: refund.student,
+    studentCoreId: refund.studentId,
+    title: 'درخواست بازپرداخت تایید شد',
+    message: `درخواست بازپرداخت شماره ${formatFinanceCode(refund.refundNumber || '')} تایید شد و به‌زودی پرداخت می‌شود.`,
+    emailSubject: 'تایید درخواست بازپرداخت'
+  });
+
+  await logActivity({
+    req,
+    action: 'finance_approve_refund',
+    targetType: 'FinanceRefund',
+    targetId: refund._id.toString(),
+    meta: { amount: refund.amount, level: actorLevel }
+  });
+
+  return { item: refund, message: 'درخواست بازپرداخت تایید شد.' };
+}
+
+async function rejectRefundAction({ req, refundId = '', body = {} } = {}) {
+  const [refund, actor] = await Promise.all([
+    FinanceRefund.findById(refundId),
+    User.findById(req.user.id).select('name role orgRole adminLevel')
+  ]);
+  if (!refund) throw createActionError(404, 'درخواست بازپرداخت پیدا نشد.');
+  if (!actor || actor.role !== 'admin') throw createActionError(403, 'فقط مدیران اجازه بررسی بازپرداخت را دارند.');
+
+  const actorLevel = resolveAdminOrgRole(actor);
+  if (!['finance_lead', 'general_president'].includes(actorLevel)) {
+    throw createActionError(403, 'رد بازپرداخت فقط برای آمریت مالی یا ریاست عمومی مجاز است.');
+  }
+  if (refund.status !== 'pending_review') {
+    throw createActionError(400, 'این درخواست بازپرداخت قبلاً بررسی شده است.');
+  }
+  const reason = String(body?.reason || '').trim();
+  if (!reason) throw createActionError(400, 'برای رد درخواست بازپرداخت، ثبت دلیل الزامی است.');
+
+  const now = new Date();
+  refund.status = 'rejected';
+  refund.reviewedBy = req.user.id;
+  refund.reviewedAt = now;
+  refund.rejectReason = reason;
+  refund.approvalTrail = Array.isArray(refund.approvalTrail) ? refund.approvalTrail : [];
+  refund.approvalTrail.push({ action: 'reject', by: req.user.id, at: now, note: '', reason });
+  await refund.save();
+
+  await logActivity({
+    req,
+    action: 'finance_reject_refund',
+    targetType: 'FinanceRefund',
+    targetId: refund._id.toString(),
+    meta: { reason, level: actorLevel }
+  });
+
+  return { item: refund, message: 'درخواست بازپرداخت رد شد.' };
+}
+
+async function markRefundPaidAction({ req, refundId = '', body = {} } = {}) {
+  const refund = await FinanceRefund.findById(refundId);
+  if (!refund) throw createActionError(404, 'درخواست بازپرداخت پیدا نشد.');
+  const actorLevel = await resolveAdminActorLevel(req.user.id);
+  if (!actorLevel) throw createActionError(403, 'فقط مدیران مالی اجازه ثبت پرداخت بازپرداخت را دارند.');
+  if (refund.status !== 'approved') {
+    throw createActionError(400, 'فقط درخواست‌های تاییدشده قابل پرداخت‌اند.');
+  }
+
+  const refundMethod = String(body?.refundMethod || '').trim();
+  if (!REFUND_METHODS.includes(refundMethod)) {
+    throw createActionError(400, 'روش بازپرداخت معتبر نیست.');
+  }
+  const proofReference = String(body?.proofReference || '').trim();
+  if (!proofReference) throw createActionError(400, 'شماره سند/رسید بازپرداخت الزامی است.');
+
+  let treasuryTransactionId = null;
+  const accountId = String(body?.accountId || '').trim();
+  if (accountId) {
+    const account = await resolveTreasuryAccountSelection({ accountId, schoolId: refund.schoolId });
+    const financialYear = account ? await FinancialYear.findById(account.financialYearId) : null;
+    if (!account || !financialYear) throw createActionError(404, 'حساب خزانه یا سال مالی آن پیدا نشد.');
+    await assertFinancePeriodWritable({
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      dateValue: new Date()
+    });
+    const transaction = await createTreasuryManualTransaction({
+      financialYear,
+      account,
+      payload: {
+        transactionType: 'withdrawal',
+        amount: refund.amount,
+        currency: refund.currency,
+        referenceNo: proofReference,
+        note: `بازپرداخت ${refund.refundNumber}`,
+        idempotencyKey: `finance-refund:${refund._id}`
+      },
+      actorId: req.user.id
+    });
+    treasuryTransactionId = transaction?._id || transaction?.id || null;
+  }
+
+  refund.status = 'paid';
+  refund.refundMethod = refundMethod;
+  refund.proofReference = proofReference;
+  refund.paidAt = new Date();
+  refund.paidBy = req.user.id;
+  if (treasuryTransactionId) refund.treasuryTransactionId = treasuryTransactionId;
+  await refund.save();
+
+  await notifyStudent({
+    req,
+    studentId: refund.student,
+    studentCoreId: refund.studentId,
+    title: 'بازپرداخت انجام شد',
+    message: `مبلغ بازپرداخت شماره ${formatFinanceCode(refund.refundNumber || '')} به شما پرداخت شد.`,
+    emailSubject: 'بازپرداخت انجام شد'
+  });
+
+  await logActivity({
+    req,
+    action: 'finance_mark_refund_paid',
+    targetType: 'FinanceRefund',
+    targetId: refund._id.toString(),
+    meta: { amount: refund.amount, refundMethod, proofReference }
+  });
+
+  return { item: refund, message: 'بازپرداخت با موفقیت ثبت شد.' };
+}
+
+async function listFinanceRefunds(filters = {}) {
+  const query = {};
+  if (String(filters.schoolId || '').trim()) query.schoolId = filters.schoolId;
+  if (REFUND_STATUSES_FOR_FILTER.includes(String(filters.status || '').trim())) query.status = filters.status;
+  if (String(filters.studentMembershipId || '').trim()) query.studentMembershipId = filters.studentMembershipId;
+  const studentId = String(filters.studentId || filters.student || '').trim();
+  if (studentId) query.$or = [{ student: studentId }, { studentId }];
+
+  const limit = Math.min(200, Math.max(1, Number(filters.limit) || 50));
+  const items = await FinanceRefund.find(query)
+    .sort({ status: 1, createdAt: -1 })
+    .limit(limit)
+    .populate('student', 'name email')
+    .populate('bill', 'billNumber dueDate amountPaid')
+    .populate('feeOrder', 'orderNumber dueDate amountPaid')
+    .lean();
+
+  return { items, count: items.length };
+}
+
 function wrapAction(action) {
   return async function wrappedAction(args = {}) {
     try {
@@ -1654,5 +1895,10 @@ module.exports = {
   rejectReceiptAction: wrapAction(rejectReceiptAction),
   rejectFeePaymentAction: wrapAction(rejectFeePaymentAction),
   updateReceiptFollowUpAction: wrapAction(updateReceiptFollowUpAction),
-  updateFeePaymentFollowUpAction: wrapAction(updateFeePaymentFollowUpAction)
+  updateFeePaymentFollowUpAction: wrapAction(updateFeePaymentFollowUpAction),
+  createRefundCaseAction: wrapAction(createRefundCaseAction),
+  approveRefundAction: wrapAction(approveRefundAction),
+  rejectRefundAction: wrapAction(rejectRefundAction),
+  markRefundPaidAction: wrapAction(markRefundPaidAction),
+  listFinanceRefunds
 };

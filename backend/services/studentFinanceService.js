@@ -23,6 +23,7 @@ const FinanceRelief = require('../models/FinanceRelief');
 const TransportFee = require('../models/TransportFee');
 const FinanceBill = require('../models/FinanceBill');
 const FinanceReceipt = require('../models/FinanceReceipt');
+const FinanceRefund = require('../models/FinanceRefund');
 const {
   refreshFinanceBillStatus,
   syncStudentFinanceFromFinanceBill,
@@ -2680,11 +2681,20 @@ async function getMembershipFinanceOverview(studentMembershipId) {
     pendingPayments: formattedPayments.filter((item) => item.status === 'pending' && Number(item?.recognizedAmount || 0) > 0).length
   };
   summary.byFeeType = buildFeeTypeLedgerSummary(formattedOrders);
+  const openRefunds = await FinanceRefund.find({
+    studentMembershipId,
+    status: { $in: ['pending_review', 'approved'] }
+  }).select('bill feeOrder status').lean();
   const anomalyPack = buildMembershipFinanceAnomalies({
     membership: formattedMembership,
     orders: formattedOrders,
     payments: formattedPayments,
     reliefs: formattedReliefs,
+    refunds: openRefunds.map((item) => ({
+      bill: item?.bill ? String(item.bill) : '',
+      feeOrder: item?.feeOrder ? String(item.feeOrder) : '',
+      status: item?.status || ''
+    })),
     asOf: new Date(),
     limit: 8
   });

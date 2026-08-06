@@ -30,6 +30,8 @@ const emptySale = {
   bookDate: today(),
   uniformDate: today(),
   uniformSize: '',
+  bookDiscount: '',
+  uniformDiscount: '',
   note: ''
 };
 
@@ -144,6 +146,22 @@ export default function AcademySupplies() {
 
   const currency = selectedPrice?.currency || prices[0]?.currency || 'AFN';
 
+  // Mirrors the backend's clamp (discount can't exceed its own item's
+  // price) so the form shows the same net amount that will actually be
+  // saved, before the student even submits.
+  const saleNetPreview = useMemo(() => {
+    const grossBook = saleForm.bookTaken ? Number(selectedPrice?.bookPrice || 0) : 0;
+    const grossUniform = saleForm.uniformTaken ? Number(selectedPrice?.uniformPrice || 0) : 0;
+    const bookDiscount = saleForm.bookTaken ? Math.min(grossBook, Math.max(0, Number(saleForm.bookDiscount || 0))) : 0;
+    const uniformDiscount = saleForm.uniformTaken ? Math.min(grossUniform, Math.max(0, Number(saleForm.uniformDiscount || 0))) : 0;
+    return {
+      netBook: grossBook - bookDiscount,
+      netUniform: grossUniform - uniformDiscount,
+      totalDiscount: bookDiscount + uniformDiscount,
+      total: (grossBook - bookDiscount) + (grossUniform - uniformDiscount)
+    };
+  }, [saleForm.bookTaken, saleForm.uniformTaken, saleForm.bookDiscount, saleForm.uniformDiscount, selectedPrice]);
+
   const filteredRows = useMemo(() => {
     return (report.rows || []).filter((row) => {
       const student = row.student || {};
@@ -187,6 +205,8 @@ export default function AcademySupplies() {
         ...saleForm,
         bookPrice: selectedPrice?.bookPrice || 0,
         uniformPrice: selectedPrice?.uniformPrice || 0,
+        bookDiscount: saleForm.bookDiscount || 0,
+        uniformDiscount: saleForm.uniformDiscount || 0,
         currency: selectedPrice?.currency || 'AFN'
       },
       reset: () => setSaleForm(emptySale)
@@ -202,13 +222,15 @@ export default function AcademySupplies() {
       bookDate: existing?.bookDate || today(),
       uniformDate: existing?.uniformDate || today(),
       uniformSize: existing?.uniformSize || '',
+      bookDiscount: existing?.bookDiscount || '',
+      uniformDiscount: existing?.uniformDiscount || '',
       note: existing?.note || ''
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const exportCsv = () => {
-    const columns = ['ID', 'Name', 'Father', 'Class', 'Book', 'Book Date', 'Uniform', 'Uniform Date', 'Uniform Size', 'Total'];
+    const columns = ['ID', 'Name', 'Father', 'Class', 'Book', 'Book Date', 'Book Discount', 'Uniform', 'Uniform Date', 'Uniform Size', 'Uniform Discount', 'Total'];
     const rows = filteredRows.map((row) => {
       const student = row.student || {};
       const sale = row.sale || {};
@@ -219,9 +241,11 @@ export default function AcademySupplies() {
         student.className,
         row.bookTaken ? 'Taken' : 'Missing',
         sale.bookDate || '',
+        row.bookDiscount || 0,
         row.uniformTaken ? 'Taken' : 'Missing',
         sale.uniformDate || '',
         sale.uniformSize || '',
+        row.uniformDiscount || 0,
         row.totalAmount || 0
       ];
     });
@@ -265,6 +289,7 @@ export default function AcademySupplies() {
             <Stat label="کتاب نگرفته" value={fmt(report?.totals?.bookMissing)} tone="amber" />
             <Stat label="یونیفرم گرفته" value={fmt(report?.totals?.uniformTaken)} tone="green" />
             <Stat label="یونیفرم نگرفته" value={fmt(report?.totals?.uniformMissing)} tone="amber" />
+            <Stat label="مجموع تخفیف" value={`${fmt(report?.totals?.totalDiscount)} ${currency}`} tone="amber" />
             <Stat label="جمع داخلی" value={`${fmt(report?.totals?.totalAmount)} ${currency}`} />
           </div>
 
@@ -342,15 +367,33 @@ export default function AcademySupplies() {
                 <span>صنف: {text(selectedStudent?.className)}</span>
                 <span>کتاب: {fmt(selectedPrice?.bookPrice)} {selectedPrice?.currency || 'AFN'}</span>
                 <span>یونیفرم: {fmt(selectedPrice?.uniformPrice)} {selectedPrice?.currency || 'AFN'}</span>
+                {saleNetPreview.totalDiscount > 0 && (
+                  <>
+                    <span className="academy-supply-discount-note">تخفیف: −{fmt(saleNetPreview.totalDiscount)} {currency}</span>
+                    <span className="academy-supply-discount-note academy-supply-net">مبلغ نهایی: {fmt(saleNetPreview.total)} {currency}</span>
+                  </>
+                )}
               </div>
               <label className="academy-supply-check">
                 <input type="checkbox" checked={saleForm.bookTaken} onChange={(e) => setSaleForm({ ...saleForm, bookTaken: e.target.checked })} />
                 <span>کتاب گرفته است</span>
               </label>
               {saleForm.bookTaken && (
-                <Field label="تاریخ گرفتن کتاب">
-                  <input type="date" value={saleForm.bookDate} onChange={(e) => setSaleForm({ ...saleForm, bookDate: e.target.value })} />
-                </Field>
+                <>
+                  <Field label="تاریخ گرفتن کتاب">
+                    <input type="date" value={saleForm.bookDate} onChange={(e) => setSaleForm({ ...saleForm, bookDate: e.target.value })} />
+                  </Field>
+                  <Field label="تخفیف کتاب">
+                    <input
+                      type="number"
+                      min="0"
+                      max={selectedPrice?.bookPrice || 0}
+                      placeholder="0"
+                      value={saleForm.bookDiscount}
+                      onChange={(e) => setSaleForm({ ...saleForm, bookDiscount: e.target.value })}
+                    />
+                  </Field>
+                </>
               )}
               <label className="academy-supply-check">
                 <input type="checkbox" checked={saleForm.uniformTaken} onChange={(e) => setSaleForm({ ...saleForm, uniformTaken: e.target.checked })} />
@@ -363,6 +406,16 @@ export default function AcademySupplies() {
                   </Field>
                   <Field label="سایز یونیفرم">
                     <input value={saleForm.uniformSize} onChange={(e) => setSaleForm({ ...saleForm, uniformSize: e.target.value })} />
+                  </Field>
+                  <Field label="تخفیف یونیفرم">
+                    <input
+                      type="number"
+                      min="0"
+                      max={selectedPrice?.uniformPrice || 0}
+                      placeholder="0"
+                      value={saleForm.uniformDiscount}
+                      onChange={(e) => setSaleForm({ ...saleForm, uniformDiscount: e.target.value })}
+                    />
                   </Field>
                 </>
               )}
@@ -389,7 +442,7 @@ export default function AcademySupplies() {
             <div className="academy-supply-panel">
               <h2>گزارش به تفکیک صنف</h2>
               <Table
-                columns={['صنف', 'شاگردان', 'کتاب گرفته', 'کتاب نگرفته', 'یونیفرم گرفته', 'یونیفرم نگرفته', 'جمع']}
+                columns={['صنف', 'شاگردان', 'کتاب گرفته', 'کتاب نگرفته', 'یونیفرم گرفته', 'یونیفرم نگرفته', 'تخفیف', 'جمع']}
                 rows={(report.byClass || []).map((item) => [
                   item.className,
                   fmt(item.students),
@@ -397,6 +450,7 @@ export default function AcademySupplies() {
                   fmt(item.bookMissing),
                   fmt(item.uniformTaken),
                   fmt(item.uniformMissing),
+                  `${fmt(item.totalDiscount)} ${currency}`,
                   `${fmt(item.totalAmount)} ${currency}`
                 ])}
               />
@@ -421,10 +475,11 @@ export default function AcademySupplies() {
               </div>
             </div>
             <Table
-              columns={['آی‌دی', 'نام', 'نام پدر', 'صنف', 'کتاب', 'تاریخ کتاب', 'یونیفرم', 'تاریخ یونیفرم', 'سایز', 'جمع', 'ثبت']}
+              columns={['آی‌دی', 'نام', 'نام پدر', 'صنف', 'کتاب', 'تاریخ کتاب', 'یونیفرم', 'تاریخ یونیفرم', 'سایز', 'تخفیف', 'جمع', 'ثبت']}
               rows={filteredRows.map((row) => {
                 const student = row.student || {};
                 const sale = row.sale || {};
+                const totalDiscount = (row.bookDiscount || 0) + (row.uniformDiscount || 0);
                 return [
                   student.studentCode,
                   student.fullName,
@@ -435,6 +490,7 @@ export default function AcademySupplies() {
                   row.uniformTaken ? 'گرفته' : 'نگرفته',
                   text(sale.uniformDate),
                   text(sale.uniformSize),
+                  totalDiscount > 0 ? `${fmt(totalDiscount)} ${sale.currency || currency}` : '-',
                   `${fmt(row.totalAmount)} ${sale.currency || currency}`,
                   <button type="button" className="academy-supply-inline" onClick={() => loadStudentSale(student)}>ویرایش</button>
                 ];
