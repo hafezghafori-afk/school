@@ -100,6 +100,13 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/school_db')
         console.error('Finance bill payment mirror repair failed (server will continue starting):', error);
       }
     }
+    // Only now does requireDatabase let /api requests through - before this,
+    // the process is up and /api/health reports it, but ordinary API traffic
+    // gets a 503 "starting" instead of racing the boot sequence for the same
+    // DB connection (which is what made the finance dashboard so slow right
+    // after the deploy that first shipped the bill-mirror repair).
+    markAppReady();
+    console.log('Server boot sequence complete; now accepting API requests.');
   })
   .catch((err) => console.error('Database connection error:', err));
 
@@ -160,7 +167,7 @@ const schoolWebsiteRoutes = require('./routes/schoolWebsiteRoutes');
 const academyRoutes = require('./routes/academyRoutes');
 const academySupplyRoutes = require('./routes/academySupplyRoutes');
 const errorHandler = require('./middleware/errorHandler');
-const { getDatabaseStatus, requireDatabase } = require('./middleware/requireDatabase');
+const { getDatabaseStatus, requireDatabase, markAppReady, isAppReady } = require('./middleware/requireDatabase');
 const ChatThread = require('./models/ChatThread');
 const ChatMessage = require('./models/ChatMessage');
 require('./models/School');
@@ -175,14 +182,23 @@ const { repairChatThreadIndexes } = require('./utils/repairChatThreadIndexes');
 app.get('/api/health', (req, res) => {
   const database = getDatabaseStatus();
   const healthy = database.connected;
+  const ready = isAppReady();
 
+  // Deliberately keeps the same 200/503 status codes as before (based on the
+  // DB connection alone) so this doesn't change how Render's own health
+  // check behaves - `ready` is informational, letting a human tell "up but
+  // still finishing the boot sequence" apart from "fully up" without that
+  // affecting deploy/restart decisions.
   res
     .status(healthy ? 200 : 503)
     .type('application/json; charset=utf-8')
     .json({
       status: healthy ? 'OK' : 'DEGRADED',
-      message: healthy ? 'سرور و دیتابیس فعال هستند' : 'سرور فعال است اما دیتابیس در دسترس نیست',
-      database
+      message: healthy
+        ? (ready ? 'سرور و دیتابیس فعال هستند' : 'سرور و دیتابیس فعال‌اند؛ آماده‌سازی نهایی هنوز در حال اجراست')
+        : 'سرور فعال است اما دیتابیس در دسترس نیست',
+      database,
+      ready
     });
 });
 
