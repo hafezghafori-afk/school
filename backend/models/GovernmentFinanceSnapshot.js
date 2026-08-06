@@ -21,7 +21,7 @@ const governmentFinanceSnapshotSchema = new mongoose.Schema({
   },
   reportType: {
     type: String,
-    enum: ['quarterly', 'annual'],
+    enum: ['monthly', 'quarterly', 'annual'],
     required: true,
     index: true
   },
@@ -29,6 +29,13 @@ const governmentFinanceSnapshotSchema = new mongoose.Schema({
     type: Number,
     min: 1,
     max: 4,
+    default: null,
+    index: true
+  },
+  month: {
+    type: Number,
+    min: 1,
+    max: 12,
     default: null,
     index: true
   },
@@ -56,6 +63,6 @@ const governmentFinanceSnapshotSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-governmentFinanceSnapshotSchema.index({ financialYearId: 1, reportType: 1, quarter: 1, classId: 1, version: 1 }, { unique: true });
+governmentFinanceSnapshotSchema.index({ financialYearId: 1, reportType: 1, quarter: 1, month: 1, classId: 1, version: 1 }, { unique: true });
 
 module.exports = mongoose.model('GovernmentFinanceSnapshot', governmentFinanceSnapshotSchema);

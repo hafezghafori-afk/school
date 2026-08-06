@@ -9,6 +9,7 @@ const emptyStudent = {
   lastName: '',
   fullName: '',
   fatherName: '',
+  tazkiraNumber: '',
   gender: '',
   phone: '',
   guardianPhone: '',
@@ -179,6 +180,7 @@ export default function AcademyManagement() {
     email: '',
     currency: 'AFN',
     invoicePrefix: 'ACD',
+    studentCodePrefix: 'AST',
     invoiceFooter: 'تشکر از پرداخت شما',
     receiptSize: 'half',
     isActive: true
@@ -201,7 +203,9 @@ export default function AcademyManagement() {
   const [teacherForm, setTeacherForm] = useState(emptyTeacher);
   const [classForm, setClassForm] = useState(emptyClass);
   const [registrationForm, setRegistrationForm] = useState(emptyRegistration);
+  const [registrationStudentSearch, setRegistrationStudentSearch] = useState('');
   const [paymentForm, setPaymentForm] = useState(emptyPayment);
+  const [paymentRegistrationSearch, setPaymentRegistrationSearch] = useState('');
   const [expenseForm, setExpenseForm] = useState(emptyExpense);
   const [attendanceForm, setAttendanceForm] = useState(emptyAttendance);
   const [printInvoice, setPrintInvoice] = useState(null);
@@ -260,6 +264,29 @@ export default function AcademyManagement() {
     [students, searchTerm]
   );
 
+  // آی‌دی/نام/نام پدر/تذکره - all live inside studentMatchesSearch's generic
+  // field scan already (it walks every primitive value on the student
+  // object), so searching by any one of those just works without extra code
+  // here.
+  const registrationStudentOptions = useMemo(() => {
+    const matches = students.filter((item) => studentMatchesSearch(item, registrationStudentSearch));
+    // Keep the already-selected student in the list even if a later search
+    // no longer matches them, so picking one and then refining the search
+    // text doesn't silently blank out the select.
+    const selected = students.find((item) => String(item._id) === String(registrationForm.studentId));
+    if (selected && !matches.some((item) => item._id === selected._id)) return [selected, ...matches];
+    return matches;
+  }, [students, registrationStudentSearch, registrationForm.studentId]);
+
+  const paymentRegistrationOptions = useMemo(() => {
+    const matches = activeRegistrations.filter((item) => studentMatchesSearch(item.studentId || item, paymentRegistrationSearch, [
+      item.courseId?.name
+    ]));
+    const selected = activeRegistrations.find((item) => String(item._id) === String(paymentForm.registrationId));
+    if (selected && !matches.some((item) => item._id === selected._id)) return [selected, ...matches];
+    return matches;
+  }, [activeRegistrations, paymentRegistrationSearch, paymentForm.registrationId]);
+
   const filteredRegistrations = useMemo(
     () => registrations.filter((item) => studentMatchesSearch(item.studentId || item, searchTerm, [
       item.courseId?.name,
@@ -310,7 +337,7 @@ export default function AcademyManagement() {
     }));
   }, [attendanceForm.classId, selectedAttendanceClassRegistrations]);
 
-  const submit = async ({ path, payload, reset, successTab }) => {
+  const submit = async ({ path, payload, reset, successTab, autoPrintReceipt }) => {
     setBusy(true);
     setMessage('');
     try {
@@ -319,7 +346,13 @@ export default function AcademyManagement() {
         body: JSON.stringify(payload)
       });
       setMessage(data.message || 'ذخیره شد.');
-      if (data.invoice) setPrintInvoice(data.invoice);
+      if (data.invoice) {
+        // A student paying is exactly the moment they need a receipt in hand -
+        // print it right away instead of only stashing it for someone to find
+        // later in the "بل‌های صادرشده" table.
+        if (autoPrintReceipt) printCurrentInvoice(data.invoice);
+        else setPrintInvoice(data.invoice);
+      }
       if (reset) reset();
       if (successTab) setActiveTab(successTab);
       await loadData();
@@ -483,6 +516,7 @@ export default function AcademyManagement() {
                 <Field label="تخلص"><input value={studentForm.lastName} onChange={(e) => setStudentForm({ ...studentForm, lastName: e.target.value })} /></Field>
                 <Field label="نام کامل"><input value={studentForm.fullName} onChange={(e) => setStudentForm({ ...studentForm, fullName: e.target.value })} /></Field>
                 <Field label="نام پدر"><input value={studentForm.fatherName} onChange={(e) => setStudentForm({ ...studentForm, fatherName: e.target.value })} /></Field>
+                <Field label="نمبر تذکره"><input value={studentForm.tazkiraNumber} onChange={(e) => setStudentForm({ ...studentForm, tazkiraNumber: e.target.value })} /></Field>
                 <Field label="جنسیت">
                   <select value={studentForm.gender} onChange={(e) => setStudentForm({ ...studentForm, gender: e.target.value })}>
                     <option value="">انتخاب</option>
@@ -606,10 +640,21 @@ export default function AcademyManagement() {
                 submit({ path: '/api/academy/registrations', payload: registrationForm, reset: () => setRegistrationForm(emptyRegistration) });
               }}>
                 <h2>ثبت‌نام شاگرد در کورس</h2>
+                <Field label="جستجوی شاگرد">
+                  <input
+                    value={registrationStudentSearch}
+                    onChange={(e) => setRegistrationStudentSearch(e.target.value)}
+                    placeholder="آی‌دی، نام، نام پدر یا نمبر تذکره"
+                  />
+                </Field>
                 <Field label="شاگرد">
                   <select required value={registrationForm.studentId} onChange={(e) => setRegistrationForm({ ...registrationForm, studentId: e.target.value })}>
-                    <option value="">انتخاب شاگرد</option>
-                    {students.map((item) => <option key={item._id} value={item._id}>{item.fullName} - {getStudentAsasNumber(item)}</option>)}
+                    <option value="">انتخاب شاگرد ({registrationStudentOptions.length} نتیجه)</option>
+                    {registrationStudentOptions.map((item) => (
+                      <option key={item._id} value={item._id}>
+                        {item.fullName} - {getStudentAsasNumber(item)}{item.fatherName ? ` - فرزند ${item.fatherName}` : ''}
+                      </option>
+                    ))}
                   </select>
                 </Field>
                 <Field label="کورس">
@@ -660,13 +705,27 @@ export default function AcademyManagement() {
             <div className="academy-grid">
               <form className="academy-panel academy-form" onSubmit={(event) => {
                 event.preventDefault();
-                submit({ path: '/api/academy/payments', payload: paymentForm, reset: () => setPaymentForm(emptyPayment), successTab: 'payments' });
+                submit({
+                  path: '/api/academy/payments',
+                  payload: paymentForm,
+                  reset: () => setPaymentForm(emptyPayment),
+                  successTab: 'payments',
+                  autoPrintReceipt: true
+                });
               }}>
                 <h2>ثبت پرداخت فیس</h2>
+                <p className="academy-form-hint">پس از ثبت، رسید پرداخت همین شاگرد خودکار برای چاپ باز می‌شود.</p>
+                <Field label="جستجوی شاگرد">
+                  <input
+                    value={paymentRegistrationSearch}
+                    onChange={(e) => setPaymentRegistrationSearch(e.target.value)}
+                    placeholder="آی‌دی، نام، نام پدر یا نمبر تذکره"
+                  />
+                </Field>
                 <Field label="ثبت‌نام">
                   <select required value={paymentForm.registrationId} onChange={(e) => setPaymentForm({ ...paymentForm, registrationId: e.target.value })}>
-                    <option value="">انتخاب ثبت‌نام</option>
-                    {activeRegistrations.map((item) => (
+                    <option value="">انتخاب ثبت‌نام ({paymentRegistrationOptions.length} نتیجه)</option>
+                    {paymentRegistrationOptions.map((item) => (
                       <option key={item._id} value={item._id}>
                         {text(item.studentId?.fullName)} - {text(item.courseId?.name)} - باقی {fmt(item.balance)}
                       </option>
@@ -685,16 +744,16 @@ export default function AcademyManagement() {
                 <button type="submit" disabled={busy}>ثبت پرداخت و صدور بل</button>
               </form>
               <div className="academy-panel">
-                <h2>بل‌های صادرشده</h2>
+                <h2>رسیدهای پرداخت / بل‌های صادرشده</h2>
                 <Table
-                  columns={['شماره بل', 'شاگرد', 'کورس', 'پرداخت', 'باقی', 'چاپ']}
+                  columns={['شماره', 'شاگرد', 'کورس', 'این پرداخت', 'باقی', 'رسید']}
                   rows={filteredInvoices.map((item) => [
                     item.invoiceNumber,
                     text(item.studentId?.fullName),
                     text(item.courseName),
                     `${fmt(item.paidAmount)} ${item.currency || currency}`,
                     fmt(item.remainingBalance),
-                    <button type="button" className="academy-inline-button" onClick={() => printCurrentInvoice(item)}>چاپ</button>
+                    <button type="button" className="academy-inline-button" onClick={() => printCurrentInvoice(item)}>چاپ رسید</button>
                   ])}
                 />
               </div>
@@ -852,6 +911,9 @@ export default function AcademyManagement() {
               <Field label="ایمیل"><input value={settings.email || ''} onChange={(e) => setSettings({ ...settings, email: e.target.value })} /></Field>
               <Field label="واحد پول"><input value={settings.currency || 'AFN'} onChange={(e) => setSettings({ ...settings, currency: e.target.value })} /></Field>
               <Field label="پیشوند بل"><input value={settings.invoicePrefix || 'ACD'} onChange={(e) => setSettings({ ...settings, invoicePrefix: e.target.value })} /></Field>
+              <Field label="پیشوند کد شاگرد">
+                <input value={settings.studentCodePrefix || 'AST'} onChange={(e) => setSettings({ ...settings, studentCodePrefix: e.target.value })} />
+              </Field>
               <Field label="متن پایین بل"><textarea value={settings.invoiceFooter || ''} onChange={(e) => setSettings({ ...settings, invoiceFooter: e.target.value })} /></Field>
               <button type="submit" disabled={busy}>ذخیره تنظیمات</button>
             </form>
@@ -861,7 +923,12 @@ export default function AcademyManagement() {
 
       <InvoicePrint invoice={printInvoice} settings={settings} />
       <ClassListPrint classItem={printClass} registrations={registrations} settings={settings} />
-      <StudentProfileModal student={selectedStudent} currency={currency} onClose={() => setSelectedStudent(null)} />
+      <StudentProfileModal
+        student={selectedStudent}
+        currency={currency}
+        onClose={() => setSelectedStudent(null)}
+        onPrintInvoice={printCurrentInvoice}
+      />
     </section>
   );
 }
@@ -890,30 +957,53 @@ function Table({ columns = [], rows = [] }) {
 
 function InvoicePrint({ invoice, settings }) {
   if (!invoice) return null;
+  const issuedAtLabel = invoice.issuedAt
+    ? new Date(invoice.issuedAt).toLocaleDateString('fa-AF-u-ca-persian')
+    : '';
+
+  // Same "two copies + cut line on one A4 sheet" pattern as the finance
+  // center's receipt print (student copy + office copy, so both sides keep
+  // a paper record from the same sheet) - just with this module's simpler
+  // fields, since the academy has no letterhead/logo settings of its own.
+  const renderCopy = (label) => (
+    <section className="academy-receipt-copy">
+      <div className="academy-receipt-copy-label">{label}</div>
+      <header>
+        <div>
+          <h2>{text(settings?.name, 'آموزشگاه')}</h2>
+          <p>{text(settings?.address, '')}</p>
+          <p>{text(settings?.phone, '')}</p>
+        </div>
+        <div className="academy-print-doc-meta">
+          <strong>رسید پرداخت - {invoice.invoiceNumber}</strong>
+          {issuedAtLabel ? <span>تاریخ: {issuedAtLabel}</span> : null}
+        </div>
+      </header>
+      <dl>
+        <div><dt>شاگرد</dt><dd>{text(invoice.studentId?.fullName)}</dd></div>
+        <div><dt>کورس</dt><dd>{text(invoice.courseName)}</dd></div>
+        <div><dt>صنف</dt><dd>{text(invoice.className)}</dd></div>
+        <div><dt>فیس اصلی</dt><dd>{fmt(invoice.feeAmount)} {invoice.currency}</dd></div>
+        <div><dt>تخفیف</dt><dd>{fmt(invoice.discountAmount)} {invoice.currency}</dd></div>
+        <div><dt>مبلغ این پرداخت</dt><dd>{fmt(invoice.paidAmount)} {invoice.currency}</dd></div>
+        <div><dt>روش پرداخت</dt><dd>{paymentMethodLabels[invoice.paymentMethod] || text(invoice.paymentMethod)}</dd></div>
+        {invoice.referenceNo ? <div><dt>شماره مرجع</dt><dd>{invoice.referenceNo}</dd></div> : null}
+        <div><dt>باقی‌مانده قبلی</dt><dd>{fmt(invoice.previousBalance)} {invoice.currency}</dd></div>
+        <div><dt>باقی‌مانده فعلی</dt><dd>{fmt(invoice.remainingBalance)} {invoice.currency}</dd></div>
+      </dl>
+      <footer>
+        <span>{text(settings?.invoiceFooter, 'تشکر از پرداخت شما')}</span>
+        <span>امضا: __________________</span>
+      </footer>
+    </section>
+  );
+
   return (
     <div className="academy-print">
-      <div className="academy-print-paper">
-        <header>
-          <div>
-            <h2>{text(settings?.name, 'آموزشگاه')}</h2>
-            <p>{text(settings?.address, '')}</p>
-            <p>{text(settings?.phone, '')}</p>
-          </div>
-          <strong>{invoice.invoiceNumber}</strong>
-        </header>
-        <dl>
-          <div><dt>شاگرد</dt><dd>{text(invoice.studentId?.fullName)}</dd></div>
-          <div><dt>کورس</dt><dd>{text(invoice.courseName)}</dd></div>
-          <div><dt>صنف</dt><dd>{text(invoice.className)}</dd></div>
-          <div><dt>فیس اصلی</dt><dd>{fmt(invoice.feeAmount)} {invoice.currency}</dd></div>
-          <div><dt>تخفیف</dt><dd>{fmt(invoice.discountAmount)} {invoice.currency}</dd></div>
-          <div><dt>پرداخت</dt><dd>{fmt(invoice.paidAmount)} {invoice.currency}</dd></div>
-          <div><dt>باقی‌مانده</dt><dd>{fmt(invoice.remainingBalance)} {invoice.currency}</dd></div>
-        </dl>
-        <footer>
-          <span>{text(settings?.invoiceFooter, 'تشکر از پرداخت شما')}</span>
-          <span>امضا: __________________</span>
-        </footer>
+      <div className="academy-receipt-print-sheet">
+        {renderCopy('نسخه شاگرد')}
+        <div className="academy-receipt-cut-line" aria-hidden="true"><span>محل برش</span></div>
+        {renderCopy('نسخه آموزشگاه')}
       </div>
     </div>
   );
@@ -960,7 +1050,7 @@ function ClassListPrint({ classItem, registrations = [], settings }) {
   );
 }
 
-function StudentProfileModal({ student, currency, onClose }) {
+function StudentProfileModal({ student, currency, onClose, onPrintInvoice }) {
   if (!student) return null;
   const totalPaid = (student.payments || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const totalBalance = (student.registrations || []).reduce((sum, item) => sum + Number(item.balance || 0), 0);
@@ -988,14 +1078,15 @@ function StudentProfileModal({ student, currency, onClose }) {
             fmt(item.balance)
           ])}
         />
-        <h3>بل‌ها</h3>
+        <h3>رسیدهای پرداخت</h3>
         <Table
-          columns={['شماره بل', 'کورس', 'پرداخت', 'باقی']}
+          columns={['شماره', 'کورس', 'پرداخت', 'باقی', 'رسید']}
           rows={(student.invoices || []).map((item) => [
             item.invoiceNumber,
             text(item.courseName),
             fmt(item.paidAmount),
-            fmt(item.remainingBalance)
+            fmt(item.remainingBalance),
+            <button type="button" className="academy-inline-button" onClick={() => onPrintInvoice?.(item)}>چاپ رسید</button>
           ])}
         />
       </section>

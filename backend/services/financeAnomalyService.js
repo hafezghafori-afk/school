@@ -8,6 +8,7 @@ require('../models/FeePayment');
 require('../models/FinanceRelief');
 require('../models/FinanceFeePlan');
 require('../models/FinanceBill');
+require('../models/FinanceRefund');
 
 const crypto = require('crypto');
 const StudentMembership = require('../models/StudentMembership');
@@ -16,6 +17,7 @@ const FeePayment = require('../models/FeePayment');
 const FinanceRelief = require('../models/FinanceRelief');
 const FinanceFeePlan = require('../models/FinanceFeePlan');
 const FinanceBill = require('../models/FinanceBill');
+const FinanceRefund = require('../models/FinanceRefund');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const {
   formatAfghanMonthYearLabel,
@@ -484,6 +486,7 @@ function buildMembershipFinanceAnomalies({
   payments = [],
   reliefs = [],
   bills = [],
+  refunds = [],
   admissionDocuments = [],
   feePlans = [],
   asOf = new Date(),
@@ -522,6 +525,13 @@ function buildMembershipFinanceAnomalies({
   const normalizedPayments = (Array.isArray(payments) ? payments : []).filter(Boolean);
   const normalizedReliefs = (Array.isArray(reliefs) ? reliefs : []).filter(Boolean);
   const normalizedBills = (Array.isArray(bills) ? bills : []).filter(Boolean);
+  const normalizedRefunds = (Array.isArray(refunds) ? refunds : []).filter(Boolean);
+  const documentsWithOpenRefund = new Set(
+    normalizedRefunds
+      .filter((refund) => normalizeText(refund?.status) !== 'rejected')
+      .flatMap((refund) => [normalizeNullableId(refund?.bill), normalizeNullableId(refund?.feeOrder)])
+      .filter(Boolean)
+  );
   const normalizedAdmissionDocuments = (Array.isArray(admissionDocuments) ? admissionDocuments : []).filter(Boolean);
   const openOrders = normalizedOrders.filter((item) => ['new', 'partial', 'overdue'].includes(normalizeText(item?.status)) && roundMoney(item?.outstandingAmount) > 0);
   const activeReliefs = normalizedReliefs.filter((item) => reliefIsActiveAt(item, now));
@@ -860,6 +870,55 @@ function buildMembershipFinanceAnomalies({
         }
       });
     }
+  } else {
+    // Membership already ended (dropped/transferred/expelled/graduated/...).
+    // A bill or order due on/after the month it ended that still shows money
+    // paid on it means the student was charged (and paid) for a period they
+    // were no longer enrolled in - that money needs a refund case, not a
+    // silent "paid" bill sitting in the books.
+    const membershipEndedAt = toDate(membershipItem?.endedAt);
+    if (membershipEndedAt) {
+      const postEndWindowStart = new Date(membershipEndedAt.getFullYear(), membershipEndedAt.getMonth() + 1, 1);
+      const postEndDocuments = [...normalizedBills, ...normalizedOrders].filter((document) => {
+        if (normalizeText(document?.status) === 'void') return false;
+        if (roundMoney(document?.amountPaid) <= 0) return false;
+        const dueDate = toDate(document?.dueDate);
+        if (!dueDate) return false;
+        return dueDate.getTime() >= postEndWindowStart.getTime();
+      });
+
+      postEndDocuments.forEach((document) => {
+        const documentId = normalizeNullableId(document?.id || document?._id);
+        if (documentId && documentsWithOpenRefund.has(documentId)) return;
+        const reference = normalizeText(document?.billNumber || document?.orderNumber || document?.title) || 'سند مالی';
+        const dueDate = toDate(document?.dueDate);
+        anomalies.push({
+          id: `payment-after-membership-end-${documentId || reference}`,
+          anomalyType: 'payment_after_membership_end',
+          severity: 'critical',
+          actionRequired: true,
+          title: 'پرداخت برای دوره بعد از ختم عضویت ثبت شده',
+          description: `${studentName} از عضویت خارج شده، اما ${reference} برای دوره‌ای بعد از آن مبلغ پرداخت‌شده نشان می‌دهد. این مبلغ باید بازپرداخت یا بررسی شود.`,
+          studentName,
+          studentUserId,
+          classTitle,
+          classId,
+          academicYearTitle,
+          academicYearId,
+          membershipId,
+          referenceNumber: reference,
+          amount: roundMoney(document?.amountPaid),
+          amountLabel: formatAmountLabel(document?.amountPaid, currency),
+          status: normalizeText(document?.status),
+          dueDate: dueDate?.toISOString() || null,
+          membershipEndedAt: membershipEndedAt.toISOString(),
+          at: dueDate?.toISOString() || membershipEndedAt.toISOString(),
+          billId: document?.documentKind === 'bill' ? documentId : null,
+          orderId: document?.documentKind === 'order' ? documentId : null,
+          tags: ['membership_ended', 'refund_review', document?.documentKind || 'document']
+        });
+      });
+    }
   }
 
   const ordered = sortAnomalies(anomalies);
@@ -878,6 +937,7 @@ function formatMembershipLite(doc) {
     status: normalizeText(item.status),
     isCurrent: Boolean(item.isCurrent),
     enrolledAt: item.enrolledAt || null,
+    endedAt: item.endedAt || item.leftAt || null,
     createdAt: item.createdAt || null,
     student: item.student ? {
       userId: normalizeNullableId(item.student?._id || item.student),
@@ -1116,6 +1176,7 @@ async function buildFinanceAnomalyReport({
   const billFilter = { status: { $ne: 'void' } };
   const paymentFilter = { status: { $in: ['pending', 'approved'] } };
   const reliefFilter = { status: 'active', feeOrderId: null };
+  const refundFilter = { status: { $in: ['pending_review', 'approved'] } };
   const feePlanFilter = { isActive: true, lifecycleStatus: 'active' };
 
   if (normalizeNullableId(schoolId)) {
@@ -1124,6 +1185,7 @@ async function buildFinanceAnomalyReport({
     billFilter.schoolId = schoolId;
     paymentFilter.schoolId = schoolId;
     reliefFilter.schoolId = schoolId;
+    refundFilter.schoolId = schoolId;
     feePlanFilter.schoolId = schoolId;
   }
 
@@ -1132,12 +1194,14 @@ async function buildFinanceAnomalyReport({
     orderFilter.studentMembershipId = studentMembershipId;
     billFilter.studentMembershipId = studentMembershipId;
     reliefFilter.studentMembershipId = studentMembershipId;
+    refundFilter.studentMembershipId = studentMembershipId;
   }
   if (normalizeNullableId(classId)) {
     membershipFilter.classId = classId;
     orderFilter.classId = classId;
     billFilter.classId = classId;
     reliefFilter.classId = classId;
+    refundFilter.classId = classId;
     feePlanFilter.classId = classId;
   }
   if (normalizeNullableId(academicYearId)) {
@@ -1145,6 +1209,7 @@ async function buildFinanceAnomalyReport({
     orderFilter.academicYearId = academicYearId;
     billFilter.academicYearId = academicYearId;
     reliefFilter.academicYearId = academicYearId;
+    refundFilter.academicYearId = academicYearId;
     feePlanFilter.academicYearId = academicYearId;
   }
 
@@ -1158,7 +1223,7 @@ async function buildFinanceAnomalyReport({
     Object.assign(paymentFilter, buildPaymentOrderLinkFilter(scopedPaymentOrders.map((item) => item?._id).filter(Boolean)));
   }
 
-  const [memberships, orders, bills, payments, reliefs, feePlans] = await Promise.all([
+  const [memberships, orders, bills, payments, reliefs, refunds, feePlans] = await Promise.all([
     StudentMembership.find(membershipFilter)
       .populate('student', 'name email')
       .populate('studentId', 'fullName admissionNo')
@@ -1213,6 +1278,10 @@ async function buildFinanceAnomalyReport({
       .populate('classId', 'title code gradeLevel section')
       .populate('academicYearId', 'title code')
       .sort({ endDate: 1, createdAt: -1 })
+      .limit(sourceLimit)
+      .lean(),
+    FinanceRefund.find(refundFilter)
+      .select('studentMembershipId bill feeOrder status')
       .limit(sourceLimit)
       .lean(),
     FinanceFeePlan.find(feePlanFilter)
@@ -1323,6 +1392,19 @@ async function buildFinanceAnomalyReport({
     reliefMap.set(membershipId, current);
   });
 
+  const refundMap = new Map();
+  refunds.forEach((item) => {
+    const membershipId = normalizeNullableId(item?.studentMembershipId);
+    if (!membershipId) return;
+    const current = refundMap.get(membershipId) || [];
+    current.push({
+      bill: normalizeNullableId(item?.bill),
+      feeOrder: normalizeNullableId(item?.feeOrder),
+      status: normalizeText(item?.status)
+    });
+    refundMap.set(membershipId, current);
+  });
+
   const studentAdmissionDocumentMap = new Map();
   const pushStudentAdmissionDocument = (item = null) => {
     if (!item) return;
@@ -1360,6 +1442,7 @@ async function buildFinanceAnomalyReport({
       admissionDocuments,
       payments: paymentMap.get(membershipId) || [],
       reliefs: reliefMap.get(membershipId) || [],
+      refunds: refundMap.get(membershipId) || [],
       feePlans,
       asOf,
       limit: Math.max(Number(limit) || 120, 50)

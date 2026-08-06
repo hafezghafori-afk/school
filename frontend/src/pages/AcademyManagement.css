@@ -36,8 +36,10 @@
 .academy-topbar-actions,
 .academy-tabs {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 8px;
+  padding-bottom: 2px;
 }
 
 .academy-topbar-actions a,
@@ -54,6 +56,20 @@
   cursor: pointer;
 }
 
+/* App.css has a global "button { width: 100% }" rule for the public
+   site's stacked form buttons. It also wins here unless overridden, and
+   with flex-basis:auto that width becomes each button's flex-basis - so
+   every topbar/tab/inline button stretched to fill its whole row instead
+   of sizing to its own label. .academy-form button is deliberately left
+   out: those submit buttons sit at the bottom of a single-column form and
+   are meant to span it. */
+.academy-topbar-actions a,
+.academy-topbar-actions button,
+.academy-tabs button,
+.academy-inline-button {
+  width: auto;
+}
+
 .academy-topbar-actions a {
   background: rgba(8, 145, 178, 0.2);
 }
@@ -63,7 +79,17 @@
 }
 
 .academy-tabs button {
-  min-width: 112px;
+  /* A global "button { width: 100% }" rule in App.css (meant for the
+     public site's stacked form buttons) otherwise wins here too - with
+     flex-basis:auto, that width becomes each tab's flex-basis, so every
+     button stretched to fill the whole row instead of sizing to its
+     label. */
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 0;
+  white-space: nowrap;
+  padding: 9px 12px;
+  font-size: 13px;
 }
 
 .academy-tabs button.active {
@@ -170,6 +196,12 @@
 .academy-form {
   display: grid;
   gap: 12px;
+}
+
+.academy-form-hint {
+  margin: -6px 0 0;
+  font-size: 12.5px;
+  color: rgba(236, 254, 255, 0.66);
 }
 
 .academy-settings-form {
@@ -327,8 +359,52 @@
 }
 
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+
+  html,
+  body,
+  #root {
+    width: 100%;
+    min-height: 0;
+    margin: 0;
+    background: #fff;
+  }
+
   body * {
     visibility: hidden;
+  }
+
+  /* This page is rendered inside the admin dashboard shell (App.jsx),
+     which can also mount an API-health status banner as a sibling of
+     .academy-page inside .dashboard-content. Collapsing only
+     .academy-page's own children (below) missed that banner - still
+     invisible but still taking up its own layout height, which was just
+     enough extra height to spill the one-page receipt onto a second,
+     otherwise-blank page. Collapse that level too. */
+  .dashboard-content > :not(.academy-page) {
+    display: none !important;
+  }
+
+  /* visibility:hidden keeps every hidden element's own layout height, so
+     without this the still-mounted (just invisible) tab content - e.g. a
+     long student/payment table - kept the printable page as tall as that
+     content, pushing the receipt onto a second page even though nothing
+     visible was there. Collapsing every other direct child of the page to
+     display:none (same fix already used for the finance center's print
+     sheet) removes that extra height entirely. */
+  .academy-page > :not(.academy-print) {
+    display: none !important;
+  }
+
+  .academy-page {
+    display: block !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    overflow: visible !important;
   }
 
   .academy-print,
@@ -338,9 +414,13 @@
 
   .academy-print {
     display: block;
-    position: absolute;
-    inset: 0;
-    padding: 24px;
+    /* static instead of absolute: with the other siblings now collapsed to
+       display:none above, this can just be the page's one real block of
+       content sized to what it actually contains, instead of floating
+       pinned to the (now irrelevant) viewport corner. */
+    position: static;
+    inset: auto;
+    padding: 0;
     background: #fff;
     color: #111827;
   }
@@ -356,7 +436,9 @@
   }
 
   .academy-print-paper header,
-  .academy-print-paper footer {
+  .academy-print-paper footer,
+  .academy-receipt-copy header,
+  .academy-receipt-copy footer {
     display: flex;
     justify-content: space-between;
     gap: 16px;
@@ -364,27 +446,48 @@
     padding-bottom: 14px;
   }
 
-  .academy-print-paper footer {
+  .academy-print-doc-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    text-align: left;
+  }
+
+  .academy-print-doc-meta strong {
+    font-size: 15px;
+  }
+
+  .academy-print-doc-meta span {
+    font-size: 12px;
+    color: #374151;
+  }
+
+  .academy-print-paper footer,
+  .academy-receipt-copy footer {
     border-top: 1px solid #111827;
     border-bottom: 0;
     padding-top: 14px;
     margin-top: 18px;
   }
 
-  .academy-print-paper dl {
+  .academy-print-paper dl,
+  .academy-receipt-copy dl {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 10px 18px;
     margin: 18px 0;
   }
 
-  .academy-print-paper div {
+  .academy-print-paper div,
+  .academy-receipt-copy div {
     display: flex;
     justify-content: space-between;
     gap: 12px;
   }
 
-  .academy-print-paper dt {
+  .academy-print-paper dt,
+  .academy-receipt-copy dt {
     font-weight: 700;
   }
 
@@ -399,5 +502,104 @@
     border: 1px solid #111827;
     padding: 8px;
     text-align: right;
+  }
+
+  /* Two copies of the same receipt (student + academy office) on one A4
+     sheet with a cut line between, same idea as the finance center's
+     receipt print. */
+  .academy-receipt-print-sheet {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) 5mm minmax(0, 1fr);
+    gap: 0;
+    width: 100%;
+    max-width: 186mm;
+    /* A few mm under the full 273mm printable height (297mm A4 minus the
+       12mm @page margin on each side) on purpose: real print engines round
+       mm-based layout against px-based borders/line-heights slightly
+       differently than an on-screen render does, and sizing to the exact
+       limit left just enough overflow in practice to spill onto a second,
+       otherwise-blank page. This buffer absorbs that rounding. */
+    height: 268mm;
+    min-height: 268mm;
+    max-height: 268mm;
+    margin: 0 auto;
+    direction: rtl;
+    overflow: hidden;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .academy-receipt-copy {
+    min-width: 0;
+    min-height: 0;
+    box-sizing: border-box;
+    padding: 8px 12px;
+    border: 1px solid #111827;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    font-size: 9.5pt;
+    line-height: 1.3;
+    overflow: hidden;
+    font-family: var(--font-persian-ui);
+  }
+
+  .academy-receipt-copy-label {
+    margin-bottom: 4px;
+    font-size: 8pt;
+    font-weight: 700;
+    color: #374151;
+  }
+
+  .academy-receipt-copy header,
+  .academy-receipt-copy footer {
+    padding-bottom: 6px;
+    margin-bottom: 6px;
+  }
+
+  .academy-receipt-copy footer {
+    padding-top: 6px;
+    margin-top: 8px;
+  }
+
+  .academy-receipt-copy dl {
+    margin: 8px 0;
+    gap: 6px 14px;
+  }
+
+  .academy-receipt-copy h2 {
+    margin: 0 0 2px;
+    font-size: 12pt;
+  }
+
+  .academy-receipt-copy p {
+    margin: 0;
+    font-size: 8pt;
+  }
+
+  .academy-receipt-cut-line {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 5mm;
+    color: #6b7280;
+    font-size: 7pt;
+    line-height: 1;
+  }
+
+  .academy-receipt-cut-line::before {
+    position: absolute;
+    right: 0;
+    left: 0;
+    top: 50%;
+    border-top: 0.25mm dashed #9ca3af;
+    content: '';
+  }
+
+  .academy-receipt-cut-line span {
+    position: relative;
+    z-index: 1;
+    padding: 0 3mm;
+    background: #fff;
   }
 }

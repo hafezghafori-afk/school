@@ -55,6 +55,7 @@ const {
 const { deriveFinanceOrderStatus } = require('../utils/financeLineItems');
 const {
   buildAnnualGovernmentFinanceReport,
+  buildMonthlyGovernmentFinanceReport,
   buildQuarterlyGovernmentFinanceReport
 } = require('./governmentFinanceReportService');
 
@@ -148,6 +149,14 @@ const REPORT_DEFINITIONS = Object.freeze([
     description: 'خلاصه preview/apply تراکنش‌های ارتقا'
   },
   {
+    key: 'government_finance_monthly',
+    title: 'گزارش مالی دولت - ماهوار',
+    category: 'finance',
+    requiredPermissions: ['manage_finance'],
+    supportedFilters: ['financialYearId', 'academicYearId', 'monthNumber', 'classId', 'dateFrom', 'dateTo'],
+    description: 'خلاصه مالی رسمی دولت در سطح یک ماه مالی'
+  },
+  {
     key: 'government_finance_quarterly',
     title: 'گزارش مالی دولت - ربعوار',
     category: 'finance',
@@ -209,6 +218,7 @@ function normalizeFilters(input = {}) {
     termId: normalizeNullableId(input.termId || input.term || input.assessmentPeriodId),
     examId: normalizeNullableId(input.examId || input.sessionId),
     month: normalizeText(input.month || input.monthLabel || input.periodLabel),
+    monthNumber: Math.max(0, Math.min(12, Number(input.monthNumber) || 0)) || null,
     quarter: Math.max(0, Math.min(4, Number(input.quarter) || 0)) || null,
     classId: normalizeNullableId(input.classId || input.schoolClassId),
     studentId: normalizeNullableId(input.studentId),
@@ -1729,6 +1739,39 @@ async function buildPromotionOverviewReport(filters) {
   });
 }
 
+async function buildGovernmentFinanceMonthlyReport(filters) {
+  const definition = getReportDefinition('government_finance_monthly');
+  const payload = await buildMonthlyGovernmentFinanceReport({ ...filters, month: filters.monthNumber });
+  const rows = (payload.rows || []).map((item) => ({
+    classId: normalizeText(item.classId),
+    classTitle: normalizeText(item.classTitle),
+    totalIncome: Number(item.totalIncome || 0),
+    totalExpense: Number(item.totalExpense || 0),
+    balance: Number(item.balance || 0),
+    paymentCount: Number(item.paymentCount || 0),
+    expenseCount: Number(item.expenseCount || 0)
+  }));
+
+  return buildBaseReport(definition, filters, {
+    columns: [
+      { key: 'classTitle', label: 'صنف' },
+      { key: 'totalIncome', label: 'عواید' },
+      { key: 'totalExpense', label: 'مصارف' },
+      { key: 'balance', label: 'بیلانس' },
+      { key: 'paymentCount', label: 'تعداد پرداخت‌ها' },
+      { key: 'expenseCount', label: 'تعداد مصارف' }
+    ],
+    rows,
+    summary: payload.summary || {},
+    meta: {
+      totalRows: rows.length,
+      ...(payload.meta || {}),
+      rangeStart: payload.range?.startDate ? new Date(payload.range.startDate).toISOString() : '',
+      rangeEnd: payload.range?.endDate ? new Date(payload.range.endDate).toISOString() : ''
+    }
+  });
+}
+
 async function buildGovernmentFinanceQuarterlyReport(filters) {
   const definition = getReportDefinition('government_finance_quarterly');
   const payload = await buildQuarterlyGovernmentFinanceReport(filters);
@@ -1834,6 +1877,8 @@ async function runReport(reportKey, rawFilters = {}) {
       return buildTimetableOverviewReport(filters);
     case 'promotion_overview':
       return buildPromotionOverviewReport(filters);
+    case 'government_finance_monthly':
+      return buildGovernmentFinanceMonthlyReport(filters);
     case 'government_finance_quarterly':
       return buildGovernmentFinanceQuarterlyReport(filters);
     case 'government_finance_annual':

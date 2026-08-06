@@ -2996,6 +2996,20 @@ const FinanceReliefMock = {
   }
 };
 
+const financeRefunds = [];
+const FinanceRefundMock = {
+  find(filter = {}) {
+    return new MockQuery(() => (
+      financeRefunds.filter((item) => matchesFilter(item, filter)).map((item) => clone(item))
+    ));
+  },
+  findOne(filter = {}) {
+    return new MockQuery(() => (
+      clone(financeRefunds.find((item) => matchesFilter(item, filter)) || null)
+    ));
+  }
+};
+
 const StudentCoreMock = {
   find() {
     return new MockQuery(() => []);
@@ -4971,6 +4985,7 @@ function loadFinanceRouter() {
     if (isFinanceRoute && request === '../models/FeeOrder') return FeeOrderMock;
     if (isFinanceRoute && request === '../models/FeePayment') return FeePaymentMock;
     if (isFinanceRoute && request === '../models/FinanceRelief') return FinanceReliefMock;
+    if (isFinanceRoute && request === '../models/FinanceRefund') return FinanceRefundMock;
     if (isFinanceRoute && request === '../utils/studentMembershipLookup') return studentMembershipLookupMock;
     if (isFinanceRoute && request === '../utils/financeNumberSequence') {
       return {
@@ -5072,7 +5087,10 @@ function loadFinanceRouter() {
     if (isFinanceAnomalyService && request === '../models/FinanceRelief') return FinanceReliefMock;
     if (isFinanceAnomalyService && request === '../models/FinanceFeePlan') return FinanceFeePlanMock;
     if (isFinanceAnomalyService && request === '../models/FinanceBill') return FinanceBillMock;
+    if (isFinanceAnomalyService && request === '../models/FinanceRefund') return FinanceRefundMock;
     if (isFinanceAdminActionService && request === '../models/FinanceBill') return FinanceBillMock;
+    if (isFinanceAdminActionService && request === '../models/FinanceRefund') return FinanceRefundMock;
+    if (isFinanceAdminActionService && request === '../models/FinancialYear') return FinancialYearMock;
     if (isFinanceAdminActionService && request === '../models/FinanceReceipt') return FinanceReceiptMock;
     if (isFinanceAdminActionService && request === '../models/FinanceMonthClose') return FinanceMonthCloseMock;
     if (isFinanceAdminActionService && request === '../models/StudentCore') return StudentCoreMock;

@@ -174,6 +174,18 @@ const buildStudentOptionList = ({
 
 const toSafeNumber = (value) => Number(value || 0) || 0;
 const RECEIPT_PAGE_SIZE = 10;
+const EXPENSE_PAGE_SIZE = 10;
+
+// Quick-tools dropdown in the Payments tab - these four panels used to
+// render fully inline (one after another) inside the receipt-inbox card,
+// making that card very long. Now only the selected one mounts, keyed off
+// its existing data-testid so we can scroll it into view once it renders.
+const PAYMENT_TOOL_OPTIONS = [
+  { value: 'class_bulk_approval', label: 'تأیید نهایی گروهی رسیدها بر اساس صنف', anchorTestId: 'class-payment-approval-panel' },
+  { value: 'admission_bulk_correction', label: 'اصلاح گروهی مبلغ رسیدهای داخله', anchorTestId: 'admission-receipt-correction-panel' },
+  { value: 'payment_scope_repair', label: 'ترمیم تفکیک پرداخت فیس و داخله', anchorTestId: 'payment-scope-repair-panel' },
+  { value: 'refund_requests', label: 'درخواست‌های بازپرداخت', anchorTestId: 'finance-refunds-card' }
+];
 
 const getFeePlanBillPeriodType = (plan = {}) => (
   String(plan?.billingFrequency || plan?.periodType || '').trim().toLowerCase() === 'monthly'
@@ -825,7 +837,30 @@ const FINANCE_ANOMALY_UI_LABELS = {
   admission_missing: 'بل داخله صادر نشده',
   planned_fee_missing: 'بل فیس صادر نشده',
   duplicate_fee_bill: 'بل تکراری',
-  fee_underbilled: 'مبلغ کمتر از پلان'
+  fee_underbilled: 'مبلغ کمتر از پلان',
+  payment_after_membership_end: 'پرداخت بعد از ختم عضویت'
+};
+
+const FINANCE_REFUND_REASON_LABELS = {
+  membership_ended: 'ختم عضویت',
+  overpayment: 'بیش‌پرداخت',
+  billing_error: 'اشتباه در بل',
+  other: 'سایر'
+};
+
+const FINANCE_REFUND_STATUS_LABELS = {
+  pending_review: 'در انتظار بررسی',
+  approved: 'تاییدشده',
+  rejected: 'ردشده',
+  paid: 'پرداخت‌شده'
+};
+
+const FINANCE_REFUND_METHOD_LABELS = {
+  cash: 'نقدی',
+  bank_transfer: 'حواله بانکی',
+  hawala: 'حواله سنتی',
+  credit_next_bill: 'اعتبار برای بل بعدی',
+  other: 'سایر'
 };
 
 const FINANCE_ANOMALY_WORKFLOW_LABELS = {
@@ -1070,6 +1105,7 @@ const FINANCE_SECTION_LABELS = {
   overview: 'داشبورد',
   payments: 'پرداخت‌ها',
   orders: 'بل‌ها و تعهدات',
+  expenses: 'مصارف',
   discounts: 'تخفیف و معافیت',
   anomalies: 'ناهنجاری‌ها',
   reports: 'گزارش‌ها',
@@ -1080,10 +1116,37 @@ const FINANCE_SECTION_DESCRIPTIONS = {
   overview: 'نمای کلان از وصول، بدهی‌های سررسید گذشته، صندوق و وضعیت عملیات مالی.',
   payments: 'ثبت پرداخت، بررسی رسیدها و مدیریت صندوق روزانه.',
   orders: 'صدور بل، بازبینی بدهی‌ها و مدیریت تعهدات مالی متعلمین.',
+  expenses: 'ثبت، بررسی، تایید و باطل‌سازی مصارف مکتب - سازمان‌یافته بر اساس ماه.',
   discounts: 'تخفیف‌ها، معافیت‌ها و رجیستر مزایای مالی متعلمین.',
   anomalies: 'کنترل هوشمند مغایرت‌ها؛ بل صادرنشده، بل تکراری، مبلغ کمتر از پلان و هشدارهای نیازمند اقدام.',
   reports: 'گزارش‌های تحلیلی، کاش‌فلو، بدهکاران و خروجی مدیریتی.',
   settings: 'پلان فیس، بستن ماه مالی، یادآوری و پیوند به فرماندهی دولت.'
+};
+
+const EXPENSE_STATUS_LABELS = {
+  draft: 'پیش‌نویس',
+  pending_review: 'در انتظار بررسی',
+  approved: 'تاییدشده',
+  rejected: 'ردشده',
+  void: 'باطل'
+};
+
+const EXPENSE_STAGE_LABELS = {
+  draft: 'پیش‌نویس',
+  finance_manager_review: 'بررسی مدیر مالی',
+  finance_lead_review: 'بررسی آمریت مالی',
+  general_president_review: 'بررسی ریاست عمومی',
+  completed: 'تکمیل‌شده',
+  rejected: 'ردشده',
+  void: 'باطل'
+};
+
+const EXPENSE_PAYMENT_METHOD_LABELS = {
+  cash: 'نقدی',
+  bank_transfer: 'حواله بانکی',
+  hawala: 'حواله سنتی',
+  manual: 'دستی',
+  other: 'سایر'
 };
 
 const OPEN_ORDER_STATUSES = new Set(['new', 'partial', 'overdue']);
@@ -1595,6 +1658,7 @@ export default function AdminFinance() {
   const { settings: siteSettings } = useSiteSettings();
   const [summary, setSummary] = useState(null);
   const [financeOverview, setFinanceOverview] = useState(null);
+  const [monthlyTrend, setMonthlyTrend] = useState([]);
   const [financeOverviewLoading, setFinanceOverviewLoading] = useState(false);
   const [financeOverviewRange, setFinanceOverviewRange] = useState(getDefaultFinanceDashboardRange);
   const [students, setStudents] = useState([]);
@@ -1688,6 +1752,38 @@ export default function AdminFinance() {
     snoozedUntil: '',
     note: ''
   });
+  const [refunds, setRefunds] = useState([]);
+  const [selectedRefundId, setSelectedRefundId] = useState('');
+  const [refundStatusFilter, setRefundStatusFilter] = useState('all');
+  const [refundSearchTerm, setRefundSearchTerm] = useState('');
+  const [refundReviewNote, setRefundReviewNote] = useState('');
+  const [refundPayForm, setRefundPayForm] = useState({ refundMethod: 'cash', proofReference: '', accountId: '' });
+  const [manualRefundForm, setManualRefundForm] = useState({ feeOrderId: '', amount: '', reason: 'membership_ended', reasonNote: '' });
+  const [expenses, setExpenses] = useState([]);
+  const [expenseCategories, setExpenseCategories] = useState([]);
+  const [treasuryAccounts, setTreasuryAccounts] = useState([]);
+  const [expenseStatusFilter, setExpenseStatusFilter] = useState('all');
+  const [expenseCategoryFilter, setExpenseCategoryFilter] = useState('all');
+  const [expenseSearchTerm, setExpenseSearchTerm] = useState('');
+  const [expensePage, setExpensePage] = useState(1);
+  const [expenseForm, setExpenseForm] = useState({
+    category: '',
+    subCategory: '',
+    amount: '',
+    currency: 'AFN',
+    expenseDate: toInputDate(new Date()),
+    academicYearId: '',
+    classId: '',
+    paymentMethod: 'manual',
+    treasuryAccountId: '',
+    vendorName: '',
+    referenceNo: '',
+    note: '',
+    submitForReview: true
+  });
+  const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [showAddExpenseCategory, setShowAddExpenseCategory] = useState(false);
+  const [newExpenseCategoryForm, setNewExpenseCategoryForm] = useState({ label: '' });
   const [admissionBatchForm, setAdmissionBatchForm] = useState({
     classId: '',
     mode: 'open',
@@ -1735,6 +1831,11 @@ export default function AdminFinance() {
   const [classPaymentApprovalRefreshKey, setClassPaymentApprovalRefreshKey] = useState(0);
   const [message, setMessageState] = useState('');
   const setMessage = (value = '') => setMessageState(localizeSystemMessage(value));
+  useEffect(() => {
+    if (!message) return undefined;
+    const timer = setTimeout(() => setMessageState(''), 6000);
+    return () => clearTimeout(timer);
+  }, [message]);
   const [financeDataErrors, setFinanceDataErrors] = useState({ orders: '', payments: '' });
   const [busy, setBusy] = useState(false);
   const [activeSchoolContext, setActiveSchoolContext] = useState(null);
@@ -1745,6 +1846,7 @@ export default function AdminFinance() {
   const [receiptAcademicYearFilter, setReceiptAcademicYearFilter] = useState('all');
   const [receiptClassFilter, setReceiptClassFilter] = useState('all');
   const [receiptPage, setReceiptPage] = useState(1);
+  const [activePaymentTool, setActivePaymentTool] = useState('');
   const [selectedReceiptId, setSelectedReceiptId] = useState('');
   const [selectedReceiptDetail, setSelectedReceiptDetail] = useState(null);
   const [receiptFollowUpForm, setReceiptFollowUpForm] = useState({
@@ -2058,6 +2160,11 @@ export default function AdminFinance() {
       hint: `${openBillsCount} بدهی باز`
     },
     {
+      key: 'expenses',
+      label: FINANCE_SECTION_LABELS.expenses,
+      hint: `${expenses.filter((item) => item.status === 'pending_review').length} در انتظار`
+    },
+    {
       key: 'discounts',
       label: FINANCE_SECTION_LABELS.discounts,
       hint: `${activeFinanceReliefCount} ثبت فعال`
@@ -2077,7 +2184,7 @@ export default function AdminFinance() {
       label: FINANCE_SECTION_LABELS.settings,
       hint: `${feePlans.length} پلان فیس`
     }
-  ]), [summary?.pendingReceipts, pendingReceipts.length, openBillsCount, activeFinanceReliefCount, anomalies.length, anomalySummary?.total, financeOverview?.byClass?.length, feePlans.length]);
+  ]), [summary?.pendingReceipts, pendingReceipts.length, openBillsCount, expenses, activeFinanceReliefCount, anomalies.length, anomalySummary?.total, financeOverview?.byClass?.length, feePlans.length]);
   const indexedStudents = useMemo(() => (
     students.map((student) => ({
       student,
@@ -3015,6 +3122,7 @@ export default function AdminFinance() {
     critical: overviewDebtors.filter((row) => row?.risk === 'critical').length
   }), [overviewDebtors]);
   const financeOverviewKpis = financeOverview?.kpis || {};
+  const openRefundItems = refunds.filter((item) => ['pending_review', 'approved'].includes(String(item?.status || '')));
   const financeSmartCards = [
     {
       key: 'issued',
@@ -3079,6 +3187,14 @@ export default function AdminFinance() {
       meta: `${fmt(financeOverviewKpis?.overdue?.count || 0)} بل`,
       tone: 'orange',
       section: 'reports'
+    },
+    {
+      key: 'refunds',
+      label: 'بازپرداخت‌های باز',
+      value: openRefundItems.reduce((sum, item) => sum + Number(item?.amount || 0), 0),
+      meta: `${fmt(openRefundItems.length)} مورد`,
+      tone: 'rose',
+      section: 'payments'
     }
   ];
 
@@ -3216,7 +3332,12 @@ export default function AdminFinance() {
         deliveryRecoveryQueueData,
         documentArchiveData,
         auditTimelineData,
-        anomaliesData
+        anomaliesData,
+        refundsData,
+        monthlyTrendData,
+        expensesData,
+        expenseCategoriesData,
+        treasuryAnalyticsData
       ] = await Promise.all([
         safeFetchJson(`${API_BASE}/api/finance/admin/reference-data`, { success: false, students: [], classes: [], academicYears: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/student-memberships`, { success: true, items: [] }),
@@ -3237,7 +3358,12 @@ export default function AdminFinance() {
         Promise.resolve({ success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/document-archive?limit=12`, { success: true, items: [] }),
         safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/audit-timeline'), { success: true, items: [], summary: null }),
-        safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/anomalies'), { success: true, items: [], summary: null })
+        safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/anomalies'), { success: true, items: [], summary: null }),
+        safeFetchJson(`${API_BASE}/api/student-finance/refunds?limit=200`, { success: true, items: [] }),
+        safeFetchJson(`${API_BASE}/api/finance/admin/dashboard/monthly-trend?months=12`, { success: true, months: [] }),
+        safeFetchJson(`${API_BASE}/api/finance/admin/expenses`, { success: true, items: [] }),
+        safeFetchJson(`${API_BASE}/api/finance/admin/expense-categories`, { success: true, items: [] }),
+        safeFetchJson(`${API_BASE}/api/finance/admin/treasury/analytics`, { success: true, analytics: null })
       ]);
 
       if (!refData?.success) {
@@ -3299,6 +3425,21 @@ export default function AdminFinance() {
       if (shouldApplyPaymentWorkspace && anomaliesData?.success) {
         setAnomalies(anomaliesData.items || []);
         setAnomalySummary(anomaliesData.summary || null);
+      }
+      if (shouldApplyPaymentWorkspace && refundsData?.success) {
+        setRefunds(refundsData.items || []);
+      }
+      if (shouldApplyPaymentWorkspace && monthlyTrendData?.success) {
+        setMonthlyTrend(monthlyTrendData.months || []);
+      }
+      if (shouldApplyPaymentWorkspace && expensesData?.success) {
+        setExpenses(expensesData.items || []);
+      }
+      if (shouldApplyPaymentWorkspace && expenseCategoriesData?.success) {
+        setExpenseCategories(expenseCategoriesData.items || []);
+      }
+      if (shouldApplyPaymentWorkspace && treasuryAnalyticsData?.success) {
+        setTreasuryAccounts(treasuryAnalyticsData.analytics?.accounts || []);
       }
 
       // Finance operation forms must follow current memberships, not every student user in the system.
@@ -3447,7 +3588,10 @@ export default function AdminFinance() {
         anomaliesData,
         discountRegistryData,
         reliefsData,
-        exemptionsData
+        exemptionsData,
+        refundsData,
+        monthlyTrendData,
+        expensesData
       ] = await Promise.all([
         safeFetchJson(`${API_BASE}/api/finance/admin/summary`, { success: false, summary: null, topDebtors: [] }),
         safeFetchJson(buildFinanceOverviewUrl(), { success: false, overview: null }),
@@ -3464,7 +3608,10 @@ export default function AdminFinance() {
           : Promise.resolve(null),
         includeRegistries
           ? safeFetchJson(`${API_BASE}/api/student-finance/exemptions?status=active`, { success: false, items: [] })
-          : Promise.resolve(null)
+          : Promise.resolve(null),
+        safeFetchJson(`${API_BASE}/api/student-finance/refunds?limit=200`, { success: false, items: [] }),
+        safeFetchJson(`${API_BASE}/api/finance/admin/dashboard/monthly-trend?months=12`, { success: false, months: [] }),
+        safeFetchJson(`${API_BASE}/api/finance/admin/expenses`, { success: false, items: [] })
       ]);
 
       if (refreshId !== paymentWorkspaceRefreshIdRef.current) return false;
@@ -3505,6 +3652,9 @@ export default function AdminFinance() {
       }
       if (reliefsData?.success) setReliefs(reliefsData.items || []);
       if (exemptionsData?.success) setExemptions(exemptionsData.items || []);
+      if (refundsData?.success) setRefunds(refundsData.items || []);
+      if (monthlyTrendData?.success) setMonthlyTrend(monthlyTrendData.months || []);
+      if (expensesData?.success) setExpenses(expensesData.items || []);
       return true;
     } finally {
       if (refreshId === paymentWorkspaceRefreshIdRef.current) {
@@ -4000,6 +4150,14 @@ export default function AdminFinance() {
   }, [receiptTotalPages]);
 
   useEffect(() => {
+    if (!activePaymentTool) return;
+    const anchor = PAYMENT_TOOL_OPTIONS.find((item) => item.value === activePaymentTool);
+    if (!anchor) return;
+    const el = document.querySelector(`[data-testid="${anchor.anchorTestId}"]`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [activePaymentTool]);
+
+  useEffect(() => {
     if (!paginatedReceipts.length) {
       if (selectedReceiptId) setSelectedReceiptId('');
       setSelectedReceiptDetail(null);
@@ -4306,6 +4464,171 @@ export default function AdminFinance() {
     || visibleAnomalies[0]
     || null
   ), [visibleAnomalies, anomalies, selectedAnomalyId]);
+
+  const filteredRefunds = useMemo(() => {
+    const term = refundSearchTerm.trim().toLowerCase();
+    return refunds.filter((item) => {
+      if (refundStatusFilter !== 'all' && String(item?.status || '') !== refundStatusFilter) return false;
+      if (!term) return true;
+      const haystack = [
+        item?.refundNumber,
+        item?.student?.name,
+        item?.bill?.billNumber,
+        item?.feeOrder?.orderNumber
+      ].map((value) => String(value || '').toLowerCase()).join(' ');
+      return haystack.includes(term);
+    });
+  }, [refunds, refundStatusFilter, refundSearchTerm]);
+
+  const selectedRefund = useMemo(() => {
+    const targetId = String(selectedRefundId || '');
+    return filteredRefunds.find((item) => String(item?._id || '') === targetId)
+      || refunds.find((item) => String(item?._id || '') === targetId)
+      || null;
+  }, [filteredRefunds, refunds, selectedRefundId]);
+
+  const refundSummaryStats = useMemo(() => {
+    const openItems = refunds.filter((item) => ['pending_review', 'approved'].includes(String(item?.status || '')));
+    return {
+      openCount: openItems.length,
+      openAmount: openItems.reduce((sum, item) => sum + Number(item?.amount || 0), 0)
+    };
+  }, [refunds]);
+
+  const refundEligibleBills = useMemo(() => (
+    bills.filter((item) => Number(item?.amountPaid || 0) > 0)
+  ), [bills]);
+
+  const expenseCategoryOptions = useMemo(() => (
+    expenseCategories.filter((item) => item.isActive !== false)
+  ), [expenseCategories]);
+
+  const expenseSubCategoryOptions = useMemo(() => (
+    expenseCategoryOptions.find((item) => item.key === expenseForm.category)?.subCategories || []
+  ), [expenseCategoryOptions, expenseForm.category]);
+
+  // Stored records only keep the internal key ('utilities', 'internet', ...);
+  // look up the human label from the full category list (not just the
+  // active-only options) so an expense against a since-deactivated category
+  // still displays correctly instead of the raw key.
+  const resolveExpenseCategoryLabel = (categoryKey = '') => (
+    expenseCategories.find((item) => item.key === categoryKey)?.label || categoryKey || '---'
+  );
+  const resolveExpenseSubCategoryLabel = (categoryKey = '', subCategoryKey = '') => {
+    if (!subCategoryKey) return 'بدون زیردسته';
+    const category = expenseCategories.find((item) => item.key === categoryKey);
+    return category?.subCategories?.find((item) => item.key === subCategoryKey)?.label || subCategoryKey;
+  };
+
+  const filteredExpenses = useMemo(() => {
+    const term = expenseSearchTerm.trim().toLowerCase();
+    const rangeStart = financeOverviewRange.from ? new Date(financeOverviewRange.from) : null;
+    const rangeEnd = financeOverviewRange.to ? new Date(financeOverviewRange.to) : null;
+    if (rangeEnd) rangeEnd.setHours(23, 59, 59, 999);
+    return expenses.filter((item) => {
+      if (expenseStatusFilter !== 'all' && String(item?.status || '') !== expenseStatusFilter) return false;
+      if (expenseCategoryFilter !== 'all' && String(item?.category || '') !== expenseCategoryFilter) return false;
+      const expenseDate = item?.expenseDate ? new Date(item.expenseDate) : null;
+      if (rangeStart && expenseDate && expenseDate < rangeStart) return false;
+      if (rangeEnd && expenseDate && expenseDate > rangeEnd) return false;
+      if (!term) return true;
+      const haystack = [item?.category, item?.subCategory, item?.vendorName, item?.referenceNo, item?.note]
+        .map((value) => String(value || '').toLowerCase()).join(' ');
+      return haystack.includes(term);
+    });
+  }, [expenses, expenseStatusFilter, expenseCategoryFilter, expenseSearchTerm, financeOverviewRange.from, financeOverviewRange.to]);
+
+  const expenseSummary = useMemo(() => ({
+    count: filteredExpenses.length,
+    total: filteredExpenses.reduce((sum, item) => sum + Number(item?.amount || 0), 0),
+    approved: filteredExpenses.filter((item) => item.status === 'approved').reduce((sum, item) => sum + Number(item?.amount || 0), 0),
+    pending: filteredExpenses.filter((item) => item.status === 'pending_review').length
+  }), [filteredExpenses]);
+
+  // 10 expenses per page (same page size as the receipt inbox), rest on
+  // the next page - avoids one long unbroken list once expenses build up.
+  const expenseTotalPages = Math.max(1, Math.ceil(filteredExpenses.length / EXPENSE_PAGE_SIZE));
+  const effectiveExpensePage = Math.min(Math.max(1, expensePage), expenseTotalPages);
+  const paginatedExpenses = useMemo(() => {
+    const start = (effectiveExpensePage - 1) * EXPENSE_PAGE_SIZE;
+    return filteredExpenses.slice(start, start + EXPENSE_PAGE_SIZE);
+  }, [filteredExpenses, effectiveExpensePage]);
+
+  useEffect(() => {
+    setExpensePage(1);
+  }, [expenseStatusFilter, expenseCategoryFilter, expenseSearchTerm, financeOverviewRange.from, financeOverviewRange.to]);
+
+  useEffect(() => {
+    setExpensePage((current) => Math.min(Math.max(1, current), expenseTotalPages));
+  }, [expenseTotalPages]);
+
+  // Quick month jump for the Expenses tab - sets the same shared
+  // "از تاریخ/تا تاریخ" range the whole finance page reads from, so the
+  // user does not need to leave this tab and go to Overview/Reports just to
+  // change the month. Buckets are Gregorian calendar months (same convention
+  // already used by the monthly-trend report/strip above), labeled in Dari
+  // via toFaMonthKey.
+  const expenseMonthFilterOptions = useMemo(() => {
+    const now = new Date();
+    const options = [];
+    for (let i = 0; i < 18; i += 1) {
+      const cursor = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
+      options.push({ key, label: toFaMonthKey(key) });
+    }
+    return options;
+  }, []);
+
+  const selectedExpenseMonthKey = useMemo(() => {
+    if (!financeOverviewRange.from || !financeOverviewRange.to) return '';
+    const from = new Date(financeOverviewRange.from);
+    if (Number.isNaN(from.getTime())) return '';
+    const monthStart = new Date(from.getFullYear(), from.getMonth(), 1);
+    const monthEnd = new Date(from.getFullYear(), from.getMonth() + 1, 0);
+    if (
+      toGregorianDateInputValue(monthStart) === financeOverviewRange.from
+      && toGregorianDateInputValue(monthEnd) === financeOverviewRange.to
+    ) {
+      return `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}`;
+    }
+    return '';
+  }, [financeOverviewRange.from, financeOverviewRange.to]);
+
+  const applyExpenseMonthFilter = (monthKey) => {
+    if (!monthKey) return;
+    const [year, month] = monthKey.split('-').map(Number);
+    if (!year || !month) return;
+    setFinanceOverviewRange({
+      from: toGregorianDateInputValue(new Date(year, month - 1, 1)),
+      to: toGregorianDateInputValue(new Date(year, month, 0))
+    });
+  };
+
+  // Same date-range scope as the overview KPI card (from/to only, no
+  // status/category filter) - used to break the KPI's single "pending"
+  // figure into draft vs actually-submitted-for-review, since those are
+  // very different things (a draft has not even been sent anywhere yet).
+  const expensesInDateRange = useMemo(() => {
+    const rangeStart = financeOverviewRange.from ? new Date(financeOverviewRange.from) : null;
+    const rangeEnd = financeOverviewRange.to ? new Date(financeOverviewRange.to) : null;
+    if (rangeEnd) rangeEnd.setHours(23, 59, 59, 999);
+    return expenses.filter((item) => {
+      const expenseDate = item?.expenseDate ? new Date(item.expenseDate) : null;
+      if (rangeStart && expenseDate && expenseDate < rangeStart) return false;
+      if (rangeEnd && expenseDate && expenseDate > rangeEnd) return false;
+      return true;
+    });
+  }, [expenses, financeOverviewRange.from, financeOverviewRange.to]);
+
+  const expenseStatusBreakdown = useMemo(() => {
+    const sumByStatus = (status) => expensesInDateRange
+      .filter((item) => item.status === status)
+      .reduce((sum, item) => sum + Number(item?.amount || 0), 0);
+    return {
+      draft: sumByStatus('draft'),
+      pendingReview: sumByStatus('pending_review')
+    };
+  }, [expensesInDateRange]);
 
   useEffect(() => {
     let active = true;
@@ -5309,6 +5632,257 @@ export default function AdminFinance() {
       await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
+      setBusy(false);
+    }
+  };
+
+  const refreshRefunds = async () => {
+    try {
+      const data = await fetchJson(`${API_BASE}/api/student-finance/refunds?limit=200`);
+      if (data?.success) setRefunds(data.items || []);
+    } catch {
+      // keep the previously loaded list on a transient error
+    }
+  };
+
+  const createRefundCase = async (payload) => {
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/student-finance/refunds`, payload);
+      setMessage(data.message || 'درخواست بازپرداخت ثبت شد.');
+      await refreshRefunds();
+      if (data?.item?._id) setSelectedRefundId(String(data.item._id));
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createManualRefundCase = async () => {
+    if (!manualRefundForm.feeOrderId) {
+      setMessage('یک بل را برای بازپرداخت انتخاب کنید.');
+      return;
+    }
+    await createRefundCase({
+      feeOrderId: manualRefundForm.feeOrderId,
+      amount: manualRefundForm.amount ? Number(manualRefundForm.amount) : undefined,
+      reason: manualRefundForm.reason,
+      reasonNote: manualRefundForm.reasonNote
+    });
+    setManualRefundForm({ feeOrderId: '', amount: '', reason: 'membership_ended', reasonNote: '' });
+  };
+
+  const createRefundFromAnomaly = async () => {
+    if (!selectedAnomaly) return;
+    await createRefundCase({
+      billId: selectedAnomaly.billId || undefined,
+      feeOrderId: selectedAnomaly.orderId || undefined,
+      reason: 'membership_ended',
+      reasonNote: selectedAnomaly.description || ''
+    });
+    await refreshPaymentWorkspace({ includeAnomalies: true });
+  };
+
+  const approveRefund = async () => {
+    if (!selectedRefund) return;
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/student-finance/refunds/${selectedRefund._id}/approve`, { note: refundReviewNote });
+      setMessage(data.message || 'درخواست بازپرداخت تایید شد.');
+      setRefundReviewNote('');
+      await refreshRefunds();
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rejectRefund = async () => {
+    if (!selectedRefund) return;
+    const reason = refundReviewNote.trim() || window.prompt('دلیل رد درخواست بازپرداخت:', '') || '';
+    if (!reason.trim()) return;
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/student-finance/refunds/${selectedRefund._id}/reject`, { reason });
+      setMessage(data.message || 'درخواست بازپرداخت رد شد.');
+      setRefundReviewNote('');
+      await refreshRefunds();
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const markRefundAsPaid = async () => {
+    if (!selectedRefund) return;
+    if (!refundPayForm.proofReference.trim()) {
+      setMessage('شماره سند/رسید بازپرداخت را وارد کنید.');
+      return;
+    }
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/student-finance/refunds/${selectedRefund._id}/mark-paid`, {
+        refundMethod: refundPayForm.refundMethod,
+        proofReference: refundPayForm.proofReference,
+        accountId: refundPayForm.accountId || undefined
+      });
+      setMessage(data.message || 'بازپرداخت با موفقیت ثبت شد.');
+      setRefundPayForm({ refundMethod: 'cash', proofReference: '', accountId: '' });
+      await refreshRefunds();
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const refreshExpenses = async () => {
+    try {
+      const data = await fetchJson(`${API_BASE}/api/finance/admin/expenses`);
+      if (data?.success) setExpenses(data.items || []);
+    } catch {
+      // keep the previously loaded list on a transient error
+    }
+  };
+
+  const createExpense = async (e) => {
+    e.preventDefault();
+    if (!expenseForm.category) {
+      setMessage('دسته‌بندی مصرف را انتخاب کنید.');
+      return;
+    }
+    if (!expenseForm.academicYearId) {
+      setMessage('سال تعلیمی را برای ثبت مصرف انتخاب کنید.');
+      return;
+    }
+    if (!expenseForm.expenseDate || toSafeNumber(expenseForm.amount) <= 0) {
+      setMessage('تاریخ و مبلغ معتبر برای مصرف وارد کنید.');
+      return;
+    }
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/finance/admin/expenses`, {
+        academicYearId: expenseForm.academicYearId,
+        classId: expenseForm.classId || undefined,
+        category: expenseForm.category,
+        subCategory: expenseForm.subCategory,
+        amount: expenseForm.amount,
+        currency: expenseForm.currency,
+        expenseDate: expenseForm.expenseDate,
+        paymentMethod: expenseForm.paymentMethod,
+        treasuryAccountId: expenseForm.treasuryAccountId || undefined,
+        vendorName: expenseForm.vendorName,
+        referenceNo: expenseForm.referenceNo,
+        note: expenseForm.note,
+        status: expenseForm.submitForReview ? 'pending_review' : 'draft'
+      });
+      setMessage(data.message || 'مصرف ثبت شد.');
+      setExpenseForm((prev) => ({
+        ...prev,
+        subCategory: '',
+        amount: '',
+        vendorName: '',
+        referenceNo: '',
+        note: ''
+      }));
+      await refreshExpenses();
+      await refreshPaymentWorkspace();
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitExpenseForReview = async (expenseId) => {
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/finance/admin/expenses/${expenseId}/submit`, {});
+      setMessage(data.message || 'مصرف برای بررسی ارسال شد.');
+      await refreshExpenses();
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reviewExpenseEntry = async (expenseId, action = 'approve') => {
+    let reason = '';
+    if (action === 'reject') {
+      reason = window.prompt('دلیل رد مصرف:', '') || '';
+      if (!reason.trim()) return;
+    }
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/finance/admin/expenses/${expenseId}/review`, {
+        action,
+        reason,
+        note: action === 'reject' ? 'از مرکز مالی مکتب رد شد.' : 'از مرکز مالی مکتب تایید شد.'
+      });
+      setMessage(data.message || (action === 'reject' ? 'مصرف رد شد.' : 'مصرف بررسی و ثبت شد.'));
+      await refreshExpenses();
+      await refreshPaymentWorkspace();
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const voidExpenseEntry = async (expenseId) => {
+    const reason = window.prompt('دلیل باطل‌سازی مصرف:', '') || '';
+    if (!reason.trim()) return;
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/finance/admin/expenses/${expenseId}/void`, { note: reason });
+      setMessage(data.message || 'مصرف باطل شد.');
+      await refreshExpenses();
+      await refreshPaymentWorkspace();
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteExpenseEntry = async (expenseId) => {
+    if (!window.confirm('این مصرفِ پیش‌نویس کاملاً حذف شود؟ این کار قابل بازگشت نیست.')) return;
+    try {
+      setBusy(true);
+      const data = await fetchJson(`${API_BASE}/api/finance/admin/expenses/${expenseId}`, { method: 'DELETE' });
+      if (!data?.success) throw new Error(data?.message || 'حذف مصرف ناموفق بود');
+      setMessage(data.message || 'مصرف پیش‌نویس حذف شد.');
+      await refreshExpenses();
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createExpenseCategory = async (e) => {
+    e.preventDefault();
+    if (!newExpenseCategoryForm.label.trim()) {
+      setMessage('نام دسته را وارد کنید.');
+      return;
+    }
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/finance/admin/expense-categories`, {
+        label: newExpenseCategoryForm.label
+      });
+      setMessage(data.message || 'دسته‌بندی مصرف ثبت شد.');
+      setExpenseCategories((prev) => [...prev, data.item]);
+      setExpenseForm((prev) => ({ ...prev, category: data.item?.key || prev.category }));
+      setNewExpenseCategoryForm({ label: '' });
+      setShowAddExpenseCategory(false);
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
       setBusy(false);
     }
   };
@@ -6458,7 +7032,12 @@ export default function AdminFinance() {
       </div>
       <h2>مرکز مالی مکتب</h2>
       <p className="muted">سطح فعال مالی: {ADMIN_LEVEL_UI_LABELS[financeRole] || financeRole}</p>
-      {message && <div className="finance-msg">{message}</div>}
+      {message && (
+        <div className="finance-msg" role="status" data-testid="finance-toast">
+          <span>{message}</span>
+          <button type="button" className="finance-msg-close" onClick={() => setMessageState('')} aria-label="بستن پیام">×</button>
+        </div>
+      )}
 
       <div className="finance-shell-tabs" role="tablist" aria-label="بخش‌های مرکز مالی">
         {financeSections.map((item) => (
@@ -6466,6 +7045,7 @@ export default function AdminFinance() {
             key={item.key}
             type="button"
             role="tab"
+            title={item.hint}
             data-testid={`finance-section-${item.key}`}
             aria-selected={activeSection === item.key}
             className={`finance-shell-tab ${activeSection === item.key ? 'active' : ''}`}
@@ -6479,6 +7059,7 @@ export default function AdminFinance() {
           to="/academy"
           className="finance-shell-tab finance-shell-link"
           data-testid="finance-academy-link"
+          title="سیستم جدا برای شاگرد، فیس، بل و مصارف"
         >
           <strong>آموزشگاه</strong>
           <span>سیستم جدا برای شاگرد، فیس، بل و مصارف</span>
@@ -6499,12 +7080,9 @@ export default function AdminFinance() {
       </div>
 
       {activeSchoolContext?.school ? (
-        <div className="finance-card finance-school-scope-card">
-          <div>
-            <span className="finance-eyebrow">مکتب فعال</span>
-            <strong>{activeSchoolContext.school.nameDari || activeSchoolContext.school.name || 'مکتب'}</strong>
-            <p className="muted">تمام پلان‌های فیس، بل‌ها، پرداخت‌ها و گزارش‌ها باید مربوط همین مکتب باشند.</p>
-          </div>
+        <div className="finance-card finance-school-scope-card" title="تمام پلان‌های فیس، بل‌ها، پرداخت‌ها و گزارش‌ها باید مربوط همین مکتب باشند.">
+          <span className="finance-eyebrow">مکتب فعال</span>
+          <strong>{activeSchoolContext.school.nameDari || activeSchoolContext.school.name || 'مکتب'}</strong>
           <div className="finance-chip-group">
             <span className="finance-chip">کد: {activeSchoolContext.school.schoolCode || '-'}</span>
             <span className="finance-chip finance-chip-muted">شاگردان: {fmt(activeSchoolContext.scopeSummary?.students?.count || financeMembershipStudentCount || 0)}</span>
@@ -6751,6 +7329,43 @@ export default function AdminFinance() {
             </div>
           ) : (
             <p className="muted finance-chart-empty">برای بازه انتخاب‌شده عاید یا مصرف تاییدشده‌ای ثبت نشده است.</p>
+          )}
+        </div>
+      </div>
+
+      <div className="finance-grid finance-dashboard-grid" data-finance-section="overview">
+        <div className="finance-card" data-testid="finance-monthly-trend-card">
+          <div className="finance-card-head">
+            <div>
+              <h3>روند ماهانه مرکز مالی</h3>
+              <p className="muted">عاید، بازپرداخت، مصرف، بل صادرشده و باقیات هر ماه در ۱۲ ماه اخیر - مستقل از فیلتر بازه‌ی بالا.</p>
+            </div>
+          </div>
+          {monthlyTrend.length ? (
+            <div className="finance-table monthly-trend-table">
+              <div className="head">
+                <span>ماه</span>
+                <span>عاید</span>
+                <span>بازپرداخت</span>
+                <span>مصرف</span>
+                <span>خالص</span>
+                <span>بل صادرشده</span>
+                <span>باقیات</span>
+              </div>
+              {monthlyTrend.map((item) => (
+                <div key={`monthly-trend-${item.monthKey}`} className="row">
+                  <span>{toFaMonthKey(item.monthKey)}</span>
+                  <span>{fmt(item.income)}</span>
+                  <span>{fmt(item.refunds)}</span>
+                  <span>{fmt(item.expense)}</span>
+                  <span className={Number(item.netCash || 0) < 0 ? 'finance-negative' : ''}>{fmt(item.netCash)}</span>
+                  <span>{fmt(item.billsIssuedAmount)} ({fmt(item.billsIssuedCount)})</span>
+                  <span>{fmt(item.arrearsAmount)} ({fmt(item.arrearsCount)})</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted finance-chart-empty">هنوز داده‌ای برای روند ماهانه ثبت نشده است.</p>
           )}
         </div>
       </div>
@@ -7055,15 +7670,19 @@ export default function AdminFinance() {
           {hasPaymentStudentSearchTerm && !highlightedPaymentStudentOptions.length && (
             <p className="muted finance-order-empty finance-payment-search-results">برای این جستجو متعلم فعال در دفتر ممبرشیپ پیدا نشد.</p>
           )}
-          <select data-testid="desk-student-select" value={paymentDeskForm.studentId} onChange={(e) => handlePaymentDeskStudentChange(e.target.value)}>
-            <option value="">ابتدا شاگرد را انتخاب کنید</option>
-            {paymentStudentOptions.length ? paymentStudentOptions.map((student) => (
-              <option key={`payment-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student)}</option>
-            )) : (
-              <option value="" disabled>متعلمی پیدا نشد</option>
-            )}
-          </select>
-          <div className="finance-split-grid finance-payment-class-year">
+          <label className="finance-inline-filter">
+            <span>متعلم</span>
+            <select data-testid="desk-student-select" value={paymentDeskForm.studentId} onChange={(e) => handlePaymentDeskStudentChange(e.target.value)}>
+              <option value="">ابتدا شاگرد را انتخاب کنید</option>
+              {paymentStudentOptions.length ? paymentStudentOptions.map((student) => (
+                <option key={`payment-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student)}</option>
+              )) : (
+                <option value="" disabled>متعلمی پیدا نشد</option>
+              )}
+            </select>
+          </label>
+          <label className="finance-inline-filter">
+            <span>صنف</span>
             <select data-testid="desk-class-select" value={paymentDeskForm.classId} onChange={(e) => {
               setPaymentDeskForm((p) => ({
                 ...p,
@@ -7076,6 +7695,9 @@ export default function AdminFinance() {
               <option value="">صنف را انتخاب کنید</option>
               {classOptions.map((item) => <option key={`payment-class-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>)}
             </select>
+          </label>
+          <label className="finance-inline-filter">
+            <span>سال تعلیمی</span>
             <select data-testid="desk-academic-year-select" value={paymentDeskForm.academicYearId} onChange={(e) => {
               setPaymentDeskForm((p) => ({
                 ...p,
@@ -7087,7 +7709,7 @@ export default function AdminFinance() {
             }}>
               {academicYears.map((item) => <option key={`payment-year-${item.id}`} value={item.id}>{getAcademicYearOptionLabel(item)}</option>)}
             </select>
-          </div>
+          </label>
           </div>
           {!!paymentDeskMembershipStudent && (
             <div className="finance-payment-identity-strip">
@@ -7138,51 +7760,66 @@ export default function AdminFinance() {
             <small>مبلغ، نوع پرداخت و تاریخ</small>
           </div>
           <div className="finance-payment-row finance-payment-row-money">
-            <select
-              data-testid="desk-fee-type-select"
-              value={paymentDeskForm.feeType}
-              onChange={(e) => {
-                setPaymentDeskForm((prev) => ({
-                  ...prev,
-                  feeType: e.target.value,
-                  selectedFeeOrderIds: [],
-                  manualAllocations: {}
+            <label className="finance-inline-filter">
+              <span>نوع فیس</span>
+              <select
+                data-testid="desk-fee-type-select"
+                value={paymentDeskForm.feeType}
+                onChange={(e) => {
+                  setPaymentDeskForm((prev) => ({
+                    ...prev,
+                    feeType: e.target.value,
+                    selectedFeeOrderIds: [],
+                    manualAllocations: {}
+                  }));
+                  setPaymentPreview(null);
+                }}
+              >
+                {MANUAL_BILL_FEE_TYPES.map((feeType) => (
+                  <option key={`desk-fee-type-${feeType}`} value={feeType}>{FEE_LINE_TYPE_LABELS[feeType] || feeType}</option>
+                ))}
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>مبلغ پرداخت</span>
+              <input value={paymentDeskForm.amount} onChange={(e) => { setPaymentDeskForm((p) => ({ ...p, amount: e.target.value })); setPaymentPreview(null); }} placeholder="مبلغ پرداخت" />
+            </label>
+            <label className="finance-inline-filter">
+              <span>روش پرداخت</span>
+              <select data-testid="desk-payment-method-select" value={paymentDeskForm.paymentMethod} onChange={(e) => {
+                const nextMethod = e.target.value;
+                setPaymentDeskForm((p) => ({
+                  ...p,
+                  paymentMethod: nextMethod,
+                  referenceNo: nextMethod === 'cash' ? '' : p.referenceNo
                 }));
                 setPaymentPreview(null);
-              }}
-            >
-              {MANUAL_BILL_FEE_TYPES.map((feeType) => (
-                <option key={`desk-fee-type-${feeType}`} value={feeType}>{FEE_LINE_TYPE_LABELS[feeType] || feeType}</option>
-              ))}
-            </select>
-            <input value={paymentDeskForm.amount} onChange={(e) => { setPaymentDeskForm((p) => ({ ...p, amount: e.target.value })); setPaymentPreview(null); }} placeholder="مبلغ پرداخت" />
-            <select data-testid="desk-payment-method-select" value={paymentDeskForm.paymentMethod} onChange={(e) => {
-              const nextMethod = e.target.value;
-              setPaymentDeskForm((p) => ({
-                ...p,
-                paymentMethod: nextMethod,
-                referenceNo: nextMethod === 'cash' ? '' : p.referenceNo
-              }));
-              setPaymentPreview(null);
-            }}>
-              <option value="cash">نقدی</option>
-              <option value="bank_transfer">بانکی</option>
-              <option value="hawala">حواله</option>
-              <option value="manual">دستی</option>
-            </select>
-            <div className="finance-payment-date-field">
-            <AfghanDateInput value={paymentDeskForm.paidAt} onChange={(value) => setPaymentDeskForm((p) => ({ ...p, paidAt: value }))} />
-            </div>
+              }}>
+                <option value="cash">نقدی</option>
+                <option value="bank_transfer">بانکی</option>
+                <option value="hawala">حواله</option>
+                <option value="manual">دستی</option>
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>تاریخ پرداخت</span>
+              <div className="finance-payment-date-field">
+              <AfghanDateInput value={paymentDeskForm.paidAt} onChange={(value) => setPaymentDeskForm((p) => ({ ...p, paidAt: value }))} />
+              </div>
+            </label>
           {paymentDeskRequiresReference && (
-            <input
-              value={paymentDeskForm.referenceNo}
-              onChange={(e) => {
-                setPaymentDeskForm((p) => ({ ...p, referenceNo: e.target.value }));
-                setPaymentPreview(null);
-              }}
-              placeholder="شماره رسید / مرجع"
-              required
-            />
+            <label className="finance-inline-filter">
+              <span>شماره رسید / مرجع</span>
+              <input
+                value={paymentDeskForm.referenceNo}
+                onChange={(e) => {
+                  setPaymentDeskForm((p) => ({ ...p, referenceNo: e.target.value }));
+                  setPaymentPreview(null);
+                }}
+                placeholder="شماره رسید / مرجع"
+                required
+              />
+            </label>
           )}
           </div>
           <div className="finance-payment-section-title">
@@ -7211,20 +7848,26 @@ export default function AdminFinance() {
           <button type="button" className="secondary finance-advanced-toggle" onClick={() => setPaymentAdvancedOpen((value) => !value)}>
             {paymentAdvancedOpen ? 'بستن تنظیمات تخصیص' : 'تخصیص پیشرفته'}
           </button>
-            <select data-testid="desk-allocation-mode-select" value={paymentDeskForm.allocationMode} onChange={(e) => {
-              setPaymentDeskForm((p) => ({
-                ...p,
-                allocationMode: e.target.value,
-                selectedFeeOrderIds: [],
-                manualAllocations: {}
-              }));
-              setPaymentPreview(null);
-            }}>
-              <option value="auto_oldest_due">تخصیص خودکار به قدیمی‌ترین بدهی‌ها</option>
-              <option value="auto_selected">تخصیص فقط به بدهی‌های انتخاب‌شده</option>
-              <option value="manual">تخصیص دستی روی هر بدهی</option>
-            </select>
-          <textarea value={paymentDeskForm.note} onChange={(e) => setPaymentDeskForm((p) => ({ ...p, note: e.target.value }))} rows={3} placeholder="یادداشت پرداخت" />
+            <label className="finance-inline-filter">
+              <span>روش تخصیص</span>
+              <select data-testid="desk-allocation-mode-select" value={paymentDeskForm.allocationMode} onChange={(e) => {
+                setPaymentDeskForm((p) => ({
+                  ...p,
+                  allocationMode: e.target.value,
+                  selectedFeeOrderIds: [],
+                  manualAllocations: {}
+                }));
+                setPaymentPreview(null);
+              }}>
+                <option value="auto_oldest_due">تخصیص خودکار به قدیمی‌ترین بدهی‌ها</option>
+                <option value="auto_selected">تخصیص فقط به بدهی‌های انتخاب‌شده</option>
+                <option value="manual">تخصیص دستی روی هر بدهی</option>
+              </select>
+            </label>
+          <label className="finance-inline-filter finance-inline-filter-note">
+            <span>یادداشت پرداخت</span>
+            <textarea value={paymentDeskForm.note} onChange={(e) => setPaymentDeskForm((p) => ({ ...p, note: e.target.value }))} rows={2} placeholder="یادداشت پرداخت" />
+          </label>
           </div>
           {!!paymentDeskForm.studentId && (
             <div className="finance-subcard finance-student-spotlight finance-payment-student-card-row">
@@ -7816,6 +8459,331 @@ export default function AdminFinance() {
         </form>
       </div>
 
+      <div className="finance-card" data-finance-section="expenses" data-testid="expense-treasury-impact-card">
+        <div className="finance-card-head">
+          <div>
+            <h3>اثر مصارف روی عواید و خزانه مکتب</h3>
+            <p className="muted">همان بازه‌ی «از تاریخ/تا تاریخ» بالای صفحه؛ مصرفِ تاییدشده مستقیم از عواید کم و در صندوق خزانه ثبت می‌شود.</p>
+          </div>
+        </div>
+        <div className="finance-kpi-grid finance-kpi-grid-dense">
+          <div className="finance-kpi-item"><span>عواید تاییدشده</span><strong>{fmt(financeOverviewKpis?.approvedRevenue?.amount || 0)} AFN</strong></div>
+          <div className="finance-kpi-item finance-kpi-item-accent"><span>مصارف تاییدشده (کسرشده از عواید)</span><strong>−{fmt(financeOverviewKpis?.expenses?.amount || 0)} AFN</strong></div>
+          <div className="finance-kpi-item"><span>خالص عواید (عواید − مصارف)</span><strong>{fmt(financeOverviewKpis?.netCash?.amount || 0)} AFN</strong></div>
+          <div className="finance-kpi-item"><span>نسبت مصرف به عاید</span><strong>{fmt(financeOverviewKpis?.rates?.expenseToIncome || 0)}٪</strong></div>
+          <div className="finance-kpi-item"><span>ورودی خزانه/صندوق</span><strong>{fmt(financeOverviewKpis?.treasury?.inflow || 0)} AFN</strong></div>
+          <div className="finance-kpi-item"><span>خروجی خزانه/صندوق</span><strong>{fmt(financeOverviewKpis?.treasury?.outflow || 0)} AFN</strong></div>
+          <div className="finance-kpi-item finance-kpi-item-accent"><span>خالص صندوق</span><strong>{fmt(financeOverviewKpis?.treasury?.net || 0)} AFN</strong></div>
+          <div className="finance-kpi-item"><span>مصارف پیش‌نویس (هنوز ارسال نشده، کم نشده)</span><strong>{fmt(expenseStatusBreakdown.draft)} AFN</strong></div>
+          <div className="finance-kpi-item"><span>مصارف در انتظار بررسی (ارسال‌شده، هنوز کم نشده)</span><strong>{fmt(expenseStatusBreakdown.pendingReview)} AFN</strong></div>
+        </div>
+        <p className="muted">فقط مصرفِ «تاییدشده» از عواید/خالص کسر می‌شود؛ پیش‌نویس و در‌انتظارِ‌بررسی هنوز اثری روی این ارقام ندارند. انتخاب «حساب خزانه» هنگام ثبت مصرف کافی است: به‌محض تایید مصرف، همان لحظه هم از عواید و هم از «خروجی صندوق» همین حساب کم می‌شود و در فهرست «مصارف بدون حساب خزانه» دیگر نمی‌آید — نیازی به ثبت دوباره‌ی آن از مرکز مالی دولت نیست. تنها استثنا مصارفی‌اند که از «تعهدات تدارکاتی» تسویه می‌شوند؛ اثر خروجیِ آن‌ها با تراکنش تسویه‌ی همان تعهد ثبت می‌شود، نه اینجا.</p>
+      </div>
+
+      <div className="finance-card" data-finance-section="expenses" data-testid="finance-expenses-card">
+        <div className="finance-toolbar finance-expenses-filter-toolbar">
+          <div className="finance-expenses-toolbar-intro">
+            <h3>مصارف مکتب</h3>
+            <p className="muted">ثبت، بررسی، تایید و باطل‌سازی مصارف - با فلتر «ماه» همین‌جا یا بازه‌ی «از تاریخ/تا تاریخ» بالای صفحه (یک ماه، چند ماه یا کل سال).</p>
+          </div>
+          <div className="finance-expenses-filter-row">
+            <label className="finance-inline-filter">
+              <span>جستجو</span>
+              <input
+                value={expenseSearchTerm}
+                onChange={(e) => setExpenseSearchTerm(e.target.value)}
+                placeholder="دسته، فروشنده، شماره سند یا یادداشت"
+                data-testid="expense-search-input"
+              />
+            </label>
+            <label className="finance-inline-filter">
+              <span>ماه</span>
+              <select
+                value={selectedExpenseMonthKey}
+                onChange={(e) => applyExpenseMonthFilter(e.target.value)}
+                data-testid="expense-month-filter"
+              >
+                <option value="">{selectedExpenseMonthKey ? 'بازه سفارشی' : 'یک ماه را انتخاب کنید'}</option>
+                {expenseMonthFilterOptions.map((item) => (
+                  <option key={`expense-month-filter-${item.key}`} value={item.key}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>دسته</span>
+              <select value={expenseCategoryFilter} onChange={(e) => setExpenseCategoryFilter(e.target.value)} data-testid="expense-category-filter">
+                <option value="all">همه دسته‌ها</option>
+                {expenseCategoryOptions.map((item) => (
+                  <option key={`expense-cat-filter-${item.key}`} value={item.key}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>وضعیت</span>
+              <select value={expenseStatusFilter} onChange={(e) => setExpenseStatusFilter(e.target.value)} data-testid="expense-status-filter">
+                <option value="all">همه</option>
+                {Object.entries(EXPENSE_STATUS_LABELS).map(([value, label]) => (
+                  <option key={`expense-status-${value}`} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div className="finance-chip-group receipt-inbox-summary">
+          <span className="finance-chip">در این بازه: {fmt(expenseSummary.count)}</span>
+          <span className="finance-chip">مجموع مبلغ: {fmt(expenseSummary.total)} AFN</span>
+          <span className="finance-chip finance-chip-emerald">تاییدشده: {fmt(expenseSummary.approved)} AFN</span>
+          <span className="finance-chip finance-chip-amber">در انتظار بررسی: {fmt(expenseSummary.pending)}</span>
+        </div>
+
+        {monthlyTrend.length ? (
+          <div className="finance-chip-group finance-expense-monthly-strip" data-testid="expense-monthly-strip">
+            {monthlyTrend.slice(-6).map((item) => (
+              <span key={`expense-month-${item.monthKey}`} className="finance-chip">
+                {toFaMonthKey(item.monthKey)}: {fmt(item.expense)} AFN
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="row-actions finance-expense-toggle-row">
+          <button
+            type="button"
+            className={showExpenseForm ? '' : 'secondary'}
+            onClick={() => setShowExpenseForm((value) => !value)}
+            data-testid="expense-form-toggle"
+          >
+            {showExpenseForm ? 'بستن فورم مصرف' : '+ مصرف جدید'}
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => setShowAddExpenseCategory((value) => !value)}
+            data-testid="expense-category-toggle"
+          >
+            {showAddExpenseCategory ? 'بستن' : '+ دسته جدید'}
+          </button>
+        </div>
+
+        {showAddExpenseCategory && (
+          <form className="finance-toolbar" onSubmit={createExpenseCategory} data-testid="create-expense-category-form">
+            <label className="finance-inline-filter finance-inline-filter-wide">
+              <span>نام دسته جدید</span>
+              <input
+                value={newExpenseCategoryForm.label}
+                onChange={(e) => setNewExpenseCategoryForm({ label: e.target.value })}
+                placeholder="مثلاً: اجاره یا بیمه"
+                data-testid="new-expense-category-label"
+              />
+            </label>
+            <button type="submit" className="secondary" disabled={busy} data-testid="new-expense-category-submit">ثبت دسته</button>
+          </form>
+        )}
+
+        {showExpenseForm && (
+          <form className="receipt-follow-up-form finance-compact-form" onSubmit={createExpense} data-testid="create-expense-form">
+            <div className="receipt-follow-up-grid finance-expense-form-grid">
+              <label className="finance-inline-filter">
+                <span>دسته</span>
+                <select
+                  value={expenseForm.category}
+                  onChange={(e) => setExpenseForm((prev) => ({ ...prev, category: e.target.value, subCategory: '' }))}
+                  data-testid="expense-form-category"
+                >
+                  <option value="">انتخاب دسته</option>
+                  {expenseCategoryOptions.map((item) => (
+                    <option key={`expense-form-cat-${item.key}`} value={item.key}>{item.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="finance-inline-filter">
+                <span>زیردسته</span>
+                <select
+                  value={expenseForm.subCategory}
+                  onChange={(e) => setExpenseForm((prev) => ({ ...prev, subCategory: e.target.value }))}
+                  data-testid="expense-form-subcategory"
+                >
+                  <option value="">بدون زیردسته</option>
+                  {expenseSubCategoryOptions.map((item) => (
+                    <option key={`expense-form-subcat-${item.key}`} value={item.key}>{item.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="finance-inline-filter">
+                <span>سال تعلیمی</span>
+                <select
+                  value={expenseForm.academicYearId}
+                  onChange={(e) => setExpenseForm((prev) => ({ ...prev, academicYearId: e.target.value }))}
+                  data-testid="expense-form-academic-year"
+                >
+                  <option value="">انتخاب سال تعلیمی</option>
+                  {academicYears.map((item) => (
+                    <option key={`expense-form-year-${item.id}`} value={item.id}>{getAcademicYearOptionLabel(item)}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="finance-inline-filter">
+                <span>صنف (اختیاری)</span>
+                <select
+                  value={expenseForm.classId}
+                  onChange={(e) => setExpenseForm((prev) => ({ ...prev, classId: e.target.value }))}
+                  data-testid="expense-form-class"
+                >
+                  <option value="">مربوط به کل مکتب</option>
+                  {classOptions.map((item) => (
+                    <option key={`expense-form-class-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="finance-inline-filter">
+                <span>مبلغ</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={expenseForm.amount}
+                  onChange={(e) => setExpenseForm((prev) => ({ ...prev, amount: e.target.value }))}
+                  data-testid="expense-form-amount"
+                />
+              </label>
+              <label className="finance-inline-filter">
+                <span>تاریخ مصرف</span>
+                <AfghanDateInput
+                  value={expenseForm.expenseDate}
+                  onChange={(value) => setExpenseForm((prev) => ({ ...prev, expenseDate: value }))}
+                  showGregorianEquivalent
+                  data-testid="expense-form-date"
+                />
+              </label>
+              <label className="finance-inline-filter">
+                <span>روش پرداخت</span>
+                <select
+                  value={expenseForm.paymentMethod}
+                  onChange={(e) => setExpenseForm((prev) => ({ ...prev, paymentMethod: e.target.value }))}
+                  data-testid="expense-form-payment-method"
+                >
+                  {Object.entries(EXPENSE_PAYMENT_METHOD_LABELS).map(([value, label]) => (
+                    <option key={`expense-form-method-${value}`} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="finance-inline-filter">
+                <span>حساب خزانه (اختیاری)</span>
+                <select
+                  value={expenseForm.treasuryAccountId}
+                  onChange={(e) => setExpenseForm((prev) => ({ ...prev, treasuryAccountId: e.target.value }))}
+                  data-testid="expense-form-treasury-account"
+                >
+                  <option value="">بدون اتصال به خزانه</option>
+                  {treasuryAccounts.map((item) => (
+                    <option key={`expense-form-treasury-${item._id || item.id}`} value={item._id || item.id}>
+                      {item.title || item.code || 'حساب خزانه'}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="finance-inline-filter">
+                <span>فروشنده/دریافت‌کننده</span>
+                <input
+                  value={expenseForm.vendorName}
+                  onChange={(e) => setExpenseForm((prev) => ({ ...prev, vendorName: e.target.value }))}
+                  data-testid="expense-form-vendor"
+                />
+              </label>
+              <label className="finance-inline-filter">
+                <span>شماره سند/رسید</span>
+                <input
+                  value={expenseForm.referenceNo}
+                  onChange={(e) => setExpenseForm((prev) => ({ ...prev, referenceNo: e.target.value }))}
+                  data-testid="expense-form-reference"
+                />
+              </label>
+              <label className="finance-inline-filter finance-inline-filter-wide">
+                <span>یادداشت</span>
+                <input
+                  value={expenseForm.note}
+                  onChange={(e) => setExpenseForm((prev) => ({ ...prev, note: e.target.value }))}
+                  placeholder="توضیح کوتاه مصرف"
+                  data-testid="expense-form-note"
+                />
+              </label>
+            </div>
+            <div className="row-actions">
+              <label className="finance-inline-filter finance-expense-submit-toggle">
+                <input
+                  type="checkbox"
+                  checked={expenseForm.submitForReview}
+                  onChange={(e) => setExpenseForm((prev) => ({ ...prev, submitForReview: e.target.checked }))}
+                  data-testid="expense-form-submit-toggle"
+                />
+                <span>همین حالا ارسال شود (وگرنه پیش‌نویس می‌ماند)</span>
+              </label>
+              <button type="submit" disabled={busy} data-testid="expense-form-submit">ثبت مصرف</button>
+            </div>
+          </form>
+        )}
+
+        {!filteredExpenses.length && <p className="muted">با این فیلتر مصرفی پیدا نشد.</p>}
+        {!!filteredExpenses.length && (
+          <div className="finance-table expenses-table">
+            <div className="head"><span>دسته</span><span>فروشنده</span><span>مبلغ</span><span>تاریخ</span><span>وضعیت</span><span>مرحله</span><span>عملیات</span></div>
+            {paginatedExpenses.map((item) => (
+              <div key={item._id} className="row">
+                <div className="receipt-cell-stack">
+                  <strong>{resolveExpenseCategoryLabel(item.category)}</strong>
+                  <small>{resolveExpenseSubCategoryLabel(item.category, item.subCategory)}</small>
+                </div>
+                <span>{item.vendorName || '-'}</span>
+                <span>{fmt(item.amount)} {item.currency || 'AFN'}</span>
+                <span>{toFaDate(item.expenseDate)}</span>
+                <span className={`receipt-status-badge ${item.status || 'draft'}`}>
+                  {EXPENSE_STATUS_LABELS[item.status] || item.status}
+                </span>
+                <span>{EXPENSE_STAGE_LABELS[item.approvalStage] || item.approvalStage || '-'}</span>
+                <div className="row-actions">
+                  {(item.status === 'draft' || item.status === 'rejected') && (
+                    <button type="button" onClick={() => submitExpenseForReview(item._id)} disabled={busy}>ارسال برای بررسی</button>
+                  )}
+                  {item.status === 'pending_review' && (
+                    <>
+                      <button type="button" onClick={() => reviewExpenseEntry(item._id, 'approve')} disabled={busy}>تایید مرحله</button>
+                      <button type="button" className="danger" onClick={() => reviewExpenseEntry(item._id, 'reject')} disabled={busy}>رد</button>
+                    </>
+                  )}
+                  {item.status === 'draft' && (
+                    <button type="button" className="danger" onClick={() => deleteExpenseEntry(item._id)} disabled={busy}>حذف</button>
+                  )}
+                  {item.status !== 'void' && (
+                    <button type="button" className="danger" onClick={() => voidExpenseEntry(item._id)} disabled={busy}>باطل‌سازی</button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {!!filteredExpenses.length && (
+          <div className="finance-pagination" data-testid="expense-pagination">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setExpensePage((current) => Math.max(1, current - 1))}
+              disabled={effectiveExpensePage <= 1}
+            >
+              قبلی
+            </button>
+            <span>صفحه {fmt(effectiveExpensePage)} از {fmt(expenseTotalPages)}</span>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setExpensePage((current) => Math.min(expenseTotalPages, current + 1))}
+              disabled={effectiveExpensePage >= expenseTotalPages}
+            >
+              بعدی
+            </button>
+          </div>
+        )}
+      </div>
+
       <section className="finance-relief-entry-workspace" data-finance-section="discounts" data-testid="relief-entry-workspace">
         <div className="finance-subsection-tabs finance-relief-mode-tabs" role="group" aria-label="فورم‌های تخفیف و معافیت">
           <button type="button" className={reliefFormMode === 'discount' ? 'secondary is-active' : 'secondary'} onClick={() => setReliefFormMode('discount')}>فورم تخفیف</button>
@@ -8394,84 +9362,103 @@ export default function AdminFinance() {
         <button type="button" onClick={requestMonthClose} disabled={busy}>درخواست بستن ماه مالی</button>
       </div>
 
+      <div className="finance-card finance-payment-tools-card" data-finance-section="payments" data-testid="payment-tools-card">
+        <label className="finance-inline-filter finance-inline-filter-wide">
+          <span>ابزارهای گروهی و ویژه</span>
+          <select
+            value={activePaymentTool}
+            onChange={(e) => setActivePaymentTool(e.target.value)}
+            data-testid="payment-tools-select"
+          >
+            <option value="">— انتخاب ابزار (بسته) —</option>
+            {PAYMENT_TOOL_OPTIONS.map((item) => (
+              <option key={`payment-tool-${item.value}`} value={item.value}>{item.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
       <div id="pending-receipts" className="finance-card" data-finance-section="payments">
-        <div className="finance-toolbar">
-          <div>
+        <div className="finance-toolbar finance-receipts-filter-toolbar">
+          <div className="finance-receipts-toolbar-intro">
             <h3>تمام رسیدهای پرداخت</h3>
             <p className="muted">رسیدهای در انتظار، تاییدشده و ردشده را همراه با فایل، مرحله و ردپای تایید بررسی کنید.</p>
           </div>
-          <label className="finance-inline-filter finance-inline-filter-wide">
-            <span>جستجو در رسیدها</span>
-            <input
-              value={receiptSearchTerm}
-              onChange={(e) => setReceiptSearchTerm(e.target.value)}
-              placeholder="نام یا نمبر اساس شاگرد، شماره بل، مرجع یا روش پرداخت"
-            />
-          </label>
-          <label className="finance-inline-filter">
-            <span>فیلتر مرحله</span>
-            <select value={receiptStageFilter} onChange={(e) => setReceiptStageFilter(e.target.value)}>
-              <option value="all">همه مراحل</option>
-              <option value="finance_manager_review">مدیر مالی</option>
-              <option value="general_president_review">ریاست عمومی</option>
-            </select>
-          </label>
-          <label className="finance-inline-filter">
-            <span>وضعیت</span>
-            <select value={receiptStatusFilter} onChange={(e) => setReceiptStatusFilter(e.target.value)}>
-              <option value="all">همه</option>
-              <option value="pending">در انتظار</option>
-              <option value="approved">تاییدشده</option>
-              <option value="rejected">ردشده</option>
-            </select>
-          </label>
-          <label className="finance-inline-filter">
-            <span>منبع</span>
-            <select value={receiptSourceFilter} onChange={(e) => setReceiptSourceFilter(e.target.value)}>
-              <option value="all">همه</option>
-              <option value="legacy_receipt">رسید قدیمی</option>
-              <option value="guardian_upload">ارسال ولی/متعلم</option>
-              <option value="cashier_manual">ثبت صندوق</option>
-              <option value="canonical_manual">پرداخت رسمی دستی</option>
-              <option value="gateway">درگاه آنلاین</option>
-            </select>
-          </label>
-          <label className="finance-inline-filter">
-            <span>پیگیری</span>
-            <select value={receiptFollowUpFilter} onChange={(e) => setReceiptFollowUpFilter(e.target.value)}>
-              <option value="all">همه</option>
-              {FOLLOW_UP_STATUS_OPTIONS.map((item) => (
-                <option key={item.value} value={item.value}>{item.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="finance-inline-filter">
-            <span>سال تعلیمی</span>
-            <select
-              value={receiptAcademicYearFilter}
-              onChange={(e) => setReceiptAcademicYearFilter(e.target.value)}
-              data-testid="receipt-academic-year-filter"
-            >
-              <option value="all">همه سال‌ها</option>
-              {academicYears.map((item) => (
-                <option key={`receipt-year-${item.id}`} value={item.id}>{getAcademicYearOptionLabel(item)}</option>
-              ))}
-            </select>
-          </label>
-          <label className="finance-inline-filter">
-            <span>صنف</span>
-            <select
-              value={receiptClassFilter}
-              onChange={(e) => setReceiptClassFilter(e.target.value)}
-              data-testid="receipt-class-filter"
-            >
-              <option value="all">همه صنف‌ها</option>
-              {classOptions.map((item) => (
-                <option key={`receipt-class-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>
-              ))}
-            </select>
-          </label>
+          <div className="finance-receipts-filter-row">
+            <label className="finance-inline-filter">
+              <span>جستجو در رسیدها</span>
+              <input
+                value={receiptSearchTerm}
+                onChange={(e) => setReceiptSearchTerm(e.target.value)}
+                placeholder="نام یا نمبر اساس شاگرد، شماره بل، مرجع یا روش پرداخت"
+              />
+            </label>
+            <label className="finance-inline-filter">
+              <span>فیلتر مرحله</span>
+              <select value={receiptStageFilter} onChange={(e) => setReceiptStageFilter(e.target.value)}>
+                <option value="all">همه مراحل</option>
+                <option value="finance_manager_review">مدیر مالی</option>
+                <option value="general_president_review">ریاست عمومی</option>
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>وضعیت</span>
+              <select value={receiptStatusFilter} onChange={(e) => setReceiptStatusFilter(e.target.value)}>
+                <option value="all">همه</option>
+                <option value="pending">در انتظار</option>
+                <option value="approved">تاییدشده</option>
+                <option value="rejected">ردشده</option>
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>منبع</span>
+              <select value={receiptSourceFilter} onChange={(e) => setReceiptSourceFilter(e.target.value)}>
+                <option value="all">همه</option>
+                <option value="legacy_receipt">رسید قدیمی</option>
+                <option value="guardian_upload">ارسال ولی/متعلم</option>
+                <option value="cashier_manual">ثبت صندوق</option>
+                <option value="canonical_manual">پرداخت رسمی دستی</option>
+                <option value="gateway">درگاه آنلاین</option>
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>پیگیری</span>
+              <select value={receiptFollowUpFilter} onChange={(e) => setReceiptFollowUpFilter(e.target.value)}>
+                <option value="all">همه</option>
+                {FOLLOW_UP_STATUS_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>سال تعلیمی</span>
+              <select
+                value={receiptAcademicYearFilter}
+                onChange={(e) => setReceiptAcademicYearFilter(e.target.value)}
+                data-testid="receipt-academic-year-filter"
+              >
+                <option value="all">همه سال‌ها</option>
+                {academicYears.map((item) => (
+                  <option key={`receipt-year-${item.id}`} value={item.id}>{getAcademicYearOptionLabel(item)}</option>
+                ))}
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>صنف</span>
+              <select
+                value={receiptClassFilter}
+                onChange={(e) => setReceiptClassFilter(e.target.value)}
+                data-testid="receipt-class-filter"
+              >
+                <option value="all">همه صنف‌ها</option>
+                {classOptions.map((item) => (
+                  <option key={`receipt-class-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
+        {activePaymentTool === 'class_bulk_approval' && (
         <div className="class-payment-approval-panel" data-testid="class-payment-approval-panel">
           <div className="finance-card-head">
             <div>
@@ -8580,6 +9567,8 @@ export default function AdminFinance() {
             </button>
           </div>
         </div>
+        )}
+        {activePaymentTool === 'admission_bulk_correction' && (
         <div className="admission-receipt-correction-panel" data-testid="admission-receipt-correction-panel">
           <div className="finance-card-head">
             <div>
@@ -8673,6 +9662,8 @@ export default function AdminFinance() {
             </button>
           </div>
         </div>
+        )}
+        {activePaymentTool === 'payment_scope_repair' && (
         <div className="admission-receipt-correction-panel" data-testid="payment-scope-repair-panel">
           <div className="finance-card-head">
             <div>
@@ -8759,6 +9750,7 @@ export default function AdminFinance() {
             </button>
           </div>
         </div>
+        )}
         <div className="finance-chip-group receipt-inbox-summary">
           <span className="finance-chip">کل: {receiptInboxSummary.total}</span>
           <span className="finance-chip finance-chip-emerald">در انتظار: {receiptInboxSummary.pending}</span>
@@ -9024,6 +10016,250 @@ export default function AdminFinance() {
           </div>
         ) : null}
       </div>
+
+      {activePaymentTool === 'refund_requests' && (
+      <div id="finance-refunds" className="finance-card" data-finance-section="payments" data-testid="finance-refunds-card">
+        <div className="finance-toolbar">
+          <div>
+            <h3>درخواست‌های بازپرداخت</h3>
+            <p className="muted">پرداخت‌هایی که باید به شاگرد برگردانده شود - مثلاً پولی که بعد از منفک/تبدیل‌شدن شاگرد اشتباهاً دریافت شده.</p>
+          </div>
+          <label className="finance-inline-filter finance-inline-filter-wide">
+            <span>جستجو</span>
+            <input
+              value={refundSearchTerm}
+              onChange={(e) => setRefundSearchTerm(e.target.value)}
+              placeholder="نام شاگرد، شماره بازپرداخت یا شماره بل"
+              data-testid="refund-search-input"
+            />
+          </label>
+          <label className="finance-inline-filter">
+            <span>وضعیت</span>
+            <select value={refundStatusFilter} onChange={(e) => setRefundStatusFilter(e.target.value)} data-testid="refund-status-filter">
+              <option value="all">همه</option>
+              {Object.entries(FINANCE_REFUND_STATUS_LABELS).map(([value, label]) => (
+                <option key={`refund-status-${value}`} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="finance-chip-group receipt-inbox-summary">
+          <span className="finance-chip">کل: {refunds.length}</span>
+          <span className="finance-chip finance-chip-emerald">باز (در انتظار/تاییدشده): {refundSummaryStats.openCount}</span>
+          <span className="finance-chip">مجموع مبلغ باز: {fmt(refundSummaryStats.openAmount)}</span>
+        </div>
+
+        <div className="receipt-follow-up-form" data-testid="manual-refund-form">
+          <h4>ثبت دستی درخواست بازپرداخت</h4>
+          <div className="receipt-follow-up-grid">
+            <label className="finance-inline-filter finance-inline-filter-wide">
+              <span>بل / بدهی مالی</span>
+              <select
+                value={manualRefundForm.feeOrderId}
+                onChange={(e) => setManualRefundForm((prev) => ({ ...prev, feeOrderId: e.target.value }))}
+                data-testid="manual-refund-bill-select"
+              >
+                <option value="">یک بل با مبلغ پرداخت‌شده انتخاب کنید</option>
+                {refundEligibleBills.map((item) => (
+                  <option key={`manual-refund-bill-${item.id}`} value={item.id}>
+                    {formatFinanceCode(item.billNumber, '---')} - {item.student?.name || '---'} - {fmt(item.amountPaid)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="finance-inline-filter">
+              <span>مبلغ (خالی = تمام مبلغ پرداخت‌شده)</span>
+              <input
+                type="number"
+                min="0"
+                value={manualRefundForm.amount}
+                onChange={(e) => setManualRefundForm((prev) => ({ ...prev, amount: e.target.value }))}
+                data-testid="manual-refund-amount"
+              />
+            </label>
+            <label className="finance-inline-filter">
+              <span>دلیل</span>
+              <select
+                value={manualRefundForm.reason}
+                onChange={(e) => setManualRefundForm((prev) => ({ ...prev, reason: e.target.value }))}
+                data-testid="manual-refund-reason"
+              >
+                {Object.entries(FINANCE_REFUND_REASON_LABELS).map(([value, label]) => (
+                  <option key={`manual-refund-reason-${value}`} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="finance-inline-filter finance-inline-filter-wide">
+            <span>یادداشت</span>
+            <textarea
+              value={manualRefundForm.reasonNote}
+              onChange={(e) => setManualRefundForm((prev) => ({ ...prev, reasonNote: e.target.value }))}
+              placeholder="توضیح کوتاه دلیل بازپرداخت"
+              data-testid="manual-refund-note"
+            />
+          </label>
+          <div className="row-actions">
+            <button type="button" onClick={createManualRefundCase} disabled={busy || !manualRefundForm.feeOrderId} data-testid="manual-refund-submit">
+              ثبت درخواست بازپرداخت
+            </button>
+          </div>
+        </div>
+
+        {!filteredRefunds.length && <p className="muted">با این فیلتر درخواست بازپرداختی پیدا نشد.</p>}
+        {!!filteredRefunds.length && (
+          <div className="receipt-review-layout">
+            <div className="finance-table refunds-table">
+              <div className="head"><span>شاگرد</span><span>شماره بازپرداخت</span><span>مبلغ</span><span>دلیل</span><span>وضعیت</span><span>عملیات</span></div>
+              {filteredRefunds.map((item) => (
+                <div
+                  key={item._id}
+                  className={`row selectable-row ${selectedRefund?._id === item._id ? 'selected' : ''}`}
+                  onClick={() => setSelectedRefundId(String(item._id))}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSelectedRefundId(String(item._id));
+                    }
+                  }}
+                >
+                  <div className="receipt-cell-stack">
+                    <strong>{item.student?.name || '---'}</strong>
+                    <small>{item.bill?.billNumber ? formatFinanceCode(item.bill.billNumber, '-') : (item.feeOrder?.orderNumber ? formatFinanceCode(item.feeOrder.orderNumber, '-') : '-')}</small>
+                  </div>
+                  <span className="finance-latin-code">{formatFinanceCode(item.refundNumber, '-')}</span>
+                  <span>{fmt(item.amount)}</span>
+                  <span>{FINANCE_REFUND_REASON_LABELS[item.reason] || item.reason || '-'}</span>
+                  <span className={`receipt-status-badge ${item.status || 'pending_review'}`}>
+                    {FINANCE_REFUND_STATUS_LABELS[item.status] || item.status || '-'}
+                  </span>
+                  <div className="row-actions">
+                    {item.status === 'pending_review' && (
+                      <>
+                        <button type="button" onClick={(e) => { e.stopPropagation(); setSelectedRefundId(String(item._id)); approveRefund(); }} disabled={busy}>تایید</button>
+                        <button type="button" className="danger" onClick={(e) => { e.stopPropagation(); setSelectedRefundId(String(item._id)); rejectRefund(); }} disabled={busy}>رد</button>
+                      </>
+                    )}
+                    {item.status === 'approved' && (
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setSelectedRefundId(String(item._id)); }} disabled={busy}>ثبت پرداخت</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {selectedRefund && (
+              <aside className="receipt-inspector" data-testid="refund-inspector">
+                <div className="receipt-inspector-head">
+                  <div>
+                    <strong>{selectedRefund.student?.name || '---'}</strong>
+                    <span className="finance-latin-code">{formatFinanceCode(selectedRefund.refundNumber, '-')}</span>
+                  </div>
+                  <span className={`receipt-status-badge ${selectedRefund.status || 'pending_review'}`}>
+                    {FINANCE_REFUND_STATUS_LABELS[selectedRefund.status] || selectedRefund.status}
+                  </span>
+                </div>
+
+                <div className="receipt-meta-grid">
+                  <div><span>مبلغ</span><strong>{fmt(selectedRefund.amount)} {selectedRefund.currency || 'AFN'}</strong></div>
+                  <div><span>دلیل</span><strong>{FINANCE_REFUND_REASON_LABELS[selectedRefund.reason] || selectedRefund.reason || '-'}</strong></div>
+                  <div><span>بل/بدهی مرجع</span><strong className="finance-latin-code">{formatFinanceCode(selectedRefund.bill?.billNumber || selectedRefund.feeOrder?.orderNumber, '-')}</strong></div>
+                  <div><span>تاریخ ثبت</span><strong>{toFaDate(selectedRefund.createdAt)}</strong></div>
+                  {selectedRefund.status === 'paid' && (
+                    <>
+                      <div><span>روش بازپرداخت</span><strong>{FINANCE_REFUND_METHOD_LABELS[selectedRefund.refundMethod] || selectedRefund.refundMethod || '-'}</strong></div>
+                      <div><span>شماره سند</span><strong>{selectedRefund.proofReference || '-'}</strong></div>
+                      <div><span>تاریخ پرداخت</span><strong>{toFaDate(selectedRefund.paidAt)}</strong></div>
+                    </>
+                  )}
+                  {selectedRefund.status === 'rejected' && (
+                    <div><span>دلیل رد</span><strong>{selectedRefund.rejectReason || '-'}</strong></div>
+                  )}
+                </div>
+
+                {selectedRefund.reasonNote ? (
+                  <div className="receipt-note-box">
+                    <span>یادداشت</span>
+                    <p>{selectedRefund.reasonNote}</p>
+                  </div>
+                ) : null}
+
+                {selectedRefund.status === 'pending_review' && (
+                  <div className="receipt-follow-up-form">
+                    <label className="finance-inline-filter finance-inline-filter-wide">
+                      <span>یادداشت بررسی (برای رد، دلیل الزامی است)</span>
+                      <textarea
+                        value={refundReviewNote}
+                        onChange={(e) => setRefundReviewNote(e.target.value)}
+                        placeholder="نتیجه بررسی یا دلیل رد را بنویسید"
+                        data-testid="refund-review-note"
+                      />
+                    </label>
+                    <div className="row-actions">
+                      <button type="button" onClick={approveRefund} disabled={busy} data-testid="refund-approve-button">تایید درخواست</button>
+                      <button type="button" className="danger" onClick={rejectRefund} disabled={busy} data-testid="refund-reject-button">رد درخواست</button>
+                    </div>
+                  </div>
+                )}
+
+                {selectedRefund.status === 'approved' && (
+                  <div className="receipt-follow-up-form">
+                    <div className="receipt-follow-up-grid">
+                      <label className="finance-inline-filter">
+                        <span>روش بازپرداخت</span>
+                        <select
+                          value={refundPayForm.refundMethod}
+                          onChange={(e) => setRefundPayForm((prev) => ({ ...prev, refundMethod: e.target.value }))}
+                          data-testid="refund-pay-method"
+                        >
+                          {Object.entries(FINANCE_REFUND_METHOD_LABELS).map(([value, label]) => (
+                            <option key={`refund-pay-method-${value}`} value={value}>{label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="finance-inline-filter">
+                        <span>شماره سند/رسید</span>
+                        <input
+                          value={refundPayForm.proofReference}
+                          onChange={(e) => setRefundPayForm((prev) => ({ ...prev, proofReference: e.target.value }))}
+                          data-testid="refund-pay-reference"
+                        />
+                      </label>
+                    </div>
+                    <div className="row-actions">
+                      <button type="button" onClick={markRefundAsPaid} disabled={busy || !refundPayForm.proofReference.trim()} data-testid="refund-pay-button">
+                        ثبت پرداخت
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {Array.isArray(selectedRefund.approvalTrail) && selectedRefund.approvalTrail.length ? (
+                  <div className="receipt-trail">
+                    <h4>تاریخچه بازپرداخت</h4>
+                    <div className="trail-list">
+                      {selectedRefund.approvalTrail.map((entry, index) => (
+                        <div key={`refund-trail-${selectedRefund._id}-${index}`} className="trail-item">
+                          <div className="trail-item-head">
+                            <strong>{entry.action === 'approve' ? 'تایید' : 'رد'}</strong>
+                            <span>{toFaDateTime(entry.at)}</span>
+                          </div>
+                          {entry.note ? <p>{entry.note}</p> : null}
+                          {entry.reason ? <p>{entry.reason}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </aside>
+            )}
+          </div>
+        )}
+      </div>
+      )}
 
       <div className="finance-card finance-orders-table-card" data-finance-section="orders" data-testid="finance-orders-table-card">
         <div className="finance-toolbar finance-orders-filter-toolbar">
@@ -9550,6 +10786,9 @@ export default function AdminFinance() {
                             <button type="button" className="secondary" onClick={() => settleAdmissionAnomaly('paid')} disabled={busy || !selectedAnomaly} data-testid="anomaly-admission-paid-button">داخله پرداخت شده</button>
                             <button type="button" className="secondary" onClick={() => settleAdmissionAnomaly('waived')} disabled={busy || !selectedAnomaly} data-testid="anomaly-admission-waived-button">معاف/تخفیف کامل</button>
                           </>
+                        )}
+                        {selectedAnomaly.anomalyType === 'payment_after_membership_end' && (
+                          <button type="button" onClick={createRefundFromAnomaly} disabled={busy || !selectedAnomaly} data-testid="anomaly-create-refund-button">ایجاد درخواست بازپرداخت</button>
                         )}
                         <button type="button" onClick={resolveAnomaly} disabled={busy || !selectedAnomaly} data-testid="anomaly-resolve-button">ثبت حل‌شدن</button>
                       </div>

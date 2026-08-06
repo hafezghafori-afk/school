@@ -14,7 +14,12 @@ const {
   voidFeeOrderAction,
   approveFeePaymentAction,
   rejectFeePaymentAction,
-  updateFeePaymentFollowUpAction
+  updateFeePaymentFollowUpAction,
+  createRefundCaseAction,
+  approveRefundAction,
+  rejectRefundAction,
+  markRefundPaidAction,
+  listFinanceRefunds
 } = require('../services/financeAdminActionService');
 const {
   cancelDiscount,
@@ -426,6 +431,51 @@ router.post('/payments/:id/follow-up', requireAuth, requireRole(['admin']), requ
     return res.json({ success: true, ...result });
   } catch (error) {
     return res.status(error?.status || 500).json({ success: false, message: error?.message || 'به‌روزرسانی پیگیری پرداخت مالی ناموفق بود.' });
+  }
+});
+
+router.get('/refunds', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const result = await listFinanceRefunds(withRequestSchoolScope(req, req.query || {}));
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    return res.status(error?.status || 500).json({ success: false, message: error?.message || 'دریافت فهرست بازپرداخت‌ها ناموفق بود.' });
+  }
+});
+
+router.post('/refunds', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const result = await createRefundCaseAction({ req, body: req.body || {} });
+    return res.status(201).json({ success: true, ...result });
+  } catch (error) {
+    return res.status(error?.status || 500).json({ success: false, message: error?.message || 'ثبت درخواست بازپرداخت ناموفق بود.' });
+  }
+});
+
+router.post('/refunds/:id/approve', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const result = await approveRefundAction({ req, refundId: req.params.id, body: req.body || {} });
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    return res.status(error?.status || 500).json({ success: false, message: error?.message || 'تایید درخواست بازپرداخت ناموفق بود.' });
+  }
+});
+
+router.post('/refunds/:id/reject', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const result = await rejectRefundAction({ req, refundId: req.params.id, body: req.body || {} });
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    return res.status(error?.status || 500).json({ success: false, message: error?.message || 'رد درخواست بازپرداخت ناموفق بود.' });
+  }
+});
+
+router.post('/refunds/:id/mark-paid', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const result = await markRefundPaidAction({ req, refundId: req.params.id, body: req.body || {} });
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    return res.status(error?.status || 500).json({ success: false, message: error?.message || 'ثبت پرداخت بازپرداخت ناموفق بود.' });
   }
 });
 

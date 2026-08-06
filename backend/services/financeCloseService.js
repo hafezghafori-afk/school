@@ -12,6 +12,7 @@ const FeePayment = require('../models/FeePayment');
 const FinanceRelief = require('../models/FinanceRelief');
 const ExpenseEntry = require('../models/ExpenseEntry');
 const FinanceTreasuryTransaction = require('../models/FinanceTreasuryTransaction');
+const FinanceRefund = require('../models/FinanceRefund');
 const { buildFinanceAnomalyReport } = require('./financeAnomalyService');
 const {
   mergeFinanceAnomalyCases,
@@ -19,6 +20,7 @@ const {
 } = require('../utils/financeAnomalyWorkflow');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
+const { sumPaidRefunds } = require('../utils/financeRefundRecognition');
 
 const CURRENT_MEMBERSHIP_STATUSES = ['active', 'pending', 'suspended', 'transferred_in'];
 
@@ -283,7 +285,7 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
   if (!academicYearId) throw new Error('finance_academic_year_scope_required');
   const scopeFilter = { schoolId, academicYearId };
 
-  const [ordersBeforeClose, ordersIssuedInMonth, approvedPayments, pendingPayments, reliefs, activeMemberships, anomalyReport, approvedExpenses, pendingExpenses, treasuryRows] = await Promise.all([
+  const [ordersBeforeClose, ordersIssuedInMonth, approvedPayments, pendingPayments, reliefs, activeMemberships, anomalyReport, approvedExpenses, pendingExpenses, treasuryRows, refundSummary] = await Promise.all([
     FeeOrder.find({
       ...scopeFilter,
       status: { $ne: 'void' },
@@ -342,7 +344,8 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
       ...scopeFilter,
       status: 'posted',
       transactionDate: { $gte: startAt, $lte: endAt }
-    }).select('amount direction transactionType sourceType transactionDate').lean()
+    }).select('amount direction transactionType sourceType transactionDate').lean(),
+    sumPaidRefunds({ schoolId, academicYearId, startAt, endAt })
   ]);
   const [approvedRecognition, pendingRecognition] = await Promise.all([
     recognizePayments(approvedPayments),
@@ -379,6 +382,16 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
   const unassignedTreasuryExpenses = approvedExpenses.filter((item) => (
     !item?.treasuryAccountId && !item?.procurementCommitmentId
   ));
+  // Mirrors accumulateAccountMetrics in treasuryGovernanceService.js: an
+  // approved expense linked to a treasury account debits that account the
+  // moment it is approved, with no separate withdrawal transaction posted
+  // for it. Procurement-settled expenses are excluded because their cash
+  // effect is booked later via a dedicated procurement_settlement
+  // transaction (already inside treasuryRows), so including them here too
+  // would double the outflow.
+  const expenseTreasuryOutflowAmount = roundMoney(approvedExpenses
+    .filter((item) => item?.treasuryAccountId && !item?.procurementCommitmentId)
+    .reduce((sum, item) => sum + Number(item?.amount || 0), 0));
   const mergedAnomalies = mergeFinanceAnomalyCases(anomalyReport?.items || [], anomalyCases, { asOf: endAt });
   const anomalySummary = {
     ...(anomalyReport?.summary || { total: 0, critical: 0, warning: 0, info: 0, actionRequired: 0, byType: {} }),
@@ -416,6 +429,8 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
     approvedPaymentAmount: roundMoney(recognizedApprovedPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
     pendingPaymentCount: recognizedPendingPayments.length,
     pendingPaymentAmount: roundMoney(recognizedPendingPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
+    refundCount: refundSummary?.count || 0,
+    refundAmount: roundMoney(refundSummary?.total || 0),
     missingTreasuryPaymentCount: missingTreasuryPayments.length,
     missingTreasuryPaymentAmount: roundMoney(missingTreasuryPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
     approvedExpenseCount: approvedExpenses.length,
@@ -425,7 +440,10 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
     unassignedTreasuryExpenseCount: unassignedTreasuryExpenses.length,
     unassignedTreasuryExpenseAmount: roundMoney(unassignedTreasuryExpenses.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
     treasuryInflowAmount: roundMoney(treasuryRows.filter((item) => item?.direction === 'in').reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
-    treasuryOutflowAmount: roundMoney(treasuryRows.filter((item) => item?.direction === 'out').reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
+    treasuryOutflowAmount: roundMoney(
+      treasuryRows.filter((item) => item?.direction === 'out').reduce((sum, item) => sum + Number(item?.amount || 0), 0)
+      + expenseTreasuryOutflowAmount
+    ),
     standingDueAmount: roundMoney(ordersBeforeClose.reduce((sum, item) => sum + Number(item?.amountDue || 0), 0)),
     standingPaidAmount: roundMoney(ordersBeforeClose.reduce((sum, item) => sum + Number(item?.amountPaid || 0), 0)),
     standingOutstandingAmount: roundMoney(ordersBeforeClose.reduce((sum, item) => sum + Number(item?.outstandingAmount || 0), 0)),
@@ -433,7 +451,7 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
     activeMemberships,
     ...reliefSummary
   };
-  totals.netCashAmount = roundMoney(totals.approvedPaymentAmount - totals.approvedExpenseAmount);
+  totals.netCashAmount = roundMoney(totals.approvedPaymentAmount - totals.refundAmount - totals.approvedExpenseAmount);
   totals.treasuryNetAmount = roundMoney(totals.treasuryInflowAmount - totals.treasuryOutflowAmount);
 
   const anomalies = {
@@ -458,6 +476,8 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
       approvedCount: recognizedApprovedPayments.length,
       pendingTotal: roundMoney(recognizedPendingPayments.reduce((sum, item) => sum + Number(item?.amount || 0), 0)),
       pendingCount: recognizedPendingPayments.length,
+      refundTotal: totals.refundAmount,
+      refundCount: totals.refundCount,
       approvedExpenseTotal: totals.approvedExpenseAmount,
       approvedExpenseCount: totals.approvedExpenseCount,
       netCashAmount: totals.netCashAmount,
@@ -477,7 +497,107 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
   };
 }
 
+function toMonthKeyFromDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function lastNMonthKeys(count = 12, asOf = new Date()) {
+  const keys = [];
+  for (let i = count - 1; i >= 0; i -= 1) {
+    keys.push(toMonthKeyFromDate(new Date(asOf.getFullYear(), asOf.getMonth() - i, 1)));
+  }
+  return keys;
+}
+
+// A lighter, multi-month sibling of buildFinanceMonthCloseSnapshot - built for
+// a trend chart/table (income, refunds, expense, bills issued, arrears per
+// month), not for the full month-close readiness workflow. "Arrears" here
+// means orders due in that month that are still outstanding as of *now*
+// (not a historical point-in-time reconstruction), which is enough for a
+// trend view and stays cheap to compute.
+async function buildFinanceMonthlyTrend({
+  schoolId = '',
+  academicYearId = '',
+  months = 12,
+  asOf = new Date()
+} = {}) {
+  const normalizedSchoolId = normalizeNullableId(schoolId);
+  if (!normalizedSchoolId) throw new Error('finance_school_scope_required');
+  const normalizedAcademicYearId = normalizeNullableId(academicYearId);
+  const monthCount = Math.max(1, Math.min(24, Number(months) || 12));
+  const monthKeys = lastNMonthKeys(monthCount, asOf);
+  const rangeStart = toMonthDateRange(monthKeys[0]).startAt;
+  const rangeEnd = toMonthDateRange(monthKeys[monthKeys.length - 1]).endAt;
+
+  const scopeFilter = {
+    schoolId: normalizedSchoolId,
+    ...(normalizedAcademicYearId ? { academicYearId: normalizedAcademicYearId } : {})
+  };
+
+  const [orders, approvedPayments, expenses, refunds] = await Promise.all([
+    FeeOrder.find({ ...scopeFilter, status: { $ne: 'void' }, dueDate: { $gte: rangeStart, $lte: rangeEnd } })
+      .select('dueDate amountDue outstandingAmount')
+      .lean(),
+    FeePayment.find({ ...scopeFilter, status: 'approved', paidAt: { $gte: rangeStart, $lte: rangeEnd } })
+      .select('amount paidAt feeOrderId allocations')
+      .lean(),
+    ExpenseEntry.find({ ...scopeFilter, status: 'approved', expenseDate: { $gte: rangeStart, $lte: rangeEnd } })
+      .select('amount expenseDate')
+      .lean(),
+    FinanceRefund.find({ ...scopeFilter, status: 'paid', paidAt: { $gte: rangeStart, $lte: rangeEnd } })
+      .select('amount paidAt')
+      .lean()
+  ]);
+
+  const recognizedPayments = await recognizePayments(approvedPayments);
+
+  const buckets = new Map(monthKeys.map((key) => [key, {
+    monthKey: key,
+    income: 0,
+    refunds: 0,
+    expense: 0,
+    billsIssuedCount: 0,
+    billsIssuedAmount: 0,
+    arrearsCount: 0,
+    arrearsAmount: 0
+  }]));
+
+  recognizedPayments.forEach((row) => {
+    const paidAt = row.payment?.paidAt;
+    const bucket = paidAt ? buckets.get(toMonthKeyFromDate(new Date(paidAt))) : null;
+    if (bucket) bucket.income = roundMoney(bucket.income + Number(row.recognizedAmount || 0));
+  });
+
+  expenses.forEach((item) => {
+    const bucket = item?.expenseDate ? buckets.get(toMonthKeyFromDate(new Date(item.expenseDate))) : null;
+    if (bucket) bucket.expense = roundMoney(bucket.expense + Number(item?.amount || 0));
+  });
+
+  refunds.forEach((item) => {
+    const bucket = item?.paidAt ? buckets.get(toMonthKeyFromDate(new Date(item.paidAt))) : null;
+    if (bucket) bucket.refunds = roundMoney(bucket.refunds + Number(item?.amount || 0));
+  });
+
+  orders.forEach((item) => {
+    const bucket = item?.dueDate ? buckets.get(toMonthKeyFromDate(new Date(item.dueDate))) : null;
+    if (!bucket) return;
+    bucket.billsIssuedCount += 1;
+    bucket.billsIssuedAmount = roundMoney(bucket.billsIssuedAmount + Number(item?.amountDue || 0));
+    if (Number(item?.outstandingAmount || 0) > 0) {
+      bucket.arrearsCount += 1;
+      bucket.arrearsAmount = roundMoney(bucket.arrearsAmount + Number(item.outstandingAmount || 0));
+    }
+  });
+
+  return monthKeys.map((key) => {
+    const bucket = buckets.get(key);
+    const netIncome = roundMoney(bucket.income - bucket.refunds);
+    return { ...bucket, netIncome, netCash: roundMoney(netIncome - bucket.expense) };
+  });
+}
+
 module.exports = {
   buildFinanceMonthCloseSnapshot,
+  buildFinanceMonthlyTrend,
   toMonthDateRange
 };
