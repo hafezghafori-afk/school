@@ -11,6 +11,7 @@ const FinancialYear = require('../models/FinancialYear');
 const User = require('../models/User');
 const UserNotification = require('../models/UserNotification');
 const { logActivity } = require('../utils/activity');
+const { invalidateAll: invalidateFinanceReportCache } = require('../utils/financeReportCache');
 const { sendMail } = require('../utils/mailer');
 const { normalizeAdminLevel } = require('../utils/permissions');
 const { resolveAdminOrgRole } = require('../utils/userRole');
@@ -1877,6 +1878,11 @@ function wrapAction(action) {
       if (result && typeof result.message === 'string') {
         result.message = repairDisplayText(result.message);
       }
+      // Every action wrapped here (void, refund, payment/receipt approve or
+      // reject, adjustments, installments) changes numbers the cached
+      // dashboard/treasury/anomaly/audit-timeline reports show - clear them
+      // so the next view is fresh instead of waiting out the cache TTL.
+      invalidateFinanceReportCache();
       return result;
     } catch (error) {
       if (isFinanceVersionConflict(error)) {

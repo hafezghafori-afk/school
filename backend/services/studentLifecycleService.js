@@ -16,6 +16,7 @@ const { issueTransferAdmissionBill } = require('./transferAdmissionBillingServic
 const { syncStudentFinanceFromFinanceBill } = require('../utils/studentFinanceSync');
 const { createFinanceRefundCase } = require('../utils/financeRefundCase');
 const { notifyFinanceOfLifecycleChange, broadcastFinanceLifecycleChange } = require('../utils/financeLifecycleNotifications');
+const { invalidateAll: invalidateFinanceReportCache } = require('../utils/financeReportCache');
 const {
   ACTIVE_STUDENT_MEMBERSHIP_STATUSES,
   CURRENT_STUDENT_MEMBERSHIP_STATUSES
@@ -715,6 +716,10 @@ async function executeStudentLifecycleAction(payload = {}, context = {}) {
     action: result?.action,
     effectiveAt: result?.effectiveAt
   });
+  // A lifecycle action can void/refund-case bills and always changes the
+  // status the debtor/legacy-arrears split reads - keep the cached finance
+  // reports from showing a departed student as still active.
+  invalidateFinanceReportCache();
 
   return result;
 }
