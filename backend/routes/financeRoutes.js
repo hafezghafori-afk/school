@@ -4825,11 +4825,19 @@ router.get('/admin/dashboard/monthly-trend', requireAuth, requireRole(['admin'])
       return res.status(400).json({ success: false, message: 'برای نمایش روند ماهانه، مکتب فعال را انتخاب کنید.' });
     }
     writeSchoolContextHeaders(res, schoolId);
-    const months = await buildFinanceMonthlyTrend({
+    const monthlyTrendParams = {
       schoolId,
       academicYearId: String(req.query?.academicYearId || '').trim(),
       months: req.query?.months
-    });
+    };
+    // Recomputes from the school's full financial history the same as
+    // dashboard/overview and treasury/analytics (see financeReportCache.js),
+    // but this one shipped without the cache those got - it was the one
+    // uncached heavy report still fired on every admin-finance page load.
+    const months = await withReportCache(
+      buildCacheKey('monthly-trend', monthlyTrendParams),
+      () => buildFinanceMonthlyTrend(monthlyTrendParams)
+    );
     return res.json({ success: true, months });
   } catch (error) {
     return res.status(error?.statusCode || 500).json({

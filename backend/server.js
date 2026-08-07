@@ -75,17 +75,15 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/school_db')
     // noticed and manually restarted the process. Log loudly and move on
     // instead, the same way the finance-repair step already did.
     try {
-      await repairChatThreadIndexes();
-      if (typeof SchoolClass.ensureSchoolClassShiftUniqueIndex === 'function') {
-        await SchoolClass.ensureSchoolClassShiftUniqueIndex();
-      }
-      if (typeof TeacherAssignment.ensureTeacherAssignmentLegacyIndex === 'function') {
-        await TeacherAssignment.ensureTeacherAssignmentLegacyIndex();
-      }
-      const resultTableReferenceSummary = await ensureResultTableReferenceData();
-      if (resultTableReferenceSummary.templatesCreated || resultTableReferenceSummary.configsCreated) {
-        console.log('Result table reference data initialized', resultTableReferenceSummary);
-      }
+      // These five steps each touch a different collection (ChatThread,
+      // SchoolClass, TeacherAssignment, TableTemplate/TableConfig,
+      // FinanceBill/FeeOrder) and don't depend on one another's results, so
+      // running them sequentially only added up their latencies for no
+      // reason - on a cold start against a remote Atlas cluster (network
+      // round trip per step) that's the difference between ~1 step's worth
+      // of latency and 5 steps' worth stacked before markAppReady() below
+      // ever runs. Promise.all runs them concurrently instead.
+      //
       // Self-heals FinanceBill records left stale by a payment approved
       // against their canonical FeeOrder mirror (see
       // syncFinanceBillPaymentFromFeeOrder in utils/studentFinanceSync.js for
@@ -93,20 +91,38 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/school_db')
       // lowers one, so it's safe to run on every deploy - once a database is
       // fully synced this is a fast no-op. Set
       // AUTO_FINANCE_BILL_REPAIR_ENABLED=false to disable if ever needed.
-      if (String(process.env.AUTO_FINANCE_BILL_REPAIR_ENABLED || 'true').toLowerCase() !== 'false') {
-        try {
-          const repairSummary = await repairFinanceBillPaymentMirrors();
-          if (repairSummary.changed) {
-            console.log(`Finance bill payment mirror repair: fixed ${repairSummary.changed} of ${repairSummary.checked} bill(s)`, repairSummary.fixes.map((fix) => ({
-              orderNumber: fix.orderNumber,
-              from: fix.from,
-              to: fix.to
-            })));
-          } else {
-            console.log(`Finance bill payment mirror repair: checked ${repairSummary.checked} bill(s), all in sync`);
-          }
-        } catch (error) {
-          console.error('Finance bill payment mirror repair failed (server will continue starting):', error);
+      const financeBillRepairEnabled = String(process.env.AUTO_FINANCE_BILL_REPAIR_ENABLED || 'true').toLowerCase() !== 'false';
+      const financeBillRepairTask = financeBillRepairEnabled
+        ? repairFinanceBillPaymentMirrors().catch((error) => {
+            console.error('Finance bill payment mirror repair failed (server will continue starting):', error);
+            return null;
+          })
+        : Promise.resolve(null);
+
+      const [, , , resultTableReferenceSummary, repairSummary] = await Promise.all([
+        repairChatThreadIndexes(),
+        typeof SchoolClass.ensureSchoolClassShiftUniqueIndex === 'function'
+          ? SchoolClass.ensureSchoolClassShiftUniqueIndex()
+          : Promise.resolve(),
+        typeof TeacherAssignment.ensureTeacherAssignmentLegacyIndex === 'function'
+          ? TeacherAssignment.ensureTeacherAssignmentLegacyIndex()
+          : Promise.resolve(),
+        ensureResultTableReferenceData(),
+        financeBillRepairTask
+      ]);
+
+      if (resultTableReferenceSummary.templatesCreated || resultTableReferenceSummary.configsCreated) {
+        console.log('Result table reference data initialized', resultTableReferenceSummary);
+      }
+      if (repairSummary) {
+        if (repairSummary.changed) {
+          console.log(`Finance bill payment mirror repair: fixed ${repairSummary.changed} of ${repairSummary.checked} bill(s)`, repairSummary.fixes.map((fix) => ({
+            orderNumber: fix.orderNumber,
+            from: fix.from,
+            to: fix.to
+          })));
+        } else {
+          console.log(`Finance bill payment mirror repair: checked ${repairSummary.checked} bill(s), all in sync`);
         }
       }
     } catch (error) {
