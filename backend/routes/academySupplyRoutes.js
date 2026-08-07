@@ -5,10 +5,13 @@ const AcademyCounter = require('../models/AcademyCounter');
 const AcademySupplyClassPrice = require('../models/AcademySupplyClassPrice');
 const AcademySupplySale = require('../models/AcademySupplySale');
 const AcademySupplyStudent = require('../models/AcademySupplyStudent');
+const { logActivity } = require('../utils/activity');
+const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
 
 const router = express.Router();
 
 router.use(requireAuth, requireRole(['admin']), requirePermission('manage_finance'));
+attachWriteActivityAudit(router, { targetType: 'AcademySupply', actionPrefix: 'academy_supply', audit: (payload) => logActivity(payload) });
 
 const userId = (req) => req.user?.id || null;
 const todayKey = () => new Date().toISOString().slice(0, 10);

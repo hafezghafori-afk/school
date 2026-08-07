@@ -160,6 +160,7 @@ async function buildResultTablePdfBuffer(table = {}) {
     const page = await browser.newPage({ locale: 'fa-AF' });
     await page.setContent(html, { waitUntil: 'load' });
     await page.emulateMedia({ media: 'print' });
+    // eslint-disable-next-line no-undef -- runs inside the Playwright page (browser context), where `document` is defined
     await page.evaluate(() => (document.fonts ? document.fonts.ready : Promise.resolve()));
     return await page.pdf({
       format: 'A4',

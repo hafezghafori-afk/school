@@ -2,8 +2,12 @@ const express = require('express');
 const SchoolClass = require('../models/SchoolClass');
 const { requireAuth } = require('../middleware/auth');
 const { DEFAULT_SCHOOL_ID, resolveActiveSchool, requireWritableSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
+const { logActivity } = require('../utils/activity');
+const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
 
 const router = express.Router();
+
+attachWriteActivityAudit(router, { targetType: 'SchoolClass', actionPrefix: 'school_class_legacy', audit: (payload) => logActivity(payload) });
 
 router.get('/school/:schoolId', requireAuth, async (req, res) => {
   try {

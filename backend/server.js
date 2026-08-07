@@ -66,39 +66,51 @@ app.use('/uploads', express.static(uploadDir));
 mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/school_db')
   .then(async () => {
     console.log('Database connected successfully');
-    await repairChatThreadIndexes();
-    if (typeof SchoolClass.ensureSchoolClassShiftUniqueIndex === 'function') {
-      await SchoolClass.ensureSchoolClassShiftUniqueIndex();
-    }
-    if (typeof TeacherAssignment.ensureTeacherAssignmentLegacyIndex === 'function') {
-      await TeacherAssignment.ensureTeacherAssignmentLegacyIndex();
-    }
-    const resultTableReferenceSummary = await ensureResultTableReferenceData();
-    if (resultTableReferenceSummary.templatesCreated || resultTableReferenceSummary.configsCreated) {
-      console.log('Result table reference data initialized', resultTableReferenceSummary);
-    }
-    // Self-heals FinanceBill records left stale by a payment approved
-    // against their canonical FeeOrder mirror (see
-    // syncFinanceBillPaymentFromFeeOrder in utils/studentFinanceSync.js for
-    // why this happens). Only ever raises a bill's recorded payment, never
-    // lowers one, so it's safe to run on every deploy - once a database is
-    // fully synced this is a fast no-op. Set
-    // AUTO_FINANCE_BILL_REPAIR_ENABLED=false to disable if ever needed.
-    if (String(process.env.AUTO_FINANCE_BILL_REPAIR_ENABLED || 'true').toLowerCase() !== 'false') {
-      try {
-        const repairSummary = await repairFinanceBillPaymentMirrors();
-        if (repairSummary.changed) {
-          console.log(`Finance bill payment mirror repair: fixed ${repairSummary.changed} of ${repairSummary.checked} bill(s)`, repairSummary.fixes.map((fix) => ({
-            orderNumber: fix.orderNumber,
-            from: fix.from,
-            to: fix.to
-          })));
-        } else {
-          console.log(`Finance bill payment mirror repair: checked ${repairSummary.checked} bill(s), all in sync`);
-        }
-      } catch (error) {
-        console.error('Finance bill payment mirror repair failed (server will continue starting):', error);
+    // Every step below is a best-effort repair/seed step, not something the
+    // rest of the app depends on to function - so nothing in here may be
+    // allowed to throw past this try/catch. An uncaught rejection here used
+    // to abort the whole .then() chain, which meant markAppReady() below
+    // never ran and requireDatabase kept every /api request stuck behind a
+    // 503 "starting" response forever (no retry, no restart) until someone
+    // noticed and manually restarted the process. Log loudly and move on
+    // instead, the same way the finance-repair step already did.
+    try {
+      await repairChatThreadIndexes();
+      if (typeof SchoolClass.ensureSchoolClassShiftUniqueIndex === 'function') {
+        await SchoolClass.ensureSchoolClassShiftUniqueIndex();
       }
+      if (typeof TeacherAssignment.ensureTeacherAssignmentLegacyIndex === 'function') {
+        await TeacherAssignment.ensureTeacherAssignmentLegacyIndex();
+      }
+      const resultTableReferenceSummary = await ensureResultTableReferenceData();
+      if (resultTableReferenceSummary.templatesCreated || resultTableReferenceSummary.configsCreated) {
+        console.log('Result table reference data initialized', resultTableReferenceSummary);
+      }
+      // Self-heals FinanceBill records left stale by a payment approved
+      // against their canonical FeeOrder mirror (see
+      // syncFinanceBillPaymentFromFeeOrder in utils/studentFinanceSync.js for
+      // why this happens). Only ever raises a bill's recorded payment, never
+      // lowers one, so it's safe to run on every deploy - once a database is
+      // fully synced this is a fast no-op. Set
+      // AUTO_FINANCE_BILL_REPAIR_ENABLED=false to disable if ever needed.
+      if (String(process.env.AUTO_FINANCE_BILL_REPAIR_ENABLED || 'true').toLowerCase() !== 'false') {
+        try {
+          const repairSummary = await repairFinanceBillPaymentMirrors();
+          if (repairSummary.changed) {
+            console.log(`Finance bill payment mirror repair: fixed ${repairSummary.changed} of ${repairSummary.checked} bill(s)`, repairSummary.fixes.map((fix) => ({
+              orderNumber: fix.orderNumber,
+              from: fix.from,
+              to: fix.to
+            })));
+          } else {
+            console.log(`Finance bill payment mirror repair: checked ${repairSummary.checked} bill(s), all in sync`);
+          }
+        } catch (error) {
+          console.error('Finance bill payment mirror repair failed (server will continue starting):', error);
+        }
+      }
+    } catch (error) {
+      console.error('Server boot repair/seed sequence failed unexpectedly (server will still start accepting requests):', error);
     }
     // Only now does requireDatabase let /api requests through - before this,
     // the process is up and /api/health reports it, but ordinary API traffic
