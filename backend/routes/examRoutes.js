@@ -452,9 +452,11 @@ router.post('/sessions/:sessionId/status', requireAuth, requireRole(['admin', 'i
 router.get('/sessions/:sessionId/export.print', requireAuth, requireRole(['admin', 'instructor']), requirePermission('manage_content'), async (req, res) => {
   try {
     await assertSessionAccess(req, req.params.sessionId);
-    const { report, template, session } = await buildSessionSheetReport(req.params.sessionId);
-    const html = await renderReportPrintHtml({ report, template, req });
-    const filename = `${session?.code || req.params.sessionId || 'exam-sheet'}.html`;
+    // شقه سفید (?blank=1): برای گرفتن امتحان حضوری — بدون نمره و بدون جزئیات متن پایین.
+    const blank = ['1', 'true'].includes(String(req.query.blank || '').toLowerCase());
+    const { report, template, session } = await buildSessionSheetReport(req.params.sessionId, { blank });
+    const html = await renderReportPrintHtml({ report, template, req, blank });
+    const filename = `${session?.code || req.params.sessionId || 'exam-sheet'}${blank ? '-blank' : ''}.html`;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
     return res.status(200).send(html);
@@ -468,9 +470,11 @@ router.get('/sessions/:sessionId/export.print', requireAuth, requireRole(['admin
 router.get('/sessions/:sessionId/export.pdf', requireAuth, requireRole(['admin', 'instructor']), requirePermission('manage_content'), async (req, res) => {
   try {
     await assertSessionAccess(req, req.params.sessionId);
-    const { report, template, session } = await buildSessionSheetReport(req.params.sessionId);
-    const buffer = await buildReportPdfBuffer({ report, template, req });
-    const filename = `${session?.code || req.params.sessionId || 'exam-sheet'}.pdf`;
+    // شقه سفید (?blank=1): برای گرفتن امتحان حضوری — بدون نمره و بدون جزئیات متن پایین.
+    const blank = ['1', 'true'].includes(String(req.query.blank || '').toLowerCase());
+    const { report, template, session } = await buildSessionSheetReport(req.params.sessionId, { blank });
+    const buffer = await buildReportPdfBuffer({ report, template, req, blank });
+    const filename = `${session?.code || req.params.sessionId || 'exam-sheet'}${blank ? '-blank' : ''}.pdf`;
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.status(200).send(buffer);

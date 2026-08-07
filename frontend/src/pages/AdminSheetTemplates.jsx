@@ -940,13 +940,15 @@ export default function AdminSheetTemplates() {
     }
   };
 
-  const exportFromTemplate = async (kind = 'csv') => {
+  const exportFromTemplate = async (kind = 'csv', { blank = false } = {}) => {
     if (!selectedTemplateId) return;
+    // شقه سفید: برای گرفتن امتحان حضوری — بدون نمره و بدون جزئیات متن پایین.
     try {
-      setBusyAction(`export:${kind}`);
+      setBusyAction(`export:${kind}${blank ? ':blank' : ''}`);
       if (kind === 'print') {
         const { text, filename, contentType } = await fetchText(`/api/sheet-templates/${selectedTemplateId}/export.print`, {
-          filters: buildPreviewFilters()
+          filters: buildPreviewFilters(),
+          blank
         });
         const opened = openHtmlDocument(text, filename);
         if (!opened) {
@@ -959,11 +961,12 @@ export default function AdminSheetTemplates() {
             ? `/api/sheet-templates/${selectedTemplateId}/export.pdf`
             : `/api/sheet-templates/${selectedTemplateId}/export.csv`;
         const { blob, filename } = await fetchBlob(endpoint, {
-          filters: buildPreviewFilters()
+          filters: buildPreviewFilters(),
+          blank
         });
         downloadBlob(blob, filename);
       }
-      showMessage('خروجی شقه دریافت شد.');
+      showMessage(blank ? 'شقهٔ سفید آماده شد.' : 'خروجی شقه دریافت شد.');
     } catch (error) {
       showMessage(errorMessage(error, 'گرفتن خروجی شقه ناموفق بود.'), 'error');
     } finally {
@@ -1544,6 +1547,31 @@ export default function AdminSheetTemplates() {
                   چاپ
                 </button>
               </div>
+
+              {selectedTemplate?.type === 'exam' && (
+                <div className="admin-sheet-command-group" aria-label="شقهٔ سفید برای امتحان حضوری">
+                  <button
+                    type="button"
+                    className="admin-workspace-button-ghost"
+                    onClick={() => exportFromTemplate('print', { blank: true })}
+                    disabled={busyAction === 'export:print:blank' || !selectedTemplateId || !filters.examId}
+                    title={filters.examId ? 'چاپ شقهٔ سفید برای گرفتن امتحان حضوری' : 'اول جلسهٔ امتحان را از فیلترها انتخاب کنید'}
+                    data-testid="sheet-export-print-blank"
+                  >
+                    چاپ شقهٔ سفید
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-workspace-button-secondary"
+                    onClick={() => exportFromTemplate('pdf', { blank: true })}
+                    disabled={busyAction === 'export:pdf:blank' || !selectedTemplateId || !filters.examId}
+                    title={filters.examId ? 'دانلود PDF شقهٔ سفید برای گرفتن امتحان حضوری' : 'اول جلسهٔ امتحان را از فیلترها انتخاب کنید'}
+                    data-testid="sheet-export-pdf-blank"
+                  >
+                    PDF شقهٔ سفید
+                  </button>
+                </div>
+              )}
 
               <div className="admin-sheet-command-group" aria-label="عملیات فیلتر">
                 <button type="button" className="admin-workspace-button-ghost" onClick={resetFilters} data-testid="sheet-reset-filters">

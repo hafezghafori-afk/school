@@ -23,7 +23,7 @@ const examMarkSchema = new mongoose.Schema({
   },
   markStatus: {
     type: String,
-    enum: ['recorded', 'absent', 'excused', 'pending', 'not_applicable'],
+    enum: ['recorded', 'absent', 'excused', 'pending', 'not_applicable', 'expelled', 'transferred'],
     default: 'recorded',
     index: true
   },

@@ -343,10 +343,17 @@ function buildTableHtml(report = {}) {
   `;
 }
 
-function buildExamTableHtml(columns = [], rows = [], { blankWhenEmpty = false } = {}) {
+function buildExamTableHtml(columns = [], rows = [], { padTo = 0, numberOffset = 0 } = {}) {
   const visibleColumns = (Array.isArray(columns) ? columns : []).filter((column) => column?.visible !== false && normalizeText(column?.key));
   if (!visibleColumns.length) {
     return '<div class="exam-sheet-empty">ستونی برای نمایش در تنظیمات شقه انتخاب نشده است.</div>';
+  }
+  // هر قدر جای خالی در صفحه باقی بماند، با علامت / در همه ستون‌ها پر می‌شود — به جز
+  // ستون شماره که باید عدد پیهم داشته باشد، نه علامت /.
+  const paddedRowCount = Math.max(0, Number(padTo) || 0);
+  const displayRows = Array.isArray(rows) ? rows.slice() : [];
+  while (displayRows.length < paddedRowCount) {
+    displayRows.push({ __placeholder: true, number: numberOffset + displayRows.length + 1 });
   }
 
   const hasGroups = visibleColumns.some((column) => normalizeText(column?.group));
@@ -367,22 +374,33 @@ function buildExamTableHtml(columns = [], rows = [], { blankWhenEmpty = false } 
     const key = normalizeText(column?.key);
     return ['studentName', 'fatherName'].includes(key) ? 'is-identity-heading' : 'is-compact-heading';
   };
+  // متن هدر هر ستون (شماره، نام، نام پدر، تحریری، تقریری، فعالیت صنفی، کارخانگی، به
+  // عدد، به حروف، ملاحظات) نود درجه چرخانده می‌شود تا در ستون‌های باریک جا شود. عنوان
+  // گروه‌بندی‌شونده (شهرت متعلمین / مجموعه نمره) چون چند ستون را پوشش می‌دهد افقی می‌ماند.
+  // پوشش flex دور متن، چون transform:rotate به‌تنهایی برای متن‌های بلند مثل «فعالیت
+  // صنفی از ۵» وسط خانه نمی‌ماند (بسته به طول متن، جابه‌جا می‌شود).
+  const rotatedLabel = (label = '') => `<span class="th-rotate-wrap"><span class="th-rotate">${escapeHtml(label)}</span></span>`;
   const head = hasGroups
     ? `<tr>${topCells.map((cell) => cell.group
       ? `<th colspan="${cell.count}" class="group-heading">${escapeHtml(cell.group)}</th>`
-      : `<th rowspan="2" class="${headerClass(cell)}">${escapeHtml(cell.label)}</th>`).join('')}</tr><tr>${visibleColumns
+      : `<th rowspan="2" class="${headerClass(cell)}">${rotatedLabel(cell.label)}</th>`).join('')}</tr><tr>${visibleColumns
         .filter((column) => normalizeText(column?.group))
-        .map((column) => `<th class="${headerClass(column)}">${escapeHtml(getColumnLabel(column))}</th>`).join('')}</tr>`
-    : `<tr>${visibleColumns.map((column) => `<th class="${headerClass(column)}">${escapeHtml(getColumnLabel(column))}</th>`).join('')}</tr>`;
+        .map((column) => `<th class="${headerClass(column)}">${rotatedLabel(getColumnLabel(column))}</th>`).join('')}</tr>`
+    : `<tr>${visibleColumns.map((column) => `<th class="${headerClass(column)}">${rotatedLabel(getColumnLabel(column))}</th>`).join('')}</tr>`;
 
-  const rowMarkup = (Array.isArray(rows) ? rows : []).map((row) => `<tr>${visibleColumns.map((column) => {
+  const rowMarkup = displayRows.map((row) => `<tr>${visibleColumns.map((column) => {
     const key = normalizeText(column?.key);
-    const cellClass = ['studentName', 'fatherName'].includes(key) ? 'name-cell' : '';
-    return `<td class="${cellClass}">${escapeHtml(formatCellValue(row?.[key])) || '&nbsp;'}</td>`;
+    // ردیف خالی (جای شاگرد نیست): همه ستون‌ها با علامت / قید می‌شود، به جز شماره که
+    // عدد پیهم را نشان می‌دهد. علامت / باید مثل بقیهٔ ستون‌ها وسط خانه باشد — پس کلاس
+    // راست‌چین «نام/نام پدر» فقط برای ردیف‌های واقعی اعمال می‌شود.
+    const isPlaceholder = Boolean(row?.__placeholder);
+    const cellClass = !isPlaceholder && ['studentName', 'fatherName'].includes(key) ? 'name-cell' : '';
+    const cellValue = isPlaceholder
+      ? (key === 'number' ? escapeHtml(formatCellValue(row.number)) : '/')
+      : (escapeHtml(formatCellValue(row?.[key])) || '&nbsp;');
+    return `<td class="${cellClass}">${cellValue}</td>`;
   }).join('')}</tr>`).join('');
-  const body = rowMarkup || (blankWhenEmpty
-    ? `<tr class="blank-row">${visibleColumns.map(() => '<td>&nbsp;</td>').join('')}</tr>`
-    : `<tr><td colspan="${visibleColumns.length}">داده‌ای برای نمایش موجود نیست.</td></tr>`);
+  const body = rowMarkup || `<tr><td colspan="${visibleColumns.length}">داده‌ای برای نمایش موجود نیست.</td></tr>`;
 
   return `
     <table class="exam-sheet-table">
@@ -438,11 +456,22 @@ function shouldRenderSummary(type = '') {
   return type !== 'subjects' && type !== 'exam';
 }
 
-function buildFormalNote(type = '', report = {}) {
+function buildFormalNote(type = '', report = {}, { blank = false } = {}) {
   if (type === 'exam') {
     const firstRow = Array.isArray(report?.rows) && report.rows.length ? report.rows[0] : {};
     const summary = report?.summary || {};
-    return `قرار شرح فوق نمرات امتحان ${normalizeText(report?.report?.title || '') || 'ماهوار'} مضمون (${normalizeText(firstRow.subject || '')}) از صنف (${normalizeText(firstRow.classTitle || '')}) به تعداد (${String(summary.totalStudents || 0)}) شاگرد ثبت گردیده است که شامل کامیاب (${String(summary.passedMarks || 0)})، مشروط (${String(summary.conditionalMarks || 0)})، معذور (${String(summary.excusedMarks || 0)}) و غایب (${String(summary.absentMarks || 0)}) می‌باشد. درج این شقه بدون قلم‌خوردگی و تراشیدگی صحیح است.`;
+    const subject = normalizeText(firstRow.subject || '');
+    // شقه سفید: جای رقم‌ها با فاصلهٔ خالی گذاشته می‌شود تا با قلم عددی مثل ۱۰۰ نوشته
+    // شود. فاصلهٔ معمولی در HTML جمع می‌شود، پس از فاصلهٔ نیم‌فاصله (NBSP) استفاده شده.
+    const blankPlaceholder = ' '.repeat(14);
+    const enrolledCount = blank ? blankPlaceholder : String(summary.enrolledCount ?? summary.totalStudents ?? 0);
+    const includedInExamCount = blank ? blankPlaceholder : String(summary.recordedMarks || 0);
+    const excusedOnlyCount = blank ? blankPlaceholder : String(summary.excusedOnlyCount ?? summary.excusedMarks ?? 0);
+    const suspendedCount = blank ? blankPlaceholder : String(summary.suspendedCount || 0);
+    const line1 = `قرار شرح فوق نمرات مضمون (${subject}) از روی اوراق امتحان شاگردان بدون قلم خوردگی و تراش درج شقه هذا گردیده و به اداره محترم تسلیم است.`;
+    const line2 = `تعداد داخله (${enrolledCount}) تن شامل امتحان (${includedInExamCount}) تن معذرتی (${excusedOnlyCount}) تن محروم (${suspendedCount}) تن.`;
+    // یک انتر بین دو سطر — ببینید محل رندر (renderExamSheetPrintHtml) که \n را به <br> تبدیل می‌کند.
+    return `${line1}\n${line2}`;
   }
   if (type === 'subjects') {
     return 'این شقه مضامین به اساس مضامین و تعیینات ثبت‌شده برای صنف ترتیب و جهت تایید ارایه گردید.';
@@ -643,13 +672,13 @@ function buildOfficialCornerSignatures(items = [], side = 'right') {
   `;
 }
 
-function buildOfficialHeaderHtml({ title = '', siteSettings = null, logoUrl = '', cornerSignatures = [] } = {}) {
+function buildOfficialHeaderHtml({ siteSettings = null, logoUrl = '', cornerSignatures = [] } = {}) {
   const brandName = normalizeDariText(siteSettings?.brandName || siteSettings?.schoolName || '');
   const directorateLine = normalizeDariText(siteSettings?.educationDirectorate || siteSettings?.directorateName || '');
-  const districtLine = normalizeDariText(siteSettings?.educationZone || siteSettings?.district || '');
   const schoolLine = brandName || normalizeDariText(siteSettings?.name) || '';
   const ministryLogo = normalizeText(siteSettings?.ministryLogoUrl || siteSettings?.governmentLogoUrl || '');
-  const schoolLogo = normalizeText(logoUrl || siteSettings?.schoolLogoUrl || siteSettings?.logoUrl || '');
+  // لوگوی آمریت معارف باید همیشه به‌جای لوگوی مکتب در این جایگاه چاپ شود.
+  const departmentLogo = normalizeText(siteSettings?.departmentLogoUrl || logoUrl || siteSettings?.schoolLogoUrl || siteSettings?.logoUrl || '');
   const assetBaseUrl = normalizeText(siteSettings?._printAssetBaseUrl || '');
   const signatures = Array.isArray(cornerSignatures) ? cornerSignatures : [];
   const hasCornerSignatures = signatures.length > 0;
@@ -658,9 +687,8 @@ function buildOfficialHeaderHtml({ title = '', siteSettings = null, logoUrl = ''
             <div class="line">امارت اسلامی افغانستان</div>
             <div class="line">وزارت معارف</div>
             <div class="line">${escapeHtml(directorateLine || 'ریاست معارف شهر کابل')}</div>
-            <div class="line">${escapeHtml(districtLine || 'آمریت معارف حوزه تعلیمی (     )')}</div>
+            <div class="line">آمریت حوزه تعلیمی (پنجم)</div>
             ${schoolLine ? `<div class="school">${escapeHtml(schoolLine)}</div>` : ''}
-            ${title ? `<h1>${escapeHtml(title)}</h1>` : ''}
           </div>
   `;
 
@@ -675,7 +703,7 @@ function buildOfficialHeaderHtml({ title = '', siteSettings = null, logoUrl = ''
               </div>
               ${centerMarkup}
               <div class="official-report-logo-wrap official-report-logo-wrap--left">
-                ${buildOfficialLogoMarkup(schoolLogo, 'لوگو مکتب', assetBaseUrl)}
+                ${buildOfficialLogoMarkup(departmentLogo, 'لوگو آمریت', assetBaseUrl)}
               </div>
             </div>
             ${buildOfficialCornerSignatures(signatures.slice(2, 4), 'left')}
@@ -730,9 +758,11 @@ function renderExamSheetPrintHtml({ report = {}, subtitle = '', metadata = [], s
   const headerCenterWidth = resolvedLayout.orientation === 'portrait' ? 230 : 260;
   const headerSideMin = resolvedLayout.orientation === 'portrait' ? 84 : 140;
   const examTitle = 'شقه امتحان';
+  // با dir="rtl"، اولین آیتم در گرید دو-ستونه سمت راست قرار می‌گیرد — پس ممیز اول
+  // (راست) و ممتحین دوم (چپ) می‌آید.
   const bottomSignatures = [
-    { role: 'امضای ممتحن', name: normalizeText(firstRow.teacherName) },
-    { role: 'امضای ممیز', name: normalizeText(firstRow.reviewedByName) }
+    { role: 'امضای ممیز', name: normalizeText(firstRow.reviewedByName) },
+    { role: 'امضای ممتحین', name: normalizeText(firstRow.teacherName) }
   ];
   const metadataValue = (label, fallbackLabel = '') => infoMap.get(label) || (fallbackLabel ? infoMap.get(fallbackLabel) : '') || '';
   const examMetadataItems = [
@@ -749,11 +779,18 @@ function renderExamSheetPrintHtml({ report = {}, subtitle = '', metadata = [], s
   ];
   const configuredColumns = (Array.isArray(report?.columns) ? report.columns : [])
     .filter((column) => column?.visible !== false && normalizeText(column?.key));
-  const portraitSplitIndex = Math.ceil(rows.length / 2);
+  // سمت راست تا آخر ورق پر می‌شود (هر قدر شاگرد جای داشته باشد)، سپس سمت چپ همان‌طور
+  // پر می‌شود؛ هر جای خالی باقی‌مانده در هر دو ستون با علامت / قید می‌شود.
+  // عدد ۴۰ با اندازه‌گیری واقعی صفحهٔ A4 با این چیدمان به‌دست آمده (حداکثر واقعی ~۴۳
+  // ردیف در هر ستون بود؛ کمی کمتر گرفته شد تا برای نام‌های بلندتر و لوگوی واقعی هم جا بماند).
+  const PORTRAIT_COLUMN_CAPACITY = 40;
+  const rightColumnRows = rows.slice(0, PORTRAIT_COLUMN_CAPACITY);
+  // اگر بیشتر از ۸۰ شاگرد باشد، همه در سمت چپ ادامه می‌یابد (بدون افتادن داده).
+  const leftColumnRows = rows.slice(PORTRAIT_COLUMN_CAPACITY);
   const examTableMarkup = resolvedLayout.orientation === 'portrait' && rows.length > 0
     ? `<div class="exam-sheet-table-grid exam-sheet-table-grid--split">
-        <div class="exam-sheet-table-panel">${buildExamTableHtml(configuredColumns, rows.slice(0, portraitSplitIndex))}</div>
-        <div class="exam-sheet-table-panel">${buildExamTableHtml(configuredColumns, rows.slice(portraitSplitIndex), { blankWhenEmpty: true })}</div>
+        <div class="exam-sheet-table-panel">${buildExamTableHtml(configuredColumns, rightColumnRows, { padTo: PORTRAIT_COLUMN_CAPACITY, numberOffset: 0 })}</div>
+        <div class="exam-sheet-table-panel">${buildExamTableHtml(configuredColumns, leftColumnRows, { padTo: PORTRAIT_COLUMN_CAPACITY, numberOffset: PORTRAIT_COLUMN_CAPACITY })}</div>
       </div>`
     : buildExamTableHtml(configuredColumns, rows);
   return `<!doctype html>
@@ -784,8 +821,11 @@ function renderExamSheetPrintHtml({ report = {}, subtitle = '', metadata = [], s
       .exam-sheet-meta .item.is-exam-type span { white-space: nowrap; overflow-wrap: normal; }
       .exam-sheet-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
       .exam-sheet-table th, .exam-sheet-table td { border: 1px solid #111; padding: 3px 2px; text-align: center; vertical-align: middle; font-size: 10pt; }
-      .exam-sheet-table th { font-weight: 700; background: #fff; }
-      .exam-sheet-table .group-heading { font-size: 10.5pt; }
+      .exam-sheet-table th { font-weight: 700; background: #fff; height: 72px; }
+      /* پوشش flex باعث می‌شود متن چرخانده‌شده، صرف‌نظر از طول متن، همیشه وسط خانه بماند. */
+      .exam-sheet-table th .th-rotate-wrap { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+      .exam-sheet-table th .th-rotate { display: inline-block; white-space: nowrap; transform: rotate(-90deg); }
+      .exam-sheet-table .group-heading { font-size: 10.5pt; height: auto; }
       .exam-sheet-table td.name-cell { text-align: right; padding-right: 4px; }
       .exam-sheet-table-grid { width: 100%; }
       .exam-sheet-table-grid--split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; direction: rtl; align-items: start; }
@@ -888,7 +928,7 @@ function renderExamSheetPrintHtml({ report = {}, subtitle = '', metadata = [], s
   </head>
   <body>
     <main class="exam-sheet-page">
-      ${resolvedLayout.showHeader ? buildOfficialHeaderHtml({ title: examTitle, siteSettings: officialSettings, logoUrl, cornerSignatures: signatures }) : ''}
+      ${resolvedLayout.showHeader ? buildOfficialHeaderHtml({ siteSettings: officialSettings, logoUrl, cornerSignatures: signatures }) : ''}
 
       <section class="exam-sheet-meta">
         <div class="exam-sheet-meta-row">
@@ -903,7 +943,7 @@ function renderExamSheetPrintHtml({ report = {}, subtitle = '', metadata = [], s
 
       ${examTableMarkup}
 
-      ${formalNote ? `<div class="exam-sheet-note">${escapeHtml(formalNote)}</div>` : ''}
+      ${formalNote ? `<div class="exam-sheet-note">${String(formalNote).split('\n').map((line) => escapeHtml(line)).join('<br>')}</div>` : ''}
 
       <section class="exam-sheet-bottom-signatures" aria-label="امضاهای ممتحن و ممیز">
         ${bottomSignatures.map((item) => `
@@ -947,14 +987,14 @@ async function loadSiteSettings(req = null) {
   }
 }
 
-async function renderReportPrintHtml({ report = {}, template = null, req = null } = {}) {
+async function renderReportPrintHtml({ report = {}, template = null, req = null, blank = false } = {}) {
   const layout = getLayout(template);
   const type = inferSheetType(template, report);
   const siteSettings = await loadSiteSettings(req);
   const metadata = buildMetadata(type, template, report, siteSettings).filter(([, value]) => normalizeText(value));
   const summaryItems = shouldRenderSummary(type) ? buildSummaryItems(report) : '';
   const filterBadges = shouldRenderSummary(type) ? buildFilterBadges(report) : '';
-  const formalNote = buildFormalNote(type, report);
+  const formalNote = buildFormalNote(type, report, { blank });
   const title = normalizeText(template?.title) || getDefaultTitleByType(type);
   const subtitle = normalizeText(template?.layout?.headerText) || normalizeText(siteSettings?.brandName) || 'لیسه خصوصی مدیر';
   const footerText = normalizeText(template?.layout?.footerText) || normalizeText(siteSettings?.footerNote);

@@ -280,7 +280,7 @@ const TESTS = [
         'امضای سرمعلم',
         'امضای مدیر مکتب',
         'امضای عضو علمی و مسلکی',
-        'امضای ممتحن',
+        'امضای ممتحین',
         'امضای ممیز',
         'exam-sheet-bottom-signatures',
         'exam-sheet-custom-footer',
