@@ -195,14 +195,24 @@ TeacherAssignment.ensureTeacherAssignmentLegacyIndex = async function ensureTeac
     }
   }
 
-  await collection.createIndex(
-    { legacyInstructorSubjectId: 1 },
-    {
-      name: LEGACY_INSTRUCTOR_INDEX_NAME,
-      unique: true,
-      partialFilterExpression: { legacyInstructorSubjectId: { $type: 'objectId' } },
-      background: true
-    }
-  );
+  try {
+    await collection.createIndex(
+      { legacyInstructorSubjectId: 1 },
+      {
+        name: LEGACY_INSTRUCTOR_INDEX_NAME,
+        unique: true,
+        partialFilterExpression: { legacyInstructorSubjectId: { $type: 'objectId' } },
+        background: true
+      }
+    );
+  } catch (error) {
+    // Same reasoning as SchoolClass.ensureSchoolClassShiftUniqueIndex: a
+    // duplicate-key error here must not propagate out of the boot sequence,
+    // or the server never calls markAppReady() and every request is stuck
+    // behind requireDatabase's "starting" 503 until someone finds and fixes
+    // the duplicate legacyInstructorSubjectId values by hand.
+    // eslint-disable-next-line no-console
+    console.error('Failed creating teacher assignment legacy index (server will continue starting; check for duplicate legacyInstructorSubjectId values):', error?.message || error);
+  }
 };
 module.exports = TeacherAssignment;
