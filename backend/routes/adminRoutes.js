@@ -2575,7 +2575,7 @@ router.get('/search', requireAuth, requireRole(['admin']), requirePermission('vi
   }
 });
 
-router.get('/recent-activity', requireAuth, requireRole(['admin']), async (req, res) => {
+router.get('/recent-activity', requireAuth, requireRole(['admin']), requirePermission('view_reports'), async (req, res) => {
   try {
     const limit = Math.min(Math.max(Number(req.query.limit || 12), 1), 30);
     const filter = {

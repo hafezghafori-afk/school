@@ -9,7 +9,18 @@ const breakpoints = [
 ];
 
 const criticalRoutes = ['/', '/login', '/register', '/contact', '/dashboard', '/admin', '/chat'];
-const publicHeaderRoutes = new Set(['/', '/login', '/register', '/contact']);
+
+// Routes that render the redesigned public site chrome (PublicLayout /
+// PublicHeader, see components/public/index.jsx): a single `.public-nav`
+// that reflows via CSS instead of branching into separate mobile/desktop
+// nav elements. This must mirror `usesPublicRedesign` in App.jsx.
+const publicRedesignRoutes = new Set(['/', '/login', '/contact']);
+
+// Routes that still render the legacy app-shell header (App.jsx, `header
+// className="site-header"`), which does have distinct mobile
+// (`.mobile-nav-toggle` / `.mobile-nav-drawer`) and desktop (`.desktop-nav`)
+// chrome. `/register` hasn't been migrated to the public redesign yet.
+const legacyHeaderRoutes = new Set(['/register']);
 
 const readLayoutMetrics = async (page) => page.evaluate(() => {
   const doc = document.documentElement;
@@ -40,7 +51,9 @@ test.describe('responsive layout', () => {
         expect(metrics.docScrollWidth - metrics.docClientWidth).toBeLessThanOrEqual(2);
         expect(metrics.bodyScrollWidth - metrics.bodyClientWidth).toBeLessThanOrEqual(2);
 
-        if (publicHeaderRoutes.has(route)) {
+        if (publicRedesignRoutes.has(route)) {
+          await expect(page.locator('.public-nav').first()).toBeVisible();
+        } else if (legacyHeaderRoutes.has(route)) {
           if (bp.navMode === 'mobile') {
             await expect(page.locator('.mobile-nav-toggle').first()).toBeVisible();
           } else {
@@ -53,7 +66,10 @@ test.describe('responsive layout', () => {
 
   test('responsive layout mobile drawer opens and closes on link click', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 900 });
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    // /register still renders the legacy app-shell header with the
+    // hamburger/drawer; / now uses the redesigned PublicLayout header
+    // (see publicRedesignRoutes above), which has no drawer to open.
+    await page.goto('/register', { waitUntil: 'domcontentloaded' });
 
     const toggle = page.locator('.mobile-nav-toggle').first();
     await expect(toggle).toBeVisible();
@@ -69,18 +85,17 @@ test.describe('responsive layout', () => {
     await expect(page.locator('.mobile-nav-drawer.open')).toHaveCount(0);
   });
 
-  test('responsive layout desktop shows desktop nav and mega dropdown', async ({ page }) => {
+  test('responsive layout desktop shows desktop nav', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    // Same reasoning as above: /register is the anonymous-reachable route
+    // still on the legacy header. Its anonymous nav menu has no dropdown
+    // items (those are only populated for authenticated users), so this
+    // only asserts the layout split itself rather than mega-dropdown
+    // content that isn't reachable without logging in.
+    await page.goto('/register', { waitUntil: 'domcontentloaded' });
 
     const desktopNav = page.locator('.desktop-nav').first();
     await expect(desktopNav).toBeVisible();
     await expect(page.locator('.mobile-nav-bar').first()).toBeHidden();
-
-    const firstDropdown = page.locator('.desktop-nav .nav-dropdown').first();
-    await expect(firstDropdown).toBeVisible();
-    await firstDropdown.hover();
-
-    await expect(page.locator('.desktop-nav .nav-dropdown .nav-menu').first()).toBeVisible();
   });
 });

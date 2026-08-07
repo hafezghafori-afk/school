@@ -133,6 +133,16 @@ const authMock = {
     } catch {
       return res.status(400).json({ success: false, message: 'Invalid test user.' });
     }
+  },
+  // Fine-grained permission checks are exercised separately by check:permissions;
+  // this contract test only needs an authenticated user to pass through, same as
+  // the role check below.
+  requirePermission() {
+    return (req, res, next) => (
+      req.user?.id
+        ? next()
+        : res.status(401).json({ success: false, message: 'Authentication required.' })
+    );
   }
 };
 

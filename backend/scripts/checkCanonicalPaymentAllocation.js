@@ -114,9 +114,13 @@ async function run() {
   assert.strictEqual(demoScope, IDS.school,
     'A demo user must remain locked to the authenticated demo school.');
   assert.doesNotThrow(() => assertDocumentInActiveSchool({ schoolId: IDS.school }, IDS.school, 'Payment'));
+  // The thrown message is user-facing and localized (Dari), like the rest of
+  // financeAdminActionService's errors, so assert on the stable parts of the
+  // contract (a 404 "not found" rejection naming the document) rather than
+  // pinning an English string.
   assert.throws(
     () => assertDocumentInActiveSchool({ schoolId: IDS.otherSchool }, IDS.school, 'Payment'),
-    /not found in the active school/,
+    (error) => error?.status === 404 && String(error.message || '').includes('Payment'),
     'A cross-school payment or linked order must be rejected before review.'
   );
 
@@ -230,7 +234,7 @@ async function run() {
     })];
     await assert.rejects(
       () => assertCanonicalPaymentReviewScope({ req: request, payment }),
-      /not found in the active school/,
+      (error) => error?.status === 404,
       'Every linked fee order must be rejected when it belongs to another school.'
     );
 
@@ -265,7 +269,7 @@ async function run() {
         req: request,
         payment: { ...payment, sourceReceiptId: '507f191e810c19729de86503' }
       }),
-      /not found in the active school/,
+      (error) => error?.status === 404,
       'A canonical payment linked to a receipt in another school must be rejected before any review mutation.'
     );
   } finally {

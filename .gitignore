@@ -16,3 +16,6 @@ Thumbs.db
 # editor
 .vscode
 .idea
+
+# agent scratch space (should never be committed)
+.codex_tmp/

@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 const criticalPages = [
-  { path: '/', rootSelector: '.home-page' },
+  { path: '/', rootSelector: '.public-layout' },
   { path: '/login', rootSelector: '.login-modern-container' },
   { path: '/dashboard', rootSelector: '.login-modern-container, .auth-page' },
   { path: '/admin', rootSelector: '.login-modern-container, .auth-page' },

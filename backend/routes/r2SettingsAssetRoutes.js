@@ -5,8 +5,12 @@ const multer = require('multer');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const SiteSettings = require('../models/SiteSettings');
 const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
+const { logActivity } = require('../utils/activity');
+const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
 
 const router = express.Router();
+
+attachWriteActivityAudit(router, { targetType: 'R2SettingsAsset', actionPrefix: 'r2_settings_asset', audit: (payload) => logActivity(payload) });
 
 const requiredEnv = [
   'R2_ACCESS_KEY_ID',

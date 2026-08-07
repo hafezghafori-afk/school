@@ -6,8 +6,12 @@ const SchoolWebsiteProfile = require('../models/SchoolWebsiteProfile');
 const ContactMessage = require('../models/ContactMessage');
 const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
 const { getSchoolWebsiteLocale } = require('../config/schoolWebsiteLocales');
+const { logActivity } = require('../utils/activity');
+const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
 
 const router = express.Router();
+
+attachWriteActivityAudit(router, { targetType: 'SchoolWebsite', actionPrefix: 'school_website', audit: (payload) => logActivity(payload) });
 
 const SUPPORTED_LANGUAGES = ['fa', 'en', 'ps'];
 const TRANSLATABLE_TEXT_FIELDS = [

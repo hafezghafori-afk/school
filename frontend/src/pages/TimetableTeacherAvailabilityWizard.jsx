@@ -41,6 +41,20 @@ const createEmptyFormData = () => ({
   temporaryRestrictions: []
 });
 
+const WEEK_DAYS = [
+  { value: 'saturday', label: 'شنبه' },
+  { value: 'sunday', label: 'یکشنبه' },
+  { value: 'monday', label: 'دوشنبه' },
+  { value: 'tuesday', label: 'سه‌شنبه' },
+  { value: 'wednesday', label: 'چهارشنبه' },
+  { value: 'thursday', label: 'پنجشنبه' }
+];
+
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 export default function TimetableTeacherAvailabilityWizard() {
   const [step, setStep] = useState(0);
   const [formData, setFormData] = useState(createEmptyFormData());
@@ -48,167 +62,267 @@ export default function TimetableTeacherAvailabilityWizard() {
   const [academicYears, setAcademicYears] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
-                                  try {
-                                    const [tRes, yRes, sRes] = await Promise.all([
-                                      fetch('/api/users/school/' + (localStorage.getItem('schoolId') || '') + '?role=teacher'),
-                                      fetch('/api/academic-years/school/' + (localStorage.getItem('schoolId') || '')),
-                                      fetch('/api/shifts/school/' + (localStorage.getItem('schoolId') || ''))
-                                    ]);
-                                    const tData = await tRes.json();
-                                    const yData = await yRes.json();
-                                    const sData = await sRes.json();
-                                    if (tData.success) setTeachers(tData.data);
-                                    if (yData.success) setAcademicYears(yData.data.filter(y => y.status === 'active'));
-                                    if (sData.success) setShifts(sData.data);
-                                  } catch (e) {
-                                    toast.error('دریافت داده‌ها ناموفق بود');
-                                  } finally {
-                                    setLoading(false);
-                                  }
-                                }
-                                fetchData();
-                              }, []);
+      try {
+        const schoolId = localStorage.getItem('schoolId') || '';
+        const [tRes, yRes, sRes] = await Promise.all([
+          fetch(`/api/users/school/${schoolId}?role=teacher`, { headers: { ...getAuthHeaders() } }),
+          fetch(`/api/academic-years/school/${schoolId}`, { headers: { ...getAuthHeaders() } }),
+          fetch(`/api/shifts/school/${schoolId}`, { headers: { ...getAuthHeaders() } })
+        ]);
+        const tData = await tRes.json();
+        const yData = await yRes.json();
+        const sData = await sRes.json();
+        if (tData.success) setTeachers(tData.data);
+        if (yData.success) setAcademicYears(yData.data.filter(y => y.status === 'active'));
+        if (sData.success) setShifts(sData.data);
+      } catch (e) {
+        toast.error('دریافت داده‌ها ناموفق بود');
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, []);
 
-                              // ...existing code...
+  const handleChange = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
 
-                              const weekDays = [
-                                { value: 'saturday', label: 'شنبه' },
-                                { value: 'sunday', label: 'یکشنبه' },
-                                { value: 'monday', label: 'دوشنبه' },
-                                { value: 'tuesday', label: 'سه‌شنبه' },
-                                { value: 'wednesday', label: 'چهارشنبه' },
-                                { value: 'thursday', label: 'پنجشنبه' }
-                              ];
+  const handleDayToggle = (day) => {
+    setFormData(prev => ({
+      ...prev,
+      availableDays: prev.availableDays.includes(day)
+        ? prev.availableDays.filter(d => d !== day)
+        : [...prev.availableDays, day]
+    }));
+  };
 
-                              // Step 1
-                              const renderStep1 = () => (
-                                <Card className="mb-4">
-                                  <CardHeader>
-                                    <CardTitle>انتخاب استاد، سال و نوبت</CardTitle>
-                                  </CardHeader>
-                                  <CardContent>
-                                    <div className="flex flex-col gap-4">
-                                      <div>
-                                        <label className="block mb-1 text-xs font-bold text-slate-600">استاد</label>
-                                        <Select value={formData.teacherId} onValueChange={v => handleChange('teacherId', v)}>
-                                          <SelectTrigger className="h-11 bg-white rounded-xl border-slate-200"><SelectValue placeholder="انتخاب استاد" /></SelectTrigger>
-                                          <SelectContent>
-                                            {teachers.map(t => (
-                                              <SelectItem key={t._id} value={t._id}>{t.firstName} {t.lastName}</SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
-                                      </div>
-                                      <div>
-                                        <label className="block mb-1 text-xs font-bold text-slate-600">سال تعلیمی</label>
-                                        <Select value={formData.academicYearId} onValueChange={v => handleChange('academicYearId', v)}>
-                                          <SelectTrigger className="h-11 bg-white rounded-xl border-slate-200"><SelectValue placeholder="انتخاب سال" /></SelectTrigger>
-                                          <SelectContent>
-                                            {academicYears.map(y => (
-                                              <SelectItem key={y._id} value={y._id}>{y.title}</SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
-                                      </div>
-                                      <div>
-                                        <label className="block mb-1 text-xs font-bold text-slate-600">نوبت</label>
-                                        <Select value={formData.shiftId} onValueChange={v => handleChange('shiftId', v)}>
-                                          <SelectTrigger className="h-11 bg-white rounded-xl border-slate-200"><SelectValue placeholder="انتخاب نوبت" /></SelectTrigger>
-                                          <SelectContent>
-                                            {shifts.map(s => (
-                                              <SelectItem key={s._id} value={s._id}>{s.nameDari || s.name}</SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
-                                      </div>
-                                    </div>
-                                  </CardContent>
-                                </Card>
-                              );
+  const handleConstraintToggle = (key) => {
+    setFormData(prev => ({
+      ...prev,
+      specialConstraints: {
+        ...prev.specialConstraints,
+        [key]: !prev.specialConstraints[key]
+      }
+    }));
+  };
+
+  const canGoNext = () => {
+    if (step === 0) {
+      return Boolean(formData.teacherId && formData.academicYearId && formData.shiftId);
+    }
+    return true;
+  };
+
+  const handleNext = () => {
+    if (!canGoNext()) {
+      toast.error('لطفاً استاد، سال تعلیمی و نوبت را انتخاب کنید.');
+      return;
+    }
+    setStep(prev => Math.min(prev + 1, STEPS.length - 1));
+  };
+
+  const handlePrev = () => {
+    setStep(prev => Math.max(prev - 1, 0));
+  };
+
+  const handleSubmit = async () => {
+    if (!canGoNext()) {
+      toast.error('لطفاً استاد، سال تعلیمی و نوبت را انتخاب کنید.');
+      setStep(0);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const schoolId = localStorage.getItem('schoolId') || 'default-school-id';
+      const response = await fetch(`/api/teacher-availability/school/${schoolId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify(formData)
+      });
+      const data = await response.json();
+      if (data.success) {
+        toast.success('حضور استاد با موفقیت ثبت شد.');
+        setFormData(createEmptyFormData());
+        setStep(0);
+      } else {
+        toast.error(data.message || 'ثبت حضور استاد ناموفق بود.');
+      }
+    } catch (e) {
+      toast.error('ثبت حضور استاد ناموفق بود.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Step 1
+  const renderStep1 = () => (
+    <Card className="mb-4">
+      <CardHeader>
+        <CardTitle>انتخاب استاد، سال و نوبت</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col gap-4">
+          <div>
+            <label className="block mb-1 text-xs font-bold text-slate-600">استاد</label>
+            <Select value={formData.teacherId} onValueChange={v => handleChange('teacherId', v)}>
+              <SelectTrigger className="h-11 bg-white rounded-xl border-slate-200"><SelectValue placeholder="انتخاب استاد" /></SelectTrigger>
+              <SelectContent>
+                {teachers.map(t => (
+                  <SelectItem key={t._id} value={t._id}>{t.firstName} {t.lastName}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <label className="block mb-1 text-xs font-bold text-slate-600">سال تعلیمی</label>
+            <Select value={formData.academicYearId} onValueChange={v => handleChange('academicYearId', v)}>
+              <SelectTrigger className="h-11 bg-white rounded-xl border-slate-200"><SelectValue placeholder="انتخاب سال" /></SelectTrigger>
+              <SelectContent>
+                {academicYears.map(y => (
+                  <SelectItem key={y._id} value={y._id}>{y.title}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <label className="block mb-1 text-xs font-bold text-slate-600">نوبت</label>
+            <Select value={formData.shiftId} onValueChange={v => handleChange('shiftId', v)}>
+              <SelectTrigger className="h-11 bg-white rounded-xl border-slate-200"><SelectValue placeholder="انتخاب نوبت" /></SelectTrigger>
+              <SelectContent>
+                {shifts.map(s => (
+                  <SelectItem key={s._id} value={s._id}>{s.nameDari || s.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  // Step 2
+  const renderStep2 = () => (
+    <Card className="mb-4">
+      <CardHeader>
+        <CardTitle>انتخاب روزهای حضور و زنگ‌های مجاز</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col gap-3 mb-4">
+          <div className="flex flex-wrap gap-2">
+            {WEEK_DAYS.map(day => (
+              <label key={day.value} className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm cursor-pointer whitespace-nowrap transition-colors hover:bg-slate-100">
+                <Checkbox
+                  checked={formData.availableDays.includes(day.value)}
+                  onCheckedChange={() => handleDayToggle(day.value)}
+                  className="w-4 h-4 rounded text-blue-600"
+                />
+                <span className="text-xs font-bold text-slate-700">{day.label}</span>
+              </label>
+            ))}
+          </div>
+          <div className="flex flex-col gap-3 mt-2">
+            <div>
+              <label className="block mb-1 text-xs font-bold text-slate-600">حداکثر زنگ در روز</label>
+              <Input type="number" min={1} max={8} value={formData.maxPeriodsPerDay} onChange={e => handleChange('maxPeriodsPerDay', Number(e.target.value))} className="h-10 rounded-xl border-slate-200" />
+            </div>
+            <div>
+              <label className="block mb-1 text-xs font-bold text-slate-600">حداکثر زنگ در هفته</label>
+              <Input type="number" min={1} max={40} value={formData.maxPeriodsPerWeek} onChange={e => handleChange('maxPeriodsPerWeek', Number(e.target.value))} className="h-10 rounded-xl border-slate-200" />
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  // Step 3
+  const renderStep3 = () => (
+    <Card className="mb-4">
+      <CardHeader>
+        <CardTitle>محدودیت‌های خاص</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col gap-3">
+          <label className="flex items-center gap-2">
+            <Checkbox checked={formData.specialConstraints.onlyMorningShift} onCheckedChange={() => handleConstraintToggle('onlyMorningShift')} className="w-4 h-4 rounded text-blue-600" />
+            <span className="text-xs font-bold text-slate-700">فقط شیفت صبح</span>
+          </label>
+          <label className="flex items-center gap-2">
+            <Checkbox checked={formData.specialConstraints.onlyAfternoonShift} onCheckedChange={() => handleConstraintToggle('onlyAfternoonShift')} className="w-4 h-4 rounded text-blue-600" />
+            <span className="text-xs font-bold text-slate-700">فقط شیفت بعدازظهر</span>
+          </label>
+          <label className="flex items-center gap-2">
+            <Checkbox checked={formData.specialConstraints.noBackToBackClasses} onCheckedChange={() => handleConstraintToggle('noBackToBackClasses')} className="w-4 h-4 rounded text-blue-600" />
+            <span className="text-xs font-bold text-slate-700">بدون کلاس پشت‌سرهم</span>
+          </label>
+          <label className="flex items-center gap-2">
+            <Checkbox checked={formData.specialConstraints.prefersSameClassroom} onCheckedChange={() => handleConstraintToggle('prefersSameClassroom')} className="w-4 h-4 rounded text-blue-600" />
+            <span className="text-xs font-bold text-slate-700">ترجیحاً یک صنف ثابت</span>
+          </label>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  // Step 4
+  const renderStep4 = () => (
+    <Card className="mb-4">
+      <CardHeader>
+        <CardTitle>یادداشت و تایید نهایی</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <label className="block mb-2 text-xs font-bold text-slate-600">یادداشت اجرایی (اختیاری)</label>
+        <Textarea
+          placeholder="یادداشت اجرایی (اختیاری)"
+          value={formData.notes}
+          onChange={e => handleChange('notes', e.target.value)}
+          className="rounded-xl border-slate-200 min-h-[80px]"
+        />
+      </CardContent>
+    </Card>
+  );
+
+  const stepRenderers = [renderStep1, renderStep2, renderStep3, renderStep4];
+
+  if (loading) {
+    return (
+      <div className="p-6 text-center text-sm text-slate-500">در حال بارگذاری...</div>
+    );
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto p-4">
+      <div className="flex items-center justify-between mb-4">
+        {STEPS.map((label, idx) => (
+          <div key={label} className={`flex-1 text-center text-xs font-bold pb-2 border-b-2 ${idx === step ? 'text-blue-600 border-blue-600' : 'text-slate-400 border-slate-200'}`}>
+            {label}
+          </div>
+        ))}
+      </div>
+
+      {stepRenderers[step]()}
+
+      <div className="flex items-center justify-between mt-4">
+        <Button variant="outline" onClick={handlePrev} disabled={step === 0}>
+          مرحله قبل
+        </Button>
+        {step < STEPS.length - 1 ? (
+          <Button onClick={handleNext}>مرحله بعد</Button>
+        ) : (
+          <Button onClick={handleSubmit} disabled={submitting}>
+            {submitting ? 'در حال ثبت...' : 'ثبت حضور استاد'}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
 }
-                              // Step 2
-                              const renderStep2 = () => (
-                                <Card className="mb-4">
-                                  <CardHeader>
-                                    <CardTitle>انتخاب روزهای حضور و زنگ‌های مجاز</CardTitle>
-                                  </CardHeader>
-                                  <CardContent>
-                                    <div className="flex flex-col gap-3 mb-4">
-                                      <div className="flex flex-wrap gap-2">
-                                        {weekDays.map(day => (
-                                          <label key={day.value} className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm cursor-pointer whitespace-nowrap transition-colors hover:bg-slate-100">
-                                            <Checkbox
-                                              checked={formData.availableDays.includes(day.value)}
-                                              onCheckedChange={() => handleDayToggle(day.value)}
-                                              className="w-4 h-4 rounded text-blue-600"
-                                            />
-                                            <span className="text-xs font-bold text-slate-700">{day.label}</span>
-                                          </label>
-                                        ))}
-                                      </div>
-                                      <div className="flex flex-col gap-3 mt-2">
-                                        <div>
-                                          <label className="block mb-1 text-xs font-bold text-slate-600">حداکثر زنگ در روز</label>
-                                          <Input type="number" min={1} max={8} value={formData.maxPeriodsPerDay} onChange={e => handleChange('maxPeriodsPerDay', Number(e.target.value))} className="h-10 rounded-xl border-slate-200" />
-                                        </div>
-                                        <div>
-                                          <label className="block mb-1 text-xs font-bold text-slate-600">حداکثر زنگ در هفته</label>
-                                          <Input type="number" min={1} max={40} value={formData.maxPeriodsPerWeek} onChange={e => handleChange('maxPeriodsPerWeek', Number(e.target.value))} className="h-10 rounded-xl border-slate-200" />
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </CardContent>
-                                </Card>
-                              );
-
-                              // Step 3
-                              const renderStep3 = () => (
-                                <Card className="mb-4">
-                                  <CardHeader>
-                                    <CardTitle>محدودیت‌های خاص</CardTitle>
-                                  </CardHeader>
-                                  <CardContent>
-                                    <div className="flex flex-col gap-3">
-                                      <label className="flex items-center gap-2">
-                                        <Checkbox checked={formData.specialConstraints.onlyMorningShift} onCheckedChange={() => handleConstraintToggle('onlyMorningShift')} className="w-4 h-4 rounded text-blue-600" />
-                                        <span className="text-xs font-bold text-slate-700">فقط شیفت صبح</span>
-                                      </label>
-                                      <label className="flex items-center gap-2">
-                                        <Checkbox checked={formData.specialConstraints.onlyAfternoonShift} onCheckedChange={() => handleConstraintToggle('onlyAfternoonShift')} className="w-4 h-4 rounded text-blue-600" />
-                                        <span className="text-xs font-bold text-slate-700">فقط شیفت بعدازظهر</span>
-                                      </label>
-                                      <label className="flex items-center gap-2">
-                                        <Checkbox checked={formData.specialConstraints.noBackToBackClasses} onCheckedChange={() => handleConstraintToggle('noBackToBackClasses')} className="w-4 h-4 rounded text-blue-600" />
-                                        <span className="text-xs font-bold text-slate-700">بدون کلاس پشت‌سرهم</span>
-                                      </label>
-                                      <label className="flex items-center gap-2">
-                                        <Checkbox checked={formData.specialConstraints.prefersSameClassroom} onCheckedChange={() => handleConstraintToggle('prefersSameClassroom')} className="w-4 h-4 rounded text-blue-600" />
-                                        <span className="text-xs font-bold text-slate-700">ترجیحاً یک صنف ثابت</span>
-                                      </label>
-                                    </div>
-                                  </CardContent>
-                                </Card>
-                              );
-
-                              // Step 4
-                              const renderStep4 = () => (
-                                <Card className="mb-4">
-                                  <CardHeader>
-                                    <CardTitle>یادداشت و تایید نهایی</CardTitle>
-                                  </CardHeader>
-                                  <CardContent>
-                                    <label className="block mb-2 text-xs font-bold text-slate-600">یادداشت اجرایی (اختیاری)</label>
-                                    <Textarea
-                                      placeholder="یادداشت اجرایی (اختیاری)"
-                                      value={formData.notes}
-                                      onChange={e => handleChange('notes', e.target.value)}
-                                      className="rounded-xl border-slate-200 min-h-[80px]"
-                                    />
-                                  </CardContent>
-                                </Card>
-                              );
-                            
