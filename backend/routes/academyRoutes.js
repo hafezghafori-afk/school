@@ -12,10 +12,13 @@ const AcademyPayment = require('../models/AcademyPayment');
 const AcademyInvoice = require('../models/AcademyInvoice');
 const AcademyExpense = require('../models/AcademyExpense');
 const AcademyAttendance = require('../models/AcademyAttendance');
+const { logActivity } = require('../utils/activity');
+const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
 
 const router = express.Router();
 
 router.use(requireAuth, requireRole(['admin']), requirePermission('manage_finance'));
+attachWriteActivityAudit(router, { targetType: 'Academy', actionPrefix: 'academy', audit: (payload) => logActivity(payload) });
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
 const toNumber = (value) => Math.max(0, Number(value || 0));

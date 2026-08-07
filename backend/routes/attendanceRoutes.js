@@ -16,6 +16,7 @@ const { logActivity } = require('../utils/activity');
 const {
   buildCourseAttendanceSummary,
   buildStudentAttendanceSummary,
+  formatLocalDateKey,
   normalizeDay,
   normalizeAttendanceStatus,
   parseAttendanceStatus,

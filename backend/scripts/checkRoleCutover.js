@@ -10,6 +10,7 @@ const {
   buildUserRoleState,
   serializeUserIdentity
 } = require('../utils/userRole');
+const { expandLegacyPermissions } = require('../utils/permissionCatalog');
 
 const sortList = (items = []) => [...items].sort();
 
@@ -21,7 +22,7 @@ assert.deepStrictEqual(
 
 assert.deepStrictEqual(
   sortList(Object.keys(ADMIN_LEVEL_DEFAULT_PERMISSIONS)),
-  sortList(['finance_manager', 'finance_lead', 'school_manager', 'head_teacher', 'general_president']),
+  sortList(['finance_manager', 'finance_lead', 'school_manager', 'academic_manager', 'head_teacher', 'general_president']),
   'finance admin levels must stay aligned with canonical org roles'
 );
 
@@ -30,6 +31,7 @@ const expectedRoleStates = {
   instructor: { role: 'instructor', orgRole: 'instructor', adminLevel: '' },
   finance_manager: { role: 'admin', orgRole: 'finance_manager', adminLevel: 'finance_manager' },
   finance_lead: { role: 'admin', orgRole: 'finance_lead', adminLevel: 'finance_lead' },
+  academic_manager: { role: 'admin', orgRole: 'academic_manager', adminLevel: 'academic_manager' },
   general_president: { role: 'admin', orgRole: 'general_president', adminLevel: 'general_president' }
 };
 
@@ -53,21 +55,25 @@ assert.strictEqual(
   'legacy instructor role should resolve to instructor orgRole'
 );
 
+// Note: resolvePermissions expands each coarse legacy permission (e.g. `manage_finance`)
+// into its full set of fine-grained permissions via expandLegacyPermissions, so the
+// expected sets below are derived the same way rather than hardcoded, to avoid drifting
+// out of sync every time the permission catalog grows.
 assert.deepStrictEqual(
   sortList(resolvePermissions({ orgRole: 'finance_manager', explicitPermissions: ['manage_users', 'manage_content'] })),
-  ['manage_finance'],
+  sortList(expandLegacyPermissions(ORG_ROLE_DEFAULT_PERMISSIONS.finance_manager)),
   'finance_manager should remain policy-locked to finance permissions only'
 );
 
 assert.deepStrictEqual(
   sortList(resolvePermissions({ role: 'admin', adminLevel: 'finance_lead', explicitPermissions: ['manage_users'] })),
-  ['manage_finance', 'view_reports'],
+  sortList(expandLegacyPermissions(ORG_ROLE_DEFAULT_PERMISSIONS.finance_lead)),
   'finance_lead should ignore extra explicit permissions during compatibility mode'
 );
 
 assert.deepStrictEqual(
   sortList(resolvePermissions({ orgRole: 'general_president', explicitPermissions: ['manage_users'] })),
-  ['access_head_teacher', 'access_school_manager', 'manage_content', 'manage_finance', 'manage_schedule', 'manage_users', 'view_reports'],
+  sortList(expandLegacyPermissions(ORG_ROLE_DEFAULT_PERMISSIONS.general_president)),
   'general_president should retain the full admin permission set'
 );
 

@@ -1003,6 +1003,33 @@ const StudentManagement = () => {
     navigate(`/student-management/${reference}?tab=identity`);
   };
 
+  const handleDelete = async (studentId) => {
+    if (!studentId) {
+      toast.error('شناسهٔ شاگرد پیدا نشد.');
+      return;
+    }
+    if (!confirm('آیا مطمئن هستید که این شاگرد حذف شود؟ این عملیات قابل بازگشت نیست.')) return;
+
+    setActionLoading(studentId);
+    try {
+      const response = await fetch(`/api/afghan-students/${studentId}`, {
+        method: 'DELETE',
+        headers: { ...getAuthHeaders() }
+      });
+      const data = await readApiResponse(response);
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'حذف شاگرد ناموفق بود.');
+      }
+      toast.success('شاگرد حذف شد.');
+      setStudents((currentRows) => currentRows.filter((row) => row._id !== studentId));
+      await fetchStudents();
+    } catch (error) {
+      toast.error(error.message || 'حذف شاگرد ناموفق بود.');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleEditFormChange = (field, value) => {
     setEditFeedback({ type: '', message: '' });
     setEditForm((current) => {
