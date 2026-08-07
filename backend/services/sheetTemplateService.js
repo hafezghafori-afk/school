@@ -480,7 +480,8 @@ async function previewSheetTemplate(templateId, filters = {}, options = {}) {
       };
     }
 
-    const { report } = await buildSessionSheetReport(previewFilters.examId);
+    // شقه سفید (options.blank): برای گرفتن امتحان حضوری — بدون نمره و بدون جزئیات متن پایین.
+    const { report } = await buildSessionSheetReport(previewFilters.examId, { blank: Boolean(options?.blank) });
     return {
       template: formatTemplate(template),
       preview: applyTemplateColumns(report, template)

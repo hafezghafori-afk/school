@@ -17,8 +17,18 @@ const STATUS_OPTIONS = [
   { value: 'recorded', label: 'ثبت‌شده' },
   { value: 'pending', label: 'در انتظار' },
   { value: 'absent', label: 'غایب' },
-  { value: 'excused', label: 'معذور' }
+  { value: 'excused', label: 'معذور' },
+  { value: 'expelled', label: 'منفک' },
+  { value: 'transferred', label: 'تبدیل' }
 ];
+
+// غیرحاضر/منفک/تبدیل: خانه‌های فعالیت صنفی، تحریری، تقریری و کارخانگی با علامت / قید شود.
+// خانهٔ ملاحظات همیشه نمایش داده می‌شود؛ فقط برچسب خودکار منفک/تبدیل در چاپ نوشته نمی‌شود
+// (نگاه کنید به buildOfficialExamSheetNote در examEngineService.js).
+const SLASHED_SCORE_STATUSES = new Set(['absent', 'expelled', 'transferred']);
+// وضعیت عضویت سیستمی که یعنی منفک یا تبدیل — عمداً 'transferred_in' را شامل نمی‌شود،
+// چون آن یک شاگرد فعال و قابل نمره‌دهی است که تازه به این صنف تبدیل شده.
+const DISMISSED_OR_TRANSFERRED_MEMBERSHIP_STATUSES = new Set(['expelled', 'transferred', 'transferred_out']);
 
 const STATUS_LABELS = STATUS_OPTIONS.reduce((acc, item) => {
   acc[item.value] = item.label;
@@ -46,8 +56,8 @@ const SESSION_STATUS_LABELS = {
   archived: 'آرشیف'
 };
 
-const SCORE_BLOCKING_STATUSES = new Set(['absent', 'excused', 'not_applicable']);
-const SCORE_CLEARING_STATUSES = new Set(['pending', 'absent', 'excused', 'not_applicable']);
+const SCORE_BLOCKING_STATUSES = new Set(['absent', 'excused', 'not_applicable', 'expelled', 'transferred']);
+const SCORE_CLEARING_STATUSES = new Set(['pending', 'absent', 'excused', 'not_applicable', 'expelled', 'transferred']);
 const APPROVAL_PAGE_SIZE = 20;
 const APPROVAL_WARNING_DAYS = 3;
 const APPROVAL_URGENT_DAYS = 7;
@@ -184,6 +194,11 @@ const computeRowTotal = (row = {}, fields = COMPONENT_FIELDS) => fields.reduce((
 const rowBlocksScoreInput = (status = '') => SCORE_BLOCKING_STATUSES.has(String(status || '').trim());
 const rowNeedsScoreReset = (status = '') => SCORE_CLEARING_STATUSES.has(String(status || '').trim());
 const rowHasSystemStatus = (row = {}) => SYSTEM_MEMBERSHIP_STATUSES.has(String(row.membershipStatus || '').trim());
+const isDismissedOrTransferredMembership = (row = {}) => DISMISSED_OR_TRANSFERRED_MEMBERSHIP_STATUSES
+  .has(String(row.membershipStatus || '').trim());
+// غیرحاضر/منفک/تبدیل (چه استاد مستقیم انتخاب کرده باشد، چه از وضعیت سیستمی عضویت معلوم شود).
+const rowShowsSlashedScores = (row = {}) => SLASHED_SCORE_STATUSES.has(String(row.markStatus || '').trim())
+  || isDismissedOrTransferredMembership(row);
 
 const readInitialSessionStatusFilter = () => {
   if (userRole() === 'instructor') return 'all';
@@ -943,11 +958,13 @@ export default function GradeManager() {
     }
   };
 
-  const handleExport = async (kind = 'pdf') => {
+  const handleExport = async (kind = 'pdf', { blank = false } = {}) => {
     if (!selectedSessionId) return;
+    // شقهٔ سفید: برای گرفتن امتحان حضوری — بدون نمره و بدون جزئیات متن پایین.
+    const query = blank ? '?blank=1' : '';
     try {
       if (kind === 'print') {
-        const html = await fetchBinary(`${API_BASE}/api/exams/sessions/${selectedSessionId}/export.print`, 'text');
+        const html = await fetchBinary(`${API_BASE}/api/exams/sessions/${selectedSessionId}/export.print${query}`, 'text');
         const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         window.open(url, '_blank', 'noopener,noreferrer');
@@ -955,17 +972,17 @@ export default function GradeManager() {
         return;
       }
 
-      const blob = await fetchBinary(`${API_BASE}/api/exams/sessions/${selectedSessionId}/export.pdf`);
+      const blob = await fetchBinary(`${API_BASE}/api/exams/sessions/${selectedSessionId}/export.pdf${query}`);
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${selectedSession?.code || 'exam-sheet'}.pdf`;
+      link.download = `${selectedSession?.code || 'exam-sheet'}${blank ? '-blank' : ''}.pdf`;
       document.body.appendChild(link);
       link.click();
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch {
-      applyMessage(`خروجی ${kind === 'print' ? 'چاپی' : 'PDF'} شقه آماده نشد.`, 'error');
+      applyMessage(`خروجی ${kind === 'print' ? 'چاپی' : 'PDF'} ${blank ? 'شقهٔ سفید' : 'شقه'} آماده نشد.`, 'error');
     }
   };
 
@@ -1340,6 +1357,25 @@ export default function GradeManager() {
                     <button type="button" className="secondary" onClick={() => handleExport('pdf')} disabled={!selectedSessionId}>
                       PDF
                     </button>
+                    {/* شقهٔ سفید: برای گرفتن امتحان حضوری — شماره/نام/نام پدر پر است، نمره و ملاحظات خالی. */}
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => handleExport('print', { blank: true })}
+                      disabled={!selectedSessionId}
+                      title="چاپ شقهٔ سفید برای گرفتن امتحان حضوری"
+                    >
+                      چاپ شقهٔ سفید
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => handleExport('pdf', { blank: true })}
+                      disabled={!selectedSessionId}
+                      title="دانلود PDF شقهٔ سفید برای گرفتن امتحان حضوری"
+                    >
+                      PDF شقهٔ سفید
+                    </button>
                     <button type="button" className="secondary" onClick={handleSaveChanges} disabled={!dirtyCount || saving || loadingSheet || sheetLocked}>
                       {saving ? 'در حال ذخیره...' : `ذخیره تغییرات${dirtyCount ? ` (${toFaNumber(dirtyCount)})` : ''}`}
                     </button>
@@ -1446,6 +1482,7 @@ export default function GradeManager() {
                           const total = computeRowTotal(row, activeComponentFields);
                           const totalInWords = row.markStatus === 'recorded' ? numberToFaWords(total) : '';
                           const systemManaged = rowHasSystemStatus(row);
+                          const showSlashedScores = systemManaged || rowShowsSlashedScores(row);
                           return (
                             <tr key={row.studentMembershipId}>
                               <td className="serial-column">{toFaNumber(row.rowNumber)}</td>
@@ -1457,15 +1494,19 @@ export default function GradeManager() {
                               <td className="father-name-column">{row.fatherName || '---'}</td>
                               {activeComponentFields.map((field) => (
                                 <td key={field.key}>
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max={String(scoreComponents[field.maxKey] || 0)}
-                                    value={row[field.key]}
-                                    disabled={systemManaged || rowBlocksScoreInput(row.markStatus) || sheetLocked}
-                                    className="score-input"
-                                    onChange={(event) => handleRowChange(row.studentMembershipId, field.key, event.target.value)}
-                                  />
+                                  {showSlashedScores ? (
+                                    <span className="score-slash" aria-label={`${field.label} — بدون نمره`}>/</span>
+                                  ) : (
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max={String(scoreComponents[field.maxKey] || 0)}
+                                      value={row[field.key]}
+                                      disabled={rowBlocksScoreInput(row.markStatus) || sheetLocked}
+                                      className="score-input"
+                                      onChange={(event) => handleRowChange(row.studentMembershipId, field.key, event.target.value)}
+                                    />
+                                  )}
                                 </td>
                               ))}
                               <td className="total-cell">{toFaNumber(total)}</td>

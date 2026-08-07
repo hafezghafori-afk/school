@@ -130,8 +130,29 @@ const EXAM_MARK_STATUS_LABELS = Object.freeze({
   absent: 'غایب',
   excused: 'معذور',
   pending: 'در انتظار نمره',
-  not_applicable: 'شامل امتحان نبوده'
+  not_applicable: 'شامل امتحان نبوده',
+  expelled: 'منفک',
+  transferred: 'تبدیل'
 });
+
+// Statuses whose label should never be written into the official ملاحظات column —
+// covers both a teacher-selected markStatus (expelled/transferred) and a system
+// membership status that means منفک or تبدیل. NOTE: 'transferred_in' is deliberately
+// excluded — it means the student just transferred INTO this class and is a normal,
+// currently gradeable member (its Dari label "تبدیلی آمده" even contains the
+// substring "تبدیل", which is why we match on the status code, not the label text).
+const NOTE_SUPPRESSED_MARK_STATUSES = new Set(['expelled', 'transferred']);
+const DISMISSED_OR_TRANSFERRED_MEMBERSHIP_STATUSES = new Set(['expelled', 'transferred', 'transferred_out']);
+// Statuses whose score-component cells (تحریری/تقریری/فعالیت صنفی/کارخانگی) must
+// print as "/" instead of being left blank.
+const SLASHED_SCORE_MARK_STATUSES = new Set(['absent', 'expelled', 'transferred']);
+
+function isDismissedOrTransferredMembership(membershipSnapshot = {}) {
+  const status = normalizeText(membershipSnapshot?.status);
+  if (DISMISSED_OR_TRANSFERRED_MEMBERSHIP_STATUSES.has(status)) return true;
+  // "dropped" با دلیل منفک، به شکل قدیمی/دستی هم منفک شمرده می‌شود.
+  return status === 'dropped' && /منفک/.test(normalizeText(membershipSnapshot?.endedReason));
+}
 
 const OFFICIAL_MEMBERSHIP_NOTE_STATUSES = new Set([
   'transferred',
@@ -159,9 +180,17 @@ function buildOfficialExamSheetNote(membershipSnapshot = {}, markStatus = '', no
   const membershipLabel = normalizeText(membershipSnapshot?.statusLabel)
     || getMembershipLifecycleLabel(membershipSnapshot);
   const normalizedMarkStatus = normalizeText(markStatus);
-  const primary = OFFICIAL_MEMBERSHIP_NOTE_STATUSES.has(membershipStatus)
-    ? membershipLabel
-    : (normalizedMarkStatus === 'pending' ? '' : (EXAM_MARK_STATUS_LABELS[normalizedMarkStatus] || ''));
+  // منفک (dismissed) و تبدیل (transferred) شاگردان: برچسب خودکار وضعیت در ملاحظات
+  // نوشته نشود — نه از روی وضعیت عضویت سیستمی و نه از روی وضعیتی که استاد مستقیم
+  // انتخاب کرده. اما خانهٔ ملاحظات باید نمایش داده شود، پس یادداشت دستی استاد
+  // (در صورت وجود) هنوز چاپ می‌شود.
+  const isAutoLabelSuppressed = NOTE_SUPPRESSED_MARK_STATUSES.has(normalizedMarkStatus)
+    || isDismissedOrTransferredMembership(membershipSnapshot);
+  const primary = isAutoLabelSuppressed
+    ? ''
+    : (OFFICIAL_MEMBERSHIP_NOTE_STATUSES.has(membershipStatus)
+      ? membershipLabel
+      : (normalizedMarkStatus === 'pending' ? '' : (EXAM_MARK_STATUS_LABELS[normalizedMarkStatus] || '')));
   const customNote = sanitizeExamNote(note);
   return [primary, customNote && customNote !== primary ? customNote : ''].filter(Boolean).join(' - ');
 }
@@ -854,6 +883,8 @@ function computeResultStatus({ examType, rankingRule, defaultMark, percentage, o
   if (markStatus === 'absent') return 'absent';
   if (markStatus === 'pending') return 'pending';
   if (markStatus === 'not_applicable') return 'not_applicable';
+  if (markStatus === 'expelled') return 'expelled';
+  if (markStatus === 'transferred') return 'transferred';
 
   const officialPolicy = getOfficialExamPolicy(examType);
   if (officialPolicy) {
@@ -2187,7 +2218,9 @@ function assertMembershipMatchesSession(membership, session) {
 
 function normalizeMarkStatus(value = '', fallback = 'recorded') {
   const normalized = normalizeText(value);
-  return ['recorded', 'absent', 'excused', 'pending', 'not_applicable'].includes(normalized) ? normalized : fallback;
+  return ['recorded', 'absent', 'excused', 'pending', 'not_applicable', 'expelled', 'transferred'].includes(normalized)
+    ? normalized
+    : fallback;
 }
 
 function assertSessionEditable(session) {
@@ -2766,6 +2799,9 @@ async function buildSessionSheetDataset(sessionId) {
       const officialMembershipSnapshot = toPlain(officialMembershipState) || {};
       const membershipStatusLabel = normalizeText(officialMembershipState?.statusLabel)
         || getMembershipLifecycleLabel(officialMembershipState);
+      // غیرحاضر/منفک/تبدیل: خانه‌های فعالیت صنفی، تحریری، تقریری و کارخانگی با علامت / قید شود.
+      const scoreSlashed = SLASHED_SCORE_MARK_STATUSES.has(markStatus)
+        || isDismissedOrTransferredMembership(officialMembershipSnapshot);
       const row = {
         rowNumber: index + 1,
         admissionNo: getStudentAdmissionNo(studentCore),
@@ -2790,6 +2826,7 @@ async function buildSessionSheetDataset(sessionId) {
           markStatus,
           note
         ),
+        scoreSlashed,
         markStatus,
         percentage: Number(result?.percentage || mark?.percentage || 0),
         resultStatus: normalizeText(result?.resultStatus),
@@ -2832,21 +2869,26 @@ async function getSessionMarks(sessionId) {
   };
 }
 
-async function buildSessionSheetReport(sessionId) {
+async function buildSessionSheetReport(sessionId, { blank = false } = {}) {
   const data = await getSessionMarks(sessionId);
+  // شقه سفید: برای گرفتن امتحان حضوری — شماره/نام/نام پدر از سیستم پر است، اما هیچ
+  // نمره یا ملاحظه‌ای چاپ نمی‌شود تا مدیر تدریسی روی کاغذ با دست پر کند. شاگردانی که
+  // از قبل غیرحاضر/منفک/تبدیل شمرده شده‌اند همچنان با / مشخص می‌مانند.
   const reportRows = data.items.map((item) => ({
     number: item.row.rowNumber,
     admissionNo: item.row.admissionNo,
     studentName: item.row.studentName,
     fatherName: item.row.fatherName,
     attendanceScore: item.row.attendanceScore == null ? '' : item.row.attendanceScore,
-    writtenScore: item.row.writtenScore == null ? '' : item.row.writtenScore,
-    oralScore: item.row.oralScore == null ? '' : item.row.oralScore,
-    classActivityScore: item.row.classActivityScore == null ? '' : item.row.classActivityScore,
-    homeworkScore: item.row.homeworkScore == null ? '' : item.row.homeworkScore,
-    obtainedMark: item.row.markStatus === 'recorded' ? item.row.obtainedMark : '',
-    totalInWords: item.row.totalInWords,
-    note: item.row.officialNote || item.row.note,
+    writtenScore: item.row.scoreSlashed ? '/' : (blank ? '' : (item.row.writtenScore == null ? '' : item.row.writtenScore)),
+    oralScore: item.row.scoreSlashed ? '/' : (blank ? '' : (item.row.oralScore == null ? '' : item.row.oralScore)),
+    classActivityScore: item.row.scoreSlashed ? '/' : (blank ? '' : (item.row.classActivityScore == null ? '' : item.row.classActivityScore)),
+    homeworkScore: item.row.scoreSlashed ? '/' : (blank ? '' : (item.row.homeworkScore == null ? '' : item.row.homeworkScore)),
+    obtainedMark: blank
+      ? (item.row.scoreSlashed ? '/' : '')
+      : (item.row.markStatus === 'recorded' ? item.row.obtainedMark : ''),
+    totalInWords: blank ? '' : item.row.totalInWords,
+    note: blank ? '' : (item.row.officialNote || item.row.note),
     markStatus: item.row.markStatus,
     subject: item.row.subject,
     teacherName: item.row.teacherName,
@@ -2921,16 +2963,26 @@ async function buildSessionSheetReport(sessionId) {
         month: data.session.monthLabel || '',
         dateFrom: data.session.heldAt || ''
       },
-      summary: {
-        totalStudents: Number(data.summary?.eligibleMemberships || 0),
-        recordedMarks: Number(data.summary?.recordedMarks || 0),
-        pendingMarks: Number(data.summary?.pendingMarks || 0),
-        absentMarks: Number(data.summary?.absentMarks || 0),
-        excusedMarks: Number(data.summary?.excusedMarks || 0),
-        passedMarks: data.items.filter((item) => ['passed', 'distinction', 'placement', 'temporary'].includes(String(item?.result?.resultStatus || ''))).length,
-        conditionalMarks: data.items.filter((item) => String(item?.result?.resultStatus || '') === 'conditional').length,
-        failedMarks: data.items.filter((item) => String(item?.result?.resultStatus || '') === 'failed').length
-      },
+      summary: (() => {
+        const suspendedCount = data.items.filter((item) => normalizeText(item?.row?.membershipStatus) === 'suspended').length;
+        const excusedMarks = Number(data.summary?.excusedMarks || 0);
+        return {
+          totalStudents: Number(data.summary?.eligibleMemberships || 0),
+          // تعداد داخله: کل شاگردانی که در این شقه ثبت‌اند (فارغ از وضعیت).
+          enrolledCount: data.items.length,
+          recordedMarks: Number(data.summary?.recordedMarks || 0),
+          pendingMarks: Number(data.summary?.pendingMarks || 0),
+          absentMarks: Number(data.summary?.absentMarks || 0),
+          excusedMarks,
+          // محروم: شاگردانی که وضعیت عضویت‌شان «محروم» است (جدا از معذرتی معمولی امتحان).
+          suspendedCount,
+          // معذرتی: شاگردان معذور امتحان که محروم (تعلیق‌شده) نیستند.
+          excusedOnlyCount: Math.max(0, excusedMarks - suspendedCount),
+          passedMarks: data.items.filter((item) => ['passed', 'distinction', 'placement', 'temporary'].includes(String(item?.result?.resultStatus || ''))).length,
+          conditionalMarks: data.items.filter((item) => String(item?.result?.resultStatus || '') === 'conditional').length,
+          failedMarks: data.items.filter((item) => String(item?.result?.resultStatus || '') === 'failed').length
+        };
+      })(),
       columns: configuredColumns,
       rows: reportRows
     },

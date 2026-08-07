@@ -463,8 +463,9 @@ function drawExamOfficialHeader(doc, context, continuation = false) {
   const ministryLogoPath = layout.showLogo
     ? resolveLocalAssetPath(siteSettings?.ministryLogoUrl || siteSettings?.governmentLogoUrl)
     : '';
-  const schoolLogoPath = layout.showLogo
-    ? (resolveLocalAssetPath(siteSettings?.schoolLogoUrl || siteSettings?.logoUrl) || logoPath)
+  // لوگوی آمریت معارف باید همیشه به‌جای لوگوی مکتب در این جایگاه چاپ شود.
+  const departmentLogoPath = layout.showLogo
+    ? (resolveLocalAssetPath(siteSettings?.departmentLogoUrl) || resolveLocalAssetPath(siteSettings?.schoolLogoUrl || siteSettings?.logoUrl) || logoPath)
     : '';
 
   const drawLogo = (assetPath, x, label) => {
@@ -511,23 +512,23 @@ function drawExamOfficialHeader(doc, context, continuation = false) {
   drawTopSignatures(signatures.slice(2, 4), box.left, 'left');
 
   drawLogo(ministryLogoPath, rightLogoX, 'لوگو وزارت');
-  drawLogo(schoolLogoPath, leftLogoX, 'لوگو مکتب');
+  drawLogo(departmentLogoPath, leftLogoX, 'لوگو آمریت');
 
+  // متن «شقه امتحان» زیر نام مکتب حذف شد؛ خط آمریت معارف اکنون متن ثابت است.
   const centerLines = [
     ['امارت اسلامی افغانستان', 10],
     ['وزارت معارف', 10],
     [normalizeDariText(siteSettings?.educationDirectorate || siteSettings?.directorateName) || 'ریاست معارف شهر کابل', 9.5],
-    [normalizeDariText(siteSettings?.educationZone || siteSettings?.district) || 'آمریت معارف حوزه تعلیمی (     )', 9.5],
-    [normalizeDariText(siteSettings?.brandName || siteSettings?.schoolName || siteSettings?.name) || normalizeDariText(context.subtitle) || '', 10.5],
-    [continuation ? 'ادامه شقه امتحان' : 'شقه امتحان', 13]
+    ['آمریت حوزه تعلیمی (پنجم)', 9.5],
+    [normalizeDariText(siteSettings?.brandName || siteSettings?.schoolName || siteSettings?.name) || normalizeDariText(context.subtitle) || '', 10.5, true]
   ];
   let lineY = brandY;
-  centerLines.forEach(([line, size], index) => {
+  centerLines.forEach(([line, size, extraGapAfter]) => {
     if (!line) return;
     setFont(doc, size, fontPath);
     doc.fillColor('#111111');
     writeText(doc, line, centerX, lineY, { width: centerWidth, align: 'center' });
-    lineY += index === centerLines.length - 2 ? 18 : 15;
+    lineY += extraGapAfter ? 18 : 15;
   });
 
   return Math.max(brandY + logoSize, lineY, y + signatureTabGap + 14) + 4;
@@ -862,6 +863,147 @@ function drawTableRow(doc, context, columns, row, y) {
   return rowHeight;
 }
 
+// --- شقه امتحان، حالت عمودی (fallback بدون Playwright): سمت راست تا آخر هر قدر
+// شاگرد بود پر می‌شود، باقی به سمت چپ می‌رود و خانه‌های خالی با / قید می‌شود ---
+// عدد ۲۴ با تولید واقعی PDF و شمارش صفحه به‌دست آمده (حداکثر واقعی ~۲۸ ردیف در هر
+// ستون بود؛ کمی کمتر گرفته شد چون این مسیر فقط زمانی اجرا می‌شود که Chromium روی
+// سرور نصب نباشد و اندازه‌گیری دقیق‌تر امکان‌پذیر نیست).
+const EXAM_SPLIT_COLUMN_CAPACITY = 24;
+const EXAM_SPLIT_HEADER_HEIGHT = 46;
+const EXAM_SPLIT_ROW_HEIGHT = 18;
+
+function buildExamSlashRow(columns = [], number = null) {
+  const row = (Array.isArray(columns) ? columns : []).reduce((acc, column) => {
+    const key = normalizeText(column?.key);
+    if (key) acc[key] = '/';
+    return acc;
+  }, {});
+  // ستون شماره علامت / نمی‌گیرد؛ عدد پیهم را نشان می‌دهد.
+  if (number != null && Object.prototype.hasOwnProperty.call(row, 'number')) {
+    row.number = String(number);
+  }
+  return row;
+}
+
+function padExamRowsToCapacity(rows = [], columns = [], capacity = EXAM_SPLIT_COLUMN_CAPACITY, numberOffset = 0) {
+  const padded = Array.isArray(rows) ? rows.slice() : [];
+  while (padded.length < capacity) {
+    padded.push(buildExamSlashRow(columns, numberOffset + padded.length + 1));
+  }
+  return padded;
+}
+
+// متن هدر یک ستون را نود درجه می‌چرخاند (برای ستون‌های باریک شقه امتحان).
+function drawRotatedHeaderLabel(doc, label, x, y, width, height) {
+  const centerX = x + (width / 2);
+  const centerY = y + (height / 2);
+  doc.save();
+  doc.rotate(-90, { origin: [centerX, centerY] });
+  writeText(doc, label, centerX - (height / 2), centerY - 4, {
+    width: height - 4,
+    align: 'center'
+  });
+  doc.restore();
+}
+
+function drawExamSplitTableColumn(doc, context, columns, rows, y, box) {
+  const { fontPath } = context;
+  const tableLayout = buildTableLayout(columns, box.width);
+  const hasGroupedColumns = tableLayout.some((column) => column.group);
+
+  setFont(doc, 7, fontPath);
+  if (hasGroupedColumns) {
+    const groups = [];
+    tableLayout.forEach((column) => {
+      const previous = groups[groups.length - 1];
+      if (column.group && previous?.group === column.group) {
+        previous.columns.push(column);
+      } else {
+        groups.push({ group: column.group, columns: [column] });
+      }
+    });
+    const topHeight = EXAM_SPLIT_HEADER_HEIGHT / 2;
+    const bottomHeight = EXAM_SPLIT_HEADER_HEIGHT / 2;
+    groups.forEach((group) => {
+      const x = box.left + Math.min(...group.columns.map((column) => column.x));
+      const width = group.columns.reduce((sum, column) => sum + column.width, 0);
+      if (group.group) {
+        doc.save();
+        doc.rect(x, y, width, topHeight).fillAndStroke('#E6EFEB', '#183933');
+        doc.restore();
+        doc.fillColor('#173933');
+        // عنوان گروه (شهرت متعلمین / مجموعه نمره) چند ستون را می‌پوشاند، پس افقی می‌ماند.
+        writeText(doc, group.group, x + 2, y + 3, { width: width - 4, align: 'center' });
+        group.columns.forEach((column) => {
+          const columnX = box.left + column.x;
+          doc.save();
+          doc.rect(columnX, y + topHeight, column.width, bottomHeight).fillAndStroke('#F7FAF8', '#183933');
+          doc.restore();
+          doc.fillColor('#173933');
+          drawRotatedHeaderLabel(doc, column.label, columnX, y + topHeight, column.width, bottomHeight);
+        });
+        return;
+      }
+      const soloColumn = group.columns[0];
+      doc.save();
+      doc.rect(x, y, width, EXAM_SPLIT_HEADER_HEIGHT).fillAndStroke('#E6EFEB', '#183933');
+      doc.restore();
+      doc.fillColor('#173933');
+      drawRotatedHeaderLabel(doc, soloColumn.label, x, y, width, EXAM_SPLIT_HEADER_HEIGHT);
+    });
+  } else {
+    tableLayout.forEach((column) => {
+      const x = box.left + column.x;
+      doc.save();
+      doc.rect(x, y, column.width, EXAM_SPLIT_HEADER_HEIGHT).fillAndStroke('#E6EFEB', '#183933');
+      doc.restore();
+      doc.fillColor('#173933');
+      drawRotatedHeaderLabel(doc, column.label, x, y, column.width, EXAM_SPLIT_HEADER_HEIGHT);
+    });
+  }
+
+  let rowY = y + EXAM_SPLIT_HEADER_HEIGHT;
+  setFont(doc, 6.6, fontPath);
+  rows.forEach((row) => {
+    tableLayout.forEach((column) => {
+      const x = box.left + column.x;
+      doc.save();
+      doc.rect(x, rowY, column.width, EXAM_SPLIT_ROW_HEIGHT).stroke('#183933');
+      doc.restore();
+      doc.fillColor('#10231F');
+      writeText(doc, row?.[column.key] ?? '', x + 3, rowY + 3, {
+        width: column.width - 6,
+        align: 'center'
+      });
+    });
+    rowY += EXAM_SPLIT_ROW_HEIGHT;
+  });
+
+  return rowY - y;
+}
+
+// یک صفحه دو-ستونه می‌کشد: سمت راست تا آخر جای دارد پر می‌شود، بعد سمت چپ؛
+// جاهای خالی باقی‌مانده (در هر دو ستون) با علامت / قید می‌شود — به جز شماره که عدد
+// پیهم می‌گیرد. chunkOffset شمارهٔ سطر جهانی (در صفحات بعدی هم) را درست نگه می‌دارد.
+function drawExamSplitTable(doc, context, columns, rows, y, chunkOffset = 0) {
+  const { layout } = context;
+  const metrics = pageMetrics(doc, layout);
+  const columnGap = 10;
+  const halfWidth = (metrics.width - columnGap) / 2;
+  const rightBox = { left: metrics.right - halfWidth, width: halfWidth };
+  const leftBox = { left: metrics.left, width: halfWidth };
+  const rightRows = padExamRowsToCapacity(rows.slice(0, EXAM_SPLIT_COLUMN_CAPACITY), columns, EXAM_SPLIT_COLUMN_CAPACITY, chunkOffset);
+  const leftRows = padExamRowsToCapacity(
+    rows.slice(EXAM_SPLIT_COLUMN_CAPACITY, EXAM_SPLIT_COLUMN_CAPACITY * 2),
+    columns,
+    EXAM_SPLIT_COLUMN_CAPACITY,
+    chunkOffset + EXAM_SPLIT_COLUMN_CAPACITY
+  );
+  const rightHeight = drawExamSplitTableColumn(doc, context, columns, rightRows, y, rightBox);
+  const leftHeight = drawExamSplitTableColumn(doc, context, columns, leftRows, y, leftBox);
+  return y + Math.max(rightHeight, leftHeight);
+}
+
 async function loadSiteSettings() {
   if (mongoose.connection.readyState !== 1) return null;
   try {
@@ -876,9 +1018,11 @@ function drawSignatures(doc, context, startY) {
   const firstRow = Array.isArray(context.report?.rows) && context.report.rows.length
     ? context.report.rows[0]
     : {};
+  // در PDFKit مختصات از چپ به راست است — پس آیتم اول (index 0) سمت چپ صفحه می‌افتد؛
+  // چون ممیز باید راست باشد، ممتحین باید همیشه اول (چپ) بیاید.
   const effectiveSignatures = context.type === 'exam'
     ? [
-      { role: 'امضای ممتحن', name: normalizeText(firstRow.teacherName) },
+      { role: 'امضای ممتحین', name: normalizeText(firstRow.teacherName) },
       { role: 'امضای ممیز', name: normalizeText(firstRow.reviewedByName) }
     ]
     : signatures;
@@ -1105,14 +1249,23 @@ function shouldRenderPdfSummary(type = '') {
   return type !== 'subjects' && type !== 'exam';
 }
 
-function buildPdfFormalNote(type = '', report = {}) {
+function buildPdfFormalNote(type = '', report = {}, { blank = false } = {}) {
   if (type === 'exam') {
     if (!Array.isArray(report?.rows) || !report.rows.length) {
       return 'این شقه امتحان بر اساس فیلترهای انتخاب‌شده تولید شد، اما هنوز نتیجه‌ای برای نمایش ثبت نشده است.';
     }
     const firstRow = report.rows[0] || {};
     const summary = report?.summary || {};
-    return `قرار شرح فوق نمرات امتحان ${normalizeText(report?.report?.title || '') || 'ماهوار'} مضمون (${normalizeText(firstRow.subject || '')}) از صنف (${normalizeText(firstRow.classTitle || '')}) به تعداد (${String(summary.totalStudents || 0)}) شاگرد ثبت گردیده است که شامل کامیاب (${String(summary.passedMarks || 0)})، مشروط (${String(summary.conditionalMarks || 0)})، معذور (${String(summary.excusedMarks || 0)}) و غایب (${String(summary.absentMarks || 0)}) می‌باشد. درج این شقه بدون قلم‌خوردگی و تراشیدگی صحیح است.`;
+    const subject = normalizeText(firstRow.subject || '');
+    // شقه سفید: جای رقم‌ها با فاصلهٔ خالی گذاشته می‌شود تا با قلم عددی مثل ۱۰۰ نوشته شود.
+    const blankPlaceholder = ' '.repeat(10);
+    const enrolledCount = blank ? blankPlaceholder : String(summary.enrolledCount ?? summary.totalStudents ?? 0);
+    const includedInExamCount = blank ? blankPlaceholder : String(summary.recordedMarks || 0);
+    const excusedOnlyCount = blank ? blankPlaceholder : String(summary.excusedOnlyCount ?? summary.excusedMarks ?? 0);
+    const suspendedCount = blank ? blankPlaceholder : String(summary.suspendedCount || 0);
+    const line1 = `قرار شرح فوق نمرات مضمون (${subject}) از روی اوراق امتحان شاگردان بدون قلم خوردگی و تراش درج شقه هذا گردیده و به اداره محترم تسلیم است.`;
+    const line2 = `تعداد داخله (${enrolledCount}) تن شامل امتحان (${includedInExamCount}) تن معذرتی (${excusedOnlyCount}) تن محروم (${suspendedCount}) تن.`;
+    return `${line1}\n${line2}`;
   }
   if (type === 'subjects') {
     return 'این شقه مضامین به اساس مضامین و تعیینات ثبت‌شده برای صنف ترتیب و جهت تایید ارایه گردید.';
@@ -1152,7 +1305,7 @@ function drawNoRowsTableMessage(doc, context, y, message) {
   return rowHeight;
 }
 
-async function buildReportPdfBuffer({ report = {}, template = null } = {}) {
+async function buildReportPdfBuffer({ report = {}, template = null, blank = false } = {}) {
   const layout = getLayout(template);
   const type = inferSheetType(template, report);
   const siteSettings = await loadSiteSettings();
@@ -1163,7 +1316,7 @@ async function buildReportPdfBuffer({ report = {}, template = null } = {}) {
   const subtitle = normalizeText(template?.layout?.headerText) || normalizeText(siteSettings?.brandName) || 'لیسه خصوصی مدیر';
   const footerText = normalizeText(template?.layout?.footerText) || normalizeText(siteSettings?.footerNote);
   const signatures = buildPdfSignatureBlocks(type, siteSettings, report);
-  const formalNote = buildPdfFormalNote(type, report);
+  const formalNote = buildPdfFormalNote(type, report, { blank });
   const logoPath = layout.showLogo ? resolveLocalAssetPath(siteSettings?.logoUrl) : '';
   const fontPath = resolveFontPath(layout.fontFamily);
   const columns = Array.isArray(report?.columns) ? report.columns : [];
@@ -1223,6 +1376,20 @@ async function buildReportPdfBuffer({ report = {}, template = null } = {}) {
         align: 'center'
       });
       y += 42;
+    } else if (type === 'exam' && layout.orientation === 'portrait') {
+      // سمت راست تا آخر هر قدر شاگرد بود پر می‌شود، بعد سمت چپ؛ خانه‌های خالی با / قید می‌شود.
+      const EXAM_SPLIT_CHUNK_SIZE = EXAM_SPLIT_COLUMN_CAPACITY * 2;
+      const chunks = rows.length ? [] : [[]];
+      for (let i = 0; i < rows.length; i += EXAM_SPLIT_CHUNK_SIZE) {
+        chunks.push(rows.slice(i, i + EXAM_SPLIT_CHUNK_SIZE));
+      }
+      chunks.forEach((chunk, index) => {
+        const estimatedHeight = EXAM_SPLIT_HEADER_HEIGHT + (EXAM_SPLIT_COLUMN_CAPACITY * EXAM_SPLIT_ROW_HEIGHT);
+        if (index > 0 || y + estimatedHeight + signatureReserve + footerReserve > metrics.bottom) {
+          y = addPage(doc, context, true);
+        }
+        y = drawExamSplitTable(doc, context, columns, chunk, y, index * EXAM_SPLIT_CHUNK_SIZE);
+      });
     } else {
       let headerState = drawTableHeader(doc, context, columns, y);
       y += headerState.headerHeight;
@@ -1266,13 +1433,13 @@ async function buildReportPdfBuffer({ report = {}, template = null } = {}) {
   });
 }
 
-async function buildBrowserReportPdfBuffer({ report = {}, template = null, req = null } = {}) {
+async function buildBrowserReportPdfBuffer({ report = {}, template = null, req = null, blank = false } = {}) {
   let browser = null;
   try {
     const { chromium } = require('playwright');
     const { renderReportPrintHtml } = require('./sheetTemplatePrintService');
     const layout = getLayout(template);
-    const html = await renderReportPrintHtml({ report, template, req });
+    const html = await renderReportPrintHtml({ report, template, req, blank });
 
     browser = await launchChromium(chromium);
     const page = await browser.newPage({

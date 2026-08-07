@@ -293,9 +293,11 @@ router.post('/:templateId/export.xlsx', ...readAccess, async (req, res) => {
 
 router.post('/:templateId/export.pdf', ...readAccess, async (req, res) => {
   try {
-    const item = await previewSheetTemplate(req.params.templateId, req.body?.filters || {}, { req });
-    const buffer = await buildReportPdfBuffer({ report: item.preview || {}, template: item.template || null, req });
-    const filename = `${item.template?.code || item.template?.id || 'sheet-template'}.pdf`;
+    // شقه سفید: برای گرفتن امتحان حضوری — بدون نمره و بدون جزئیات متن پایین.
+    const blank = Boolean(req.body?.blank);
+    const item = await previewSheetTemplate(req.params.templateId, req.body?.filters || {}, { req, blank });
+    const buffer = await buildReportPdfBuffer({ report: item.preview || {}, template: item.template || null, req, blank });
+    const filename = `${item.template?.code || item.template?.id || 'sheet-template'}${blank ? '-blank' : ''}.pdf`;
 
     await logActivity({
       req,
@@ -322,9 +324,11 @@ router.post('/:templateId/export.pdf', ...readAccess, async (req, res) => {
 
 router.post('/:templateId/export.print', ...readAccess, async (req, res) => {
   try {
-    const item = await previewSheetTemplate(req.params.templateId, req.body?.filters || {}, { req });
-    const html = await renderReportPrintHtml({ report: item.preview || {}, template: item.template || null, req });
-    const filename = `${item.template?.code || item.template?.id || 'sheet-template'}.html`;
+    // شقه سفید: برای گرفتن امتحان حضوری — بدون نمره و بدون جزئیات متن پایین.
+    const blank = Boolean(req.body?.blank);
+    const item = await previewSheetTemplate(req.params.templateId, req.body?.filters || {}, { req, blank });
+    const html = await renderReportPrintHtml({ report: item.preview || {}, template: item.template || null, req, blank });
+    const filename = `${item.template?.code || item.template?.id || 'sheet-template'}${blank ? '-blank' : ''}.html`;
 
     await logActivity({
       req,
