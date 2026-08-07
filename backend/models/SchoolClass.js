@@ -186,13 +186,27 @@ async function ensureSchoolClassShiftUniqueIndex() {
   ));
 
   if (!hasNewUniqueIndex) {
-    await collection.createIndex(NEW_UNIQUE_INDEX_KEY, {
-      name: NEW_UNIQUE_INDEX_NAME,
-      unique: true,
-      background: true
-    });
-    // eslint-disable-next-line no-console
-    console.log('Created school class unique index with shiftId');
+    try {
+      await collection.createIndex(NEW_UNIQUE_INDEX_KEY, {
+        name: NEW_UNIQUE_INDEX_NAME,
+        unique: true,
+        background: true
+      });
+      // eslint-disable-next-line no-console
+      console.log('Created school class unique index with shiftId');
+    } catch (error) {
+      // A duplicate-key error here (11000) means production data already has
+      // two classes sharing the same school/year/grade/section/gender/shift
+      // combination - most likely left over from before shiftId was added to
+      // this constraint. Left uncaught, this used to abort the whole boot
+      // sequence and permanently wedge the server in "starting" (requireDatabase
+      // never sees markAppReady()), turning a data-cleanup issue into a full
+      // outage. Log it loudly and let boot continue; the app worked without
+      // this index before, so its absence isn't fatal - the duplicates should
+      // still be found and merged/removed so the index can be created later.
+      // eslint-disable-next-line no-console
+      console.error('Failed creating school class unique index (server will continue starting; check for duplicate school/year/grade/section/gender/shift combinations):', error?.message || error);
+    }
   }
 }
 
