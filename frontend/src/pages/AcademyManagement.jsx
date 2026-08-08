@@ -210,6 +210,8 @@ export default function AcademyManagement() {
   const [payments, setPayments] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [expenses, setExpenses] = useState([]);
+  const [expenseCategories, setExpenseCategories] = useState([]);
+  const [expenseCategoryForm, setExpenseCategoryForm] = useState({ name: '' });
   const [attendance, setAttendance] = useState([]);
   const [reports, setReports] = useState(null);
   const [monthlyReport, setMonthlyReport] = useState(null);
@@ -248,6 +250,7 @@ export default function AcademyManagement() {
       setPayments(data.payments || []);
       setInvoices(data.invoices || []);
       setExpenses(data.expenses || []);
+      setExpenseCategories(data.expenseCategories || []);
       setAttendance(data.attendance || []);
     } catch (error) {
       toast.error(error.message);
@@ -367,6 +370,18 @@ export default function AcademyManagement() {
     [courses, registrationForm.courseId]
   );
 
+  // Built-in categories (hardcoded, always offered) plus whatever the
+  // academy has defined for itself and left active - custom names are used
+  // verbatim as both the option value and its label, since AcademyExpense
+  // stores the category as a plain string rather than a coded key.
+  const expenseCategoryOptions = useMemo(() => {
+    const builtIn = Object.entries(expenseCategoryLabels).map(([value, label]) => ({ value, label }));
+    const custom = expenseCategories
+      .filter((item) => item.status !== 'inactive')
+      .map((item) => ({ value: item.name, label: item.name }));
+    return [...builtIn, ...custom];
+  }, [expenseCategories]);
+
   const selectedAttendanceClassRegistrations = useMemo(
     () => registrations.filter((item) => (
       item.status === 'active'
@@ -466,6 +481,32 @@ export default function AcademyManagement() {
       reset: () => setAttendanceForm(emptyAttendance),
       successTab: 'attendance'
     });
+  };
+
+  const saveExpenseCategory = async (event) => {
+    event.preventDefault();
+    await submit({
+      path: '/api/academy/expense-categories',
+      payload: expenseCategoryForm,
+      reset: () => setExpenseCategoryForm({ name: '' })
+    });
+  };
+
+  const toggleExpenseCategoryStatus = async (item) => {
+    setBusy(true);
+    try {
+      const nextStatus = item.status === 'inactive' ? 'active' : 'inactive';
+      const data = await requestJson(`/api/academy/expense-categories/${item._id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: nextStatus })
+      });
+      toast.success(data.message || 'دسته‌بندی مصرف به‌روزرسانی شد.');
+      await loadData();
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const exportCsv = (filename, columns, rows) => {
@@ -833,7 +874,7 @@ export default function AcademyManagement() {
                 <Field label="عنوان"><input required value={expenseForm.title} onChange={(e) => setExpenseForm({ ...expenseForm, title: e.target.value })} /></Field>
                 <Field label="دسته‌بندی">
                   <select value={expenseForm.category} onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })}>
-                    {Object.entries(expenseCategoryLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    {expenseCategoryOptions.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
                   </select>
                 </Field>
                 <Field label="مبلغ"><input required type="number" min="1" value={expenseForm.amount} onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })} /></Field>
@@ -851,6 +892,32 @@ export default function AcademyManagement() {
                     expenseCategoryLabels[item.category] || item.category,
                     `${fmt(item.amount)} ${item.currency || currency}`,
                     item.expenseDate
+                  ])}
+                />
+              </div>
+              <form className="academy-panel academy-form" onSubmit={saveExpenseCategory}>
+                <h2>تعریف دسته‌بندی مصرف</h2>
+                <p className="academy-form-hint">دسته‌های ثابت (معاش استادان، کرایه، ...) همیشه در لیست هستند؛ اینجا فقط دسته‌های اضافه‌ای که خودتان نیاز دارید تعریف کنید.</p>
+                <Field label="نام دسته">
+                  <input
+                    required
+                    value={expenseCategoryForm.name}
+                    onChange={(e) => setExpenseCategoryForm({ ...expenseCategoryForm, name: e.target.value })}
+                    placeholder="مثلاً: ترانسپورت"
+                  />
+                </Field>
+                <button type="submit" disabled={busy}>افزودن دسته</button>
+              </form>
+              <div className="academy-panel">
+                <h2>دسته‌بندی‌های تعریف‌شده</h2>
+                <Table
+                  columns={['نام', 'وضعیت', 'عملیات']}
+                  rows={expenseCategories.map((item) => [
+                    item.name,
+                    item.status === 'inactive' ? 'غیرفعال' : 'فعال',
+                    <button type="button" className="academy-inline-button" onClick={() => toggleExpenseCategoryStatus(item)} disabled={busy}>
+                      {item.status === 'inactive' ? 'فعال‌سازی' : 'غیرفعال‌سازی'}
+                    </button>
                   ])}
                 />
               </div>

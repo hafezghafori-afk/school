@@ -11,6 +11,7 @@ const AcademyRegistration = require('../models/AcademyRegistration');
 const AcademyPayment = require('../models/AcademyPayment');
 const AcademyInvoice = require('../models/AcademyInvoice');
 const AcademyExpense = require('../models/AcademyExpense');
+const AcademyExpenseCategory = require('../models/AcademyExpenseCategory');
 const AcademyAttendance = require('../models/AcademyAttendance');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
@@ -102,7 +103,7 @@ async function buildSummary() {
 }
 
 async function listPayload() {
-  const [settings, students, courses, teachers, classes, registrations, payments, invoices, expenses, attendance, summary] = await Promise.all([
+  const [settings, students, courses, teachers, classes, registrations, payments, invoices, expenses, expenseCategories, attendance, summary] = await Promise.all([
     getSettings(),
     AcademyStudent.find().sort({ createdAt: -1 }).limit(250).lean(),
     AcademyCourse.find().sort({ createdAt: -1 }).limit(250).lean(),
@@ -121,6 +122,7 @@ async function listPayload() {
       .populate('studentId', 'fullName studentCode')
       .lean(),
     AcademyExpense.find().sort({ expenseDate: -1, createdAt: -1 }).limit(200).lean(),
+    AcademyExpenseCategory.find().sort({ name: 1 }).lean(),
     AcademyAttendance.find().sort({ attendanceDate: -1, createdAt: -1 }).limit(120)
       .populate('classId', 'name')
       .populate('students.studentId', 'fullName studentCode')
@@ -128,7 +130,7 @@ async function listPayload() {
     buildSummary()
   ]);
 
-  return { settings, students, courses, teachers, classes, registrations, payments, invoices, expenses, attendance, summary };
+  return { settings, students, courses, teachers, classes, registrations, payments, invoices, expenses, expenseCategories, attendance, summary };
 }
 
 router.get('/bootstrap', async (_req, res) => {
@@ -389,6 +391,42 @@ router.post('/expenses', async (req, res) => {
     res.status(201).json({ success: true, item, message: 'مصرف آموزشگاه ثبت شد.' });
   } catch {
     res.status(400).json({ success: false, message: 'ثبت مصرف آموزشگاه ناموفق بود.' });
+  }
+});
+
+router.get('/expense-categories', async (_req, res) => {
+  try {
+    const items = await AcademyExpenseCategory.find().sort({ name: 1 }).lean();
+    res.json({ success: true, items });
+  } catch {
+    res.status(500).json({ success: false, message: 'دریافت دسته‌بندی‌های مصرف ناموفق بود.' });
+  }
+});
+
+router.post('/expense-categories', async (req, res) => {
+  try {
+    const item = await AcademyExpenseCategory.create({ name: req.body.name });
+    res.status(201).json({ success: true, item, message: 'دسته‌بندی مصرف ثبت شد.' });
+  } catch (error) {
+    // Unique-index violation (duplicate name) surfaces as error.code 11000 -
+    // worth its own message since "ثبت ناموفق بود" would hide the actual
+    // reason (this name already exists) from the person filling the form.
+    const message = error?.code === 11000 ? 'این دسته‌بندی قبلاً تعریف شده است.' : 'ثبت دسته‌بندی مصرف ناموفق بود.';
+    res.status(400).json({ success: false, message });
+  }
+});
+
+router.put('/expense-categories/:id', async (req, res) => {
+  try {
+    const update = {};
+    if (req.body.name !== undefined) update.name = req.body.name;
+    if (req.body.status !== undefined) update.status = req.body.status;
+    const item = await AcademyExpenseCategory.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
+    if (!item) return res.status(404).json({ success: false, message: 'دسته‌بندی مصرف پیدا نشد.' });
+    res.json({ success: true, item, message: 'دسته‌بندی مصرف به‌روزرسانی شد.' });
+  } catch (error) {
+    const message = error?.code === 11000 ? 'این دسته‌بندی قبلاً تعریف شده است.' : 'به‌روزرسانی دسته‌بندی مصرف ناموفق بود.';
+    res.status(400).json({ success: false, message });
   }
 });
 

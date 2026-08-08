@@ -3,10 +3,13 @@ const academyConnection = require('./academyConnection');
 
 const academyExpenseSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true },
+  // No enum here on purpose: the academy can define its own categories
+  // (see AcademyExpenseCategory) on top of the built-in ones the frontend
+  // hardcodes labels for, so this just stores whichever name was chosen.
   category: {
     type: String,
-    enum: ['teacher_salary', 'rent', 'utilities', 'internet', 'stationery', 'marketing', 'equipment', 'other'],
     default: 'other',
+    trim: true,
     index: true
   },
   amount: { type: Number, required: true, min: 1 },
