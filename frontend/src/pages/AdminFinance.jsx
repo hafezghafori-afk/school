@@ -249,6 +249,15 @@ const getMonthBucket = (value) => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 };
 
+// Afghan solar-hijri year-month bucket (e.g. "1405-05"), unlike getMonthBucket
+// above which buckets by the Gregorian calendar. Used wherever a bucket key
+// needs to line up with Afghan month labels/filters instead of Gregorian ones.
+const getAfghanMonthBucket = (value) => {
+  const solar = gregorianToAfghanSolar(value);
+  if (!solar || !Number.isInteger(solar.jy) || !Number.isInteger(solar.jm)) return '';
+  return `${solar.jy}-${String(solar.jm).padStart(2, '0')}`;
+};
+
 const getWeekBucket = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
@@ -1195,6 +1204,18 @@ const getFinanceBillMonthFilterKey = (item = {}) => {
   const explicitKey = String(item?.monthKey || item?.billingMonth || '').trim().replace('/', '-');
   if (/^\d{4}-(0[1-9]|1[0-2])$/.test(explicitKey)) return explicitKey;
 
+  // Prefer deriving the key from the actual due/issue date (converted to the
+  // Afghan solar calendar) whenever one is available. This keeps bills that
+  // share the same real month on one canonical "YYYY-MM" key regardless of
+  // whether they went through the periodLabel text path or not — previously
+  // this branch only ran as a last resort and used the *Gregorian* calendar,
+  // which could silently produce a second, differently-formatted key for the
+  // same Afghan month (e.g. one bill keyed "period:اسد 1405" via periodLabel
+  // and another keyed "2026-07" via the Gregorian due date), causing the
+  // month filter dropdown to show duplicate entries for the same month.
+  const dateBucket = getAfghanMonthBucket(item?.dueDate || item?.issuedAt);
+  if (dateBucket) return dateBucket;
+
   const periodLabel = String(item?.periodLabel || '').trim();
   const periodMatches = [...periodLabel.matchAll(/(?:^|\D)((?:13|14|20)\d{2})[-/](0?[1-9]|1[0-2])(?=\D|$)/g)];
   if (periodMatches.length) {
@@ -1206,7 +1227,7 @@ const getFinanceBillMonthFilterKey = (item = {}) => {
     return `period:${normalizeFinanceSearchTerm(periodLabel)}`;
   }
 
-  return getMonthBucket(item?.dueDate || item?.issuedAt);
+  return '';
 };
 
 const formatFinanceBillMonthFilterLabel = (key = '', item = {}) => {
