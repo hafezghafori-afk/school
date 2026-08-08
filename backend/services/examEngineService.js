@@ -1305,6 +1305,48 @@ function getSessionScoringDefaults(examType, payload = {}) {
   };
 }
 
+// Looks up the most recently used score-component split (written/oral/homework/classActivity)
+// for a specific subject + exam type, so the assignment form can offer that subject's own
+// breakdown as a default instead of always falling back to one fixed split for every subject.
+// Different subjects legitimately split the same official total differently (e.g. a subject
+// with no oral component gets 36/0/2/2 while another gets 24/12/2/2 — both sum to 40).
+async function findLatestSubjectScoreComponents({ subjectId, examTypeId, classId, academicYearId } = {}) {
+  const subjectRef = normalizeNullableId(subjectId);
+  const examTypeRef = normalizeNullableId(examTypeId);
+  if (!subjectRef || !examTypeRef) return null;
+
+  const baseQuery = { subjectId: subjectRef, examTypeId: examTypeRef, status: 'active' };
+  const classRef = normalizeNullableId(classId);
+  const yearRef = normalizeNullableId(academicYearId);
+
+  // Try the most specific scope first (same class + same year), then widen the search so a
+  // subject's usual split is still suggested even for a brand-new class or academic year.
+  const candidateQueries = [];
+  if (classRef && yearRef) candidateQueries.push({ ...baseQuery, classId: classRef, academicYearId: yearRef });
+  if (classRef) candidateQueries.push({ ...baseQuery, classId: classRef });
+  candidateQueries.push(baseQuery);
+
+  for (const candidateQuery of candidateQueries) {
+    const defaultMark = await ExamDefaultMark.findOne(candidateQuery).sort({ updatedAt: -1 }).lean();
+    const components = defaultMark?.scoreComponents || {};
+    const hasBreakdown = Object.values(components).some((value) => Number(value || 0) > 0);
+    if (defaultMark && hasBreakdown) {
+      return {
+        scoreComponents: {
+          attendanceMax: Number(components.attendanceMax || 0),
+          writtenMax: Number(components.writtenMax || 0),
+          oralMax: Number(components.oralMax || 0),
+          classActivityMax: Number(components.classActivityMax || 0),
+          homeworkMax: Number(components.homeworkMax || 0)
+        },
+        totalMark: Number(defaultMark.totalMark || 0),
+        updatedAt: defaultMark.updatedAt || null
+      };
+    }
+  }
+  return null;
+}
+
 async function resolveReviewerIdentity(reviewerUserId = null, reviewedByName = '') {
   const normalizedId = normalizeNullableId(reviewerUserId);
   if (!normalizedId) {
@@ -3046,6 +3088,7 @@ module.exports = {
   createExamType,
   deleteExamSession,
   ensureExamSessionAccess,
+  findLatestSubjectScoreComponents,
   getExamSessionManagementState,
   getSessionMarks,
   getSessionRosterStatus,

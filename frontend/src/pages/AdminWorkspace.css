@@ -156,6 +156,17 @@
   line-height: 1.8;
 }
 
+.admin-workspace-hint {
+  margin: 8px 0 14px;
+  padding: 8px 12px;
+  background: #f1f8f6;
+  border: 1px dashed #b9d7d0;
+  border-radius: 8px;
+  color: #3d6b62;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
 .admin-workspace-form {
   display: grid;
   gap: 14px;

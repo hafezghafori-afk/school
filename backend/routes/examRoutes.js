@@ -12,6 +12,7 @@ const {
   createExamType,
   deleteExamSession,
   ensureExamSessionAccess,
+  findLatestSubjectScoreComponents,
   getExamSessionManagementState,
   getSessionMarks,
   getSessionRosterStatus,
@@ -70,6 +71,19 @@ router.get('/types', requireAuth, requireRole(['admin', 'instructor']), requireP
     res.json({ success: true, items });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to load exam types.' });
+  }
+});
+
+// Returns the most recently used score-component split (written/oral/homework/classActivity)
+// for a specific subject + exam type, so the assignment form can suggest that subject's own
+// breakdown instead of one fixed split shared by every subject of the same exam type.
+router.get('/default-marks/latest', requireAuth, requireRole(['admin', 'instructor']), requirePermission('manage_content'), async (req, res) => {
+  try {
+    const { subjectId, examTypeId, classId, academicYearId } = req.query || {};
+    const item = await findLatestSubjectScoreComponents({ subjectId, examTypeId, classId, academicYearId });
+    res.json({ success: true, item });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to load the subject score defaults.' });
   }
 });
 
