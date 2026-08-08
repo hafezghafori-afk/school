@@ -127,6 +127,9 @@ async function mockSheetCenter(page, state = {}) {
       });
     });
   }
+  await page.route('**/api/exams/default-marks/latest**', async (route) => {
+    await route.fulfill(json({ success: true, item: null }));
+  });
   await page.route('**/api/exams/sessions/bootstrap-preview', async (route) => {
     state.previewPayload = route.request().postDataJSON();
     await route.fulfill(json({ success: true, existingSession: null, rosterCount: 2 }));

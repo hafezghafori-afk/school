@@ -342,6 +342,13 @@ export default function AdminSheetTemplates() {
   const [editingSession, setEditingSession] = useState(null);
   const [editingManagement, setEditingManagement] = useState(null);
   const [sessionEdit, setSessionEdit] = useState(EMPTY_SESSION_EDIT);
+  // Once the admin manually edits a score-component field (written/oral/homework/classActivity),
+  // stop auto-overwriting it — different subjects legitimately split the same official total
+  // differently (e.g. 36/0/2/2 vs 24/12/2/2, both summing to 40), and re-applying one fixed
+  // preset on every exam-type change used to silently erase that customization.
+  const [assignmentScoreTouched, setAssignmentScoreTouched] = useState(false);
+  const [editScoreTouched, setEditScoreTouched] = useState(false);
+  const [assignmentScoreHint, setAssignmentScoreHint] = useState('');
 
   const templateTypes = useMemo(() => normalizeOptions(TEMPLATE_TYPES, ['title', 'id']), []);
   const yearOptions = useMemo(() => normalizeOptions(academicYears, ['title', 'code']), [academicYears]);
@@ -561,6 +568,32 @@ export default function AdminSheetTemplates() {
     loadAll();
   }, []);
 
+  // Suggests the subject's own last-used score split (instead of one fixed preset shared by
+  // every subject of the exam type) once teacher/class/subject/examType are all selected.
+  // Skipped entirely once the admin has started customizing the fields by hand.
+  useEffect(() => {
+    const { subjectId, examTypeId, classId, academicYearId } = assignment;
+    if (assignmentScoreTouched || !subjectId || !examTypeId || !classId || !academicYearId) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const query = new URLSearchParams({ subjectId, examTypeId, classId, academicYearId }).toString();
+        const data = await fetchJson(`/api/exams/default-marks/latest?${query}`);
+        if (cancelled || !data?.item?.scoreComponents) return;
+        setAssignment((current) => {
+          if (String(current.subjectId) !== String(subjectId) || String(current.examTypeId) !== String(examTypeId)) {
+            return current;
+          }
+          return { ...current, ...data.item.scoreComponents };
+        });
+        if (!cancelled) setAssignmentScoreHint('ترکیب نمرهٔ همین مضمون از تخصیص قبلی آن بارگذاری شد.');
+      } catch (error) {
+        // Best-effort suggestion only — silence failures so it never blocks the form.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [assignment.subjectId, assignment.examTypeId, assignment.classId, assignment.academicYearId, assignmentScoreTouched]);
+
   useEffect(() => {
     if (!filteredTemplates.length) {
       setSelectedTemplateId('');
@@ -587,6 +620,15 @@ export default function AdminSheetTemplates() {
 
   const updateAssignment = (event) => {
     const { name, value } = event.target;
+    if (SCORE_COMPONENTS.some((component) => component.key === name)) {
+      // The admin is customizing this subject's own score split — stop overwriting it.
+      setAssignmentScoreTouched(true);
+      setAssignmentScoreHint('');
+    } else if (name === 'subjectId') {
+      // A new subject may have its own saved split; allow the lookup effect to suggest it again.
+      setAssignmentScoreTouched(false);
+      setAssignmentScoreHint('');
+    }
     setAssignment((current) => {
       const next = { ...current, [name]: value };
       if (name === 'academicYearId') {
@@ -603,7 +645,9 @@ export default function AdminSheetTemplates() {
         next.subjectId = '';
       }
       if (name === 'classId') next.subjectId = '';
-      if (name === 'examTypeId') Object.assign(next, getExamScoringPreset(examTypes.find((item) => String(item.id) === String(value))));
+      if (name === 'examTypeId' && !assignmentScoreTouched) {
+        Object.assign(next, getExamScoringPreset(examTypes.find((item) => String(item.id) === String(value))));
+      }
       return next;
     });
   };
@@ -633,6 +677,7 @@ export default function AdminSheetTemplates() {
       const components = item.defaultMark?.scoreComponents || {};
       setEditingSession(item);
       setEditingManagement(data);
+      setEditScoreTouched(false);
       setSessionEdit({
         ...EMPTY_SESSION_EDIT,
         id: item.id,
@@ -666,10 +711,14 @@ export default function AdminSheetTemplates() {
     setEditingSession(null);
     setEditingManagement(null);
     setSessionEdit(EMPTY_SESSION_EDIT);
+    setEditScoreTouched(false);
   };
 
   const updateSessionEdit = (event) => {
     const { name, value } = event.target;
+    if (SCORE_COMPONENTS.some((component) => component.key === name)) {
+      setEditScoreTouched(true);
+    }
     setSessionEdit((current) => {
       const next = { ...current, [name]: value };
       if (name === 'academicYearId') {
@@ -686,7 +735,9 @@ export default function AdminSheetTemplates() {
         next.subjectId = '';
       }
       if (name === 'classId') next.subjectId = '';
-      if (name === 'examTypeId') Object.assign(next, getExamScoringPreset(examTypes.find((item) => String(item.id) === String(value))));
+      if (name === 'examTypeId' && !editScoreTouched) {
+        Object.assign(next, getExamScoringPreset(examTypes.find((item) => String(item.id) === String(value))));
+      }
       return next;
     });
   };
@@ -1225,6 +1276,9 @@ export default function AdminSheetTemplates() {
                   </label>
                 ))}
               </div>
+              <p className="admin-workspace-hint">
+                {assignmentScoreHint || 'صفر گذاشتن یک جزء نمره (مثلاً تقریری) کاملاً مجاز است؛ فقط لازم است مجموع چهار جزء دقیقاً برابر عدد بالا باشد. هر مضمون می‌تواند ترکیب متفاوتی داشته باشد.'}
+              </p>
 
               <div className="admin-workspace-actions admin-workspace-section-actions">
                 <button type="button" className="admin-workspace-button" onClick={createAssignedExamSheet} disabled={busyAction === 'assign-exam' || assignmentScoreTotal !== expectedScoreTotal}>
@@ -1685,6 +1739,11 @@ export default function AdminSheetTemplates() {
               <div className={`admin-sheet-session-score-total ${editScoreTotal === expectedEditScoreTotal ? 'is-valid' : 'is-invalid'}`}>
                 مجموع نمره: {formatNumber(editScoreTotal)} از {formatNumber(expectedEditScoreTotal)}
               </div>
+              {editingManagement?.permissions?.canEditStructure && (
+                <p className="admin-workspace-hint">
+                  صفر گذاشتن یک جزء نمره کاملاً مجاز است؛ فقط لازم است مجموع چهار جزء دقیقاً برابر عدد بالا باشد.
+                </p>
+              )}
 
               <div className="admin-sheet-session-dialog__actions">
                 <button type="button" className="admin-workspace-button" onClick={saveSessionEdit} disabled={busyAction === 'update-session' || (editingManagement?.permissions?.canEditStructure && editScoreTotal !== expectedEditScoreTotal) || !selectedEditAssignment?.id}>
