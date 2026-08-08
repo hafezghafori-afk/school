@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState } from 'react';
+import './toast.css';
 
 // Toast context
 const ToastContext = createContext();
@@ -50,7 +51,7 @@ export const useToast = () => {
 // Toast container component
 const ToastContainer = ({ toasts, removeToast }) => {
   return (
-    <div className="fixed top-4 right-4 z-50 space-y-2">
+    <div className="app-toast-viewport">
       {toasts.map(toast => (
         <ToastItem key={toast.id} toast={toast} onRemove={removeToast} />
       ))}
@@ -60,29 +61,16 @@ const ToastContainer = ({ toasts, removeToast }) => {
 
 // Individual toast item
 const ToastItem = ({ toast, onRemove }) => {
-  const getStyles = (type) => {
-    switch (type) {
-      case 'success':
-        return 'bg-green-500 text-white';
-      case 'error':
-        return 'bg-red-500 text-white';
-      case 'warning':
-        return 'bg-yellow-500 text-white';
-      default:
-        return 'bg-gray-800 text-white';
-    }
-  };
-
   return (
-    <div
-      className={`${getStyles(toast.type)} px-4 py-3 rounded-lg shadow-lg flex items-center justify-between min-w-[250px] max-w-md transform transition-all duration-300 ease-in-out`}
-    >
-      <span className="text-sm font-medium">{toast.message}</span>
+    <div className={`app-toast-item app-toast-item--${toast.type || 'info'}`} role="status">
+      <span className="app-toast-message">{toast.message}</span>
       <button
+        type="button"
         onClick={() => onRemove(toast.id)}
-        className="ml-4 text-white hover:text-gray-200 focus:outline-none"
+        className="app-toast-close"
+        aria-label="بستن پیام"
       >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
         </svg>
       </button>

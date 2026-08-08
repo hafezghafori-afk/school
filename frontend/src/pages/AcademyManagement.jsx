@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import './AcademyManagement.css';
 import { API_BASE } from '../config/api';
 import { getStudentAsasNumber, studentMatchesSearch } from '../utils/studentSearch';
+import { useToast } from '../components/ui/toast';
 
 const emptyStudent = {
   firstName: '',
@@ -120,6 +121,21 @@ const expenseCategoryLabels = {
   other: 'سایر'
 };
 
+// All date inputs in this page (<input type="date">, paidAt, expenseDate)
+// are Gregorian, so the monthly report's year/month filter and labels stay
+// in the Gregorian calendar too - these are the everyday Dari names for it,
+// same words used on Afghan government paperwork alongside the solar year.
+const gregorianMonthNamesFa = ['جنوری', 'فبروری', 'مارچ', 'اپریل', 'می', 'جون', 'جولای', 'اگست', 'سپتمبر', 'اکتوبر', 'نومبر', 'دسمبر'];
+// toLocaleString('fa-AF') group-separates by thousands, which turns a plain
+// 4-digit year like 2026 into "۲٬۰۲۶" - useGrouping:false keeps it as a
+// single "۲۰۲۶" run of Persian digits instead.
+const faYear = (year) => Number(year || 0).toLocaleString('fa-AF', { useGrouping: false });
+const formatMonthLabel = (monthKey) => {
+  const [year, month] = String(monthKey || '').split('-');
+  const label = gregorianMonthNamesFa[Number(month) - 1] || month;
+  return `${label} ${faYear(year)}`;
+};
+
 const fmt = (value) => (Number(value || 0)).toLocaleString('fa-AF');
 const text = (value, fallback = '-') => String(value || '').trim() || fallback;
 const normalizeSearch = (value = '') => String(value || '').trim().toLowerCase();
@@ -169,10 +185,10 @@ function StatCard({ label, value, tone = '' }) {
 }
 
 export default function AcademyManagement() {
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState('');
   const [settings, setSettings] = useState({
     name: 'آموزشگاه',
     address: '',
@@ -196,6 +212,11 @@ export default function AcademyManagement() {
   const [expenses, setExpenses] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [reports, setReports] = useState(null);
+  const [monthlyReport, setMonthlyReport] = useState(null);
+  const [monthlyReportLoading, setMonthlyReportLoading] = useState(false);
+  const [monthlyReportDetail, setMonthlyReportDetail] = useState(null);
+  const [monthlyReportYear, setMonthlyReportYear] = useState(new Date().getFullYear());
+  const [monthlyReportMonth, setMonthlyReportMonth] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [studentForm, setStudentForm] = useState(emptyStudent);
@@ -229,7 +250,7 @@ export default function AcademyManagement() {
       setExpenses(data.expenses || []);
       setAttendance(data.attendance || []);
     } catch (error) {
-      setMessage(error.message);
+      toast.error(error.message);
     } finally {
       setLoading(false);
     }
@@ -244,15 +265,51 @@ export default function AcademyManagement() {
       const data = await requestJson('/api/academy/reports/overview');
       setReports(data);
     } catch (error) {
-      setMessage(error.message);
+      toast.error(error.message);
     }
   };
+
+  const loadMonthlyReport = async (year = monthlyReportYear) => {
+    setMonthlyReportLoading(true);
+    try {
+      const data = await requestJson(`/api/academy/reports/monthly?year=${year}`);
+      const months = (data.months || []).map((item) => ({
+        ...item,
+        monthLabel: formatMonthLabel(item.month)
+      }));
+      setMonthlyReport(months);
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setMonthlyReportLoading(false);
+    }
+  };
+
+  const changeMonthlyReportYear = (year) => {
+    setMonthlyReportYear(year);
+    setMonthlyReportMonth('');
+    setMonthlyReport(null);
+  };
+
+  const monthlyReportYearOptions = useMemo(
+    () => Array.from({ length: 6 }, (_, index) => new Date().getFullYear() - index),
+    []
+  );
+
+  const visibleMonthlyReport = useMemo(() => {
+    if (!monthlyReport) return [];
+    if (!monthlyReportMonth) return monthlyReport;
+    return monthlyReport.filter((item) => item.month === `${monthlyReportYear}-${monthlyReportMonth}`);
+  }, [monthlyReport, monthlyReportMonth, monthlyReportYear]);
 
   useEffect(() => {
     if (activeTab === 'reports' && !reports) {
       loadReports();
     }
-  }, [activeTab, reports]);
+    if (activeTab === 'reports' && !monthlyReport) {
+      loadMonthlyReport();
+    }
+  }, [activeTab, reports, monthlyReport]);
 
   const activeRegistrations = useMemo(
     () => registrations.filter((item) => item.status === 'active'),
@@ -339,13 +396,16 @@ export default function AcademyManagement() {
 
   const submit = async ({ path, payload, reset, successTab, autoPrintReceipt }) => {
     setBusy(true);
-    setMessage('');
     try {
       const data = await requestJson(path, {
         method: 'POST',
         body: JSON.stringify(payload)
       });
-      setMessage(data.message || 'ذخیره شد.');
+      // Shown via the shared floating toast (fixed to the viewport) instead
+      // of an inline banner at the top of the page, so the confirmation is
+      // visible right where the user is - even deep in a scrolled-down form -
+      // instead of forcing a scroll back up to check whether it went through.
+      toast.success(data.message || 'ذخیره شد.');
       if (data.invoice) {
         // A student paying is exactly the moment they need a receipt in hand -
         // print it right away instead of only stashing it for someone to find
@@ -356,8 +416,14 @@ export default function AcademyManagement() {
       if (reset) reset();
       if (successTab) setActiveTab(successTab);
       await loadData();
+      // Payments/expenses are the only writes that change the monthly
+      // income/expense numbers - invalidate the cached report so switching
+      // to "گزارش‌ها" afterwards refetches instead of showing stale totals.
+      if (monthlyReport && (path === '/api/academy/payments' || path === '/api/academy/expenses')) {
+        setMonthlyReport(null);
+      }
     } catch (error) {
-      setMessage(error.message);
+      toast.error(error.message);
     } finally {
       setBusy(false);
     }
@@ -366,16 +432,15 @@ export default function AcademyManagement() {
   const saveSettings = async (event) => {
     event.preventDefault();
     setBusy(true);
-    setMessage('');
     try {
       const data = await requestJson('/api/academy/settings', {
         method: 'PUT',
         body: JSON.stringify(settings)
       });
       setSettings(data.settings || settings);
-      setMessage(data.message || 'تنظیمات ذخیره شد.');
+      toast.success(data.message || 'تنظیمات ذخیره شد.');
     } catch (error) {
-      setMessage(error.message);
+      toast.error(error.message);
     } finally {
       setBusy(false);
     }
@@ -440,8 +505,6 @@ export default function AcademyManagement() {
           <button type="button" onClick={loadData} disabled={loading || busy}>تازه‌سازی</button>
         </div>
       </div>
-
-      {message && <div className="academy-message">{message}</div>}
 
       <div className="academy-searchbar">
         <input
@@ -899,6 +962,56 @@ export default function AcademyManagement() {
                   />
                 </div>
               </div>
+              <div className="academy-panel">
+                <div className="academy-panel-head">
+                  <h2>گزارش ماهانه عاید و مصرف</h2>
+                  <button
+                    type="button"
+                    className="academy-inline-button"
+                    onClick={() => exportCsv(
+                      'academy-monthly-report.csv',
+                      ['Month', 'Income', 'Expenses', 'Net'],
+                      visibleMonthlyReport.map((item) => [item.month, item.income, item.expenses, item.net])
+                    )}
+                    disabled={!visibleMonthlyReport.length}
+                  >
+                    Excel/CSV
+                  </button>
+                </div>
+                <div className="academy-report-filters">
+                  <Field label="سال">
+                    <select value={monthlyReportYear} onChange={(e) => changeMonthlyReportYear(Number(e.target.value))}>
+                      {monthlyReportYearOptions.map((year) => (
+                        <option key={year} value={year}>{faYear(year)}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="ماه">
+                    <select value={monthlyReportMonth} onChange={(e) => setMonthlyReportMonth(e.target.value)}>
+                      <option value="">همه ماه‌ها</option>
+                      {gregorianMonthNamesFa.map((name, index) => (
+                        <option key={name} value={String(index + 1).padStart(2, '0')}>{name}</option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+                {monthlyReportLoading ? (
+                  <p className="academy-empty">در حال بارگذاری گزارش ماهانه...</p>
+                ) : (
+                  <Table
+                    columns={['ماه', 'عاید', 'مصرف', 'مفاد/ضرر خالص', 'جزئیات']}
+                    rows={visibleMonthlyReport.map((item) => [
+                      item.monthLabel || item.month,
+                      `${fmt(item.income)} ${currency}`,
+                      `${fmt(item.expenses)} ${currency}`,
+                      <span className={item.net >= 0 ? 'academy-amount-positive' : 'academy-amount-negative'}>
+                        {`${fmt(Math.abs(item.net))} ${currency}`}{item.net < 0 ? ' (ضرر)' : ''}
+                      </span>,
+                      <button type="button" className="academy-inline-button" onClick={() => setMonthlyReportDetail(item)}>مشاهده</button>
+                    ])}
+                  />
+                )}
+              </div>
             </div>
           )}
 
@@ -929,14 +1042,39 @@ export default function AcademyManagement() {
         onClose={() => setSelectedStudent(null)}
         onPrintInvoice={printCurrentInvoice}
       />
+      <MonthlyReportDetailModal
+        detail={monthlyReportDetail}
+        currency={currency}
+        onClose={() => setMonthlyReportDetail(null)}
+      />
     </section>
   );
 }
 
+const TABLE_PAGE_SIZE = 10;
+
+// Every list in this page - shagirds, courses, invoices, expenses, the
+// monthly report, and so on - renders through this one Table, so paging it
+// here caps every long list at 10 rows with قبلی/بعدی buttons instead of
+// dumping the whole thing on one page.
 function Table({ columns = [], rows = [] }) {
+  const [page, setPage] = useState(1);
+
+  // A shrinking/growing row count (new search term, a row added or removed)
+  // means the page the user was on may no longer exist - snap back to the
+  // first page rather than showing an empty page or a stale slice.
+  useEffect(() => {
+    setPage(1);
+  }, [rows.length]);
+
   if (!rows.length) {
     return <p className="academy-empty">هنوز موردی ثبت نشده است.</p>;
   }
+
+  const pageCount = Math.max(1, Math.ceil(rows.length / TABLE_PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const pageRows = rows.slice((safePage - 1) * TABLE_PAGE_SIZE, safePage * TABLE_PAGE_SIZE);
+
   return (
     <div className="academy-table-wrap">
       <table className="academy-table">
@@ -944,13 +1082,20 @@ function Table({ columns = [], rows = [] }) {
           <tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr>
         </thead>
         <tbody>
-          {rows.map((row, index) => (
+          {pageRows.map((row, index) => (
             <tr key={index}>
               {row.map((cell, cellIndex) => <td key={`${index}-${cellIndex}`}>{cell}</td>)}
             </tr>
           ))}
         </tbody>
       </table>
+      {pageCount > 1 && (
+        <div className="academy-table-pagination">
+          <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={safePage <= 1}>قبلی</button>
+          <span>صفحه {safePage.toLocaleString('fa-AF')} از {pageCount.toLocaleString('fa-AF')}</span>
+          <button type="button" onClick={() => setPage((p) => Math.min(pageCount, p + 1))} disabled={safePage >= pageCount}>بعدی</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1087,6 +1232,39 @@ function StudentProfileModal({ student, currency, onClose, onPrintInvoice }) {
             fmt(item.paidAmount),
             fmt(item.remainingBalance),
             <button type="button" className="academy-inline-button" onClick={() => onPrintInvoice?.(item)}>چاپ رسید</button>
+          ])}
+        />
+      </section>
+    </div>
+  );
+}
+
+function MonthlyReportDetailModal({ detail, currency, onClose }) {
+  if (!detail) return null;
+  return (
+    <div className="academy-modal-backdrop" role="presentation" onClick={onClose}>
+      <section className="academy-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+        <button type="button" className="academy-modal-close" onClick={onClose}>بستن</button>
+        <h2>{detail.monthLabel || detail.month}</h2>
+        <div className="academy-profile-grid">
+          <span>مجموع عاید: {fmt(detail.income)} {currency}</span>
+          <span>مجموع مصرف: {fmt(detail.expenses)} {currency}</span>
+          <span>مفاد/ضرر خالص: {fmt(detail.net)} {currency}</span>
+        </div>
+        <h3>عاید به تفکیک روش پرداخت</h3>
+        <Table
+          columns={['روش پرداخت', 'مبلغ']}
+          rows={(detail.byPaymentMethod || []).map((item) => [
+            paymentMethodLabels[item.method] || item.method,
+            `${fmt(item.total)} ${currency}`
+          ])}
+        />
+        <h3>مصرف به تفکیک دسته</h3>
+        <Table
+          columns={['دسته', 'مبلغ']}
+          rows={(detail.byExpenseCategory || []).map((item) => [
+            expenseCategoryLabels[item.category] || item.category,
+            `${fmt(item.total)} ${currency}`
           ])}
         />
       </section>
