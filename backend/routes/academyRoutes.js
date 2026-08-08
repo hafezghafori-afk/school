@@ -478,4 +478,103 @@ router.get('/reports/overview', async (_req, res) => {
   }
 });
 
+// Builds the last `count` calendar months (oldest first) as 'YYYY-MM' keys,
+// ending with the current month - used as the fixed axis both aggregations
+// below get merged onto, so a month with zero payments/expenses still shows
+// up as a 0 row instead of silently disappearing from the report.
+function lastMonthKeys(count) {
+  const keys = [];
+  const cursor = new Date();
+  cursor.setDate(1);
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const d = new Date(cursor.getFullYear(), cursor.getMonth() - i, 1);
+    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return keys;
+}
+
+// All 12 'YYYY-MM' keys of a single calendar year (Jan-Dec), for the
+// year/month filter on the report - as opposed to lastMonthKeys' rolling
+// window ending at "today".
+function yearMonthKeys(year) {
+  const keys = [];
+  for (let m = 1; m <= 12; m += 1) {
+    keys.push(`${year}-${String(m).padStart(2, '0')}`);
+  }
+  return keys;
+}
+
+router.get('/reports/monthly', async (req, res) => {
+  try {
+    const yearParam = Number(req.query.year);
+    const monthKeys = (yearParam && yearParam >= 1900 && yearParam <= 3000)
+      ? yearMonthKeys(yearParam)
+      : lastMonthKeys(Math.min(24, Math.max(1, Number(req.query.months) || 12)));
+
+    const earliestStart = new Date(`${monthKeys[0]}-01T00:00:00.000Z`);
+    const [lastKeyYear, lastKeyMonth] = monthKeys[monthKeys.length - 1].split('-').map(Number);
+    const latestEnd = new Date(Date.UTC(lastKeyYear, lastKeyMonth, 1));
+    const latestEndDateStr = latestEnd.toISOString().slice(0, 10);
+
+    const [incomeRows, expenseRows] = await Promise.all([
+      AcademyPayment.aggregate([
+        { $match: { paidAt: { $gte: earliestStart, $lt: latestEnd } } },
+        {
+          $group: {
+            _id: { month: { $dateToString: { format: '%Y-%m', date: '$paidAt' } }, method: '$paymentMethod' },
+            total: { $sum: '$amount' }
+          }
+        }
+      ]),
+      AcademyExpense.aggregate([
+        { $match: { expenseDate: { $gte: monthKeys[0], $lt: latestEndDateStr } } },
+        {
+          $group: {
+            _id: { month: { $substrBytes: ['$expenseDate', 0, 7] }, category: '$category' },
+            total: { $sum: '$amount' }
+          }
+        }
+      ])
+    ]);
+
+    const monthMap = new Map(monthKeys.map((key) => [key, {
+      month: key,
+      income: 0,
+      expenses: 0,
+      byPaymentMethod: new Map(),
+      byExpenseCategory: new Map()
+    }]));
+
+    incomeRows.forEach((row) => {
+      const bucket = monthMap.get(row._id.month);
+      if (!bucket) return;
+      bucket.income += toNumber(row.total);
+      bucket.byPaymentMethod.set(row._id.method || 'other', toNumber(row.total));
+    });
+
+    expenseRows.forEach((row) => {
+      const bucket = monthMap.get(row._id.month);
+      if (!bucket) return;
+      bucket.expenses += toNumber(row.total);
+      bucket.byExpenseCategory.set(row._id.category || 'other', toNumber(row.total));
+    });
+
+    const result = monthKeys.map((key) => {
+      const bucket = monthMap.get(key);
+      return {
+        month: bucket.month,
+        income: bucket.income,
+        expenses: bucket.expenses,
+        net: bucket.income - bucket.expenses,
+        byPaymentMethod: Array.from(bucket.byPaymentMethod, ([method, total]) => ({ method, total })),
+        byExpenseCategory: Array.from(bucket.byExpenseCategory, ([category, total]) => ({ category, total }))
+      };
+    });
+
+    res.json({ success: true, months: result });
+  } catch {
+    res.status(500).json({ success: false, message: 'گزارش ماهانه آموزشگاه ناموفق بود.' });
+  }
+});
+
 module.exports = router;

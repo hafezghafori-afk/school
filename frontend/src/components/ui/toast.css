@@ -1,0 +1,86 @@
+/* Plain CSS for the shared toast component - this project ships the
+   `tailwindcss` package but never wires it into the build (no postcss
+   config, no Vite plugin, no @import "tailwindcss" anywhere), so the
+   Tailwind utility classNames this component used to rely on (fixed,
+   top-4, right-4, w-4, h-4, ...) were silently inert. That made the toast
+   render unstyled at the bottom of the page with a giant default-sized
+   close icon instead of as a small floating box pinned to the viewport
+   corner. These rules replace that dead styling with real CSS. */
+
+.app-toast-viewport {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.app-toast-item {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 240px;
+  max-width: 420px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.35);
+  color: #fff;
+  animation: app-toast-in 0.2s ease-out;
+}
+
+@keyframes app-toast-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.app-toast-item--success { background: #16a34a; }
+.app-toast-item--error { background: #dc2626; }
+.app-toast-item--warning { background: #d97706; }
+.app-toast-item--info { background: #1f2937; }
+
+.app-toast-message {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.app-toast-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.8;
+  cursor: pointer;
+}
+
+.app-toast-close:hover {
+  opacity: 1;
+}
+
+.app-toast-close svg {
+  width: 14px;
+  height: 14px;
+}
+
+@media (max-width: 480px) {
+  .app-toast-viewport {
+    top: 12px;
+    right: 12px;
+    left: 12px;
+  }
+
+  .app-toast-item {
+    max-width: none;
+  }
+}
