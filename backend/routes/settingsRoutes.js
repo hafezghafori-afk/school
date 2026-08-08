@@ -6,6 +6,7 @@ const fs = require('fs');
 const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
+const { storeSiteAsset } = require('../services/siteAssetStorageService');
 
 const router = express.Router();
 const auditWrite = (payload) => logActivity(payload);
@@ -16,20 +17,10 @@ if (!fs.existsSync(logoDir)) {
   fs.mkdirSync(logoDir, { recursive: true });
 }
 
-const safeName = (name) => name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-
-const logoStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, logoDir),
-  filename: (req, file, cb) => cb(null, `logo-${Date.now()}-${safeName(file.originalname)}`)
-});
-
-const assetStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, logoDir),
-  filename: (req, file, cb) => cb(null, `asset-${Date.now()}-${safeName(file.originalname)}`)
-});
+const memoryStorage = multer.memoryStorage();
 
 const logoUpload = multer({
-  storage: logoStorage,
+  storage: memoryStorage,
   limits: { fileSize: 3 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -40,7 +31,7 @@ const logoUpload = multer({
 });
 
 const assetUpload = multer({
-  storage: assetStorage,
+  storage: memoryStorage,
   limits: { fileSize: 3 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -797,6 +788,12 @@ router.put('/', requireAuth, requireRole(['admin']), requirePermission('manage_c
   }
 });
 
+const siteAssetErrorMessage = (error) => (
+  error?.code === 'SITE_ASSET_STORAGE_CONFIG_MISSING'
+    ? 'ذخیره‌سازی عمومی وب‌سایت روی سرور تنظیم نشده است. متغیرهای R2_BUCKET_NAME، R2_PUBLIC_URL، R2_ACCESS_KEY_ID، R2_SECRET_ACCESS_KEY و R2_ENDPOINT را در Render تنظیم کنید.'
+    : null
+);
+
 router.put('/logo', requireAuth, requireRole(['admin']), requirePermission('manage_content'), (req, res, next) => {
   logoUpload.single('logo')(req, res, (err) => {
     if (err) return res.status(400).json({ success: false, message: err.message });
@@ -808,11 +805,12 @@ router.put('/logo', requireAuth, requireRole(['admin']), requirePermission('mana
       return res.status(400).json({ success: false, message: 'لوگو الزامی است' });
     }
     const settings = await ensureSettings();
-    settings.logoUrl = `uploads/site/${req.file.filename}`;
+    settings.logoUrl = await storeSiteAsset({ file: req.file, prefix: 'logo' });
     await settings.save();
     res.json({ success: true, settings, message: 'لوگو بروزرسانی شد' });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'خطا در آپلود لوگو' });
+    const configMessage = siteAssetErrorMessage(error);
+    res.status(configMessage ? 503 : 500).json({ success: false, message: configMessage || 'خطا در آپلود لوگو' });
   }
 });
 
@@ -830,21 +828,21 @@ router.put('/assets', requireAuth, requireRole(['admin']), requirePermission('ma
 }, async (req, res) => {
   try {
     const settings = await ensureSettings();
-    if (req.files?.schoolLogo?.[0]?.filename) {
-      settings.schoolLogoUrl = `uploads/site/${req.files.schoolLogo[0].filename}`;
+    if (req.files?.schoolLogo?.[0]) {
+      settings.schoolLogoUrl = await storeSiteAsset({ file: req.files.schoolLogo[0], prefix: 'school-logo' });
       settings.logoUrl = settings.schoolLogoUrl;
     }
-    if (req.files?.ministryLogo?.[0]?.filename) {
-      settings.ministryLogoUrl = `uploads/site/${req.files.ministryLogo[0].filename}`;
+    if (req.files?.ministryLogo?.[0]) {
+      settings.ministryLogoUrl = await storeSiteAsset({ file: req.files.ministryLogo[0], prefix: 'ministry-logo' });
     }
-    if (req.files?.departmentLogo?.[0]?.filename) {
-      settings.departmentLogoUrl = `uploads/site/${req.files.departmentLogo[0].filename}`;
+    if (req.files?.departmentLogo?.[0]) {
+      settings.departmentLogoUrl = await storeSiteAsset({ file: req.files.departmentLogo[0], prefix: 'department-logo' });
     }
-    if (req.files?.signature?.[0]?.filename) {
-      settings.signatureUrl = `uploads/site/${req.files.signature[0].filename}`;
+    if (req.files?.signature?.[0]) {
+      settings.signatureUrl = await storeSiteAsset({ file: req.files.signature[0], prefix: 'signature' });
     }
-    if (req.files?.stamp?.[0]?.filename) {
-      settings.stampUrl = `uploads/site/${req.files.stamp[0].filename}`;
+    if (req.files?.stamp?.[0]) {
+      settings.stampUrl = await storeSiteAsset({ file: req.files.stamp[0], prefix: 'stamp' });
     }
     if (req.body?.signatureName) {
       settings.signatureName = String(req.body.signatureName);
@@ -852,7 +850,8 @@ router.put('/assets', requireAuth, requireRole(['admin']), requirePermission('ma
     await settings.save();
     res.json({ success: true, settings, message: 'دارایی‌ها بروزرسانی شد' });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'خطا در بروزرسانی دارایی‌ها' });
+    const configMessage = siteAssetErrorMessage(error);
+    res.status(configMessage ? 503 : 500).json({ success: false, message: configMessage || 'خطا در بروزرسانی دارایی‌ها' });
   }
 });
 

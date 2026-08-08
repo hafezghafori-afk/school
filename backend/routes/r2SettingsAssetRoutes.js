@@ -1,46 +1,24 @@
 const express = require('express');
-const crypto = require('crypto');
 const path = require('path');
 const multer = require('multer');
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const SiteSettings = require('../models/SiteSettings');
 const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
+const { storeSiteAsset } = require('../services/siteAssetStorageService');
+
+// This router is mounted ahead of the legacy disk-backed settings routes by
+// r2ServerBootstrap.js (the actual `npm start` entry point) - see that file.
+// storeSiteAsset shares its R2 upload logic with the legacy routes'
+// fallback path, so both entry points support the exact same set of assets
+// (adding a new one here used to mean also remembering to add it to the
+// legacy handler and vice versa - that drift is how departmentLogo ended up
+// supported in the admin UI and the legacy route, but silently dropped
+// here, since this router matches /assets first and never falls through).
 
 const router = express.Router();
 
 attachWriteActivityAudit(router, { targetType: 'R2SettingsAsset', actionPrefix: 'r2_settings_asset', audit: (payload) => logActivity(payload) });
-
-const requiredEnv = [
-  'R2_ACCESS_KEY_ID',
-  'R2_SECRET_ACCESS_KEY',
-  'R2_BUCKET_NAME',
-  'R2_ENDPOINT',
-  'R2_PUBLIC_URL'
-];
-
-const getR2Config = () => {
-  const missing = requiredEnv.filter((name) => !String(process.env[name] || '').trim());
-  if (missing.length) {
-    const error = new Error(`تنظیمات Cloudflare R2 ناقص است: ${missing.join(', ')}`);
-    error.code = 'R2_CONFIG_MISSING';
-    throw error;
-  }
-
-  return {
-    bucket: process.env.R2_BUCKET_NAME.trim(),
-    publicUrl: process.env.R2_PUBLIC_URL.trim().replace(/\/+$/, ''),
-    client: new S3Client({
-      region: 'auto',
-      endpoint: process.env.R2_ENDPOINT.trim().replace(/\/+$/, ''),
-      credentials: {
-        accessKeyId: process.env.R2_ACCESS_KEY_ID.trim(),
-        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY.trim()
-      }
-    })
-  };
-};
 
 const allowedExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp', '.svg']);
 const memoryStorage = multer.memoryStorage();
@@ -69,28 +47,18 @@ const loadSettings = async () => {
   return settings;
 };
 
-const uploadToR2 = async (file, prefix) => {
-  const { client, bucket, publicUrl } = getR2Config();
-  const ext = path.extname(file.originalname || '').toLowerCase();
-  const key = `site/${prefix}-${Date.now()}-${crypto.randomUUID()}${ext}`;
-
-  await client.send(new PutObjectCommand({
-    Bucket: bucket,
-    Key: key,
-    Body: file.buffer,
-    ContentType: file.mimetype || 'application/octet-stream',
-    CacheControl: 'public, max-age=31536000, immutable'
-  }));
-
-  return `${publicUrl}/${key}`;
-};
-
 const uploadMiddleware = (handler) => (req, res, next) => {
   handler(req, res, (error) => {
     if (error) return res.status(400).json({ success: false, message: error.message });
     next();
   });
 };
+
+const siteAssetErrorMessage = (error) => (
+  error?.code === 'SITE_ASSET_STORAGE_CONFIG_MISSING'
+    ? 'ذخیره‌سازی عمومی وب‌سایت روی سرور تنظیم نشده است. متغیرهای R2_BUCKET_NAME، R2_PUBLIC_URL، R2_ACCESS_KEY_ID، R2_SECRET_ACCESS_KEY و R2_ENDPOINT را در Render تنظیم کنید.'
+    : null
+);
 
 const adminAssetAccess = [requireAuth, requireRole(['admin']), requirePermission('manage_content')];
 
@@ -105,12 +73,13 @@ router.put(
       }
 
       const settings = await loadSettings();
-      settings.logoUrl = await uploadToR2(req.file, 'logo');
+      settings.logoUrl = await storeSiteAsset({ file: req.file, prefix: 'logo' });
       await settings.save();
-      return res.json({ success: true, settings, message: 'لوگو در Cloudflare R2 بروزرسانی شد' });
+      return res.json({ success: true, settings, message: 'لوگو بروزرسانی شد' });
     } catch (error) {
-      console.error('R2 logo upload failed:', error);
-      return res.status(500).json({ success: false, message: error.message || 'خطا در آپلود لوگو' });
+      const configMessage = siteAssetErrorMessage(error);
+      if (!configMessage) console.error('Site logo upload failed:', error);
+      return res.status(configMessage ? 503 : 500).json({ success: false, message: configMessage || error.message || 'خطا در آپلود لوگو' });
     }
   }
 );
@@ -121,6 +90,7 @@ router.put(
   uploadMiddleware(assetUpload.fields([
     { name: 'schoolLogo', maxCount: 1 },
     { name: 'ministryLogo', maxCount: 1 },
+    { name: 'departmentLogo', maxCount: 1 },
     { name: 'signature', maxCount: 1 },
     { name: 'stamp', maxCount: 1 }
   ])),
@@ -129,27 +99,31 @@ router.put(
       const settings = await loadSettings();
 
       if (req.files?.schoolLogo?.[0]) {
-        settings.schoolLogoUrl = await uploadToR2(req.files.schoolLogo[0], 'school-logo');
+        settings.schoolLogoUrl = await storeSiteAsset({ file: req.files.schoolLogo[0], prefix: 'school-logo' });
         settings.logoUrl = settings.schoolLogoUrl;
       }
       if (req.files?.ministryLogo?.[0]) {
-        settings.ministryLogoUrl = await uploadToR2(req.files.ministryLogo[0], 'ministry-logo');
+        settings.ministryLogoUrl = await storeSiteAsset({ file: req.files.ministryLogo[0], prefix: 'ministry-logo' });
+      }
+      if (req.files?.departmentLogo?.[0]) {
+        settings.departmentLogoUrl = await storeSiteAsset({ file: req.files.departmentLogo[0], prefix: 'department-logo' });
       }
       if (req.files?.signature?.[0]) {
-        settings.signatureUrl = await uploadToR2(req.files.signature[0], 'signature');
+        settings.signatureUrl = await storeSiteAsset({ file: req.files.signature[0], prefix: 'signature' });
       }
       if (req.files?.stamp?.[0]) {
-        settings.stampUrl = await uploadToR2(req.files.stamp[0], 'stamp');
+        settings.stampUrl = await storeSiteAsset({ file: req.files.stamp[0], prefix: 'stamp' });
       }
       if (req.body?.signatureName) {
         settings.signatureName = String(req.body.signatureName);
       }
 
       await settings.save();
-      return res.json({ success: true, settings, message: 'دارایی‌ها در Cloudflare R2 بروزرسانی شد' });
+      return res.json({ success: true, settings, message: 'دارایی‌ها بروزرسانی شد' });
     } catch (error) {
-      console.error('R2 asset upload failed:', error);
-      return res.status(500).json({ success: false, message: error.message || 'خطا در بروزرسانی دارایی‌ها' });
+      const configMessage = siteAssetErrorMessage(error);
+      if (!configMessage) console.error('Site asset upload failed:', error);
+      return res.status(configMessage ? 503 : 500).json({ success: false, message: configMessage || error.message || 'خطا در بروزرسانی دارایی‌ها' });
     }
   }
 );
