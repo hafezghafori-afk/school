@@ -716,7 +716,7 @@ function buildOfficialHeaderHtml({ siteSettings = null, logoUrl = '', cornerSign
         <section class="official-report-header">
           ${buildOfficialLogoMarkup(ministryLogo, 'لوگو وزارت', assetBaseUrl)}
           ${centerMarkup}
-          ${buildOfficialLogoMarkup(schoolLogo, 'لوگو مکتب', assetBaseUrl)}
+          ${buildOfficialLogoMarkup(departmentLogo, 'لوگو مکتب', assetBaseUrl)}
         </section>
   `;
 }
