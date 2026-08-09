@@ -1663,13 +1663,28 @@ const buildAnomalyActionPayload = (item = {}, extras = {}) => ({
   }
 });
 
-const waitForPrintableImages = async (selector = '.finance-print-sheet') => {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+// Print data (financeOverview / selectedReceiptPrintModel / cashierReportPrintModel) is loaded
+// asynchronously and the printable sheet is only mounted in the DOM once that data is ready. If
+// window.print() fires before React has actually committed the sheet, the print CSS (which hides
+// everything except .finance-print-sheet) has nothing left to show and the printout comes out
+// completely blank/white. This polls for the sheet instead of relying on a fixed delay, so print
+// only fires once there is really something on the page.
+const waitForPrintableSheet = async (selector = '.finance-print-sheet', { maxAttempts = 20, intervalMs = 50 } = {}) => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const root = document.querySelector(selector);
+    if (root) return root;
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
+  }
+  return null;
+};
+
+const waitForPrintableImages = async (root) => {
+  if (!root || typeof window === 'undefined') return;
   await new Promise((resolve) => {
     window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
   });
-  const root = document.querySelector(selector);
-  if (!root) return;
   const images = Array.from(root.querySelectorAll('img'));
   if (!images.length) return;
   await Promise.all(images.map((image) => new Promise((resolve) => {
@@ -4884,11 +4899,18 @@ export default function AdminFinance() {
     };
   }, [activeSchoolContext]);
   const printLogoUrls = useMemo(() => getPrintLogoUrls(siteSettings), [siteSettings]);
-  const schedulePrint = (mode, selector = '.finance-print-sheet') => {
+  const schedulePrint = async (mode, selector = '.finance-print-sheet') => {
     setPrintMode(mode);
-    window.setTimeout(() => {
-      waitForPrintableImages(selector).finally(() => window.print());
-    }, 80);
+    const root = await waitForPrintableSheet(selector);
+    if (!root) {
+      // The requested print data never rendered (e.g. the report/receipt was still loading or
+      // failed to load) — printing now would produce a blank/white page, so bail out instead.
+      setPrintMode('');
+      setMessage('داده‌ای برای چاپ آماده نشد؛ لطفاً دوباره تلاش کنید.');
+      return;
+    }
+    await waitForPrintableImages(root);
+    window.print();
   };
 
   useEffect(() => {
@@ -7296,7 +7318,20 @@ export default function AdminFinance() {
           <button type="button" className="secondary" onClick={() => void loadAll()} disabled={busy || financeOverviewLoading}>
             {financeOverviewLoading ? 'در حال تازه‌سازی…' : 'تازه‌سازی'}
           </button>
-          <button type="button" className="secondary" onClick={() => schedulePrint('overview')}>چاپ / پی‌دی‌اف</button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => {
+              if (!financeOverview) {
+                setMessage('پیش از چاپ، گزارش را بارگذاری کنید.');
+                return;
+              }
+              schedulePrint('overview');
+            }}
+            disabled={financeOverviewLoading || !financeOverview}
+          >
+            چاپ / پی‌دی‌اف
+          </button>
         </div>
       </div>
 
