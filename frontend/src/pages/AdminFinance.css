@@ -4209,7 +4209,16 @@
 
   .finance-receipt-print-sheet {
     display: grid !important;
-    grid-template-rows: minmax(0, 1fr) 5mm minmax(0, 1fr);
+    /* Explicit mm rows instead of minmax(0, 1fr): the print sheet was confirmed (via an on-page
+       diagnostic during live production debugging) to have real, fully-populated DOM content
+       (child count + text length checked out) at the exact moment window.print() fired, yet the
+       resulting page/PDF painted nothing but the browser's own header/footer - and the PDF's own
+       print-area clip rectangle decoded to exactly 186mm x 273mm, i.e. Chrome sized the page
+       correctly but painted none of the grid's row content into it. fr-track sizing inside a
+       fixed-size grid is a known trouble spot for Chromium's separate print layout pass; fixed mm
+       rows that already sum to the container's own height (134 + 5 + 134 = 273mm) sidestep that
+       distribution step entirely. */
+    grid-template-rows: 134mm 5mm 134mm;
     gap: 0;
     width: 100%;
     max-width: 186mm;
@@ -4218,7 +4227,11 @@
     max-height: 273mm;
     margin: 0 auto;
     direction: rtl;
-    overflow: hidden;
+    /* visible, not hidden: if sizing is still off by any amount for some record's content, the
+       previous overflow:hidden combined with the bug above turned that into a fully blank page.
+       Letting content overflow (worst case: bleeds onto a second sheet of paper) is strictly
+       better than the guaranteed-blank failure mode it replaces. */
+    overflow: visible;
     break-inside: avoid;
     page-break-inside: avoid;
   }
@@ -4235,7 +4248,7 @@
     font-size: 8.5pt;
     line-height: 1.2;
     gap: 2px;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .finance-receipt-print-sheet .finance-receipt-cut-line {

@@ -4977,14 +4977,6 @@ export default function AdminFinance() {
       return;
     }
     await Promise.all([waitForPrintableImages(root), waitForPrintableFonts()]);
-    // TEMP DIAGNOSTIC (see AdminFinance print investigation): every prior theory (data not ready,
-    // render crash, font load, a background refresh clearing the data) has been fixed and
-    // deployed, yet the printed output is still reportedly blank. This puts what's actually in the
-    // sheet right before printing on screen (no devtools needed) so the next report tells us
-    // definitively whether the DOM has real content at print time or not. Remove once resolved.
-    // eslint-disable-next-line no-console
-    console.log('[print-debug]', { children: root.children.length, textLength: root.textContent?.length, html: root.outerHTML?.slice(0, 500) });
-    setMessage(`[دیباگ چاپ] عنصر چاپ ${root.children.length} فرزند و ${root.textContent?.length || 0} کاراکتر متن دارد.`);
     window.print();
   };
 
