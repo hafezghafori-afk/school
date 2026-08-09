@@ -1704,6 +1704,39 @@ const waitForPrintableImages = async (root) => {
   })));
 };
 
+// The app has no top-level error boundary, so a render crash caused by an edge case in a real
+// record's data (e.g. a malformed allocation, an unexpected field shape) would otherwise unmount
+// the whole page and print a totally blank sheet with no clue why. This boundary is scoped to just
+// the printable sheets: on a crash it swaps in a normal (non print-sheet-classed) fallback, which
+// means waitForPrintableSheet correctly treats the print as "not ready" and reports it instead of
+// silently opening the print dialog on nothing, and it surfaces the actual error via onError so it
+// shows up in the on-page message instead of only the browser console.
+class PrintSheetErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error) {
+    this.props.onError?.(error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="finance-print-error" role="alert">
+          آماده‌سازی این مورد برای چاپ با خطا مواجه شد: {String(this.state.error?.message || this.state.error)}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function AdminFinance() {
   const { settings: siteSettings } = useSiteSettings();
   const [summary, setSummary] = useState(null);
@@ -4899,6 +4932,10 @@ export default function AdminFinance() {
     };
   }, [activeSchoolContext]);
   const printLogoUrls = useMemo(() => getPrintLogoUrls(siteSettings), [siteSettings]);
+  const handlePrintSheetError = (error) => {
+    setPrintMode('');
+    setMessage(`آماده‌سازی چاپ با خطا مواجه شد: ${error?.message || error}`);
+  };
   const schedulePrint = async (mode, selector = '.finance-print-sheet') => {
     setPrintMode(mode);
     const root = await waitForPrintableSheet(selector);
@@ -13070,6 +13107,7 @@ export default function AdminFinance() {
         )}
       </div>
       {printMode === 'overview' && financeOverview && (
+      <PrintSheetErrorBoundary onError={handlePrintSheetError}>
         <div className="finance-print-sheet" data-testid="printable-finance-overview">
           <div className="finance-print-school-header">
             <div className="finance-print-logo-box">
@@ -13132,8 +13170,10 @@ export default function AdminFinance() {
             <div><span>مدیر مکتب</span><strong>امضا و مهر: __________________</strong></div>
           </div>
         </div>
+      </PrintSheetErrorBoundary>
       )}
       {printMode === 'receipt' && selectedReceiptPrintModel && (
+      <PrintSheetErrorBoundary onError={handlePrintSheetError}>
         <div className="finance-print-sheet finance-receipt-print-sheet" data-testid="printable-receipt-sheet">
           {[
             { key: 'student', label: 'نسخه شاگرد' },
@@ -13244,8 +13284,10 @@ export default function AdminFinance() {
             </React.Fragment>
           ))}
         </div>
+      </PrintSheetErrorBoundary>
       )}
       {printMode === 'cashier' && cashierReportPrintModel && (
+      <PrintSheetErrorBoundary onError={handlePrintSheetError}>
         <div className="finance-print-sheet" data-testid="printable-cashier-report-sheet">
           <div className="finance-print-school-header">
             <div className="finance-print-logo-box">
@@ -13325,6 +13367,7 @@ export default function AdminFinance() {
             <span><strong>آدرس مکتب:</strong> {activeSchoolPrintInfo.address || '-'}</span>
           </div>
         </div>
+      </PrintSheetErrorBoundary>
       )}
     </section>
   );
