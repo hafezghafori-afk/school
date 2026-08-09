@@ -3583,10 +3583,6 @@
   color: #eef5ff;
 }
 
-.finance-print-sheet {
-  display: none;
-}
-
 .delivery-provider-layout {
   display: grid;
   grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
@@ -4200,7 +4196,7 @@
   }
 
   .finance-print-sheet {
-    display: block;
+    display: block !important;
     position: static;
     inset: auto;
     width: 100%;
@@ -4212,7 +4208,7 @@
   }
 
   .finance-receipt-print-sheet {
-    display: grid;
+    display: grid !important;
     grid-template-rows: minmax(0, 1fr) 5mm minmax(0, 1fr);
     gap: 0;
     width: 100%;

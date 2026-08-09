@@ -1957,6 +1957,17 @@ export default function AdminFinance() {
     note: ''
   });
   const [printMode, setPrintMode] = useState('');
+  // A snapshot of whatever data was live at the moment printing started, frozen for the
+  // duration of the print. Printing now stays open for several seconds (waiting for the sheet
+  // to mount, its logos to load, and its fonts to finish loading) - meanwhile a socket.io
+  // 'finance:lifecycle-changed' event from ANY admin action anywhere in the school (not just this
+  // one) can fire loadAll() and replace pendingReceipts/financeOverview mid-print. If the sheet
+  // read those live values directly, a refresh landing in that window could change or clear
+  // selectedReceiptPrintModel/financeOverview/cashierReportPrintModel and unmount the sheet out
+  // from under window.print(), producing a totally blank page despite everything above having
+  // gone right. Snapshotting once when printMode is set (see the effect below) makes the printed
+  // sheet immune to any data change that happens after the user clicked print.
+  const [printSnapshot, setPrintSnapshot] = useState(null);
   const [activeSection, setActiveSection] = useState('overview');
   const [formLayoutMode, setFormLayoutMode] = useState('landscape');
   const [orderFormMode, setOrderFormMode] = useState('manual');
@@ -5070,8 +5081,27 @@ export default function AdminFinance() {
     };
   }, [cashierReport, cashierReportDate]);
 
+  // Freeze the data for the sheet the instant printing starts (see printSnapshot above). This
+  // must depend only on printMode, not on the live values themselves - depending on them would
+  // re-snapshot (and thus re-expose the sheet to) every later refresh, defeating the point.
   useEffect(() => {
-    const handleAfterPrint = () => setPrintMode('');
+    if (printMode === 'receipt') {
+      setPrintSnapshot(selectedReceiptPrintModel);
+    } else if (printMode === 'overview') {
+      setPrintSnapshot({ financeOverview, financeOverviewKpis });
+    } else if (printMode === 'cashier') {
+      setPrintSnapshot(cashierReportPrintModel);
+    } else {
+      setPrintSnapshot(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [printMode]);
+
+  useEffect(() => {
+    const handleAfterPrint = () => {
+      setPrintMode('');
+      setPrintSnapshot(null);
+    };
     window.addEventListener('afterprint', handleAfterPrint);
     return () => window.removeEventListener('afterprint', handleAfterPrint);
   }, []);
@@ -13125,7 +13155,9 @@ export default function AdminFinance() {
           </div>
         )}
       </div>
-      {printMode === 'overview' && financeOverview && (
+      {printMode === 'overview' && printSnapshot && (() => {
+        const { financeOverview, financeOverviewKpis } = printSnapshot;
+        return (
       <PrintSheetErrorBoundary onError={handlePrintSheetError}>
         <div className="finance-print-sheet" data-testid="printable-finance-overview">
           <div className="finance-print-school-header">
@@ -13190,8 +13222,11 @@ export default function AdminFinance() {
           </div>
         </div>
       </PrintSheetErrorBoundary>
-      )}
-      {printMode === 'receipt' && selectedReceiptPrintModel && (
+        );
+      })()}
+      {printMode === 'receipt' && printSnapshot && (() => {
+        const selectedReceiptPrintModel = printSnapshot;
+        return (
       <PrintSheetErrorBoundary onError={handlePrintSheetError}>
         <div className="finance-print-sheet finance-receipt-print-sheet" data-testid="printable-receipt-sheet">
           {[
@@ -13304,8 +13339,11 @@ export default function AdminFinance() {
           ))}
         </div>
       </PrintSheetErrorBoundary>
-      )}
-      {printMode === 'cashier' && cashierReportPrintModel && (
+        );
+      })()}
+      {printMode === 'cashier' && printSnapshot && (() => {
+        const cashierReportPrintModel = printSnapshot;
+        return (
       <PrintSheetErrorBoundary onError={handlePrintSheetError}>
         <div className="finance-print-sheet" data-testid="printable-cashier-report-sheet">
           <div className="finance-print-school-header">
@@ -13387,7 +13425,8 @@ export default function AdminFinance() {
           </div>
         </div>
       </PrintSheetErrorBoundary>
-      )}
+        );
+      })()}
     </section>
   );
 }
