@@ -805,6 +805,79 @@ const PAYMENT_METHOD_UI_LABELS = {
   other: 'سایر'
 };
 
+// Pure, React-free: builds the receipt print model straight from a receipt record. Previously this
+// lived only inside a useMemo keyed on component state, which meant printing had to wait for a
+// React re-render (and for the sheet built from it to mount, keep its data frozen against
+// concurrent refreshes, load its fonts, etc.) before anything could be printed - a whole chain of
+// timing that kept producing a blank page in production for reasons that were fixed one at a time
+// (see #51-#57) without ever fully landing. buildReceiptPrintHtml below uses this to generate a
+// standalone print document directly from data, sidestepping that chain entirely.
+const buildReceiptPrintModel = (receipt) => {
+  if (!receipt) return null;
+  const details = receipt.receiptDetails || {};
+  const allocations = Array.isArray(details.allocations) && details.allocations.length
+    ? details.allocations
+    : (Array.isArray(receipt.allocations) ? receipt.allocations : []);
+  const isMultiBill = allocations.length > 1;
+  const billNumber = (isMultiBill ? (details.paymentNumber || receipt.paymentNumber || receipt.id) : '')
+    || details.billNumber
+    || receipt.bill?.billNumber
+    || allocations.find((item) => item?.orderNumber)?.orderNumber
+    || receipt.paymentNumber
+    || receipt.id
+    || '';
+  const purpose = (isMultiBill ? `پرداخت یک‌جای ${allocations.length} بل فیس` : details.title)
+    || allocations[0]?.title
+    || 'پرداخت فیس';
+  const toOptionalAmount = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    const amount = Number(value);
+    return Number.isFinite(amount) ? amount : null;
+  };
+  return {
+    title: details.title || receipt.bill?.billNumber || 'رسید مالی',
+    billNumber: toEnglishAlphaNumeric(billNumber),
+    purpose,
+    paymentNumber: formatFinanceCode(details.paymentNumber || receipt.id, ''),
+    studentName: details.studentName || receipt.student?.fullName || receipt.student?.name || '---',
+    fatherName: details.fatherName || receipt.student?.fatherName || 'ثبت نشده',
+    asasNumber: String(
+      details.asasNumber
+      || details.admissionNo
+      || receipt.student?.asasNumber
+      || receipt.student?.admissionNo
+      || receipt.student?.studentCode
+      || ''
+    ).trim() || 'ثبت نشده',
+    classTitle: details.classTitle || receipt.classId?.title || receipt.course?.title || '---',
+    academicYearTitle: details.academicYearTitle
+      || receipt.academicYear?.title
+      || '-',
+    amount: Number(receipt.amount || 0),
+    grossAmount: toOptionalAmount(details.grossAmount ?? receipt.bill?.amountOriginal),
+    discountAmount: toOptionalAmount(details.discountAmount),
+    netAmount: toOptionalAmount(details.netAmount ?? receipt.bill?.amountDue),
+    currency: details.currency || 'AFN',
+    currencyLabel: String(details.currency || 'AFN').trim().toUpperCase() === 'AFN' ? 'افغانی' : details.currency,
+    paymentMethod: receipt.paymentMethod || '-',
+    referenceNo: receipt.referenceNo || '-',
+    status: receipt.status || 'pending',
+    paidAt: receipt.paidAt || null,
+    note: receipt.note || '',
+    receivedBy: receipt.receivedBy?.name || 'ثبت سیستمی',
+    remainingBeforePayment: toOptionalAmount(details.remainingBeforePayment),
+    remainingAfterPayment: toOptionalAmount(details.remainingAfterPayment),
+    currentOutstandingAmount: toOptionalAmount(
+      details.currentOutstandingAmount
+      ?? (allocations.length
+        ? allocations.reduce((sum, allocation) => sum + Number(allocation?.outstandingAmount || 0), 0)
+        : details.remainingAfterPayment)
+    ),
+    allocations,
+    isMultiBill
+  };
+};
+
 const FEE_LINE_TYPE_LABELS = {
   tuition: 'فیس/شهریه',
   admission: 'داخله',
@@ -1663,8 +1736,9 @@ const buildAnomalyActionPayload = (item = {}, extras = {}) => ({
   }
 });
 
-// Print data (financeOverview / selectedReceiptPrintModel / cashierReportPrintModel) is loaded
-// asynchronously and the printable sheet is only mounted in the DOM once that data is ready. If
+// Print data (financeOverview / cashierReportPrintModel) is loaded asynchronously and the
+// printable sheet is only mounted in the DOM once that data is ready (this no longer applies to
+// receipts - see buildReceiptPrintHtml, which prints from its own standalone window instead). If
 // window.print() fires before React has actually committed the sheet, the print CSS (which hides
 // everything except .finance-print-sheet) has nothing left to show and the printout comes out
 // completely blank/white. This polls for the sheet instead of relying on a fixed delay, so print
@@ -1755,6 +1829,196 @@ class PrintSheetErrorBoundary extends React.Component {
     return this.props.children;
   }
 }
+
+const escapeHtml = (value) => String(value == null ? '' : value)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+// Renders one physical copy (student/school) of the receipt as a self-contained HTML fragment -
+// no dependency on the app's own stylesheet, DOM, or React tree at all.
+const buildReceiptCopyHtml = (model, schoolInfo, logoUrls, copyLabel, copyKey) => {
+  const currency = model.currencyLabel || 'افغانی';
+  const amountLabel = (value) => (value === null || value === undefined
+    ? '-'
+    : `${escapeHtml(fmt(value))} ${escapeHtml(currency)}`);
+  const logoHtml = (url, alt) => (url
+    ? `<img class="${escapeHtml(getOfficialPrintLogoImageClass(url))}" src="${escapeHtml(url)}" alt="${alt}" />`
+    : `<span>${alt}</span>`);
+  const allocationsHtml = model.allocations.length ? `
+    <div class="allocation-block">
+      <span>تفکیک بل‌های پرداخت‌شده:</span>
+      <div class="allocation-list">
+        ${model.allocations.map((allocation, index) => `
+          <div>
+            <strong>${escapeHtml(allocation.title || `بل ${index + 1}`)}</strong>
+            <small class="latin">${escapeHtml(formatFinanceCode(allocation.orderNumber, '-'))}</small>
+            <b>پرداخت: ${escapeHtml(fmt(allocation.amount))} ${escapeHtml(currency)}</b>
+            <small class="totals">اصل: ${allocation.grossAmount == null ? '-' : escapeHtml(fmt(allocation.grossAmount))} · تخفیف: ${allocation.discountAmount == null ? '-' : escapeHtml(fmt(allocation.discountAmount))} · باقیات: ${allocation.outstandingAmount == null ? '-' : escapeHtml(fmt(allocation.outstandingAmount))}</small>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  ` : '';
+  const noteHtml = model.note
+    ? `<div class="note-line"><span>یادداشت:</span><strong>${escapeHtml(model.note)}</strong></div>`
+    : '';
+
+  return `
+    <section class="copy" data-receipt-copy="${escapeHtml(copyKey)}">
+      <div class="copy-label">${escapeHtml(copyLabel)}</div>
+      <div class="letterhead">
+        <div class="logo-box">${logoHtml(logoUrls.schoolLogoUrl, 'لوگوی مکتب')}</div>
+        <div class="letterhead-center">
+          <div class="kicker">${escapeHtml(schoolInfo.title)}</div>
+          <h3>رسید پرداخت فیس شاگرد</h3>
+          ${schoolInfo.subtitle ? `<small>${escapeHtml(schoolInfo.subtitle)}</small>` : ''}
+        </div>
+        <div class="logo-box">${logoHtml(logoUrls.ministryLogoUrl, 'لوگوی وزارت معارف')}</div>
+      </div>
+      <div class="document-meta">
+        <div><span>شماره رسید</span><strong class="latin">${escapeHtml(model.paymentNumber || '-')}</strong></div>
+        <div><span>تاریخ</span><strong>${escapeHtml(toFaDate(model.paidAt))}</strong></div>
+        <div><span>سال تعلیمی</span><strong>${escapeHtml(model.academicYearTitle || '-')}</strong></div>
+        <div><span>وضعیت</span><strong>${escapeHtml(PAYMENT_STATUS_UI_LABELS[model.status] || model.status || '-')}</strong></div>
+      </div>
+      <div class="main-grid">
+        <section class="info-panel">
+          <h4>مشخصات شاگرد</h4>
+          <div><span>نام شاگرد:</span><strong>${escapeHtml(model.studentName)}</strong></div>
+          <div><span>نام پدر:</span><strong>${escapeHtml(model.fatherName)}</strong></div>
+          <div><span>نمبر اساس:</span><strong class="latin">${escapeHtml(model.asasNumber)}</strong></div>
+          <div><span>صنف:</span><strong>${escapeHtml(model.classTitle)}</strong></div>
+        </section>
+        <section class="info-panel">
+          <h4>مشخصات پرداخت</h4>
+          <div><span>${model.isMultiBill ? 'شماره سند:' : 'شماره بل:'}</span><strong class="latin">${escapeHtml(model.billNumber || '-')}</strong></div>
+          <div><span>مبلغ پرداختی:</span><strong>${escapeHtml(fmt(model.amount))} ${escapeHtml(currency)}</strong></div>
+          <div><span>روش پرداخت:</span><strong>${escapeHtml(PAYMENT_METHOD_UI_LABELS[model.paymentMethod] || model.paymentMethod || '-')}</strong></div>
+          <div><span>شماره مرجع:</span><strong class="latin">${escapeHtml(model.referenceNo || '-')}</strong></div>
+        </section>
+      </div>
+      <div class="purpose-line"><span>بابت:</span><strong>${escapeHtml(model.purpose)}</strong></div>
+      <div class="summary-grid">
+        <div><span>مبلغ اصلی بل</span><strong>${amountLabel(model.grossAmount)}</strong></div>
+        <div><span>تخفیف و معافیت</span><strong>${amountLabel(model.discountAmount)}</strong></div>
+        <div><span>پرداخت فعلی</span><strong>${escapeHtml(fmt(model.amount))} ${escapeHtml(currency)}</strong></div>
+        <div><span>باقیات فعلی</span><strong>${amountLabel(model.currentOutstandingAmount)}</strong></div>
+      </div>
+      ${noteHtml}
+      ${allocationsHtml}
+      <div class="signatures">
+        <div><span>ثبت‌کننده پرداخت</span><strong>${escapeHtml(model.receivedBy || ' ')}</strong></div>
+        <div><span>مدیر مالی</span><strong>نام: __________________</strong><b>امضا و مهر: __________________</b></div>
+      </div>
+    </section>
+  `;
+};
+
+// Builds a complete, standalone HTML document for the receipt and prints it from its own isolated
+// window instead of inside the main app page. This deliberately avoids the entire class of bugs
+// spent #51-#57 chasing one at a time in the in-page print sheet: no "everything hidden except one
+// element" CSS trick to get wrong, no dependency on the main document's own layout/CSS cascade or
+// React re-render timing, nothing else on the page (sockets, other admins' activity, unrelated
+// state) able to touch this document at all once it's open. The one browser-side risk this
+// approach carries - the print sheet still overflowing its own single physical page - is handled
+// directly: the inline script measures the rendered content against an actual page-height
+// reference and scales the whole thing down to fit if it's too tall, rather than silently clipping
+// or blanking anything.
+const buildReceiptPrintHtml = (model, schoolInfo, logoUrls) => {
+  const studentCopy = buildReceiptCopyHtml(model, schoolInfo, logoUrls, 'نسخه شاگرد', 'student');
+  const schoolCopy = buildReceiptCopyHtml(model, schoolInfo, logoUrls, 'نسخه مکتب', 'school');
+  return `<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<title>رسید پرداخت فیس شاگرد</title>
+<style>
+  @font-face { font-family: 'B Nazanin'; src: url('/fonts/B_Nazanin.ttf') format('truetype'); font-weight: 400; }
+  @font-face { font-family: 'B Nazanin'; src: url('/fonts/B_Nazanin_Bold.ttf') format('truetype'); font-weight: 700; }
+  @page { size: A4 portrait; margin: 12mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: 'B Nazanin', 'B Mitra', Tahoma, sans-serif; }
+  #page-ruler { position: absolute; visibility: hidden; height: 273mm; width: 1px; top: 0; left: 0; }
+  #scale-wrap { width: 186mm; margin: 0 auto; transform-origin: top center; }
+  .copy { border: 0.25mm solid #111; padding: 2.2mm 2.6mm; font-size: 8.5pt; line-height: 1.2; display: grid; gap: 2px; direction: rtl; }
+  .copy + .cut-line + .copy { margin-top: 0; }
+  .cut-line { position: relative; display: flex; align-items: center; justify-content: center; height: 5mm; color: #555; font-size: 7pt; margin: 2.5mm 0; }
+  .cut-line::before { position: absolute; right: 0; left: 0; top: 50%; border-top: 0.25mm dashed #777; content: ''; }
+  .cut-line span { position: relative; z-index: 1; padding: 0 3mm; background: #fff; }
+  .copy-label, .kicker { text-align: center; font-weight: 700; }
+  .copy h3 { margin: 0; text-align: center; font-size: 11pt; line-height: 1.15; }
+  .letterhead { display: grid; grid-template-columns: 15mm minmax(0, 1fr) 15mm; gap: 2mm; align-items: center; direction: ltr; }
+  .letterhead-center { min-width: 0; text-align: center; direction: rtl; }
+  .letterhead-center small { display: block; margin-top: 1px; color: #222; font-size: 6.3pt; line-height: 1.1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .logo-box { display: grid; place-items: center; width: 13mm; height: 13mm; border: 1px solid #b8b8b8; background: #fff; color: #444; font-size: 6pt; padding: 0.5mm; overflow: hidden; text-align: center; }
+  .logo-box img { width: 100%; height: 100%; object-fit: contain; }
+  .document-meta, .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border-top: 1px solid #111; border-right: 1px solid #111; }
+  .document-meta > div, .summary-grid > div { display: grid; gap: 0; min-width: 0; padding: 1px 2px; border-bottom: 1px solid #111; border-left: 1px solid #111; text-align: center; }
+  .document-meta span, .summary-grid span { font-size: 7pt; font-weight: 700; line-height: 1.05; }
+  .document-meta strong, .summary-grid strong { min-width: 0; overflow-wrap: anywhere; font-size: 7.8pt; line-height: 1.1; }
+  .main-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.6mm; }
+  .info-panel { display: grid; align-content: start; min-width: 0; border-top: 1px solid #111; border-right: 1px solid #111; }
+  .info-panel h4 { margin: 0; padding: 1px 3px; border-bottom: 1px solid #111; border-left: 1px solid #111; background: #f1f1f1; text-align: center; font-size: 8pt; }
+  .info-panel > div { display: grid; grid-template-columns: 35% minmax(0, 1fr); min-height: 4.6mm; border-bottom: 1px solid #111; }
+  .info-panel span, .info-panel strong { display: flex; align-items: center; min-width: 0; padding: 1px 3px; border-left: 1px solid #111; overflow-wrap: anywhere; font-size: 8pt; line-height: 1.05; }
+  .info-panel span { color: #111; font-weight: 700; }
+  .purpose-line, .note-line { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px; align-items: center; min-height: 4.6mm; padding: 1px 3px; border: 1px solid #111; font-size: 7.8pt; line-height: 1.05; }
+  .purpose-line span, .note-line span { font-weight: 800; }
+  .allocation-block { display: grid; gap: 1px; color: #111; font-size: 7.4pt; line-height: 1.1; }
+  .allocation-block > span { font-weight: 800; }
+  .allocation-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid #111; border-right: 1px solid #111; }
+  .allocation-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 2px; min-width: 0; padding: 1px 2px; border-bottom: 1px solid #111; border-left: 1px solid #111; }
+  .allocation-list strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .allocation-list small { grid-column: 1; }
+  .allocation-list .totals { grid-column: 1 / -1; color: #222; line-height: 1.25; white-space: normal; font-size: 6.6pt; }
+  .allocation-list b { grid-column: 2; grid-row: 1 / span 2; align-self: center; white-space: nowrap; font-size: 6.6pt; }
+  .signatures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5mm; margin-top: 2px; }
+  .signatures > div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 5px; align-items: end; min-height: 7mm; border-bottom: 1px solid #111; font-size: 7.8pt; line-height: 1.1; }
+  .signatures > div > b { grid-column: 1 / -1; font-weight: 700; }
+  .latin { direction: ltr; unicode-bidi: isolate; text-align: left; letter-spacing: 0; }
+</style>
+</head>
+<body>
+  <div id="page-ruler"></div>
+  <div id="scale-wrap">
+    ${studentCopy}
+    <div class="cut-line"><span>محل برش</span></div>
+    ${schoolCopy}
+  </div>
+  <script>
+    (function () {
+      var printed = false;
+      function ready() {
+        if (printed) return;
+        printed = true;
+        try {
+          var wrap = document.getElementById('scale-wrap');
+          var ruler = document.getElementById('page-ruler');
+          var pageHeightPx = ruler.getBoundingClientRect().height;
+          var contentHeight = wrap.getBoundingClientRect().height;
+          if (pageHeightPx > 0 && contentHeight > pageHeightPx) {
+            var scale = pageHeightPx / contentHeight;
+            wrap.style.transform = 'scale(' + scale + ')';
+            wrap.style.height = (contentHeight * scale) + 'px';
+          }
+        } catch (err) {
+          // Printing the unscaled document beats not printing at all.
+        }
+        setTimeout(function () { window.print(); }, 60);
+      }
+      if (window.document.fonts && window.document.fonts.ready) {
+        window.document.fonts.ready.then(ready, ready);
+      }
+      window.addEventListener('load', ready);
+      setTimeout(ready, 2500);
+    })();
+  </script>
+</body>
+</html>`;
+};
 
 export default function AdminFinance() {
   const { settings: siteSettings } = useSiteSettings();
@@ -1961,12 +2225,13 @@ export default function AdminFinance() {
   // duration of the print. Printing now stays open for several seconds (waiting for the sheet
   // to mount, its logos to load, and its fonts to finish loading) - meanwhile a socket.io
   // 'finance:lifecycle-changed' event from ANY admin action anywhere in the school (not just this
-  // one) can fire loadAll() and replace pendingReceipts/financeOverview mid-print. If the sheet
+  // one) can fire loadAll() and replace financeOverview/cashierReport mid-print. If the sheet
   // read those live values directly, a refresh landing in that window could change or clear
-  // selectedReceiptPrintModel/financeOverview/cashierReportPrintModel and unmount the sheet out
-  // from under window.print(), producing a totally blank page despite everything above having
-  // gone right. Snapshotting once when printMode is set (see the effect below) makes the printed
-  // sheet immune to any data change that happens after the user clicked print.
+  // financeOverview/cashierReportPrintModel and unmount the sheet out from under window.print(),
+  // producing a totally blank page despite everything above having gone right. Snapshotting once
+  // when printMode is set (see the effect below) makes the printed sheet immune to any data
+  // change that happens after the user clicked print. (Receipts no longer go through this path at
+  // all - see buildReceiptPrintHtml.)
   const [printSnapshot, setPrintSnapshot] = useState(null);
   const [activeSection, setActiveSection] = useState('overview');
   const [formLayoutMode, setFormLayoutMode] = useState('landscape');
@@ -5004,72 +5269,6 @@ export default function AdminFinance() {
     selectedReceipt?.followUp?.updatedAt
   ]);
 
-  const selectedReceiptPrintModel = useMemo(() => {
-    if (!selectedReceipt) return null;
-    const details = selectedReceipt.receiptDetails || {};
-    const allocations = Array.isArray(details.allocations) && details.allocations.length
-      ? details.allocations
-      : (Array.isArray(selectedReceipt.allocations) ? selectedReceipt.allocations : []);
-    const isMultiBill = allocations.length > 1;
-    const billNumber = (isMultiBill ? (details.paymentNumber || selectedReceipt.paymentNumber || selectedReceipt.id) : '')
-      || details.billNumber
-      || selectedReceipt.bill?.billNumber
-      || allocations.find((item) => item?.orderNumber)?.orderNumber
-      || selectedReceipt.paymentNumber
-      || selectedReceipt.id
-      || '';
-    const purpose = (isMultiBill ? `پرداخت یک‌جای ${allocations.length} بل فیس` : details.title)
-      || allocations[0]?.title
-      || 'پرداخت فیس';
-    const toOptionalAmount = (value) => {
-      if (value === null || value === undefined || value === '') return null;
-      const amount = Number(value);
-      return Number.isFinite(amount) ? amount : null;
-    };
-    return {
-      title: details.title || selectedReceipt.bill?.billNumber || 'رسید مالی',
-      billNumber: toEnglishAlphaNumeric(billNumber),
-      purpose,
-      paymentNumber: formatFinanceCode(details.paymentNumber || selectedReceipt.id, ''),
-      studentName: details.studentName || selectedReceipt.student?.fullName || selectedReceipt.student?.name || '---',
-      fatherName: details.fatherName || selectedReceipt.student?.fatherName || 'ثبت نشده',
-      asasNumber: String(
-        details.asasNumber
-        || details.admissionNo
-        || selectedReceipt.student?.asasNumber
-        || selectedReceipt.student?.admissionNo
-        || selectedReceipt.student?.studentCode
-        || ''
-      ).trim() || 'ثبت نشده',
-      classTitle: details.classTitle || selectedReceipt.classId?.title || selectedReceipt.course?.title || '---',
-      academicYearTitle: details.academicYearTitle
-        || selectedReceipt.academicYear?.title
-        || '-',
-      amount: Number(selectedReceipt.amount || 0),
-      grossAmount: toOptionalAmount(details.grossAmount ?? selectedReceipt.bill?.amountOriginal),
-      discountAmount: toOptionalAmount(details.discountAmount),
-      netAmount: toOptionalAmount(details.netAmount ?? selectedReceipt.bill?.amountDue),
-      currency: details.currency || 'AFN',
-      currencyLabel: String(details.currency || 'AFN').trim().toUpperCase() === 'AFN' ? 'افغانی' : details.currency,
-      paymentMethod: selectedReceipt.paymentMethod || '-',
-      referenceNo: selectedReceipt.referenceNo || '-',
-      status: selectedReceipt.status || 'pending',
-      paidAt: selectedReceipt.paidAt || null,
-      note: selectedReceipt.note || '',
-      receivedBy: selectedReceipt.receivedBy?.name || 'ثبت سیستمی',
-      remainingBeforePayment: toOptionalAmount(details.remainingBeforePayment),
-      remainingAfterPayment: toOptionalAmount(details.remainingAfterPayment),
-      currentOutstandingAmount: toOptionalAmount(
-        details.currentOutstandingAmount
-        ?? (allocations.length
-          ? allocations.reduce((sum, allocation) => sum + Number(allocation?.outstandingAmount || 0), 0)
-          : details.remainingAfterPayment)
-      ),
-      allocations,
-      isMultiBill
-    };
-  }, [selectedReceipt]);
-
   const cashierReportPrintModel = useMemo(() => {
     if (!cashierReport) return null;
     return {
@@ -5085,9 +5284,7 @@ export default function AdminFinance() {
   // must depend only on printMode, not on the live values themselves - depending on them would
   // re-snapshot (and thus re-expose the sheet to) every later refresh, defeating the point.
   useEffect(() => {
-    if (printMode === 'receipt') {
-      setPrintSnapshot(selectedReceiptPrintModel);
-    } else if (printMode === 'overview') {
+    if (printMode === 'overview') {
       setPrintSnapshot({ financeOverview, financeOverviewKpis });
     } else if (printMode === 'cashier') {
       setPrintSnapshot(cashierReportPrintModel);
@@ -5441,6 +5638,15 @@ export default function AdminFinance() {
 
   const createDeskPayment = async (e) => {
     e.preventDefault();
+    // Must open synchronously, before any await, or the browser's popup blocker treats the later
+    // window.open (after the payment API call resolves) as not user-initiated and silently blocks
+    // it. Opened up front whenever printing was requested; filled in or closed once we know the
+    // outcome below.
+    const wantsPrint = deskPaymentSubmitMode === 'save_print';
+    const printWindow = wantsPrint ? window.open('', '_blank') : null;
+    if (wantsPrint && !printWindow) {
+      setMessage('مرورگر بازشدن پنجرهٔ چاپ را مسدود کرد؛ لطفاً پنجره‌های بازشو (popup) را برای این سایت مجاز کنید.');
+    }
     try {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/student-finance/payments`, buildDeskPaymentPayload());
@@ -5476,15 +5682,28 @@ export default function AdminFinance() {
         selectedFeeOrderIds: [],
         manualAllocations: {}
       }));
-      if (deskPaymentSubmitMode === 'save_print' && createdReceipt?._id) {
+      if (wantsPrint && createdReceipt?._id) {
         setActiveSection('payments');
+        let detailedReceipt = createdReceipt;
         try {
-          const detailedReceipt = await fetchReceiptDetailRow(createdReceipt._id);
+          detailedReceipt = await fetchReceiptDetailRow(createdReceipt._id);
           setSelectedReceiptDetail(detailedReceipt);
         } catch {
-          // The newly created row is still printable if the detail request is temporarily unavailable.
+          // The newly created row is still printable from what we already have if the detail
+          // request is temporarily unavailable.
         }
-        schedulePrint('receipt', '.finance-receipt-print-sheet');
+        if (printWindow) {
+          const model = buildReceiptPrintModel(detailedReceipt);
+          if (model) {
+            printWindow.document.open();
+            printWindow.document.write(buildReceiptPrintHtml(model, activeSchoolPrintInfo, printLogoUrls));
+            printWindow.document.close();
+          } else {
+            printWindow.close();
+          }
+        }
+      } else if (printWindow) {
+        printWindow.close();
       }
       setDeskPaymentSubmitMode('save');
       await refreshPaymentWorkspace();
@@ -5492,6 +5711,7 @@ export default function AdminFinance() {
       setMessage(err.message);
       setDeskPaymentSubmitMode('save');
       setBusy(false);
+      if (printWindow) printWindow.close();
     }
   };
 
@@ -6299,9 +6519,26 @@ export default function AdminFinance() {
     if (!selectedReceipt?._id || busy) return;
     setBusy(true);
     try {
+      // Open the window synchronously, in direct response to the click - not after the await
+      // below. Opening it later (once the fetch resolves) is what most browsers' popup blockers
+      // treat as "not user-initiated" and silently block.
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) {
+        setMessage('مرورگر بازشدن پنجرهٔ چاپ را مسدود کرد؛ لطفاً پنجره‌های بازشو (popup) را برای این سایت مجاز کنید.');
+        return;
+      }
       const detailedReceipt = await fetchReceiptDetailRow(selectedReceipt._id);
       setSelectedReceiptDetail(detailedReceipt);
-      await schedulePrint('receipt', '.finance-receipt-print-sheet');
+      const model = buildReceiptPrintModel({ ...selectedReceipt, ...detailedReceipt });
+      if (!model) {
+        printWindow.close();
+        setMessage('داده‌ای برای چاپ آماده نشد؛ لطفاً دوباره تلاش کنید.');
+        return;
+      }
+      const html = buildReceiptPrintHtml(model, activeSchoolPrintInfo, printLogoUrls);
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
     } catch (err) {
       setMessage(err.message || 'جزئیات رسید برای چاپ دریافت نشد.');
     } finally {
@@ -13233,123 +13470,6 @@ export default function AdminFinance() {
             <div><span>مدیر مالی</span><strong>امضا: __________________</strong></div>
             <div><span>مدیر مکتب</span><strong>امضا و مهر: __________________</strong></div>
           </div>
-        </div>
-      </PrintSheetErrorBoundary>
-        );
-      })()}
-      {printMode === 'receipt' && printSnapshot && (() => {
-        const selectedReceiptPrintModel = printSnapshot;
-        return (
-      <PrintSheetErrorBoundary onError={handlePrintSheetError}>
-        <div className="finance-print-sheet finance-receipt-print-sheet" data-testid="printable-receipt-sheet">
-          {[
-            { key: 'student', label: 'نسخه شاگرد' },
-            { key: 'school', label: 'نسخه مکتب' }
-          ].map((copy, copyIndex) => (
-            <React.Fragment key={`receipt-copy-${copy.key}`}>
-            <section className="finance-receipt-print-copy" data-receipt-copy={copy.key}>
-              <div className="finance-receipt-copy-label">{copy.label}</div>
-              <div className="finance-receipt-letterhead">
-                <div className="finance-print-logo-box">
-                  {printLogoUrls.schoolLogoUrl ? <img className={getOfficialPrintLogoImageClass(printLogoUrls.schoolLogoUrl)} src={printLogoUrls.schoolLogoUrl} alt="لوگوی مکتب" /> : <span>لوگو مکتب</span>}
-                </div>
-                <div className="finance-receipt-letterhead-center">
-                  <div className="finance-receipt-print-kicker">{activeSchoolPrintInfo.title}</div>
-                  <h3>رسید پرداخت فیس شاگرد</h3>
-                  {!!activeSchoolPrintInfo.subtitle && <small>{activeSchoolPrintInfo.subtitle}</small>}
-                </div>
-                <div className="finance-print-logo-box">
-                  {printLogoUrls.ministryLogoUrl ? <img className={getOfficialPrintLogoImageClass(printLogoUrls.ministryLogoUrl)} src={printLogoUrls.ministryLogoUrl} alt="لوگوی وزارت معارف" /> : <span>لوگو وزارت</span>}
-                </div>
-              </div>
-              <div className="finance-receipt-document-meta">
-                <div><span>شماره رسید</span><strong className="finance-latin-code">{selectedReceiptPrintModel.paymentNumber || '-'}</strong></div>
-                <div><span>تاریخ</span><strong>{toFaDate(selectedReceiptPrintModel.paidAt)}</strong></div>
-                <div><span>سال تعلیمی</span><strong>{selectedReceiptPrintModel.academicYearTitle || '-'}</strong></div>
-                <div><span>وضعیت</span><strong>{PAYMENT_STATUS_UI_LABELS[selectedReceiptPrintModel.status] || selectedReceiptPrintModel.status || '-'}</strong></div>
-              </div>
-              <div className="finance-receipt-main-grid">
-                <section className="finance-receipt-info-panel finance-receipt-student-panel">
-                  <h4>مشخصات شاگرد</h4>
-                  <div><span>نام شاگرد:</span><strong>{selectedReceiptPrintModel.studentName}</strong></div>
-                  <div><span>نام پدر:</span><strong>{selectedReceiptPrintModel.fatherName}</strong></div>
-                  <div><span>نمبر اساس:</span><strong className="finance-latin-code">{selectedReceiptPrintModel.asasNumber}</strong></div>
-                  <div><span>صنف:</span><strong>{selectedReceiptPrintModel.classTitle}</strong></div>
-                </section>
-                <section className="finance-receipt-info-panel finance-receipt-payment-panel">
-                  <h4>مشخصات پرداخت</h4>
-                  <div>
-                    <span>{selectedReceiptPrintModel.isMultiBill ? 'شماره سند:' : 'شماره بل:'}</span>
-                    <strong className="finance-latin-code">{selectedReceiptPrintModel.billNumber || '-'}</strong>
-                  </div>
-                  <div><span>مبلغ پرداختی:</span><strong>{fmt(selectedReceiptPrintModel.amount)} {selectedReceiptPrintModel.currencyLabel || 'افغانی'}</strong></div>
-                  <div><span>روش پرداخت:</span><strong>{PAYMENT_METHOD_UI_LABELS[selectedReceiptPrintModel.paymentMethod] || selectedReceiptPrintModel.paymentMethod || '-'}</strong></div>
-                  <div><span>شماره مرجع:</span><strong className="finance-latin-code">{selectedReceiptPrintModel.referenceNo || '-'}</strong></div>
-                </section>
-              </div>
-              <div className="finance-receipt-purpose-line">
-                <span>بابت:</span>
-                <strong>{selectedReceiptPrintModel.purpose}</strong>
-              </div>
-              <div className="finance-receipt-summary-grid">
-                <div>
-                  <span>مبلغ اصلی بل</span>
-                  <strong>{selectedReceiptPrintModel.grossAmount === null ? '-' : `${fmt(selectedReceiptPrintModel.grossAmount)} ${selectedReceiptPrintModel.currencyLabel || 'افغانی'}`}</strong>
-                </div>
-                <div>
-                  <span>تخفیف و معافیت</span>
-                  <strong>{selectedReceiptPrintModel.discountAmount === null ? '-' : `${fmt(selectedReceiptPrintModel.discountAmount)} ${selectedReceiptPrintModel.currencyLabel || 'افغانی'}`}</strong>
-                </div>
-                <div>
-                  <span>پرداخت فعلی</span>
-                  <strong>{fmt(selectedReceiptPrintModel.amount)} {selectedReceiptPrintModel.currencyLabel || 'افغانی'}</strong>
-                </div>
-                <div>
-                  <span>باقیات فعلی</span>
-                  <strong>{selectedReceiptPrintModel.currentOutstandingAmount === null ? '-' : `${fmt(selectedReceiptPrintModel.currentOutstandingAmount)} ${selectedReceiptPrintModel.currencyLabel || 'افغانی'}`}</strong>
-                </div>
-              </div>
-              {!!selectedReceiptPrintModel.note && (
-                <div className="finance-receipt-note-line"><span>یادداشت:</span><strong>{selectedReceiptPrintModel.note}</strong></div>
-              )}
-              {!!selectedReceiptPrintModel.allocations.length && (
-                <div className="finance-receipt-allocation-block">
-                  <span>تفکیک بل‌های پرداخت‌شده:</span>
-                  <div className="finance-receipt-allocation-list">
-                    {selectedReceiptPrintModel.allocations.map((allocation, index) => (
-                      <div key={`${copy.key}-receipt-allocation-${index}`}>
-                        <strong>{allocation.title || `بل ${index + 1}`}</strong>
-                        <small className="finance-latin-code">{formatFinanceCode(allocation.orderNumber, '-')}</small>
-                        <b>پرداخت: {fmt(allocation.amount)} {selectedReceiptPrintModel.currencyLabel || 'افغانی'}</b>
-                        <small className="finance-receipt-allocation-totals">
-                          اصل: {allocation.grossAmount === null || allocation.grossAmount === undefined ? '-' : fmt(allocation.grossAmount)}
-                          {' · '}تخفیف: {allocation.discountAmount === null || allocation.discountAmount === undefined ? '-' : fmt(allocation.discountAmount)}
-                          {' · '}باقیات: {allocation.outstandingAmount === null || allocation.outstandingAmount === undefined ? '-' : fmt(allocation.outstandingAmount)}
-                        </small>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div className="finance-receipt-signatures">
-                <div>
-                  <span>ثبت‌کننده پرداخت</span>
-                  <strong>{selectedReceiptPrintModel.receivedBy || ' '}</strong>
-                </div>
-                <div>
-                  <span>مدیر مالی</span>
-                  <strong>نام: __________________</strong>
-                  <b>امضا و مهر: __________________</b>
-                </div>
-              </div>
-            </section>
-            {copyIndex === 0 && (
-              <div className="finance-receipt-cut-line" aria-hidden="true">
-                <span>محل برش</span>
-              </div>
-            )}
-            </React.Fragment>
-          ))}
         </div>
       </PrintSheetErrorBoundary>
         );
