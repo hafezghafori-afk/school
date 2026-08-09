@@ -1680,6 +1680,25 @@ const waitForPrintableSheet = async (selector = '.finance-print-sheet', { maxAtt
   return null;
 };
 
+// The page's Persian text runs through the custom @font-face families (B Nazanin / B Mitra / B
+// Zar). On a slow connection those fonts can still be loading when window.print() fires; the
+// browser's own print header/footer (system font) shows up fine, but every bit of the sheet's own
+// text renders with essentially nothing visible until the font swap finishes — indistinguishable
+// from a blank page. document.fonts.ready resolves once all fonts the page actually used have
+// finished loading (or failed), so wait for it — bounded, so a font that never loads can't hang
+// printing forever.
+const waitForPrintableFonts = async (timeoutMs = 4000) => {
+  if (typeof document === 'undefined' || !document.fonts?.ready) return;
+  try {
+    await Promise.race([
+      document.fonts.ready,
+      new Promise((resolve) => { if (typeof window !== 'undefined') window.setTimeout(resolve, timeoutMs); })
+    ]);
+  } catch {
+    // A rejected font load shouldn't block printing — proceed with whatever is ready.
+  }
+};
+
 const waitForPrintableImages = async (root) => {
   if (!root || typeof window === 'undefined') return;
   await new Promise((resolve) => {
@@ -4946,7 +4965,7 @@ export default function AdminFinance() {
       setMessage('داده‌ای برای چاپ آماده نشد؛ لطفاً دوباره تلاش کنید.');
       return;
     }
-    await waitForPrintableImages(root);
+    await Promise.all([waitForPrintableImages(root), waitForPrintableFonts()]);
     window.print();
   };
 
