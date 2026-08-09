@@ -1868,6 +1868,7 @@ const buildReceiptCopyHtml = (model, schoolInfo, logoUrls, copyLabel, copyKey) =
 
   return `
     <section class="copy" data-receipt-copy="${escapeHtml(copyKey)}">
+    <div class="copy-inner">
       <div class="copy-label">${escapeHtml(copyLabel)}</div>
       <div class="letterhead">
         <div class="logo-box">${logoHtml(logoUrls.schoolLogoUrl, 'لوگوی مکتب')}</div>
@@ -1913,6 +1914,7 @@ const buildReceiptCopyHtml = (model, schoolInfo, logoUrls, copyLabel, copyKey) =
         <div><span>ثبت‌کننده پرداخت</span><strong>${escapeHtml(model.receivedBy || ' ')}</strong></div>
         <div><span>مدیر مالی</span><strong>نام: __________________</strong><b>امضا و مهر: __________________</b></div>
       </div>
+    </div>
     </section>
   `;
 };
@@ -1941,11 +1943,15 @@ const buildReceiptPrintHtml = (model, schoolInfo, logoUrls) => {
   @page { size: A4 portrait; margin: 12mm; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: 'B Nazanin', 'B Mitra', Tahoma, sans-serif; }
-  #page-ruler { position: absolute; visibility: hidden; height: 273mm; width: 1px; top: 0; left: 0; }
-  #scale-wrap { width: 186mm; margin: 0 auto; transform-origin: top center; }
-  .copy { border: 0.25mm solid #111; padding: 2.2mm 2.6mm; font-size: 8.5pt; line-height: 1.2; display: grid; gap: 2px; direction: rtl; }
-  .copy + .cut-line + .copy { margin-top: 0; }
-  .cut-line { position: relative; display: flex; align-items: center; justify-content: center; height: 5mm; color: #555; font-size: 7pt; margin: 2.5mm 0; }
+  /* Two copies must each occupy exactly half of the printable page (not just their natural
+     content height) so the two halves always meet edge-to-edge with the cut line exactly in the
+     middle - a page shorter than that leaves an empty gap at the bottom of the sheet, which is
+     the "نصف بالا / نصف پایین" layout this was asked to produce. */
+  #page-ruler { position: absolute; visibility: hidden; height: 134mm; width: 1px; top: 0; left: 0; }
+  #scale-wrap { width: 186mm; margin: 0 auto; }
+  .copy { height: 134mm; box-sizing: border-box; border: 0.25mm solid #111; padding: 2.2mm 2.6mm; font-size: 8.5pt; line-height: 1.2; overflow: visible; position: relative; }
+  .copy-inner { display: grid; gap: 2px; direction: rtl; transform-origin: top center; }
+  .cut-line { position: relative; display: flex; align-items: center; justify-content: center; height: 5mm; color: #555; font-size: 7pt; margin: 0; }
   .cut-line::before { position: absolute; right: 0; left: 0; top: 50%; border-top: 0.25mm dashed #777; content: ''; }
   .cut-line span { position: relative; z-index: 1; padding: 0 3mm; background: #fff; }
   .copy-label, .kicker { text-align: center; font-weight: 700; }
@@ -1995,14 +2001,15 @@ const buildReceiptPrintHtml = (model, schoolInfo, logoUrls) => {
         if (printed) return;
         printed = true;
         try {
-          var wrap = document.getElementById('scale-wrap');
-          var ruler = document.getElementById('page-ruler');
-          var pageHeightPx = ruler.getBoundingClientRect().height;
-          var contentHeight = wrap.getBoundingClientRect().height;
-          if (pageHeightPx > 0 && contentHeight > pageHeightPx) {
-            var scale = pageHeightPx / contentHeight;
-            wrap.style.transform = 'scale(' + scale + ')';
-            wrap.style.height = (contentHeight * scale) + 'px';
+          var halfPageHeightPx = document.getElementById('page-ruler').getBoundingClientRect().height;
+          var inners = document.querySelectorAll('.copy-inner');
+          for (var i = 0; i < inners.length; i += 1) {
+            var inner = inners[i];
+            inner.style.transform = 'none';
+            var naturalHeight = inner.getBoundingClientRect().height;
+            if (halfPageHeightPx > 0 && naturalHeight > halfPageHeightPx) {
+              inner.style.transform = 'scale(' + (halfPageHeightPx / naturalHeight) + ')';
+            }
           }
         } catch (err) {
           // Printing the unscaled document beats not printing at all.
