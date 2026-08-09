@@ -6291,19 +6291,32 @@ export default function AdminFinance() {
   };
 
   const printSelectedReceipt = async () => {
-    if (!selectedReceipt?._id) return;
+    // The backend has been observed taking 5-10+ seconds to answer this exact endpoint under
+    // load, with nothing on screen telling the admin a print is even in progress. Without this
+    // guard/feedback, an admin who doesn't see anything happen for several seconds naturally
+    // clicks the button again, firing a second overlapping fetch+print for the same receipt (as
+    // seen in a real production log) instead of just waiting for the first one to finish.
+    if (!selectedReceipt?._id || busy) return;
+    setBusy(true);
     try {
       const detailedReceipt = await fetchReceiptDetailRow(selectedReceipt._id);
       setSelectedReceiptDetail(detailedReceipt);
-      schedulePrint('receipt', '.finance-receipt-print-sheet');
+      await schedulePrint('receipt', '.finance-receipt-print-sheet');
     } catch (err) {
       setMessage(err.message || 'جزئیات رسید برای چاپ دریافت نشد.');
+    } finally {
+      setBusy(false);
     }
   };
 
-  const printCashierReport = () => {
-    if (!cashierReportPrintModel) return;
-    schedulePrint('cashier');
+  const printCashierReport = async () => {
+    if (!cashierReportPrintModel || busy) return;
+    setBusy(true);
+    try {
+      await schedulePrint('cashier');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const exportCashierReportCsv = () => {
@@ -10119,8 +10132,8 @@ export default function AdminFinance() {
                   ) : (
                     <span className="muted">فایل رسید ثبت نشده است.</span>
                   )}
-                  <button type="button" className="secondary" onClick={printSelectedReceipt} data-testid="print-selected-receipt">
-                    چاپ رسید
+                  <button type="button" className="secondary" onClick={printSelectedReceipt} disabled={busy} data-testid="print-selected-receipt">
+                    {busy ? 'در حال آماده‌سازی چاپ…' : 'چاپ رسید'}
                   </button>
                   <div className="row-actions">
                     <button type="button" onClick={() => approveReceipt(selectedReceipt._id)} disabled={busy || !canReviewReceipt(selectedReceipt)}>
