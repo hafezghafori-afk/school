@@ -7577,6 +7577,15 @@ export default function AdminFinance() {
           <strong>آموزشگاه</strong>
           <span>سیستم جدا برای شاگرد، فیس، بل و مصارف</span>
         </Link>
+        <Link
+          to="/short-term-center"
+          className="finance-shell-tab finance-shell-link"
+          data-testid="finance-short-term-center-link"
+          title="سیستم جدا برای شاگردان موقت: صنف، فیس، بل و رسید، حاضری و مصارف"
+        >
+          <strong>مرکز آموزش کوتاه‌مدت</strong>
+          <span>سیستم جدا برای شاگردان موقت</span>
+        </Link>
       </div>
 
       <div className="finance-section-head">
