@@ -194,6 +194,7 @@ const dashboardRoutes = require('./routes/dashboardRoutes');
 const schoolWebsiteRoutes = require('./routes/schoolWebsiteRoutes');
 const academyRoutes = require('./routes/academyRoutes');
 const academySupplyRoutes = require('./routes/academySupplyRoutes');
+const shortTermRoutes = require('./routes/shortTermRoutes');
 const errorHandler = require('./middleware/errorHandler');
 const { getDatabaseStatus, requireDatabase, markAppReady, isAppReady } = require('./middleware/requireDatabase');
 const ChatThread = require('./models/ChatThread');
@@ -291,6 +292,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/school-websites', schoolWebsiteRoutes);
 app.use('/api/academy', academyRoutes);
 app.use('/api/academy-supplies', academySupplyRoutes);
+app.use('/api/short-term-center', shortTermRoutes);
 
 app.use('/api', (req, res) => {
   res.status(404).json({

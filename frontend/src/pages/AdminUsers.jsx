@@ -138,7 +138,7 @@ const PERMISSION_PRESETS = [
     key: 'finance_operator',
     label: 'قالب مدیر مالی',
     orgRoles: ['finance_manager', 'finance_lead', 'school_manager', 'general_president'],
-    permissions: ['finance.center.manage', 'finance.bills.manage', 'finance.payments.manage', 'finance.receipts.approve', 'finance.receipts.reject', 'finance.reports.view', 'finance.student_profile.view']
+    permissions: ['finance.center.manage', 'shortterm.center.manage', 'finance.bills.manage', 'finance.payments.manage', 'finance.receipts.approve', 'finance.receipts.reject', 'finance.reports.view', 'finance.student_profile.view']
   },
   {
     key: 'head_teacher',

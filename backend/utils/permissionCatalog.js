@@ -40,6 +40,7 @@ const LEGACY_PERMISSION_MAP = Object.freeze({
   ],
   manage_finance: [
     'finance.center.manage',
+    'shortterm.center.manage',
     'finance.government.view',
     'finance.memberships.manage',
     'finance.student_profile.view',
@@ -251,6 +252,7 @@ const PERMISSION_GROUPS = Object.freeze([
     key: 'finance',
     permissions: [
       'finance.center.manage',
+      'shortterm.center.manage',
       'finance.government.view',
       'finance.memberships.manage',
       'finance.student_profile.view',

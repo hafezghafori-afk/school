@@ -73,6 +73,7 @@ const AdminFinancialMemberships = lazy(() => import('./pages/AdminFinancialMembe
 const AdminGovernmentFinance = lazy(() => import('./pages/AdminGovernmentFinance'));
 const AcademyManagement = lazy(() => import('./pages/AcademyManagement'));
 const AcademySupplies = lazy(() => import('./pages/AcademySupplies'));
+const ShortTermCenter = lazy(() => import('./pages/ShortTermCenter'));
 const AdminEducationCore = lazy(() => import('./pages/AdminEducationCore'));
 const StudentFinance = lazy(() => import('./pages/StudentFinance'));
 const TimetableHub = lazy(() => import('./pages/TimetableHub'));
@@ -140,6 +141,7 @@ const routePrefetchers = {
   adminFinance: () => import('./pages/AdminFinance'),
   academyManagement: () => import('./pages/AcademyManagement'),
   academySupplies: () => import('./pages/AcademySupplies'),
+  shortTermCenter: () => import('./pages/ShortTermCenter'),
   adminGovernmentFinance: () => import('./pages/AdminGovernmentFinance'),
   adminEducation: () => import('./pages/AdminEducationCore'),
   timetableConfig: () => import('./pages/TimetableConfiguration'),
@@ -204,6 +206,7 @@ const routePrefetchersByPath = {
   '/academy': routePrefetchers.academyManagement,
   '/academy-management': routePrefetchers.academyManagement,
   '/academy-supplies': routePrefetchers.academySupplies,
+  '/short-term-center': routePrefetchers.shortTermCenter,
   '/admin-government-finance': routePrefetchers.adminGovernmentFinance,
   '/admin-education': routePrefetchers.adminEducation,
   '/timetable': routePrefetchers.timetableConfig,
@@ -1081,6 +1084,7 @@ function AppShell() {
     path === '/parent-dashboard' ||
     path.startsWith('/admin') ||
     path.startsWith('/academy') ||
+    path.startsWith('/short-term-center') ||
     path.startsWith('/timetable') ||
     path.startsWith('/instructor') ||
     path.startsWith('/quiz') ||
@@ -3325,6 +3329,10 @@ function AppShell() {
             <Route
               path="/academy-supplies"
               element={adminRoute('finance.center.manage', <AcademySupplies />, 'دسترسی بخش کتاب و یونیفرم آموزشگاه برای این حساب فعال نیست.')}
+            />
+            <Route
+              path="/short-term-center"
+              element={adminRoute('shortterm.center.manage', <ShortTermCenter />, 'دسترسی مرکز آموزش کوتاه‌مدت برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-financial-memberships"
