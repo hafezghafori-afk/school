@@ -461,13 +461,21 @@ export default function ShortTermCenter() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attendanceForm.classId, selectedAttendanceClassRegistrations]);
 
-  const submit = async ({ path, method = 'POST', payload, reset, successTab, autoPrintReceipt }) => {
+  // `preOpenedPrintWindow`, when passed, is a window already opened
+  // synchronously by the caller *before* this async function's first await -
+  // see the payment form's onSubmit below. Opening window.open() after an
+  // await (i.e. after the payment API call resolves) is what most browsers'
+  // popup blockers treat as "not user-initiated" and silently neuter, which
+  // is exactly what produced the blank/white print.
+  const submit = async ({ path, method = 'POST', payload, reset, successTab, autoPrintReceipt, preOpenedPrintWindow }) => {
     setBusy(true);
     try {
       const data = await requestJson(path, { method, body: JSON.stringify(payload) });
       toast.success(data.message || 'ذخیره شد.');
       if (data.invoice && autoPrintReceipt) {
-        printReceipt(data.invoice, data.settings || settings);
+        printReceipt(data.invoice, data.settings || settings, preOpenedPrintWindow);
+      } else if (preOpenedPrintWindow) {
+        preOpenedPrintWindow.close();
       }
       if (reset) reset();
       if (successTab) setActiveTab(successTab);
@@ -477,6 +485,7 @@ export default function ShortTermCenter() {
       }
     } catch (error) {
       toast.error(error.message);
+      if (preOpenedPrintWindow) preOpenedPrintWindow.close();
     } finally {
       setBusy(false);
     }
@@ -500,12 +509,18 @@ export default function ShortTermCenter() {
     }
   };
 
-  const printReceipt = (invoice, settingsForPrint) => {
-    const printWindow = window.open('', '_blank', 'noopener,noreferrer');
+  // `existingWindow`, when given, must already be open (see submit() above).
+  // 'noopener'/'noreferrer' are deliberately NOT passed to window.open here -
+  // Chromium-based browsers (Chrome, Brave, Edge) return null for the new
+  // window reference when 'noopener' is set, which silently breaks the
+  // document.write() below into printing a blank page instead of erroring.
+  const printReceipt = (invoice, settingsForPrint, existingWindow) => {
+    const printWindow = existingWindow || window.open('', '_blank');
     if (!printWindow) {
-      toast.error('اجازهٔ باز کردن پنجرهٔ چاپ داده نشد. مسدودکنندهٔ پاپ‌آپ را بررسی کنید.');
+      toast.error('مرورگر بازشدن پنجرهٔ چاپ را مسدود کرد؛ لطفاً پنجره‌های بازشو (popup) را برای این سایت مجاز کنید.');
       return;
     }
+    printWindow.document.open();
     printWindow.document.write(buildReceiptPrintHtml(invoice, settingsForPrint || settings));
     printWindow.document.close();
   };
@@ -750,7 +765,16 @@ export default function ShortTermCenter() {
 
           {activeTab === 'payments' && (
             <div className="stc-grid">
-              <form className="stc-panel stc-form" onSubmit={(event) => { event.preventDefault(); submit({ path: '/api/short-term-center/payments', payload: paymentForm, reset: () => setPaymentForm(emptyPayment), successTab: 'payments', autoPrintReceipt: true }); }}>
+              <form className="stc-panel stc-form" onSubmit={(event) => {
+                event.preventDefault();
+                // Opened synchronously, in direct response to this submit click - not after the
+                // payment API call resolves below. Opening it later is what popup blockers treat
+                // as "not user-initiated" and either block outright or hand back a window that
+                // prints blank (see submit()/printReceipt() above for the full story).
+                const printWindow = window.open('', '_blank');
+                if (!printWindow) toast.error('مرورگر بازشدن پنجرهٔ چاپ را مسدود کرد؛ لطفاً پنجره‌های بازشو (popup) را برای این سایت مجاز کنید.');
+                submit({ path: '/api/short-term-center/payments', payload: paymentForm, reset: () => setPaymentForm(emptyPayment), successTab: 'payments', autoPrintReceipt: true, preOpenedPrintWindow: printWindow });
+              }}>
                 <h2>ثبت پرداخت فیس</h2>
                 <p className="stc-form-hint">پس از ثبت، بل صادر و رسید A4 دو‌نسخه‌ای (نسخهٔ شاگرد و نسخهٔ مرکز) خودکار برای چاپ باز می‌شود.</p>
                 <Field label="جستجوی شاگرد">
