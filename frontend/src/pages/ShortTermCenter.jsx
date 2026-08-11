@@ -211,75 +211,122 @@ function Table({ columns = [], rows = [] }) {
   );
 }
 
-// Standalone print window on a real A4 page - same approach as the finance
-// center's receipt print (AdminFinance.jsx / buildReceiptPrintHtml), not the
-// half-page in-page sheet the academy module uses. Two copies (student +
-// center) stacked on one page with a dashed cut line between them.
+const escapeHtml = (value) => String(value == null ? '' : value)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+// Standalone print window on a real A4 page - same approach and same
+// fixed-page-math as the finance center's receipt print (AdminFinance.jsx /
+// buildReceiptPrintHtml). Two copies (student + center) MUST land on one
+// physical page every time, including after this receipt grows a field or
+// two later - so each copy gets a fixed-height box (134mm; two of those plus
+// a 5mm cut line exactly fill the 273mm of usable height a 12mm page margin
+// leaves on A4's 297mm) and the print script measures the copy's actual
+// rendered height against that box and scales the whole copy down to fit if
+// it ever runs long, instead of letting it spill onto a second/third page.
 function buildReceiptPrintHtml(invoice, settings) {
   const issuedAtLabel = invoice.issuedAt ? new Date(invoice.issuedAt).toLocaleDateString('fa-AF-u-ca-persian') : '';
-  const centerName = text(settings?.name, 'مرکز آموزش کوتاه‌مدت');
+  const centerName = escapeHtml(text(settings?.name, 'مرکز آموزش کوتاه‌مدت'));
   const renderCopy = (label) => `
     <section class="copy">
-      <div class="copy-label">${label}</div>
+    <div class="copy-inner">
+      <div class="copy-label">${escapeHtml(label)}</div>
       <div class="letterhead">
         <h2>${centerName}</h2>
-        <p>${[settings?.address, settings?.phone, settings?.email].filter(Boolean).join(' · ')}</p>
+        <p>${escapeHtml([settings?.address, settings?.phone, settings?.email].filter(Boolean).join(' · '))}</p>
       </div>
-      <div class="doc-title">رسید پرداخت فیس — ${invoice.invoiceNumber}</div>
+      <div class="doc-title">رسید پرداخت فیس — ${escapeHtml(invoice.invoiceNumber)}</div>
       <table class="meta-grid">
-        <tr><th>شاگرد</th><td>${text(invoice.studentId?.fullName)}</td><th>کد شاگرد</th><td class="ltr">${text(invoice.studentId?.studentCode)}</td></tr>
-        <tr><th>صنف</th><td>${text(invoice.className)}</td><th>تاریخ</th><td>${issuedAtLabel || '-'}</td></tr>
-        <tr><th>روش پرداخت</th><td>${paymentMethodLabels[invoice.paymentMethod] || text(invoice.paymentMethod)}</td><th>مرجع</th><td class="ltr">${text(invoice.referenceNo, '-')}</td></tr>
+        <tr><th>شاگرد</th><td>${escapeHtml(text(invoice.studentId?.fullName))}</td><th>کد شاگرد</th><td class="ltr">${escapeHtml(text(invoice.studentId?.studentCode))}</td></tr>
+        <tr><th>صنف</th><td>${escapeHtml(text(invoice.className))}</td><th>تاریخ</th><td>${escapeHtml(issuedAtLabel || '-')}</td></tr>
+        <tr><th>روش پرداخت</th><td>${escapeHtml(paymentMethodLabels[invoice.paymentMethod] || text(invoice.paymentMethod))}</td><th>مرجع</th><td class="ltr">${escapeHtml(text(invoice.referenceNo, '-'))}</td></tr>
       </table>
       <table class="amount-grid">
-        <tr><td>فیس اصلی</td><td class="ltr">${fmt(invoice.feeAmount)} ${invoice.currency}</td></tr>
-        <tr><td>تخفیف</td><td class="ltr">${fmt(invoice.discountAmount)} ${invoice.currency}</td></tr>
-        <tr><td>باقی‌ماندهٔ قبلی</td><td class="ltr">${fmt(invoice.previousBalance)} ${invoice.currency}</td></tr>
-        <tr class="total"><td>مبلغ این پرداخت</td><td class="ltr">${fmt(invoice.paidAmount)} ${invoice.currency}</td></tr>
-        <tr><td>باقی‌ماندهٔ جدید</td><td class="ltr">${fmt(invoice.remainingBalance)} ${invoice.currency}</td></tr>
+        <tr><td>فیس اصلی</td><td class="ltr">${escapeHtml(fmt(invoice.feeAmount))} ${escapeHtml(invoice.currency)}</td></tr>
+        <tr><td>تخفیف</td><td class="ltr">${escapeHtml(fmt(invoice.discountAmount))} ${escapeHtml(invoice.currency)}</td></tr>
+        <tr><td>باقی‌ماندهٔ قبلی</td><td class="ltr">${escapeHtml(fmt(invoice.previousBalance))} ${escapeHtml(invoice.currency)}</td></tr>
+        <tr class="total"><td>مبلغ این پرداخت</td><td class="ltr">${escapeHtml(fmt(invoice.paidAmount))} ${escapeHtml(invoice.currency)}</td></tr>
+        <tr><td>باقی‌ماندهٔ جدید</td><td class="ltr">${escapeHtml(fmt(invoice.remainingBalance))} ${escapeHtml(invoice.currency)}</td></tr>
       </table>
       <div class="foot">
-        <span>${text(settings?.receiptFooter, 'تشکر از پرداخت شما')}</span>
+        <span>${escapeHtml(text(settings?.receiptFooter, 'تشکر از پرداخت شما'))}</span>
         <div class="sig-seal">
           <div class="sig">امضای دریافت‌کننده</div>
-          <div class="seal">${settings?.sealText ? settings.sealText : 'جای تمبر'}</div>
+          <div class="seal">${escapeHtml(settings?.sealText ? settings.sealText : 'جای تمبر')}</div>
         </div>
       </div>
+    </div>
     </section>`;
 
   return `<!doctype html>
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="utf-8" />
-<title>رسید پرداخت - ${invoice.invoiceNumber}</title>
+<title>رسید پرداخت - ${escapeHtml(invoice.invoiceNumber)}</title>
 <style>
-  @page { size: A4 portrait; margin: 14mm; }
+  @page { size: A4 portrait; margin: 12mm; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: Tahoma, 'B Nazanin', sans-serif; }
-  .copy { border: 0.3mm solid #111; border-radius: 3mm; padding: 6mm 7mm; margin-bottom: 8mm; }
+  #page-ruler { position: absolute; visibility: hidden; height: 134mm; width: 1px; top: 0; left: 0; }
+  .copy { height: 134mm; box-sizing: border-box; border: 0.3mm solid #111; border-radius: 2mm; padding: 4mm 6mm; overflow: visible; position: relative; }
+  .copy-inner { transform-origin: top center; }
+  .cut-line { position: relative; display: flex; align-items: center; justify-content: center; height: 5mm; color: #555; font-size: 7pt; margin: 0; }
+  .cut-line::before { position: absolute; right: 0; left: 0; top: 50%; border-top: 0.25mm dashed #777; content: ''; }
+  .cut-line span { position: relative; z-index: 1; padding: 0 3mm; background: #fff; }
   .copy-label { text-align: center; font-weight: 700; font-size: 9pt; color: #444; margin-bottom: 2mm; }
-  .letterhead { text-align: center; margin-bottom: 4mm; }
-  .letterhead h2 { margin: 0; font-size: 15pt; }
+  .letterhead { text-align: center; margin-bottom: 3mm; }
+  .letterhead h2 { margin: 0; font-size: 14pt; }
   .letterhead p { margin: 1mm 0 0; font-size: 8.5pt; color: #333; }
-  .doc-title { text-align: center; font-weight: 700; font-size: 10.5pt; border-top: 0.3mm solid #111; border-bottom: 0.3mm solid #111; padding: 2mm 0; margin-bottom: 3mm; }
-  table { width: 100%; border-collapse: collapse; font-size: 9pt; margin-bottom: 3mm; }
-  .meta-grid th, .meta-grid td { border: 0.2mm solid #999; padding: 1.6mm 2mm; text-align: right; }
+  .doc-title { text-align: center; font-weight: 700; font-size: 10pt; border-top: 0.3mm solid #111; border-bottom: 0.3mm solid #111; padding: 1.6mm 0; margin-bottom: 2.5mm; }
+  table { width: 100%; border-collapse: collapse; font-size: 8.8pt; margin-bottom: 2.5mm; }
+  .meta-grid th, .meta-grid td { border: 0.2mm solid #999; padding: 1.4mm 2mm; text-align: right; }
   .meta-grid th { background: #f2f2f2; font-weight: 700; width: 14%; }
-  .amount-grid td { border: 0.2mm solid #999; padding: 1.8mm 3mm; }
+  .amount-grid td { border: 0.2mm solid #999; padding: 1.6mm 3mm; }
   .amount-grid td:first-child { width: 65%; }
-  .amount-grid .total td { font-weight: 800; background: #f2f2f2; font-size: 10pt; }
+  .amount-grid .total td { font-weight: 800; background: #f2f2f2; font-size: 9.5pt; }
   .ltr { direction: ltr; unicode-bidi: isolate; text-align: left; }
-  .foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 4mm; font-size: 8.5pt; }
+  .foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 3mm; font-size: 8.5pt; }
   .sig-seal { display: flex; gap: 6mm; align-items: flex-end; }
   .sig { border-top: 0.2mm solid #333; padding-top: 1.5mm; width: 34mm; text-align: center; }
-  .seal { width: 22mm; height: 22mm; border: 0.3mm dashed #8c3b34; color: #8c3b34; border-radius: 50%; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 7pt; padding: 1mm; }
+  .seal { width: 20mm; height: 20mm; border: 0.3mm dashed #8c3b34; color: #8c3b34; border-radius: 50%; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 6.5pt; padding: 1mm; }
 </style>
 </head>
 <body>
+  <div id="page-ruler"></div>
   ${renderCopy('نسخهٔ شاگرد')}
+  <div class="cut-line"><span>محل برش</span></div>
   ${renderCopy('نسخهٔ مرکز')}
   <script>
-    window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 120); });
+    (function () {
+      var printed = false;
+      function ready() {
+        if (printed) return;
+        printed = true;
+        try {
+          var halfPageHeightPx = document.getElementById('page-ruler').getBoundingClientRect().height;
+          var inners = document.querySelectorAll('.copy-inner');
+          for (var i = 0; i < inners.length; i += 1) {
+            var inner = inners[i];
+            inner.style.transform = 'none';
+            var naturalHeight = inner.getBoundingClientRect().height;
+            if (halfPageHeightPx > 0 && naturalHeight > halfPageHeightPx) {
+              inner.style.transform = 'scale(' + (halfPageHeightPx / naturalHeight) + ')';
+            }
+          }
+        } catch (err) {
+          // Printing the unscaled document beats not printing at all.
+        }
+        setTimeout(function () { window.print(); }, 60);
+      }
+      if (window.document.fonts && window.document.fonts.ready) {
+        window.document.fonts.ready.then(ready, ready);
+      }
+      window.addEventListener('load', ready);
+      setTimeout(ready, 2500);
+    })();
   </script>
 </body>
 </html>`;
