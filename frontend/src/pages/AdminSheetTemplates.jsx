@@ -395,17 +395,10 @@ export default function AdminSheetTemplates() {
   const editTeachers = useMemo(() => Array.from(new Map(
     teacherAssignments
       .filter((item) => !sessionEdit.academicYearId || String(getAssignmentAcademicYearId(item)) === String(sessionEdit.academicYearId))
-      .filter((item) => editingManagement?.permissions?.canEditStructure
-        || String(item?.schoolClass?.id || '') === String(sessionEdit.classId))
-      .filter((item) => editingManagement?.permissions?.canEditStructure
-        || String(item?.subject?.id || '') === String(sessionEdit.subjectId))
       .filter((item) => item?.teacher?.id)
       .map((item) => [String(item.teacher.id), item.teacher])
   ).values()), [
-    editingManagement?.permissions?.canEditStructure,
     sessionEdit.academicYearId,
-    sessionEdit.classId,
-    sessionEdit.subjectId,
     teacherAssignments
   ]);
   const editClasses = useMemo(() => Array.from(new Map(
@@ -730,7 +723,7 @@ export default function AdminSheetTemplates() {
         next.classId = '';
         next.subjectId = '';
       }
-      if (name === 'teacherId' && editingManagement?.permissions?.canEditStructure) {
+      if (name === 'teacherId') {
         next.classId = '';
         next.subjectId = '';
       }
@@ -753,7 +746,7 @@ export default function AdminSheetTemplates() {
       showMessage('برای ترکیب انتخاب‌شده تخصیص فعالی در بخش «معرفی صنف به استاد» پیدا نشد.', 'error');
       return;
     }
-    if (editingManagement?.permissions?.canEditStructure && editScoreTotal !== expectedEditScoreTotal) {
+    if (editScoreTotal !== expectedEditScoreTotal) {
       showMessage(`مجموع اجزای نمره باید دقیقاً ${formatNumber(expectedEditScoreTotal)} باشد؛ مجموع فعلی ${formatNumber(editScoreTotal)} است.`, 'error');
       return;
     }
@@ -766,18 +759,14 @@ export default function AdminSheetTemplates() {
         reviewerUserId: sessionEdit.reviewerUserId || null,
         heldAt: sessionEdit.heldAt,
         monthLabel: sessionEdit.monthLabel,
-        note: sessionEdit.note
+        note: sessionEdit.note,
+        academicYearId: sessionEdit.academicYearId,
+        assessmentPeriodId: sessionEdit.assessmentPeriodId,
+        classId: sessionEdit.classId,
+        subjectId: sessionEdit.subjectId,
+        examTypeId: sessionEdit.examTypeId,
+        scoreComponents: buildExamScoreComponents(sessionEdit, { preserveAttendance: true })
       };
-      if (editingManagement?.permissions?.canEditStructure) {
-        Object.assign(payload, {
-          academicYearId: sessionEdit.academicYearId,
-          assessmentPeriodId: sessionEdit.assessmentPeriodId,
-          classId: sessionEdit.classId,
-          subjectId: sessionEdit.subjectId,
-          examTypeId: sessionEdit.examTypeId,
-          scoreComponents: buildExamScoreComponents(sessionEdit, { preserveAttendance: true })
-        });
-      }
       const data = await fetchJson(`/api/exams/sessions/${sessionEdit.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -801,7 +790,7 @@ export default function AdminSheetTemplates() {
       setBusyAction(`delete-session:${session.id}`);
       const state = await fetchJson(`/api/exams/sessions/${session.id}/management-state`);
       if (!state.permissions?.canHardDelete) {
-        showMessage('این شقه نمره یا وابستگی رسمی دارد و حذف کامل نمی‌شود؛ از آرشیف یا نسخهٔ اصلاحی استفاده کنید.', 'error');
+        showMessage('این پیش‌نویس به جدول نتیجه یا ترفیع رسمی شاگرد وصل است و حذف کامل نمی‌شود؛ از آرشیف یا نسخهٔ اصلاحی استفاده کنید.', 'error');
         return;
       }
       const confirmed = window.confirm(`شقه «${session.subject?.name || session.title}» و ردیف‌های موقت آن حذف شود؟ این عمل قابل برگشت نیست.`);
@@ -1707,19 +1696,19 @@ export default function AdminSheetTemplates() {
                 <span>این فورم تخصیص تازه نمی‌سازد؛ فقط یکی از تخصیص‌های فعال موجود در بخش «معرفی صنف به استاد» را به شقه وصل می‌کند.</span>
               </div>
 
-              {!editingManagement?.permissions?.canEditStructure ? (
+              {(editingManagement?.summary?.substantiveMarkCount > 0 || editingManagement?.blockers?.length > 0) ? (
                 <div className="admin-sheet-session-lock-note">
-                  نمره یا سند وابسته موجود است؛ سال، صنف، مضمون، نوع امتحان و اجزای نمره قفل‌اند. استاد، ممیز، تاریخ، ماه و یادداشت هنوز قابل ویرایش است.
+                  برای این شقه نمره یا سند وابسته ثبت شده است؛ همه فیلدها همچنان قابل ویرایش‌اند، اما تغییر سال، صنف، مضمون، نوع امتحان یا اجزای نمره ممکن است روی نمرات و اسناد قبلی اثر بگذارد. با احتیاط ویرایش کنید.
                 </div>
               ) : null}
 
               <div className="admin-sheet-session-edit-grid">
-                <label><span>سال تعلیمی</span><select name="academicYearId" value={sessionEdit.academicYearId} onChange={updateSessionEdit} disabled={!editingManagement?.permissions?.canEditStructure}><option value="">انتخاب سال</option>{academicYears.map((item) => <option key={item.id} value={item.id}>{item.title || item.code}</option>)}</select></label>
-                <label><span>دوره</span><select name="assessmentPeriodId" value={sessionEdit.assessmentPeriodId} onChange={updateSessionEdit} disabled={!editingManagement?.permissions?.canEditStructure}><option value="">انتخاب دوره</option>{editTerms.map((item) => <option key={item.id} value={item.id}>{item.title || item.code}</option>)}</select></label>
+                <label><span>سال تعلیمی</span><select name="academicYearId" value={sessionEdit.academicYearId} onChange={updateSessionEdit}><option value="">انتخاب سال</option>{academicYears.map((item) => <option key={item.id} value={item.id}>{item.title || item.code}</option>)}</select></label>
+                <label><span>دوره</span><select name="assessmentPeriodId" value={sessionEdit.assessmentPeriodId} onChange={updateSessionEdit}><option value="">انتخاب دوره</option>{editTerms.map((item) => <option key={item.id} value={item.id}>{item.title || item.code}</option>)}</select></label>
                 <label><span>استاد</span><select name="teacherId" value={sessionEdit.teacherId} onChange={updateSessionEdit}><option value="">انتخاب استاد</option>{editTeachers.map((item) => <option key={item.id} value={item.id}>{item.name || item.email}</option>)}</select></label>
-                <label><span>صنف</span><select name="classId" value={sessionEdit.classId} onChange={updateSessionEdit} disabled={!editingManagement?.permissions?.canEditStructure}><option value="">انتخاب صنف</option>{editClasses.map((item) => <option key={item.id} value={item.id}>{item.title || item.code}</option>)}</select></label>
-                <label><span>مضمون</span><select name="subjectId" value={sessionEdit.subjectId} onChange={updateSessionEdit} disabled={!editingManagement?.permissions?.canEditStructure}><option value="">انتخاب مضمون</option>{editSubjects.map((item) => <option key={item.id} value={item.id}>{item.name || item.title}</option>)}</select></label>
-                <label><span>نوع امتحان</span><select name="examTypeId" value={sessionEdit.examTypeId} onChange={updateSessionEdit} disabled={!editingManagement?.permissions?.canEditStructure}><option value="">انتخاب نوع امتحان</option>{examTypes.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+                <label><span>صنف</span><select name="classId" value={sessionEdit.classId} onChange={updateSessionEdit}><option value="">انتخاب صنف</option>{editClasses.map((item) => <option key={item.id} value={item.id}>{item.title || item.code}</option>)}</select></label>
+                <label><span>مضمون</span><select name="subjectId" value={sessionEdit.subjectId} onChange={updateSessionEdit}><option value="">انتخاب مضمون</option>{editSubjects.map((item) => <option key={item.id} value={item.id}>{item.name || item.title}</option>)}</select></label>
+                <label><span>نوع امتحان</span><select name="examTypeId" value={sessionEdit.examTypeId} onChange={updateSessionEdit}><option value="">انتخاب نوع امتحان</option>{examTypes.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
                 <label><span>فارمت شقه</span><select name="sheetTemplateId" value={sessionEdit.sheetTemplateId} onChange={updateSessionEdit}><option value="">فارمت پیش‌فرض</option>{items.filter((item) => item.type === 'exam' && item.isActive !== false).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
                 <label><span>استاد ممیز</span><select name="reviewerUserId" value={sessionEdit.reviewerUserId} onChange={updateSessionEdit}><option value="">هنگام تأیید تعیین شود</option>{reviewers.map((item) => <option key={item.id} value={item.id}>{item.name || item.email}</option>)}</select></label>
                 <label><span>ماه</span><input name="monthLabel" value={sessionEdit.monthLabel} onChange={updateSessionEdit} placeholder="مثلاً سرطان" /></label>
@@ -1731,7 +1720,7 @@ export default function AdminSheetTemplates() {
                 {SCORE_COMPONENTS.map((component) => (
                   <label key={component.key} className="admin-sheet-score-card">
                     <span>{component.label}</span>
-                    <input type="number" min="0" name={component.key} value={sessionEdit[component.key]} onChange={updateSessionEdit} disabled={!editingManagement?.permissions?.canEditStructure} />
+                    <input type="number" min="0" name={component.key} value={sessionEdit[component.key]} onChange={updateSessionEdit} />
                   </label>
                 ))}
               </div>
@@ -1739,14 +1728,12 @@ export default function AdminSheetTemplates() {
               <div className={`admin-sheet-session-score-total ${editScoreTotal === expectedEditScoreTotal ? 'is-valid' : 'is-invalid'}`}>
                 مجموع نمره: {formatNumber(editScoreTotal)} از {formatNumber(expectedEditScoreTotal)}
               </div>
-              {editingManagement?.permissions?.canEditStructure && (
-                <p className="admin-workspace-hint">
-                  صفر گذاشتن یک جزء نمره کاملاً مجاز است؛ فقط لازم است مجموع چهار جزء دقیقاً برابر عدد بالا باشد.
-                </p>
-              )}
+              <p className="admin-workspace-hint">
+                صفر گذاشتن یک جزء نمره کاملاً مجاز است؛ فقط لازم است مجموع چهار جزء دقیقاً برابر عدد بالا باشد.
+              </p>
 
               <div className="admin-sheet-session-dialog__actions">
-                <button type="button" className="admin-workspace-button" onClick={saveSessionEdit} disabled={busyAction === 'update-session' || (editingManagement?.permissions?.canEditStructure && editScoreTotal !== expectedEditScoreTotal) || !selectedEditAssignment?.id}>
+                <button type="button" className="admin-workspace-button" onClick={saveSessionEdit} disabled={busyAction === 'update-session'}>
                   {busyAction === 'update-session' ? 'در حال ذخیره…' : 'ذخیره تغییرات'}
                 </button>
                 <button type="button" className="admin-workspace-button-ghost" onClick={closeSessionEditor}>انصراف</button>
