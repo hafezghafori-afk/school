@@ -4,6 +4,16 @@ const mongoose = require('mongoose');
 const Discount = require('../models/Discount');
 const FeeExemption = require('../models/FeeExemption');
 const FinanceRelief = require('../models/FinanceRelief');
+// applySchoolOwnership() (invoked from FinanceRelief's pre('validate') hook) resolves
+// schoolId via mongoose.model('SchoolClass' | 'AcademicYear' | 'StudentMembership' | ...)
+// lazy lookups. Those schemas must be registered before any relief document is saved,
+// or mongoose throws MissingSchemaError. Requiring them here (unused directly) registers them.
+require('../models/SchoolClass');
+require('../models/AcademicYear');
+require('../models/StudentMembership');
+require('../models/AfghanStudent');
+require('../models/FinanceBill');
+require('../models/FeeOrder');
 const {
   syncFinanceReliefFromDiscount,
   syncFinanceReliefFromFeeExemption
