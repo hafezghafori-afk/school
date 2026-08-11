@@ -121,6 +121,7 @@ export const PERMISSION_GROUPS = [
     label: 'مالی',
     permissions: [
       { key: 'finance.center.manage', label: 'مرکز مالی', legacy: ['manage_finance'] },
+      { key: 'shortterm.center.manage', label: 'مرکز آموزش کوتاه‌مدت (شاگردان موقت)', legacy: ['manage_finance'] },
       { key: 'finance.government.view', label: 'داشبورد مالی دولت', legacy: ['manage_finance'] },
       { key: 'finance.memberships.manage', label: 'عضویت‌های مالی', legacy: ['manage_finance'] },
       { key: 'finance.student_profile.view', label: 'پروفایل مالی شاگرد', legacy: ['manage_finance'] },

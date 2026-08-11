@@ -853,6 +853,7 @@ export default function AdminPanel() {
 
   const canManageUsers = effectivePermissions.includes('manage_users');
   const canManageFinance = effectivePermissions.includes('manage_finance');
+  const canManageShortTermCenter = effectivePermissions.includes('shortterm.center.manage');
   const canManageContent = effectivePermissions.includes('manage_content');
   const canViewReports = effectivePermissions.includes('view_reports');
   const canViewDashboardStats = canViewReports || canManageFinance;
@@ -3693,6 +3694,14 @@ export default function AdminPanel() {
       subtitle: 'دوره‌ها، پرداخت‌ها و مدیریت آموزشگاه',
       count: 0,
       to: canManageFinance ? '/academy-management' : ''
+    },
+    {
+      key: 'short-term-center',
+      title: 'مرکز آموزش کوتاه‌مدت',
+      group: 'مالی',
+      subtitle: 'شاگردان موقت، صنف، فیس، بل و رسید - کاملاً جدا از مکتب و آموزشگاه',
+      count: 0,
+      to: canManageShortTermCenter ? '/short-term-center' : ''
     },
     {
       key: 'reports',
