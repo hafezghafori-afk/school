@@ -1853,7 +1853,11 @@ async function getExamSessionManagementState(sessionId) {
     || templateFilterCount > 0
     || dependentSessionCount > 0;
   const canEditStructure = editableStatus && substantiveMarkCount === 0 && !hasExternalReferences;
-  const canHardDelete = status === 'draft' && substantiveMarkCount === 0 && !hasExternalReferences;
+  // A draft is, by definition, not final yet: admins can always delete it outright to correct a
+  // mistake, even if marks were entered or it was used by a print template / revision link.
+  // The only things that stay off-limits are official downstream records — a result table or a
+  // promotion transaction — which must be cleared through their own screens first.
+  const canHardDelete = status === 'draft' && resultTableCount === 0 && promotionCount === 0;
   const canArchive = status !== 'archived' && promotionCount === 0;
   const blockers = [];
   if (!editableStatus) blockers.push('exam_session_locked');
@@ -1947,14 +1951,18 @@ async function updateExamSession(sessionId, payload = {}, actorUserId = null, ac
         passMark: Number(source.defaultMarkId?.passMark || 0),
         conditionalMark: Number(source.defaultMarkId?.conditionalMark || 0)
       };
-  const structuralChange = Object.keys(sourceIds).some((key) => sourceIds[key] !== nextIds[key])
-    || JSON.stringify(existingComponents) !== JSON.stringify(scoring.scoreComponents);
-  if (structuralChange && !management.permissions.canEditStructure) {
-    throw new Error('exam_session_structural_edit_blocked');
-  }
+  // Structural fields (year/class/subject/exam type/score components) stay editable even when
+  // marks or dependent records exist, so admins can always correct a mistaken assignment.
+  const identityFieldsChanged = Object.keys(sourceIds).some((key) => sourceIds[key] !== nextIds[key]);
+  const scoreComponentsChanged = JSON.stringify(existingComponents) !== JSON.stringify(scoring.scoreComponents);
+  const structuralChange = identityFieldsChanged || scoreComponentsChanged;
 
   const monthChanged = normalizeText(source.monthLabel) !== normalizeText(mergedPayload.monthLabel);
-  const identityChange = structuralChange || monthChanged;
+  // Only year/class/subject/exam type/month define a session's identity and its uniqueness scope.
+  // A score-only edit must never regenerate the code or run the duplicate-scope check below —
+  // otherwise saving a pure score correction on a session that has a linked revision sibling
+  // (same identity, different status) gets rejected as a false "duplicate".
+  const identityChange = identityFieldsChanged || monthChanged;
   const nextCode = identityChange
     ? buildSessionCode({
       examType: refs.examType,
@@ -1966,14 +1974,16 @@ async function updateExamSession(sessionId, payload = {}, actorUserId = null, ac
       sessionKind: source.sessionKind
     })
     : normalizeText(source.code);
-  const duplicate = await findExistingSessionCandidate({
-    code: nextCode,
-    refs,
-    sessionKind: source.sessionKind,
-    monthLabel: mergedPayload.monthLabel
-  });
-  if (duplicate && String(duplicate._id) !== String(source._id)) {
-    throw new Error('exam_session_duplicate_scope');
+  if (identityChange) {
+    const duplicate = await findExistingSessionCandidate({
+      code: nextCode,
+      refs,
+      sessionKind: source.sessionKind,
+      monthLabel: mergedPayload.monthLabel
+    });
+    if (duplicate && String(duplicate._id) !== String(source._id)) {
+      throw new Error('exam_session_duplicate_scope');
+    }
   }
 
   const reviewerIdWasProvided = payload.reviewerUserId !== undefined;
@@ -2075,28 +2085,14 @@ async function deleteExamSession(sessionId, actorUserId = null, actorRole = '') 
       const current = await ExamSession.findOne({ _id: sessionId, status: 'draft' }).session(dbSession);
       if (!current) throw new Error('exam_session_delete_blocked');
 
-      const [substantiveMarkCount, resultCount, resultTableCount, promotionCount, templateFilterCount, dependentSessionCount] = await Promise.all([
-        ExamMark.countDocuments({
-          sessionId: current._id,
-          $or: [
-            { markStatus: 'recorded' },
-            { markStatus: { $in: ['absent', 'excused'] }, note: { $ne: 'initialized_roster' } }
-          ]
-        }).session(dbSession),
-        ExamResult.countDocuments({ sessionId: current._id }).session(dbSession),
+      const [resultTableCount, promotionCount] = await Promise.all([
         ResultTable.countDocuments({ $or: [{ sessionId: current._id }, { sourceSessionIds: current._id }] }).session(dbSession),
-        PromotionTransaction.countDocuments({ sessionId: current._id }).session(dbSession),
-        SheetTemplate.countDocuments({ 'filters.examId': current._id }).session(dbSession),
-        ExamSession.countDocuments({
-          _id: { $ne: current._id },
-          $or: [
-            { revisionRootSessionId: current._id },
-            { supersedesSessionId: current._id },
-            { replacedBySessionId: current._id }
-          ]
-        }).session(dbSession)
+        PromotionTransaction.countDocuments({ sessionId: current._id }).session(dbSession)
       ]);
-      if (substantiveMarkCount || resultCount || resultTableCount || promotionCount || templateFilterCount || dependentSessionCount) {
+      // Official downstream records stay protected — everything else about a draft (marks,
+      // template filters, revision links) is disposable and gets cleared so the delete never
+      // leaves a dangling reference elsewhere in the app.
+      if (resultTableCount || promotionCount) {
         throw new Error('exam_session_delete_blocked');
       }
 
@@ -2105,6 +2101,13 @@ async function deleteExamSession(sessionId, actorUserId = null, actorRole = '') 
       deletedMarks = Number(markDelete.deletedCount || 0);
       deletedResults = Number(resultDelete.deletedCount || 0);
       await ExamDefaultMark.deleteMany({ $or: [{ sessionId: current._id }, { _id: current.defaultMarkId }] }).session(dbSession);
+      await SheetTemplate.updateMany(
+        { 'filters.examId': current._id },
+        { $set: { 'filters.examId': null } }
+      ).session(dbSession);
+      await ExamSession.updateMany({ revisionRootSessionId: current._id }, { $unset: { revisionRootSessionId: '' } }).session(dbSession);
+      await ExamSession.updateMany({ supersedesSessionId: current._id }, { $unset: { supersedesSessionId: '' } }).session(dbSession);
+      await ExamSession.updateMany({ replacedBySessionId: current._id }, { $unset: { replacedBySessionId: '' } }).session(dbSession);
       const deletion = await ExamSession.deleteOne({ _id: current._id, status: 'draft' }).session(dbSession);
       if (Number(deletion.deletedCount || 0) !== 1) {
         throw new Error('exam_session_delete_blocked');
