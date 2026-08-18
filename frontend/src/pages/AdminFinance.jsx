@@ -2388,6 +2388,9 @@ export default function AdminFinance() {
   const [paymentPreview, setPaymentPreview] = useState(null);
   const [advanceBillingPreview, setAdvanceBillingPreview] = useState(null);
   const [advanceBillingPayload, setAdvanceBillingPayload] = useState(null);
+  const [advanceMonthCountInput, setAdvanceMonthCountInput] = useState('');
+  const [paymentSectionHighlighted, setPaymentSectionHighlighted] = useState(false);
+  const paymentSectionRef = useRef(null);
 
   const paymentDeskStudent = useMemo(
     () => students.find((item) => String(item?._id || '') === String(paymentDeskForm.studentId || '')) || null,
@@ -5368,7 +5371,7 @@ export default function AdminFinance() {
       dueDate: paymentDeskForm.paidAt || toInputDate(new Date()),
       periodType: 'monthly',
       includeFutureMonths: true,
-      futureMonthCount: Math.max(1, Math.min(12, Number(monthCount || 1))),
+      futureMonthCount: Math.max(1, Math.min(24, Number(monthCount || 1))),
       includeAdmission: false,
       includeTransport: false,
       onlyDebtors: false,
@@ -5379,9 +5382,13 @@ export default function AdminFinance() {
       const data = await postJson(`${API_BASE}/api/finance/admin/bills/preview`, payload);
       setAdvanceBillingPayload(payload);
       setAdvanceBillingPreview(data);
-      setMessage(data?.summary?.candidateCount
-        ? `پیش‌نمایش آماده شد: ${fmt(data.summary.candidateCount)} بل به مبلغ ${fmt(data.summary.totalAmountDue || 0)} افغانی.`
-        : 'برای این بازه بل جدید قابل صدور پیدا نشد؛ ماه‌ها ممکن است قبلاً صادر شده باشند.');
+      const existingOpenCount = Number(data?.summary?.existingOpenCount || 0);
+      const existingOpenNote = existingOpenCount
+        ? ` (${fmt(existingOpenCount)} ماه دیگر از قبل بل داشت، به مبلغ ${fmt(data.summary.existingOpenAmount || 0)} افغانی - این هم در مبلغ کل و انتخاب پرداخت لحاظ می‌شود)`
+        : '';
+      setMessage(data?.summary?.candidateCount || existingOpenCount
+        ? `پیش‌نمایش آماده شد: ${fmt(data.summary.candidateCount || 0)} بل جدید به مبلغ ${fmt(data.summary.totalAmountDue || 0)} افغانی.${existingOpenNote}`
+        : 'برای این بازه بل جدید قابل صدور پیدا نشد؛ ماه‌ها ممکن است قبلاً صادر و پرداخت شده باشند.');
     } catch (error) {
       setAdvanceBillingPreview(null);
       setAdvanceBillingPayload(null);
@@ -5392,7 +5399,9 @@ export default function AdminFinance() {
   };
 
   const generateAdvanceStudentBilling = async () => {
-    if (!advanceBillingPayload || !advanceBillingPreview?.summary?.candidateCount) return;
+    const candidateCount = Number(advanceBillingPreview?.summary?.candidateCount || 0);
+    const existingOpenCount = Number(advanceBillingPreview?.summary?.existingOpenCount || 0);
+    if (!advanceBillingPayload || (!candidateCount && !existingOpenCount)) return;
     setBusy(true);
     try {
       const data = await postJson(`${API_BASE}/api/finance/admin/bills/generate`, advanceBillingPayload);
@@ -5401,15 +5410,30 @@ export default function AdminFinance() {
       setAdvanceBillingPayload(null);
       await refreshPaymentWorkspace({ includeAnomalies: true });
       const createdFeeOrderIds = Array.isArray(data?.createdFeeOrderIds) ? data.createdFeeOrderIds.map(String) : [];
-      if (createdFeeOrderIds.length) {
+      // A "pay N months at once" request can include months that already had
+      // an open bill before this click - those are not newly created, but
+      // they still belong in the same payment (see existingFeeOrderIds on
+      // the backend), otherwise they'd silently fall out of the lump sum.
+      const existingFeeOrderIds = Array.isArray(data?.existingFeeOrderIds) ? data.existingFeeOrderIds.map(String) : [];
+      const combinedFeeOrderIds = Array.from(new Set([...createdFeeOrderIds, ...existingFeeOrderIds]));
+      const combinedAmount = Math.round((Number(data?.createdAmount || 0) + Number(data?.existingAmount || 0)) * 100) / 100;
+      if (combinedFeeOrderIds.length) {
         setPaymentDeskForm((previous) => ({
           ...previous,
-          amount: String(data?.createdAmount || ''),
+          amount: String(combinedAmount || ''),
           allocationMode: 'auto_selected',
-          selectedFeeOrderIds: createdFeeOrderIds,
+          selectedFeeOrderIds: combinedFeeOrderIds,
           manualAllocations: {}
         }));
-        setMessage(`${data.message || 'بل‌ها صادر شد.'} مبلغ و بل‌های جدید برای پیش‌نمایش پرداخت انتخاب شدند.`);
+        const monthNote = existingFeeOrderIds.length
+          ? ` (شامل ${fmt(existingFeeOrderIds.length)} ماه که از قبل بل داشت)`
+          : '';
+        setMessage(`${data.message || 'بل‌ها صادر شد.'} مبلغ و ${fmt(combinedFeeOrderIds.length)} بل برای پرداخت انتخاب شدند${monthNote}.`);
+        setPaymentSectionHighlighted(true);
+        requestAnimationFrame(() => {
+          paymentSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+        setTimeout(() => setPaymentSectionHighlighted(false), 4000);
       }
     } catch (error) {
       setMessage(error.message);
@@ -8259,7 +8283,7 @@ export default function AdminFinance() {
           <div className="finance-advance-payment-panel" data-testid="advance-month-payment-panel">
             <div>
               <strong>پرداخت چندماهه یا یک‌جای سال</strong>
-              <small>ابتدا بل ماه‌های موردنظر را پیش‌نمایش کنید؛ بل‌های تکراری دوباره ساخته نمی‌شوند.</small>
+              <small>برای ماه‌هایی که بل‌شان هنوز صادر نشده هم کار می‌کند - ابتدا پیش‌نمایش کنید؛ بل‌های تکراری دوباره ساخته نمی‌شوند و ماه‌هایی که از قبل بل داشتند هم در پرداخت لحاظ می‌شوند.</small>
             </div>
             <div className="finance-advance-payment-actions">
               {[1, 3, 6, 9, 12].map((count) => (
@@ -8273,24 +8297,79 @@ export default function AdminFinance() {
                   {count === 12 ? 'تا پایان سال' : `${fmt(count)} ماه`}
                 </button>
               ))}
+              <label className="finance-inline-filter finance-advance-custom-months">
+                <span>تعداد ماه دلخواه</span>
+                <div className="finance-advance-custom-months-row">
+                  <input
+                    type="number"
+                    min="1"
+                    max="24"
+                    value={advanceMonthCountInput}
+                    placeholder="مثلاً ۲"
+                    disabled={busy || !paymentDeskMembershipStudent}
+                    onChange={(e) => setAdvanceMonthCountInput(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={busy || !paymentDeskMembershipStudent || !(Number(advanceMonthCountInput) > 0)}
+                    onClick={() => previewAdvanceStudentBilling(Number(advanceMonthCountInput))}
+                  >
+                    پیش‌نمایش
+                  </button>
+                </div>
+              </label>
             </div>
             {advanceBillingPreview ? (
               <div className="finance-advance-preview">
                 <span>
-                  قابل صدور: <strong>{fmt(advanceBillingPreview?.summary?.candidateCount || 0)} بل</strong>
+                  قابل صدور: <strong>{fmt(advanceBillingPreview?.summary?.candidateCount || 0)} بل جدید</strong>
                   {' · '}
-                  مبلغ: <strong>{fmt(advanceBillingPreview?.summary?.totalAmountDue || 0)} AFN</strong>
+                  مبلغ بل‌های جدید: <strong>{fmt(advanceBillingPreview?.summary?.totalAmountDue || 0)} AFN</strong>
+                  {!!advanceBillingPreview?.summary?.existingOpenCount && (
+                    <>
+                      {' · '}
+                      از قبل صادرشده: <strong>{fmt(advanceBillingPreview.summary.existingOpenCount)} ماه ({fmt(advanceBillingPreview.summary.existingOpenAmount || 0)} AFN)</strong>
+                    </>
+                  )}
                   {' · '}
-                  تکراری: <strong>{fmt(advanceBillingPreview?.summary?.duplicateCount || 0)}</strong>
+                  مجموع کل برای پرداخت: <strong>{fmt(advanceBillingPreview?.summary?.combinedAmountDue ?? advanceBillingPreview?.summary?.totalAmountDue ?? 0)} AFN</strong>
                 </span>
+                {Array.isArray(advanceBillingPreview?.items) && advanceBillingPreview.items.length > 0 && (
+                  <ul className="finance-advance-month-list">
+                    {advanceBillingPreview.items.map((item, index) => (
+                      <li key={`advance-month-item-${index}`}>
+                        <span>{item.periodLabel || item.term || `ماه ${index + 1}`}</span>
+                        {item.duplicate ? (
+                          <span className={`finance-chip ${item.duplicate.outstandingAmount > 0 ? 'finance-chip-muted' : 'finance-chip-emerald'}`}>
+                            {item.duplicate.outstandingAmount > 0
+                              ? `از قبل صادر شده - مانده: ${fmt(item.duplicate.outstandingAmount)} AFN`
+                              : 'از قبل صادر و تسویه شده'}
+                          </span>
+                        ) : (
+                          <span className="finance-chip finance-chip-emerald">بل جدید - {fmt(item.amountDue || 0)} AFN</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <div>
                   <button type="button" className="secondary" onClick={() => { setAdvanceBillingPreview(null); setAdvanceBillingPayload(null); }}>لغو پیش‌نمایش</button>
-                  <button type="button" onClick={generateAdvanceStudentBilling} disabled={busy || !advanceBillingPreview?.summary?.candidateCount}>تایید صدور بل‌ها</button>
+                  <button
+                    type="button"
+                    onClick={generateAdvanceStudentBilling}
+                    disabled={busy || !(Number(advanceBillingPreview?.summary?.candidateCount || 0) || Number(advanceBillingPreview?.summary?.existingOpenCount || 0))}
+                  >
+                    تایید و آماده‌سازی پرداخت
+                  </button>
                 </div>
               </div>
             ) : null}
           </div>
-          <div className="finance-payment-section-title">
+          <div
+            ref={paymentSectionRef}
+            className={`finance-payment-section-title${paymentSectionHighlighted ? ' finance-payment-section-highlighted' : ''}`}
+          >
             <span>مشخصات پرداخت</span>
             <small>مبلغ، نوع پرداخت و تاریخ</small>
           </div>

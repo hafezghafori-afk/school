@@ -5405,6 +5405,13 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
 
     const items = [];
     let duplicateCount = 0;
+    // A duplicate here means "this month already has a bill" - which, for an
+    // advance/lump-sum multi-month payment, is not just noise to report: if
+    // that existing bill is still open, its FeeOrder needs to be surfaced too
+    // so the caller can fold it into the same payment instead of silently
+    // dropping that month from a "pay N months at once" total.
+    let existingOpenAmount = 0;
+    let existingOpenCount = 0;
     for (const candidate of preview.items) {
       const duplicate = await findConflictingBill({
         schoolId: schoolContext.schoolId,
@@ -5418,7 +5425,25 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
         dueDate: candidate.dueDate || dueDateValue,
         feeTypes: candidate.feeScopes
       });
-      if (duplicate) duplicateCount += 1;
+      let duplicatePayload = null;
+      if (duplicate) {
+        duplicateCount += 1;
+        const linkedOrder = await FeeOrder.findOne({ sourceBillId: duplicate._id })
+          .select('_id status outstandingAmount')
+          .lean();
+        const isOpen = linkedOrder && !['paid', 'void'].includes(String(linkedOrder.status || ''));
+        if (isOpen) {
+          existingOpenCount += 1;
+          existingOpenAmount = roundMoney(existingOpenAmount + Number(linkedOrder.outstandingAmount || 0));
+        }
+        duplicatePayload = {
+          id: String(duplicate._id || ''),
+          billNumber: String(duplicate.billNumber || ''),
+          feeOrderId: linkedOrder ? String(linkedOrder._id) : null,
+          status: linkedOrder?.status || duplicate.status || '',
+          outstandingAmount: isOpen ? roundMoney(linkedOrder.outstandingAmount) : 0
+        };
+      }
       items.push({
         studentId: candidate.student,
         studentMembershipId: candidate.studentMembershipId,
@@ -5433,7 +5458,7 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
         periodType: candidate.periodType || effectivePeriodType,
         periodLabel: candidate.periodLabel || normalizedPeriodLabel,
         term: candidate.term || normalizedTerm,
-        duplicate: duplicate ? { id: String(duplicate._id || ''), billNumber: String(duplicate.billNumber || '') } : null
+        duplicate: duplicatePayload
       });
     }
 
@@ -5445,7 +5470,10 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
       excluded: preview.excluded,
       summary: {
         ...preview.summary,
-        duplicateCount
+        duplicateCount,
+        existingOpenCount,
+        existingOpenAmount,
+        combinedAmountDue: roundMoney(Number(preview.summary?.totalAmountDue || 0) + existingOpenAmount)
       }
     });
   } catch (error) {
@@ -5564,10 +5592,15 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
     })
       .select('schoolId student course academicYearId academicYear term periodType periodLabel dueDate feeScopes lineItems')
       .lean();
-    const existingObligationKeys = new Set(existingBills.map((item) => getBillObligationKey(item)));
-    const existingStudentMonthlyTuitionKeys = new Set(existingBills
+    // Maps (not just Sets) so that when a candidate month turns out to already
+    // have a bill, we know WHICH bill it is - needed to fold that bill's
+    // still-open FeeOrder into this response (see existingFeeOrderIds below),
+    // instead of the caller losing track of already-billed months inside a
+    // "pay N months at once" request.
+    const existingObligationKeys = new Map(existingBills.map((item) => [getBillObligationKey(item), item._id]));
+    const existingStudentMonthlyTuitionKeys = new Map(existingBills
       .filter(isMonthlyTuitionRecord)
-      .map((item) => buildStudentMonthlyTuitionIdentity({
+      .map((item) => [buildStudentMonthlyTuitionIdentity({
         schoolId: item.schoolId || schoolContext.schoolId,
         studentId: item.student,
         academicYearId: item.academicYearId,
@@ -5576,8 +5609,9 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
         periodLabel: item.periodLabel,
         dueDate: item.dueDate,
         term: item.term
-      }))
-      .filter(Boolean));
+      }), item._id])
+      .filter(([key]) => Boolean(key)));
+    const matchedExistingBillIds = new Set();
     for (const candidate of preview.items) {
       const obligationKey = buildBillObligationKey({
         schoolId: schoolContext.schoolId,
@@ -5592,6 +5626,7 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       });
       if (existingObligationKeys.has(obligationKey)) {
         skipped += 1;
+        matchedExistingBillIds.add(String(existingObligationKeys.get(obligationKey)));
         continue;
       }
       const studentMonthlyTuitionKey = getFinanceRecordFeeTypes(candidate).includes('tuition')
@@ -5608,6 +5643,7 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
         : '';
       if (studentMonthlyTuitionKey && existingStudentMonthlyTuitionKeys.has(studentMonthlyTuitionKey)) {
         skipped += 1;
+        matchedExistingBillIds.add(String(existingStudentMonthlyTuitionKeys.get(studentMonthlyTuitionKey)));
         continue;
       }
 
@@ -5669,8 +5705,8 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
         createdFeeOrderIds.push(String(feeOrderId));
         createdAmount = roundMoney(createdAmount + Number(candidate.amountDue || 0));
       }
-      existingObligationKeys.add(obligationKey);
-      if (studentMonthlyTuitionKey) existingStudentMonthlyTuitionKeys.add(studentMonthlyTuitionKey);
+      existingObligationKeys.set(obligationKey, bill._id);
+      if (studentMonthlyTuitionKey) existingStudentMonthlyTuitionKeys.set(studentMonthlyTuitionKey, bill._id);
       created += 1;
       createdIds.push(bill._id);
       createdNotifications.push({
@@ -5705,12 +5741,30 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       }
     });
 
+    // Months that were skipped because a bill already exists for them are not
+    // just noise: for a "pay N months at once" request they still need to be
+    // part of the same payment. Resolve the matched bills to their still-open
+    // canonical FeeOrder so the caller can fold them into one payment together
+    // with createdFeeOrderIds, instead of silently dropping those months.
+    let existingFeeOrderIds = [];
+    let existingAmount = 0;
+    if (matchedExistingBillIds.size) {
+      const existingOpenOrders = await FeeOrder.find({
+        sourceBillId: { $in: Array.from(matchedExistingBillIds) },
+        status: { $nin: ['paid', 'void'] }
+      }).select('_id outstandingAmount').lean();
+      existingFeeOrderIds = existingOpenOrders.map((item) => String(item._id));
+      existingAmount = roundMoney(existingOpenOrders.reduce((sum, item) => sum + Number(item.outstandingAmount || 0), 0));
+    }
+
     res.json({
       success: true,
       message: `صدور گروهی انجام شد: ${created} بل ایجاد شد، ${skipped} مورد رد یا تکراری بود.`,
       created,
       createdAmount,
       createdFeeOrderIds,
+      existingFeeOrderIds,
+      existingAmount,
       skipped,
       periodType: effectivePeriodType,
       feePlan: preview.feePlan

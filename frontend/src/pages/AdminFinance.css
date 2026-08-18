@@ -584,6 +584,41 @@
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.finance-advance-custom-months {
+  gap: 4px;
+}
+
+.finance-advance-custom-months-row {
+  display: flex;
+  gap: 6px;
+}
+
+.finance-advance-custom-months-row input[type="number"] {
+  width: 84px;
+}
+
+.finance-advance-month-list {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.finance-advance-month-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+  color: rgba(226, 232, 240, 0.86);
+}
+
 .finance-recent-finance-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -2163,6 +2198,16 @@
   margin-top: 0;
   padding-top: 0;
   border-top: 0;
+}
+
+.finance-payment-section-highlighted {
+  animation: finance-payment-section-flash 1.4s ease-in-out 2;
+  border-radius: 10px;
+}
+
+@keyframes finance-payment-section-flash {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(34, 211, 238, 0.16); }
 }
 
 .finance-payment-section-title span {
