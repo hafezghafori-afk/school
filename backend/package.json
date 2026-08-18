@@ -111,6 +111,8 @@
     "finance:line-items:dry": "node ./scripts/backfillFeeOrderLineItems.js --dry-run",
     "finance:reliefs": "node ./scripts/backfillFinanceReliefs.js --apply",
     "finance:reliefs:dry": "node ./scripts/backfillFinanceReliefs.js --dry-run",
+    "check:legacy-linked-orders": "node ./scripts/checkLegacyLinkedOrders.js",
+    "print:legacy-linked-order-drift": "node ./scripts/printLegacyLinkedOrderDrift.js",
     "finance:admission-payment-evidence": "node ./scripts/repairAdmissionPaymentEvidence.js --apply",
     "finance:admission-payment-evidence:dry": "node ./scripts/repairAdmissionPaymentEvidence.js",
     "finance:auto-monthly-orders:dry": "node ./scripts/repairAutoMonthlyFeeOrders.js",
