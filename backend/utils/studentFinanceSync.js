@@ -669,8 +669,15 @@ async function syncFinanceBillPaymentFromFeeOrder(order, { session = null, dryRu
   if (!bill.paidAt && mergedPaid > 0) {
     bill.paidAt = normalizeDate(order.paidAt) || new Date();
   }
+  // Raising amountPaid alone leaves bill.status stuck at whatever it was
+  // (e.g. 'new') even once the bill is fully paid through the canonical
+  // order - anyone still reading FinanceBill.status directly would see a
+  // paid bill reported as unpaid. refreshFinanceBillStatus is a no-op on
+  // void bills (already guarded above) and only recomputes lineItems/status
+  // off the amounts just set, so this stays a pure "raise, never lower" fix.
+  refreshFinanceBillStatus(bill);
   await bill.save({ session });
-  return { skipped: false, updated: true, billId: bill._id, from: priorPaid, to: mergedPaid };
+  return { skipped: false, updated: true, billId: bill._id, from: priorPaid, to: mergedPaid, status: bill.status };
 }
 
 /**
