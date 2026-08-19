@@ -264,6 +264,14 @@ function formatFeeOrder(doc) {
           paidAt: entry?.paidAt || null
         }))
       : [],
+    // createdBy isn't populated by the queries that reach this formatter, so it's deliberately
+    // left out of the response here rather than risk formatActorLite mangling a bare ObjectId.
+    followUpNotes: Array.isArray(item.followUpNotes)
+      ? item.followUpNotes.map((entry) => ({
+          note: normalizeText(entry?.note),
+          createdAt: entry?.createdAt || null
+        }))
+      : [],
     voidReason: normalizeText(item.voidReason),
     voidedAt: item.voidedAt || null,
     voidedBy: formatActorLite(item.voidedBy),
@@ -2424,6 +2432,106 @@ async function listOpenFeeOrdersForMembership(studentMembershipId = '') {
   };
 }
 
+const normalizePhoneForMatch = (value = '') => String(value || '').replace(/\D/g, '');
+
+// There is no "family"/"sibling" link anywhere in the data model - the only cross-student signal
+// available today is a shared guardian phone number on the student's profile. This is therefore
+// a best-effort, informational-only match: it never blocks or drives any action, and is scoped to
+// the same school and to phone numbers with at least 7 digits (after stripping non-digits) to cut
+// down on matching on empty/placeholder values. A false match here only ever shows another
+// student's outstanding total on screen - callers must treat this as advisory, not authoritative.
+async function getSiblingDebtSummary({ studentId, schoolId } = {}) {
+  const normalizedStudentId = normalizeNullableId(studentId);
+  const normalizedSchoolId = normalizeNullableId(schoolId);
+  if (!normalizedStudentId) throw new Error('student_finance_membership_not_found');
+  if (!normalizedSchoolId) throw new Error('student_finance_school_scope_required');
+
+  const scopedClassIds = await SchoolClass.find({ schoolId: normalizedSchoolId }).distinct('_id');
+  const schoolMembershipFilter = {
+    isCurrent: true,
+    $or: [
+      { schoolId: normalizedSchoolId },
+      { $and: [{ schoolId: null }, { classId: { $in: scopedClassIds } }] }
+    ]
+  };
+
+  const selfMembership = await StudentMembership.findOne({
+    ...schoolMembershipFilter,
+    $or: [
+      { student: normalizedStudentId },
+      { studentId: normalizedStudentId }
+    ]
+  }).lean();
+  if (!selfMembership) return { siblings: [], totalSiblingOutstanding: 0 };
+
+  const selfStudentCoreId = normalizeNullableId(selfMembership.studentId);
+  if (!selfStudentCoreId) return { siblings: [], totalSiblingOutstanding: 0 };
+
+  const selfProfile = await StudentProfile.findOne({ studentId: selfStudentCoreId }).select('contact.primaryPhone').lean();
+  const selfPhone = normalizePhoneForMatch(selfProfile?.contact?.primaryPhone);
+  if (selfPhone.length < 7) return { siblings: [], totalSiblingOutstanding: 0 };
+
+  const schoolMemberships = await StudentMembership.find(schoolMembershipFilter)
+    .select('studentId student classId')
+    .populate('classId', 'title')
+    .lean();
+  const otherCoreIds = Array.from(new Set(
+    schoolMemberships
+      .map((item) => normalizeNullableId(item.studentId))
+      .filter((id) => id && id !== selfStudentCoreId)
+  ));
+  if (!otherCoreIds.length) return { siblings: [], totalSiblingOutstanding: 0 };
+
+  const candidateProfiles = await StudentProfile.find({
+    studentId: { $in: otherCoreIds },
+    'contact.primaryPhone': { $exists: true, $ne: '' }
+  }).select('studentId contact.primaryPhone').lean();
+
+  const matchedCoreIds = candidateProfiles
+    .filter((profile) => normalizePhoneForMatch(profile?.contact?.primaryPhone) === selfPhone)
+    .map((profile) => normalizeNullableId(profile.studentId))
+    .filter(Boolean)
+    .slice(0, 5);
+  if (!matchedCoreIds.length) return { siblings: [], totalSiblingOutstanding: 0 };
+
+  const membershipByCoreId = new Map();
+  schoolMemberships.forEach((item) => {
+    const coreId = normalizeNullableId(item.studentId);
+    if (coreId && !membershipByCoreId.has(coreId)) membershipByCoreId.set(coreId, item);
+  });
+
+  const [studentCores, openOrders] = await Promise.all([
+    StudentCore.find({ _id: { $in: matchedCoreIds } }).select('fullName admissionNo').lean(),
+    FeeOrder.find({
+      studentId: { $in: matchedCoreIds },
+      status: { $in: OPEN_ORDER_STATUSES }
+    }).select('studentId outstandingAmount').lean()
+  ]);
+  const studentCoreById = new Map(studentCores.map((item) => [normalizeNullableId(item._id), item]));
+  const outstandingByCoreId = new Map();
+  openOrders.forEach((order) => {
+    const coreId = normalizeNullableId(order.studentId);
+    if (!coreId) return;
+    outstandingByCoreId.set(coreId, (outstandingByCoreId.get(coreId) || 0) + Number(order.outstandingAmount || 0));
+  });
+
+  const siblings = matchedCoreIds.map((coreId) => {
+    const membership = membershipByCoreId.get(coreId);
+    const core = studentCoreById.get(coreId);
+    return {
+      studentCoreId: coreId,
+      name: normalizeText(core?.fullName) || 'شاگرد',
+      classTitle: normalizeText(membership?.classId?.title) || '-',
+      outstandingAmount: roundMoney(outstandingByCoreId.get(coreId) || 0)
+    };
+  });
+
+  return {
+    siblings,
+    totalSiblingOutstanding: roundMoney(siblings.reduce((sum, item) => sum + item.outstandingAmount, 0))
+  };
+}
+
 async function previewFeePaymentAllocation(payload = {}) {
   const schoolId = normalizeNullableId(payload.schoolId);
   if (!schoolId) {
@@ -2914,6 +3022,7 @@ module.exports = {
   listFeeExemptions,
   listDiscounts,
   listOpenFeeOrdersForMembership,
+  getSiblingDebtSummary,
   listFeeOrders,
   listFeePayments,
   inspectDiscountDuplicates,

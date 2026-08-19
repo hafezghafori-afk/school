@@ -10,6 +10,7 @@ const {
 } = require('../utils/financeDocumentArchive');
 const {
   addFeeOrderAdjustmentAction,
+  addFeeOrderFollowUpNoteAction,
   setFeeOrderInstallmentsAction,
   voidFeeOrderAction,
   approveFeePaymentAction,
@@ -386,6 +387,15 @@ router.post('/orders/:id/discount', requireAuth, requireRole(['admin']), require
     return res.json({ success: true, ...result });
   } catch (error) {
     return res.status(error?.status || 500).json({ success: false, message: error?.message || 'اعمال تخفیف یا تعدیل روی بدهی مالی ناموفق بود.' });
+  }
+});
+
+router.post('/orders/:id/follow-up-note', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const result = await addFeeOrderFollowUpNoteAction({ req, feeOrderId: req.params.id, body: req.body || {} });
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    return res.status(error?.status || 500).json({ success: false, message: error?.message || 'ثبت یادداشت پیگیری ناموفق بود.' });
   }
 });
 

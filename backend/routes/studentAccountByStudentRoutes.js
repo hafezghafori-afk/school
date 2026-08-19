@@ -1,6 +1,7 @@
 const express = require('express');
 const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
 const { getStudentOpenAccount } = require('../services/studentOpenAccountService');
+const { getSiblingDebtSummary } = require('../services/studentFinanceService');
 
 const router = express.Router();
 
@@ -50,6 +51,35 @@ router.get(
         console.error('[student-finance][student-open-account]', error);
       }
       return res.status(response.statusCode).json(response.body);
+    }
+  }
+);
+
+// Informational only (see getSiblingDebtSummary doc comment) - matched purely on a shared
+// guardian phone number within the same school, never used to gate or drive any financial action.
+router.get(
+  '/students/:studentId/sibling-debt-summary',
+  requireAuth,
+  requireRole(['admin']),
+  requirePermission('manage_finance'),
+  async (req, res) => {
+    try {
+      const result = await getSiblingDebtSummary({
+        studentId: asId(req.params.studentId),
+        schoolId: requestSchoolId(req)
+      });
+      res.set('Cache-Control', 'private, no-store');
+      return res.json({ success: true, ...result });
+    } catch (error) {
+      const code = String(error?.message || '').trim();
+      if (code === 'student_finance_school_scope_required') {
+        return res.status(400).json({ success: false, message: 'برای مشاهده بدهی خواهر/برادر، مکتب فعال را انتخاب کنید.' });
+      }
+      if (code === 'student_finance_membership_not_found') {
+        return res.status(400).json({ success: false, message: 'شناسه شاگرد معتبر نیست.' });
+      }
+      console.error('[student-finance][sibling-debt-summary]', error);
+      return res.status(500).json({ success: false, message: 'دریافت خلاصهٔ بدهی خواهر/برادر ناموفق بود.' });
     }
   }
 );

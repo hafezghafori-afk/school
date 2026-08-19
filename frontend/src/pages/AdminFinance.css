@@ -889,6 +889,15 @@
   white-space: nowrap;
 }
 
+.finance-chip-button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.finance-chip-button:hover {
+  filter: brightness(1.15);
+}
+
 .finance-chip-emerald {
   border-color: rgba(16, 185, 129, 0.28);
   background: rgba(16, 185, 129, 0.14);
@@ -911,6 +920,72 @@
   border-color: rgba(244, 114, 182, 0.26);
   background: rgba(244, 114, 182, 0.14);
   color: #fbcfe8;
+}
+
+.finance-aging-bar {
+  display: flex;
+  height: 10px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(148, 163, 184, 0.12);
+  margin: 2px 0 4px;
+}
+
+.finance-aging-segment {
+  min-width: 2px;
+  height: 100%;
+}
+
+.finance-aging-current { background: #34d399; }
+.finance-aging-31-60 { background: #fbbf24; }
+.finance-aging-61-90 { background: #fb923c; }
+.finance-aging-over-90 { background: #f87171; }
+
+.finance-aging-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: rgba(226, 232, 240, 0.75);
+}
+
+.finance-aging-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.finance-aging-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.finance-overdue-badge {
+  display: inline-block;
+  margin-inline-start: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.finance-overdue-badge-medium {
+  background: rgba(251, 191, 36, 0.16);
+  color: #fde68a;
+}
+
+.finance-overdue-badge-high {
+  background: rgba(251, 146, 60, 0.18);
+  color: #fed7aa;
+}
+
+.finance-overdue-badge-critical {
+  background: rgba(248, 113, 113, 0.2);
+  color: #fecaca;
 }
 
 .finance-chip-sky {
@@ -1055,6 +1130,28 @@
 
 .finance-order-pick-row input[type="number"] {
   min-width: 0;
+}
+
+.finance-order-pick-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.finance-order-pick-actions button {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.finance-order-followup-note {
+  color: rgba(253, 230, 138, 0.85) !important;
+}
+
+.finance-order-installment-suggest-btn {
+  border-color: rgba(96, 165, 250, 0.5) !important;
+  color: rgba(191, 219, 254, 0.95) !important;
 }
 
 /* The open-orders list under "تخصیص پرداخت" - tighter than the generic
@@ -2760,6 +2857,82 @@
   border-radius: 12px;
   background: rgba(244, 63, 94, 0.1);
   color: #fecdd3;
+}
+
+.finance-risk-alert {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  border-radius: 12px;
+  background: rgba(248, 113, 113, 0.12);
+  color: #fecaca;
+  font-size: 13px;
+}
+
+.finance-sibling-note {
+  display: grid;
+  gap: 3px;
+  margin: 10px 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.08);
+  font-size: 12px;
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.finance-sibling-note-list {
+  color: rgba(226, 232, 240, 0.65);
+}
+
+.finance-trend-chart {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.finance-trend-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(226, 232, 240, 0.8);
+  margin-bottom: 8px;
+}
+
+.finance-trend-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 60px;
+}
+
+.finance-trend-bar-col {
+  flex: 1;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 4px;
+  height: 100%;
+  text-align: center;
+}
+
+.finance-trend-bar-track {
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+}
+
+.finance-trend-bar-fill {
+  width: 100%;
+  min-height: 2px;
+  border-radius: 3px 3px 0 0;
+  background: linear-gradient(180deg, #34d399, rgba(52, 211, 153, 0.35));
+}
+
+.finance-trend-bar-col small {
+  font-size: 10px;
+  color: rgba(226, 232, 240, 0.6);
 }
 
 .finance-table .head {
