@@ -93,6 +93,14 @@ const REPORT_DEFINITIONS = Object.freeze([
     description: 'تحلیل وصول، پرداخت‌های در انتظار و باقی‌مانده فیس در سطح صنف'
   },
   {
+    key: 'fee_advance_payments_overview',
+    title: 'گزارش پیش‌پرداخت‌کنندگان',
+    category: 'finance',
+    requiredPermissions: ['manage_finance'],
+    supportedFilters: ['academicYearId', 'classId', 'dateFrom', 'dateTo'],
+    description: 'لیست شاگردانی که فیس یک یا چند ماه آینده را از قبل پرداخت کرده‌اند'
+  },
+  {
     key: 'exam_outcomes',
     title: 'گزارش نتایج امتحانات',
     category: 'exam',
@@ -791,6 +799,83 @@ async function buildFeeDebtorsOverviewReport(filters) {
       { key: 'fullReliefCount', label: 'معافیت‌های کامل' },
       { key: 'lastDueDate', label: 'آخرین مهلت پرداخت' },
       { key: 'debtorStatus', label: 'وضعیت بدهکاری' }
+    ],
+    rows,
+    summary,
+    meta: { totalRows: rows.length }
+  });
+}
+
+// A "prepaid" order is one that is already fully paid for a period that
+// hasn't started yet as of the reference date (dateTo if given, else today).
+// This is the natural companion report to the advance/lump-sum multi-month
+// payment flow in AdminFinance.jsx's payment desk: once an admin can collect
+// several future months at once, finance staff need a way to see who has
+// actually done that, and how far ahead.
+async function buildFeeAdvancePaymentsOverviewReport(filters) {
+  const definition = getReportDefinition('fee_advance_payments_overview');
+  const referenceDate = filters.dateTo ? new Date(`${filters.dateTo}T23:59:59.999Z`) : new Date();
+
+  const orderFilter = { status: 'paid', dueDate: { $gt: referenceDate } };
+  if (filters.academicYearId) orderFilter.academicYearId = filters.academicYearId;
+  if (filters.classId) orderFilter.classId = filters.classId;
+  await applySchoolClassScope(filters, orderFilter);
+  if (filters.dateFrom) orderFilter.dueDate.$gte = new Date(`${filters.dateFrom}T00:00:00.000Z`);
+
+  const orders = await FeeOrder.find(orderFilter)
+    .populate('student', 'name email')
+    .populate('studentId', 'fullName admissionNo')
+    .populate('classId', 'title code gradeLevel section')
+    .populate('academicYearId', 'title code')
+    .sort({ dueDate: 1 });
+
+  const grouped = new Map();
+  for (const item of orders) {
+    const groupKey = [
+      getReferenceId(item.studentMembershipId),
+      getReferenceId(item.studentId),
+      getReferenceId(item.student)
+    ].find(Boolean) || String(item._id);
+
+    const current = grouped.get(groupKey) || {
+      studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId }),
+      classTitle: getClassTitle(item.classId),
+      academicYear: getAcademicYearTitle(item.academicYearId),
+      monthsPrepaid: 0,
+      totalPrepaidAmount: 0,
+      earliestPrepaidMonth: '',
+      latestPrepaidMonth: ''
+    };
+
+    current.monthsPrepaid += 1;
+    current.totalPrepaidAmount += Number(item.amountPaid || 0);
+    const periodLabel = normalizeText(item.periodLabel) || toIsoOrEmpty(item.dueDate).slice(0, 10);
+    if (!current.earliestPrepaidMonth) current.earliestPrepaidMonth = periodLabel;
+    current.latestPrepaidMonth = periodLabel;
+
+    grouped.set(groupKey, current);
+  }
+
+  const rows = Array.from(grouped.values())
+    .map((item) => ({ ...item, totalPrepaidAmount: Number(item.totalPrepaidAmount.toFixed(2)) }))
+    .sort((left, right) => right.monthsPrepaid - left.monthsPrepaid || right.totalPrepaidAmount - left.totalPrepaidAmount);
+
+  const summary = {
+    referenceDate: referenceDate.toISOString().slice(0, 10),
+    totalStudents: rows.length,
+    totalMonthsPrepaid: rows.reduce((sum, item) => sum + Number(item.monthsPrepaid || 0), 0),
+    totalPrepaidAmount: Number(rows.reduce((sum, item) => sum + Number(item.totalPrepaidAmount || 0), 0).toFixed(2))
+  };
+
+  return buildBaseReport(definition, filters, {
+    columns: [
+      { key: 'studentName', label: 'متعلم' },
+      { key: 'classTitle', label: 'صنف' },
+      { key: 'academicYear', label: 'سال تعلیمی' },
+      { key: 'monthsPrepaid', label: 'تعداد ماه پیش‌پرداخت‌شده' },
+      { key: 'totalPrepaidAmount', label: 'مجموع مبلغ پیش‌پرداخت‌شده' },
+      { key: 'earliestPrepaidMonth', label: 'اولین ماه پیش‌پرداخت' },
+      { key: 'latestPrepaidMonth', label: 'آخرین ماه پیش‌پرداخت' }
     ],
     rows,
     summary,
@@ -1863,6 +1948,8 @@ async function runReport(reportKey, rawFilters = {}) {
       return buildFeeDiscountExemptionOverviewReport(filters);
     case 'fee_collection_by_class':
       return buildFeeCollectionByClassReport(filters);
+    case 'fee_advance_payments_overview':
+      return buildFeeAdvancePaymentsOverviewReport(filters);
     case 'exam_outcomes':
       return buildExamOutcomesReport(filters);
     case 'attendance_overview':

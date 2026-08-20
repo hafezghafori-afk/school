@@ -144,14 +144,21 @@ const {
 const {
   createFeePayment,
   getMembershipFinanceStatement,
-  listFeePayments
+  listFeePayments,
+  getDailyCashierReport
 } = require('../services/studentFinanceService');
 const { resolveQuarterForDate } = require('../services/financialPeriodService');
 const {
   inspectPaymentScopeRepairs,
   applyPaymentScopeRepairs
 } = require('../services/paymentScopeRepairService');
-const { runReport } = require('../services/reportEngineService');
+const { runReport, getReportDefinition } = require('../services/reportEngineService');
+const {
+  renderReportsToPdfBuffer,
+  formatMoney: formatReportMoney,
+  formatNumber: formatReportNumber,
+  formatDateLabel: formatReportDateLabel
+} = require('../utils/financeReportPdf');
 const { resolveActiveSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
 const {
   buildFinanceAnomalyReport,
@@ -7361,7 +7368,7 @@ router.get('/admin/reports/cashflow', requireAuth, requireRole(['admin']), requi
 
 router.get('/admin/reports/by-class', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const { classId = '', courseId = '' } = req.query || {};
+    const { classId = '', courseId = '', academicYearId = '', dateFrom = '', dateTo = '' } = req.query || {};
     const scope = await resolveFinanceReportReadContext(req, res, { classId, courseId });
     if (scope.error) return res.status(400).json({ success: false, message: scope.error });
     if (normalizeScopeText(courseId) && !normalizeScopeText(classId) && scope.classId) {
@@ -7370,7 +7377,10 @@ router.get('/admin/reports/by-class', requireAuth, requireRole(['admin']), requi
 
     const report = await runReport('fee_collection_by_class', {
       schoolId: scope.schoolId,
-      classId: scope.classId || ''
+      classId: scope.classId || '',
+      academicYearId,
+      dateFrom,
+      dateTo
     });
     const items = Array.isArray(report?.rows)
       ? report.rows.map((row) => ({
@@ -7586,6 +7596,384 @@ router.get('/admin/reports/anomalies', requireAuth, requireRole(['admin']), requ
       success: false,
       message: code === 'finance_month_key_invalid' ? 'فرمت تاریخ یا ماه برای anomalies معتبر نیست.' : 'خطا در تحلیل ناهنجاری‌های مالی'
     });
+  }
+});
+
+router.get('/admin/reports/debtors', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const { classId = '', courseId = '', academicYearId = '', dateFrom = '', dateTo = '' } = req.query || {};
+    const scope = await resolveFinanceReportReadContext(req, res, { classId, courseId });
+    if (scope.error) return res.status(400).json({ success: false, message: scope.error });
+    const report = await runReport('fee_debtors_overview', {
+      schoolId: scope.schoolId,
+      classId: scope.classId || '',
+      academicYearId,
+      dateFrom,
+      dateTo
+    });
+    res.json({ success: true, columns: report.columns, items: report.rows, summary: report.summary });
+  } catch {
+    res.status(500).json({ success: false, message: 'خطا در گزارش باقیداران' });
+  }
+});
+
+router.get('/admin/reports/advance-payments', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const { classId = '', courseId = '', academicYearId = '', dateFrom = '', dateTo = '' } = req.query || {};
+    const scope = await resolveFinanceReportReadContext(req, res, { classId, courseId });
+    if (scope.error) return res.status(400).json({ success: false, message: scope.error });
+    const report = await runReport('fee_advance_payments_overview', {
+      schoolId: scope.schoolId,
+      classId: scope.classId || '',
+      academicYearId,
+      dateFrom,
+      dateTo
+    });
+    res.json({ success: true, columns: report.columns, items: report.rows, summary: report.summary });
+  } catch {
+    res.status(500).json({ success: false, message: 'خطا در گزارش پیش‌پرداخت‌کنندگان' });
+  }
+});
+
+// Shared label dictionary for turning a report's `summary` object (English
+// keys, coming straight out of reportEngineService's aggregations) into the
+// small Dari key/value cards shown above every report's table - both in the
+// JSON summary tiles and in the PDF export. One dictionary reused across all
+// engine-backed reports, since their summary fields overlap heavily.
+const FINANCE_REPORT_SUMMARY_LABELS = {
+  totalDebtors: 'تعداد بدهکاران',
+  totalOrders: 'تعداد بل‌ها',
+  totalOutstanding: 'مجموع باقی‌مانده',
+  overdueDebtors: 'بدهکاران مهلت‌گذشته',
+  partialDebtors: 'بدهکاران نیمه‌پرداخت',
+  debtorsWithRelief: 'بدهکاران دارای تسهیل',
+  totalReliefs: 'تعداد تسهیلات فعال',
+  totalFixedReliefAmount: 'مبلغ تسهیلات ثابت',
+  fullReliefCount: 'معافیت‌های کامل',
+  percentReliefCount: 'تسهیلات درصدی',
+  totalClasses: 'تعداد صنف‌ها',
+  totalDue: 'مبلغ کل',
+  approvedCollection: 'وصول تاییدشده',
+  pendingCollection: 'وصول در انتظار',
+  totalPayments: 'تعداد پرداخت‌ها',
+  totalEntries: 'تعداد ثبت‌ها',
+  activeDiscounts: 'تخفیف‌های فعال',
+  activeExemptions: 'معافیت‌های فعال',
+  totalDiscountAmount: 'مجموع مبلغ تخفیف',
+  fullWaivers: 'معافیت کامل',
+  partialWaivers: 'معافیت جزئی',
+  referenceDate: 'تاریخ مرجع',
+  totalStudents: 'تعداد شاگردان',
+  totalMonthsPrepaid: 'مجموع ماه‌های پیش‌پرداخت‌شده',
+  totalPrepaidAmount: 'مجموع مبلغ پیش‌پرداخت‌شده',
+  total: 'مجموع دریافتی',
+  pendingTotal: 'مجموع در انتظار',
+  pendingCount: 'تعداد در انتظار'
+};
+
+// Explicit allowlist rather than a substring/regex match - a loose regex
+// like /due/i also matches "overdueDebtors" (a count, not money) and misreports
+// it as an amount. Every summary/column key that is genuinely a money value
+// across all four engine-backed reports is listed here once.
+const FINANCE_REPORT_MONEY_KEYS = new Set([
+  'totalOutstanding', 'totalFixedReliefAmount', 'totalDue', 'approvedCollection',
+  'pendingCollection', 'totalDiscountAmount', 'totalPrepaidAmount', 'total', 'pendingTotal',
+  'totalPaid', 'approvedAmount', 'pendingAmount', 'amount', 'fixedReliefAmount'
+]);
+const FINANCE_REPORT_DATE_KEYS = new Set([
+  'lastDueDate', 'createdAt', 'startDate', 'endDate', 'referenceDate', 'dueDate', 'date'
+]);
+const FINANCE_REPORT_STATUS_LABELS = {
+  overdue: 'مهلت‌گذشته', partial: 'نیمه‌پرداخت', new: 'جدید', paid: 'پرداخت‌شده', void: 'باطل',
+  active: 'فعال', cancelled: 'لغوشده', fixed: 'ثابت', percent: 'درصدی', full: 'کامل',
+  discount: 'تخفیف', exemption: 'معافیت', tuition: 'فیس', admission: 'داخله',
+  // financeAnomalyService.js anomalyType values
+  overpayment: 'بیش‌پرداخت',
+  full_relief_with_open_balance: 'معافیت کامل با باقی باز',
+  long_overdue_balance: 'باقی سررسیدگذشته طولانی',
+  relief_expiring: 'تسهیل در حال انقضا',
+  pending_payment_stalled: 'پرداخت معلق مانده',
+  admission_missing: 'بل داخله ناقص',
+  planned_fee_missing: 'فیس پلان صادرنشده',
+  duplicate_fee_bill: 'بل تکراری',
+  fee_underbilled: 'کم‌صورتحساب',
+  missing_admission: 'بل داخله ناقص',
+  critical: 'حساس', warning: 'هشدار', info: 'اطلاعیه'
+};
+
+function formatFinanceReportCellValue(key, value) {
+  if (value === null || value === undefined || value === '') return '-';
+  if (FINANCE_REPORT_DATE_KEYS.has(key)) return formatReportDateLabel(value);
+  if (FINANCE_REPORT_MONEY_KEYS.has(key)) return formatReportMoney(value);
+  if (typeof value === 'number') return formatReportNumber(value);
+  const statusLabel = FINANCE_REPORT_STATUS_LABELS[String(value).trim().toLowerCase()];
+  return statusLabel || String(value);
+}
+
+function buildFinanceReportSummaryRows(summary = {}) {
+  return Object.entries(summary || {})
+    .filter(([, value]) => typeof value === 'number' || typeof value === 'string')
+    .map(([key, value]) => ({
+      label: FINANCE_REPORT_SUMMARY_LABELS[key] || key,
+      value: formatFinanceReportCellValue(key, value)
+    }));
+}
+
+// The report engine's full column set (10-15 columns) is meant for on-screen
+// exploration; a printed A4 report reads better with a curated subset. Falls
+// back to every engine column when a report has no override below.
+const FINANCE_REPORT_PDF_COLUMN_OVERRIDES = {
+  fee_debtors_overview: ['studentName', 'classTitle', 'totalOutstanding', 'overdueOrders', 'lastDueDate', 'debtorStatus'],
+  fee_collection_by_class: ['classTitle', 'orderCount', 'totalDue', 'approvedAmount', 'totalOutstanding', 'collectionRate'],
+  fee_advance_payments_overview: ['studentName', 'classTitle', 'monthsPrepaid', 'totalPrepaidAmount', 'latestPrepaidMonth'],
+  fee_discount_exemption_overview: ['studentName', 'classTitle', 'recordType', 'benefitType', 'amount', 'status']
+};
+
+// Every report a school finance office can download as PDF - either backed
+// by the generic report engine (reportEngineService), or adapted here from
+// an existing report route's own data shape into the same
+// {title, columns, rows, summary} envelope the PDF renderer expects.
+const FINANCE_REPORT_PDF_CATALOG = {
+  debtors: { title: 'گزارش باقیداران', engineKey: 'fee_debtors_overview' },
+  by_class: { title: 'گزارش وصول صنف‌وار', engineKey: 'fee_collection_by_class' },
+  advance_payments: { title: 'گزارش پیش‌پرداخت‌کنندگان', engineKey: 'fee_advance_payments_overview' },
+  discounts: { title: 'گزارش تخفیف و معافیت', engineKey: 'fee_discount_exemption_overview' },
+  cashflow: { title: 'گزارش جریان نقدی', adapter: 'cashflow' },
+  daily_cashier: { title: 'گزارش صندوق روزانه', adapter: 'dailyCashier' },
+  anomalies: { title: 'گزارش ناهنجاری‌های مالی', adapter: 'anomalies' },
+  audit_timeline: { title: 'گزارش تاریخچه ممیزی', adapter: 'auditTimeline' }
+};
+
+async function buildFinanceReportPdfPayload(reportKey, { scope, query = {} } = {}) {
+  const catalogEntry = FINANCE_REPORT_PDF_CATALOG[reportKey];
+  if (!catalogEntry) {
+    const error = new Error('finance_report_pdf_unknown_key');
+    error.status = 404;
+    throw error;
+  }
+
+  const filtersLabel = [
+    scope.schoolClass?.title ? `صنف: ${scope.schoolClass.title}` : 'صنف: همه صنف‌ها',
+    query.dateFrom || query.dateTo ? `بازه: ${query.dateFrom || '...'} تا ${query.dateTo || '...'}` : ''
+  ].filter(Boolean).join(' | ');
+  const generatedAtLabel = `تاریخ تولید گزارش: ${formatReportDateLabel(new Date())}`;
+
+  if (catalogEntry.engineKey) {
+    const report = await runReport(catalogEntry.engineKey, {
+      schoolId: scope.schoolId,
+      classId: scope.classId || '',
+      academicYearId: query.academicYearId || '',
+      dateFrom: query.dateFrom || '',
+      dateTo: query.dateTo || ''
+    });
+    const keepKeys = FINANCE_REPORT_PDF_COLUMN_OVERRIDES[catalogEntry.engineKey];
+    const columns = keepKeys
+      ? keepKeys.map((key) => (report.columns || []).find((column) => column.key === key)).filter(Boolean)
+      : (report.columns || []);
+    const rows = (report.rows || []).map((row) => {
+      const formatted = {};
+      columns.forEach((column) => {
+        formatted[column.key] = formatFinanceReportCellValue(column.key, row[column.key]);
+      });
+      return formatted;
+    });
+    return {
+      title: catalogEntry.title,
+      filtersLabel,
+      generatedAtLabel,
+      summary: buildFinanceReportSummaryRows(report.summary),
+      columns,
+      rows
+    };
+  }
+
+  if (catalogEntry.adapter === 'cashflow') {
+    const from = parseDateSafe(query.dateFrom, new Date(Date.now() - (30 * 24 * 60 * 60 * 1000)));
+    const to = parseDateSafe(query.dateTo, new Date());
+    const end = new Date(to);
+    end.setHours(23, 59, 59, 999);
+    // classId here is the payment's own primary scope (set from its first
+    // allocated order) - close enough for a PDF summary; the canonical
+    // /admin/reports/cashflow JSON endpoint does the fuller per-allocation
+    // class split for anyone who needs that precision on-screen.
+    const paymentMatch = { schoolId: scope.schoolId, status: { $in: ['approved', 'pending'] }, paidAt: { $gte: from, $lte: end } };
+    if (scope.classId) paymentMatch.classId = scope.classId;
+    const payments = await FeePayment.find(paymentMatch).lean();
+    const recognizedPayments = await recognizePayments(payments, { FeeOrderModel: FeeOrder });
+    const dayMap = new Map();
+    recognizedPayments.forEach(({ payment: item, recognizedAmount }) => {
+      if (String(item?.status || '') !== 'approved' || recognizedAmount <= 0) return;
+      const date = new Date(item?.paidAt);
+      if (Number.isNaN(date.getTime())) return;
+      const dateKey = date.toISOString().slice(0, 10);
+      const current = dayMap.get(dateKey) || { date: dateKey, total: 0, count: 0 };
+      current.total += Number(recognizedAmount || 0);
+      current.count += 1;
+      dayMap.set(dateKey, current);
+    });
+    const rows = [...dayMap.values()]
+      .sort((left, right) => String(left.date).localeCompare(String(right.date)))
+      .map((row) => ({ date: formatReportDateLabel(row.date), total: formatReportMoney(row.total), count: formatReportNumber(row.count) }));
+    const totalAmount = [...dayMap.values()].reduce((sum, row) => sum + row.total, 0);
+    return {
+      title: catalogEntry.title,
+      filtersLabel,
+      generatedAtLabel,
+      summary: [
+        { label: 'مجموع وصول تاییدشده', value: formatReportMoney(totalAmount) },
+        { label: 'تعداد روز دارای تراکنش', value: formatReportNumber(dayMap.size) }
+      ],
+      columns: [
+        { key: 'date', label: 'تاریخ' },
+        { key: 'total', label: 'مجموع دریافتی روز' },
+        { key: 'count', label: 'تعداد تراکنش' }
+      ],
+      rows
+    };
+  }
+
+  if (catalogEntry.adapter === 'dailyCashier') {
+    const data = await getDailyCashierReport({
+      schoolId: scope.schoolId,
+      date: query.dateTo || query.dateFrom || new Date(),
+      requireSchoolScope: true
+    });
+    const rows = (Array.isArray(data.items) ? data.items : []).map((item) => ({
+      paymentNumber: item?.paymentNumber || '-',
+      student: item?.student?.fullName || item?.student?.name || '-',
+      amount: formatReportMoney(item?.amount),
+      paymentMethod: item?.paymentMethod || '-',
+      receivedBy: item?.receivedBy?.name || '-',
+      status: item?.status || '-'
+    }));
+    return {
+      title: catalogEntry.title,
+      filtersLabel: `تاریخ: ${formatReportDateLabel(data.date)}`,
+      generatedAtLabel,
+      summary: [
+        { label: 'مجموع دریافتی روز', value: formatReportMoney(data.summary?.totalRecognizedAmount || data.summary?.totalAmount || 0) },
+        { label: 'تعداد رسید', value: formatReportNumber(rows.length) }
+      ],
+      columns: [
+        { key: 'paymentNumber', label: 'شماره رسید' },
+        { key: 'student', label: 'متعلم' },
+        { key: 'amount', label: 'مبلغ' },
+        { key: 'paymentMethod', label: 'روش پرداخت' },
+        { key: 'receivedBy', label: 'دریافت‌کننده' },
+        { key: 'status', label: 'وضعیت' }
+      ],
+      rows
+    };
+  }
+
+  if (catalogEntry.adapter === 'anomalies') {
+    const report = await buildFinanceAnomalyReport({
+      schoolId: scope.schoolId,
+      classId: scope.classId || '',
+      academicYearId: query.academicYearId || '',
+      studentMembershipId: '',
+      asOf: new Date(),
+      limit: 300
+    });
+    const rows = (Array.isArray(report?.items) ? report.items : []).map((item) => ({
+      studentName: item?.studentName || '-',
+      anomalyType: item?.anomalyType || '-',
+      severity: item?.severity || '-',
+      description: item?.description || item?.title || '-',
+      amount: item?.amount ? formatReportMoney(item.amount) : '-'
+    }));
+    return {
+      title: catalogEntry.title,
+      filtersLabel,
+      generatedAtLabel,
+      summary: [{ label: 'تعداد ناهنجاری‌های باز', value: formatReportNumber(rows.length) }],
+      columns: [
+        { key: 'studentName', label: 'متعلم' },
+        { key: 'anomalyType', label: 'نوع ناهنجاری' },
+        { key: 'severity', label: 'شدت' },
+        { key: 'description', label: 'توضیح' },
+        { key: 'amount', label: 'مبلغ' }
+      ],
+      rows
+    };
+  }
+
+  if (catalogEntry.adapter === 'auditTimeline') {
+    const timeline = await buildFinanceAuditTimeline({
+      schoolId: scope.schoolId,
+      scope,
+      limit: 300,
+      q: '',
+      kind: 'all',
+      severity: 'all'
+    });
+    const rows = (Array.isArray(timeline?.items) ? timeline.items : []).map((item) => ({
+      date: formatReportDateLabel(item?.at || item?.date || item?.createdAt),
+      kind: item?.kind || '-',
+      severity: item?.severity || '-',
+      title: item?.title || '-',
+      amount: item?.amount ? formatReportMoney(item.amount) : '-'
+    }));
+    return {
+      title: catalogEntry.title,
+      filtersLabel,
+      generatedAtLabel,
+      summary: [{ label: 'تعداد رویداد', value: formatReportNumber(rows.length) }],
+      columns: [
+        { key: 'date', label: 'تاریخ' },
+        { key: 'kind', label: 'نوع' },
+        { key: 'severity', label: 'شدت' },
+        { key: 'title', label: 'رویداد' },
+        { key: 'amount', label: 'مبلغ' }
+      ],
+      rows
+    };
+  }
+
+  const error = new Error('finance_report_pdf_unknown_key');
+  error.status = 404;
+  throw error;
+}
+
+router.get('/admin/reports/:reportKey/export.pdf', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const { classId = '', courseId = '' } = req.query || {};
+    if (!FINANCE_REPORT_PDF_CATALOG[req.params.reportKey]) {
+      return res.status(404).json({ success: false, message: 'گزارش درخواست‌شده پیدا نشد.' });
+    }
+    const scope = await resolveFinanceReportReadContext(req, res, { classId, courseId });
+    if (scope.error) return res.status(400).json({ success: false, message: scope.error });
+    const payload = await buildFinanceReportPdfPayload(req.params.reportKey, { scope, query: req.query || {} });
+    const buffer = await renderReportsToPdfBuffer([payload]);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${req.params.reportKey}.pdf"`);
+    res.send(buffer);
+  } catch (error) {
+    res.status(error?.status || 500).json({ success: false, message: 'خطا در ساخت PDF گزارش' });
+  }
+});
+
+router.get('/admin/reports/export-bundle.pdf', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const { classId = '', courseId = '' } = req.query || {};
+    const scope = await resolveFinanceReportReadContext(req, res, { classId, courseId });
+    if (scope.error) return res.status(400).json({ success: false, message: scope.error });
+    const reportKeys = Object.keys(FINANCE_REPORT_PDF_CATALOG);
+    const payloads = [];
+    for (const reportKey of reportKeys) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        payloads.push(await buildFinanceReportPdfPayload(reportKey, { scope, query: req.query || {} }));
+      } catch (error) {
+        payloads.push({ title: FINANCE_REPORT_PDF_CATALOG[reportKey].title, rows: [], columns: [], emptyText: 'این گزارش قابل تولید نبود.' });
+      }
+    }
+    const buffer = await renderReportsToPdfBuffer(payloads);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="finance-reports-bundle.pdf"');
+    res.send(buffer);
+  } catch {
+    res.status(500).json({ success: false, message: 'خطا در ساخت بسته‌ی کامل گزارش‌ها' });
   }
 });
 
