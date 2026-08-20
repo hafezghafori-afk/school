@@ -30,6 +30,12 @@ const adjustmentSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 }, { _id: false });
 
+const followUpNoteSchema = new mongoose.Schema({
+  note: { type: String, required: true, trim: true },
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  createdAt: { type: Date, default: Date.now }
+}, { _id: false });
+
 const lineItemSchema = new mongoose.Schema({
   feeType: { type: String, enum: LINE_ITEM_TYPES, default: 'tuition' },
   label: { type: String, default: '' },
@@ -105,6 +111,7 @@ const feeOrderSchema = new mongoose.Schema({
   note: { type: String, default: '' },
   installments: { type: [installmentSchema], default: [] },
   adjustments: { type: [adjustmentSchema], default: [] },
+  followUpNotes: { type: [followUpNoteSchema], default: [] },
   voidReason: { type: String, default: '' },
   voidedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   voidedAt: { type: Date, default: null },

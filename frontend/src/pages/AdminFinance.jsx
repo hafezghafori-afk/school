@@ -35,6 +35,15 @@ const toFaDate = (value) => {
   }) || '-';
 };
 
+// Days between a due date and now, clamped to 0 for not-yet-due dates (so "current" and
+// "not yet due" land in the same aging bucket, matching standard aging-report convention).
+const getDaysOverdue = (dueDate) => {
+  if (!dueDate) return 0;
+  const due = new Date(dueDate).getTime();
+  if (Number.isNaN(due)) return 0;
+  return Math.max(0, Math.floor((Date.now() - due) / 86400000));
+};
+
 const toFaDateTime = (value) => {
   return formatAfghanDateTime(value, {
     year: 'numeric',
@@ -1576,6 +1585,7 @@ const toLegacyLikeBillRow = (order = {}) => {
     note: String(order?.note || '').trim(),
     adjustments: Array.isArray(order?.adjustments) ? order.adjustments : [],
     installments: Array.isArray(order?.installments) ? order.installments : [],
+    followUpNotes: Array.isArray(order?.followUpNotes) ? order.followUpNotes : [],
     voidReason: String(order?.voidReason || '').trim(),
     voidedAt: order?.voidedAt || null,
     lifecycleStatus: String(order?.lifecycleStatus || '').trim(),
@@ -2027,6 +2037,118 @@ const buildReceiptPrintHtml = (model, schoolInfo, logoUrls) => {
 </html>`;
 };
 
+// Debt statement (صورت‌حساب بدهی): a single-page, single-copy informational document listing a
+// student's open debts - not a proof-of-payment receipt, so it reuses only the standalone-window
+// print pattern and helpers above (escapeHtml, the school/logo params, the same font-loading +
+// print trigger script), not the two-copy receipt layout.
+const buildDebtStatementHtml = (model, schoolInfo, logoUrls) => {
+  const logoHtml = (url, alt) => (url
+    ? `<img class="${escapeHtml(getOfficialPrintLogoImageClass(url))}" src="${escapeHtml(url)}" alt="${alt}" />`
+    : `<span>${alt}</span>`);
+  const rowsHtml = model.orders.map((order) => `
+    <tr>
+      <td>${escapeHtml(order.title || '-')}</td>
+      <td class="latin">${escapeHtml(order.billNumber || '-')}</td>
+      <td>${escapeHtml(order.dueDate)}</td>
+      <td>${order.overdueDays > 0 ? `${escapeHtml(String(order.overdueDays))} روز` : '-'}</td>
+      <td>${escapeHtml(fmt(order.amount))} ${escapeHtml(model.currencyLabel)}</td>
+    </tr>
+  `).join('');
+
+  return `<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<title>صورت‌حساب بدهی</title>
+<style>
+  @font-face { font-family: 'B Nazanin'; src: url('/fonts/B_Nazanin.ttf') format('truetype'); font-weight: 400; }
+  @font-face { font-family: 'B Nazanin'; src: url('/fonts/B_Nazanin_Bold.ttf') format('truetype'); font-weight: 700; }
+  @page { size: A4 portrait; margin: 14mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: 'B Nazanin', 'B Mitra', Tahoma, sans-serif; direction: rtl; }
+  .letterhead { display: grid; grid-template-columns: 20mm minmax(0, 1fr) 20mm; gap: 3mm; align-items: center; direction: ltr; margin-bottom: 6mm; }
+  .logo-box { display: grid; place-items: center; width: 18mm; height: 18mm; border: 1px solid #b8b8b8; color: #444; font-size: 8pt; padding: 1mm; overflow: hidden; text-align: center; }
+  .logo-box img { width: 100%; height: 100%; object-fit: contain; }
+  .letterhead-center { text-align: center; direction: rtl; }
+  .letterhead-center h1 { margin: 0; font-size: 15pt; }
+  .letterhead-center small { display: block; margin-top: 2px; color: #333; font-size: 9pt; }
+  h2 { text-align: center; font-size: 13pt; margin: 0 0 5mm; }
+  .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; border: 1px solid #111; margin-bottom: 5mm; }
+  .meta > div { display: grid; grid-template-columns: 40% minmax(0, 1fr); border-bottom: 1px solid #111; }
+  .meta > div:nth-child(odd) { border-left: 1px solid #111; }
+  .meta > div > span { padding: 2mm 3mm; font-weight: 700; background: #f1f1f1; border-left: 1px solid #111; }
+  .meta > div > strong { padding: 2mm 3mm; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 5mm; font-size: 10pt; }
+  th, td { border: 1px solid #111; padding: 2mm 3mm; text-align: center; }
+  th { background: #f1f1f1; }
+  .latin { direction: ltr; unicode-bidi: isolate; }
+  .totals { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid #111; margin-bottom: 8mm; }
+  .totals > div { padding: 2mm 3mm; text-align: center; border-left: 1px solid #111; }
+  .totals > div:last-child { border-left: none; }
+  .totals span { display: block; font-size: 8pt; font-weight: 700; margin-bottom: 1mm; }
+  .totals strong { font-size: 10pt; }
+  .grand-total { text-align: center; font-size: 12pt; font-weight: 800; margin-bottom: 10mm; }
+  .footer-note { font-size: 9pt; color: #333; text-align: center; }
+  .signature-line { margin-top: 16mm; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10mm; }
+  .signature-line > div { border-top: 1px solid #111; padding-top: 2mm; text-align: center; font-size: 9pt; }
+</style>
+</head>
+<body>
+  <div class="letterhead">
+    <div class="logo-box">${logoHtml(logoUrls.schoolLogoUrl, 'لوگوی مکتب')}</div>
+    <div class="letterhead-center">
+      <h1>${escapeHtml(schoolInfo.title)}</h1>
+      ${schoolInfo.subtitle ? `<small>${escapeHtml(schoolInfo.subtitle)}</small>` : ''}
+    </div>
+    <div class="logo-box">${logoHtml(logoUrls.ministryLogoUrl, 'لوگوی وزارت معارف')}</div>
+  </div>
+  <h2>صورت‌حساب بدهی متعلم</h2>
+  <div class="meta">
+    <div><span>نام شاگرد</span><strong>${escapeHtml(model.studentName)}</strong></div>
+    <div><span>نام پدر</span><strong>${escapeHtml(model.fatherName)}</strong></div>
+    <div><span>صنف</span><strong>${escapeHtml(model.classTitle)}</strong></div>
+    <div><span>سال تعلیمی</span><strong>${escapeHtml(model.academicYearTitle)}</strong></div>
+    <div><span>نمبر اساس</span><strong class="latin">${escapeHtml(model.asasNumber || '-')}</strong></div>
+    <div><span>تاریخ صدور</span><strong>${escapeHtml(model.issuedAt)}</strong></div>
+  </div>
+  <table>
+    <thead>
+      <tr><th>عنوان بدهی</th><th>شماره بل</th><th>مهلت پرداخت</th><th>سررسید گذشته</th><th>مبلغ باقی‌مانده</th></tr>
+    </thead>
+    <tbody>${rowsHtml || `<tr><td colspan="5">بدهی بازی برای این شاگرد ثبت نشده است.</td></tr>`}</tbody>
+  </table>
+  <div class="totals">
+    <div><span>جاری</span><strong>${escapeHtml(fmt(model.aging.current))}</strong></div>
+    <div><span>۳۱-۶۰ روز</span><strong>${escapeHtml(fmt(model.aging.d31to60))}</strong></div>
+    <div><span>۶۱-۹۰ روز</span><strong>${escapeHtml(fmt(model.aging.d61to90))}</strong></div>
+    <div><span>+۹۰ روز</span><strong>${escapeHtml(fmt(model.aging.over90))}</strong></div>
+    <div><span>جمع کل</span><strong>${escapeHtml(fmt(model.totalOutstanding))}</strong></div>
+  </div>
+  <div class="grand-total">مجموع بدهی باز: ${escapeHtml(fmt(model.totalOutstanding))} ${escapeHtml(model.currencyLabel)}</div>
+  <div class="signature-line">
+    <div>امضای مدیر مالی</div>
+    <div>امضای اداره مکتب</div>
+  </div>
+  <p class="footer-note">این سند فقط جهت اطلاع از وضعیت بدهی است و به‌منزلهٔ رسید پرداخت نیست.</p>
+  <script>
+    (function () {
+      var printed = false;
+      function ready() {
+        if (printed) return;
+        printed = true;
+        setTimeout(function () { window.print(); }, 60);
+      }
+      if (window.document.fonts && window.document.fonts.ready) {
+        window.document.fonts.ready.then(ready, ready);
+      }
+      window.addEventListener('load', ready);
+      setTimeout(ready, 2500);
+    })();
+  </script>
+</body>
+</html>`;
+};
+
 export default function AdminFinance() {
   const { settings: siteSettings } = useSiteSettings();
   const [summary, setSummary] = useState(null);
@@ -2391,6 +2513,8 @@ export default function AdminFinance() {
   const [advanceMonthCountInput, setAdvanceMonthCountInput] = useState('');
   const [paymentSectionHighlighted, setPaymentSectionHighlighted] = useState(false);
   const paymentSectionRef = useRef(null);
+  const [siblingDebtSummary, setSiblingDebtSummary] = useState(null);
+  const [paymentDeskTrend, setPaymentDeskTrend] = useState(null);
 
   const paymentDeskStudent = useMemo(
     () => students.find((item) => String(item?._id || '') === String(paymentDeskForm.studentId || '')) || null,
@@ -2451,6 +2575,39 @@ export default function AdminFinance() {
   const paymentDeskTotalOutstanding = useMemo(() => (
     paymentDeskOpenOrders.reduce((sum, item) => sum + getBillFeeScopeSummary(item, paymentDeskForm.feeType).outstanding, 0)
   ), [paymentDeskOpenOrders, paymentDeskForm.feeType]);
+  // Aging buckets for the open debts currently shown on the payment desk card - a debt not yet
+  // due (or due within the last 30 days) counts as "current", same convention as a standard aging
+  // report. Used for the aging bar and per-row overdue badges.
+  const paymentDeskAging = useMemo(() => {
+    const buckets = { current: 0, d31to60: 0, d61to90: 0, over90: 0 };
+    paymentDeskOpenOrders.forEach((item) => {
+      const amount = getBillFeeScopeSummary(item, paymentDeskForm.feeType).outstanding;
+      const days = getDaysOverdue(item.dueDate);
+      if (days <= 30) buckets.current += amount;
+      else if (days <= 60) buckets.d31to60 += amount;
+      else if (days <= 90) buckets.d61to90 += amount;
+      else buckets.over90 += amount;
+    });
+    const total = buckets.current + buckets.d31to60 + buckets.d61to90 + buckets.over90;
+    return { ...buckets, total };
+  }, [paymentDeskOpenOrders, paymentDeskForm.feeType]);
+  // What the student's scoped balance will be right after the amount currently typed in is
+  // applied - null while no amount has been entered yet, so the UI can hide the line entirely.
+  const paymentDeskRemainingAfterPayment = useMemo(() => {
+    const amount = Number(paymentDeskForm.amount || 0);
+    if (!amount) return null;
+    return paymentDeskTotalOutstanding - amount;
+  }, [paymentDeskForm.amount, paymentDeskTotalOutstanding]);
+  // Reuses the anomaly report already loaded on page load (no extra fetch) to surface the
+  // existing "بدهی سررسید گذشته بیش از سه ماه" signal directly on the payment desk card, instead
+  // of the admin having to separately go check the anomalies section to notice it.
+  const paymentDeskLongOverdueFlags = useMemo(() => {
+    if (!paymentDeskForm.studentId) return [];
+    return anomalies.filter((item) => (
+      item?.anomalyType === 'long_overdue_balance'
+      && String(item?.studentUserId || '') === String(paymentDeskForm.studentId || '')
+    ));
+  }, [anomalies, paymentDeskForm.studentId]);
   const paymentDeskStudentTotalOutstanding = useMemo(() => (
     paymentDeskStudentOpenOrders.reduce((sum, item) => sum + getBillFeeScopeSummary(item, 'tuition').outstanding, 0)
   ), [paymentDeskStudentOpenOrders]);
@@ -2603,6 +2760,21 @@ export default function AdminFinance() {
       });
     return new Map(Array.from(grouped.entries()).map(([classId, studentIds]) => [classId, studentIds.size]));
   }, [studentMemberships]);
+  // Average outstanding balance per student in the same class, for the "نسبت به میانگین صنف"
+  // comparison line - total open balance of the class divided by its current student count.
+  const paymentDeskClassAverageOutstanding = useMemo(() => {
+    const classId = String(paymentDeskForm.classId || '').trim();
+    if (!classId) return 0;
+    const studentCount = financeMembershipClassCounts.get(classId) || 0;
+    if (!studentCount) return 0;
+    const classTotal = bills
+      .filter((item) => (
+        getFinanceRecordClassId(item) === classId
+        && OPEN_ORDER_STATUSES.has(String(item?.status || '').trim())
+      ))
+      .reduce((sum, item) => sum + getBillFeeScopeSummary(item, paymentDeskForm.feeType).outstanding, 0);
+    return classTotal / studentCount;
+  }, [bills, paymentDeskForm.classId, paymentDeskForm.feeType, financeMembershipClassCounts]);
   const currentFinanceClassByStudentId = useMemo(() => {
     const grouped = new Map();
     (Array.isArray(studentMemberships) ? studentMemberships : [])
@@ -5346,6 +5518,68 @@ export default function AdminFinance() {
     setAdvanceBillingPayload(null);
   }, [paymentDeskForm.studentId, paymentDeskForm.classId, paymentDeskForm.academicYearId]);
 
+  // Informational only - see the backend doc comment on getSiblingDebtSummary. Matched purely on
+  // a shared guardian phone number, so this is advisory ("possibly the same family"), never used
+  // to gate or drive any action here.
+  useEffect(() => {
+    let active = true;
+    if (!paymentDeskForm.studentId) {
+      setSiblingDebtSummary(null);
+      return () => { active = false; };
+    }
+    setSiblingDebtSummary(null);
+    fetchJson(`${API_BASE}/api/student-finance/students/${encodeURIComponent(paymentDeskForm.studentId)}/sibling-debt-summary`)
+      .then((data) => {
+        if (!active) return;
+        setSiblingDebtSummary(data?.success ? data : null);
+      })
+      .catch(() => {
+        if (active) setSiblingDebtSummary(null);
+      });
+    return () => { active = false; };
+  }, [paymentDeskForm.studentId]);
+
+  // Reuses the same open-account endpoint the student finance profile page already fetches (no new
+  // backend aggregation) and buckets payments by month client-side - there's no per-student
+  // monthly-trend endpoint today, only a school-wide one.
+  useEffect(() => {
+    let active = true;
+    if (!paymentDeskForm.studentId) {
+      setPaymentDeskTrend(null);
+      return () => { active = false; };
+    }
+    setPaymentDeskTrend(null);
+    fetchJson(`${API_BASE}/api/student-finance/students/${encodeURIComponent(paymentDeskForm.studentId)}/open-account?all=true`)
+      .then((data) => {
+        if (!active) return;
+        if (!data?.success) { setPaymentDeskTrend(null); return; }
+        const payments = Array.isArray(data.payments) ? data.payments : [];
+        const now = new Date();
+        const months = [];
+        for (let i = 5; i >= 0; i -= 1) {
+          const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          months.push({
+            key: `${monthDate.getFullYear()}-${monthDate.getMonth()}`,
+            label: formatAfghanDate(monthDate, { year: 'numeric', month: 'short' }) || '-',
+            total: 0
+          });
+        }
+        const byKey = new Map(months.map((item) => [item.key, item]));
+        payments.forEach((payment) => {
+          if (String(payment?.status || '').trim() === 'rejected') return;
+          const paidAt = payment?.paidAt ? new Date(payment.paidAt) : null;
+          if (!paidAt || Number.isNaN(paidAt.getTime())) return;
+          const bucket = byKey.get(`${paidAt.getFullYear()}-${paidAt.getMonth()}`);
+          if (bucket) bucket.total += Number(payment?.amount || 0);
+        });
+        setPaymentDeskTrend(months);
+      })
+      .catch(() => {
+        if (active) setPaymentDeskTrend(null);
+      });
+    return () => { active = false; };
+  }, [paymentDeskForm.studentId]);
+
   const postJson = async (url, body) => {
     const data = await fetchJson(url, {
       method: 'POST',
@@ -6577,6 +6811,39 @@ export default function AdminFinance() {
     }
   };
 
+  // Unlike the receipt print, everything this needs (open orders, aging, student info) is already
+  // loaded client-side on the payment desk card - no fetch, so this can build and print immediately.
+  const printDebtStatement = () => {
+    if (!paymentDeskForm.studentId || !paymentDeskOpenOrders.length) return;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      setMessage('مرورگر بازشدن پنجرهٔ چاپ را مسدود کرد؛ لطفاً پنجره‌های بازشو (popup) را برای این سایت مجاز کنید.');
+      return;
+    }
+    const model = {
+      studentName: paymentDeskMembershipStudent?.fullName || paymentDeskMembershipStudent?.name || paymentDeskStudent?.name || '---',
+      fatherName: paymentDeskMembershipStudent?.fatherName || 'ثبت نشده',
+      asasNumber: paymentDeskMembershipStudent?.asasNumber || '',
+      classTitle: paymentDeskClass?.title || paymentDeskMembershipStudent?.classTitle || '-',
+      academicYearTitle: paymentDeskAcademicYear?.title || paymentDeskMembershipStudent?.academicYearTitle || '-',
+      issuedAt: toFaDate(new Date()),
+      currencyLabel: 'افغانی',
+      totalOutstanding: paymentDeskTotalOutstanding,
+      aging: paymentDeskAging,
+      orders: paymentDeskOpenOrders.map((item) => ({
+        title: item.title || formatFinanceCode(item.billNumber, '') || 'بدهی مالی',
+        billNumber: item.billNumber,
+        dueDate: toFaDate(item.dueDate),
+        overdueDays: getDaysOverdue(item.dueDate),
+        amount: getBillFeeScopeSummary(item, paymentDeskForm.feeType).outstanding
+      }))
+    };
+    const html = buildDebtStatementHtml(model, activeSchoolPrintInfo, printLogoUrls);
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
   const printCashierReport = async () => {
     if (!cashierReportPrintModel || busy) return;
     setBusy(true);
@@ -6651,6 +6918,36 @@ export default function AdminFinance() {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/student-finance/orders/${billId}/installments`, { count, startDate, stepDays: 30 });
       setMessage(data.message || 'قسط‌بندی ثبت شد');
+      await refreshPaymentWorkspace();
+    } catch (err) {
+      setMessage(err.message);
+      setBusy(false);
+    }
+  };
+
+  const addFollowUpNote = async (billId) => {
+    const note = (window.prompt('یادداشت پیگیری این بدهی را بنویسید:', '') || '').trim();
+    if (!note) return;
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/student-finance/orders/${billId}/follow-up-note`, { note });
+      setMessage(data.message || 'یادداشت پیگیری ثبت شد');
+      await refreshPaymentWorkspace();
+    } catch (err) {
+      setMessage(err.message);
+      setBusy(false);
+    }
+  };
+
+  const applyInstallmentSuggestion = async (billId, suggestedCount) => {
+    const count = Math.max(2, Math.round(Number(suggestedCount) || 3));
+    const confirmed = window.confirm(`تقسیم این بدهی به ${fmt(count)} قسط ماهانه (هر ۳۰ روز) پیشنهاد می‌شود، از فردا آغاز شود. تایید می‌کنید؟`);
+    if (!confirmed) return;
+    const startDate = toInputDate(new Date(Date.now() + 86400000));
+    try {
+      setBusy(true);
+      const data = await postJson(`${API_BASE}/api/student-finance/orders/${billId}/installments`, { count, startDate, stepDays: 30 });
+      setMessage(data.message || 'قسط‌بندی پیشنهادی ثبت شد');
       await refreshPaymentWorkspace();
     } catch (err) {
       setMessage(err.message);
@@ -8398,6 +8695,26 @@ export default function AdminFinance() {
               <span>مبلغ پرداخت</span>
               <input value={paymentDeskForm.amount} onChange={(e) => { setPaymentDeskForm((p) => ({ ...p, amount: e.target.value })); setPaymentPreview(null); }} placeholder="مبلغ پرداخت" />
             </label>
+            {paymentDeskTotalOutstanding > 0 && (
+              <button
+                type="button"
+                className="secondary finance-pay-full-debt-btn"
+                data-testid="desk-pay-full-debt"
+                title="مبلغ پرداخت را برابر کل بدهی باز پر می‌کند"
+                onClick={() => {
+                  setPaymentDeskForm((p) => ({
+                    ...p,
+                    amount: String(paymentDeskTotalOutstanding),
+                    allocationMode: 'auto_oldest_due',
+                    selectedFeeOrderIds: [],
+                    manualAllocations: {}
+                  }));
+                  setPaymentPreview(null);
+                }}
+              >
+                پرداخت کامل بدهی ({fmt(paymentDeskTotalOutstanding)} AFN)
+              </button>
+            )}
             <label className="finance-inline-filter">
               <span>روش پرداخت</span>
               <select data-testid="desk-payment-method-select" value={paymentDeskForm.paymentMethod} onChange={(e) => {
@@ -8453,7 +8770,57 @@ export default function AdminFinance() {
             {paymentDeskForm.allocationMode === 'manual' && Number(paymentDeskForm.amount || 0) > 0 && (
               <span className={`finance-chip ${paymentDeskRemainingAmount < 0 ? 'finance-chip-rose' : 'finance-chip-muted'}`}>{fmt(paymentDeskRemainingAmount)} AFN اختلاف با مبلغ پرداخت</span>
             )}
+            {!!paymentDeskForm.classId && paymentDeskClassAverageOutstanding > 0 && (
+              <span className={`finance-chip ${paymentDeskTotalOutstanding > paymentDeskClassAverageOutstanding ? 'finance-chip-rose' : 'finance-chip-muted'}`}>
+                میانگین بدهی صنف: {fmt(paymentDeskClassAverageOutstanding)} AFN
+              </span>
+            )}
+            {paymentDeskRemainingAfterPayment !== null && (
+              <span className={`finance-chip ${paymentDeskRemainingAfterPayment > 0 ? 'finance-chip-amber' : 'finance-chip-emerald'}`}>
+                باقی‌ماندهٔ بعد از این پرداخت: {fmt(Math.max(paymentDeskRemainingAfterPayment, 0))} AFN
+              </span>
+            )}
           </div>
+          {paymentDeskAging.total > 0 && (
+            <div className="finance-aging-bar" data-testid="desk-debt-aging-bar" title="تفکیک بدهی‌های باز بر اساس مدت سررسید گذشته">
+              {paymentDeskAging.current > 0 && (
+                <span
+                  className="finance-aging-segment finance-aging-current"
+                  style={{ flexGrow: paymentDeskAging.current }}
+                  title={`جاری/سررسیدنشده: ${fmt(paymentDeskAging.current)} AFN`}
+                />
+              )}
+              {paymentDeskAging.d31to60 > 0 && (
+                <span
+                  className="finance-aging-segment finance-aging-31-60"
+                  style={{ flexGrow: paymentDeskAging.d31to60 }}
+                  title={`۳۱ تا ۶۰ روز سررسید گذشته: ${fmt(paymentDeskAging.d31to60)} AFN`}
+                />
+              )}
+              {paymentDeskAging.d61to90 > 0 && (
+                <span
+                  className="finance-aging-segment finance-aging-61-90"
+                  style={{ flexGrow: paymentDeskAging.d61to90 }}
+                  title={`۶۱ تا ۹۰ روز سررسید گذشته: ${fmt(paymentDeskAging.d61to90)} AFN`}
+                />
+              )}
+              {paymentDeskAging.over90 > 0 && (
+                <span
+                  className="finance-aging-segment finance-aging-over-90"
+                  style={{ flexGrow: paymentDeskAging.over90 }}
+                  title={`بیش از ۹۰ روز سررسید گذشته: ${fmt(paymentDeskAging.over90)} AFN`}
+                />
+              )}
+            </div>
+          )}
+          {paymentDeskAging.total > 0 && (
+            <div className="finance-aging-legend">
+              <span><i className="finance-aging-dot finance-aging-current" />جاری ({fmt(paymentDeskAging.current)})</span>
+              <span><i className="finance-aging-dot finance-aging-31-60" />۳۱-۶۰ روز ({fmt(paymentDeskAging.d31to60)})</span>
+              <span><i className="finance-aging-dot finance-aging-61-90" />۶۱-۹۰ روز ({fmt(paymentDeskAging.d61to90)})</span>
+              <span><i className="finance-aging-dot finance-aging-over-90" />+۹۰ روز ({fmt(paymentDeskAging.over90)})</span>
+            </div>
+          )}
           <div className="finance-payment-section-title">
             <span>تخصیص پرداخت</span>
             <small>روش تخصیص و یادداشت مالی</small>
@@ -8497,8 +8864,47 @@ export default function AdminFinance() {
                   <Link className="finance-chip finance-chip-muted" to={`/admin-finance/profile/${encodeURIComponent(paymentDeskForm.studentId)}`}>
                     تاریخچه کامل شاگرد
                   </Link>
+                  {paymentDeskOpenOrders.length > 0 && (
+                    <button type="button" className="finance-chip finance-chip-muted finance-chip-button" data-testid="print-debt-statement" onClick={printDebtStatement}>
+                      صدور صورت‌حساب بدهی
+                    </button>
+                  )}
                 </div>
               </div>
+              {paymentDeskLongOverdueFlags.length > 0 && (
+                <div className="finance-risk-alert" role="alert" data-testid="desk-long-overdue-flag">
+                  <strong>⚠ بدهی پرخطر:</strong> {paymentDeskLongOverdueFlags.length} بدهی این شاگرد بیش از ۹۰ روز سررسید گذشته دارد
+                  (جمعاً {fmt(paymentDeskLongOverdueFlags.reduce((sum, item) => sum + Number(item.amount || 0), 0))} AFN).
+                </div>
+              )}
+              {!!siblingDebtSummary?.siblings?.length && (
+                <div className="finance-sibling-note" data-testid="desk-sibling-debt-summary">
+                  <span title="بر اساس شماره تماس مشترک ولی - تخمینی است، نه یک رابطهٔ خانوادگی تاییدشده">
+                    👪 {siblingDebtSummary.siblings.length} شاگرد دیگر با همین شمارهٔ تماس ولی، جمعاً {fmt(siblingDebtSummary.totalSiblingOutstanding)} AFN بدهی باز:
+                  </span>
+                  <span className="finance-sibling-note-list">
+                    {siblingDebtSummary.siblings.map((sib) => `${sib.name} (${sib.classTitle}): ${fmt(sib.outstandingAmount)} AFN`).join(' | ')}
+                  </span>
+                </div>
+              )}
+              {!!paymentDeskTrend?.length && (
+                <div className="finance-trend-chart" data-testid="desk-payment-trend">
+                  <span className="finance-trend-title">روند پرداخت ۶ ماه اخیر</span>
+                  <div className="finance-trend-bars">
+                    {(() => {
+                      const maxTotal = Math.max(1, ...paymentDeskTrend.map((month) => month.total));
+                      return paymentDeskTrend.map((month) => (
+                        <div key={`trend-${month.key}`} className="finance-trend-bar-col" title={`${month.label}: ${fmt(month.total)} AFN`}>
+                          <div className="finance-trend-bar-track">
+                            <div className="finance-trend-bar-fill" style={{ height: `${Math.max(2, (month.total / maxTotal) * 100)}%` }} />
+                          </div>
+                          <small>{month.label}</small>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              )}
               {financeDataErrors.orders ? (
                 <div className="finance-data-error" role="alert">
                   کارت مالی قابل محاسبه نیست: {financeDataErrors.orders}
@@ -8563,6 +8969,7 @@ export default function AdminFinance() {
               {paymentDeskOpenOrders.map((item) => {
                 const orderId = getFeeOrderRowId(item);
                 const scopedBalance = getBillFeeScopeSummary(item, paymentDeskForm.feeType).outstanding;
+                const overdueDays = getDaysOverdue(item.dueDate);
                 return (
                 <div key={`pick-${orderId}`} className="finance-flag finance-order-pick-row">
                   <div className="finance-order-pick-copy">
@@ -8578,7 +8985,20 @@ export default function AdminFinance() {
                     ) : (
                       <strong>{item.title || formatFinanceCode(item.billNumber, '') || 'بدهی مالی'}</strong>
                     )}
-                    <small>{FEE_LINE_TYPE_LABELS[paymentDeskForm.feeType] || paymentDeskForm.feeType} | مهلت پرداخت: {toFaDate(item.dueDate)} | مانده: {fmt(scopedBalance)} AFN</small>
+                    <small>
+                      {FEE_LINE_TYPE_LABELS[paymentDeskForm.feeType] || paymentDeskForm.feeType} | مهلت پرداخت: {toFaDate(item.dueDate)} | مانده: {fmt(scopedBalance)} AFN
+                      {overdueDays > 30 && (
+                        <span className={`finance-overdue-badge ${overdueDays > 90 ? 'finance-overdue-badge-critical' : overdueDays > 60 ? 'finance-overdue-badge-high' : 'finance-overdue-badge-medium'}`}>
+                          {overdueDays} روز سررسید گذشته
+                        </span>
+                      )}
+                    </small>
+                    {!!item.followUpNotes?.length && (
+                      <small className="finance-order-followup-note" title={`${item.followUpNotes.length} یادداشت پیگیری ثبت شده`}>
+                        📝 آخرین پیگیری: {item.followUpNotes[item.followUpNotes.length - 1].note}
+                        {' '}({toFaDate(item.followUpNotes[item.followUpNotes.length - 1].createdAt)})
+                      </small>
+                    )}
                   </div>
                   {paymentDeskForm.allocationMode === 'manual' ? (
                     <input
@@ -8598,6 +9018,45 @@ export default function AdminFinance() {
                         : `${fmt(scopedBalance)} AFN`}
                     </span>
                   )}
+                  <div className="finance-order-pick-actions">
+                    <button
+                      type="button"
+                      className="secondary finance-order-quick-relief-btn"
+                      data-testid={`desk-quick-relief-${orderId}`}
+                      title="اعمال تخفیف، معافیت یا جریمه روی همین بدهی"
+                      onClick={() => addDiscount(orderId)}
+                      disabled={busy}
+                    >
+                      تخفیف/تعدیل
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary finance-order-quick-note-btn"
+                      data-testid={`desk-follow-up-note-${orderId}`}
+                      title="ثبت یادداشت پیگیری روی همین بدهی"
+                      onClick={() => addFollowUpNote(orderId)}
+                      disabled={busy}
+                    >
+                      یادداشت پیگیری{item.followUpNotes?.length ? ` (${item.followUpNotes.length})` : ''}
+                    </button>
+                    {!item.installments?.length
+                      && scopedBalance > 0
+                      && (scopedBalance > 3000 || (paymentDeskClassAverageOutstanding > 0 && scopedBalance > paymentDeskClassAverageOutstanding)) && (
+                      <button
+                        type="button"
+                        className="secondary finance-order-installment-suggest-btn"
+                        data-testid={`desk-installment-suggest-${orderId}`}
+                        title="این بدهی نسبتاً بزرگ است؛ پیشنهاد قسط‌بندی خودکار"
+                        onClick={() => applyInstallmentSuggestion(
+                          orderId,
+                          scopedBalance > 15000 ? 6 : scopedBalance > 7000 ? 4 : 3
+                        )}
+                        disabled={busy}
+                      >
+                        قسط‌بندی پیشنهادی
+                      </button>
+                    )}
+                  </div>
                 </div>
               );})}
             </div>

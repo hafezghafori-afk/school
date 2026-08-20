@@ -667,6 +667,32 @@ async function addFeeOrderAdjustmentAction({ req, feeOrderId = '', body = {} } =
   return { item, message: 'تعدیل بل مالی ثبت شد.' };
 }
 
+async function addFeeOrderFollowUpNoteAction({ req, feeOrderId = '', body = {} } = {}) {
+  const item = await FeeOrder.findById(feeOrderId);
+  if (!item) throw createActionError(404, 'بل مالی پیدا نشد.');
+
+  const note = String(body?.note || '').trim();
+  if (!note) throw createActionError(400, 'متن یادداشت الزامی است.');
+  if (note.length > 500) throw createActionError(400, 'یادداشت نباید بیشتر از ۵۰۰ کاراکتر باشد.');
+
+  item.followUpNotes = Array.isArray(item.followUpNotes) ? item.followUpNotes : [];
+  item.followUpNotes.push({ note, createdBy: req.user.id, createdAt: new Date() });
+  // Follow-up notes are a lightweight pursuit log, not part of the financial recalculation this
+  // document otherwise goes through on save (recalculateBill/pre-validate) - keep this action from
+  // accidentally re-deriving amounts by only touching the one field being changed.
+  await item.save({ validateModifiedOnly: true });
+
+  await logActivity({
+    req,
+    action: 'fee_order_add_follow_up_note',
+    targetType: 'FeeOrder',
+    targetId: item._id.toString(),
+    meta: { noteLength: note.length }
+  });
+
+  return { item, message: 'یادداشت پیگیری ثبت شد.' };
+}
+
 async function setBillInstallmentsAction({ req, billId = '', body = {} } = {}) {
   const item = await FinanceBill.findById(billId);
   if (!item) throw createActionError(404, 'Ø¨Ù„ ÛŒØ§ÙØª Ù†Ø´Ø¯');
@@ -1908,6 +1934,7 @@ module.exports = {
   },
   addBillAdjustmentAction: wrapAction(addBillAdjustmentAction),
   addFeeOrderAdjustmentAction: wrapAction(addFeeOrderAdjustmentAction),
+  addFeeOrderFollowUpNoteAction: wrapAction(addFeeOrderFollowUpNoteAction),
   setBillInstallmentsAction: wrapAction(setBillInstallmentsAction),
   setFeeOrderInstallmentsAction: wrapAction(setFeeOrderInstallmentsAction),
   voidBillAction: wrapAction(voidBillAction),
