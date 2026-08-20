@@ -2303,7 +2303,7 @@ export default function AdminEducationCore() {
                       {selectedLifecycleStudent && !lifecycleStudentOptions.some((item) => String(item.value || '') === String(selectedLifecycleStudent.value || '')) ? (
                         <option value={selectedLifecycleStudent.value}>{selectedLifecycleStudent.uiLabel}</option>
                       ) : null}
-                      {lifecycleStudentOptions.map((item) => <option key={item.value} value={item.value}>{item.uiLabel}</option>)}
+                      {lifecycleStudentOptions.map((item, index) => <option key={item.value} value={item.value}>{index + 1}. {item.uiLabel}</option>)}
                     </select>
                     <small className="admin-workspace-subtitle">
                       {lifecycleStudentOptions.length.toLocaleString('fa-AF-u-ca-persian')} نتیجه
@@ -2533,7 +2533,7 @@ export default function AdminEducationCore() {
               </div>
               {enrollmentSelectOptions.length ? (
                 <div className="admin-education-candidate-list">
-                  {visibleEnrollmentCandidates.map((item) => {
+                  {visibleEnrollmentCandidates.map((item, candidateIndex) => {
                     const itemId = item.value || item._id || item.id;
                     const isSelected = String(selectedEnrollmentCandidate?.value || '') === String(itemId);
                     const isSelectedBulk = bulkSelectedIds.includes(itemId);
@@ -2557,7 +2557,7 @@ export default function AdminEducationCore() {
                           />
                         )}
                         <button type="button" className="admin-education-candidate-main" onClick={() => enrollmentMode === 'detailed' ? loadEnrollmentCandidate(item) : (enrollmentMode === 'bulk' && !isEnrollmentBlocked ? setBulkSelectedIds(prev => prev.includes(itemId) ? prev.filter(x => x !== itemId) : [...prev, itemId]) : null)} style={{ cursor: enrollmentMode === 'quick' || isEnrollmentBlocked ? 'default' : 'pointer' }}>
-                          <strong>{item.name || 'متعلم بی‌نام'}</strong>
+                          <strong>{candidateIndex + 1}. {item.name || 'متعلم بی‌نام'}{getStudentAsasNumber(item) ? ` (نمبر اساس: ${getStudentAsasNumber(item)})` : ''}</strong>
                           <span>{[item.grade ? `پایه ${item.grade}` : '', item.phone || '', item.sourceLabel || getStudentCandidateSourceLabel(item.sourceType)].filter(Boolean).join(' | ') || 'بدون مشخصات بیشتر'}</span>
                           {item.createdAt ? <span>{`ثبت: ${formatFaDate(item.createdAt)}`}</span> : null}
                           {isEnrollmentBlocked ? <span>{item.enrollmentBlockReason}</span> : null}
@@ -2728,7 +2728,7 @@ export default function AdminEducationCore() {
             ) : null}
           </div>
           <div className="admin-education-list">
-            {visibleOnlineRegistrationQueue.length ? visibleOnlineRegistrationQueue.map((item) => {
+            {visibleOnlineRegistrationQueue.length ? visibleOnlineRegistrationQueue.map((item, queueIndex) => {
               const itemId = item.sourceRef || item.value || item.id || item._id;
               const isSelectedBulk = bulkSelectedIds.includes(itemId);
               return (
@@ -2745,7 +2745,7 @@ export default function AdminEducationCore() {
                   />
                 )}
                 <button type="button" className="admin-education-list-main" onClick={() => enrollmentMode === 'detailed' ? loadEnrollmentCandidate(item) : (enrollmentMode === 'bulk' ? setBulkSelectedIds(prev => prev.includes(itemId) ? prev.filter(x => x !== itemId) : [...prev, itemId]) : null)} style={{ cursor: enrollmentMode === 'quick' ? 'default' : 'pointer' }}>
-                  <strong>{item.name || 'درخواست بی‌نام'}</strong>
+                  <strong>{queueIndex + 1}. {item.name || 'درخواست بی‌نام'}{getStudentAsasNumber(item) ? ` (نمبر اساس: ${getStudentAsasNumber(item)})` : ''}</strong>
                   <span>{[item.grade ? `پایه ${item.grade}` : '', item.phone || '', getEnrollmentStatusLabel(item.status)].filter(Boolean).join(' | ') || 'درخواست ثبت‌نام آنلاین'}</span>
                   <span>{item.createdAt ? `ثبت: ${formatFaDate(item.createdAt)}` : 'درخواست ثبت‌نام آنلاین'}</span>
                 </button>
@@ -2852,7 +2852,10 @@ export default function AdminEducationCore() {
                   return (
                     <React.Fragment key={membershipId}>
                       <tr>
-                        <td>{item.user?.name || '---'}</td>
+                        <td>
+                          {item.user?.name || '---'}
+                          {getStudentAsasNumber(item.user || item) ? <small className="admin-workspace-subtitle"> (اساس: {getStudentAsasNumber(item.user || item)})</small> : null}
+                        </td>
                         <td>{item.schoolClass?.title || item.course?.title || '---'}</td>
                         <td>{item.schoolClass?.academicYear?.title || item.academicYear?.title || '---'}</td>
                         <td><span className={`admin-workspace-badge ${getEnrollmentStatusTone(item.status)}`}>{getEnrollmentStatusLabel(item.status, item.endedReason)}</span></td>

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import './AdminWorkspace.css';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
-import { studentMatchesSearch } from '../utils/studentSearch';
+import { studentMatchesSearch, formatStudentDisplayLabel } from '../utils/studentSearch';
 
 import {
   downloadBlob,
@@ -640,7 +640,13 @@ export default function AdminReports() {
   const academicTerms = useMemo(() => normalizeOptions(reference.academicTerms, ['title', 'code']), [reference.academicTerms]);
   const examSessions = useMemo(() => normalizeOptions(reference.examSessions, ['title', 'code']), [reference.examSessions]);
   const classes = useMemo(() => normalizeOptions(reference.classes, ['title', 'code']), [reference.classes]);
-  const students = useMemo(() => normalizeOptions(reference.students, ['fullName', 'admissionNo']), [reference.students]);
+  // normalizeOptions() picks a single label field (the first truthy one),
+  // which is correct for years/classes/etc. but wrong for students - it
+  // meant admissionNo (نمبر اساس) never actually showed, since fullName is
+  // almost always present. The label itself is built at render time (below)
+  // with formatStudentDisplayLabel, which combines name + admission number
+  // + a running serial number instead.
+  const students = useMemo(() => (Array.isArray(reference.students) ? reference.students : []), [reference.students]);
   const visibleStudents = useMemo(() => {
     const matches = students.filter((item) => studentMatchesSearch(item, studentSearch));
     if (!form.studentId || matches.some((item) => String(item.id) === String(form.studentId))) return matches;
@@ -870,8 +876,8 @@ export default function AdminReports() {
                   />
                   <select id="report-student" name="studentId" value={form.studentId} onChange={handleChange}>
                     <option value="">همه</option>
-                    {visibleStudents.map((item) => (
-                      <option key={item.id} value={item.id}>{item.uiLabel}</option>
+                    {visibleStudents.map((item, index) => (
+                      <option key={item.id} value={item.id}>{formatStudentDisplayLabel(item, { index: index + 1 })}</option>
                     ))}
                   </select>
                 </div>

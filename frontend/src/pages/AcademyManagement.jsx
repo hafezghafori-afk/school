@@ -754,9 +754,9 @@ export default function AcademyManagement() {
                 <Field label="شاگرد">
                   <select required value={registrationForm.studentId} onChange={(e) => setRegistrationForm({ ...registrationForm, studentId: e.target.value })}>
                     <option value="">انتخاب شاگرد ({registrationStudentOptions.length} نتیجه)</option>
-                    {registrationStudentOptions.map((item) => (
+                    {registrationStudentOptions.map((item, index) => (
                       <option key={item._id} value={item._id}>
-                        {item.fullName} - {getStudentAsasNumber(item)}{item.fatherName ? ` - فرزند ${item.fatherName}` : ''}
+                        {index + 1}. {item.fullName} - {getStudentAsasNumber(item)}{item.fatherName ? ` - فرزند ${item.fatherName}` : ''}
                       </option>
                     ))}
                   </select>

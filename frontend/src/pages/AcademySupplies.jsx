@@ -356,9 +356,9 @@ export default function AcademySupplies() {
               <Field label="شاگرد">
                 <select required value={saleForm.studentId} onChange={(e) => setSaleForm({ ...saleForm, studentId: e.target.value })}>
                   <option value="">انتخاب شاگرد</option>
-                  {students.map((student) => (
+                  {students.map((student, index) => (
                     <option key={student._id} value={student._id}>
-                      {student.studentCode} - {student.fullName} - {student.className}
+                      {index + 1}. {student.studentCode} - {student.fullName} - {student.className}
                     </option>
                   ))}
                 </select>

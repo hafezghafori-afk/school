@@ -469,7 +469,7 @@ const normalizeAcademicYearOptions = (refData = {}) => (
 );
 
 const getClassOptionLabel = (item = {}) => String(item?.uiLabel || item?.title || '').trim() || 'صنف';
-const getStudentOptionLabel = (item = {}) => {
+const getStudentOptionLabel = (item = {}, serialNo = null) => {
   const asasNumber = String(
     item?.asasNumber
     || item?.admissionNo
@@ -479,6 +479,11 @@ const getStudentOptionLabel = (item = {}) => {
 
   return (
     [
+      // A plain running row number, shown first - not a stored field, just
+      // this list's position - so two same-name rows are visibly distinct
+      // even when (as often happens with real enrollment data) نمبر اساس
+      // hasn't been filled in yet for one or both of them.
+      serialNo !== null && serialNo !== undefined ? `${serialNo}.` : '',
       item?.fullName
         || item?.name
         || item?.email
@@ -501,9 +506,9 @@ const getAcademicYearOptionLabel = (item = {}) => (
 );
 const AFGHAN_SCHOOL_MONTHS = ['حمل', 'ثور', 'جوزا', 'سرطان', 'اسد', 'سنبله', 'میزان', 'عقرب', 'قوس', 'جدی', 'دلو', 'حوت'];
 
-const getFinanceStudentOptionLabel = (item = {}) => (
+const getFinanceStudentOptionLabel = (item = {}, serialNo = null) => (
   [
-    getStudentOptionLabel(item),
+    getStudentOptionLabel(item, serialNo),
 
     item?.fatherName
       ? `- پدر: ${item.fatherName}`
@@ -8415,8 +8420,8 @@ export default function AdminFinance() {
             </label>
             <select value={manualForm.studentId} onChange={(e) => applyManualMembershipStudent(e.target.value)} required>
               <option value="">شاگرد را انتخاب کنید</option>
-              {manualStudentOptions.length ? manualStudentOptions.map((student) => (
-                <option key={student.membershipId || student._id} value={student._id}>{getFinanceStudentOptionLabel(student)}</option>
+              {manualStudentOptions.length ? manualStudentOptions.map((student, index) => (
+                <option key={student.membershipId || student._id} value={student._id}>{getFinanceStudentOptionLabel(student, index + 1)}</option>
               )) : (
                 <option value="">متعلمی پیدا نشد</option>
               )}
@@ -8585,8 +8590,8 @@ export default function AdminFinance() {
             <span>متعلم</span>
             <select data-testid="desk-student-select" value={paymentDeskForm.studentId} onChange={(e) => handlePaymentDeskStudentChange(e.target.value)}>
               <option value="">ابتدا شاگرد را انتخاب کنید</option>
-              {paymentStudentOptions.length ? paymentStudentOptions.map((student) => (
-                <option key={`payment-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student)}</option>
+              {paymentStudentOptions.length ? paymentStudentOptions.map((student, index) => (
+                <option key={`payment-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student, index + 1)}</option>
               )) : (
                 <option value="" disabled>متعلمی پیدا نشد</option>
               )}
@@ -9991,8 +9996,8 @@ export default function AdminFinance() {
             )}
             {discountForm.targetScope === 'student' && <select value={discountForm.studentId} onChange={(e) => applyDiscountMembershipStudent(e.target.value)}>
               <option value="">متعلم را انتخاب کنید</option>
-              {discountStudentOptions.length ? discountStudentOptions.map((student) => (
-                <option key={`discount-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student)}</option>
+              {discountStudentOptions.length ? discountStudentOptions.map((student, index) => (
+                <option key={`discount-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student, index + 1)}</option>
               )) : (
                 <option value="">متعلمی پیدا نشد</option>
               )}
@@ -10077,8 +10082,8 @@ export default function AdminFinance() {
             </label>
             <select value={exemptionForm.studentId} onChange={(e) => applyExemptionMembershipStudent(e.target.value)} required>
               <option value="">متعلم را انتخاب کنید</option>
-              {exemptionStudentOptions.length ? exemptionStudentOptions.map((student) => (
-                <option key={`exemption-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student)}</option>
+              {exemptionStudentOptions.length ? exemptionStudentOptions.map((student, index) => (
+                <option key={`exemption-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student, index + 1)}</option>
               )) : (
                 <option value="">متعلمی پیدا نشد</option>
               )}

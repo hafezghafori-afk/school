@@ -770,8 +770,8 @@ export default function ShortTermCenter() {
                 <Field label="شاگرد">
                   <select required value={registrationForm.studentId} onChange={(e) => setRegistrationForm({ ...registrationForm, studentId: e.target.value })}>
                     <option value="">انتخاب شاگرد ({registrationStudentOptions.length} نتیجه)</option>
-                    {registrationStudentOptions.map((item) => (
-                      <option key={item._id} value={item._id}>{item.fullName} - {item.studentCode}{item.fatherName ? ` - فرزند ${item.fatherName}` : ''}</option>
+                    {registrationStudentOptions.map((item, index) => (
+                      <option key={item._id} value={item._id}>{index + 1}. {item.fullName} - {item.studentCode}{item.fatherName ? ` - فرزند ${item.fatherName}` : ''}</option>
                     ))}
                   </select>
                 </Field>
@@ -836,8 +836,8 @@ export default function ShortTermCenter() {
                 <Field label="ثبت‌نام">
                   <select required value={paymentForm.registrationId} onChange={(e) => setPaymentForm({ ...paymentForm, registrationId: e.target.value })}>
                     <option value="">انتخاب ثبت‌نام ({paymentRegistrationOptions.length} نتیجه)</option>
-                    {paymentRegistrationOptions.map((item) => (
-                      <option key={item._id} value={item._id}>{text(item.studentId?.fullName)} - {text(item.classId?.name)} - باقی {fmt(item.balance)}</option>
+                    {paymentRegistrationOptions.map((item, index) => (
+                      <option key={item._id} value={item._id}>{index + 1}. {text(item.studentId?.fullName)}{item.studentId?.studentCode ? ` - ${item.studentId.studentCode}` : ''} - {text(item.classId?.name)} - باقی {fmt(item.balance)}</option>
                     ))}
                   </select>
                 </Field>

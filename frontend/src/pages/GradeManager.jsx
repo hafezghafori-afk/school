@@ -1488,6 +1488,7 @@ export default function GradeManager() {
                               <td className="serial-column">{toFaNumber(row.rowNumber)}</td>
                               <td className="student-cell">
                                 <strong>{row.studentName || '---'}</strong>
+                                {row.admissionNo && <small className="student-admission-no">اساس: {row.admissionNo}</small>}
                                 {row.resultStatus && <span>{row.resultStatus}</span>}
                                 {row.membershipStatusLabel && <span>{row.membershipStatusLabel}</span>}
                               </td>
