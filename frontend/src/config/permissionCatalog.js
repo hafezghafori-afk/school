@@ -222,3 +222,15 @@ export const expandLegacyPermissions = (permissions = []) => {
   });
   return Array.from(next);
 };
+
+// یک کاربر وقتی به یک مجوز چتری/قدیمی (مثلاً 'manage_users') نیاز داریم مجاز است که یا خودِ
+// همان کلید را داشته باشد، یا هر یک از مجوزهای جزئی/دقیقی که زیرمجموعهٔ همان مجوز چتری هستند
+// (مثلاً 'students.manage'، 'users.manage' و ...). بدون این بررسیِ دوطرفه، وقتی از پنل مدیریت
+// کاربران فقط یک مجوز جزئی به کسی داده می‌شود، بخش‌هایی از رابط کاربری که هنوز بر اساس کلید
+// چتری قدیمی تصمیم می‌گیرند آن مجوز را نمی‌بینند و آن ویژگی برای کاربر مخفی می‌ماند.
+export const permissionAllows = (permission = '', permissions = []) => {
+  if (!permission) return true;
+  const list = Array.isArray(permissions) ? permissions : [];
+  if (list.includes(permission)) return true;
+  return (LEGACY_PERMISSION_MAP[permission] || []).some((mapped) => list.includes(mapped));
+};
