@@ -619,6 +619,44 @@
   color: rgba(226, 232, 240, 0.86);
 }
 
+.finance-report-download-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.finance-report-download-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.finance-report-download-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.finance-report-download-copy strong {
+  font-size: 13.5px;
+  color: #f8fafc;
+}
+
+.finance-report-download-copy small {
+  color: rgba(226, 232, 240, 0.62);
+  font-size: 11.5px;
+}
+
+@media (max-width: 720px) {
+  .finance-report-download-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .finance-recent-finance-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }

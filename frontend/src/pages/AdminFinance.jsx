@@ -1203,6 +1203,21 @@ const sortCountEntries = (value = {}) => (
     .sort((left, right) => Number(right?.[1] || 0) - Number(left?.[1] || 0))
 );
 
+// The full list of finance reports available as a real, downloadable PDF -
+// backed by GET /api/finance/admin/reports/:reportKey/export.pdf on the
+// backend. Kept as one flat list (not scattered across tabs) so the
+// "گزارش‌ها" tab stays a single, simple place to find every report.
+const FINANCE_REPORT_CARDS = [
+  { key: 'debtors', title: 'باقیداران', description: 'لیست شاگردان بدهکار به تفکیک صنف، با مبلغ باقی‌مانده و وضعیت.' },
+  { key: 'by_class', title: 'وصول صنف‌وار', description: 'وصول، باقیات و نرخ تحصیل هر صنف در بازه‌ی انتخاب‌شده - ماه‌وار یا سال‌وار.' },
+  { key: 'advance_payments', title: 'پیش‌پرداخت‌کنندگان', description: 'شاگردانی که فیس یک یا چند ماه آینده را از قبل پرداخت کرده‌اند.' },
+  { key: 'discounts', title: 'تخفیف و معافیت', description: 'لیست تخفیف‌ها و معافیت‌های فعال با نوع، مبلغ و وضعیت.' },
+  { key: 'cashflow', title: 'جریان نقدی', description: 'وصول روزانه‌ی تاییدشده در بازه‌ی انتخاب‌شده.' },
+  { key: 'daily_cashier', title: 'صندوق روزانه', description: 'رسیدهای دریافت‌شده در یک روز مشخص (تا تاریخ بازه).' },
+  { key: 'anomalies', title: 'ناهنجاری‌های مالی', description: 'همه‌ی هشدارها و مغایرت‌های باز مالی.' },
+  { key: 'audit_timeline', title: 'تاریخچه ممیزی', description: 'رویدادهای مالی اخیر برای بازبینی و حسابرسی.' }
+];
+
 const FINANCE_SECTION_LABELS = {
   overview: 'داشبورد',
   payments: 'پرداخت‌ها',
@@ -7859,6 +7874,46 @@ export default function AdminFinance() {
     }
   };
 
+  const [reportPdfBusyKey, setReportPdfBusyKey] = useState('');
+
+  const buildFinanceReportPdfUrl = (path) => {
+    const url = new URL(buildScopedReportUrl(path));
+    if (financeOverviewRange.from) url.searchParams.set('dateFrom', financeOverviewRange.from);
+    if (financeOverviewRange.to) url.searchParams.set('dateTo', financeOverviewRange.to);
+    return url.toString();
+  };
+
+  const downloadFinancePdfFile = async (url, filename, busyKey) => {
+    setReportPdfBusyKey(busyKey);
+    try {
+      const res = await fetch(url, { headers: { ...getAuthHeaders() } });
+      if (!res.ok) throw new Error('دانلود PDF ناموفق بود');
+      const blob = await res.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename;
+      link.click();
+      window.URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setReportPdfBusyKey('');
+    }
+  };
+
+  const downloadFinanceReportPdf = (reportKey) => downloadFinancePdfFile(
+    buildFinanceReportPdfUrl(`/api/finance/admin/reports/${reportKey}/export.pdf`),
+    `${reportKey}.pdf`,
+    reportKey
+  );
+
+  const downloadFinanceReportBundle = () => downloadFinancePdfFile(
+    buildFinanceReportPdfUrl('/api/finance/admin/reports/export-bundle.pdf'),
+    'finance-reports-bundle.pdf',
+    'bundle'
+  );
+
   return (
     <section className="finance-page" data-active-section={activeSection} data-form-layout={formLayoutMode}>
       <div className="card-back">
@@ -10433,6 +10488,42 @@ export default function AdminFinance() {
           <small>{monthKey ? `هجری شمسی: ${toFaMonthKey(monthKey)}` : 'ماه مالی را به شکل YYYY-MM وارد کنید؛ نمایش رسمی به هجری شمسی نشان داده می‌شود.'}</small>
         </div>
         <button type="button" onClick={requestMonthClose} disabled={busy}>درخواست بستن ماه مالی</button>
+      </div>
+
+      <div className="finance-card finance-report-downloads-card" data-finance-section="reports" data-testid="finance-report-downloads-card">
+        <div className="finance-card-head">
+          <div>
+            <h3>گزارش‌های مالی قابل دانلود</h3>
+            <p className="muted">همان صنف و بازه‌ی «از تاریخ/تا تاریخ» بالای صفحه روی همه‌ی این گزارش‌ها اعمال می‌شود.</p>
+          </div>
+          <button
+            type="button"
+            onClick={downloadFinanceReportBundle}
+            disabled={reportPdfBusyKey !== ''}
+            data-testid="download-finance-report-bundle"
+          >
+            {reportPdfBusyKey === 'bundle' ? 'در حال آماده‌سازی...' : 'دانلود بسته‌ی کامل گزارش‌ها (PDF)'}
+          </button>
+        </div>
+        <div className="finance-report-download-grid">
+          {FINANCE_REPORT_CARDS.map((item) => (
+            <div key={item.key} className="finance-report-download-row">
+              <div className="finance-report-download-copy">
+                <strong>{item.title}</strong>
+                <small>{item.description}</small>
+              </div>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => downloadFinanceReportPdf(item.key)}
+                disabled={reportPdfBusyKey !== ''}
+                data-testid={`download-finance-report-${item.key}`}
+              >
+                {reportPdfBusyKey === item.key ? 'در حال آماده‌سازی...' : 'دانلود PDF'}
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="finance-card finance-payment-tools-card" data-finance-section="payments" data-testid="payment-tools-card">
