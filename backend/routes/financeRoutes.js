@@ -7645,6 +7645,24 @@ router.get('/admin/reports/advance-payments', requireAuth, requireRole(['admin']
   }
 });
 
+router.get('/admin/reports/payment-timing', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const { classId = '', courseId = '', academicYearId = '', dateFrom = '', dateTo = '' } = req.query || {};
+    const scope = await resolveFinanceReportReadContext(req, res, { classId, courseId });
+    if (scope.error) return res.status(400).json({ success: false, message: scope.error });
+    const report = await runReport('fee_payment_timing_overview', {
+      schoolId: scope.schoolId,
+      classId: scope.classId || '',
+      academicYearId,
+      dateFrom,
+      dateTo
+    });
+    res.json({ success: true, columns: report.columns, items: report.rows, summary: report.summary });
+  } catch {
+    res.status(500).json({ success: false, message: 'خطا در گزارش زمان‌بندی پرداخت فیس' });
+  }
+});
+
 // Shared label dictionary for turning a report's `summary` object (English
 // keys, coming straight out of reportEngineService's aggregations) into the
 // small Dari key/value cards shown above every report's table - both in the
@@ -7678,7 +7696,11 @@ const FINANCE_REPORT_SUMMARY_LABELS = {
   totalPrepaidAmount: 'مجموع مبلغ پیش‌پرداخت‌شده',
   total: 'مجموع دریافتی',
   pendingTotal: 'مجموع در انتظار',
-  pendingCount: 'تعداد در انتظار'
+  pendingCount: 'تعداد در انتظار',
+  onTimeCount: 'پرداخت‌های به‌موقع',
+  lateCount: 'پرداخت‌های با تأخیر',
+  advanceCount: 'پرداخت‌های پیش‌پرداختی',
+  averageLagMonths: 'میانگین فاصله (ماه)'
 };
 
 // Explicit allowlist rather than a substring/regex match - a loose regex
@@ -7691,7 +7713,7 @@ const FINANCE_REPORT_MONEY_KEYS = new Set([
   'totalPaid', 'approvedAmount', 'pendingAmount', 'amount', 'fixedReliefAmount'
 ]);
 const FINANCE_REPORT_DATE_KEYS = new Set([
-  'lastDueDate', 'createdAt', 'startDate', 'endDate', 'referenceDate', 'dueDate', 'date'
+  'lastDueDate', 'createdAt', 'startDate', 'endDate', 'referenceDate', 'dueDate', 'date', 'paidAt'
 ]);
 const FINANCE_REPORT_STATUS_LABELS = {
   overdue: 'مهلت‌گذشته', partial: 'نیمه‌پرداخت', new: 'جدید', paid: 'پرداخت‌شده', void: 'باطل',
@@ -7711,10 +7733,16 @@ const FINANCE_REPORT_STATUS_LABELS = {
   critical: 'حساس', warning: 'هشدار', info: 'اطلاعیه'
 };
 
+// A per-fee-month net revenue breakdown (fee_payment_timing_overview) can't
+// use a fixed key allowlist - the months present depend on the data. Those
+// summary keys are built as `netRevenue:<month label>` specifically so this
+// prefix check can still recognize them as money without a fixed key list.
+const FINANCE_REPORT_DYNAMIC_MONEY_KEY_PREFIX = 'netRevenue:';
+
 function formatFinanceReportCellValue(key, value) {
   if (value === null || value === undefined || value === '') return '-';
   if (FINANCE_REPORT_DATE_KEYS.has(key)) return formatReportDateLabel(value);
-  if (FINANCE_REPORT_MONEY_KEYS.has(key)) return formatReportMoney(value);
+  if (FINANCE_REPORT_MONEY_KEYS.has(key) || key.startsWith(FINANCE_REPORT_DYNAMIC_MONEY_KEY_PREFIX)) return formatReportMoney(value);
   if (typeof value === 'number') return formatReportNumber(value);
   const statusLabel = FINANCE_REPORT_STATUS_LABELS[String(value).trim().toLowerCase()];
   return statusLabel || String(value);
@@ -7724,7 +7752,9 @@ function buildFinanceReportSummaryRows(summary = {}) {
   return Object.entries(summary || {})
     .filter(([, value]) => typeof value === 'number' || typeof value === 'string')
     .map(([key, value]) => ({
-      label: FINANCE_REPORT_SUMMARY_LABELS[key] || key,
+      label: key.startsWith(FINANCE_REPORT_DYNAMIC_MONEY_KEY_PREFIX)
+        ? `خالص عاید ${key.slice(FINANCE_REPORT_DYNAMIC_MONEY_KEY_PREFIX.length)}`
+        : (FINANCE_REPORT_SUMMARY_LABELS[key] || key),
       value: formatFinanceReportCellValue(key, value)
     }));
 }
@@ -7747,6 +7777,7 @@ const FINANCE_REPORT_PDF_CATALOG = {
   debtors: { title: 'گزارش باقیداران', engineKey: 'fee_debtors_overview' },
   by_class: { title: 'گزارش وصول صنف‌وار', engineKey: 'fee_collection_by_class' },
   advance_payments: { title: 'گزارش پیش‌پرداخت‌کنندگان', engineKey: 'fee_advance_payments_overview' },
+  payment_timing: { title: 'گزارش زمان‌بندی پرداخت فیس', engineKey: 'fee_payment_timing_overview' },
   discounts: { title: 'گزارش تخفیف و معافیت', engineKey: 'fee_discount_exemption_overview' },
   cashflow: { title: 'گزارش جریان نقدی', adapter: 'cashflow' },
   daily_cashier: { title: 'گزارش صندوق روزانه', adapter: 'dailyCashier' },
