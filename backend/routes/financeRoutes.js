@@ -7723,10 +7723,10 @@ function buildFinanceReportSummaryRows(summary = {}) {
 // exploration; a printed A4 report reads better with a curated subset. Falls
 // back to every engine column when a report has no override below.
 const FINANCE_REPORT_PDF_COLUMN_OVERRIDES = {
-  fee_debtors_overview: ['studentName', 'classTitle', 'totalOutstanding', 'overdueOrders', 'lastDueDate', 'debtorStatus'],
+  fee_debtors_overview: ['studentName', 'admissionNo', 'classTitle', 'totalOutstanding', 'overdueOrders', 'lastDueDate', 'debtorStatus'],
   fee_collection_by_class: ['classTitle', 'orderCount', 'totalDue', 'approvedAmount', 'totalOutstanding', 'collectionRate'],
-  fee_advance_payments_overview: ['studentName', 'classTitle', 'monthsPrepaid', 'totalPrepaidAmount', 'latestPrepaidMonth'],
-  fee_discount_exemption_overview: ['studentName', 'classTitle', 'recordType', 'benefitType', 'amount', 'status']
+  fee_advance_payments_overview: ['studentName', 'admissionNo', 'classTitle', 'monthsPrepaid', 'totalPrepaidAmount', 'latestPrepaidMonth'],
+  fee_discount_exemption_overview: ['studentName', 'admissionNo', 'classTitle', 'recordType', 'benefitType', 'amount', 'status']
 };
 
 // Every report a school finance office can download as PDF - either backed
@@ -7841,6 +7841,7 @@ async function buildFinanceReportPdfPayload(reportKey, { scope, query = {} } = {
     const rows = (Array.isArray(data.items) ? data.items : []).map((item) => ({
       paymentNumber: item?.paymentNumber || '-',
       student: item?.student?.fullName || item?.student?.name || '-',
+      admissionNo: item?.student?.admissionNo || item?.student?.asasNumber || '-',
       amount: formatReportMoney(item?.amount),
       paymentMethod: item?.paymentMethod || '-',
       receivedBy: item?.receivedBy?.name || '-',
@@ -7857,6 +7858,7 @@ async function buildFinanceReportPdfPayload(reportKey, { scope, query = {} } = {
       columns: [
         { key: 'paymentNumber', label: 'شماره رسید' },
         { key: 'student', label: 'متعلم' },
+        { key: 'admissionNo', label: 'نمبر اساس' },
         { key: 'amount', label: 'مبلغ' },
         { key: 'paymentMethod', label: 'روش پرداخت' },
         { key: 'receivedBy', label: 'دریافت‌کننده' },

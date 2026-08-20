@@ -717,6 +717,7 @@ async function buildFeeDebtorsOverviewReport(filters) {
 
     const current = grouped.get(groupKey) || {
       studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId, membership: item.studentMembershipId }),
+      admissionNo: normalizeText(item.studentId?.admissionNo),
       classTitle: getClassTitle(item.classId),
       academicYear: getAcademicYearTitle(item.academicYearId),
       orderCount: 0,
@@ -786,6 +787,7 @@ async function buildFeeDebtorsOverviewReport(filters) {
   return buildBaseReport(definition, filters, {
     columns: [
       { key: 'studentName', label: 'متعلم' },
+      { key: 'admissionNo', label: 'نمبر اساس' },
       { key: 'classTitle', label: 'صنف' },
       { key: 'academicYear', label: 'سال تعلیمی' },
       { key: 'orderCount', label: 'تعداد بل‌ها' },
@@ -839,6 +841,7 @@ async function buildFeeAdvancePaymentsOverviewReport(filters) {
 
     const current = grouped.get(groupKey) || {
       studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId }),
+      admissionNo: normalizeText(item.studentId?.admissionNo),
       classTitle: getClassTitle(item.classId),
       academicYear: getAcademicYearTitle(item.academicYearId),
       monthsPrepaid: 0,
@@ -870,6 +873,7 @@ async function buildFeeAdvancePaymentsOverviewReport(filters) {
   return buildBaseReport(definition, filters, {
     columns: [
       { key: 'studentName', label: 'متعلم' },
+      { key: 'admissionNo', label: 'نمبر اساس' },
       { key: 'classTitle', label: 'صنف' },
       { key: 'academicYear', label: 'سال تعلیمی' },
       { key: 'monthsPrepaid', label: 'تعداد ماه پیش‌پرداخت‌شده' },
@@ -901,6 +905,7 @@ async function buildFeeDiscountExemptionOverviewReport(filters) {
   if (reliefDocs.length) {
     rows = reliefDocs.map((item) => ({
       studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId, membership: item.studentMembershipId }),
+      admissionNo: normalizeText(item.studentId?.admissionNo),
       classTitle: getClassTitle(item.classId),
       academicYear: getAcademicYearTitle(item.academicYearId),
       recordType: normalizeText(item.sourceModel || 'relief'),
@@ -980,6 +985,7 @@ async function buildFeeDiscountExemptionOverviewReport(filters) {
 
     const discountRows = discounts.map((item) => ({
       studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId }),
+      admissionNo: normalizeText(item.studentId?.admissionNo),
       classTitle: getClassTitle(item.classId),
       academicYear: getAcademicYearTitle(item.academicYearId),
       recordType: 'discount',
@@ -998,6 +1004,7 @@ async function buildFeeDiscountExemptionOverviewReport(filters) {
 
     const exemptionRows = exemptions.map((item) => ({
       studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId }),
+      admissionNo: normalizeText(item.studentId?.admissionNo),
       classTitle: getClassTitle(item.classId),
       academicYear: getAcademicYearTitle(item.academicYearId),
       recordType: 'exemption',
@@ -1039,6 +1046,7 @@ async function buildFeeDiscountExemptionOverviewReport(filters) {
   return buildBaseReport(definition, filters, {
     columns: [
       { key: 'studentName', label: 'متعلم' },
+      { key: 'admissionNo', label: 'نمبر اساس' },
       { key: 'classTitle', label: 'صنف' },
       { key: 'academicYear', label: 'سال تعلیمی' },
       { key: 'recordType', label: 'نوع ثبت' },
