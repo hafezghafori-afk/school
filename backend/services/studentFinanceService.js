@@ -64,6 +64,7 @@ const {
 const { buildMembershipFinanceAnomalies } = require('./financeAnomalyService');
 const { assertFinancePeriodWritable } = require('./financePeriodGuardService');
 const { loadCurrentMembershipStatusMap, attachLifecycleBadge } = require('../utils/financeStudentLifecycleStatus');
+const { resolveAsasNumberMapForDocs } = require('../utils/studentAdmissionNumber');
 
 function toPlain(doc) {
   if (!doc) return null;
@@ -137,15 +138,24 @@ function formatCourse(doc) {
   };
 }
 
-function formatStudentIdentityFromMembership(item = {}) {
+// asasNumberMap (userId -> asasNumber) is an optional bridge for doc types
+// that don't carry afghanStudentId directly (FeeOrder/FeePayment/FinanceBill/
+// Discount/TransportFee/FeeExemption/FinanceRelief only have `student`, the
+// User ref - only StudentMembership has afghanStudentId). See
+// utils/studentAdmissionNumber.js for how callers build this map in one
+// batch query instead of resolving it per row.
+function formatStudentIdentityFromMembership(item = {}, asasNumberMap = null) {
   const studentCore = toPlain(item.studentId);
   const user = toPlain(item.student);
   const afghanStudent = toPlain(item.afghanStudentId);
+  const userId = user ? String(user._id || '') : normalizeNullableId(item.student);
+  const bridgedAsasNumber = asasNumberMap ? normalizeText(asasNumberMap.get(userId)) : '';
   const asasNumber = normalizeText(afghanStudent?.asasNumber)
-    || normalizeText(studentCore?.admissionNo);
+    || normalizeText(studentCore?.admissionNo)
+    || bridgedAsasNumber;
   return {
     studentId: studentCore ? String(studentCore._id || '') : '',
-    userId: user ? String(user._id || '') : normalizeNullableId(item.student),
+    userId,
     fullName: normalizeText(studentCore?.fullName) || normalizeText(user?.name),
     email: normalizeText(studentCore?.email) || normalizeText(user?.email),
     fatherName: normalizeText(afghanStudent?.personalInfo?.fatherName),
@@ -154,14 +164,14 @@ function formatStudentIdentityFromMembership(item = {}) {
   };
 }
 
-function formatMembership(doc) {
+function formatMembership(doc, asasNumberMap = null) {
   const item = toPlain(doc);
   if (!item) return null;
   return {
     id: String(item._id || ''),
     status: normalizeText(item.status),
     enrolledAt: item.enrolledAt || null,
-    student: formatStudentIdentityFromMembership(item),
+    student: formatStudentIdentityFromMembership(item, asasNumberMap),
     schoolClass: formatSchoolClass(item.classId),
     academicYear: formatAcademicYear(item.academicYearId)
   };
@@ -186,7 +196,7 @@ function formatExamSession(doc) {
   };
 }
 
-function formatFeeOrder(doc) {
+function formatFeeOrder(doc, asasNumberMap = null) {
   const item = toPlain(doc);
   if (!item) return null;
   const normalizedLineItems = normalizeFinanceLineItems({
@@ -275,7 +285,7 @@ function formatFeeOrder(doc) {
     voidReason: normalizeText(item.voidReason),
     voidedAt: item.voidedAt || null,
     voidedBy: formatActorLite(item.voidedBy),
-    student: formatStudentIdentityFromMembership(item),
+    student: formatStudentIdentityFromMembership(item, asasNumberMap),
     schoolClass: formatSchoolClass(item.classId),
     academicYear: formatAcademicYear(item.academicYearId),
     assessmentPeriod: formatAssessmentPeriod(item.assessmentPeriodId),
@@ -419,7 +429,7 @@ function formatFeePaymentAllocation(doc) {
   };
 }
 
-function formatFeePayment(doc) {
+function formatFeePayment(doc, asasNumberMap = null) {
   const item = toPlain(doc);
   if (!item) return null;
   const sourceReceipt = formatSourceReceipt(item.sourceReceiptId);
@@ -459,14 +469,14 @@ function formatFeePayment(doc) {
     rejectReason: normalizeText(item.rejectReason) || normalizeText(sourceReceipt?.rejectReason),
     approvalTrail,
     followUp,
-    student: formatStudentIdentityFromMembership(item),
+    student: formatStudentIdentityFromMembership(item, asasNumberMap),
     schoolClass: formatSchoolClass(item.classId),
     academicYear: formatAcademicYear(item.academicYearId),
     createdAt: item.createdAt || null,
     updatedAt: item.updatedAt || null
   };
 }
-function formatDiscount(doc) {
+function formatDiscount(doc, asasNumberMap = null) {
   const item = toPlain(doc);
   if (!item) return null;
   return {
@@ -489,7 +499,7 @@ function formatDiscount(doc) {
     source: normalizeText(item.source),
     createdAt: item.createdAt || null,
     updatedAt: item.updatedAt || null,
-    student: formatStudentIdentityFromMembership(item),
+    student: formatStudentIdentityFromMembership(item, asasNumberMap),
     schoolClass: formatSchoolClass(item.classId),
     academicYear: formatAcademicYear(item.academicYearId)
   };
@@ -731,7 +741,7 @@ function resolveDiscountDurationWindow(membership = null, payload = {}) {
   return { durationMode, ...window };
 }
 
-function formatTransportFee(doc) {
+function formatTransportFee(doc, asasNumberMap = null) {
   const item = toPlain(doc);
   if (!item) return null;
   return {
@@ -743,14 +753,14 @@ function formatTransportFee(doc) {
     currency: normalizeText(item.currency),
     status: normalizeText(item.status),
     note: normalizeText(item.note),
-    student: formatStudentIdentityFromMembership(item),
+    student: formatStudentIdentityFromMembership(item, asasNumberMap),
     schoolClass: formatSchoolClass(item.classId),
     academicYear: formatAcademicYear(item.academicYearId),
     assessmentPeriod: formatAssessmentPeriod(item.assessmentPeriodId)
   };
 }
 
-function formatFeeExemption(doc) {
+function formatFeeExemption(doc, asasNumberMap = null) {
   const item = toPlain(doc);
   if (!item) return null;
   return {
@@ -763,7 +773,7 @@ function formatFeeExemption(doc) {
     note: normalizeText(item.note),
     status: normalizeText(item.status),
     linkScope: deriveLinkScope({ linkScope: item.linkScope, studentMembershipId: item.studentMembershipId, classId: item.classId }),
-    student: formatStudentIdentityFromMembership(item),
+    student: formatStudentIdentityFromMembership(item, asasNumberMap),
     schoolClass: formatSchoolClass(item.classId),
     academicYear: formatAcademicYear(item.academicYearId),
     approvedBy: item.approvedBy ? { id: String(item.approvedBy._id || item.approvedBy), name: normalizeText(item.approvedBy.name) } : null,
@@ -774,7 +784,7 @@ function formatFeeExemption(doc) {
   };
 }
 
-function formatFinanceRelief(doc) {
+function formatFinanceRelief(doc, asasNumberMap = null) {
   const item = toPlain(doc);
   if (!item) return null;
   return {
@@ -794,7 +804,7 @@ function formatFinanceRelief(doc) {
     reason: normalizeText(item.reason),
     note: normalizeText(item.note),
     status: normalizeText(item.status),
-    student: formatStudentIdentityFromMembership(item),
+    student: formatStudentIdentityFromMembership(item, asasNumberMap),
     schoolClass: formatSchoolClass(item.classId),
     academicYear: formatAcademicYear(item.academicYearId),
     approvedBy: item.approvedBy ? { id: String(item.approvedBy._id || item.approvedBy), name: normalizeText(item.approvedBy.name) } : null,
@@ -905,7 +915,8 @@ async function listFeeOrders(filters = {}) {
   // bills table too - so a withdrawn/transferred/expelled student's open
   // bill doesn't look identical to an active student's.
   const statusMap = await loadCurrentMembershipStatusMap(items.map((item) => item.student));
-  return items.map((item) => attachLifecycleBadge(formatFeeOrder(item), item.student, statusMap));
+  const asasNumberMap = await resolveAsasNumberMapForDocs(items);
+  return items.map((item) => attachLifecycleBadge(formatFeeOrder(item, asasNumberMap), item.student, statusMap));
 }
 
 function resolveMembershipSchoolId(membership = {}) {
@@ -1261,7 +1272,8 @@ async function listFeePayments(filters = {}) {
     .populate({ path: 'classId', populate: { path: 'academicYearId' } })
     .populate('academicYearId')
     .sort({ paidAt: -1, createdAt: -1 });
-  return buildPaymentReceiptDetails(items.map(formatFeePayment), [], null);
+  const asasNumberMap = await resolveAsasNumberMapForDocs(items);
+  return buildPaymentReceiptDetails(items.map((item) => formatFeePayment(item, asasNumberMap)), [], null);
 }
 
 function buildPaymentReceiptDetails(payments = [], orders = [], membership = null) {
@@ -1747,7 +1759,8 @@ async function getDailyCashierReport(filters = {}) {
 
   const [items, totalPaymentRows] = await Promise.all([rowQuery, totalsQuery]);
 
-  const formattedItems = buildPaymentReceiptDetails(items.map(formatFeePayment), [], null);
+  const asasNumberMap = await resolveAsasNumberMapForDocs(items);
+  const formattedItems = buildPaymentReceiptDetails(items.map((item) => formatFeePayment(item, asasNumberMap)), [], null);
   const recognizedRows = await recognizePayments(totalPaymentRows);
   const recognitionById = new Map(recognizedRows.map((row) => [
     String(row.payment?._id || ''),
@@ -1908,7 +1921,8 @@ async function listDiscounts(filters = {}) {
     .populate({ path: 'classId', populate: { path: 'academicYearId' } })
     .populate('academicYearId')
     .sort({ createdAt: -1 });
-  return items.map(formatDiscount);
+  const asasNumberMap = await resolveAsasNumberMapForDocs(items);
+  return items.map((item) => formatDiscount(item, asasNumberMap));
 }
 
 function buildDiscountRegistryQuery(filters = {}) {
@@ -2099,7 +2113,8 @@ async function listFinanceReliefs(filters = {}) {
     .populate('createdBy', 'name')
     .populate('cancelledBy', 'name')
     .sort({ createdAt: -1 });
-  return items.map(formatFinanceRelief);
+  const asasNumberMap = await resolveAsasNumberMapForDocs(items);
+  return items.map((item) => formatFinanceRelief(item, asasNumberMap));
 }
 
 async function createDiscount(payload = {}) {
@@ -2196,7 +2211,8 @@ async function createDiscount(payload = {}) {
       await syncDiscountOpenBills(populatedEquivalent);
       await syncFinanceReliefFromDiscount(populatedEquivalent);
     }
-    return { ...formatDiscount(populatedEquivalent), wasCreated: false, wasReactivated };
+    const equivalentAsasNumberMap = await resolveAsasNumberMapForDocs([populatedEquivalent]);
+    return { ...formatDiscount(populatedEquivalent, equivalentAsasNumberMap), wasCreated: false, wasReactivated };
   }
 
   let item;
@@ -2217,7 +2233,8 @@ async function createDiscount(payload = {}) {
       .populate({ path: 'classId', populate: { path: 'academicYearId' } })
       .populate('academicYearId')
       .populate('createdBy', 'name');
-    return { ...formatDiscount(populatedConcurrent), wasCreated: false, wasReactivated: false };
+    const concurrentAsasNumberMap = await resolveAsasNumberMapForDocs([populatedConcurrent]);
+    return { ...formatDiscount(populatedConcurrent, concurrentAsasNumberMap), wasCreated: false, wasReactivated: false };
   }
 
   const populated = await Discount.findById(item._id)
@@ -2230,7 +2247,8 @@ async function createDiscount(payload = {}) {
   await syncDiscountOpenBills(populated);
   await syncFinanceReliefFromDiscount(populated);
 
-  return { ...formatDiscount(populated), wasCreated: true, wasReactivated: false };
+  const createdAsasNumberMap = await resolveAsasNumberMapForDocs([populated]);
+  return { ...formatDiscount(populated, createdAsasNumberMap), wasCreated: true, wasReactivated: false };
 }
 
 async function cancelDiscount(discountId, payload = {}) {
@@ -2243,6 +2261,7 @@ async function cancelDiscount(discountId, payload = {}) {
   if (!item) {
     throw new Error('student_finance_discount_not_found');
   }
+  const cancelAsasNumberMap = await resolveAsasNumberMapForDocs([item]);
 
   if (item.targetScope === 'class' && item.groupKey) {
     const groupedItems = await Discount.find({ groupKey: item.groupKey, status: 'active' });
@@ -2255,7 +2274,7 @@ async function cancelDiscount(discountId, payload = {}) {
     }
     item.status = 'cancelled';
     item.reason = normalizeText(payload.reason) || item.reason;
-    return formatDiscount(item);
+    return formatDiscount(item, cancelAsasNumberMap);
   }
 
   item.status = 'cancelled';
@@ -2264,7 +2283,7 @@ async function cancelDiscount(discountId, payload = {}) {
   await syncDiscountOpenBills(item);
   await syncFinanceReliefFromDiscount(item);
 
-  return formatDiscount(item);
+  return formatDiscount(item, cancelAsasNumberMap);
 }
 
 async function listFeeExemptions(filters = {}) {
@@ -2287,7 +2306,8 @@ async function listFeeExemptions(filters = {}) {
     .populate('cancelledBy', 'name')
     .sort({ createdAt: -1 });
 
-  return items.map(formatFeeExemption);
+  const asasNumberMap = await resolveAsasNumberMapForDocs(items);
+  return items.map((item) => formatFeeExemption(item, asasNumberMap));
 }
 
 async function createFeeExemption(payload = {}) {
@@ -2335,7 +2355,8 @@ async function createFeeExemption(payload = {}) {
   await syncFinanceReliefFromFeeExemption(populated);
   await syncExemptionOpenBills(populated);
 
-  return formatFeeExemption(populated);
+  const asasNumberMap = await resolveAsasNumberMapForDocs([populated]);
+  return formatFeeExemption(populated, asasNumberMap);
 }
 
 async function cancelFeeExemption(exemptionId, payload = {}) {
@@ -2359,7 +2380,8 @@ async function cancelFeeExemption(exemptionId, payload = {}) {
   await syncFinanceReliefFromFeeExemption(item);
   await syncExemptionOpenBills(item);
 
-  return formatFeeExemption(item);
+  const asasNumberMap = await resolveAsasNumberMapForDocs([item]);
+  return formatFeeExemption(item, asasNumberMap);
 }
 
 async function listTransportFees(filters = {}) {
@@ -2375,7 +2397,8 @@ async function listTransportFees(filters = {}) {
     .populate('academicYearId')
     .populate('assessmentPeriodId')
     .sort({ createdAt: -1 });
-  return items.map(formatTransportFee);
+  const asasNumberMap = await resolveAsasNumberMapForDocs(items);
+  return items.map((item) => formatTransportFee(item, asasNumberMap));
 }
 
 async function createTransportFee(payload = {}) {
@@ -2403,7 +2426,8 @@ async function createTransportFee(payload = {}) {
     .populate('academicYearId')
     .populate('assessmentPeriodId');
 
-  return formatTransportFee(populated);
+  const asasNumberMap = await resolveAsasNumberMapForDocs([populated]);
+  return formatTransportFee(populated, asasNumberMap);
 }
 
 async function listOpenFeeOrdersForMembership(studentMembershipId = '') {
@@ -2422,9 +2446,10 @@ async function listOpenFeeOrdersForMembership(studentMembershipId = '') {
   }
 
   const orders = await getOpenFeeOrderDocsForMembership(membership._id);
+  const asasNumberMap = await resolveAsasNumberMapForDocs([membership], orders);
   return {
-    membership: formatMembership(membership),
-    items: orders.map(formatFeeOrder),
+    membership: formatMembership(membership, asasNumberMap),
+    items: orders.map((item) => formatFeeOrder(item, asasNumberMap)),
     summary: {
       totalOrders: orders.length,
       totalOutstanding: roundMoney(orders.reduce((sum, item) => sum + Number(item.outstandingAmount || 0), 0))
@@ -2556,8 +2581,9 @@ async function previewFeePaymentAllocation(payload = {}) {
   const resolved = resolvePaymentAllocations({ openOrders, payload });
   const rawRequestedFeeType = normalizeText(payload.feeType).toLowerCase();
   const requestedFeeType = LINE_ITEM_TYPES.includes(rawRequestedFeeType) ? rawRequestedFeeType : '';
+  const asasNumberMap = await resolveAsasNumberMapForDocs([membership]);
   return {
-    membership: formatMembership(membership),
+    membership: formatMembership(membership, asasNumberMap),
     schoolId,
     amount,
     currency: normalizeText(payload.currency).toUpperCase() || 'AFN',
@@ -2595,7 +2621,9 @@ async function createFeePayment(payload = {}) {
       .populate({ path: 'classId', populate: { path: 'academicYearId' } })
       .populate('academicYearId');
 
-    return populated ? formatFeePayment(populated) : null;
+    if (!populated) return null;
+    const asasNumberMap = await resolveAsasNumberMapForDocs([populated]);
+    return formatFeePayment(populated, asasNumberMap);
   };
 
   const paidAt = resolvePaymentDate(payload.paidAt);
@@ -2711,14 +2739,16 @@ async function getMembershipFinanceOverview(studentMembershipId) {
       .sort({ createdAt: -1 })
   ]);
 
+  const asasNumberMap = await resolveAsasNumberMapForDocs([membership], orders, payments, discounts, transportFees, exemptions, reliefDocs);
+
   const totalDue = orders.reduce((sum, item) => sum + (Number(item.amountDue) || 0), 0);
   const totalPaid = orders.reduce((sum, item) => sum + (Number(item.amountPaid) || 0), 0);
   const totalOutstanding = orders.reduce((sum, item) => sum + (Number(item.outstandingAmount) || 0), 0);
-  const formattedOrders = orders.map(formatFeeOrder);
+  const formattedOrders = orders.map((item) => formatFeeOrder(item, asasNumberMap));
   const formattedPayments = buildPaymentReceiptDetails(
-    payments.map(formatFeePayment),
+    payments.map((item) => formatFeePayment(item, asasNumberMap)),
     formattedOrders,
-    formatMembership(membership)
+    formatMembership(membership, asasNumberMap)
   );
   const recognizedPaymentRows = await recognizePayments(payments);
   const recognitionById = new Map(recognizedPaymentRows.map((row) => [
@@ -2730,13 +2760,13 @@ async function getMembershipFinanceOverview(studentMembershipId) {
     item.recognizedAmount = Number(recognition?.recognizedAmount || 0);
     item.excludedVoidAmount = Number(recognition?.excludedVoidAmount || 0);
   });
-  const formattedDiscounts = discounts.map(formatDiscount);
-  const formattedExemptions = exemptions.map(formatFeeExemption);
+  const formattedDiscounts = discounts.map((item) => formatDiscount(item, asasNumberMap));
+  const formattedExemptions = exemptions.map((item) => formatFeeExemption(item, asasNumberMap));
   const formattedReliefs = [];
   const reliefSourceKeys = new Set();
 
   for (const reliefDoc of reliefDocs) {
-    const formatted = formatFinanceRelief(reliefDoc);
+    const formatted = formatFinanceRelief(reliefDoc, asasNumberMap);
     if (!formatted) continue;
     formattedReliefs.push(formatted);
     if (formatted.sourceKey) reliefSourceKeys.add(formatted.sourceKey);
@@ -2755,7 +2785,7 @@ async function getMembershipFinanceOverview(studentMembershipId) {
       createdBy: discount.createdBy,
       createdAt: discount.createdAt,
       updatedAt: discount.updatedAt
-    }));
+    }, asasNumberMap));
     if (fallback.sourceKey) reliefSourceKeys.add(fallback.sourceKey);
   }
 
@@ -2774,12 +2804,12 @@ async function getMembershipFinanceOverview(studentMembershipId) {
       cancelledBy: exemption.cancelledBy,
       createdAt: exemption.createdAt,
       updatedAt: exemption.updatedAt
-    }));
+    }, asasNumberMap));
     if (fallback.sourceKey) reliefSourceKeys.add(fallback.sourceKey);
   }
 
-  const formattedTransportFees = transportFees.map(formatTransportFee);
-  const formattedMembership = formatMembership(membership);
+  const formattedTransportFees = transportFees.map((item) => formatTransportFee(item, asasNumberMap));
+  const formattedMembership = formatMembership(membership, asasNumberMap);
   const summary = {
     totalOrders: orders.length,
     totalPayments: formattedPayments.filter((item) => Number(item?.recognizedAmount || 0) > 0).length,
