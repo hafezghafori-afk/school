@@ -67,3 +67,21 @@ export function studentMatchesSearch(student = {}, query = '', extraValues = [])
   const searchBlob = buildStudentSearchBlob(student, extraValues);
   return normalizedQuery.split(' ').filter(Boolean).every((token) => searchBlob.includes(token));
 }
+
+// Two students can share the exact same name - admission number (نمبر اساس)
+// is the real, unique identifier, but on its own it's easy to miss in a long
+// dropdown/list. Prefixing a plain running serial number (not a stored field -
+// just this list's row position) makes same-name rows visibly distinct at a
+// glance, and the admission number lets someone confirm which one is which.
+// Use this everywhere a student's name is shown in an <option>, list row, or
+// table cell, instead of ad-hoc `${student.name}` concatenation.
+export function formatStudentDisplayLabel(student = {}, { index = null, name = '', suffix = '' } = {}) {
+  const displayName = String(name || student?.fullName || student?.name || student?.studentName || 'شاگرد').trim();
+  const asasNumber = getStudentAsasNumber(student);
+  const parts = [];
+  if (index !== null && index !== undefined && index !== '') parts.push(`${index}.`);
+  parts.push(displayName);
+  if (asasNumber) parts.push(`(اساس: ${asasNumber})`);
+  if (suffix) parts.push(`- ${suffix}`);
+  return parts.join(' ');
+}

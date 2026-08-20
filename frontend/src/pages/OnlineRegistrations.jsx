@@ -363,7 +363,7 @@ export default function OnlineRegistrations() {
         <div className="online-registrations-loading">در حال بارگذاری درخواست‌های ثبت‌نام آنلاین...</div>
       ) : filteredRegistrations.length ? (
         <div className="online-registrations-grid">
-          {filteredRegistrations.map((item) => {
+          {filteredRegistrations.map((item, index) => {
             const statusMeta = getStatusMeta(item.status);
             const approveBusy = actionLoading === `approve:${item._id}`;
             const rejectBusy = actionLoading === `reject:${item._id}`;
@@ -371,7 +371,7 @@ export default function OnlineRegistrations() {
               <article key={item._id} className="online-registration-card">
                 <div className="online-registration-card-head">
                   <div>
-                    <h3>{item.studentName || 'درخواست بی‌نام'}</h3>
+                    <h3>{index + 1}. {item.studentName || 'درخواست بی‌نام'}</h3>
                     <p>
                       {[item.grade ? `پایه ${item.grade}` : '', item.phone || '', item.email || '']
                         .filter(Boolean)

@@ -403,6 +403,7 @@ export default function AdminFinancialMemberships() {
         <table className="afm-table">
           <thead>
             <tr>
+              <th>#</th>
               <th>نام شاگرد</th>
               <th>شماره شاگرد</th>
               <th>صنف</th>
@@ -416,15 +417,16 @@ export default function AdminFinancialMemberships() {
           </thead>
           <tbody>
             {filteredMemberships.length === 0 && (
-              <tr><td colSpan={9} className="muted">عضویتی یافت نشد.</td></tr>
+              <tr><td colSpan={10} className="muted">عضویتی یافت نشد.</td></tr>
             )}
-            {paginatedMemberships.map((m) => {
+            {paginatedMemberships.map((m, index) => {
               const studentName = getMembershipStudentName(m, students);
               const admissionNo = getMembershipAdmissionNo(m, students);
               const classTitle = getMembershipClassTitle(m, classes);
               const academicYearTitle = getMembershipAcademicYearTitle(m, academicYears);
               return (
                 <tr key={m._id || m.id}>
+                  <td>{index + 1}</td>
                   <td>{studentName}</td>
                   <td>{admissionNo}</td>
                   <td>{classTitle}</td>
@@ -539,8 +541,8 @@ export default function AdminFinancialMemberships() {
                         const matchesSearch = studentMatchesSearch(s, filters.modalStudentSearch);
                         const matchesRegType = !filters.modalRegistrationType || s.registrationType === filters.modalRegistrationType;
                         return matchesSearch && matchesRegType;
-                      }).map(s => (
-                        <option key={s._id} value={s._id}>{s.fullName || s.name} {getStudentAsasNumber(s) ? `(نمبر اساس: ${getStudentAsasNumber(s)})` : ''} {s.registrationType === 'online' ? 'آنلاین' : 'مدیریت'}</option>
+                      }).map((s, index) => (
+                        <option key={s._id} value={s._id}>{index + 1}. {s.fullName || s.name} {getStudentAsasNumber(s) ? `(نمبر اساس: ${getStudentAsasNumber(s)})` : ''} {s.registrationType === 'online' ? 'آنلاین' : 'مدیریت'}</option>
                       ))}
                     </select>
                   </div>

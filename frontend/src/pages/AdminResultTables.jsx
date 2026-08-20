@@ -346,7 +346,7 @@ export default function AdminResultTables() {
                   { key: 'general', label: 'نتیجه نهایی', scoreKey: 'total' }
                 ];
                 return <React.Fragment key={row.id}>{stages.map((stage, index) => <tr key={`${row.id}:${stage.key}`} className={index === 2 ? 'result-preview-student-end' : ''}>
-                  {index === 0 && <><td rowSpan="3">{row.serialNo}</td><td rowSpan="3"><b>{row.displayName}</b><small>{row.cells?.identity?.fatherName ? `ولد ${row.cells.identity.fatherName}` : ''}</small></td></>}
+                  {index === 0 && <><td rowSpan="3">{row.serialNo}</td><td rowSpan="3"><b>{row.displayName}</b><small>{row.cells?.identity?.fatherName ? `ولد ${row.cells.identity.fatherName}` : ''}</small>{(row.cells?.identity?.asasNumber || row.cells?.identity?.admissionNo) ? <small>{`اساس: ${row.cells.identity.asasNumber || row.cells.identity.admissionNo}`}</small> : null}</td></>}
                   <td><b>{stage.label}</b></td>
                   {previewSubjects.map((subject) => { const item = scores.get(String(subject.id || subject.code || '')) || {}; return <td key={subject.id || subject.code}>{item[stage.scoreKey] ?? '—'}</td>; })}
                   <td>{row.cells?.stageTotals?.[stage.key]?.obtained ?? '—'}</td><td>{percentageLabel(row.cells?.stageTotals?.[stage.key])}</td>

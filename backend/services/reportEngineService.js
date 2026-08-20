@@ -93,6 +93,22 @@ const REPORT_DEFINITIONS = Object.freeze([
     description: 'تحلیل وصول، پرداخت‌های در انتظار و باقی‌مانده فیس در سطح صنف'
   },
   {
+    key: 'fee_advance_payments_overview',
+    title: 'گزارش پیش‌پرداخت‌کنندگان',
+    category: 'finance',
+    requiredPermissions: ['manage_finance'],
+    supportedFilters: ['academicYearId', 'classId', 'dateFrom', 'dateTo'],
+    description: 'لیست شاگردانی که فیس یک یا چند ماه آینده را از قبل پرداخت کرده‌اند'
+  },
+  {
+    key: 'fee_payment_timing_overview',
+    title: 'گزارش زمان‌بندی پرداخت فیس',
+    category: 'finance',
+    requiredPermissions: ['manage_finance'],
+    supportedFilters: ['academicYearId', 'classId', 'dateFrom', 'dateTo'],
+    description: 'برای هر پرداخت، ماه فیس را با ماه پرداخت واقعی مقایسه می‌کند (به‌موقع/تأخیر/پیش‌پرداخت) و خالص عاید هر ماه فیس را - فارغ از تاریخ دریافت - جمع می‌زند'
+  },
+  {
     key: 'exam_outcomes',
     title: 'گزارش نتایج امتحانات',
     category: 'exam',
@@ -182,6 +198,10 @@ function toPlain(doc) {
 
 function toRawText(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function roundMoney(value = 0) {
+  return Number((Number(value) || 0).toFixed(2));
 }
 
 function repairDisplayText(value) {
@@ -709,6 +729,7 @@ async function buildFeeDebtorsOverviewReport(filters) {
 
     const current = grouped.get(groupKey) || {
       studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId, membership: item.studentMembershipId }),
+      admissionNo: normalizeText(item.studentId?.admissionNo),
       classTitle: getClassTitle(item.classId),
       academicYear: getAcademicYearTitle(item.academicYearId),
       orderCount: 0,
@@ -778,6 +799,7 @@ async function buildFeeDebtorsOverviewReport(filters) {
   return buildBaseReport(definition, filters, {
     columns: [
       { key: 'studentName', label: 'متعلم' },
+      { key: 'admissionNo', label: 'نمبر اساس' },
       { key: 'classTitle', label: 'صنف' },
       { key: 'academicYear', label: 'سال تعلیمی' },
       { key: 'orderCount', label: 'تعداد بل‌ها' },
@@ -791,6 +813,218 @@ async function buildFeeDebtorsOverviewReport(filters) {
       { key: 'fullReliefCount', label: 'معافیت‌های کامل' },
       { key: 'lastDueDate', label: 'آخرین مهلت پرداخت' },
       { key: 'debtorStatus', label: 'وضعیت بدهکاری' }
+    ],
+    rows,
+    summary,
+    meta: { totalRows: rows.length }
+  });
+}
+
+// A "prepaid" order is one that is already fully paid for a period that
+// hasn't started yet as of the reference date (dateTo if given, else today).
+// This is the natural companion report to the advance/lump-sum multi-month
+// payment flow in AdminFinance.jsx's payment desk: once an admin can collect
+// several future months at once, finance staff need a way to see who has
+// actually done that, and how far ahead.
+async function buildFeeAdvancePaymentsOverviewReport(filters) {
+  const definition = getReportDefinition('fee_advance_payments_overview');
+  const referenceDate = filters.dateTo ? new Date(`${filters.dateTo}T23:59:59.999Z`) : new Date();
+
+  const orderFilter = { status: 'paid', dueDate: { $gt: referenceDate } };
+  if (filters.academicYearId) orderFilter.academicYearId = filters.academicYearId;
+  if (filters.classId) orderFilter.classId = filters.classId;
+  await applySchoolClassScope(filters, orderFilter);
+  if (filters.dateFrom) orderFilter.dueDate.$gte = new Date(`${filters.dateFrom}T00:00:00.000Z`);
+
+  const orders = await FeeOrder.find(orderFilter)
+    .populate('student', 'name email')
+    .populate('studentId', 'fullName admissionNo')
+    .populate('classId', 'title code gradeLevel section')
+    .populate('academicYearId', 'title code')
+    .sort({ dueDate: 1 });
+
+  const grouped = new Map();
+  for (const item of orders) {
+    const groupKey = [
+      getReferenceId(item.studentMembershipId),
+      getReferenceId(item.studentId),
+      getReferenceId(item.student)
+    ].find(Boolean) || String(item._id);
+
+    const current = grouped.get(groupKey) || {
+      studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId }),
+      admissionNo: normalizeText(item.studentId?.admissionNo),
+      classTitle: getClassTitle(item.classId),
+      academicYear: getAcademicYearTitle(item.academicYearId),
+      monthsPrepaid: 0,
+      totalPrepaidAmount: 0,
+      earliestPrepaidMonth: '',
+      latestPrepaidMonth: ''
+    };
+
+    current.monthsPrepaid += 1;
+    current.totalPrepaidAmount += Number(item.amountPaid || 0);
+    const periodLabel = normalizeText(item.periodLabel) || toIsoOrEmpty(item.dueDate).slice(0, 10);
+    if (!current.earliestPrepaidMonth) current.earliestPrepaidMonth = periodLabel;
+    current.latestPrepaidMonth = periodLabel;
+
+    grouped.set(groupKey, current);
+  }
+
+  const rows = Array.from(grouped.values())
+    .map((item) => ({ ...item, totalPrepaidAmount: Number(item.totalPrepaidAmount.toFixed(2)) }))
+    .sort((left, right) => right.monthsPrepaid - left.monthsPrepaid || right.totalPrepaidAmount - left.totalPrepaidAmount);
+
+  const summary = {
+    referenceDate: referenceDate.toISOString().slice(0, 10),
+    totalStudents: rows.length,
+    totalMonthsPrepaid: rows.reduce((sum, item) => sum + Number(item.monthsPrepaid || 0), 0),
+    totalPrepaidAmount: Number(rows.reduce((sum, item) => sum + Number(item.totalPrepaidAmount || 0), 0).toFixed(2))
+  };
+
+  return buildBaseReport(definition, filters, {
+    columns: [
+      { key: 'studentName', label: 'متعلم' },
+      { key: 'admissionNo', label: 'نمبر اساس' },
+      { key: 'classTitle', label: 'صنف' },
+      { key: 'academicYear', label: 'سال تعلیمی' },
+      { key: 'monthsPrepaid', label: 'تعداد ماه پیش‌پرداخت‌شده' },
+      { key: 'totalPrepaidAmount', label: 'مجموع مبلغ پیش‌پرداخت‌شده' },
+      { key: 'earliestPrepaidMonth', label: 'اولین ماه پیش‌پرداخت' },
+      { key: 'latestPrepaidMonth', label: 'آخرین ماه پیش‌پرداخت' }
+    ],
+    rows,
+    summary,
+    meta: { totalRows: rows.length }
+  });
+}
+
+// Solar (Hijri Shamsi) year/month for a Gregorian date, via the same
+// Intl API the rest of the finance module already relies on for Afghan
+// calendar math (see feeBillingService.js's getSolarDateParts) - kept
+// local here since that helper isn't exported for reuse.
+function getSolarYearMonth(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date?.getTime?.())) return null;
+  try {
+    const parts = new Intl.DateTimeFormat('en-u-ca-persian', { year: 'numeric', month: 'numeric' }).formatToParts(date);
+    const read = (type) => Number(parts.find((part) => part.type === type)?.value || 0);
+    const year = read('year');
+    const month = read('month');
+    return year && month ? { year, month } : null;
+  } catch {
+    return null;
+  }
+}
+
+// The core distinction this report exists for: "cashflow" (how much
+// arrived on a given date) is not the same as "which fee month that money
+// actually belongs to". A payment made in Asad for a Saratan bill is
+// Saratan revenue collected late, not Asad revenue; a payment made in Asad
+// for a Qows bill is an advance against Qows, not Asad revenue either.
+// This groups every recognized payment allocation by the FEE order's own
+// period instead of the payment's paidAt date, and separately reports how
+// many solar months apart the two dates are (0 = on time, positive = late,
+// negative = paid in advance).
+async function buildFeePaymentTimingOverviewReport(filters) {
+  const definition = getReportDefinition('fee_payment_timing_overview');
+  const paymentFilter = { status: 'approved' };
+  if (filters.academicYearId) paymentFilter.academicYearId = filters.academicYearId;
+  if (filters.classId) paymentFilter.classId = filters.classId;
+  Object.assign(paymentFilter, buildDateRangeFilter('paidAt', filters));
+  await applySchoolClassScope(filters, paymentFilter);
+
+  const payments = await FeePayment.find(paymentFilter)
+    .populate('student', 'name email')
+    .populate('studentId', 'fullName admissionNo')
+    .populate('classId', 'title code gradeLevel section')
+    .populate('feeOrderId', 'periodLabel dueDate status')
+    .populate('allocations.feeOrderId', 'periodLabel dueDate status')
+    .sort({ paidAt: -1 });
+
+  const rows = [];
+  const monthlyNet = new Map();
+  let onTimeCount = 0;
+  let lateCount = 0;
+  let advanceCount = 0;
+  let lagMonthSum = 0;
+  let lagMonthSamples = 0;
+
+  for (const payment of payments) {
+    const allocations = Array.isArray(payment.allocations) && payment.allocations.length
+      ? payment.allocations
+      : (payment.feeOrderId ? [{ feeOrderId: payment.feeOrderId, amount: payment.amount }] : []);
+
+    for (const allocation of allocations) {
+      const order = allocation?.feeOrderId;
+      if (!order || typeof order !== 'object') continue;
+      if (normalizeText(order.status) === 'void') continue;
+      const amount = roundMoney(allocation.amount);
+      if (amount <= 0) continue;
+
+      const feeSolar = getSolarYearMonth(order.dueDate);
+      const paidSolar = getSolarYearMonth(payment.paidAt);
+      const feeMonthLabel = normalizeText(order.periodLabel)
+        || (feeSolar ? `${feeSolar.year}-${String(feeSolar.month).padStart(2, '0')}` : '-');
+
+      let timingStatus = '-';
+      let lagMonths = null;
+      if (feeSolar && paidSolar) {
+        lagMonths = (paidSolar.year - feeSolar.year) * 12 + (paidSolar.month - feeSolar.month);
+        if (lagMonths === 0) timingStatus = 'به‌موقع';
+        else if (lagMonths > 0) { timingStatus = `تأخیر: ${lagMonths} ماه`; lateCount += 1; }
+        else { timingStatus = `پیش‌پرداخت: ${Math.abs(lagMonths)} ماه`; advanceCount += 1; }
+        if (lagMonths === 0) onTimeCount += 1;
+        lagMonthSum += lagMonths;
+        lagMonthSamples += 1;
+      }
+
+      rows.push({
+        studentName: getStudentName({ studentUser: payment.student, studentCore: payment.studentId }),
+        admissionNo: normalizeText(payment.studentId?.admissionNo),
+        classTitle: getClassTitle(payment.classId),
+        feeMonth: feeMonthLabel,
+        paidAt: toIsoOrEmpty(payment.paidAt),
+        timingStatus,
+        amount
+      });
+
+      const monthKey = feeSolar ? `${feeSolar.year}-${String(feeSolar.month).padStart(2, '0')}` : feeMonthLabel;
+      const current = monthlyNet.get(monthKey) || { label: feeMonthLabel, amount: 0, count: 0, sortKey: monthKey };
+      current.amount = roundMoney(current.amount + amount);
+      current.count += 1;
+      monthlyNet.set(monthKey, current);
+    }
+  }
+
+  rows.sort((left, right) => String(right.paidAt).localeCompare(String(left.paidAt)));
+
+  const summary = {
+    totalPayments: rows.length,
+    onTimeCount,
+    lateCount,
+    advanceCount,
+    averageLagMonths: lagMonthSamples ? Number((lagMonthSum / lagMonthSamples).toFixed(2)) : 0
+  };
+  // One dynamic summary card per fee month with real activity - the actual
+  // answer to "خالص عاید ماه X": net revenue for that month regardless of
+  // when it was actually collected. Prefixed so the PDF layer (which can't
+  // know these keys ahead of time) can still tell they're money, not counts.
+  Array.from(monthlyNet.values())
+    .sort((left, right) => String(left.sortKey).localeCompare(String(right.sortKey)))
+    .forEach((item) => {
+      summary[`netRevenue:${item.label}`] = item.amount;
+    });
+
+  return buildBaseReport(definition, filters, {
+    columns: [
+      { key: 'studentName', label: 'متعلم' },
+      { key: 'admissionNo', label: 'نمبر اساس' },
+      { key: 'classTitle', label: 'صنف' },
+      { key: 'feeMonth', label: 'ماه فیس' },
+      { key: 'paidAt', label: 'تاریخ پرداخت' },
+      { key: 'timingStatus', label: 'وضعیت زمان‌بندی' },
+      { key: 'amount', label: 'مبلغ' }
     ],
     rows,
     summary,
@@ -816,6 +1050,7 @@ async function buildFeeDiscountExemptionOverviewReport(filters) {
   if (reliefDocs.length) {
     rows = reliefDocs.map((item) => ({
       studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId, membership: item.studentMembershipId }),
+      admissionNo: normalizeText(item.studentId?.admissionNo),
       classTitle: getClassTitle(item.classId),
       academicYear: getAcademicYearTitle(item.academicYearId),
       recordType: normalizeText(item.sourceModel || 'relief'),
@@ -895,6 +1130,7 @@ async function buildFeeDiscountExemptionOverviewReport(filters) {
 
     const discountRows = discounts.map((item) => ({
       studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId }),
+      admissionNo: normalizeText(item.studentId?.admissionNo),
       classTitle: getClassTitle(item.classId),
       academicYear: getAcademicYearTitle(item.academicYearId),
       recordType: 'discount',
@@ -913,6 +1149,7 @@ async function buildFeeDiscountExemptionOverviewReport(filters) {
 
     const exemptionRows = exemptions.map((item) => ({
       studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId }),
+      admissionNo: normalizeText(item.studentId?.admissionNo),
       classTitle: getClassTitle(item.classId),
       academicYear: getAcademicYearTitle(item.academicYearId),
       recordType: 'exemption',
@@ -954,6 +1191,7 @@ async function buildFeeDiscountExemptionOverviewReport(filters) {
   return buildBaseReport(definition, filters, {
     columns: [
       { key: 'studentName', label: 'متعلم' },
+      { key: 'admissionNo', label: 'نمبر اساس' },
       { key: 'classTitle', label: 'صنف' },
       { key: 'academicYear', label: 'سال تعلیمی' },
       { key: 'recordType', label: 'نوع ثبت' },
@@ -1863,6 +2101,10 @@ async function runReport(reportKey, rawFilters = {}) {
       return buildFeeDiscountExemptionOverviewReport(filters);
     case 'fee_collection_by_class':
       return buildFeeCollectionByClassReport(filters);
+    case 'fee_advance_payments_overview':
+      return buildFeeAdvancePaymentsOverviewReport(filters);
+    case 'fee_payment_timing_overview':
+      return buildFeePaymentTimingOverviewReport(filters);
     case 'exam_outcomes':
       return buildExamOutcomesReport(filters);
     case 'attendance_overview':

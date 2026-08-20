@@ -10,7 +10,7 @@ import TaskAlertPanel from '../components/dashboard/TaskAlertPanel';
 import TrendBars from '../components/dashboard/TrendBars';
 
 import { API_BASE } from '../config/api';
-import { expandLegacyPermissions } from '../config/permissionCatalog';
+import { LEGACY_PERMISSION_MAP, expandLegacyPermissions } from '../config/permissionCatalog';
 import { formatAfghanDate, formatAfghanDateTime, formatAfghanTime } from '../utils/afghanDate';
 import { formatFinanceCode } from '../utils/latinFinanceCode';
 import {
@@ -526,6 +526,11 @@ const permissionAllows = (permission = '', permissions = []) => {
   if (permission === 'education.promotions.manage' && permissions.includes('manage_users')) return true;
   if (permission === 'finance.lifecycle_effects.manage' && permissions.includes('manage_finance')) return true;
   if (permission === 'view_schedule' && permissions.includes('manage_schedule')) return true;
+  // اگر «permission» یک مجوز چتری/قدیمی باشد (مثلاً manage_users)، داشتنِ هر یک از مجوزهای
+  // جزئیِ زیرمجموعهٔ آن (مثلاً students.manage، users.manage و ...) هم باید کافی باشد. بدون
+  // این خط، وقتی از «دسترسی‌های جزئی» فقط یک مجوز دقیق به کاربر داده می‌شود، ویژگی‌هایی که بر
+  // اساس مجوز چتری تصمیم می‌گیرند (کارت‌ها/لینک‌های منوی داشبورد) برای او مخفی می‌مانند.
+  if ((LEGACY_PERMISSION_MAP[permission] || []).some((mapped) => permissions.includes(mapped))) return true;
   return false;
 };
 
@@ -851,13 +856,13 @@ export default function AdminPanel() {
     [user?.orgRole, user?.adminLevel]
   );
 
-  const canManageUsers = effectivePermissions.includes('manage_users');
-  const canManageFinance = effectivePermissions.includes('manage_finance');
+  const canManageUsers = permissionAllows('manage_users', effectivePermissions);
+  const canManageFinance = permissionAllows('manage_finance', effectivePermissions);
   const canManageShortTermCenter = effectivePermissions.includes('shortterm.center.manage');
-  const canManageContent = effectivePermissions.includes('manage_content');
-  const canViewReports = effectivePermissions.includes('view_reports');
+  const canManageContent = permissionAllows('manage_content', effectivePermissions);
+  const canViewReports = permissionAllows('view_reports', effectivePermissions);
   const canViewDashboardStats = canViewReports || canManageFinance;
-  const canManageSchedule = effectivePermissions.includes('manage_schedule');
+  const canManageSchedule = permissionAllows('manage_schedule', effectivePermissions);
   const canManageTeacherAssignments = permissionAllows('timetable.teacher_assignments.manage', effectivePermissions);
   const canManageEnrollments = permissionAllows('manage_enrollments', effectivePermissions);
   const canManageMemberships = permissionAllows('manage_memberships', effectivePermissions);

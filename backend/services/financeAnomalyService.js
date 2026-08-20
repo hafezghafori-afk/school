@@ -64,6 +64,18 @@ function getStudentName(item = {}) {
   ) || 'متعلم';
 }
 
+// Same shape-fallback pattern as getStudentName above, for نمبر اساس -
+// same-named students are otherwise indistinguishable in this report.
+function getStudentAdmissionNo(item = {}) {
+  return normalizeText(
+    item?.studentId?.admissionNo
+    || item?.student?.admissionNo
+    || item?.membership?.studentId?.admissionNo
+    || item?.membership?.student?.admissionNo
+    || ''
+  );
+}
+
 function getClassTitle(item = {}) {
   return normalizeText(
     item?.schoolClass?.title
@@ -496,6 +508,7 @@ function buildMembershipFinanceAnomalies({
   const membershipId = normalizeNullableId(membershipItem?.id || membershipItem?._id);
   const now = toDate(asOf) || new Date();
   const studentName = getStudentName({ membership: membershipItem });
+  const admissionNo = getStudentAdmissionNo({ membership: membershipItem });
   const classTitle = getClassTitle({ membership: membershipItem });
   const academicYearTitle = getAcademicYearTitle({ membership: membershipItem });
   const studentUserId = normalizeNullableId(
@@ -554,6 +567,7 @@ function buildMembershipFinanceAnomalies({
         title: 'بیش‌پرداخت روی بدهی ثبت شده است',
         description: `${orderNumber} برای ${studentName} بیشتر از مبلغ لازم پرداخت شده است.`,
         studentName,
+        admissionNo,
         studentUserId,
         classTitle,
         classId,
@@ -584,6 +598,7 @@ function buildMembershipFinanceAnomalies({
           title: 'بل باز با وجود تسهیل کامل',
           description: `${studentName} تسهیل کامل فعال دارد اما ${orderNumber} هنوز مانده باز دارد.`,
           studentName,
+        admissionNo,
           studentUserId,
           classTitle,
           classId,
@@ -613,6 +628,7 @@ function buildMembershipFinanceAnomalies({
         title: 'بدهی بیش از سه ماه معوق مانده است',
         description: `${studentName} برای ${orderNumber} بیشتر از سه ماه بدهی باز دارد.`,
         studentName,
+        admissionNo,
         studentUserId,
         classTitle,
         classId,
@@ -645,6 +661,7 @@ function buildMembershipFinanceAnomalies({
       title: 'تسهیل مالی رو به ختم است',
       description: `${studentName} یک تسهیل مالی دارد که تا ${daysLeft.toLocaleString('fa-AF-u-ca-persian')} روز دیگر ختم می‌شود.`,
       studentName,
+      admissionNo,
       studentUserId,
       classTitle,
       classId,
@@ -682,6 +699,7 @@ function buildMembershipFinanceAnomalies({
         title: 'پرداخت در انتظار بیش از حد طول کشیده است',
         description: `${paymentNumber} برای ${studentName} هنوز تایید نشده است.`,
         studentName,
+        admissionNo,
         studentUserId,
         classTitle,
         classId,
@@ -724,6 +742,7 @@ function buildMembershipFinanceAnomalies({
         title: 'بل داخله از پلان مالی صادر نشده',
         description: `${studentName} عضویت فعال دارد و پلان مالی صنف ${formatAmountLabel(plannedAdmissionFee, currency)} داخله دارد، اما هنوز بل یا سند داخله برای او دیده نشد.`,
         studentName,
+        admissionNo,
         studentUserId,
         classTitle,
         classId,
@@ -761,6 +780,7 @@ function buildMembershipFinanceAnomalies({
             title: `بل ${feeLabel} صادر نشده`,
             description: `${studentName} در پلان مالی صنف ${formatAmountLabel(plannedAmount, currency)} ${feeLabel} دارد، اما برای این عضویت بل معتبر دیده نشد.`,
             studentName,
+        admissionNo,
             studentUserId,
             classTitle,
             classId,
@@ -822,6 +842,7 @@ function buildMembershipFinanceAnomalies({
             title: `بل تکراری ${feeLabel}`,
             description: `${studentName} برای ${feeLabel} در دوره ${displayedPeriod} بیش از یک بل دارد. تعداد سندها: ${periodDocuments.length.toLocaleString('fa-AF-u-ca-persian')}.`,
             studentName,
+        admissionNo,
             studentUserId,
             classTitle,
             classId,
@@ -852,6 +873,7 @@ function buildMembershipFinanceAnomalies({
             title: `مبلغ بل ${feeLabel} کمتر از پلان است`,
             description: `${studentName} در پلان مالی ${formatAmountLabel(plannedAmount, currency)} ${feeLabel} دارد، اما مبلغ صادرشده ${formatAmountLabel(totalIssuedAmount, currency)} است.`,
             studentName,
+        admissionNo,
             studentUserId,
             classTitle,
             classId,
@@ -900,6 +922,7 @@ function buildMembershipFinanceAnomalies({
           title: 'پرداخت برای دوره بعد از ختم عضویت ثبت شده',
           description: `${studentName} از عضویت خارج شده، اما ${reference} برای دوره‌ای بعد از آن مبلغ پرداخت‌شده نشان می‌دهد. این مبلغ باید بازپرداخت یا بررسی شود.`,
           studentName,
+        admissionNo,
           studentUserId,
           classTitle,
           classId,

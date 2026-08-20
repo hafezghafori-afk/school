@@ -9,7 +9,7 @@ import { ToastProvider } from './components/ui/toast';
 import useSiteSettings, { PUBLIC_WEBSITE_LANGUAGE_KEY } from './hooks/useSiteSettings';
 import { getPublicWebsiteLocale, publicLanguageOptions } from './i18n/publicWebsite';
 import { API_BASE, API_ORIGIN } from './config/api';
-import { LEGACY_PERMISSION_MAP, expandLegacyPermissions } from './config/permissionCatalog';
+import { expandLegacyPermissions, permissionAllows } from './config/permissionCatalog';
 import { formatAfghanDate, formatAfghanDateTime, formatAfghanTime } from './utils/afghanDate';
 import { normalizeBrandName, normalizeBrandSubtitle } from './utils/brand';
 
@@ -527,10 +527,7 @@ const hasEffectivePermission = (permission) => {
   const expected = normalizePermissionList(permission);
   if (!expected.length) return true;
   const permissions = getStoredEffectivePermissions();
-  return expected.some((item) => (
-    permissions.includes(item)
-    || (LEGACY_PERMISSION_MAP[item] || []).some((mapped) => permissions.includes(mapped))
-  ));
+  return expected.some((item) => permissionAllows(item, permissions));
 };
 
 const clearAuthSession = () => {
@@ -919,10 +916,7 @@ function PermissionAccessGuard({
         } catch {
           // ignore storage errors
         }
-        finish(permissionList.some((item) => (
-          permissions.includes(item)
-          || (LEGACY_PERMISSION_MAP[item] || []).some((mapped) => permissions.includes(mapped))
-        )));
+        finish(permissionList.some((item) => permissionAllows(item, permissions)));
       } catch {
         finish(false);
       }

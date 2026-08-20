@@ -42,11 +42,17 @@ async function fetchJson(path, options = {}) {
   return { response, data };
 }
 
-function buildStudentLabel(item = {}) {
+function buildStudentLabel(item = {}, index = null) {
   const classTitle = item.currentMembership?.schoolClass?.title || '';
   const yearTitle = item.currentMembership?.academicYear?.label || '';
   const asasNumber = getStudentAsasNumber(item);
-  return [item.fullName, asasNumber ? `نمبر اساس: ${asasNumber}` : '', classTitle, yearTitle].filter(Boolean).join(' - ');
+  return [
+    index !== null ? `${index}.` : '',
+    item.fullName,
+    asasNumber ? `نمبر اساس: ${asasNumber}` : '',
+    classTitle,
+    yearTitle
+  ].filter(Boolean).join(' - ');
 }
 
 const ACTIVITY_PREVIEW_COUNT = 3;
@@ -322,9 +328,9 @@ export default function StudentReport() {
           <label className="student-report-field student-report-select-field">
             <span>انتخاب شاگرد</span>
             <select value={studentId} onChange={(event) => setStudentId(event.target.value)}>
-              {filteredStudents.map((item) => (
+              {filteredStudents.map((item, index) => (
                 <option key={item.studentId} value={item.studentId}>
-                  {buildStudentLabel(item)}
+                  {buildStudentLabel(item, index + 1)}
                 </option>
               ))}
             </select>

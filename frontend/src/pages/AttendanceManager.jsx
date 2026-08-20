@@ -1100,8 +1100,8 @@ export default function AttendanceManager() {
                     <span>شاگرد</span>
                     <select value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)}>
                       <option value="">انتخاب شاگرد</option>
-                      {visibleStudentOptions.map((student) => (
-                        <option key={student._id} value={student._id}>{student.name}{student.admissionNo ? ` - ${student.admissionNo}` : ''}</option>
+                      {visibleStudentOptions.map((student, index) => (
+                        <option key={student._id} value={student._id}>{index + 1}. {student.name}{student.admissionNo ? ` - ${student.admissionNo}` : ''}</option>
                       ))}
                     </select>
                   </label>

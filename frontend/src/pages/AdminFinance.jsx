@@ -1,4 +1,4 @@
-import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import './AdminFinance.css';
@@ -469,7 +469,7 @@ const normalizeAcademicYearOptions = (refData = {}) => (
 );
 
 const getClassOptionLabel = (item = {}) => String(item?.uiLabel || item?.title || '').trim() || 'صنف';
-const getStudentOptionLabel = (item = {}) => {
+const getStudentOptionLabel = (item = {}, serialNo = null) => {
   const asasNumber = String(
     item?.asasNumber
     || item?.admissionNo
@@ -479,6 +479,11 @@ const getStudentOptionLabel = (item = {}) => {
 
   return (
     [
+      // A plain running row number, shown first - not a stored field, just
+      // this list's position - so two same-name rows are visibly distinct
+      // even when (as often happens with real enrollment data) نمبر اساس
+      // hasn't been filled in yet for one or both of them.
+      serialNo !== null && serialNo !== undefined ? `${serialNo}.` : '',
       item?.fullName
         || item?.name
         || item?.email
@@ -501,9 +506,9 @@ const getAcademicYearOptionLabel = (item = {}) => (
 );
 const AFGHAN_SCHOOL_MONTHS = ['حمل', 'ثور', 'جوزا', 'سرطان', 'اسد', 'سنبله', 'میزان', 'عقرب', 'قوس', 'جدی', 'دلو', 'حوت'];
 
-const getFinanceStudentOptionLabel = (item = {}) => (
+const getFinanceStudentOptionLabel = (item = {}, serialNo = null) => (
   [
-    getStudentOptionLabel(item),
+    getStudentOptionLabel(item, serialNo),
 
     item?.fatherName
       ? `- پدر: ${item.fatherName}`
@@ -1202,6 +1207,22 @@ const sortCountEntries = (value = {}) => (
     .filter(([key, count]) => String(key || '').trim() && Number(count || 0) > 0)
     .sort((left, right) => Number(right?.[1] || 0) - Number(left?.[1] || 0))
 );
+
+// The full list of finance reports available as a real, downloadable PDF -
+// backed by GET /api/finance/admin/reports/:reportKey/export.pdf on the
+// backend. Kept as one flat list (not scattered across tabs) so the
+// "گزارش‌ها" tab stays a single, simple place to find every report.
+const FINANCE_REPORT_CARDS = [
+  { key: 'debtors', title: 'باقیداران', description: 'لیست شاگردان بدهکار به تفکیک صنف، با مبلغ باقی‌مانده و وضعیت.' },
+  { key: 'by_class', title: 'وصول صنف‌وار', description: 'وصول، باقیات و نرخ تحصیل هر صنف در بازه‌ی انتخاب‌شده - ماه‌وار یا سال‌وار.' },
+  { key: 'advance_payments', title: 'پیش‌پرداخت‌کنندگان', description: 'شاگردانی که فیس یک یا چند ماه آینده را از قبل پرداخت کرده‌اند.' },
+  { key: 'payment_timing', title: 'زمان‌بندی پرداخت فیس', description: 'ماه فیس هر پرداخت را با ماه پرداخت واقعی مقایسه می‌کند (به‌موقع/تأخیر/پیش‌پرداخت) و خالص عاید هر ماه فیس را نشان می‌دهد.' },
+  { key: 'discounts', title: 'تخفیف و معافیت', description: 'لیست تخفیف‌ها و معافیت‌های فعال با نوع، مبلغ و وضعیت.' },
+  { key: 'cashflow', title: 'جریان نقدی', description: 'وصول روزانه‌ی تاییدشده در بازه‌ی انتخاب‌شده.' },
+  { key: 'daily_cashier', title: 'صندوق روزانه', description: 'رسیدهای دریافت‌شده در یک روز مشخص (تا تاریخ بازه).' },
+  { key: 'anomalies', title: 'ناهنجاری‌های مالی', description: 'همه‌ی هشدارها و مغایرت‌های باز مالی.' },
+  { key: 'audit_timeline', title: 'تاریخچه ممیزی', description: 'رویدادهای مالی اخیر برای بازبینی و حسابرسی.' }
+];
 
 const FINANCE_SECTION_LABELS = {
   overview: 'داشبورد',
@@ -2379,6 +2400,8 @@ export default function AdminFinance() {
   const [reliefFocusPage, setReliefFocusPage] = useState(1);
   const [reliefFocusPageSize, setReliefFocusPageSize] = useState(5);
   const [paymentAdvancedOpen, setPaymentAdvancedOpen] = useState(false);
+  const [advancePaymentPanelOpen, setAdvancePaymentPanelOpen] = useState(false);
+  const [paymentAgingDetailOpen, setPaymentAgingDetailOpen] = useState(false);
   const [reliefFormMode, setReliefFormMode] = useState('discount');
   const [incomeTrendRange, setIncomeTrendRange] = useState('daily');
   const [debtorDelayFilter, setDebtorDelayFilter] = useState('all');
@@ -2510,6 +2533,9 @@ export default function AdminFinance() {
   const [paymentPreview, setPaymentPreview] = useState(null);
   const [advanceBillingPreview, setAdvanceBillingPreview] = useState(null);
   const [advanceBillingPayload, setAdvanceBillingPayload] = useState(null);
+  const [advanceMonthCountInput, setAdvanceMonthCountInput] = useState('');
+  const [paymentSectionHighlighted, setPaymentSectionHighlighted] = useState(false);
+  const paymentSectionRef = useRef(null);
   const [siblingDebtSummary, setSiblingDebtSummary] = useState(null);
   const [paymentDeskTrend, setPaymentDeskTrend] = useState(null);
 
@@ -3033,6 +3059,37 @@ export default function AdminFinance() {
       filteredCount: filteredBills.length
     };
   }, [bills, filteredBills.length]);
+  const topOverdueBills = useMemo(() => {
+    const now = Date.now();
+    return bills
+      .filter((item) => String(item?.status || '').trim() === 'overdue')
+      .map((item) => {
+        const outstanding = Math.max(0, toSafeNumber(item?.outstandingAmount ?? (toSafeNumber(item?.amountDue) - toSafeNumber(item?.amountPaid))));
+        const dueDate = item?.dueDate ? new Date(item.dueDate) : null;
+        const daysOverdue = dueDate && !Number.isNaN(dueDate.getTime())
+          ? Math.max(0, Math.floor((now - dueDate.getTime()) / 86400000))
+          : null;
+        return {
+          id: String(item?._id || item?.billNumber || `${item?.student?.userId || ''}-${item?.dueDate || ''}`),
+          outstanding,
+          daysOverdue,
+          studentName: item?.student?.fullName || item?.student?.name || 'شاگرد',
+          admissionNo: item?.student?.asasNumber || item?.student?.admissionNo || '',
+          searchTerm: item?.student?.asasNumber || item?.student?.admissionNo || item?.student?.fullName || item?.student?.name || ''
+        };
+      })
+      .filter((row) => row.outstanding > 0)
+      .sort((a, b) => b.outstanding - a.outstanding)
+      .slice(0, 5);
+  }, [bills]);
+  const focusOverdueBill = useCallback((row) => {
+    if (!row) return;
+    setOrderStatusFilter('overdue');
+    setOrderSearchTerm(row.searchTerm || '');
+    setTimeout(() => {
+      document.querySelector('[data-testid="finance-orders-table-card"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  }, [setOrderStatusFilter, setOrderSearchTerm]);
   const filteredDiscountRegistry = useMemo(() => (
     discountRegistry.filter((item) => (
       !String(item?.reason || '').trim().toLowerCase().startsWith('[discount:')
@@ -5602,7 +5659,7 @@ export default function AdminFinance() {
       dueDate: paymentDeskForm.paidAt || toInputDate(new Date()),
       periodType: 'monthly',
       includeFutureMonths: true,
-      futureMonthCount: Math.max(1, Math.min(12, Number(monthCount || 1))),
+      futureMonthCount: Math.max(1, Math.min(24, Number(monthCount || 1))),
       includeAdmission: false,
       includeTransport: false,
       onlyDebtors: false,
@@ -5613,9 +5670,13 @@ export default function AdminFinance() {
       const data = await postJson(`${API_BASE}/api/finance/admin/bills/preview`, payload);
       setAdvanceBillingPayload(payload);
       setAdvanceBillingPreview(data);
-      setMessage(data?.summary?.candidateCount
-        ? `پیش‌نمایش آماده شد: ${fmt(data.summary.candidateCount)} بل به مبلغ ${fmt(data.summary.totalAmountDue || 0)} افغانی.`
-        : 'برای این بازه بل جدید قابل صدور پیدا نشد؛ ماه‌ها ممکن است قبلاً صادر شده باشند.');
+      const existingOpenCount = Number(data?.summary?.existingOpenCount || 0);
+      const existingOpenNote = existingOpenCount
+        ? ` (${fmt(existingOpenCount)} ماه دیگر از قبل بل داشت، به مبلغ ${fmt(data.summary.existingOpenAmount || 0)} افغانی - این هم در مبلغ کل و انتخاب پرداخت لحاظ می‌شود)`
+        : '';
+      setMessage(data?.summary?.candidateCount || existingOpenCount
+        ? `پیش‌نمایش آماده شد: ${fmt(data.summary.candidateCount || 0)} بل جدید به مبلغ ${fmt(data.summary.totalAmountDue || 0)} افغانی.${existingOpenNote}`
+        : 'برای این بازه بل جدید قابل صدور پیدا نشد؛ ماه‌ها ممکن است قبلاً صادر و پرداخت شده باشند.');
     } catch (error) {
       setAdvanceBillingPreview(null);
       setAdvanceBillingPayload(null);
@@ -5626,7 +5687,9 @@ export default function AdminFinance() {
   };
 
   const generateAdvanceStudentBilling = async () => {
-    if (!advanceBillingPayload || !advanceBillingPreview?.summary?.candidateCount) return;
+    const candidateCount = Number(advanceBillingPreview?.summary?.candidateCount || 0);
+    const existingOpenCount = Number(advanceBillingPreview?.summary?.existingOpenCount || 0);
+    if (!advanceBillingPayload || (!candidateCount && !existingOpenCount)) return;
     setBusy(true);
     try {
       const data = await postJson(`${API_BASE}/api/finance/admin/bills/generate`, advanceBillingPayload);
@@ -5635,15 +5698,30 @@ export default function AdminFinance() {
       setAdvanceBillingPayload(null);
       await refreshPaymentWorkspace({ includeAnomalies: true });
       const createdFeeOrderIds = Array.isArray(data?.createdFeeOrderIds) ? data.createdFeeOrderIds.map(String) : [];
-      if (createdFeeOrderIds.length) {
+      // A "pay N months at once" request can include months that already had
+      // an open bill before this click - those are not newly created, but
+      // they still belong in the same payment (see existingFeeOrderIds on
+      // the backend), otherwise they'd silently fall out of the lump sum.
+      const existingFeeOrderIds = Array.isArray(data?.existingFeeOrderIds) ? data.existingFeeOrderIds.map(String) : [];
+      const combinedFeeOrderIds = Array.from(new Set([...createdFeeOrderIds, ...existingFeeOrderIds]));
+      const combinedAmount = Math.round((Number(data?.createdAmount || 0) + Number(data?.existingAmount || 0)) * 100) / 100;
+      if (combinedFeeOrderIds.length) {
         setPaymentDeskForm((previous) => ({
           ...previous,
-          amount: String(data?.createdAmount || ''),
+          amount: String(combinedAmount || ''),
           allocationMode: 'auto_selected',
-          selectedFeeOrderIds: createdFeeOrderIds,
+          selectedFeeOrderIds: combinedFeeOrderIds,
           manualAllocations: {}
         }));
-        setMessage(`${data.message || 'بل‌ها صادر شد.'} مبلغ و بل‌های جدید برای پیش‌نمایش پرداخت انتخاب شدند.`);
+        const monthNote = existingFeeOrderIds.length
+          ? ` (شامل ${fmt(existingFeeOrderIds.length)} ماه که از قبل بل داشت)`
+          : '';
+        setMessage(`${data.message || 'بل‌ها صادر شد.'} مبلغ و ${fmt(combinedFeeOrderIds.length)} بل برای پرداخت انتخاب شدند${monthNote}.`);
+        setPaymentSectionHighlighted(true);
+        requestAnimationFrame(() => {
+          paymentSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+        setTimeout(() => setPaymentSectionHighlighted(false), 4000);
       }
     } catch (error) {
       setMessage(error.message);
@@ -7835,6 +7913,46 @@ export default function AdminFinance() {
     }
   };
 
+  const [reportPdfBusyKey, setReportPdfBusyKey] = useState('');
+
+  const buildFinanceReportPdfUrl = (path) => {
+    const url = new URL(buildScopedReportUrl(path));
+    if (financeOverviewRange.from) url.searchParams.set('dateFrom', financeOverviewRange.from);
+    if (financeOverviewRange.to) url.searchParams.set('dateTo', financeOverviewRange.to);
+    return url.toString();
+  };
+
+  const downloadFinancePdfFile = async (url, filename, busyKey) => {
+    setReportPdfBusyKey(busyKey);
+    try {
+      const res = await fetch(url, { headers: { ...getAuthHeaders() } });
+      if (!res.ok) throw new Error('دانلود PDF ناموفق بود');
+      const blob = await res.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename;
+      link.click();
+      window.URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setReportPdfBusyKey('');
+    }
+  };
+
+  const downloadFinanceReportPdf = (reportKey) => downloadFinancePdfFile(
+    buildFinanceReportPdfUrl(`/api/finance/admin/reports/${reportKey}/export.pdf`),
+    `${reportKey}.pdf`,
+    reportKey
+  );
+
+  const downloadFinanceReportBundle = () => downloadFinancePdfFile(
+    buildFinanceReportPdfUrl('/api/finance/admin/reports/export-bundle.pdf'),
+    'finance-reports-bundle.pdf',
+    'bundle'
+  );
+
   return (
     <section className="finance-page" data-active-section={activeSection} data-form-layout={formLayoutMode}>
       <div className="card-back">
@@ -7912,16 +8030,6 @@ export default function AdminFinance() {
           </div>
         </div>
       ) : null}
-
-      <div className="finance-control-rail">
-        {/* حذف دکمه‌های لندسکیپ و پورتریت */}
-        {activeSection === 'orders' && (
-          <div className="finance-subsection-tabs" role="group" aria-label="فورم‌های بل و تعهدات">
-            <button type="button" className={orderFormMode === 'manual' ? 'secondary is-active' : 'secondary'} onClick={() => setOrderFormMode('manual')}>بل دستی</button>
-            <button type="button" className={orderFormMode === 'bulk' ? 'secondary is-active' : 'secondary'} onClick={() => setOrderFormMode('bulk')}>صدور گروهی</button>
-          </div>
-        )}
-      </div>
 
       <div className="finance-card finance-overview-filter" data-finance-section="overview reports">
         <div>
@@ -8288,14 +8396,14 @@ export default function AdminFinance() {
               <h3>بل‌ها و تعهدات مالی</h3>
               <p className="muted">نمای سریع بدهی‌ها، بل‌های سررسید گذشته و تعهدات فعال پیش از صدور یا پیگیری بل.</p>
             </div>
-            <div className="finance-chip-group">
-              <span className="finance-chip">{orderWorkspaceStats.officialCount} بل رسمی</span>
-              <span className="finance-chip finance-chip-emerald">{orderWorkspaceStats.openCount} بدهی باز</span>
-              <span className="finance-chip finance-chip-rose">{orderWorkspaceStats.overdueCount} سررسید گذشته</span>
-              {!!orderWorkspaceStats.voidCount && (
-                <span className="finance-chip finance-chip-muted">{orderWorkspaceStats.voidCount} بل باطل (جدا از رسمی)</span>
-              )}
-            </div>
+          </div>
+          <div className="finance-chip-group">
+            <span className="finance-chip">{orderWorkspaceStats.officialCount} بل رسمی</span>
+            <span className="finance-chip finance-chip-emerald">{orderWorkspaceStats.openCount} بدهی باز</span>
+            <span className="finance-chip finance-chip-rose">{orderWorkspaceStats.overdueCount} سررسید گذشته</span>
+            {!!orderWorkspaceStats.voidCount && (
+              <span className="finance-chip finance-chip-muted">{orderWorkspaceStats.voidCount} بل باطل (جدا از رسمی)</span>
+            )}
           </div>
           <div className="finance-kpi-grid finance-kpi-grid-dense finance-order-kpis">
             <div className="finance-kpi-item finance-kpi-item-accent">
@@ -8315,10 +8423,37 @@ export default function AdminFinance() {
               <strong>{orderWorkspaceStats.activeCommitments}</strong>
             </div>
           </div>
+          <div className="finance-order-top-debtors">
+            <div className="finance-order-top-debtors-head">
+              <span>بدهکاران برتر (سررسید گذشته)</span>
+              <small>{orderWorkspaceStats.overdueCount} بل سررسید گذشته</small>
+            </div>
+            {topOverdueBills.length ? topOverdueBills.map((row) => (
+              <div className="mini-row finance-order-debtor-row" key={row.id}>
+                <span className="finance-order-debtor-info">
+                  <strong>{row.studentName}</strong>
+                  <small>
+                    {row.admissionNo ? `اساس: ${row.admissionNo}` : 'نمبر اساس ثبت نشده'}
+                    {Number.isFinite(row.daysOverdue) ? ` — ${row.daysOverdue} روز تأخیر` : ''}
+                  </small>
+                </span>
+                <span className="finance-order-debtor-actions">
+                  <b>{fmt(row.outstanding)} AFN</b>
+                  <button type="button" className="secondary" onClick={() => focusOverdueBill(row)}>پیگیری</button>
+                </span>
+              </div>
+            )) : (
+              <p className="muted">در حال حاضر بل سررسیدگذشته‌ای ثبت نشده است.</p>
+            )}
+          </div>
         </section>
 
         {orderFormMode === 'manual' && (
           <form className="finance-card finance-order-action-card" data-finance-section="orders" onSubmit={createManualBill} data-testid="manual-bill-form">
+            <div className="finance-order-mode-toggle" role="group" aria-label="فورم‌های بل و تعهدات">
+              <button type="button" className={orderFormMode === 'manual' ? 'secondary is-active' : 'secondary'} onClick={() => setOrderFormMode('manual')}>بل دستی</button>
+              <button type="button" className={orderFormMode === 'bulk' ? 'secondary is-active' : 'secondary'} onClick={() => setOrderFormMode('bulk')}>صدور گروهی</button>
+            </div>
             <div className="finance-card-head">
               <div>
                 <h3>صدور بل دستی</h3>
@@ -8326,23 +8461,28 @@ export default function AdminFinance() {
               </div>
               <span className="finance-chip finance-chip-muted">{manualStudentOptions.length} متعلم</span>
             </div>
-            <label className="finance-inline-filter finance-inline-filter-wide">
-              <span>جستجوی متعلم</span>
-              <input
-                value={manualStudentSearch}
-                onChange={(e) => setManualStudentSearch(e.target.value)}
-               placeholder="نام، ایمیل یا نمبر اساس شاگرد"
-              />
-            </label>
-            <select value={manualForm.studentId} onChange={(e) => applyManualMembershipStudent(e.target.value)} required>
-              <option value="">شاگرد را انتخاب کنید</option>
-              {manualStudentOptions.length ? manualStudentOptions.map((student) => (
-                <option key={student.membershipId || student._id} value={student._id}>{getFinanceStudentOptionLabel(student)}</option>
-              )) : (
-                <option value="">متعلمی پیدا نشد</option>
-              )}
-            </select>
-            <div className="finance-split-grid">
+            <div className="finance-order-form-row">
+              <label className="finance-inline-filter finance-inline-filter-wide">
+                <span>جستجوی متعلم</span>
+                <input
+                  value={manualStudentSearch}
+                  onChange={(e) => setManualStudentSearch(e.target.value)}
+                 placeholder="نام، ایمیل یا نمبر اساس شاگرد"
+                />
+              </label>
+              <label className="finance-inline-filter">
+                <span>شاگرد</span>
+                <select value={manualForm.studentId} onChange={(e) => applyManualMembershipStudent(e.target.value)} required>
+                  <option value="">شاگرد را انتخاب کنید</option>
+                  {manualStudentOptions.length ? manualStudentOptions.map((student, index) => (
+                    <option key={student.membershipId || student._id} value={student._id}>{getFinanceStudentOptionLabel(student, index + 1)}</option>
+                  )) : (
+                    <option value="">متعلمی پیدا نشد</option>
+                  )}
+                </select>
+              </label>
+            </div>
+            <div className="finance-split-grid finance-split-grid-3">
               <select value={manualForm.classId} onChange={(e) => {
                 const classId = e.target.value;
                 const membership = financeMembershipStudents.find((item) => (
@@ -8378,8 +8518,6 @@ export default function AdminFinance() {
                   <option key={feeType} value={feeType}>{FEE_LINE_TYPE_LABELS[feeType] || feeType}</option>
                 ))}
               </select>
-            </div>
-            <div className="finance-split-grid">
               <select
                 value={manualForm.amountSource}
                 onChange={(e) => setManualForm((p) => ({ ...p, amountSource: e.target.value }))}
@@ -8388,6 +8526,8 @@ export default function AdminFinance() {
                 <option value="plan">مبلغ از پلان مالی</option>
                 <option value="manual">مبلغ دستی</option>
               </select>
+            </div>
+            <div className="finance-split-grid finance-split-grid-3">
               {manualForm.amountSource === 'manual' ? (
                 <input
                   type="number"
@@ -8414,8 +8554,6 @@ export default function AdminFinance() {
                   </small>
                 </div>
               )}
-            </div>
-            <div className="finance-split-grid">
               <div className="finance-cell-stack">
                 <span className="finance-field-label">مهلت پرداخت</span>
                 <AfghanDateInput value={manualForm.dueDate} onChange={(value) => setManualForm((p) => ({ ...p, dueDate: value }))} showGregorianEquivalent required />
@@ -8432,7 +8570,9 @@ export default function AdminFinance() {
                 <input value={manualForm.term} onChange={(e) => setManualForm((p) => ({ ...p, term: e.target.value }))} placeholder="ترم" />
               </div>
             )}
-            <button type="submit" disabled={busy}>ایجاد بل</button>
+            <div className="row-actions">
+              <button type="submit" disabled={busy}>ایجاد بل</button>
+            </div>
           </form>
         )}
 
@@ -8445,6 +8585,7 @@ export default function AdminFinance() {
             <span className="finance-chip finance-chip-emerald">{paymentPreview?.membership?.student?.fullName || paymentDeskMembershipStudent?.name || paymentDeskStudent?.name || 'عضویت مالی'}</span>
           </div>
           <div className="finance-payment-form-grid">
+          <div className="finance-payment-subsection finance-payment-subsection-student">
           <div className="finance-payment-section-title">
             <span>انتخاب متعلم</span>
             <small>جستجو، صنف و سال تعلیمی</small>
@@ -8506,8 +8647,8 @@ export default function AdminFinance() {
             <span>متعلم</span>
             <select data-testid="desk-student-select" value={paymentDeskForm.studentId} onChange={(e) => handlePaymentDeskStudentChange(e.target.value)}>
               <option value="">ابتدا شاگرد را انتخاب کنید</option>
-              {paymentStudentOptions.length ? paymentStudentOptions.map((student) => (
-                <option key={`payment-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student)}</option>
+              {paymentStudentOptions.length ? paymentStudentOptions.map((student, index) => (
+                <option key={`payment-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student, index + 1)}</option>
               )) : (
                 <option value="" disabled>متعلمی پیدا نشد</option>
               )}
@@ -8553,41 +8694,107 @@ export default function AdminFinance() {
               ))}
             </div>
           )}
-          <div className="finance-advance-payment-panel" data-testid="advance-month-payment-panel">
-            <div>
-              <strong>پرداخت چندماهه یا یک‌جای سال</strong>
-              <small>ابتدا بل ماه‌های موردنظر را پیش‌نمایش کنید؛ بل‌های تکراری دوباره ساخته نمی‌شوند.</small>
-            </div>
-            <div className="finance-advance-payment-actions">
-              {[1, 3, 6, 9, 12].map((count) => (
-                <button
-                  key={`advance-month-${count}`}
-                  type="button"
-                  className="secondary"
-                  disabled={busy || !paymentDeskMembershipStudent}
-                  onClick={() => previewAdvanceStudentBilling(count)}
-                >
-                  {count === 12 ? 'تا پایان سال' : `${fmt(count)} ماه`}
-                </button>
-              ))}
-            </div>
-            {advanceBillingPreview ? (
-              <div className="finance-advance-preview">
-                <span>
-                  قابل صدور: <strong>{fmt(advanceBillingPreview?.summary?.candidateCount || 0)} بل</strong>
-                  {' · '}
-                  مبلغ: <strong>{fmt(advanceBillingPreview?.summary?.totalAmountDue || 0)} AFN</strong>
-                  {' · '}
-                  تکراری: <strong>{fmt(advanceBillingPreview?.summary?.duplicateCount || 0)}</strong>
-                </span>
-                <div>
-                  <button type="button" className="secondary" onClick={() => { setAdvanceBillingPreview(null); setAdvanceBillingPayload(null); }}>لغو پیش‌نمایش</button>
-                  <button type="button" onClick={generateAdvanceStudentBilling} disabled={busy || !advanceBillingPreview?.summary?.candidateCount}>تایید صدور بل‌ها</button>
-                </div>
-              </div>
-            ) : null}
           </div>
-          <div className="finance-payment-section-title">
+          <div className="finance-advance-payment-panel" data-testid="advance-month-payment-panel">
+            <div className="finance-advance-payment-panel-head">
+              <div>
+                <strong>پرداخت چندماهه یا یک‌جای سال</strong>
+                <small>برای ماه‌هایی که بل‌شان هنوز صادر نشده هم کار می‌کند - ابتدا پیش‌نمایش کنید؛ بل‌های تکراری دوباره ساخته نمی‌شوند و ماه‌هایی که از قبل بل داشتند هم در پرداخت لحاظ می‌شوند.</small>
+              </div>
+              <button type="button" className="secondary finance-advanced-toggle" onClick={() => setAdvancePaymentPanelOpen((value) => !value)}>
+                {advancePaymentPanelOpen || advanceBillingPreview ? 'بستن' : 'باز کردن'}
+              </button>
+            </div>
+            {(advancePaymentPanelOpen || advanceBillingPreview) && (
+              <>
+                <div className="finance-advance-payment-actions">
+                  {[1, 3, 6, 9, 12].map((count) => (
+                    <button
+                      key={`advance-month-${count}`}
+                      type="button"
+                      className="secondary"
+                      disabled={busy || !paymentDeskMembershipStudent}
+                      onClick={() => previewAdvanceStudentBilling(count)}
+                    >
+                      {count === 12 ? 'تا پایان سال' : `${fmt(count)} ماه`}
+                    </button>
+                  ))}
+                  <label className="finance-inline-filter finance-advance-custom-months">
+                    <span>تعداد ماه دلخواه</span>
+                    <div className="finance-advance-custom-months-row">
+                      <input
+                        type="number"
+                        min="1"
+                        max="24"
+                        value={advanceMonthCountInput}
+                        placeholder="مثلاً ۲"
+                        disabled={busy || !paymentDeskMembershipStudent}
+                        onChange={(e) => setAdvanceMonthCountInput(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={busy || !paymentDeskMembershipStudent || !(Number(advanceMonthCountInput) > 0)}
+                        onClick={() => previewAdvanceStudentBilling(Number(advanceMonthCountInput))}
+                      >
+                        پیش‌نمایش
+                      </button>
+                    </div>
+                  </label>
+                </div>
+                {advanceBillingPreview ? (
+                  <div className="finance-advance-preview">
+                    <span>
+                      قابل صدور: <strong>{fmt(advanceBillingPreview?.summary?.candidateCount || 0)} بل جدید</strong>
+                      {' · '}
+                      مبلغ بل‌های جدید: <strong>{fmt(advanceBillingPreview?.summary?.totalAmountDue || 0)} AFN</strong>
+                      {!!advanceBillingPreview?.summary?.existingOpenCount && (
+                        <>
+                          {' · '}
+                          از قبل صادرشده: <strong>{fmt(advanceBillingPreview.summary.existingOpenCount)} ماه ({fmt(advanceBillingPreview.summary.existingOpenAmount || 0)} AFN)</strong>
+                        </>
+                      )}
+                      {' · '}
+                      مجموع کل برای پرداخت: <strong>{fmt(advanceBillingPreview?.summary?.combinedAmountDue ?? advanceBillingPreview?.summary?.totalAmountDue ?? 0)} AFN</strong>
+                    </span>
+                    {Array.isArray(advanceBillingPreview?.items) && advanceBillingPreview.items.length > 0 && (
+                      <ul className="finance-advance-month-list">
+                        {advanceBillingPreview.items.map((item, index) => (
+                          <li key={`advance-month-item-${index}`}>
+                            <span>{item.periodLabel || item.term || `ماه ${index + 1}`}</span>
+                            {item.duplicate ? (
+                              <span className={`finance-chip ${item.duplicate.outstandingAmount > 0 ? 'finance-chip-muted' : 'finance-chip-emerald'}`}>
+                                {item.duplicate.outstandingAmount > 0
+                                  ? `از قبل صادر شده - مانده: ${fmt(item.duplicate.outstandingAmount)} AFN`
+                                  : 'از قبل صادر و تسویه شده'}
+                              </span>
+                            ) : (
+                              <span className="finance-chip finance-chip-emerald">بل جدید - {fmt(item.amountDue || 0)} AFN</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <div>
+                      <button type="button" className="secondary" onClick={() => { setAdvanceBillingPreview(null); setAdvanceBillingPayload(null); }}>لغو پیش‌نمایش</button>
+                      <button
+                        type="button"
+                        onClick={generateAdvanceStudentBilling}
+                        disabled={busy || !(Number(advanceBillingPreview?.summary?.candidateCount || 0) || Number(advanceBillingPreview?.summary?.existingOpenCount || 0))}
+                      >
+                        تایید و آماده‌سازی پرداخت
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+          <div className="finance-payment-subsection finance-payment-subsection-money">
+          <div
+            ref={paymentSectionRef}
+            className={`finance-payment-section-title${paymentSectionHighlighted ? ' finance-payment-section-highlighted' : ''}`}
+          >
             <span>مشخصات پرداخت</span>
             <small>مبلغ، نوع پرداخت و تاریخ</small>
           </div>
@@ -8616,26 +8823,6 @@ export default function AdminFinance() {
               <span>مبلغ پرداخت</span>
               <input value={paymentDeskForm.amount} onChange={(e) => { setPaymentDeskForm((p) => ({ ...p, amount: e.target.value })); setPaymentPreview(null); }} placeholder="مبلغ پرداخت" />
             </label>
-            {paymentDeskTotalOutstanding > 0 && (
-              <button
-                type="button"
-                className="secondary finance-pay-full-debt-btn"
-                data-testid="desk-pay-full-debt"
-                title="مبلغ پرداخت را برابر کل بدهی باز پر می‌کند"
-                onClick={() => {
-                  setPaymentDeskForm((p) => ({
-                    ...p,
-                    amount: String(paymentDeskTotalOutstanding),
-                    allocationMode: 'auto_oldest_due',
-                    selectedFeeOrderIds: [],
-                    manualAllocations: {}
-                  }));
-                  setPaymentPreview(null);
-                }}
-              >
-                پرداخت کامل بدهی ({fmt(paymentDeskTotalOutstanding)} AFN)
-              </button>
-            )}
             <label className="finance-inline-filter">
               <span>روش پرداخت</span>
               <select data-testid="desk-payment-method-select" value={paymentDeskForm.paymentMethod} onChange={(e) => {
@@ -8659,8 +8846,9 @@ export default function AdminFinance() {
               <AfghanDateInput value={paymentDeskForm.paidAt} onChange={(value) => setPaymentDeskForm((p) => ({ ...p, paidAt: value }))} />
               </div>
             </label>
+          </div>
           {paymentDeskRequiresReference && (
-            <label className="finance-inline-filter">
+            <label className="finance-inline-filter finance-payment-reference-field">
               <span>شماره رسید / مرجع</span>
               <input
                 value={paymentDeskForm.referenceNo}
@@ -8673,36 +8861,68 @@ export default function AdminFinance() {
               />
             </label>
           )}
+          {paymentDeskTotalOutstanding > 0 && (
+            <button
+              type="button"
+              className="secondary finance-pay-full-debt-btn"
+              data-testid="desk-pay-full-debt"
+              title="مبلغ پرداخت را برابر کل بدهی باز پر می‌کند"
+              onClick={() => {
+                setPaymentDeskForm((p) => ({
+                  ...p,
+                  amount: String(paymentDeskTotalOutstanding),
+                  allocationMode: 'auto_oldest_due',
+                  selectedFeeOrderIds: [],
+                  manualAllocations: {}
+                }));
+                setPaymentPreview(null);
+              }}
+            >
+              پرداخت کامل بدهی ({fmt(paymentDeskTotalOutstanding)} AFN)
+            </button>
+          )}
           </div>
+          <div className="finance-payment-subsection finance-payment-subsection-summary">
           <div className="finance-payment-section-title">
             <span>خلاصه مالی سریع</span>
             <small>مانده و بدهی‌های باز</small>
           </div>
           <div className="finance-chip-group finance-payment-summary-chips">
-            <span className="finance-chip">{paymentDeskClass?.title || 'صنف'}</span>
-            <span className="finance-chip finance-chip-muted">{paymentDeskAcademicYear?.title || 'سال تعلیمی'}</span>
             <span className="finance-chip finance-chip-emerald">{fmt(paymentDeskTotalOutstanding)} AFN مانده دامنه انتخاب‌شده</span>
             <span className="finance-chip">{paymentDeskOpenOrders.length} بدهی باز</span>
-            {paymentDeskFinanceSnapshot.nextDueOrder?.dueDate && (
-              <span className="finance-chip finance-chip-muted">مهلت بعدی: {toFaDate(paymentDeskFinanceSnapshot.nextDueOrder.dueDate)}</span>
-            )}
-            {paymentDeskForm.allocationMode === 'auto_selected' && <span className="finance-chip finance-chip-muted">{paymentDeskSelectedOrderIds.length} مورد انتخاب شده</span>}
-            {paymentDeskForm.allocationMode === 'manual' && <span className="finance-chip finance-chip-muted">{fmt(paymentDeskManualAllocated)} AFN تخصیص دستی</span>}
-            {paymentDeskForm.allocationMode === 'manual' && Number(paymentDeskForm.amount || 0) > 0 && (
-              <span className={`finance-chip ${paymentDeskRemainingAmount < 0 ? 'finance-chip-rose' : 'finance-chip-muted'}`}>{fmt(paymentDeskRemainingAmount)} AFN اختلاف با مبلغ پرداخت</span>
-            )}
-            {!!paymentDeskForm.classId && paymentDeskClassAverageOutstanding > 0 && (
-              <span className={`finance-chip ${paymentDeskTotalOutstanding > paymentDeskClassAverageOutstanding ? 'finance-chip-rose' : 'finance-chip-muted'}`}>
-                میانگین بدهی صنف: {fmt(paymentDeskClassAverageOutstanding)} AFN
-              </span>
-            )}
             {paymentDeskRemainingAfterPayment !== null && (
               <span className={`finance-chip ${paymentDeskRemainingAfterPayment > 0 ? 'finance-chip-amber' : 'finance-chip-emerald'}`}>
-                باقی‌ماندهٔ بعد از این پرداخت: {fmt(Math.max(paymentDeskRemainingAfterPayment, 0))} AFN
+                باقی‌مانده بعد از این پرداخت: {fmt(Math.max(paymentDeskRemainingAfterPayment, 0))} AFN
               </span>
             )}
+            <button
+              type="button"
+              className="finance-chip finance-chip-muted finance-chip-button"
+              onClick={() => setPaymentAgingDetailOpen((value) => !value)}
+            >
+              {paymentAgingDetailOpen ? 'جزئیات کمتر ▲' : 'جزئیات بیشتر ▼'}
+            </button>
           </div>
-          {paymentDeskAging.total > 0 && (
+          {paymentAgingDetailOpen && (
+            <div className="finance-chip-group finance-payment-summary-chips finance-payment-summary-chips-extra">
+              <span className="finance-chip">{paymentDeskClass?.title || 'صنف'}</span>
+              <span className="finance-chip finance-chip-muted">{paymentDeskAcademicYear?.title || 'سال تعلیمی'}</span>
+              {paymentDeskFinanceSnapshot.nextDueOrder?.dueDate && (
+                <span className="finance-chip finance-chip-muted">مهلت بعدی: {toFaDate(paymentDeskFinanceSnapshot.nextDueOrder.dueDate)}</span>
+              )}
+              {paymentDeskForm.allocationMode === 'auto_selected' && <span className="finance-chip finance-chip-muted">{paymentDeskSelectedOrderIds.length} مورد انتخاب شده</span>}
+              {paymentDeskForm.allocationMode === 'manual' && <span className="finance-chip finance-chip-muted">{fmt(paymentDeskManualAllocated)} AFN تخصیص دستی</span>}
+              {paymentDeskForm.allocationMode === 'manual' && Number(paymentDeskForm.amount || 0) > 0 && (
+                <span className={`finance-chip ${paymentDeskRemainingAmount < 0 ? 'finance-chip-rose' : 'finance-chip-muted'}`}>{fmt(paymentDeskRemainingAmount)} AFN اختلاف با مبلغ پرداخت</span>
+              )}
+              {!!paymentDeskForm.classId && paymentDeskClassAverageOutstanding > 0 && (
+                <span className={`finance-chip ${paymentDeskTotalOutstanding > paymentDeskClassAverageOutstanding ? 'finance-chip-rose' : 'finance-chip-muted'}`}>
+                  میانگین بدهی صنف: {fmt(paymentDeskClassAverageOutstanding)} AFN
+                </span>
+              )}
+            </div>
+          )}
+          {paymentAgingDetailOpen && paymentDeskAging.total > 0 && (
             <div className="finance-aging-bar" data-testid="desk-debt-aging-bar" title="تفکیک بدهی‌های باز بر اساس مدت سررسید گذشته">
               {paymentDeskAging.current > 0 && (
                 <span
@@ -8734,7 +8954,7 @@ export default function AdminFinance() {
               )}
             </div>
           )}
-          {paymentDeskAging.total > 0 && (
+          {paymentAgingDetailOpen && paymentDeskAging.total > 0 && (
             <div className="finance-aging-legend">
               <span><i className="finance-aging-dot finance-aging-current" />جاری ({fmt(paymentDeskAging.current)})</span>
               <span><i className="finance-aging-dot finance-aging-31-60" />۳۱-۶۰ روز ({fmt(paymentDeskAging.d31to60)})</span>
@@ -8742,6 +8962,8 @@ export default function AdminFinance() {
               <span><i className="finance-aging-dot finance-aging-over-90" />+۹۰ روز ({fmt(paymentDeskAging.over90)})</span>
             </div>
           )}
+          </div>
+          <div className="finance-payment-subsection finance-payment-subsection-allocation">
           <div className="finance-payment-section-title">
             <span>تخصیص پرداخت</span>
             <small>روش تخصیص و یادداشت مالی</small>
@@ -8770,6 +8992,106 @@ export default function AdminFinance() {
             <span>یادداشت پرداخت</span>
             <textarea value={paymentDeskForm.note} onChange={(e) => setPaymentDeskForm((p) => ({ ...p, note: e.target.value }))} rows={2} placeholder="یادداشت پرداخت" />
           </label>
+          </div>
+          {paymentDeskOpenOrders.length > 0 && (paymentAdvancedOpen || paymentDeskForm.allocationMode !== 'auto_oldest_due') ? (
+            <div className="finance-order-pick-list finance-payment-open-orders-row" data-testid="desk-open-orders">
+              {paymentDeskOpenOrders.map((item) => {
+                const orderId = getFeeOrderRowId(item);
+                const scopedBalance = getBillFeeScopeSummary(item, paymentDeskForm.feeType).outstanding;
+                const overdueDays = getDaysOverdue(item.dueDate);
+                return (
+                <div key={`pick-${orderId}`} className="finance-flag finance-order-pick-row">
+                  <div className="finance-order-pick-copy">
+                    {paymentDeskForm.allocationMode === 'auto_selected' ? (
+                      <label className="finance-order-pick-toggle">
+                        <input
+                          type="checkbox"
+                          checked={paymentDeskSelectedOrderIds.includes(orderId)}
+                          onChange={() => toggleDeskOrderSelection(orderId)}
+                        />
+                        <span>{item.title || formatFinanceCode(item.billNumber, '') || 'بدهی مالی'}</span>
+                      </label>
+                    ) : (
+                      <strong>{item.title || formatFinanceCode(item.billNumber, '') || 'بدهی مالی'}</strong>
+                    )}
+                    <small>
+                      {FEE_LINE_TYPE_LABELS[paymentDeskForm.feeType] || paymentDeskForm.feeType} | مهلت پرداخت: {toFaDate(item.dueDate)} | مانده: {fmt(scopedBalance)} AFN
+                      {overdueDays > 30 && (
+                        <span className={`finance-overdue-badge ${overdueDays > 90 ? 'finance-overdue-badge-critical' : overdueDays > 60 ? 'finance-overdue-badge-high' : 'finance-overdue-badge-medium'}`}>
+                          {overdueDays} روز سررسید گذشته
+                        </span>
+                      )}
+                    </small>
+                    {!!item.followUpNotes?.length && (
+                      <small className="finance-order-followup-note" title={`${item.followUpNotes.length} یادداشت پیگیری ثبت شده`}>
+                        📝 آخرین پیگیری: {item.followUpNotes[item.followUpNotes.length - 1].note}
+                        {' '}({toFaDate(item.followUpNotes[item.followUpNotes.length - 1].createdAt)})
+                      </small>
+                    )}
+                  </div>
+                  {paymentDeskForm.allocationMode === 'manual' ? (
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      max={scopedBalance}
+                      value={paymentDeskForm.manualAllocations?.[orderId] || ''}
+                      onChange={(e) => updateDeskManualAllocation(orderId, e.target.value)}
+                      placeholder="مبلغ تخصیص"
+                      data-testid={`desk-manual-allocation-${orderId}`}
+                    />
+                  ) : (
+                    <span className={`finance-chip ${paymentDeskSelectedOrderIds.includes(orderId) ? 'finance-chip-emerald' : 'finance-chip-muted'}`}>
+                      {paymentDeskForm.allocationMode === 'auto_selected'
+                        ? (paymentDeskSelectedOrderIds.includes(orderId) ? 'انتخاب شده' : 'انتخاب نشده')
+                        : `${fmt(scopedBalance)} AFN`}
+                    </span>
+                  )}
+                  <div className="finance-order-pick-actions">
+                    <button
+                      type="button"
+                      className="secondary finance-order-quick-relief-btn"
+                      data-testid={`desk-quick-relief-${orderId}`}
+                      title="اعمال تخفیف، معافیت یا جریمه روی همین بدهی"
+                      onClick={() => addDiscount(orderId)}
+                      disabled={busy}
+                    >
+                      تخفیف/تعدیل
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary finance-order-quick-note-btn"
+                      data-testid={`desk-follow-up-note-${orderId}`}
+                      title="ثبت یادداشت پیگیری روی همین بدهی"
+                      onClick={() => addFollowUpNote(orderId)}
+                      disabled={busy}
+                    >
+                      یادداشت پیگیری{item.followUpNotes?.length ? ` (${item.followUpNotes.length})` : ''}
+                    </button>
+                    {!item.installments?.length
+                      && scopedBalance > 0
+                      && (scopedBalance > 3000 || (paymentDeskClassAverageOutstanding > 0 && scopedBalance > paymentDeskClassAverageOutstanding)) && (
+                      <button
+                        type="button"
+                        className="secondary finance-order-installment-suggest-btn"
+                        data-testid={`desk-installment-suggest-${orderId}`}
+                        title="این بدهی نسبتاً بزرگ است؛ پیشنهاد قسط‌بندی خودکار"
+                        onClick={() => applyInstallmentSuggestion(
+                          orderId,
+                          scopedBalance > 15000 ? 6 : scopedBalance > 7000 ? 4 : 3
+                        )}
+                        disabled={busy}
+                      >
+                        قسط‌بندی پیشنهادی
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );})}
+            </div>
+          ) : paymentDeskOpenOrders.length <= 0 ? (
+            <p className="muted finance-order-empty">برای متعلم، صنف و سال تعلیمی انتخاب‌شده هیچ بدهی باز پیدا نشد.</p>
+          ) : null}
           </div>
           {!!paymentDeskForm.studentId && (
             <div className="finance-subcard finance-student-spotlight finance-payment-student-card-row">
@@ -8885,105 +9207,6 @@ export default function AdminFinance() {
               </div>
             </div>
           )}
-          {paymentDeskOpenOrders.length > 0 && (paymentAdvancedOpen || paymentDeskForm.allocationMode !== 'auto_oldest_due') ? (
-            <div className="finance-order-pick-list finance-payment-open-orders-row" data-testid="desk-open-orders">
-              {paymentDeskOpenOrders.map((item) => {
-                const orderId = getFeeOrderRowId(item);
-                const scopedBalance = getBillFeeScopeSummary(item, paymentDeskForm.feeType).outstanding;
-                const overdueDays = getDaysOverdue(item.dueDate);
-                return (
-                <div key={`pick-${orderId}`} className="finance-flag finance-order-pick-row">
-                  <div className="finance-order-pick-copy">
-                    {paymentDeskForm.allocationMode === 'auto_selected' ? (
-                      <label className="finance-order-pick-toggle">
-                        <input
-                          type="checkbox"
-                          checked={paymentDeskSelectedOrderIds.includes(orderId)}
-                          onChange={() => toggleDeskOrderSelection(orderId)}
-                        />
-                        <span>{item.title || formatFinanceCode(item.billNumber, '') || 'بدهی مالی'}</span>
-                      </label>
-                    ) : (
-                      <strong>{item.title || formatFinanceCode(item.billNumber, '') || 'بدهی مالی'}</strong>
-                    )}
-                    <small>
-                      {FEE_LINE_TYPE_LABELS[paymentDeskForm.feeType] || paymentDeskForm.feeType} | مهلت پرداخت: {toFaDate(item.dueDate)} | مانده: {fmt(scopedBalance)} AFN
-                      {overdueDays > 30 && (
-                        <span className={`finance-overdue-badge ${overdueDays > 90 ? 'finance-overdue-badge-critical' : overdueDays > 60 ? 'finance-overdue-badge-high' : 'finance-overdue-badge-medium'}`}>
-                          {overdueDays} روز سررسید گذشته
-                        </span>
-                      )}
-                    </small>
-                    {!!item.followUpNotes?.length && (
-                      <small className="finance-order-followup-note" title={`${item.followUpNotes.length} یادداشت پیگیری ثبت شده`}>
-                        📝 آخرین پیگیری: {item.followUpNotes[item.followUpNotes.length - 1].note}
-                        {' '}({toFaDate(item.followUpNotes[item.followUpNotes.length - 1].createdAt)})
-                      </small>
-                    )}
-                  </div>
-                  {paymentDeskForm.allocationMode === 'manual' ? (
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      max={scopedBalance}
-                      value={paymentDeskForm.manualAllocations?.[orderId] || ''}
-                      onChange={(e) => updateDeskManualAllocation(orderId, e.target.value)}
-                      placeholder="مبلغ تخصیص"
-                      data-testid={`desk-manual-allocation-${orderId}`}
-                    />
-                  ) : (
-                    <span className={`finance-chip ${paymentDeskSelectedOrderIds.includes(orderId) ? 'finance-chip-emerald' : 'finance-chip-muted'}`}>
-                      {paymentDeskForm.allocationMode === 'auto_selected'
-                        ? (paymentDeskSelectedOrderIds.includes(orderId) ? 'انتخاب شده' : 'انتخاب نشده')
-                        : `${fmt(scopedBalance)} AFN`}
-                    </span>
-                  )}
-                  <div className="finance-order-pick-actions">
-                    <button
-                      type="button"
-                      className="secondary finance-order-quick-relief-btn"
-                      data-testid={`desk-quick-relief-${orderId}`}
-                      title="اعمال تخفیف، معافیت یا جریمه روی همین بدهی"
-                      onClick={() => addDiscount(orderId)}
-                      disabled={busy}
-                    >
-                      تخفیف/تعدیل
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary finance-order-quick-note-btn"
-                      data-testid={`desk-follow-up-note-${orderId}`}
-                      title="ثبت یادداشت پیگیری روی همین بدهی"
-                      onClick={() => addFollowUpNote(orderId)}
-                      disabled={busy}
-                    >
-                      یادداشت پیگیری{item.followUpNotes?.length ? ` (${item.followUpNotes.length})` : ''}
-                    </button>
-                    {!item.installments?.length
-                      && scopedBalance > 0
-                      && (scopedBalance > 3000 || (paymentDeskClassAverageOutstanding > 0 && scopedBalance > paymentDeskClassAverageOutstanding)) && (
-                      <button
-                        type="button"
-                        className="secondary finance-order-installment-suggest-btn"
-                        data-testid={`desk-installment-suggest-${orderId}`}
-                        title="این بدهی نسبتاً بزرگ است؛ پیشنهاد قسط‌بندی خودکار"
-                        onClick={() => applyInstallmentSuggestion(
-                          orderId,
-                          scopedBalance > 15000 ? 6 : scopedBalance > 7000 ? 4 : 3
-                        )}
-                        disabled={busy}
-                      >
-                        قسط‌بندی پیشنهادی
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );})}
-            </div>
-          ) : paymentDeskOpenOrders.length <= 0 ? (
-            <p className="muted finance-order-empty">برای متعلم، صنف و سال تعلیمی انتخاب‌شده هیچ بدهی باز پیدا نشد.</p>
-          ) : null}
           {false && paymentPreview?.membership && (
             <div className="finance-chip-group">
               <span className="finance-chip">{paymentPreview.membership?.schoolClass?.title || 'صنف'}</span>
@@ -9064,6 +9287,10 @@ export default function AdminFinance() {
 
         {orderFormMode === 'bulk' && (
           <form className="finance-card finance-order-action-card" data-finance-section="orders" onSubmit={generateBulkBills} data-testid="bulk-billing-form">
+            <div className="finance-order-mode-toggle" role="group" aria-label="فورم‌های بل و تعهدات">
+              <button type="button" className={orderFormMode === 'manual' ? 'secondary is-active' : 'secondary'} onClick={() => setOrderFormMode('manual')}>بل دستی</button>
+              <button type="button" className={orderFormMode === 'bulk' ? 'secondary is-active' : 'secondary'} onClick={() => setOrderFormMode('bulk')}>صدور گروهی</button>
+            </div>
             <div className="finance-card-head">
               <div>
                 <h3>صدور گروهی بل</h3>
@@ -9071,36 +9298,36 @@ export default function AdminFinance() {
               </div>
               <span className="finance-chip">{classOptions.length} صنف</span>
             </div>
-            <select value={bulkForm.classId} onChange={(e) => applyBulkClassSelection(e.target.value)} required>
-              <option value="">صنف را انتخاب کنید</option>
-              {classOptions.map((item) => <option key={item.classId} value={item.classId}>{getClassOptionLabel(item)}</option>)}
-            </select>
-            <div className="finance-split-grid">
+            <div className="finance-split-grid finance-split-grid-3">
+              <select value={bulkForm.classId} onChange={(e) => applyBulkClassSelection(e.target.value)} required>
+                <option value="">صنف را انتخاب کنید</option>
+                {classOptions.map((item) => <option key={item.classId} value={item.classId}>{getClassOptionLabel(item)}</option>)}
+              </select>
               <select value={bulkForm.academicYearId} onChange={(e) => setBulkForm((p) => ({ ...p, academicYearId: e.target.value }))}>
                 <option value="">سال تعلیمی عضویت‌ها</option>
                 {academicYears.map((item) => <option key={`bulk-year-${item.id}`} value={item.id}>{getAcademicYearOptionLabel(item)}</option>)}
               </select>
               <div className="finance-info-note">مبلغ فیس و داخله فقط از پلان مالی فعال همین صنف و سال تعلیمی گرفته می‌شود.</div>
             </div>
-            <div className="finance-split-grid">
+            <div className="finance-split-grid finance-split-grid-3">
               <div className="finance-cell-stack">
                 <span className="finance-field-label">مهلت پرداخت</span>
                 <AfghanDateInput value={bulkForm.dueDate} onChange={(value) => setBulkForm((p) => ({ ...p, dueDate: value }))} showGregorianEquivalent required />
                 <small>{bulkForm.dueDate ? `مهلت پرداخت: ${toFaDate(bulkForm.dueDate)}` : 'مهلت پرداخت گروهی انتخاب نشده است.'}</small>
               </div>
               <input value={bulkForm.periodLabel} onChange={(e) => setBulkForm((p) => ({ ...p, periodLabel: e.target.value }))} placeholder="عنوان بل / دوره" />
+              <label className="finance-flag">
+                <input type="checkbox" checked={bulkForm.includeAdmission} onChange={(e) => setBulkForm((p) => ({ ...p, includeAdmission: e.target.checked }))} />
+                <span>شامل داخله از پلان مالی</span>
+              </label>
             </div>
-            <label className="finance-flag">
-              <input type="checkbox" checked={bulkForm.includeAdmission} onChange={(e) => setBulkForm((p) => ({ ...p, includeAdmission: e.target.checked }))} />
-              <span>شامل داخله از پلان مالی</span>
-            </label>
-            <p className="muted">اگر این گزینه خاموش باشد، صدور گروهی فقط فیس/شهریه را ایجاد می‌کند و داخله جداگانه صادر نمی‌شود.</p>
+            <p className="muted">اگر گزینه «شامل داخله» خاموش باشد، صدور گروهی فقط فیس/شهریه را ایجاد می‌کند و داخله جداگانه صادر نمی‌شود.</p>
             <button type="button" className="secondary finance-advanced-toggle" onClick={() => setBillingAdvancedOpen((value) => !value)}>
               {billingAdvancedOpen ? 'بستن تنظیمات پیشرفته' : 'تنظیمات پیشرفته'}
             </button>
             {billingAdvancedOpen && (
               <>
-                <div className="finance-split-grid">
+                <div className="finance-split-grid finance-split-grid-3">
                   <select value={bulkForm.periodType} onChange={(e) => setBulkForm((p) => ({ ...p, periodType: e.target.value }))}>
                     <option value="monthly">بل ماهانه</option>
                     <option value="term">بل دوره‌ای</option>
@@ -9857,8 +10084,8 @@ export default function AdminFinance() {
             )}
             {discountForm.targetScope === 'student' && <select value={discountForm.studentId} onChange={(e) => applyDiscountMembershipStudent(e.target.value)}>
               <option value="">متعلم را انتخاب کنید</option>
-              {discountStudentOptions.length ? discountStudentOptions.map((student) => (
-                <option key={`discount-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student)}</option>
+              {discountStudentOptions.length ? discountStudentOptions.map((student, index) => (
+                <option key={`discount-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student, index + 1)}</option>
               )) : (
                 <option value="">متعلمی پیدا نشد</option>
               )}
@@ -9943,8 +10170,8 @@ export default function AdminFinance() {
             </label>
             <select value={exemptionForm.studentId} onChange={(e) => applyExemptionMembershipStudent(e.target.value)} required>
               <option value="">متعلم را انتخاب کنید</option>
-              {exemptionStudentOptions.length ? exemptionStudentOptions.map((student) => (
-                <option key={`exemption-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student)}</option>
+              {exemptionStudentOptions.length ? exemptionStudentOptions.map((student, index) => (
+                <option key={`exemption-student-${student.membershipId || student._id}`} value={student._id}>{getFinanceStudentOptionLabel(student, index + 1)}</option>
               )) : (
                 <option value="">متعلمی پیدا نشد</option>
               )}
@@ -10354,6 +10581,42 @@ export default function AdminFinance() {
           <small>{monthKey ? `هجری شمسی: ${toFaMonthKey(monthKey)}` : 'ماه مالی را به شکل YYYY-MM وارد کنید؛ نمایش رسمی به هجری شمسی نشان داده می‌شود.'}</small>
         </div>
         <button type="button" onClick={requestMonthClose} disabled={busy}>درخواست بستن ماه مالی</button>
+      </div>
+
+      <div className="finance-card finance-report-downloads-card" data-finance-section="reports" data-testid="finance-report-downloads-card">
+        <div className="finance-card-head">
+          <div>
+            <h3>گزارش‌های مالی قابل دانلود</h3>
+            <p className="muted">همان صنف و بازه‌ی «از تاریخ/تا تاریخ» بالای صفحه روی همه‌ی این گزارش‌ها اعمال می‌شود.</p>
+          </div>
+          <button
+            type="button"
+            onClick={downloadFinanceReportBundle}
+            disabled={reportPdfBusyKey !== ''}
+            data-testid="download-finance-report-bundle"
+          >
+            {reportPdfBusyKey === 'bundle' ? 'در حال آماده‌سازی...' : 'دانلود بسته‌ی کامل گزارش‌ها (PDF)'}
+          </button>
+        </div>
+        <div className="finance-report-download-grid">
+          {FINANCE_REPORT_CARDS.map((item) => (
+            <div key={item.key} className="finance-report-download-row">
+              <div className="finance-report-download-copy">
+                <strong>{item.title}</strong>
+                <small>{item.description}</small>
+              </div>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => downloadFinanceReportPdf(item.key)}
+                disabled={reportPdfBusyKey !== ''}
+                data-testid={`download-finance-report-${item.key}`}
+              >
+                {reportPdfBusyKey === item.key ? 'در حال آماده‌سازی...' : 'دانلود PDF'}
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="finance-card finance-payment-tools-card" data-finance-section="payments" data-testid="payment-tools-card">

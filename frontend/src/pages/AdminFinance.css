@@ -102,15 +102,6 @@
   font-size: 22px;
 }
 
-.finance-control-rail {
-  margin-bottom: 16px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .finance-layout-toggle,
 .finance-subsection-tabs {
   display: inline-flex;
@@ -456,6 +447,12 @@
 }
 
 .finance-card {
+  /* Overrides the generic "form { max-width: 400px; margin: 0 auto; }" rule
+     in App.css, which applies to every bare <form> element (including the
+     finance <form className="finance-card ...">) and otherwise silently
+     caps these cards at 400px no matter what the surrounding grid intends. */
+  max-width: none;
+  margin: 0;
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(12, 20, 36, 0.78);
@@ -560,9 +557,23 @@
   background: linear-gradient(135deg, rgba(8, 145, 178, 0.12), rgba(15, 23, 42, 0.54));
 }
 
-.finance-advance-payment-panel > div:first-child {
+.finance-advance-payment-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.finance-advance-payment-panel-head > div {
   display: grid;
   gap: 4px;
+  min-width: 0;
+}
+
+.finance-advance-payment-panel-head .finance-advanced-toggle {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  font-size: 12px;
 }
 
 .finance-advance-payment-panel small {
@@ -582,6 +593,79 @@
   justify-content: space-between;
   padding-top: 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.finance-advance-custom-months {
+  gap: 4px;
+}
+
+.finance-advance-custom-months-row {
+  display: flex;
+  gap: 6px;
+}
+
+.finance-advance-custom-months-row input[type="number"] {
+  width: 84px;
+}
+
+.finance-advance-month-list {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.finance-advance-month-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+  color: rgba(226, 232, 240, 0.86);
+}
+
+.finance-report-download-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.finance-report-download-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.finance-report-download-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.finance-report-download-copy strong {
+  font-size: 13.5px;
+  color: #f8fafc;
+}
+
+.finance-report-download-copy small {
+  color: rgba(226, 232, 240, 0.62);
+  font-size: 11.5px;
+}
+
+@media (max-width: 720px) {
+  .finance-report-download-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .finance-recent-finance-grid {
@@ -1005,7 +1089,15 @@
 }
 
 .finance-card :is(input, select, textarea) {
+  /* App.css has a generic "input { margin-bottom: 15px; ... }" meant for
+     plain standalone forms; it targets the bare <input> element, and a
+     <select> never matches it, so every text/number input in a finance
+     card carried 15px more bottom margin than its sibling <select>
+     fields - the actual cause of rows whose fields didn't share a
+     baseline. */
+  margin: 0;
   width: 100%;
+  min-width: 0;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 10px;
   background: rgba(8, 14, 24, 0.8);
@@ -1086,6 +1178,7 @@
 .finance-info-note {
   display: flex;
   align-items: center;
+  min-width: 0;
   min-height: 44px;
   padding: 0.7rem 0.85rem;
   border: 1px solid rgba(56, 189, 248, 0.3);
@@ -2009,6 +2102,7 @@
 .finance-flag {
   display: flex;
   align-items: center;
+  min-width: 0;
   gap: 8px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -2202,7 +2296,7 @@
 }
 
 .finance-page[data-active-section="orders"] .finance-grid[data-finance-section~="orders"] {
-  grid-template-columns: minmax(0, 1.25fr) minmax(340px, 0.75fr);
+  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
   align-items: start;
 }
 
@@ -2245,6 +2339,57 @@
   overflow: hidden;
 }
 
+/* Each payment-desk step (pick student, payment details, quick summary,
+   allocation) gets its own tinted card so the eye can tell one step ends
+   and the next begins, instead of one long undifferentiated column. Flat
+   tint + a solid accent stripe read far more clearly against the card's
+   own dark navy than a two-stop gradient fading into more dark navy did. */
+.finance-payment-subsection {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-inline-start-width: 4px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.finance-payment-subsection-student {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(56, 189, 248, 0.14);
+}
+
+.finance-payment-subsection-money {
+  border-color: rgba(52, 211, 153, 0.55);
+  background: rgba(52, 211, 153, 0.14);
+}
+
+.finance-payment-subsection-summary {
+  border-color: rgba(251, 191, 36, 0.55);
+  background: rgba(251, 191, 36, 0.14);
+}
+
+.finance-payment-subsection-allocation {
+  border-color: rgba(196, 181, 253, 0.55);
+  background: rgba(196, 181, 253, 0.14);
+}
+
+.finance-payment-subsection-student .finance-payment-section-title span:first-child {
+  color: #7dd3fc;
+}
+
+.finance-payment-subsection-money .finance-payment-section-title span:first-child {
+  color: #6ee7b7;
+}
+
+.finance-payment-subsection-summary .finance-payment-section-title span:first-child {
+  color: #fcd34d;
+}
+
+.finance-payment-subsection-allocation .finance-payment-section-title span:first-child {
+  color: #ddd6fe;
+}
+
 .finance-payment-section-title {
   display: flex;
   flex-wrap: wrap;
@@ -2260,6 +2405,16 @@
   margin-top: 0;
   padding-top: 0;
   border-top: 0;
+}
+
+.finance-payment-section-highlighted {
+  animation: finance-payment-section-flash 1.4s ease-in-out 2;
+  border-radius: 10px;
+}
+
+@keyframes finance-payment-section-flash {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(34, 211, 238, 0.16); }
 }
 
 .finance-payment-section-title span {
@@ -2307,7 +2462,12 @@
 .finance-payment-row-primary .finance-inline-filter,
 .finance-payment-row-money .finance-inline-filter,
 .finance-payment-row-allocation .finance-inline-filter {
-  grid-template-rows: 15px 44px;
+  /* second row is a floor, not a hard cap - a plain 44px here clipped
+     nothing itself, but the label's own box stopped at exactly 15+44px,
+     so the moment a control (the multi-part AfghanDateInput, in
+     particular) needed a touch more room than that, it spilled out past
+     the label's bottom edge instead of the label growing to hold it. */
+  grid-template-rows: 15px minmax(44px, auto);
   gap: 4px;
   align-self: end;
 }
@@ -2357,21 +2517,35 @@
   grid-column: 1 / -1;
 }
 
-.finance-payment-row-money {
-  grid-template-columns: minmax(120px, 0.7fr) minmax(120px, 0.65fr) minmax(140px, 0.7fr) minmax(280px, 1.1fr);
+/* .finance-payment-row-money's own grid-template-columns (4 explicit
+   tracks: fee type, amount, method, date - one field each, so nothing
+   auto-wraps into a row sized for different content) lives in
+   AdminFinancePaymentCompact.css, whose "[data-active-section=payments]"-
+   scoped selector is more specific than a plain class here and always
+   wins; a duplicate definition in this file would just be dead weight. */
+
+.finance-payment-reference-field {
+  max-width: 320px;
 }
 
-/* AfghanDateInput's own year/month/day grid is a CSS container query
-   (see AfghanDateInput.css) that switches to a cramped 2-row layout once
-   its box drops under 260px wide - min-width here keeps this column above
-   that threshold so the date control never stacks into two rows and
-   overflows its fixed-height grid cell. */
+.finance-pay-full-debt-btn {
+  justify-self: start;
+  padding: 6px 12px;
+  font-size: 12px;
+  background: linear-gradient(140deg, rgba(16, 185, 129, 0.22), rgba(16, 185, 129, 0.1));
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #d1fae5;
+}
+
+/* AfghanDateInput's own year/month/day grid is a CSS container query (see
+   AfghanDateInput.css) that already knows how to fold itself down at
+   260px/190px - no hard floor needed here any more; the row's own
+   minmax(220px, ...) track is the real guard against a cramped fold. */
 .finance-payment-date-field {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   align-items: center;
-  min-width: 280px;
   min-height: 44px;
 }
 
@@ -2485,9 +2659,12 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .finance-payment-row-money,
   .finance-payment-row-allocation {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .finance-payment-reference-field {
+    max-width: none;
   }
 
   .finance-payment-summary-chips {
@@ -2576,7 +2753,86 @@
 }
 
 .finance-order-kpis {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.finance-order-mode-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.finance-order-mode-toggle button {
+  padding: 6px 14px;
+  font-size: 0.85rem;
+}
+
+.finance-order-top-debtors {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.finance-order-top-debtors-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.finance-order-top-debtors-head span {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.finance-order-top-debtors-head small {
+  color: rgba(238, 245, 255, 0.6);
+  font-size: 11px;
+}
+
+.finance-order-debtor-row {
+  align-items: center;
+}
+
+.finance-order-debtor-info {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.finance-order-debtor-info small {
+  color: rgba(238, 245, 255, 0.62);
+  font-size: 11px;
+}
+
+.finance-order-debtor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.finance-order-debtor-actions b {
+  color: #fca5a5;
+  font-size: 12.5px;
+}
+
+.finance-order-debtor-actions button {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.finance-order-action-card .finance-order-form-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.3fr) minmax(200px, 1fr);
+  gap: 9px;
+}
+
+.finance-order-action-card .finance-split-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .finance-orders-table-card {
@@ -4269,6 +4525,21 @@
     grid-template-columns: 1fr;
   }
 
+  .finance-order-action-card .finance-split-grid-3,
+  .finance-order-action-card .finance-order-form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .finance-order-debtor-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .finance-order-debtor-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
   .finance-page[data-active-section="payments"] .finance-payment-workspace {
     grid-template-columns: 1fr;
     grid-template-areas:
@@ -4290,13 +4561,16 @@
   }
 
   .finance-payment-row-primary,
-  .finance-payment-row-money,
   .finance-payment-row-allocation,
   .finance-payment-date-field,
   .finance-payment-actions-row,
   .finance-payment-student-card-row .finance-kpi-grid-dense,
   .finance-payment-student-card-row .finance-subcard-list {
     grid-template-columns: 1fr;
+  }
+
+  .finance-payment-reference-field {
+    max-width: none;
   }
 
   .finance-payment-summary-chips {

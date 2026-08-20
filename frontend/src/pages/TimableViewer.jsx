@@ -14,6 +14,7 @@ import {
   List
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { permissionAllows } from '../config/permissionCatalog';
 import './TimableViewer.css';
 
 const getAuthHeaders = () => {
@@ -113,7 +114,7 @@ const CORE_SUBJECT_KEYWORDS = [
 
 const TimableViewer = () => {
   const effectivePermissions = getStoredEffectivePermissions();
-  const canManageSchedule = effectivePermissions.includes('manage_schedule');
+  const canManageSchedule = permissionAllows('manage_schedule', effectivePermissions);
   const [timetableData, setTimetableData] = useState(null);
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
