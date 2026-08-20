@@ -53,6 +53,7 @@ const {
   groupPaymentAmountsByClass
 } = require('../utils/paymentClassScope');
 const { deriveFinanceOrderStatus } = require('../utils/financeLineItems');
+const { resolveAsasNumberMapForDocs, pickAdmissionNo } = require('../utils/studentAdmissionNumber');
 const {
   buildAnnualGovernmentFinanceReport,
   buildMonthlyGovernmentFinanceReport,
@@ -696,6 +697,8 @@ async function buildFeeDebtorsOverviewReport(filters) {
       .sort({ createdAt: -1, startDate: -1 })
   ]);
 
+  const asasNumberMap = await resolveAsasNumberMapForDocs(orders, reliefs);
+
   const reliefGrouped = new Map();
   for (const item of reliefs) {
     const groupKey = [
@@ -729,7 +732,7 @@ async function buildFeeDebtorsOverviewReport(filters) {
 
     const current = grouped.get(groupKey) || {
       studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId, membership: item.studentMembershipId }),
-      admissionNo: normalizeText(item.studentId?.admissionNo),
+      admissionNo: pickAdmissionNo(item, asasNumberMap),
       classTitle: getClassTitle(item.classId),
       academicYear: getAcademicYearTitle(item.academicYearId),
       orderCount: 0,
@@ -843,6 +846,8 @@ async function buildFeeAdvancePaymentsOverviewReport(filters) {
     .populate('academicYearId', 'title code')
     .sort({ dueDate: 1 });
 
+  const asasNumberMap = await resolveAsasNumberMapForDocs(orders);
+
   const grouped = new Map();
   for (const item of orders) {
     const groupKey = [
@@ -853,7 +858,7 @@ async function buildFeeAdvancePaymentsOverviewReport(filters) {
 
     const current = grouped.get(groupKey) || {
       studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId }),
-      admissionNo: normalizeText(item.studentId?.admissionNo),
+      admissionNo: pickAdmissionNo(item, asasNumberMap),
       classTitle: getClassTitle(item.classId),
       academicYear: getAcademicYearTitle(item.academicYearId),
       monthsPrepaid: 0,
@@ -942,6 +947,8 @@ async function buildFeePaymentTimingOverviewReport(filters) {
     .populate('allocations.feeOrderId', 'periodLabel dueDate status')
     .sort({ paidAt: -1 });
 
+  const asasNumberMap = await resolveAsasNumberMapForDocs(payments);
+
   const rows = [];
   const monthlyNet = new Map();
   let onTimeCount = 0;
@@ -981,7 +988,7 @@ async function buildFeePaymentTimingOverviewReport(filters) {
 
       rows.push({
         studentName: getStudentName({ studentUser: payment.student, studentCore: payment.studentId }),
-        admissionNo: normalizeText(payment.studentId?.admissionNo),
+        admissionNo: pickAdmissionNo(payment, asasNumberMap),
         classTitle: getClassTitle(payment.classId),
         feeMonth: feeMonthLabel,
         paidAt: toIsoOrEmpty(payment.paidAt),
@@ -1048,9 +1055,10 @@ async function buildFeeDiscountExemptionOverviewReport(filters) {
   let summary = {};
 
   if (reliefDocs.length) {
+    const asasNumberMap = await resolveAsasNumberMapForDocs(reliefDocs);
     rows = reliefDocs.map((item) => ({
       studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId, membership: item.studentMembershipId }),
-      admissionNo: normalizeText(item.studentId?.admissionNo),
+      admissionNo: pickAdmissionNo(item, asasNumberMap),
       classTitle: getClassTitle(item.classId),
       academicYear: getAcademicYearTitle(item.academicYearId),
       recordType: normalizeText(item.sourceModel || 'relief'),
@@ -1128,9 +1136,11 @@ async function buildFeeDiscountExemptionOverviewReport(filters) {
         .sort({ createdAt: -1 })
     ]);
 
+    const asasNumberMap = await resolveAsasNumberMapForDocs(discounts, exemptions);
+
     const discountRows = discounts.map((item) => ({
       studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId }),
-      admissionNo: normalizeText(item.studentId?.admissionNo),
+      admissionNo: pickAdmissionNo(item, asasNumberMap),
       classTitle: getClassTitle(item.classId),
       academicYear: getAcademicYearTitle(item.academicYearId),
       recordType: 'discount',
@@ -1149,7 +1159,7 @@ async function buildFeeDiscountExemptionOverviewReport(filters) {
 
     const exemptionRows = exemptions.map((item) => ({
       studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId }),
-      admissionNo: normalizeText(item.studentId?.admissionNo),
+      admissionNo: pickAdmissionNo(item, asasNumberMap),
       classTitle: getClassTitle(item.classId),
       academicYear: getAcademicYearTitle(item.academicYearId),
       recordType: 'exemption',

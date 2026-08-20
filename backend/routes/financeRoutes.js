@@ -126,6 +126,7 @@ const {
   isPaymentFullyCoveredByClasses
 } = require('../utils/paymentClassScope');
 const { nextFinanceDocumentNumber } = require('../utils/financeNumberSequence');
+const { resolveAsasNumberMapForDocs, pickAdmissionNo } = require('../utils/studentAdmissionNumber');
 const {
   buildStudentMonthlyTuitionIdentity,
   getFinanceRecordFeeTypes,
@@ -6076,8 +6077,8 @@ const resolveFinanceStudentName = (doc = {}) => (
   String(doc?.studentId?.fullName || doc?.student?.name || doc?.student?.fullName || '').trim() || 'متعلم'
 );
 
-const resolveFinanceStudentAdmissionNo = (doc = {}) => (
-  String(doc?.studentId?.admissionNo || doc?.student?.admissionNo || '').trim()
+const resolveFinanceStudentAdmissionNo = (doc = {}, asasNumberMap = null) => (
+  asasNumberMap ? pickAdmissionNo(doc, asasNumberMap) : String(doc?.studentId?.admissionNo || '').trim()
 );
 
 const resolveFinanceAcademicYearTitle = (doc = {}) => (
@@ -6326,6 +6327,7 @@ const buildFinanceAuditSearchText = (item = {}) => (
     item?.title,
     item?.description,
     item?.studentName,
+    item?.admissionNo,
     item?.classTitle,
     item?.academicYearTitle,
     item?.referenceNumber,
@@ -6397,7 +6399,7 @@ async function buildFinanceAuditTimeline({ schoolId = '', scope = {}, limit = 80
   const [orders, payments, reliefs, activities, anomalyCases] = await Promise.all([
     FeeOrder.find(classFilter)
       .populate('student', 'name email')
-      .populate('studentId', 'fullName')
+      .populate('studentId', 'fullName admissionNo')
       .populate('classId', 'title code gradeLevel section')
       .populate('academicYearId', 'title code')
       .populate('createdBy', 'name email')
@@ -6408,7 +6410,7 @@ async function buildFinanceAuditTimeline({ schoolId = '', scope = {}, limit = 80
       .lean(),
     FeePayment.find(paymentFilter)
       .populate('student', 'name email')
-      .populate('studentId', 'fullName')
+      .populate('studentId', 'fullName admissionNo')
       .populate('classId', 'title code gradeLevel section')
       .populate('academicYearId', 'title code')
       .populate({
@@ -6438,7 +6440,7 @@ async function buildFinanceAuditTimeline({ schoolId = '', scope = {}, limit = 80
       .lean(),
     FinanceRelief.find(classFilter)
       .populate('student', 'name email')
-      .populate('studentId', 'fullName')
+      .populate('studentId', 'fullName admissionNo')
       .populate('classId', 'title code gradeLevel section')
       .populate('academicYearId', 'title code')
       .populate('approvedBy', 'name email')
@@ -6461,6 +6463,8 @@ async function buildFinanceAuditTimeline({ schoolId = '', scope = {}, limit = 80
     ).lean()
   ]);
 
+  const asasNumberMap = await resolveAsasNumberMapForDocs(orders, payments, reliefs);
+
   const items = [];
   const addItem = (payload = {}) => {
     const at = payload?.at || null;
@@ -6476,6 +6480,7 @@ async function buildFinanceAuditTimeline({ schoolId = '', scope = {}, limit = 80
       at,
       actorName: String(payload?.actorName || '').trim() || 'سیستم',
       studentName: String(payload?.studentName || '').trim(),
+      admissionNo: String(payload?.admissionNo || '').trim(),
       classTitle: String(payload?.classTitle || '').trim(),
       academicYearTitle: String(payload?.academicYearTitle || '').trim(),
       referenceNumber: String(payload?.referenceNumber || '').trim(),
@@ -6501,7 +6506,7 @@ async function buildFinanceAuditTimeline({ schoolId = '', scope = {}, limit = 80
 
   orders.forEach((order) => {
     const studentName = resolveFinanceStudentName(order);
-    const admissionNo = resolveFinanceStudentAdmissionNo(order);
+    const admissionNo = resolveFinanceStudentAdmissionNo(order, asasNumberMap);
     const classTitle = resolveFinanceClassTitle(order);
     const academicYearTitle = resolveFinanceAcademicYearTitle(order);
     const referenceNumber = String(order?.orderNumber || order?.title || '').trim() || 'بل';
@@ -6610,7 +6615,7 @@ async function buildFinanceAuditTimeline({ schoolId = '', scope = {}, limit = 80
 
   payments.forEach((payment) => {
     const studentName = resolveFinanceStudentName(payment);
-    const admissionNo = resolveFinanceStudentAdmissionNo(payment);
+    const admissionNo = resolveFinanceStudentAdmissionNo(payment, asasNumberMap);
     const paymentOrderMap = new Map();
     [
       payment?.feeOrderId,
@@ -6720,7 +6725,7 @@ async function buildFinanceAuditTimeline({ schoolId = '', scope = {}, limit = 80
 
   reliefs.forEach((relief) => {
     const studentName = resolveFinanceStudentName(relief);
-    const admissionNo = resolveFinanceStudentAdmissionNo(relief);
+    const admissionNo = resolveFinanceStudentAdmissionNo(relief, asasNumberMap);
     const classTitle = resolveFinanceClassTitle(relief);
     const academicYearTitle = resolveFinanceAcademicYearTitle(relief);
     const referenceNumber = String(relief?.sourceKey || relief?._id || '').trim();

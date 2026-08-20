@@ -1,5 +1,6 @@
 require('../models/User');
 require('../models/StudentCore');
+require('../models/AfghanStudent');
 require('../models/SchoolClass');
 require('../models/AcademicYear');
 require('../models/StudentMembership');
@@ -66,6 +67,8 @@ function getStudentName(item = {}) {
 
 // Same shape-fallback pattern as getStudentName above, for نمبر اساس -
 // same-named students are otherwise indistinguishable in this report.
+// formatMembershipLite() already resolves StudentCore.admissionNo with an
+// AfghanStudent.asasNumber fallback onto membership.student.admissionNo.
 function getStudentAdmissionNo(item = {}) {
   return normalizeText(
     item?.studentId?.admissionNo
@@ -967,13 +970,18 @@ function formatMembershipLite(doc) {
       studentCoreId: normalizeNullableId(item.studentId?._id || item.studentId),
       fullName: normalizeText(item.studentId?.fullName),
       name: normalizeText(item.student?.name),
-      email: normalizeText(item.student?.email)
+      email: normalizeText(item.student?.email),
+      // StudentCore.admissionNo is rarely filled in by this school - fall
+      // back to AfghanStudent.asasNumber (via the membership's own
+      // afghanStudentId link, populated alongside studentId above).
+      admissionNo: normalizeText(item.studentId?.admissionNo) || normalizeText(item.afghanStudentId?.asasNumber)
     } : {
       userId: normalizeNullableId(item.student),
       studentCoreId: normalizeNullableId(item.studentId?._id || item.studentId),
       fullName: normalizeText(item.studentId?.fullName),
       name: '',
-      email: ''
+      email: '',
+      admissionNo: normalizeText(item.studentId?.admissionNo) || normalizeText(item.afghanStudentId?.asasNumber)
     },
     schoolClass: item.classId ? {
       id: normalizeNullableId(item.classId?._id || item.classId),
@@ -1250,6 +1258,7 @@ async function buildFinanceAnomalyReport({
     StudentMembership.find(membershipFilter)
       .populate('student', 'name email')
       .populate('studentId', 'fullName admissionNo')
+      .populate('afghanStudentId', 'asasNumber')
       .populate('classId', 'title code gradeLevel section')
       .populate('academicYearId', 'title code')
       .sort({ createdAt: -1 })
