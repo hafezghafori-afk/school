@@ -286,10 +286,10 @@ export default function AdminEnrollments() {
       {message && <div className="form-message">{message}</div>}
 
       <div className="admin-content-list">
-        {paged.map(item => (
+        {paged.map((item, index) => (
           <div key={item._id} className="admin-content-item">
             <div>
-              <strong>{item.studentName}</strong>
+              <strong>{(page - 1) * PAGE_SIZE + index + 1}. {item.studentName}</strong>
               <span style={{ color: '#0f172a', fontWeight: 'bold' }}>شماره پیگیری: {item.registrationId || '---'} {item.asasNumber ? `| مدخل اساس: ${item.asasNumber}` : ''}</span>
               <span>{item.grade || 'بدون پایه'} - {item.status}</span>
               <span>{item.phone || 'بدون شماره'}</span>
