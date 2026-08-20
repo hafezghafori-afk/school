@@ -7926,7 +7926,10 @@ export default function AdminFinance() {
     setReportPdfBusyKey(busyKey);
     try {
       const res = await fetch(url, { headers: { ...getAuthHeaders() } });
-      if (!res.ok) throw new Error('دانلود PDF ناموفق بود');
+      if (!res.ok) {
+        const serverMessage = await res.clone().json().then((body) => body?.message).catch(() => null);
+        throw new Error(serverMessage ? `دانلود PDF ناموفق بود: ${serverMessage} (${res.status})` : `دانلود PDF ناموفق بود (${res.status})`);
+      }
       const blob = await res.blob();
       const objectUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');

@@ -7998,6 +7998,7 @@ router.get('/admin/reports/:reportKey/export.pdf', requireAuth, requireRole(['ad
     res.setHeader('Content-Disposition', `attachment; filename="${req.params.reportKey}.pdf"`);
     res.send(buffer);
   } catch (error) {
+    console.error(`[finance-report-pdf] export.pdf failed for report "${req.params.reportKey}":`, error);
     res.status(error?.status || 500).json({ success: false, message: 'خطا در ساخت PDF گزارش' });
   }
 });
@@ -8021,7 +8022,8 @@ router.get('/admin/reports/export-bundle.pdf', requireAuth, requireRole(['admin'
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="finance-reports-bundle.pdf"');
     res.send(buffer);
-  } catch {
+  } catch (error) {
+    console.error('[finance-report-pdf] export-bundle.pdf failed:', error);
     res.status(500).json({ success: false, message: 'خطا در ساخت بسته‌ی کامل گزارش‌ها' });
   }
 });
