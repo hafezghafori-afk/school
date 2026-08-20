@@ -557,9 +557,23 @@
   background: linear-gradient(135deg, rgba(8, 145, 178, 0.12), rgba(15, 23, 42, 0.54));
 }
 
-.finance-advance-payment-panel > div:first-child {
+.finance-advance-payment-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.finance-advance-payment-panel-head > div {
   display: grid;
   gap: 4px;
+  min-width: 0;
+}
+
+.finance-advance-payment-panel-head .finance-advanced-toggle {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  font-size: 12px;
 }
 
 .finance-advance-payment-panel small {
@@ -1075,6 +1089,13 @@
 }
 
 .finance-card :is(input, select, textarea) {
+  /* App.css has a generic "input { margin-bottom: 15px; ... }" meant for
+     plain standalone forms; it targets the bare <input> element, and a
+     <select> never matches it, so every text/number input in a finance
+     card carried 15px more bottom margin than its sibling <select>
+     fields - the actual cause of rows whose fields didn't share a
+     baseline. */
+  margin: 0;
   width: 100%;
   min-width: 0;
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -2318,6 +2339,57 @@
   overflow: hidden;
 }
 
+/* Each payment-desk step (pick student, payment details, quick summary,
+   allocation) gets its own tinted card so the eye can tell one step ends
+   and the next begins, instead of one long undifferentiated column. Flat
+   tint + a solid accent stripe read far more clearly against the card's
+   own dark navy than a two-stop gradient fading into more dark navy did. */
+.finance-payment-subsection {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-inline-start-width: 4px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.finance-payment-subsection-student {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(56, 189, 248, 0.14);
+}
+
+.finance-payment-subsection-money {
+  border-color: rgba(52, 211, 153, 0.55);
+  background: rgba(52, 211, 153, 0.14);
+}
+
+.finance-payment-subsection-summary {
+  border-color: rgba(251, 191, 36, 0.55);
+  background: rgba(251, 191, 36, 0.14);
+}
+
+.finance-payment-subsection-allocation {
+  border-color: rgba(196, 181, 253, 0.55);
+  background: rgba(196, 181, 253, 0.14);
+}
+
+.finance-payment-subsection-student .finance-payment-section-title span:first-child {
+  color: #7dd3fc;
+}
+
+.finance-payment-subsection-money .finance-payment-section-title span:first-child {
+  color: #6ee7b7;
+}
+
+.finance-payment-subsection-summary .finance-payment-section-title span:first-child {
+  color: #fcd34d;
+}
+
+.finance-payment-subsection-allocation .finance-payment-section-title span:first-child {
+  color: #ddd6fe;
+}
+
 .finance-payment-section-title {
   display: flex;
   flex-wrap: wrap;
@@ -2390,7 +2462,12 @@
 .finance-payment-row-primary .finance-inline-filter,
 .finance-payment-row-money .finance-inline-filter,
 .finance-payment-row-allocation .finance-inline-filter {
-  grid-template-rows: 15px 44px;
+  /* second row is a floor, not a hard cap - a plain 44px here clipped
+     nothing itself, but the label's own box stopped at exactly 15+44px,
+     so the moment a control (the multi-part AfghanDateInput, in
+     particular) needed a touch more room than that, it spilled out past
+     the label's bottom edge instead of the label growing to hold it. */
+  grid-template-rows: 15px minmax(44px, auto);
   gap: 4px;
   align-self: end;
 }
@@ -2440,21 +2517,35 @@
   grid-column: 1 / -1;
 }
 
-.finance-payment-row-money {
-  grid-template-columns: minmax(120px, 0.7fr) minmax(120px, 0.65fr) minmax(140px, 0.7fr) minmax(280px, 1.1fr);
+/* .finance-payment-row-money's own grid-template-columns (4 explicit
+   tracks: fee type, amount, method, date - one field each, so nothing
+   auto-wraps into a row sized for different content) lives in
+   AdminFinancePaymentCompact.css, whose "[data-active-section=payments]"-
+   scoped selector is more specific than a plain class here and always
+   wins; a duplicate definition in this file would just be dead weight. */
+
+.finance-payment-reference-field {
+  max-width: 320px;
 }
 
-/* AfghanDateInput's own year/month/day grid is a CSS container query
-   (see AfghanDateInput.css) that switches to a cramped 2-row layout once
-   its box drops under 260px wide - min-width here keeps this column above
-   that threshold so the date control never stacks into two rows and
-   overflows its fixed-height grid cell. */
+.finance-pay-full-debt-btn {
+  justify-self: start;
+  padding: 6px 12px;
+  font-size: 12px;
+  background: linear-gradient(140deg, rgba(16, 185, 129, 0.22), rgba(16, 185, 129, 0.1));
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #d1fae5;
+}
+
+/* AfghanDateInput's own year/month/day grid is a CSS container query (see
+   AfghanDateInput.css) that already knows how to fold itself down at
+   260px/190px - no hard floor needed here any more; the row's own
+   minmax(220px, ...) track is the real guard against a cramped fold. */
 .finance-payment-date-field {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   align-items: center;
-  min-width: 280px;
   min-height: 44px;
 }
 
@@ -2568,9 +2659,12 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .finance-payment-row-money,
   .finance-payment-row-allocation {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .finance-payment-reference-field {
+    max-width: none;
   }
 
   .finance-payment-summary-chips {
@@ -2666,6 +2760,8 @@
   display: inline-flex;
   flex-wrap: wrap;
   gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .finance-order-mode-toggle button {
@@ -4465,13 +4561,16 @@
   }
 
   .finance-payment-row-primary,
-  .finance-payment-row-money,
   .finance-payment-row-allocation,
   .finance-payment-date-field,
   .finance-payment-actions-row,
   .finance-payment-student-card-row .finance-kpi-grid-dense,
   .finance-payment-student-card-row .finance-subcard-list {
     grid-template-columns: 1fr;
+  }
+
+  .finance-payment-reference-field {
+    max-width: none;
   }
 
   .finance-payment-summary-chips {
