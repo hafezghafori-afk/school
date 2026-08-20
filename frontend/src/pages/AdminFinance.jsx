@@ -1,4 +1,4 @@
-import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import './AdminFinance.css';
@@ -1216,6 +1216,7 @@ const FINANCE_REPORT_CARDS = [
   { key: 'debtors', title: 'باقیداران', description: 'لیست شاگردان بدهکار به تفکیک صنف، با مبلغ باقی‌مانده و وضعیت.' },
   { key: 'by_class', title: 'وصول صنف‌وار', description: 'وصول، باقیات و نرخ تحصیل هر صنف در بازه‌ی انتخاب‌شده - ماه‌وار یا سال‌وار.' },
   { key: 'advance_payments', title: 'پیش‌پرداخت‌کنندگان', description: 'شاگردانی که فیس یک یا چند ماه آینده را از قبل پرداخت کرده‌اند.' },
+  { key: 'payment_timing', title: 'زمان‌بندی پرداخت فیس', description: 'ماه فیس هر پرداخت را با ماه پرداخت واقعی مقایسه می‌کند (به‌موقع/تأخیر/پیش‌پرداخت) و خالص عاید هر ماه فیس را نشان می‌دهد.' },
   { key: 'discounts', title: 'تخفیف و معافیت', description: 'لیست تخفیف‌ها و معافیت‌های فعال با نوع، مبلغ و وضعیت.' },
   { key: 'cashflow', title: 'جریان نقدی', description: 'وصول روزانه‌ی تاییدشده در بازه‌ی انتخاب‌شده.' },
   { key: 'daily_cashier', title: 'صندوق روزانه', description: 'رسیدهای دریافت‌شده در یک روز مشخص (تا تاریخ بازه).' },
@@ -3056,6 +3057,37 @@ export default function AdminFinance() {
       filteredCount: filteredBills.length
     };
   }, [bills, filteredBills.length]);
+  const topOverdueBills = useMemo(() => {
+    const now = Date.now();
+    return bills
+      .filter((item) => String(item?.status || '').trim() === 'overdue')
+      .map((item) => {
+        const outstanding = Math.max(0, toSafeNumber(item?.outstandingAmount ?? (toSafeNumber(item?.amountDue) - toSafeNumber(item?.amountPaid))));
+        const dueDate = item?.dueDate ? new Date(item.dueDate) : null;
+        const daysOverdue = dueDate && !Number.isNaN(dueDate.getTime())
+          ? Math.max(0, Math.floor((now - dueDate.getTime()) / 86400000))
+          : null;
+        return {
+          id: String(item?._id || item?.billNumber || `${item?.student?.userId || ''}-${item?.dueDate || ''}`),
+          outstanding,
+          daysOverdue,
+          studentName: item?.student?.fullName || item?.student?.name || 'شاگرد',
+          admissionNo: item?.student?.asasNumber || item?.student?.admissionNo || '',
+          searchTerm: item?.student?.asasNumber || item?.student?.admissionNo || item?.student?.fullName || item?.student?.name || ''
+        };
+      })
+      .filter((row) => row.outstanding > 0)
+      .sort((a, b) => b.outstanding - a.outstanding)
+      .slice(0, 5);
+  }, [bills]);
+  const focusOverdueBill = useCallback((row) => {
+    if (!row) return;
+    setOrderStatusFilter('overdue');
+    setOrderSearchTerm(row.searchTerm || '');
+    setTimeout(() => {
+      document.querySelector('[data-testid="finance-orders-table-card"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  }, [setOrderStatusFilter, setOrderSearchTerm]);
   const filteredDiscountRegistry = useMemo(() => (
     discountRegistry.filter((item) => (
       !String(item?.reason || '').trim().toLowerCase().startsWith('[discount:')
@@ -7997,16 +8029,6 @@ export default function AdminFinance() {
         </div>
       ) : null}
 
-      <div className="finance-control-rail">
-        {/* حذف دکمه‌های لندسکیپ و پورتریت */}
-        {activeSection === 'orders' && (
-          <div className="finance-subsection-tabs" role="group" aria-label="فورم‌های بل و تعهدات">
-            <button type="button" className={orderFormMode === 'manual' ? 'secondary is-active' : 'secondary'} onClick={() => setOrderFormMode('manual')}>بل دستی</button>
-            <button type="button" className={orderFormMode === 'bulk' ? 'secondary is-active' : 'secondary'} onClick={() => setOrderFormMode('bulk')}>صدور گروهی</button>
-          </div>
-        )}
-      </div>
-
       <div className="finance-card finance-overview-filter" data-finance-section="overview reports">
         <div>
           <span className="finance-eyebrow">گزارش هوشمند مالی</span>
@@ -8372,14 +8394,18 @@ export default function AdminFinance() {
               <h3>بل‌ها و تعهدات مالی</h3>
               <p className="muted">نمای سریع بدهی‌ها، بل‌های سررسید گذشته و تعهدات فعال پیش از صدور یا پیگیری بل.</p>
             </div>
-            <div className="finance-chip-group">
-              <span className="finance-chip">{orderWorkspaceStats.officialCount} بل رسمی</span>
-              <span className="finance-chip finance-chip-emerald">{orderWorkspaceStats.openCount} بدهی باز</span>
-              <span className="finance-chip finance-chip-rose">{orderWorkspaceStats.overdueCount} سررسید گذشته</span>
-              {!!orderWorkspaceStats.voidCount && (
-                <span className="finance-chip finance-chip-muted">{orderWorkspaceStats.voidCount} بل باطل (جدا از رسمی)</span>
-              )}
-            </div>
+          </div>
+          <div className="finance-order-mode-toggle" role="group" aria-label="فورم‌های بل و تعهدات">
+            <button type="button" className={orderFormMode === 'manual' ? 'secondary is-active' : 'secondary'} onClick={() => setOrderFormMode('manual')}>بل دستی</button>
+            <button type="button" className={orderFormMode === 'bulk' ? 'secondary is-active' : 'secondary'} onClick={() => setOrderFormMode('bulk')}>صدور گروهی</button>
+          </div>
+          <div className="finance-chip-group">
+            <span className="finance-chip">{orderWorkspaceStats.officialCount} بل رسمی</span>
+            <span className="finance-chip finance-chip-emerald">{orderWorkspaceStats.openCount} بدهی باز</span>
+            <span className="finance-chip finance-chip-rose">{orderWorkspaceStats.overdueCount} سررسید گذشته</span>
+            {!!orderWorkspaceStats.voidCount && (
+              <span className="finance-chip finance-chip-muted">{orderWorkspaceStats.voidCount} بل باطل (جدا از رسمی)</span>
+            )}
           </div>
           <div className="finance-kpi-grid finance-kpi-grid-dense finance-order-kpis">
             <div className="finance-kpi-item finance-kpi-item-accent">
@@ -8399,6 +8425,29 @@ export default function AdminFinance() {
               <strong>{orderWorkspaceStats.activeCommitments}</strong>
             </div>
           </div>
+          <div className="finance-order-top-debtors">
+            <div className="finance-order-top-debtors-head">
+              <span>بدهکاران برتر (سررسید گذشته)</span>
+              <small>{orderWorkspaceStats.overdueCount} بل سررسید گذشته</small>
+            </div>
+            {topOverdueBills.length ? topOverdueBills.map((row) => (
+              <div className="mini-row finance-order-debtor-row" key={row.id}>
+                <span className="finance-order-debtor-info">
+                  <strong>{row.studentName}</strong>
+                  <small>
+                    {row.admissionNo ? `اساس: ${row.admissionNo}` : 'نمبر اساس ثبت نشده'}
+                    {Number.isFinite(row.daysOverdue) ? ` — ${row.daysOverdue} روز تأخیر` : ''}
+                  </small>
+                </span>
+                <span className="finance-order-debtor-actions">
+                  <b>{fmt(row.outstanding)} AFN</b>
+                  <button type="button" className="secondary" onClick={() => focusOverdueBill(row)}>پیگیری</button>
+                </span>
+              </div>
+            )) : (
+              <p className="muted">در حال حاضر بل سررسیدگذشته‌ای ثبت نشده است.</p>
+            )}
+          </div>
         </section>
 
         {orderFormMode === 'manual' && (
@@ -8410,23 +8459,28 @@ export default function AdminFinance() {
               </div>
               <span className="finance-chip finance-chip-muted">{manualStudentOptions.length} متعلم</span>
             </div>
-            <label className="finance-inline-filter finance-inline-filter-wide">
-              <span>جستجوی متعلم</span>
-              <input
-                value={manualStudentSearch}
-                onChange={(e) => setManualStudentSearch(e.target.value)}
-               placeholder="نام، ایمیل یا نمبر اساس شاگرد"
-              />
-            </label>
-            <select value={manualForm.studentId} onChange={(e) => applyManualMembershipStudent(e.target.value)} required>
-              <option value="">شاگرد را انتخاب کنید</option>
-              {manualStudentOptions.length ? manualStudentOptions.map((student, index) => (
-                <option key={student.membershipId || student._id} value={student._id}>{getFinanceStudentOptionLabel(student, index + 1)}</option>
-              )) : (
-                <option value="">متعلمی پیدا نشد</option>
-              )}
-            </select>
-            <div className="finance-split-grid">
+            <div className="finance-order-form-row">
+              <label className="finance-inline-filter finance-inline-filter-wide">
+                <span>جستجوی متعلم</span>
+                <input
+                  value={manualStudentSearch}
+                  onChange={(e) => setManualStudentSearch(e.target.value)}
+                 placeholder="نام، ایمیل یا نمبر اساس شاگرد"
+                />
+              </label>
+              <label className="finance-inline-filter">
+                <span>شاگرد</span>
+                <select value={manualForm.studentId} onChange={(e) => applyManualMembershipStudent(e.target.value)} required>
+                  <option value="">شاگرد را انتخاب کنید</option>
+                  {manualStudentOptions.length ? manualStudentOptions.map((student, index) => (
+                    <option key={student.membershipId || student._id} value={student._id}>{getFinanceStudentOptionLabel(student, index + 1)}</option>
+                  )) : (
+                    <option value="">متعلمی پیدا نشد</option>
+                  )}
+                </select>
+              </label>
+            </div>
+            <div className="finance-split-grid finance-split-grid-3">
               <select value={manualForm.classId} onChange={(e) => {
                 const classId = e.target.value;
                 const membership = financeMembershipStudents.find((item) => (
@@ -8462,8 +8516,6 @@ export default function AdminFinance() {
                   <option key={feeType} value={feeType}>{FEE_LINE_TYPE_LABELS[feeType] || feeType}</option>
                 ))}
               </select>
-            </div>
-            <div className="finance-split-grid">
               <select
                 value={manualForm.amountSource}
                 onChange={(e) => setManualForm((p) => ({ ...p, amountSource: e.target.value }))}
@@ -8472,6 +8524,8 @@ export default function AdminFinance() {
                 <option value="plan">مبلغ از پلان مالی</option>
                 <option value="manual">مبلغ دستی</option>
               </select>
+            </div>
+            <div className="finance-split-grid finance-split-grid-3">
               {manualForm.amountSource === 'manual' ? (
                 <input
                   type="number"
@@ -8498,8 +8552,6 @@ export default function AdminFinance() {
                   </small>
                 </div>
               )}
-            </div>
-            <div className="finance-split-grid">
               <div className="finance-cell-stack">
                 <span className="finance-field-label">مهلت پرداخت</span>
                 <AfghanDateInput value={manualForm.dueDate} onChange={(value) => setManualForm((p) => ({ ...p, dueDate: value }))} showGregorianEquivalent required />
@@ -8516,7 +8568,9 @@ export default function AdminFinance() {
                 <input value={manualForm.term} onChange={(e) => setManualForm((p) => ({ ...p, term: e.target.value }))} placeholder="ترم" />
               </div>
             )}
-            <button type="submit" disabled={busy}>ایجاد بل</button>
+            <div className="row-actions">
+              <button type="submit" disabled={busy}>ایجاد بل</button>
+            </div>
           </form>
         )}
 
@@ -9210,36 +9264,36 @@ export default function AdminFinance() {
               </div>
               <span className="finance-chip">{classOptions.length} صنف</span>
             </div>
-            <select value={bulkForm.classId} onChange={(e) => applyBulkClassSelection(e.target.value)} required>
-              <option value="">صنف را انتخاب کنید</option>
-              {classOptions.map((item) => <option key={item.classId} value={item.classId}>{getClassOptionLabel(item)}</option>)}
-            </select>
-            <div className="finance-split-grid">
+            <div className="finance-split-grid finance-split-grid-3">
+              <select value={bulkForm.classId} onChange={(e) => applyBulkClassSelection(e.target.value)} required>
+                <option value="">صنف را انتخاب کنید</option>
+                {classOptions.map((item) => <option key={item.classId} value={item.classId}>{getClassOptionLabel(item)}</option>)}
+              </select>
               <select value={bulkForm.academicYearId} onChange={(e) => setBulkForm((p) => ({ ...p, academicYearId: e.target.value }))}>
                 <option value="">سال تعلیمی عضویت‌ها</option>
                 {academicYears.map((item) => <option key={`bulk-year-${item.id}`} value={item.id}>{getAcademicYearOptionLabel(item)}</option>)}
               </select>
               <div className="finance-info-note">مبلغ فیس و داخله فقط از پلان مالی فعال همین صنف و سال تعلیمی گرفته می‌شود.</div>
             </div>
-            <div className="finance-split-grid">
+            <div className="finance-split-grid finance-split-grid-3">
               <div className="finance-cell-stack">
                 <span className="finance-field-label">مهلت پرداخت</span>
                 <AfghanDateInput value={bulkForm.dueDate} onChange={(value) => setBulkForm((p) => ({ ...p, dueDate: value }))} showGregorianEquivalent required />
                 <small>{bulkForm.dueDate ? `مهلت پرداخت: ${toFaDate(bulkForm.dueDate)}` : 'مهلت پرداخت گروهی انتخاب نشده است.'}</small>
               </div>
               <input value={bulkForm.periodLabel} onChange={(e) => setBulkForm((p) => ({ ...p, periodLabel: e.target.value }))} placeholder="عنوان بل / دوره" />
+              <label className="finance-flag">
+                <input type="checkbox" checked={bulkForm.includeAdmission} onChange={(e) => setBulkForm((p) => ({ ...p, includeAdmission: e.target.checked }))} />
+                <span>شامل داخله از پلان مالی</span>
+              </label>
             </div>
-            <label className="finance-flag">
-              <input type="checkbox" checked={bulkForm.includeAdmission} onChange={(e) => setBulkForm((p) => ({ ...p, includeAdmission: e.target.checked }))} />
-              <span>شامل داخله از پلان مالی</span>
-            </label>
-            <p className="muted">اگر این گزینه خاموش باشد، صدور گروهی فقط فیس/شهریه را ایجاد می‌کند و داخله جداگانه صادر نمی‌شود.</p>
+            <p className="muted">اگر گزینه «شامل داخله» خاموش باشد، صدور گروهی فقط فیس/شهریه را ایجاد می‌کند و داخله جداگانه صادر نمی‌شود.</p>
             <button type="button" className="secondary finance-advanced-toggle" onClick={() => setBillingAdvancedOpen((value) => !value)}>
               {billingAdvancedOpen ? 'بستن تنظیمات پیشرفته' : 'تنظیمات پیشرفته'}
             </button>
             {billingAdvancedOpen && (
               <>
-                <div className="finance-split-grid">
+                <div className="finance-split-grid finance-split-grid-3">
                   <select value={bulkForm.periodType} onChange={(e) => setBulkForm((p) => ({ ...p, periodType: e.target.value }))}>
                     <option value="monthly">بل ماهانه</option>
                     <option value="term">بل دوره‌ای</option>

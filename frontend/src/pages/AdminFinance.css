@@ -102,15 +102,6 @@
   font-size: 22px;
 }
 
-.finance-control-rail {
-  margin-bottom: 16px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .finance-layout-toggle,
 .finance-subsection-tabs {
   display: inline-flex;
@@ -456,6 +447,12 @@
 }
 
 .finance-card {
+  /* Overrides the generic "form { max-width: 400px; margin: 0 auto; }" rule
+     in App.css, which applies to every bare <form> element (including the
+     finance <form className="finance-card ...">) and otherwise silently
+     caps these cards at 400px no matter what the surrounding grid intends. */
+  max-width: none;
+  margin: 0;
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(12, 20, 36, 0.78);
@@ -1079,6 +1076,7 @@
 
 .finance-card :is(input, select, textarea) {
   width: 100%;
+  min-width: 0;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 10px;
   background: rgba(8, 14, 24, 0.8);
@@ -1159,6 +1157,7 @@
 .finance-info-note {
   display: flex;
   align-items: center;
+  min-width: 0;
   min-height: 44px;
   padding: 0.7rem 0.85rem;
   border: 1px solid rgba(56, 189, 248, 0.3);
@@ -2082,6 +2081,7 @@
 .finance-flag {
   display: flex;
   align-items: center;
+  min-width: 0;
   gap: 8px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -2275,7 +2275,7 @@
 }
 
 .finance-page[data-active-section="orders"] .finance-grid[data-finance-section~="orders"] {
-  grid-template-columns: minmax(0, 1.25fr) minmax(340px, 0.75fr);
+  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
   align-items: start;
 }
 
@@ -2659,7 +2659,84 @@
 }
 
 .finance-order-kpis {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.finance-order-mode-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.finance-order-mode-toggle button {
+  padding: 6px 14px;
+  font-size: 0.85rem;
+}
+
+.finance-order-top-debtors {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.finance-order-top-debtors-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.finance-order-top-debtors-head span {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.finance-order-top-debtors-head small {
+  color: rgba(238, 245, 255, 0.6);
+  font-size: 11px;
+}
+
+.finance-order-debtor-row {
+  align-items: center;
+}
+
+.finance-order-debtor-info {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.finance-order-debtor-info small {
+  color: rgba(238, 245, 255, 0.62);
+  font-size: 11px;
+}
+
+.finance-order-debtor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.finance-order-debtor-actions b {
+  color: #fca5a5;
+  font-size: 12.5px;
+}
+
+.finance-order-debtor-actions button {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.finance-order-action-card .finance-order-form-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.3fr) minmax(200px, 1fr);
+  gap: 9px;
+}
+
+.finance-order-action-card .finance-split-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .finance-orders-table-card {
@@ -4350,6 +4427,21 @@
 
   .finance-split-grid {
     grid-template-columns: 1fr;
+  }
+
+  .finance-order-action-card .finance-split-grid-3,
+  .finance-order-action-card .finance-order-form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .finance-order-debtor-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .finance-order-debtor-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .finance-page[data-active-section="payments"] .finance-payment-workspace {
