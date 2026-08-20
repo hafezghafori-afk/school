@@ -6076,6 +6076,10 @@ const resolveFinanceStudentName = (doc = {}) => (
   String(doc?.studentId?.fullName || doc?.student?.name || doc?.student?.fullName || '').trim() || 'متعلم'
 );
 
+const resolveFinanceStudentAdmissionNo = (doc = {}) => (
+  String(doc?.studentId?.admissionNo || doc?.student?.admissionNo || '').trim()
+);
+
 const resolveFinanceAcademicYearTitle = (doc = {}) => (
   String(doc?.academicYearId?.title || doc?.academicYear?.title || '').trim()
 );
@@ -6497,6 +6501,7 @@ async function buildFinanceAuditTimeline({ schoolId = '', scope = {}, limit = 80
 
   orders.forEach((order) => {
     const studentName = resolveFinanceStudentName(order);
+    const admissionNo = resolveFinanceStudentAdmissionNo(order);
     const classTitle = resolveFinanceClassTitle(order);
     const academicYearTitle = resolveFinanceAcademicYearTitle(order);
     const referenceNumber = String(order?.orderNumber || order?.title || '').trim() || 'بل';
@@ -6505,6 +6510,7 @@ async function buildFinanceAuditTimeline({ schoolId = '', scope = {}, limit = 80
     const basePayload = {
       kind: 'order',
       studentName,
+      admissionNo,
       classTitle,
       academicYearTitle,
       referenceNumber,
@@ -6604,6 +6610,7 @@ async function buildFinanceAuditTimeline({ schoolId = '', scope = {}, limit = 80
 
   payments.forEach((payment) => {
     const studentName = resolveFinanceStudentName(payment);
+    const admissionNo = resolveFinanceStudentAdmissionNo(payment);
     const paymentOrderMap = new Map();
     [
       payment?.feeOrderId,
@@ -6643,6 +6650,7 @@ async function buildFinanceAuditTimeline({ schoolId = '', scope = {}, limit = 80
     const basePayload = {
       kind: 'payment',
       studentName,
+      admissionNo,
       classTitle,
       academicYearTitle,
       referenceNumber,
@@ -6712,6 +6720,7 @@ async function buildFinanceAuditTimeline({ schoolId = '', scope = {}, limit = 80
 
   reliefs.forEach((relief) => {
     const studentName = resolveFinanceStudentName(relief);
+    const admissionNo = resolveFinanceStudentAdmissionNo(relief);
     const classTitle = resolveFinanceClassTitle(relief);
     const academicYearTitle = resolveFinanceAcademicYearTitle(relief);
     const referenceNumber = String(relief?.sourceKey || relief?._id || '').trim();
@@ -6726,6 +6735,7 @@ async function buildFinanceAuditTimeline({ schoolId = '', scope = {}, limit = 80
     const basePayload = {
       kind: 'relief',
       studentName,
+      admissionNo,
       classTitle,
       academicYearTitle,
       referenceNumber,
@@ -7879,6 +7889,7 @@ async function buildFinanceReportPdfPayload(reportKey, { scope, query = {} } = {
     });
     const rows = (Array.isArray(report?.items) ? report.items : []).map((item) => ({
       studentName: item?.studentName || '-',
+      admissionNo: item?.admissionNo || '-',
       anomalyType: item?.anomalyType || '-',
       severity: item?.severity || '-',
       description: item?.description || item?.title || '-',
@@ -7891,6 +7902,7 @@ async function buildFinanceReportPdfPayload(reportKey, { scope, query = {} } = {
       summary: [{ label: 'تعداد ناهنجاری‌های باز', value: formatReportNumber(rows.length) }],
       columns: [
         { key: 'studentName', label: 'متعلم' },
+        { key: 'admissionNo', label: 'نمبر اساس' },
         { key: 'anomalyType', label: 'نوع ناهنجاری' },
         { key: 'severity', label: 'شدت' },
         { key: 'description', label: 'توضیح' },
@@ -7911,6 +7923,8 @@ async function buildFinanceReportPdfPayload(reportKey, { scope, query = {} } = {
     });
     const rows = (Array.isArray(timeline?.items) ? timeline.items : []).map((item) => ({
       date: formatReportDateLabel(item?.at || item?.date || item?.createdAt),
+      student: item?.studentName || '-',
+      admissionNo: item?.admissionNo || '-',
       kind: item?.kind || '-',
       severity: item?.severity || '-',
       title: item?.title || '-',
@@ -7923,6 +7937,8 @@ async function buildFinanceReportPdfPayload(reportKey, { scope, query = {} } = {
       summary: [{ label: 'تعداد رویداد', value: formatReportNumber(rows.length) }],
       columns: [
         { key: 'date', label: 'تاریخ' },
+        { key: 'student', label: 'متعلم' },
+        { key: 'admissionNo', label: 'نمبر اساس' },
         { key: 'kind', label: 'نوع' },
         { key: 'severity', label: 'شدت' },
         { key: 'title', label: 'رویداد' },
