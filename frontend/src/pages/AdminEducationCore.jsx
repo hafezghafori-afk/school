@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { permissionAllows } from '../config/permissionCatalog';
 import { Link } from 'react-router-dom';
 import './AdminWorkspace.css';
 import { errorMessage, fetchJson, normalizeOptions, postJson, resolveActiveSchoolContext } from './adminWorkspaceUtils';
@@ -403,12 +404,9 @@ export default function AdminEducationCore() {
       return [];
     }
   }, []);
-  const canManageUsers = effectivePermissions.includes('manage_users');
-  const canManageContent = effectivePermissions.includes('manage_content');
-  const canManageMemberships = canManageUsers
-    || effectivePermissions.includes('manage_memberships')
-    || effectivePermissions.includes('students.lifecycle.manage')
-    || effectivePermissions.includes('students.transfers.manage');
+  const canManageUsers = permissionAllows('manage_users', effectivePermissions);
+  const canManageContent = permissionAllows('manage_content', effectivePermissions);
+  const canManageMemberships = canManageUsers || permissionAllows('manage_memberships', effectivePermissions);
   const canManageStudentLifecycle = canManageMemberships;
   const visibleEducationSections = useMemo(() => (
     canManageContent

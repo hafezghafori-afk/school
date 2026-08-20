@@ -75,19 +75,6 @@ const USER_STATUS_OPTIONS = [
   { key: 'suspended', label: 'تعلیق' }
 ];
 
-const LEGACY_PERMISSION_OPTIONS = [
-  { key: 'manage_users', label: 'مدیریت کاربران' },
-  { key: 'manage_enrollments', label: 'مدیریت ثبت‌نام‌ها' },
-  { key: 'manage_memberships', label: 'مدیریت ممبرشیپ آموزشی' },
-  { key: 'manage_finance', label: 'مدیریت مالی' },
-  { key: 'manage_content', label: 'مدیریت محتوا' },
-  { key: 'view_reports', label: 'مشاهده گزارش‌ها' },
-  { key: 'view_schedule', label: 'مشاهده تقسیم اوقات' },
-  { key: 'manage_schedule', label: 'مدیریت تقسیم اوقات' },
-  { key: 'access_school_manager', label: 'دسترسی پست مدیر مکتب' },
-  { key: 'access_head_teacher', label: 'دسترسی پست سر معلم مکتب' }
-];
-
 const PERMISSION_OPTIONS = CATALOG_PERMISSION_OPTIONS;
 
 const PERMISSION_GROUP_MODES = [
@@ -386,96 +373,6 @@ const toDateTime = (value) => {
 };
 
 const uniquePermissions = (permissions = []) => Array.from(new Set((permissions || []).filter(Boolean)));
-
-function PermissionTree({ value = [], onChange, disabled = false, compact = false, idPrefix = 'permission' }) {
-  const selected = useMemo(() => new Set(value || []), [value]);
-  const [openGroups, setOpenGroups] = useState(() => new Set(PERMISSION_GROUPS.slice(0, 2).map((group) => group.key)));
-
-  const emit = (nextSet) => {
-    if (typeof onChange === 'function') onChange(Array.from(nextSet));
-  };
-
-  const toggleGroupOpen = (groupKey) => {
-    setOpenGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(groupKey)) next.delete(groupKey);
-      else next.add(groupKey);
-      return next;
-    });
-  };
-
-  const togglePermission = (permissionKey, checked) => {
-    const next = new Set(selected);
-    if (checked) next.add(permissionKey);
-    else next.delete(permissionKey);
-    emit(next);
-  };
-
-  const toggleGroupPermissions = (permissions = [], checked) => {
-    const next = new Set(selected);
-    permissions.forEach((permission) => {
-      if (checked) next.add(permission.key);
-      else next.delete(permission.key);
-    });
-    emit(next);
-  };
-
-  return (
-    <div className={`permission-tree${compact ? ' compact' : ''}`}>
-      {PERMISSION_GROUPS.map((group) => {
-        const groupPermissions = group.permissions || [];
-        const selectedCount = groupPermissions.filter((permission) => selected.has(permission.key)).length;
-        const allSelected = selectedCount > 0 && selectedCount === groupPermissions.length;
-        const isPartial = selectedCount > 0 && selectedCount < groupPermissions.length;
-        const isOpen = openGroups.has(group.key);
-
-        return (
-          <div key={`${idPrefix}-${group.key}`} className={`permission-group${isOpen ? ' is-open' : ''}`}>
-            <div className="permission-group-head">
-              <button
-                type="button"
-                className="permission-group-toggle"
-                onClick={() => toggleGroupOpen(group.key)}
-                aria-expanded={isOpen}
-              >
-                <span className="permission-group-caret">{isOpen ? '-' : '+'}</span>
-                <span>{group.label}</span>
-                <small>{selectedCount}/{groupPermissions.length}</small>
-              </button>
-              <label className="permission-group-select">
-                <input
-                  type="checkbox"
-                  checked={allSelected}
-                  disabled={disabled}
-                  ref={(node) => {
-                    if (node) node.indeterminate = isPartial;
-                  }}
-                  onChange={(event) => toggleGroupPermissions(groupPermissions, event.target.checked)}
-                />
-                <span>انتخاب همه</span>
-              </label>
-            </div>
-            {isOpen ? (
-              <div className="permission-group-body">
-                {groupPermissions.map((permission) => (
-                  <label key={`${idPrefix}-${permission.key}`} className="permission-option">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(permission.key)}
-                      disabled={disabled}
-                      onChange={(event) => togglePermission(permission.key, event.target.checked)}
-                    />
-                    <span>{permission.label}</span>
-                  </label>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 const isViewPermission = (permissionKey = '') => {
   const key = String(permissionKey || '').trim();
