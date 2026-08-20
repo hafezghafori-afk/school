@@ -9,6 +9,7 @@ const LEGACY_PERMISSION_MAP = Object.freeze({
     'users.access_requests.manage',
     'users.profile_requests.manage',
     'students.manage',
+    'students.register',
     'students.documents.manage',
     'students.guardians.manage',
     'students.transfers.manage',
@@ -130,7 +131,8 @@ const LEGACY_PERMISSION_MAP = Object.freeze({
     'timetable.operations.manage',
     'timetable.reports.view',
     'timetable.conflicts.manage',
-    'timetable.history.view'
+    'timetable.history.view',
+    'settings.academic.manage'
   ],
   manage_platform_requests: [
     'content.contacts.manage'

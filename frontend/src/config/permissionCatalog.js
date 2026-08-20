@@ -40,7 +40,7 @@ export const PERMISSION_GROUPS = [
       { key: 'students.profile.view', label: 'پروفایل شاگرد', legacy: ['view_reports'] },
       { key: 'students.documents.manage', label: 'اسناد شاگرد', legacy: ['manage_users'] },
       { key: 'students.guardians.manage', label: 'والد/سرپرست شاگرد', legacy: ['manage_users'] },
-      { key: 'students.transfers.manage', label: 'انتقالات شاگرد', legacy: ['manage_users'] },
+      { key: 'students.transfers.manage', label: 'انتقالات شاگرد', legacy: ['manage_users', 'manage_memberships'] },
       { key: 'students.lifecycle.view', label: 'مشاهده سوانح تعلیمی شاگرد', legacy: ['manage_users', 'manage_memberships'] },
       { key: 'students.lifecycle.manage', label: 'مدیریت تبدیلی، ترک تحصیل و منفکی شاگرد', legacy: ['manage_users', 'manage_memberships'] },
       { key: 'students.lifecycle.approve', label: 'تایید تغییرات وضعیت تعلیمی شاگرد', legacy: ['manage_users'] },
@@ -61,7 +61,7 @@ export const PERMISSION_GROUPS = [
       { key: 'education.annual_plan.manage', label: 'پلان تعلیمی سالانه', legacy: ['manage_schedule'] },
       { key: 'education.weekly_plan.manage', label: 'پلان تعلیمی هفته‌وار', legacy: ['manage_schedule'] },
       { key: 'education.memberships.manage', label: 'ممبرشیپ آموزشی', legacy: ['manage_memberships'] },
-      { key: 'education.promotions.manage', label: 'ارتقای صنف', legacy: ['manage_users'] },
+      { key: 'education.promotions.manage', label: 'ارتقای صنف', legacy: ['manage_users', 'manage_memberships'] },
       { key: 'education.result_tables.manage', label: 'جدول نتایج', legacy: ['manage_content'] },
       { key: 'education.sheet_templates.manage', label: 'قالب شقه‌ها / sheet templates', legacy: ['manage_content'] },
       { key: 'education.exams.manage', label: 'داشبورد امتحانات', legacy: ['manage_content'] }

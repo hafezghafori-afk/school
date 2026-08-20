@@ -10,7 +10,8 @@
     "dev:frontend": "npm --prefix frontend run dev",
     "test:dev": "node scripts/dev.js --smoke",
     "test:frontend:smoke": "npm --prefix frontend run test:smoke",
-    "test:backend:smoke": "npm --prefix backend run test:smoke"
+    "test:backend:smoke": "npm --prefix backend run test:smoke",
+    "check:permissions": "node scripts/checkPermissionCatalogSync.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

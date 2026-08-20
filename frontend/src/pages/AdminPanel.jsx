@@ -10,7 +10,7 @@ import TaskAlertPanel from '../components/dashboard/TaskAlertPanel';
 import TrendBars from '../components/dashboard/TrendBars';
 
 import { API_BASE } from '../config/api';
-import { LEGACY_PERMISSION_MAP, expandLegacyPermissions } from '../config/permissionCatalog';
+import { expandLegacyPermissions, permissionAllows } from '../config/permissionCatalog';
 import { formatAfghanDate, formatAfghanDateTime, formatAfghanTime } from '../utils/afghanDate';
 import { formatFinanceCode } from '../utils/latinFinanceCode';
 import {
@@ -513,26 +513,6 @@ const normalizeQuickLinkItems = (items = []) => {
 const getQuickLinkPermissionLabel = (permission = '') => (
   permission ? (PERMISSION_LABELS[permission] || permission) : 'عمومی'
 );
-
-const permissionAllows = (permission = '', permissions = []) => {
-  if (!permission) return true;
-  if (permissions.includes(permission)) return true;
-  if (permission === 'manage_enrollments' && permissions.includes('manage_users')) return true;
-  if (permission === 'manage_memberships' && permissions.includes('manage_users')) return true;
-  if (permission === 'students.transfers.manage' && permissions.includes('manage_users')) return true;
-  if (permission === 'students.lifecycle.manage' && permissions.includes('manage_memberships')) return true;
-  if (permission === 'students.lifecycle.manage' && permissions.includes('manage_users')) return true;
-  if (permission === 'education.promotions.manage' && permissions.includes('manage_memberships')) return true;
-  if (permission === 'education.promotions.manage' && permissions.includes('manage_users')) return true;
-  if (permission === 'finance.lifecycle_effects.manage' && permissions.includes('manage_finance')) return true;
-  if (permission === 'view_schedule' && permissions.includes('manage_schedule')) return true;
-  // اگر «permission» یک مجوز چتری/قدیمی باشد (مثلاً manage_users)، داشتنِ هر یک از مجوزهای
-  // جزئیِ زیرمجموعهٔ آن (مثلاً students.manage، users.manage و ...) هم باید کافی باشد. بدون
-  // این خط، وقتی از «دسترسی‌های جزئی» فقط یک مجوز دقیق به کاربر داده می‌شود، ویژگی‌هایی که بر
-  // اساس مجوز چتری تصمیم می‌گیرند (کارت‌ها/لینک‌های منوی داشبورد) برای او مخفی می‌مانند.
-  if ((LEGACY_PERMISSION_MAP[permission] || []).some((mapped) => permissions.includes(mapped))) return true;
-  return false;
-};
 
 const isQuickLinkActiveForUser = (item, permissions = []) => (
   item?.enabled !== false && permissionAllows(item?.permission || '', permissions)

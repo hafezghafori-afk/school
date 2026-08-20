@@ -75,19 +75,6 @@ const USER_STATUS_OPTIONS = [
   { key: 'suspended', label: 'تعلیق' }
 ];
 
-const LEGACY_PERMISSION_OPTIONS = [
-  { key: 'manage_users', label: 'مدیریت کاربران' },
-  { key: 'manage_enrollments', label: 'مدیریت ثبت‌نام‌ها' },
-  { key: 'manage_memberships', label: 'مدیریت ممبرشیپ آموزشی' },
-  { key: 'manage_finance', label: 'مدیریت مالی' },
-  { key: 'manage_content', label: 'مدیریت محتوا' },
-  { key: 'view_reports', label: 'مشاهده گزارش‌ها' },
-  { key: 'view_schedule', label: 'مشاهده تقسیم اوقات' },
-  { key: 'manage_schedule', label: 'مدیریت تقسیم اوقات' },
-  { key: 'access_school_manager', label: 'دسترسی پست مدیر مکتب' },
-  { key: 'access_head_teacher', label: 'دسترسی پست سر معلم مکتب' }
-];
-
 const PERMISSION_OPTIONS = CATALOG_PERMISSION_OPTIONS;
 
 const PERMISSION_GROUP_MODES = [
