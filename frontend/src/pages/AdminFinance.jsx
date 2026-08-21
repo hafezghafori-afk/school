@@ -2547,6 +2547,7 @@ export default function AdminFinance() {
   const [exemptionEditForm, setExemptionEditForm] = useState({ reason: '', note: '' });
   const [expandedReliefId, setExpandedReliefId] = useState('');
   const [expandedClassSummaryId, setExpandedClassSummaryId] = useState('');
+  const [expandedReliefFocusItemId, setExpandedReliefFocusItemId] = useState('');
 
   const [paymentDeskForm, setPaymentDeskForm] = useState({
     studentId: '',
@@ -10536,12 +10537,34 @@ export default function AdminFinance() {
                 <span>نزدیک‌ترین مهلت پرداخت</span>
                 <span>{reliefFocusSnapshot.nextDueOrder?.dueDate ? toFaDate(reliefFocusSnapshot.nextDueOrder.dueDate) : '-'}</span>
               </div>
-              {pagedReliefFocusItems.map((item) => (
-                <div key={`focus-relief-${item.id}`} className="mini-row">
-                  <span>{RELIEF_TYPE_UI_LABELS[item.reliefType] || item.reliefType || 'تسهیل'}</span>
-                  <span>{getReliefValueLabel(item)}</span>
-                </div>
-              ))}
+              {pagedReliefFocusItems.map((item) => {
+                const isExpanded = expandedReliefFocusItemId === item.id;
+                return (
+                  <div key={`focus-relief-${item.id}`} className="finance-registry-row-wrap">
+                    <button
+                      type="button"
+                      className={`finance-registry-row-compact ${isExpanded ? 'is-expanded' : ''}`}
+                      onClick={() => setExpandedReliefFocusItemId(isExpanded ? '' : item.id)}
+                      data-testid={`relief-focus-row-${item.id}`}
+                    >
+                      <strong>{RELIEF_TYPE_UI_LABELS[item.reliefType] || item.reliefType || 'تسهیل'}</strong>
+                      <span className="finance-chip finance-chip-muted">{getReliefValueLabel(item)}</span>
+                      <span className="finance-registry-row-chevron" aria-hidden="true">{isExpanded ? '▴' : '▾'}</span>
+                    </button>
+                    {isExpanded && (
+                      <div className="finance-registry-detail" data-testid={`relief-focus-detail-${item.id}`}>
+                        <table className="finance-registry-detail-table">
+                          <tbody>
+                            <tr><td>دامنه</td><td>{EXEMPTION_SCOPE_UI_LABELS[item.scope] || item.scope || 'همه موارد'}</td></tr>
+                            <tr><td>پوشش</td><td>{RELIEF_COVERAGE_MODE_UI_LABELS[item.coverageMode] || item.coverageMode || 'پوشش'}</td></tr>
+                            <tr><td>دلیل</td><td>{item.reason || 'بدون توضیح'}</td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               {!reliefFocusSnapshot.scopedReliefs.length && (
                 <div className="mini-row">
                   <span>تسهیلات فعال</span>
