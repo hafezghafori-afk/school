@@ -2404,7 +2404,7 @@ export default function AdminFinance() {
   const [billVisibleCount, setBillVisibleCount] = useState(5);
   const [ordersCatalogLoading, setOrdersCatalogLoading] = useState(false);
   const [discountRegistryPage, setDiscountRegistryPage] = useState(1);
-  const [discountRegistryPageSize, setDiscountRegistryPageSize] = useState(10);
+  const [discountRegistryPageSize, setDiscountRegistryPageSize] = useState(5);
   const [discountRegistryClassFilter, setDiscountRegistryClassFilter] = useState('all');
   const [reliefRegistryPage, setReliefRegistryPage] = useState(1);
   const [reliefRegistryPageSize, setReliefRegistryPageSize] = useState(5);
@@ -10648,33 +10648,32 @@ export default function AdminFinance() {
           <div className="finance-card-head">
             <div>
               <h3>فقط تخفیف‌های ثبت‌شده</h3>
-              <p className="muted">فقط رکوردهای تخفیف مستقیم را نشان می‌دهد؛ معافیت، رایگان، بورسیه و حمایت خیریه در لیست همه تسهیلات مالی دیده می‌شوند.</p>
             </div>
             <div className="finance-chip-group">
               <span className="finance-chip">{filteredDiscountRegistry.length} مورد</span>
               <span className="finance-chip finance-chip-muted">{fmt(filteredDiscountRegistry.reduce((sum, item) => sum + (Number(item.amount) || 0), 0))} AFN</span>
             </div>
           </div>
-          <label className="finance-inline-filter finance-inline-filter-wide">
-            <span>جستجو در تخفیف‌های ثبت‌شده</span>
-            <input
-              value={discountRegistrySearch}
-              onChange={(e) => setDiscountRegistrySearch(e.target.value)}
-              placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل یا نوع تخفیف"
-            />
+          <label className="finance-field">
+            <span>نمایش بر اساس صنف</span>
+            <select value={discountRegistryClassFilter} onChange={(e) => setDiscountRegistryClassFilter(e.target.value)}>
+              <option value="all">همه صنف‌ها</option>
+              {classOptions.map((item) => (
+                <option key={`discount-registry-class-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>
+              ))}
+            </select>
           </label>
-          <div className="finance-split-grid">
-            <label className="finance-field">
-              <span>نمایش بر اساس صنف</span>
-              <select value={discountRegistryClassFilter} onChange={(e) => setDiscountRegistryClassFilter(e.target.value)}>
-                <option value="all">همه صنف‌ها</option>
-                {classOptions.map((item) => (
-                  <option key={`discount-registry-class-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>
-                ))}
-              </select>
+          <div className="finance-inline-controls" data-testid="discount-registry-controls">
+            <label className="finance-inline-filter finance-inline-filter-wide">
+              <span>جستجو در تخفیف‌های ثبت‌شده</span>
+              <input
+                value={discountRegistrySearch}
+                onChange={(e) => setDiscountRegistrySearch(e.target.value)}
+                placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل یا نوع تخفیف"
+              />
             </label>
-            <label className="finance-field">
-              <span>تعداد در هر صفحه</span>
+            <label className="finance-inline-filter">
+              <span>تعداد در صفحه</span>
               <select value={discountRegistryPageSize} onChange={(e) => setDiscountRegistryPageSize(Number(e.target.value) || 10)}>
                 <option value={5}>5 مورد</option>
                 <option value={10}>10 مورد</option>
