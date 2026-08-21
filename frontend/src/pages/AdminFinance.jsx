@@ -2404,12 +2404,12 @@ export default function AdminFinance() {
   const [billVisibleCount, setBillVisibleCount] = useState(5);
   const [ordersCatalogLoading, setOrdersCatalogLoading] = useState(false);
   const [discountRegistryPage, setDiscountRegistryPage] = useState(1);
-  const [discountRegistryPageSize, setDiscountRegistryPageSize] = useState(5);
+  const [discountRegistryPageSize, setDiscountRegistryPageSize] = useState(50);
   const [discountRegistryClassFilter, setDiscountRegistryClassFilter] = useState('all');
   const [reliefRegistryPage, setReliefRegistryPage] = useState(1);
-  const [reliefRegistryPageSize, setReliefRegistryPageSize] = useState(5);
+  const [reliefRegistryPageSize, setReliefRegistryPageSize] = useState(50);
   const [exemptionRegistryPage, setExemptionRegistryPage] = useState(1);
-  const [exemptionRegistryPageSize, setExemptionRegistryPageSize] = useState(5);
+  const [exemptionRegistryPageSize, setExemptionRegistryPageSize] = useState(50);
   const [reliefFocusPage, setReliefFocusPage] = useState(1);
   const [reliefFocusPageSize, setReliefFocusPageSize] = useState(5);
   const [paymentAdvancedOpen, setPaymentAdvancedOpen] = useState(false);
@@ -3127,7 +3127,7 @@ export default function AdminFinance() {
     + Number(discountDuplicateSummary?.mirroredActiveReliefs || 0)
   ) > 0;
   const filteredDiscountRegistry = useMemo(() => (
-    !discountRegistrySearch.trim() ? [] : discountRegistry.filter((item) => (
+    discountRegistry.filter((item) => (
       !String(item?.reason || '').trim().toLowerCase().startsWith('[discount:')
       && String(item?.source || '').trim().toLowerCase() !== 'finance_adjustment'
       && (discountRegistryClassFilter === 'all' || getFinanceRecordClassId(item) === discountRegistryClassFilter)
@@ -3186,8 +3186,38 @@ export default function AdminFinance() {
     const start = (safePage - 1) * pageSize;
     return filteredDiscountRegistry.slice(start, start + pageSize);
   }, [discountRegistryPage, discountRegistryPageSize, discountRegistryTotalPages, filteredDiscountRegistry]);
-  const filteredExemptionRegistry = useMemo(() => (
-    !exemptionRegistrySearch.trim() ? [] : exemptions.filter((item) => includesFinanceSearch([
+  // A fixed discount that happens to zero out the fee, or a 100%-percent
+  // discount, has the exact same effect on the student's bill as a full
+  // exemption - the user asked these to surface in this registry too, even
+  // though the underlying record is still a Discount, not a FeeExemption.
+  const getMatchingTuitionFeePlan = useCallback((classId, academicYearId) => {
+    if (!classId || !academicYearId) return null;
+    return feePlans.find((plan) => {
+      const lifecycleStatus = String(plan?.lifecycleStatus || (plan?.isActive === false ? 'inactive' : 'active')).trim() || 'active';
+      const sameClass = String(plan?.classId || plan?.schoolClass?._id || plan?.schoolClass?.id || '') === String(classId);
+      const sameYear = String(plan?.academicYearId || plan?.academicYear?._id || plan?.academicYear?.id || '') === String(academicYearId);
+      return lifecycleStatus === 'active' && sameClass && sameYear;
+    }) || null;
+  }, [feePlans]);
+  const isFullCoverageDiscount = useCallback((item) => {
+    if (String(item?.status || '') !== 'active') return false;
+    if (String(item?.coverageMode || '') === 'percent') return Number(item?.percentage || 0) >= 100;
+    if (String(item?.coverageMode || '') === 'fixed') {
+      const plan = getMatchingTuitionFeePlan(item?.schoolClass?.id, item?.academicYear?.id);
+      const tuitionFee = toSafeNumber(plan?.tuitionFee);
+      return tuitionFee > 0 && Math.abs(toSafeNumber(item?.amount) - tuitionFee) < 0.01;
+    }
+    return false;
+  }, [getMatchingTuitionFeePlan]);
+  const fullCoverageDiscountRegistry = useMemo(() => (
+    discountRegistry.filter(isFullCoverageDiscount)
+  ), [discountRegistry, isFullCoverageDiscount]);
+  const filteredExemptionRegistry = useMemo(() => {
+    const combined = [
+      ...exemptions.map((item) => ({ ...item, registryKind: 'exemption' })),
+      ...fullCoverageDiscountRegistry.map((item) => ({ ...item, registryKind: 'discount' }))
+    ];
+    return combined.filter((item) => includesFinanceSearch([
       item?.student?.fullName,
       item?.student?.name,
       item?.student?.asasNumber,
@@ -3199,9 +3229,10 @@ export default function AdminFinance() {
       item?.academicYear?.title,
       item?.reason,
       item?.scope,
-      item?.exemptionType
-    ], exemptionRegistrySearch))
-  ), [exemptions, exemptionRegistrySearch, studentSearchBlobById]);
+      item?.exemptionType,
+      item?.discountType
+    ], exemptionRegistrySearch));
+  }, [exemptions, fullCoverageDiscountRegistry, exemptionRegistrySearch, studentSearchBlobById]);
   const exemptionRegistryTotalPages = Math.max(1, Math.ceil(filteredExemptionRegistry.length / Math.max(1, Number(exemptionRegistryPageSize) || 10)));
   const pagedExemptionRegistry = useMemo(() => {
     const pageSize = Math.max(1, Number(exemptionRegistryPageSize) || 10);
@@ -3221,7 +3252,7 @@ export default function AdminFinance() {
       .filter((group) => group.count > 0)
   ), [reliefs]);
   const filteredReliefRegistry = useMemo(() => (
-    !reliefRegistrySearch.trim() ? [] : reliefs.filter((item) => (
+    reliefs.filter((item) => (
       (reliefRegistryTypeFilter === 'all' || (
         RELIEF_TYPE_GROUPS.find((group) => group.key === reliefRegistryTypeFilter)?.types || []
       ).includes(String(item?.reliefType || '').trim()))
@@ -10634,11 +10665,7 @@ export default function AdminFinance() {
                 </div>
               );
             })}
-            {!filteredReliefRegistry.length && (
-              <p className="muted">
-                {reliefRegistrySearch.trim() ? 'برای این جستجو یا فیلتر، تسهیل مالی فعالی پیدا نشد.' : 'برای دیدن رکوردها، نام یا نمبر اساس متعلم را جستجو کنید.'}
-              </p>
-            )}
+            {!filteredReliefRegistry.length && <p className="muted">برای این جستجو یا فیلتر، تسهیل مالی فعالی پیدا نشد.</p>}
             {filteredReliefRegistry.length > reliefRegistryPageSize && (
               <div className="finance-pagination">
                 <button type="button" className="secondary" disabled={reliefRegistryPage <= 1} onClick={() => setReliefRegistryPage((value) => Math.max(1, value - 1))}>قبلی</button>
@@ -10802,11 +10829,7 @@ export default function AdminFinance() {
                 </div>
               );
             })}
-            {!filteredDiscountRegistry.length && (
-              <p className="muted">
-                {discountRegistrySearch.trim() ? 'برای این جستجو، تخفیفی پیدا نشد.' : 'برای دیدن رکوردها، نام یا نمبر اساس متعلم را جستجو کنید.'}
-              </p>
-            )}
+            {!filteredDiscountRegistry.length && <p className="muted">برای این جستجو، تخفیفی پیدا نشد.</p>}
             {filteredDiscountRegistry.length > discountRegistryPageSize && (
               <div className="finance-pagination">
                 <button type="button" className="secondary" disabled={discountRegistryPage <= 1} onClick={() => setDiscountRegistryPage((value) => Math.max(1, value - 1))}>قبلی</button>
@@ -10824,7 +10847,8 @@ export default function AdminFinance() {
             </div>
             <div className="finance-chip-group">
               <span className="finance-chip finance-chip-emerald">{filteredExemptionRegistry.length} مورد</span>
-              <span className="finance-chip finance-chip-muted">{filteredExemptionRegistry.filter((item) => item.exemptionType === 'full').length} کامل</span>
+              <span className="finance-chip finance-chip-muted">{filteredExemptionRegistry.filter((item) => item.registryKind === 'discount' || item.exemptionType === 'full').length} کامل</span>
+              <span className="finance-chip">{filteredExemptionRegistry.filter((item) => item.registryKind === 'discount').length} تخفیف معادل</span>
             </div>
           </div>
           <div className="finance-inline-controls" data-testid="exemption-registry-controls">
@@ -10848,18 +10872,29 @@ export default function AdminFinance() {
           </div>
           <div className="finance-registry-list">
             {pagedExemptionRegistry.map((item) => {
+              const isDiscountKind = item.registryKind === 'discount';
               const isExpanded = expandedExemptionId === item.id;
+              const isEditing = (isDiscountKind ? editingDiscountId : editingExemptionId) === item.id;
               return (
                 <div key={item.id} className="finance-registry-row-wrap">
                   <button
                     type="button"
                     className={`finance-registry-row-compact ${isExpanded ? 'is-expanded' : ''}`}
-                    onClick={() => { setExpandedExemptionId(isExpanded ? '' : item.id); if (isExpanded) setEditingExemptionId(''); }}
+                    onClick={() => { setExpandedExemptionId(isExpanded ? '' : item.id); if (isExpanded) { setEditingExemptionId(''); setEditingDiscountId(''); } }}
                     data-testid={`exemption-row-${item.id}`}
                   >
                     <strong>{item.student?.fullName || item.student?.name || 'متعلم'}</strong>
-                    <span className="finance-chip finance-chip-emerald">{EXEMPTION_TYPE_UI_LABELS[item.exemptionType] || item.exemptionType || 'معافیت'}</span>
-                    <span className="finance-chip finance-chip-muted">{item.exemptionType === 'partial' ? `${fmt(item.amount)} AFN / ${fmt(item.percentage)}%` : '100%'}</span>
+                    {isDiscountKind ? (
+                      <>
+                        <span className="finance-chip">{item.coverageMode === 'percent' ? 'تخفیف ۱۰۰٪' : 'تخفیف معادل فیس'}</span>
+                        <span className="finance-chip finance-chip-muted">{item.coverageMode === 'percent' ? `${fmt(item.percentage)}%` : `${fmt(item.amount)} AFN`}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="finance-chip finance-chip-emerald">{EXEMPTION_TYPE_UI_LABELS[item.exemptionType] || item.exemptionType || 'معافیت'}</span>
+                        <span className="finance-chip finance-chip-muted">{item.exemptionType === 'partial' ? `${fmt(item.amount)} AFN / ${fmt(item.percentage)}%` : '100%'}</span>
+                      </>
+                    )}
                     <span className="finance-registry-row-chevron" aria-hidden="true">{isExpanded ? '▴' : '▾'}</span>
                   </button>
                   {isExpanded && (
@@ -10867,12 +10902,32 @@ export default function AdminFinance() {
                       <table className="finance-registry-detail-table">
                         <tbody>
                           <tr><td>صنف / سال</td><td>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</td></tr>
-                          <tr><td>دامنه</td><td>{EXEMPTION_SCOPE_UI_LABELS[item.scope] || item.scope || 'همه موارد'}</td></tr>
+                          {isDiscountKind ? (
+                            <tr><td>منبع</td><td>تخفیف ثبت‌شده که فیس را کامل می‌پوشاند - برای جزئیات بیشتر به کارت «تخفیف‌ها» مراجعه کنید.</td></tr>
+                          ) : (
+                            <tr><td>دامنه</td><td>{EXEMPTION_SCOPE_UI_LABELS[item.scope] || item.scope || 'همه موارد'}</td></tr>
+                          )}
                           <tr><td>دلیل</td><td>{item.reason || 'بدون توضیح'}</td></tr>
                           {item.note ? <tr><td>ملاحظات</td><td>{item.note}</td></tr> : null}
                         </tbody>
                       </table>
-                      {editingExemptionId === item.id ? (
+                      {isEditing ? (
+                        isDiscountKind ? (
+                          <div className="finance-registry-edit-panel" data-testid={`discount-edit-panel-${item.id}`}>
+                            <label className="finance-field">
+                              <span>دلیل</span>
+                              <textarea
+                                value={discountEditForm.reason}
+                                onChange={(e) => setDiscountEditForm((prev) => ({ ...prev, reason: e.target.value }))}
+                                rows={2}
+                              />
+                            </label>
+                            <div className="row-actions">
+                              <button type="button" disabled={busy} onClick={() => saveDiscountEdit(item.id)} data-testid={`save-discount-edit-${item.id}`}>ذخیره</button>
+                              <button type="button" className="secondary" disabled={busy} onClick={() => setEditingDiscountId('')}>انصراف</button>
+                            </div>
+                          </div>
+                        ) : (
                         <div className="finance-registry-edit-panel" data-testid={`exemption-edit-panel-${item.id}`}>
                           <label className="finance-field">
                             <span>دلیل</span>
@@ -10896,6 +10951,17 @@ export default function AdminFinance() {
                           </div>
                           <p className="muted">برای تغییر نوع، مبلغ یا فیصدی معافیت از دکمهٔ «جایگزینی» استفاده کنید.</p>
                         </div>
+                        )
+                      ) : isDiscountKind ? (
+                        <div className="row-actions">
+                          {item.status === 'active' && (
+                            <button type="button" className="secondary" disabled={busy} onClick={() => startEditDiscount(item)} data-testid={`edit-discount-${item.id}`}>ویرایش</button>
+                          )}
+                          {item.status === 'active' && (
+                            <button type="button" className="secondary" disabled={busy} onClick={() => startReplaceDiscount(item)} data-testid={`replace-discount-${item.id}`}>جایگزینی</button>
+                          )}
+                          <button type="button" className="danger" disabled={busy} onClick={() => cancelDiscountRegistry(item.id)} data-testid={`cancel-discount-${item.id}`}>لغو</button>
+                        </div>
                       ) : (
                         <div className="row-actions">
                           {item.status === 'active' && (
@@ -10912,11 +10978,7 @@ export default function AdminFinance() {
                 </div>
               );
             })}
-            {!filteredExemptionRegistry.length && (
-              <p className="muted">
-                {exemptionRegistrySearch.trim() ? 'برای این جستجو، معافیتی پیدا نشد.' : 'برای دیدن رکوردها، نام یا نمبر اساس متعلم را جستجو کنید.'}
-              </p>
-            )}
+            {!filteredExemptionRegistry.length && <p className="muted">برای این جستجو، معافیتی پیدا نشد.</p>}
             {filteredExemptionRegistry.length > exemptionRegistryPageSize && (
               <div className="finance-pagination">
                 <button type="button" className="secondary" disabled={exemptionRegistryPage <= 1} onClick={() => setExemptionRegistryPage((value) => Math.max(1, value - 1))}>قبلی</button>
