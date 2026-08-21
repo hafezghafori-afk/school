@@ -1056,9 +1056,29 @@
 
 .finance-relief-type-breakdown {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-wrap: nowrap;
+  gap: 6px;
   margin: 2px 0 4px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+/* Glassy + smaller than the default .finance-chip-button - only 4 buttons
+   (همه + 3 groups) live here, so they should read as one light quick-filter
+   row, not compete visually with the 3 stat chips above them. */
+.finance-relief-type-breakdown .finance-chip-button {
+  padding: 4px 10px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.finance-relief-type-breakdown .finance-chip-button.is-active {
+  background: rgba(16, 185, 129, 0.16);
+  border-color: rgba(16, 185, 129, 0.4);
+  outline: none;
 }
 
 .finance-chip-button.is-active {

@@ -814,13 +814,13 @@ const RELIEF_COVERAGE_MODE_UI_LABELS = {
 // mirrors into (see FinanceRelief.sourceModel on the backend) - these groups
 // are how the overview card's quick-filter chips break that umbrella down,
 // so admins see the parent/child relationship instead of nine flat types.
+// 3 groups (+ "همه") is the whole quick-filter row now - بورسیه/حمایت خیریه/
+// جریمه fold into معافیت as the general non-discount, non-free-student
+// bucket, since they're rare and don't each need a dedicated button.
 const RELIEF_TYPE_GROUPS = [
   { key: 'discount', label: 'تخفیف', types: ['discount', 'sibling_discount', 'manual'] },
-  { key: 'exemption', label: 'معافیت', types: ['waiver'] },
-  { key: 'scholarship', label: 'بورسیه', types: ['scholarship_partial', 'scholarship_full'] },
-  { key: 'free', label: 'رایگان', types: ['free_student'] },
-  { key: 'charity', label: 'حمایت خیریه', types: ['charity_support'] },
-  { key: 'penalty', label: 'جریمه', types: ['penalty'] }
+  { key: 'exemption', label: 'معافیت', types: ['waiver', 'scholarship_partial', 'scholarship_full', 'charity_support', 'penalty'] },
+  { key: 'free', label: 'رایگان', types: ['free_student'] }
 ];
 
 const PAYMENT_METHOD_UI_LABELS = {
@@ -2407,7 +2407,7 @@ export default function AdminFinance() {
   const [discountRegistryPageSize, setDiscountRegistryPageSize] = useState(10);
   const [discountRegistryClassFilter, setDiscountRegistryClassFilter] = useState('all');
   const [reliefRegistryPage, setReliefRegistryPage] = useState(1);
-  const [reliefRegistryPageSize, setReliefRegistryPageSize] = useState(10);
+  const [reliefRegistryPageSize, setReliefRegistryPageSize] = useState(5);
   const [exemptionRegistryPage, setExemptionRegistryPage] = useState(1);
   const [exemptionRegistryPageSize, setExemptionRegistryPageSize] = useState(10);
   const [reliefFocusPage, setReliefFocusPage] = useState(1);
@@ -10527,7 +10527,6 @@ export default function AdminFinance() {
           <div className="finance-card-head">
             <div>
               <h3>همه تسهیلات مالی</h3>
-              <p className="muted">نمای مشترک تخفیف، معافیت، بورسیه، شاگردان رایگان و حمایت خیریه؛ این لیست فقط مخصوص تخفیف نیست.</p>
             </div>
             <div className="finance-chip-group">
               <span className="finance-chip">{filteredReliefRegistry.length} مورد</span>
