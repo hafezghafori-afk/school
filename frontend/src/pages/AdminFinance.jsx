@@ -3121,6 +3121,11 @@ export default function AdminFinance() {
       document.querySelector('[data-testid="finance-orders-table-card"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 0);
   }, [setOrderStatusFilter, setOrderSearchTerm]);
+  const hasDiscountDuplicates = (
+    Number(discountDuplicateSummary?.duplicateRecords || 0)
+    + Number(discountDuplicateSummary?.mirroredDiscountRecords || 0)
+    + Number(discountDuplicateSummary?.mirroredActiveReliefs || 0)
+  ) > 0;
   const filteredDiscountRegistry = useMemo(() => (
     !discountRegistrySearch.trim() ? [] : discountRegistry.filter((item) => (
       !String(item?.reason || '').trim().toLowerCase().startsWith('[discount:')
@@ -10654,15 +10659,6 @@ export default function AdminFinance() {
               <span className="finance-chip finance-chip-muted">{fmt(filteredDiscountRegistry.reduce((sum, item) => sum + (Number(item.amount) || 0), 0))} AFN</span>
             </div>
           </div>
-          <label className="finance-field">
-            <span>نمایش بر اساس صنف</span>
-            <select value={discountRegistryClassFilter} onChange={(e) => setDiscountRegistryClassFilter(e.target.value)}>
-              <option value="all">همه صنف‌ها</option>
-              {classOptions.map((item) => (
-                <option key={`discount-registry-class-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>
-              ))}
-            </select>
-          </label>
           <div className="finance-inline-controls" data-testid="discount-registry-controls">
             <label className="finance-inline-filter finance-inline-filter-wide">
               <span>جستجو در تخفیف‌های ثبت‌شده</span>
@@ -10671,6 +10667,18 @@ export default function AdminFinance() {
                 onChange={(e) => setDiscountRegistrySearch(e.target.value)}
                 placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل یا نوع تخفیف"
               />
+            </label>
+          </div>
+          {/* صنف، تعداد در صفحه و رفع تکرار - هر سه کنار هم در یک قطار. */}
+          <div className="finance-inline-controls" data-testid="discount-registry-quick-row">
+            <label className="finance-inline-filter">
+              <span>نمایش بر اساس صنف</span>
+              <select value={discountRegistryClassFilter} onChange={(e) => setDiscountRegistryClassFilter(e.target.value)}>
+                <option value="all">همه صنف‌ها</option>
+                {classOptions.map((item) => (
+                  <option key={`discount-registry-class-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>
+                ))}
+              </select>
             </label>
             <label className="finance-inline-filter">
               <span>تعداد در صفحه</span>
@@ -10681,27 +10689,30 @@ export default function AdminFinance() {
                 <option value={50}>50 مورد</option>
               </select>
             </label>
+            <div className="finance-inline-filter">
+              <span>رفع تکرار</span>
+              <button
+                type="button"
+                className="danger"
+                disabled={busy}
+                onClick={repairDuplicateDiscountRegistry}
+                title="اگر تعداد رکوردهای فعال از شاگردان دارای تخفیف بیشتر است، بررسی را اجرا کنید."
+                data-testid="discount-repair-duplicates-button"
+              >
+                رفع تکرارها
+              </button>
+            </div>
           </div>
-          <div className="finance-anomaly-alert" data-testid="discount-duplicate-alert">
-            {(Number(discountDuplicateSummary?.duplicateRecords || 0)
-              + Number(discountDuplicateSummary?.mirroredDiscountRecords || 0)
-              + Number(discountDuplicateSummary?.mirroredActiveReliefs || 0)) > 0 ? (
+          {hasDiscountDuplicates && (
+            <div className="finance-anomaly-alert" data-testid="discount-duplicate-alert">
               <div>
                 <strong>{fmt(discountDuplicateSummary.duplicateRecords)} تکرار مستقیم و {fmt(discountDuplicateSummary.mirroredDiscountRecords)} تصویر بل پیدا شد</strong>
                 <p className="muted">
                   رکورد اصلی و سابقه مالی حفظ می‌شود؛ تصاویر <code>Relief (tuition)</code> از رجیستر مستقیم جدا و محاسبه بل‌های مرتبط بازسازی می‌گردد.
                 </p>
               </div>
-            ) : (
-              <div>
-                <strong>بررسی و رفع تکرارهای تخفیف</strong>
-                <p className="muted">اگر تعداد رکوردهای فعال از شاگردان دارای تخفیف بیشتر است، بررسی را اجرا کنید.</p>
-              </div>
-            )}
-            <button type="button" className="danger" disabled={busy} onClick={repairDuplicateDiscountRegistry}>
-              بررسی، رفع تکرارها و اصلاح بل‌ها
-            </button>
-          </div>
+            </div>
+          )}
           {!!discountRegistryByClass.length && (
             <div className="finance-class-discount-summary">
               {discountRegistryByClass.slice(0, 8).map((item) => (

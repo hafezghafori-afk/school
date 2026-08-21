@@ -1048,6 +1048,32 @@
   min-width: 0;
 }
 
+/* صنف + تعداد در صفحه + رفع تکرار - three fixed-width columns so all 3 fit
+   one row instead of the "شرینک ولی هنوز پهن است" outcome of a bare
+   min-width; the class <select>'s own text ellipsizes at this width in
+   Chromium, and the horizontal scroll below is only a safety net for an
+   unusually long class name at very narrow widths. */
+[data-testid="discount-registry-quick-row"] {
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+[data-testid="discount-registry-quick-row"] > * {
+  flex: 0 0 auto;
+  width: 118px;
+  min-width: 118px;
+}
+
+[data-testid="discount-registry-quick-row"] select,
+[data-testid="discount-registry-quick-row"] button {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  padding-inline: 8px;
+}
+
 [data-testid="relief-registry-hub"] .finance-inline-controls > .finance-inline-filter:not(.finance-inline-filter-wide),
 [data-testid="discount-registry-list"] .finance-inline-controls > .finance-inline-filter:not(.finance-inline-filter-wide),
 [data-testid="exemption-registry-list"] .finance-inline-controls > .finance-inline-filter:not(.finance-inline-filter-wide) {
