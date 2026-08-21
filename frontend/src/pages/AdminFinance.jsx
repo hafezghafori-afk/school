@@ -8046,7 +8046,6 @@ export default function AdminFinance() {
             <AfghanDateInput
               value={financeOverviewRange.from}
               onChange={(value) => setFinanceOverviewRange((previous) => ({ ...previous, from: value }))}
-              showGregorianEquivalent
             />
           </label>
           <label>
@@ -8054,7 +8053,6 @@ export default function AdminFinance() {
             <AfghanDateInput
               value={financeOverviewRange.to}
               onChange={(value) => setFinanceOverviewRange((previous) => ({ ...previous, to: value }))}
-              showGregorianEquivalent
             />
           </label>
           <label>
