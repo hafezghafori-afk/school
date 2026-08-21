@@ -2015,6 +2015,11 @@
   font-size: 18px;
 }
 
+.finance-registry-row-wrap {
+  display: grid;
+  gap: 6px;
+}
+
 .finance-registry-row {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.9fr) auto;
@@ -2023,6 +2028,15 @@
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
+  padding: 12px;
+}
+
+.finance-registry-edit-panel {
+  display: grid;
+  gap: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  background: rgba(15, 23, 42, 0.5);
   padding: 12px;
 }
 

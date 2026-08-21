@@ -2286,6 +2286,41 @@ async function cancelDiscount(discountId, payload = {}) {
   return formatDiscount(item, cancelAsasNumberMap);
 }
 
+// Only non-financial fields are editable in place (reason, duration/dates) -
+// amount, percentage, coverageMode and discountType change what a bill
+// already reflects, so those go through cancel + re-register instead
+// (createDiscount again with new values) to keep the audit trail honest.
+async function updateDiscount(discountId, payload = {}) {
+  const item = await Discount.findById(discountId)
+    .populate('studentId')
+    .populate('student', 'name email')
+    .populate({ path: 'classId', populate: { path: 'academicYearId' } })
+    .populate('academicYearId')
+    .populate('createdBy', 'name');
+  if (!item) {
+    throw new Error('student_finance_discount_not_found');
+  }
+  if (item.status !== 'active') {
+    throw new Error('student_finance_discount_not_editable');
+  }
+
+  if (payload.reason !== undefined) item.reason = normalizeText(payload.reason);
+  if (payload.durationMode !== undefined) {
+    const durationMode = normalizeText(payload.durationMode);
+    if (['academic_year', 'custom_period', 'selected_bills'].includes(durationMode)) {
+      item.durationMode = durationMode;
+    }
+  }
+  if (payload.startDate !== undefined) item.startDate = payload.startDate ? new Date(payload.startDate) : null;
+  if (payload.endDate !== undefined) item.endDate = payload.endDate ? new Date(payload.endDate) : null;
+
+  await item.save();
+  await syncFinanceReliefFromDiscount(item);
+
+  const asasNumberMap = await resolveAsasNumberMapForDocs([item]);
+  return formatDiscount(item, asasNumberMap);
+}
+
 async function listFeeExemptions(filters = {}) {
   const query = {};
   if (normalizeNullableId(filters.schoolId)) query.schoolId = filters.schoolId;
@@ -2376,6 +2411,42 @@ async function cancelFeeExemption(exemptionId, payload = {}) {
   item.cancelReason = normalizeText(payload.cancelReason);
   item.cancelledBy = normalizeNullableId(payload.cancelledBy);
   item.cancelledAt = new Date();
+  await item.save();
+  await syncFinanceReliefFromFeeExemption(item);
+  await syncExemptionOpenBills(item);
+
+  const asasNumberMap = await resolveAsasNumberMapForDocs([item]);
+  return formatFeeExemption(item, asasNumberMap);
+}
+
+// Same reasoning as updateDiscount: only reason/note/scope are safe to edit
+// in place - exemptionType/amount/percentage change bill math, so those
+// require cancel + re-register (createFeeExemption again) instead.
+async function updateFeeExemption(exemptionId, payload = {}) {
+  const item = await FeeExemption.findById(exemptionId)
+    .populate('studentId')
+    .populate('student', 'name email')
+    .populate({ path: 'classId', populate: { path: 'academicYearId' } })
+    .populate('academicYearId')
+    .populate('approvedBy', 'name')
+    .populate('createdBy', 'name')
+    .populate('cancelledBy', 'name');
+  if (!item) {
+    throw new Error('student_finance_exemption_not_found');
+  }
+  if (item.status !== 'active') {
+    throw new Error('student_finance_exemption_not_editable');
+  }
+
+  if (payload.reason !== undefined) item.reason = normalizeText(payload.reason);
+  if (payload.note !== undefined) item.note = normalizeText(payload.note);
+  if (payload.scope !== undefined) {
+    const scope = normalizeText(payload.scope);
+    if (['tuition', 'admission', 'exam', 'transport', 'document', 'other', 'all'].includes(scope)) {
+      item.scope = scope;
+    }
+  }
+
   await item.save();
   await syncFinanceReliefFromFeeExemption(item);
   await syncExemptionOpenBills(item);
@@ -3038,6 +3109,8 @@ async function seedStudentFinanceCanonical({ dryRun = false } = {}) {
 module.exports = {
   cancelDiscount,
   cancelFeeExemption,
+  updateDiscount,
+  updateFeeExemption,
   createDiscount,
   createFeeExemption,
   createFeePayment,

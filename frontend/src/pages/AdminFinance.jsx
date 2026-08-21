@@ -2513,7 +2513,12 @@ export default function AdminFinance() {
     durationMode: 'academic_year',
     startDate: '',
     endDate: '',
-    reason: ''
+    reason: '',
+    // Set by "جایگزینی" on an existing row: amount/percentage/coverage can't
+    // be edited in place (would silently rewrite already-applied bill math),
+    // so the flow is submit-a-replacement-then-auto-cancel-the-old-one -
+    // this id is what gets cancelled once the new one is created.
+    replacingId: ''
   });
 
   const [exemptionForm, setExemptionForm] = useState({
@@ -2526,8 +2531,15 @@ export default function AdminFinance() {
     amount: '',
     percentage: '',
     reason: '',
-    note: ''
+    note: '',
+    replacingId: ''
   });
+
+  // Inline "ویرایش" (safe fields only) state for the discount/exemption rows.
+  const [editingDiscountId, setEditingDiscountId] = useState('');
+  const [discountEditForm, setDiscountEditForm] = useState({ reason: '', startDate: '', endDate: '' });
+  const [editingExemptionId, setEditingExemptionId] = useState('');
+  const [exemptionEditForm, setExemptionEditForm] = useState({ reason: '', note: '' });
 
   const [paymentDeskForm, setPaymentDeskForm] = useState({
     studentId: '',
@@ -5669,6 +5681,18 @@ export default function AdminFinance() {
     return data;
   };
 
+  const patchJson = async (url, body) => {
+    const data = await fetchJson(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    });
+    if (!data?.success) {
+      throw new Error(data?.message || 'عملیات ناموفق بود');
+    }
+    return data;
+  };
+
   const previewAdvanceStudentBilling = async (monthCount) => {
     const membershipId = String(paymentDeskMembershipStudent?.membershipId || '').trim();
     if (!membershipId || !paymentDeskForm.classId || !paymentDeskForm.academicYearId) {
@@ -6275,7 +6299,11 @@ export default function AdminFinance() {
       if (createdDiscount.discountType === 'discount') {
         setDiscountRegistry((prev) => [createdDiscount, ...prev.filter((item) => item.id !== createdDiscount.id)]);
       }
-      setMessage(data.message || 'تخفیف متعلم ثبت شد');
+      const wasReplacing = discountForm.replacingId;
+      if (wasReplacing) {
+        await cancelDiscountById(wasReplacing, 'جایگزین شد با تخفیف ویرایش‌شده');
+      }
+      setMessage(wasReplacing ? 'تخفیف با مقادیر جدید جایگزین شد' : (data.message || 'تخفیف متعلم ثبت شد'));
       setDiscountForm((prev) => ({
         ...prev,
         amount: '',
@@ -6283,7 +6311,8 @@ export default function AdminFinance() {
         durationMode: 'academic_year',
         startDate: '',
         endDate: '',
-        reason: ''
+        reason: '',
+        replacingId: ''
       }));
       await refreshPaymentWorkspace({
         includeAnomalies: true,
@@ -6297,13 +6326,18 @@ export default function AdminFinance() {
     }
   };
 
+  const cancelDiscountById = async (discountId, reason) => {
+    const data = await postJson(`${API_BASE}/api/student-finance/discounts/${discountId}/cancel`, { reason });
+    setDiscountRegistry((prev) => prev.filter((item) => item.id !== discountId));
+    return data;
+  };
+
   const cancelDiscountRegistry = async (discountId) => {
     const reason = window.prompt('دلیل لغو تخفیف:', '') || '';
     if (!reason.trim()) return;
     try {
       setBusy(true);
-      const data = await postJson(`${API_BASE}/api/student-finance/discounts/${discountId}/cancel`, { reason });
-      setDiscountRegistry((prev) => prev.filter((item) => item.id !== discountId));
+      const data = await cancelDiscountById(discountId, reason);
       setMessage(data.message || 'تخفیف لغو شد');
       await refreshPaymentWorkspace({
         includeAnomalies: true,
@@ -6313,6 +6347,54 @@ export default function AdminFinance() {
       setMessage(err.message);
       setBusy(false);
     }
+  };
+
+  const startEditDiscount = (item) => {
+    setEditingDiscountId(item.id);
+    setDiscountEditForm({
+      reason: item.reason || '',
+      startDate: item.startDate ? toInputDate(item.startDate) : '',
+      endDate: item.endDate ? toInputDate(item.endDate) : ''
+    });
+  };
+
+  const saveDiscountEdit = async (discountId) => {
+    try {
+      setBusy(true);
+      const data = await patchJson(`${API_BASE}/api/student-finance/discounts/${discountId}`, discountEditForm);
+      setDiscountRegistry((prev) => prev.map((item) => (item.id === discountId ? { ...item, ...data.item } : item)));
+      setMessage(data.message || 'تخفیف ویرایش شد');
+      setEditingDiscountId('');
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Amount/percentage/coverageMode can't be edited in place - opens the
+  // create form pre-filled with this discount's values; on submit the old
+  // one is auto-cancelled once the replacement is created successfully.
+  const startReplaceDiscount = (item) => {
+    setReliefFormMode('discount');
+    setDiscountForm((prev) => ({
+      ...prev,
+      targetScope: 'student',
+      studentId: item.student?.userId || '',
+      studentMembershipId: item.studentMembershipId || '',
+      classId: item.schoolClass?.id || '',
+      academicYearId: item.academicYear?.id || '',
+      discountType: item.discountType || 'discount',
+      coverageMode: item.coverageMode || 'fixed',
+      amount: item.coverageMode === 'percent' ? '' : String(item.amount || ''),
+      percentage: item.coverageMode === 'percent' ? String(item.percentage || '') : '',
+      durationMode: item.durationMode || 'academic_year',
+      startDate: item.startDate ? toInputDate(item.startDate) : '',
+      endDate: item.endDate ? toInputDate(item.endDate) : '',
+      reason: item.reason || '',
+      replacingId: item.id
+    }));
+    document.querySelector('[data-testid="discount-registry-form"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   const saveExemptionRegistry = async (e) => {
@@ -6374,13 +6456,18 @@ export default function AdminFinance() {
         }
       };
       setExemptions((prev) => [createdExemption, ...prev.filter((item) => item.id !== createdExemption.id)]);
-      setMessage(data.message || 'معافیت/رایگان‌بودن متعلم ثبت شد');
+      const wasReplacing = exemptionForm.replacingId;
+      if (wasReplacing) {
+        await cancelExemptionById(wasReplacing, 'جایگزین شد با معافیت ویرایش‌شده');
+      }
+      setMessage(wasReplacing ? 'معافیت با مقادیر جدید جایگزین شد' : (data.message || 'معافیت/رایگان‌بودن متعلم ثبت شد'));
       setExemptionForm((prev) => ({
         ...prev,
         amount: '',
         percentage: '',
         reason: '',
-        note: ''
+        note: '',
+        replacingId: ''
       }));
       await refreshPaymentWorkspace({
         includeAnomalies: true,
@@ -6392,13 +6479,18 @@ export default function AdminFinance() {
     }
   };
 
+  const cancelExemptionById = async (exemptionId, cancelReason) => {
+    const data = await postJson(`${API_BASE}/api/student-finance/exemptions/${exemptionId}/cancel`, { cancelReason });
+    setExemptions((prev) => prev.filter((item) => item.id !== exemptionId));
+    return data;
+  };
+
   const cancelExemptionRegistry = async (exemptionId) => {
     const cancelReason = window.prompt('دلیل لغو معافیت:', '') || '';
     if (!cancelReason.trim()) return;
     try {
       setBusy(true);
-      const data = await postJson(`${API_BASE}/api/student-finance/exemptions/${exemptionId}/cancel`, { cancelReason });
-      setExemptions((prev) => prev.filter((item) => item.id !== exemptionId));
+      const data = await cancelExemptionById(exemptionId, cancelReason);
       setMessage(data.message || 'معافیت لغو شد');
       await refreshPaymentWorkspace({
         includeAnomalies: true,
@@ -6408,6 +6500,46 @@ export default function AdminFinance() {
       setMessage(err.message);
       setBusy(false);
     }
+  };
+
+  const startEditExemption = (item) => {
+    setEditingExemptionId(item.id);
+    setExemptionEditForm({ reason: item.reason || '', note: item.note || '' });
+  };
+
+  const saveExemptionEdit = async (exemptionId) => {
+    try {
+      setBusy(true);
+      const data = await patchJson(`${API_BASE}/api/student-finance/exemptions/${exemptionId}`, exemptionEditForm);
+      setExemptions((prev) => prev.map((item) => (item.id === exemptionId ? { ...item, ...data.item } : item)));
+      setMessage(data.message || 'معافیت ویرایش شد');
+      setEditingExemptionId('');
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Same reasoning as startReplaceDiscount - amount/percentage/exemptionType
+  // aren't editable in place.
+  const startReplaceExemption = (item) => {
+    setReliefFormMode('exemption');
+    setExemptionForm((prev) => ({
+      ...prev,
+      studentId: item.student?.userId || '',
+      studentMembershipId: item.studentMembershipId || '',
+      classId: item.schoolClass?.id || '',
+      academicYearId: item.academicYear?.id || '',
+      exemptionType: item.exemptionType || 'full',
+      scope: item.scope || 'all',
+      amount: item.exemptionType === 'partial' ? String(item.amount || '') : '',
+      percentage: item.exemptionType === 'partial' ? String(item.percentage || '') : '',
+      reason: item.reason || '',
+      note: item.note || '',
+      replacingId: item.id
+    }));
+    document.querySelector('[data-testid="exemption-registry-form"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   const cancelReliefRegistryItem = async (item) => {
@@ -6426,6 +6558,31 @@ export default function AdminFinance() {
       return;
     }
     setMessage('لغو مستقیم فعلاً فقط برای تخفیف‌ها و معافیت‌های رسمی پشتیبانی می‌شود.');
+  };
+
+  // "تسهیلات مالی" is a read-only mirror (FinanceRelief) of Discount/
+  // FeeExemption - editing it directly wouldn't write back to the source,
+  // so a row's action here is "find and jump to the real record", not edit.
+  const jumpToReliefSource = (item) => {
+    const sourceModel = String(item?.sourceModel || '').trim();
+    const sourceEntityId = getReliefSourceEntityId(item);
+    if (!sourceEntityId) {
+      setMessage('شناسه مرجع این تسهیل مالی پیدا نشد.');
+      return;
+    }
+    if (sourceModel === 'discount') {
+      const match = discountRegistry.find((row) => row.id === sourceEntityId);
+      document.querySelector('[data-testid="discount-registry-list"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (match) startEditDiscount(match);
+      return;
+    }
+    if (sourceModel === 'fee_exemption') {
+      const match = exemptions.find((row) => row.id === sourceEntityId);
+      document.querySelector('[data-testid="exemption-registry-list"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (match) startEditExemption(match);
+      return;
+    }
+    setMessage('این رکورد سیستمی است و رکورد اصلی جداگانه‌ای ندارد.');
   };
 
   const approveReceipt = async (id) => {
@@ -10047,6 +10204,15 @@ export default function AdminFinance() {
               </div>
               <span className="finance-chip">{discountRegistry.length} فعال</span>
             </div>
+            {discountForm.replacingId && (
+              <div className="finance-anomaly-alert" data-testid="discount-replacing-banner">
+                <div>
+                  <strong>در حال جایگزینی یک تخفیف موجود</strong>
+                  <p className="muted">با ثبت این فورم، تخفیف قبلی خودکار لغو و این نسخه جایگزین آن می‌شود.</p>
+                </div>
+                <button type="button" className="secondary" onClick={() => setDiscountForm((prev) => ({ ...prev, replacingId: '' }))}>انصراف از جایگزینی</button>
+              </div>
+            )}
             <div className="finance-split-grid">
               <label className="finance-field">
                 <span>دامنه تخفیف</span>
@@ -10186,6 +10352,15 @@ export default function AdminFinance() {
               </div>
               <span className="finance-chip finance-chip-emerald">{exemptions.length} فعال</span>
             </div>
+            {exemptionForm.replacingId && (
+              <div className="finance-anomaly-alert" data-testid="exemption-replacing-banner">
+                <div>
+                  <strong>در حال جایگزینی یک معافیت موجود</strong>
+                  <p className="muted">با ثبت این فورم، معافیت قبلی خودکار لغو و این نسخه جایگزین آن می‌شود.</p>
+                </div>
+                <button type="button" className="secondary" onClick={() => setExemptionForm((prev) => ({ ...prev, replacingId: '' }))}>انصراف از جایگزینی</button>
+              </div>
+            )}
             <label className="finance-inline-filter finance-inline-filter-wide">
               <span>جستجوی متعلم</span>
               <input
@@ -10413,9 +10588,14 @@ export default function AdminFinance() {
                   </div>
                   <div className="row-actions">
                     {canCancel ? (
-                      <button type="button" className="danger" disabled={busy} onClick={() => cancelReliefRegistryItem(item)}>
-                        لغو
-                      </button>
+                      <>
+                        <button type="button" className="secondary" disabled={busy} onClick={() => jumpToReliefSource(item)}>
+                          پیدا کردن رکورد اصلی
+                        </button>
+                        <button type="button" className="danger" disabled={busy} onClick={() => cancelReliefRegistryItem(item)}>
+                          لغو
+                        </button>
+                      </>
                     ) : (
                       <button type="button" className="secondary" disabled>
                         فقط نمایش
@@ -10513,19 +10693,62 @@ export default function AdminFinance() {
           )}
           <div className="finance-registry-list">
             {pagedDiscountRegistry.map((item) => (
-              <div key={item.id} className="finance-registry-row">
-                <div>
-                  <strong>{item.student?.fullName || item.student?.name || 'متعلم'}</strong>
-                  <span>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</span>
-                  <small>{item.reason || 'بدون توضیح'}</small>
+              <div key={item.id} className="finance-registry-row-wrap">
+                <div className="finance-registry-row">
+                  <div>
+                    <strong>{item.student?.fullName || item.student?.name || 'متعلم'}</strong>
+                    <span>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</span>
+                    <small>{item.reason || 'بدون توضیح'}</small>
+                  </div>
+                  <div className="finance-registry-meta">
+                    <span className="finance-chip">{DISCOUNT_TYPE_UI_LABELS[item.discountType] || item.discountType || 'تخفیف'}</span>
+                    <strong>{item.coverageMode === 'percent' ? `${fmt(item.percentage)}%` : `${fmt(item.amount)} AFN`}</strong>
+                  </div>
+                  <div className="row-actions">
+                    {item.status === 'active' && (
+                      <button type="button" className="secondary" disabled={busy} onClick={() => (editingDiscountId === item.id ? setEditingDiscountId('') : startEditDiscount(item))} data-testid={`edit-discount-${item.id}`}>
+                        {editingDiscountId === item.id ? 'بستن' : 'ویرایش'}
+                      </button>
+                    )}
+                    {item.status === 'active' && (
+                      <button type="button" className="secondary" disabled={busy} onClick={() => startReplaceDiscount(item)} data-testid={`replace-discount-${item.id}`}>جایگزینی</button>
+                    )}
+                    <button type="button" className="danger" disabled={busy} onClick={() => cancelDiscountRegistry(item.id)} data-testid={`cancel-discount-${item.id}`}>لغو</button>
+                  </div>
                 </div>
-                <div className="finance-registry-meta">
-                  <span className="finance-chip">{DISCOUNT_TYPE_UI_LABELS[item.discountType] || item.discountType || 'تخفیف'}</span>
-                  <strong>{item.coverageMode === 'percent' ? `${fmt(item.percentage)}%` : `${fmt(item.amount)} AFN`}</strong>
-                </div>
-                <div className="row-actions">
-                  <button type="button" className="danger" disabled={busy} onClick={() => cancelDiscountRegistry(item.id)} data-testid={`cancel-discount-${item.id}`}>لغو</button>
-                </div>
+                {editingDiscountId === item.id && (
+                  <div className="finance-registry-edit-panel" data-testid={`discount-edit-panel-${item.id}`}>
+                    <label className="finance-field">
+                      <span>دلیل</span>
+                      <textarea
+                        value={discountEditForm.reason}
+                        onChange={(e) => setDiscountEditForm((prev) => ({ ...prev, reason: e.target.value }))}
+                        rows={2}
+                      />
+                    </label>
+                    <div className="finance-split-grid">
+                      <label className="finance-cell-stack">
+                        <span className="finance-field-label">تاریخ شروع</span>
+                        <AfghanDateInput
+                          value={discountEditForm.startDate}
+                          onChange={(value) => setDiscountEditForm((prev) => ({ ...prev, startDate: value }))}
+                        />
+                      </label>
+                      <label className="finance-cell-stack">
+                        <span className="finance-field-label">تاریخ ختم</span>
+                        <AfghanDateInput
+                          value={discountEditForm.endDate}
+                          onChange={(value) => setDiscountEditForm((prev) => ({ ...prev, endDate: value }))}
+                        />
+                      </label>
+                    </div>
+                    <div className="row-actions">
+                      <button type="button" disabled={busy} onClick={() => saveDiscountEdit(item.id)} data-testid={`save-discount-edit-${item.id}`}>ذخیره</button>
+                      <button type="button" className="secondary" disabled={busy} onClick={() => setEditingDiscountId('')}>انصراف</button>
+                    </div>
+                    <p className="muted">برای تغییر مبلغ یا فیصدی از دکمهٔ «جایگزینی» استفاده کنید؛ این فورم فقط دلیل و تاریخ را ویرایش می‌کند.</p>
+                  </div>
+                )}
               </div>
             ))}
             {!filteredDiscountRegistry.length && <p className="muted">برای این جستجو، تخفیفی پیدا نشد.</p>}
@@ -10569,19 +10792,54 @@ export default function AdminFinance() {
           </label>
           <div className="finance-registry-list">
             {pagedExemptionRegistry.map((item) => (
-              <div key={item.id} className="finance-registry-row">
-                <div>
-                  <strong>{item.student?.fullName || item.student?.name || 'متعلم'}</strong>
-                  <span>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</span>
-                  <small>{item.reason || 'بدون توضیح'} · {EXEMPTION_SCOPE_UI_LABELS[item.scope] || item.scope || 'همه موارد'}</small>
+              <div key={item.id} className="finance-registry-row-wrap">
+                <div className="finance-registry-row">
+                  <div>
+                    <strong>{item.student?.fullName || item.student?.name || 'متعلم'}</strong>
+                    <span>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</span>
+                    <small>{item.reason || 'بدون توضیح'} · {EXEMPTION_SCOPE_UI_LABELS[item.scope] || item.scope || 'همه موارد'}</small>
+                  </div>
+                  <div className="finance-registry-meta">
+                    <span className="finance-chip finance-chip-emerald">{EXEMPTION_TYPE_UI_LABELS[item.exemptionType] || item.exemptionType || 'معافیت'}</span>
+                    <strong>{item.exemptionType === 'partial' ? `${fmt(item.amount)} AFN / ${fmt(item.percentage)}%` : '100%'}</strong>
+                  </div>
+                  <div className="row-actions">
+                    {item.status === 'active' && (
+                      <button type="button" className="secondary" disabled={busy} onClick={() => (editingExemptionId === item.id ? setEditingExemptionId('') : startEditExemption(item))} data-testid={`edit-exemption-${item.id}`}>
+                        {editingExemptionId === item.id ? 'بستن' : 'ویرایش'}
+                      </button>
+                    )}
+                    {item.status === 'active' && (
+                      <button type="button" className="secondary" disabled={busy} onClick={() => startReplaceExemption(item)} data-testid={`replace-exemption-${item.id}`}>جایگزینی</button>
+                    )}
+                    <button type="button" className="danger" disabled={busy} onClick={() => cancelExemptionRegistry(item.id)} data-testid={`cancel-exemption-${item.id}`}>لغو</button>
+                  </div>
                 </div>
-                <div className="finance-registry-meta">
-                  <span className="finance-chip finance-chip-emerald">{EXEMPTION_TYPE_UI_LABELS[item.exemptionType] || item.exemptionType || 'معافیت'}</span>
-                  <strong>{item.exemptionType === 'partial' ? `${fmt(item.amount)} AFN / ${fmt(item.percentage)}%` : '100%'}</strong>
-                </div>
-                <div className="row-actions">
-                  <button type="button" className="danger" disabled={busy} onClick={() => cancelExemptionRegistry(item.id)} data-testid={`cancel-exemption-${item.id}`}>لغو</button>
-                </div>
+                {editingExemptionId === item.id && (
+                  <div className="finance-registry-edit-panel" data-testid={`exemption-edit-panel-${item.id}`}>
+                    <label className="finance-field">
+                      <span>دلیل</span>
+                      <textarea
+                        value={exemptionEditForm.reason}
+                        onChange={(e) => setExemptionEditForm((prev) => ({ ...prev, reason: e.target.value }))}
+                        rows={2}
+                      />
+                    </label>
+                    <label className="finance-field">
+                      <span>ملاحظات اداری / حمایوی</span>
+                      <textarea
+                        value={exemptionEditForm.note}
+                        onChange={(e) => setExemptionEditForm((prev) => ({ ...prev, note: e.target.value }))}
+                        rows={2}
+                      />
+                    </label>
+                    <div className="row-actions">
+                      <button type="button" disabled={busy} onClick={() => saveExemptionEdit(item.id)} data-testid={`save-exemption-edit-${item.id}`}>ذخیره</button>
+                      <button type="button" className="secondary" disabled={busy} onClick={() => setEditingExemptionId('')}>انصراف</button>
+                    </div>
+                    <p className="muted">برای تغییر نوع، مبلغ یا فیصدی معافیت از دکمهٔ «جایگزینی» استفاده کنید.</p>
+                  </div>
+                )}
               </div>
             ))}
             {!filteredExemptionRegistry.length && <p className="muted">برای این جستجو، معافیتی پیدا نشد.</p>}
