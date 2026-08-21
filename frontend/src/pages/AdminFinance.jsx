@@ -2404,12 +2404,12 @@ export default function AdminFinance() {
   const [billVisibleCount, setBillVisibleCount] = useState(5);
   const [ordersCatalogLoading, setOrdersCatalogLoading] = useState(false);
   const [discountRegistryPage, setDiscountRegistryPage] = useState(1);
-  const [discountRegistryPageSize, setDiscountRegistryPageSize] = useState(50);
+  const [discountRegistryPageSize, setDiscountRegistryPageSize] = useState(5);
   const [discountRegistryClassFilter, setDiscountRegistryClassFilter] = useState('all');
   const [reliefRegistryPage, setReliefRegistryPage] = useState(1);
-  const [reliefRegistryPageSize, setReliefRegistryPageSize] = useState(50);
+  const [reliefRegistryPageSize, setReliefRegistryPageSize] = useState(5);
   const [exemptionRegistryPage, setExemptionRegistryPage] = useState(1);
-  const [exemptionRegistryPageSize, setExemptionRegistryPageSize] = useState(50);
+  const [exemptionRegistryPageSize, setExemptionRegistryPageSize] = useState(5);
   const [reliefFocusPage, setReliefFocusPage] = useState(1);
   const [reliefFocusPageSize, setReliefFocusPageSize] = useState(5);
   const [paymentAdvancedOpen, setPaymentAdvancedOpen] = useState(false);
@@ -2546,6 +2546,7 @@ export default function AdminFinance() {
   const [editingExemptionId, setEditingExemptionId] = useState('');
   const [exemptionEditForm, setExemptionEditForm] = useState({ reason: '', note: '' });
   const [expandedReliefId, setExpandedReliefId] = useState('');
+  const [expandedClassSummaryId, setExpandedClassSummaryId] = useState('');
 
   const [paymentDeskForm, setPaymentDeskForm] = useState({
     studentId: '',
@@ -3179,6 +3180,7 @@ export default function AdminFinance() {
       }))
       .sort((left, right) => right.classStudentCount - left.classStudentCount || right.count - left.count || left.classTitle.localeCompare(right.classTitle));
   }, [filteredDiscountRegistry, financeMembershipClassCounts]);
+  const expandedClassSummaryItem = discountRegistryByClass.find((item) => item.classId === expandedClassSummaryId) || null;
   const discountRegistryTotalPages = Math.max(1, Math.ceil(filteredDiscountRegistry.length / Math.max(1, Number(discountRegistryPageSize) || 10)));
   const pagedDiscountRegistry = useMemo(() => {
     const pageSize = Math.max(1, Number(discountRegistryPageSize) || 10);
@@ -10741,20 +10743,51 @@ export default function AdminFinance() {
             </div>
           )}
           {!!discountRegistryByClass.length && (
-            <div className="finance-class-discount-summary">
-              {discountRegistryByClass.slice(0, 8).map((item) => (
-                <button
-                  type="button"
-                  key={`discount-class-summary-${item.classId}`}
-                  className={`finance-class-discount-card ${discountRegistryClassFilter === item.classId ? 'is-active' : ''}`}
-                  onClick={() => setDiscountRegistryClassFilter(item.classId)}
-                >
-                  <span>{item.classTitle}</span>
-                  <strong>{fmt(item.classStudentCount)} شاگرد در صنف</strong>
-                  <small>{fmt(item.discountStudentCount)} شاگرد دارای تخفیف | {fmt(item.count)} رکورد فعال | {fmt(item.totalAmount)} AFN</small>
-                </button>
-              ))}
-            </div>
+            <>
+              {/* Just the class name + a small count badge - click toggles the
+                  detail panel below (one at a time) instead of each card
+                  carrying its own 3-line stat block, so the whole list of
+                  classes can fit in 1-2 rows. */}
+              <div className="finance-class-discount-summary">
+                {discountRegistryByClass.slice(0, 8).map((item) => {
+                  const isExpanded = expandedClassSummaryId === item.classId;
+                  return (
+                    <button
+                      type="button"
+                      key={`discount-class-summary-${item.classId}`}
+                      className={`finance-class-discount-card ${isExpanded ? 'is-active' : ''}`}
+                      onClick={() => setExpandedClassSummaryId(isExpanded ? '' : item.classId)}
+                      data-testid={`discount-class-summary-${item.classId}`}
+                    >
+                      <span>{item.classTitle}</span>
+                      <span className="finance-chip finance-chip-muted">{fmt(item.count)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {expandedClassSummaryItem && (
+                <div className="finance-registry-detail" data-testid={`discount-class-detail-${expandedClassSummaryItem.classId}`}>
+                  <table className="finance-registry-detail-table">
+                    <tbody>
+                      <tr><td>صنف</td><td>{expandedClassSummaryItem.classTitle}</td></tr>
+                      <tr><td>شاگردان صنف</td><td>{fmt(expandedClassSummaryItem.classStudentCount)}</td></tr>
+                      <tr><td>شاگردان دارای تخفیف</td><td>{fmt(expandedClassSummaryItem.discountStudentCount)}</td></tr>
+                      <tr><td>رکورد فعال</td><td>{fmt(expandedClassSummaryItem.count)}</td></tr>
+                      <tr><td>مجموع مبلغ</td><td>{fmt(expandedClassSummaryItem.totalAmount)} AFN</td></tr>
+                    </tbody>
+                  </table>
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => { setDiscountRegistryClassFilter(expandedClassSummaryItem.classId); setExpandedClassSummaryId(''); }}
+                    >
+                      فیلتر لیست به همین صنف
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
           <div className="finance-registry-list">
             {pagedDiscountRegistry.map((item) => {

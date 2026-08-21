@@ -503,6 +503,15 @@
   align-items: stretch;
 }
 
+/* The 3 relief/discount/exemption cards vary a lot in natural content
+   height (rows are compact now, and each card can hold a different
+   number of them) - grid's default "stretch" was forcing all 3 to the
+   tallest one's height, leaving big blank space at the bottom of the
+   shorter cards. */
+.finance-grid[data-finance-section="discounts"] {
+  align-items: start;
+}
+
 .finance-card {
   /* Overrides the generic "form { max-width: 400px; margin: 0 auto; }" rule
      in App.css, which applies to every bare <form> element (including the
@@ -2052,37 +2061,40 @@
   margin: 4px 0 0;
 }
 
+/* A pill row of just class names now, not 3-line stat cards - clicking one
+   opens its detail in the single .finance-registry-detail panel right below
+   the row (see expandedClassSummaryItem), so as many classes as possible
+   fit across 1-2 lines instead of one big card per class. */
 .finance-class-discount-summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .finance-class-discount-card {
-  display: grid;
-  gap: 4px;
-  text-align: right;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   color: #eef5ff;
-  padding: 10px;
+  padding: 5px 10px;
+  font-size: 12px;
   cursor: pointer;
 }
 
 .finance-class-discount-card:hover,
 .finance-class-discount-card.is-active {
   border-color: rgba(34, 197, 94, 0.45);
-  background: rgba(34, 197, 94, 0.1);
+  background: rgba(34, 197, 94, 0.14);
 }
 
-.finance-class-discount-card span,
-.finance-class-discount-card small {
-  color: rgba(238, 245, 255, 0.78);
-}
-
-.finance-class-discount-card strong {
-  font-size: 18px;
+.finance-class-discount-card .finance-chip {
+  padding: 2px 7px;
+  font-size: 10.5px;
 }
 
 .finance-registry-row-wrap {
@@ -2092,17 +2104,21 @@
 
 /* A row is just name + a couple of badges until clicked - full details
    (class/year, reason, dates, scope) and the action buttons live in the
-   .finance-registry-detail panel that expands underneath it. */
+   .finance-registry-detail panel that expands underneath it. Small and
+   glassy: this is a scan-a-list-of-many view, not a data card. */
 .finance-registry-row-compact {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  padding: 6px 10px;
   font-family: inherit;
+  font-size: 12.5px;
   color: inherit;
   cursor: pointer;
   text-align: right;
@@ -2111,7 +2127,7 @@
 .finance-registry-row-compact:hover,
 .finance-registry-row-compact.is-expanded {
   border-color: rgba(56, 189, 248, 0.4);
-  background: rgba(56, 189, 248, 0.08);
+  background: rgba(56, 189, 248, 0.1);
 }
 
 .finance-registry-row-compact strong {
@@ -2120,6 +2136,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.finance-registry-row-compact .finance-chip {
+  padding: 3px 8px;
+  font-size: 10.5px;
 }
 
 .finance-registry-row-chevron {
