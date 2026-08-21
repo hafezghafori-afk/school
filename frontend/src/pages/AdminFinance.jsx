@@ -2409,7 +2409,7 @@ export default function AdminFinance() {
   const [reliefRegistryPage, setReliefRegistryPage] = useState(1);
   const [reliefRegistryPageSize, setReliefRegistryPageSize] = useState(5);
   const [exemptionRegistryPage, setExemptionRegistryPage] = useState(1);
-  const [exemptionRegistryPageSize, setExemptionRegistryPageSize] = useState(10);
+  const [exemptionRegistryPageSize, setExemptionRegistryPageSize] = useState(5);
   const [reliefFocusPage, setReliefFocusPage] = useState(1);
   const [reliefFocusPageSize, setReliefFocusPageSize] = useState(5);
   const [paymentAdvancedOpen, setPaymentAdvancedOpen] = useState(false);
@@ -10821,30 +10821,31 @@ export default function AdminFinance() {
           <div className="finance-card-head">
             <div>
               <h3>رجیستر معافیت‌ها</h3>
-              <p className="muted">معافیت‌های کامل (شاگرد رایگان) و جزئی، همراه با دامنه‌ی اثر و دلیل تصویب - رکورد خام معافیت، جدا از رجیستر تخفیف.</p>
             </div>
             <div className="finance-chip-group">
               <span className="finance-chip finance-chip-emerald">{filteredExemptionRegistry.length} مورد</span>
               <span className="finance-chip finance-chip-muted">{filteredExemptionRegistry.filter((item) => item.exemptionType === 'full').length} کامل</span>
             </div>
           </div>
-          <label className="finance-inline-filter finance-inline-filter-wide">
-            <span>جستجو در رجیستر معافیت‌ها</span>
-            <input
-              value={exemptionRegistrySearch}
-              onChange={(e) => setExemptionRegistrySearch(e.target.value)}
-              placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل یا دامنه معافیت"
-            />
-          </label>
-          <label className="finance-inline-filter">
-            <span>تعداد در صفحه</span>
-            <select value={exemptionRegistryPageSize} onChange={(e) => setExemptionRegistryPageSize(Number(e.target.value) || 10)}>
-              <option value={5}>5 مورد</option>
-              <option value={10}>10 مورد</option>
-              <option value={20}>20 مورد</option>
-              <option value={50}>50 مورد</option>
-            </select>
-          </label>
+          <div className="finance-inline-controls" data-testid="exemption-registry-controls">
+            <label className="finance-inline-filter finance-inline-filter-wide">
+              <span>جستجو در رجیستر معافیت‌ها</span>
+              <input
+                value={exemptionRegistrySearch}
+                onChange={(e) => setExemptionRegistrySearch(e.target.value)}
+                placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل یا دامنه معافیت"
+              />
+            </label>
+            <label className="finance-inline-filter">
+              <span>تعداد در صفحه</span>
+              <select value={exemptionRegistryPageSize} onChange={(e) => setExemptionRegistryPageSize(Number(e.target.value) || 10)}>
+                <option value={5}>5 مورد</option>
+                <option value={10}>10 مورد</option>
+                <option value={20}>20 مورد</option>
+                <option value={50}>50 مورد</option>
+              </select>
+            </label>
+          </div>
           <div className="finance-registry-list">
             {pagedExemptionRegistry.map((item) => {
               const isExpanded = expandedExemptionId === item.id;
