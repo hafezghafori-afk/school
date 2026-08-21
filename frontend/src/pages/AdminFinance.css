@@ -994,6 +994,21 @@
   gap: 12px;
 }
 
+/* General default for a small label sitting above a card's <h3> - the two
+   more specific .finance-eyebrow selectors elsewhere override this inside
+   their own flex-row contexts. */
+.finance-eyebrow {
+  display: block;
+  margin-bottom: 2px;
+  color: rgba(226, 232, 240, 0.6);
+  font-size: 11px;
+}
+
+.finance-relief-focus-summary {
+  margin: 2px 0 0;
+  line-height: 1.7;
+}
+
 .finance-card-head-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1037,6 +1052,18 @@
 
 .finance-chip-button:hover {
   filter: brightness(1.15);
+}
+
+.finance-relief-type-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 2px 0 4px;
+}
+
+.finance-chip-button.is-active {
+  outline: 2px solid rgba(16, 185, 129, 0.55);
+  outline-offset: 1px;
 }
 
 .finance-chip-emerald {

@@ -810,6 +810,19 @@ const RELIEF_COVERAGE_MODE_UI_LABELS = {
   full: 'پوشش کامل'
 };
 
+// "تسهیل" (relief) is the umbrella every discount/exemption/scholarship/etc.
+// mirrors into (see FinanceRelief.sourceModel on the backend) - these groups
+// are how the overview card's quick-filter chips break that umbrella down,
+// so admins see the parent/child relationship instead of nine flat types.
+const RELIEF_TYPE_GROUPS = [
+  { key: 'discount', label: 'تخفیف', types: ['discount', 'sibling_discount', 'manual'] },
+  { key: 'exemption', label: 'معافیت', types: ['waiver'] },
+  { key: 'scholarship', label: 'بورسیه', types: ['scholarship_partial', 'scholarship_full'] },
+  { key: 'free', label: 'رایگان', types: ['free_student'] },
+  { key: 'charity', label: 'حمایت خیریه', types: ['charity_support'] },
+  { key: 'penalty', label: 'جریمه', types: ['penalty'] }
+];
+
 const PAYMENT_METHOD_UI_LABELS = {
   cash: 'نقدی',
   bank_transfer: 'انتقال بانکی',
@@ -3173,12 +3186,22 @@ export default function AdminFinance() {
     const start = (safePage - 1) * pageSize;
     return filteredExemptionRegistry.slice(start, start + pageSize);
   }, [exemptionRegistryPage, exemptionRegistryPageSize, exemptionRegistryTotalPages, filteredExemptionRegistry]);
-  const reliefRegistryTypeOptions = useMemo(() => (
-    Array.from(new Set(reliefs.map((item) => String(item?.reliefType || '').trim()).filter(Boolean)))
+  // Per-group counts for the "تسهیلات مالی" overview card's breakdown chips -
+  // computed from the full (search/type-unfiltered) list so the chips always
+  // show the whole picture, not just what the current filter leaves behind.
+  const reliefTypeGroupBreakdown = useMemo(() => (
+    RELIEF_TYPE_GROUPS
+      .map((group) => ({
+        ...group,
+        count: reliefs.filter((item) => group.types.includes(String(item?.reliefType || '').trim())).length
+      }))
+      .filter((group) => group.count > 0)
   ), [reliefs]);
   const filteredReliefRegistry = useMemo(() => (
     reliefs.filter((item) => (
-      (reliefRegistryTypeFilter === 'all' || String(item?.reliefType || '').trim() === reliefRegistryTypeFilter)
+      (reliefRegistryTypeFilter === 'all' || (
+        RELIEF_TYPE_GROUPS.find((group) => group.key === reliefRegistryTypeFilter)?.types || []
+      ).includes(String(item?.reliefType || '').trim()))
       && includesFinanceSearch([
         item?.student?.fullName,
         item?.student?.name,
@@ -10225,8 +10248,8 @@ export default function AdminFinance() {
           <aside className="finance-card finance-spotlight-card finance-relief-profile-pane" data-finance-section="discounts" data-testid="relief-student-spotlight">
             <div className="finance-card-head">
               <div>
-                <h3>پروفایل مالی متعلم</h3>
-                <p className="muted">هم‌زمان با ثبت تخفیف یا معافیت، سوابق و اثر تصمیم مالی را بررسی کنید.</p>
+                <span className="finance-eyebrow">پیش از تصویب تخفیف/معافیت</span>
+                <h3>وضعیت مالی متعلم</h3>
               </div>
               <div className="finance-chip-group">
                 <span className="finance-chip finance-chip-emerald">{getStudentDisplayName(reliefFocusStudent)}</span>
@@ -10236,7 +10259,24 @@ export default function AdminFinance() {
             <div className="finance-chip-group">
               <span className="finance-chip">{reliefFocusClass?.title || 'صنف'}</span>
               <span className="finance-chip finance-chip-muted">{reliefFocusAcademicYear?.title || 'سال تعلیمی'}</span>
-              <span className="finance-chip finance-chip-emerald">{reliefFocusSnapshot.reliefCount} تسهیل در همین دامنه</span>
+            </div>
+            <p className="muted finance-relief-focus-summary">
+              این متعلم {fmt(reliefFocusSnapshot.reliefCount)} تسهیل فعال دارد و {fmt(reliefFocusLedgerSnapshot.outstanding)} AFN بدهی باز
+              {reliefFocusSnapshot.nextDueOrder?.dueDate ? `، با نزدیک‌ترین مهلت ${toFaDate(reliefFocusSnapshot.nextDueOrder.dueDate)}` : ''}.
+            </p>
+            <div className="finance-kpi-grid finance-kpi-grid-dense">
+              <div className="finance-kpi-item finance-kpi-item-accent">
+                <span>باقی {reliefFocusFeeScope === 'all' ? 'تعهدات' : (FEE_LINE_TYPE_LABELS[reliefFocusFeeScope] || 'تعهد')}</span>
+                <strong>{fmt(reliefFocusLedgerSnapshot.outstanding)} AFN</strong>
+              </div>
+              <div className="finance-kpi-item">
+                <span>پرداخت {reliefFocusFeeScope === 'all' ? 'تعهدات' : (FEE_LINE_TYPE_LABELS[reliefFocusFeeScope] || 'تعهد')}</span>
+                <strong>{fmt(reliefFocusLedgerSnapshot.paid)} AFN</strong>
+              </div>
+              <div className="finance-kpi-item">
+                <span>تسهیلات مبلغی</span>
+                <strong>{fmt(reliefFocusSnapshot.fixedReliefAmount)} AFN</strong>
+              </div>
             </div>
             <label className="finance-inline-filter">
               <span>نمایش تسهیلات</span>
@@ -10246,24 +10286,6 @@ export default function AdminFinance() {
                 <option value={10}>10 مورد</option>
               </select>
             </label>
-            <div className="finance-kpi-grid finance-kpi-grid-dense">
-              <div className="finance-kpi-item">
-                <span>اصل {reliefFocusFeeScope === 'all' ? 'تعهدات' : (FEE_LINE_TYPE_LABELS[reliefFocusFeeScope] || 'تعهد')}</span>
-                <strong>{fmt(reliefFocusLedgerSnapshot.due)} AFN</strong>
-              </div>
-              <div className="finance-kpi-item">
-                <span>پرداخت {reliefFocusFeeScope === 'all' ? 'تعهدات' : (FEE_LINE_TYPE_LABELS[reliefFocusFeeScope] || 'تعهد')}</span>
-                <strong>{fmt(reliefFocusLedgerSnapshot.paid)} AFN</strong>
-              </div>
-              <div className="finance-kpi-item finance-kpi-item-accent">
-                <span>باقی {reliefFocusFeeScope === 'all' ? 'تعهدات' : (FEE_LINE_TYPE_LABELS[reliefFocusFeeScope] || 'تعهد')}</span>
-                <strong>{fmt(reliefFocusLedgerSnapshot.outstanding)} AFN</strong>
-              </div>
-              <div className="finance-kpi-item">
-                <span>تسهیلات مبلغی</span>
-                <strong>{fmt(reliefFocusSnapshot.fixedReliefAmount)} AFN</strong>
-              </div>
-            </div>
             <div className="finance-subcard-list">
               <div className="mini-row">
                 <span>فیس/شهریه</span>
@@ -10322,11 +10344,29 @@ export default function AdminFinance() {
               <span className="finance-chip finance-chip-muted">{fmt(reliefRegistrySummary.fixedAmount)} AFN مبلغی</span>
             </div>
           </div>
-          <div className="finance-summary finance-summary-compact">
-            <div><span>پوشش کامل</span><strong>{reliefRegistrySummary.fullCount}</strong></div>
-            <div><span>درصدی</span><strong>{reliefRegistrySummary.percentCount}</strong></div>
-            <div><span>تخفیف و تعدیل</span><strong>{reliefRegistrySummary.discountCount}</strong></div>
-            <div><span>معافیت و بورسیه</span><strong>{reliefRegistrySummary.exemptionCount}</strong></div>
+          {/* Breakdown of the "تسهیل" umbrella into its actual types, doubling
+              as one-click filters for the registry list below - replaces the
+              old coverage-mode summary tiles + the separate "نوع تسهیل"
+              dropdown, which showed the same filter with none of the
+              parent/child context. */}
+          <div className="finance-relief-type-breakdown">
+            <button
+              type="button"
+              className={`finance-chip finance-chip-button ${reliefRegistryTypeFilter === 'all' ? 'finance-chip-emerald is-active' : 'finance-chip-muted'}`}
+              onClick={() => setReliefRegistryTypeFilter('all')}
+            >
+              همه · {reliefs.length}
+            </button>
+            {reliefTypeGroupBreakdown.map((group) => (
+              <button
+                type="button"
+                key={`relief-group-${group.key}`}
+                className={`finance-chip finance-chip-button ${reliefRegistryTypeFilter === group.key ? 'finance-chip-emerald is-active' : 'finance-chip-muted'}`}
+                onClick={() => setReliefRegistryTypeFilter(group.key)}
+              >
+                {group.label} · {group.count}
+              </button>
+            ))}
           </div>
           <div className="finance-inline-controls">
             <label className="finance-inline-filter finance-inline-filter-wide">
@@ -10336,17 +10376,6 @@ export default function AdminFinance() {
                 onChange={(e) => setReliefRegistrySearch(e.target.value)}
                 placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل، نوع یا دامنه"
               />
-            </label>
-            <label className="finance-inline-filter">
-              <span>نوع تسهیل</span>
-              <select value={reliefRegistryTypeFilter} onChange={(e) => setReliefRegistryTypeFilter(e.target.value)}>
-                <option value="all">همه</option>
-                {reliefRegistryTypeOptions.map((value) => (
-                  <option key={`relief-type-${value}`} value={value}>
-                    {RELIEF_TYPE_UI_LABELS[value] || value}
-                  </option>
-                ))}
-              </select>
             </label>
             <label className="finance-inline-filter">
               <span>تعداد در صفحه</span>
@@ -10513,8 +10542,8 @@ export default function AdminFinance() {
         <div className="finance-card" data-finance-section="discounts" data-testid="exemption-registry-list">
           <div className="finance-card-head">
             <div>
-              <h3>رجیستر متعلمین رایگان</h3>
-              <p className="muted">لیست معافیت‌های کامل و جزئی، همراه با دامنه‌ی اثر و دلیل تصویب.</p>
+              <h3>رجیستر معافیت‌ها</h3>
+              <p className="muted">معافیت‌های کامل (شاگرد رایگان) و جزئی، همراه با دامنه‌ی اثر و دلیل تصویب - رکورد خام معافیت، جدا از رجیستر تخفیف.</p>
             </div>
             <div className="finance-chip-group">
               <span className="finance-chip finance-chip-emerald">{filteredExemptionRegistry.length} مورد</span>
