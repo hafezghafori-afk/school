@@ -10482,61 +10482,40 @@ export default function AdminFinance() {
                 <h3>وضعیت مالی متعلم</h3>
               </div>
               <div className="finance-chip-group">
-                <span className="finance-chip finance-chip-emerald">{getStudentDisplayName(reliefFocusStudent)}</span>
-                <span className="finance-chip">{reliefFormMode === 'discount' ? 'فورم تخفیف' : 'فورم معافیت'}</span>
+                <span className="finance-chip finance-chip-emerald">باقی {fmt(reliefFocusLedgerSnapshot.outstanding)} AFN</span>
+                <span className="finance-chip">پرداخت {fmt(reliefFocusLedgerSnapshot.paid)} AFN</span>
+                <span className="finance-chip finance-chip-muted">تسهیلات {fmt(reliefFocusSnapshot.fixedReliefAmount)} AFN</span>
               </div>
             </div>
-            <div className="finance-chip-group">
-              <span className="finance-chip">{reliefFocusClass?.title || 'صنف'}</span>
-              <span className="finance-chip finance-chip-muted">{reliefFocusAcademicYear?.title || 'سال تعلیمی'}</span>
-            </div>
-            <p className="muted finance-relief-focus-summary">
-              این متعلم {fmt(reliefFocusSnapshot.reliefCount)} تسهیل فعال دارد و {fmt(reliefFocusLedgerSnapshot.outstanding)} AFN بدهی باز
-              {reliefFocusSnapshot.nextDueOrder?.dueDate ? `، با نزدیک‌ترین مهلت ${toFaDate(reliefFocusSnapshot.nextDueOrder.dueDate)}` : ''}.
-            </p>
+            {reliefFocusStudentId && (
+              <p className="muted finance-relief-focus-summary">
+                این متعلم {fmt(reliefFocusSnapshot.reliefCount)} تسهیل فعال دارد و {fmt(reliefFocusLedgerSnapshot.outstanding)} AFN بدهی باز
+                {reliefFocusSnapshot.nextDueOrder?.dueDate ? `، با نزدیک‌ترین مهلت ${toFaDate(reliefFocusSnapshot.nextDueOrder.dueDate)}` : ''}.
+              </p>
+            )}
             <div className="finance-kpi-grid finance-kpi-grid-dense">
-              <div className="finance-kpi-item finance-kpi-item-accent">
-                <span>باقی {reliefFocusFeeScope === 'all' ? 'تعهدات' : (FEE_LINE_TYPE_LABELS[reliefFocusFeeScope] || 'تعهد')}</span>
-                <strong>{fmt(reliefFocusLedgerSnapshot.outstanding)} AFN</strong>
+              <div className="finance-kpi-item">
+                <span>فیس/شهریه</span>
+                <strong>{fmt(reliefFocusSnapshot.byFeeType?.tuition?.paid || 0)} / {fmt(reliefFocusSnapshot.byFeeType?.tuition?.outstanding || 0)} AFN</strong>
               </div>
               <div className="finance-kpi-item">
-                <span>پرداخت {reliefFocusFeeScope === 'all' ? 'تعهدات' : (FEE_LINE_TYPE_LABELS[reliefFocusFeeScope] || 'تعهد')}</span>
-                <strong>{fmt(reliefFocusLedgerSnapshot.paid)} AFN</strong>
+                <span>داخله</span>
+                <strong>{fmt(reliefFocusSnapshot.byFeeType?.admission?.paid || 0)} / {fmt(reliefFocusSnapshot.byFeeType?.admission?.outstanding || 0)} AFN</strong>
               </div>
               <div className="finance-kpi-item">
-                <span>تسهیلات مبلغی</span>
-                <strong>{fmt(reliefFocusSnapshot.fixedReliefAmount)} AFN</strong>
+                <span>بدهی‌های باز</span>
+                <strong>{reliefFocusSnapshot.openOrders}</strong>
+              </div>
+              <div className="finance-kpi-item">
+                <span>پوشش کامل / درصدی</span>
+                <strong>{reliefFocusSnapshot.fullReliefCount} / {reliefFocusSnapshot.percentReliefCount}</strong>
+              </div>
+              <div className="finance-kpi-item">
+                <span>نزدیک‌ترین مهلت</span>
+                <strong>{reliefFocusSnapshot.nextDueOrder?.dueDate ? toFaDate(reliefFocusSnapshot.nextDueOrder.dueDate) : '-'}</strong>
               </div>
             </div>
-            <label className="finance-inline-filter">
-              <span>نمایش تسهیلات</span>
-              <select value={reliefFocusPageSize} onChange={(e) => setReliefFocusPageSize(Number(e.target.value) || 5)}>
-                <option value={3}>3 مورد</option>
-                <option value={5}>5 مورد</option>
-                <option value={10}>10 مورد</option>
-              </select>
-            </label>
             <div className="finance-subcard-list">
-              <div className="mini-row">
-                <span>فیس/شهریه</span>
-                <span>پرداخت {fmt(reliefFocusSnapshot.byFeeType?.tuition?.paid || 0)} | باقی {fmt(reliefFocusSnapshot.byFeeType?.tuition?.outstanding || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>داخله</span>
-                <span>پرداخت {fmt(reliefFocusSnapshot.byFeeType?.admission?.paid || 0)} | باقی {fmt(reliefFocusSnapshot.byFeeType?.admission?.outstanding || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>بدهی‌های باز</span>
-                <span>{reliefFocusSnapshot.openOrders}</span>
-              </div>
-              <div className="mini-row">
-                <span>پوشش کامل / درصدی</span>
-                <span>{reliefFocusSnapshot.fullReliefCount} / {reliefFocusSnapshot.percentReliefCount}</span>
-              </div>
-              <div className="mini-row">
-                <span>نزدیک‌ترین مهلت پرداخت</span>
-                <span>{reliefFocusSnapshot.nextDueOrder?.dueDate ? toFaDate(reliefFocusSnapshot.nextDueOrder.dueDate) : '-'}</span>
-              </div>
               {pagedReliefFocusItems.map((item) => {
                 const isExpanded = expandedReliefFocusItemId === item.id;
                 return (
