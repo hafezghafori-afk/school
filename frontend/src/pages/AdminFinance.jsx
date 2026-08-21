@@ -3122,7 +3122,7 @@ export default function AdminFinance() {
     }, 0);
   }, [setOrderStatusFilter, setOrderSearchTerm]);
   const filteredDiscountRegistry = useMemo(() => (
-    discountRegistry.filter((item) => (
+    !discountRegistrySearch.trim() ? [] : discountRegistry.filter((item) => (
       !String(item?.reason || '').trim().toLowerCase().startsWith('[discount:')
       && String(item?.source || '').trim().toLowerCase() !== 'finance_adjustment'
       && (discountRegistryClassFilter === 'all' || getFinanceRecordClassId(item) === discountRegistryClassFilter)
@@ -3182,7 +3182,7 @@ export default function AdminFinance() {
     return filteredDiscountRegistry.slice(start, start + pageSize);
   }, [discountRegistryPage, discountRegistryPageSize, discountRegistryTotalPages, filteredDiscountRegistry]);
   const filteredExemptionRegistry = useMemo(() => (
-    exemptions.filter((item) => includesFinanceSearch([
+    !exemptionRegistrySearch.trim() ? [] : exemptions.filter((item) => includesFinanceSearch([
       item?.student?.fullName,
       item?.student?.name,
       item?.student?.asasNumber,
@@ -3216,7 +3216,7 @@ export default function AdminFinance() {
       .filter((group) => group.count > 0)
   ), [reliefs]);
   const filteredReliefRegistry = useMemo(() => (
-    reliefs.filter((item) => (
+    !reliefRegistrySearch.trim() ? [] : reliefs.filter((item) => (
       (reliefRegistryTypeFilter === 'all' || (
         RELIEF_TYPE_GROUPS.find((group) => group.key === reliefRegistryTypeFilter)?.types || []
       ).includes(String(item?.reliefType || '').trim()))
@@ -6578,14 +6578,22 @@ export default function AdminFinance() {
       setMessage('شناسه مرجع این تسهیل مالی پیدا نشد.');
       return;
     }
+    // Both destination lists are empty until searched (find-first design) -
+    // search by admission number when available so a same-named student
+    // doesn't pull up the wrong row, falling back to the name.
+    const searchTerm = item.student?.admissionNo || item.student?.asasNumber || item.student?.fullName || item.student?.name || '';
     if (sourceModel === 'discount') {
       const match = discountRegistry.find((row) => row.id === sourceEntityId);
+      setDiscountRegistrySearch(searchTerm);
+      setDiscountRegistryPage(1);
       document.querySelector('[data-testid="discount-registry-list"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       if (match) startEditDiscount(match);
       return;
     }
     if (sourceModel === 'fee_exemption') {
       const match = exemptions.find((row) => row.id === sourceEntityId);
+      setExemptionRegistrySearch(searchTerm);
+      setExemptionRegistryPage(1);
       document.querySelector('[data-testid="exemption-registry-list"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       if (match) startEditExemption(match);
       return;
@@ -10622,7 +10630,11 @@ export default function AdminFinance() {
                 </div>
               );
             })}
-            {!filteredReliefRegistry.length && <p className="muted">برای این جستجو یا فیلتر، تسهیل مالی فعالی پیدا نشد.</p>}
+            {!filteredReliefRegistry.length && (
+              <p className="muted">
+                {reliefRegistrySearch.trim() ? 'برای این جستجو یا فیلتر، تسهیل مالی فعالی پیدا نشد.' : 'برای دیدن رکوردها، نام یا نمبر اساس متعلم را جستجو کنید.'}
+              </p>
+            )}
             {filteredReliefRegistry.length > reliefRegistryPageSize && (
               <div className="finance-pagination">
                 <button type="button" className="secondary" disabled={reliefRegistryPage <= 1} onClick={() => setReliefRegistryPage((value) => Math.max(1, value - 1))}>قبلی</button>
@@ -10781,7 +10793,11 @@ export default function AdminFinance() {
                 </div>
               );
             })}
-            {!filteredDiscountRegistry.length && <p className="muted">برای این جستجو، تخفیفی پیدا نشد.</p>}
+            {!filteredDiscountRegistry.length && (
+              <p className="muted">
+                {discountRegistrySearch.trim() ? 'برای این جستجو، تخفیفی پیدا نشد.' : 'برای دیدن رکوردها، نام یا نمبر اساس متعلم را جستجو کنید.'}
+              </p>
+            )}
             {filteredDiscountRegistry.length > discountRegistryPageSize && (
               <div className="finance-pagination">
                 <button type="button" className="secondary" disabled={discountRegistryPage <= 1} onClick={() => setDiscountRegistryPage((value) => Math.max(1, value - 1))}>قبلی</button>
@@ -10886,7 +10902,11 @@ export default function AdminFinance() {
                 </div>
               );
             })}
-            {!filteredExemptionRegistry.length && <p className="muted">برای این جستجو، معافیتی پیدا نشد.</p>}
+            {!filteredExemptionRegistry.length && (
+              <p className="muted">
+                {exemptionRegistrySearch.trim() ? 'برای این جستجو، معافیتی پیدا نشد.' : 'برای دیدن رکوردها، نام یا نمبر اساس متعلم را جستجو کنید.'}
+              </p>
+            )}
             {filteredExemptionRegistry.length > exemptionRegistryPageSize && (
               <div className="finance-pagination">
                 <button type="button" className="secondary" disabled={exemptionRegistryPage <= 1} onClick={() => setExemptionRegistryPage((value) => Math.max(1, value - 1))}>قبلی</button>
