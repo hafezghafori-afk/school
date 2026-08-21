@@ -10568,7 +10568,7 @@ export default function AdminFinance() {
               <span>جستجو در رجیستر</span>
               <input
                 value={reliefRegistrySearch}
-                onChange={(e) => setReliefRegistrySearch(e.target.value)}
+                onChange={(e) => { setReliefRegistrySearch(e.target.value); setExpandedReliefId(''); }}
                 placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل، نوع یا دامنه"
               />
             </label>
@@ -10664,7 +10664,7 @@ export default function AdminFinance() {
               <span>جستجو در تخفیف‌های ثبت‌شده</span>
               <input
                 value={discountRegistrySearch}
-                onChange={(e) => setDiscountRegistrySearch(e.target.value)}
+                onChange={(e) => { setDiscountRegistrySearch(e.target.value); setExpandedDiscountId(''); setEditingDiscountId(''); }}
                 placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل یا نوع تخفیف"
               />
             </label>
@@ -10832,7 +10832,7 @@ export default function AdminFinance() {
               <span>جستجو در رجیستر معافیت‌ها</span>
               <input
                 value={exemptionRegistrySearch}
-                onChange={(e) => setExemptionRegistrySearch(e.target.value)}
+                onChange={(e) => { setExemptionRegistrySearch(e.target.value); setExpandedExemptionId(''); setEditingExemptionId(''); }}
                 placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل یا دامنه معافیت"
               />
             </label>
