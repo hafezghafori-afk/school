@@ -272,27 +272,82 @@
   font-size: 20px;
 }
 
-.finance-overview-filter {
-  display: grid;
-  grid-template-columns: minmax(220px, 1.4fr) repeat(4, minmax(150px, 1fr)) auto;
-  gap: 10px;
-  align-items: end;
+/* .finance-card (a later, equal-specificity rule) sets display:grid - beat
+   it with a compound selector rather than relying on source order. The
+   title/description block sits on its own row above; the real filter
+   controls (date range, year, class, refresh/print) live in a separate
+   nowrap row below (.finance-overview-filter-controls) so they shrink to
+   fit before anything wraps. */
+.finance-card.finance-overview-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   margin-bottom: 14px;
   border-color: rgba(56, 189, 248, 0.22);
   background: linear-gradient(135deg, rgba(14, 116, 144, 0.16), rgba(15, 23, 42, 0.86));
 }
 
-.finance-overview-filter > div:first-child strong {
-  display: block;
-  margin: 3px 0;
+/* Eyebrow, title and description used to each sit on their own line
+   (span, then a display:block strong, then a <p>) - now a single wrapped
+   line, cheapest way to shave more height off the card. */
+.finance-overview-filter-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+
+.finance-overview-filter-heading .finance-eyebrow {
+  flex: 0 0 auto;
+  color: rgba(226, 232, 240, 0.7);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.finance-overview-filter-heading strong {
+  flex: 0 0 auto;
   color: #f8fafc;
-  font-size: 16px;
+  font-size: 15px;
+}
+
+.finance-overview-filter-heading strong::after {
+  content: '—';
+  margin-inline-start: 8px;
+  color: rgba(226, 232, 240, 0.4);
+  font-weight: 400;
+}
+
+.finance-overview-filter-heading .muted {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.finance-overview-filter-controls {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  gap: 10px 12px;
+  min-width: 0;
+  /* Ultimate escape hatch once every field is already at its floor width -
+     a horizontal scrollbar reads better than a broken layout. */
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
 
 .finance-overview-filter label {
   display: grid;
   gap: 6px;
-  min-width: 0;
+  min-width: 90px;
+  flex: 1 1 140px;
+}
+
+/* The two AfghanDateInput fields (year+month+day inline) need more room
+   than a plain <select> before their own internal container query starts
+   compacting them - give them a taller basis/floor so "از/تا تاریخ" never
+   wrap their day box onto its own line while still shrinking to fit. */
+.finance-overview-filter label:has(.afghan-date-field) {
+  flex-basis: 240px;
+  min-width: 190px;
 }
 
 .finance-overview-filter label > span {
@@ -309,7 +364,9 @@
 .finance-overview-filter-actions {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  align-items: flex-end;
+  margin-inline-start: auto;
 }
 
 .finance-smart-kpi-grid {
@@ -4020,14 +4077,6 @@
 }
 
 @media (max-width: 1100px) {
-  .finance-overview-filter {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .finance-overview-filter > div:first-child {
-    grid-column: 1 / -1;
-  }
-
   .finance-smart-kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -4481,13 +4530,32 @@
     justify-content: flex-start;
   }
 
-  .finance-overview-filter,
   .finance-smart-kpi-grid,
   .finance-donut-layout,
   .finance-debtor-controls,
   .finance-problem-row,
   .finance-smart-debtor-row {
     grid-template-columns: 1fr;
+  }
+
+  .finance-overview-filter-controls {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+
+  .finance-overview-filter label {
+    flex-basis: 100%;
+  }
+
+  .finance-overview-filter label:has(.afghan-date-field) {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+
+  .finance-overview-filter-actions {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+    justify-content: flex-end;
   }
 
   .finance-problem-row > button,

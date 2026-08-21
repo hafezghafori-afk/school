@@ -8035,63 +8035,63 @@ export default function AdminFinance() {
       ) : null}
 
       <div className="finance-card finance-overview-filter" data-finance-section="overview reports">
-        <div>
+        <div className="finance-overview-filter-heading">
           <span className="finance-eyebrow">گزارش هوشمند مالی</span>
           <strong>یک بازه، یک منبع ارقام</strong>
-          <p className="muted">بل، پرداخت، تخفیف، مصرف و خزانه در همین بازه با هم محاسبه می‌شوند.</p>
+          <span className="muted">بل، پرداخت، تخفیف، مصرف و خزانه در همین بازه با هم محاسبه می‌شوند.</span>
         </div>
-        <label>
-          <span>از تاریخ</span>
-          <AfghanDateInput
-            value={financeOverviewRange.from}
-            onChange={(value) => setFinanceOverviewRange((previous) => ({ ...previous, from: value }))}
-            showGregorianEquivalent
-          />
-        </label>
-        <label>
-          <span>تا تاریخ</span>
-          <AfghanDateInput
-            value={financeOverviewRange.to}
-            onChange={(value) => setFinanceOverviewRange((previous) => ({ ...previous, to: value }))}
-            showGregorianEquivalent
-          />
-        </label>
-        <label>
-          <span>سال تعلیمی</span>
-          <select value={reportAcademicYearId} onChange={(event) => setReportAcademicYearId(event.target.value)}>
-            <option value="">همه سال‌ها</option>
-            {academicYears.map((item) => (
-              <option key={`finance-report-year-${item.id}`} value={item.id}>{item.title}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>صنف</span>
-          <select value={reportClassId} onChange={(event) => setReportClassId(event.target.value)}>
-            <option value="">همه صنف‌ها</option>
-            {classOptions.map((item) => (
-              <option key={`finance-report-class-${item.classId}`} value={item.classId}>{item.title}</option>
-            ))}
-          </select>
-        </label>
-        <div className="finance-overview-filter-actions">
-          <button type="button" className="secondary" onClick={() => void loadAll()} disabled={busy || financeOverviewLoading}>
-            {financeOverviewLoading ? 'در حال تازه‌سازی…' : 'تازه‌سازی'}
-          </button>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => {
-              if (!financeOverview) {
-                setMessage('پیش از چاپ، گزارش را بارگذاری کنید.');
-                return;
-              }
-              schedulePrint('overview');
-            }}
-            disabled={financeOverviewLoading || !financeOverview}
-          >
-            چاپ / پی‌دی‌اف
-          </button>
+        <div className="finance-overview-filter-controls">
+          <label>
+            <span>از تاریخ</span>
+            <AfghanDateInput
+              value={financeOverviewRange.from}
+              onChange={(value) => setFinanceOverviewRange((previous) => ({ ...previous, from: value }))}
+            />
+          </label>
+          <label>
+            <span>تا تاریخ</span>
+            <AfghanDateInput
+              value={financeOverviewRange.to}
+              onChange={(value) => setFinanceOverviewRange((previous) => ({ ...previous, to: value }))}
+            />
+          </label>
+          <label>
+            <span>سال تعلیمی</span>
+            <select value={reportAcademicYearId} onChange={(event) => setReportAcademicYearId(event.target.value)}>
+              <option value="">همه سال‌ها</option>
+              {academicYears.map((item) => (
+                <option key={`finance-report-year-${item.id}`} value={item.id}>{item.title}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>صنف</span>
+            <select value={reportClassId} onChange={(event) => setReportClassId(event.target.value)}>
+              <option value="">همه صنف‌ها</option>
+              {classOptions.map((item) => (
+                <option key={`finance-report-class-${item.classId}`} value={item.classId}>{item.title}</option>
+              ))}
+            </select>
+          </label>
+          <div className="finance-overview-filter-actions">
+            <button type="button" className="secondary" onClick={() => void loadAll()} disabled={busy || financeOverviewLoading}>
+              {financeOverviewLoading ? 'در حال تازه‌سازی…' : 'تازه‌سازی'}
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                if (!financeOverview) {
+                  setMessage('پیش از چاپ، گزارش را بارگذاری کنید.');
+                  return;
+                }
+                schedulePrint('overview');
+              }}
+              disabled={financeOverviewLoading || !financeOverview}
+            >
+              چاپ / پی‌دی‌اف
+            </button>
+          </div>
         </div>
       </div>
 
