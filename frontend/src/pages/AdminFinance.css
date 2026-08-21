@@ -1031,6 +1031,24 @@
   gap: 10px;
 }
 
+/* This card's own search + page-size row (not the generic
+   .finance-inline-filter[-wide] used elsewhere) - shrink both so they
+   actually share one line at this card's narrower width instead of
+   wrapping, per the user's request. */
+[data-testid="relief-registry-hub"] .finance-inline-controls {
+  flex-wrap: nowrap;
+}
+
+[data-testid="relief-registry-hub"] .finance-inline-filter-wide {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+[data-testid="relief-registry-hub"] .finance-inline-controls > .finance-inline-filter:not(.finance-inline-filter-wide) {
+  flex: 0 0 auto;
+  min-width: 90px;
+}
+
 .finance-chip {
   display: inline-flex;
   align-items: center;
