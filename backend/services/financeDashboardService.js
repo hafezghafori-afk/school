@@ -6,6 +6,7 @@ const { recognizePayments } = require('../utils/financeRevenueRecognition');
 const { sumPaidRefunds } = require('../utils/financeRefundRecognition');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const { loadCurrentMembershipStatusMap, attachLifecycleBadge, hasStudentLeft } = require('../utils/financeStudentLifecycleStatus');
+const { resolveAsasNumberMapForDocs } = require('../utils/studentAdmissionNumber');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -213,19 +214,23 @@ function buildClassRows(orders = []) {
 // proposal's item #3. The departed total is computed over the *full* set
 // before slicing so the dashboard KPI never undercounts because of the list
 // page size.
-function buildDebtorGroups(orders = [], limit = 10, asOf = new Date(), statusMap = null) {
+function buildDebtorGroups(orders = [], limit = 10, asOf = new Date(), statusMap = null, asasNumberMap = null) {
   const map = new Map();
   orders.forEach((order) => {
     const outstanding = roundMoney(order?.outstandingAmount);
     if (outstanding <= 0) return;
     const studentId = normalizeText(order?.studentId || order?.student) || orderStudentName(order);
+    // StudentCore.admissionNo is rarely filled in by this school - fall back
+    // to AfghanStudent.asasNumber via the order's own `student` (User) link.
+    const resolvedAdmissionNo = String(order?.studentId?.admissionNo || '').trim()
+      || (asasNumberMap ? String(asasNumberMap.get(normalizeText(order?.student?._id || order?.student)) || '').trim() : '');
     const row = map.get(studentId) || {
       studentId,
       studentCoreId: normalizeText(order?.studentId),
       studentUserId: normalizeText(order?.student),
       name: orderStudentName(order),
-      asasNumber: String(order?.studentId?.admissionNo || '').trim(),
-      admissionNo: String(order?.studentId?.admissionNo || '').trim(),
+      asasNumber: resolvedAdmissionNo,
+      admissionNo: resolvedAdmissionNo,
       classTitle: classTitle(order),
       amount: 0,
       orderCount: 0,
@@ -415,7 +420,8 @@ async function buildFinanceDashboardOverview(options = {}) {
     { key: 'expense', label: 'مصارف تاییدشده', value: approvedExpense }
   ];
   const incomeExpenseTotal = incomeExpenseDistribution.reduce((sum, row) => sum + row.value, 0);
-  const debtorGroups = buildDebtorGroups(standingOrders, debtorLimit, asOf, lifecycleStatusMap);
+  const debtorAsasNumberMap = await resolveAsasNumberMapForDocs(standingOrders);
+  const debtorGroups = buildDebtorGroups(standingOrders, debtorLimit, asOf, lifecycleStatusMap, debtorAsasNumberMap);
 
   return {
     generatedAt: new Date().toISOString(),

@@ -1413,6 +1413,8 @@ async function buildExamOutcomesReport(filters) {
     .populate('studentId', 'fullName admissionNo')
     .sort({ rank: 1, percentage: -1, computedAt: -1 });
 
+  const asasNumberMap = await resolveAsasNumberMapForDocs(results);
+
   const summary = {
     totalResults: results.length,
     passed: results.filter((item) => item.resultStatus === 'passed').length,
@@ -1429,7 +1431,7 @@ async function buildExamOutcomesReport(filters) {
   const rows = results.map((item, index) => ({
     serialNo: index + 1,
     studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId, membership: item.studentMembershipId }),
-    admissionNo: normalizeText(item.studentId?.admissionNo),
+    admissionNo: pickAdmissionNo(item, asasNumberMap),
     classTitle: getClassTitle(item.classId),
     sessionTitle: normalizeText(item.sessionId?.title),
     examType: normalizeText(item.examTypeId?.title),
@@ -1490,6 +1492,8 @@ async function buildAttendanceOverviewReport(filters) {
     .populate('academicYearId', 'title code')
     .sort({ date: -1, createdAt: -1 });
 
+  const asasNumberMap = await resolveAsasNumberMapForDocs(items);
+
   const total = items.length;
   const present = items.filter((item) => normalizeAttendanceReportStatus(item.status) === 'present').length;
   const absent = items.filter((item) => normalizeAttendanceReportStatus(item.status) === 'absent').length;
@@ -1510,6 +1514,7 @@ async function buildAttendanceOverviewReport(filters) {
   const rows = items.map((item) => ({
     date: item.date ? new Date(item.date).toISOString() : '',
     studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId }),
+    admissionNo: pickAdmissionNo(item, asasNumberMap),
     classTitle: getClassTitle(item.classId),
     academicYear: normalizeText(item.academicYearId?.title),
     status: getAttendanceStatusLabel(item.status),
@@ -1521,6 +1526,7 @@ async function buildAttendanceOverviewReport(filters) {
     columns: [
       { key: 'date', label: 'تاریخ' },
       { key: 'studentName', label: 'متعلم' },
+      { key: 'admissionNo', label: 'نمبر اساس' },
       { key: 'classTitle', label: 'صنف' },
       { key: 'academicYear', label: 'سال' },
       { key: 'status', label: 'وضعیت' },
@@ -1568,6 +1574,8 @@ async function buildAttendanceSummaryOverviewReport(filters) {
     .populate('academicYearId', 'title code')
     .sort({ classId: 1, createdAt: 1 });
 
+  const asasNumberMap = await resolveAsasNumberMapForDocs(items, memberships);
+
   memberships.forEach((membership) => {
     const membershipId = getReferenceId(membership);
     if (!membershipId) return;
@@ -1588,7 +1596,7 @@ async function buildAttendanceSummaryOverviewReport(filters) {
     grouped.set(membershipId, {
       serialNo: 0,
       studentName: getStudentName({ studentUser: membership.student, studentCore: membership.studentId, membership }),
-      admissionNo: normalizeText(membership.studentId?.admissionNo),
+      admissionNo: pickAdmissionNo(membership, asasNumberMap),
       classTitle: getClassTitle(membership.classId),
       academicYear: normalizeText(membership.academicYearId?.title),
       presentDays: 0,
@@ -1620,7 +1628,7 @@ async function buildAttendanceSummaryOverviewReport(filters) {
     const current = grouped.get(bucketKey) || {
       serialNo: 0,
       studentName: getStudentName({ studentUser: item.student, studentCore: item.studentId, membership: item.studentMembershipId }),
-      admissionNo: normalizeText(item.studentId?.admissionNo),
+      admissionNo: pickAdmissionNo(item, asasNumberMap),
       classTitle: getClassTitle(item.classId),
       academicYear: normalizeText(item.academicYearId?.title),
       presentDays: 0,
