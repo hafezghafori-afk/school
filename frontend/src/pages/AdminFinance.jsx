@@ -2535,11 +2535,17 @@ export default function AdminFinance() {
     replacingId: ''
   });
 
-  // Inline "ویرایش" (safe fields only) state for the discount/exemption rows.
+  // Rows in all 3 relief cards are compact (name + type + amount) until
+  // clicked - the expanded*Id below controls which single row's detail
+  // panel is open; editing*Id (nested inside that panel) controls whether
+  // the inline "ویرایش" sub-form (safe fields only) is showing.
+  const [expandedDiscountId, setExpandedDiscountId] = useState('');
   const [editingDiscountId, setEditingDiscountId] = useState('');
   const [discountEditForm, setDiscountEditForm] = useState({ reason: '', startDate: '', endDate: '' });
+  const [expandedExemptionId, setExpandedExemptionId] = useState('');
   const [editingExemptionId, setEditingExemptionId] = useState('');
   const [exemptionEditForm, setExemptionEditForm] = useState({ reason: '', note: '' });
+  const [expandedReliefId, setExpandedReliefId] = useState('');
 
   const [paymentDeskForm, setPaymentDeskForm] = useState({
     studentId: '',
@@ -6350,6 +6356,7 @@ export default function AdminFinance() {
   };
 
   const startEditDiscount = (item) => {
+    setExpandedDiscountId(item.id);
     setEditingDiscountId(item.id);
     setDiscountEditForm({
       reason: item.reason || '',
@@ -6503,6 +6510,7 @@ export default function AdminFinance() {
   };
 
   const startEditExemption = (item) => {
+    setExpandedExemptionId(item.id);
     setEditingExemptionId(item.id);
     setExemptionEditForm({ reason: item.reason || '', note: item.note || '' });
   };
@@ -10566,42 +10574,51 @@ export default function AdminFinance() {
             {pagedReliefRegistry.map((item) => {
               const sourceEntityId = getReliefSourceEntityId(item);
               const canCancel = !!sourceEntityId && (item.sourceModel === 'discount' || item.sourceModel === 'fee_exemption');
+              const isExpanded = expandedReliefId === item.id;
               return (
-                <div key={`relief-row-${item.id}`} className="finance-registry-row">
-                  <div>
+                <div key={`relief-row-${item.id}`} className="finance-registry-row-wrap">
+                  <button
+                    type="button"
+                    className={`finance-registry-row-compact ${isExpanded ? 'is-expanded' : ''}`}
+                    onClick={() => setExpandedReliefId(isExpanded ? '' : item.id)}
+                    data-testid={`relief-row-${item.id}`}
+                  >
                     <strong>{item.student?.fullName || item.student?.name || 'متعلم'}</strong>
-                    <span>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</span>
-                    <small>
-                      {RELIEF_TYPE_UI_LABELS[item.reliefType] || item.reliefType || 'تسهیل'}
-                      {' · '}
-                      {(EXEMPTION_SCOPE_UI_LABELS[item.scope] || item.scope || 'همه موارد')}
-                      {' · '}
-                      {RELIEF_COVERAGE_MODE_UI_LABELS[item.coverageMode] || item.coverageMode || 'پوشش'}
-                      {item.reason ? ` · ${item.reason}` : ''}
-                    </small>
-                  </div>
-                  <div className="finance-registry-meta">
                     <span className={`finance-chip ${item.coverageMode === 'full' ? 'finance-chip-emerald' : item.reliefType === 'penalty' ? 'finance-chip-rose' : ''}`}>
                       {item.sourceModel === 'discount' ? 'تخفیف' : item.sourceModel === 'fee_exemption' ? 'معافیت' : 'سیستمی'}
                     </span>
-                    <strong>{getReliefValueLabel(item)}</strong>
-                  </div>
-                  <div className="row-actions">
-                    {canCancel ? (
-                      <>
-                        <button type="button" className="secondary" disabled={busy} onClick={() => jumpToReliefSource(item)}>
-                          پیدا کردن رکورد اصلی
-                        </button>
-                        <button type="button" className="danger" disabled={busy} onClick={() => cancelReliefRegistryItem(item)}>
-                          لغو
-                        </button>
-                      </>
-                    ) : (
-                      <button type="button" className="secondary" disabled>
-                        فقط نمایش
-                      </button>
-                    )}
-                  </div>
+                    <span className="finance-chip finance-chip-muted">{getReliefValueLabel(item)}</span>
+                    <span className="finance-registry-row-chevron" aria-hidden="true">{isExpanded ? '▴' : '▾'}</span>
+                  </button>
+                  {isExpanded && (
+                    <div className="finance-registry-detail">
+                      <table className="finance-registry-detail-table">
+                        <tbody>
+                          <tr><td>صنف / سال</td><td>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</td></tr>
+                          <tr><td>نوع تسهیل</td><td>{RELIEF_TYPE_UI_LABELS[item.reliefType] || item.reliefType || 'تسهیل'}</td></tr>
+                          <tr><td>دامنه</td><td>{EXEMPTION_SCOPE_UI_LABELS[item.scope] || item.scope || 'همه موارد'}</td></tr>
+                          <tr><td>پوشش</td><td>{RELIEF_COVERAGE_MODE_UI_LABELS[item.coverageMode] || item.coverageMode || 'پوشش'}</td></tr>
+                          <tr><td>دلیل</td><td>{item.reason || 'بدون توضیح'}</td></tr>
+                        </tbody>
+                      </table>
+                      <div className="row-actions">
+                        {canCancel ? (
+                          <>
+                            <button type="button" className="secondary" disabled={busy} onClick={() => jumpToReliefSource(item)}>
+                              پیدا کردن رکورد اصلی
+                            </button>
+                            <button type="button" className="danger" disabled={busy} onClick={() => cancelReliefRegistryItem(item)}>
+                              لغو
+                            </button>
+                          </>
+                        ) : (
+                          <button type="button" className="secondary" disabled>
+                            فقط نمایش
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -10692,65 +10709,78 @@ export default function AdminFinance() {
             </div>
           )}
           <div className="finance-registry-list">
-            {pagedDiscountRegistry.map((item) => (
-              <div key={item.id} className="finance-registry-row-wrap">
-                <div className="finance-registry-row">
-                  <div>
+            {pagedDiscountRegistry.map((item) => {
+              const isExpanded = expandedDiscountId === item.id;
+              return (
+                <div key={item.id} className="finance-registry-row-wrap">
+                  <button
+                    type="button"
+                    className={`finance-registry-row-compact ${isExpanded ? 'is-expanded' : ''}`}
+                    onClick={() => { setExpandedDiscountId(isExpanded ? '' : item.id); if (isExpanded) setEditingDiscountId(''); }}
+                    data-testid={`discount-row-${item.id}`}
+                  >
                     <strong>{item.student?.fullName || item.student?.name || 'متعلم'}</strong>
-                    <span>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</span>
-                    <small>{item.reason || 'بدون توضیح'}</small>
-                  </div>
-                  <div className="finance-registry-meta">
                     <span className="finance-chip">{DISCOUNT_TYPE_UI_LABELS[item.discountType] || item.discountType || 'تخفیف'}</span>
-                    <strong>{item.coverageMode === 'percent' ? `${fmt(item.percentage)}%` : `${fmt(item.amount)} AFN`}</strong>
-                  </div>
-                  <div className="row-actions">
-                    {item.status === 'active' && (
-                      <button type="button" className="secondary" disabled={busy} onClick={() => (editingDiscountId === item.id ? setEditingDiscountId('') : startEditDiscount(item))} data-testid={`edit-discount-${item.id}`}>
-                        {editingDiscountId === item.id ? 'بستن' : 'ویرایش'}
-                      </button>
-                    )}
-                    {item.status === 'active' && (
-                      <button type="button" className="secondary" disabled={busy} onClick={() => startReplaceDiscount(item)} data-testid={`replace-discount-${item.id}`}>جایگزینی</button>
-                    )}
-                    <button type="button" className="danger" disabled={busy} onClick={() => cancelDiscountRegistry(item.id)} data-testid={`cancel-discount-${item.id}`}>لغو</button>
-                  </div>
+                    <span className="finance-chip finance-chip-muted">{item.coverageMode === 'percent' ? `${fmt(item.percentage)}%` : `${fmt(item.amount)} AFN`}</span>
+                    <span className="finance-registry-row-chevron" aria-hidden="true">{isExpanded ? '▴' : '▾'}</span>
+                  </button>
+                  {isExpanded && (
+                    <div className="finance-registry-detail" data-testid={`discount-detail-${item.id}`}>
+                      <table className="finance-registry-detail-table">
+                        <tbody>
+                          <tr><td>صنف / سال</td><td>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</td></tr>
+                          <tr><td>دلیل</td><td>{item.reason || 'بدون توضیح'}</td></tr>
+                          <tr><td>مدت اثر</td><td>{item.durationMode === 'custom_period' ? `${item.startDate ? toFaDate(item.startDate) : '-'} تا ${item.endDate ? toFaDate(item.endDate) : '-'}` : 'تا ختم سال تعلیمی'}</td></tr>
+                        </tbody>
+                      </table>
+                      {editingDiscountId === item.id ? (
+                        <div className="finance-registry-edit-panel" data-testid={`discount-edit-panel-${item.id}`}>
+                          <label className="finance-field">
+                            <span>دلیل</span>
+                            <textarea
+                              value={discountEditForm.reason}
+                              onChange={(e) => setDiscountEditForm((prev) => ({ ...prev, reason: e.target.value }))}
+                              rows={2}
+                            />
+                          </label>
+                          <div className="finance-split-grid">
+                            <label className="finance-cell-stack">
+                              <span className="finance-field-label">تاریخ شروع</span>
+                              <AfghanDateInput
+                                value={discountEditForm.startDate}
+                                onChange={(value) => setDiscountEditForm((prev) => ({ ...prev, startDate: value }))}
+                              />
+                            </label>
+                            <label className="finance-cell-stack">
+                              <span className="finance-field-label">تاریخ ختم</span>
+                              <AfghanDateInput
+                                value={discountEditForm.endDate}
+                                onChange={(value) => setDiscountEditForm((prev) => ({ ...prev, endDate: value }))}
+                              />
+                            </label>
+                          </div>
+                          <div className="row-actions">
+                            <button type="button" disabled={busy} onClick={() => saveDiscountEdit(item.id)} data-testid={`save-discount-edit-${item.id}`}>ذخیره</button>
+                            <button type="button" className="secondary" disabled={busy} onClick={() => setEditingDiscountId('')}>انصراف</button>
+                          </div>
+                          <p className="muted">برای تغییر مبلغ یا فیصدی از دکمهٔ «جایگزینی» استفاده کنید؛ این فورم فقط دلیل و تاریخ را ویرایش می‌کند.</p>
+                        </div>
+                      ) : (
+                        <div className="row-actions">
+                          {item.status === 'active' && (
+                            <button type="button" className="secondary" disabled={busy} onClick={() => startEditDiscount(item)} data-testid={`edit-discount-${item.id}`}>ویرایش</button>
+                          )}
+                          {item.status === 'active' && (
+                            <button type="button" className="secondary" disabled={busy} onClick={() => startReplaceDiscount(item)} data-testid={`replace-discount-${item.id}`}>جایگزینی</button>
+                          )}
+                          <button type="button" className="danger" disabled={busy} onClick={() => cancelDiscountRegistry(item.id)} data-testid={`cancel-discount-${item.id}`}>لغو</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                {editingDiscountId === item.id && (
-                  <div className="finance-registry-edit-panel" data-testid={`discount-edit-panel-${item.id}`}>
-                    <label className="finance-field">
-                      <span>دلیل</span>
-                      <textarea
-                        value={discountEditForm.reason}
-                        onChange={(e) => setDiscountEditForm((prev) => ({ ...prev, reason: e.target.value }))}
-                        rows={2}
-                      />
-                    </label>
-                    <div className="finance-split-grid">
-                      <label className="finance-cell-stack">
-                        <span className="finance-field-label">تاریخ شروع</span>
-                        <AfghanDateInput
-                          value={discountEditForm.startDate}
-                          onChange={(value) => setDiscountEditForm((prev) => ({ ...prev, startDate: value }))}
-                        />
-                      </label>
-                      <label className="finance-cell-stack">
-                        <span className="finance-field-label">تاریخ ختم</span>
-                        <AfghanDateInput
-                          value={discountEditForm.endDate}
-                          onChange={(value) => setDiscountEditForm((prev) => ({ ...prev, endDate: value }))}
-                        />
-                      </label>
-                    </div>
-                    <div className="row-actions">
-                      <button type="button" disabled={busy} onClick={() => saveDiscountEdit(item.id)} data-testid={`save-discount-edit-${item.id}`}>ذخیره</button>
-                      <button type="button" className="secondary" disabled={busy} onClick={() => setEditingDiscountId('')}>انصراف</button>
-                    </div>
-                    <p className="muted">برای تغییر مبلغ یا فیصدی از دکمهٔ «جایگزینی» استفاده کنید؛ این فورم فقط دلیل و تاریخ را ویرایش می‌کند.</p>
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
             {!filteredDiscountRegistry.length && <p className="muted">برای این جستجو، تخفیفی پیدا نشد.</p>}
             {filteredDiscountRegistry.length > discountRegistryPageSize && (
               <div className="finance-pagination">
@@ -10791,57 +10821,71 @@ export default function AdminFinance() {
             </select>
           </label>
           <div className="finance-registry-list">
-            {pagedExemptionRegistry.map((item) => (
-              <div key={item.id} className="finance-registry-row-wrap">
-                <div className="finance-registry-row">
-                  <div>
+            {pagedExemptionRegistry.map((item) => {
+              const isExpanded = expandedExemptionId === item.id;
+              return (
+                <div key={item.id} className="finance-registry-row-wrap">
+                  <button
+                    type="button"
+                    className={`finance-registry-row-compact ${isExpanded ? 'is-expanded' : ''}`}
+                    onClick={() => { setExpandedExemptionId(isExpanded ? '' : item.id); if (isExpanded) setEditingExemptionId(''); }}
+                    data-testid={`exemption-row-${item.id}`}
+                  >
                     <strong>{item.student?.fullName || item.student?.name || 'متعلم'}</strong>
-                    <span>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</span>
-                    <small>{item.reason || 'بدون توضیح'} · {EXEMPTION_SCOPE_UI_LABELS[item.scope] || item.scope || 'همه موارد'}</small>
-                  </div>
-                  <div className="finance-registry-meta">
                     <span className="finance-chip finance-chip-emerald">{EXEMPTION_TYPE_UI_LABELS[item.exemptionType] || item.exemptionType || 'معافیت'}</span>
-                    <strong>{item.exemptionType === 'partial' ? `${fmt(item.amount)} AFN / ${fmt(item.percentage)}%` : '100%'}</strong>
-                  </div>
-                  <div className="row-actions">
-                    {item.status === 'active' && (
-                      <button type="button" className="secondary" disabled={busy} onClick={() => (editingExemptionId === item.id ? setEditingExemptionId('') : startEditExemption(item))} data-testid={`edit-exemption-${item.id}`}>
-                        {editingExemptionId === item.id ? 'بستن' : 'ویرایش'}
-                      </button>
-                    )}
-                    {item.status === 'active' && (
-                      <button type="button" className="secondary" disabled={busy} onClick={() => startReplaceExemption(item)} data-testid={`replace-exemption-${item.id}`}>جایگزینی</button>
-                    )}
-                    <button type="button" className="danger" disabled={busy} onClick={() => cancelExemptionRegistry(item.id)} data-testid={`cancel-exemption-${item.id}`}>لغو</button>
-                  </div>
-                </div>
-                {editingExemptionId === item.id && (
-                  <div className="finance-registry-edit-panel" data-testid={`exemption-edit-panel-${item.id}`}>
-                    <label className="finance-field">
-                      <span>دلیل</span>
-                      <textarea
-                        value={exemptionEditForm.reason}
-                        onChange={(e) => setExemptionEditForm((prev) => ({ ...prev, reason: e.target.value }))}
-                        rows={2}
-                      />
-                    </label>
-                    <label className="finance-field">
-                      <span>ملاحظات اداری / حمایوی</span>
-                      <textarea
-                        value={exemptionEditForm.note}
-                        onChange={(e) => setExemptionEditForm((prev) => ({ ...prev, note: e.target.value }))}
-                        rows={2}
-                      />
-                    </label>
-                    <div className="row-actions">
-                      <button type="button" disabled={busy} onClick={() => saveExemptionEdit(item.id)} data-testid={`save-exemption-edit-${item.id}`}>ذخیره</button>
-                      <button type="button" className="secondary" disabled={busy} onClick={() => setEditingExemptionId('')}>انصراف</button>
+                    <span className="finance-chip finance-chip-muted">{item.exemptionType === 'partial' ? `${fmt(item.amount)} AFN / ${fmt(item.percentage)}%` : '100%'}</span>
+                    <span className="finance-registry-row-chevron" aria-hidden="true">{isExpanded ? '▴' : '▾'}</span>
+                  </button>
+                  {isExpanded && (
+                    <div className="finance-registry-detail" data-testid={`exemption-detail-${item.id}`}>
+                      <table className="finance-registry-detail-table">
+                        <tbody>
+                          <tr><td>صنف / سال</td><td>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</td></tr>
+                          <tr><td>دامنه</td><td>{EXEMPTION_SCOPE_UI_LABELS[item.scope] || item.scope || 'همه موارد'}</td></tr>
+                          <tr><td>دلیل</td><td>{item.reason || 'بدون توضیح'}</td></tr>
+                          {item.note ? <tr><td>ملاحظات</td><td>{item.note}</td></tr> : null}
+                        </tbody>
+                      </table>
+                      {editingExemptionId === item.id ? (
+                        <div className="finance-registry-edit-panel" data-testid={`exemption-edit-panel-${item.id}`}>
+                          <label className="finance-field">
+                            <span>دلیل</span>
+                            <textarea
+                              value={exemptionEditForm.reason}
+                              onChange={(e) => setExemptionEditForm((prev) => ({ ...prev, reason: e.target.value }))}
+                              rows={2}
+                            />
+                          </label>
+                          <label className="finance-field">
+                            <span>ملاحظات اداری / حمایوی</span>
+                            <textarea
+                              value={exemptionEditForm.note}
+                              onChange={(e) => setExemptionEditForm((prev) => ({ ...prev, note: e.target.value }))}
+                              rows={2}
+                            />
+                          </label>
+                          <div className="row-actions">
+                            <button type="button" disabled={busy} onClick={() => saveExemptionEdit(item.id)} data-testid={`save-exemption-edit-${item.id}`}>ذخیره</button>
+                            <button type="button" className="secondary" disabled={busy} onClick={() => setEditingExemptionId('')}>انصراف</button>
+                          </div>
+                          <p className="muted">برای تغییر نوع، مبلغ یا فیصدی معافیت از دکمهٔ «جایگزینی» استفاده کنید.</p>
+                        </div>
+                      ) : (
+                        <div className="row-actions">
+                          {item.status === 'active' && (
+                            <button type="button" className="secondary" disabled={busy} onClick={() => startEditExemption(item)} data-testid={`edit-exemption-${item.id}`}>ویرایش</button>
+                          )}
+                          {item.status === 'active' && (
+                            <button type="button" className="secondary" disabled={busy} onClick={() => startReplaceExemption(item)} data-testid={`replace-exemption-${item.id}`}>جایگزینی</button>
+                          )}
+                          <button type="button" className="danger" disabled={busy} onClick={() => cancelExemptionRegistry(item.id)} data-testid={`cancel-exemption-${item.id}`}>لغو</button>
+                        </div>
+                      )}
                     </div>
-                    <p className="muted">برای تغییر نوع، مبلغ یا فیصدی معافیت از دکمهٔ «جایگزینی» استفاده کنید.</p>
-                  </div>
-                )}
-              </div>
-            ))}
+                  )}
+                </div>
+              );
+            })}
             {!filteredExemptionRegistry.length && <p className="muted">برای این جستجو، معافیتی پیدا نشد.</p>}
             {filteredExemptionRegistry.length > exemptionRegistryPageSize && (
               <div className="finance-pagination">

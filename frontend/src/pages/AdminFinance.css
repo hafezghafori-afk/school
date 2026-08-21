@@ -2020,15 +2020,68 @@
   gap: 6px;
 }
 
-.finance-registry-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.9fr) auto;
-  gap: 12px;
+/* A row is just name + a couple of badges until clicked - full details
+   (class/year, reason, dates, scope) and the action buttons live in the
+   .finance-registry-detail panel that expands underneath it. */
+.finance-registry-row-compact {
+  display: flex;
   align-items: center;
+  gap: 10px;
+  width: 100%;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
+  padding: 10px 12px;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: right;
+}
+
+.finance-registry-row-compact:hover,
+.finance-registry-row-compact.is-expanded {
+  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.finance-registry-row-compact strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finance-registry-row-chevron {
+  flex: 0 0 auto;
+  color: rgba(226, 232, 240, 0.6);
+  font-size: 11px;
+}
+
+.finance-registry-detail {
+  display: grid;
+  gap: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.4);
   padding: 12px;
+}
+
+.finance-registry-detail-table {
+  width: 100%;
+  font-size: 13px;
+  border-collapse: collapse;
+}
+
+.finance-registry-detail-table td {
+  padding: 4px 0;
+  vertical-align: top;
+}
+
+.finance-registry-detail-table td:first-child {
+  color: rgba(226, 232, 240, 0.6);
+  width: 110px;
+  white-space: nowrap;
 }
 
 .finance-registry-edit-panel {
@@ -2038,21 +2091,6 @@
   border: 1px solid rgba(56, 189, 248, 0.3);
   background: rgba(15, 23, 42, 0.5);
   padding: 12px;
-}
-
-.finance-registry-row strong {
-  display: block;
-  margin-bottom: 4px;
-}
-
-.finance-registry-row span,
-.finance-registry-row small {
-  color: rgba(238, 245, 255, 0.78);
-}
-
-.finance-registry-row small {
-  display: block;
-  margin-top: 4px;
 }
 
 .finance-registry-meta {
