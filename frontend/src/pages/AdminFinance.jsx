@@ -8035,10 +8035,10 @@ export default function AdminFinance() {
       ) : null}
 
       <div className="finance-card finance-overview-filter" data-finance-section="overview reports">
-        <div>
+        <div className="finance-overview-filter-heading">
           <span className="finance-eyebrow">گزارش هوشمند مالی</span>
           <strong>یک بازه، یک منبع ارقام</strong>
-          <p className="muted">بل، پرداخت، تخفیف، مصرف و خزانه در همین بازه با هم محاسبه می‌شوند.</p>
+          <span className="muted">بل، پرداخت، تخفیف، مصرف و خزانه در همین بازه با هم محاسبه می‌شوند.</span>
         </div>
         <div className="finance-overview-filter-controls">
           <label>

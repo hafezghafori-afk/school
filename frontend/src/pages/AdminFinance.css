@@ -287,11 +287,39 @@
   background: linear-gradient(135deg, rgba(14, 116, 144, 0.16), rgba(15, 23, 42, 0.86));
 }
 
-.finance-overview-filter > div:first-child strong {
-  display: block;
-  margin: 3px 0;
+/* Eyebrow, title and description used to each sit on their own line
+   (span, then a display:block strong, then a <p>) - now a single wrapped
+   line, cheapest way to shave more height off the card. */
+.finance-overview-filter-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+
+.finance-overview-filter-heading .finance-eyebrow {
+  flex: 0 0 auto;
+  color: rgba(226, 232, 240, 0.7);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.finance-overview-filter-heading strong {
+  flex: 0 0 auto;
   color: #f8fafc;
-  font-size: 16px;
+  font-size: 15px;
+}
+
+.finance-overview-filter-heading strong::after {
+  content: '—';
+  margin-inline-start: 8px;
+  color: rgba(226, 232, 240, 0.4);
+  font-weight: 400;
+}
+
+.finance-overview-filter-heading .muted {
+  margin: 0;
+  font-size: 12.5px;
 }
 
 .finance-overview-filter-controls {
