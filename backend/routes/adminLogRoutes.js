@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const ActivityLog = require('../models/ActivityLog');
 const User = require('../models/User');
 const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
@@ -22,7 +23,14 @@ const buildFilter = async (query) => {
   const filter = {};
   const reasonQuery = String(query.reason || '').trim();
   const actorQuery = String(query.actor_q || query.actorName || query.actor_name || '').trim();
-  if (query.actor) filter.actor = query.actor;
+  if (query.actor) {
+    // .find()/.countDocuments() auto-cast a string to ObjectId, but .aggregate() ($match in
+    // the /summary route) does not — so this must be cast explicitly or byAction comes back empty.
+    const rawActor = String(query.actor).trim();
+    filter.actor = mongoose.Types.ObjectId.isValid(rawActor)
+      ? new mongoose.Types.ObjectId(rawActor)
+      : rawActor;
+  }
   if (actorQuery && !query.actor) {
     const safeActorQuery = actorQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const users = await User.find({
@@ -47,6 +55,12 @@ const buildFilter = async (query) => {
       .map((item) => item.trim())
       .filter(Boolean);
     if (values.length) filter.action = { $in: values };
+  }
+  const freeText = String(query.q || '').trim();
+  if (freeText) {
+    const safeText = freeText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const textRegex = new RegExp(safeText, 'i');
+    filter.$or = [{ action: textRegex }, { route: textRegex }];
   }
   const sensitiveOnly = String(query.sensitive || '').trim() === 'true';
   if (reasonQuery && sensitiveOnly) {
@@ -75,16 +89,68 @@ const buildFilter = async (query) => {
   return filter;
 };
 
+const MAX_PAGE_SIZE = 200;
+const DEFAULT_PAGE_SIZE = 50;
+
+function parsePagination(query) {
+  const page = Math.max(1, Number.parseInt(query.page, 10) || 1);
+  const pageSize = Math.min(
+    MAX_PAGE_SIZE,
+    Math.max(1, Number.parseInt(query.pageSize, 10) || DEFAULT_PAGE_SIZE)
+  );
+  return { page, pageSize, skip: (page - 1) * pageSize };
+}
+
+// Lightweight actor picker for the log/report UI. Deliberately separate from GET /api/admin/users
+// (which requires manage_users/users.manage and returns permissions/adminLevel/status) so a
+// view_reports-only admin can pick a teacher/admin to inspect without needing user-management access.
+router.get('/actors', requireAuth, requireRole(['admin']), requirePermission('view_reports'), async (req, res) => {
+  try {
+    const users = await User.find({ role: { $in: ['instructor', 'admin'] } })
+      .select('name email role orgRole')
+      .sort({ name: 1 })
+      .lean();
+    res.json({ success: true, items: users });
+  } catch {
+    res.status(500).json({ success: false, message: 'خطا در دریافت فهرست کاربران' });
+  }
+});
+
 router.get('/', requireAuth, requireRole(['admin']), requirePermission('view_reports'), async (req, res) => {
   try {
     const filter = await buildFilter(req.query);
-    const items = await ActivityLog.find(filter)
-      .populate('actor', 'name email role orgRole')
-      .sort({ createdAt: -1 })
-      .limit(500);
-    res.json({ success: true, items });
+    const { page, pageSize, skip } = parsePagination(req.query);
+    const [items, total] = await Promise.all([
+      ActivityLog.find(filter)
+        .populate('actor', 'name email role orgRole')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(pageSize),
+      ActivityLog.countDocuments(filter)
+    ]);
+    res.json({ success: true, items, total, page, pageSize });
   } catch {
     res.status(500).json({ success: false, message: '\u062e\u0637\u0627 \u062f\u0631 \u062f\u0631\u06cc\u0627\u0641\u062a \u0644\u0627\u06af\u200c\u0647\u0627' });
+  }
+});
+
+router.get('/summary', requireAuth, requireRole(['admin']), requirePermission('view_reports'), async (req, res) => {
+  try {
+    const filter = await buildFilter(req.query);
+    const sensitiveFilter = await buildFilter({ ...req.query, sensitive: 'true' });
+    const [total, sensitiveTotal, byAction] = await Promise.all([
+      ActivityLog.countDocuments(filter),
+      ActivityLog.countDocuments(sensitiveFilter),
+      ActivityLog.aggregate([
+        { $match: filter },
+        { $group: { _id: '$action', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 8 }
+      ])
+    ]);
+    res.json({ success: true, total, sensitiveTotal, byAction });
+  } catch {
+    res.status(500).json({ success: false, message: '\u062e\u0637\u0627 \u062f\u0631 \u062f\u0631\u06cc\u0627\u0641\u062a \u062e\u0644\u0627\u0635\u0647' });
   }
 });
 

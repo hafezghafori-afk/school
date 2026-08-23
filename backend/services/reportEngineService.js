@@ -12,6 +12,7 @@ require('../models/FeeExemption');
 require('../models/FinanceRelief');
 require('../models/FinancialYear');
 require('../models/ExpenseEntry');
+require('../models/FinanceRefund');
 require('../models/Attendance');
 require('../models/ExamSession');
 require('../models/ExamType');
@@ -36,6 +37,7 @@ const Discount = require('../models/Discount');
 const FeeExemption = require('../models/FeeExemption');
 const FinanceRelief = require('../models/FinanceRelief');
 const FinancialYear = require('../models/FinancialYear');
+const FinanceRefund = require('../models/FinanceRefund');
 const Attendance = require('../models/Attendance');
 const ExamSession = require('../models/ExamSession');
 const ExamResult = require('../models/ExamResult');
@@ -54,6 +56,7 @@ const {
 } = require('../utils/paymentClassScope');
 const { deriveFinanceOrderStatus } = require('../utils/financeLineItems');
 const { resolveAsasNumberMapForDocs, pickAdmissionNo } = require('../utils/studentAdmissionNumber');
+const { loadCurrentMembershipStatusMap, getStudentStatusBadge, hasStudentLeft } = require('../utils/financeStudentLifecycleStatus');
 const {
   buildAnnualGovernmentFinanceReport,
   buildMonthlyGovernmentFinanceReport,
@@ -108,6 +111,14 @@ const REPORT_DEFINITIONS = Object.freeze([
     requiredPermissions: ['manage_finance'],
     supportedFilters: ['academicYearId', 'classId', 'dateFrom', 'dateTo'],
     description: 'برای هر پرداخت، ماه فیس را با ماه پرداخت واقعی مقایسه می‌کند (به‌موقع/تأخیر/پیش‌پرداخت) و خالص عاید هر ماه فیس را - فارغ از تاریخ دریافت - جمع می‌زند'
+  },
+  {
+    key: 'fee_monthly_summary',
+    title: 'گزارش ماهانه مالی',
+    category: 'finance',
+    requiredPermissions: ['manage_finance'],
+    supportedFilters: ['academicYearId', 'classId', 'month'],
+    description: 'خلاصه‌ی یک ماه مشخص: کل دریافتی نقدی و خالص آن، سهم باقیات و پیش‌پرداخت وصول‌شده در همین ماه، تعداد بل‌های همین ماه و وضعیت پرداخت شاگردان'
   },
   {
     key: 'exam_outcomes',
@@ -278,7 +289,7 @@ function buildStringDateRangeFilter(field, filters = {}) {
   return Object.keys(range).length ? { [field]: range } : {};
 }
 
-function buildFinanceReliefFilter(filters = {}, { activeOnly = false, dateField = 'createdAt' } = {}) {
+function buildFinanceReliefFilter(filters = {}, { activeOnly = false, dateField = 'createdAt', applyDateFilter = true } = {}) {
   const query = { feeOrderId: null };
   if (filters.academicYearId) query.academicYearId = filters.academicYearId;
   if (filters.classId) query.classId = filters.classId;
@@ -286,7 +297,13 @@ function buildFinanceReliefFilter(filters = {}, { activeOnly = false, dateField 
   if (filters.studentId) query.studentId = filters.studentId;
   if (filters.userId) query.student = filters.userId;
   if (activeOnly) query.status = 'active';
-  Object.assign(query, buildDateRangeFilter(dateField, filters));
+  // A relief's `createdAt` is when it was granted, not when it is in effect -
+  // an ongoing relief granted months ago should still count as "active" for
+  // a report filtered to a recent window. Callers showing current standing
+  // (e.g. buildFeeDebtorsOverviewReport) pass applyDateFilter:false so an old
+  // but still-active relief isn't silently dropped just because the report's
+  // date range doesn't cover its creation date.
+  if (applyDateFilter) Object.assign(query, buildDateRangeFilter(dateField, filters));
   return query;
 }
 
@@ -678,7 +695,16 @@ async function buildFeeDebtorsOverviewReport(filters) {
   if (filters.studentMembershipId) orderFilter.studentMembershipId = filters.studentMembershipId;
   if (filters.studentId) orderFilter.studentId = filters.studentId;
   if (filters.userId) orderFilter.student = filters.userId;
-  Object.assign(orderFilter, buildDateRangeFilter('issuedAt', filters));
+  // A debtors report answers "who currently owes money", not "which bills
+  // were issued in this window" - a bill issued before dateFrom that is
+  // still unpaid is still a debt today. So dateFrom is intentionally not
+  // applied here (unlike other report engine queries via buildDateRangeFilter):
+  // only dateTo is honored, as an "as of this date" cutoff, matching the
+  // finance dashboard's "بدهکاران اصلی" widget (buildDebtorGroups in
+  // financeDashboardService.js), which uses the same issuedAt <= endAt shape.
+  // Without this the two views disagree on both debtor count and total owed
+  // whenever a date range narrower than "all time" is picked.
+  if (filters.dateTo) orderFilter.issuedAt = { $lte: new Date(`${filters.dateTo}T23:59:59.999Z`) };
 
   const [orders, reliefs] = await Promise.all([
     FeeOrder.find(orderFilter)
@@ -688,7 +714,11 @@ async function buildFeeDebtorsOverviewReport(filters) {
       .populate('classId', 'title code gradeLevel section')
       .populate('academicYearId', 'title code')
       .sort({ dueDate: 1, issuedAt: -1, createdAt: -1 }),
-    FinanceRelief.find(buildFinanceReliefFilter(filters, { activeOnly: true }))
+    // activeOnly:true already restricts this to reliefs in effect right now;
+    // applyDateFilter:false keeps a relief granted before the report's date
+    // range from being dropped just because it wasn't *created* in-window
+    // (see buildFinanceReliefFilter's comment).
+    FinanceRelief.find(buildFinanceReliefFilter(filters, { activeOnly: true, applyDateFilter: false }))
       .populate('student', 'name email')
       .populate('studentId', 'fullName admissionNo')
       .populate('studentMembershipId', 'status isCurrent')
@@ -698,13 +728,23 @@ async function buildFeeDebtorsOverviewReport(filters) {
   ]);
 
   const asasNumberMap = await resolveAsasNumberMapForDocs(orders, reliefs);
+  // Single source of truth for "is this student still enrolled", same map
+  // the finance dashboard uses (financeStudentLifecycleStatus.js), so a
+  // transferred/dropped/expelled student's debt reads the same way here as
+  // it does on the dashboard's "بدهکاران اصلی" widget instead of looking
+  // identical to an active student's.
+  const lifecycleStatusMap = await loadCurrentMembershipStatusMap(orders.map((item) => item.student));
 
   const reliefGrouped = new Map();
   for (const item of reliefs) {
+    // Same precedence as the order grouping key below (studentId/student
+    // before studentMembershipId) so a relief and its student's orders join
+    // onto the same debtor row even when the relief was recorded against an
+    // older/newer membership than the order.
     const groupKey = [
-      getReferenceId(item.studentMembershipId),
       getReferenceId(item.studentId),
-      getReferenceId(item.student)
+      getReferenceId(item.student),
+      getReferenceId(item.studentMembershipId)
     ].find(Boolean) || normalizeText(item.sourceKey) || String(item._id);
     const current = reliefGrouped.get(groupKey) || {
       reliefCount: 0,
@@ -724,10 +764,17 @@ async function buildFeeDebtorsOverviewReport(filters) {
     const outstandingAmount = Number(item.outstandingAmount || 0);
     if (outstandingAmount <= 0) continue;
 
+    // Group by the student (StudentCore/User), not by studentMembershipId:
+    // the same person re-enrolling (new membership row) must still collapse
+    // to one debtor row, matching buildDebtorGroups in
+    // financeDashboardService.js. Grouping by membership first used to split
+    // one student's debt across two rows whenever their orders spanned more
+    // than one membership, inflating the debtor count relative to the
+    // dashboard.
     const groupKey = [
-      getReferenceId(item.studentMembershipId),
       getReferenceId(item.studentId),
-      getReferenceId(item.student)
+      getReferenceId(item.student),
+      getReferenceId(item.studentMembershipId)
     ].find(Boolean) || normalizeText(item.orderNumber) || String(item._id);
 
     const current = grouped.get(groupKey) || {
@@ -735,6 +782,7 @@ async function buildFeeDebtorsOverviewReport(filters) {
       admissionNo: pickAdmissionNo(item, asasNumberMap),
       classTitle: getClassTitle(item.classId),
       academicYear: getAcademicYearTitle(item.academicYearId),
+      studentUserId: getReferenceId(item.student),
       orderCount: 0,
       totalDue: 0,
       totalPaid: 0,
@@ -777,13 +825,23 @@ async function buildFeeDebtorsOverviewReport(filters) {
   }
 
   const rows = Array.from(grouped.values())
-    .map((item) => ({
-      ...item,
-      totalDue: Number(item.totalDue.toFixed(2)),
-      totalPaid: Number(item.totalPaid.toFixed(2)),
-      totalOutstanding: Number(item.totalOutstanding.toFixed(2)),
-      fixedReliefAmount: Number(item.fixedReliefAmount.toFixed(2))
-    }))
+    .map((item) => {
+      const badge = getStudentStatusBadge(lifecycleStatusMap.get(item.studentUserId));
+      return {
+        ...item,
+        totalDue: Number(item.totalDue.toFixed(2)),
+        totalPaid: Number(item.totalPaid.toFixed(2)),
+        totalOutstanding: Number(item.totalOutstanding.toFixed(2)),
+        fixedReliefAmount: Number(item.fixedReliefAmount.toFixed(2)),
+        // Student's enrollment status (فعال/تبدیل‌شده/منفک‌شده/...), separate
+        // from debtorStatus above which describes the *bill's* payment state
+        // (overdue/partial/new). A departed student's unpaid balance needs a
+        // different follow-up (refund/transfer/write-off) than an enrolled
+        // one's, so both statuses are shown side by side.
+        studentStatus: lifecycleStatusMap.get(item.studentUserId) || '',
+        studentStatusLabel: badge.label || 'نامشخص'
+      };
+    })
     .sort((left, right) => right.totalOutstanding - left.totalOutstanding);
 
   const summary = {
@@ -796,7 +854,11 @@ async function buildFeeDebtorsOverviewReport(filters) {
     totalReliefs: rows.reduce((sum, item) => sum + Number(item.reliefCount || 0), 0),
     totalFixedReliefAmount: Number(rows.reduce((sum, item) => sum + Number(item.fixedReliefAmount || 0), 0).toFixed(2)),
     fullReliefCount: rows.reduce((sum, item) => sum + Number(item.fullReliefCount || 0), 0),
-    percentReliefCount: rows.reduce((sum, item) => sum + Number(item.percentReliefCount || 0), 0)
+    percentReliefCount: rows.reduce((sum, item) => sum + Number(item.percentReliefCount || 0), 0),
+    // Debtors who are no longer enrolled - mirrors legacyArrears on the
+    // finance dashboard so this report can flag the same "needs a deliberate
+    // decision" balances instead of quietly mixing them into totalDebtors.
+    departedDebtors: rows.filter((item) => hasStudentLeft(item.studentStatus)).length
   };
 
   return buildBaseReport(definition, filters, {
@@ -815,7 +877,8 @@ async function buildFeeDebtorsOverviewReport(filters) {
       { key: 'fixedReliefAmount', label: 'مبلغ تسهیلات ثابت' },
       { key: 'fullReliefCount', label: 'معافیت‌های کامل' },
       { key: 'lastDueDate', label: 'آخرین مهلت پرداخت' },
-      { key: 'debtorStatus', label: 'وضعیت بدهکاری' }
+      { key: 'debtorStatus', label: 'وضعیت بدهکاری' },
+      { key: 'studentStatusLabel', label: 'وضعیت شاگرد' }
     ],
     rows,
     summary,
@@ -1037,6 +1100,174 @@ async function buildFeePaymentTimingOverviewReport(filters) {
     summary,
     meta: { totalRows: rows.length }
   });
+}
+
+// Same "YYYY-MM" solar key every bill-month picker in the app already uses
+// (see getFinanceBillMonthFilterKey on the frontend) - periodLabel first
+// since that's the explicit, human-assigned fee period, falling back to the
+// order's dueDate converted to the Afghan solar calendar.
+function resolveFeeOrderMonthKey(order = {}) {
+  const periodLabel = normalizeText(order.periodLabel);
+  const periodMatches = periodLabel
+    ? [...periodLabel.matchAll(/(?:^|\D)((?:13|14|20)\d{2})[-/](0?[1-9]|1[0-2])(?=\D|$)/g)]
+    : [];
+  if (periodMatches.length) {
+    const [, year, month] = periodMatches[periodMatches.length - 1];
+    return `${year}-${String(month).padStart(2, '0')}`;
+  }
+  const solar = getSolarYearMonth(order.dueDate);
+  return solar ? `${solar.year}-${String(solar.month).padStart(2, '0')}` : '';
+}
+
+// Reverse of getSolarYearMonth: given a solar "YYYY-MM" key, finds the
+// Gregorian [start, end] window that solar month covers. There's no direct
+// solar-year+month -> Gregorian-date constructor in Intl, so this seeds a
+// rough guess (Nowruz/Hamal 1 falls near March 21 of solarYear+621) and then
+// walks day-by-day - same self-correcting technique feeBillingService's
+// solarMonthBounds() uses - until it lands exactly on the target solar month
+// and finds its real boundaries.
+function resolveSolarMonthWindow(monthKey) {
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(String(monthKey || '').trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const targetIndex = (year * 12) + month;
+  const addDays = (date, count) => new Date(date.getTime() + (count * 24 * 60 * 60 * 1000));
+  const solarIndex = (date) => {
+    const solar = getSolarYearMonth(date);
+    return solar ? (solar.year * 12) + solar.month : null;
+  };
+  const sameSolarMonth = (date) => solarIndex(date) === targetIndex;
+
+  const gregorianYear = year + 621;
+  let probe = new Date(gregorianYear, 2, 21 + Math.round((month - 1) * 30.44));
+  let idx = solarIndex(probe);
+  if (idx == null) return null;
+  // solarIndex only ever moves forward as the Gregorian date moves forward,
+  // so stepping one day at a time toward the target can't overshoot or
+  // oscillate - unlike a coarse "jump 30 days" step, which skips clean over
+  // any 29/30-day solar month sitting near a probe that's already close.
+  let guard = 0;
+  while (idx !== targetIndex && guard < 400) {
+    probe = addDays(probe, idx < targetIndex ? 1 : -1);
+    idx = solarIndex(probe);
+    if (idx == null) return null;
+    guard += 1;
+  }
+  if (idx !== targetIndex) return null;
+
+  let start = probe;
+  while (sameSolarMonth(addDays(start, -1))) start = addDays(start, -1);
+  let end = probe;
+  while (sameSolarMonth(addDays(end, 1))) end = addDays(end, 1);
+
+  return {
+    start: new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0, 0),
+    end: new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999)
+  };
+}
+
+// The single-month answer to everything AdminFinance.jsx's "گزارش ماهانه"
+// card asks for. Two independent axes anchored to the same solar month M:
+//  - "bills FOR month M" (periodLabel/dueDate = M) - issuance/collection
+//    status of M's own tuition orders, regardless of when they get paid.
+//  - "cash received DURING month M" (paidAt = M) - actual money that moved,
+//    split into what belongs to M itself vs. arrears from earlier months vs.
+//    advance payments for later months, whichever fee period it's really for.
+async function buildFeeMonthlySummaryReport(filters) {
+  const definition = getReportDefinition('fee_monthly_summary');
+  const monthKey = normalizeText(filters.month);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthKey)) {
+    const error = new Error('report_month_required');
+    error.status = 400;
+    throw error;
+  }
+  const window = resolveSolarMonthWindow(monthKey);
+
+  // ---- Axis B: bills issued for this fee month ----
+  const orderFilter = { status: { $ne: 'void' } };
+  if (filters.academicYearId) orderFilter.academicYearId = filters.academicYearId;
+  if (filters.classId) orderFilter.classId = filters.classId;
+  await applySchoolClassScope(filters, orderFilter);
+
+  const candidateOrders = await FeeOrder.find(orderFilter)
+    .select('student studentId periodLabel dueDate outstandingAmount status adjustments')
+    .lean();
+  const monthOrders = candidateOrders.filter((order) => resolveFeeOrderMonthKey(order) === monthKey);
+
+  const partialStudents = new Set();
+  const paidStudents = new Set();
+  let outstandingTotal = 0;
+  let discountExemptionTotal = 0;
+  for (const order of monthOrders) {
+    const studentKey = String(order.student || order.studentId || '');
+    if (order.status === 'partial') partialStudents.add(studentKey);
+    if (order.status === 'paid') paidStudents.add(studentKey);
+    outstandingTotal += Number(order.outstandingAmount || 0);
+    for (const adjustment of (Array.isArray(order.adjustments) ? order.adjustments : [])) {
+      if (['discount', 'waiver'].includes(normalizeText(adjustment.type))) {
+        discountExemptionTotal += Number(adjustment.amount || 0);
+      }
+    }
+  }
+
+  // ---- Axis A: cash actually received during this calendar (solar) month ----
+  const paymentFilter = { status: 'approved' };
+  if (filters.academicYearId) paymentFilter.academicYearId = filters.academicYearId;
+  if (filters.classId) paymentFilter.classId = filters.classId;
+  await applySchoolClassScope(filters, paymentFilter);
+  if (window) paymentFilter.paidAt = { $gte: window.start, $lte: window.end };
+
+  const payments = await FeePayment.find(paymentFilter)
+    .populate('feeOrderId', 'periodLabel dueDate status')
+    .populate('allocations.feeOrderId', 'periodLabel dueDate status')
+    .lean();
+
+  let grossCollected = 0;
+  let pastMonthsCollected = 0;
+  let futureMonthsCollected = 0;
+  for (const payment of payments) {
+    const allocations = Array.isArray(payment.allocations) && payment.allocations.length
+      ? payment.allocations
+      : (payment.feeOrderId ? [{ feeOrderId: payment.feeOrderId, amount: payment.amount }] : []);
+    for (const allocation of allocations) {
+      const order = allocation?.feeOrderId;
+      if (!order || typeof order !== 'object') continue;
+      if (normalizeText(order.status) === 'void') continue;
+      const amount = roundMoney(allocation.amount);
+      if (amount <= 0) continue;
+      grossCollected += amount;
+      const orderMonthKey = resolveFeeOrderMonthKey(order);
+      if (orderMonthKey && orderMonthKey < monthKey) pastMonthsCollected += amount;
+      else if (orderMonthKey && orderMonthKey > monthKey) futureMonthsCollected += amount;
+    }
+  }
+
+  // ---- Refunds actually paid out during this month, also cut from "net" ----
+  const refundFilter = { status: 'paid' };
+  if (filters.academicYearId) refundFilter.academicYearId = filters.academicYearId;
+  if (filters.classId) refundFilter.classId = filters.classId;
+  if (window) refundFilter.paidAt = { $gte: window.start, $lte: window.end };
+  const refunds = await FinanceRefund.find(refundFilter).select('amount').lean();
+  const refundTotal = refunds.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+
+  const netMonthlyIncome = roundMoney(grossCollected - discountExemptionTotal - refundTotal);
+
+  const summary = {
+    monthKey,
+    grossMonthlyIncome: roundMoney(grossCollected),
+    netMonthlyIncome,
+    pastMonthsCollectedThisMonth: roundMoney(pastMonthsCollected),
+    futureMonthsCollectedThisMonth: roundMoney(futureMonthsCollected),
+    totalOrders: monthOrders.length,
+    partialPaymentStudents: partialStudents.size,
+    fullPaymentStudents: paidStudents.size,
+    outstandingThisMonth: roundMoney(outstandingTotal),
+    discountExemptionDeducted: roundMoney(discountExemptionTotal),
+    refundsDeducted: roundMoney(refundTotal)
+  };
+
+  return buildBaseReport(definition, filters, { columns: [], rows: [], summary });
 }
 
 async function buildFeeDiscountExemptionOverviewReport(filters) {
@@ -2123,6 +2354,8 @@ async function runReport(reportKey, rawFilters = {}) {
       return buildFeeAdvancePaymentsOverviewReport(filters);
     case 'fee_payment_timing_overview':
       return buildFeePaymentTimingOverviewReport(filters);
+    case 'fee_monthly_summary':
+      return buildFeeMonthlySummaryReport(filters);
     case 'exam_outcomes':
       return buildExamOutcomesReport(filters);
     case 'attendance_overview':

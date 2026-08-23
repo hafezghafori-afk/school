@@ -93,8 +93,8 @@ router.get('/transactions/:transactionId', requireAuth, requireRole(['admin']), 
 
 router.post('/preview', requireAuth, requireRole(['admin', 'instructor']), requirePermission('view_reports'), async (req, res) => {
   try {
-    if (!req.body?.sessionId) {
-      return res.status(400).json({ success: false, message: 'Session is required.' });
+    if (!req.body?.sessionId && !(req.body?.academicYearId && req.body?.classId)) {
+      return res.status(400).json({ success: false, message: 'Session or academic year + class is required.' });
     }
     const data = await previewPromotions(req.body || {});
     return res.json({ success: true, ...data });
@@ -106,8 +106,8 @@ router.post('/preview', requireAuth, requireRole(['admin', 'instructor']), requi
 
 router.post('/apply', requireAuth, requireRole(['admin']), requirePermission('education.promotions.manage'), async (req, res) => {
   try {
-    if (!req.body?.sessionId) {
-      return res.status(400).json({ success: false, message: 'Session is required.' });
+    if (!req.body?.sessionId && !(req.body?.academicYearId && req.body?.classId)) {
+      return res.status(400).json({ success: false, message: 'Session or academic year + class is required.' });
     }
     const data = await applyPromotions(req.body || {}, req.user?.id || null);
     await logActivity({

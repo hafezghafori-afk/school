@@ -7668,6 +7668,26 @@ router.get('/admin/reports/payment-timing', requireAuth, requireRole(['admin']),
   }
 });
 
+router.get('/admin/reports/monthly-summary', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const { classId = '', courseId = '', academicYearId = '', month = '' } = req.query || {};
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(month || '').trim())) {
+      return res.status(400).json({ success: false, message: 'ماه انتخاب‌شده معتبر نیست.' });
+    }
+    const scope = await resolveFinanceReportReadContext(req, res, { classId, courseId });
+    if (scope.error) return res.status(400).json({ success: false, message: scope.error });
+    const report = await runReport('fee_monthly_summary', {
+      schoolId: scope.schoolId,
+      classId: scope.classId || '',
+      academicYearId,
+      month
+    });
+    res.json({ success: true, summary: report.summary });
+  } catch {
+    res.status(500).json({ success: false, message: 'خطا در گزارش ماهانه مالی' });
+  }
+});
+
 // Shared label dictionary for turning a report's `summary` object (English
 // keys, coming straight out of reportEngineService's aggregations) into the
 // small Dari key/value cards shown above every report's table - both in the
@@ -7680,6 +7700,7 @@ const FINANCE_REPORT_SUMMARY_LABELS = {
   overdueDebtors: 'بدهکاران مهلت‌گذشته',
   partialDebtors: 'بدهکاران نیمه‌پرداخت',
   debtorsWithRelief: 'بدهکاران دارای تسهیل',
+  departedDebtors: 'بدهکاران ترک‌کرده',
   totalReliefs: 'تعداد تسهیلات فعال',
   totalFixedReliefAmount: 'مبلغ تسهیلات ثابت',
   fullReliefCount: 'معافیت‌های کامل',
@@ -7705,7 +7726,17 @@ const FINANCE_REPORT_SUMMARY_LABELS = {
   onTimeCount: 'پرداخت‌های به‌موقع',
   lateCount: 'پرداخت‌های با تأخیر',
   advanceCount: 'پرداخت‌های پیش‌پرداختی',
-  averageLagMonths: 'میانگین فاصله (ماه)'
+  averageLagMonths: 'میانگین فاصله (ماه)',
+  monthKey: 'ماه گزارش',
+  grossMonthlyIncome: 'عاید ماه',
+  netMonthlyIncome: 'عاید خالص ماه',
+  pastMonthsCollectedThisMonth: 'عاید ماه‌های گذشته در این ماه',
+  futureMonthsCollectedThisMonth: 'عاید ماه‌های آینده در این ماه',
+  partialPaymentStudents: 'شاگردان پرداخت ناقص',
+  fullPaymentStudents: 'شاگردان پرداخت مکمل',
+  outstandingThisMonth: 'باقیات این ماه',
+  discountExemptionDeducted: 'تخفیف و معافیت (کسرشده از خالص)',
+  refundsDeducted: 'استرداد (کسرشده از خالص)'
 };
 
 // Explicit allowlist rather than a substring/regex match - a loose regex
@@ -7715,7 +7746,10 @@ const FINANCE_REPORT_SUMMARY_LABELS = {
 const FINANCE_REPORT_MONEY_KEYS = new Set([
   'totalOutstanding', 'totalFixedReliefAmount', 'totalDue', 'approvedCollection',
   'pendingCollection', 'totalDiscountAmount', 'totalPrepaidAmount', 'total', 'pendingTotal',
-  'totalPaid', 'approvedAmount', 'pendingAmount', 'amount', 'fixedReliefAmount'
+  'totalPaid', 'approvedAmount', 'pendingAmount', 'amount', 'fixedReliefAmount',
+  'grossMonthlyIncome', 'netMonthlyIncome', 'pastMonthsCollectedThisMonth',
+  'futureMonthsCollectedThisMonth', 'outstandingThisMonth', 'discountExemptionDeducted',
+  'refundsDeducted'
 ]);
 const FINANCE_REPORT_DATE_KEYS = new Set([
   'lastDueDate', 'createdAt', 'startDate', 'endDate', 'referenceDate', 'dueDate', 'date', 'paidAt'
@@ -7768,7 +7802,7 @@ function buildFinanceReportSummaryRows(summary = {}) {
 // exploration; a printed A4 report reads better with a curated subset. Falls
 // back to every engine column when a report has no override below.
 const FINANCE_REPORT_PDF_COLUMN_OVERRIDES = {
-  fee_debtors_overview: ['studentName', 'admissionNo', 'classTitle', 'totalOutstanding', 'overdueOrders', 'lastDueDate', 'debtorStatus'],
+  fee_debtors_overview: ['studentName', 'admissionNo', 'classTitle', 'totalOutstanding', 'overdueOrders', 'lastDueDate', 'debtorStatus', 'studentStatusLabel'],
   fee_collection_by_class: ['classTitle', 'orderCount', 'totalDue', 'approvedAmount', 'totalOutstanding', 'collectionRate'],
   fee_advance_payments_overview: ['studentName', 'admissionNo', 'classTitle', 'monthsPrepaid', 'totalPrepaidAmount', 'latestPrepaidMonth'],
   fee_discount_exemption_overview: ['studentName', 'admissionNo', 'classTitle', 'recordType', 'benefitType', 'amount', 'status']
@@ -7783,6 +7817,7 @@ const FINANCE_REPORT_PDF_CATALOG = {
   by_class: { title: 'گزارش وصول صنف‌وار', engineKey: 'fee_collection_by_class' },
   advance_payments: { title: 'گزارش پیش‌پرداخت‌کنندگان', engineKey: 'fee_advance_payments_overview' },
   payment_timing: { title: 'گزارش زمان‌بندی پرداخت فیس', engineKey: 'fee_payment_timing_overview' },
+  monthly_summary: { title: 'گزارش ماهانه مالی', engineKey: 'fee_monthly_summary' },
   discounts: { title: 'گزارش تخفیف و معافیت', engineKey: 'fee_discount_exemption_overview' },
   cashflow: { title: 'گزارش جریان نقدی', adapter: 'cashflow' },
   daily_cashier: { title: 'گزارش صندوق روزانه', adapter: 'dailyCashier' },
@@ -7798,9 +7833,20 @@ async function buildFinanceReportPdfPayload(reportKey, { scope, query = {} } = {
     throw error;
   }
 
+  // The debtors report shows every open balance as of a cutoff date, not
+  // bills issued within a from/to window (see buildFeeDebtorsOverviewReport
+  // in reportEngineService.js) - labeling it "بازه: از ... تا ..." reads as
+  // "only bills from this window" and is exactly what made a debtors PDF
+  // look like it was missing older debts. Every other report here is a real
+  // issued/paid-in-window range, so only this one gets the "as of" phrasing.
+  const dateLabel = reportKey === 'debtors'
+    ? (query.dateTo ? `وضعیت باقیات تا تاریخ: ${query.dateTo}` : '')
+    : reportKey === 'monthly_summary'
+      ? (query.month ? `ماه: ${query.month}` : '')
+      : (query.dateFrom || query.dateTo ? `بازه: ${query.dateFrom || '...'} تا ${query.dateTo || '...'}` : '');
   const filtersLabel = [
     scope.schoolClass?.title ? `صنف: ${scope.schoolClass.title}` : 'صنف: همه صنف‌ها',
-    query.dateFrom || query.dateTo ? `بازه: ${query.dateFrom || '...'} تا ${query.dateTo || '...'}` : ''
+    dateLabel
   ].filter(Boolean).join(' | ');
   const generatedAtLabel = `تاریخ تولید گزارش: ${formatReportDateLabel(new Date())}`;
 
@@ -7810,7 +7856,8 @@ async function buildFinanceReportPdfPayload(reportKey, { scope, query = {} } = {
       classId: scope.classId || '',
       academicYearId: query.academicYearId || '',
       dateFrom: query.dateFrom || '',
-      dateTo: query.dateTo || ''
+      dateTo: query.dateTo || '',
+      month: query.month || ''
     });
     const keepKeys = FINANCE_REPORT_PDF_COLUMN_OVERRIDES[catalogEntry.engineKey];
     const columns = keepKeys

@@ -269,7 +269,8 @@ const REPORT_COLUMN_OVERRIDES = {
     overdueOrders: 'بل‌های مهلت‌گذشته',
     partialOrders: 'بل‌های نیمه‌پرداخت',
     lastDueDate: 'آخرین مهلت پرداخت',
-    debtorStatus: 'وضعیت بدهکاری'
+    debtorStatus: 'وضعیت بدهکاری',
+    studentStatusLabel: 'وضعیت شاگرد'
   },
   fee_discount_exemption_overview: {
     studentName: 'متعلم',
@@ -360,6 +361,7 @@ const SUMMARY_LABEL_OVERRIDES = {
   totalDebtors: 'تعداد بدهکاران',
   overdueDebtors: 'بدهکاران مهلت‌گذشته',
   partialDebtors: 'بدهکاران نیمه‌پرداخت',
+  departedDebtors: 'بدهکاران ترک‌کرده',
   totalEntries: 'تعداد ثبت‌ها',
   activeDiscounts: 'تخفیف‌های فعال',
   activeExemptions: 'معافیت‌های فعال',
@@ -438,7 +440,8 @@ const CLEAN_REPORT_COLUMN_LABELS = {
     overdueOrders: 'بل‌های مهلت‌گذشته',
     partialOrders: 'بل‌های نیمه‌پرداخت',
     lastDueDate: 'آخرین مهلت پرداخت',
-    debtorStatus: 'وضعیت بدهکاری'
+    debtorStatus: 'وضعیت بدهکاری',
+    studentStatusLabel: 'وضعیت شاگرد'
   },
   fee_discount_exemption_overview: {
     studentName: 'متعلم',
@@ -471,6 +474,7 @@ const CLEAN_SUMMARY_LABELS = {
   totalDebtors: 'تعداد بدهکاران',
   overdueDebtors: 'بدهکاران مهلت‌گذشته',
   partialDebtors: 'بدهکاران نیمه‌پرداخت',
+  departedDebtors: 'بدهکاران ترک‌کرده',
   totalEntries: 'تعداد ثبت‌ها',
   activeDiscounts: 'تخفیف‌های فعال',
   activeExemptions: 'معافیت‌های فعال',

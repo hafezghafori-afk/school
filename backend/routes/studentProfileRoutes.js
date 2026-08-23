@@ -22,6 +22,11 @@ const {
   removeStudentDocumentFile,
   storeStudentDocumentFile
 } = require('../services/studentDocumentStorageService');
+const {
+  buildCertificateHtml,
+  buildDiplomaHtml,
+  buildTranscriptHtml
+} = require('../services/studentDocumentPrintService');
 const { assertSafeStudentInput } = require('../utils/studentInputSafety');
 
 const router = express.Router();
@@ -104,6 +109,78 @@ router.get('/:studentRef', requireAuth, requireRole(['admin']), requireAnyPermis
     return res.json({ success: true, item });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'دریافت پروفایل شاگرد ناموفق بود.' });
+  }
+});
+
+const studentDocumentPrintAccess = [
+  requireAuth,
+  requireRole(['admin']),
+  requireAnyPermission(['students.profile.view', 'students.manage', 'view_reports', 'manage_users'])
+];
+
+function sendPrintableDocument(res, doc, { fallbackMessage } = {}) {
+  if (!doc) {
+    return res.status(404).json({ success: false, message: fallbackMessage || 'پروفایل شاگرد پیدا نشد.' });
+  }
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Content-Disposition', `inline; filename="${doc.documentNo}.html"`);
+  return res.send(doc.html);
+}
+
+router.get('/:studentRef/documents/certificate.print', ...studentDocumentPrintAccess, async (req, res) => {
+  try {
+    const doc = await buildCertificateHtml(req.params.studentRef, { membershipId: req.query.membershipId || '' });
+    if (doc) {
+      await logActivity({
+        req,
+        action: 'print_student_certificate',
+        targetType: 'StudentCore',
+        targetId: String(req.params.studentRef || ''),
+        meta: { membershipId: String(req.query.membershipId || ''), documentNo: doc.documentNo }
+      }).catch(() => {});
+    }
+    return sendPrintableDocument(res, doc);
+  } catch (error) {
+    console.error('Student certificate print failed:', error);
+    return res.status(500).json({ success: false, message: 'ساخت سرتیفیکیت ناموفق بود.' });
+  }
+});
+
+router.get('/:studentRef/documents/diploma.print', ...studentDocumentPrintAccess, async (req, res) => {
+  try {
+    const doc = await buildDiplomaHtml(req.params.studentRef, { membershipId: req.query.membershipId || '' });
+    if (doc) {
+      await logActivity({
+        req,
+        action: 'print_student_diploma',
+        targetType: 'StudentCore',
+        targetId: String(req.params.studentRef || ''),
+        meta: { membershipId: String(req.query.membershipId || ''), documentNo: doc.documentNo }
+      }).catch(() => {});
+    }
+    return sendPrintableDocument(res, doc);
+  } catch (error) {
+    console.error('Student diploma print failed:', error);
+    return res.status(500).json({ success: false, message: 'ساخت شهادتنامه ناموفق بود.' });
+  }
+});
+
+router.get('/:studentRef/documents/transcript.print', ...studentDocumentPrintAccess, async (req, res) => {
+  try {
+    const doc = await buildTranscriptHtml(req.params.studentRef, { years: req.query.years || 3 });
+    if (doc) {
+      await logActivity({
+        req,
+        action: 'print_student_transcript',
+        targetType: 'StudentCore',
+        targetId: String(req.params.studentRef || ''),
+        meta: { years: Number(req.query.years || 3), documentNo: doc.documentNo }
+      }).catch(() => {});
+    }
+    return sendPrintableDocument(res, doc);
+  } catch (error) {
+    console.error('Student transcript print failed:', error);
+    return res.status(500).json({ success: false, message: 'ساخت کارنامهٔ سه‌ساله ناموفق بود.' });
   }
 });
 

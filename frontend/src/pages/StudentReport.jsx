@@ -5,6 +5,7 @@ import { API_BASE } from '../config/api';
 import useExpandableList from '../hooks/useExpandableList';
 import { formatFinanceCode } from '../utils/latinFinanceCode';
 import { getStudentAsasNumber, studentMatchesSearch } from '../utils/studentSearch';
+import { errorMessage as describeError, fetchText, openHtmlDocument } from './adminWorkspaceUtils';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -79,6 +80,8 @@ export default function StudentReport() {
     note: '',
     isPrimary: false
   });
+  const [documentMembershipId, setDocumentMembershipId] = useState('');
+  const [documentActionLoading, setDocumentActionLoading] = useState('');
 
   const filteredStudents = useMemo(() => {
     return students.filter((item) => studentMatchesSearch(item, filterText));
@@ -193,6 +196,45 @@ export default function StudentReport() {
     const hasSelected = filteredStudents.some((item) => item.studentId === studentId);
     if (!hasSelected) setStudentId(filteredStudents[0].studentId);
   }, [filteredStudents, studentId]);
+
+  useEffect(() => {
+    const memberships = profile?.memberships || [];
+    if (!memberships.length) {
+      setDocumentMembershipId('');
+      return;
+    }
+    const current = memberships.find((item) => item.isCurrent) || memberships[0];
+    setDocumentMembershipId(current.id);
+  }, [profile]);
+
+  const printStudentDocument = async (kind) => {
+    if (!studentId) return;
+    const endpoints = {
+      certificate: `/api/student-profiles/${studentId}/documents/certificate.print${documentMembershipId ? `?membershipId=${encodeURIComponent(documentMembershipId)}` : ''}`,
+      diploma: `/api/student-profiles/${studentId}/documents/diploma.print${documentMembershipId ? `?membershipId=${encodeURIComponent(documentMembershipId)}` : ''}`,
+      transcript: `/api/student-profiles/${studentId}/documents/transcript.print?years=3`
+    };
+    const labels = {
+      certificate: 'سرتیفیکیت',
+      diploma: 'شهادتنامه',
+      transcript: 'کارنامهٔ سه‌ساله'
+    };
+
+    setDocumentActionLoading(kind);
+    try {
+      const { text: html } = await fetchText(endpoints[kind], {}, { method: 'GET' });
+      const opened = openHtmlDocument(html, labels[kind]);
+      if (!opened) {
+        setFeedback('error', 'مرورگر بازکردن پنجرهٔ چاپ را مسدود کرد؛ اجازهٔ پنجره‌های بازشو را برای این سایت فعال کنید.');
+        return;
+      }
+      setFeedback('info', `${labels[kind]} برای چاپ آماده شد.`);
+    } catch (error) {
+      setFeedback('error', describeError(error, `آماده‌سازی ${labels[kind]} ناموفق بود.`));
+    } finally {
+      setDocumentActionLoading('');
+    }
+  };
 
   const searchGuardianCandidates = async () => {
     const query = String(guardianQuery || '').trim();
@@ -448,6 +490,62 @@ export default function StudentReport() {
             </section>
 
             <section className="student-report-secondary-grid">
+              <article className="student-report-panel">
+                <div className="student-report-panel-head compact">
+                  <div>
+                    <span className="student-report-eyebrow">اسناد رسمی</span>
+                    <h3>چاپ سرتیفیکیت، شهادتنامه و کارنامه</h3>
+                  </div>
+                </div>
+                {!profile.memberships?.length && (
+                  <div className="student-report-empty">برای صدور سند رسمی، این شاگرد باید حداقل یک عضویت صنفی ثبت‌شده داشته باشد.</div>
+                )}
+                {!!profile.memberships?.length && (
+                  <>
+                    <label className="student-report-field">
+                      <span>صنف/سال مبنای سرتیفیکیت و شهادتنامه</span>
+                      <select value={documentMembershipId} onChange={(event) => setDocumentMembershipId(event.target.value)}>
+                        {profile.memberships.map((membership) => (
+                          <option key={membership.id} value={membership.id}>
+                            {[
+                              membership.schoolClass?.title || membership.course?.title || 'صنف',
+                              membership.academicYear?.label || membership.academicYear?.title || 'سال نامشخص',
+                              membership.isCurrent ? 'فعلی' : 'آرشیفی'
+                            ].filter(Boolean).join(' - ')}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="student-report-document-actions">
+                      <button
+                        type="button"
+                        className="student-report-action-btn"
+                        onClick={() => printStudentDocument('certificate')}
+                        disabled={!!documentActionLoading}
+                      >
+                        {documentActionLoading === 'certificate' ? 'در حال آماده‌سازی...' : 'چاپ سرتیفیکیت'}
+                      </button>
+                      <button
+                        type="button"
+                        className="student-report-action-btn"
+                        onClick={() => printStudentDocument('diploma')}
+                        disabled={!!documentActionLoading}
+                      >
+                        {documentActionLoading === 'diploma' ? 'در حال آماده‌سازی...' : 'چاپ شهادتنامه'}
+                      </button>
+                      <button
+                        type="button"
+                        className="student-report-action-btn"
+                        onClick={() => printStudentDocument('transcript')}
+                        disabled={!!documentActionLoading}
+                      >
+                        {documentActionLoading === 'transcript' ? 'در حال آماده‌سازی...' : 'چاپ کارنامهٔ سه‌ساله'}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </article>
+
               <article className="student-report-panel">
                 <div className="student-report-panel-head compact">
                   <div>

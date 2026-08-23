@@ -8,7 +8,7 @@ const getAuthHeaders = () => {
   };
 };
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
@@ -84,6 +84,8 @@ export default function AdminFinancialMemberships() {
     const [openActionMenuId, setOpenActionMenuId] = useState('');
     const [openActionMenuDirection, setOpenActionMenuDirection] = useState('down');
     const [currentPage, setCurrentPage] = useState(1);
+    const [sortConfig, setSortConfig] = useState({ key: '', direction: 'asc' });
+    const originalEndDateRef = useRef('');
 
     const fetchMemberships = useCallback(async () => {
       setLoading(true);
@@ -101,12 +103,6 @@ export default function AdminFinancialMemberships() {
       }
     }, []);
 
-    // Helper: filter classes by selected year
-    const filteredClasses = useMemo(() => {
-      if (!form.academicYearId) return classes;
-      return classes.filter(c => !c.academicYearId || c.academicYearId === form.academicYearId);
-    }, [classes, form.academicYearId]);
-
     // Handle form field changes
     const handleFormChange = (field, value) => {
       setForm((prev) => {
@@ -116,16 +112,12 @@ export default function AdminFinancialMemberships() {
       });
     };
 
-    const openCreateModal = () => {
-      setEditingMembershipId('');
-      setForm(getDefaultForm());
-      setShowModal(true);
-    };
-
     const openEditModal = (membership) => {
       setOpenActionMenuId('');
       setOpenActionMenuDirection('down');
       setEditingMembershipId(String(membership?._id || membership?.id || ''));
+      const normalizedEndDate = normalizeDateInput(membership?.endDate);
+      originalEndDateRef.current = normalizedEndDate;
       setForm({
         studentId: String(membership?.studentId || ''),
         academicYearId: String(membership?.academicYearId || ''),
@@ -133,7 +125,7 @@ export default function AdminFinancialMemberships() {
         membershipType: String(membership?.membershipType || 'normal'),
         status: String(membership?.status || 'active'),
         startDate: normalizeDateInput(membership?.startDate),
-        endDate: normalizeDateInput(membership?.endDate),
+        endDate: normalizedEndDate,
         notes: String(membership?.notes || '')
       });
       setShowModal(true);
@@ -143,6 +135,7 @@ export default function AdminFinancialMemberships() {
       setShowModal(false);
       setEditingMembershipId('');
       setForm(getDefaultForm());
+      originalEndDateRef.current = '';
     };
 
     const toggleRowActionMenu = (membership, event) => {
@@ -184,6 +177,14 @@ export default function AdminFinancialMemberships() {
     // Handle submit membership (create/edit)
     const handleFormSubmit = async (e) => {
       e.preventDefault();
+      const isEditing = Boolean(editingMembershipId);
+      const isSettingNewEndDate = isEditing && form.endDate && form.endDate !== originalEndDateRef.current;
+      if (isSettingNewEndDate) {
+        const confirmed = window.confirm(
+          'با ثبت این تاریخ ختم، قبض‌ها و سفارش‌های مالی آینده‌ی این شاگرد (از ماه بعد از تاریخ ختم به بعد) به‌صورت خودکار باطل خواهند شد. آیا مطمئن هستید؟'
+        );
+        if (!confirmed) return;
+      }
       setFormLoading(true);
       setMessage('');
       try {
@@ -199,7 +200,6 @@ export default function AdminFinancialMemberships() {
           endDate: form.endDate || null,
           notes: form.notes
         };
-        const isEditing = Boolean(editingMembershipId);
         const endpoint = isEditing
           ? `${API_BASE}/api/finance/admin/student-memberships/${editingMembershipId}`
           : `${API_BASE}/api/finance/admin/student-memberships`;
@@ -212,7 +212,13 @@ export default function AdminFinancialMemberships() {
         const data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.message || (isEditing ? 'خطا در ویرایش عضویت' : 'خطا در ثبت عضویت'));
         closeModal();
-        setMessage(isEditing ? 'عضویت با موفقیت ویرایش شد' : 'عضویت جدید با موفقیت ثبت شد');
+        let successMessage = isEditing ? 'عضویت با موفقیت ویرایش شد' : 'عضویت جدید با موفقیت ثبت شد';
+        const stopped = data.stoppedFutureBills;
+        const stoppedTotal = (stopped?.bills || 0) + (stopped?.orders || 0);
+        if (stoppedTotal > 0) {
+          successMessage += ` (${stoppedTotal} قبض/سفارش مالی آینده باطل شد)`;
+        }
+        setMessage(successMessage);
         await fetchMemberships();
       } catch (err) {
         setMessage(err.message || 'خطا در ذخیره عضویت');
@@ -276,15 +282,42 @@ export default function AdminFinancialMemberships() {
     });
   }, [memberships, filters, students]);
 
+  const handleSort = (key) => {
+    setSortConfig((prev) => (
+      prev.key === key
+        ? { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+        : { key, direction: 'asc' }
+    ));
+  };
+
+  const sortedMemberships = useMemo(() => {
+    if (!sortConfig.key) return filteredMemberships;
+    const dir = sortConfig.direction === 'asc' ? 1 : -1;
+    const getSortValue = (m) => {
+      switch (sortConfig.key) {
+        case 'studentName': return getMembershipStudentName(m, students);
+        case 'classTitle': return getMembershipClassTitle(m, classes);
+        case 'academicYearTitle': return getMembershipAcademicYearTitle(m, academicYears);
+        case 'status': return m.status || '';
+        case 'startDate': return m.startDate || '';
+        case 'endDate': return m.endDate || '';
+        default: return '';
+      }
+    };
+    return [...filteredMemberships].sort((a, b) => (
+      String(getSortValue(a)).localeCompare(String(getSortValue(b)), 'fa') * dir
+    ));
+  }, [filteredMemberships, sortConfig, students, classes, academicYears]);
+
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(filteredMemberships.length / PAGE_SIZE)),
-    [filteredMemberships.length]
+    () => Math.max(1, Math.ceil(sortedMemberships.length / PAGE_SIZE)),
+    [sortedMemberships.length]
   );
 
   const paginatedMemberships = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
-    return filteredMemberships.slice(start, start + PAGE_SIZE);
-  }, [filteredMemberships, currentPage]);
+    return sortedMemberships.slice(start, start + PAGE_SIZE);
+  }, [sortedMemberships, currentPage]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -303,12 +336,51 @@ export default function AdminFinancialMemberships() {
 
   const pageStart = filteredMemberships.length ? ((currentPage - 1) * PAGE_SIZE) + 1 : 0;
   const pageEnd = filteredMemberships.length ? Math.min(currentPage * PAGE_SIZE, filteredMemberships.length) : 0;
-  const membershipStats = useMemo(() => ({
-    current: memberships.filter(isCurrentMembership).length,
-    active: memberships.filter((item) => String(item.status || '') === 'active').length,
-    pending: memberships.filter((item) => String(item.status || '') === 'pending').length,
-    ended: memberships.filter((item) => item?.isCurrent === false || ENDED_MEMBERSHIP_STATUSES.has(String(item.status || '').trim())).length
-  }), [memberships]);
+  const membershipStats = useMemo(() => {
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+
+    const currentStudentIds = new Set();
+    memberships.forEach((item) => {
+      if (isCurrentMembership(item) && item.studentId) {
+        currentStudentIds.add(String(item.studentId));
+      }
+    });
+
+    const newThisMonth = memberships.filter((item) => {
+      const createdAt = item.createdAt ? new Date(item.createdAt) : null;
+      return createdAt && !Number.isNaN(createdAt.getTime()) && createdAt >= monthStart;
+    }).length;
+
+    const studentsWithoutMembership = students.filter(
+      (s) => !currentStudentIds.has(String(s._id))
+    ).length;
+
+    return {
+      active: memberships.filter((item) => String(item.status || '') === 'active').length,
+      ended: memberships.filter((item) => item?.isCurrent === false || ENDED_MEMBERSHIP_STATUSES.has(String(item.status || '').trim())).length,
+      newThisMonth,
+      studentsWithoutMembership
+    };
+  }, [memberships, students]);
+
+  const editingStudentDisplay = useMemo(() => {
+    const student = students.find((s) => String(s._id) === String(form.studentId));
+    if (!student) return '-';
+    const asasNumber = getStudentAsasNumber(student);
+    return `${student.fullName || student.name || '-'}${asasNumber ? ` (نمبر اساس: ${asasNumber})` : ''}`;
+  }, [students, form.studentId]);
+
+  const editingClassDisplay = useMemo(() => {
+    const cls = classes.find((c) => String(c.classId || c.id) === String(form.classId));
+    return cls?.title || '-';
+  }, [classes, form.classId]);
+
+  const editingYearDisplay = useMemo(() => {
+    const year = academicYears.find((y) => String(y._id || y.id) === String(form.academicYearId));
+    return year?.title || '-';
+  }, [academicYears, form.academicYearId]);
 
   return (
     <div className="admin-financial-memberships-page">
@@ -324,6 +396,7 @@ export default function AdminFinancialMemberships() {
       </div>
 
       {message ? <div className="afm-feedback-banner">{message}</div> : null}
+      {loading ? <div className="afm-loading-banner">در حال بارگذاری اطلاعات...</div> : null}
       <div className="afm-source-banner">
         ممبرشیپ مالی اکنون از ثبت‌نام متعلمین در مرکز مدیریت آموزش ساخته می‌شود. در این صفحه فقط وضعیت مالی، یادداشت و توقف/فعال‌سازی همان عضویت کنترل می‌شود.
       </div>
@@ -340,11 +413,11 @@ export default function AdminFinancialMemberships() {
         </div>
         <div className="afm-summary-card afm-summary-new">
           <div className="afm-summary-title">جدید این ماه</div>
-          <div className="afm-summary-value">{membershipStats.pending}</div>
+          <div className="afm-summary-value">{membershipStats.newThisMonth}</div>
         </div>
         <div className="afm-summary-card afm-summary-no-membership">
           <div className="afm-summary-title">بدون عضویت</div>
-          <div className="afm-summary-value">{membershipStats.current}</div>
+          <div className="afm-summary-value">{membershipStats.studentsWithoutMembership}</div>
         </div>
       </div>
 
@@ -404,19 +477,34 @@ export default function AdminFinancialMemberships() {
           <thead>
             <tr>
               <th>#</th>
-              <th>نام شاگرد</th>
+              <th className="afm-th-sortable" onClick={() => handleSort('studentName')}>
+                نام شاگرد{sortConfig.key === 'studentName' ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ''}
+              </th>
               <th>شماره شاگرد</th>
-              <th>صنف</th>
-              <th>سال</th>
+              <th className="afm-th-sortable" onClick={() => handleSort('classTitle')}>
+                صنف{sortConfig.key === 'classTitle' ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ''}
+              </th>
+              <th className="afm-th-sortable" onClick={() => handleSort('academicYearTitle')}>
+                سال{sortConfig.key === 'academicYearTitle' ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ''}
+              </th>
               <th>نوع عضویت</th>
-              <th>وضعیت</th>
-              <th>تاریخ شروع</th>
-              <th>تاریخ ختم</th>
+              <th className="afm-th-sortable" onClick={() => handleSort('status')}>
+                وضعیت{sortConfig.key === 'status' ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ''}
+              </th>
+              <th className="afm-th-sortable" onClick={() => handleSort('startDate')}>
+                تاریخ شروع{sortConfig.key === 'startDate' ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ''}
+              </th>
+              <th className="afm-th-sortable" onClick={() => handleSort('endDate')}>
+                تاریخ ختم{sortConfig.key === 'endDate' ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ''}
+              </th>
               <th>عملیات</th>
             </tr>
           </thead>
           <tbody>
-            {filteredMemberships.length === 0 && (
+            {loading && (
+              <tr><td colSpan={10} className="muted">در حال بارگذاری...</td></tr>
+            )}
+            {!loading && filteredMemberships.length === 0 && (
               <tr><td colSpan={10} className="muted">عضویتی یافت نشد.</td></tr>
             )}
             {paginatedMemberships.map((m, index) => {
@@ -512,57 +600,17 @@ export default function AdminFinancialMemberships() {
             <div className="afm-modal-body">
               <form className="afm-form-modern-row" onSubmit={handleFormSubmit} autoComplete="off" dir="rtl">
                 <div className="afm-form-row-cards">
-                  <div className="afm-form-card">
-                    <label>جستجوی شاگرد</label>
-                    <input
-                      className="afm-filter-input"
-                      placeholder="نام، نام پدر یا نمبر اساس شاگرد..."
-                      value={filters.modalStudentSearch || ''}
-                      onChange={e => setFilters(f => ({ ...f, modalStudentSearch: e.target.value }))}
-                    />
-                  </div>
-                  <div className="afm-form-card">
-                    <label>نوع ثبت‌نام</label>
-                    <select
-                      className="afm-filter-select"
-                      value={filters.modalRegistrationType || ''}
-                      onChange={e => setFilters(f => ({ ...f, modalRegistrationType: e.target.value }))}
-                    >
-                      <option value="">نوع ثبت‌نام</option>
-                      <option value="online">آنلاین</option>
-                      <option value="manager">مدیریت تدریسی</option>
-                    </select>
-                  </div>
-                  <div className="afm-form-card">
+                  <div className="afm-form-card afm-form-card-readonly">
                     <label>شاگرد</label>
-                    <select required value={form.studentId} onChange={e => handleFormChange('studentId', e.target.value)} disabled={Boolean(editingMembershipId)}>
-                      <option value="">انتخاب شاگرد</option>
-                      {students.filter(s => {
-                        const matchesSearch = studentMatchesSearch(s, filters.modalStudentSearch);
-                        const matchesRegType = !filters.modalRegistrationType || s.registrationType === filters.modalRegistrationType;
-                        return matchesSearch && matchesRegType;
-                      }).map((s, index) => (
-                        <option key={s._id} value={s._id}>{index + 1}. {s.fullName || s.name} {getStudentAsasNumber(s) ? `(نمبر اساس: ${getStudentAsasNumber(s)})` : ''} {s.registrationType === 'online' ? 'آنلاین' : 'مدیریت'}</option>
-                      ))}
-                    </select>
+                    <div className="afm-readonly-value">{editingStudentDisplay}</div>
                   </div>
-                  <div className="afm-form-card">
-                    <label>سال تعلیمی</label>
-                    <select required value={form.academicYearId} onChange={e => handleFormChange('academicYearId', e.target.value)} disabled>
-                      <option value="">انتخاب سال</option>
-                      {academicYears.map(y => (
-                        <option key={y._id || y.id} value={y._id || y.id}>{y.title}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="afm-form-card">
+                  <div className="afm-form-card afm-form-card-readonly">
                     <label>صنف</label>
-                    <select required value={form.classId} onChange={e => handleFormChange('classId', e.target.value)} disabled>
-                      <option value="">انتخاب صنف</option>
-                      {filteredClasses.map(c => (
-                        <option key={c.classId || c.id} value={c.classId || c.id}>{c.title}</option>
-                      ))}
-                    </select>
+                    <div className="afm-readonly-value">{editingClassDisplay}</div>
+                  </div>
+                  <div className="afm-form-card afm-form-card-readonly">
+                    <label>سال تعلیمی</label>
+                    <div className="afm-readonly-value">{editingYearDisplay}</div>
                   </div>
                   <div className="afm-form-card">
                     <label>نوع عضویت</label>

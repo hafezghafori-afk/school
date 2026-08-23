@@ -267,15 +267,14 @@ function buildReceiptPrintHtml(invoice, settings) {
 <meta charset="utf-8" />
 <title>رسید پرداخت - ${escapeHtml(invoice.invoiceNumber)}</title>
 <style>
-  /* Same faces the finance center's own receipt loads (frontend/public/fonts)
-     - a proper Dari/Farsi typeface (Nazanin) instead of leaving it to
+  /* Same face the finance center's own receipt loads (frontend/public/fonts)
+     - a proper Dari/Farsi typeface (Vazirmatn) instead of leaving it to
      whatever generic sans-serif the OS happens to substitute for Persian
      script, which is what Tahoma-first was silently doing before. */
-  @font-face { font-family: 'B Nazanin'; src: url('/fonts/B_Nazanin.ttf') format('truetype'); font-weight: 400; }
-  @font-face { font-family: 'B Nazanin'; src: url('/fonts/B_Nazanin_Bold.ttf') format('truetype'); font-weight: 700; }
+  @font-face { font-family: 'Vazirmatn'; src: url('/fonts/Vazirmatn-Variable.ttf') format('truetype'); font-weight: 100 900; }
   @page { size: A4 portrait; margin: 12mm; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: 'B Nazanin', 'B Mitra', Tahoma, sans-serif; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: 'Vazirmatn', 'B Nazanin', 'B Mitra', Tahoma, sans-serif; }
   #page-ruler { position: absolute; visibility: hidden; height: 134mm; width: 1px; top: 0; left: 0; }
   .copy { height: 134mm; box-sizing: border-box; border: 0.3mm solid #111; border-radius: 2mm; padding: 4mm 6mm; overflow: visible; position: relative; }
   .copy-inner { transform-origin: top center; }

@@ -1,5 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800;900&display=swap');
-
+/* Vazirmatn is self-hosted via the @font-face in src/index.css - no external
+   Google Fonts dependency, so this keeps working offline. */
 :root {
   --public-primary: #6d4aff;
   --public-primary-dark: #5633df;

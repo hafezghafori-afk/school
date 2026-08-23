@@ -41,8 +41,8 @@
 }
 
 :root {
-  --font-persian-ui: 'B Nazanin', 'B Mitra', 'B Zar', Tahoma, sans-serif;
-  --font-persian-display: 'B Zar', 'B Nazanin', 'B Mitra', Tahoma, sans-serif;
+  --font-persian-ui: 'Vazirmatn', 'B Nazanin', 'B Mitra', 'B Zar', Tahoma, sans-serif;
+  --font-persian-display: 'Vazirmatn', 'B Zar', 'B Nazanin', 'B Mitra', Tahoma, sans-serif;
   --bg-1: #0f1b2d;
   --bg-2: #10273d;
   --accent: #f2b90c;

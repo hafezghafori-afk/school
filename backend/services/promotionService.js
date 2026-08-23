@@ -24,6 +24,7 @@ const ExamResult = require('../models/ExamResult');
 const SheetTemplate = require('../models/SheetTemplate');
 const PromotionRule = require('../models/PromotionRule');
 const PromotionTransaction = require('../models/PromotionTransaction');
+const { evaluateClassOfficialResults } = require('./classAggregateResultService');
 
 const SCORE_BREAKDOWN_KEYS = ['writtenScore', 'oralScore', 'classActivityScore', 'homeworkScore'];
 
@@ -98,7 +99,10 @@ function formatSchoolClass(doc) {
     id: String(item._id || item.id || ''),
     title: normalizeText(item.title),
     code: normalizeText(item.code),
-    gradeLevel: normalizeText(item.gradeLevel),
+    // gradeLevel is a numeric field on SchoolClass — normalizeText() only accepts strings and
+    // silently returns '' for a number, which was hiding the grade in every place that displays
+    // this formatted class (dropdown/badge labels, class-ID disambiguation).
+    gradeLevel: Number(item.gradeLevel) || 0,
     section: normalizeText(item.section),
     status: normalizeText(item.status),
     academicYear: formatAcademicYear(item.academicYearId)
@@ -280,7 +284,7 @@ function buildDefaultPromotionRulePayload() {
     promotedMembershipStatus: 'pending',
     repeatedMembershipStatus: 'pending',
     conditionalMembershipStatus: 'pending',
-    evaluationMode: 'score_policy',
+    evaluationMode: 'official_general_result',
     passingScore: 55,
     subjectPassingScore: 55,
     maxConditionalSubjects: 3,
@@ -406,7 +410,7 @@ async function createPromotionRule(payload = {}) {
     conditionalMembershipStatus: ['active', 'pending', 'suspended'].includes(normalizeText(payload.conditionalMembershipStatus))
       ? normalizeText(payload.conditionalMembershipStatus)
       : 'pending',
-    evaluationMode: ['result_status', 'score_policy'].includes(normalizeText(payload.evaluationMode))
+    evaluationMode: ['result_status', 'score_policy', 'official_general_result'].includes(normalizeText(payload.evaluationMode))
       ? normalizeText(payload.evaluationMode)
       : 'score_policy',
     passingScore: Number.isFinite(Number(payload.passingScore)) ? Number(payload.passingScore) : 55,
@@ -479,17 +483,26 @@ function getClassMatchScore(candidate, sourceClass, mode = 'repeated') {
   const sourceGrade = normalizeText(sourceClass.gradeLevel).toLowerCase();
   const candidateSection = normalizeText(candidate.section).toLowerCase();
   const sourceSection = normalizeText(sourceClass.section).toLowerCase();
-  const candidateSequence = extractSequenceValue(candidate.title) ?? extractSequenceValue(candidate.code) ?? extractSequenceValue(candidate.gradeLevel);
-  const sourceSequence = extractSequenceValue(sourceClass.title) ?? extractSequenceValue(sourceClass.code) ?? extractSequenceValue(sourceClass.gradeLevel);
+  // gradeLevel is a required, purpose-built Number field (1-12) on every SchoolClass — it is the
+  // authoritative signal for "which grade this class is" and must be checked before falling back
+  // to free-text title/code parsing, which can pick up an unrelated digit (e.g. a section index
+  // baked into a code like "thow-1") and silently produce the wrong sequence.
+  const candidateSequence = extractSequenceValue(candidate.gradeLevel) ?? extractSequenceValue(candidate.title) ?? extractSequenceValue(candidate.code);
+  const sourceSequence = extractSequenceValue(sourceClass.gradeLevel) ?? extractSequenceValue(sourceClass.title) ?? extractSequenceValue(sourceClass.code);
 
   if (candidateTitle && candidateTitle === sourceTitle) score += 30;
   if (candidateCode && sourceCode && candidateCode === sourceCode) score += 25;
   if (candidateGrade && sourceGrade && candidateGrade === sourceGrade) score += 20;
   if (candidateSection && sourceSection && candidateSection === sourceSection) score += 10;
 
+  // The sequence relationship is decisive, not just a tie-breaker: a class cloned into the next
+  // year keeps the SAME title/code as its source (see bootstrapNextAcademicYear.js), so relying on
+  // title/code/section alone (max 85 combined above) would keep a "promoted" student in a same-named
+  // class instead of the next grade. Weight this well above that combined maximum so a correct-grade
+  // candidate always wins over a same-named-but-wrong-grade one.
   if (sourceSequence != null && candidateSequence != null) {
-    if (mode === 'promoted' && candidateSequence === sourceSequence + 1) score += 40;
-    if (mode === 'repeated' && candidateSequence === sourceSequence) score += 40;
+    if (mode === 'promoted' && candidateSequence === sourceSequence + 1) score += 200;
+    if (mode === 'repeated' && candidateSequence === sourceSequence) score += 200;
   }
 
   return score;
@@ -696,6 +709,65 @@ function evaluateScorePolicyForMembership({ membershipId, resultsByMembership, s
   };
 }
 
+function evaluateOfficialGeneralResultForMembership({ membershipId, classOfficialResults, rule }) {
+  const entry = classOfficialResults?.evaluatedByMembership?.get(String(membershipId || ''));
+  if (!classOfficialResults?.readiness?.ready || !entry) {
+    return {
+      mode: 'official_general_result',
+      sourceResultStatus: 'pending',
+      computedOutcome: 'blocked',
+      averageScore: 0,
+      totalSubjects: 0,
+      failedSubjectCount: 0,
+      missingSessionCount: 0,
+      missingSubjectCount: 0,
+      issueCode: 'official_result_not_ready',
+      subjects: [],
+      failedSubjects: [],
+      includedSessions: [],
+      sheetTemplates: []
+    };
+  }
+
+  const { subjects, general } = entry;
+  // 'pending'/'not_applicable' means THIS student's own marks are incomplete even though the
+  // class overall is ready (e.g. absent/ungraded in one subject) — that is missing data, not an
+  // academic failure, so it must resolve to 'blocked' rather than fall through to the rule's
+  // repeatedStatuses list (which includes 'pending' for the legacy modes' own reasons).
+  const isIncomplete = general.resultStatus === 'pending' || general.resultStatus === 'not_applicable';
+  const computedOutcome = isIncomplete ? 'blocked' : resolvePromotionOutcome(rule, general.resultStatus);
+  const failedSubjects = subjects.filter((subject) => subject.passed === false);
+
+  return {
+    mode: 'official_general_result',
+    sourceResultStatus: general.resultStatus,
+    computedOutcome,
+    averageScore: general.average ?? 0,
+    totalSubjects: subjects.length,
+    failedSubjectCount: failedSubjects.length,
+    missingSessionCount: 0,
+    missingSubjectCount: subjects.filter((subject) => !subject.complete).length,
+    issueCode: isIncomplete ? 'official_result_pending' : '',
+    subjects: subjects.map((subject) => ({
+      subjectId: subject.subjectId,
+      subjectTitle: subject.subjectName,
+      percentage: subject.total,
+      obtainedMark: subject.total,
+      totalMark: 100,
+      isFailed: subject.passed === false
+    })),
+    failedSubjects: failedSubjects.map((subject) => ({
+      subjectId: subject.subjectId,
+      subjectTitle: subject.subjectName,
+      percentage: subject.total,
+      obtainedMark: subject.total,
+      totalMark: 100
+    })),
+    includedSessions: (classOfficialResults.readiness.sourceSessionIds || []).map((id) => ({ id: String(id) })),
+    sheetTemplates: []
+  };
+}
+
 function buildLegacyPolicyEvaluation(result = {}, computedOutcome = 'blocked') {
   return {
     mode: 'result_status',
@@ -850,29 +922,117 @@ function summarizePromotionItems(items = []) {
 }
 async function resolvePromotionPreviewState(payload = {}) {
   const sessionId = normalizeNullableId(payload.sessionId);
-  if (!sessionId) {
+  const explicitAcademicYearId = normalizeNullableId(payload.academicYearId);
+  const explicitClassId = normalizeNullableId(payload.classId);
+  if (!sessionId && !(explicitAcademicYearId && explicitClassId)) {
     throw new Error('promotion_session_required');
   }
 
-  const session = await resolvePromotionSession(sessionId);
+  const session = sessionId ? await resolvePromotionSession(sessionId) : null;
+  const scopeAcademicYearId = explicitAcademicYearId || String(session?.academicYearId?._id || session?.academicYearId || '');
+  const scopeClassId = explicitClassId || String(session?.classId?._id || session?.classId || '');
+  const sourceAcademicYear = session?.academicYearId
+    || (scopeAcademicYearId ? await AcademicYear.findById(scopeAcademicYearId) : null);
+
   const rule = normalizeNullableId(payload.ruleId)
     ? await PromotionRule.findById(payload.ruleId)
     : await findBestPromotionRule({
-        academicYearId: session.academicYearId?._id || session.academicYearId,
-        classId: session.classId?._id || session.classId
+        academicYearId: scopeAcademicYearId,
+        classId: scopeClassId
       });
 
   if (!rule) {
     throw new Error('promotion_rule_not_found');
   }
 
-  const targetAcademicYear = await resolveTargetAcademicYear(session.academicYearId, payload, rule);
+  const targetAcademicYear = await resolveTargetAcademicYear(sourceAcademicYear, payload, rule);
   const targetClasses = targetAcademicYear
     ? await SchoolClass.find({ academicYearId: targetAcademicYear._id, status: { $ne: 'archived' } })
       .select('title code gradeLevel section status academicYearId legacyCourseId')
       .populate('academicYearId')
       .sort({ title: 1, createdAt: 1 })
     : [];
+
+  if (normalizeText(rule.evaluationMode) === 'official_general_result') {
+    const classOfficialResults = await evaluateClassOfficialResults({
+      academicYearId: scopeAcademicYearId,
+      classId: scopeClassId
+    });
+
+    const membershipQuery = {
+      classId: scopeClassId,
+      $or: [{ academicYearId: scopeAcademicYearId }, { academicYear: scopeAcademicYearId }]
+    };
+    let memberships = await StudentMembership.find(membershipQuery)
+      .populate({ path: 'classId', populate: { path: 'academicYearId' } })
+      .populate('academicYearId')
+      .populate('studentId')
+      .populate('student', 'name email');
+
+    if (Array.isArray(payload.sourceMembershipIds) && payload.sourceMembershipIds.length) {
+      const ids = new Set(payload.sourceMembershipIds.map((item) => normalizeNullableId(item)).filter(Boolean));
+      memberships = memberships.filter((membership) => ids.has(String(membership._id)));
+    }
+
+    const items = [];
+    for (const membership of memberships) {
+      const policyEvaluation = evaluateOfficialGeneralResultForMembership({
+        membershipId: membership._id,
+        classOfficialResults,
+        rule
+      });
+      const computedOutcome = policyEvaluation.computedOutcome;
+      const targetClass = needsGeneratedMembership(computedOutcome, rule)
+        ? resolveTargetClassFromCandidates({
+            sourceClass: membership.classId,
+            targetClasses,
+            rule,
+            payload,
+            outcome: computedOutcome
+          })
+        : null;
+      const targetCourseId = targetClass ? await resolveCourseForTargetClass(targetClass, membership) : null;
+      const issueCode = policyEvaluation.issueCode
+        || (needsGeneratedMembership(computedOutcome, rule) && !targetAcademicYear
+          ? 'target_year_not_resolved'
+          : needsGeneratedMembership(computedOutcome, rule) && !targetClass
+            ? 'target_class_not_resolved'
+            : needsGeneratedMembership(computedOutcome, rule) && !targetCourseId
+              ? 'target_course_not_resolved'
+              : '');
+      const canApply = computedOutcome === 'graduated'
+        || (computedOutcome !== 'blocked' && ((!needsGeneratedMembership(computedOutcome, rule)) || !issueCode));
+
+      items.push({
+        examResult: null,
+        sourceMembership: membership,
+        studentCore: membership.studentId || null,
+        studentUser: membership.student || null,
+        computedOutcome,
+        policyEvaluation,
+        canApply,
+        issueCode,
+        targetAcademicYear,
+        targetClass,
+        targetCourseId,
+        generatedMembershipStatus: canApply ? getGeneratedMembershipStatus(computedOutcome, rule) : ''
+      });
+    }
+
+    return {
+      session,
+      rule,
+      targetAcademicYear,
+      items,
+      scopeAcademicYearId,
+      scopeClassId,
+      classReadiness: classOfficialResults.readiness
+    };
+  }
+
+  if (!session) {
+    throw new Error('promotion_session_required');
+  }
 
   const resultQuery = { sessionId: session._id };
   if (Array.isArray(payload.sourceMembershipIds) && payload.sourceMembershipIds.length) {
@@ -999,7 +1159,10 @@ async function resolvePromotionPreviewState(payload = {}) {
     session,
     rule,
     targetAcademicYear,
-    items
+    items,
+    scopeAcademicYearId,
+    scopeClassId,
+    classReadiness: null
   };
 }
 
@@ -1008,12 +1171,13 @@ function serializePromotionPreview(state) {
     session: formatExamSession(state.session),
     rule: formatPromotionRule(state.rule),
     targetAcademicYear: formatAcademicYear(state.targetAcademicYear),
+    readiness: state.classReadiness || null,
     summary: summarizePromotionItems(state.items),
     items: state.items.map((item) => ({
-      examResultId: String(item.examResult._id),
-      sourceResultStatus: normalizeText(item.policyEvaluation?.sourceResultStatus || item.examResult.resultStatus),
-      percentage: Number(item.examResult.percentage || 0),
-      averageScore: Number(item.policyEvaluation?.averageScore ?? item.examResult.percentage ?? 0),
+      examResultId: item.examResult ? String(item.examResult._id) : null,
+      sourceResultStatus: normalizeText(item.policyEvaluation?.sourceResultStatus || item.examResult?.resultStatus),
+      percentage: Number(item.examResult?.percentage || 0),
+      averageScore: Number(item.policyEvaluation?.averageScore ?? item.examResult?.percentage ?? 0),
       computedOutcome: item.computedOutcome,
       canApply: item.canApply,
       issueCode: item.issueCode,
@@ -1079,7 +1243,7 @@ async function applyPromotions(payload = {}, actorUserId = null) {
   for (const item of state.items) {
     const existingTransaction = await populatePromotionTransactionQuery(
       PromotionTransaction.findOne({
-        sessionId: state.session._id,
+        sessionId: state.session?._id || null,
         studentMembershipId: item.sourceMembership._id,
         targetAcademicYearId: item.targetAcademicYear?._id || null,
         transactionStatus: 'applied'
@@ -1122,18 +1286,18 @@ async function applyPromotions(payload = {}, actorUserId = null) {
 
     const transaction = await PromotionTransaction.create({
       ruleId: state.rule._id,
-      sessionId: state.session._id,
-      examResultId: item.examResult._id,
+      sessionId: state.session?._id || null,
+      examResultId: item.examResult?._id || null,
       studentMembershipId: item.sourceMembership._id,
       targetMembershipId: targetMembership?._id || null,
       studentId: item.studentCore?._id || item.sourceMembership.studentId || null,
       student: item.studentUser?._id || item.sourceMembership.student || null,
-      academicYearId: state.session.academicYearId?._id || state.session.academicYearId || null,
+      academicYearId: state.session?.academicYearId?._id || state.session?.academicYearId || normalizeNullableId(state.scopeAcademicYearId) || null,
       targetAcademicYearId: item.targetAcademicYear?._id || null,
-      assessmentPeriodId: state.session.assessmentPeriodId?._id || state.session.assessmentPeriodId || null,
+      assessmentPeriodId: state.session?.assessmentPeriodId?._id || state.session?.assessmentPeriodId || null,
       classId: item.sourceMembership.classId?._id || item.sourceMembership.classId || null,
       targetClassId: item.targetClass?._id || null,
-      sourceResultStatus: normalizeText(item.policyEvaluation?.sourceResultStatus || item.examResult.resultStatus),
+      sourceResultStatus: normalizeText(item.policyEvaluation?.sourceResultStatus || item.examResult?.resultStatus),
       promotionOutcome,
       transactionStatus: 'applied',
       generatedMembershipStatus: targetMembership ? normalizeText(targetMembership.status) : item.generatedMembershipStatus,
@@ -1235,6 +1399,7 @@ async function listPromotionTransactions(filters = {}) {
   if (normalizeNullableId(filters.ruleId)) query.ruleId = filters.ruleId;
   if (normalizeNullableId(filters.sessionId)) query.sessionId = filters.sessionId;
   if (normalizeNullableId(filters.academicYearId)) query.academicYearId = filters.academicYearId;
+  if (normalizeNullableId(filters.classId)) query.classId = filters.classId;
   if (normalizeNullableId(filters.targetAcademicYearId)) query.targetAcademicYearId = filters.targetAcademicYearId;
   if (normalizeNullableId(filters.studentMembershipId)) query.studentMembershipId = filters.studentMembershipId;
   if (normalizeNullableId(filters.studentId)) query.studentId = filters.studentId;

@@ -7,8 +7,8 @@
   --slate: #3d5a57;
   --rose: #9f1239;
   --border: rgba(21, 48, 43, 0.12);
-  --font-persian-ui: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
-  --font-persian-display: "B Nazanin", "B Mitra", "B Zar", Tahoma, sans-serif;
+  --font-persian-ui: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  --font-persian-display: "Vazirmatn", "B Nazanin", "B Mitra", "B Zar", Tahoma, sans-serif;
   min-height: 100vh;
   padding: 28px 18px 56px;
   color: var(--ink);

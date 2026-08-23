@@ -10,7 +10,7 @@
   --tt-audience-shadow: 0 24px 60px rgba(15, 34, 56, 0.12);
   position: relative;
   direction: rtl;
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
 }
 
 .tt-audience-page::before {
@@ -52,14 +52,14 @@
   box-shadow: var(--tt-audience-shadow);
   text-align: center;
   color: var(--tt-audience-ink);
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
 }
 
 .tt-audience-loading-card strong {
   display: block;
   font-size: 1.15rem;
   margin-bottom: 0.45rem;
-  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
 }
 
 .tt-audience-loading-card p {
@@ -93,7 +93,7 @@
   color: var(--tt-audience-accent-strong);
   font-size: 0.84rem;
   font-weight: 800;
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
 }
 
 .tt-audience-hero-copy h1 {
@@ -102,7 +102,7 @@
   font-size: clamp(1.7rem, 2.6vw, 2.4rem);
   line-height: 1.2;
   font-weight: 900;
-  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
 }
 
 .tt-audience-hero-copy p {
@@ -110,7 +110,7 @@
   color: var(--tt-audience-muted);
   line-height: 1.95;
   max-width: 56rem;
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
 }
 
 .tt-audience-chip-row {
@@ -136,7 +136,7 @@
   border-radius: 1.15rem;
   background: linear-gradient(180deg, rgba(20, 57, 92, 0.95), rgba(15, 118, 110, 0.9));
   color: #f9fbff;
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
 }
 
 .tt-audience-hero-panel-label {
@@ -150,7 +150,7 @@
   margin-top: 0.35rem;
   font-size: 1.55rem;
   font-weight: 900;
-  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
 }
 
 .tt-audience-hero-panel-note {
@@ -172,7 +172,7 @@
   padding-inline: 1rem !important;
   gap: 0.4rem;
   font-weight: 800 !important;
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif !important;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif !important;
 }
 
 .tt-audience-btn.tt-audience-btn-light {
@@ -199,7 +199,7 @@
   border: 1px solid var(--tt-audience-line);
   background: linear-gradient(180deg, var(--tt-audience-panel-strong), rgba(247, 250, 254, 0.96));
   box-shadow: 0 14px 28px rgba(15, 34, 56, 0.08);
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
 }
 
 .tt-audience-stat-card span {
@@ -217,7 +217,7 @@
   color: var(--tt-audience-ink);
   font-size: 1.55rem;
   font-weight: 900;
-  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
 }
 
 .tt-audience-stat-note {
@@ -252,7 +252,7 @@
 .tt-audience-board-copy strong {
   margin: 0;
   color: var(--tt-audience-ink);
-  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
 }
 
 .tt-audience-section-head p,
@@ -261,7 +261,7 @@
   color: var(--tt-audience-muted);
   line-height: 1.8;
   font-size: 0.9rem;
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
 }
 
 .tt-audience-filter-grid {
@@ -317,7 +317,7 @@
   color: #355878;
   font-size: 0.9rem;
   font-weight: 800;
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
 }
 
 .tt-audience-field select {
@@ -329,7 +329,7 @@
   background: linear-gradient(180deg, #ffffff, #f7fbff);
   color: var(--tt-audience-ink);
   font-size: 0.95rem;
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
@@ -366,7 +366,7 @@
   color: #355878;
   font-size: 0.88rem;
   line-height: 1.9;
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
 }
 
 .tt-audience-board-head {
@@ -391,7 +391,7 @@
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(245, 249, 255, 0.96));
   color: #58718b;
   line-height: 1.9;
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
 }
 
 .tt-audience-table-wrap {
@@ -406,7 +406,7 @@
   min-width: 860px;
   border-collapse: separate;
   border-spacing: 0;
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
 }
 
 .tt-audience-table th,
@@ -431,7 +431,7 @@
   font-weight: 900;
   padding: 0.95rem 0.75rem;
   text-align: center;
-  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
 }
 
 .tt-audience-period-cell {
@@ -444,7 +444,7 @@
 .tt-audience-period-title {
   font-size: 0.95rem;
   font-weight: 900;
-  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
 }
 
 .tt-audience-period-time {
@@ -483,7 +483,7 @@
   font-size: 0.96rem;
   font-weight: 900;
   line-height: 1.6;
-  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
 }
 
 .tt-audience-slot-meta {
@@ -493,7 +493,7 @@
   color: var(--tt-audience-muted);
   font-size: 0.82rem;
   line-height: 1.7;
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
 }
 
 .tt-audience-slot-empty {
@@ -505,7 +505,7 @@
   color: #8aa0b8;
   font-size: 0.85rem;
   text-align: center;
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
 }
 
 .tt-audience-slot-break {
@@ -516,7 +516,7 @@
   color: #9a5f05;
   font-size: 0.92rem;
   font-weight: 800;
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
 }
 
 .tt-audience-mobile-days {
@@ -539,7 +539,7 @@
   background: linear-gradient(180deg, #f8fbff, #edf4fb);
   color: var(--tt-audience-ink);
   font-weight: 900;
-  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
 }
 
 .tt-audience-mobile-list {
@@ -563,7 +563,7 @@
   margin-bottom: 0.55rem;
   color: var(--tt-audience-muted);
   font-size: 0.78rem;
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
 }
 
 .tt-audience-footer-content {
@@ -574,13 +574,13 @@
   justify-content: space-between;
   color: var(--tt-audience-muted);
   line-height: 1.8;
-  font-family: "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
 }
 
 .tt-audience-footer-main {
   color: var(--tt-audience-ink);
   font-weight: 800;
-  font-family: "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
+  font-family: "Vazirmatn", "B Zar", "B Mitra", "B Nazanin", Tahoma, sans-serif;
 }
 
 .tt-audience-footer-note {

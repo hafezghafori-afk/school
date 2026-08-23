@@ -456,7 +456,9 @@ function deriveFinanceOrderStatus({
 
   // A fully covered obligation is not a payment: no cash was received.
   if (grossAmount > 0 && payableAmount <= 0 && paidAmount <= 0) return 'waived';
-  if (paidAmount > 0 && remainingAmount <= 0) return 'paid';
+  // Nothing left to collect — whether because it was paid off or because
+  // there was never anything payable — is settled, never "overdue".
+  if (remainingAmount <= 0) return 'paid';
   if (dueDate && isFinanceDueDatePast(dueDate, now)) return 'overdue';
   if (paidAmount > 0) return 'partial';
   return 'new';

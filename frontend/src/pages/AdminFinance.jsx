@@ -1982,11 +1982,10 @@ const buildReceiptPrintHtml = (model, schoolInfo, logoUrls) => {
 <meta charset="utf-8" />
 <title>رسید پرداخت فیس شاگرد</title>
 <style>
-  @font-face { font-family: 'B Nazanin'; src: url('/fonts/B_Nazanin.ttf') format('truetype'); font-weight: 400; }
-  @font-face { font-family: 'B Nazanin'; src: url('/fonts/B_Nazanin_Bold.ttf') format('truetype'); font-weight: 700; }
+  @font-face { font-family: 'Vazirmatn'; src: url('/fonts/Vazirmatn-Variable.ttf') format('truetype'); font-weight: 100 900; }
   @page { size: A4 portrait; margin: 12mm; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: 'B Nazanin', 'B Mitra', Tahoma, sans-serif; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: 'Vazirmatn', 'B Nazanin', 'B Mitra', Tahoma, sans-serif; }
   /* Two copies must each occupy exactly half of the printable page (not just their natural
      content height) so the two halves always meet edge-to-edge with the cut line exactly in the
      middle - a page shorter than that leaves an empty gap at the bottom of the sheet, which is
@@ -2095,11 +2094,10 @@ const buildDebtStatementHtml = (model, schoolInfo, logoUrls) => {
 <meta charset="utf-8" />
 <title>صورت‌حساب بدهی</title>
 <style>
-  @font-face { font-family: 'B Nazanin'; src: url('/fonts/B_Nazanin.ttf') format('truetype'); font-weight: 400; }
-  @font-face { font-family: 'B Nazanin'; src: url('/fonts/B_Nazanin_Bold.ttf') format('truetype'); font-weight: 700; }
+  @font-face { font-family: 'Vazirmatn'; src: url('/fonts/Vazirmatn-Variable.ttf') format('truetype'); font-weight: 100 900; }
   @page { size: A4 portrait; margin: 14mm; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: 'B Nazanin', 'B Mitra', Tahoma, sans-serif; direction: rtl; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: 'Vazirmatn', 'B Nazanin', 'B Mitra', Tahoma, sans-serif; direction: rtl; }
   .letterhead { display: grid; grid-template-columns: 20mm minmax(0, 1fr) 20mm; gap: 3mm; align-items: center; direction: ltr; margin-bottom: 6mm; }
   .logo-box { display: grid; place-items: center; width: 18mm; height: 18mm; border: 1px solid #b8b8b8; color: #444; font-size: 8pt; padding: 1mm; overflow: hidden; text-align: center; }
   .logo-box img { width: 100%; height: 100%; object-fit: contain; }
@@ -3829,6 +3827,10 @@ export default function AdminFinance() {
   const [cashierReport, setCashierReport] = useState(null);
   const [reportClassId, setReportClassId] = useState('');
   const [reportAcademicYearId, setReportAcademicYearId] = useState('');
+  const [monthlySummaryMonth, setMonthlySummaryMonth] = useState('');
+  const [monthlySummaryData, setMonthlySummaryData] = useState(null);
+  const [monthlySummaryLoading, setMonthlySummaryLoading] = useState(false);
+  const [monthlySummaryError, setMonthlySummaryError] = useState('');
   const [auditTimeline, setAuditTimeline] = useState([]);
   const [auditTimelineSummary, setAuditTimelineSummary] = useState(null);
   const [auditTimelineSearch, setAuditTimelineSearch] = useState('');
@@ -4012,6 +4014,46 @@ export default function AdminFinance() {
     }
     return url.toString();
   };
+
+  const loadMonthlySummary = useCallback(async (targetMonthKey) => {
+    if (!targetMonthKey) {
+      setMonthlySummaryData(null);
+      setMonthlySummaryError('');
+      return;
+    }
+    try {
+      setMonthlySummaryLoading(true);
+      setMonthlySummaryError('');
+      const url = new URL(buildScopedReportUrl('/api/finance/admin/reports/monthly-summary'));
+      url.searchParams.set('month', targetMonthKey);
+      const res = await fetch(url.toString(), { headers: { ...getAuthHeaders() } });
+      const data = await res.json();
+      if (!data?.success) {
+        setMonthlySummaryData(null);
+        setMonthlySummaryError(data?.message || 'خطا در دریافت گزارش ماهانه.');
+        return;
+      }
+      setMonthlySummaryData(data.summary || null);
+    } catch {
+      setMonthlySummaryData(null);
+      setMonthlySummaryError('خطا در دریافت گزارش ماهانه.');
+    } finally {
+      setMonthlySummaryLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportClassId, reportAcademicYearId]);
+
+  useEffect(() => {
+    if (!billMonthOptions.length) return;
+    if (!monthlySummaryMonth || !billMonthOptions.some((item) => item.key === monthlySummaryMonth)) {
+      setMonthlySummaryMonth(billMonthOptions[0].key);
+    }
+  }, [billMonthOptions, monthlySummaryMonth]);
+
+  useEffect(() => {
+    if (activeSection !== 'reports') return;
+    loadMonthlySummary(monthlySummaryMonth);
+  }, [activeSection, monthlySummaryMonth, loadMonthlySummary]);
 
   const buildFinanceOverviewUrl = () => {
     const url = new URL(`${API_BASE}/api/finance/admin/dashboard/overview`, window.location.origin);
@@ -8179,11 +8221,13 @@ export default function AdminFinance() {
     }
   };
 
-  const downloadFinanceReportPdf = (reportKey) => downloadFinancePdfFile(
-    buildFinanceReportPdfUrl(`/api/finance/admin/reports/${reportKey}/export.pdf`),
-    `${reportKey}.pdf`,
-    reportKey
-  );
+  const downloadFinanceReportPdf = (reportKey, extraParams = {}) => {
+    const url = new URL(buildFinanceReportPdfUrl(`/api/finance/admin/reports/${reportKey}/export.pdf`));
+    Object.entries(extraParams).forEach(([key, value]) => {
+      if (value) url.searchParams.set(key, value);
+    });
+    return downloadFinancePdfFile(url.toString(), `${reportKey}.pdf`, reportKey);
+  };
 
   const downloadFinanceReportBundle = () => downloadFinancePdfFile(
     buildFinanceReportPdfUrl('/api/finance/admin/reports/export-bundle.pdf'),
@@ -11059,6 +11103,85 @@ export default function AdminFinance() {
             {reportPdfBusyKey === 'bundle' ? 'در حال آماده‌سازی...' : 'دانلود بسته‌ی کامل گزارش‌ها (PDF)'}
           </button>
         </div>
+
+        <div className="finance-monthly-summary-card" data-testid="finance-monthly-summary-card">
+          <div className="finance-card-head">
+            <div>
+              <h3>گزارش ماهانه</h3>
+              <p className="muted">یک ماه را انتخاب کنید تا عاید، خالص عاید، سهم باقیات/پیش‌پرداخت وصول‌شده و وضعیت پرداخت شاگردان همان ماه نشان داده شود.</p>
+            </div>
+            <label className="finance-inline-filter">
+              <span>ماه</span>
+              <select
+                value={monthlySummaryMonth}
+                onChange={(e) => setMonthlySummaryMonth(e.target.value)}
+                data-testid="monthly-summary-month-select"
+              >
+                {!billMonthOptions.length && <option value="">ماهی برای انتخاب نیست</option>}
+                {billMonthOptions.map((item) => (
+                  <option key={`monthly-summary-${item.key}`} value={item.key}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {monthlySummaryLoading && <p className="muted" role="status">در حال دریافت گزارش ماهانه...</p>}
+          {!monthlySummaryLoading && monthlySummaryError && <p className="finance-monthly-summary-error">{monthlySummaryError}</p>}
+
+          {!monthlySummaryLoading && !monthlySummaryError && monthlySummaryData && (
+            <>
+              <div className="finance-smart-kpi-grid" data-testid="monthly-summary-stats">
+                <div className="finance-smart-kpi finance-smart-kpi-emerald">
+                  <span>عاید ماه</span>
+                  <strong>{fmt(monthlySummaryData.grossMonthlyIncome || 0)} <small>AFN</small></strong>
+                  <small>کل دریافتی نقدی این ماه</small>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-cyan">
+                  <span>عاید خالص ماه</span>
+                  <strong>{fmt(monthlySummaryData.netMonthlyIncome || 0)} <small>AFN</small></strong>
+                  <small>پس از کسر تخفیف/معافیت و استرداد</small>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-amber">
+                  <span>عاید ماه‌های گذشته در این ماه</span>
+                  <strong>{fmt(monthlySummaryData.pastMonthsCollectedThisMonth || 0)} <small>AFN</small></strong>
+                  <small>باقیات وصول‌شده در این ماه</small>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-violet">
+                  <span>عاید ماه‌های آینده در این ماه</span>
+                  <strong>{fmt(monthlySummaryData.futureMonthsCollectedThisMonth || 0)} <small>AFN</small></strong>
+                  <small>پیش‌پرداخت وصول‌شده در این ماه</small>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-slate">
+                  <span>تعداد بل‌ها</span>
+                  <strong>{fmt(monthlySummaryData.totalOrders || 0)}</strong>
+                  <small>بل‌های صادرشده برای این ماه</small>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-amber">
+                  <span>شاگردان پرداخت ناقص</span>
+                  <strong>{fmt(monthlySummaryData.partialPaymentStudents || 0)}</strong>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-emerald">
+                  <span>شاگردان پرداخت مکمل</span>
+                  <strong>{fmt(monthlySummaryData.fullPaymentStudents || 0)}</strong>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-rose">
+                  <span>باقیات این ماه</span>
+                  <strong>{fmt(monthlySummaryData.outstandingThisMonth || 0)} <small>AFN</small></strong>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => downloadFinanceReportPdf('monthly_summary', { month: monthlySummaryMonth })}
+                disabled={reportPdfBusyKey !== '' || !monthlySummaryMonth}
+                data-testid="download-finance-report-monthly_summary"
+              >
+                {reportPdfBusyKey === 'monthly_summary' ? 'در حال آماده‌سازی...' : 'دانلود PDF گزارش ماهانه'}
+              </button>
+            </>
+          )}
+        </div>
+
         <div className="finance-report-download-grid">
           {FINANCE_REPORT_CARDS.map((item) => (
             <div key={item.key} className="finance-report-download-row">

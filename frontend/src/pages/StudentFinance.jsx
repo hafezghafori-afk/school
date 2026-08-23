@@ -177,12 +177,12 @@ function buildStudentStatementHtml({
       <title>بسته استیتمنت مالی</title>
       <style>
         @font-face {
-          font-family: 'B Nazanin Print';
-          src: url('/fonts/B_Nazanin.ttf') format('truetype');
-          font-weight: 400;
+          font-family: 'Vazirmatn Print';
+          src: url('/fonts/Vazirmatn-Variable.ttf') format('truetype');
+          font-weight: 100 900;
           font-style: normal;
         }
-        body { font-family: 'B Nazanin Print', 'B Nazanin', 'B Mitra', sans-serif; margin: 24px; color: #0f172a; }
+        body { font-family: 'Vazirmatn Print', 'B Nazanin', 'B Mitra', sans-serif; margin: 24px; color: #0f172a; }
         h1, h2, p { margin: 0 0 10px; }
         .meta, .summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
         .card { border: 1px solid #cbd5e1; border-radius: 12px; padding: 14px; background: #f8fafc; }
