@@ -454,6 +454,10 @@ function deriveFinanceOrderStatus({
   const paidAmount = Math.max(0, roundMoney(amountPaid));
   const remainingAmount = Math.max(0, roundMoney(payableAmount - paidAmount));
 
+  // Nothing has ever been billed or paid on this order (e.g. a shell created before its
+  // line items were priced) - that is not the same as being settled, so it must not read
+  // as "paid" just because 0 due minus 0 paid happens to equal 0.
+  if (grossAmount <= 0 && paidAmount <= 0) return 'new';
   // A fully covered obligation is not a payment: no cash was received.
   if (grossAmount > 0 && payableAmount <= 0 && paidAmount <= 0) return 'waived';
   // Nothing left to collect — whether because it was paid off or because
