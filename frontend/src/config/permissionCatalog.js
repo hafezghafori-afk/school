@@ -162,7 +162,7 @@ export const PERMISSION_GROUPS = [
     permissions: [
       { key: 'reports.builder.view', label: 'گزارش‌ساز عمومی', legacy: ['view_reports'] },
       { key: 'reports.students.view', label: 'گزارش شاگرد', legacy: ['view_reports'] },
-      { key: 'reports.teachers.view', label: 'گزارش استاد', legacy: ['view_reports'] },
+      { key: 'reports.teachers.view', label: 'گزارش فعالیت کاربر', legacy: ['view_reports'] },
       { key: 'reports.government_finance.view', label: 'گزارش مالی دولت', legacy: ['manage_finance', 'view_reports'] },
       { key: 'reports.schools.view', label: 'گزارش مالکیت/مکتب‌ها', legacy: ['view_reports'] },
       { key: 'reports.logs.view', label: 'لاگ‌های سیستم', legacy: ['view_reports'] },

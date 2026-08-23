@@ -106,6 +106,36 @@ const getClassLabel = (schoolClass) => (
 const getAcademicYearLabel = (academicYear) => normalizeText(academicYear?.title) || 'سال تعلیمی';
 const toFaNumber = (value) => Number(value || 0).toLocaleString('fa-AF');
 
+function PasswordField({
+  id, label, value, onChange, show, onToggleShow, error, placeholder, autoComplete
+}) {
+  return (
+    <div className="password-field">
+      <label htmlFor={id}>{label}</label>
+      <div className={`password-input-wrap ${error ? 'has-error' : ''}`}>
+        <input
+          id={id}
+          type={show ? 'text' : 'password'}
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+          autoComplete={autoComplete}
+        />
+        <button
+          type="button"
+          className="password-toggle-btn"
+          onClick={onToggleShow}
+          aria-label={show ? 'پنهان‌کردن رمز عبور' : 'نمایش رمز عبور'}
+          aria-pressed={show}
+        >
+          <i className={`fa ${show ? 'fa-eye-slash' : 'fa-eye'}`} aria-hidden="true" />
+        </button>
+      </div>
+      {error && <div className="field-error">{error}</div>}
+    </div>
+  );
+}
+
 export default function Profile() {
   const location = useLocation();
   const [user, setUser] = useState(null);
@@ -142,6 +172,12 @@ export default function Profile() {
   const [passwordModal, setPasswordModal] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
+  const [passwordErrors, setPasswordErrors] = useState({});
+  const [passwordSaving, setPasswordSaving] = useState(false);
   const [profileUpdateRequest, setProfileUpdateRequest] = useState(null);
   const [activityRange, setActivityRange] = useState('7d');
   const [executiveSummary, setExecutiveSummary] = useState(null);
@@ -335,11 +371,33 @@ export default function Profile() {
     return () => window.clearInterval(intervalId);
   }, [isGeneralPresident, loadExecutiveSummary]);
 
+  const openPasswordModal = useCallback(() => {
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmNewPassword('');
+    setShowCurrentPassword(false);
+    setShowNewPassword(false);
+    setShowConfirmNewPassword(false);
+    setPasswordErrors({});
+    setPasswordModal(true);
+  }, []);
+
+  const closePasswordModal = useCallback(() => {
+    setPasswordModal(false);
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmNewPassword('');
+    setShowCurrentPassword(false);
+    setShowNewPassword(false);
+    setShowConfirmNewPassword(false);
+    setPasswordErrors({});
+  }, []);
+
   useEffect(() => {
     if (location.hash === '#password') {
-      setPasswordModal(true);
+      openPasswordModal();
     }
-  }, [location.hash]);
+  }, [location.hash, openPasswordModal]);
 
   useEffect(() => {
     return () => {
@@ -606,7 +664,23 @@ export default function Profile() {
 
   const handlePassword = async () => {
     setMessage('');
+    const nextErrors = {};
+    if (!currentPassword) {
+      nextErrors.currentPassword = 'رمز فعلی را وارد کنید.';
+    }
+    if (!newPassword || newPassword.length < 6) {
+      nextErrors.newPassword = 'رمز جدید باید حداقل 6 کاراکتر باشد.';
+    } else if (currentPassword && newPassword === currentPassword) {
+      nextErrors.newPassword = 'رمز جدید باید با رمز فعلی متفاوت باشد.';
+    }
+    if (!confirmNewPassword || confirmNewPassword !== newPassword) {
+      nextErrors.confirmNewPassword = 'رمز جدید و تکرار آن یکسان نیستند.';
+    }
+    setPasswordErrors(nextErrors);
+    if (Object.keys(nextErrors).length) return;
+
     try {
+      setPasswordSaving(true);
       const res = await fetch(`${API_BASE}/api/users/me/password`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
@@ -614,17 +688,32 @@ export default function Profile() {
       });
       const data = await res.json();
       if (!data?.success) {
+        if (/رمز فعلی/.test(data?.message || '')) {
+          setPasswordErrors((prev) => ({ ...prev, currentPassword: data.message }));
+        }
         setMessage(data?.message || 'تغییر رمز عبور ناموفق بود.');
         return;
       }
-      setPasswordModal(false);
-      setCurrentPassword('');
-      setNewPassword('');
+      closePasswordModal();
       setMessage('رمز عبور با موفقیت تغییر کرد.');
     } catch {
       setMessage('خطا در تغییر رمز عبور');
+    } finally {
+      setPasswordSaving(false);
     }
   };
+
+  const passwordChecklist = useMemo(() => ([
+    { key: 'length', label: 'حداقل 6 کاراکتر', valid: newPassword.length >= 6 },
+    { key: 'diff', label: 'متفاوت از رمز فعلی', valid: !!newPassword && newPassword !== currentPassword },
+    {
+      key: 'match',
+      label: 'مطابق با تکرار رمز جدید',
+      valid: !!newPassword && !!confirmNewPassword && newPassword === confirmNewPassword
+    }
+  ]), [confirmNewPassword, currentPassword, newPassword]);
+
+  const isPasswordFormValid = !!currentPassword && passwordChecklist.every((item) => item.valid);
 
   const roleClass = user?.role === 'admin' ? 'role-admin' : isInstructorUser ? 'role-instructor' : 'role-student';
   const displaySubject = useMemo(
@@ -896,7 +985,7 @@ export default function Profile() {
 
         <div className="profile-quick-actions">
           <button type="button" onClick={openEditProfileModal}>ویرایش مشخصات</button>
-          <button type="button" className="ghost" onClick={() => setPasswordModal(true)}>
+          <button type="button" className="ghost" onClick={openPasswordModal}>
             تغییر رمز عبور
           </button>
         </div>
@@ -1158,24 +1247,74 @@ export default function Profile() {
 
       {passwordModal && (
         <div className="modal-backdrop">
-          <div className="modal-card">
-            <h3>تغییر رمز عبور</h3>
-            <label>رمز فعلی</label>
-            <input
-              type="password"
+          <div className="modal-card password-modal">
+            <div className="password-modal-head">
+              <span className="password-modal-icon"><i className="fa fa-lock" aria-hidden="true" /></span>
+              <div>
+                <h3>تغییر رمز عبور</h3>
+                <p>برای امنیت حساب خود، یک رمز عبور تازه و قوی انتخاب کنید.</p>
+              </div>
+            </div>
+
+            <PasswordField
+              id="password-current"
+              label="رمز فعلی"
               value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
+              onChange={(e) => {
+                setCurrentPassword(e.target.value);
+                setPasswordErrors((prev) => ({ ...prev, currentPassword: undefined }));
+              }}
+              show={showCurrentPassword}
+              onToggleShow={() => setShowCurrentPassword((prev) => !prev)}
+              error={passwordErrors.currentPassword}
+              placeholder="رمز عبور فعلی خود را وارد کنید"
+              autoComplete="current-password"
             />
-            <label>رمز جدید</label>
-            <input
-              type="password"
+
+            <PasswordField
+              id="password-new"
+              label="رمز جدید"
               value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
+              onChange={(e) => {
+                setNewPassword(e.target.value);
+                setPasswordErrors((prev) => ({ ...prev, newPassword: undefined }));
+              }}
+              show={showNewPassword}
+              onToggleShow={() => setShowNewPassword((prev) => !prev)}
+              error={passwordErrors.newPassword}
+              placeholder="حداقل 6 کاراکتر"
+              autoComplete="new-password"
             />
-            <div className="profile-message">رمز جدید باید حداقل 6 کاراکتر باشد.</div>
+
+            <PasswordField
+              id="password-confirm"
+              label="تکرار رمز جدید"
+              value={confirmNewPassword}
+              onChange={(e) => {
+                setConfirmNewPassword(e.target.value);
+                setPasswordErrors((prev) => ({ ...prev, confirmNewPassword: undefined }));
+              }}
+              show={showConfirmNewPassword}
+              onToggleShow={() => setShowConfirmNewPassword((prev) => !prev)}
+              error={passwordErrors.confirmNewPassword}
+              placeholder="رمز جدید را دوباره وارد کنید"
+              autoComplete="new-password"
+            />
+
+            <ul className="password-checklist">
+              {passwordChecklist.map((item) => (
+                <li key={item.key} className={item.valid ? 'is-valid' : ''}>
+                  <i className={`fa ${item.valid ? 'fa-circle-check' : 'fa-circle'}`} aria-hidden="true" />
+                  <span>{item.label}</span>
+                </li>
+              ))}
+            </ul>
+
             <div className="modal-actions">
-              <button type="button" onClick={handlePassword}>ثبت</button>
-              <button type="button" className="ghost" onClick={() => setPasswordModal(false)}>
+              <button type="button" onClick={handlePassword} disabled={passwordSaving || !isPasswordFormValid}>
+                {passwordSaving ? 'در حال ثبت...' : 'ثبت رمز جدید'}
+              </button>
+              <button type="button" className="ghost" onClick={closePasswordModal} disabled={passwordSaving}>
                 لغو
               </button>
             </div>

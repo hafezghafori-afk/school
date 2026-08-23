@@ -503,6 +503,15 @@
   align-items: stretch;
 }
 
+/* The 3 relief/discount/exemption cards vary a lot in natural content
+   height (rows are compact now, and each card can hold a different
+   number of them) - grid's default "stretch" was forcing all 3 to the
+   tallest one's height, leaving big blank space at the bottom of the
+   shorter cards. */
+.finance-grid[data-finance-section="discounts"] {
+  align-items: start;
+}
+
 .finance-card {
   /* Overrides the generic "form { max-width: 400px; margin: 0 auto; }" rule
      in App.css, which applies to every bare <form> element (including the
@@ -723,6 +732,29 @@
   .finance-report-download-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.finance-monthly-summary-card {
+  margin-bottom: 16px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.finance-monthly-summary-card .finance-card-head {
+  margin-bottom: 10px;
+}
+
+.finance-monthly-summary-card .finance-smart-kpi-grid {
+  margin-bottom: 12px;
+}
+
+.finance-monthly-summary-error {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #fecaca;
 }
 
 .finance-recent-finance-grid {
@@ -994,6 +1026,21 @@
   gap: 12px;
 }
 
+/* General default for a small label sitting above a card's <h3> - the two
+   more specific .finance-eyebrow selectors elsewhere override this inside
+   their own flex-row contexts. */
+.finance-eyebrow {
+  display: block;
+  margin-bottom: 2px;
+  color: rgba(226, 232, 240, 0.6);
+  font-size: 11px;
+}
+
+.finance-relief-focus-summary {
+  margin: 2px 0 0;
+  line-height: 1.7;
+}
+
 .finance-card-head-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1014,6 +1061,56 @@
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 10px;
+}
+
+/* These 3 relief/discount/exemption cards' own search + page-size row
+   (not the generic .finance-inline-filter[-wide] used elsewhere) - shrink
+   both so they actually share one line at these cards' narrower width
+   instead of wrapping, per the user's request. */
+[data-testid="relief-registry-hub"] .finance-inline-controls,
+[data-testid="discount-registry-list"] .finance-inline-controls,
+[data-testid="exemption-registry-list"] .finance-inline-controls {
+  flex-wrap: nowrap;
+}
+
+[data-testid="relief-registry-hub"] .finance-inline-filter-wide,
+[data-testid="discount-registry-list"] .finance-inline-filter-wide,
+[data-testid="exemption-registry-list"] .finance-inline-filter-wide {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* صنف + تعداد در صفحه + رفع تکرار - three fixed-width columns so all 3 fit
+   one row instead of the "شرینک ولی هنوز پهن است" outcome of a bare
+   min-width; the class <select>'s own text ellipsizes at this width in
+   Chromium, and the horizontal scroll below is only a safety net for an
+   unusually long class name at very narrow widths. */
+[data-testid="discount-registry-quick-row"] {
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+[data-testid="discount-registry-quick-row"] > * {
+  flex: 0 0 auto;
+  width: 118px;
+  min-width: 118px;
+}
+
+[data-testid="discount-registry-quick-row"] select,
+[data-testid="discount-registry-quick-row"] button {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  padding-inline: 8px;
+}
+
+[data-testid="relief-registry-hub"] .finance-inline-controls > .finance-inline-filter:not(.finance-inline-filter-wide),
+[data-testid="discount-registry-list"] .finance-inline-controls > .finance-inline-filter:not(.finance-inline-filter-wide),
+[data-testid="exemption-registry-list"] .finance-inline-controls > .finance-inline-filter:not(.finance-inline-filter-wide) {
+  flex: 0 0 auto;
+  min-width: 90px;
 }
 
 .finance-chip {
@@ -1037,6 +1134,38 @@
 
 .finance-chip-button:hover {
   filter: brightness(1.15);
+}
+
+.finance-relief-type-breakdown {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin: 2px 0 4px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+/* Glassy + smaller than the default .finance-chip-button - only 4 buttons
+   (همه + 3 groups) live here, so they should read as one light quick-filter
+   row, not compete visually with the 3 stat chips above them. */
+.finance-relief-type-breakdown .finance-chip-button {
+  padding: 4px 10px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.finance-relief-type-breakdown .finance-chip-button.is-active {
+  background: rgba(16, 185, 129, 0.16);
+  border-color: rgba(16, 185, 129, 0.4);
+  outline: none;
+}
+
+.finance-chip-button.is-active {
+  outline: 2px solid rgba(16, 185, 129, 0.55);
+  outline-offset: 1px;
 }
 
 .finance-chip-emerald {
@@ -1955,63 +2084,134 @@
   margin: 4px 0 0;
 }
 
+/* A pill row of just class names now, not 3-line stat cards - clicking one
+   opens its detail in the single .finance-registry-detail panel right below
+   the row (see expandedClassSummaryItem), so as many classes as possible
+   fit across 1-2 lines instead of one big card per class. */
 .finance-class-discount-summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.finance-class-discount-card {
-  display: grid;
-  gap: 4px;
-  text-align: right;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
+/* .finance-card button (a bare-<button> reset elsewhere in this file) beats
+   a single-class selector on specificity, painting these solid green
+   regardless of source order - the .finance-card prefix here isn't
+   decorative, it's what makes the glass background actually win. */
+.finance-card .finance-class-discount-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   color: #eef5ff;
-  padding: 10px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
 }
 
-.finance-class-discount-card:hover,
-.finance-class-discount-card.is-active {
+.finance-card .finance-class-discount-card:hover,
+.finance-card .finance-class-discount-card.is-active {
   border-color: rgba(34, 197, 94, 0.45);
-  background: rgba(34, 197, 94, 0.1);
+  background: rgba(34, 197, 94, 0.16);
 }
 
-.finance-class-discount-card span,
-.finance-class-discount-card small {
-  color: rgba(238, 245, 255, 0.78);
+.finance-class-discount-card .finance-chip {
+  padding: 2px 7px;
+  font-size: 10.5px;
 }
 
-.finance-class-discount-card strong {
-  font-size: 18px;
-}
-
-.finance-registry-row {
+.finance-registry-row-wrap {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.9fr) auto;
-  gap: 12px;
+  gap: 6px;
+}
+
+/* A row is just name + a couple of badges until clicked - full details
+   (class/year, reason, dates, scope) and the action buttons live in the
+   .finance-registry-detail panel that expands underneath it. Small and
+   glassy: this is a scan-a-list-of-many view, not a data card. */
+.finance-card .finance-registry-row-compact {
+  display: flex;
   align-items: center;
+  gap: 8px;
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  padding: 6px 10px;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: #eef5ff;
+  cursor: pointer;
+  text-align: right;
+}
+
+.finance-card .finance-registry-row-compact:hover,
+.finance-card .finance-registry-row-compact.is-expanded {
+  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.14);
+}
+
+.finance-registry-row-compact strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.finance-registry-row-compact .finance-chip {
+  padding: 3px 8px;
+  font-size: 10.5px;
+}
+
+.finance-registry-row-chevron {
+  flex: 0 0 auto;
+  color: rgba(226, 232, 240, 0.6);
+  font-size: 11px;
+}
+
+.finance-registry-detail {
+  display: grid;
+  gap: 10px;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(15, 23, 42, 0.4);
   padding: 12px;
 }
 
-.finance-registry-row strong {
-  display: block;
-  margin-bottom: 4px;
+.finance-registry-detail-table {
+  width: 100%;
+  font-size: 13px;
+  border-collapse: collapse;
 }
 
-.finance-registry-row span,
-.finance-registry-row small {
-  color: rgba(238, 245, 255, 0.78);
+.finance-registry-detail-table td {
+  padding: 4px 0;
+  vertical-align: top;
 }
 
-.finance-registry-row small {
-  display: block;
-  margin-top: 4px;
+.finance-registry-detail-table td:first-child {
+  color: rgba(226, 232, 240, 0.6);
+  width: 110px;
+  white-space: nowrap;
+}
+
+.finance-registry-edit-panel {
+  display: grid;
+  gap: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  background: rgba(15, 23, 42, 0.5);
+  padding: 12px;
 }
 
 .finance-registry-meta {

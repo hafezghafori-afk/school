@@ -3285,12 +3285,12 @@ export default function AdminPanel() {
         <title>گزارش ماتریس دسترسی مدیریتی</title>
         <style>
           @font-face {
-            font-family: 'B Nazanin Print';
-            src: url('/fonts/B_Nazanin.ttf') format('truetype');
-            font-weight: 400;
+            font-family: 'Vazirmatn Print';
+            src: url('/fonts/Vazirmatn-Variable.ttf') format('truetype');
+            font-weight: 100 900;
             font-style: normal;
           }
-          body { font-family: 'B Nazanin Print', 'B Nazanin', 'B Mitra', sans-serif; color: #0f172a; margin: 20px; }
+          body { font-family: 'Vazirmatn Print', 'B Nazanin', 'B Mitra', sans-serif; color: #0f172a; margin: 20px; }
           h1 { font-size: 20px; margin: 0 0 10px; }
           .meta { margin: 0 0 12px; font-size: 13px; line-height: 1.9; }
           table { width: 100%; border-collapse: collapse; margin-top: 10px; }
@@ -3706,9 +3706,9 @@ export default function AdminPanel() {
     },
     {
       key: 'instructor-report',
-      title: 'گزارش استاد',
+      title: 'گزارش فعالیت کاربر',
       group: 'گزارش‌ها',
-      subtitle: 'گزارش فعالیت و تدریس استاد',
+      subtitle: 'فعالیت یک استاد یا ادمین مشخص به‌همراه فیلتر و خروجی',
       count: 0,
       to: canViewReports ? '/instructor-report' : ''
     },

@@ -810,6 +810,19 @@ const RELIEF_COVERAGE_MODE_UI_LABELS = {
   full: 'پوشش کامل'
 };
 
+// "تسهیل" (relief) is the umbrella every discount/exemption/scholarship/etc.
+// mirrors into (see FinanceRelief.sourceModel on the backend) - these groups
+// are how the overview card's quick-filter chips break that umbrella down,
+// so admins see the parent/child relationship instead of nine flat types.
+// 3 groups (+ "همه") is the whole quick-filter row now - بورسیه/حمایت خیریه/
+// جریمه fold into معافیت as the general non-discount, non-free-student
+// bucket, since they're rare and don't each need a dedicated button.
+const RELIEF_TYPE_GROUPS = [
+  { key: 'discount', label: 'تخفیف', types: ['discount', 'sibling_discount', 'manual'] },
+  { key: 'exemption', label: 'معافیت', types: ['waiver', 'scholarship_partial', 'scholarship_full', 'charity_support', 'penalty'] },
+  { key: 'free', label: 'رایگان', types: ['free_student'] }
+];
+
 const PAYMENT_METHOD_UI_LABELS = {
   cash: 'نقدی',
   bank_transfer: 'انتقال بانکی',
@@ -1969,11 +1982,10 @@ const buildReceiptPrintHtml = (model, schoolInfo, logoUrls) => {
 <meta charset="utf-8" />
 <title>رسید پرداخت فیس شاگرد</title>
 <style>
-  @font-face { font-family: 'B Nazanin'; src: url('/fonts/B_Nazanin.ttf') format('truetype'); font-weight: 400; }
-  @font-face { font-family: 'B Nazanin'; src: url('/fonts/B_Nazanin_Bold.ttf') format('truetype'); font-weight: 700; }
+  @font-face { font-family: 'Vazirmatn'; src: url('/fonts/Vazirmatn-Variable.ttf') format('truetype'); font-weight: 100 900; }
   @page { size: A4 portrait; margin: 12mm; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: 'B Nazanin', 'B Mitra', Tahoma, sans-serif; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: 'Vazirmatn', 'B Nazanin', 'B Mitra', Tahoma, sans-serif; }
   /* Two copies must each occupy exactly half of the printable page (not just their natural
      content height) so the two halves always meet edge-to-edge with the cut line exactly in the
      middle - a page shorter than that leaves an empty gap at the bottom of the sheet, which is
@@ -2082,11 +2094,10 @@ const buildDebtStatementHtml = (model, schoolInfo, logoUrls) => {
 <meta charset="utf-8" />
 <title>صورت‌حساب بدهی</title>
 <style>
-  @font-face { font-family: 'B Nazanin'; src: url('/fonts/B_Nazanin.ttf') format('truetype'); font-weight: 400; }
-  @font-face { font-family: 'B Nazanin'; src: url('/fonts/B_Nazanin_Bold.ttf') format('truetype'); font-weight: 700; }
+  @font-face { font-family: 'Vazirmatn'; src: url('/fonts/Vazirmatn-Variable.ttf') format('truetype'); font-weight: 100 900; }
   @page { size: A4 portrait; margin: 14mm; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: 'B Nazanin', 'B Mitra', Tahoma, sans-serif; direction: rtl; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: 'Vazirmatn', 'B Nazanin', 'B Mitra', Tahoma, sans-serif; direction: rtl; }
   .letterhead { display: grid; grid-template-columns: 20mm minmax(0, 1fr) 20mm; gap: 3mm; align-items: center; direction: ltr; margin-bottom: 6mm; }
   .logo-box { display: grid; place-items: center; width: 18mm; height: 18mm; border: 1px solid #b8b8b8; color: #444; font-size: 8pt; padding: 1mm; overflow: hidden; text-align: center; }
   .logo-box img { width: 100%; height: 100%; object-fit: contain; }
@@ -2391,12 +2402,12 @@ export default function AdminFinance() {
   const [billVisibleCount, setBillVisibleCount] = useState(5);
   const [ordersCatalogLoading, setOrdersCatalogLoading] = useState(false);
   const [discountRegistryPage, setDiscountRegistryPage] = useState(1);
-  const [discountRegistryPageSize, setDiscountRegistryPageSize] = useState(10);
+  const [discountRegistryPageSize, setDiscountRegistryPageSize] = useState(5);
   const [discountRegistryClassFilter, setDiscountRegistryClassFilter] = useState('all');
   const [reliefRegistryPage, setReliefRegistryPage] = useState(1);
-  const [reliefRegistryPageSize, setReliefRegistryPageSize] = useState(10);
+  const [reliefRegistryPageSize, setReliefRegistryPageSize] = useState(5);
   const [exemptionRegistryPage, setExemptionRegistryPage] = useState(1);
-  const [exemptionRegistryPageSize, setExemptionRegistryPageSize] = useState(10);
+  const [exemptionRegistryPageSize, setExemptionRegistryPageSize] = useState(5);
   const [reliefFocusPage, setReliefFocusPage] = useState(1);
   const [reliefFocusPageSize, setReliefFocusPageSize] = useState(5);
   const [paymentAdvancedOpen, setPaymentAdvancedOpen] = useState(false);
@@ -2500,7 +2511,12 @@ export default function AdminFinance() {
     durationMode: 'academic_year',
     startDate: '',
     endDate: '',
-    reason: ''
+    reason: '',
+    // Set by "جایگزینی" on an existing row: amount/percentage/coverage can't
+    // be edited in place (would silently rewrite already-applied bill math),
+    // so the flow is submit-a-replacement-then-auto-cancel-the-old-one -
+    // this id is what gets cancelled once the new one is created.
+    replacingId: ''
   });
 
   const [exemptionForm, setExemptionForm] = useState({
@@ -2513,8 +2529,23 @@ export default function AdminFinance() {
     amount: '',
     percentage: '',
     reason: '',
-    note: ''
+    note: '',
+    replacingId: ''
   });
+
+  // Rows in all 3 relief cards are compact (name + type + amount) until
+  // clicked - the expanded*Id below controls which single row's detail
+  // panel is open; editing*Id (nested inside that panel) controls whether
+  // the inline "ویرایش" sub-form (safe fields only) is showing.
+  const [expandedDiscountId, setExpandedDiscountId] = useState('');
+  const [editingDiscountId, setEditingDiscountId] = useState('');
+  const [discountEditForm, setDiscountEditForm] = useState({ reason: '', startDate: '', endDate: '' });
+  const [expandedExemptionId, setExpandedExemptionId] = useState('');
+  const [editingExemptionId, setEditingExemptionId] = useState('');
+  const [exemptionEditForm, setExemptionEditForm] = useState({ reason: '', note: '' });
+  const [expandedReliefId, setExpandedReliefId] = useState('');
+  const [expandedClassSummaryId, setExpandedClassSummaryId] = useState('');
+  const [expandedReliefFocusItemId, setExpandedReliefFocusItemId] = useState('');
 
   const [paymentDeskForm, setPaymentDeskForm] = useState({
     studentId: '',
@@ -3090,6 +3121,11 @@ export default function AdminFinance() {
       document.querySelector('[data-testid="finance-orders-table-card"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 0);
   }, [setOrderStatusFilter, setOrderSearchTerm]);
+  const hasDiscountDuplicates = (
+    Number(discountDuplicateSummary?.duplicateRecords || 0)
+    + Number(discountDuplicateSummary?.mirroredDiscountRecords || 0)
+    + Number(discountDuplicateSummary?.mirroredActiveReliefs || 0)
+  ) > 0;
   const filteredDiscountRegistry = useMemo(() => (
     discountRegistry.filter((item) => (
       !String(item?.reason || '').trim().toLowerCase().startsWith('[discount:')
@@ -3143,6 +3179,7 @@ export default function AdminFinance() {
       }))
       .sort((left, right) => right.classStudentCount - left.classStudentCount || right.count - left.count || left.classTitle.localeCompare(right.classTitle));
   }, [filteredDiscountRegistry, financeMembershipClassCounts]);
+  const expandedClassSummaryItem = discountRegistryByClass.find((item) => item.classId === expandedClassSummaryId) || null;
   const discountRegistryTotalPages = Math.max(1, Math.ceil(filteredDiscountRegistry.length / Math.max(1, Number(discountRegistryPageSize) || 10)));
   const pagedDiscountRegistry = useMemo(() => {
     const pageSize = Math.max(1, Number(discountRegistryPageSize) || 10);
@@ -3150,8 +3187,38 @@ export default function AdminFinance() {
     const start = (safePage - 1) * pageSize;
     return filteredDiscountRegistry.slice(start, start + pageSize);
   }, [discountRegistryPage, discountRegistryPageSize, discountRegistryTotalPages, filteredDiscountRegistry]);
-  const filteredExemptionRegistry = useMemo(() => (
-    exemptions.filter((item) => includesFinanceSearch([
+  // A fixed discount that happens to zero out the fee, or a 100%-percent
+  // discount, has the exact same effect on the student's bill as a full
+  // exemption - the user asked these to surface in this registry too, even
+  // though the underlying record is still a Discount, not a FeeExemption.
+  const getMatchingTuitionFeePlan = useCallback((classId, academicYearId) => {
+    if (!classId || !academicYearId) return null;
+    return feePlans.find((plan) => {
+      const lifecycleStatus = String(plan?.lifecycleStatus || (plan?.isActive === false ? 'inactive' : 'active')).trim() || 'active';
+      const sameClass = String(plan?.classId || plan?.schoolClass?._id || plan?.schoolClass?.id || '') === String(classId);
+      const sameYear = String(plan?.academicYearId || plan?.academicYear?._id || plan?.academicYear?.id || '') === String(academicYearId);
+      return lifecycleStatus === 'active' && sameClass && sameYear;
+    }) || null;
+  }, [feePlans]);
+  const isFullCoverageDiscount = useCallback((item) => {
+    if (String(item?.status || '') !== 'active') return false;
+    if (String(item?.coverageMode || '') === 'percent') return Number(item?.percentage || 0) >= 100;
+    if (String(item?.coverageMode || '') === 'fixed') {
+      const plan = getMatchingTuitionFeePlan(item?.schoolClass?.id, item?.academicYear?.id);
+      const tuitionFee = toSafeNumber(plan?.tuitionFee);
+      return tuitionFee > 0 && Math.abs(toSafeNumber(item?.amount) - tuitionFee) < 0.01;
+    }
+    return false;
+  }, [getMatchingTuitionFeePlan]);
+  const fullCoverageDiscountRegistry = useMemo(() => (
+    discountRegistry.filter(isFullCoverageDiscount)
+  ), [discountRegistry, isFullCoverageDiscount]);
+  const filteredExemptionRegistry = useMemo(() => {
+    const combined = [
+      ...exemptions.map((item) => ({ ...item, registryKind: 'exemption' })),
+      ...fullCoverageDiscountRegistry.map((item) => ({ ...item, registryKind: 'discount' }))
+    ];
+    return combined.filter((item) => includesFinanceSearch([
       item?.student?.fullName,
       item?.student?.name,
       item?.student?.asasNumber,
@@ -3163,9 +3230,10 @@ export default function AdminFinance() {
       item?.academicYear?.title,
       item?.reason,
       item?.scope,
-      item?.exemptionType
-    ], exemptionRegistrySearch))
-  ), [exemptions, exemptionRegistrySearch, studentSearchBlobById]);
+      item?.exemptionType,
+      item?.discountType
+    ], exemptionRegistrySearch));
+  }, [exemptions, fullCoverageDiscountRegistry, exemptionRegistrySearch, studentSearchBlobById]);
   const exemptionRegistryTotalPages = Math.max(1, Math.ceil(filteredExemptionRegistry.length / Math.max(1, Number(exemptionRegistryPageSize) || 10)));
   const pagedExemptionRegistry = useMemo(() => {
     const pageSize = Math.max(1, Number(exemptionRegistryPageSize) || 10);
@@ -3173,12 +3241,22 @@ export default function AdminFinance() {
     const start = (safePage - 1) * pageSize;
     return filteredExemptionRegistry.slice(start, start + pageSize);
   }, [exemptionRegistryPage, exemptionRegistryPageSize, exemptionRegistryTotalPages, filteredExemptionRegistry]);
-  const reliefRegistryTypeOptions = useMemo(() => (
-    Array.from(new Set(reliefs.map((item) => String(item?.reliefType || '').trim()).filter(Boolean)))
+  // Per-group counts for the "تسهیلات مالی" overview card's breakdown chips -
+  // computed from the full (search/type-unfiltered) list so the chips always
+  // show the whole picture, not just what the current filter leaves behind.
+  const reliefTypeGroupBreakdown = useMemo(() => (
+    RELIEF_TYPE_GROUPS
+      .map((group) => ({
+        ...group,
+        count: reliefs.filter((item) => group.types.includes(String(item?.reliefType || '').trim())).length
+      }))
+      .filter((group) => group.count > 0)
   ), [reliefs]);
   const filteredReliefRegistry = useMemo(() => (
     reliefs.filter((item) => (
-      (reliefRegistryTypeFilter === 'all' || String(item?.reliefType || '').trim() === reliefRegistryTypeFilter)
+      (reliefRegistryTypeFilter === 'all' || (
+        RELIEF_TYPE_GROUPS.find((group) => group.key === reliefRegistryTypeFilter)?.types || []
+      ).includes(String(item?.reliefType || '').trim()))
       && includesFinanceSearch([
         item?.student?.fullName,
         item?.student?.name,
@@ -3749,6 +3827,10 @@ export default function AdminFinance() {
   const [cashierReport, setCashierReport] = useState(null);
   const [reportClassId, setReportClassId] = useState('');
   const [reportAcademicYearId, setReportAcademicYearId] = useState('');
+  const [monthlySummaryMonth, setMonthlySummaryMonth] = useState('');
+  const [monthlySummaryData, setMonthlySummaryData] = useState(null);
+  const [monthlySummaryLoading, setMonthlySummaryLoading] = useState(false);
+  const [monthlySummaryError, setMonthlySummaryError] = useState('');
   const [auditTimeline, setAuditTimeline] = useState([]);
   const [auditTimelineSummary, setAuditTimelineSummary] = useState(null);
   const [auditTimelineSearch, setAuditTimelineSearch] = useState('');
@@ -3932,6 +4014,46 @@ export default function AdminFinance() {
     }
     return url.toString();
   };
+
+  const loadMonthlySummary = useCallback(async (targetMonthKey) => {
+    if (!targetMonthKey) {
+      setMonthlySummaryData(null);
+      setMonthlySummaryError('');
+      return;
+    }
+    try {
+      setMonthlySummaryLoading(true);
+      setMonthlySummaryError('');
+      const url = new URL(buildScopedReportUrl('/api/finance/admin/reports/monthly-summary'));
+      url.searchParams.set('month', targetMonthKey);
+      const res = await fetch(url.toString(), { headers: { ...getAuthHeaders() } });
+      const data = await res.json();
+      if (!data?.success) {
+        setMonthlySummaryData(null);
+        setMonthlySummaryError(data?.message || 'خطا در دریافت گزارش ماهانه.');
+        return;
+      }
+      setMonthlySummaryData(data.summary || null);
+    } catch {
+      setMonthlySummaryData(null);
+      setMonthlySummaryError('خطا در دریافت گزارش ماهانه.');
+    } finally {
+      setMonthlySummaryLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportClassId, reportAcademicYearId]);
+
+  useEffect(() => {
+    if (!billMonthOptions.length) return;
+    if (!monthlySummaryMonth || !billMonthOptions.some((item) => item.key === monthlySummaryMonth)) {
+      setMonthlySummaryMonth(billMonthOptions[0].key);
+    }
+  }, [billMonthOptions, monthlySummaryMonth]);
+
+  useEffect(() => {
+    if (activeSection !== 'reports') return;
+    loadMonthlySummary(monthlySummaryMonth);
+  }, [activeSection, monthlySummaryMonth, loadMonthlySummary]);
 
   const buildFinanceOverviewUrl = () => {
     const url = new URL(`${API_BASE}/api/finance/admin/dashboard/overview`, window.location.origin);
@@ -5646,6 +5768,18 @@ export default function AdminFinance() {
     return data;
   };
 
+  const patchJson = async (url, body) => {
+    const data = await fetchJson(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    });
+    if (!data?.success) {
+      throw new Error(data?.message || 'عملیات ناموفق بود');
+    }
+    return data;
+  };
+
   const previewAdvanceStudentBilling = async (monthCount) => {
     const membershipId = String(paymentDeskMembershipStudent?.membershipId || '').trim();
     if (!membershipId || !paymentDeskForm.classId || !paymentDeskForm.academicYearId) {
@@ -6252,7 +6386,11 @@ export default function AdminFinance() {
       if (createdDiscount.discountType === 'discount') {
         setDiscountRegistry((prev) => [createdDiscount, ...prev.filter((item) => item.id !== createdDiscount.id)]);
       }
-      setMessage(data.message || 'تخفیف متعلم ثبت شد');
+      const wasReplacing = discountForm.replacingId;
+      if (wasReplacing) {
+        await cancelDiscountById(wasReplacing, 'جایگزین شد با تخفیف ویرایش‌شده');
+      }
+      setMessage(wasReplacing ? 'تخفیف با مقادیر جدید جایگزین شد' : (data.message || 'تخفیف متعلم ثبت شد'));
       setDiscountForm((prev) => ({
         ...prev,
         amount: '',
@@ -6260,7 +6398,8 @@ export default function AdminFinance() {
         durationMode: 'academic_year',
         startDate: '',
         endDate: '',
-        reason: ''
+        reason: '',
+        replacingId: ''
       }));
       await refreshPaymentWorkspace({
         includeAnomalies: true,
@@ -6274,13 +6413,18 @@ export default function AdminFinance() {
     }
   };
 
+  const cancelDiscountById = async (discountId, reason) => {
+    const data = await postJson(`${API_BASE}/api/student-finance/discounts/${discountId}/cancel`, { reason });
+    setDiscountRegistry((prev) => prev.filter((item) => item.id !== discountId));
+    return data;
+  };
+
   const cancelDiscountRegistry = async (discountId) => {
     const reason = window.prompt('دلیل لغو تخفیف:', '') || '';
     if (!reason.trim()) return;
     try {
       setBusy(true);
-      const data = await postJson(`${API_BASE}/api/student-finance/discounts/${discountId}/cancel`, { reason });
-      setDiscountRegistry((prev) => prev.filter((item) => item.id !== discountId));
+      const data = await cancelDiscountById(discountId, reason);
       setMessage(data.message || 'تخفیف لغو شد');
       await refreshPaymentWorkspace({
         includeAnomalies: true,
@@ -6290,6 +6434,55 @@ export default function AdminFinance() {
       setMessage(err.message);
       setBusy(false);
     }
+  };
+
+  const startEditDiscount = (item) => {
+    setExpandedDiscountId(item.id);
+    setEditingDiscountId(item.id);
+    setDiscountEditForm({
+      reason: item.reason || '',
+      startDate: item.startDate ? toInputDate(item.startDate) : '',
+      endDate: item.endDate ? toInputDate(item.endDate) : ''
+    });
+  };
+
+  const saveDiscountEdit = async (discountId) => {
+    try {
+      setBusy(true);
+      const data = await patchJson(`${API_BASE}/api/student-finance/discounts/${discountId}`, discountEditForm);
+      setDiscountRegistry((prev) => prev.map((item) => (item.id === discountId ? { ...item, ...data.item } : item)));
+      setMessage(data.message || 'تخفیف ویرایش شد');
+      setEditingDiscountId('');
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Amount/percentage/coverageMode can't be edited in place - opens the
+  // create form pre-filled with this discount's values; on submit the old
+  // one is auto-cancelled once the replacement is created successfully.
+  const startReplaceDiscount = (item) => {
+    setReliefFormMode('discount');
+    setDiscountForm((prev) => ({
+      ...prev,
+      targetScope: 'student',
+      studentId: item.student?.userId || '',
+      studentMembershipId: item.studentMembershipId || '',
+      classId: item.schoolClass?.id || '',
+      academicYearId: item.academicYear?.id || '',
+      discountType: item.discountType || 'discount',
+      coverageMode: item.coverageMode || 'fixed',
+      amount: item.coverageMode === 'percent' ? '' : String(item.amount || ''),
+      percentage: item.coverageMode === 'percent' ? String(item.percentage || '') : '',
+      durationMode: item.durationMode || 'academic_year',
+      startDate: item.startDate ? toInputDate(item.startDate) : '',
+      endDate: item.endDate ? toInputDate(item.endDate) : '',
+      reason: item.reason || '',
+      replacingId: item.id
+    }));
+    document.querySelector('[data-testid="discount-registry-form"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   const saveExemptionRegistry = async (e) => {
@@ -6351,13 +6544,18 @@ export default function AdminFinance() {
         }
       };
       setExemptions((prev) => [createdExemption, ...prev.filter((item) => item.id !== createdExemption.id)]);
-      setMessage(data.message || 'معافیت/رایگان‌بودن متعلم ثبت شد');
+      const wasReplacing = exemptionForm.replacingId;
+      if (wasReplacing) {
+        await cancelExemptionById(wasReplacing, 'جایگزین شد با معافیت ویرایش‌شده');
+      }
+      setMessage(wasReplacing ? 'معافیت با مقادیر جدید جایگزین شد' : (data.message || 'معافیت/رایگان‌بودن متعلم ثبت شد'));
       setExemptionForm((prev) => ({
         ...prev,
         amount: '',
         percentage: '',
         reason: '',
-        note: ''
+        note: '',
+        replacingId: ''
       }));
       await refreshPaymentWorkspace({
         includeAnomalies: true,
@@ -6369,13 +6567,18 @@ export default function AdminFinance() {
     }
   };
 
+  const cancelExemptionById = async (exemptionId, cancelReason) => {
+    const data = await postJson(`${API_BASE}/api/student-finance/exemptions/${exemptionId}/cancel`, { cancelReason });
+    setExemptions((prev) => prev.filter((item) => item.id !== exemptionId));
+    return data;
+  };
+
   const cancelExemptionRegistry = async (exemptionId) => {
     const cancelReason = window.prompt('دلیل لغو معافیت:', '') || '';
     if (!cancelReason.trim()) return;
     try {
       setBusy(true);
-      const data = await postJson(`${API_BASE}/api/student-finance/exemptions/${exemptionId}/cancel`, { cancelReason });
-      setExemptions((prev) => prev.filter((item) => item.id !== exemptionId));
+      const data = await cancelExemptionById(exemptionId, cancelReason);
       setMessage(data.message || 'معافیت لغو شد');
       await refreshPaymentWorkspace({
         includeAnomalies: true,
@@ -6385,6 +6588,47 @@ export default function AdminFinance() {
       setMessage(err.message);
       setBusy(false);
     }
+  };
+
+  const startEditExemption = (item) => {
+    setExpandedExemptionId(item.id);
+    setEditingExemptionId(item.id);
+    setExemptionEditForm({ reason: item.reason || '', note: item.note || '' });
+  };
+
+  const saveExemptionEdit = async (exemptionId) => {
+    try {
+      setBusy(true);
+      const data = await patchJson(`${API_BASE}/api/student-finance/exemptions/${exemptionId}`, exemptionEditForm);
+      setExemptions((prev) => prev.map((item) => (item.id === exemptionId ? { ...item, ...data.item } : item)));
+      setMessage(data.message || 'معافیت ویرایش شد');
+      setEditingExemptionId('');
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Same reasoning as startReplaceDiscount - amount/percentage/exemptionType
+  // aren't editable in place.
+  const startReplaceExemption = (item) => {
+    setReliefFormMode('exemption');
+    setExemptionForm((prev) => ({
+      ...prev,
+      studentId: item.student?.userId || '',
+      studentMembershipId: item.studentMembershipId || '',
+      classId: item.schoolClass?.id || '',
+      academicYearId: item.academicYear?.id || '',
+      exemptionType: item.exemptionType || 'full',
+      scope: item.scope || 'all',
+      amount: item.exemptionType === 'partial' ? String(item.amount || '') : '',
+      percentage: item.exemptionType === 'partial' ? String(item.percentage || '') : '',
+      reason: item.reason || '',
+      note: item.note || '',
+      replacingId: item.id
+    }));
+    document.querySelector('[data-testid="exemption-registry-form"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   const cancelReliefRegistryItem = async (item) => {
@@ -6403,6 +6647,39 @@ export default function AdminFinance() {
       return;
     }
     setMessage('لغو مستقیم فعلاً فقط برای تخفیف‌ها و معافیت‌های رسمی پشتیبانی می‌شود.');
+  };
+
+  // "تسهیلات مالی" is a read-only mirror (FinanceRelief) of Discount/
+  // FeeExemption - editing it directly wouldn't write back to the source,
+  // so a row's action here is "find and jump to the real record", not edit.
+  const jumpToReliefSource = (item) => {
+    const sourceModel = String(item?.sourceModel || '').trim();
+    const sourceEntityId = getReliefSourceEntityId(item);
+    if (!sourceEntityId) {
+      setMessage('شناسه مرجع این تسهیل مالی پیدا نشد.');
+      return;
+    }
+    // Both destination lists are empty until searched (find-first design) -
+    // search by admission number when available so a same-named student
+    // doesn't pull up the wrong row, falling back to the name.
+    const searchTerm = item.student?.admissionNo || item.student?.asasNumber || item.student?.fullName || item.student?.name || '';
+    if (sourceModel === 'discount') {
+      const match = discountRegistry.find((row) => row.id === sourceEntityId);
+      setDiscountRegistrySearch(searchTerm);
+      setDiscountRegistryPage(1);
+      document.querySelector('[data-testid="discount-registry-list"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (match) startEditDiscount(match);
+      return;
+    }
+    if (sourceModel === 'fee_exemption') {
+      const match = exemptions.find((row) => row.id === sourceEntityId);
+      setExemptionRegistrySearch(searchTerm);
+      setExemptionRegistryPage(1);
+      document.querySelector('[data-testid="exemption-registry-list"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (match) startEditExemption(match);
+      return;
+    }
+    setMessage('این رکورد سیستمی است و رکورد اصلی جداگانه‌ای ندارد.');
   };
 
   const approveReceipt = async (id) => {
@@ -7944,11 +8221,13 @@ export default function AdminFinance() {
     }
   };
 
-  const downloadFinanceReportPdf = (reportKey) => downloadFinancePdfFile(
-    buildFinanceReportPdfUrl(`/api/finance/admin/reports/${reportKey}/export.pdf`),
-    `${reportKey}.pdf`,
-    reportKey
-  );
+  const downloadFinanceReportPdf = (reportKey, extraParams = {}) => {
+    const url = new URL(buildFinanceReportPdfUrl(`/api/finance/admin/reports/${reportKey}/export.pdf`));
+    Object.entries(extraParams).forEach(([key, value]) => {
+      if (value) url.searchParams.set(key, value);
+    });
+    return downloadFinancePdfFile(url.toString(), `${reportKey}.pdf`, reportKey);
+  };
 
   const downloadFinanceReportBundle = () => downloadFinancePdfFile(
     buildFinanceReportPdfUrl('/api/finance/admin/reports/export-bundle.pdf'),
@@ -10024,6 +10303,15 @@ export default function AdminFinance() {
               </div>
               <span className="finance-chip">{discountRegistry.length} فعال</span>
             </div>
+            {discountForm.replacingId && (
+              <div className="finance-anomaly-alert" data-testid="discount-replacing-banner">
+                <div>
+                  <strong>در حال جایگزینی یک تخفیف موجود</strong>
+                  <p className="muted">با ثبت این فورم، تخفیف قبلی خودکار لغو و این نسخه جایگزین آن می‌شود.</p>
+                </div>
+                <button type="button" className="secondary" onClick={() => setDiscountForm((prev) => ({ ...prev, replacingId: '' }))}>انصراف از جایگزینی</button>
+              </div>
+            )}
             <div className="finance-split-grid">
               <label className="finance-field">
                 <span>دامنه تخفیف</span>
@@ -10163,6 +10451,15 @@ export default function AdminFinance() {
               </div>
               <span className="finance-chip finance-chip-emerald">{exemptions.length} فعال</span>
             </div>
+            {exemptionForm.replacingId && (
+              <div className="finance-anomaly-alert" data-testid="exemption-replacing-banner">
+                <div>
+                  <strong>در حال جایگزینی یک معافیت موجود</strong>
+                  <p className="muted">با ثبت این فورم، معافیت قبلی خودکار لغو و این نسخه جایگزین آن می‌شود.</p>
+                </div>
+                <button type="button" className="secondary" onClick={() => setExemptionForm((prev) => ({ ...prev, replacingId: '' }))}>انصراف از جایگزینی</button>
+              </div>
+            )}
             <label className="finance-inline-filter finance-inline-filter-wide">
               <span>جستجوی متعلم</span>
               <input
@@ -10225,72 +10522,72 @@ export default function AdminFinance() {
           <aside className="finance-card finance-spotlight-card finance-relief-profile-pane" data-finance-section="discounts" data-testid="relief-student-spotlight">
             <div className="finance-card-head">
               <div>
-                <h3>پروفایل مالی متعلم</h3>
-                <p className="muted">هم‌زمان با ثبت تخفیف یا معافیت، سوابق و اثر تصمیم مالی را بررسی کنید.</p>
+                <span className="finance-eyebrow">پیش از تصویب تخفیف/معافیت</span>
+                <h3>وضعیت مالی متعلم</h3>
               </div>
               <div className="finance-chip-group">
-                <span className="finance-chip finance-chip-emerald">{getStudentDisplayName(reliefFocusStudent)}</span>
-                <span className="finance-chip">{reliefFormMode === 'discount' ? 'فورم تخفیف' : 'فورم معافیت'}</span>
+                <span className="finance-chip finance-chip-emerald">باقی {fmt(reliefFocusLedgerSnapshot.outstanding)} AFN</span>
+                <span className="finance-chip">پرداخت {fmt(reliefFocusLedgerSnapshot.paid)} AFN</span>
+                <span className="finance-chip finance-chip-muted">تسهیلات {fmt(reliefFocusSnapshot.fixedReliefAmount)} AFN</span>
               </div>
             </div>
-            <div className="finance-chip-group">
-              <span className="finance-chip">{reliefFocusClass?.title || 'صنف'}</span>
-              <span className="finance-chip finance-chip-muted">{reliefFocusAcademicYear?.title || 'سال تعلیمی'}</span>
-              <span className="finance-chip finance-chip-emerald">{reliefFocusSnapshot.reliefCount} تسهیل در همین دامنه</span>
-            </div>
-            <label className="finance-inline-filter">
-              <span>نمایش تسهیلات</span>
-              <select value={reliefFocusPageSize} onChange={(e) => setReliefFocusPageSize(Number(e.target.value) || 5)}>
-                <option value={3}>3 مورد</option>
-                <option value={5}>5 مورد</option>
-                <option value={10}>10 مورد</option>
-              </select>
-            </label>
+            {reliefFocusStudentId && (
+              <p className="muted finance-relief-focus-summary">
+                این متعلم {fmt(reliefFocusSnapshot.reliefCount)} تسهیل فعال دارد و {fmt(reliefFocusLedgerSnapshot.outstanding)} AFN بدهی باز
+                {reliefFocusSnapshot.nextDueOrder?.dueDate ? `، با نزدیک‌ترین مهلت ${toFaDate(reliefFocusSnapshot.nextDueOrder.dueDate)}` : ''}.
+              </p>
+            )}
             <div className="finance-kpi-grid finance-kpi-grid-dense">
               <div className="finance-kpi-item">
-                <span>اصل {reliefFocusFeeScope === 'all' ? 'تعهدات' : (FEE_LINE_TYPE_LABELS[reliefFocusFeeScope] || 'تعهد')}</span>
-                <strong>{fmt(reliefFocusLedgerSnapshot.due)} AFN</strong>
+                <span>فیس/شهریه</span>
+                <strong>{fmt(reliefFocusSnapshot.byFeeType?.tuition?.paid || 0)} / {fmt(reliefFocusSnapshot.byFeeType?.tuition?.outstanding || 0)} AFN</strong>
               </div>
               <div className="finance-kpi-item">
-                <span>پرداخت {reliefFocusFeeScope === 'all' ? 'تعهدات' : (FEE_LINE_TYPE_LABELS[reliefFocusFeeScope] || 'تعهد')}</span>
-                <strong>{fmt(reliefFocusLedgerSnapshot.paid)} AFN</strong>
-              </div>
-              <div className="finance-kpi-item finance-kpi-item-accent">
-                <span>باقی {reliefFocusFeeScope === 'all' ? 'تعهدات' : (FEE_LINE_TYPE_LABELS[reliefFocusFeeScope] || 'تعهد')}</span>
-                <strong>{fmt(reliefFocusLedgerSnapshot.outstanding)} AFN</strong>
+                <span>داخله</span>
+                <strong>{fmt(reliefFocusSnapshot.byFeeType?.admission?.paid || 0)} / {fmt(reliefFocusSnapshot.byFeeType?.admission?.outstanding || 0)} AFN</strong>
               </div>
               <div className="finance-kpi-item">
-                <span>تسهیلات مبلغی</span>
-                <strong>{fmt(reliefFocusSnapshot.fixedReliefAmount)} AFN</strong>
+                <span>بدهی‌های باز</span>
+                <strong>{reliefFocusSnapshot.openOrders}</strong>
+              </div>
+              <div className="finance-kpi-item">
+                <span>پوشش کامل / درصدی</span>
+                <strong>{reliefFocusSnapshot.fullReliefCount} / {reliefFocusSnapshot.percentReliefCount}</strong>
+              </div>
+              <div className="finance-kpi-item">
+                <span>نزدیک‌ترین مهلت</span>
+                <strong>{reliefFocusSnapshot.nextDueOrder?.dueDate ? toFaDate(reliefFocusSnapshot.nextDueOrder.dueDate) : '-'}</strong>
               </div>
             </div>
             <div className="finance-subcard-list">
-              <div className="mini-row">
-                <span>فیس/شهریه</span>
-                <span>پرداخت {fmt(reliefFocusSnapshot.byFeeType?.tuition?.paid || 0)} | باقی {fmt(reliefFocusSnapshot.byFeeType?.tuition?.outstanding || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>داخله</span>
-                <span>پرداخت {fmt(reliefFocusSnapshot.byFeeType?.admission?.paid || 0)} | باقی {fmt(reliefFocusSnapshot.byFeeType?.admission?.outstanding || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>بدهی‌های باز</span>
-                <span>{reliefFocusSnapshot.openOrders}</span>
-              </div>
-              <div className="mini-row">
-                <span>پوشش کامل / درصدی</span>
-                <span>{reliefFocusSnapshot.fullReliefCount} / {reliefFocusSnapshot.percentReliefCount}</span>
-              </div>
-              <div className="mini-row">
-                <span>نزدیک‌ترین مهلت پرداخت</span>
-                <span>{reliefFocusSnapshot.nextDueOrder?.dueDate ? toFaDate(reliefFocusSnapshot.nextDueOrder.dueDate) : '-'}</span>
-              </div>
-              {pagedReliefFocusItems.map((item) => (
-                <div key={`focus-relief-${item.id}`} className="mini-row">
-                  <span>{RELIEF_TYPE_UI_LABELS[item.reliefType] || item.reliefType || 'تسهیل'}</span>
-                  <span>{getReliefValueLabel(item)}</span>
-                </div>
-              ))}
+              {pagedReliefFocusItems.map((item) => {
+                const isExpanded = expandedReliefFocusItemId === item.id;
+                return (
+                  <div key={`focus-relief-${item.id}`} className="finance-registry-row-wrap">
+                    <button
+                      type="button"
+                      className={`finance-registry-row-compact ${isExpanded ? 'is-expanded' : ''}`}
+                      onClick={() => setExpandedReliefFocusItemId(isExpanded ? '' : item.id)}
+                      data-testid={`relief-focus-row-${item.id}`}
+                    >
+                      <strong>{RELIEF_TYPE_UI_LABELS[item.reliefType] || item.reliefType || 'تسهیل'}</strong>
+                      <span className="finance-chip finance-chip-muted">{getReliefValueLabel(item)}</span>
+                      <span className="finance-registry-row-chevron" aria-hidden="true">{isExpanded ? '▴' : '▾'}</span>
+                    </button>
+                    {isExpanded && (
+                      <div className="finance-registry-detail" data-testid={`relief-focus-detail-${item.id}`}>
+                        <table className="finance-registry-detail-table">
+                          <tbody>
+                            <tr><td>دامنه</td><td>{EXEMPTION_SCOPE_UI_LABELS[item.scope] || item.scope || 'همه موارد'}</td></tr>
+                            <tr><td>پوشش</td><td>{RELIEF_COVERAGE_MODE_UI_LABELS[item.coverageMode] || item.coverageMode || 'پوشش'}</td></tr>
+                            <tr><td>دلیل</td><td>{item.reason || 'بدون توضیح'}</td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               {!reliefFocusSnapshot.scopedReliefs.length && (
                 <div className="mini-row">
                   <span>تسهیلات فعال</span>
@@ -10314,7 +10611,6 @@ export default function AdminFinance() {
           <div className="finance-card-head">
             <div>
               <h3>همه تسهیلات مالی</h3>
-              <p className="muted">نمای مشترک تخفیف، معافیت، بورسیه، شاگردان رایگان و حمایت خیریه؛ این لیست فقط مخصوص تخفیف نیست.</p>
             </div>
             <div className="finance-chip-group">
               <span className="finance-chip">{filteredReliefRegistry.length} مورد</span>
@@ -10322,31 +10618,38 @@ export default function AdminFinance() {
               <span className="finance-chip finance-chip-muted">{fmt(reliefRegistrySummary.fixedAmount)} AFN مبلغی</span>
             </div>
           </div>
-          <div className="finance-summary finance-summary-compact">
-            <div><span>پوشش کامل</span><strong>{reliefRegistrySummary.fullCount}</strong></div>
-            <div><span>درصدی</span><strong>{reliefRegistrySummary.percentCount}</strong></div>
-            <div><span>تخفیف و تعدیل</span><strong>{reliefRegistrySummary.discountCount}</strong></div>
-            <div><span>معافیت و بورسیه</span><strong>{reliefRegistrySummary.exemptionCount}</strong></div>
+          {/* Breakdown of the "تسهیل" umbrella into its actual types, doubling
+              as one-click filters for the registry list below - replaces the
+              old coverage-mode summary tiles + the separate "نوع تسهیل"
+              dropdown, which showed the same filter with none of the
+              parent/child context. */}
+          <div className="finance-relief-type-breakdown">
+            <button
+              type="button"
+              className={`finance-chip finance-chip-button ${reliefRegistryTypeFilter === 'all' ? 'finance-chip-emerald is-active' : 'finance-chip-muted'}`}
+              onClick={() => setReliefRegistryTypeFilter('all')}
+            >
+              همه · {reliefs.length}
+            </button>
+            {reliefTypeGroupBreakdown.map((group) => (
+              <button
+                type="button"
+                key={`relief-group-${group.key}`}
+                className={`finance-chip finance-chip-button ${reliefRegistryTypeFilter === group.key ? 'finance-chip-emerald is-active' : 'finance-chip-muted'}`}
+                onClick={() => setReliefRegistryTypeFilter(group.key)}
+              >
+                {group.label} · {group.count}
+              </button>
+            ))}
           </div>
           <div className="finance-inline-controls">
             <label className="finance-inline-filter finance-inline-filter-wide">
               <span>جستجو در رجیستر</span>
               <input
                 value={reliefRegistrySearch}
-                onChange={(e) => setReliefRegistrySearch(e.target.value)}
+                onChange={(e) => { setReliefRegistrySearch(e.target.value); setExpandedReliefId(''); }}
                 placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل، نوع یا دامنه"
               />
-            </label>
-            <label className="finance-inline-filter">
-              <span>نوع تسهیل</span>
-              <select value={reliefRegistryTypeFilter} onChange={(e) => setReliefRegistryTypeFilter(e.target.value)}>
-                <option value="all">همه</option>
-                {reliefRegistryTypeOptions.map((value) => (
-                  <option key={`relief-type-${value}`} value={value}>
-                    {RELIEF_TYPE_UI_LABELS[value] || value}
-                  </option>
-                ))}
-              </select>
             </label>
             <label className="finance-inline-filter">
               <span>تعداد در صفحه</span>
@@ -10362,37 +10665,51 @@ export default function AdminFinance() {
             {pagedReliefRegistry.map((item) => {
               const sourceEntityId = getReliefSourceEntityId(item);
               const canCancel = !!sourceEntityId && (item.sourceModel === 'discount' || item.sourceModel === 'fee_exemption');
+              const isExpanded = expandedReliefId === item.id;
               return (
-                <div key={`relief-row-${item.id}`} className="finance-registry-row">
-                  <div>
+                <div key={`relief-row-${item.id}`} className="finance-registry-row-wrap">
+                  <button
+                    type="button"
+                    className={`finance-registry-row-compact ${isExpanded ? 'is-expanded' : ''}`}
+                    onClick={() => setExpandedReliefId(isExpanded ? '' : item.id)}
+                    data-testid={`relief-row-${item.id}`}
+                  >
                     <strong>{item.student?.fullName || item.student?.name || 'متعلم'}</strong>
-                    <span>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</span>
-                    <small>
-                      {RELIEF_TYPE_UI_LABELS[item.reliefType] || item.reliefType || 'تسهیل'}
-                      {' · '}
-                      {(EXEMPTION_SCOPE_UI_LABELS[item.scope] || item.scope || 'همه موارد')}
-                      {' · '}
-                      {RELIEF_COVERAGE_MODE_UI_LABELS[item.coverageMode] || item.coverageMode || 'پوشش'}
-                      {item.reason ? ` · ${item.reason}` : ''}
-                    </small>
-                  </div>
-                  <div className="finance-registry-meta">
                     <span className={`finance-chip ${item.coverageMode === 'full' ? 'finance-chip-emerald' : item.reliefType === 'penalty' ? 'finance-chip-rose' : ''}`}>
                       {item.sourceModel === 'discount' ? 'تخفیف' : item.sourceModel === 'fee_exemption' ? 'معافیت' : 'سیستمی'}
                     </span>
-                    <strong>{getReliefValueLabel(item)}</strong>
-                  </div>
-                  <div className="row-actions">
-                    {canCancel ? (
-                      <button type="button" className="danger" disabled={busy} onClick={() => cancelReliefRegistryItem(item)}>
-                        لغو
-                      </button>
-                    ) : (
-                      <button type="button" className="secondary" disabled>
-                        فقط نمایش
-                      </button>
-                    )}
-                  </div>
+                    <span className="finance-chip finance-chip-muted">{getReliefValueLabel(item)}</span>
+                    <span className="finance-registry-row-chevron" aria-hidden="true">{isExpanded ? '▴' : '▾'}</span>
+                  </button>
+                  {isExpanded && (
+                    <div className="finance-registry-detail">
+                      <table className="finance-registry-detail-table">
+                        <tbody>
+                          <tr><td>صنف / سال</td><td>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</td></tr>
+                          <tr><td>نوع تسهیل</td><td>{RELIEF_TYPE_UI_LABELS[item.reliefType] || item.reliefType || 'تسهیل'}</td></tr>
+                          <tr><td>دامنه</td><td>{EXEMPTION_SCOPE_UI_LABELS[item.scope] || item.scope || 'همه موارد'}</td></tr>
+                          <tr><td>پوشش</td><td>{RELIEF_COVERAGE_MODE_UI_LABELS[item.coverageMode] || item.coverageMode || 'پوشش'}</td></tr>
+                          <tr><td>دلیل</td><td>{item.reason || 'بدون توضیح'}</td></tr>
+                        </tbody>
+                      </table>
+                      <div className="row-actions">
+                        {canCancel ? (
+                          <>
+                            <button type="button" className="secondary" disabled={busy} onClick={() => jumpToReliefSource(item)}>
+                              پیدا کردن رکورد اصلی
+                            </button>
+                            <button type="button" className="danger" disabled={busy} onClick={() => cancelReliefRegistryItem(item)}>
+                              لغو
+                            </button>
+                          </>
+                        ) : (
+                          <button type="button" className="secondary" disabled>
+                            فقط نمایش
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -10411,23 +10728,25 @@ export default function AdminFinance() {
           <div className="finance-card-head">
             <div>
               <h3>فقط تخفیف‌های ثبت‌شده</h3>
-              <p className="muted">فقط رکوردهای تخفیف مستقیم را نشان می‌دهد؛ معافیت، رایگان، بورسیه و حمایت خیریه در لیست همه تسهیلات مالی دیده می‌شوند.</p>
             </div>
             <div className="finance-chip-group">
               <span className="finance-chip">{filteredDiscountRegistry.length} مورد</span>
               <span className="finance-chip finance-chip-muted">{fmt(filteredDiscountRegistry.reduce((sum, item) => sum + (Number(item.amount) || 0), 0))} AFN</span>
             </div>
           </div>
-          <label className="finance-inline-filter finance-inline-filter-wide">
-            <span>جستجو در تخفیف‌های ثبت‌شده</span>
-            <input
-              value={discountRegistrySearch}
-              onChange={(e) => setDiscountRegistrySearch(e.target.value)}
-              placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل یا نوع تخفیف"
-            />
-          </label>
-          <div className="finance-split-grid">
-            <label className="finance-field">
+          <div className="finance-inline-controls" data-testid="discount-registry-controls">
+            <label className="finance-inline-filter finance-inline-filter-wide">
+              <span>جستجو در تخفیف‌های ثبت‌شده</span>
+              <input
+                value={discountRegistrySearch}
+                onChange={(e) => { setDiscountRegistrySearch(e.target.value); setExpandedDiscountId(''); setEditingDiscountId(''); }}
+                placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل یا نوع تخفیف"
+              />
+            </label>
+          </div>
+          {/* صنف، تعداد در صفحه و رفع تکرار - هر سه کنار هم در یک قطار. */}
+          <div className="finance-inline-controls" data-testid="discount-registry-quick-row">
+            <label className="finance-inline-filter">
               <span>نمایش بر اساس صنف</span>
               <select value={discountRegistryClassFilter} onChange={(e) => setDiscountRegistryClassFilter(e.target.value)}>
                 <option value="all">همه صنف‌ها</option>
@@ -10436,8 +10755,8 @@ export default function AdminFinance() {
                 ))}
               </select>
             </label>
-            <label className="finance-field">
-              <span>تعداد در هر صفحه</span>
+            <label className="finance-inline-filter">
+              <span>تعداد در صفحه</span>
               <select value={discountRegistryPageSize} onChange={(e) => setDiscountRegistryPageSize(Number(e.target.value) || 10)}>
                 <option value={5}>5 مورد</option>
                 <option value={10}>10 مورد</option>
@@ -10445,60 +10764,150 @@ export default function AdminFinance() {
                 <option value={50}>50 مورد</option>
               </select>
             </label>
+            <div className="finance-inline-filter">
+              <span>رفع تکرار</span>
+              <button
+                type="button"
+                className="danger"
+                disabled={busy}
+                onClick={repairDuplicateDiscountRegistry}
+                title="اگر تعداد رکوردهای فعال از شاگردان دارای تخفیف بیشتر است، بررسی را اجرا کنید."
+                data-testid="discount-repair-duplicates-button"
+              >
+                رفع تکرارها
+              </button>
+            </div>
           </div>
-          <div className="finance-anomaly-alert" data-testid="discount-duplicate-alert">
-            {(Number(discountDuplicateSummary?.duplicateRecords || 0)
-              + Number(discountDuplicateSummary?.mirroredDiscountRecords || 0)
-              + Number(discountDuplicateSummary?.mirroredActiveReliefs || 0)) > 0 ? (
+          {hasDiscountDuplicates && (
+            <div className="finance-anomaly-alert" data-testid="discount-duplicate-alert">
               <div>
                 <strong>{fmt(discountDuplicateSummary.duplicateRecords)} تکرار مستقیم و {fmt(discountDuplicateSummary.mirroredDiscountRecords)} تصویر بل پیدا شد</strong>
                 <p className="muted">
                   رکورد اصلی و سابقه مالی حفظ می‌شود؛ تصاویر <code>Relief (tuition)</code> از رجیستر مستقیم جدا و محاسبه بل‌های مرتبط بازسازی می‌گردد.
                 </p>
               </div>
-            ) : (
-              <div>
-                <strong>بررسی و رفع تکرارهای تخفیف</strong>
-                <p className="muted">اگر تعداد رکوردهای فعال از شاگردان دارای تخفیف بیشتر است، بررسی را اجرا کنید.</p>
-              </div>
-            )}
-            <button type="button" className="danger" disabled={busy} onClick={repairDuplicateDiscountRegistry}>
-              بررسی، رفع تکرارها و اصلاح بل‌ها
-            </button>
-          </div>
-          {!!discountRegistryByClass.length && (
-            <div className="finance-class-discount-summary">
-              {discountRegistryByClass.slice(0, 8).map((item) => (
-                <button
-                  type="button"
-                  key={`discount-class-summary-${item.classId}`}
-                  className={`finance-class-discount-card ${discountRegistryClassFilter === item.classId ? 'is-active' : ''}`}
-                  onClick={() => setDiscountRegistryClassFilter(item.classId)}
-                >
-                  <span>{item.classTitle}</span>
-                  <strong>{fmt(item.classStudentCount)} شاگرد در صنف</strong>
-                  <small>{fmt(item.discountStudentCount)} شاگرد دارای تخفیف | {fmt(item.count)} رکورد فعال | {fmt(item.totalAmount)} AFN</small>
-                </button>
-              ))}
             </div>
           )}
-          <div className="finance-registry-list">
-            {pagedDiscountRegistry.map((item) => (
-              <div key={item.id} className="finance-registry-row">
-                <div>
-                  <strong>{item.student?.fullName || item.student?.name || 'متعلم'}</strong>
-                  <span>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</span>
-                  <small>{item.reason || 'بدون توضیح'}</small>
-                </div>
-                <div className="finance-registry-meta">
-                  <span className="finance-chip">{DISCOUNT_TYPE_UI_LABELS[item.discountType] || item.discountType || 'تخفیف'}</span>
-                  <strong>{item.coverageMode === 'percent' ? `${fmt(item.percentage)}%` : `${fmt(item.amount)} AFN`}</strong>
-                </div>
-                <div className="row-actions">
-                  <button type="button" className="danger" disabled={busy} onClick={() => cancelDiscountRegistry(item.id)} data-testid={`cancel-discount-${item.id}`}>لغو</button>
-                </div>
+          {!!discountRegistryByClass.length && (
+            <>
+              {/* Just the class name + a small count badge - click toggles the
+                  detail panel below (one at a time) instead of each card
+                  carrying its own 3-line stat block, so the whole list of
+                  classes can fit in 1-2 rows. */}
+              <div className="finance-class-discount-summary">
+                {discountRegistryByClass.slice(0, 8).map((item) => {
+                  const isExpanded = expandedClassSummaryId === item.classId;
+                  return (
+                    <button
+                      type="button"
+                      key={`discount-class-summary-${item.classId}`}
+                      className={`finance-class-discount-card ${isExpanded ? 'is-active' : ''}`}
+                      onClick={() => setExpandedClassSummaryId(isExpanded ? '' : item.classId)}
+                      data-testid={`discount-class-summary-${item.classId}`}
+                    >
+                      <span>{item.classTitle}</span>
+                      <span className="finance-chip finance-chip-muted">{fmt(item.count)}</span>
+                    </button>
+                  );
+                })}
               </div>
-            ))}
+              {expandedClassSummaryItem && (
+                <div className="finance-registry-detail" data-testid={`discount-class-detail-${expandedClassSummaryItem.classId}`}>
+                  <table className="finance-registry-detail-table">
+                    <tbody>
+                      <tr><td>صنف</td><td>{expandedClassSummaryItem.classTitle}</td></tr>
+                      <tr><td>شاگردان صنف</td><td>{fmt(expandedClassSummaryItem.classStudentCount)}</td></tr>
+                      <tr><td>شاگردان دارای تخفیف</td><td>{fmt(expandedClassSummaryItem.discountStudentCount)}</td></tr>
+                      <tr><td>رکورد فعال</td><td>{fmt(expandedClassSummaryItem.count)}</td></tr>
+                      <tr><td>مجموع مبلغ</td><td>{fmt(expandedClassSummaryItem.totalAmount)} AFN</td></tr>
+                    </tbody>
+                  </table>
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => { setDiscountRegistryClassFilter(expandedClassSummaryItem.classId); setExpandedClassSummaryId(''); }}
+                    >
+                      فیلتر لیست به همین صنف
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+          <div className="finance-registry-list">
+            {pagedDiscountRegistry.map((item) => {
+              const isExpanded = expandedDiscountId === item.id;
+              return (
+                <div key={item.id} className="finance-registry-row-wrap">
+                  <button
+                    type="button"
+                    className={`finance-registry-row-compact ${isExpanded ? 'is-expanded' : ''}`}
+                    onClick={() => { setExpandedDiscountId(isExpanded ? '' : item.id); if (isExpanded) setEditingDiscountId(''); }}
+                    data-testid={`discount-row-${item.id}`}
+                  >
+                    <strong>{item.student?.fullName || item.student?.name || 'متعلم'}</strong>
+                    <span className="finance-chip">{DISCOUNT_TYPE_UI_LABELS[item.discountType] || item.discountType || 'تخفیف'}</span>
+                    <span className="finance-chip finance-chip-muted">{item.coverageMode === 'percent' ? `${fmt(item.percentage)}%` : `${fmt(item.amount)} AFN`}</span>
+                    <span className="finance-registry-row-chevron" aria-hidden="true">{isExpanded ? '▴' : '▾'}</span>
+                  </button>
+                  {isExpanded && (
+                    <div className="finance-registry-detail" data-testid={`discount-detail-${item.id}`}>
+                      <table className="finance-registry-detail-table">
+                        <tbody>
+                          <tr><td>صنف / سال</td><td>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</td></tr>
+                          <tr><td>دلیل</td><td>{item.reason || 'بدون توضیح'}</td></tr>
+                          <tr><td>مدت اثر</td><td>{item.durationMode === 'custom_period' ? `${item.startDate ? toFaDate(item.startDate) : '-'} تا ${item.endDate ? toFaDate(item.endDate) : '-'}` : 'تا ختم سال تعلیمی'}</td></tr>
+                        </tbody>
+                      </table>
+                      {editingDiscountId === item.id ? (
+                        <div className="finance-registry-edit-panel" data-testid={`discount-edit-panel-${item.id}`}>
+                          <label className="finance-field">
+                            <span>دلیل</span>
+                            <textarea
+                              value={discountEditForm.reason}
+                              onChange={(e) => setDiscountEditForm((prev) => ({ ...prev, reason: e.target.value }))}
+                              rows={2}
+                            />
+                          </label>
+                          <div className="finance-split-grid">
+                            <label className="finance-cell-stack">
+                              <span className="finance-field-label">تاریخ شروع</span>
+                              <AfghanDateInput
+                                value={discountEditForm.startDate}
+                                onChange={(value) => setDiscountEditForm((prev) => ({ ...prev, startDate: value }))}
+                              />
+                            </label>
+                            <label className="finance-cell-stack">
+                              <span className="finance-field-label">تاریخ ختم</span>
+                              <AfghanDateInput
+                                value={discountEditForm.endDate}
+                                onChange={(value) => setDiscountEditForm((prev) => ({ ...prev, endDate: value }))}
+                              />
+                            </label>
+                          </div>
+                          <div className="row-actions">
+                            <button type="button" disabled={busy} onClick={() => saveDiscountEdit(item.id)} data-testid={`save-discount-edit-${item.id}`}>ذخیره</button>
+                            <button type="button" className="secondary" disabled={busy} onClick={() => setEditingDiscountId('')}>انصراف</button>
+                          </div>
+                          <p className="muted">برای تغییر مبلغ یا فیصدی از دکمهٔ «جایگزینی» استفاده کنید؛ این فورم فقط دلیل و تاریخ را ویرایش می‌کند.</p>
+                        </div>
+                      ) : (
+                        <div className="row-actions">
+                          {item.status === 'active' && (
+                            <button type="button" className="secondary" disabled={busy} onClick={() => startEditDiscount(item)} data-testid={`edit-discount-${item.id}`}>ویرایش</button>
+                          )}
+                          {item.status === 'active' && (
+                            <button type="button" className="secondary" disabled={busy} onClick={() => startReplaceDiscount(item)} data-testid={`replace-discount-${item.id}`}>جایگزینی</button>
+                          )}
+                          <button type="button" className="danger" disabled={busy} onClick={() => cancelDiscountRegistry(item.id)} data-testid={`cancel-discount-${item.id}`}>لغو</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             {!filteredDiscountRegistry.length && <p className="muted">برای این جستجو، تخفیفی پیدا نشد.</p>}
             {filteredDiscountRegistry.length > discountRegistryPageSize && (
               <div className="finance-pagination">
@@ -10513,48 +10922,141 @@ export default function AdminFinance() {
         <div className="finance-card" data-finance-section="discounts" data-testid="exemption-registry-list">
           <div className="finance-card-head">
             <div>
-              <h3>رجیستر متعلمین رایگان</h3>
-              <p className="muted">لیست معافیت‌های کامل و جزئی، همراه با دامنه‌ی اثر و دلیل تصویب.</p>
+              <h3>رجیستر معافیت‌ها</h3>
             </div>
             <div className="finance-chip-group">
               <span className="finance-chip finance-chip-emerald">{filteredExemptionRegistry.length} مورد</span>
-              <span className="finance-chip finance-chip-muted">{filteredExemptionRegistry.filter((item) => item.exemptionType === 'full').length} کامل</span>
+              <span className="finance-chip finance-chip-muted">{filteredExemptionRegistry.filter((item) => item.registryKind === 'discount' || item.exemptionType === 'full').length} کامل</span>
+              <span className="finance-chip">{filteredExemptionRegistry.filter((item) => item.registryKind === 'discount').length} تخفیف معادل</span>
             </div>
           </div>
-          <label className="finance-inline-filter finance-inline-filter-wide">
-            <span>جستجو در رجیستر معافیت‌ها</span>
-            <input
-              value={exemptionRegistrySearch}
-              onChange={(e) => setExemptionRegistrySearch(e.target.value)}
-              placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل یا دامنه معافیت"
-            />
-          </label>
-          <label className="finance-inline-filter">
-            <span>تعداد در صفحه</span>
-            <select value={exemptionRegistryPageSize} onChange={(e) => setExemptionRegistryPageSize(Number(e.target.value) || 10)}>
-              <option value={5}>5 مورد</option>
-              <option value={10}>10 مورد</option>
-              <option value={20}>20 مورد</option>
-              <option value={50}>50 مورد</option>
-            </select>
-          </label>
+          <div className="finance-inline-controls" data-testid="exemption-registry-controls">
+            <label className="finance-inline-filter finance-inline-filter-wide">
+              <span>جستجو در رجیستر معافیت‌ها</span>
+              <input
+                value={exemptionRegistrySearch}
+                onChange={(e) => { setExemptionRegistrySearch(e.target.value); setExpandedExemptionId(''); setEditingExemptionId(''); }}
+                placeholder="نام یا نمبر اساس متعلم، صنف، سال، دلیل یا دامنه معافیت"
+              />
+            </label>
+            <label className="finance-inline-filter">
+              <span>تعداد در صفحه</span>
+              <select value={exemptionRegistryPageSize} onChange={(e) => setExemptionRegistryPageSize(Number(e.target.value) || 10)}>
+                <option value={5}>5 مورد</option>
+                <option value={10}>10 مورد</option>
+                <option value={20}>20 مورد</option>
+                <option value={50}>50 مورد</option>
+              </select>
+            </label>
+          </div>
           <div className="finance-registry-list">
-            {pagedExemptionRegistry.map((item) => (
-              <div key={item.id} className="finance-registry-row">
-                <div>
-                  <strong>{item.student?.fullName || item.student?.name || 'متعلم'}</strong>
-                  <span>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</span>
-                  <small>{item.reason || 'بدون توضیح'} · {EXEMPTION_SCOPE_UI_LABELS[item.scope] || item.scope || 'همه موارد'}</small>
+            {pagedExemptionRegistry.map((item) => {
+              const isDiscountKind = item.registryKind === 'discount';
+              const isExpanded = expandedExemptionId === item.id;
+              const isEditing = (isDiscountKind ? editingDiscountId : editingExemptionId) === item.id;
+              return (
+                <div key={item.id} className="finance-registry-row-wrap">
+                  <button
+                    type="button"
+                    className={`finance-registry-row-compact ${isExpanded ? 'is-expanded' : ''}`}
+                    onClick={() => { setExpandedExemptionId(isExpanded ? '' : item.id); if (isExpanded) { setEditingExemptionId(''); setEditingDiscountId(''); } }}
+                    data-testid={`exemption-row-${item.id}`}
+                  >
+                    <strong>{item.student?.fullName || item.student?.name || 'متعلم'}</strong>
+                    {isDiscountKind ? (
+                      <>
+                        <span className="finance-chip">{item.coverageMode === 'percent' ? 'تخفیف ۱۰۰٪' : 'تخفیف معادل فیس'}</span>
+                        <span className="finance-chip finance-chip-muted">{item.coverageMode === 'percent' ? `${fmt(item.percentage)}%` : `${fmt(item.amount)} AFN`}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="finance-chip finance-chip-emerald">{EXEMPTION_TYPE_UI_LABELS[item.exemptionType] || item.exemptionType || 'معافیت'}</span>
+                        <span className="finance-chip finance-chip-muted">{item.exemptionType === 'partial' ? `${fmt(item.amount)} AFN / ${fmt(item.percentage)}%` : '100%'}</span>
+                      </>
+                    )}
+                    <span className="finance-registry-row-chevron" aria-hidden="true">{isExpanded ? '▴' : '▾'}</span>
+                  </button>
+                  {isExpanded && (
+                    <div className="finance-registry-detail" data-testid={`exemption-detail-${item.id}`}>
+                      <table className="finance-registry-detail-table">
+                        <tbody>
+                          <tr><td>صنف / سال</td><td>{item.schoolClass?.title || 'صنف'} - {item.academicYear?.title || 'سال'}</td></tr>
+                          {isDiscountKind ? (
+                            <tr><td>منبع</td><td>تخفیف ثبت‌شده که فیس را کامل می‌پوشاند - برای جزئیات بیشتر به کارت «تخفیف‌ها» مراجعه کنید.</td></tr>
+                          ) : (
+                            <tr><td>دامنه</td><td>{EXEMPTION_SCOPE_UI_LABELS[item.scope] || item.scope || 'همه موارد'}</td></tr>
+                          )}
+                          <tr><td>دلیل</td><td>{item.reason || 'بدون توضیح'}</td></tr>
+                          {item.note ? <tr><td>ملاحظات</td><td>{item.note}</td></tr> : null}
+                        </tbody>
+                      </table>
+                      {isEditing ? (
+                        isDiscountKind ? (
+                          <div className="finance-registry-edit-panel" data-testid={`discount-edit-panel-${item.id}`}>
+                            <label className="finance-field">
+                              <span>دلیل</span>
+                              <textarea
+                                value={discountEditForm.reason}
+                                onChange={(e) => setDiscountEditForm((prev) => ({ ...prev, reason: e.target.value }))}
+                                rows={2}
+                              />
+                            </label>
+                            <div className="row-actions">
+                              <button type="button" disabled={busy} onClick={() => saveDiscountEdit(item.id)} data-testid={`save-discount-edit-${item.id}`}>ذخیره</button>
+                              <button type="button" className="secondary" disabled={busy} onClick={() => setEditingDiscountId('')}>انصراف</button>
+                            </div>
+                          </div>
+                        ) : (
+                        <div className="finance-registry-edit-panel" data-testid={`exemption-edit-panel-${item.id}`}>
+                          <label className="finance-field">
+                            <span>دلیل</span>
+                            <textarea
+                              value={exemptionEditForm.reason}
+                              onChange={(e) => setExemptionEditForm((prev) => ({ ...prev, reason: e.target.value }))}
+                              rows={2}
+                            />
+                          </label>
+                          <label className="finance-field">
+                            <span>ملاحظات اداری / حمایوی</span>
+                            <textarea
+                              value={exemptionEditForm.note}
+                              onChange={(e) => setExemptionEditForm((prev) => ({ ...prev, note: e.target.value }))}
+                              rows={2}
+                            />
+                          </label>
+                          <div className="row-actions">
+                            <button type="button" disabled={busy} onClick={() => saveExemptionEdit(item.id)} data-testid={`save-exemption-edit-${item.id}`}>ذخیره</button>
+                            <button type="button" className="secondary" disabled={busy} onClick={() => setEditingExemptionId('')}>انصراف</button>
+                          </div>
+                          <p className="muted">برای تغییر نوع، مبلغ یا فیصدی معافیت از دکمهٔ «جایگزینی» استفاده کنید.</p>
+                        </div>
+                        )
+                      ) : isDiscountKind ? (
+                        <div className="row-actions">
+                          {item.status === 'active' && (
+                            <button type="button" className="secondary" disabled={busy} onClick={() => startEditDiscount(item)} data-testid={`edit-discount-${item.id}`}>ویرایش</button>
+                          )}
+                          {item.status === 'active' && (
+                            <button type="button" className="secondary" disabled={busy} onClick={() => startReplaceDiscount(item)} data-testid={`replace-discount-${item.id}`}>جایگزینی</button>
+                          )}
+                          <button type="button" className="danger" disabled={busy} onClick={() => cancelDiscountRegistry(item.id)} data-testid={`cancel-discount-${item.id}`}>لغو</button>
+                        </div>
+                      ) : (
+                        <div className="row-actions">
+                          {item.status === 'active' && (
+                            <button type="button" className="secondary" disabled={busy} onClick={() => startEditExemption(item)} data-testid={`edit-exemption-${item.id}`}>ویرایش</button>
+                          )}
+                          {item.status === 'active' && (
+                            <button type="button" className="secondary" disabled={busy} onClick={() => startReplaceExemption(item)} data-testid={`replace-exemption-${item.id}`}>جایگزینی</button>
+                          )}
+                          <button type="button" className="danger" disabled={busy} onClick={() => cancelExemptionRegistry(item.id)} data-testid={`cancel-exemption-${item.id}`}>لغو</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="finance-registry-meta">
-                  <span className="finance-chip finance-chip-emerald">{EXEMPTION_TYPE_UI_LABELS[item.exemptionType] || item.exemptionType || 'معافیت'}</span>
-                  <strong>{item.exemptionType === 'partial' ? `${fmt(item.amount)} AFN / ${fmt(item.percentage)}%` : '100%'}</strong>
-                </div>
-                <div className="row-actions">
-                  <button type="button" className="danger" disabled={busy} onClick={() => cancelExemptionRegistry(item.id)} data-testid={`cancel-exemption-${item.id}`}>لغو</button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {!filteredExemptionRegistry.length && <p className="muted">برای این جستجو، معافیتی پیدا نشد.</p>}
             {filteredExemptionRegistry.length > exemptionRegistryPageSize && (
               <div className="finance-pagination">
@@ -10601,6 +11103,85 @@ export default function AdminFinance() {
             {reportPdfBusyKey === 'bundle' ? 'در حال آماده‌سازی...' : 'دانلود بسته‌ی کامل گزارش‌ها (PDF)'}
           </button>
         </div>
+
+        <div className="finance-monthly-summary-card" data-testid="finance-monthly-summary-card">
+          <div className="finance-card-head">
+            <div>
+              <h3>گزارش ماهانه</h3>
+              <p className="muted">یک ماه را انتخاب کنید تا عاید، خالص عاید، سهم باقیات/پیش‌پرداخت وصول‌شده و وضعیت پرداخت شاگردان همان ماه نشان داده شود.</p>
+            </div>
+            <label className="finance-inline-filter">
+              <span>ماه</span>
+              <select
+                value={monthlySummaryMonth}
+                onChange={(e) => setMonthlySummaryMonth(e.target.value)}
+                data-testid="monthly-summary-month-select"
+              >
+                {!billMonthOptions.length && <option value="">ماهی برای انتخاب نیست</option>}
+                {billMonthOptions.map((item) => (
+                  <option key={`monthly-summary-${item.key}`} value={item.key}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {monthlySummaryLoading && <p className="muted" role="status">در حال دریافت گزارش ماهانه...</p>}
+          {!monthlySummaryLoading && monthlySummaryError && <p className="finance-monthly-summary-error">{monthlySummaryError}</p>}
+
+          {!monthlySummaryLoading && !monthlySummaryError && monthlySummaryData && (
+            <>
+              <div className="finance-smart-kpi-grid" data-testid="monthly-summary-stats">
+                <div className="finance-smart-kpi finance-smart-kpi-emerald">
+                  <span>عاید ماه</span>
+                  <strong>{fmt(monthlySummaryData.grossMonthlyIncome || 0)} <small>AFN</small></strong>
+                  <small>کل دریافتی نقدی این ماه</small>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-cyan">
+                  <span>عاید خالص ماه</span>
+                  <strong>{fmt(monthlySummaryData.netMonthlyIncome || 0)} <small>AFN</small></strong>
+                  <small>پس از کسر تخفیف/معافیت و استرداد</small>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-amber">
+                  <span>عاید ماه‌های گذشته در این ماه</span>
+                  <strong>{fmt(monthlySummaryData.pastMonthsCollectedThisMonth || 0)} <small>AFN</small></strong>
+                  <small>باقیات وصول‌شده در این ماه</small>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-violet">
+                  <span>عاید ماه‌های آینده در این ماه</span>
+                  <strong>{fmt(monthlySummaryData.futureMonthsCollectedThisMonth || 0)} <small>AFN</small></strong>
+                  <small>پیش‌پرداخت وصول‌شده در این ماه</small>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-slate">
+                  <span>تعداد بل‌ها</span>
+                  <strong>{fmt(monthlySummaryData.totalOrders || 0)}</strong>
+                  <small>بل‌های صادرشده برای این ماه</small>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-amber">
+                  <span>شاگردان پرداخت ناقص</span>
+                  <strong>{fmt(monthlySummaryData.partialPaymentStudents || 0)}</strong>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-emerald">
+                  <span>شاگردان پرداخت مکمل</span>
+                  <strong>{fmt(monthlySummaryData.fullPaymentStudents || 0)}</strong>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-rose">
+                  <span>باقیات این ماه</span>
+                  <strong>{fmt(monthlySummaryData.outstandingThisMonth || 0)} <small>AFN</small></strong>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => downloadFinanceReportPdf('monthly_summary', { month: monthlySummaryMonth })}
+                disabled={reportPdfBusyKey !== '' || !monthlySummaryMonth}
+                data-testid="download-finance-report-monthly_summary"
+              >
+                {reportPdfBusyKey === 'monthly_summary' ? 'در حال آماده‌سازی...' : 'دانلود PDF گزارش ماهانه'}
+              </button>
+            </>
+          )}
+        </div>
+
         <div className="finance-report-download-grid">
           {FINANCE_REPORT_CARDS.map((item) => (
             <div key={item.key} className="finance-report-download-row">

@@ -58,7 +58,11 @@ async function assertSessionAccess(req, sessionId) {
 
 router.get('/reference-data', requireAuth, requireRole(['admin', 'instructor']), requirePermission('manage_content'), async (req, res) => {
   try {
-    const data = await listExamReferenceData();
+    // استادان فقط باید تخصیص‌های خودشان را در پاسخ ببینند؛ مدیران همه را می‌بینند.
+    const scopeTeacherUserId = String(req.user?.role || '').toLowerCase() === 'instructor'
+      ? (req.user?.id || null)
+      : null;
+    const data = await listExamReferenceData({ teacherUserId: scopeTeacherUserId });
     res.json({ success: true, ...data });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to load exam reference data.' });

@@ -25,6 +25,8 @@ const {
 const {
   cancelDiscount,
   cancelFeeExemption,
+  updateDiscount,
+  updateFeeExemption,
   createDiscount,
   createFeeExemption,
   createFeePayment,
@@ -605,6 +607,34 @@ router.post('/discounts/deduplicate', requireAuth, requireRole(['admin']), requi
   }
 });
 
+// Non-financial fields only (reason, duration mode, dates) - amount,
+// percentage and coverageMode changes go through cancel + re-register
+// instead, so a bill that has already been discounted never silently
+// changes its math without an audit trail.
+router.patch('/discounts/:id', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const item = await updateDiscount(req.params.id, req.body || {});
+    await logActivity({
+      req,
+      action: 'update_discount_registry',
+      targetType: 'Discount',
+      targetId: String(item?.id || ''),
+      targetUser: String(item?.student?.userId || ''),
+      meta: { reason: String(req.body?.reason || '').trim() }
+    });
+    return res.json({ success: true, item });
+  } catch (error) {
+    const code = String(error?.message || '');
+    if (code === 'student_finance_discount_not_found') {
+      return res.status(404).json({ success: false, message: 'تخفیف پیدا نشد.' });
+    }
+    if (code === 'student_finance_discount_not_editable') {
+      return res.status(400).json({ success: false, message: 'فقط تخفیف‌های فعال قابل ویرایش هستند.' });
+    }
+    return res.status(500).json({ success: false, message: 'ویرایش تخفیف ناموفق بود.' });
+  }
+});
+
 router.post('/discounts/:id/cancel', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const item = await cancelDiscount(req.params.id, req.body || {});
@@ -665,6 +695,31 @@ router.post('/exemptions', requireAuth, requireRole(['admin']), requirePermissio
     }
     console.error('[student-finance][create-exemption]', error);
     return res.status(500).json({ success: false, message: 'ثبت معافیت فیس ناموفق بود.' });
+  }
+});
+
+// Same reasoning as the discount PATCH above - reason/note/scope only.
+router.patch('/exemptions/:id', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const item = await updateFeeExemption(req.params.id, req.body || {});
+    await logActivity({
+      req,
+      action: 'update_fee_exemption',
+      targetType: 'FeeExemption',
+      targetId: String(item?.id || ''),
+      targetUser: String(item?.student?.userId || ''),
+      meta: { reason: String(req.body?.reason || '').trim() }
+    });
+    return res.json({ success: true, item });
+  } catch (error) {
+    const code = String(error?.message || '');
+    if (code === 'student_finance_exemption_not_found') {
+      return res.status(404).json({ success: false, message: 'معافیت پیدا نشد.' });
+    }
+    if (code === 'student_finance_exemption_not_editable') {
+      return res.status(400).json({ success: false, message: 'فقط معافیت‌های فعال قابل ویرایش هستند.' });
+    }
+    return res.status(500).json({ success: false, message: 'ویرایش معافیت فیس ناموفق بود.' });
   }
 });
 

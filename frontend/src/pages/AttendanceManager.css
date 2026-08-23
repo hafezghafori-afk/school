@@ -22,9 +22,19 @@
   font-weight: 700;
 }
 
+/* Self-hosted (no Google Fonts dependency, works offline) - single variable file covers the
+   whole 300-800 weight range this page uses, so one @font-face is enough. */
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-Variable.ttf') format('truetype-variable');
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 .attendance-page {
   --attendance-ink: #183247;
   --attendance-subtle: #5f7688;
+  --attendance-faint: #93a7b6;
   --attendance-border: rgba(94, 144, 170, 0.2);
   --attendance-border-strong: rgba(27, 86, 112, 0.24);
   --attendance-surface: rgba(255, 255, 255, 0.9);
@@ -35,13 +45,29 @@
   --attendance-warning: #c57d12;
   --attendance-danger: #dc2626;
   --attendance-success: #15803d;
+  --attendance-hold: #6d28d9;
+
+  /* Three-tier glass system - replaces the ad-hoc 0.56-0.96 opacity values that used to be
+     picked per component. Tier 1 = outer shells (card, toolbar, summary cards). Tier 2 =
+     working surfaces people scan closely (the daily table). Tier 3 = already-saturated
+     color surfaces (hero) that only need a light frost on top. */
+  --attendance-glass-1-bg: rgba(255, 255, 255, 0.62);
+  --attendance-glass-1-border: rgba(255, 255, 255, 0.6);
+  --attendance-glass-1-blur: 18px;
+  --attendance-glass-2-bg: rgba(255, 255, 255, 0.46);
+  --attendance-glass-2-border: rgba(255, 255, 255, 0.5);
+  --attendance-glass-2-blur: 13px;
+  --attendance-glass-3-bg: rgba(255, 255, 255, 0.14);
+  --attendance-glass-3-border: rgba(255, 255, 255, 0.32);
+  --attendance-glass-3-blur: 8px;
+
   min-height: 100vh;
-  padding: 28px 18px 56px;
+  padding: 20px 16px 40px;
   display: flex;
   justify-content: center;
   direction: rtl;
   color: var(--attendance-ink);
-  font-family: 'B Nazanin', 'B Mitra', Tahoma, sans-serif;
+  font-family: 'Vazirmatn', 'B Nazanin', 'B Mitra', Tahoma, sans-serif;
   background:
     radial-gradient(circle at top right, rgba(45, 212, 191, 0.18), transparent 34%),
     radial-gradient(circle at bottom left, rgba(14, 165, 233, 0.16), transparent 28%),
@@ -66,8 +92,8 @@
 
 .attendance-card {
   width: min(1360px, 100%);
-  border-radius: 30px;
-  padding: 24px;
+  border-radius: 26px;
+  padding: 18px 20px;
   position: relative;
   border: 1px solid rgba(255, 255, 255, 0.52);
   background:
@@ -130,9 +156,9 @@
 .attendance-hero {
   position: relative;
   overflow: hidden;
-  margin-bottom: 22px;
-  padding: 28px 30px;
-  border-radius: 28px;
+  margin-bottom: 16px;
+  padding: 20px 24px;
+  border-radius: 24px;
   color: #effbff;
   background:
     radial-gradient(circle at top left, rgba(255, 255, 255, 0.18), transparent 30%),
@@ -151,23 +177,25 @@
 }
 
 .attendance-hero h2 {
-  margin: 0 0 10px;
-  font-family: 'B Mitra', 'B Nazanin', Tahoma, sans-serif;
-  font-size: clamp(2rem, 3vw, 2.8rem);
-  line-height: 1.1;
+  margin: 0 0 6px;
+  font-family: 'Vazirmatn', 'B Mitra', 'B Nazanin', Tahoma, sans-serif;
+  font-weight: 800;
+  font-size: clamp(1.5rem, 2.2vw, 1.9rem);
+  line-height: 1.15;
   letter-spacing: 0.01em;
+  text-wrap: balance;
 }
 
 .attendance-hero p {
   margin: 0;
   max-width: 760px;
   color: rgba(236, 253, 255, 0.92);
-  font-size: 1.16rem;
-  line-height: 1.85;
+  font-size: 0.95rem;
+  line-height: 1.6;
 }
 
 .attendance-hero-meta {
-  margin-top: 18px;
+  margin-top: 12px;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -177,7 +205,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 14px;
+  padding: 5px 12px;
+  font-size: 13px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.12);
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -188,20 +217,33 @@
 .attendance-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 18px;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
 .attendance-tabs button {
   border: 1px solid rgba(27, 86, 112, 0.14);
   background: rgba(255, 255, 255, 0.68);
   color: var(--attendance-ink);
-  border-radius: 16px;
-  padding: 11px 18px;
-  font-size: 16px;
+  border-radius: 14px;
+  padding: 9px 16px;
+  font-size: 14px;
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 10px 20px rgba(148, 163, 184, 0.08);
+  white-space: nowrap;
+}
+
+/* View switch (حاضری روزانه / خلاصه صنف / گزارش شاگرد) - one small row, not a full tab bar. */
+.attendance-tabs--compact {
+  gap: 8px;
+}
+
+.attendance-tabs--compact button {
+  padding: 7px 13px;
+  font-size: 13px;
+  border-radius: 999px;
+  box-shadow: none;
 }
 
 .attendance-tabs button.active {
@@ -221,16 +263,14 @@
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 22px;
-  padding: 18px;
-  border-radius: 24px;
-  border: 1px solid var(--attendance-border);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(247, 251, 255, 0.88)),
-    rgba(255, 255, 255, 0.72);
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border-radius: 20px;
+  border: 1px solid var(--attendance-glass-1-border);
+  background: var(--attendance-glass-1-bg);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.64);
-  backdrop-filter: blur(14px);
+  backdrop-filter: blur(var(--attendance-glass-1-blur));
 }
 
 .attendance-filter-group {
@@ -242,9 +282,9 @@
 
 .attendance-filter-group label {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   color: var(--attendance-ink);
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
 }
 
@@ -256,12 +296,12 @@
 .attendance-filter-group input[type='date'] {
   min-width: 0;
   width: 100%;
-  border-radius: 16px;
+  border-radius: 14px;
   border: 1px solid rgba(148, 163, 184, 0.28);
   background: rgba(255, 255, 255, 0.88);
   color: var(--attendance-ink);
-  padding: 13px 15px;
-  font-size: 15px;
+  padding: 10px 13px;
+  font-size: 14px;
   box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.55);
 }
 
@@ -270,20 +310,32 @@
   border-color: rgba(13, 148, 136, 0.3);
 }
 
+/* Its own row below .attendance-toolbar (not squeezed into the same flex line as the filter
+   fields any more) - on a normal desktop width all 6 buttons now have room to sit in one row,
+   each sized to its own label instead of wrapping or stretching. */
 .attendance-toolbar-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 10px;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 22px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid var(--attendance-glass-1-border);
+  background: var(--attendance-glass-1-bg);
+  backdrop-filter: blur(var(--attendance-glass-1-blur));
 }
 
 .attendance-toolbar-actions button,
 .inline-btn,
 .save {
+  flex: 0 0 auto;
+  width: fit-content;
   border: none;
-  border-radius: 16px;
-  padding: 11px 17px;
-  font-size: 15px;
+  border-radius: 14px;
+  padding: 9px 15px;
+  font-size: 14px;
   font-weight: 700;
   cursor: pointer;
   color: #f8fafc;
@@ -338,10 +390,6 @@
   box-shadow: none;
 }
 
-.attendance-toolbar-actions--entry {
-  align-items: stretch;
-}
-
 .attendance-message,
 .attendance-empty {
   border-radius: 20px;
@@ -363,87 +411,74 @@
 
 .attendance-view {
   display: grid;
-  gap: 20px;
-}
-
-.attendance-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 14px;
 }
 
-.attendance-summary-card {
-  position: relative;
-  overflow: hidden;
-  display: grid;
-  gap: 10px;
-  min-height: 120px;
-  padding: 18px;
-  border-radius: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.48);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(247, 251, 255, 0.93)),
-    rgba(255, 255, 255, 0.82);
-  box-shadow: 0 16px 34px rgba(148, 163, 184, 0.12);
+/* Compact stat strip - was a grid of 120px-tall cards; only the number and label are
+   essential here; a wrapping row of small chips shows the same 8 figures in far less
+   height. */
+.attendance-summary-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.attendance-summary-card::after {
-  content: '';
-  position: absolute;
-  inset: auto -18px -28px auto;
-  width: 96px;
-  height: 96px;
-  border-radius: 32px;
-  background: rgba(255, 255, 255, 0.28);
-  transform: rotate(18deg);
+.attendance-summary-card {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--attendance-glass-1-border);
+  background: var(--attendance-glass-1-bg);
+  backdrop-filter: blur(var(--attendance-glass-1-blur));
 }
 
 .attendance-summary-card span {
-  position: relative;
-  z-index: 1;
   color: var(--attendance-subtle);
-  font-size: 14px;
+  font-size: 12.5px;
   font-weight: 700;
 }
 
 .attendance-summary-card strong {
-  position: relative;
-  z-index: 1;
-  font-family: 'B Mitra', 'B Nazanin', Tahoma, sans-serif;
-  font-size: clamp(1.85rem, 3vw, 2.45rem);
+  font-size: 15px;
   line-height: 1;
   color: var(--attendance-ink);
 }
 
 .attendance-summary-card.accent {
-  background: linear-gradient(180deg, rgba(240, 253, 250, 0.95), rgba(204, 251, 241, 0.78));
+  background: rgba(204, 251, 241, 0.5);
 }
 
 .attendance-summary-card.warning {
-  background: linear-gradient(180deg, rgba(255, 251, 235, 0.96), rgba(254, 240, 138, 0.38));
+  background: rgba(254, 240, 138, 0.32);
 }
 
 .attendance-summary-card.danger {
-  background: linear-gradient(180deg, rgba(254, 242, 242, 0.96), rgba(254, 202, 202, 0.4));
+  background: rgba(254, 202, 202, 0.32);
 }
 
 .attendance-summary-card.info {
-  background: linear-gradient(180deg, rgba(239, 246, 255, 0.96), rgba(191, 219, 254, 0.42));
+  background: rgba(191, 219, 254, 0.32);
 }
 
 .attendance-daily-shell {
   border-radius: 28px;
-  border: 1px solid var(--attendance-border);
-  background: rgba(255, 255, 255, 0.56);
+  border: 1px solid var(--attendance-glass-1-border);
+  background: var(--attendance-glass-1-bg);
   padding: 14px;
-  backdrop-filter: blur(12px);
+  /* The one backdrop-filter for the whole table area - deliberately not repeated on every
+     row/cell below (a table can easily have 20-40+ rows and re-blurring per cell is a real
+     GPU cost). Rows and cells just layer translucent tints on top of this single blurred
+     backdrop, which is enough to read as glass without the performance hit. */
+  backdrop-filter: blur(var(--attendance-glass-1-blur));
 }
 
 .attendance-daily-table-wrap {
   overflow: auto;
   border-radius: 22px;
-  border: 1px solid var(--attendance-border);
-  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--attendance-glass-2-border);
+  background: var(--attendance-glass-2-bg);
 }
 
 .attendance-daily-table {
@@ -457,7 +492,7 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  background: linear-gradient(180deg, rgba(240, 253, 250, 0.98), rgba(236, 254, 255, 0.98));
+  background: linear-gradient(180deg, rgba(240, 253, 250, 0.92), rgba(236, 254, 255, 0.9));
   color: #0f4c5c;
   font-size: 14px;
   font-weight: 700;
@@ -471,8 +506,8 @@
   padding: 13px 12px;
   font-size: 15px;
   color: var(--attendance-ink);
-  border-bottom: 1px solid rgba(226, 232, 240, 0.85);
-  background: rgba(255, 255, 255, 0.96);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+  background: rgba(255, 255, 255, 0.4);
 }
 
 .attendance-daily-table tbody tr:last-child td {
@@ -480,11 +515,12 @@
 }
 
 .attendance-daily-table tbody tr:hover td {
-  background: rgba(248, 252, 255, 0.98);
+  background: rgba(255, 255, 255, 0.62);
 }
 
-.attendance-daily-table tbody tr.is-dirty td {
-  background: linear-gradient(180deg, rgba(255, 251, 235, 0.96), rgba(255, 247, 237, 0.98));
+.attendance-daily-table tbody tr.is-pending td {
+  background: linear-gradient(180deg, rgba(255, 251, 235, 0.5), rgba(255, 247, 237, 0.56));
+  border-bottom-color: rgba(197, 125, 18, 0.24);
 }
 
 .attendance-student-cell,
@@ -509,36 +545,68 @@
 .attendance-note-input {
   width: 100%;
   min-width: 0;
-  border-radius: 14px;
+  border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.26);
-  padding: 11px 13px;
+  padding: 10px 16px;
   color: var(--attendance-ink);
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.7);
   font-size: 15px;
+  font-weight: 600;
+}
+
+.attendance-note-input {
+  border-radius: 14px;
+  font-weight: 400;
 }
 
 .attendance-status-select.status-present {
   color: #166534;
-  border-color: rgba(34, 197, 94, 0.28);
-  background: rgba(240, 253, 244, 0.98);
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(220, 252, 231, 0.75);
 }
 
 .attendance-status-select.status-absent {
   color: #b91c1c;
-  border-color: rgba(239, 68, 68, 0.28);
-  background: rgba(254, 242, 242, 0.98);
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(254, 226, 226, 0.72);
 }
 
 .attendance-status-select.status-sick {
   color: #a16207;
-  border-color: rgba(245, 158, 11, 0.3);
-  background: rgba(255, 251, 235, 0.98);
+  border-color: rgba(245, 158, 11, 0.32);
+  background: rgba(254, 243, 199, 0.75);
 }
 
 .attendance-status-select.status-leave {
   color: #1d4ed8;
-  border-color: rgba(59, 130, 246, 0.28);
-  background: rgba(239, 246, 255, 0.98);
+  border-color: rgba(59, 130, 246, 0.3);
+  background: rgba(219, 234, 254, 0.75);
+}
+
+.attendance-status-select.status-suspended {
+  color: var(--attendance-hold);
+  border-color: rgba(109, 40, 217, 0.32);
+  background: rgba(233, 220, 253, 0.75);
+}
+
+/* Row action cell: a small "needs recording" flag next to the save button so a row that
+   was never recorded reads as needing attention, not just as an inert default. */
+.attendance-row-action {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.attendance-need-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--attendance-warning);
+  background: rgba(197, 125, 18, 0.12);
+  border: 1px solid rgba(197, 125, 18, 0.26);
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
 }
 
 .attendance-recorded-cell {
@@ -683,6 +751,11 @@
   background: rgba(219, 234, 254, 0.94);
 }
 
+.attendance-pill.suspended {
+  color: var(--attendance-hold);
+  background: rgba(233, 220, 253, 0.92);
+}
+
 @media (max-width: 1180px) {
   .attendance-report-layout {
     grid-template-columns: 1fr;
@@ -738,8 +811,11 @@
     grid-template-columns: 1fr;
   }
 
-  .attendance-summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* Small pills wrap fine on their own width - forcing the compact view-switch into the
+     same one-per-row stack as the (larger) scope tabs above would waste space. */
+  .attendance-tabs--compact {
+    display: flex;
+    flex-wrap: wrap;
   }
 
   .attendance-toolbar-actions button,

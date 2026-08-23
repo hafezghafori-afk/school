@@ -7,7 +7,7 @@
   --daily-tt-shadow: 0 28px 80px rgba(8, 20, 36, 0.16);
   position: relative;
   direction: rtl;
-  font-family: 'B Nazanin', 'B Mitra', Vazirmatn, Tahoma, sans-serif;
+  font-family: 'Vazirmatn', 'B Nazanin', 'B Mitra', Tahoma, sans-serif;
 }
 
 .daily-tt-glow {
@@ -105,7 +105,7 @@
 .daily-tt-title {
   margin: 0.45rem 0 0;
   color: var(--daily-tt-text);
-  font-family: 'B Mitra', 'B Nazanin', Tahoma, sans-serif;
+  font-family: 'Vazirmatn', 'B Mitra', 'B Nazanin', Tahoma, sans-serif;
   font-size: clamp(2rem, 3vw, 2.8rem);
   font-weight: 700;
   line-height: 1.15;
@@ -292,7 +292,7 @@
 .daily-tt-stat-value {
   display: block;
   color: #103253;
-  font-family: 'B Mitra', 'B Nazanin', Tahoma, sans-serif;
+  font-family: 'Vazirmatn', 'B Mitra', 'B Nazanin', Tahoma, sans-serif;
   font-size: 1.8rem;
   font-weight: 700;
 }

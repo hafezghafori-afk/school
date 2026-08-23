@@ -842,6 +842,118 @@
   color: #f6f7fb;
 }
 
+.password-modal {
+  width: min(440px, 94vw);
+}
+
+.password-modal-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.password-modal-icon {
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(14, 165, 233, 0.16);
+  border: 1px solid rgba(125, 211, 252, 0.3);
+  color: #7cc4ff;
+  font-size: 16px;
+}
+
+.password-modal-head h3 {
+  margin: 0 0 2px;
+}
+
+.password-modal-head p {
+  margin: 0;
+  font-size: 12.5px;
+  color: rgba(203, 213, 225, 0.85);
+  line-height: 1.6;
+}
+
+.password-field {
+  margin-bottom: 12px;
+}
+
+.password-field label {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.password-input-wrap {
+  position: relative;
+}
+
+.password-input-wrap input {
+  padding-left: 40px;
+  margin-bottom: 0;
+}
+
+.password-input-wrap.has-error input {
+  border-color: rgba(248, 113, 113, 0.9);
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.15);
+}
+
+.password-toggle-btn {
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.72);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.password-toggle-btn:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.password-checklist {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.password-checklist li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: rgba(203, 213, 225, 0.8);
+}
+
+.password-checklist li i {
+  font-size: 13px;
+  color: rgba(148, 163, 184, 0.6);
+}
+
+.password-checklist li.is-valid {
+  color: #f8fafc;
+}
+
+.password-checklist li.is-valid i {
+  color: #22c55e;
+}
+
 @media (max-width: 720px) {
   .profile-head {
     flex-direction: column;

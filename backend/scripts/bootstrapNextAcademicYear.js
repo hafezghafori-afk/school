@@ -214,6 +214,7 @@ async function applyPlan(plan) {
 
   if (!targetYear) {
     targetYear = await AcademicYear.create({
+      schoolId: plan.sourceYear.schoolId,
       code: normalizeText(plan.targetYear.code),
       title: normalizeText(plan.targetYear.title),
       sequence: Number(plan.targetYear.sequence || 0),
@@ -239,14 +240,23 @@ async function applyPlan(plan) {
 
     if (!targetClass) {
       targetClass = await SchoolClass.create({
+        schoolId: item.sourceClass.schoolId,
         title: item.sourceClass.title,
+        titleDari: item.sourceClass.titleDari || item.sourceClass.title,
+        titlePashto: item.sourceClass.titlePashto || item.sourceClass.title,
         code: item.sourceClass.code,
         academicYearId: targetYear._id,
+        shiftId: item.sourceClass.shiftId,
         legacyCourseId: null,
         gradeLevel: item.sourceClass.gradeLevel,
         section: item.sourceClass.section,
+        genderType: item.sourceClass.genderType,
         shift: item.sourceClass.shift,
         room: item.sourceClass.room,
+        capacity: item.sourceClass.capacity,
+        classroomNumber: item.sourceClass.classroomNumber,
+        floor: item.sourceClass.floor,
+        classTeacher: item.sourceClass.classTeacher || undefined,
         status: 'draft',
         homeroomTeacherUserId: item.sourceClass.homeroomTeacherUserId || null,
         note: `Bootstrapped from ${item.sourceClass.title} (${normalizeText(plan.sourceYear.title)})`

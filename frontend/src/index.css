@@ -1,6 +1,15 @@
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-Variable.ttf') format('truetype-variations'),
+    url('/fonts/Vazirmatn-Variable.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 body {
   margin: 0;
-  font-family: 'B Nazanin', 'B Mitra', 'B Zar', Tahoma, sans-serif;
+  font-family: 'Vazirmatn', 'B Nazanin', 'B Mitra', 'B Zar', Tahoma, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

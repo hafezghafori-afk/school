@@ -1110,15 +1110,23 @@ async function seedExamReferenceData({ dryRun = false } = {}) {
   return summary;
 }
 
-async function listExamReferenceData() {
+async function listExamReferenceData({ teacherUserId = null } = {}) {
   await ensureExamTypesReady();
+
+  // وقتی درخواست از سوی یک استاد باشد، فقط تخصیص‌های خودِ همان استاد برگردانده می‌شود
+  // (نه نام/ایمیل و صنف/مضمون سایر استادان مکتب) — دراپ‌داون‌های صنف/مضمون در فرانت‌اند
+  // همین‌طور هم فیلتر می‌شوند، اما این محدودسازی باید در پاسخ سرور هم انجام شود.
+  const teacherAssignmentFilter = { status: 'active' };
+  if (teacherUserId) {
+    teacherAssignmentFilter.teacherUserId = teacherUserId;
+  }
 
   const [academicYears, assessmentPeriods, schoolClasses, subjects, teacherAssignments, examTypes, rankingRules, reviewers] = await Promise.all([
     AcademicYear.find({}).sort({ isActive: -1, sequence: 1, createdAt: 1 }),
     AcademicTerm.find({}).populate('academicYearId').sort({ sequence: 1, createdAt: 1 }),
     SchoolClass.find({ status: { $ne: 'archived' } }).populate('academicYearId').sort({ gradeLevel: 1, section: 1, title: 1 }),
     Subject.find({ isActive: true }).sort({ grade: 1, name: 1 }),
-    TeacherAssignment.find({ status: 'active' })
+    TeacherAssignment.find(teacherAssignmentFilter)
       .populate('teacherUserId', 'name email')
       .populate('academicYearId')
       .populate({ path: 'termId', populate: { path: 'academicYearId' } })

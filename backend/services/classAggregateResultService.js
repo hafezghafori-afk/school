@@ -523,9 +523,17 @@ function selectLatestMembershipSnapshot(results = [], sessionMap = new Map()) {
     ?.membershipSnapshot || null;
 }
 
-async function buildClassAggregateRows({ academicYearId, classId } = {}) {
+async function evaluateClassOfficialResults({ academicYearId, classId } = {}) {
   const readiness = await getClassAggregateReadiness({ academicYearId, classId });
-  if (!readiness.ready) throw new Error('result_table_aggregate_not_ready');
+  if (!readiness.ready) {
+    return {
+      readiness,
+      sessionMap: new Map(),
+      membershipMap: new Map(),
+      rawResultsByMembership: new Map(),
+      evaluatedByMembership: new Map()
+    };
+  }
 
   const [sessions, memberships, results] = await Promise.all([
     ExamSession.find({ _id: { $in: readiness.sourceSessionIds } })
@@ -562,12 +570,80 @@ async function buildClassAggregateRows({ academicYearId, classId } = {}) {
     `${idText(item.sessionId)}:${idText(item.studentMembershipId)}`,
     item
   ]));
-  const resultsByMembership = new Map();
+  const rawResultsByMembership = new Map();
   results.forEach((result) => {
     const key = idText(result.studentMembershipId);
-    if (!resultsByMembership.has(key)) resultsByMembership.set(key, []);
-    resultsByMembership.get(key).push(result);
+    if (!rawResultsByMembership.has(key)) rawResultsByMembership.set(key, []);
+    rawResultsByMembership.get(key).push(result);
   });
+
+  const subjectContexts = readiness.subjects.map((subject) => ({
+    subject,
+    fourHalf: sessionMap.get(subject.fourHalfSessions[0]?.id),
+    annual: sessionMap.get(subject.annualSessions[0]?.id)
+  }));
+
+  const evaluatedByMembership = new Map();
+  membershipMap.forEach((membership, membershipId) => {
+    const sourceExamResultIds = [];
+    const subjects = subjectContexts.map(({ subject, fourHalf, annual }) => {
+      const fourResult = resultMap.get(`${idText(fourHalf)}:${membershipId}`) || null;
+      const annualResult = resultMap.get(`${idText(annual)}:${membershipId}`) || null;
+      if (fourResult?._id) sourceExamResultIds.push(fourResult._id);
+      if (annualResult?._id) sourceExamResultIds.push(annualResult._id);
+      const four = scoreFromResult(fourResult);
+      const annualScore = scoreFromResult(annualResult);
+      const combined = combineOfficialSubjectScores({ fourHalf: four.score, annual: annualScore.score });
+      const applicable = four.applicable || annualScore.applicable;
+      return {
+        subjectId: subject.id,
+        subjectCode: subject.code,
+        subjectName: subject.name,
+        fourHalf: four.score,
+        fourHalfStatus: four.status,
+        annual: annualScore.score,
+        annualStatus: annualScore.status,
+        total: combined.obtainedMark,
+        // computeGeneralResult() (utils/officialResultPolicy.js) reads obtainedMark specifically —
+        // keep `total` for the existing stageTotals/table display, but also expose obtainedMark so
+        // the class-level pass/conditional/failed rollup isn't silently starved into 'pending'.
+        obtainedMark: combined.obtainedMark,
+        fourHalfPassed: combined.fourHalfPassed,
+        annualPassed: combined.annualPassed,
+        generalPassed: combined.generalPassed,
+        passed: combined.passed,
+        complete: combined.complete,
+        applicable
+      };
+    });
+
+    const applicableSubjects = subjects.filter((item) => item.applicable);
+    const general = applicableSubjects.length
+      ? computeGeneralResult(applicableSubjects)
+      : {
+          totalObtained: null,
+          totalPossible: 0,
+          average: null,
+          failedSubjects: null,
+          resultStatus: 'not_applicable',
+          rankEligible: false
+        };
+
+    evaluatedByMembership.set(membershipId, { membership, subjects, applicableSubjects, general, sourceExamResultIds });
+  });
+
+  return { readiness, sessionMap, membershipMap, rawResultsByMembership, evaluatedByMembership };
+}
+
+async function buildClassAggregateRows({ academicYearId, classId } = {}) {
+  const {
+    readiness,
+    sessionMap,
+    membershipMap,
+    rawResultsByMembership,
+    evaluatedByMembership
+  } = await evaluateClassOfficialResults({ academicYearId, classId });
+  if (!readiness.ready) throw new Error('result_table_aggregate_not_ready');
 
   const membershipIds = [...membershipMap.keys()].filter(Boolean);
   const studentCoreIds = [...new Set([...membershipMap.values()].map((item) => idText(item.studentId)).filter(Boolean))];
@@ -594,55 +670,10 @@ async function buildClassAggregateRows({ academicYearId, classId } = {}) {
     if (Object.prototype.hasOwnProperty.call(summary, status)) summary[status] += 1;
   });
 
-  const subjectContexts = readiness.subjects.map((subject) => ({
-    subject,
-    fourHalf: sessionMap.get(subject.fourHalfSessions[0]?.id),
-    annual: sessionMap.get(subject.annualSessions[0]?.id)
-  }));
-
-  const rows = [...membershipMap.values()].map((membership) => {
+  const rows = [...evaluatedByMembership.values()].map(({ membership, subjects, applicableSubjects, general, sourceExamResultIds }) => {
     const membershipId = idText(membership);
-    const sourceExamResultIds = [];
-    const subjects = subjectContexts.map(({ subject, fourHalf, annual }) => {
-      const fourResult = resultMap.get(`${idText(fourHalf)}:${membershipId}`) || null;
-      const annualResult = resultMap.get(`${idText(annual)}:${membershipId}`) || null;
-      if (fourResult?._id) sourceExamResultIds.push(fourResult._id);
-      if (annualResult?._id) sourceExamResultIds.push(annualResult._id);
-      const four = scoreFromResult(fourResult);
-      const annualScore = scoreFromResult(annualResult);
-      const combined = combineOfficialSubjectScores({ fourHalf: four.score, annual: annualScore.score });
-      const applicable = four.applicable || annualScore.applicable;
-      return {
-        subjectId: subject.id,
-        subjectCode: subject.code,
-        subjectName: subject.name,
-        fourHalf: four.score,
-        fourHalfStatus: four.status,
-        annual: annualScore.score,
-        annualStatus: annualScore.status,
-        total: combined.obtainedMark,
-        fourHalfPassed: combined.fourHalfPassed,
-        annualPassed: combined.annualPassed,
-        generalPassed: combined.generalPassed,
-        passed: combined.passed,
-        complete: combined.complete,
-        applicable
-      };
-    });
-
-    const applicableSubjects = subjects.filter((item) => item.applicable);
-    const general = applicableSubjects.length
-      ? computeGeneralResult(applicableSubjects)
-      : {
-          totalObtained: null,
-          totalPossible: 0,
-          average: null,
-          failedSubjects: null,
-          resultStatus: 'not_applicable',
-          rankEligible: false
-        };
     const membershipSnapshot = selectLatestMembershipSnapshot(
-      resultsByMembership.get(membershipId) || [],
+      rawResultsByMembership.get(membershipId) || [],
       sessionMap
     );
     const membershipState = membershipSnapshot || membership;
@@ -713,5 +744,6 @@ async function buildClassAggregateRows({ academicYearId, classId } = {}) {
 
 module.exports = {
   buildClassAggregateRows,
+  evaluateClassOfficialResults,
   getClassAggregateReadiness
 };

@@ -75,7 +75,7 @@ const promotionRuleSchema = new mongoose.Schema({
   },
   evaluationMode: {
     type: String,
-    enum: ['result_status', 'score_policy'],
+    enum: ['result_status', 'score_policy', 'official_general_result'],
     default: 'score_policy',
     index: true
   },
@@ -112,7 +112,7 @@ promotionRuleSchema.pre('validate', function syncPromotionRuleState() {
   this.promotedStatuses = normalizeStatusList(this.promotedStatuses, DEFAULT_PROMOTED_STATUSES);
   this.conditionalStatuses = normalizeStatusList(this.conditionalStatuses, DEFAULT_CONDITIONAL_STATUSES);
   this.repeatedStatuses = normalizeStatusList(this.repeatedStatuses, DEFAULT_REPEATED_STATUSES);
-  if (!['result_status', 'score_policy'].includes(this.evaluationMode)) this.evaluationMode = 'score_policy';
+  if (!['result_status', 'score_policy', 'official_general_result'].includes(this.evaluationMode)) this.evaluationMode = 'score_policy';
   this.passingScore = Math.min(100, Math.max(0, Number(this.passingScore ?? 55)));
   this.subjectPassingScore = Math.min(100, Math.max(0, Number(this.subjectPassingScore ?? this.passingScore ?? 55)));
   this.maxConditionalSubjects = Math.max(0, Math.floor(Number(this.maxConditionalSubjects ?? 3)));

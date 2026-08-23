@@ -377,6 +377,18 @@
   align-items: center;
 }
 
+.student-report-document-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.student-report-document-actions .student-report-action-btn {
+  flex: 1 1 160px;
+  text-align: center;
+}
+
 .student-report-guardian-toolbar {
   margin-bottom: 14px;
 }

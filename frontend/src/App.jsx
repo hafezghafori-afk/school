@@ -3365,7 +3365,7 @@ function AppShell() {
             />
             <Route
               path="/instructor-report"
-              element={adminRoute('reports.teachers.view', <AdminInstructorReport />, 'دسترسی گزارش استاد برای این حساب فعال نیست.')}
+              element={adminRoute('reports.teachers.view', <AdminInstructorReport />, 'دسترسی گزارش فعالیت کاربر برای این حساب فعال نیست.')}
             />
             <Route
               path="/instructor-add-student"

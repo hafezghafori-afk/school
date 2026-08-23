@@ -190,12 +190,12 @@ export default function AdminEnrollments() {
           <title>گزارش ثبت‌نام‌ها</title>
           <style>
             @font-face {
-              font-family: 'B Nazanin Print';
-              src: url('/fonts/B_Nazanin.ttf') format('truetype');
-              font-weight: 400;
+              font-family: 'Vazirmatn Print';
+              src: url('/fonts/Vazirmatn-Variable.ttf') format('truetype');
+              font-weight: 100 900;
               font-style: normal;
             }
-            body { font-family: 'B Nazanin Print', 'B Nazanin', 'B Mitra', sans-serif; padding: 24px; }
+            body { font-family: 'Vazirmatn Print', 'B Nazanin', 'B Mitra', sans-serif; padding: 24px; }
             h1 { font-size: 18px; margin: 0 0 8px; }
             .meta { font-size: 12px; color: #444; margin-bottom: 12px; }
             table { width: 100%; border-collapse: collapse; font-size: 12px; }

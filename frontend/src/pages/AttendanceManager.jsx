@@ -111,6 +111,15 @@ const isRowDirty = (row) => (
   )
 );
 
+// A row needs a save either because it was edited since load (isRowDirty) OR because it
+// has never been recorded at all (no attendanceId yet) - a freshly loaded, never-touched
+// class defaults every row to "present" with status === originalStatus, so isRowDirty alone
+// never flags it and the save button stays disabled even though nothing has been persisted.
+const needsRecording = (row) => (
+  row?.lifecycleLocked !== true
+  && (!row?.attendanceId || isRowDirty(row))
+);
+
 const uniqueStudentsFromItems = (items = []) => {
   const seen = new Set();
   const students = [];
@@ -250,6 +259,12 @@ const parseDownloadFilename = (contentDisposition, fallback = 'attendance-report
 };
 
 export default function AttendanceManager() {
+  // Staff attendance is an admin-only concern - instructors only ever manage their own
+  // students, so the "کارمندان" scope switch is hidden for them (scope just stays 'students').
+  const isInstructorAccount = useMemo(
+    () => String(localStorage.getItem('role') || '').trim().toLowerCase() === 'instructor',
+    []
+  );
   const [scope, setScope] = useState('students');
   const [view, setView] = useState('entry');
   const [courses, setCourses] = useState([]);
@@ -849,12 +864,12 @@ export default function AttendanceManager() {
   };
 
   const handleSaveAll = async () => {
-    const dirtyRows = rows
+    const pendingRows = rows
       .map((row, idx) => ({ row, idx }))
-      .filter(({ row }) => isRowDirty(row));
+      .filter(({ row }) => needsRecording(row));
 
-    if (!dirtyRows.length) {
-      setMessage('تغییری برای ثبت وجود ندارد.');
+    if (!pendingRows.length) {
+      setMessage('چیزی برای ثبت وجود ندارد.');
       return;
     }
 
@@ -864,7 +879,7 @@ export default function AttendanceManager() {
     let successCount = 0;
     let failedCount = 0;
 
-    for (const { row, idx } of dirtyRows) {
+    for (const { row, idx } of pendingRows) {
       setSaving((prev) => ({ ...prev, [idx]: true }));
       try {
         const data = await saveAttendanceRecord(row);
@@ -900,12 +915,12 @@ export default function AttendanceManager() {
   };
 
   const handleEmployeeSaveAll = async () => {
-    const dirtyRows = employeeRows
+    const pendingRows = employeeRows
       .map((row, idx) => ({ row, idx }))
-      .filter(({ row }) => isRowDirty(row));
+      .filter(({ row }) => needsRecording(row));
 
-    if (!dirtyRows.length) {
-      setMessage('تغییری برای ثبت وجود ندارد.');
+    if (!pendingRows.length) {
+      setMessage('چیزی برای ثبت وجود ندارد.');
       return;
     }
 
@@ -915,7 +930,7 @@ export default function AttendanceManager() {
     let successCount = 0;
     let failedCount = 0;
 
-    for (const { row, idx } of dirtyRows) {
+    for (const { row, idx } of pendingRows) {
       setEmployeeSaving((prev) => ({ ...prev, [idx]: true }));
       try {
         const data = await saveEmployeeAttendanceRecord(row);
@@ -954,7 +969,7 @@ export default function AttendanceManager() {
     const summary = {
       total: rows.length,
       recorded: 0,
-      dirty: 0,
+      pending: 0,
       present: 0,
       absent: 0,
       sick: 0,
@@ -965,7 +980,7 @@ export default function AttendanceManager() {
     rows.forEach((row) => {
       summary[normalizeAttendanceStatus(row.status)] = Number(summary[normalizeAttendanceStatus(row.status)] || 0) + 1;
       if (row.attendanceId) summary.recorded += 1;
-      if (isRowDirty(row)) summary.dirty += 1;
+      if (needsRecording(row)) summary.pending += 1;
     });
 
     return summary;
@@ -975,7 +990,7 @@ export default function AttendanceManager() {
     const summary = {
       total: employeeRows.length,
       recorded: 0,
-      dirty: 0,
+      pending: 0,
       present: 0,
       absent: 0,
       sick: 0,
@@ -985,7 +1000,7 @@ export default function AttendanceManager() {
     employeeRows.forEach((row) => {
       summary[normalizeAttendanceStatus(row.status)] = Number(summary[normalizeAttendanceStatus(row.status)] || 0) + 1;
       if (row.attendanceId) summary.recorded += 1;
-      if (isRowDirty(row)) summary.dirty += 1;
+      if (needsRecording(row)) summary.pending += 1;
     });
 
     return summary;
@@ -1008,10 +1023,6 @@ export default function AttendanceManager() {
   return (
     <div className="attendance-page">
       <div className="attendance-card attendance-card--modern">
-        <div className="card-back">
-          <button type="button" onClick={() => window.history.back()}>بازگشت</button>
-        </div>
-
         <header className="attendance-hero">
           <div>
             <h2>{pageTitle}</h2>
@@ -1024,16 +1035,18 @@ export default function AttendanceManager() {
           </div>
         </header>
 
-        <div className="attendance-tabs">
-          <button type="button" className={scope === 'students' ? 'active' : ''} onClick={() => setScope('students')}>
-            شاگردان
-          </button>
-          <button type="button" className={scope === 'employees' ? 'active' : ''} onClick={() => setScope('employees')}>
-            کارمندان
-          </button>
-        </div>
+        {!isInstructorAccount && (
+          <div className="attendance-tabs">
+            <button type="button" className={scope === 'students' ? 'active' : ''} onClick={() => setScope('students')}>
+              شاگردان
+            </button>
+            <button type="button" className={scope === 'employees' ? 'active' : ''} onClick={() => setScope('employees')}>
+              کارمندان
+            </button>
+          </div>
+        )}
 
-        <div className="attendance-tabs">
+        <div className="attendance-tabs attendance-tabs--compact">
           <button type="button" className={view === 'entry' ? 'active' : ''} onClick={() => setView('entry')}>
             {scope === 'students' ? 'حاضری روزانه شاگردان' : 'حاضری روزانه کارمندان'}
           </button>
@@ -1149,8 +1162,9 @@ export default function AttendanceManager() {
               </>
             )}
           </div>
+        </div>
 
-          <div className={`attendance-toolbar-actions ${view === 'entry' ? 'attendance-toolbar-actions--entry' : ''}`}>
+        <div className="attendance-toolbar-actions">
             {scope === 'students' ? (
               view === 'entry' ? (
                 <>
@@ -1161,8 +1175,8 @@ export default function AttendanceManager() {
                   <button type="button" className="secondary ghost" onClick={() => loadAttendance()} disabled={loadingEntry || bulkSaving}>
                     {loadingEntry ? 'در حال بروزرسانی...' : 'بازنشانی جدول'}
                   </button>
-                  <button type="button" onClick={handleSaveAll} disabled={bulkSaving || !dailySummary.dirty}>
-                    {bulkSaving ? 'در حال ثبت...' : `ثبت حاضری صنف${dailySummary.dirty ? ` (${toFaNumber(dailySummary.dirty)})` : ''}`}
+                  <button type="button" onClick={handleSaveAll} disabled={bulkSaving || !dailySummary.pending}>
+                    {bulkSaving ? 'در حال ثبت...' : `ثبت حاضری صنف${dailySummary.pending ? ` (${toFaNumber(dailySummary.pending)})` : ''}`}
                   </button>
                 </>
               ) : view === 'course-report' ? (
@@ -1204,8 +1218,8 @@ export default function AttendanceManager() {
                   <button type="button" className="secondary ghost" onClick={() => loadEmployeeAttendance()} disabled={loadingEmployeeEntry || employeeBulkSaving}>
                     {loadingEmployeeEntry ? 'در حال بروزرسانی...' : 'بازنشانی جدول'}
                   </button>
-                  <button type="button" onClick={handleEmployeeSaveAll} disabled={employeeBulkSaving || !employeeDailySummary.dirty}>
-                    {employeeBulkSaving ? 'در حال ثبت...' : `ثبت حاضری کارمندان${employeeDailySummary.dirty ? ` (${toFaNumber(employeeDailySummary.dirty)})` : ''}`}
+                  <button type="button" onClick={handleEmployeeSaveAll} disabled={employeeBulkSaving || !employeeDailySummary.pending}>
+                    {employeeBulkSaving ? 'در حال ثبت...' : `ثبت حاضری کارمندان${employeeDailySummary.pending ? ` (${toFaNumber(employeeDailySummary.pending)})` : ''}`}
                   </button>
                 </>
               ) : view === 'course-report' ? (
@@ -1238,7 +1252,6 @@ export default function AttendanceManager() {
                 </>
               )
             )}
-          </div>
         </div>
 
         {!!message && <div className="attendance-message">{message}</div>}
@@ -1256,7 +1269,7 @@ export default function AttendanceManager() {
               </div>
               <div className="attendance-summary-card warning">
                 <span>در انتظار ثبت</span>
-                <strong>{toFaNumber(dailySummary.dirty)}</strong>
+                <strong>{toFaNumber(dailySummary.pending)}</strong>
               </div>
               <div className="attendance-summary-card">
                 <span>حاضر</span>
@@ -1296,7 +1309,6 @@ export default function AttendanceManager() {
                         <th>نام شاگرد</th>
                         <th>نام پدر</th>
                         <th>جنسیت</th>
-                        <th>صنف</th>
                         <th>وضعیت</th>
                         <th>یادداشت</th>
                         <th>تاریخ ثبت</th>
@@ -1305,7 +1317,7 @@ export default function AttendanceManager() {
                     </thead>
                     <tbody>
                       {visibleStudentRows.map(({ row, index: rowIndex }, idx) => (
-                        <tr key={row.student?._id || rowIndex} className={isRowDirty(row) ? 'is-dirty' : ''}>
+                        <tr key={row.student?._id || rowIndex} className={needsRecording(row) ? 'is-pending' : ''}>
                           <td>{toFaNumber(idx + 1)}</td>
                           <td>{row.student?.admissionNo || '---'}</td>
                           <td>
@@ -1316,7 +1328,6 @@ export default function AttendanceManager() {
                           </td>
                           <td>{row.student?.fatherName || '---'}</td>
                           <td>{genderLabel(row.student?.gender)}</td>
-                          <td>{selectedCourseLabel}</td>
                           <td>
                             <select
                               className={`attendance-status-select status-${row.status}`}
@@ -1346,14 +1357,19 @@ export default function AttendanceManager() {
                             </div>
                           </td>
                           <td>
-                            <button
-                              className="save"
-                              type="button"
-                              onClick={() => handleSave(row, rowIndex)}
-                              disabled={row.lifecycleLocked === true || saving[rowIndex] || !isRowDirty(row)}
-                            >
-                              {saving[rowIndex] ? '...' : (isRowDirty(row) ? 'ثبت' : 'ثبت‌شده')}
-                            </button>
+                            <div className="attendance-row-action">
+                              {needsRecording(row) && !saving[rowIndex] && (
+                                <span className="attendance-need-badge">نیاز به ثبت</span>
+                              )}
+                              <button
+                                className="save"
+                                type="button"
+                                onClick={() => handleSave(row, rowIndex)}
+                                disabled={row.lifecycleLocked === true || saving[rowIndex] || !needsRecording(row)}
+                              >
+                                {saving[rowIndex] ? '...' : (needsRecording(row) ? 'ثبت' : 'ثبت‌شده')}
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1597,7 +1613,7 @@ export default function AttendanceManager() {
               </div>
               <div className="attendance-summary-card warning">
                 <span>در انتظار ثبت</span>
-                <strong>{toFaNumber(employeeDailySummary.dirty)}</strong>
+                <strong>{toFaNumber(employeeDailySummary.pending)}</strong>
               </div>
               <div className="attendance-summary-card">
                 <span>حاضر</span>
@@ -1642,7 +1658,7 @@ export default function AttendanceManager() {
                     </thead>
                     <tbody>
                       {employeeRows.map((row, idx) => (
-                        <tr key={row.employee?._id || idx} className={isRowDirty(row) ? 'is-dirty' : ''}>
+                        <tr key={row.employee?._id || idx} className={needsRecording(row) ? 'is-pending' : ''}>
                           <td>{toFaNumber(idx + 1)}</td>
                           <td>{row.employee?.employeeId || '---'}</td>
                           <td>
@@ -1681,14 +1697,19 @@ export default function AttendanceManager() {
                             </div>
                           </td>
                           <td>
-                            <button
-                              className="save"
-                              type="button"
-                              onClick={() => handleEmployeeSave(row, idx)}
-                              disabled={employeeSaving[idx] || !isRowDirty(row)}
-                            >
-                              {employeeSaving[idx] ? '...' : (isRowDirty(row) ? 'ثبت' : 'ثبت‌شده')}
-                            </button>
+                            <div className="attendance-row-action">
+                              {needsRecording(row) && !employeeSaving[idx] && (
+                                <span className="attendance-need-badge">نیاز به ثبت</span>
+                              )}
+                              <button
+                                className="save"
+                                type="button"
+                                onClick={() => handleEmployeeSave(row, idx)}
+                                disabled={employeeSaving[idx] || !needsRecording(row)}
+                              >
+                                {employeeSaving[idx] ? '...' : (needsRecording(row) ? 'ثبت' : 'ثبت‌شده')}
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}

@@ -1344,7 +1344,7 @@ const StudentManagement = () => {
     }
 
     printWindow.document.open();
-    printWindow.document.write('<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><title>در حال ساخت PDF</title></head><body style="font-family:\'B Nazanin\',\'B Mitra\',sans-serif;padding:24px">در حال آماده‌سازی فورم PDF...</body></html>');
+    printWindow.document.write('<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><title>در حال ساخت PDF</title></head><body style="font-family:\'Vazirmatn\',\'B Nazanin\',\'B Mitra\',sans-serif;padding:24px">در حال آماده‌سازی فورم PDF...</body></html>');
     printWindow.document.close();
 
     const fontFileToDataUrl = async (fontPath) => {
@@ -1365,15 +1365,11 @@ const StudentManagement = () => {
       }
     };
 
-    let regularFontSource = `${window.location.origin}/fonts/B_Nazanin.ttf`;
-    let boldFontSource = `${window.location.origin}/fonts/B_Nazanin_Bold.ttf`;
+    let variableFontSource = `${window.location.origin}/fonts/Vazirmatn-Variable.ttf`;
     try {
-      [regularFontSource, boldFontSource] = await Promise.all([
-        fontFileToDataUrl('/fonts/B_Nazanin.ttf'),
-        fontFileToDataUrl('/fonts/B_Nazanin_Bold.ttf')
-      ]);
+      variableFontSource = await fontFileToDataUrl('/fonts/Vazirmatn-Variable.ttf');
     } catch (fontError) {
-      console.warn('Persian PDF font could not be embedded; using the hosted font files.', fontError);
+      console.warn('Persian PDF font could not be embedded; using the hosted font file.', fontError);
     }
 
     if (printWindow.closed) return;
@@ -1387,21 +1383,14 @@ const StudentManagement = () => {
           <style>
             @page { size: A4 landscape; margin: 12mm; }
             @font-face {
-              font-family: 'B Nazanin PDF';
-              src: url('${regularFontSource}') format('truetype');
-              font-weight: 400;
-              font-style: normal;
-              font-display: block;
-            }
-            @font-face {
-              font-family: 'B Nazanin PDF';
-              src: url('${boldFontSource}') format('truetype');
-              font-weight: 700;
+              font-family: 'Vazirmatn PDF';
+              src: url('${variableFontSource}') format('truetype');
+              font-weight: 100 900;
               font-style: normal;
               font-display: block;
             }
             * { box-sizing: border-box; }
-            html, body, body * { font-family: 'B Nazanin PDF', 'B Nazanin', 'B Mitra', sans-serif !important; }
+            html, body, body * { font-family: 'Vazirmatn PDF', 'B Nazanin', 'B Mitra', sans-serif !important; }
             body {
               margin: 0;
               color: #111827;
@@ -1465,8 +1454,8 @@ const StudentManagement = () => {
               var fontsReady = document.fonts
                 ? Promise.race([
                     Promise.all([
-                      document.fonts.load('400 13px "B Nazanin PDF"', 'لیست شاگردان'),
-                      document.fonts.load('700 13px "B Nazanin PDF"', 'لیست شاگردان'),
+                      document.fonts.load('400 13px "Vazirmatn PDF"', 'لیست شاگردان'),
+                      document.fonts.load('700 13px "Vazirmatn PDF"', 'لیست شاگردان'),
                       document.fonts.ready
                     ]),
                     new Promise(function (resolve) { setTimeout(resolve, 3000); })
