@@ -3,27 +3,50 @@ import { Link } from 'react-router-dom';
 import './AccessDenied.css';
 
 function AccessDenied({
-  title = '\u062F\u0633\u062A\u0631\u0633\u06CC \u0645\u062D\u062F\u0648\u062F',
-  message = '\u0634\u0645\u0627 \u0627\u062C\u0627\u0632\u0647 \u0648\u0631\u0648\u062F \u0628\u0647 \u0627\u06CC\u0646 \u0628\u062E\u0634 \u0631\u0627 \u0646\u062F\u0627\u0631\u06CC\u062F.',
+  title = 'دسترسی محدود',
+  message = 'شما اجازه ورود به این بخش را ندارید.',
+  currentRoleLabel = '',
+  requiredLabel = '',
   actionHref = '/dashboard',
-  actionLabel = '\u0628\u0627\u0632\u06AF\u0634\u062A \u0628\u0647 \u062F\u0627\u0634\u0628\u0648\u0631\u062F',
+  actionLabel = 'بازگشت به داشبورد',
   secondaryHref = '/',
-  secondaryLabel = '\u0635\u0641\u062D\u0647 \u062E\u0627\u0646\u0647',
+  secondaryLabel = 'صفحه خانه',
   onRequestAccess = null,
-  requestActionLabel = '\u062F\u0631\u062E\u0648\u0627\u0633\u062A \u062F\u0633\u062A\u0631\u0633\u06CC',
+  requestActionLabel = 'درخواست دسترسی',
   requestActionLoading = false,
   requestFeedback = '',
-  requestFeedbackTone = 'info'
+  requestFeedbackTone = 'info',
+  quickLinks = []
 }) {
+  const showCompare = !!(currentRoleLabel && requiredLabel);
+  const links = Array.isArray(quickLinks) ? quickLinks.filter((item) => item?.href && item?.label) : [];
+
   return (
     <section className="access-denied" role="alert" aria-live="polite">
-      <div className="access-denied__icon" aria-hidden="true">
-        <i className="fa-solid fa-shield-halved" />
+      <div className="access-denied__badge" aria-hidden="true">
+        <i className="fa-solid fa-lock" />
       </div>
+      <p className="access-denied__eyebrow">دسترسی رد شد</p>
       <h2 className="access-denied__title">{title}</h2>
       <p className="access-denied__message">{message}</p>
+
+      {showCompare && (
+        <div className="access-denied__compare">
+          <div className="access-denied__slot">
+            <span className="access-denied__slot-label">پست فعلی شما</span>
+            <span className="access-denied__slot-value">{currentRoleLabel}</span>
+          </div>
+          <i className="fa-solid fa-arrow-left access-denied__compare-arrow" aria-hidden="true" />
+          <div className="access-denied__slot access-denied__slot--need">
+            <span className="access-denied__slot-label">دسترسی لازم</span>
+            <span className="access-denied__slot-value">{requiredLabel}</span>
+          </div>
+        </div>
+      )}
+
       <div className="access-denied__actions">
         <Link to={actionHref} className="access-denied__btn access-denied__btn--primary">
+          <i className="fa-solid fa-gauge" aria-hidden="true" />
           {actionLabel}
         </Link>
         {typeof onRequestAccess === 'function' && (
@@ -33,8 +56,9 @@ function AccessDenied({
             onClick={onRequestAccess}
             disabled={requestActionLoading}
           >
+            <i className="fa-solid fa-hand" aria-hidden="true" />
             {requestActionLoading
-              ? '\u062F\u0631 \u062D\u0627\u0644 \u0627\u0631\u0633\u0627\u0644...'
+              ? 'در حال ارسال...'
               : requestActionLabel}
           </button>
         )}
@@ -42,11 +66,29 @@ function AccessDenied({
           {secondaryLabel}
         </Link>
       </div>
+
       {requestFeedback ? (
         <p className={`access-denied__feedback access-denied__feedback--${requestFeedbackTone}`}>
           {requestFeedback}
         </p>
       ) : null}
+
+      {links.length > 0 && (
+        <div className="access-denied__quick">
+          <span className="access-denied__quick-label">این‌ها برای شما در دسترس است</span>
+          <div className="access-denied__chips">
+            {links.map((item) => (
+              <Link key={item.href} to={item.href} className="access-denied__chip">
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="access-denied__foot">
+        اگر فکر می‌کنید این یک اشتباه است، از مدیر مکتب یا ریاست عمومی درخواست دسترسی بدهید.
+      </p>
     </section>
   );
 }

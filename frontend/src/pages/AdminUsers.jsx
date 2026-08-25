@@ -163,8 +163,8 @@ const ORG_ROLE_DEFAULT_PERMISSIONS = {
   finance_manager: ['manage_finance'],
   finance_lead: ['manage_finance', 'view_reports'],
   school_manager: ['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_school_manager'],
-  academic_manager: ['manage_enrollments', 'manage_memberships', 'view_schedule'],
-  head_teacher: ['manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_head_teacher'],
+  academic_manager: ['users.manage', 'users.create', 'users.edit', 'users.deactivate', 'users.roles.manage', 'users.permissions.manage', 'users.access_requests.manage', 'users.profile_requests.manage', 'students.manage', 'students.register', 'students.documents.manage', 'students.guardians.manage', 'teachers.manage', 'manage_enrollments', 'manage_memberships', 'view_schedule'],
+  head_teacher: ['users.manage', 'users.create', 'users.edit', 'users.deactivate', 'users.roles.manage', 'users.permissions.manage', 'users.access_requests.manage', 'users.profile_requests.manage', 'students.manage', 'students.register', 'students.documents.manage', 'students.guardians.manage', 'teachers.manage', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_head_teacher'],
   general_president: ['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_finance', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_school_manager', 'access_head_teacher']
 };
 
@@ -341,15 +341,59 @@ const orgRoleLabel = (orgRole) => (
     ? 'آمر مالی (قدیمی)'
     : ORG_ROLE_OPTIONS.find((item) => item.key === orgRole)?.label || orgRole
 );
-const orgRoleSelectOptions = (current = '') => {
+
+// تن رنگی و نشان هر پست برای نشان‌دادن سلسله‌مراتب به‌صورت بصری در فهرست کاربران و پنل‌های ویرایش.
+const POST_BADGE_TONES = {
+  general_president: { tone: 'pres', glyph: '★' },
+  finance_manager: { tone: 'fin', glyph: '◈' },
+  finance_lead: { tone: 'fin', glyph: '◈' },
+  school_manager: { tone: 'sch', glyph: '◧' },
+  academic_manager: { tone: 'aca', glyph: '▤' },
+  head_teacher: { tone: 'head', glyph: '◔' }
+};
+
+function PostBadge({ orgRole = '' }) {
+  const normalized = String(orgRole || '').trim().toLowerCase();
+  const spec = POST_BADGE_TONES[normalized];
+  const label = orgRoleLabel(normalized);
+  if (!spec) {
+    return <span className="post-badge post-badge--neu">{label}</span>;
+  }
+  return (
+    <span className={`post-badge post-badge--${spec.tone}`}>
+      <span aria-hidden="true">{spec.glyph}</span> {label}
+    </span>
+  );
+}
+// سلسله‌مراتب واگذاری پست (باید با ORG_ROLE_ASSIGNABLE_TARGETS در backend/routes/adminRoutes.js
+// یکسان بماند): هر پست فقط پست‌های پایین‌تر از خودش را می‌تواند بسازد/ویرایش کند، نه هم‌سطح یا
+// بالاتر. این‌جا فقط برای فیلترکردن گزینه‌های نمایشی است؛ اجرای واقعیِ محدودیت در بک‌اند است.
+const ORG_ROLE_ASSIGNABLE_TARGETS = {
+  general_president: ['general_president', 'finance_manager', 'finance_lead', 'school_manager', 'academic_manager', 'head_teacher', 'instructor', 'student', 'parent'],
+  school_manager: ['academic_manager', 'head_teacher', 'instructor', 'student', 'parent'],
+  academic_manager: ['instructor', 'student', 'parent'],
+  head_teacher: ['instructor', 'student', 'parent'],
+  finance_manager: [],
+  finance_lead: [],
+  instructor: [],
+  parent: [],
+  student: []
+};
+const orgRoleSelectOptions = (current = '', viewerOrgRole = '') => {
   const normalized = String(current || '').trim().toLowerCase();
+  const normalizedViewer = String(viewerOrgRole || '').trim().toLowerCase();
+  const assignable = ORG_ROLE_ASSIGNABLE_TARGETS[normalizedViewer] || [];
+  const base = ORG_ROLE_OPTIONS.map((item) => ({
+    ...item,
+    disabled: item.key !== normalized && !assignable.includes(item.key)
+  }));
   if (normalized === 'finance_lead') {
     return [
-      { key: 'finance_lead', label: 'آمر مالی (قدیمی)', role: 'admin' },
-      ...ORG_ROLE_OPTIONS
+      { key: 'finance_lead', label: 'آمر مالی (قدیمی)', role: 'admin', disabled: false },
+      ...base
     ];
   }
-  return ORG_ROLE_OPTIONS;
+  return base;
 };
 const isDeactivatableUser = (user) => DEACTIVATABLE_ORG_ROLES.has(String(user?.orgRole || '').trim().toLowerCase());
 const adminLevelLabel = (level) => (
@@ -667,10 +711,16 @@ const adaptDraftForOrgRole = (draft = {}, orgRole = 'student') => {
   return nextDraft;
 };
 
-const createDraftForDirectorySection = (sectionKey = 'students') => {
+const createDraftForDirectorySection = (sectionKey = 'students', viewerOrgRole = '') => {
   const fallbackConfig = DIRECTORY_CREATE_CONFIG.students;
   const config = DIRECTORY_CREATE_CONFIG[sectionKey] || fallbackConfig;
-  return createEditUserForm({ orgRole: config.orgRole });
+  let defaultOrgRole = config.orgRole;
+  if (sectionKey === 'management') {
+    const assignable = ORG_ROLE_ASSIGNABLE_TARGETS[String(viewerOrgRole || '').trim().toLowerCase()] || [];
+    const firstAssignable = ORG_ROLE_OPTIONS.find((item) => MANAGEMENT_ORG_ROLES.has(item.key) && assignable.includes(item.key));
+    if (firstAssignable) defaultOrgRole = firstAssignable.key;
+  }
+  return createEditUserForm({ orgRole: defaultOrgRole });
 };
 
 const createGuardianLinkDraft = () => ({
@@ -840,15 +890,30 @@ function RoleGuidePanel({ guide, compact = false }) {
 }
 
 export default function AdminUsers() {
+  const viewerOrgRole = useMemo(
+    () => String(localStorage.getItem('orgRole') || '').trim().toLowerCase(),
+    []
+  );
   const [items, setItems] = useState([]);
   const [message, setMessage] = useState('');
+  const [messageTone, setMessageTone] = useState('info');
+  const showMessage = (text = '', tone = 'info') => {
+    setMessage(text);
+    setMessageTone(text ? tone : 'info');
+  };
+  useEffect(() => {
+    if (!message || messageTone === 'error' || messageTone === 'warning') return undefined;
+    const timer = setTimeout(() => setMessage(''), 4000);
+    return () => clearTimeout(timer);
+  }, [message, messageTone]);
   const [busyId, setBusyId] = useState('');
   const [workspaceTab, setWorkspaceTab] = useState(() => (
     typeof window !== 'undefined' ? resolveWorkspaceTabFromHash(window.location.hash) : 'directory'
   ));
   const [activeDirectorySection, setActiveDirectorySection] = useState('all');
+  const [createFormOpen, setCreateFormOpen] = useState(false);
   const [filters, setFilters] = useState({ q: '', orgRole: '', status: '' });
-  const [form, setForm] = useState(() => createDraftForDirectorySection('students'));
+  const [form, setForm] = useState(() => createDraftForDirectorySection('students', viewerOrgRole));
   const [guardianLinkForm, setGuardianLinkForm] = useState(() => createGuardianLinkDraft());
   const [guardianLinkBusy, setGuardianLinkBusy] = useState(false);
   const [guardianUserOptions, setGuardianUserOptions] = useState([]);
@@ -887,14 +952,13 @@ export default function AdminUsers() {
       });
       const result = await readApiResponse(res, 'خطا در دریافت کاربران');
       if (!result.success || !result.data?.success) {
-        setMessage(result.message || result.data?.message || 'خطا در دریافت کاربران');
+        showMessage(result.message || result.data?.message || 'خطا در دریافت کاربران', 'error');
         setItems([]);
         return;
       }
       setItems((Array.isArray(result.data.items) ? result.data.items : []).map(normalizeManagedUser));
-      setMessage('');
     } catch {
-      setMessage('خطا در اتصال به سرور');
+      showMessage('خطا در اتصال به سرور', 'error');
       setItems([]);
     }
   };
@@ -964,7 +1028,7 @@ export default function AdminUsers() {
 
   useEffect(() => {
     if (!DIRECTORY_CREATE_SECTIONS.has(activeDirectorySection)) return;
-    setForm(createDraftForDirectorySection(activeDirectorySection));
+    setForm(createDraftForDirectorySection(activeDirectorySection, viewerOrgRole));
     if (activeDirectorySection !== 'guardians') {
       setGuardianLinkForm(createGuardianLinkDraft());
     }
@@ -1179,10 +1243,10 @@ export default function AdminUsers() {
   };
 
   const handleCreate = async () => {
-    setMessage('');
+    showMessage('');
     const rolePayload = buildRoleRequestPayload(form.orgRole);
     if (!form.name.trim() || !form.email.trim() || !form.password.trim()) {
-      setMessage('نام، ایمیل و رمز عبور الزامی است.');
+      showMessage('نام، ایمیل و رمز عبور الزامی است.', 'error');
       return;
     }
     try {
@@ -1200,24 +1264,24 @@ export default function AdminUsers() {
       });
       const result = await readApiResponse(res, 'ایجاد کاربر ناموفق بود.');
       if (!result.success || !result.data?.success) {
-        setMessage(result.message || result.data?.message || 'ایجاد کاربر ناموفق بود.');
+        showMessage(result.message || result.data?.message || 'ایجاد کاربر ناموفق بود.', 'error');
         return;
       }
       setForm(createEditUserForm());
-      setMessage('کاربر جدید ایجاد شد.');
+      showMessage('کاربر جدید ایجاد شد.', 'success');
       loadUsers();
     } catch {
-      setMessage('خطا در ایجاد کاربر');
+      showMessage('خطا در ایجاد کاربر', 'error');
     }
   };
 
   const handleSectionCreate = async () => {
-    setMessage('');
+    showMessage('');
     const createSection = DIRECTORY_CREATE_SECTIONS.has(activeDirectorySection) ? activeDirectorySection : '';
     const config = DIRECTORY_CREATE_CONFIG[createSection] || null;
 
     if (!config) {
-      setMessage('برای ساخت کاربر، یکی از بخش‌های شاگردان، استادان، والدین/سرپرستان یا مدیریت را انتخاب کنید.');
+      showMessage('برای ساخت کاربر، یکی از بخش‌های شاگردان، استادان، والدین/سرپرستان یا مدیریت را انتخاب کنید.', 'error');
       return;
     }
 
@@ -1228,7 +1292,7 @@ export default function AdminUsers() {
     const rolePayload = buildRoleRequestPayload(requestedOrgRole);
 
     if (!draft.name.trim() || !draft.email.trim() || !draft.password.trim()) {
-      setMessage('نام، ایمیل و رمز عبور الزامی است.');
+      showMessage('نام، ایمیل و رمز عبور الزامی است.', 'error');
       return;
     }
 
@@ -1249,12 +1313,12 @@ export default function AdminUsers() {
       });
       const result = await readApiResponse(res, 'ایجاد کاربر ناموفق بود.');
       if (!result.success || !result.data?.success) {
-        setMessage(result.message || result.data?.message || 'ایجاد کاربر ناموفق بود.');
+        showMessage(result.message || result.data?.message || 'ایجاد کاربر ناموفق بود.', 'error');
         return;
       }
 
       const createdItem = normalizeManagedUser(result.data?.item || {});
-      setForm(createDraftForDirectorySection(createSection));
+      setForm(createDraftForDirectorySection(createSection, viewerOrgRole));
       if (createSection === 'guardians' && createdItem?._id) {
         setGuardianLinkForm({
           ...createGuardianLinkDraft(),
@@ -1263,13 +1327,14 @@ export default function AdminUsers() {
           guardianName: String(createdItem.name || '').trim(),
           guardianEmail: String(createdItem.email || '').trim()
         });
-        setMessage('حساب والد/سرپرست ساخته شد. حالا شاگرد مربوط را جستجو و ارتباط را ثبت کنید.');
+        showMessage('حساب والد/سرپرست ساخته شد. حالا شاگرد مربوط را جستجو و ارتباط را ثبت کنید.', 'success');
       } else {
-        setMessage(result.data?.message || 'کاربر جدید ایجاد شد.');
+        showMessage(result.data?.message || 'کاربر جدید ایجاد شد.', 'success');
       }
+      setCreateFormOpen(false);
       await loadUsers();
     } catch {
-      setMessage('خطا در ایجاد کاربر');
+      showMessage('خطا در ایجاد کاربر', 'error');
     }
   };
 
@@ -1343,13 +1408,13 @@ export default function AdminUsers() {
     const relation = String(guardianLinkForm.relation || '').trim();
     const note = String(guardianLinkForm.note || '').trim();
 
-    setMessage('');
+    showMessage('');
     if (!guardianUserId) {
-      setMessage('ابتدا حساب والد/سرپرست را انتخاب کنید.');
+      showMessage('ابتدا حساب والد/سرپرست را انتخاب کنید.', 'error');
       return;
     }
     if (!studentRef) {
-      setMessage('ابتدا شاگرد را از فهرست جستجو انتخاب کنید.');
+      showMessage('ابتدا شاگرد را از فهرست جستجو انتخاب کنید.', 'error');
       return;
     }
 
@@ -1367,7 +1432,7 @@ export default function AdminUsers() {
       });
       const result = await readApiResponse(res, 'وصل‌کردن والد/سرپرست به شاگرد ناموفق بود.');
       if (!result.success || !result.data?.success) {
-        setMessage(result.message || result.data?.message || 'وصل‌کردن والد/سرپرست به شاگرد ناموفق بود.');
+        showMessage(result.message || result.data?.message || 'وصل‌کردن والد/سرپرست به شاگرد ناموفق بود.', 'error');
         return;
       }
 
@@ -1401,10 +1466,10 @@ export default function AdminUsers() {
             && Number(prev.guardianLinkedStudentCount || prev.guardianLinkedStudents.length || 0) + 1 > 3
           )
       }));
-      setMessage(result.data?.message || 'والد/سرپرست با موفقیت به شاگرد وصل شد.');
+      showMessage(result.data?.message || 'والد/سرپرست با موفقیت به شاگرد وصل شد.', 'success');
       await loadUsers();
     } catch {
-      setMessage('خطا در وصل‌کردن والد/سرپرست به شاگرد');
+      showMessage('خطا در وصل‌کردن والد/سرپرست به شاگرد', 'error');
     } finally {
       setGuardianLinkBusy(false);
     }
@@ -1422,7 +1487,7 @@ export default function AdminUsers() {
       });
       const data = await res.json();
       if (!data?.success) {
-        setMessage(data?.message || 'تغییر نقش ناموفق بود.');
+        showMessage(data?.message || 'تغییر نقش ناموفق بود.', 'error');
         return;
       }
 
@@ -1434,15 +1499,15 @@ export default function AdminUsers() {
         });
         const permissionsData = await permissionsRes.json();
         if (!permissionsData?.success) {
-          setMessage(permissionsData?.message || 'نقش تغییر کرد اما پاک‌سازی مجوزها ناموفق بود.');
+          showMessage(permissionsData?.message || 'نقش تغییر کرد اما پاک‌سازی مجوزها ناموفق بود.', 'warning');
           return;
         }
       }
 
-      setMessage('نقش کاربر به‌روزرسانی شد.');
+      showMessage('نقش کاربر به‌روزرسانی شد.', 'success');
       loadUsers();
     } catch {
-      setMessage('خطا در تغییر نقش');
+      showMessage('خطا در تغییر نقش', 'error');
     } finally {
       setBusyId('');
     }
@@ -1458,13 +1523,13 @@ export default function AdminUsers() {
       });
       const data = await res.json();
       if (!data?.success) {
-        setMessage(data?.message || 'به‌روزرسانی دسترسی‌ها ناموفق بود.');
+        showMessage(data?.message || 'به‌روزرسانی دسترسی‌ها ناموفق بود.', 'error');
         return;
       }
-      setMessage('دسترسی‌های کاربر به‌روزرسانی شد.');
+      showMessage('دسترسی‌های کاربر به‌روزرسانی شد.', 'success');
       loadUsers();
     } catch {
-      setMessage('خطا در به‌روزرسانی دسترسی‌ها');
+      showMessage('خطا در به‌روزرسانی دسترسی‌ها', 'error');
     } finally {
       setBusyId('');
     }
@@ -1480,13 +1545,13 @@ export default function AdminUsers() {
       });
       const data = await res.json();
       if (!data?.success) {
-        setMessage(data?.message || 'به‌روزرسانی وضعیت کاربر ناموفق بود.');
+        showMessage(data?.message || 'به‌روزرسانی وضعیت کاربر ناموفق بود.', 'error');
         return;
       }
-      setMessage('وضعیت کاربر به‌روزرسانی شد.');
+      showMessage('وضعیت کاربر به‌روزرسانی شد.', 'success');
       loadUsers();
     } catch {
-      setMessage('خطا در به‌روزرسانی وضعیت کاربر');
+      showMessage('خطا در به‌روزرسانی وضعیت کاربر', 'error');
     } finally {
       setBusyId('');
     }
@@ -1514,12 +1579,12 @@ export default function AdminUsers() {
     const requiresEmail = requestedOrgRole !== 'student';
 
     if (!String(draft.name || '').trim()) {
-      setMessage('نام کاربر الزامی است.');
+      showMessage('نام کاربر الزامی است.', 'error');
       return;
     }
 
     if (requiresEmail && !String(draft.email || '').trim()) {
-      setMessage('ایمیل برای این نقش الزامی است.');
+      showMessage('ایمیل برای این نقش الزامی است.', 'error');
       return;
     }
 
@@ -1542,16 +1607,16 @@ export default function AdminUsers() {
       });
       const result = await readApiResponse(res, 'به‌روزرسانی مشخصات کاربر ناموفق بود.');
       if (!result.success || !result.data?.success) {
-        setMessage(result.message || result.data?.message || 'به‌روزرسانی مشخصات کاربر ناموفق بود.');
+        showMessage(result.message || result.data?.message || 'به‌روزرسانی مشخصات کاربر ناموفق بود.', 'error');
         setEditModal((prev) => ({ ...prev, busy: false }));
         return;
       }
 
-      setMessage(result.data?.message || 'مشخصات کاربر به‌روزرسانی شد.');
+      showMessage(result.data?.message || 'مشخصات کاربر به‌روزرسانی شد.', 'success');
       closeEditModal();
       loadUsers();
     } catch {
-      setMessage('خطا در به‌روزرسانی مشخصات کاربر');
+      showMessage('خطا در به‌روزرسانی مشخصات کاربر', 'error');
       setEditModal((prev) => ({ ...prev, busy: false }));
     }
   };
@@ -1578,14 +1643,14 @@ export default function AdminUsers() {
       });
       const result = await readApiResponse(res, 'غیرفعال‌سازی کاربر ناموفق بود.');
       if (!result.success || !result.data?.success) {
-        setMessage(result.message || result.data?.message || 'غیرفعال‌سازی کاربر ناموفق بود.');
+        showMessage(result.message || result.data?.message || 'غیرفعال‌سازی کاربر ناموفق بود.', 'error');
         return;
       }
 
-      setMessage(result.data?.message || 'کاربر غیرفعال شد.');
+      showMessage(result.data?.message || 'کاربر غیرفعال شد.', 'success');
       await loadUsers();
     } catch {
-      setMessage('خطا در غیرفعال‌سازی کاربر');
+      showMessage('خطا در غیرفعال‌سازی کاربر', 'error');
     } finally {
       setBusyId('');
     }
@@ -1772,9 +1837,15 @@ export default function AdminUsers() {
   const canShowLessUsers = displayedUsers.length > DIRECTORY_LIST_INITIAL_COUNT;
 
   const managementRoleOptions = useMemo(
-    () => ORG_ROLE_OPTIONS.filter((item) => MANAGEMENT_ORG_ROLES.has(item.key)),
-    []
+    () => {
+      const assignable = ORG_ROLE_ASSIGNABLE_TARGETS[viewerOrgRole] || [];
+      return ORG_ROLE_OPTIONS
+        .filter((item) => MANAGEMENT_ORG_ROLES.has(item.key))
+        .map((item) => ({ ...item, disabled: !assignable.includes(item.key) }));
+    },
+    [viewerOrgRole]
   );
+  const managementRoleHasDisabled = managementRoleOptions.some((item) => item.disabled);
 
   const accessEditorMatchedUsers = useMemo(() => {
     const query = String(accessEditorQuery || '').trim().toLowerCase();
@@ -1881,6 +1952,16 @@ export default function AdminUsers() {
         <h2>مدیریت کاربران</h2>
         <p>ایجاد کاربر جدید، تغییر نقش سازمانی، وضعیت کاربر و مدیریت دسترسی‌های جزئی.</p>
 
+        {message && (
+          <div className={`adminusers-toast adminusers-toast--${messageTone}`} role="status">
+            <span className="adminusers-toast-icon" aria-hidden="true">
+              {messageTone === 'success' ? '✓' : messageTone === 'error' ? '⛔' : messageTone === 'warning' ? '!' : 'ⓘ'}
+            </span>
+            <span className="adminusers-toast-text">{message}</span>
+            <button type="button" className="adminusers-toast-close" onClick={() => setMessage('')} aria-label="بستن پیام">×</button>
+          </div>
+        )}
+
         <div className="adminusers-workspace-tabs">
           {USER_WORKSPACE_TABS.map((tab) => {
             const tabCount = tab.key === 'directory' ? items.length : accessRequests.length;
@@ -1927,9 +2008,16 @@ export default function AdminUsers() {
                 <strong>{visibleUsers.length}</strong>
                 <span>نمایش‌شده از {directorySectionCounts[activeDirectorySectionMeta.key] || 0}</span>
               </div>
+              <button
+                type="button"
+                className={`create-form-toggle${createFormOpen ? ' is-open' : ''}`}
+                onClick={() => setCreateFormOpen((prev) => !prev)}
+              >
+                {createFormOpen ? '× بستن فرم' : '+ کاربر جدید'}
+              </button>
             </div>
 
-            {activeCreateConfig ? (
+            {createFormOpen && (activeCreateConfig ? (
               <div className="adminusers-form">
                 <div className="directory-form-head">
                   <div>
@@ -1965,14 +2053,21 @@ export default function AdminUsers() {
                     onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
                   />
                   {activeCreateSection === 'management' ? (
-                    <select
-                      value={form.orgRole}
-                      onChange={(e) => setForm((prev) => adaptDraftForOrgRole(prev, e.target.value))}
-                    >
-                      {managementRoleOptions.map((opt) => (
-                        <option key={opt.key} value={opt.key}>{opt.label}</option>
-                      ))}
-                    </select>
+                    <>
+                      <select
+                        value={form.orgRole}
+                        onChange={(e) => setForm((prev) => adaptDraftForOrgRole(prev, e.target.value))}
+                      >
+                        {managementRoleOptions.map((opt) => (
+                          <option key={opt.key} value={opt.key} disabled={opt.disabled}>
+                            {opt.label}{opt.disabled ? ' (بالاتر از پست شما)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {managementRoleHasDisabled ? (
+                        <p className="postpick-hint">پست‌های خاکستری بالاتر یا هم‌سطح پست شما هستند و فقط ریاست عمومی می‌تواند آن‌ها را واگذار کند.</p>
+                      ) : null}
+                    </>
                   ) : null}
                   <select
                     value={form.status}
@@ -2059,7 +2154,7 @@ export default function AdminUsers() {
                   ))}
                 </div>
               </div>
-            )}
+            ))}
 
             {activeDirectorySection === 'guardians' && (
               <div className="adminusers-form guardian-link-panel">
@@ -2380,8 +2475,6 @@ export default function AdminUsers() {
             </select>
           </div>
         </div>
-
-            {message && <div className="adminusers-message">{message}</div>}
           </>
         )}
 
@@ -2426,7 +2519,7 @@ export default function AdminUsers() {
                       <div className="access-editor-user">
                         <strong>{user.name || '-'}</strong>
                         <small>{user.email || '-'}</small>
-                        <span>{orgRoleLabel(user.orgRole)}</span>
+                        <PostBadge orgRole={user.orgRole} />
                       </div>
 
                       <label className="access-editor-role-select">
@@ -2436,8 +2529,10 @@ export default function AdminUsers() {
                           disabled={rowBusy}
                           onChange={(e) => updateRole(user._id, e.target.value)}
                         >
-                          {orgRoleSelectOptions(user.orgRole).map((opt) => (
-                            <option key={`access-role-${user._id}-${opt.key}`} value={opt.key}>{opt.label}</option>
+                          {orgRoleSelectOptions(user.orgRole, viewerOrgRole).map((opt) => (
+                            <option key={`access-role-${user._id}-${opt.key}`} value={opt.key} disabled={opt.disabled}>
+                              {opt.label}{opt.disabled ? ' (بالاتر از پست شما)' : ''}
+                            </option>
                           ))}
                         </select>
                       </label>
@@ -2672,7 +2767,7 @@ export default function AdminUsers() {
                 <span>{user.name}</span>
                 <span>{user.email}</span>
                 <div className="user-role-cell">
-                  <strong>{orgRoleLabel(user.orgRole)}</strong>
+                  <PostBadge orgRole={user.orgRole} />
                   <small className="user-role-meta">سازگاری: {roleMeta}</small>
                 </div>
                 <div className="user-status-cell">
@@ -2722,8 +2817,10 @@ export default function AdminUsers() {
                     disabled={busyId === user._id}
                     onChange={(e) => updateRole(user._id, e.target.value)}
                   >
-                    {orgRoleSelectOptions(user.orgRole).map((opt) => (
-                      <option key={opt.key} value={opt.key}>{opt.label}</option>
+                    {orgRoleSelectOptions(user.orgRole, viewerOrgRole).map((opt) => (
+                      <option key={opt.key} value={opt.key} disabled={opt.disabled}>
+                        {opt.label}{opt.disabled ? ' (بالاتر از پست شما)' : ''}
+                      </option>
                     ))}
                   </select>
                   <button
@@ -2832,8 +2929,10 @@ export default function AdminUsers() {
                       form: adaptDraftForOrgRole(prev.form, e.target.value)
                     }))}
                   >
-                    {orgRoleSelectOptions(editModal.form.orgRole).map((opt) => (
-                      <option key={`edit-${opt.key}`} value={opt.key}>{opt.label}</option>
+                    {orgRoleSelectOptions(editModal.form.orgRole, viewerOrgRole).map((opt) => (
+                      <option key={`edit-${opt.key}`} value={opt.key} disabled={opt.disabled}>
+                        {opt.label}{opt.disabled ? ' (بالاتر از پست شما)' : ''}
+                      </option>
                     ))}
                   </select>
                   <select
