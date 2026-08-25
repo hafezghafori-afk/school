@@ -9,7 +9,7 @@ import { ToastProvider } from './components/ui/toast';
 import useSiteSettings, { PUBLIC_WEBSITE_LANGUAGE_KEY } from './hooks/useSiteSettings';
 import { getPublicWebsiteLocale, publicLanguageOptions } from './i18n/publicWebsite';
 import { API_BASE, API_ORIGIN } from './config/api';
-import { expandLegacyPermissions, permissionAllows } from './config/permissionCatalog';
+import { expandLegacyPermissions, permissionAllows, PERMISSION_OPTIONS } from './config/permissionCatalog';
 import { formatAfghanDate, formatAfghanDateTime, formatAfghanTime } from './utils/afghanDate';
 import { normalizeBrandName, normalizeBrandSubtitle } from './utils/brand';
 
@@ -530,6 +530,79 @@ const hasEffectivePermission = (permission) => {
   return expected.some((item) => permissionAllows(item, permissions));
 };
 
+const ORG_ROLE_LABELS = {
+  student: 'شاگرد',
+  parent: 'والد/سرپرست',
+  instructor: 'استاد',
+  finance_manager: 'مدیر مالی',
+  finance_lead: 'آمر مالی (قدیمی)',
+  school_manager: 'مدیر مکتب',
+  academic_manager: 'مدیر تدریسی',
+  head_teacher: 'سر معلم مکتب',
+  general_president: 'ریاست عمومی'
+};
+
+const LEGACY_PERMISSION_LABELS = {
+  manage_users: 'مدیریت کاربران',
+  manage_enrollments: 'مدیریت ثبت‌نام‌ها',
+  manage_memberships: 'مدیریت ممبرشیپ',
+  manage_finance: 'دسترسی بخش مالی',
+  manage_content: 'مدیریت محتوا و آموزش',
+  view_reports: 'مشاهدهٔ گزارش‌ها',
+  view_schedule: 'مشاهدهٔ تقسیم اوقات',
+  manage_schedule: 'مدیریت تقسیم اوقات',
+  manage_platform_requests: 'مدیریت درخواست‌های سایت'
+};
+
+const getCurrentOrgRoleLabel = () => {
+  const orgRole = String(localStorage.getItem('orgRole') || '').trim().toLowerCase();
+  if (orgRole && ORG_ROLE_LABELS[orgRole]) return ORG_ROLE_LABELS[orgRole];
+  const role = getRole();
+  if (role === 'instructor') return 'استاد';
+  if (role === 'student') return 'شاگرد';
+  if (role === 'parent') return 'والد/سرپرست';
+  return 'کاربر';
+};
+
+const permissionLabel = (key = '') => (
+  PERMISSION_OPTIONS.find((item) => item.key === key)?.label
+  || LEGACY_PERMISSION_LABELS[key]
+  || key
+);
+
+const describeRequiredAccess = (permissionList = []) => {
+  const labels = Array.from(new Set(permissionList.map(permissionLabel).filter(Boolean)));
+  return labels.slice(0, 2).join(' یا ');
+};
+
+const ROLE_QUICK_LINKS = {
+  admin: [
+    { label: 'داشبورد', href: '/dashboard' },
+    { label: 'تقسیم اوقات', href: '/timetable' },
+    { label: 'تقویم', href: '/schedule' },
+    { label: 'پیام‌ها', href: '/chat' }
+  ],
+  instructor: [
+    { label: 'داشبورد', href: '/dashboard' },
+    { label: 'تقویم', href: '/schedule' },
+    { label: 'پیام‌ها', href: '/chat' },
+    { label: 'آرشیف ضبط جلسات', href: '/recordings' }
+  ],
+  student: [
+    { label: 'داشبورد', href: '/dashboard' },
+    { label: 'نمرات من', href: '/my-grades' },
+    { label: 'حاضری من', href: '/my-attendance' },
+    { label: 'تقویم', href: '/schedule' }
+  ],
+  parent: [
+    { label: 'داشبورد والد', href: '/parent-dashboard' },
+    { label: 'تقویم', href: '/schedule' },
+    { label: 'پیام‌ها', href: '/chat' }
+  ]
+};
+
+const getQuickLinksForRole = (role = '') => ROLE_QUICK_LINKS[role] || [];
+
 const clearAuthSession = () => {
   localStorage.removeItem('token');
   localStorage.removeItem('userId');
@@ -933,7 +1006,7 @@ function PermissionAccessGuard({
   if (!allowed) {
     return (
       <AccessDenied
-        title="\u062F\u0633\u062A\u0631\u0633\u06CC \u0645\u062D\u062F\u0648\u062F"
+        title="دسترسی محدود"
         message={deniedMessage || '\u062F\u0633\u062A\u0631\u0633\u06CC \u0627\u06CC\u0646 \u0628\u062E\u0634 \u0628\u0631\u0627\u06CC \u062D\u0633\u0627\u0628 \u0641\u0639\u0627\u0644 \u0646\u06CC\u0633\u062A.'}
         actionHref={deniedAction.href}
         actionLabel={deniedAction.label}
@@ -942,7 +1015,10 @@ function PermissionAccessGuard({
         requestFeedback={requestFeedback.message}
         requestFeedbackTone={requestFeedback.tone}
         secondaryHref="/profile"
-        secondaryLabel="\u062D\u0633\u0627\u0628 \u06A9\u0627\u0631\u0628\u0631\u06CC"
+        secondaryLabel="حساب کاربری"
+        currentRoleLabel={getCurrentOrgRoleLabel()}
+        requiredLabel={describeRequiredAccess(permissionList)}
+        quickLinks={getQuickLinksForRole(role)}
       />
     );
   }

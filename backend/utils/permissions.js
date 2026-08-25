@@ -22,6 +22,26 @@ const ROLE_DEFAULT_PERMISSIONS = Object.freeze({
   student: []
 });
 
+// مدیریت کاربران به‌صورت محدود به حساب استاد/شاگرد/والدین — بدون صلاحیت‌های نامرتبط چتریِ
+// manage_users کامل (مثل مدیریت مکاتب، تنظیمات ورود/امنیت) که فقط باید نزد ریاست عمومی و
+// مدیر مکتب بماند. این‌که واقعاً چه پستی توسط چه کسی قابل‌ساخت است، جدا در
+// backend/routes/adminRoutes.js (ORG_ROLE_ASSIGNABLE_TARGETS) اجرا می‌شود.
+const TEACHER_STUDENT_PARENT_USER_PERMISSIONS = [
+  'users.manage',
+  'users.create',
+  'users.edit',
+  'users.deactivate',
+  'users.roles.manage',
+  'users.permissions.manage',
+  'users.access_requests.manage',
+  'users.profile_requests.manage',
+  'students.manage',
+  'students.register',
+  'students.documents.manage',
+  'students.guardians.manage',
+  'teachers.manage'
+];
+
 const ORG_ROLE_DEFAULT_PERMISSIONS = Object.freeze({
   student: ROLE_DEFAULT_PERMISSIONS.student,
   parent: ROLE_DEFAULT_PERMISSIONS.parent,
@@ -29,8 +49,8 @@ const ORG_ROLE_DEFAULT_PERMISSIONS = Object.freeze({
   finance_manager: ['manage_finance'],
   finance_lead: ['manage_finance', 'view_reports'],
   school_manager: ['manage_users', 'manage_enrollments', 'manage_memberships', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_school_manager'],
-  academic_manager: ['manage_enrollments', 'manage_memberships', 'manage_content', 'view_reports', 'view_schedule'],
-  head_teacher: ['manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_head_teacher'],
+  academic_manager: [...TEACHER_STUDENT_PARENT_USER_PERMISSIONS, 'manage_enrollments', 'manage_memberships', 'manage_content', 'view_reports', 'view_schedule'],
+  head_teacher: [...TEACHER_STUDENT_PARENT_USER_PERMISSIONS, 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_head_teacher'],
   general_president: ROLE_DEFAULT_PERMISSIONS.admin
 });
 

@@ -876,6 +876,33 @@ const ensureRegisteredTeachersInUserDirectory = async () => {
   }
 };
 
+// سلسله‌مراتب واگذاری پست: هر پست فقط می‌تواند پست‌های «پایین‌تر» از خودش را ایجاد/ویرایش/غیرفعال
+// کند، نه پست‌های هم‌سطح یا بالاتر. ریاست عمومی تنها پستی است که به همه سطوح دسترسی دارد؛
+// مدیر مکتب زیرمجموعهٔ خودش (تدریسی، سرمعلم، استاد، شاگرد، والدین) را می‌سازد؛ تدریسی و سرمعلم
+// فقط استاد/شاگرد/والدین را؛ و پست‌های مالی اصلاً به مدیریت کاربران دسترسی ندارند.
+const ORG_ROLE_ASSIGNABLE_TARGETS = Object.freeze({
+  general_president: ['general_president', 'finance_manager', 'finance_lead', 'school_manager', 'academic_manager', 'head_teacher', 'instructor', 'student', 'parent'],
+  school_manager: ['academic_manager', 'head_teacher', 'instructor', 'student', 'parent'],
+  academic_manager: ['instructor', 'student', 'parent'],
+  head_teacher: ['instructor', 'student', 'parent'],
+  finance_manager: [],
+  finance_lead: [],
+  instructor: [],
+  parent: [],
+  student: []
+});
+
+const canAssignOrgRole = (actorOrgRole = '', targetOrgRole = '') => {
+  const normalizedActor = String(actorOrgRole || '').trim().toLowerCase();
+  const normalizedTarget = String(targetOrgRole || '').trim().toLowerCase();
+  return (ORG_ROLE_ASSIGNABLE_TARGETS[normalizedActor] || []).includes(normalizedTarget);
+};
+
+const getActorOrgRole = async (req) => {
+  const actor = await User.findById(req.user?.id || '').select('orgRole');
+  return String(actor?.orgRole || '').trim().toLowerCase();
+};
+
 const resolveRequestedOrgRole = (payload = {}) => {
   const explicitOrgRole = String(payload?.orgRole || '').trim().toLowerCase();
   if (isKnownOrgRole(explicitOrgRole)) return explicitOrgRole;
@@ -946,6 +973,11 @@ router.post('/users', requireAuth, requireRole(['admin']), requireAnyPermission(
       return res.status(409).json({ success: false, message: 'این ایمیل از قبل ثبت شده است.' });
     }
 
+    const actorOrgRole = await getActorOrgRole(req);
+    if (!canAssignOrgRole(actorOrgRole, orgRole)) {
+      return res.status(403).json({ success: false, message: 'پست شما اجازهٔ ایجاد کاربر با این پست را نمی‌دهد.' });
+    }
+
     const identity = buildUserRoleState({ orgRole });
     const hashedPassword = await bcrypt.hash(password, 10);
     const created = await User.create({
@@ -991,6 +1023,12 @@ router.put('/users/:id/role', requireAuth, requireRole(['admin']), requireAnyPer
     }
 
     const orgRole = resolveRequestedOrgRole(req.body || {});
+
+    const actorOrgRole = await getActorOrgRole(req);
+    if (!canAssignOrgRole(actorOrgRole, orgRole)) {
+      return res.status(403).json({ success: false, message: 'پست شما اجازهٔ واگذاری این پست را نمی‌دهد.' });
+    }
+
     const identity = buildUserRoleState({ orgRole });
     const updated = await User.findByIdAndUpdate(
       userId,
@@ -1030,6 +1068,11 @@ router.put('/users/:id/permissions', requireAuth, requireRole(['admin']), requir
       return res.status(404).json({ success: false, message: 'کاربر یافت نشد' });
     }
 
+    const actorOrgRole = await getActorOrgRole(req);
+    if (!canAssignOrgRole(actorOrgRole, current.orgRole)) {
+      return res.status(403).json({ success: false, message: 'پست شما اجازهٔ تغییر دسترسی‌های کاربری با این پست را نمی‌دهد.' });
+    }
+
     const updated = await User.findByIdAndUpdate(
       userId,
       { permissions: sanitizeManagedPermissions(current.orgRole || 'student', req.body?.permissions || []) },
@@ -1058,6 +1101,16 @@ router.put('/users/:id/status', requireAuth, requireRole(['admin']), requireAnyP
   try {
     const userId = String(req.params.id || '').trim();
     const status = normalizeUserStatus(req.body?.status || '', 'active');
+
+    const current = await User.findById(userId).select('_id orgRole');
+    if (!current) {
+      return res.status(404).json({ success: false, message: 'کاربر یافت نشد' });
+    }
+
+    const actorOrgRole = await getActorOrgRole(req);
+    if (!canAssignOrgRole(actorOrgRole, current.orgRole)) {
+      return res.status(403).json({ success: false, message: 'پست شما اجازهٔ تغییر وضعیت کاربری با این پست را نمی‌دهد.' });
+    }
 
     const updated = await User.findByIdAndUpdate(
       userId,
@@ -1105,6 +1158,12 @@ router.put('/users/:id', requireAuth, requireRole(['admin']), requireAnyPermissi
     const orgRole = resolveRequestedOrgRole({
       orgRole: req.body?.orgRole || current.orgRole
     });
+
+    const actorOrgRole = await getActorOrgRole(req);
+    if (!canAssignOrgRole(actorOrgRole, orgRole)) {
+      return res.status(403).json({ success: false, message: 'پست شما اجازهٔ ویرایش کاربری با این پست را نمی‌دهد.' });
+    }
+
     const identity = buildUserRoleState({ orgRole });
     const isStudent = identity.orgRole === 'student';
     const schoolLabel = await resolveSchoolMailLabel();
@@ -1209,6 +1268,11 @@ const deactivateManagedUser = async (req, res) => {
     const userOrgRole = String(user.orgRole || '').trim().toLowerCase();
     if (!DEACTIVATABLE_ORG_ROLES.has(userOrgRole)) {
       return res.status(400).json({ success: false, message: 'غیرفعال‌سازی برای این نقش مجاز نیست.' });
+    }
+
+    const actorOrgRole = await getActorOrgRole(req);
+    if (!canAssignOrgRole(actorOrgRole, userOrgRole)) {
+      return res.status(403).json({ success: false, message: 'پست شما اجازهٔ غیرفعال‌سازی کاربری با این پست را نمی‌دهد.' });
     }
 
     user.status = 'inactive';

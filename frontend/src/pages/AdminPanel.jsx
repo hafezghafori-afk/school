@@ -255,8 +255,8 @@ const ADMIN_LEVEL_PERMISSION_MATRIX = [
   { level: 'finance_manager', permissions: ['manage_finance'] },
   { level: 'finance_lead', permissions: ['manage_finance', 'view_reports'] },
   { level: 'school_manager', permissions: ['manage_users', 'manage_enrollments', 'manage_memberships', 'students.lifecycle.manage', 'education.promotions.manage', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_school_manager'] },
-  { level: 'academic_manager', permissions: ['manage_enrollments', 'manage_memberships', 'students.transfers.manage', 'students.lifecycle.manage', 'education.promotions.manage', 'manage_content', 'view_reports', 'view_schedule'] },
-  { level: 'head_teacher', permissions: ['manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_head_teacher'] },
+  { level: 'academic_manager', permissions: ['users.manage', 'users.create', 'users.edit', 'users.deactivate', 'users.roles.manage', 'users.permissions.manage', 'users.access_requests.manage', 'users.profile_requests.manage', 'students.manage', 'students.register', 'students.documents.manage', 'students.guardians.manage', 'teachers.manage', 'manage_enrollments', 'manage_memberships', 'students.transfers.manage', 'students.lifecycle.manage', 'education.promotions.manage', 'manage_content', 'view_reports', 'view_schedule'] },
+  { level: 'head_teacher', permissions: ['users.manage', 'users.create', 'users.edit', 'users.deactivate', 'users.roles.manage', 'users.permissions.manage', 'users.access_requests.manage', 'users.profile_requests.manage', 'students.manage', 'students.register', 'students.documents.manage', 'students.guardians.manage', 'teachers.manage', 'manage_content', 'view_reports', 'view_schedule', 'manage_schedule', 'access_head_teacher'] },
   { level: 'general_president', permissions: PERMISSION_ORDER }
 ];
 
