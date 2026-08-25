@@ -2196,6 +2196,106 @@
   color: rgba(226, 232, 240, 0.78);
 }
 
+.edit-drawer-head {
+  align-items: flex-start;
+}
+
+.edit-drawer-subtitle {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.edit-drawer-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.edit-drawer-tabs button {
+  width: auto;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: rgba(226, 232, 240, 0.66);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 4px;
+  cursor: pointer;
+}
+
+.edit-drawer-tabs button.is-active {
+  color: #f8fafc;
+  border-bottom-color: #38bdf8;
+}
+
+.edit-drawer-body {
+  display: grid;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.edit-drawer-field {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(226, 232, 240, 0.78);
+}
+
+.edit-drawer-field input,
+.edit-drawer-field select {
+  width: 100%;
+  background: rgba(12, 22, 38, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-size: 14px;
+}
+
+.edit-drawer-postgrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.edit-drawer-postcard {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 8px;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(12, 22, 38, 0.6);
+  cursor: pointer;
+}
+
+.edit-drawer-postcard.is-active {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(56, 189, 248, 0.14);
+}
+
+.edit-drawer-postcard:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.edit-drawer-hint {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.7;
+  color: rgba(226, 232, 240, 0.6);
+}
+
+.edit-drawer-history-empty {
+  padding: 30px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: rgba(226, 232, 240, 0.6);
+}
+
 .edit-user-permissions-box {
   margin: 0;
 }

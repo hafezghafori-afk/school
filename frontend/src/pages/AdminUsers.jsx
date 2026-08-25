@@ -951,9 +951,11 @@ export default function AdminUsers() {
   const [editModal, setEditModal] = useState({
     open: false,
     userId: '',
+    user: null,
     busy: false,
     form: createEditUserForm()
   });
+  const [editDrawerTab, setEditDrawerTab] = useState('details');
 
   const loadUsers = async () => {
     try {
@@ -1568,16 +1570,18 @@ export default function AdminUsers() {
   };
 
   const openEditModal = (user) => {
+    setEditDrawerTab('details');
     setEditModal({
       open: true,
       userId: String(user?._id || ''),
+      user: user || null,
       busy: false,
       form: createEditUserForm(user)
     });
   };
 
   const closeEditModal = () => {
-    setEditModal({ open: false, userId: '', busy: false, form: createEditUserForm() });
+    setEditModal({ open: false, userId: '', user: null, busy: false, form: createEditUserForm() });
   };
 
   const submitUserEdit = async () => {
@@ -2917,127 +2921,187 @@ export default function AdminUsers() {
         {editModal.open && createPortal(
           <div className="access-modal-backdrop edit-user-modal-backdrop" onClick={closeEditModal}>
             <div className="access-modal-card edit-user-modal-card" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-              <div className="access-modal-head">
-                <h3>ویرایش مشخصات کاربر</h3>
+              <div className="access-modal-head edit-drawer-head">
+                <div>
+                  <h3>ویرایش حساب</h3>
+                  <p className="edit-drawer-subtitle">
+                    {editModal.user?.name || '-'} · {orgRoleLabel(editModal.user?.orgRole)}
+                  </p>
+                </div>
                 <button type="button" className="access-modal-close" onClick={closeEditModal}>
                   ×
                 </button>
               </div>
-              <div className="access-modal-body">
-                <RoleGuidePanel guide={editFormRoleGuide} compact />
-                <div className="edit-user-modal-note">
-                  از این بخش می‌توانید نام، ایمیل، رمز جدید، نقش سازمانی، وضعیت، پایه، مضمون و مجوزهای کاربر را یک‌جا اصلاح کنید.
-                </div>
-                <div className="edit-user-modal-form">
-                  <input
-                    type="text"
-                    placeholder="نام کامل"
-                    value={editModal.form.name}
-                    onChange={(e) => setEditModal((prev) => ({
-                      ...prev,
-                      form: { ...prev.form, name: e.target.value }
-                    }))}
-                  />
-                  <input
-                    type="email"
-                    placeholder="ایمیل"
-                    value={editModal.form.email}
-                    onChange={(e) => setEditModal((prev) => ({
-                      ...prev,
-                      form: { ...prev.form, email: e.target.value }
-                    }))}
-                  />
-                  <input
-                    type="password"
-                    placeholder="رمز جدید (اختیاری)"
-                    value={editModal.form.password}
-                    onChange={(e) => setEditModal((prev) => ({
-                      ...prev,
-                      form: { ...prev.form, password: e.target.value }
-                    }))}
-                  />
-                  <select
-                    value={editModal.form.orgRole}
-                    onChange={(e) => setEditModal((prev) => ({
-                      ...prev,
-                      form: adaptDraftForOrgRole(prev.form, e.target.value)
-                    }))}
-                  >
-                    {orgRoleSelectOptions(editModal.form.orgRole, viewerOrgRole).map((opt) => (
-                      <option key={`edit-${opt.key}`} value={opt.key} disabled={opt.disabled}>
-                        {opt.label}{opt.disabled ? ' (بالاتر از پست شما)' : ''}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={editModal.form.status}
-                    onChange={(e) => setEditModal((prev) => ({
-                      ...prev,
-                      form: { ...prev.form, status: normalizeUserStatus(e.target.value, 'active') }
-                    }))}
-                  >
-                    {USER_STATUS_OPTIONS.map((opt) => (
-                      <option key={`edit-status-${opt.key}`} value={opt.key}>{opt.label}</option>
-                    ))}
-                  </select>
-                  <input
-                    type="text"
-                    placeholder="پایه یا صنف"
-                    hidden={!editFormRoleGuide.showGrade}
-                    disabled={!editFormRoleGuide.showGrade}
-                    value={editModal.form.grade}
-                    onChange={(e) => setEditModal((prev) => ({
-                      ...prev,
-                      form: { ...prev.form, grade: e.target.value }
-                    }))}
-                  />
-                  <input
-                    type="text"
-                    placeholder="مضمون"
-                    hidden={!editFormRoleGuide.showSubject}
-                    disabled={!editFormRoleGuide.showSubject}
-                    value={editModal.form.subject}
-                    onChange={(e) => setEditModal((prev) => ({
-                      ...prev,
-                      form: { ...prev.form, subject: e.target.value }
-                    }))}
-                  />
-                </div>
 
-                <div className="permissions-box edit-user-permissions-box">
-                  <span>مجوزهای دسترسی</span>
-                  <div className="permissions-note">
-                    {isPermissionsLocked(editModal.form.orgRole)
-                      ? 'برای نقش‌های مالی، مجوزها از خود نقش سازمانی تعیین می‌شود و در این بخش دستی نیست.'
-                      : 'مجوزهای انتخابی به مجوزهای پیش‌فرض نقش افزوده می‌شود.'}
-                  </div>
-                  {!isPermissionsLocked(editModal.form.orgRole) ? (
-                    <PermissionManager
-                      idPrefix="edit-permission"
-                      orgRole={editModal.form.orgRole}
-                      users={items}
-                      currentUserId={editModal.user?._id || ''}
-                      value={editModal.form.permissions || []}
-                      onChange={(permissions) => setEditModal((prev) => ({
-                        ...prev,
-                        form: { ...prev.form, permissions }
-                      }))}
-                    />
-                  ) : null}
-                  <div className="effective-permissions-preview">
-                    <span>مجوزهای موثر:</span>
-                    <div className="effective-chip-wrap">
-                      {resolveEffectivePermissions({
-                        orgRole: editModal.form.orgRole,
-                        permissions: editModal.form.permissions || []
-                      }).map((permission) => (
-                        <span key={`edit-effective-${permission}`} className="effective-chip">
-                          {permissionLabel(permission)}
-                        </span>
-                      ))}
+              <div className="edit-drawer-tabs">
+                <button
+                  type="button"
+                  className={editDrawerTab === 'details' ? 'is-active' : ''}
+                  onClick={() => setEditDrawerTab('details')}
+                >
+                  مشخصات
+                </button>
+                <button
+                  type="button"
+                  className={editDrawerTab === 'permissions' ? 'is-active' : ''}
+                  onClick={() => setEditDrawerTab('permissions')}
+                >
+                  دسترسی‌ها
+                </button>
+                <button
+                  type="button"
+                  className={editDrawerTab === 'history' ? 'is-active' : ''}
+                  onClick={() => setEditDrawerTab('history')}
+                >
+                  تاریخچه
+                </button>
+              </div>
+
+              <div className="access-modal-body edit-drawer-body">
+                {editDrawerTab === 'details' && (
+                  <>
+                    <label className="edit-drawer-field">
+                      <span>نام کامل</span>
+                      <input
+                        type="text"
+                        value={editModal.form.name}
+                        onChange={(e) => setEditModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, name: e.target.value }
+                        }))}
+                      />
+                    </label>
+                    <label className="edit-drawer-field">
+                      <span>ایمیل</span>
+                      <input
+                        type="email"
+                        value={editModal.form.email}
+                        onChange={(e) => setEditModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, email: e.target.value }
+                        }))}
+                      />
+                    </label>
+
+                    <div className="edit-drawer-field">
+                      <span>پست</span>
+                      <div className="edit-drawer-postgrid">
+                        {orgRoleSelectOptions(editModal.form.orgRole, viewerOrgRole).map((opt) => (
+                          <button
+                            type="button"
+                            key={`edit-post-${opt.key}`}
+                            className={`edit-drawer-postcard${opt.key === editModal.form.orgRole ? ' is-active' : ''}`}
+                            disabled={opt.disabled}
+                            onClick={() => setEditModal((prev) => ({
+                              ...prev,
+                              form: adaptDraftForOrgRole(prev.form, opt.key)
+                            }))}
+                          >
+                            <PostBadge orgRole={opt.key} />
+                          </button>
+                        ))}
+                      </div>
+                      <p className="edit-drawer-hint">
+                        فقط پست‌های هم‌سطح یا پایین‌تر از پست شما ({orgRoleLabel(viewerOrgRole)}) قابل انتخاب است.
+                      </p>
+                    </div>
+
+                    <label className="edit-drawer-field">
+                      <span>رمز جدید (اختیاری)</span>
+                      <input
+                        type="password"
+                        value={editModal.form.password}
+                        onChange={(e) => setEditModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, password: e.target.value }
+                        }))}
+                      />
+                    </label>
+                    <label className="edit-drawer-field">
+                      <span>وضعیت</span>
+                      <select
+                        value={editModal.form.status}
+                        onChange={(e) => setEditModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, status: normalizeUserStatus(e.target.value, 'active') }
+                        }))}
+                      >
+                        {USER_STATUS_OPTIONS.map((opt) => (
+                          <option key={`edit-status-${opt.key}`} value={opt.key}>{opt.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    {editFormRoleGuide.showGrade && (
+                      <label className="edit-drawer-field">
+                        <span>پایه یا صنف</span>
+                        <input
+                          type="text"
+                          value={editModal.form.grade}
+                          onChange={(e) => setEditModal((prev) => ({
+                            ...prev,
+                            form: { ...prev.form, grade: e.target.value }
+                          }))}
+                        />
+                      </label>
+                    )}
+                    {editFormRoleGuide.showSubject && (
+                      <label className="edit-drawer-field">
+                        <span>مضمون</span>
+                        <input
+                          type="text"
+                          value={editModal.form.subject}
+                          onChange={(e) => setEditModal((prev) => ({
+                            ...prev,
+                            form: { ...prev.form, subject: e.target.value }
+                          }))}
+                        />
+                      </label>
+                    )}
+                  </>
+                )}
+
+                {editDrawerTab === 'permissions' && (
+                  <div className="permissions-box edit-user-permissions-box">
+                    <span>مجوزهای دسترسی</span>
+                    <div className="permissions-note">
+                      {isPermissionsLocked(editModal.form.orgRole)
+                        ? 'برای نقش‌های مالی، مجوزها از خود نقش سازمانی تعیین می‌شود و در این بخش دستی نیست.'
+                        : 'مجوزهای انتخابی به مجوزهای پیش‌فرض نقش افزوده می‌شود.'}
+                    </div>
+                    {!isPermissionsLocked(editModal.form.orgRole) ? (
+                      <PermissionManager
+                        idPrefix="edit-permission"
+                        orgRole={editModal.form.orgRole}
+                        users={items}
+                        currentUserId={editModal.user?._id || ''}
+                        value={editModal.form.permissions || []}
+                        onChange={(permissions) => setEditModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, permissions }
+                        }))}
+                      />
+                    ) : null}
+                    <div className="effective-permissions-preview">
+                      <span>مجوزهای موثر:</span>
+                      <div className="effective-chip-wrap">
+                        {resolveEffectivePermissions({
+                          orgRole: editModal.form.orgRole,
+                          permissions: editModal.form.permissions || []
+                        }).map((permission) => (
+                          <span key={`edit-effective-${permission}`} className="effective-chip">
+                            {permissionLabel(permission)}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
+
+                {editDrawerTab === 'history' && (
+                  <div className="edit-drawer-history-empty">
+                    تاریخچهٔ تغییرات این حساب هنوز در این نسخه ثبت نمی‌شود.
+                  </div>
+                )}
               </div>
               <div className="access-modal-actions">
                 <button type="button" className="access-modal-btn ghost" onClick={closeEditModal}>
