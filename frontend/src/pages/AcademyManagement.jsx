@@ -5,7 +5,7 @@ import { API_BASE } from '../config/api';
 import { getStudentAsasNumber, studentMatchesSearch } from '../utils/studentSearch';
 import { useToast } from '../components/ui/toast';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
-import { formatAfghanStoredDateLabel } from '../utils/afghanDate';
+import { AFGHAN_SOLAR_MONTHS, formatAfghanStoredDateLabel, gregorianToAfghanSolar } from '../utils/afghanDate';
 
 const emptyStudent = {
   firstName: '',
@@ -123,18 +123,17 @@ const expenseCategoryLabels = {
   other: 'سایر'
 };
 
-// All date inputs in this page (<input type="date">, paidAt, expenseDate)
-// are Gregorian, so the monthly report's year/month filter and labels stay
-// in the Gregorian calendar too - these are the everyday Dari names for it,
-// same words used on Afghan government paperwork alongside the solar year.
-const gregorianMonthNamesFa = ['جنوری', 'فبروری', 'مارچ', 'اپریل', 'می', 'جون', 'جولای', 'اگست', 'سپتمبر', 'اکتوبر', 'نومبر', 'دسمبر'];
+// Records are still stored as Gregorian Date/'YYYY-MM-DD' under the hood,
+// but every input/display in this page (AfghanDateInput, monthly report
+// filter and labels) works in the Afghan solar (Shamsi) calendar - the
+// backend buckets the monthly report by Shamsi year-month too.
 // toLocaleString('fa-AF') group-separates by thousands, which turns a plain
 // 4-digit year like 2026 into "۲٬۰۲۶" - useGrouping:false keeps it as a
 // single "۲۰۲۶" run of Persian digits instead.
 const faYear = (year) => Number(year || 0).toLocaleString('fa-AF', { useGrouping: false });
 const formatMonthLabel = (monthKey) => {
   const [year, month] = String(monthKey || '').split('-');
-  const label = gregorianMonthNamesFa[Number(month) - 1] || month;
+  const label = AFGHAN_SOLAR_MONTHS[Number(month) - 1] || month;
   return `${label} ${faYear(year)}`;
 };
 
@@ -219,7 +218,7 @@ export default function AcademyManagement() {
   const [monthlyReport, setMonthlyReport] = useState(null);
   const [monthlyReportLoading, setMonthlyReportLoading] = useState(false);
   const [monthlyReportDetail, setMonthlyReportDetail] = useState(null);
-  const [monthlyReportYear, setMonthlyReportYear] = useState(new Date().getFullYear());
+  const [monthlyReportYear, setMonthlyReportYear] = useState(() => gregorianToAfghanSolar(new Date())?.jy || 1400);
   const [monthlyReportMonth, setMonthlyReportMonth] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStudent, setSelectedStudent] = useState(null);
@@ -297,7 +296,7 @@ export default function AcademyManagement() {
   };
 
   const monthlyReportYearOptions = useMemo(
-    () => Array.from({ length: 6 }, (_, index) => new Date().getFullYear() - index),
+    () => Array.from({ length: 6 }, (_, index) => (gregorianToAfghanSolar(new Date())?.jy || 1400) - index),
     []
   );
 
@@ -1058,7 +1057,7 @@ export default function AcademyManagement() {
                   <Field label="ماه">
                     <select value={monthlyReportMonth} onChange={(e) => setMonthlyReportMonth(e.target.value)}>
                       <option value="">همه ماه‌ها</option>
-                      {gregorianMonthNamesFa.map((name, index) => (
+                      {AFGHAN_SOLAR_MONTHS.map((name, index) => (
                         <option key={name} value={String(index + 1).padStart(2, '0')}>{name}</option>
                       ))}
                     </select>
