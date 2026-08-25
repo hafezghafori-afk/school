@@ -3,6 +3,8 @@ import './ShortTermCenter.css';
 import { API_BASE } from '../config/api';
 import { studentMatchesSearch } from '../utils/studentSearch';
 import { useToast } from '../components/ui/toast';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
+import { formatAfghanStoredDateLabel } from '../utils/afghanDate';
 
 const emptyStudent = {
   firstName: '',
@@ -780,8 +782,8 @@ export default function ShortTermCenter() {
                     {classes.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
                   </select>
                 </Field>
-                <Field label="تاریخ ثبت"><input type="date" value={registrationForm.registrationDate} onChange={(e) => setRegistrationForm({ ...registrationForm, registrationDate: e.target.value })} /></Field>
-                <Field label="تاریخ شروع"><input type="date" value={registrationForm.startDate} onChange={(e) => setRegistrationForm({ ...registrationForm, startDate: e.target.value })} /></Field>
+                <Field label="تاریخ ثبت"><AfghanDateInput value={registrationForm.registrationDate} onChange={(value) => setRegistrationForm({ ...registrationForm, registrationDate: value })} /></Field>
+                <Field label="تاریخ شروع"><AfghanDateInput value={registrationForm.startDate} onChange={(value) => setRegistrationForm({ ...registrationForm, startDate: value })} /></Field>
                 <Field label="مدت شاگرد (به ماه)"><input type="number" min="1" value={registrationForm.durationMonths} onChange={(e) => setRegistrationForm({ ...registrationForm, durationMonths: e.target.value })} /></Field>
                 <Field label="فیس اصلی"><input type="number" min="0" value={registrationForm.feeAmount} onChange={(e) => setRegistrationForm({ ...registrationForm, feeAmount: e.target.value })} /></Field>
                 <Field label="تخفیف"><input type="number" min="0" value={registrationForm.discountAmount} onChange={(e) => setRegistrationForm({ ...registrationForm, discountAmount: e.target.value })} /></Field>
@@ -841,7 +843,7 @@ export default function ShortTermCenter() {
                   </select>
                 </Field>
                 <Field label="مبلغ پرداخت"><input required type="number" min="1" value={paymentForm.amount} onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })} /></Field>
-                <Field label="تاریخ پرداخت"><input type="date" value={paymentForm.paidAt} onChange={(e) => setPaymentForm({ ...paymentForm, paidAt: e.target.value })} /></Field>
+                <Field label="تاریخ پرداخت"><AfghanDateInput value={paymentForm.paidAt} onChange={(value) => setPaymentForm({ ...paymentForm, paidAt: value })} /></Field>
                 <Field label="روش پرداخت">
                   <select value={paymentForm.paymentMethod} onChange={(e) => setPaymentForm({ ...paymentForm, paymentMethod: e.target.value })}>
                     {Object.entries(paymentMethodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -878,7 +880,7 @@ export default function ShortTermCenter() {
                     {classes.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
                   </select>
                 </Field>
-                <Field label="تاریخ"><input type="date" value={attendanceForm.attendanceDate} onChange={(e) => setAttendanceForm({ ...attendanceForm, attendanceDate: e.target.value })} /></Field>
+                <Field label="تاریخ"><AfghanDateInput value={attendanceForm.attendanceDate} onChange={(value) => setAttendanceForm({ ...attendanceForm, attendanceDate: value })} /></Field>
                 <div className="stc-attendance-list">
                   {attendanceForm.students.length ? attendanceForm.students.map((item, index) => (
                     <div className="stc-attendance-row" key={item.studentId}>
@@ -907,7 +909,7 @@ export default function ShortTermCenter() {
                   columns={['تاریخ', 'صنف', 'حاضر', 'غیرحاضر', 'تأخیر', 'رخصت']}
                   rows={attendance.map((item) => {
                     const counts = (item.students || []).reduce((acc, row) => { acc[row.status] = (acc[row.status] || 0) + 1; return acc; }, {});
-                    return [item.attendanceDate, text(item.classId?.name), fmt(counts.present), fmt(counts.absent), fmt(counts.late), fmt(counts.leave)];
+                    return [formatAfghanStoredDateLabel(item.attendanceDate), text(item.classId?.name), fmt(counts.present), fmt(counts.absent), fmt(counts.late), fmt(counts.leave)];
                   })}
                 />
               </div>
@@ -925,7 +927,7 @@ export default function ShortTermCenter() {
                   </select>
                 </Field>
                 <Field label="مبلغ"><input required type="number" min="1" value={expenseForm.amount} onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })} /></Field>
-                <Field label="تاریخ"><input type="date" value={expenseForm.expenseDate} onChange={(e) => setExpenseForm({ ...expenseForm, expenseDate: e.target.value })} /></Field>
+                <Field label="تاریخ"><AfghanDateInput value={expenseForm.expenseDate} onChange={(value) => setExpenseForm({ ...expenseForm, expenseDate: value })} /></Field>
                 <Field label="پرداخت به"><input value={expenseForm.paidTo} onChange={(e) => setExpenseForm({ ...expenseForm, paidTo: e.target.value })} /></Field>
                 <Field label="یادداشت"><textarea value={expenseForm.note} onChange={(e) => setExpenseForm({ ...expenseForm, note: e.target.value })} /></Field>
                 <button type="submit" disabled={busy}>ثبت مصرف</button>
@@ -934,7 +936,7 @@ export default function ShortTermCenter() {
                 <h2>مصارف ثبت‌شده</h2>
                 <Table
                   columns={['عنوان', 'دسته', 'مبلغ', 'تاریخ']}
-                  rows={filteredExpenses.map((item) => [item.title, expenseCategoryLabels[item.category] || item.category, `${fmt(item.amount)} ${item.currency || currency}`, item.expenseDate])}
+                  rows={filteredExpenses.map((item) => [item.title, expenseCategoryLabels[item.category] || item.category, `${fmt(item.amount)} ${item.currency || currency}`, formatAfghanStoredDateLabel(item.expenseDate)])}
                 />
               </div>
               <form className="stc-panel stc-form" onSubmit={saveExpenseCategory}>

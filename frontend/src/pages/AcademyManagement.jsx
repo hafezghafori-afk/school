@@ -4,6 +4,8 @@ import './AcademyManagement.css';
 import { API_BASE } from '../config/api';
 import { getStudentAsasNumber, studentMatchesSearch } from '../utils/studentSearch';
 import { useToast } from '../components/ui/toast';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
+import { formatAfghanStoredDateLabel } from '../utils/afghanDate';
 
 const emptyStudent = {
   firstName: '',
@@ -775,8 +777,8 @@ export default function AcademyManagement() {
                       .map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
                   </select>
                 </Field>
-                <Field label="تاریخ ثبت"><input type="date" value={registrationForm.registrationDate} onChange={(e) => setRegistrationForm({ ...registrationForm, registrationDate: e.target.value })} /></Field>
-                <Field label="تاریخ شروع"><input type="date" value={registrationForm.startDate} onChange={(e) => setRegistrationForm({ ...registrationForm, startDate: e.target.value })} /></Field>
+                <Field label="تاریخ ثبت"><AfghanDateInput value={registrationForm.registrationDate} onChange={(value) => setRegistrationForm({ ...registrationForm, registrationDate: value })} /></Field>
+                <Field label="تاریخ شروع"><AfghanDateInput value={registrationForm.startDate} onChange={(value) => setRegistrationForm({ ...registrationForm, startDate: value })} /></Field>
                 <Field label="فیس اصلی"><input type="number" min="0" value={registrationForm.feeAmount} onChange={(e) => setRegistrationForm({ ...registrationForm, feeAmount: e.target.value })} /></Field>
                 <Field label="تخفیف"><input type="number" min="0" value={registrationForm.discountAmount} onChange={(e) => setRegistrationForm({ ...registrationForm, discountAmount: e.target.value })} /></Field>
                 <Field label="نوع پرداخت">
@@ -837,7 +839,7 @@ export default function AcademyManagement() {
                   </select>
                 </Field>
                 <Field label="مبلغ پرداخت"><input required type="number" min="1" value={paymentForm.amount} onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })} /></Field>
-                <Field label="تاریخ پرداخت"><input type="date" value={paymentForm.paidAt} onChange={(e) => setPaymentForm({ ...paymentForm, paidAt: e.target.value })} /></Field>
+                <Field label="تاریخ پرداخت"><AfghanDateInput value={paymentForm.paidAt} onChange={(value) => setPaymentForm({ ...paymentForm, paidAt: value })} /></Field>
                 <Field label="روش پرداخت">
                   <select value={paymentForm.paymentMethod} onChange={(e) => setPaymentForm({ ...paymentForm, paymentMethod: e.target.value })}>
                     {Object.entries(paymentMethodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -878,7 +880,7 @@ export default function AcademyManagement() {
                   </select>
                 </Field>
                 <Field label="مبلغ"><input required type="number" min="1" value={expenseForm.amount} onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })} /></Field>
-                <Field label="تاریخ"><input type="date" value={expenseForm.expenseDate} onChange={(e) => setExpenseForm({ ...expenseForm, expenseDate: e.target.value })} /></Field>
+                <Field label="تاریخ"><AfghanDateInput value={expenseForm.expenseDate} onChange={(value) => setExpenseForm({ ...expenseForm, expenseDate: value })} /></Field>
                 <Field label="پرداخت به"><input value={expenseForm.paidTo} onChange={(e) => setExpenseForm({ ...expenseForm, paidTo: e.target.value })} /></Field>
                 <Field label="یادداشت"><textarea value={expenseForm.note} onChange={(e) => setExpenseForm({ ...expenseForm, note: e.target.value })} /></Field>
                 <button type="submit" disabled={busy}>ثبت مصرف</button>
@@ -891,7 +893,7 @@ export default function AcademyManagement() {
                     item.title,
                     expenseCategoryLabels[item.category] || item.category,
                     `${fmt(item.amount)} ${item.currency || currency}`,
-                    item.expenseDate
+                    formatAfghanStoredDateLabel(item.expenseDate)
                   ])}
                 />
               </div>
@@ -935,7 +937,7 @@ export default function AcademyManagement() {
                   </select>
                 </Field>
                 <Field label="تاریخ">
-                  <input type="date" value={attendanceForm.attendanceDate} onChange={(e) => setAttendanceForm({ ...attendanceForm, attendanceDate: e.target.value })} />
+                  <AfghanDateInput value={attendanceForm.attendanceDate} onChange={(value) => setAttendanceForm({ ...attendanceForm, attendanceDate: value })} />
                 </Field>
                 <div className="academy-attendance-list">
                   {attendanceForm.students.length ? attendanceForm.students.map((item, index) => (
@@ -969,7 +971,7 @@ export default function AcademyManagement() {
                       return acc;
                     }, {});
                     return [
-                      item.attendanceDate,
+                      formatAfghanStoredDateLabel(item.attendanceDate),
                       text(item.classId?.name),
                       fmt(counts.present),
                       fmt(counts.absent),
