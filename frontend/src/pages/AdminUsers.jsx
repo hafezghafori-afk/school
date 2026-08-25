@@ -3103,13 +3103,13 @@ export default function AdminUsers() {
                   </div>
                 )}
               </div>
-              <div className="access-modal-actions">
+              <div className="access-modal-actions edit-drawer-actions">
                 <button type="button" className="access-modal-btn ghost" onClick={closeEditModal}>
                   انصراف
                 </button>
                 <button
                   type="button"
-                  className="access-modal-btn approve"
+                  className="access-modal-btn edit-drawer-save-btn"
                   onClick={submitUserEdit}
                   disabled={editModal.busy}
                 >

@@ -2296,6 +2296,18 @@
   color: rgba(226, 232, 240, 0.6);
 }
 
+.edit-drawer-actions .access-modal-btn.ghost {
+  flex: 0 0 auto;
+}
+
+.edit-drawer-save-btn {
+  flex: 1 1 auto;
+  min-height: 40px;
+  background: linear-gradient(135deg, #38bdf8, #2563eb);
+  color: #04202f;
+  font-weight: 800;
+}
+
 .edit-user-permissions-box {
   margin: 0;
 }
