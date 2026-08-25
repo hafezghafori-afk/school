@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import './AdminUsers.css';
 
 import { API_BASE } from '../config/api';
@@ -2913,8 +2914,8 @@ export default function AdminUsers() {
           </div>
         )}
 
-        {editModal.open && (
-          <div className="access-modal-backdrop" onClick={closeEditModal}>
+        {editModal.open && createPortal(
+          <div className="access-modal-backdrop edit-user-modal-backdrop" onClick={closeEditModal}>
             <div className="access-modal-card edit-user-modal-card" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className="access-modal-head">
                 <h3>ویرایش مشخصات کاربر</h3>
@@ -3052,7 +3053,8 @@ export default function AdminUsers() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {accessDecisionModal.open && accessDecisionModal.item && (

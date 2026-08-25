@@ -2134,8 +2134,35 @@
   cursor: not-allowed;
 }
 
+.edit-user-modal-backdrop {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
+}
+
 .edit-user-modal-card {
-  width: min(760px, 96vw);
+  width: min(440px, 92vw);
+  max-height: 100vh;
+  height: 100vh;
+  margin: 0;
+  border-radius: 0 20px 20px 0;
+  animation: edit-drawer-in 0.22s ease-out;
+}
+
+@keyframes edit-drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edit-user-modal-card {
+    animation: none;
+  }
 }
 
 .edit-user-modal-note {
