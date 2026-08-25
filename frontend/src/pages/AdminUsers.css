@@ -292,6 +292,8 @@
 
 .create-form-toggle {
   flex: 0 0 auto;
+  width: auto;
+  white-space: nowrap;
   font-family: inherit;
   font-size: 13px;
   font-weight: 800;
