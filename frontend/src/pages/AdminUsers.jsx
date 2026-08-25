@@ -365,6 +365,14 @@ function PostBadge({ orgRole = '' }) {
     </span>
   );
 }
+
+const getInitials = (name = '', email = '') => {
+  const source = String(name || '').trim() || String(email || '').trim();
+  if (!source) return '؟';
+  const parts = source.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] || '') + (parts[1][0] || '');
+  return source.slice(0, 2);
+};
 // سلسله‌مراتب واگذاری پست (باید با ORG_ROLE_ASSIGNABLE_TARGETS در backend/routes/adminRoutes.js
 // یکسان بماند): هر پست فقط پست‌های پایین‌تر از خودش را می‌تواند بسازد/ویرایش کند، نه هم‌سطح یا
 // بالاتر. این‌جا فقط برای فیلترکردن گزینه‌های نمایشی است؛ اجرای واقعیِ محدودیت در بک‌اند است.
@@ -907,6 +915,7 @@ export default function AdminUsers() {
     return () => clearTimeout(timer);
   }, [message, messageTone]);
   const [busyId, setBusyId] = useState('');
+  const [openRowMenu, setOpenRowMenu] = useState('');
   const [workspaceTab, setWorkspaceTab] = useState(() => (
     typeof window !== 'undefined' ? resolveWorkspaceTabFromHash(window.location.hash) : 'directory'
   ));
@@ -2745,103 +2754,127 @@ export default function AdminUsers() {
         )}
 
         {workspaceTab === 'directory' && (
-          <div className="adminusers-list">
-          <div className="user-row head">
-            <span>نام</span>
-            <span>ایمیل</span>
-            <span>نقش سازمانی</span>
-            <span>وضعیت</span>
-            <span>دسترسی‌ها</span>
-            <span>نقش / ویرایش</span>
-          </div>
-
+          <div className="adminusers-list adminusers-list--compact">
           {displayedUsers.map((user) => {
             const rowEffectivePermissions = resolveEffectivePermissions(user);
             const permissionsLocked = isPermissionsLocked(user.orgRole);
             const roleMeta = user.role === 'admin'
               ? `${roleLabel(user.role)} / ${adminLevelLabel(user.adminLevel)}`
               : roleLabel(user.role);
+            const menuOpen = openRowMenu === user._id;
+            const toggleMenu = () => setOpenRowMenu((prev) => (prev === user._id ? '' : user._id));
 
             return (
-              <div key={user._id} className="user-row">
-                <span>{user.name}</span>
-                <span>{user.email}</span>
-                <div className="user-role-cell">
-                  <PostBadge orgRole={user.orgRole} />
-                  <small className="user-role-meta">سازگاری: {roleMeta}</small>
-                </div>
-                <div className="user-status-cell">
-                  <span className={`user-status-badge status-${user.status}`}>{userStatusLabel(user.status)}</span>
-                  <select
-                    value={user.status}
-                    disabled={busyId === user._id}
-                    onChange={(e) => updateStatus(user._id, e.target.value)}
-                  >
-                    {USER_STATUS_OPTIONS.map((opt) => (
-                      <option key={opt.key} value={opt.key}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="permissions-mini">
-                  {!permissionsLocked ? (
-                    <PermissionManager
-                      compact
-                      idPrefix={`user-row-${user._id}`}
-                      orgRole={user.orgRole}
-                      users={items}
-                      currentUserId={user._id}
-                      value={user.permissions || []}
-                      disabled={busyId === user._id}
-                      onChange={(permissions) => updatePermissions(user._id, permissions, user.orgRole)}
-                    />
-                  ) : null}
-                  <small className="adminlevel-hint">
-                    {permissionsLocked
-                      ? `مجوزهای ${orgRoleLabel(user.orgRole)} از خود نقش سازمانی محاسبه می‌شود.`
-                      : 'مجوزهای انتخابی به مجوزهای پیش‌فرض نقش افزوده می‌شود.'}
-                  </small>
-                  <div className="effective-chip-wrap mini">
-                    {rowEffectivePermissions.map((permission) => (
-                      <span key={`${user._id}-eff-${permission}`} className="effective-chip">
-                        {permissionLabel(permission)}
-                      </span>
-                    ))}
-                    {!rowEffectivePermissions.length && (
-                      <span className="effective-chip muted">بدون مجوز ویژه</span>
-                    )}
+              <div key={user._id} className={`user-row-compact${menuOpen ? ' is-open' : ''}`}>
+                <div className="user-row-main">
+                  <span className="user-avatar" aria-hidden="true">{getInitials(user.name, user.email)}</span>
+                  <div className="user-row-identity">
+                    <strong>{user.name || '-'}</strong>
+                    <small>{user.email || '-'}</small>
                   </div>
-                </div>
-                <div className="user-role-actions">
-                  <select
-                    value={user.orgRole}
-                    disabled={busyId === user._id}
-                    onChange={(e) => updateRole(user._id, e.target.value)}
-                  >
-                    {orgRoleSelectOptions(user.orgRole, viewerOrgRole).map((opt) => (
-                      <option key={opt.key} value={opt.key} disabled={opt.disabled}>
-                        {opt.label}{opt.disabled ? ' (بالاتر از پست شما)' : ''}
-                      </option>
-                    ))}
-                  </select>
+                  <PostBadge orgRole={user.orgRole} />
+                  <span className={`user-status-badge status-${user.status}`}>{userStatusLabel(user.status)}</span>
                   <button
                     type="button"
-                    className="user-edit-btn"
+                    className="user-row-kebab"
                     disabled={busyId === user._id}
-                    onClick={() => openEditModal(user)}
+                    onClick={toggleMenu}
+                    aria-label="گزینه‌های کاربر"
+                    aria-expanded={menuOpen}
                   >
-                    ویرایش مشخصات
+                    ⋮
                   </button>
-                  {isDeactivatableUser(user) && (
-                    <button
-                      type="button"
-                      className="user-delete-btn"
-                      disabled={busyId === user._id}
-                      onClick={() => deactivateManagedUser(user)}
-                    >
-                      حذف کاربر (غیرفعال)
-                    </button>
-                  )}
                 </div>
+
+                {menuOpen && (
+                  <div className="user-row-menu">
+                    <div className="user-row-menu-head">
+                      <span>گزینه‌ها · سازگاری: {roleMeta}</span>
+                      <button type="button" className="user-row-menu-close" onClick={toggleMenu} aria-label="بستن">×</button>
+                    </div>
+
+                    <div className="user-row-menu-grid">
+                      <label className="user-row-menu-field">
+                        <span>پست</span>
+                        <select
+                          value={user.orgRole}
+                          disabled={busyId === user._id}
+                          onChange={(e) => updateRole(user._id, e.target.value)}
+                        >
+                          {orgRoleSelectOptions(user.orgRole, viewerOrgRole).map((opt) => (
+                            <option key={opt.key} value={opt.key} disabled={opt.disabled}>
+                              {opt.label}{opt.disabled ? ' (بالاتر از پست شما)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="user-row-menu-field">
+                        <span>وضعیت</span>
+                        <select
+                          value={user.status}
+                          disabled={busyId === user._id}
+                          onChange={(e) => updateStatus(user._id, e.target.value)}
+                        >
+                          {USER_STATUS_OPTIONS.map((opt) => (
+                            <option key={opt.key} value={opt.key}>{opt.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+
+                    <div className="permissions-mini">
+                      {!permissionsLocked ? (
+                        <PermissionManager
+                          compact
+                          idPrefix={`user-row-${user._id}`}
+                          orgRole={user.orgRole}
+                          users={items}
+                          currentUserId={user._id}
+                          value={user.permissions || []}
+                          disabled={busyId === user._id}
+                          onChange={(permissions) => updatePermissions(user._id, permissions, user.orgRole)}
+                        />
+                      ) : null}
+                      <small className="adminlevel-hint">
+                        {permissionsLocked
+                          ? `مجوزهای ${orgRoleLabel(user.orgRole)} از خود نقش سازمانی محاسبه می‌شود.`
+                          : 'مجوزهای انتخابی به مجوزهای پیش‌فرض نقش افزوده می‌شود.'}
+                      </small>
+                      <div className="effective-chip-wrap mini">
+                        {rowEffectivePermissions.map((permission) => (
+                          <span key={`${user._id}-eff-${permission}`} className="effective-chip">
+                            {permissionLabel(permission)}
+                          </span>
+                        ))}
+                        {!rowEffectivePermissions.length && (
+                          <span className="effective-chip muted">بدون مجوز ویژه</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="user-row-menu-actions">
+                      <button
+                        type="button"
+                        className="user-edit-btn"
+                        disabled={busyId === user._id}
+                        onClick={() => openEditModal(user)}
+                      >
+                        ویرایش مشخصات
+                      </button>
+                      {isDeactivatableUser(user) && (
+                        <button
+                          type="button"
+                          className="user-delete-btn"
+                          disabled={busyId === user._id}
+                          onClick={() => deactivateManagedUser(user)}
+                        >
+                          حذف کاربر (غیرفعال)
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
