@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { API_BASE } from '../config/api';
 import { studentMatchesSearch } from '../utils/studentSearch';
 import './AcademySupplies.css';
+import AfghanDateInput from '../components/ui/AfghanDateInput';
+import { formatAfghanStoredDateLabel } from '../utils/afghanDate';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -381,7 +383,7 @@ export default function AcademySupplies() {
               {saleForm.bookTaken && (
                 <>
                   <Field label="تاریخ گرفتن کتاب">
-                    <input type="date" value={saleForm.bookDate} onChange={(e) => setSaleForm({ ...saleForm, bookDate: e.target.value })} />
+                    <AfghanDateInput value={saleForm.bookDate} onChange={(value) => setSaleForm({ ...saleForm, bookDate: value })} />
                   </Field>
                   <Field label="تخفیف کتاب">
                     <input
@@ -402,7 +404,7 @@ export default function AcademySupplies() {
               {saleForm.uniformTaken && (
                 <>
                   <Field label="تاریخ گرفتن یونیفرم">
-                    <input type="date" value={saleForm.uniformDate} onChange={(e) => setSaleForm({ ...saleForm, uniformDate: e.target.value })} />
+                    <AfghanDateInput value={saleForm.uniformDate} onChange={(value) => setSaleForm({ ...saleForm, uniformDate: value })} />
                   </Field>
                   <Field label="سایز یونیفرم">
                     <input value={saleForm.uniformSize} onChange={(e) => setSaleForm({ ...saleForm, uniformSize: e.target.value })} />
@@ -486,9 +488,9 @@ export default function AcademySupplies() {
                   text(student.fatherName),
                   student.className,
                   row.bookTaken ? 'گرفته' : 'نگرفته',
-                  text(sale.bookDate),
+                  sale.bookDate ? formatAfghanStoredDateLabel(sale.bookDate) : '-',
                   row.uniformTaken ? 'گرفته' : 'نگرفته',
-                  text(sale.uniformDate),
+                  sale.uniformDate ? formatAfghanStoredDateLabel(sale.uniformDate) : '-',
                   text(sale.uniformSize),
                   totalDiscount > 0 ? `${fmt(totalDiscount)} ${sale.currency || currency}` : '-',
                   `${fmt(row.totalAmount)} ${sale.currency || currency}`,

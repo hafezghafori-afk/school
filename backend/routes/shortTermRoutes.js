@@ -13,6 +13,7 @@ const ShortTermExpenseCategory = require('../models/ShortTermExpenseCategory');
 const ShortTermAttendance = require('../models/ShortTermAttendance');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
+const { buildShamsiMonthlyReport, currentShamsiMonthRange } = require('../utils/shamsiMonthlyReport');
 
 const router = express.Router();
 
@@ -78,20 +79,20 @@ async function buildSummary() {
   const dueTotal = registrations.reduce((sum, item) => sum + toNumber(item.totalPayable), 0);
   const today = todayKey();
   const overdueCount = registrations.filter((item) => item.status === 'active' && item.endDate && item.endDate < today).length;
-  const month = today.slice(0, 7);
+  const { start: shamsiMonthStart, endExclusive: shamsiMonthEnd } = currentShamsiMonthRange();
   const monthIncome = await ShortTermPayment.aggregate([
     {
       $match: {
         paidAt: {
-          $gte: new Date(`${month}-01T00:00:00.000Z`),
-          $lt: new Date(new Date(`${month}-01T00:00:00.000Z`).setMonth(new Date(`${month}-01T00:00:00.000Z`).getMonth() + 1))
+          $gte: new Date(`${shamsiMonthStart}T00:00:00.000Z`),
+          $lt: new Date(`${shamsiMonthEnd}T00:00:00.000Z`)
         }
       }
     },
     { $group: { _id: null, total: { $sum: '$amount' } } }
   ]);
   const monthExpenses = await ShortTermExpense.aggregate([
-    { $match: { expenseDate: { $regex: `^${month}` } } },
+    { $match: { expenseDate: { $gte: shamsiMonthStart, $lt: shamsiMonthEnd } } },
     { $group: { _id: null, total: { $sum: '$amount' } } }
   ]);
 
@@ -493,90 +494,13 @@ router.get('/reports/overview', async (_req, res) => {
   }
 });
 
-function lastMonthKeys(count) {
-  const keys = [];
-  const cursor = new Date();
-  cursor.setDate(1);
-  for (let i = count - 1; i >= 0; i -= 1) {
-    const d = new Date(cursor.getFullYear(), cursor.getMonth() - i, 1);
-    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-  }
-  return keys;
-}
-
-function yearMonthKeys(year) {
-  const keys = [];
-  for (let m = 1; m <= 12; m += 1) {
-    keys.push(`${year}-${String(m).padStart(2, '0')}`);
-  }
-  return keys;
-}
-
 router.get('/reports/monthly', async (req, res) => {
   try {
-    const yearParam = Number(req.query.year);
-    const monthKeys = (yearParam && yearParam >= 1900 && yearParam <= 3000)
-      ? yearMonthKeys(yearParam)
-      : lastMonthKeys(Math.min(24, Math.max(1, Number(req.query.months) || 12)));
-
-    const earliestStart = new Date(`${monthKeys[0]}-01T00:00:00.000Z`);
-    const [lastKeyYear, lastKeyMonth] = monthKeys[monthKeys.length - 1].split('-').map(Number);
-    const latestEnd = new Date(Date.UTC(lastKeyYear, lastKeyMonth, 1));
-    const latestEndDateStr = latestEnd.toISOString().slice(0, 10);
-
-    const [incomeRows, expenseRows] = await Promise.all([
-      ShortTermPayment.aggregate([
-        { $match: { paidAt: { $gte: earliestStart, $lt: latestEnd } } },
-        {
-          $group: {
-            _id: { month: { $dateToString: { format: '%Y-%m', date: '$paidAt' } }, method: '$paymentMethod' },
-            total: { $sum: '$amount' }
-          }
-        }
-      ]),
-      ShortTermExpense.aggregate([
-        { $match: { expenseDate: { $gte: monthKeys[0], $lt: latestEndDateStr } } },
-        {
-          $group: {
-            _id: { month: { $substrBytes: ['$expenseDate', 0, 7] }, category: '$category' },
-            total: { $sum: '$amount' }
-          }
-        }
-      ])
-    ]);
-
-    const monthMap = new Map(monthKeys.map((key) => [key, {
-      month: key,
-      income: 0,
-      expenses: 0,
-      byPaymentMethod: new Map(),
-      byExpenseCategory: new Map()
-    }]));
-
-    incomeRows.forEach((row) => {
-      const bucket = monthMap.get(row._id.month);
-      if (!bucket) return;
-      bucket.income += toNumber(row.total);
-      bucket.byPaymentMethod.set(row._id.method || 'other', toNumber(row.total));
-    });
-
-    expenseRows.forEach((row) => {
-      const bucket = monthMap.get(row._id.month);
-      if (!bucket) return;
-      bucket.expenses += toNumber(row.total);
-      bucket.byExpenseCategory.set(row._id.category || 'other', toNumber(row.total));
-    });
-
-    const result = monthKeys.map((key) => {
-      const bucket = monthMap.get(key);
-      return {
-        month: bucket.month,
-        income: bucket.income,
-        expenses: bucket.expenses,
-        net: bucket.income - bucket.expenses,
-        byPaymentMethod: Array.from(bucket.byPaymentMethod, ([method, total]) => ({ method, total })),
-        byExpenseCategory: Array.from(bucket.byExpenseCategory, ([category, total]) => ({ category, total }))
-      };
+    const result = await buildShamsiMonthlyReport({
+      paymentModel: ShortTermPayment,
+      expenseModel: ShortTermExpense,
+      year: Number(req.query.year),
+      months: req.query.months
     });
 
     res.json({ success: true, months: result });
