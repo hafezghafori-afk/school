@@ -38,6 +38,19 @@ function reliefChanged(existing = {}, payload = {}) {
     || String(existing?.sourceUpdatedAt ? new Date(existing.sourceUpdatedAt).toISOString() : '') !== String(payload?.sourceUpdatedAt ? new Date(payload.sourceUpdatedAt).toISOString() : '');
 }
 
+// buildFinanceReliefPayloadFromDiscount/Exemption always emit cancelledAt: null because the
+// source models (Discount/FeeExemption) don't track a cancellation timestamp themselves. If a
+// FinanceRelief mirror is already cancelled, re-applying that null would wipe existing.cancelledAt,
+// and FinanceRelief's own pre('validate') hook would immediately re-stamp a fresh `new Date()` on
+// save — making the record look "changed" again on every subsequent sync (infinite drift). Preserve
+// the mirror's real cancelledAt whenever both sides already agree the relief is cancelled.
+function preserveExistingCancelledAt(payload = {}, existing = null) {
+  if (payload.status === 'cancelled' && existing?.status === 'cancelled' && existing.cancelledAt) {
+    payload.cancelledAt = existing.cancelledAt;
+  }
+  return payload;
+}
+
 function promoteDiscountReliefToFullCoverage(payload = {}, order = null) {
   if (payload.status !== 'active' || payload.coverageMode !== 'fixed' || payload.reliefType === 'penalty') return payload;
   const reliefAmount = Number(payload.amount || 0);
@@ -109,6 +122,7 @@ async function syncFinanceReliefFromDiscount(input, { dryRun = false } = {}) {
     const created = await FinanceRelief.create(payload);
     return { created: true, updated: false, skipped: false, reliefId: created._id };
   }
+  preserveExistingCancelledAt(payload, existing);
 
   if (!reliefChanged(existing.toObject ? existing.toObject() : existing, payload)) {
     return { created: false, updated: false, skipped: true, reason: 'no_change', reliefId: existing._id };
@@ -133,6 +147,7 @@ async function syncFinanceReliefFromFeeExemption(input, { dryRun = false } = {})
     const created = await FinanceRelief.create(payload);
     return { created: true, updated: false, skipped: false, reliefId: created._id };
   }
+  preserveExistingCancelledAt(payload, existing);
 
   if (!reliefChanged(existing.toObject ? existing.toObject() : existing, payload)) {
     return { created: false, updated: false, skipped: true, reason: 'no_change', reliefId: existing._id };
