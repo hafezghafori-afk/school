@@ -1,0 +1,33 @@
+# Nginx reverse-proxy config for the school app (single VPS, frontend + backend
+# served by the same Node process on PORT, default 5000/5001 — check backend/.env).
+#
+# Install:
+#   sudo cp deploy/nginx.school.conf.example /etc/nginx/sites-available/school
+#   sudo nano /etc/nginx/sites-available/school   # replace your-domain.com below
+#   sudo ln -s /etc/nginx/sites-available/school /etc/nginx/sites-enabled/school
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# Then get a free TLS certificate (this also rewrites the file to add the
+# certificate + a :80 -> :443 redirect automatically):
+#   sudo certbot --nginx -d your-domain.com
+
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    # Allow big uploads (student photos/documents, report PDFs, etc.) — adjust
+    # if your R2/local upload limits differ.
+    client_max_body_size 20m;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
