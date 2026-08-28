@@ -19,9 +19,11 @@ attachWriteActivityAudit(router, {
   audit: (payload) => logActivity(payload)
 });
 
-const VIEW_ROLES = ['admin', 'principal', 'teacher', 'registration_manager'];
+// req.user.role در این سیستم معمولاً 'admin' | 'instructor' است؛ رشته‌های دیگر برای
+// سازگاری با دادهٔ قدیمی نگه داشته شده‌اند. نگرانِ صنف نقش 'instructor' دارد.
+const VIEW_ROLES = ['admin', 'principal', 'teacher', 'instructor', 'registration_manager'];
 const EDIT_ROLES = ['admin', 'principal', 'registration_manager'];
-const REMARK_ROLES = ['admin', 'principal', 'teacher', 'registration_manager'];
+const REMARK_ROLES = ['admin', 'principal', 'teacher', 'instructor', 'registration_manager'];
 const MANAGER_ROLES = new Set(['admin', 'principal', 'registration_manager']);
 
 const { gradeNumber } = sawanehCardService._internals;
