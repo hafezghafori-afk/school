@@ -25,6 +25,7 @@ const {
   assignStudentToClass,
   serializeTransferAdmissionBilling
 } = require('../services/studentClassAssignmentService');
+const sawanehCardService = require('../services/sawanehCardService');
 
 const router = express.Router();
 const auditWrite = (payload) => logActivity(payload);
@@ -527,6 +528,13 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
       membership?.$locals?.transferAdmissionBilling || null
     );
     await syncManualStudentEnrollment({ student, studentData, req });
+
+    // کارت سوانحِ متعلم را همراه ثبت‌نام بساز (شکستش نباید ثبت شاگرد را خراب کند)
+    try {
+      await sawanehCardService.ensureCard(student._id, { actorId: req.user?.id || null });
+    } catch (sawanehError) {
+      console.error('ensureSawanehCard (create student) failed:', sawanehError?.message || sawanehError);
+    }
 
     // Populate school info for response
     await student.populate('academicInfo.currentSchool', 'name province district');

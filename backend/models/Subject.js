@@ -46,6 +46,14 @@ const subjectSchema = new mongoose.Schema({
     default: '',
     trim: true
   },
+  // کلید کانونیک مضمون در فرم «سوانح تعلیمی» (backend/constants/sawanehSubjects.js)
+  // خالی = نگاشت خودکار از روی نام هنگام تولید ترانسکریپت
+  sawanehKey: {
+    type: String,
+    default: '',
+    trim: true,
+    lowercase: true
+  },
   gradeLevels: [{
     type: Number,
     min: 1,
