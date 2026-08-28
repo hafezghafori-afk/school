@@ -33,7 +33,7 @@ const { gradeNumber } = sawanehCardService._internals;
 const isObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
 
 const cardResponsePopulate = (query) => query
-  .populate('studentId', 'personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari personalInfo.fatherName asasNumber registrationId academicInfo.currentGrade academicInfo.academicYearId academicInfo.currentClassId')
+  .populate('studentId', 'personalInfo identification familyInfo contactInfo asasNumber registrationId academicInfo.currentGrade academicInfo.academicYearId academicInfo.currentClassId')
   .populate('schoolId', 'name nameDari province district')
   .populate('createdBy', 'name email')
   .populate('lastUpdatedBy', 'name email');

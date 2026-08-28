@@ -457,6 +457,12 @@
   margin-inline-start: auto;
 }
 
+.sw-transcript-bar-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
 .sw-transcript-cols {
   display: grid;
   grid-template-columns: 1fr 200px;

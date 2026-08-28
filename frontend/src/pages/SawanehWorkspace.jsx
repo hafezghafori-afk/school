@@ -368,6 +368,12 @@ const SawanehWorkspace = () => {
     runTranscript(`/${activeYearId}/lock`);
   };
 
+  const openPrint = (printForm, query = {}) => {
+    if (!selectedId) return;
+    const search = new URLSearchParams({ form: printForm, ...query }).toString();
+    window.open(`/afghan-sawaneh/${selectedId}/print?${search}`, '_blank', 'noopener');
+  };
+
   const currentStudentGrade = gradeNumber(cardStudent?.academicInfo?.currentGrade || '');
 
   return (
@@ -465,6 +471,8 @@ const SawanehWorkspace = () => {
                         <option value="active">فعال</option>
                       </select>
                     </label>
+                    <button type="button" className="sw-btn" onClick={() => openPrint('card')}>چاپ کارت</button>
+                    <button type="button" className="sw-btn" onClick={() => openPrint('full')}>چاپ پروندهٔ کامل</button>
                     <button type="button" className="sw-btn sw-btn-primary" onClick={saveCard} disabled={saving}>
                       {saving ? 'در حال ذخیره…' : 'ذخیرهٔ کارت'}
                     </button>
@@ -511,14 +519,21 @@ const SawanehWorkspace = () => {
                         );
                       })}
                     </div>
-                    <button
-                      type="button"
-                      className="sw-btn sw-btn-primary"
-                      onClick={rebuildTranscript}
-                      disabled={transcriptBusy}
-                    >
-                      {transcriptBusy ? 'در حال پردازش…' : 'به‌روزرسانی از نمرات'}
-                    </button>
+                    <div className="sw-transcript-bar-actions">
+                      {activeYearId && (
+                        <button type="button" className="sw-btn" onClick={() => openPrint('transcript', { year: activeYearId })}>
+                          چاپ سوانح تعلیمی
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="sw-btn sw-btn-primary"
+                        onClick={rebuildTranscript}
+                        disabled={transcriptBusy}
+                      >
+                        {transcriptBusy ? 'در حال پردازش…' : 'به‌روزرسانی از نمرات'}
+                      </button>
+                    </div>
                   </div>
 
                   {!activeTranscript && (
