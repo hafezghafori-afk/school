@@ -7,6 +7,7 @@ const StudentSawanehCard = require('../models/StudentSawanehCard');
 const StudentAcademicTranscript = require('../models/StudentAcademicTranscript');
 const sawanehCardService = require('../services/sawanehCardService');
 const transcriptService = require('../services/transcriptService');
+const sawanehReportService = require('../services/sawanehReportService');
 const { computeAnnualMark, isSubjectPassed, resultTierFromAverage, promotionStatusFromFailedCount } = require('../constants/sawanehGrading');
 const { ok, fail } = require('../utils/response');
 const { logActivity } = require('../utils/activity');
@@ -534,6 +535,80 @@ router.post(
     } catch (error) {
       console.error('POST recompute-ranks error:', error?.message || error);
       return fail(res, 'بازمحاسبهٔ رتبه ناموفق بود.', 500);
+    }
+  }
+);
+
+/* ============================ گزارش‌ها (فاز ۶) ============================ */
+
+const REPORT_ROLES = ['admin', 'principal', 'teacher', 'instructor', 'registration_manager', 'finance_manager'];
+
+// GET /api/sawaneh/reports/overview — کارت‌های ناقص / وضعیت ترانسکریپت / آمار نتیجه / جریمه‌های پرداخت‌نشده
+router.get(
+  '/reports/overview',
+  requireAuth,
+  requireRole(REPORT_ROLES),
+  requirePermission('sawaneh.card.view'),
+  async (req, res) => {
+    try {
+      const data = await sawanehReportService.getOverview({
+        schoolId: req.query.schoolId,
+        academicYearId: req.query.academicYearId,
+        grade: req.query.grade
+      });
+      return ok(res, { data }, 'گزارشِ سوانح دریافت شد.');
+    } catch (error) {
+      console.error('GET sawaneh reports/overview error:', error?.message || error);
+      return fail(res, 'دریافت گزارشِ سوانح ناموفق بود.', 500);
+    }
+  }
+);
+
+// GET /api/sawaneh/reports/class-ranks?classId=&academicYearId=&top=
+router.get(
+  '/reports/class-ranks',
+  requireAuth,
+  requireRole(REPORT_ROLES),
+  requirePermission('sawaneh.transcript.view'),
+  async (req, res) => {
+    try {
+      const { classId, academicYearId, top } = req.query;
+      if (!isObjectId(classId) || !isObjectId(academicYearId)) return fail(res, 'شناسهٔ صنف/سال معتبر نیست.', 400);
+      const data = await sawanehReportService.getClassRanks({ classId, academicYearId, top });
+      return ok(res, { data }, 'جدول رتبهٔ صنف دریافت شد.');
+    } catch (error) {
+      console.error('GET sawaneh reports/class-ranks error:', error?.message || error);
+      return fail(res, 'دریافت جدول رتبه ناموفق بود.', 500);
+    }
+  }
+);
+
+// GET /api/sawaneh/reports/asas-list.xlsx?schoolId=&grade=
+router.get(
+  '/reports/asas-list.xlsx',
+  requireAuth,
+  requireRole(REPORT_ROLES),
+  requirePermission('sawaneh.card.view'),
+  async (req, res) => {
+    try {
+      const buffer = await sawanehReportService.buildAsasListWorkbook({
+        schoolId: req.query.schoolId,
+        grade: req.query.grade
+      });
+      const stamp = new Date().toISOString().slice(0, 10);
+      await logActivity({
+        req,
+        action: 'sawaneh_report_asas_list_xlsx',
+        targetType: 'StudentSawanehCard',
+        targetId: String(req.query.schoolId || 'all'),
+        meta: { grade: req.query.grade || 'all' }
+      });
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="asas-list-${stamp}.xlsx"`);
+      return res.status(200).send(Buffer.from(buffer));
+    } catch (error) {
+      console.error('GET sawaneh asas-list.xlsx error:', error?.message || error);
+      return fail(res, 'ساخت فایل اکسل «لست اساس» ناموفق بود.', 500);
     }
   }
 );

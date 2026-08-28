@@ -416,9 +416,14 @@ const SawanehWorkspace = () => {
           <h1>پرونده‌های سوانح شاگرد</h1>
           <p>کارت سوانح متعلم — مکاتب افغانستان</p>
         </div>
-        <button type="button" className="sw-btn sw-btn-ghost" onClick={() => navigate('/afghan-dashboard')}>
-          بازگشت به داشبورد
-        </button>
+        <div className="sw-header-actions">
+          <button type="button" className="sw-btn sw-btn-ghost" onClick={() => navigate('/afghan-sawaneh/reports')}>
+            گزارش‌های سوانح
+          </button>
+          <button type="button" className="sw-btn sw-btn-ghost" onClick={() => navigate('/afghan-dashboard')}>
+            بازگشت به داشبورد
+          </button>
+        </div>
       </header>
 
       <div className="sw-body">
