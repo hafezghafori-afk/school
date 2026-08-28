@@ -164,9 +164,45 @@ const syncFromStudent = async (cardOrStudentId, opts = {}) => {
   return card;
 };
 
+/**
+ * نظر نگرانِ یک صنف را روی کارت ثبت یا جایگزین می‌کند (حداکثر یک ردیف per صنف).
+ * @param {string|ObjectId} studentId شناسهٔ AfghanStudent
+ * @param {object} payload { grade, remark, healthStatus, academicYearId?, classId?, supervisorId?, supervisorName? }
+ * @param {{ actorId?: string|ObjectId }} [opts]
+ * @returns {Promise<import('mongoose').Document>}
+ */
+const upsertSupervisorRemark = async (studentId, payload = {}, opts = {}) => {
+  const grade = gradeNumber(payload.grade);
+  if (!grade) throw new Error('sawaneh_invalid_grade');
+
+  const card = await ensureCard(studentId, opts);
+
+  const entry = {
+    grade,
+    academicYearId: toObjectId(payload.academicYearId),
+    classId: toObjectId(payload.classId),
+    supervisorId: toObjectId(payload.supervisorId) || toObjectId(opts.actorId),
+    supervisorName: String(payload.supervisorName || '').trim(),
+    remark: String(payload.remark || '').trim(),
+    healthStatus: ['good', 'needs_followup', 'chronic_condition', ''].includes(payload.healthStatus)
+      ? payload.healthStatus
+      : '',
+    recordedAt: new Date()
+  };
+
+  card.supervisorRemarks = (card.supervisorRemarks || []).filter(
+    (item) => Number(item.grade) !== grade
+  );
+  card.supervisorRemarks.push(entry);
+  card.lastUpdatedBy = toObjectId(opts.actorId) || card.lastUpdatedBy;
+  await card.save();
+  return card;
+};
+
 module.exports = {
   ensureCard,
   syncFromStudent,
+  upsertSupervisorRemark,
   // helperهای داخلی برای تست/استفادهٔ مجدد
-  _internals: { gradeNumber, addressFromContact, dateLocal }
+  _internals: { gradeNumber, addressFromContact, dateLocal, toObjectId }
 };

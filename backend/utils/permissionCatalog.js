@@ -136,6 +136,38 @@ const LEGACY_PERMISSION_MAP = Object.freeze({
   ],
   manage_platform_requests: [
     'content.contacts.manage'
+  ],
+  // پروندهٔ سوانح شاگرد (مکاتب افغانستان) — دارندگان permissionهای زیر خودکار مجازند
+  'sawaneh.card.view': [
+    'manage_content', 'manage_users', 'manage_enrollments',
+    'students.profile.view', 'students.manage', 'education.core.manage',
+    'schools.reports.view', 'teachers.dashboard.access'
+  ],
+  'sawaneh.card.edit': [
+    'manage_content', 'manage_users', 'students.manage', 'education.core.manage'
+  ],
+  'sawaneh.card.supervisor_remark': [
+    'manage_content', 'education.core.manage', 'education.exams.manage',
+    'teachers.dashboard.access'
+  ],
+  'sawaneh.card.name_correction': [
+    'manage_users', 'students.manage'
+  ],
+  'sawaneh.card.separation': [
+    'manage_users', 'students.transfers.manage', 'students.lifecycle.manage'
+  ],
+  'sawaneh.transcript.view': [
+    'manage_content', 'grades.detail.view', 'education.result_tables.manage',
+    'reports.students.view', 'teachers.dashboard.access'
+  ],
+  'sawaneh.transcript.build': [
+    'manage_content', 'education.exams.manage', 'education.result_tables.manage'
+  ],
+  'sawaneh.transcript.finalize': [
+    'manage_content', 'education.result_tables.manage'
+  ],
+  'sawaneh.transcript.lock': [
+    'manage_content', 'settings.academic.manage'
   ]
 });
 
@@ -325,6 +357,20 @@ const PERMISSION_GROUPS = Object.freeze([
       'settings.security.manage',
       'access_school_manager',
       'access_head_teacher'
+    ]
+  },
+  {
+    key: 'sawaneh',
+    permissions: [
+      'sawaneh.card.view',
+      'sawaneh.card.edit',
+      'sawaneh.card.supervisor_remark',
+      'sawaneh.card.name_correction',
+      'sawaneh.card.separation',
+      'sawaneh.transcript.view',
+      'sawaneh.transcript.build',
+      'sawaneh.transcript.finalize',
+      'sawaneh.transcript.lock'
     ]
   }
 ]);
