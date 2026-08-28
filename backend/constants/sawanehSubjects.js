@@ -123,8 +123,42 @@ const DARI_SYNONYMS = Object.freeze({
   'کامپیوتر': 'computer',
   'تربیت بدنی': 'physical_ed',
   'ورزش': 'physical_ed',
-  'تدبیر منزل': 'physical_ed'
+  'تدبیر منزل': 'physical_ed',
+  // ترانویسیِ لاتینِ رایج در دادهٔ ثبت‌شده
+  'reyazi': 'math',
+  'riazi': 'math',
+  'dari': 'dari',
+  'pashto': 'pashto',
+  'englisi': 'english',
+  'english': 'english',
+  'sayns': 'science',
+  'science': 'science',
+  'ijtimaiyat': 'social',
+  'tafsir': 'tafsir',
+  'hifz': 'hifz',
+  'tajweed': 'tajweed',
+  'tajwid': 'tajweed',
+  'hadis': 'hadith',
+  'hadith': 'hadith',
+  'fiqh': 'fiqh',
+  'aqaid': 'aqaid',
+  'sirat': 'sirat',
+  'akhlaq': 'akhlaq',
+  'sarf': 'sarf',
+  'nahw': 'nahw',
+  'arabi': 'arabic',
+  'mantiq': 'mantiq',
+  'balaghat': 'balaghat',
+  'computer': 'computer',
+  'kampyutar': 'computer'
 });
+
+// نرمال‌سازیِ لاتین: حروف کوچک، حذف رقم/علائم، فشرده‌سازی فاصله
+const normalizeLatin = (value = '') => String(value || '')
+  .toLowerCase()
+  .replace(/[^a-z\s]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
 
 const isValidSawanehKey = (value = '') => SAWANEH_SUBJECT_KEYS.includes(String(value || '').trim());
 
@@ -167,6 +201,15 @@ const resolveSubjectKey = (subject = {}) => {
     const tokens = candidate.split(' ').filter(Boolean);
     const hit = singleWordSynonyms.find((syn) => tokens.includes(syn));
     if (hit) return DARI_SYNONYMS[hit];
+  }
+
+  // ۴) ترانویسیِ لاتین (مثلاً "reyazi 5"، "Dari 7")
+  const latinTokens = [subject.name, subject.nameDari]
+    .map((label) => normalizeLatin(label))
+    .filter(Boolean)
+    .flatMap((text) => text.split(' '));
+  for (const token of latinTokens) {
+    if (DARI_SYNONYMS[token]) return DARI_SYNONYMS[token];
   }
 
   return 'other';

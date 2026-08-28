@@ -4,7 +4,10 @@ const AfghanStudent = require('../models/AfghanStudent');
 const SchoolClass = require('../models/SchoolClass');
 const User = require('../models/User');
 const StudentSawanehCard = require('../models/StudentSawanehCard');
+const StudentAcademicTranscript = require('../models/StudentAcademicTranscript');
 const sawanehCardService = require('../services/sawanehCardService');
+const transcriptService = require('../services/transcriptService');
+const { computeAnnualMark, isSubjectPassed, resultTierFromAverage, promotionStatusFromFailedCount } = require('../constants/sawanehGrading');
 const { ok, fail } = require('../utils/response');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
@@ -30,7 +33,7 @@ const { gradeNumber } = sawanehCardService._internals;
 const isObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
 
 const cardResponsePopulate = (query) => query
-  .populate('studentId', 'personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari personalInfo.fatherName asasNumber registrationId academicInfo.currentGrade')
+  .populate('studentId', 'personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari personalInfo.fatherName asasNumber registrationId academicInfo.currentGrade academicInfo.academicYearId academicInfo.currentClassId')
   .populate('schoolId', 'name nameDari province district')
   .populate('createdBy', 'name email')
   .populate('lastUpdatedBy', 'name email');
@@ -309,6 +312,198 @@ router.post(
       if (error?.message === 'sawaneh_invalid_grade') return fail(res, 'صنف نامعتبر است.', 400);
       if (error?.message === 'sawaneh_student_without_school') return fail(res, 'شاگرد به هیچ مکتبی وصل نیست.', 400);
       return fail(res, 'ثبت نظر نگرانِ صنف ناموفق بود.', 500);
+    }
+  }
+);
+
+/* ============================ سوانح تعلیمی (فرم B) ============================ */
+
+const TRANSCRIPT_VIEW_ROLES = ['admin', 'principal', 'teacher', 'instructor', 'registration_manager'];
+const TRANSCRIPT_WRITE_ROLES = ['admin', 'principal', 'teacher', 'instructor', 'registration_manager'];
+
+const transcriptWarningMessage = (warning) => ({
+  transcript_grade_unresolved: 'صنفِ شاگرد در این سال قابل تشخیص نیست.',
+  transcript_school_unresolved: 'مکتبِ شاگرد قابل تشخیص نیست.'
+}[warning] || 'ساخت سوانح تعلیمی کامل نشد.');
+
+// GET /api/sawaneh/transcripts/:studentId — همهٔ سال‌ها
+router.get(
+  '/transcripts/:studentId',
+  requireAuth,
+  requireRole(TRANSCRIPT_VIEW_ROLES),
+  requirePermission('sawaneh.transcript.view'),
+  async (req, res) => {
+    try {
+      const { studentId } = req.params;
+      if (!isObjectId(studentId)) return fail(res, 'شناسهٔ شاگرد معتبر نیست.', 400);
+      const list = await StudentAcademicTranscript.find({ studentId })
+        .populate('academicYearId', 'title')
+        .sort({ grade: 1, createdAt: 1 })
+        .lean();
+      return ok(res, { data: list }, 'سوانح تعلیمی دریافت شد.');
+    } catch (error) {
+      console.error('GET transcripts error:', error?.message || error);
+      return fail(res, 'دریافت سوانح تعلیمی ناموفق بود.', 500);
+    }
+  }
+);
+
+// GET /api/sawaneh/transcripts/:studentId/:academicYearId — یک سال
+router.get(
+  '/transcripts/:studentId/:academicYearId',
+  requireAuth,
+  requireRole(TRANSCRIPT_VIEW_ROLES),
+  requirePermission('sawaneh.transcript.view'),
+  async (req, res) => {
+    try {
+      const { studentId, academicYearId } = req.params;
+      if (!isObjectId(studentId) || !isObjectId(academicYearId)) return fail(res, 'شناسه معتبر نیست.', 400);
+      const transcript = await StudentAcademicTranscript.findOne({ studentId, academicYearId })
+        .populate('academicYearId', 'title')
+        .populate('classId', 'title titleDari gradeLevel section')
+        .lean();
+      if (!transcript) return fail(res, 'برای این سال سوانح تعلیمی ساخته نشده است.', 404);
+      return ok(res, { data: transcript }, 'سوانح تعلیمی دریافت شد.');
+    } catch (error) {
+      console.error('GET transcript error:', error?.message || error);
+      return fail(res, 'دریافت سوانح تعلیمی ناموفق بود.', 500);
+    }
+  }
+);
+
+// POST /api/sawaneh/transcripts/:studentId/:academicYearId/rebuild — تولید/به‌روزرسانی از ExamResult
+router.post(
+  '/transcripts/:studentId/:academicYearId/rebuild',
+  requireAuth,
+  requireRole(TRANSCRIPT_WRITE_ROLES),
+  requirePermission('sawaneh.transcript.build'),
+  async (req, res) => {
+    try {
+      const { studentId, academicYearId } = req.params;
+      if (!isObjectId(studentId) || !isObjectId(academicYearId)) return fail(res, 'شناسه معتبر نیست.', 400);
+      const result = await transcriptService.rebuild(studentId, academicYearId, { actorId: req.user?.id || null });
+      if (!result.transcript) return fail(res, transcriptWarningMessage(result.warning), 422);
+      return ok(res, {
+        data: result.transcript,
+        locked: result.locked,
+        message: result.locked ? 'سوانح تعلیمی قفل است؛ تغییری اعمال نشد.' : undefined
+      }, result.locked ? 'سوانح تعلیمی قفل است.' : 'سوانح تعلیمی به‌روزرسانی شد.');
+    } catch (error) {
+      console.error('POST transcript rebuild error:', error?.message || error);
+      if (error?.message === 'transcript_student_not_found') return fail(res, 'شاگرد پیدا نشد.', 404);
+      return fail(res, 'به‌روزرسانی سوانح تعلیمی ناموفق بود.', 500);
+    }
+  }
+);
+
+// PUT /api/sawaneh/transcripts/:studentId/:academicYearId — ویرایش دستی (فقط state=draft)
+router.put(
+  '/transcripts/:studentId/:academicYearId',
+  requireAuth,
+  requireRole(TRANSCRIPT_WRITE_ROLES),
+  requirePermission('sawaneh.transcript.build'),
+  async (req, res) => {
+    try {
+      const { studentId, academicYearId } = req.params;
+      if (!isObjectId(studentId) || !isObjectId(academicYearId)) return fail(res, 'شناسه معتبر نیست.', 400);
+      const transcript = await StudentAcademicTranscript.findOne({ studentId, academicYearId });
+      if (!transcript) return fail(res, 'سوانح تعلیمی یافت نشد.', 404);
+      if (transcript.state === 'locked') return fail(res, 'سوانح تعلیمی قفل است.', 409);
+
+      if (typeof req.body?.examNotes === 'string') transcript.examNotes = req.body.examNotes;
+
+      if (Array.isArray(req.body?.rows) && transcript.state === 'draft') {
+        const patchByKey = new Map(req.body.rows.filter((r) => r && r.subjectKey).map((r) => [r.subjectKey, r]));
+        transcript.rows.forEach((row) => {
+          const patch = patchByKey.get(row.subjectKey);
+          if (!patch) return;
+          if (patch.midYearMark !== undefined) row.midYearMark = patch.midYearMark === '' ? null : Number(patch.midYearMark);
+          if (patch.finalMark !== undefined) row.finalMark = patch.finalMark === '' ? null : Number(patch.finalMark);
+          if (patch.sawiyaMark !== undefined) row.sawiyaMark = patch.sawiyaMark === '' ? null : Number(patch.sawiyaMark);
+          row.annualMark = computeAnnualMark(row.midYearMark, row.finalMark);
+          row.subjectPassed = isSubjectPassed(row.annualMark);
+          row.isManual = true;
+        });
+        const graded = transcript.rows.filter((row) => row.annualMark !== null && row.annualMark !== undefined);
+        transcript.totalObtained = Math.round(graded.reduce((sum, row) => sum + Number(row.annualMark || 0), 0) * 100) / 100;
+        transcript.subjectCount = graded.length;
+        transcript.average = graded.length ? Math.round((transcript.totalObtained / graded.length) * 100) / 100 : 0;
+        transcript.failedSubjectCount = graded.filter((row) => Number(row.annualMark) < 55).length;
+        transcript.resultTier = resultTierFromAverage(transcript.average, transcript.subjectCount);
+        transcript.promotionStatus = promotionStatusFromFailedCount(transcript.failedSubjectCount, transcript.subjectCount);
+      }
+
+      transcript.lastUpdatedBy = req.user?.id || transcript.lastUpdatedBy;
+      await transcript.save();
+      if (transcript.classId) {
+        await transcriptService.recomputeRanks({ classId: transcript.classId }, academicYearId);
+      }
+      const fresh = await StudentAcademicTranscript.findById(transcript._id).lean();
+      return ok(res, { data: fresh }, 'سوانح تعلیمی ذخیره شد.');
+    } catch (error) {
+      console.error('PUT transcript error:', error?.message || error);
+      return fail(res, 'ذخیرهٔ سوانح تعلیمی ناموفق بود.', 500);
+    }
+  }
+);
+
+const transcriptStateAction = (action, permission, roles) => async (req, res) => {
+  try {
+    const { studentId, academicYearId } = req.params;
+    if (!isObjectId(studentId) || !isObjectId(academicYearId)) return fail(res, 'شناسه معتبر نیست.', 400);
+    const opts = { actorId: req.user?.id || null };
+    if (action === 'lock') {
+      opts.supervisorSignedBy = req.body?.supervisorSignedBy || req.user?.id || null;
+      opts.teacherSignedBy = req.body?.teacherSignedBy || null;
+    }
+    const transcript = await transcriptService[action](studentId, academicYearId, null, opts);
+    return ok(res, { data: transcript }, 'انجام شد.');
+  } catch (error) {
+    console.error(`POST transcript ${action} error:`, error?.message || error);
+    if (error?.message === 'transcript_not_found') return fail(res, 'سوانح تعلیمی یافت نشد.', 404);
+    if (error?.message === 'transcript_locked') return fail(res, 'سوانح تعلیمی قفل است.', 409);
+    return fail(res, 'عملیات ناموفق بود.', 500);
+  }
+};
+
+router.post('/transcripts/:studentId/:academicYearId/finalize', requireAuth, requireRole(TRANSCRIPT_WRITE_ROLES), requirePermission('sawaneh.transcript.finalize'), transcriptStateAction('finalize'));
+router.post('/transcripts/:studentId/:academicYearId/reopen', requireAuth, requireRole(TRANSCRIPT_WRITE_ROLES), requirePermission('sawaneh.transcript.finalize'), transcriptStateAction('reopen'));
+router.post('/transcripts/:studentId/:academicYearId/lock', requireAuth, requireRole(['admin', 'principal', 'registration_manager']), requirePermission('sawaneh.transcript.lock'), transcriptStateAction('lock'));
+
+// POST /api/sawaneh/transcripts/class/:classId/:academicYearId/rebuild — دسته‌ای
+router.post(
+  '/transcripts/class/:classId/:academicYearId/rebuild',
+  requireAuth,
+  requireRole(TRANSCRIPT_WRITE_ROLES),
+  requirePermission('sawaneh.transcript.build'),
+  async (req, res) => {
+    try {
+      const { classId, academicYearId } = req.params;
+      if (!isObjectId(classId) || !isObjectId(academicYearId)) return fail(res, 'شناسه معتبر نیست.', 400);
+      const result = await transcriptService.rebuildClass(classId, academicYearId, { actorId: req.user?.id || null });
+      return ok(res, { data: result }, `سوانح تعلیمیِ ${result.count} شاگرد پردازش شد.`);
+    } catch (error) {
+      console.error('POST transcript class rebuild error:', error?.message || error);
+      return fail(res, 'پردازش دسته‌ای ناموفق بود.', 500);
+    }
+  }
+);
+
+// POST /api/sawaneh/transcripts/class/:classId/:academicYearId/recompute-ranks
+router.post(
+  '/transcripts/class/:classId/:academicYearId/recompute-ranks',
+  requireAuth,
+  requireRole(TRANSCRIPT_WRITE_ROLES),
+  requirePermission('sawaneh.transcript.build'),
+  async (req, res) => {
+    try {
+      const { classId, academicYearId } = req.params;
+      if (!isObjectId(classId) || !isObjectId(academicYearId)) return fail(res, 'شناسه معتبر نیست.', 400);
+      const result = await transcriptService.recomputeRanks({ classId }, academicYearId);
+      return ok(res, { data: result }, 'رتبه‌بندی بازمحاسبه شد.');
+    } catch (error) {
+      console.error('POST recompute-ranks error:', error?.message || error);
+      return fail(res, 'بازمحاسبهٔ رتبه ناموفق بود.', 500);
     }
   }
 );

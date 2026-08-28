@@ -52,6 +52,19 @@ const SEPARATION_REASONS = {
   other: 'سایر'
 };
 
+const TIER_LABELS = {
+  aali: 'اعلی', ali: 'عالی', motawaset: 'متوسط', nakam: 'ناکام', pending: 'نامشخص'
+};
+const PROMOTION_LABELS = {
+  kamyab: 'کامیاب',
+  kamyab_makeup: 'کامیاب (با حق چاره‌جویی)',
+  mashroot: 'مشروط',
+  nakam_senf: 'ناکام صنف',
+  pending: 'نامشخص'
+};
+const TRANSCRIPT_STATE_LABELS = { draft: 'پیش‌نویس', finalized: 'نهایی‌شده', locked: 'قفل‌شده' };
+const CATEGORY_LABELS = { religious: 'مضامین دینی', general: 'مضامین عمومی', '': 'سایر' };
+
 const gradeNumber = (value) => {
   const match = String(value == null ? '' : value).match(/\d+/);
   if (!match) return null;
@@ -92,6 +105,13 @@ const SawanehWorkspace = () => {
   const [form, setForm] = useState(null);
   const [remarkDraft, setRemarkDraft] = useState({ grade: null, remark: '', healthStatus: '' });
   const [remarkSaving, setRemarkSaving] = useState(false);
+
+  // تب سوانح تعلیمی
+  const [activeTab, setActiveTab] = useState('card');
+  const [transcripts, setTranscripts] = useState([]);
+  const [activeYearId, setActiveYearId] = useState('');
+  const [transcriptBusy, setTranscriptBusy] = useState(false);
+  const [examNotesDraft, setExamNotesDraft] = useState('');
 
   const flash = useCallback((message) => {
     setToast(message);
@@ -270,6 +290,84 @@ const SawanehWorkspace = () => {
     return map;
   }, [card]);
 
+  // ---- سوانح تعلیمی ----
+  const loadTranscripts = useCallback(async (studentId) => {
+    if (!studentId) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/sawaneh/transcripts/${studentId}`, { headers: authHeaders() });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const list = Array.isArray(data.data) ? data.data : [];
+        setTranscripts(list);
+        setActiveYearId((prev) => prev || (list[0] ? String(list[0].academicYearId?._id || list[0].academicYearId) : ''));
+      } else {
+        setTranscripts([]);
+      }
+    } catch {
+      setTranscripts([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedId) loadTranscripts(selectedId);
+    setActiveYearId('');
+    setActiveTab('card');
+  }, [selectedId, loadTranscripts]);
+
+  const activeTranscript = useMemo(() => {
+    if (!activeYearId) return null;
+    return transcripts.find((item) => String(item.academicYearId?._id || item.academicYearId) === String(activeYearId)) || null;
+  }, [transcripts, activeYearId]);
+
+  useEffect(() => {
+    setExamNotesDraft(activeTranscript?.examNotes || '');
+  }, [activeTranscript]);
+
+  const studentYearId = cardStudent?.academicInfo?.academicYearId
+    ? String(cardStudent.academicInfo.academicYearId._id || cardStudent.academicInfo.academicYearId)
+    : '';
+
+  const runTranscript = async (path, method = 'POST', body) => {
+    if (!selectedId) return;
+    setTranscriptBusy(true);
+    setCardError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/sawaneh/transcripts/${selectedId}${path}`, {
+        method,
+        headers: authHeaders(),
+        ...(body ? { body: JSON.stringify(body) } : {})
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.message || 'عملیات ناموفق بود');
+      await loadTranscripts(selectedId);
+      if (data.data?.academicYearId) {
+        setActiveYearId(String(data.data.academicYearId?._id || data.data.academicYearId));
+      }
+      flash(data.message || 'انجام شد.');
+    } catch (err) {
+      setCardError(err.message || 'خطا در عملیات سوانح تعلیمی');
+    } finally {
+      setTranscriptBusy(false);
+    }
+  };
+
+  const rebuildTranscript = () => {
+    const yearId = activeYearId || studentYearId;
+    if (!yearId) {
+      setCardError('سال تحصیلیِ فعالِ شاگرد مشخص نیست.');
+      return;
+    }
+    runTranscript(`/${yearId}/rebuild`);
+  };
+  const saveExamNotes = () => activeYearId && runTranscript(`/${activeYearId}`, 'PUT', { examNotes: examNotesDraft });
+  const finalizeTranscript = () => activeYearId && runTranscript(`/${activeYearId}/finalize`);
+  const reopenTranscript = () => activeYearId && runTranscript(`/${activeYearId}/reopen`);
+  const lockTranscript = () => {
+    if (!activeYearId) return;
+    if (!window.confirm('پس از قفل، سوانح تعلیمیِ این سال غیرقابل تغییر می‌شود. ادامه؟')) return;
+    runTranscript(`/${activeYearId}/lock`);
+  };
+
   const currentStudentGrade = gradeNumber(cardStudent?.academicInfo?.currentGrade || '');
 
   return (
@@ -355,25 +453,196 @@ const SawanehWorkspace = () => {
                     {currentStudentGrade ? ` · صنف ${GRADE_LABELS[currentStudentGrade - 1]}` : ''}
                   </p>
                 </div>
-                <div className="sw-card-head-actions">
-                  <label className="sw-status-toggle">
-                    وضعیت کارت
-                    <select
-                      value={form.status}
-                      onChange={(event) => updateForm({ status: event.target.value })}
-                    >
-                      <option value="draft">پیش‌نویس</option>
-                      <option value="active">فعال</option>
-                    </select>
-                  </label>
-                  <button type="button" className="sw-btn sw-btn-primary" onClick={saveCard} disabled={saving}>
-                    {saving ? 'در حال ذخیره…' : 'ذخیرهٔ کارت'}
-                  </button>
-                </div>
+                {activeTab === 'card' && (
+                  <div className="sw-card-head-actions">
+                    <label className="sw-status-toggle">
+                      وضعیت کارت
+                      <select
+                        value={form.status}
+                        onChange={(event) => updateForm({ status: event.target.value })}
+                      >
+                        <option value="draft">پیش‌نویس</option>
+                        <option value="active">فعال</option>
+                      </select>
+                    </label>
+                    <button type="button" className="sw-btn sw-btn-primary" onClick={saveCard} disabled={saving}>
+                      {saving ? 'در حال ذخیره…' : 'ذخیرهٔ کارت'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="sw-tabs">
+                <button
+                  type="button"
+                  className={activeTab === 'card' ? 'is-active' : ''}
+                  onClick={() => setActiveTab('card')}
+                >
+                  کارت سوانح
+                </button>
+                <button
+                  type="button"
+                  className={activeTab === 'transcript' ? 'is-active' : ''}
+                  onClick={() => setActiveTab('transcript')}
+                >
+                  سوانح تعلیمی
+                </button>
               </div>
 
               {toast && <div className="sw-toast">{toast}</div>}
 
+              {activeTab === 'transcript' && (
+                <div className="sw-transcript">
+                  <div className="sw-transcript-bar">
+                    <div className="sw-year-chips">
+                      {transcripts.length === 0 && <span className="sw-muted">هنوز سوانح تعلیمی ساخته نشده.</span>}
+                      {transcripts.map((item) => {
+                        const yid = String(item.academicYearId?._id || item.academicYearId);
+                        return (
+                          <button
+                            key={yid}
+                            type="button"
+                            className={activeYearId === yid ? 'is-active' : ''}
+                            onClick={() => setActiveYearId(yid)}
+                          >
+                            {item.yearLabel || item.academicYearId?.title || 'سال'}
+                            {item.grade ? ` · صنف ${GRADE_LABELS[item.grade - 1]}` : ''}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      type="button"
+                      className="sw-btn sw-btn-primary"
+                      onClick={rebuildTranscript}
+                      disabled={transcriptBusy}
+                    >
+                      {transcriptBusy ? 'در حال پردازش…' : 'به‌روزرسانی از نمرات'}
+                    </button>
+                  </div>
+
+                  {!activeTranscript && (
+                    <p className="sw-muted">
+                      برای سالِ جاری «به‌روزرسانی از نمرات» را بزنید تا سوانح تعلیمی از نتایج امتحانات ساخته شود.
+                    </p>
+                  )}
+
+                  {activeTranscript && (
+                    <>
+                      <div className="sw-transcript-state">
+                        <span className={`sw-chip sw-chip-${activeTranscript.state === 'locked' ? 'closed' : activeTranscript.state === 'finalized' ? 'active' : 'draft'}`}>
+                          {TRANSCRIPT_STATE_LABELS[activeTranscript.state]}
+                        </span>
+                        {activeTranscript.rankProvisional && <span className="sw-hint">رتبه موقتی است</span>}
+                        <div className="sw-transcript-actions">
+                          {activeTranscript.state === 'draft' && (
+                            <button type="button" className="sw-btn" onClick={finalizeTranscript} disabled={transcriptBusy}>نهایی‌سازی</button>
+                          )}
+                          {activeTranscript.state === 'finalized' && (
+                            <>
+                              <button type="button" className="sw-btn" onClick={reopenTranscript} disabled={transcriptBusy}>بازگشایی</button>
+                              <button type="button" className="sw-btn sw-btn-primary" onClick={lockTranscript} disabled={transcriptBusy}>قفل و مهر</button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="sw-transcript-cols">
+                        <div className="sw-table-wrap">
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>مضمون</th>
+                                <th>سویه</th>
+                                <th>چهارونیم‌ماهه</th>
+                                <th>سالانه</th>
+                                <th>مجموع</th>
+                                <th>وضعیت</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {['religious', 'general', ''].map((cat) => {
+                                const catRows = (activeTranscript.rows || []).filter((row) => (row.category || '') === cat);
+                                if (catRows.length === 0) return null;
+                                return (
+                                  <React.Fragment key={cat || 'other'}>
+                                    <tr className="sw-cat-row"><td colSpan={6}>{CATEGORY_LABELS[cat]}</td></tr>
+                                    {catRows.map((row, idx) => (
+                                      <tr key={`${cat}-${idx}`} className={row.subjectPassed === false ? 'sw-row-fail' : ''}>
+                                        <td>{row.subjectLabel}{row.isManual ? ' ✎' : ''}</td>
+                                        <td>{row.sawiyaMark ?? '—'}</td>
+                                        <td>{row.midYearMark ?? '—'}</td>
+                                        <td>{row.finalMark ?? '—'}</td>
+                                        <td>{row.annualMark ?? '—'}</td>
+                                        <td>{row.subjectPassed === null || row.subjectPassed === undefined ? '—' : row.subjectPassed ? 'کامیاب' : 'ناکام'}</td>
+                                      </tr>
+                                    ))}
+                                  </React.Fragment>
+                                );
+                              })}
+                              <tr className="sw-sum-row">
+                                <td>مجموعه</td>
+                                <td colSpan={3} />
+                                <td>{fmtNum(activeTranscript.totalObtained)}</td>
+                                <td />
+                              </tr>
+                              <tr className="sw-sum-row">
+                                <td>اوسط نمرات</td>
+                                <td colSpan={3} />
+                                <td>{activeTranscript.average}</td>
+                                <td>{TIER_LABELS[activeTranscript.resultTier]}</td>
+                              </tr>
+                              <tr className="sw-sum-row">
+                                <td>نتیجه</td>
+                                <td colSpan={3} />
+                                <td colSpan={2}>{PROMOTION_LABELS[activeTranscript.promotionStatus]}</td>
+                              </tr>
+                              <tr className="sw-sum-row">
+                                <td>درجه (رتبه در صنف)</td>
+                                <td colSpan={3} />
+                                <td colSpan={2}>
+                                  {activeTranscript.rank
+                                    ? `${fmtNum(activeTranscript.rank)} از ${fmtNum(activeTranscript.classSize || 0)}`
+                                    : '—'}
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="sw-attend-card">
+                          <h4>حاضری</h4>
+                          <dl>
+                            <div><dt>ایام سال تعلیمی</dt><dd>{fmtNum(activeTranscript.attendance?.schoolDays)}</dd></div>
+                            <div><dt>حاضر</dt><dd>{fmtNum(activeTranscript.attendance?.present)}</dd></div>
+                            <div><dt>غیرحاضر</dt><dd>{fmtNum(activeTranscript.attendance?.absent)}</dd></div>
+                            <div><dt>مریض</dt><dd>{fmtNum(activeTranscript.attendance?.sick)}</dd></div>
+                            <div><dt>رخصت</dt><dd>{fmtNum(activeTranscript.attendance?.leave)}</dd></div>
+                          </dl>
+                        </div>
+                      </div>
+
+                      <label className="sw-exam-notes">
+                        توضیحات در مورد امتحانات متعلم
+                        <textarea
+                          rows={3}
+                          value={examNotesDraft}
+                          disabled={activeTranscript.state === 'locked'}
+                          onChange={(event) => setExamNotesDraft(event.target.value)}
+                        />
+                        {activeTranscript.state !== 'locked' && (
+                          <button type="button" className="sw-btn" onClick={saveExamNotes} disabled={transcriptBusy}>
+                            ذخیرهٔ توضیحات
+                          </button>
+                        )}
+                      </label>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'card' && (
+              <>
               <div className="sw-grid">
                 <fieldset className="sw-section">
                   <legend>زبان</legend>
@@ -673,6 +942,8 @@ const SawanehWorkspace = () => {
                     </span>
                   </div>
                 </fieldset>
+              )}
+              </>
               )}
             </>
           )}
