@@ -55,11 +55,18 @@ const findMemberships = async (studentId, academicYearId) => {
   }).select('_id classId student enrolledAt endedAt').lean();
 };
 
-const resolveContext = async (student, memberships, academicYearId) => {
+const resolveContext = async (student, memberships, academicYearId, preferredMembershipIds = []) => {
   const academic = student.academicInfo || {};
-  let classId = memberships.find((m) => m.classId)?.classId
+  const preferred = new Set((preferredMembershipIds || []).map(String));
+
+  // اولویت صنف: (۱) عضویتی که واقعاً نتیجهٔ امتحان دارد (۲) صنفِ جاریِ خودِ شاگرد
+  // (۳) هر عضویتِ همان سال. — تا وقتی شاگرد چند عضویت (مثلاً تبدیلی) دارد، صنف از
+  // عضویتِ مرتبط با نمرات گرفته شود نه اولین عضویت.
+  const membershipWithResults = memberships.find((m) => m.classId && preferred.has(String(m._id)));
+  let classId = membershipWithResults?.classId
     || academic.currentClassId
     || academic.classId
+    || memberships.find((m) => m.classId)?.classId
     || null;
 
   let grade = gradeNumber(academic.currentGrade);
@@ -196,7 +203,16 @@ const rebuild = async (studentId, academicYearId, opts = {}) => {
 
   const memberships = await findMemberships(sid, yid);
   const membershipIds = memberships.map((m) => m._id);
-  const ctx = await resolveContext(student, memberships, yid);
+
+  const results = membershipIds.length
+    ? await ExamResult.find({ studentMembershipId: { $in: membershipIds }, academicYearId: yid })
+      .populate('subjectId', 'nameDari name namePashto code ministryCode sawanehKey resultOrder category')
+      .populate('examTypeId', 'code title')
+      .lean()
+    : [];
+
+  const resultMembershipIds = [...new Set(results.map((r) => String(r.studentMembershipId)).filter(Boolean))];
+  const ctx = await resolveContext(student, memberships, yid, resultMembershipIds);
 
   if (!ctx.grade) {
     return { transcript: null, changed: false, locked: false, warning: 'transcript_grade_unresolved' };
@@ -212,13 +228,6 @@ const rebuild = async (studentId, academicYearId, opts = {}) => {
   if (existing && existing.state === 'locked') {
     return { transcript: existing, changed: false, locked: true };
   }
-
-  const results = membershipIds.length
-    ? await ExamResult.find({ studentMembershipId: { $in: membershipIds }, academicYearId: yid })
-      .populate('subjectId', 'nameDari name namePashto code ministryCode sawanehKey resultOrder category')
-      .populate('examTypeId', 'code title')
-      .lean()
-    : [];
 
   const rows = buildRows(results, existing?.rows || []);
   const totals = summarize(rows);
