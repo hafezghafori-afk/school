@@ -106,6 +106,9 @@ const SawanehWorkspace = () => {
   const [remarkDraft, setRemarkDraft] = useState({ grade: null, remark: '', healthStatus: '' });
   const [remarkSaving, setRemarkSaving] = useState(false);
 
+  const [sepDraft, setSepDraft] = useState({ letterNo: '', penaltyAmount: '', penaltyPaid: false });
+  const [sepSaving, setSepSaving] = useState(false);
+
   // تب سوانح تعلیمی
   const [activeTab, setActiveTab] = useState('card');
   const [transcripts, setTranscripts] = useState([]);
@@ -183,6 +186,11 @@ const SawanehWorkspace = () => {
         (nextCard.studentId && nextCard.studentId.academicInfo && nextCard.studentId.academicInfo.currentGrade) || ''
       );
       setRemarkDraft({ grade: studentGrade, remark: '', healthStatus: '' });
+      setSepDraft({
+        letterNo: nextCard.separation?.letterNo || '',
+        penaltyAmount: nextCard.separation?.penaltyAmount ? String(nextCard.separation.penaltyAmount) : '',
+        penaltyPaid: Boolean(nextCard.separation?.penaltyPaid)
+      });
     } catch (err) {
       setCardError(err.message || 'خطا در اتصال به سرور');
     } finally {
@@ -281,6 +289,31 @@ const SawanehWorkspace = () => {
       setCardError(err.message || 'خطا در ثبت نظر');
     } finally {
       setRemarkSaving(false);
+    }
+  };
+
+  const saveSeparation = async () => {
+    if (!selectedId) return;
+    setSepSaving(true);
+    setCardError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/sawaneh/cards/${selectedId}/separation`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          letterNo: sepDraft.letterNo,
+          penaltyAmount: sepDraft.penaltyAmount === '' ? 0 : Number(sepDraft.penaltyAmount),
+          penaltyPaid: sepDraft.penaltyPaid
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.message || 'ذخیره ناموفق بود');
+      setCard(data.data);
+      flash('جزئیاتِ منفکی ذخیره شد.');
+    } catch (err) {
+      setCardError(err.message || 'خطا در ذخیرهٔ منفکی');
+    } finally {
+      setSepSaving(false);
     }
   };
 
@@ -950,11 +983,36 @@ const SawanehWorkspace = () => {
                     <span>علت: {SEPARATION_REASONS[card.separation.reason] || card.separation.reasonText || '—'}</span>
                     <span>صنف: {card.separation.grade ? GRADE_LABELS[card.separation.grade - 1] : '—'}</span>
                     <span>تاریخ: {card.separation.dateLocal || '—'}</span>
-                    <span>نمبر مکتوب: {card.separation.letterNo || '—'}</span>
-                    <span>
-                      جریمه: {fmtNum(card.separation.penaltyAmount)}
-                      {card.separation.penaltyPaid ? ' (پرداخت‌شده)' : ''}
-                    </span>
+                  </div>
+                  <div className="sw-relative-row" style={{ gridTemplateColumns: '1fr 1fr auto auto' }}>
+                    <label>
+                      نمبر مکتوب
+                      <input
+                        type="text"
+                        value={sepDraft.letterNo}
+                        onChange={(event) => setSepDraft((prev) => ({ ...prev, letterNo: event.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      جریمه
+                      <input
+                        type="number"
+                        min="0"
+                        value={sepDraft.penaltyAmount}
+                        onChange={(event) => setSepDraft((prev) => ({ ...prev, penaltyAmount: event.target.value }))}
+                      />
+                    </label>
+                    <label className="sw-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={sepDraft.penaltyPaid}
+                        onChange={(event) => setSepDraft((prev) => ({ ...prev, penaltyPaid: event.target.checked }))}
+                      />
+                      پرداخت‌شده
+                    </label>
+                    <button type="button" className="sw-btn" onClick={saveSeparation} disabled={sepSaving}>
+                      {sepSaving ? 'در حال ذخیره…' : 'ذخیرهٔ منفکی'}
+                    </button>
                   </div>
                 </fieldset>
               )}

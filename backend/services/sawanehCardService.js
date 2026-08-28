@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const StudentSawanehCard = require('../models/StudentSawanehCard');
+const StudentAcademicTranscript = require('../models/StudentAcademicTranscript');
 const AfghanStudent = require('../models/AfghanStudent');
 const AfghanSchool = require('../models/AfghanSchool');
 const { formatAfghanStoredDateLabel } = require('../utils/afghanDate');
@@ -199,10 +200,191 @@ const upsertSupervisorRemark = async (studentId, payload = {}, opts = {}) => {
   return card;
 };
 
+// نگاشتِ فیلدهای نامِ AfghanStudent → کلیدِ اصلاح شهرت در کارت
+const NAME_FIELD_MAP = {
+  firstNameDari: 'name',
+  firstName: 'name',
+  lastNameDari: 'lastName',
+  lastName: 'lastName',
+  fatherName: 'fatherName',
+  fatherNameEnglish: 'fatherName',
+  grandfatherName: 'grandfatherName'
+};
+const TRACKED_NAME_FIELDS = Object.keys(NAME_FIELD_MAP);
+
+/**
+ * تفاوتِ فیلدهای نام بین مقادیر قبلی و جدید را برمی‌گرداند (فقط کلیدهایی که در payload آمده‌اند).
+ * @returns {Array<{ field:string, sourceField:string, oldValue:string, newValue:string }>}
+ */
+const diffNameFields = (previousPersonalInfo = {}, incomingPersonalInfo = {}) => {
+  const diffs = [];
+  TRACKED_NAME_FIELDS.forEach((sourceField) => {
+    if (!Object.prototype.hasOwnProperty.call(incomingPersonalInfo, sourceField)) return;
+    const before = String(previousPersonalInfo?.[sourceField] || '').trim();
+    const after = String(incomingPersonalInfo?.[sourceField] || '').trim();
+    if (before !== after) {
+      diffs.push({ field: NAME_FIELD_MAP[sourceField], sourceField, oldValue: before, newValue: after });
+    }
+  });
+  return diffs;
+};
+
+/**
+ * ثبتِ اصلاح شهرت در کارت سوانح (پس از ذخیرهٔ AfghanStudent، با نمبر مکتوبِ اجباری).
+ * @param {string|ObjectId} studentId
+ * @param {Array<{ field, oldValue, newValue }>} corrections
+ * @param {{ letterNo:string, date?:Date, note?:string, actorId?:string }} meta
+ */
+const recordNameCorrections = async (studentId, corrections = [], meta = {}) => {
+  if (!Array.isArray(corrections) || corrections.length === 0) return null;
+  const letterNo = String(meta.letterNo || '').trim();
+  if (!letterNo) throw new Error('sawaneh_name_correction_letter_required');
+
+  const card = await ensureCard(studentId, { actorId: meta.actorId });
+  const when = meta.date ? new Date(meta.date) : new Date();
+
+  // یک ردیف per کلیدِ نگاشت‌شده (اگر دری و انگلیسی هر دو عوض شده باشند، دری اولویت دارد)
+  const byField = new Map();
+  corrections.forEach((item) => {
+    if (!item || !item.field) return;
+    if (!byField.has(item.field)) byField.set(item.field, item);
+  });
+
+  byField.forEach((item) => {
+    card.nameCorrections.push({
+      field: item.field,
+      oldValue: item.oldValue || '',
+      newValue: item.newValue || '',
+      letterNo,
+      date: when,
+      dateLocal: dateLocal(when),
+      note: String(meta.note || '').trim(),
+      recordedBy: toObjectId(meta.actorId)
+    });
+  });
+  card.lastUpdatedBy = toObjectId(meta.actorId) || card.lastUpdatedBy;
+  await card.save();
+  return card;
+};
+
+const LIFECYCLE_END_REASON = {
+  transfer_out: 'transfer',
+  dropout: 'dropout',
+  expulsion: 'expulsion',
+  graduation: 'graduation'
+};
+const LIFECYCLE_REENTRY_KIND = {
+  transfer_in: 'transfer_in',
+  re_enrollment: 're_admission'
+};
+
+/**
+ * هم‌گام‌سازیِ کارت سوانح با یک رویدادِ چرخهٔ حیات (best-effort، پس از commit صدا زده می‌شود).
+ * end actions → پرکردنِ بخشِ منفکی + بستنِ کارت + قفلِ ترانسکریپت‌ها.
+ * transfer_in / re_enrollment → افزودنِ ردیفِ شمولیت + بازکردنِ کارت.
+ * @param {{ afghanStudentId, action, effectiveAt, eventId, membership?, actorId? }} payload
+ */
+const onLifecycleEvent = async ({ afghanStudentId, action, effectiveAt, eventId, actorId } = {}) => {
+  const sid = toObjectId(afghanStudentId);
+  if (!sid) return null;
+  const endReason = LIFECYCLE_END_REASON[action];
+  const reentryKind = LIFECYCLE_REENTRY_KIND[action];
+  if (!endReason && !reentryKind) return null;
+
+  const card = await ensureCard(sid, { actorId });
+  const student = await AfghanStudent.findById(sid).select('academicInfo asasNumber').lean();
+  const when = effectiveAt ? new Date(effectiveAt) : new Date();
+  const grade = gradeNumber(student?.academicInfo?.currentGrade);
+
+  if (endReason) {
+    const existing = card.separation || {};
+    card.separation = {
+      isSeparated: true,
+      date: when,
+      dateLocal: dateLocal(when),
+      letterNo: existing.letterNo || '',
+      grade: grade || existing.grade || null,
+      reason: endReason,
+      reasonText: existing.reasonText || '',
+      penaltyAmount: existing.penaltyAmount || 0,
+      penaltyPaid: existing.penaltyPaid || false,
+      penaltyReceiptId: existing.penaltyReceiptId || null,
+      sourceEventId: toObjectId(eventId)
+    };
+    card.status = 'closed';
+    card.lastUpdatedBy = toObjectId(actorId) || card.lastUpdatedBy;
+    await card.save();
+
+    await StudentAcademicTranscript.updateMany(
+      { studentId: sid, state: { $ne: 'locked' } },
+      { $set: { state: 'locked', lockedAt: when, lockedBy: toObjectId(actorId) || null, sealApplied: true } }
+    );
+    return card;
+  }
+
+  // reentry
+  const eid = toObjectId(eventId);
+  const already = eid && (card.enrollmentHistory || []).some((row) => String(row.sourceEventId || '') === String(eid));
+  if (!already) {
+    const schoolId = toObjectId(student?.academicInfo?.currentSchool);
+    card.enrollmentHistory.push({
+      schoolName: await resolveSchoolName(schoolId),
+      schoolId,
+      asasNumber: String(student?.asasNumber || '').trim(),
+      grade,
+      date: when,
+      dateLocal: dateLocal(when),
+      letterNo: '',
+      kind: reentryKind,
+      isManual: false,
+      sourceEventId: eid
+    });
+  }
+  if (card.status === 'closed') card.status = 'active';
+  // بازگشتِ شاگرد → پاک‌کردنِ کاملِ بخشِ منفکی (بازگشت در enrollmentHistory ثبت شده است)
+  if (card.separation && card.separation.isSeparated) {
+    card.separation = {
+      isSeparated: false,
+      date: null, dateLocal: '', letterNo: '', grade: null,
+      reason: '', reasonText: '',
+      penaltyAmount: 0, penaltyPaid: false, penaltyReceiptId: null,
+      sourceEventId: null
+    };
+  }
+  card.lastUpdatedBy = toObjectId(actorId) || card.lastUpdatedBy;
+  await card.save();
+  return card;
+};
+
+/**
+ * تکمیلِ دستیِ جزئیاتِ منفکی روی کارت (نمبر مکتوب، جریمه، وضعیت پرداخت).
+ */
+const updateSeparationDetails = async (studentId, payload = {}, opts = {}) => {
+  const card = await ensureCard(studentId, opts);
+  const sep = card.separation || {};
+  if (typeof payload.letterNo === 'string') sep.letterNo = payload.letterNo.trim();
+  if (typeof payload.reasonText === 'string') sep.reasonText = payload.reasonText.trim();
+  if (payload.penaltyAmount !== undefined) {
+    const amount = Number(payload.penaltyAmount);
+    sep.penaltyAmount = Number.isFinite(amount) && amount > 0 ? amount : 0;
+  }
+  if (typeof payload.penaltyPaid === 'boolean') sep.penaltyPaid = payload.penaltyPaid;
+  if (payload.penaltyReceiptId !== undefined) sep.penaltyReceiptId = toObjectId(payload.penaltyReceiptId);
+  card.separation = sep;
+  card.lastUpdatedBy = toObjectId(opts.actorId) || card.lastUpdatedBy;
+  await card.save();
+  return card;
+};
+
 module.exports = {
   ensureCard,
   syncFromStudent,
   upsertSupervisorRemark,
+  diffNameFields,
+  recordNameCorrections,
+  onLifecycleEvent,
+  updateSeparationDetails,
+  TRACKED_NAME_FIELDS,
   // helperهای داخلی برای تست/استفادهٔ مجدد
-  _internals: { gradeNumber, addressFromContact, dateLocal, toObjectId }
+  _internals: { gradeNumber, addressFromContact, dateLocal, toObjectId, NAME_FIELD_MAP }
 };

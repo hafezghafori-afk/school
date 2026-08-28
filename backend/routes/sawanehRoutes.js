@@ -316,6 +316,36 @@ router.post(
   }
 );
 
+// POST /api/sawaneh/cards/:studentId/separation — تکمیلِ دستیِ جزئیاتِ منفکی (نمبر مکتوب، جریمه)
+router.post(
+  '/cards/:studentId/separation',
+  requireAuth,
+  requireRole(['admin', 'principal', 'registration_manager', 'finance_manager']),
+  requirePermission('sawaneh.card.separation'),
+  async (req, res) => {
+    try {
+      const { studentId } = req.params;
+      if (!isObjectId(studentId)) return fail(res, 'شناسهٔ شاگرد معتبر نیست.', 400);
+      const studentSchoolId = await loadStudentSchoolId(studentId);
+      if (studentSchoolId === null) return fail(res, 'شاگرد پیدا نشد.', 404);
+
+      const card = await sawanehCardService.updateSeparationDetails(studentId, {
+        letterNo: req.body?.letterNo,
+        reasonText: req.body?.reasonText,
+        penaltyAmount: req.body?.penaltyAmount,
+        penaltyPaid: req.body?.penaltyPaid,
+        penaltyReceiptId: req.body?.penaltyReceiptId
+      }, { actorId: req.user?.id || null });
+
+      const populated = await cardResponsePopulate(StudentSawanehCard.findById(card._id));
+      return ok(res, { data: populated }, 'جزئیاتِ منفکی به‌روزرسانی شد.');
+    } catch (error) {
+      console.error('POST sawaneh separation error:', error?.message || error);
+      return fail(res, 'به‌روزرسانی جزئیاتِ منفکی ناموفق بود.', 500);
+    }
+  }
+);
+
 /* ============================ سوانح تعلیمی (فرم B) ============================ */
 
 const TRANSCRIPT_VIEW_ROLES = ['admin', 'principal', 'teacher', 'instructor', 'registration_manager'];
