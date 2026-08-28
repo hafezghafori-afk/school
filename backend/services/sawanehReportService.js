@@ -159,9 +159,16 @@ const getOverview = async (filter = {}) => {
     };
   });
 
+  const cardsActive = cards.filter((c) => c.status === 'active').length;
+
   return {
     counts: {
+      activeStudents: students.length,
+      cardsCreated: cards.length,
+      cardsActive,
+      cardsMissing: students.length - cards.length,
       incompleteCards: incompleteCards.length,
+      transcriptsTotal: transcripts.length,
       unfinalizedTranscripts: unfinalizedList.length,
       unpaidPenalties: unpaidPenalties.length,
       unpaidPenaltyTotal: unpaidPenalties.reduce((sum, p) => sum + Number(p.amount || 0), 0)

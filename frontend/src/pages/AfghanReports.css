@@ -574,3 +574,33 @@
     font-size: 24px;
   }
 }
+
+/* ===== dark-glass theme override (auto-appended) ===== */
+.afghan-reports { background: transparent !important; color: #f6f7fb; }
+.afghan-reports h1, .afghan-reports h2, .afghan-reports h3, .afghan-reports h4, .afghan-reports h5,
+.afghan-reports strong, .afghan-reports label, .afghan-reports legend, .afghan-reports dt, .afghan-reports th { color: #f6f7fb !important; }
+.afghan-reports p, .afghan-reports span, .afghan-reports li, .afghan-reports td, .afghan-reports dd, .afghan-reports small { color: rgba(246, 247, 251, 0.82); }
+.afghan-reports [class*="header"], .afghan-reports [class*="card"], .afghan-reports [class*="panel"],
+.afghan-reports [class*="section"], .afghan-reports [class*="box"], .afghan-reports [class*="stat"],
+.afghan-reports [class*="tile"], .afghan-reports [class*="widget"], .afghan-reports table, .afghan-reports form {
+  background: rgba(255, 255, 255, 0.045) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+.afghan-reports [class*="gradient"], .afghan-reports [class*="hero"] { background: rgba(255, 255, 255, 0.045) !important; }
+.afghan-reports input, .afghan-reports select, .afghan-reports textarea {
+  background: #15263a !important;
+  color: #f6f7fb !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+}
+.afghan-reports select option { background: #15263a; color: #f6f7fb; }
+.afghan-reports th, .afghan-reports td { border-color: rgba(255, 255, 255, 0.12) !important; }
+.afghan-reports thead th, .afghan-reports table th { background: rgba(255, 255, 255, 0.06) !important; }
+.afghan-reports button:not([class*="danger"]):not([class*="delete"]):not([class*="remove"]) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f6f7fb;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+.afghan-reports a { color: #4fd0a8; }
