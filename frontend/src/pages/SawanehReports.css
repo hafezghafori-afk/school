@@ -20,7 +20,23 @@
   font-family: 'Vazirmatn', 'B Nazanin', Tahoma, sans-serif;
 }
 
-.sawaneh-reports select option { color: #0b1220; }
+.sawaneh-reports select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: #15263a !important;
+  background-image: linear-gradient(45deg, transparent 50%, rgba(246, 247, 251, 0.55) 50%),
+    linear-gradient(135deg, rgba(246, 247, 251, 0.55) 50%, transparent 50%) !important;
+  background-position: left 0.9rem center, left 0.55rem center !important;
+  background-size: 5px 5px, 5px 5px !important;
+  background-repeat: no-repeat !important;
+  padding-left: 1.7rem;
+  color: #f6f7fb !important;
+}
+.sawaneh-reports select option,
+.sawaneh-reports select optgroup {
+  background-color: #15263a;
+  color: #f6f7fb;
+}
 
 .sr-header {
   display: flex;
