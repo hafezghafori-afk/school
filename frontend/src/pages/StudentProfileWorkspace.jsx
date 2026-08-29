@@ -135,9 +135,15 @@ export default function StudentProfileWorkspace() {
           givenName: item.identity?.givenName || '', familyName: item.identity?.familyName || '',
           email: item.identity?.email || '', phone: item.identity?.phone || '', gender: item.identity?.gender || '',
           dateOfBirth: item.identity?.dateOfBirth ? String(item.identity.dateOfBirth).slice(0, 10) : '', note: item.identity?.note || '',
-          tazkiraNumber: item.identity?.tazkiraNumber || ''
+          tazkiraNumber: item.identity?.tazkiraNumber || '',
+          tazkiraVolume: item.identity?.tazkiraVolume || '',
+          tazkiraPage: item.identity?.tazkiraPage || ''
         },
-        family: { fatherName: '', motherName: '', guardianName: '', guardianRelation: '', ...(item.profile?.family || {}) },
+        family: {
+          fatherName: '', motherName: '', guardianName: '', guardianRelation: '',
+          fatherResidence: '', fatherWorkplace: '', fatherLandline: '',
+          ...(item.profile?.family || {})
+        },
         contact: { primaryPhone: '', alternatePhone: '', email: '', address: '', ...(item.profile?.contact || {}) },
         background: { previousSchool: '', emergencyPhone: '', ...(item.profile?.background || {}) },
         notes: { medical: '', administrative: '', ...(item.profile?.notes || {}) }
@@ -359,10 +365,12 @@ export default function StudentProfileWorkspace() {
         <label><span>جنسیت</span><select value={profileForm.identity.gender || ''} onChange={(e) => updateFormSection('identity','gender',e.target.value)}><option value="">انتخاب</option><option value="male">ذکور</option><option value="female">اناث</option><option value="other">دیگر</option></select></label>
         <label><span>تاریخ تولد</span><AfghanDateInput value={profileForm.identity.dateOfBirth || ''} onChange={(value) => updateFormSection('identity','dateOfBirth',value)} showGregorianEquivalent /></label>
         <label><span>شماره تذکره</span><input value={profileForm.identity.tazkiraNumber || ''} onChange={(e) => updateFormSection('identity','tazkiraNumber',e.target.value)} /></label>
+        <label><span>جلد تذکره</span><input value={profileForm.identity.tazkiraVolume || ''} onChange={(e) => updateFormSection('identity','tazkiraVolume',e.target.value)} /></label>
+        <label><span>صفحهٔ تذکره</span><input value={profileForm.identity.tazkiraPage || ''} onChange={(e) => updateFormSection('identity','tazkiraPage',e.target.value)} /></label>
       </div></article></section> : null}
 
       {activeTab === 'family' && profileForm ? <section className="student-profile-section"><article className="student-profile-card"><div className="student-profile-section-head"><div><h2>خانواده، سرپرست و تماس</h2><p>معلومات ارتباطی و حالات ضروری شاگرد.</p></div><button className="student-profile-button primary" onClick={saveProfile} disabled={busy === 'profile'}>ذخیره معلومات</button></div><div className="student-profile-form-grid">
-        {[['family','fatherName','نام پدر'],['family','motherName','نام مادر'],['family','guardianName','نام سرپرست'],['family','guardianRelation','نسبت سرپرست'],['contact','primaryPhone','شماره تماس اصلی'],['contact','alternatePhone','شماره بدیل'],['contact','email','ایمیل'],['contact','address','آدرس'],['background','previousSchool','مکتب قبلی'],['background','emergencyPhone','تماس اضطراری'],['notes','medical','ملاحظات صحی'],['notes','administrative','ملاحظات اداری']].map(([section,key,label]) => <label key={`${section}-${key}`}><span>{label}</span><input value={profileForm[section]?.[key] || ''} onChange={(e) => updateFormSection(section,key,e.target.value)} /></label>)}
+        {[['family','fatherName','نام پدر'],['family','fatherResidence','محل بودوباش پدر'],['family','fatherWorkplace','محل وظیفهٔ پدر'],['family','fatherLandline','تلفن ثابت پدر'],['family','motherName','نام مادر'],['family','guardianName','نام سرپرست'],['family','guardianRelation','نسبت سرپرست'],['contact','primaryPhone','شماره تماس اصلی'],['contact','alternatePhone','شماره بدیل'],['contact','email','ایمیل'],['contact','address','آدرس'],['background','previousSchool','مکتب قبلی'],['background','emergencyPhone','تماس اضطراری'],['notes','medical','ملاحظات صحی'],['notes','administrative','ملاحظات اداری']].map(([section,key,label]) => <label key={`${section}-${key}`}><span>{label}</span><input value={profileForm[section]?.[key] || ''} onChange={(e) => updateFormSection(section,key,e.target.value)} /></label>)}
       </div></article><article className="student-profile-card"><h2>سرپرستان وصل‌شده</h2>{data.profile?.guardians?.length ? data.profile.guardians.map((item) => <div className="student-profile-list-row" key={item.id}><div><b>{item.name || 'بدون نام'} {item.isPrimary ? <em>سرپرست اصلی</em> : null}</b><span>{item.relation || 'نسبت ثبت نشده'} · {item.phone || item.email || 'تماس ثبت نشده'}</span></div><span>{statusLabel(item.status)}</span></div>) : <EmptyState>سرپرست وصل‌شده وجود ندارد.</EmptyState>}</article></section> : null}
 
       {activeTab === 'memberships' ? <section className="student-profile-section"><article className="student-profile-card"><div className="student-profile-section-head"><div><h2>تاریخچهٔ صنف‌ها و عضویت‌ها</h2><p>عضویت‌های پایان‌یافته حذف یا دوباره باز نمی‌شوند.</p></div><Link className="student-profile-button ghost" to="/admin-education?section=enrollments">مرکز مدیریت آموزش</Link></div>{memberships.length ? <div className="student-profile-table-wrap"><table><thead><tr><th>صنف</th><th>سال تعلیمی</th><th>وضعیت</th><th>نوع پذیرش</th><th>شمول</th><th>پایان</th></tr></thead><tbody>{memberships.map((item) => <tr key={item.id}><td>{item.schoolClass?.title || item.course?.title || '—'}</td><td>{item.academicYear?.label || '—'}</td><td><span className={`student-profile-badge ${item.isCurrent ? 'good' : 'muted'}`}>{statusLabel(item.status)}</span></td><td>{ADMISSION_LABELS[item.admissionType] || item.admissionType || 'عادی'}</td><td>{dateLabel(item.enrolledAt)}</td><td>{item.isCurrent ? 'فعلی' : dateLabel(item.endedAt)}</td></tr>)}</tbody></table></div> : <EmptyState>عضویت ثبت نشده است.</EmptyState>}</article></section> : null}

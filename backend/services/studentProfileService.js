@@ -178,6 +178,8 @@ function formatIdentity(studentCoreDoc, userDoc, afghanStudentDoc = null) {
     admissionNo: normalizeText(studentCore.admissionNo),
     asasNumber: normalizeText(afghanStudent.asasNumber) || normalizeText(studentCore.admissionNo),
     tazkiraNumber: normalizeText(identification.tazkiraNumber),
+    tazkiraVolume: normalizeText(identification.tazkiraVolume),
+    tazkiraPage: normalizeText(identification.tazkiraPage),
     fullName,
     preferredName: normalizeText(studentCore.preferredName) || fullName,
     givenName: normalizeText(studentCore.givenName),
@@ -405,7 +407,10 @@ function sanitizeFamilyInput(input = {}) {
     fatherName: normalizeText(input.fatherName),
     motherName: normalizeText(input.motherName),
     guardianName: normalizeText(input.guardianName),
-    guardianRelation: normalizeText(input.guardianRelation)
+    guardianRelation: normalizeText(input.guardianRelation),
+    fatherResidence: normalizeText(input.fatherResidence),
+    fatherWorkplace: normalizeText(input.fatherWorkplace),
+    fatherLandline: normalizeText(input.fatherLandline)
   };
 }
 
@@ -850,13 +855,20 @@ async function getStudentProfile(studentRef) {
   const profile = toPlain(profileDoc) || {};
   const currentMembership = membershipItems.find((item) => item.isCurrent) || membershipItems[0] || null;
 
+  // «معلومات پدر / ولی» فرم سوانح روی AfghanStudent است؛ اگر آینهٔ پروفایل خالی بود، از همان‌جا پر کن
+  const afghanFamilyInfo = toPlain(afghanStudent)?.familyInfo || {};
+  const familyOut = sanitizeFamilyInput(profile.family || {});
+  ['fatherResidence', 'fatherWorkplace', 'fatherLandline'].forEach((key) => {
+    if (!familyOut[key]) familyOut[key] = normalizeText(afghanFamilyInfo[key]);
+  });
+
   return {
     identity: {
       ...formatIdentity(studentCore, user, afghanStudent),
       currentMembership
     },
     profile: {
-      family: profile.family || sanitizeFamilyInput(),
+      family: familyOut,
       contact: profile.contact || sanitizeContactInput(),
       background: profile.background || sanitizeBackgroundInput(),
       notes: profile.notes || sanitizeNotesInput(),
@@ -989,7 +1001,8 @@ async function updateStudentProfileBasics(studentRef, payload = {}) {
   }
 
   const profile = await ensureStudentProfile(studentCore._id);
-  profile.family = sanitizeFamilyInput(payload.family || profile.family);
+  const familyInput = sanitizeFamilyInput(payload.family || profile.family);
+  profile.family = familyInput;
   profile.contact = sanitizeContactInput(payload.contact || profile.contact);
   profile.background = sanitizeBackgroundInput(payload.background || profile.background);
   profile.notes = sanitizeNotesInput(payload.notes || profile.notes);
@@ -1005,6 +1018,8 @@ async function updateStudentProfileBasics(studentRef, payload = {}) {
     if (Object.prototype.hasOwnProperty.call(identity, 'tazkiraNumber') && normalizeText(identity.tazkiraNumber)) {
       update['identification.tazkiraNumber'] = normalizeText(identity.tazkiraNumber);
     }
+    if (Object.prototype.hasOwnProperty.call(identity, 'tazkiraVolume')) update['identification.tazkiraVolume'] = normalizeText(identity.tazkiraVolume);
+    if (Object.prototype.hasOwnProperty.call(identity, 'tazkiraPage')) update['identification.tazkiraPage'] = normalizeText(identity.tazkiraPage);
     if (givenName) {
       update['personalInfo.firstName'] = givenName;
       update['personalInfo.firstNameDari'] = givenName;
@@ -1015,10 +1030,13 @@ async function updateStudentProfileBasics(studentRef, payload = {}) {
     }
     if (Object.prototype.hasOwnProperty.call(identity, 'gender')) update['personalInfo.gender'] = studentCore.gender;
     if (Object.prototype.hasOwnProperty.call(identity, 'dateOfBirth') && normalizeText(identity.dateOfBirth)) update['personalInfo.birthDate'] = normalizeText(identity.dateOfBirth);
-    if (Object.prototype.hasOwnProperty.call(profile.family || {}, 'fatherName')) update['personalInfo.fatherName'] = normalizeText(profile.family.fatherName);
-    if (Object.prototype.hasOwnProperty.call(profile.family || {}, 'motherName')) update['familyInfo.motherName'] = normalizeText(profile.family.motherName);
-    if (Object.prototype.hasOwnProperty.call(profile.family || {}, 'guardianName')) update['familyInfo.guardianName'] = normalizeText(profile.family.guardianName);
-    if (Object.prototype.hasOwnProperty.call(profile.family || {}, 'guardianRelation')) update['familyInfo.guardianRelation'] = normalizeText(profile.family.guardianRelation) || undefined;
+    if (Object.prototype.hasOwnProperty.call(familyInput, 'fatherName')) update['personalInfo.fatherName'] = normalizeText(familyInput.fatherName);
+    if (Object.prototype.hasOwnProperty.call(familyInput, 'motherName')) update['familyInfo.motherName'] = normalizeText(familyInput.motherName);
+    if (Object.prototype.hasOwnProperty.call(familyInput, 'guardianName')) update['familyInfo.guardianName'] = normalizeText(familyInput.guardianName);
+    if (Object.prototype.hasOwnProperty.call(familyInput, 'guardianRelation')) update['familyInfo.guardianRelation'] = normalizeText(familyInput.guardianRelation) || undefined;
+    if (Object.prototype.hasOwnProperty.call(familyInput, 'fatherResidence')) update['familyInfo.fatherResidence'] = normalizeText(familyInput.fatherResidence);
+    if (Object.prototype.hasOwnProperty.call(familyInput, 'fatherWorkplace')) update['familyInfo.fatherWorkplace'] = normalizeText(familyInput.fatherWorkplace);
+    if (Object.prototype.hasOwnProperty.call(familyInput, 'fatherLandline')) update['familyInfo.fatherLandline'] = normalizeText(familyInput.fatherLandline);
     if (Object.prototype.hasOwnProperty.call(profile.contact || {}, 'primaryPhone')) {
       update['contactInfo.phone'] = normalizeText(profile.contact.primaryPhone);
       update['contactInfo.mobile'] = normalizeText(profile.contact.primaryPhone);

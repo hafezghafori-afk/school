@@ -234,9 +234,6 @@ const normalizeAfghanStudent = (student = {}) => {
     transferReason: getText(previousSchool.transferReason),
     fatherPhone: familyInfo.fatherPhone || '',
     fatherOccupation: getText(familyInfo.fatherOccupation),
-    fatherResidence: getText(familyInfo.fatherResidence),
-    fatherWorkplace: getText(familyInfo.fatherWorkplace),
-    fatherLandline: familyInfo.fatherLandline || '',
     motherName: getText(familyInfo.motherName),
     motherPhone: familyInfo.motherPhone || '',
     motherOccupation: getText(familyInfo.motherOccupation),
@@ -698,9 +695,6 @@ const StudentManagement = () => {
     transferReason: '',
     fatherPhone: '',
     fatherOccupation: '',
-    fatherResidence: '',
-    fatherWorkplace: '',
-    fatherLandline: '',
     motherName: '',
     motherPhone: '',
     motherOccupation: '',
@@ -1096,11 +1090,6 @@ const StudentManagement = () => {
         'personalInfo.grandfatherName': editForm.grandfatherName.trim(),
         'personalInfo.gender': editForm.gender,
         'identification.tazkiraNumber': editForm.nationalId.trim(),
-        'identification.tazkiraVolume': editForm.tazkiraVolume.trim(),
-        'identification.tazkiraPage': editForm.tazkiraPage.trim(),
-        'familyInfo.fatherResidence': editForm.fatherResidence.trim(),
-        'familyInfo.fatherWorkplace': editForm.fatherWorkplace.trim(),
-        'familyInfo.fatherLandline': editForm.fatherLandline.trim(),
         'contactInfo.phone': editForm.phone.trim(),
         'contactInfo.mobile': editForm.phone.trim(),
         'contactInfo.email': editForm.email.trim(),
@@ -1221,8 +1210,6 @@ const StudentManagement = () => {
       setRequiredPayloadValue(payload, 'personalInfo.birthPlace', district);
       setRequiredPayloadValue(payload, 'personalInfo.nationality', editForm.nationality.trim() || 'Afghan');
       setRequiredPayloadValue(payload, 'identification.tazkiraNumber', editForm.nationalId);
-      setOptionalPayloadValue(payload, 'identification.tazkiraVolume', editForm.tazkiraVolume);
-      setOptionalPayloadValue(payload, 'identification.tazkiraPage', editForm.tazkiraPage);
       setOptionalPayloadValue(payload, 'contactInfo.phone', editForm.phone);
       setOptionalPayloadValue(payload, 'contactInfo.mobile', editForm.phone);
       setOptionalPayloadValue(payload, 'contactInfo.email', editForm.email);
@@ -1246,9 +1233,6 @@ const StudentManagement = () => {
       if (editForm.registrationType === 'transfer') payload['academicInfo.previousSchool.type'] = editForm.previousSchoolType || 'private';
       setOptionalPayloadValue(payload, 'familyInfo.fatherPhone', editForm.fatherPhone);
       setOptionalPayloadValue(payload, 'familyInfo.fatherOccupation', editForm.fatherOccupation);
-      setOptionalPayloadValue(payload, 'familyInfo.fatherResidence', editForm.fatherResidence);
-      setOptionalPayloadValue(payload, 'familyInfo.fatherWorkplace', editForm.fatherWorkplace);
-      setOptionalPayloadValue(payload, 'familyInfo.fatherLandline', editForm.fatherLandline);
       setOptionalPayloadValue(payload, 'familyInfo.motherName', editForm.motherName);
       setOptionalPayloadValue(payload, 'familyInfo.motherPhone', editForm.motherPhone);
       setOptionalPayloadValue(payload, 'familyInfo.motherOccupation', editForm.motherOccupation);
@@ -1871,12 +1855,6 @@ const StudentManagement = () => {
               <label className="required"><span>شماره تذکره</span>
                 <input value={editForm.nationalId} onChange={(event) => handleEditFormChange('nationalId', event.target.value)} />
               </label>
-              <label><span>جلد تذکره</span>
-                <input value={editForm.tazkiraVolume} onChange={(event) => handleEditFormChange('tazkiraVolume', event.target.value)} />
-              </label>
-              <label><span>صفحهٔ تذکره</span>
-                <input value={editForm.tazkiraPage} onChange={(event) => handleEditFormChange('tazkiraPage', event.target.value)} />
-              </label>
               <label>
                 <span>شماره اساس شاگرد</span>
                 <input value={editForm.studentIdentifier || ''} readOnly className="student-readonly-input" />
@@ -1990,18 +1968,6 @@ const StudentManagement = () => {
               <label>
                 <span>مسلک پدر</span>
                 <input value={editForm.fatherOccupation} onChange={(event) => handleEditFormChange('fatherOccupation', event.target.value)} />
-              </label>
-              <label>
-                <span>محل بودوباش پدر</span>
-                <input value={editForm.fatherResidence} onChange={(event) => handleEditFormChange('fatherResidence', event.target.value)} />
-              </label>
-              <label>
-                <span>محل وظیفهٔ پدر</span>
-                <input value={editForm.fatherWorkplace} onChange={(event) => handleEditFormChange('fatherWorkplace', event.target.value)} />
-              </label>
-              <label>
-                <span>تلفن ثابت پدر</span>
-                <input value={editForm.fatherLandline} onChange={(event) => handleEditFormChange('fatherLandline', event.target.value)} />
               </label>
               <label>
                 <span>نام مادر</span>
