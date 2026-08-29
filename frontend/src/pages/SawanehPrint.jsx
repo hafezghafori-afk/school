@@ -20,7 +20,6 @@ const gradeNumber = (value) => {
   return n >= 1 && n <= 12 ? n : null;
 };
 
-const MOTHER_TONGUE = { dari: 'دری', pashto: 'پشتو', other: 'سایر' };
 const RELATION = {
   brother: 'برادر', paternal_uncle: 'کاکا', maternal_uncle: 'ماما',
   paternal_cousin: 'پسر کاکا', maternal_cousin: 'پسر ماما', other: 'سایر'
@@ -171,30 +170,8 @@ const CardSheet = ({ settings, student, card, blank }) => {
         </tbody>
       </table>
 
-      {/* شمولیت + منفک (چپ)   /   سکونت‌ها + تذکره + تولد + زبان (راست) */}
+      {/* راست: سکونت‌ها + تذکره + تولد + زبان   |   چپ: شمولیت + منفک */}
       <div className="sp-two sp-atop">
-        <div>
-          <table className="sp-kv sp-kv-grid">
-            <caption>شمولیت (نمبر اساس متعلم در مکاتب)</caption>
-            <thead><tr><th>نام مدرسه</th><th>نمبر اساس</th><th>صنف</th><th>تاریخ</th><th>نمبر مکتوب</th></tr></thead>
-            <tbody>
-              {enroll.map((r, i) => (
-                <tr key={i}>
-                  <td>{r.schoolName}</td><td>{r.asasNumber}</td>
-                  <td>{r.grade ? gradeLabel(r.grade) : ''}</td><td>{dateLabel(r.date, r.dateLocal)}</td><td>{r.letterNo}</td>
-                </tr>
-              ))}
-              {pad(enroll, 4).map((_, i) => <tr key={`e${i}`}><td>&nbsp;</td><td /><td /><td /><td /></tr>)}
-            </tbody>
-          </table>
-          <VTable title="منفک شدن متعلم" rows={[
-            ['تاریخ', b(sep.isSeparated ? dateLabel(sep.date, sep.dateLocal) : '')],
-            ['نمبر مکتوب', b(sep.isSeparated ? sep.letterNo : '')],
-            ['صنف', b(sep.isSeparated && sep.grade ? gradeLabel(sep.grade) : '')],
-            ['علت', b(sep.isSeparated ? (SEPARATION_REASON[sep.reason] || sep.reasonText) : '')],
-            ['جریمه', b(sep.isSeparated && sep.penaltyAmount ? String(sep.penaltyAmount) : '')]
-          ]} />
-        </div>
         <div>
           <HTable title="سکونت اصلی" cols={[
             ['ولایت', b(provinceLabel(origin.province))],
@@ -214,9 +191,36 @@ const CardSheet = ({ settings, student, card, blank }) => {
           <HTable title="تاریخ تولد متعلم" cols={[
             ['روز', b(bd.day)], ['ماه', b(bd.month)], ['سال', b(bd.year)]
           ]} />
-          <HTable title="زبان مادری" cols={[
-            ['زبان مادری', b(MOTHER_TONGUE[card?.motherTongue] || '')],
-            ['لسان سوم', b(card?.thirdLanguage)]
+          <table className="sp-kv sp-kv-h">
+            <caption>زبان مادری</caption>
+            <thead><tr><th>دری</th><th>پشتو</th><th>لسان سوم</th></tr></thead>
+            <tbody><tr>
+              <td>{blank ? '' : (card?.motherTongue === 'dari' ? '✓' : '')}</td>
+              <td>{blank ? '' : (card?.motherTongue === 'pashto' ? '✓' : '')}</td>
+              <td>{b(card?.motherTongue === 'other' ? (card?.thirdLanguage || '✓') : card?.thirdLanguage)}</td>
+            </tr></tbody>
+          </table>
+        </div>
+        <div>
+          <table className="sp-kv sp-kv-grid">
+            <caption>شمولیت (نمبر اساس متعلم در مکاتب)</caption>
+            <thead><tr><th>نام مدرسه</th><th>نمبر اساس</th><th>صنف</th><th>تاریخ</th><th>نمبر مکتوب</th></tr></thead>
+            <tbody>
+              {enroll.map((r, i) => (
+                <tr key={i}>
+                  <td>{r.schoolName}</td><td>{r.asasNumber}</td>
+                  <td>{r.grade ? gradeLabel(r.grade) : ''}</td><td>{dateLabel(r.date, r.dateLocal)}</td><td>{r.letterNo}</td>
+                </tr>
+              ))}
+              {pad(enroll, 8).map((_, i) => <tr key={`e${i}`}><td>&nbsp;</td><td /><td /><td /><td /></tr>)}
+            </tbody>
+          </table>
+          <VTable title="منفک شدن متعلم" rows={[
+            ['تاریخ', b(sep.isSeparated ? dateLabel(sep.date, sep.dateLocal) : '')],
+            ['نمبر مکتوب', b(sep.isSeparated ? sep.letterNo : '')],
+            ['صنف', b(sep.isSeparated && sep.grade ? gradeLabel(sep.grade) : '')],
+            ['علت', b(sep.isSeparated ? (SEPARATION_REASON[sep.reason] || sep.reasonText) : '')],
+            ['جریمه', b(sep.isSeparated && sep.penaltyAmount ? String(sep.penaltyAmount) : '')]
           ]} />
         </div>
       </div>
