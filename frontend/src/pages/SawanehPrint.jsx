@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import useSiteSettings from '../hooks/useSiteSettings';
 import { normalizeBrandName } from '../utils/brand';
-import { getOfficialPrintLogoImageClass, getPrintLogoUrls } from '../utils/printLogos';
+import { getOfficialPrintLogoImageClass, getPrintLogoUrls, toAssetUrl } from '../utils/printLogos';
 import { formatAfghanStoredDateLabel } from '../utils/afghanDate';
 import { API_BASE } from '../config/api';
 import './SawanehPrint.css';
@@ -117,6 +117,8 @@ const CardSheet = ({ settings, student, card, blank }) => {
   const relByRelation = (k) => (card?.relatives || []).find((r) => r.relation === k)?.name || '';
   const sep = card?.separation || {};
   const bd = splitBirth(p.birthDate);
+  const photoDoc = (student?.documents || []).find((d) => d && d.type === 'photo' && d.url) || null;
+  const photoUrl = blank ? '' : toAssetUrl(photoDoc?.url || '');
   const enroll = blank ? [] : (card?.enrollmentHistory || []);
   const corrections = blank ? [] : (card?.nameCorrections || []);
   const pad = (arr, min) => Array.from({ length: Math.max(0, min - arr.length) });
@@ -147,7 +149,7 @@ const CardSheet = ({ settings, student, card, blank }) => {
           <table className="sp-kv sp-father">
             <caption>معلومات در مورد پدر / ولی متعلم</caption>
             <tbody>
-              <tr><th>محل بود و باش</th><td>{b(fam.fatherResidence)}</td><td rowSpan={6} className="sp-photo-cell">عکس ۳×۴</td></tr>
+              <tr><th>محل بود و باش</th><td>{b(fam.fatherResidence)}</td><td rowSpan={6} className="sp-photo-cell">{photoUrl ? <img className="sp-photo-img" src={photoUrl} alt="" /> : 'عکس ۳×۴'}</td></tr>
               <tr><th>وظیفه</th><td>{b(fam.fatherOccupation)}</td></tr>
               <tr><th>محل وظیفه</th><td>{b(fam.fatherWorkplace)}</td></tr>
               <tr><th>نمبر تلفون</th><td>{b(fam.fatherLandline)}</td></tr>
