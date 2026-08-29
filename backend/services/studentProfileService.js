@@ -862,11 +862,25 @@ async function getStudentProfile(studentRef) {
     if (!familyOut[key]) familyOut[key] = normalizeText(afghanFamilyInfo[key]);
   });
 
+  // snapshotِ فیلدهای «کارت سوانح متعلم» از رکوردِ AfghanStudent — فرمِ مدیریت شاگردان
+  // همین‌ها را با کاتالوگِ مشترک ویرایش می‌کند و مستقیم روی AfghanStudent ذخیره می‌کند.
+  const afghanPlain = toPlain(afghanStudent) || {};
+  const afghanSnapshot = afghanPlain._id ? {
+    _id: String(afghanPlain._id),
+    personalInfo: afghanPlain.personalInfo || {},
+    identification: afghanPlain.identification || {},
+    familyInfo: afghanPlain.familyInfo || {},
+    contactInfo: afghanPlain.contactInfo || {},
+    medicalInfo: { bloodGroup: afghanPlain.medicalInfo?.bloodGroup || '' },
+    academicInfo: { previousSchool: afghanPlain.academicInfo?.previousSchool || {} }
+  } : null;
+
   return {
     identity: {
       ...formatIdentity(studentCore, user, afghanStudent),
       currentMembership
     },
+    afghanStudent: afghanSnapshot,
     profile: {
       family: familyOut,
       contact: profile.contact || sanitizeContactInput(),
@@ -1001,11 +1015,19 @@ async function updateStudentProfileBasics(studentRef, payload = {}) {
   }
 
   const profile = await ensureStudentProfile(studentCore._id);
-  const familyInput = sanitizeFamilyInput(payload.family || profile.family);
-  profile.family = familyInput;
-  profile.contact = sanitizeContactInput(payload.contact || profile.contact);
-  profile.background = sanitizeBackgroundInput(payload.background || profile.background);
-  profile.notes = sanitizeNotesInput(payload.notes || profile.notes);
+  // به‌روزرسانیِ جزئی: هر زیربخش فقط وقتی که واقعاً در payload آمده دست‌کاری شود
+  // (تا مثلاً یک PUTِ «فقط یادداشت» آینهٔ خانواده/تماس را روی AfghanStudent بازننویسد).
+  const hasFamily = Boolean(payload.family && typeof payload.family === 'object');
+  const hasContact = Boolean(payload.contact && typeof payload.contact === 'object');
+  const familyInput = sanitizeFamilyInput(hasFamily ? payload.family : profile.family);
+  if (hasFamily) profile.family = familyInput;
+  if (hasContact) profile.contact = sanitizeContactInput(payload.contact);
+  if (payload.background && typeof payload.background === 'object') {
+    profile.background = sanitizeBackgroundInput(payload.background);
+  }
+  if (payload.notes && typeof payload.notes === 'object') {
+    profile.notes = sanitizeNotesInput(payload.notes);
+  }
   await profile.save();
 
   if (afghanStudent?._id) {
@@ -1030,19 +1052,21 @@ async function updateStudentProfileBasics(studentRef, payload = {}) {
     }
     if (Object.prototype.hasOwnProperty.call(identity, 'gender')) update['personalInfo.gender'] = studentCore.gender;
     if (Object.prototype.hasOwnProperty.call(identity, 'dateOfBirth') && normalizeText(identity.dateOfBirth)) update['personalInfo.birthDate'] = normalizeText(identity.dateOfBirth);
-    if (Object.prototype.hasOwnProperty.call(familyInput, 'fatherName')) update['personalInfo.fatherName'] = normalizeText(familyInput.fatherName);
-    if (Object.prototype.hasOwnProperty.call(familyInput, 'motherName')) update['familyInfo.motherName'] = normalizeText(familyInput.motherName);
-    if (Object.prototype.hasOwnProperty.call(familyInput, 'guardianName')) update['familyInfo.guardianName'] = normalizeText(familyInput.guardianName);
-    if (Object.prototype.hasOwnProperty.call(familyInput, 'guardianRelation')) update['familyInfo.guardianRelation'] = normalizeText(familyInput.guardianRelation) || undefined;
-    if (Object.prototype.hasOwnProperty.call(familyInput, 'fatherResidence')) update['familyInfo.fatherResidence'] = normalizeText(familyInput.fatherResidence);
-    if (Object.prototype.hasOwnProperty.call(familyInput, 'fatherWorkplace')) update['familyInfo.fatherWorkplace'] = normalizeText(familyInput.fatherWorkplace);
-    if (Object.prototype.hasOwnProperty.call(familyInput, 'fatherLandline')) update['familyInfo.fatherLandline'] = normalizeText(familyInput.fatherLandline);
-    if (Object.prototype.hasOwnProperty.call(profile.contact || {}, 'primaryPhone')) {
+    if (hasFamily) {
+      update['personalInfo.fatherName'] = normalizeText(familyInput.fatherName);
+      update['familyInfo.motherName'] = normalizeText(familyInput.motherName);
+      update['familyInfo.guardianName'] = normalizeText(familyInput.guardianName);
+      update['familyInfo.guardianRelation'] = normalizeText(familyInput.guardianRelation) || undefined;
+      update['familyInfo.fatherResidence'] = normalizeText(familyInput.fatherResidence);
+      update['familyInfo.fatherWorkplace'] = normalizeText(familyInput.fatherWorkplace);
+      update['familyInfo.fatherLandline'] = normalizeText(familyInput.fatherLandline);
+    }
+    if (hasContact) {
       update['contactInfo.phone'] = normalizeText(profile.contact.primaryPhone);
       update['contactInfo.mobile'] = normalizeText(profile.contact.primaryPhone);
+      update['contactInfo.email'] = normalizeText(profile.contact.email);
+      update['contactInfo.address'] = normalizeText(profile.contact.address);
     }
-    if (Object.prototype.hasOwnProperty.call(profile.contact || {}, 'email')) update['contactInfo.email'] = normalizeText(profile.contact.email);
-    if (Object.prototype.hasOwnProperty.call(profile.contact || {}, 'address')) update['contactInfo.address'] = normalizeText(profile.contact.address);
     Object.keys(update).forEach((key) => update[key] === undefined && delete update[key]);
     if (Object.keys(update).length) {
       try {

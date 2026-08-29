@@ -1,0 +1,105 @@
+/* گریدِ مشترکِ فیلدهای کارت سوانح — ساختار یکسان، دو تمِ رنگی (روشن / شیشه‌ای) */
+.asf-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  font-family: 'Vazirmatn', 'IRANSans', Tahoma, sans-serif;
+}
+
+.asf-section {
+  border: 1px solid var(--asf-border);
+  border-radius: 12px;
+  padding: 0.75rem 1rem 1rem;
+  margin: 0;
+  background: var(--asf-surface);
+}
+
+.asf-section > legend {
+  font-weight: 800;
+  font-size: 0.92rem;
+  padding: 0 0.4rem;
+  color: var(--asf-accent);
+}
+
+.asf-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.7rem 1rem;
+}
+
+.asf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.asf-label {
+  font-size: 0.78rem;
+  color: var(--asf-muted);
+}
+
+.asf-req { color: var(--asf-req); font-style: normal; }
+.asf-error { font-size: 0.72rem; color: var(--asf-req); font-style: normal; }
+
+.asf-field input,
+.asf-field select {
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--asf-border-strong);
+  border-radius: 8px;
+  font: inherit;
+  color: var(--asf-ink);
+  background: var(--asf-input-bg);
+  box-sizing: border-box;
+}
+
+.asf-field input:disabled,
+.asf-field select:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.asf-field input:focus,
+.asf-field select:focus {
+  outline: none;
+  border-color: var(--asf-accent);
+}
+
+/* ---------- تمِ روشن (فورم ثبت‌نام + مدیریت شاگردان) ---------- */
+.asf-light {
+  --asf-border: #e2e6ee;
+  --asf-border-strong: #cfd6e2;
+  --asf-surface: #fbfcfe;
+  --asf-input-bg: #fff;
+  --asf-ink: #1f2937;
+  --asf-muted: #55617a;
+  --asf-accent: #2f80c4;
+  --asf-req: #c0392b;
+}
+
+/* ---------- تمِ شیشه‌ای (محل کار سوانح) ---------- */
+.asf-glass {
+  --asf-border: rgba(255, 255, 255, 0.12);
+  --asf-border-strong: rgba(255, 255, 255, 0.16);
+  --asf-surface: rgba(255, 255, 255, 0.045);
+  --asf-input-bg: rgba(255, 255, 255, 0.08);
+  --asf-ink: #f6f7fb;
+  --asf-muted: rgba(246, 247, 251, 0.62);
+  --asf-accent: #34d399;
+  --asf-req: #fbbf24;
+}
+
+.asf-glass .asf-section {
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* native <select> روی تمِ تیره خوانا بماند */
+.asf-glass .asf-field select {
+  background-color: #15263a;
+}
+.asf-glass .asf-field select option {
+  background-color: #15263a;
+  color: #f6f7fb;
+}
