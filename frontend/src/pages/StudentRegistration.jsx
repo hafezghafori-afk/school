@@ -181,11 +181,16 @@ const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedY
       nationality: 'Afghan'
     },
     identification: {
-      tazkiraNumber: trimValue(formData.nationalId)
+      tazkiraNumber: trimValue(formData.nationalId),
+      tazkiraVolume: trimValue(formData.tazkiraVolume),
+      tazkiraPage: trimValue(formData.tazkiraPage)
     },
     familyInfo: {
       fatherOccupation: trimValue(formData.fatherOccupation),
       fatherPhone: trimValue(formData.fatherPhone),
+      fatherResidence: trimValue(formData.fatherResidence),
+      fatherWorkplace: trimValue(formData.fatherWorkplace),
+      fatherLandline: trimValue(formData.fatherLandline),
       motherName: trimValue(formData.motherName) || 'ثبت نشده',
       motherOccupation: trimValue(formData.motherOccupation),
       motherPhone: trimValue(formData.motherPhone),
@@ -269,6 +274,8 @@ const createEmptyForm = (academicYearId = '') => ({
   fatherNameEnglish: '',
   grandfatherName: '',
   nationalId: '',
+  tazkiraVolume: '',
+  tazkiraPage: '',
   birthDate: '',
   gender: '',
   bloodType: '',
@@ -285,6 +292,9 @@ const createEmptyForm = (academicYearId = '') => ({
   shiftId: '',
   fatherPhone: '',
   fatherOccupation: '',
+  fatherResidence: '',
+  fatherWorkplace: '',
+  fatherLandline: '',
   motherName: '',
   motherPhone: '',
   motherOccupation: '',
@@ -742,6 +752,14 @@ const StudentRegistration = () => {
               {errors.nationalId && <span className="text-red-500">{errors.nationalId}</span>}
             </div>
             <div className="form-group">
+              <label htmlFor="tazkiraVolume">جلد تذکره</label>
+              <input id="tazkiraVolume" value={formData.tazkiraVolume} onChange={e => handleInputChange('tazkiraVolume', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label htmlFor="tazkiraPage">صفحهٔ تذکره</label>
+              <input id="tazkiraPage" value={formData.tazkiraPage} onChange={e => handleInputChange('tazkiraPage', e.target.value)} />
+            </div>
+            <div className="form-group">
               <label htmlFor="birthDate">تاریخ تولد *</label>
               <AfghanDateInput id="birthDate" value={formData.birthDate} onChange={value => handleInputChange('birthDate', value)} required inputClassName={errors.birthDate ? 'border-red-500' : ''} showGregorianEquivalent />
               {errors.birthDate && <span className="text-red-500">{errors.birthDate}</span>}
@@ -876,6 +894,18 @@ const StudentRegistration = () => {
             <div className="form-group">
               <label htmlFor="fatherOccupation">مسلک پدر</label>
               <input id="fatherOccupation" value={formData.fatherOccupation} onChange={e => handleInputChange('fatherOccupation', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label htmlFor="fatherResidence">محل بودوباش پدر</label>
+              <input id="fatherResidence" value={formData.fatherResidence} onChange={e => handleInputChange('fatherResidence', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label htmlFor="fatherWorkplace">محل وظیفهٔ پدر</label>
+              <input id="fatherWorkplace" value={formData.fatherWorkplace} onChange={e => handleInputChange('fatherWorkplace', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label htmlFor="fatherLandline">تلفن ثابت پدر</label>
+              <input id="fatherLandline" value={formData.fatherLandline} onChange={e => handleInputChange('fatherLandline', e.target.value)} />
             </div>
             <div className="form-group">
               <label htmlFor="motherName">نام مادر</label>
