@@ -3,10 +3,9 @@ import { Link } from 'react-router-dom';
 import './AdminPanel.css';
 import '../components/dashboard/dashboard.css';
 import NotificationBell from '../components/NotificationBell';
+import DashboardProfileCard from '../components/DashboardProfileCard';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import KpiRingCard from '../components/dashboard/KpiRingCard';
-import QuickActionRail from '../components/dashboard/QuickActionRail';
-import TaskAlertPanel from '../components/dashboard/TaskAlertPanel';
 import TrendBars from '../components/dashboard/TrendBars';
 
 import { API_BASE } from '../config/api';
@@ -239,6 +238,122 @@ const ADMIN_LEVEL_LABELS = {
   general_president: 'ریاست عمومی'
 };
 
+// هر پست اداری فقط گروه‌های مرتبط با وظیفه خودش را در «ابزارها و بخش‌های مدیریتی» می‌بیند.
+// ریاست عمومی به همه گروه‌ها دسترسی دارد (null = بدون فیلتر).
+const ADMIN_LEVEL_GROUP_ACCESS = {
+  general_president: null,
+  // «ساختار مکتب» فقط شامل کارت «مکاتب» (ایجاد/تعویض مکتب در سیستم چندمکتبه) است — مخصوص ریاست
+  // عمومی؛ مدیر یک مکتب نباید بتواند مکتب جدید بسازد یا بین مکاتب دیگر جابه‌جا شود.
+  school_manager: new Set(['ثبت‌نام و شاگردان', 'کاربران و دسترسی', 'سیستم و تنظیمات']),
+  // مدیر تدریسی/سر معلم واقعاً صلاحیت ثبت‌نام، تبدیلی، ارتقای صنف و مدیریت شاگردان را دارند
+  // (students.manage, students.transfers.manage, education.promotions.manage, manage_enrollments...)
+  // پس باید گروه «ثبت‌نام و شاگردان» را هم ببینند، نه فقط «آموزش و برنامه».
+  academic_manager: new Set(['آموزش و برنامه', 'ثبت‌نام و شاگردان']),
+  head_teacher: new Set(['آموزش و برنامه', 'ثبت‌نام و شاگردان']),
+  finance_manager: new Set(['مالی']),
+  finance_lead: new Set(['مالی'])
+};
+
+// «هشدارهای فوری» (urgentAlerts) قبلاً بدون فیلتر به همهٔ نقش‌ها نشان داده می‌شد — مثلاً «بل‌های مالی
+// معوق» در داشبورد مدیر تدریسی، که کاری از دستش برنمی‌آید. اینجا هر نقش فقط دامنه‌های مرتبط با کارش را می‌بیند.
+// ریاست عمومی همه‌چیز را می‌بیند (null = بدون فیلتر).
+const ADMIN_LEVEL_ALERT_DOMAINS = {
+  general_president: null,
+  school_manager: new Set(['education', 'users', 'support', 'general']),
+  academic_manager: new Set(['education', 'general']),
+  head_teacher: new Set(['education', 'general']),
+  finance_manager: new Set(['finance', 'general']),
+  finance_lead: new Set(['finance', 'general'])
+};
+
+// آیکون هر بخش مدیریتی (بر اساس key در modernManagementSections) — فقط برای ردیف میانبرهای بزرگ استفاده می‌شود.
+const MANAGEMENT_SECTION_ICONS = {
+  schools: 'fa-building',
+  registrations: 'fa-clipboard-check',
+  'student-registration': 'fa-user-plus',
+  'online-registrations': 'fa-globe',
+  students: 'fa-users',
+  memberships: 'fa-link',
+  sawaneh: 'fa-folder-open',
+  'sawaneh-reports': 'fa-chart-pie',
+  'transfer-in': 'fa-right-to-bracket',
+  'transfer-out': 'fa-right-from-bracket',
+  promotions: 'fa-arrow-up-right-dots',
+  users: 'fa-users-gear',
+  education: 'fa-graduation-cap',
+  attendance: 'fa-calendar-check',
+  homework: 'fa-book',
+  exams: 'fa-file-pen',
+  'result-tables': 'fa-table',
+  'sheet-templates': 'fa-layer-group',
+  schedule: 'fa-calendar-days',
+  'teacher-assignments': 'fa-chalkboard-user',
+  'schedule-reports': 'fa-chart-line',
+  finance: 'fa-sack-dollar',
+  'government-finance': 'fa-landmark',
+  'financial-memberships': 'fa-money-bill-transfer',
+  academy: 'fa-school',
+  'short-term-center': 'fa-clock',
+  reports: 'fa-chart-column',
+  'student-report': 'fa-id-card',
+  'instructor-report': 'fa-user-tie',
+  logs: 'fa-list',
+  communications: 'fa-comments',
+  notifications: 'fa-bell',
+  settings: 'fa-gear',
+  'ownership-audit': 'fa-database'
+};
+
+// مهم‌ترین بخش‌های واقعی هر پست، برای ردیف میانبر بزرگ بالای صفحه (بقیه در «ابزارها و بخش‌های مدیریتی» پایین صفحه هستند).
+// نکته: تایید نهایی پرداخت‌ها از سوی مدیر مالی/آمریت مالی انجام می‌شود، نه ریاست عمومی — بنابراین اینجا نیست.
+const PRIMARY_ACTION_KEYS_BY_LEVEL = {
+  general_president: ['schools', 'logs', 'ownership-audit', 'reports', 'users', 'settings'],
+  school_manager: ['registrations', 'students', 'users', 'communications', 'settings'],
+  academic_manager: ['schedule', 'teacher-assignments', 'education', 'exams', 'attendance'],
+  head_teacher: ['schedule', 'teacher-assignments', 'education', 'exams', 'attendance'],
+  finance_manager: ['finance', 'government-finance', 'academy', 'reports'],
+  finance_lead: ['finance', 'government-finance', 'academy', 'reports']
+};
+
+const PRIMARY_ACTION_TONES = ['teal', 'copper', 'mint', 'slate', 'navy', 'rose'];
+
+// دو دکمهٔ اصلی هدر (غیرفعال/اصلی) مخصوص هر پست — به‌جای دکمه‌های عمومی قدیمی.
+const ADMIN_LEVEL_HERO_ACTIONS = {
+  general_president: { ghost: { label: 'گزارش اجرایی', to: '/admin-reports' }, primaryLabel: 'مدیریت کاربران', primaryTo: '/admin-users' },
+  school_manager: { ghost: { label: 'اطلاعیه جدید', to: '/admin-news' }, primaryLabel: 'بررسی ثبت‌نام‌ها', primaryTo: '/admin-enrollments' },
+  academic_manager: { ghost: { label: 'ابلاغیه به اساتید', to: '/admin-communications' }, primaryLabel: 'تخصیص استاد جدید', primaryTo: ADMIN_TEACHER_ASSIGNMENTS_ROUTE },
+  head_teacher: { ghost: { label: 'ابلاغیه به اساتید', to: '/admin-communications' }, primaryLabel: 'تخصیص استاد جدید', primaryTo: ADMIN_TEACHER_ASSIGNMENTS_ROUTE },
+  finance_manager: { ghost: { label: 'گزارش مالی دولت', to: '/admin-government-finance' }, primaryLabel: 'بررسی صف پرداخت', primaryTo: '/admin-finance#pending-receipts' },
+  finance_lead: { ghost: { label: 'گزارش مالی دولت', to: '/admin-government-finance' }, primaryLabel: 'بررسی صف پرداخت', primaryTo: '/admin-finance#pending-receipts' }
+};
+
+const ADMIN_LEVEL_HERO_COPY = {
+  general_president: {
+    kickerSuffix: 'سطح دسترسی: همه مکاتب',
+    greet: 'وضعیت آموزشی، مالی و اداری همه مکاتب زیرمجموعه را در یک نگاه ببینید و سلامت داده و کاربران را پیگیری کنید.'
+  },
+  school_manager: {
+    kickerSuffix: '',
+    greet: 'ثبت‌نام‌ها، کاربران، اطلاعیه‌ها و کارهای روزمره همین مکتب را از یک‌جا مدیریت کنید.'
+  },
+  academic_manager: {
+    kickerSuffix: '',
+    greet: 'برنامه درسی، تخصیص استاد، حاضری صنوف و امتحانات را از یک‌جا هماهنگ کنید.'
+  },
+  head_teacher: {
+    kickerSuffix: '',
+    greet: 'برنامه درسی، تخصیص استاد، حاضری صنوف و امتحانات را از یک‌جا هماهنگ کنید.'
+  },
+  finance_manager: {
+    kickerSuffix: '',
+    greet: 'عواید، بل‌ها، پرداخت‌های در انتظار بررسی شما و تسهیلات مالی را از یک‌جا پیگیری کنید.'
+  },
+  finance_lead: {
+    kickerSuffix: '',
+    greet: 'عواید، بل‌ها، پرداخت‌های در انتظار بررسی شما و تسهیلات مالی را از یک‌جا پیگیری کنید.'
+  }
+};
+
 const formatWorkflowNote = (value) => {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -458,7 +573,9 @@ const REQUIRED_QUICK_LINK_ITEMS = [
   { to: '/admin-education?section=enrollments&lifecycle=end', label: 'تبدیلی، ترک تحصیل و منفکی', permission: 'students.lifecycle.manage' },
   { to: '/admin-promotions', label: 'ارتقای صنف', permission: 'education.promotions.manage' },
   { to: '/admin-financial-memberships', label: 'اثر مالی تغییرات آموزشی', permission: 'finance.lifecycle_effects.manage' },
-  { to: '/admin-settings#student-ids', label: 'تنظیم شماره اساس و ریجیستر نمبر', permission: 'manage_content' }
+  { to: '/admin-settings#student-ids', label: 'تنظیم شماره اساس و ریجیستر نمبر', permission: 'manage_content' },
+  { to: '/afghan-sawaneh', label: 'پرونده‌های سوانح شاگرد', permission: 'sawaneh.card.view' },
+  { to: '/afghan-sawaneh/reports', label: 'گزارش‌های سوانح', permission: 'sawaneh.card.view' }
 ];
 
 const PRIMARY_ADMIN_LINKS = new Set([
@@ -722,7 +839,9 @@ export default function AdminPanel() {
   const [schoolEditForm, setSchoolEditForm] = useState(null);
   const [schoolSearchQuery, setSchoolSearchQuery] = useState('');
   const [schoolStatusFilter, setSchoolStatusFilter] = useState('all');
-  const [adminModernView, setAdminModernView] = useState('overview');
+  const [activeManagementGroup, setActiveManagementGroup] = useState('');
+  const [schoolListOpen, setSchoolListOpen] = useState(false);
+  const [toolsPanelOpen, setToolsPanelOpen] = useState(true);
   const [stats, setStats] = useState({
     users: 0,
     courses: 0,
@@ -818,6 +937,29 @@ export default function AdminPanel() {
   const searchToolRef = useRef(null);
   const searchToolButtonRef = useRef(null);
   const searchToolInputRef = useRef(null);
+  const modernSearchPanelRef = useRef(null);
+  const modernSearchInputRef = useRef(null);
+  const schoolSwitcherRef = useRef(null);
+  const ownershipPanelRef = useRef(null);
+
+  useEffect(() => {
+    if (!searchToolOpen) return undefined;
+    // پنل جستجو اکنون یک پنل شیشه‌ای است که دقیقا زیر دکمه جستجوی هدر باز می‌شود؛ فقط فوکوس لازم است، نه اسکرول.
+    // نکته: از یک ref جدا (نه searchToolInputRef قدیمی) استفاده می‌شود چون آن ref با ورودی مخفیِ ابزار جستجوی قدیمی مشترک است.
+    const timer = window.setTimeout(() => {
+      modernSearchInputRef.current?.focus();
+    }, 60);
+    const handleOutsideClick = (event) => {
+      if (modernSearchPanelRef.current && !modernSearchPanelRef.current.contains(event.target)) {
+        setSearchToolOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, [searchToolOpen]);
 
   const effectivePermissions = useMemo(() => {
     const fromUser = Array.isArray(user?.effectivePermissions) ? user.effectivePermissions : [];
@@ -846,6 +988,7 @@ export default function AdminPanel() {
   const canManageTeacherAssignments = permissionAllows('timetable.teacher_assignments.manage', effectivePermissions);
   const canManageEnrollments = permissionAllows('manage_enrollments', effectivePermissions);
   const canManageMemberships = permissionAllows('manage_memberships', effectivePermissions);
+  const canViewSawaneh = permissionAllows('sawaneh.card.view', effectivePermissions);
   const canViewSchedule = permissionAllows('view_schedule', effectivePermissions);
   const canManagePlatformRequests = permissionAllows('manage_platform_requests', effectivePermissions);
   const apiHealthCheckedLabel = useMemo(() => {
@@ -3361,6 +3504,11 @@ export default function AdminPanel() {
   };
 
   const dashboardSummary = adminDashboard?.summary || {};
+  const directoryHealth = dashboardSummary.directoryHealth || {};
+  // حساب کاربری «یتیم» یعنی حساب با نقش استاد/والد وجود دارد ولی به هیچ پروفایل رسمی
+  // (رکورد AfghanTeacher برای استاد، یا guardian در پروفایل شاگرد برای والد) وصل نیست.
+  const orphanInstructorUserCount = Number(directoryHealth.orphanInstructorUsers || 0);
+  const orphanParentUserCount = Number(directoryHealth.orphanParentUsers || 0);
   const financeStats = stats.finance || {};
   const executiveSummary = {
     totalStudents: Number(financeStats.membershipStudents ?? dashboardSummary.totalStudents ?? stats.users ?? 0),
@@ -3382,102 +3530,212 @@ export default function AdminPanel() {
     activeSchools: Number(financeStats.activeSchools ?? stats.activeSchools ?? schoolOverviewStats.activeRecords ?? 0)
   };
 
-  const executiveQuickActions = [
-    ...(canManageEnrollments ? [{ to: '/admin-enrollments', label: 'ثبت‌نام‌ها', caption: 'بررسی و تایید درخواست‌ها', tone: 'mint' }] : []),
-    ...(canManageMemberships ? [{ to: '/admin-education?section=enrollments', label: 'ممبرشیپ آموزشی', caption: 'وصل شاگرد به صنف', tone: 'mint' }] : []),
-    ...(canViewSchedule ? [{ to: canManageSchedule ? ADMIN_SCHEDULE_ROUTE : ADMIN_SCHEDULE_VIEW_ROUTE, label: 'تقسیم اوقات', caption: canManageSchedule ? 'ویرایش و نشر برنامه' : 'مشاهده برنامه رسمی', tone: 'slate' }] : []),
-    ...(canManageTeacherAssignments ? [{ to: ADMIN_TEACHER_ASSIGNMENTS_ROUTE, label: 'تخصیص استاد', caption: 'وصل استاد به صنف و مضمون', tone: 'slate' }] : []),
-    ...(canManageFinance ? [{ to: '/admin-finance', label: 'مرکز مالی', caption: 'پرداخت و صندوق', tone: 'copper' }] : []),
-    ...(canManageFinance ? [{ to: '/admin-government-finance', label: 'مالی دولت', caption: 'گزارش و آرشیف رسمی', tone: 'teal' }] : []),
-    ...(canManageContent ? [{ to: '/admin-education', label: 'مرکز آموزش', caption: 'سال تعلیمی، صنف و مضمون', tone: 'mint' }] : []),
-    ...(canManageContent ? [{ to: '/admin-exams-dashboard', label: 'داشبورد امتحانات', caption: 'جلسه‌ها و نتیجه‌ها', tone: 'slate' }] : []),
-    ...(canManagePlatformRequests ? [{ to: '/admin-communications', label: 'مرکز ارتباطات سیما', caption: 'دمو، تماس، پیشنهاد و شکایت', tone: 'teal' }] : []),
-    ...(canViewReports ? [{ to: '/admin-reports', label: 'گزارش‌ها', caption: 'خروجی و تحلیل', tone: 'teal' }] : [])
-  ];
-
-  const focusedExecutiveQuickActions = [
-    ...(canManageFinance ? [{ to: '/admin-finance', label: 'مرکز مالی', caption: 'پرداخت، رسید و صندوق', tone: 'copper' }] : []),
-    ...(canManageContent ? [{ to: '/admin-education', label: 'مرکز آموزش', caption: 'سال تعلیمی، صنف و مضمون', tone: 'mint' }] : []),
-    ...(canManageUsers ? [{ to: '/admin-users', label: 'کاربران', caption: 'حساب‌ها، نقش‌ها و دسترسی', tone: 'slate' }] : []),
-    ...(canViewSchedule ? [{ to: canManageSchedule ? ADMIN_SCHEDULE_ROUTE : ADMIN_SCHEDULE_VIEW_ROUTE, label: 'تقسیم اوقات', caption: canManageSchedule ? 'ویرایش و نشر برنامه' : 'مشاهده برنامه رسمی', tone: 'slate' }] : []),
-    ...(canManageTeacherAssignments ? [{ to: ADMIN_TEACHER_ASSIGNMENTS_ROUTE, label: 'تخصیص استاد', caption: 'وصل استاد به صنف و مضمون', tone: 'slate' }] : []),
-    ...(canManagePlatformRequests ? [{ to: '/admin-communications', label: 'مرکز ارتباطات سیما', caption: 'دمو، تماس، پیشنهاد و شکایت', tone: 'teal' }] : []),
-    ...(canViewReports ? [{ to: '/admin-reports', label: 'گزارش‌ها', caption: 'خروجی و تحلیل', tone: 'teal' }] : [])
-  ];
-
-  const executiveTasks = (adminDashboard?.tasks || []).map((item) => ({
-    id: item.id,
-    title: item.label,
-    subtitle: item.meta
-  }));
-
-  const executiveAlerts = (adminDashboard?.alerts || []).map((item) => ({
-    id: item.id,
-    title: item.label,
-    subtitle: item.meta
-  }));
-
-  const zeroSignalValues = useMemo(() => ([
-    Number(executiveSummary.pendingFinanceReviews || 0),
-    Number(executiveSummary.pendingAccessRequests || 0),
-    Number(executiveSummary.pendingProfileRequests || 0),
-    Number(stats.pendingOrders || 0)
-  ]), [
-    executiveSummary.pendingAccessRequests,
-    executiveSummary.pendingFinanceReviews,
-    executiveSummary.pendingProfileRequests,
-    stats.pendingOrders
-  ]);
-
-  const showExecutiveZeroWarning = useMemo(() => {
-    if (!canViewReports) return false;
-    if (Number(executiveSummary.totalStudents || 0) <= 0) return false;
-    const zeroCount = zeroSignalValues.filter((value) => value === 0).length;
-    return zeroCount >= 3;
-  }, [canViewReports, executiveSummary.totalStudents, zeroSignalValues]);
+  // شمار واقعی بل‌های معوق (سررسیدگذشته و دارای باقیمانده) — از /api/admin/alerts (کلید finance_overdue)،
+  // نه orders.length که صف رسیدهای منتظر تایید است (یک چیز کاملاً متفاوت).
+  const financeOverdueCount = Number(
+    (alerts || []).find((item) => item?.key === 'finance_overdue')?.count || 0
+  );
 
   const modernKpiItems = [
     {
       label: 'شاگردان ممبرشیپ',
       value: Number(executiveSummary.totalStudents || stats.users || 0).toLocaleString('fa-AF-u-ca-persian'),
-      hint: `${Number(executiveSummary.activeMemberships || 0).toLocaleString('fa-AF-u-ca-persian')} ممبرشیپ مالی فعال`
+      hint: `${Number(executiveSummary.activeMemberships || 0).toLocaleString('fa-AF-u-ca-persian')} ممبرشیپ مالی فعال`,
+      tone: 'teal',
+      progress: Number(executiveSummary.totalStudents || 0)
+        ? Math.min(100, (Number(executiveSummary.activeMemberships || 0) / Number(executiveSummary.totalStudents || 1)) * 100)
+        : 0
     },
     {
       label: 'پرداخت امروز',
       value: Number(executiveSummary.todayPayments || stats.todayPayments || 0).toLocaleString('fa-AF-u-ca-persian'),
-      hint: `${Number(executiveSummary.todayPaymentAmount || 0).toLocaleString('fa-AF-u-ca-persian')} AFN / ${Number(executiveSummary.pendingFinanceReviews || orders.length || 0).toLocaleString('fa-AF-u-ca-persian')} رسید در انتظار`
+      hint: `${Number(executiveSummary.todayPaymentAmount || 0).toLocaleString('fa-AF-u-ca-persian')} AFN / ${Number(executiveSummary.pendingFinanceReviews || orders.length || 0).toLocaleString('fa-AF-u-ca-persian')} رسید در انتظار`,
+      tone: 'copper',
+      // شمارش کل امروز است، سقف مشخصی ندارد (ضرب‌کردن در ۱۰ یک درصد فرضی بی‌معنا بود)؛
+      // رینگ فقط نشان می‌دهد امروز پرداختی ثبت شده یا نه.
+      progress: Number(executiveSummary.todayPayments || stats.todayPayments || 0) > 0 ? 100 : 0
     },
     {
       label: 'حضور عمومی',
       value: `${Number(executiveSummary.attendanceRate || 0).toLocaleString('fa-AF-u-ca-persian')}%`,
-      hint: `${Number(todayScheduleSummary.total || 0).toLocaleString('fa-AF-u-ca-persian')} برنامه امروز`
+      hint: `${Number(todayScheduleSummary.total || 0).toLocaleString('fa-AF-u-ca-persian')} برنامه امروز`,
+      tone: 'mint',
+      progress: Number(executiveSummary.attendanceRate || 0)
     },
     {
       label: 'پیام‌ها',
       value: Number(executiveSummary.openMessages || supportMessages.length || 0).toLocaleString('fa-AF-u-ca-persian'),
-      hint: `${Number(visibleAlerts.length || 0).toLocaleString('fa-AF-u-ca-persian')} هشدار فعال`
+      hint: `${Number(visibleAlerts.length || 0).toLocaleString('fa-AF-u-ca-persian')} هشدار فعال`,
+      tone: 'rose',
+      // شمارش کل است، سقف مشخصی ندارد؛ رینگ به‌عنوان نشانگر وضعیت: پر = پیام خوانده‌نشده دارد، خالی = صندوق تمیز است
+      progress: Number(executiveSummary.openMessages || supportMessages.length || 0) > 0 ? 100 : 0
     },
     {
       label: 'مکاتب فعال',
       value: Number(executiveSummary.activeSchools || schoolOverviewStats.activeRecords || 0).toLocaleString('fa-AF-u-ca-persian'),
-      hint: schoolOverviewStats.currentSchoolName
+      hint: schoolOverviewStats.currentSchoolName,
+      tone: 'slate',
+      // شمارش کل است، سقف مشخصی ندارد؛ رینگ فقط نشان می‌دهد حداقل یک مکتب فعال هست یا نه
+      progress: Number(executiveSummary.activeSchools || schoolOverviewStats.activeRecords || 0) > 0 ? 100 : 0
     }
   ];
 
+  // مدیر مکتب: کارهای روزمرهٔ همین یک مکتب — ثبت‌نام، حضور، کاربران؛ نه چیزی مالی یا چندمکتبه.
+  const schoolManagerKpiItems = [
+    {
+      label: 'شاگردان فعال',
+      value: Number(executiveSummary.totalStudents || stats.users || 0).toLocaleString('fa-AF-u-ca-persian'),
+      hint: `${Number(executiveSummary.activeMemberships || 0).toLocaleString('fa-AF-u-ca-persian')} ممبرشیپ مالی فعال`,
+      tone: 'teal',
+      progress: Number(executiveSummary.totalStudents || 0)
+        ? Math.min(100, (Number(executiveSummary.activeMemberships || 0) / Number(executiveSummary.totalStudents || 1)) * 100)
+        : 0
+    },
+    {
+      label: 'ثبت‌نام‌های در انتظار',
+      value: Number(inboxCounts?.enrollments || 0).toLocaleString('fa-AF-u-ca-persian'),
+      hint: 'نیاز به بررسی و تایید',
+      tone: 'copper',
+      // شمارش کل است، سقف مشخصی ندارد؛ رینگ فقط نشان می‌دهد صفی برای بررسی هست یا نه
+      progress: Number(inboxCounts?.enrollments || 0) > 0 ? 100 : 0
+    },
+    {
+      label: 'حضور امروز',
+      value: `${Number(executiveSummary.attendanceRate || 0).toLocaleString('fa-AF-u-ca-persian')}%`,
+      hint: `${Number(todayScheduleSummary.total || 0).toLocaleString('fa-AF-u-ca-persian')} برنامه امروز`,
+      tone: 'mint',
+      progress: Number(executiveSummary.attendanceRate || 0)
+    },
+    {
+      label: 'کاربران مکتب',
+      value: Number(stats.users || 0).toLocaleString('fa-AF-u-ca-persian'),
+      hint: 'حساب‌های فعال این مکتب',
+      tone: 'slate',
+      progress: Number(stats.users || 0) > 0 ? 100 : 0
+    }
+  ];
+
+  // مدیر تدریسی/سر معلم: برنامه، حضور و تخصیص استاد — نه چیزی مالی.
+  const academicManagerKpiItems = [
+    {
+      label: 'حضور امروز',
+      value: `${Number(executiveSummary.attendanceRate || 0).toLocaleString('fa-AF-u-ca-persian')}%`,
+      hint: `${Number(todayScheduleSummary.total || 0).toLocaleString('fa-AF-u-ca-persian')} برنامه امروز`,
+      tone: 'mint',
+      progress: Number(executiveSummary.attendanceRate || 0)
+    },
+    {
+      label: 'برنامه‌های نشرشده',
+      value: Number(todayScheduleSummary.published || 0).toLocaleString('fa-AF-u-ca-persian'),
+      hint: `از ${Number(todayScheduleSummary.total || 0).toLocaleString('fa-AF-u-ca-persian')} برنامه امروز`,
+      tone: 'teal',
+      progress: Number(todayScheduleSummary.total || 0)
+        ? Math.min(100, (Number(todayScheduleSummary.published || 0) / Number(todayScheduleSummary.total || 1)) * 100)
+        : 0
+    },
+    {
+      label: 'برنامه‌های پیش‌نویس',
+      value: Number(todayScheduleSummary.draft || 0).toLocaleString('fa-AF-u-ca-persian'),
+      hint: 'نیاز به بررسی و نشر',
+      tone: 'copper',
+      progress: Number(todayScheduleSummary.draft || 0) > 0 ? 100 : 0
+    },
+    {
+      label: 'تخصیص استاد',
+      value: Number(activeSchoolContext?.scopeSummary?.teacherAssignments?.count || 0).toLocaleString('fa-AF-u-ca-persian'),
+      hint: 'صنف‌های دارای استاد مشخص',
+      tone: 'slate',
+      progress: Number(activeSchoolContext?.scopeSummary?.teacherAssignments?.count || 0) > 0 ? 100 : 0
+    }
+  ];
+
+  // مدیر مالی/آمریت مالی: صف تایید، بل معوق و عواید — نه چیزی آموزشی.
+  const financeManagerKpiItems = [
+    {
+      label: 'بل‌های معوق',
+      value: financeOverdueCount.toLocaleString('fa-AF-u-ca-persian'),
+      hint: 'سررسیدگذشته، نیاز به پیگیری',
+      tone: 'rose',
+      progress: financeOverdueCount > 0 ? 100 : 0
+    },
+    {
+      label: 'پرداخت امروز',
+      value: Number(executiveSummary.todayPayments || stats.todayPayments || 0).toLocaleString('fa-AF-u-ca-persian'),
+      hint: `${Number(executiveSummary.todayPaymentAmount || 0).toLocaleString('fa-AF-u-ca-persian')} افغانی`,
+      tone: 'copper',
+      progress: Number(executiveSummary.todayPayments || stats.todayPayments || 0) > 0 ? 100 : 0
+    },
+    {
+      label: 'رسیدهای در انتظار تایید',
+      value: orders.length.toLocaleString('fa-AF-u-ca-persian'),
+      hint: 'در صف بررسی شما',
+      tone: 'slate',
+      progress: orders.length > 0 ? 100 : 0
+    },
+    {
+      label: 'عواید این ماه',
+      value: Number(executiveSummary.monthlyRevenue || 0).toLocaleString('fa-AF-u-ca-persian'),
+      hint: `${Number(executiveSummary.monthDeltaPercent || 0).toLocaleString('fa-AF-u-ca-persian')}٪ نسبت به ماه قبل`,
+      tone: 'mint',
+      progress: Number(executiveSummary.totalDue || 0)
+        ? Math.min(100, (Number(executiveSummary.monthlyRevenue || 0) / Number(executiveSummary.totalDue || 1)) * 100)
+        : 0
+    }
+  ];
+
+  // «کارهای فوری» باید تمام مشکلات واقعی سیستم را پوشش بدهد: رکوردهای با مالکیت مبهم،
+  // هشدارهای حساس (SLA/فوری)، و همه صف‌های اینباکس (رسید، پروفایل، پیام).
+  // نکته: تایید نهایی پرداخت‌ها از سوی مدیر مالی/آمریت مالی انجام می‌شود، نه ریاست عمومی — بنابراین در این لیست نیست.
   const modernUrgentItems = [
-    ...(urgentAlerts || []).slice(0, 4).map((alert) => ({
-      key: `alert-${alert.key}`,
-      title: alert.title,
-      meta: `${Number(alert.count || 0).toLocaleString('fa-AF-u-ca-persian')} مورد`,
-      to: ALERT_LINKS[alert.key] || ''
-    })),
-    ...(inboxItems || []).filter((item) => item.kind !== 'profile').slice(0, 4).map((item) => ({
+    ...(adminLevel === 'general_president' && ownershipIssueCount > 0 ? [{
+      key: 'ownership-issue',
+      title: 'رکورد با مالکیت مبهم',
+      meta: `${Number(ownershipIssueCount).toLocaleString('fa-AF-u-ca-persian')} رکورد نیاز به تعیین مکتب مشخص دارد`,
+      action: () => ownershipPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      badge: 'فوری',
+      tone: 'bad'
+    }] : []),
+    ...(adminLevel === 'general_president' && orphanInstructorUserCount > 0 ? [{
+      key: 'orphan-instructor-users',
+      title: 'حساب استاد بدون پروفایل رسمی',
+      meta: `${orphanInstructorUserCount.toLocaleString('fa-AF-u-ca-persian')} حساب استاد — برای رفع، پروندهٔ رسمی بسازید و به حساب موجود وصل کنید`,
+      to: '/teacher-registration',
+      badge: 'فوری',
+      tone: 'bad'
+    }] : []),
+    ...(adminLevel === 'general_president' && orphanParentUserCount > 0 ? [{
+      key: 'orphan-parent-users',
+      title: 'حساب والد بدون فرزند وصل‌شده',
+      meta: `${orphanParentUserCount.toLocaleString('fa-AF-u-ca-persian')} حساب والد — برای رفع، او را از تب والدین/سرپرستان به فرزندش وصل کنید`,
+      to: '/admin-users#guardians',
+      badge: 'فوری',
+      tone: 'bad'
+    }] : []),
+    ...(urgentAlerts || [])
+      .filter((alert) => {
+        const roleDomains = ADMIN_LEVEL_ALERT_DOMAINS[adminLevel];
+        return !roleDomains || roleDomains.has(resolveAlertDomain(alert));
+      })
+      .slice(0, 4)
+      .map((alert) => ({
+        key: `alert-${alert.key}`,
+        title: alert.title,
+        meta: `${Number(alert.count || 0).toLocaleString('fa-AF-u-ca-persian')} مورد`,
+        to: ALERT_LINKS[alert.key] || '',
+        badge: 'فوری',
+        tone: 'bad'
+      })),
+    ...(inboxItems || []).slice(0, 6).map((item) => ({
       key: `inbox-${item.kind}-${item.id}`,
       title: item.title,
       meta: item.subtitle,
-      to: item.kind === 'receipt' ? '/admin-finance#pending-receipts' : '/admin-communications'
+      to: item.kind === 'receipt'
+        ? '/admin-finance#pending-receipts'
+        : (item.kind === 'profile' ? '/admin-users' : '/admin-communications'),
+      badge: item.kind === 'receipt' ? 'بررسی مالی' : (item.kind === 'profile' ? 'بررسی پروفایل' : 'بررسی'),
+      tone: 'warn'
     }))
-  ].slice(0, 6);
+  ].slice(0, 10);
 
   const modernActivityItems = [
     ...(recentActivityItems || []).slice(0, 5).map((item) => ({
@@ -3543,6 +3801,22 @@ export default function AdminPanel() {
       subtitle: 'وصل شاگرد به صنف و سال تعلیمی',
       count: 0,
       to: canManageMemberships ? '/admin-education?section=enrollments' : ''
+    },
+    {
+      key: 'sawaneh',
+      title: 'پرونده‌های سوانح شاگرد',
+      group: 'ثبت‌نام و شاگردان',
+      subtitle: 'کارت سوانح متعلم، سوانح تعلیمی (کارنامه) و چاپ فرم رسمی',
+      count: 0,
+      to: canViewSawaneh ? '/afghan-sawaneh' : ''
+    },
+    {
+      key: 'sawaneh-reports',
+      title: 'گزارش‌های سوانح',
+      group: 'ثبت‌نام و شاگردان',
+      subtitle: 'کارت‌های ناقص، وضعیت کارنامه‌ها و خروجی اکسل «لست اساس»',
+      count: 0,
+      to: canViewSawaneh ? '/afghan-sawaneh/reports' : ''
     },
     {
       key: 'transfer-in',
@@ -3746,14 +4020,122 @@ export default function AdminPanel() {
     }
   ];
 
-  const modernUtilityShortcuts = [
-    { key: 'profile', title: 'پروفایل من', subtitle: 'مشخصات حساب و فعالیت‌ها', to: '/profile' },
-    { key: 'search', title: 'جستجوی سراسری', subtitle: 'کاربر، پیام، خبر و درخواست', action: () => setSearchToolOpen((prev) => !prev) },
-    { key: 'notifications', title: 'اعلان‌ها', subtitle: 'پیام‌های سیستم و یادآوری‌ها', to: '/admin-notifications' }
-  ];
 
   const visibleManagementSections = modernManagementSections.filter((item) => item.to || item.onAction);
   const managementGroups = Array.from(new Set(visibleManagementSections.map((item) => item.group || 'عمومی')));
+
+  const isGeneralPresident = adminLevel === 'general_president';
+  const roleAllowedGroups = ADMIN_LEVEL_GROUP_ACCESS[adminLevel] ?? null;
+  const roleManagementSections = roleAllowedGroups
+    ? visibleManagementSections.filter((item) => roleAllowedGroups.has(item.group || 'عمومی'))
+    : visibleManagementSections;
+  const roleManagementGroups = managementGroups.filter((group) => (
+    roleManagementSections.some((item) => (item.group || 'عمومی') === group)
+  ));
+  const roleHeroCopy = ADMIN_LEVEL_HERO_COPY[adminLevel] || ADMIN_LEVEL_HERO_COPY.general_president;
+  const roleHeroActions = ADMIN_LEVEL_HERO_ACTIONS[adminLevel] || ADMIN_LEVEL_HERO_ACTIONS.general_president;
+  const generalPresidentKpiItems = [
+    {
+      label: 'مکاتب فعال',
+      value: `${Number(executiveSummary.activeSchools || schoolOverviewStats.activeRecords || 0).toLocaleString('fa-AF-u-ca-persian')} مکتب`,
+      hint: schoolOverviewStats.currentSchoolName,
+      tone: 'slate',
+      // درصد رینگ = چند درصد از مکاتب ثبت‌شده «فعال» هستند (نسبت واقعی، نه عدد فرضی)
+      progress: Number(schoolOverviewStats.total || 0)
+        ? Math.round((Number(schoolOverviewStats.activeRecords || 0) / Number(schoolOverviewStats.total || 1)) * 100)
+        : 100
+    },
+    {
+      label: 'کل شاگردان',
+      value: Number(executiveSummary.totalStudents || 0).toLocaleString('fa-AF-u-ca-persian'),
+      hint: 'همه مکاتب زیرمجموعه',
+      tone: 'teal',
+      // شمارش کل است، سقف مشخصی ندارد؛ رینگ فقط نشان می‌دهد آیا عدد صفر است یا نه (نه یک درصد واقعی)
+      progress: Number(executiveSummary.totalStudents || 0) > 0 ? 100 : 0
+    },
+    {
+      label: 'عواید کل این ماه',
+      value: Number(executiveSummary.monthlyRevenue || 0).toLocaleString('fa-AF-u-ca-persian'),
+      hint: `${Number(executiveSummary.monthDeltaPercent || 0).toLocaleString('fa-AF-u-ca-persian')}٪ نسبت به ماه قبل`,
+      tone: 'copper',
+      progress: Number(executiveSummary.totalDue || 0)
+        ? Math.min(100, (Number(executiveSummary.monthlyRevenue || 0) / Number(executiveSummary.totalDue || 1)) * 100)
+        : 0
+    },
+    {
+      label: 'بدهی باز کل',
+      value: Number(executiveSummary.outstandingAmount || 0).toLocaleString('fa-AF-u-ca-persian'),
+      hint: `${financeOverdueCount.toLocaleString('fa-AF-u-ca-persian')} بل معوق`,
+      tone: 'rose',
+      progress: Number(executiveSummary.totalDue || 0)
+        ? Math.min(100, (Number(executiveSummary.outstandingAmount || 0) / Number(executiveSummary.totalDue || 1)) * 100)
+        : 0
+    },
+    {
+      label: 'کل اساتید',
+      value: Number(executiveSummary.totalInstructors || 0).toLocaleString('fa-AF-u-ca-persian'),
+      hint: 'همه مکاتب زیرمجموعه',
+      tone: 'copper',
+      // شمارش کل است، سقف مشخصی ندارد؛ رینگ فقط نشان می‌دهد آیا عدد صفر است یا نه (نه یک درصد واقعی)
+      progress: Number(executiveSummary.totalInstructors || 0) > 0 ? 100 : 0
+    },
+    {
+      label: 'حضور عمومی',
+      value: `${Number(executiveSummary.attendanceRate || 0).toLocaleString('fa-AF-u-ca-persian')}٪`,
+      hint: 'میانگین همه مکاتب',
+      tone: 'mint',
+      progress: Number(executiveSummary.attendanceRate || 0)
+    }
+  ];
+  const ROLE_KPI_ITEMS_BY_LEVEL = {
+    general_president: generalPresidentKpiItems,
+    school_manager: schoolManagerKpiItems,
+    academic_manager: academicManagerKpiItems,
+    head_teacher: academicManagerKpiItems,
+    finance_manager: financeManagerKpiItems,
+    finance_lead: financeManagerKpiItems
+  };
+  const roleKpiItems = ROLE_KPI_ITEMS_BY_LEVEL[adminLevel] || modernKpiItems.filter((item) => item.label !== 'مکاتب فعال');
+
+  const primaryActionKeys = PRIMARY_ACTION_KEYS_BY_LEVEL[adminLevel] || PRIMARY_ACTION_KEYS_BY_LEVEL.general_president;
+  const SYNTHETIC_PRIMARY_ACTIONS = {
+    schools: {
+      key: 'schools',
+      title: 'مدیریت مکاتب',
+      subtitle: 'لیست، انتخاب مکتب فعال و ویرایش مشخصات',
+      action: () => {
+        setSchoolListOpen(true);
+        window.setTimeout(() => schoolSwitcherRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30);
+      }
+    },
+    'ownership-audit': {
+      key: 'ownership-audit',
+      title: 'بررسی مالکیت دیتا',
+      subtitle: 'سلامت داده چندمکتبه',
+      action: () => ownershipPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  };
+  const primaryQuickActions = primaryActionKeys
+    .map((key) => SYNTHETIC_PRIMARY_ACTIONS[key] || visibleManagementSections.find((item) => item.key === key))
+    .filter(Boolean)
+    .map((item, index) => ({
+      key: item.key,
+      title: item.title,
+      subtitle: item.subtitle,
+      to: item.to,
+      action: item.action || item.onAction,
+      icon: MANAGEMENT_SECTION_ICONS[item.key] || 'fa-circle',
+      tone: PRIMARY_ACTION_TONES[index % PRIMARY_ACTION_TONES.length]
+    }));
+  // پروفایل/جستجو/اعلان‌ها دیگر اینجا تکرار نمی‌شوند — همان‌ها در نوار بالای صفحه (Topbar) هستند.
+  const combinedQuickActions = primaryQuickActions;
+
+  const activeManagementGroupResolved = roleManagementGroups.includes(activeManagementGroup)
+    ? activeManagementGroup
+    : (roleManagementGroups[0] || '');
+  const activeManagementGroupItems = roleManagementSections.filter(
+    (item) => (item.group || 'عمومی') === activeManagementGroupResolved
+  );
 
   return (
     <section className="admin-page">
@@ -3762,140 +4144,474 @@ export default function AdminPanel() {
       </div>
 
       <div className="admin-modern-dashboard" dir="rtl">
-        <header className="admin-modern-hero">
-          <div>
-            <span className="admin-modern-eyebrow">داشبورد ادمین</span>
-            <h1>سلام {user?.name || getName()}، همه چیز در یک نگاه</h1>
-            <p>نمای سبک برای وضعیت امروز، کارهای فوری و دسترسی سریع به مرکز مدیریت.</p>
+        <div className="admin-modern-topbar">
+          <div className="admin-modern-topbar__brand">
+            <div className="admin-modern-topbar__mark">ای</div>
+            <div className="admin-modern-topbar__brand-text">
+              <strong>مکتب دخترانه ایمان</strong>
+              <small>سامانه مدیریت مکتب</small>
+            </div>
           </div>
-          <div className="admin-modern-top-actions">
-            {canManageContent && (
-              <button type="button" onClick={() => setCreateSchoolOpen(true)}>
-                ایجاد مکتب
+          <div className="admin-modern-topbar__crumb">داشبورد {currentLevelLabel}</div>
+          <div className="admin-modern-topbar__actions">
+            <div className="admin-modern-topbar__search-wrap" ref={modernSearchPanelRef}>
+              <button
+                type="button"
+                className="admin-modern-topbar__search"
+                onClick={() => setSearchToolOpen((prev) => !prev)}
+                aria-expanded={searchToolOpen}
+                aria-haspopup="true"
+              >
+                <i className="fa-solid fa-magnifying-glass" aria-hidden="true" />
+                جستجو در سامانه…
               </button>
-            )}
-            <NotificationBell apiBase={API_BASE} panelPath="/admin-notifications" showLabel title="اعلان‌ها" />
-            <button type="button" className="danger" onClick={logout}>خروج</button>
+
+              {searchToolOpen && (
+                <section className="admin-modern-search-dropdown" aria-label="جستجوی سراسری">
+                  <div className="admin-modern-panel-head">
+                    <h2>جستجوی سراسری</h2>
+                    <button type="button" onClick={() => setSearchToolOpen(false)}>بستن</button>
+                  </div>
+                  <div className="admin-modern-search-row">
+                    <input
+                      ref={modernSearchInputRef}
+                      value={searchQ}
+                      onChange={(e) => setSearchQ(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          onSearchToolSubmit();
+                        }
+                      }}
+                      placeholder="نام یا نمبر اساس شاگرد، ایمیل، پیام، خبر..."
+                    />
+                    <button type="button" onClick={onSearchToolSubmit}>
+                      {searching ? 'در حال جستجو...' : 'جستجو'}
+                    </button>
+                  </div>
+                  {searchMessage && <div className="admin-modern-empty">{searchMessage}</div>}
+                  {!!searchQ.trim() && !searchMessage && (
+                    <div className="admin-modern-search-results">
+                      {!totalSearchHits && <div className="admin-modern-empty">نتیجه‌ای پیدا نشد.</div>}
+                      {!!totalSearchHits && searchSections.map((section) => (
+                        <div key={section.key} className="admin-modern-search-group">
+                          <h3>{section.title} ({section.count})</h3>
+                          {section.items.slice(0, 4).map((item, index) => {
+                            const itemKey = item?._id || item?.id || `${section.key}-${index}`;
+                            const itemLink = section.to(item);
+                            const primary = section.primary(item);
+                            const secondary = section.secondary(item);
+                            return (
+                              <Link key={itemKey} to={itemLink} onClick={() => setSearchToolOpen(false)}>
+                                <strong>{renderHighlightedSearchText(primary)}</strong>
+                                {!!secondary && <small>{renderHighlightedSearchText(secondary)}</small>}
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )}
+            </div>
+            <NotificationBell apiBase={API_BASE} panelPath="/admin-notifications" title="اعلان‌ها" />
+            <DashboardProfileCard user={user} fallbackName={getName()} apiBase={API_BASE} variant="dropdown" />
+          </div>
+        </div>
+
+        <header className="admin-modern-hero">
+          <div className="admin-modern-hero-main">
+            <span className="admin-modern-eyebrow admin-modern-hero-kicker">
+              داشبورد {currentLevelLabel}{roleHeroCopy.kickerSuffix ? ` • ${roleHeroCopy.kickerSuffix}` : ''}
+            </span>
+            <h1>داشبورد {currentLevelLabel}</h1>
+            <p>خوش آمدید {user?.name || getName()} — {roleHeroCopy.greet}</p>
+            <div className="admin-modern-hero-meta">
+              {isGeneralPresident ? (
+                <>
+                  <span>مکاتب فعال<b>{Number(executiveSummary.activeSchools || schoolOverviewStats.activeRecords || 0).toLocaleString('fa-AF-u-ca-persian')}</b></span>
+                  <span>کل شاگردان<b>{Number(executiveSummary.totalStudents || 0).toLocaleString('fa-AF-u-ca-persian')}</b></span>
+                  <span>عواید کل این ماه<b>{Number(executiveSummary.monthlyRevenue || 0).toLocaleString('fa-AF-u-ca-persian')}</b></span>
+                </>
+              ) : (
+                <>
+                  <span>شاگردان فعال<b>{Number(executiveSummary.totalStudents || 0).toLocaleString('fa-AF-u-ca-persian')}</b></span>
+                  <span>حضور عمومی<b>{Number(executiveSummary.attendanceRate || 0).toLocaleString('fa-AF-u-ca-persian')}٪</b></span>
+                </>
+              )}
+            </div>
+          </div>
+          <div className="admin-modern-hero-side">
+            <span className="admin-modern-date-pill">
+              {formatAfghanDate(new Date(), { year: 'numeric', month: 'long', day: 'numeric' })}
+            </span>
+            <div className="admin-modern-top-actions">
+              <Link to={roleHeroActions.ghost.to} className="admin-modern-hero-btn ghost">
+                {roleHeroActions.ghost.label}
+              </Link>
+              <Link to={roleHeroActions.primaryTo} className="admin-modern-hero-btn primary">
+                {roleHeroActions.primaryLabel}
+              </Link>
+            </div>
           </div>
         </header>
 
-        <nav className="admin-modern-tabs" aria-label="نمای داشبورد">
-          <button
-            type="button"
-            className={adminModernView === 'overview' ? 'active' : ''}
-            onClick={() => setAdminModernView('overview')}
-          >
-            نمای کلی
-          </button>
-          <button
-            type="button"
-            className={adminModernView === 'management' ? 'active' : ''}
-            onClick={() => setAdminModernView('management')}
-          >
-            مرکز مدیریت
-          </button>
-        </nav>
-
-        {adminModernView === 'overview' && (
-          <div className="admin-modern-overview">
+        <div className="admin-modern-overview">
             <section className="admin-modern-kpis" aria-label="خلاصه امروز">
-              {modernKpiItems.map((item) => (
-                <article key={item.label} className="admin-modern-kpi">
-                  <span>{item.label}</span>
-                  <strong>{item.value}</strong>
-                  <small>{item.hint}</small>
-                </article>
+              {roleKpiItems.map((item) => (
+                <KpiRingCard
+                  key={item.label}
+                  label={item.label}
+                  value={item.value}
+                  hint={item.hint}
+                  progress={item.progress}
+                  tone={item.tone}
+                />
               ))}
             </section>
 
-            <section className="admin-modern-grid">
-              <article className="admin-modern-panel admin-modern-panel--wide">
-                <div className="admin-modern-panel-head">
-                  <div>
-                    <span className="admin-modern-eyebrow">مکتب فعال</span>
-                    <h2>{schoolOverviewStats.currentSchoolName}</h2>
+            <section className="admin-modern-layout">
+              <div className="admin-modern-layout__col">
+                {isGeneralPresident ? (
+                  <>
+                    <article className="admin-modern-panel">
+                      <div className="admin-modern-panel-head">
+                        <div>
+                          <span className="admin-modern-eyebrow">وضعیت مکاتب</span>
+                          <h2>همه مکاتب زیرمجموعه ریاست عمومی</h2>
+                        </div>
+                        <div className="admin-modern-panel-head__actions">
+                          {canManageContent && (
+                            <button type="button" onClick={() => setCreateSchoolOpen(true)}>ایجاد مکتب</button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSchoolListOpen(true);
+                              window.setTimeout(() => schoolSwitcherRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30);
+                            }}
+                          >
+                            مدیریت مکاتب
+                          </button>
+                        </div>
+                      </div>
+                      <div className="admin-modern-summary-grid">
+                        <div className="admin-modern-summary-cell">
+                          <span>همه مکاتب</span>
+                          <strong>{Number(schoolOverviewStats.total || 0).toLocaleString('fa-AF-u-ca-persian')}</strong>
+                        </div>
+                        <div className="admin-modern-summary-cell admin-modern-summary-cell--good">
+                          <span>فعال</span>
+                          <strong>{Number(schoolOverviewStats.activeRecords || 0).toLocaleString('fa-AF-u-ca-persian')}</strong>
+                        </div>
+                        <div className="admin-modern-summary-cell">
+                          <span>غیرفعال</span>
+                          <strong>{Number(schoolOverviewStats.inactiveRecords || 0).toLocaleString('fa-AF-u-ca-persian')}</strong>
+                        </div>
+                        <div className={`admin-modern-summary-cell${ownershipIssueCount ? ' admin-modern-summary-cell--danger' : ''}`}>
+                          <span>مالکیت مبهم</span>
+                          <strong>{Number(ownershipIssueCount || 0).toLocaleString('fa-AF-u-ca-persian')}</strong>
+                        </div>
+                      </div>
+                      <div className="admin-modern-list">
+                        {!visibleSchoolOptions.length && (
+                          <span className="admin-modern-empty">هنوز مکتبی در لیست دریافت نشد.</span>
+                        )}
+                        {visibleSchoolOptions.slice(0, 5).map((school) => {
+                          const schoolId = String(school?._id || school?.id || '');
+                          const status = String(school?.status || 'active');
+                          const statusLabel = status === 'under_construction' ? 'در حال ساخت' : (status === 'active' ? 'فعال' : 'غیرفعال');
+                          const statusTone = status === 'under_construction' ? 'warn' : (status === 'active' ? 'ok' : 'bad');
+                          return (
+                            <div key={schoolId} className="admin-modern-list-item admin-modern-list-item--tagged">
+                              <div className="admin-modern-list-item__body">
+                                <strong>{school.nameDari || school.name || 'مکتب'}</strong>
+                                <small>{[school.province, school.district].filter(Boolean).join('، ') || `کد: ${school.schoolCode || '-'}`}</small>
+                              </div>
+                              <span className={`admin-modern-tag admin-modern-tag--${statusTone}`}>{statusLabel}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </article>
+
+                    <article className="admin-modern-panel">
+                      <TrendBars
+                        title="روند عواید کل سیستم"
+                        subtitle="جمع عواید ثبت‌شده در شش ماه اخیر"
+                        items={adminDashboard?.revenueTrend || []}
+                        valueFormatter={(value) => `${Number(value || 0).toLocaleString('fa-AF-u-ca-persian')} AFN`}
+                        emptyText="داده روند عواید هنوز ثبت نشده است."
+                      />
+                    </article>
+
+                    <article ref={ownershipPanelRef} className="admin-modern-panel">
+                      <div className="admin-modern-panel-head">
+                        <div>
+                          <span className="admin-modern-eyebrow">بررسی مالکیت دیتا</span>
+                          <h2>{ownershipIssueCount ? 'رکوردهای مبهم وجود دارد' : 'همه بخش‌های کلیدی مکتب مشخص دارند'}</h2>
+                        </div>
+                        {!!ownershipIssueCount && canManageFinance && (
+                          <button
+                            type="button"
+                            onClick={handleOwnershipBackfill}
+                            disabled={schoolScopeBusy || !activeSchoolId}
+                          >
+                            {schoolScopeBusy ? 'در حال ترمیم...' : 'رفع خودکار مالکیت مبهم'}
+                          </button>
+                        )}
+                      </div>
+                      <p className="admin-modern-panel-note">
+                        برای سیستم چندمکتبه، هر شاگرد، صنف، پلان فیس، بل و پرداخت باید به یک مکتب روشن وصل باشد؛
+                        و هر حساب کاربری استاد یا والد هم باید به یک پروفایل رسمی (استاد یا فرزند) وصل باشد.
+                        {' '}
+                        {ownershipIssueCount
+                          ? (canManageFinance
+                            ? 'دکمهٔ «رفع خودکار مالکیت مبهم» رکوردهای بدون مکتب مشخص را به مکتب فعال (همان که بالای صفحه انتخاب شده) وصل می‌کند.'
+                            : 'برای رفع این مورد به صلاحیت مدیریت مالی نیاز دارید؛ با مدیر مالی یا آمریت مالی هماهنگ کنید.')
+                          : 'در حال حاضر رکورد مبهمی برای رفع وجود ندارد.'}
+                        {(orphanInstructorUserCount > 0 || orphanParentUserCount > 0)
+                          ? ' حساب‌های یتیم (استاد/والد بدون پروفایل وصل‌شده) از «کاربران» قابل بررسی و اصلاح‌اند.'
+                          : ''}
+                      </p>
+                      {ownershipAudit ? (
+                        <div className="admin-modern-summary-grid">
+                          {(ownershipAudit.rows || []).slice(0, 4).map((row) => (
+                            <div
+                              key={row.key}
+                              className={`admin-modern-summary-cell${(row.missing || row.unknownSchool) ? ' admin-modern-summary-cell--danger' : ' admin-modern-summary-cell--good'}`}
+                            >
+                              <span>{row.label}</span>
+                              <strong>
+                                {(row.missing || row.unknownSchool)
+                                  ? `${Number((row.missing || 0) + (row.unknownSchool || 0)).toLocaleString('fa-AF-u-ca-persian')} مبهم`
+                                  : 'روشن'}
+                              </strong>
+                            </div>
+                          ))}
+                          <div className={`admin-modern-summary-cell${orphanInstructorUserCount ? ' admin-modern-summary-cell--danger' : ' admin-modern-summary-cell--good'}`}>
+                            <span>حساب استاد بدون پروفایل</span>
+                            <strong>
+                              {orphanInstructorUserCount
+                                ? `${orphanInstructorUserCount.toLocaleString('fa-AF-u-ca-persian')} یتیم`
+                                : 'روشن'}
+                            </strong>
+                          </div>
+                          <div className={`admin-modern-summary-cell${orphanParentUserCount ? ' admin-modern-summary-cell--danger' : ' admin-modern-summary-cell--good'}`}>
+                            <span>حساب والد بدون فرزند</span>
+                            <strong>
+                              {orphanParentUserCount
+                                ? `${orphanParentUserCount.toLocaleString('fa-AF-u-ca-persian')} یتیم`
+                                : 'روشن'}
+                            </strong>
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="admin-modern-empty">در حال دریافت وضعیت مالکیت دیتا...</span>
+                      )}
+                    </article>
+                  </>
+                ) : (
+                  <>
+                    <article className="admin-modern-panel">
+                      <div className="admin-modern-panel-head">
+                        <h2>کارهای فوری</h2>
+                        <button type="button" onClick={refreshAdminInbox}>بروزرسانی</button>
+                      </div>
+                      <div className="admin-modern-list">
+                        {!modernUrgentItems.length && <span className="admin-modern-empty">مورد فوری ثبت نشده است.</span>}
+                        {modernUrgentItems.map((item) => {
+                          const body = (
+                            <div className="admin-modern-list-item__body">
+                              <strong>{item.title}</strong>
+                              <small>{item.meta}</small>
+                            </div>
+                          );
+                          const tag = <span className={`admin-modern-tag admin-modern-tag--${item.tone}`}>{item.badge}</span>;
+                          if (item.to) {
+                            return (
+                              <Link key={item.key} to={item.to} className="admin-modern-list-item admin-modern-list-item--tagged">
+                                {body}{tag}
+                              </Link>
+                            );
+                          }
+                          if (item.action) {
+                            return (
+                              <button key={item.key} type="button" onClick={item.action} className="admin-modern-list-item admin-modern-list-item--tagged admin-modern-list-item--button">
+                                {body}{tag}
+                              </button>
+                            );
+                          }
+                          return (
+                            <div key={item.key} className="admin-modern-list-item admin-modern-list-item--tagged">
+                              {body}{tag}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </article>
+
+                    <article className="admin-modern-panel">
+                      <div className="admin-modern-panel-head">
+                        <h2>آخرین فعالیت‌ها</h2>
+                        {canViewReports && <Link to="/admin-logs">همه فعالیت‌ها</Link>}
+                      </div>
+                      <div className="admin-modern-list">
+                        {!modernActivityItems.length && <span className="admin-modern-empty">فعالیت تازه‌ای برای نمایش نیست.</span>}
+                        {modernActivityItems.map((item) => (
+                          item.to ? (
+                            <Link key={item.key} to={item.to} className="admin-modern-list-item">
+                              <strong>{item.title}</strong>
+                              <small>{item.meta}</small>
+                            </Link>
+                          ) : (
+                            <div key={item.key} className="admin-modern-list-item">
+                              <strong>{item.title}</strong>
+                              <small>{item.meta}</small>
+                            </div>
+                          )
+                        ))}
+                      </div>
+                    </article>
+                  </>
+                )}
+              </div>
+
+              <div className="admin-modern-layout__col">
+                {isGeneralPresident && (
+                  <article className="admin-modern-panel">
+                    <div className="admin-modern-panel-head">
+                      <h2>کارهای فوری مدیریتی</h2>
+                      <button type="button" onClick={refreshAdminInbox}>بروزرسانی</button>
+                    </div>
+                    <div className="admin-modern-list">
+                      {!modernUrgentItems.length && <span className="admin-modern-empty">مورد فوری ثبت نشده است.</span>}
+                      {modernUrgentItems.map((item) => {
+                        const body = (
+                          <div className="admin-modern-list-item__body">
+                            <strong>{item.title}</strong>
+                            <small>{item.meta}</small>
+                          </div>
+                        );
+                        const tag = <span className={`admin-modern-tag admin-modern-tag--${item.tone}`}>{item.badge}</span>;
+                        if (item.to) {
+                          return (
+                            <Link key={item.key} to={item.to} className="admin-modern-list-item admin-modern-list-item--tagged">
+                              {body}{tag}
+                            </Link>
+                          );
+                        }
+                        if (item.action) {
+                          return (
+                            <button key={item.key} type="button" onClick={item.action} className="admin-modern-list-item admin-modern-list-item--tagged admin-modern-list-item--button">
+                              {body}{tag}
+                            </button>
+                          );
+                        }
+                        return (
+                          <div key={item.key} className="admin-modern-list-item admin-modern-list-item--tagged">
+                            {body}{tag}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </article>
+                )}
+
+                {isGeneralPresident && (
+                  <article className="admin-modern-panel">
+                    <div className="admin-modern-panel-head">
+                      <h2>آخرین فعالیت‌ها</h2>
+                      {canViewReports && <Link to="/admin-logs">همه فعالیت‌ها</Link>}
+                    </div>
+                    <div className="admin-modern-list">
+                      {!modernActivityItems.length && <span className="admin-modern-empty">فعالیت تازه‌ای برای نمایش نیست.</span>}
+                      {modernActivityItems.map((item) => (
+                        item.to ? (
+                          <Link key={item.key} to={item.to} className="admin-modern-list-item">
+                            <strong>{item.title}</strong>
+                            <small>{item.meta}</small>
+                          </Link>
+                        ) : (
+                          <div key={item.key} className="admin-modern-list-item">
+                            <strong>{item.title}</strong>
+                            <small>{item.meta}</small>
+                          </div>
+                        )
+                      ))}
+                    </div>
+                  </article>
+                )}
+
+                {!isGeneralPresident && (
+                  <article className="admin-modern-panel">
+                    <div className="admin-modern-panel-head">
+                      <h2>برنامه امروز</h2>
+                    </div>
+                    <div className="admin-modern-list">
+                      {!todaySchedule.length && <span className="admin-modern-empty">برای امروز برنامه‌ای ثبت نشده است.</span>}
+                      {todaySchedule.slice(0, 6).map((item, index) => (
+                        <div key={item?._id || item?.id || index} className="admin-modern-list-item admin-modern-list-item--tagged">
+                          <div className="admin-modern-list-item__body">
+                            <strong>{item?.subjectTitle || item?.subject || item?.courseTitle || 'برنامه درسی'}</strong>
+                            <small>{[item?.classTitle, item?.teacherName].filter(Boolean).join(' | ') || '—'}</small>
+                          </div>
+                          <span className="admin-modern-tag admin-modern-tag--info">
+                            {[item?.startTime, item?.endTime].filter(Boolean).join(' - ') || '—'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                )}
+
+                <article className="admin-modern-panel">
+                  <div className="admin-modern-panel-head">
+                    <h2>هشدارهای کلیدی</h2>
                   </div>
-                  <button type="button" onClick={() => setAdminModernView('management')}>مدیریت مکاتب</button>
-                </div>
-                <div className="admin-modern-school-summary">
-                  <span>همه مکاتب <b>{Number(schoolOverviewStats.total || 0).toLocaleString('fa-AF-u-ca-persian')}</b></span>
-                  <span>فعال <b>{Number(schoolOverviewStats.activeRecords || 0).toLocaleString('fa-AF-u-ca-persian')}</b></span>
-                  <span>غیرفعال <b>{Number(schoolOverviewStats.inactiveRecords || 0).toLocaleString('fa-AF-u-ca-persian')}</b></span>
-                  <span className={ownershipIssueCount ? 'has-action' : ''}>
-                    مالکیت مبهم <b>{Number(ownershipIssueCount || 0).toLocaleString('fa-AF-u-ca-persian')}</b>
-                    {!!ownershipIssueCount && canManageFinance && (
-                      <button
-                        type="button"
-                        className="admin-modern-inline-action"
-                        onClick={handleOwnershipBackfill}
-                        disabled={schoolScopeBusy || !activeSchoolId}
-                      >
-                        {schoolScopeBusy ? 'در حال ترمیم...' : 'رفع خودکار'}
-                      </button>
-                    )}
-                    {!!ownershipIssueCount && !canManageFinance && (
-                      <small>نیازمند صلاحیت مالی</small>
-                    )}
-                  </span>
-                </div>
-              </article>
-
-              <article className="admin-modern-panel">
-                <div className="admin-modern-panel-head">
-                  <h2>کارهای فوری</h2>
-                  <button type="button" onClick={refreshAdminInbox}>بروزرسانی</button>
-                </div>
-                <div className="admin-modern-list">
-                  {!modernUrgentItems.length && <span className="admin-modern-empty">مورد فوری ثبت نشده است.</span>}
-                  {modernUrgentItems.map((item) => (
-                    item.to ? (
-                      <Link key={item.key} to={item.to} className="admin-modern-list-item">
-                        <strong>{item.title}</strong>
-                        <small>{item.meta}</small>
-                      </Link>
-                    ) : (
-                      <div key={item.key} className="admin-modern-list-item">
-                        <strong>{item.title}</strong>
-                        <small>{item.meta}</small>
-                      </div>
-                    )
-                  ))}
-                </div>
-              </article>
-
-              <article className="admin-modern-panel">
-                <div className="admin-modern-panel-head">
-                  <h2>آخرین فعالیت‌ها</h2>
-                  {canViewReports && <Link to="/admin-logs">همه فعالیت‌ها</Link>}
-                </div>
-                <div className="admin-modern-list">
-                  {!modernActivityItems.length && <span className="admin-modern-empty">فعالیت تازه‌ای برای نمایش نیست.</span>}
-                  {modernActivityItems.map((item) => (
-                    item.to ? (
-                      <Link key={item.key} to={item.to} className="admin-modern-list-item">
-                        <strong>{item.title}</strong>
-                        <small>{item.meta}</small>
-                      </Link>
-                    ) : (
-                      <div key={item.key} className="admin-modern-list-item">
-                        <strong>{item.title}</strong>
-                        <small>{item.meta}</small>
-                      </div>
-                    )
-                  ))}
-                </div>
-              </article>
+                  <div className="admin-modern-list">
+                    {!normalAlerts.length && <span className="admin-modern-empty">هشدار فعالی برای این لحظه دیده نشد.</span>}
+                    {normalAlerts.slice(0, 4).map((alert) => {
+                      const alertLink = ALERT_LINKS[alert.key] || '';
+                      const body = (
+                        <div className="admin-modern-list-item__body">
+                          <strong>{alert.title}</strong>
+                          <small>مالک: {alert.owner || 'تیم مدیریت'}</small>
+                        </div>
+                      );
+                      return alertLink ? (
+                        <Link key={alert.key} to={alertLink} className="admin-modern-list-item admin-modern-list-item--tagged">
+                          {body}
+                          <span className="admin-modern-tag admin-modern-tag--warn">
+                            {Number(alert.count || 0).toLocaleString('fa-AF-u-ca-persian')}
+                          </span>
+                        </Link>
+                      ) : (
+                        <div key={alert.key} className="admin-modern-list-item admin-modern-list-item--tagged">
+                          {body}
+                          <span className="admin-modern-tag admin-modern-tag--warn">
+                            {Number(alert.count || 0).toLocaleString('fa-AF-u-ca-persian')}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </article>
+              </div>
             </section>
 
             <section className="admin-modern-shortcuts" aria-label="میانبرهای اصلی">
-              {modernUtilityShortcuts.map((item) => (
+              {combinedQuickActions.map((item) => (
                 item.to ? (
-                  <Link key={item.key} to={item.to}>
+                  <Link key={item.key} to={item.to} data-tone={item.tone}>
+                    <i className={`fa-solid ${item.icon} admin-modern-shortcuts__icon`} aria-hidden="true" />
                     <strong>{item.title}</strong>
                     <small>{item.subtitle}</small>
                   </Link>
                 ) : (
-                  <button key={item.key} type="button" onClick={item.action}>
+                  <button key={item.key} type="button" onClick={item.action} data-tone={item.tone}>
+                    <i className={`fa-solid ${item.icon} admin-modern-shortcuts__icon`} aria-hidden="true" />
                     <strong>{item.title}</strong>
                     <small>{item.subtitle}</small>
                   </button>
@@ -3903,178 +4619,173 @@ export default function AdminPanel() {
               ))}
             </section>
 
-            {searchToolOpen && (
-              <section className="admin-modern-search-panel" aria-label="جستجوی سراسری">
-                <div className="admin-modern-panel-head">
-                  <h2>جستجوی سراسری</h2>
-                  <button type="button" onClick={() => setSearchToolOpen(false)}>بستن</button>
+            <section className={`admin-modern-panel admin-modern-tools-panel${toolsPanelOpen ? ' is-open' : ''}`} aria-label="ابزارها و بخش‌های مدیریتی">
+              <button
+                type="button"
+                className="admin-modern-panel-head admin-modern-panel-head--toggle"
+                onClick={() => setToolsPanelOpen((prev) => !prev)}
+                aria-expanded={toolsPanelOpen}
+              >
+                <div>
+                  <span className="admin-modern-eyebrow">ابزارها و بخش‌های مدیریتی</span>
+                  <h2>دسترسی به بخش‌های مرتبط با {currentLevelLabel}</h2>
                 </div>
-                <div className="admin-modern-search-row">
-                  <input
-                    ref={searchToolInputRef}
-                    value={searchQ}
-                    onChange={(e) => setSearchQ(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        onSearchToolSubmit();
-                      }
-                    }}
-                    placeholder="نام یا نمبر اساس شاگرد، ایمیل، پیام، خبر..."
-                  />
-                  <button type="button" onClick={onSearchToolSubmit}>
-                    {searching ? 'در حال جستجو...' : 'جستجو'}
-                  </button>
-                </div>
-                {searchMessage && <div className="admin-modern-empty">{searchMessage}</div>}
-                {!!searchQ.trim() && !searchMessage && (
-                  <div className="admin-modern-search-results">
-                    {!totalSearchHits && <div className="admin-modern-empty">نتیجه‌ای پیدا نشد.</div>}
-                    {!!totalSearchHits && searchSections.map((section) => (
-                      <div key={section.key} className="admin-modern-search-group">
-                        <h3>{section.title} ({section.count})</h3>
-                        {section.items.slice(0, 4).map((item, index) => {
-                          const itemKey = item?._id || item?.id || `${section.key}-${index}`;
-                          const itemLink = section.to(item);
-                          const primary = section.primary(item);
-                          const secondary = section.secondary(item);
-                          return (
-                            <Link key={itemKey} to={itemLink} onClick={() => setSearchToolOpen(false)}>
-                              <strong>{renderHighlightedSearchText(primary)}</strong>
-                              {!!secondary && <small>{renderHighlightedSearchText(secondary)}</small>}
-                            </Link>
-                          );
-                        })}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-            )}
-          </div>
-        )}
-
-        {adminModernView === 'management' && (
-          <div className="admin-modern-management">
-            <section className="admin-modern-management-groups">
-              {managementGroups.map((group) => (
-                <div key={group} className="admin-modern-management-group">
-                  <div className="admin-modern-management-group__head">
-                    <span className="admin-modern-eyebrow">{group}</span>
-                    <strong>{visibleManagementSections.filter((item) => (item.group || 'عمومی') === group).length.toLocaleString('fa-AF-u-ca-persian')} بخش</strong>
-                  </div>
-                  <div className="admin-modern-management-grid">
-                    {visibleManagementSections
-                      .filter((item) => (item.group || 'عمومی') === group)
-                      .map((item) => (
-                        <article key={item.key} className="admin-modern-management-card">
-                          <div>
-                            <span>{Number(item.count || 0).toLocaleString('fa-AF-u-ca-persian')}</span>
-                            <h2>{item.title}</h2>
-                            <p>{item.subtitle}</p>
-                          </div>
-                          {item.to ? (
-                            <Link to={item.to}>باز کردن</Link>
-                          ) : item.onAction ? (
-                            <button type="button" onClick={item.onAction}>{item.action || 'اقدام'}</button>
-                          ) : (
-                            <em>بدون دسترسی</em>
-                          )}
-                        </article>
-                      ))}
-                  </div>
-                </div>
-              ))}
+                <span className="admin-modern-panel-head__toggle-side">
+                  <span className="admin-modern-tools-count">
+                    {roleManagementSections.length.toLocaleString('fa-AF-u-ca-persian')} بخش در {roleManagementGroups.length.toLocaleString('fa-AF-u-ca-persian')} گروه
+                  </span>
+                  <i className={`fa-solid fa-chevron-down admin-modern-panel-head__chevron${toolsPanelOpen ? ' is-open' : ''}`} aria-hidden="true" />
+                </span>
+              </button>
+              {toolsPanelOpen && (
+              <>
+              <div className="admin-modern-management-tabs" role="tablist">
+                {roleManagementGroups.map((group) => {
+                  const groupItems = roleManagementSections.filter((item) => (item.group || 'عمومی') === group);
+                  const isActive = group === activeManagementGroupResolved;
+                  return (
+                    <button
+                      key={group}
+                      type="button"
+                      role="tab"
+                      className={`admin-modern-management-tab${isActive ? ' is-active' : ''}`}
+                      onClick={() => setActiveManagementGroup(group)}
+                      aria-selected={isActive}
+                    >
+                      {group}
+                      <span className="admin-modern-management-tab__count">
+                        {groupItems.length.toLocaleString('fa-AF-u-ca-persian')}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="admin-modern-management-grid" role="tabpanel">
+                {activeManagementGroupItems.map((item) => (
+                  <article key={item.key} className="admin-modern-management-card">
+                    <div>
+                      <span>{Number(item.count || 0).toLocaleString('fa-AF-u-ca-persian')}</span>
+                      <h2>{item.title}</h2>
+                      <p>{item.subtitle}</p>
+                    </div>
+                    {item.to ? (
+                      <Link to={item.to}>باز کردن</Link>
+                    ) : item.onAction ? (
+                      <button type="button" onClick={item.onAction}>{item.action || 'اقدام'}</button>
+                    ) : (
+                      <em>بدون دسترسی</em>
+                    )}
+                  </article>
+                ))}
+              </div>
+              </>
+              )}
             </section>
 
-            <section className="admin-school-switcher admin-modern-schools" aria-label="لیست مکاتب فعال">
-              <div className="admin-school-switcher__head">
+            {isGeneralPresident && (
+            <section
+              ref={schoolSwitcherRef}
+              id="school-switcher"
+              className={`admin-school-switcher admin-modern-schools${schoolListOpen ? ' is-open' : ''}`}
+              aria-label="لیست مکاتب فعال"
+            >
+              <button
+                type="button"
+                className="admin-school-switcher__head admin-school-switcher__head--toggle"
+                onClick={() => setSchoolListOpen((prev) => !prev)}
+                aria-expanded={schoolListOpen}
+              >
                 <div>
                   <span className="admin-active-school-scope__eyebrow">مکاتب</span>
                   <h3>لیست مکاتب فعال و ویرایش سریع</h3>
                   <p>جستجو، انتخاب مکتب فعال و ویرایش مشخصات در همین بخش انجام می‌شود.</p>
                 </div>
-                <button type="button" className="admin-school-switcher__refresh" onClick={loadSchoolOptions} disabled={schoolScopeBusy}>
-                  بازبینی لیست
-                </button>
-              </div>
+                <i className={`fa-solid fa-chevron-down admin-school-switcher__chevron${schoolListOpen ? ' is-open' : ''}`} aria-hidden="true" />
+              </button>
 
-              <div className="admin-school-switcher__toolbar">
-                <label>
-                  جستجوی مکتب
-                  <input
-                    type="search"
-                    value={schoolSearchQuery}
-                    onChange={(event) => setSchoolSearchQuery(event.target.value)}
-                    placeholder="نام، کد، ولایت یا مدیر"
-                  />
-                </label>
-                <label>
-                  وضعیت
-                  <select value={schoolStatusFilter} onChange={(event) => setSchoolStatusFilter(event.target.value)}>
-                    <option value="all">همه</option>
-                    <option value="active">فقط فعال</option>
-                    <option value="inactive">غیرفعال / بسته</option>
-                  </select>
-                </label>
-              </div>
+              {schoolListOpen && (
+                <>
+                  <div className="admin-school-switcher__toolbar">
+                    <label>
+                      جستجوی مکتب
+                      <input
+                        type="search"
+                        value={schoolSearchQuery}
+                        onChange={(event) => setSchoolSearchQuery(event.target.value)}
+                        placeholder="نام، کد، ولایت یا مدیر"
+                      />
+                    </label>
+                    <label>
+                      وضعیت
+                      <select value={schoolStatusFilter} onChange={(event) => setSchoolStatusFilter(event.target.value)}>
+                        <option value="all">همه</option>
+                        <option value="active">فقط فعال</option>
+                        <option value="inactive">غیرفعال / بسته</option>
+                      </select>
+                    </label>
+                    <button type="button" className="admin-school-switcher__refresh" onClick={loadSchoolOptions} disabled={schoolScopeBusy}>
+                      بازبینی لیست
+                    </button>
+                  </div>
 
-              {visibleSchoolOptions.length === 0 ? (
-                <div className="admin-school-switcher__empty">هنوز مکتبی در لیست دریافت نشد.</div>
-              ) : filteredSchoolOptions.length === 0 ? (
-                <div className="admin-school-switcher__empty">موردی با این جستجو یا فیلتر پیدا نشد.</div>
-              ) : (
-                <div className="admin-school-switcher__table-wrap">
-                  <table className="admin-school-switcher__table">
-                    <thead>
-                      <tr>
-                        <th>نام مکتب</th>
-                        <th>ولایت / ناحیه</th>
-                        <th>مدیر</th>
-                        <th>وضعیت</th>
-                        <th>عملیات</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredSchoolOptions.map((school) => {
-                        const schoolId = String(school?._id || school?.id || '');
-                        const isCurrent = schoolId === activeSchoolId;
-                        const isRecordActive = String(school?.status || 'active') === 'active';
-                        return (
-                          <tr key={schoolId} className={isCurrent ? 'is-current' : ''}>
-                            <td>
-                              <strong>{school.nameDari || school.name || 'مکتب'}</strong>
-                              <small>کد: {school.schoolCode || '-'}</small>
-                            </td>
-                            <td>{[school.province, school.district].filter(Boolean).join('، ') || '-'}</td>
-                            <td>{school?.principal?.name || '-'}</td>
-                            <td>
-                              <span className={`admin-school-switcher__badge${isRecordActive ? '' : ' muted'}`}>
-                                {isCurrent ? 'مکتب فعال' : (isRecordActive ? 'فعال' : 'غیرفعال')}
-                              </span>
-                            </td>
-                            <td>
-                              <div className="admin-school-switcher__actions">
-                                <button type="button" onClick={() => openSchoolEdit(school)} disabled={schoolScopeBusy}>ویرایش</button>
-                                {!isCurrent && (
-                                  <button type="button" onClick={() => handleActiveSchoolChange(schoolId)} disabled={schoolScopeBusy}>انتخاب</button>
-                                )}
-                                {!isCurrent && (
-                                  <button type="button" className="danger" onClick={() => handleDeleteSchool(school)} disabled={schoolScopeBusy}>حذف</button>
-                                )}
-                              </div>
-                            </td>
+                  {visibleSchoolOptions.length === 0 ? (
+                    <div className="admin-school-switcher__empty">هنوز مکتبی در لیست دریافت نشد.</div>
+                  ) : filteredSchoolOptions.length === 0 ? (
+                    <div className="admin-school-switcher__empty">موردی با این جستجو یا فیلتر پیدا نشد.</div>
+                  ) : (
+                    <div className="admin-school-switcher__table-wrap">
+                      <table className="admin-school-switcher__table">
+                        <thead>
+                          <tr>
+                            <th>نام مکتب</th>
+                            <th>ولایت / ناحیه</th>
+                            <th>مدیر</th>
+                            <th>وضعیت</th>
+                            <th>عملیات</th>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                        </thead>
+                        <tbody>
+                          {filteredSchoolOptions.map((school) => {
+                            const schoolId = String(school?._id || school?.id || '');
+                            const isCurrent = schoolId === activeSchoolId;
+                            const isRecordActive = String(school?.status || 'active') === 'active';
+                            return (
+                              <tr key={schoolId} className={isCurrent ? 'is-current' : ''}>
+                                <td>
+                                  <strong>{school.nameDari || school.name || 'مکتب'}</strong>
+                                  <small>کد: {school.schoolCode || '-'}</small>
+                                </td>
+                                <td>{[school.province, school.district].filter(Boolean).join('، ') || '-'}</td>
+                                <td>{school?.principal?.name || '-'}</td>
+                                <td>
+                                  <span className={`admin-school-switcher__badge${isRecordActive ? '' : ' muted'}`}>
+                                    {isCurrent ? 'مکتب فعال' : (isRecordActive ? 'فعال' : 'غیرفعال')}
+                                  </span>
+                                </td>
+                                <td>
+                                  <div className="admin-school-switcher__actions">
+                                    <button type="button" onClick={() => openSchoolEdit(school)} disabled={schoolScopeBusy}>ویرایش</button>
+                                    {!isCurrent && (
+                                      <button type="button" onClick={() => handleActiveSchoolChange(schoolId)} disabled={schoolScopeBusy}>انتخاب</button>
+                                    )}
+                                    {!isCurrent && (
+                                      <button type="button" className="danger" onClick={() => handleDeleteSchool(school)} disabled={schoolScopeBusy}>حذف</button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  {!!schoolScopeMessage && <div className="admin-school-switcher__message">{schoolScopeMessage}</div>}
+                </>
               )}
-              {!!schoolScopeMessage && <div className="admin-school-switcher__message">{schoolScopeMessage}</div>}
             </section>
-          </div>
-        )}
+            )}
+        </div>
       </div>
 
       <div className="admin-hero">
@@ -4638,95 +5349,6 @@ export default function AdminPanel() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {canViewReports && (
-        <div className="admin-executive-strip">
-          <div className="admin-executive-strip__head">
-            <div>
-              <h3>نمای اجرایی مدیریت</h3>
-              <p>
-                شاخص‌های کلیدی، روند عواید و مهم‌ترین کارهای مدیریتی را در یک نگاه ببینید.
-              </p>
-              {showExecutiveZeroWarning && (
-                <div className="admin-executive-strip__warning" role="status">
-                  چند شاخص کلیدی به‌صورت همزمان صفر است؛ در صورت انتظار داشتن داده، لطفاً منابع مالی/پروفایل/دسترسی را بازبینی کنید.
-                </div>
-              )}
-            </div>
-            <div className="admin-executive-strip__note">
-              {adminDashboard?.generatedAt ? `آخرین بروزرسانی: ${toDateTime(adminDashboard.generatedAt)}` : 'این بخش از لایه تجمیع داشبورد خوانده می‌شود.'}
-            </div>
-          </div>
-
-          <div className="admin-executive-strip__grid">
-            <KpiRingCard
-              label="کل شاگردان"
-              value={Number(executiveSummary.totalStudents || 0).toLocaleString('fa-AF-u-ca-persian')}
-              hint={`${Number(executiveSummary.totalInstructors || 0).toLocaleString('fa-AF-u-ca-persian')} استاد فعال`}
-              progress={Math.min(100, Number(executiveSummary.totalStudents || 0) / 5)}
-              tone="teal"
-            />
-            <KpiRingCard
-              label="عواید این ماه"
-              value={Number(executiveSummary.monthlyRevenue || 0).toLocaleString('fa-AF-u-ca-persian')}
-              hint={`${Number(executiveSummary.monthDeltaPercent || 0).toLocaleString('fa-AF-u-ca-persian')}% نسبت به ماه قبل`}
-              progress={(Number(executiveSummary.totalDue || 0) || Number(executiveSummary.monthlyRevenue || 0))
-                ? Math.min(100, (Number(executiveSummary.monthlyRevenue || 0) / Math.max(Number(executiveSummary.totalDue || 0), Number(executiveSummary.monthlyRevenue || 0), 1)) * 100)
-                : 0}
-              tone="copper"
-            />
-            <KpiRingCard
-              label="حضور عمومی"
-              value={`${Number(executiveSummary.attendanceRate || 0).toLocaleString('fa-AF-u-ca-persian')}%`}
-              hint={`${Number(executiveSummary.todayPayments || 0).toLocaleString('fa-AF-u-ca-persian')} پرداخت امروز`}
-              progress={executiveSummary.attendanceRate}
-              tone="mint"
-            />
-            <KpiRingCard
-              label="بدهی باز"
-              value={Number(executiveSummary.outstandingAmount || 0).toLocaleString('fa-AF-u-ca-persian')}
-              hint={`${Number(executiveSummary.pendingFinanceReviews || 0).toLocaleString('fa-AF-u-ca-persian')} رسید در انتظار`}
-              progress={Number(executiveSummary.totalDue || 0)
-                ? Math.min(100, (Number(executiveSummary.outstandingAmount || 0) / Math.max(Number(executiveSummary.totalDue || 0), 1)) * 100)
-                : 0}
-              tone="rose"
-            />
-          </div>
-
-          <div className="admin-executive-strip__quick">
-            <QuickActionRail actions={focusedExecutiveQuickActions} />
-          </div>
-
-          <div className="admin-executive-strip__panels">
-            <TaskAlertPanel
-              hideHead
-              title="کارهای مدیریتی"
-              subtitle="مهم‌ترین صف‌های امروز"
-              items={executiveTasks}
-              emptyText="مورد فوری تازه‌ای برای مدیریت دیده نشد."
-            />
-            <TaskAlertPanel
-              hideHead
-              title="هشدارهای کلیدی"
-              subtitle="مواردی که نیاز به پیگیری دارند"
-              items={executiveAlerts}
-              emptyText="هشدار فعالی برای این لحظه دیده نشد."
-            />
-            <TrendBars
-              title="روند عواید"
-              subtitle="در شش ماه اخیر"
-              items={adminDashboard?.revenueTrend || []}
-              valueFormatter={(value) => `${Number(value || 0).toLocaleString('fa-AF-u-ca-persian')} AFN`}
-            />
-            <TrendBars
-              title="رشد شاگردان"
-              subtitle="ثبت عضویت در ماه‌های اخیر"
-              items={adminDashboard?.studentGrowth || []}
-              valueFormatter={(value) => `${Number(value || 0).toLocaleString('fa-AF-u-ca-persian')} عضویت`}
-            />
           </div>
         </div>
       )}

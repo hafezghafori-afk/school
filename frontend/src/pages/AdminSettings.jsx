@@ -104,6 +104,8 @@ const WEBSITE_TEXT_FIELDS = [
   ['homeHeroBadge', 'نشانک صفحه خانه'],
   ['homeHeroTitle', 'عنوان اصلی صفحه خانه'],
   ['homeHeroText', 'متن معرفی صفحه خانه'],
+  ['heroPanelTagline', 'شعار کوتاه پنل هیرو'],
+  ['programsIntro', 'متن معرفی بخش برنامه‌های آموزشی'],
   ['aboutTitle', 'عنوان درباره مکتب'],
   ['aboutBody', 'متن درباره مکتب'],
   ['missionTitle', 'عنوان ماموریت'],
@@ -159,33 +161,49 @@ const rowsToDelimited = (rows = [], fields = ['title', 'href']) => {
     .join('\n');
 };
 
-const localizedRowsToDelimited = (rows = [], language = 'fa') => {
+// `fields` controls which columns a row exposes and in what order, so the same delimited-row
+// textarea can back menuItems/features (title|text|href|icon) as well as stats, which has no
+// href but does have a real numeric "value" column (title|text|value|icon) — previously stats
+// silently reused the href column for its value, so typing "۱۲+" into the "مقدار" column never
+// actually reached item.value and the stat rendered blank/wrong on the site.
+const LOCALIZED_ROW_FIELDS_DEFAULT = ['title', 'text', 'href', 'icon'];
+
+const localizedRowsToDelimited = (rows = [], language = 'fa', fields = LOCALIZED_ROW_FIELDS_DEFAULT) => {
   if (!Array.isArray(rows)) return '';
   return rows
-    .map((row) => [
-      row?.title?.[language] || '',
-      row?.text?.[language] || '',
-      row?.href || '',
-      row?.icon || row?.value || ''
-    ].map((value) => String(value || '').trim()).join('|'))
+    .map((row) => fields
+      .map((fieldName) => {
+        if (fieldName === 'title' || fieldName === 'text') return row?.[fieldName]?.[language] || '';
+        // "icon" used to double as the storage for "value" when a row shape had no
+        // dedicated value column (menuItems/features/footerLinks/socialLinks) — keep that
+        // fallback there, but not when "value" has its own column (stats), or the value
+        // would get echoed into the icon column too.
+        if (fieldName === 'icon') return (fields.includes('value') ? row?.icon : (row?.icon || row?.value)) || '';
+        return row?.[fieldName] || '';
+      })
+      .map((value) => String(value || '').trim())
+      .join('|'))
     .filter((line) => line.replace(/\|/g, '').trim())
     .join('\n');
 };
 
-const parseLocalizedRows = (value = '', language = 'fa', currentRows = []) => {
+const parseLocalizedRows = (value = '', language = 'fa', currentRows = [], fields = LOCALIZED_ROW_FIELDS_DEFAULT) => {
   const lines = parseLines(value);
   return lines.map((line, index) => {
     const parts = line.split('|').map((part) => part.trim());
     const existing = currentRows[index] || {};
-    return {
-      ...existing,
-      title: { ...(existing.title || {}), [language]: parts[0] || '' },
-      text: { ...(existing.text || {}), [language]: parts[1] || '' },
-      href: parts[2] || existing.href || '',
-      icon: parts[3] || existing.icon || existing.value || '',
-      value: parts[3] || existing.value || existing.icon || '',
-      enabled: existing.enabled !== false
-    };
+    const row = { ...existing, enabled: existing.enabled !== false };
+    fields.forEach((fieldName, i) => {
+      const raw = parts[i] || '';
+      if (fieldName === 'title' || fieldName === 'text') {
+        row[fieldName] = { ...(existing[fieldName] || {}), [language]: raw };
+      } else {
+        row[fieldName] = raw || existing[fieldName] || '';
+      }
+    });
+    if (fields.includes('icon') && !fields.includes('value')) row.value = row.icon;
+    if (fields.includes('value') && !fields.includes('icon')) row.icon = existing.icon || '';
+    return row;
   });
 };
 
@@ -200,7 +218,7 @@ const normalizeWebsiteProfile = (profile = null) => {
   WEBSITE_TEXT_FIELDS.forEach(([field]) => {
     next[field] = localized(next[field]);
   });
-  ['features', 'stats', 'menuItems', 'footerLinks', 'socialLinks'].forEach((field) => {
+  ['features', 'stats', 'menuItems', 'footerLinks', 'socialLinks', 'heroHighlights'].forEach((field) => {
     next[field] = (Array.isArray(next[field]) ? next[field] : []).map((item) => ({
       ...item,
       title: localized(item?.title),
@@ -257,6 +275,8 @@ export default function AdminSettings() {
   const [websiteLanguage, setWebsiteLanguage] = useState('fa');
   const [websiteBusy, setWebsiteBusy] = useState(false);
   const [activeWebsiteSection, setActiveWebsiteSection] = useState('home');
+  const [rowsDraft, setRowsDraft] = useState({});
+  const [rootDraft, setRootDraft] = useState({});
 
   const loadSettings = async () => {
     setLoading(true);
@@ -287,6 +307,8 @@ export default function AdminSettings() {
       }
       setSettings(nextSettings);
       setWebsiteProfile(normalizeWebsiteProfile(websiteData?.profile || null));
+      setRowsDraft({});
+      setRootDraft({});
       storePrintLogos(nextSettings);
       setAccessDenied(false);
       setMessage('');
@@ -315,6 +337,24 @@ export default function AdminSettings() {
   const patchRoot = (patch) => {
     setSettings((prev) => ({ ...prev, ...patch }));
   };
+
+  // Same draft-text pattern as rowsDraft/getWebsiteRowsDraft above, but for the plain
+  // line-list and delimited-row textareas that live on the root `settings` object
+  // (home/footer/header tabs) instead of on `websiteProfile`.
+  const patchRootLines = (field, value) => {
+    setRootDraft((prev) => ({ ...prev, [field]: value }));
+    patchRoot({ [field]: parseLines(value) });
+  };
+  const getRootLinesDraft = (field) => (
+    rootDraft[field] !== undefined ? rootDraft[field] : toLines(settings?.[field] || [])
+  );
+  const patchRootDelimitedRows = (field, fields, value) => {
+    setRootDraft((prev) => ({ ...prev, [field]: value }));
+    patchRoot({ [field]: parseDelimitedRows(value, fields) });
+  };
+  const getRootDelimitedRowsDraft = (field, fields) => (
+    rootDraft[field] !== undefined ? rootDraft[field] : rowsToDelimited(settings?.[field] || [], fields)
+  );
 
   const patchStudentIdFormats = (patch) => {
     setSettings((prev) => ({
@@ -383,6 +423,7 @@ export default function AdminSettings() {
       };
       await syncWebsiteLogosFromSettings(normalized);
       setSettings(normalized);
+      setRootDraft({});
       storePrintLogos(normalized);
       setMessage(successText);
     } catch {
@@ -461,11 +502,126 @@ export default function AdminSettings() {
     }));
   };
 
-  const patchWebsiteRows = (field, language, value) => {
+  const patchWebsiteRows = (field, language, value, fields = LOCALIZED_ROW_FIELDS_DEFAULT) => {
+    // Keep the textarea's own typed text as the source of truth for display (rowsDraft),
+    // instead of re-deriving it from the parsed rows on every keystroke. Re-deriving would
+    // trim/drop the blank line a user just created by pressing Enter, snapping the cursor
+    // back and making it look like typing a new line "does nothing".
+    setRowsDraft((prev) => ({ ...prev, [`${field}:${language}`]: value }));
     setWebsiteProfile((prev) => ({
       ...(prev || {}),
-      [field]: parseLocalizedRows(value, language, prev?.[field] || [])
+      [field]: parseLocalizedRows(value, language, prev?.[field] || [], fields)
     }));
+  };
+
+  const getWebsiteRowsDraft = (field, language, fields = LOCALIZED_ROW_FIELDS_DEFAULT) => {
+    const key = `${field}:${language}`;
+    return rowsDraft[key] !== undefined
+      ? rowsDraft[key]
+      : localizedRowsToDelimited(websiteProfile?.[field] || [], language, fields);
+  };
+
+  // The "اخبار"/"گالری" editor sections used to reuse the same full menuItems textarea as
+  // "هدر و هویت" — editing any one of them showed and could overwrite the entire header menu,
+  // not just the one link that section's title implied. These helpers instead target a single
+  // menuItems entry (matched by its href) so each section only ever touches its own link.
+  const findWebsiteMenuItemIndex = (hrefPrefix) => {
+    const items = Array.isArray(websiteProfile?.menuItems) ? websiteProfile.menuItems : [];
+    return items.findIndex((item) => {
+      const href = String(item?.href || '');
+      return href === hrefPrefix || href.startsWith(`${hrefPrefix}#`) || href.startsWith(`${hrefPrefix}/`) || href.startsWith(`${hrefPrefix}?`);
+    });
+  };
+
+  const patchWebsiteMenuItemAt = (index, patch) => {
+    setWebsiteProfile((prev) => {
+      const items = Array.isArray(prev?.menuItems) ? [...prev.menuItems] : [];
+      if (index < 0 || index >= items.length) return prev;
+      items[index] = { ...items[index], ...patch };
+      return { ...(prev || {}), menuItems: items };
+    });
+  };
+
+  const addWebsiteMenuItem = (item) => {
+    setWebsiteProfile((prev) => ({
+      ...(prev || {}),
+      menuItems: [...(Array.isArray(prev?.menuItems) ? prev.menuItems : []), item]
+    }));
+  };
+
+  const removeWebsiteMenuItemAt = (index) => {
+    setWebsiteProfile((prev) => ({
+      ...(prev || {}),
+      menuItems: (Array.isArray(prev?.menuItems) ? prev.menuItems : []).filter((_, i) => i !== index)
+    }));
+  };
+
+  const renderWebsiteMenuLinkField = (hrefPrefix, title, hint, defaultTitleFa) => {
+    const idx = findWebsiteMenuItemIndex(hrefPrefix);
+    const item = idx >= 0 ? websiteProfile.menuItems[idx] : null;
+    const languageLabel = WEBSITE_LANGUAGES.find((entry) => entry.key === websiteLanguage)?.label;
+    return (
+      <section className="settings-card" key={`menu-link-${hrefPrefix}`}>
+        <h3>{title}</h3>
+        <p className="settings-muted">{hint}</p>
+        {!item ? (
+          <div className="settings-actions">
+            <button
+              type="button"
+              onClick={() => addWebsiteMenuItem({
+                title: { fa: defaultTitleFa, en: '', ps: '' },
+                text: { fa: '', en: '', ps: '' },
+                href: hrefPrefix,
+                icon: '',
+                value: '',
+                enabled: true
+              })}
+            >
+              افزودن این لینک به منوی هدر
+            </button>
+          </div>
+        ) : (
+          <>
+            <p className="settings-muted">زبان فعلی: {languageLabel}</p>
+            <div className="settings-grid">
+              <div>
+                <label>عنوان در منو</label>
+                <input
+                  value={item.title?.[websiteLanguage] || ''}
+                  onChange={(e) => patchWebsiteMenuItemAt(idx, { title: { ...(item.title || {}), [websiteLanguage]: e.target.value } })}
+                />
+              </div>
+              <div>
+                <label>توضیح کوتاه (اختیاری)</label>
+                <input
+                  value={item.text?.[websiteLanguage] || ''}
+                  onChange={(e) => patchWebsiteMenuItemAt(idx, { text: { ...(item.text || {}), [websiteLanguage]: e.target.value } })}
+                />
+              </div>
+              <div>
+                <label>لینک</label>
+                <input dir="ltr" value={item.href || ''} onChange={(e) => patchWebsiteMenuItemAt(idx, { href: e.target.value })} />
+              </div>
+              <div>
+                <label>آیکن FontAwesome</label>
+                <input
+                  dir="ltr"
+                  value={item.icon || item.value || ''}
+                  onChange={(e) => patchWebsiteMenuItemAt(idx, { icon: e.target.value, value: e.target.value })}
+                />
+              </div>
+            </div>
+            <label className="settings-check child-check">
+              <input type="checkbox" checked={item.enabled !== false} onChange={(e) => patchWebsiteMenuItemAt(idx, { enabled: e.target.checked })} />
+              <span>نمایش در منو</span>
+            </label>
+            <div className="settings-actions">
+              <button type="button" className="danger" onClick={() => removeWebsiteMenuItemAt(idx)}>حذف این لینک از منو</button>
+            </div>
+          </>
+        )}
+      </section>
+    );
   };
 
   const saveWebsiteProfile = async () => {
@@ -490,6 +646,7 @@ export default function AdminSettings() {
         return;
       }
       setWebsiteProfile(normalizeWebsiteProfile(data.profile));
+      setRowsDraft({});
       setMessage('محتوای وب‌سایت مکتب ذخیره شد.');
     } catch {
       setMessage('خطا در ذخیره محتوای وب‌سایت مکتب.');
@@ -518,6 +675,7 @@ export default function AdminSettings() {
         return;
       }
       setWebsiteProfile(normalizeWebsiteProfile(data.profile));
+      setRowsDraft({});
       setMessage(overwrite ? 'ترجمه خودکار انجام شد و زبان‌های مقصد بازنویسی شدند.' : 'ترجمه خودکار فیلدهای خالی انجام شد.');
     } catch {
       setMessage('خطا در ترجمه خودکار محتوای وب‌سایت.');
@@ -527,7 +685,7 @@ export default function AdminSettings() {
   };
 
   const renderWebsiteTextField = (field, label) => {
-    const isLong = /Text|Body|Note|Address/.test(field);
+    const isLong = /Text|Body|Note|Address|Intro/.test(field);
     const value = websiteProfile?.[field]?.[websiteLanguage] || '';
     return (
       <div key={field} className={isLong ? 'settings-wide-field' : ''}>
@@ -548,14 +706,14 @@ export default function AdminSettings() {
     );
   };
 
-  const renderWebsiteRowsField = (field, title, hint) => (
+  const renderWebsiteRowsField = (field, title, hint, columns = LOCALIZED_ROW_FIELDS_DEFAULT) => (
     <section className="settings-card" key={field}>
       <h3>{title}</h3>
       <p className="settings-muted">{hint}</p>
       <textarea
         rows="6"
-        value={localizedRowsToDelimited(websiteProfile?.[field] || [], websiteLanguage)}
-        onChange={(event) => patchWebsiteRows(field, websiteLanguage, event.target.value)}
+        value={getWebsiteRowsDraft(field, websiteLanguage, columns)}
+        onChange={(event) => patchWebsiteRows(field, websiteLanguage, event.target.value, columns)}
       />
     </section>
   );
@@ -606,14 +764,14 @@ export default function AdminSettings() {
       case 'news':
         return (
           <>
-            {renderWebsiteRowsField('menuItems', 'لینک اخبار در منوی هدر', 'هر خط: عنوان|توضیح اختیاری|لینک|آیکن. برای اخبار لینک /news را نگه دارید.')}
+            {renderWebsiteMenuLinkField('/news', 'لینک اخبار در منوی هدر', 'این بخش فقط همین لینک را در منوی هدر مدیریت می‌کند؛ بقیه منو دست‌نخورده می‌ماند.', 'اخبار')}
             {renderWebsiteManagerLink('/admin-news', 'محتوای خبرها', 'خبرها، تصویرها و متن هر خبر از بخش مدیریت اخبار تغییر می‌کند.')}
           </>
         );
       case 'gallery':
         return (
           <>
-            {renderWebsiteRowsField('menuItems', 'لینک گالری در منوی هدر', 'هر خط: عنوان|توضیح اختیاری|لینک|آیکن. برای گالری لینک /gallery را نگه دارید.')}
+            {renderWebsiteMenuLinkField('/gallery', 'لینک گالری در منوی هدر', 'این بخش فقط همین لینک را در منوی هدر مدیریت می‌کند؛ بقیه منو دست‌نخورده می‌ماند.', 'گالری')}
             {renderWebsiteManagerLink('/admin-gallery', 'محتوای گالری', 'تصاویر و دسته‌بندی‌های گالری از بخش مدیریت گالری تغییر می‌کند.')}
           </>
         );
@@ -668,12 +826,19 @@ export default function AdminSettings() {
                 ['homeHeroBadge', 'نشانک صفحه خانه'],
                 ['homeHeroTitle', 'عنوان اصلی صفحه خانه'],
                 ['homeHeroText', 'متن معرفی صفحه خانه'],
+                ['heroPanelTagline', 'شعار کوتاه پنل هیرو (کنار عنوان مکتب)'],
                 ['aboutTitle', 'عنوان معرفی مکتب'],
                 ['aboutBody', 'متن معرفی مکتب']
               ])}
             </section>
+            {renderWebsiteRowsField('heroHighlights', 'نکات کوتاه پنل هیرو', 'هر خط یک نکته (فقط عنوان لازم است). حداکثر ۴ مورد در پنل کنار هیرو نمایش داده می‌شود، مثال: صنف‌های منظم')}
             {renderWebsiteRowsField('features', 'امکانات / کارت‌های صفحه خانه', 'هر خط: عنوان|متن|لینک اختیاری|آیکن')}
-            {renderWebsiteRowsField('stats', 'آمار صفحه خانه', 'هر خط: عنوان|متن یا توضیح|مقدار|آیکن')}
+            {renderWebsiteRowsField('stats', 'آمار صفحه خانه', 'هر خط: عنوان|متن یا توضیح|مقدار|آیکن', ['title', 'text', 'value', 'icon'])}
+            <section className="settings-card">
+              <h3>معرفی بخش برنامه‌های آموزشی</h3>
+              <p className="settings-muted">زبان فعلی: {languageLabel}</p>
+              {renderWebsiteFieldGroup([['programsIntro', 'متن زیر عنوان «برنامه‌های آموزشی»']])}
+            </section>
           </>
         );
     }
@@ -997,7 +1162,7 @@ export default function AdminSettings() {
           </div>
         </div>
         <label>برچسب‌های کوتاه Hero، هر خط یک مورد</label>
-        <textarea rows="3" value={toLines(settings.homeHeroTags || [])} onChange={(e) => patchRoot({ homeHeroTags: parseLines(e.target.value) })} />
+        <textarea rows="3" value={getRootLinesDraft('homeHeroTags')} onChange={(e) => patchRootLines('homeHeroTags', e.target.value)} />
       </section>
 
       <section className="settings-card">
@@ -1005,8 +1170,8 @@ export default function AdminSettings() {
         <p className="settings-muted">هر خط: عنوان|متن|آیکن FontAwesome. نمونه آیکن: fa-school</p>
         <textarea
           rows="5"
-          value={rowsToDelimited(settings.salesQuickCards || [], ['title', 'text', 'value'])}
-          onChange={(e) => patchRoot({ salesQuickCards: parseDelimitedRows(e.target.value, ['title', 'text', 'value']) })}
+          value={getRootDelimitedRowsDraft('salesQuickCards', ['title', 'text', 'value'])}
+          onChange={(e) => patchRootDelimitedRows('salesQuickCards', ['title', 'text', 'value'], e.target.value)}
         />
       </section>
 
@@ -1015,8 +1180,8 @@ export default function AdminSettings() {
         <p className="settings-muted">هر خط: عنوان|توضیح|آیکن FontAwesome. این بخش دقیقاً در قسمت «ماژول‌های اصلی سیستم» صفحه خانه نمایش داده می‌شود.</p>
         <textarea
           rows="8"
-          value={rowsToDelimited(settings.salesModules || [], ['title', 'text', 'value'])}
-          onChange={(e) => patchRoot({ salesModules: parseDelimitedRows(e.target.value, ['title', 'text', 'value']) })}
+          value={getRootDelimitedRowsDraft('salesModules', ['title', 'text', 'value'])}
+          onChange={(e) => patchRootDelimitedRows('salesModules', ['title', 'text', 'value'], e.target.value)}
         />
       </section>
 
@@ -1025,8 +1190,8 @@ export default function AdminSettings() {
         <p className="settings-muted">هر خط یک مورد. این لیست در بخش مناسب برای مکاتب و مراکز آموزشی نمایش داده می‌شود.</p>
         <textarea
           rows="6"
-          value={toLines(settings.salesAudience || [])}
-          onChange={(e) => patchRoot({ salesAudience: parseLines(e.target.value) })}
+          value={getRootLinesDraft('salesAudience')}
+          onChange={(e) => patchRootLines('salesAudience', e.target.value)}
         />
       </section>
 
@@ -1041,7 +1206,7 @@ export default function AdminSettings() {
         <label>متن بخش اعتماد</label>
         <textarea rows="4" value={settings.salesTrustText || ''} onChange={(e) => patchRoot({ salesTrustText: e.target.value })} />
         <label>نکات اعتماد، هر خط یک مورد</label>
-        <textarea rows="4" value={toLines(settings.salesTrustPoints || [])} onChange={(e) => patchRoot({ salesTrustPoints: parseLines(e.target.value) })} />
+        <textarea rows="4" value={getRootLinesDraft('salesTrustPoints')} onChange={(e) => patchRootLines('salesTrustPoints', e.target.value)} />
       </section>
 
       <section className="settings-card">
@@ -1049,8 +1214,8 @@ export default function AdminSettings() {
         <p className="settings-muted">هر خط: عنوان|مورد اول / مورد دوم / مورد سوم</p>
         <textarea
           rows="6"
-          value={rowsToDelimited(settings.salesDashboardCards || [], ['title', 'text'])}
-          onChange={(e) => patchRoot({ salesDashboardCards: parseDelimitedRows(e.target.value, ['title', 'text']) })}
+          value={getRootDelimitedRowsDraft('salesDashboardCards', ['title', 'text'])}
+          onChange={(e) => patchRootDelimitedRows('salesDashboardCards', ['title', 'text'], e.target.value)}
         />
       </section>
 
@@ -1059,8 +1224,8 @@ export default function AdminSettings() {
         <p className="settings-muted">هر خط: سوال|جواب</p>
         <textarea
           rows="7"
-          value={rowsToDelimited(settings.salesFaqs || [], ['title', 'text'])}
-          onChange={(e) => patchRoot({ salesFaqs: parseDelimitedRows(e.target.value, ['title', 'text']) })}
+          value={getRootDelimitedRowsDraft('salesFaqs', ['title', 'text'])}
+          onChange={(e) => patchRootDelimitedRows('salesFaqs', ['title', 'text'], e.target.value)}
         />
       </section>
 
@@ -1118,7 +1283,7 @@ export default function AdminSettings() {
           </div>
           <div>
             <label>زبان‌ها، هر خط یک مورد</label>
-            <textarea rows="3" value={toLines(settings.languages || [])} onChange={(e) => patchRoot({ languages: parseLines(e.target.value) })} />
+            <textarea rows="3" value={getRootLinesDraft('languages')} onChange={(e) => patchRootLines('languages', e.target.value)} />
           </div>
         </div>
       </section>
@@ -1145,8 +1310,8 @@ export default function AdminSettings() {
         <label>لینک‌های فوتر، هر خط: عنوان|لینک</label>
         <textarea
           rows="6"
-          value={rowsToDelimited(settings.footerLinks || [], ['title', 'href'])}
-          onChange={(e) => patchRoot({ footerLinks: parseDelimitedRows(e.target.value, ['title', 'href']) })}
+          value={getRootDelimitedRowsDraft('footerLinks', ['title', 'href'])}
+          onChange={(e) => patchRootDelimitedRows('footerLinks', ['title', 'href'], e.target.value)}
         />
         <label>متن پایانی فوتر</label>
         <input value={settings.footerNote || ''} onChange={(e) => patchRoot({ footerNote: e.target.value })} />

@@ -249,7 +249,7 @@ const DIRECTORY_CREATE_CONFIG = {
     label: 'ثبت استاد جدید',
     submitLabel: 'ثبت استاد',
     orgRole: 'instructor',
-    helper: 'این فورم مخصوص استادان است و مضمون تدریس را به‌عنوان فیلد اصلی نگه می‌دارد.'
+    helper: 'این فورم مخصوص استادان است و مضمون تدریس را به‌عنوان فیلد اصلی نگه می‌دارد. این فقط حساب ورود به سیستم را می‌سازد؛ برای ثبت پروندهٔ رسمی استاد (تذکره، تحصیلات، معاش...) و اتصال آن به همین حساب، از صفحهٔ «ثبت پروندهٔ رسمی استاد» (/teacher-registration) استفاده کنید.'
   },
   guardians: {
     label: 'ثبت والد/سرپرست جدید',
@@ -267,6 +267,12 @@ const DIRECTORY_CREATE_CONFIG = {
 
 const resolveWorkspaceTabFromHash = (hash = '') => (
   String(hash || '').trim().toLowerCase() === '#access-requests' ? 'access' : 'directory'
+);
+
+// اجازه می‌دهد لینک‌های دیگر (مثلاً «کارهای فوری» در داشبورد ریاست عمومی) مستقیماً به یک بخش
+// مشخص از دایرکتوری کاربران هدایت شوند — نه فقط به این صفحه به‌صورت کلی.
+const resolveDirectorySectionFromHash = (hash = '') => (
+  String(hash || '').trim().toLowerCase() === '#guardians' ? 'guardians' : 'all'
 );
 
 const normalizeAdminLevel = (level = '') => {
@@ -920,7 +926,9 @@ export default function AdminUsers() {
   const [workspaceTab, setWorkspaceTab] = useState(() => (
     typeof window !== 'undefined' ? resolveWorkspaceTabFromHash(window.location.hash) : 'directory'
   ));
-  const [activeDirectorySection, setActiveDirectorySection] = useState('all');
+  const [activeDirectorySection, setActiveDirectorySection] = useState(() => (
+    typeof window !== 'undefined' ? resolveDirectorySectionFromHash(window.location.hash) : 'all'
+  ));
   const [createFormOpen, setCreateFormOpen] = useState(false);
   const [filters, setFilters] = useState({ q: '', orgRole: '', status: '' });
   const [form, setForm] = useState(() => createDraftForDirectorySection('students', viewerOrgRole));
@@ -1009,6 +1017,10 @@ export default function AdminUsers() {
   useEffect(() => {
     const syncWorkspaceTabFromHash = () => {
       setWorkspaceTab(resolveWorkspaceTabFromHash(window.location.hash));
+      const directorySection = resolveDirectorySectionFromHash(window.location.hash);
+      if (directorySection === 'guardians') {
+        setActiveDirectorySection(directorySection);
+      }
     };
 
     syncWorkspaceTabFromHash();
