@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import useSiteSettings from '../hooks/useSiteSettings';
 import { normalizeBrandName, normalizeBrandSubtitle } from '../utils/brand';
@@ -240,85 +240,145 @@ const CardSheet = ({ settings, student, card, blank }) => {
   );
 };
 
-const TranscriptSheet = ({ settings, student, transcript, blank }) => {
+// ردیف‌های فرم B به همان ترتیبِ فرمِ رسمیِ وزارت معارف (sawaneh 1.pdf)
+const FORM_B_ROWS = [
+  ['tafsir', 'تفسیر شریف / قرآن‌کریم'],
+  ['hifz', 'حفظ'],
+  ['tajweed', 'تجوید'],
+  ['hadith', 'حدیث شریف'],
+  ['usul_hadith', 'اصول حدیث'],
+  ['usul_fiqh', 'اصول فقه'],
+  ['fiqh', 'فقه'],
+  ['aqaid', 'عقاید'],
+  ['sirat', 'سیرت‌النبی'],
+  ['akhlaq', 'اخلاق و آداب اسلامی'],
+  ['sarf', 'صرف'],
+  ['nahw', 'نحو'],
+  ['arabic', 'عربی'],
+  ['pashto', 'پشتو'],
+  ['dari', 'دری'],
+  ['science', 'ساینس'],
+  ['social', 'اجتماعیات'],
+  ['math', 'ریاضی'],
+  ['english', 'انگلیسی'],
+  ['computer', 'کمپیوتر'],
+  ['mantiq', 'منطق'],
+  ['balaghat', 'بلاغت'],
+  ['handasa', 'هندسه / رسم'],
+  ['physical_ed', 'تربیت بدنی / تدبیر منزل'],
+  ['tahzib', 'تهذیب']
+];
+const FORM_B_GRADES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+const NOTE_PAIRS = [[1, 7], [2, 8], [3, 9], [4, 10], [5, 11], [6, 12]];
+const faDigit = (n) => new Intl.NumberFormat('fa-AF', { useGrouping: false }).format(n);
+
+// جدولِ تجمیعیِ چند‌ساله — عینِ فرمِ رسمی: ردیف‌ها = مضامین، ستون‌ها = صنوف ۱ تا ۱۴
+const TranscriptSheet = ({ settings, student, transcripts, blank }) => {
   const p = student?.personalInfo || {};
-  const cats = ['religious', 'general', ''];
-  const catLabel = { religious: 'مضامین دینی', general: 'مضامین عمومی', '': 'سایر' };
-  const rows = blank ? [] : (transcript?.rows || []);
-  const att = transcript?.attendance || {};
+  const byGrade = new Map();
+  (blank ? [] : (transcripts || [])).forEach((t) => byGrade.set(Number(t.grade), t));
+
+  const rowFor = (t, key) => (t?.rows || []).find((r) => r.subjectKey === key);
+  const cell = (grade, key) => {
+    const t = byGrade.get(grade);
+    if (!t) return '';
+    const r = rowFor(t, key);
+    return r && r.annualMark != null ? faDigit(r.annualMark) : '';
+  };
+  const summaryCell = (grade, kind) => {
+    const t = byGrade.get(grade);
+    if (!t) return '';
+    if (kind === 'total') return t.totalObtained != null ? faDigit(t.totalObtained) : '';
+    if (kind === 'avg') return t.average != null ? faDigit(t.average) : '';
+    if (kind === 'result') return PROMOTION[t.promotionStatus] || '';
+    if (kind === 'tier') return TIER[t.resultTier] || '';
+    return '';
+  };
+  const attCell = (grade, k) => {
+    const a = byGrade.get(grade)?.attendance;
+    return a && a[k] != null ? faDigit(a[k]) : '';
+  };
 
   return (
-    <section className="sp-sheet">
+    <section className="sp-sheet sp-bsheet">
       <Letterhead settings={settings} title="نتیجه امتحانات متعلم — سوانح تعلیمی" />
 
-      <div className="sp-grid">
-        <Field label="نام متعلم" value={[p.firstNameDari, p.lastNameDari].filter(Boolean).join(' ')} />
-        <Field label="ولد" value={p.fatherName} />
-        <Field label="نمبر اساس" value={student?.asasNumber} />
-        <Field label="صنف" value={gradeLabel(transcript?.grade)} />
-        <Field label="سال تعلیمی" value={transcript?.yearLabel || transcript?.academicYearId?.title} />
-        <Field label="مدرسه" value={transcript?.schoolNameSnapshot} />
+      <div className="sp-bhead">
+        <span>نام متعلم: <b>{[p.firstNameDari, p.lastNameDari].filter(Boolean).join(' ') || '—'}</b></span>
+        <span>ولد: <b>{p.fatherName || '—'}</b></span>
+        <span>نمبر اساس: <b>{student?.asasNumber || '—'}</b></span>
+        <span>تذکره: <b>{student?.identification?.tazkiraNumber || '—'}</b></span>
       </div>
 
-      <table className="sp-table sp-marks">
-        <thead>
-          <tr>
-            <th>مضمون</th><th>سویه</th><th>چهارونیم‌ماهه</th><th>سالانه</th><th>مجموع</th><th>نتیجه</th>
-          </tr>
-        </thead>
+      <div className="sp-btable-wrap">
+        <table className="sp-btable">
+          <colgroup>
+            <col className="sp-bcol-subj" />
+            {FORM_B_GRADES.map((g) => <col key={g} className="sp-bcol-grade" />)}
+            <col className="sp-bcol-note" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th rowSpan={3}>مضامین</th>
+              <th colSpan={14}>صنوف / سال‌ها</th>
+              <th rowSpan={3}>ملاحظات</th>
+            </tr>
+            <tr>
+              {FORM_B_GRADES.map((g) => (
+                <th key={g} className="sp-bmeta">{blank ? '' : (byGrade.get(g)?.schoolNameSnapshot || '')}</th>
+              ))}
+            </tr>
+            <tr>
+              {FORM_B_GRADES.map((g) => (
+                <th key={g} className="sp-bmeta">{blank ? '' : (byGrade.get(g)?.yearLabel || '')}</th>
+              ))}
+            </tr>
+            <tr className="sp-bgradehdr">
+              <th>صنف</th>
+              {FORM_B_GRADES.map((g) => <th key={g}>{faDigit(g)}</th>)}
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {FORM_B_ROWS.map(([key, label]) => (
+              <tr key={key}>
+                <td className="sp-bsubj">{label}</td>
+                {FORM_B_GRADES.map((g) => <td key={g}>{cell(g, key)}</td>)}
+                <td />
+              </tr>
+            ))}
+            <tr className="sp-bsum"><td className="sp-bsubj">مجموعه</td>{FORM_B_GRADES.map((g) => <td key={g}>{summaryCell(g, 'total')}</td>)}<td /></tr>
+            <tr className="sp-bsum"><td className="sp-bsubj">اوسط نمرات</td>{FORM_B_GRADES.map((g) => <td key={g}>{summaryCell(g, 'avg')}</td>)}<td /></tr>
+            <tr className="sp-bsum"><td className="sp-bsubj">نتیجه</td>{FORM_B_GRADES.map((g) => <td key={g}>{summaryCell(g, 'result')}</td>)}<td /></tr>
+            <tr className="sp-bsum"><td className="sp-bsubj">درجه</td>{FORM_B_GRADES.map((g) => <td key={g}>{summaryCell(g, 'tier')}</td>)}<td /></tr>
+            <tr className="sp-batt"><td className="sp-bsubj">ایام سال تعلیمی</td>{FORM_B_GRADES.map((g) => <td key={g}>{attCell(g, 'schoolDays')}</td>)}<td /></tr>
+            <tr className="sp-batt"><td className="sp-bsubj">حاضر</td>{FORM_B_GRADES.map((g) => <td key={g}>{attCell(g, 'present')}</td>)}<td /></tr>
+            <tr className="sp-batt"><td className="sp-bsubj">غیرحاضر</td>{FORM_B_GRADES.map((g) => <td key={g}>{attCell(g, 'absent')}</td>)}<td /></tr>
+            <tr className="sp-batt"><td className="sp-bsubj">مریض</td>{FORM_B_GRADES.map((g) => <td key={g}>{attCell(g, 'sick')}</td>)}<td /></tr>
+            <tr className="sp-batt"><td className="sp-bsubj">رخصت</td>{FORM_B_GRADES.map((g) => <td key={g}>{attCell(g, 'leave')}</td>)}<td /></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="sp-bsign">
+        <span className="sp-sign-cell"><span className="sp-sign-line" />امضای نگران</span>
+        <span className="sp-sign-cell"><span className="sp-sign-line" />امضای معلم و مهر مکتب</span>
+      </div>
+
+      <h3 className="sp-bnotes-title">توضیحات در مورد امتحانات متعلم</h3>
+      <table className="sp-btable sp-bnotes">
         <tbody>
-          {cats.map((cat) => {
-            const catRows = rows.filter((r) => (r.category || '') === cat);
-            if (!catRows.length) return null;
+          {NOTE_PAIRS.map(([a, b]) => {
+            const t = blank ? null : (byGrade.get(a) || byGrade.get(b));
             return (
-              <React.Fragment key={cat || 'other'}>
-                <tr className="sp-cat"><td colSpan={6}>{catLabel[cat]}</td></tr>
-                {catRows.map((r, i) => (
-                  <tr key={`${cat}-${i}`}>
-                    <td className="sp-subj">{r.subjectLabel}</td>
-                    <td>{dash(r.sawiyaMark)}</td>
-                    <td>{dash(r.midYearMark)}</td>
-                    <td>{dash(r.finalMark)}</td>
-                    <td>{dash(r.annualMark)}</td>
-                    <td>{r.subjectPassed == null ? '—' : r.subjectPassed ? 'کامیاب' : 'ناکام'}</td>
-                  </tr>
-                ))}
-              </React.Fragment>
+              <tr key={a}>
+                <td className="sp-bnote-label">{`${gradeLabel(a)} / ${gradeLabel(b)}`}</td>
+                <td className="sp-bnote-text">{t?.examNotes || ''}</td>
+              </tr>
             );
           })}
-          {blank && Array.from({ length: 18 }).map((_, i) => (
-            <tr key={`b${i}`}><td>&nbsp;</td><td /><td /><td /><td /><td /></tr>
-          ))}
         </tbody>
-        <tfoot>
-          <tr><td>مجموعه</td><td colSpan={3} /><td>{blank ? '' : dash(transcript?.totalObtained)}</td><td /></tr>
-          <tr><td>اوسط نمرات</td><td colSpan={3} /><td>{blank ? '' : dash(transcript?.average)}</td><td>{blank ? '' : TIER[transcript?.resultTier]}</td></tr>
-          <tr><td>نتیجه</td><td colSpan={5}>{blank ? '' : PROMOTION[transcript?.promotionStatus]}</td></tr>
-          <tr>
-            <td>درجه (رتبه در صنف)</td>
-            <td colSpan={5}>{blank || !transcript?.rank ? '' : `${transcript.rank} از ${transcript.classSize || ''}`}</td>
-          </tr>
-        </tfoot>
       </table>
-
-      <div className="sp-two">
-        <div>
-          <h3>حاضری</h3>
-          <table className="sp-table">
-            <tbody>
-              <tr><th>ایام سال تعلیمی</th><td>{blank ? '' : dash(att.schoolDays)}</td><th>حاضر</th><td>{blank ? '' : dash(att.present)}</td></tr>
-              <tr><th>غیرحاضر</th><td>{blank ? '' : dash(att.absent)}</td><th>مریض</th><td>{blank ? '' : dash(att.sick)}</td></tr>
-              <tr><th>رخصت</th><td>{blank ? '' : dash(att.leave)}</td><th>&nbsp;</th><td /></tr>
-            </tbody>
-          </table>
-        </div>
-        <div>
-          <h3>توضیحات در مورد امتحانات متعلم</h3>
-          <div className="sp-notes">{blank ? '' : (transcript?.examNotes || '')}</div>
-        </div>
-      </div>
-
-      <Signatures right="امضای نگران" left="امضای معلم و مهر مکتب" />
     </section>
   );
 };
@@ -328,7 +388,6 @@ const SawanehPrint = () => {
   const [params] = useSearchParams();
   const { settings } = useSiteSettings();
   const form = params.get('form') || 'full';
-  const yearParam = params.get('year') || '';
   const blank = params.get('blank') === '1';
 
   const [student, setStudent] = useState(null);
@@ -370,14 +429,7 @@ const SawanehPrint = () => {
     return undefined;
   }, [ready, error]);
 
-  const transcriptSheets = useMemo(() => {
-    if (form === 'card') return [];
-    let list = transcripts;
-    if (yearParam) {
-      list = transcripts.filter((t) => String(t.academicYearId?._id || t.academicYearId) === String(yearParam));
-    }
-    return list;
-  }, [transcripts, form, yearParam]);
+  const hasTranscripts = transcripts.length > 0;
 
   if (!ready) return <div className="sp-loading">در حال آماده‌سازی چاپ…</div>;
   if (error) return <div className="sp-loading sp-error">{error}</div>;
@@ -394,17 +446,13 @@ const SawanehPrint = () => {
         <CardSheet settings={settings} student={student} card={card} blank={blank} />
       )}
 
-      {form !== 'card' && transcriptSheets.length === 0 && !blank && (
-        <section className="sp-sheet"><p className="sp-muted">برای این شاگرد سوانح تعلیمی ساخته نشده است.</p></section>
+      {form !== 'card' && (
+        (blank || hasTranscripts) ? (
+          <TranscriptSheet settings={settings} student={student} transcripts={transcripts} blank={blank} />
+        ) : (
+          <section className="sp-sheet"><p className="sp-muted">برای این شاگرد سوانح تعلیمی ساخته نشده است.</p></section>
+        )
       )}
-
-      {form !== 'card' && blank && transcriptSheets.length === 0 && (
-        <TranscriptSheet settings={settings} student={student} transcript={null} blank />
-      )}
-
-      {transcriptSheets.map((t) => (
-        <TranscriptSheet key={t._id} settings={settings} student={student} transcript={t} blank={blank} />
-      ))}
     </div>
   );
 };

@@ -175,6 +175,64 @@
   margin-bottom: 4px;
 }
 
+/* ---------- Form B: cumulative multi-year grid (matches sawaneh 1.pdf) ---------- */
+.sp-bhead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 18px;
+  font-size: 9pt;
+  margin-bottom: 6px;
+}
+
+.sp-btable-wrap { width: 100%; }
+
+.sp-btable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 6.6pt;
+  line-height: 1.15;
+}
+.sp-btable th,
+.sp-btable td {
+  border: 0.5pt solid var(--sp-ink);
+  padding: 1px 1.5px;
+  text-align: center;
+  vertical-align: middle;
+  overflow: hidden;
+  word-break: break-word;
+}
+.sp-btable thead th { background: #f0efe9; font-weight: 700; }
+.sp-bcol-subj { width: 30mm; }
+.sp-bcol-grade { width: 10mm; }
+.sp-bcol-note { width: 16mm; }
+.sp-bsubj { text-align: right !important; font-weight: 600; padding-right: 3px !important; }
+.sp-bmeta { font-weight: 400 !important; font-size: 5.6pt; height: 12mm; }
+.sp-bgradehdr th { background: #e7ede9; font-weight: 800; }
+.sp-btable .sp-bsum td { background: #f7f6f1; font-weight: 700; }
+.sp-btable .sp-batt td { background: #fafafa; }
+
+.sp-bsign {
+  display: flex;
+  justify-content: space-between;
+  gap: 20mm;
+  margin-top: 14px;
+}
+.sp-sign-cell {
+  flex: 1;
+  text-align: center;
+  font-size: 9pt;
+}
+.sp-sign-cell .sp-sign-line { margin-top: 16px; }
+
+.sp-bnotes-title {
+  margin: 12px 0 4px;
+  font-size: 10pt;
+}
+.sp-bnotes { font-size: 8.5pt; }
+.sp-bnote-label { width: 26mm; background: #f0efe9; font-weight: 700; white-space: nowrap; }
+.sp-bnote-text { text-align: right !important; height: 9mm; }
+
 /* ---------- print ---------- */
 @page { size: A4 portrait; margin: 10mm; }
 
@@ -192,4 +250,6 @@
   .sp-sheet:last-child { page-break-after: auto; }
   .sp-table { page-break-inside: auto; }
   .sp-table tr { page-break-inside: avoid; }
+  .sp-bsheet { page-break-after: auto; }
+  .sp-btable { page-break-inside: avoid; }
 }
