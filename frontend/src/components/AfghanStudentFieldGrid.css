@@ -103,3 +103,21 @@
   background-color: #15263a;
   color: #f6f7fb;
 }
+
+/* ---------- تمِ سبز/کهربایی شیشه‌ای (ویزارد ثبت‌نام شاگرد) ---------- */
+.asf-teal {
+  --asf-border: rgba(15, 118, 110, 0.16);
+  --asf-border-strong: rgba(15, 118, 110, 0.3);
+  --asf-surface: rgba(255, 255, 255, 0.55);
+  --asf-input-bg: rgba(255, 255, 255, 0.9);
+  --asf-ink: #102033;
+  --asf-muted: #64748b;
+  --asf-accent: #0f766e;
+  --asf-req: #dc2626;
+}
+
+.asf-teal .asf-section {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: 16px;
+}
