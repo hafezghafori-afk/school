@@ -217,32 +217,36 @@
 .sp-bsubj { text-align: right !important; font-weight: 600; padding-right: 2px !important; }
 .sp-bmeta { font-weight: 400 !important; font-size: 5.2pt; height: 5mm; }
 .sp-browlabel { text-align: right !important; font-weight: 700; padding-right: 2px !important; }
+.sp-bschool { text-align: right !important; }
+.sp-bschool-name { font-weight: 800; }
 .sp-bnote-head { width: 14mm; }
 .sp-bgradehdr th { background: #e7ede9; font-weight: 800; }
 
-/* diagonal-split corner cell: صنوف (top) \ مضامین (bottom) */
+/* diagonal-split corner cell: line from TOP-RIGHT to BOTTOM-LEFT,
+   صنوف in the upper-left triangle, مضامین in the lower-right triangle.
+   Drawn with an SVG <line> (not a background-gradient) so it prints even
+   when "Background graphics" is off. */
 .sp-bcorner {
   position: relative;
   height: 8mm;
   padding: 0 !important;
-  background-image: linear-gradient(
-    to bottom left,
-    transparent calc(50% - 0.35pt),
-    var(--sp-ink) calc(50% - 0.35pt),
-    var(--sp-ink) calc(50% + 0.35pt),
-    transparent calc(50% + 0.35pt)
-  ) !important;
+}
+.sp-bcorner-line {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 .sp-bcorner-top {
   position: absolute;
-  top: 0.5mm;
-  right: 1mm;
+  top: 0.4mm;
+  left: 1mm;
   font-weight: 800;
 }
 .sp-bcorner-bot {
   position: absolute;
-  bottom: 0.5mm;
-  left: 1mm;
+  bottom: 0.4mm;
+  right: 1mm;
   font-weight: 800;
 }
 .sp-btable .sp-bsum td { background: #f7f6f1; font-weight: 700; }
@@ -276,6 +280,11 @@
 
 @media print {
   html, body { background: #fff !important; }
+  /* keep the header shading / summary tints when printing */
+  .sawaneh-print, .sawaneh-print * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
   /* hide the app shell chrome so only the sheet prints */
   [class*="api-health"],
   header.site-header, .site-header, .topbar,

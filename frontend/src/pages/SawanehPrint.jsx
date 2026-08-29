@@ -68,7 +68,7 @@ const Letterhead = ({ settings }) => {
         <span>امارت اسلامی افغانستان</span>
         <span>وزارت معارف</span>
         <span>ریاست معارف شهر کابل</span>
-        <span>{`مدیریت مدرسه ${schoolName}`}</span>
+        <span>{`مدیریت ${schoolName}`}</span>
         <strong className="sp-doc-title">کارت سوانح متعلمین / محصلین</strong>
       </div>
       <div className="sp-logo">
@@ -277,6 +277,9 @@ const TranscriptSheet = ({ settings, student, transcripts, blank }) => {
   const p = student?.personalInfo || {};
   const byGrade = new Map();
   (blank ? [] : (transcripts || [])).forEach((t) => byGrade.set(Number(t.grade), t));
+  const schoolName = normalizeBrandName(settings?.brandName)
+    || (transcripts || []).find((t) => t.schoolNameSnapshot)?.schoolNameSnapshot
+    || 'اناثیه ایمان';
 
   const rowFor = (t, key) => (t?.rows || []).find((r) => r.subjectKey === key);
   const cell = (grade, key) => {
@@ -323,10 +326,10 @@ const TranscriptSheet = ({ settings, student, transcripts, blank }) => {
           </colgroup>
           <thead>
             <tr>
-              <th className="sp-browlabel">اسم مدرسه / دارالعلوم</th>
-              {FORM_B_GRADES.map((g) => (
-                <th key={g} className="sp-bmeta">{blank ? '' : (byGrade.get(g)?.schoolNameSnapshot || '')}</th>
-              ))}
+              <th className="sp-browlabel sp-bschool">
+                اسم مدرسه / دارالعلوم:&nbsp;<span className="sp-bschool-name">{schoolName}</span>
+              </th>
+              {FORM_B_GRADES.map((g) => <th key={g} className="sp-bmeta" />)}
               <th rowSpan={3} className="sp-bnote-head">ملاحظات</th>
             </tr>
             <tr>
@@ -337,6 +340,9 @@ const TranscriptSheet = ({ settings, student, transcripts, blank }) => {
             </tr>
             <tr className="sp-bgradehdr">
               <th className="sp-bcorner">
+                <svg className="sp-bcorner-line" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                  <line x1="100" y1="0" x2="0" y2="100" stroke="#111" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                </svg>
                 <span className="sp-bcorner-top">صنوف</span>
                 <span className="sp-bcorner-bot">مضامین</span>
               </th>
