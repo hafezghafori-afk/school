@@ -83,6 +83,42 @@ const studentDisplayName = (student = {}) => {
 
 const emptyAddress = () => ({ province: '', district: '', villageOrStreet: '' });
 
+const PROVINCE_LABELS = {
+  kabul: 'کابل', herat: 'هرات', kandahar: 'کندهار', balkh: 'بلخ', nangarhar: 'ننگرهار',
+  badakhshan: 'بدخشان', takhar: 'تخار', samangan: 'سمنگان', kunduz: 'کندز', baghlan: 'بغلان',
+  farah: 'فراه', nimroz: 'نیمروز', helmand: 'هلمند', ghor: 'غور', daykundi: 'دایکندی',
+  uruzgan: 'ارزگان', zabul: 'زابل', paktika: 'پکتیکا', khost: 'خوست', paktia: 'پکتیا',
+  logar: 'لوگر', parwan: 'پروان', kapisa: 'کاپیسا', panjshir: 'پنجشیر', badghis: 'بادغیس',
+  faryab: 'فاریاب', jowzjan: 'جوزجان', saripul: 'سرپل', bamyan: 'بامیان', ghazni: 'غزنی',
+  wardak: 'وردک', laghman: 'لغمان', kunar: 'کنر', nuristan: 'نورستان'
+};
+const provinceLabel = (value) => PROVINCE_LABELS[value] || value || '';
+const genderLabel = (value) => ({ male: 'ذکور', female: 'اناث' }[value] || value || '');
+
+const contactToAddress = (contactInfo = {}) => ({
+  province: contactInfo.province || '',
+  district: contactInfo.district || '',
+  villageOrStreet: contactInfo.village || contactInfo.address || ''
+});
+
+const shamsiDate = (value) => {
+  if (!value) return '';
+  try {
+    return new Date(value).toLocaleDateString('fa-AF-u-ca-persian', {
+      year: 'numeric', month: 'long', day: 'numeric'
+    });
+  } catch {
+    return '';
+  }
+};
+
+const Ro = ({ label, value }) => (
+  <div className="sw-ro-item">
+    <span className="sw-ro-label">{label}</span>
+    <span className="sw-ro-value">{value || value === 0 ? value : '—'}</span>
+  </div>
+);
+
 const SawanehWorkspace = () => {
   const navigate = useNavigate();
   const { studentId: routeStudentId } = useParams();
@@ -165,13 +201,22 @@ const SawanehWorkspace = () => {
       }
       const nextCard = data.data;
       setCard(nextCard);
-      setCardStudent(nextCard.studentId && typeof nextCard.studentId === 'object' ? nextCard.studentId : null);
+      const student = nextCard.studentId && typeof nextCard.studentId === 'object' ? nextCard.studentId : null;
+      setCardStudent(student);
+      // سکونت اصلی از رکوردِ زندهٔ شاگرد (contactInfo) خوانده می‌شود؛ مقدار ذخیره‌شدهٔ کارت فقط fallback است
+      const ciAddr = contactToAddress(student?.contactInfo || {});
+      const storedOrigin = nextCard.originAddress || {};
+      const originAddress = {
+        province: ciAddr.province || storedOrigin.province || '',
+        district: ciAddr.district || storedOrigin.district || '',
+        villageOrStreet: ciAddr.villageOrStreet || storedOrigin.villageOrStreet || ''
+      };
       setForm({
         motherTongue: nextCard.motherTongue || 'dari',
         thirdLanguage: nextCard.thirdLanguage || '',
         healthStatus: nextCard.healthStatus || '',
         currentSameAsOrigin: nextCard.currentSameAsOrigin !== false,
-        originAddress: { ...emptyAddress(), ...(nextCard.originAddress || {}) },
+        originAddress,
         currentAddress: { ...emptyAddress(), ...(nextCard.currentAddress || {}) },
         relatives: Array.isArray(nextCard.relatives)
           ? nextCard.relatives.map((item) => ({
@@ -209,10 +254,6 @@ const SawanehWorkspace = () => {
   };
 
   const updateForm = (patch) => setForm((prev) => ({ ...prev, ...patch }));
-  const updateOrigin = (patch) => setForm((prev) => ({
-    ...prev,
-    originAddress: { ...prev.originAddress, ...patch }
-  }));
   const updateCurrent = (patch) => setForm((prev) => ({
     ...prev,
     currentAddress: { ...prev.currentAddress, ...patch }
@@ -698,9 +739,66 @@ const SawanehWorkspace = () => {
 
               {activeTab === 'card' && (
               <>
+              <section className="sw-section sw-section-wide sw-readonly">
+                <div className="sw-ro-head">
+                  <h3>معلومات از پروندهٔ شاگرد</h3>
+                  <div className="sw-ro-head-actions">
+                    <span className="sw-hint">فقط‌خواندنی — از «مدیریت شاگردان» و فورم ثبت‌نام پر می‌شود.</span>
+                    {cardStudent?._id && (
+                      <button
+                        type="button"
+                        className="sw-btn sw-btn-ghost"
+                        onClick={() => window.open(`/student-management/${cardStudent._id}`, '_blank', 'noopener')}
+                      >
+                        ویرایش در مدیریت شاگرد
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {(() => {
+                  const p = cardStudent?.personalInfo || {};
+                  const idn = cardStudent?.identification || {};
+                  const fam = cardStudent?.familyInfo || {};
+                  const ci = cardStudent?.contactInfo || {};
+                  const school = card?.schoolId && typeof card.schoolId === 'object' ? card.schoolId : null;
+                  return (
+                    <div className="sw-ro-grid">
+                      <Ro label="نام (دری)" value={p.firstNameDari} />
+                      <Ro label="تخلص (دری)" value={p.lastNameDari} />
+                      <Ro label="نام پدر" value={p.fatherName} />
+                      <Ro label="نام پدرکلان" value={p.grandfatherName} />
+                      <Ro label="نام (انگلیسی)" value={p.firstName} />
+                      <Ro label="تخلص (انگلیسی)" value={p.lastName} />
+                      <Ro label="نام پدر (انگلیسی)" value={p.fatherNameEnglish} />
+                      <Ro label="جنسیت" value={genderLabel(p.gender)} />
+                      <Ro label="تابعیت" value={p.nationality} />
+                      <Ro label="تاریخ تولد" value={shamsiDate(p.birthDate)} />
+                      <Ro label="محل تولد" value={p.birthPlace} />
+                      <Ro label="نمبر تذکره" value={idn.tazkiraNumber} />
+                      <Ro label="جلد تذکره" value={idn.tazkiraVolume} />
+                      <Ro label="صفحهٔ تذکره" value={idn.tazkiraPage} />
+                      <Ro label="مسلک پدر" value={fam.fatherOccupation} />
+                      <Ro label="محل بودوباش پدر" value={fam.fatherResidence} />
+                      <Ro label="محل وظیفهٔ پدر" value={fam.fatherWorkplace} />
+                      <Ro label="تلفن ثابت پدر" value={fam.fatherLandline} />
+                      <Ro label="موبایل پدر" value={fam.fatherPhone} />
+                      <Ro label="تماس متعلم" value={ci.phone} />
+                      <Ro label="موبایل متعلم" value={ci.mobile} />
+                      <Ro label="سکونت اصلی — ولایت" value={provinceLabel(ci.province)} />
+                      <Ro label="سکونت اصلی — ولسوالی/ناحیه" value={ci.district} />
+                      <Ro label="سکونت اصلی — قریه/گذر" value={ci.village} />
+                      <Ro label="آدرس کامل" value={ci.address} />
+                      <Ro label="مکتب" value={school?.nameDari || school?.name} />
+                      <Ro label="صنف" value={currentStudentGrade ? GRADE_LABELS[currentStudentGrade - 1] : ''} />
+                      <Ro label="نمبر اساس" value={cardStudent?.asasNumber} />
+                    </div>
+                  );
+                })()}
+              </section>
+
               <div className="sw-grid">
                 <fieldset className="sw-section">
-                  <legend>زبان</legend>
+                  <legend>زبان و وضع صحی</legend>
                   <label>
                     زبان مادری
                     <select
@@ -734,34 +832,6 @@ const SawanehWorkspace = () => {
                 </fieldset>
 
                 <fieldset className="sw-section">
-                  <legend>سکونت اصلی</legend>
-                  <label>
-                    ولایت
-                    <input
-                      type="text"
-                      value={form.originAddress.province}
-                      onChange={(event) => updateOrigin({ province: event.target.value })}
-                    />
-                  </label>
-                  <label>
-                    ولسوالی / ناحیه
-                    <input
-                      type="text"
-                      value={form.originAddress.district}
-                      onChange={(event) => updateOrigin({ district: event.target.value })}
-                    />
-                  </label>
-                  <label>
-                    قریه / گذر
-                    <input
-                      type="text"
-                      value={form.originAddress.villageOrStreet}
-                      onChange={(event) => updateOrigin({ villageOrStreet: event.target.value })}
-                    />
-                  </label>
-                </fieldset>
-
-                <fieldset className="sw-section">
                   <legend>سکونت فعلی</legend>
                   <label className="sw-checkbox">
                     <input
@@ -771,6 +841,12 @@ const SawanehWorkspace = () => {
                     />
                     مثل سکونت اصلی
                   </label>
+                  {form.currentSameAsOrigin && (
+                    <p className="sw-hint">
+                      {[provinceLabel(form.originAddress.province), form.originAddress.district, form.originAddress.villageOrStreet]
+                        .filter(Boolean).join(' — ') || 'همان سکونت اصلیِ رکورد شاگرد'}
+                    </p>
+                  )}
                   {!form.currentSameAsOrigin && (
                     <>
                       <label>

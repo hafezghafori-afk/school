@@ -33,8 +33,17 @@ const MANAGER_ROLES = new Set(['admin', 'principal', 'registration_manager']);
 const { gradeNumber } = sawanehCardService._internals;
 const isObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
 
+// همهٔ اقلامِ چاپیِ فرم A از رکوردِ زندهٔ شاگرد خوانده می‌شود (کارت هیچ فیلد هویتی ذخیره نمی‌کند).
+// personalInfo / identification / familyInfo / contactInfo کاملِ زیردرخت انتخاب می‌شوند تا
+// birthPlace، جلد/صفحهٔ تذکره، محل بودوباش/وظیفهٔ پدر و … بدون ذکرِ تک‌تک بیایند.
 const cardResponsePopulate = (query) => query
-  .populate('studentId', 'personalInfo identification familyInfo contactInfo asasNumber registrationId academicInfo.currentGrade academicInfo.academicYearId academicInfo.currentClassId')
+  .populate('studentId', [
+    'personalInfo', 'identification', 'familyInfo', 'contactInfo',
+    'medicalInfo', 'documents', 'asasNumber', 'registrationId',
+    'academicInfo.currentSchool', 'academicInfo.currentGrade',
+    'academicInfo.currentSection', 'academicInfo.enrollmentDate',
+    'academicInfo.academicYearId', 'academicInfo.currentClassId'
+  ].join(' '))
   .populate('schoolId', 'name nameDari province district')
   .populate('createdBy', 'name email')
   .populate('lastUpdatedBy', 'name email');

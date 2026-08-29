@@ -592,3 +592,58 @@
 }
 
 .sw-exam-notes button { align-self: flex-start; }
+
+/* ---------- read-only «from student record» panel ---------- */
+.sw-readonly {
+  padding: 0.9rem 1rem 1rem;
+}
+
+.sw-ro-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.sw-ro-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--sw-accent);
+}
+
+.sw-ro-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.sw-ro-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.5rem 1rem;
+}
+
+.sw-ro-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px dashed var(--sw-border);
+  min-width: 0;
+}
+
+.sw-ro-label {
+  font-size: 0.72rem;
+  color: var(--sw-muted);
+}
+
+.sw-ro-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--sw-ink);
+  word-break: break-word;
+}
