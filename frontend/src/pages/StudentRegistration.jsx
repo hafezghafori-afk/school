@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import AfghanStudentFieldGrid from '../components/AfghanStudentFieldGrid';
 import { useToast } from '../components/ui/toast';
 import {
   DEFAULT_SCHOOL_ID,
@@ -11,45 +12,6 @@ import {
 } from './adminWorkspaceUtils';
 import './AfghanSchoolManagement.css';
 import './StudentRegistration.css';
-
-const PROVINCES = [
-  { value: 'kabul', label: 'کابل' },
-  { value: 'herat', label: 'هرات' },
-  { value: 'kandahar', label: 'کندهار' },
-  { value: 'balkh', label: 'بلخ' },
-  { value: 'nangarhar', label: 'ننگرهار' },
-  { value: 'badakhshan', label: 'بدخشان' },
-  { value: 'takhar', label: 'تخار' },
-  { value: 'samangan', label: 'سمنگان' },
-  { value: 'kunduz', label: 'قندوز' },
-  { value: 'baghlan', label: 'بغلان' },
-  { value: 'farah', label: 'فراه' },
-  { value: 'nimroz', label: 'نیمروز' },
-  { value: 'helmand', label: 'هلمند' },
-  { value: 'ghor', label: 'غور' },
-  { value: 'daykundi', label: 'دایکندی' },
-  { value: 'uruzgan', label: 'ارزگان' },
-  { value: 'zabul', label: 'زابل' },
-  { value: 'paktika', label: 'پکتیکا' },
-  { value: 'khost', label: 'خوست' },
-  { value: 'paktia', label: 'پکتیا' },
-  { value: 'logar', label: 'لوگر' },
-  { value: 'parwan', label: 'پروان' },
-  { value: 'kapisa', label: 'کاپیسا' },
-  { value: 'panjshir', label: 'پنجشیر' },
-  { value: 'badghis', label: 'بادغیس' },
-  { value: 'faryab', label: 'فاریاب' },
-  { value: 'jowzjan', label: 'جوزجان' },
-  { value: 'saripul', label: 'سرپل' },
-  { value: 'bamyan', label: 'بامیان' },
-  { value: 'ghazni', label: 'غزنی' },
-  { value: 'wardak', label: 'میدان وردک' },
-  { value: 'laghman', label: 'لغمان' },
-  { value: 'kunar', label: 'کنر' },
-  { value: 'nuristan', label: 'نورستان' }
-];
-
-const BLOOD_TYPES = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
 
 const trimValue = (value) => String(value || '').trim();
 const displayText = (value) => repairDisplayText(value);
@@ -151,6 +113,29 @@ const gradeFromClass = (schoolClass = {}) => {
   return `grade${boundedGrade}`;
 };
 
+// نگاشتِ کلیدِ کاتالوگِ مشترک → کلیدِ formDataِ این فرم (نام‌گذاریِ تاریخیِ فرمِ ثبت‌نام)
+const REG_FIELD_MAP = {
+  firstNameDari: 'firstName', lastNameDari: 'lastName',
+  firstName: 'firstNameEnglish', lastName: 'lastNameEnglish',
+  fatherName: 'fatherName', fatherNameEnglish: 'fatherNameEnglish', grandfatherName: 'grandfatherName',
+  gender: 'gender', nationality: 'nationality',
+  birthDate: 'birthDate', birthPlace: 'birthPlace',
+  tazkiraNumber: 'nationalId', tazkiraVolume: 'tazkiraVolume', tazkiraPage: 'tazkiraPage',
+  bloodGroup: 'bloodType',
+  fatherOccupation: 'fatherOccupation', fatherResidence: 'fatherResidence',
+  fatherWorkplace: 'fatherWorkplace', fatherLandline: 'fatherLandline', fatherPhone: 'fatherPhone',
+  motherName: 'motherName', motherOccupation: 'motherOccupation', motherPhone: 'motherPhone',
+  guardianName: 'guardianName', guardianRelation: 'guardianRelation', guardianPhone: 'guardianPhone',
+  province: 'province', district: 'city', village: 'village', address: 'address',
+  phone: 'phone', mobile: 'mobile', email: 'email',
+  emergencyName: 'emergencyContact', emergencyRelation: 'emergencyRelation', emergencyPhone: 'emergencyPhone'
+};
+const REG_GRID_ERROR_MAP = {
+  firstNameDari: 'firstName', lastNameDari: 'lastName', fatherName: 'fatherName',
+  tazkiraNumber: 'nationalId', gender: 'gender', birthDate: 'birthDate',
+  province: 'province', address: 'address', fatherPhone: 'fatherPhone'
+};
+
 const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedYear, schoolId }) => {
   const classSchoolId = getEntityId(selectedClass?.schoolId);
   const yearSchoolId = getEntityId(selectedYear?.schoolId);
@@ -159,7 +144,7 @@ const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedY
   const district = trimValue(formData.city) || trimValue(formData.address) || 'نامشخص';
   const emergencyName = trimValue(formData.emergencyContact) || trimValue(formData.guardianName) || trimValue(formData.fatherName);
   const emergencyPhone = trimValue(formData.emergencyPhone) || trimValue(formData.guardianPhone) || trimValue(formData.fatherPhone) || trimValue(formData.phone);
-  const emergencyRelation = trimValue(formData.guardianRelation) || 'سرپرست';
+  const emergencyRelation = trimValue(formData.emergencyRelation) || trimValue(formData.guardianRelation) || 'سرپرست';
   const shiftCode = normalizeShiftCode(selectedClass?.shift || selectedShift?.code || selectedShift?.name || selectedShift?.title);
   const previousSchoolName = trimValue(formData.previousSchool);
   const previousGrade = trimValue(formData.previousGrade);
@@ -177,8 +162,8 @@ const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedY
       grandfatherName: trimValue(formData.grandfatherName),
       gender: formData.gender,
       birthDate: formData.birthDate,
-      birthPlace: district,
-      nationality: 'Afghan'
+      birthPlace: trimValue(formData.birthPlace) || district,
+      nationality: trimValue(formData.nationality) || 'Afghan'
     },
     identification: {
       tazkiraNumber: trimValue(formData.nationalId),
@@ -195,15 +180,16 @@ const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedY
       motherOccupation: trimValue(formData.motherOccupation),
       motherPhone: trimValue(formData.motherPhone),
       guardianName: trimValue(formData.guardianName),
-      guardianRelation: trimValue(formData.guardianRelation) ? 'other' : undefined,
+      guardianRelation: trimValue(formData.guardianRelation) || undefined,
       guardianPhone: trimValue(formData.guardianPhone)
     },
     contactInfo: {
       phone: trimValue(formData.phone),
-      mobile: trimValue(formData.phone),
+      mobile: trimValue(formData.mobile) || trimValue(formData.phone),
       email: trimValue(formData.email),
       province: formData.province,
       district,
+      village: trimValue(formData.village),
       address: trimValue(formData.address),
       emergencyContact: {
         name: emergencyName,
@@ -277,12 +263,16 @@ const createEmptyForm = (academicYearId = '') => ({
   tazkiraVolume: '',
   tazkiraPage: '',
   birthDate: '',
+  birthPlace: '',
   gender: '',
+  nationality: 'Afghan',
   bloodType: '',
   phone: '',
+  mobile: '',
   email: '',
   address: '',
   city: '',
+  village: '',
   province: '',
   previousSchool: '',
   previousGrade: '',
@@ -304,6 +294,7 @@ const createEmptyForm = (academicYearId = '') => ({
   medicalConditions: '',
   allergies: '',
   emergencyContact: '',
+  emergencyRelation: '',
   emergencyPhone: '',
   transportation: '',
   lunchProgram: '',
@@ -451,6 +442,19 @@ const StudentRegistration = () => {
       }));
     }
   };
+
+  // آداپترِ گریدِ مشترک ↔ formDataِ این فرم
+  const handleGridChange = (catalogKey, value) => handleInputChange(REG_FIELD_MAP[catalogKey] || catalogKey, value);
+  const afghanGridValues = useMemo(() => {
+    const out = {};
+    Object.entries(REG_FIELD_MAP).forEach(([catalogKey, formKey]) => { out[catalogKey] = formData[formKey] || ''; });
+    return out;
+  }, [formData]);
+  const afghanGridErrors = useMemo(() => {
+    const out = {};
+    Object.entries(REG_GRID_ERROR_MAP).forEach(([catalogKey, errKey]) => { if (errors[errKey]) out[catalogKey] = errors[errKey]; });
+    return out;
+  }, [errors]);
 
   const openEnrollmentDesk = (candidateRef) => {
     if (!candidateRef) return;
@@ -696,9 +700,9 @@ const StudentRegistration = () => {
           </div>
         )}
 
-        {/* مشخصات شخصی */}
+        {/* مشخصات شاگرد (کارت سوانح) */}
         <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>مشخصات شخصی</h3>
+          <h3 style={{ color: '#3498db', marginBottom: 12 }}>مشخصات شاگرد</h3>
           {/* بارگذاری اسناد شاگرد - قطار افقی */}
           <div style={{ display: 'flex', flexDirection: 'row', gap: 24, marginTop: 16, marginBottom: 8, justifyContent: 'center' }}>
             <div className="form-group" style={{ minWidth: 170 }}>
@@ -714,105 +718,13 @@ const StudentRegistration = () => {
               <input key={`photo-${fileInputResetKey}`} type="file" accept=".jpg,.jpeg,.png" onChange={e => handleFileChange('photo', e.target.files?.[0])} />
             </div>
           </div>
-          <div className="form-grid">
-            <div className="form-group">
-              <label htmlFor="firstName">نام *</label>
-              <input id="firstName" value={formData.firstName} onChange={e => handleInputChange('firstName', e.target.value)} required className={errors.firstName ? 'border-red-500' : ''} />
-              {errors.firstName && <span className="text-red-500">{errors.firstName}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="lastName">تخلص *</label>
-              <input id="lastName" value={formData.lastName} onChange={e => handleInputChange('lastName', e.target.value)} required className={errors.lastName ? 'border-red-500' : ''} />
-              {errors.lastName && <span className="text-red-500">{errors.lastName}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="firstNameEnglish">نام به انگلیسی</label>
-              <input id="firstNameEnglish" dir="ltr" value={formData.firstNameEnglish} onChange={e => handleInputChange('firstNameEnglish', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="lastNameEnglish">تخلص به انگلیسی</label>
-              <input id="lastNameEnglish" dir="ltr" value={formData.lastNameEnglish} onChange={e => handleInputChange('lastNameEnglish', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="fatherName">نام پدر *</label>
-              <input id="fatherName" value={formData.fatherName} onChange={e => handleInputChange('fatherName', e.target.value)} required className={errors.fatherName ? 'border-red-500' : ''} />
-              {errors.fatherName && <span className="text-red-500">{errors.fatherName}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="fatherNameEnglish">نام پدر به انگلیسی</label>
-              <input id="fatherNameEnglish" dir="ltr" value={formData.fatherNameEnglish} onChange={e => handleInputChange('fatherNameEnglish', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="grandfatherName">نام پدرکلان</label>
-              <input id="grandfatherName" value={formData.grandfatherName} onChange={e => handleInputChange('grandfatherName', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="nationalId">شماره تذکره *</label>
-              <input id="nationalId" value={formData.nationalId} onChange={e => handleInputChange('nationalId', e.target.value)} required className={errors.nationalId ? 'border-red-500' : ''} />
-              {errors.nationalId && <span className="text-red-500">{errors.nationalId}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="tazkiraVolume">جلد تذکره</label>
-              <input id="tazkiraVolume" value={formData.tazkiraVolume} onChange={e => handleInputChange('tazkiraVolume', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="tazkiraPage">صفحهٔ تذکره</label>
-              <input id="tazkiraPage" value={formData.tazkiraPage} onChange={e => handleInputChange('tazkiraPage', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="birthDate">تاریخ تولد *</label>
-              <AfghanDateInput id="birthDate" value={formData.birthDate} onChange={value => handleInputChange('birthDate', value)} required inputClassName={errors.birthDate ? 'border-red-500' : ''} showGregorianEquivalent />
-              {errors.birthDate && <span className="text-red-500">{errors.birthDate}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="gender">جنسیت *</label>
-              <select id="gender" value={formData.gender} onChange={e => handleInputChange('gender', e.target.value)} required className={errors.gender ? 'border-red-500' : ''}>
-                <option value="">انتخاب کنید</option>
-                <option value="male">ذکور</option>
-                <option value="female">اناث</option>
-              </select>
-              {errors.gender && <span className="text-red-500">{errors.gender}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="bloodType">گروپ خونی</label>
-              <select id="bloodType" value={formData.bloodType} onChange={e => handleInputChange('bloodType', e.target.value)}>
-                <option value="">انتخاب کنید</option>
-                {BLOOD_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* اطلاعات تماس و آدرس */}
-        <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>اطلاعات تماس و آدرس</h3>
-          <div className="form-grid">
-            <div className="form-group">
-              <label htmlFor="province">ولایت *</label>
-              <select id="province" value={formData.province} onChange={e => handleInputChange('province', e.target.value)} required className={errors.province ? 'border-red-500' : ''}>
-                <option value="">انتخاب کنید</option>
-                {PROVINCES.map(province => <option key={province.value} value={province.value}>{province.label}</option>)}
-              </select>
-              {errors.province && <span className="text-red-500">{errors.province}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="city">ولسوالی/ناحیه</label>
-              <input id="city" value={formData.city} onChange={e => handleInputChange('city', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="address">آدرس کامل *</label>
-              <input id="address" value={formData.address} onChange={e => handleInputChange('address', e.target.value)} required className={errors.address ? 'border-red-500' : ''} />
-              {errors.address && <span className="text-red-500">{errors.address}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="phone">شماره تماس شاگرد/خانه</label>
-              <input id="phone" value={formData.phone} onChange={e => handleInputChange('phone', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="email">ایمیل</label>
-              <input id="email" type="email" value={formData.email} onChange={e => handleInputChange('email', e.target.value)} />
-            </div>
-          </div>
+          <AfghanStudentFieldGrid
+            theme="light"
+            sectionIds={['identity', 'birth', 'father', 'mother', 'guardian', 'contact', 'emergency']}
+            values={afghanGridValues}
+            onChange={handleGridChange}
+            errors={afghanGridErrors}
+          />
         </div>
 
         {/* اطلاعات تعلیمی */}
@@ -882,58 +794,6 @@ const StudentRegistration = () => {
           </div>
         </div>
 
-        {/* خانواده و سرپرست */}
-        <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>معلومات خانواده و سرپرست</h3>
-          <div className="form-grid">
-            <div className="form-group">
-              <label htmlFor="fatherPhone">شماره تماس پدر *</label>
-              <input id="fatherPhone" value={formData.fatherPhone} onChange={e => handleInputChange('fatherPhone', e.target.value)} required className={errors.fatherPhone ? 'border-red-500' : ''} />
-              {errors.fatherPhone && <span className="text-red-500">{errors.fatherPhone}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="fatherOccupation">مسلک پدر</label>
-              <input id="fatherOccupation" value={formData.fatherOccupation} onChange={e => handleInputChange('fatherOccupation', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="fatherResidence">محل بودوباش پدر</label>
-              <input id="fatherResidence" value={formData.fatherResidence} onChange={e => handleInputChange('fatherResidence', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="fatherWorkplace">محل وظیفهٔ پدر</label>
-              <input id="fatherWorkplace" value={formData.fatherWorkplace} onChange={e => handleInputChange('fatherWorkplace', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="fatherLandline">تلفن ثابت پدر</label>
-              <input id="fatherLandline" value={formData.fatherLandline} onChange={e => handleInputChange('fatherLandline', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="motherName">نام مادر</label>
-              <input id="motherName" value={formData.motherName} onChange={e => handleInputChange('motherName', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="motherPhone">شماره تماس مادر</label>
-              <input id="motherPhone" value={formData.motherPhone} onChange={e => handleInputChange('motherPhone', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="motherOccupation">مسلک مادر</label>
-              <input id="motherOccupation" value={formData.motherOccupation} onChange={e => handleInputChange('motherOccupation', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="guardianName">نام سرپرست</label>
-              <input id="guardianName" value={formData.guardianName} onChange={e => handleInputChange('guardianName', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="guardianPhone">شماره تماس سرپرست</label>
-              <input id="guardianPhone" value={formData.guardianPhone} onChange={e => handleInputChange('guardianPhone', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="guardianRelation">نسبت سرپرست</label>
-              <input id="guardianRelation" value={formData.guardianRelation} onChange={e => handleInputChange('guardianRelation', e.target.value)} />
-            </div>
-          </div>
-        </div>
-
         {/* صحی و اضافی */}
         <div className="form-section">
           <h3 style={{ color: '#3498db', marginBottom: 12 }}>معلومات صحی و اضافی</h3>
@@ -945,14 +805,6 @@ const StudentRegistration = () => {
             <div className="form-group">
               <label htmlFor="allergies">حساسیت‌ها</label>
               <textarea id="allergies" rows={3} value={formData.allergies} onChange={e => handleInputChange('allergies', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="emergencyContact">نام اضطراری</label>
-              <input id="emergencyContact" value={formData.emergencyContact} onChange={e => handleInputChange('emergencyContact', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="emergencyPhone">شماره اضطراری</label>
-              <input id="emergencyPhone" value={formData.emergencyPhone} onChange={e => handleInputChange('emergencyPhone', e.target.value)} />
             </div>
             <div className="form-group">
               <label htmlFor="transportation">نوع ترانسپورت</label>

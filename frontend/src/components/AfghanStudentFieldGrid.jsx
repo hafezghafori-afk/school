@@ -1,3 +1,4 @@
+import AfghanDateInput from './ui/AfghanDateInput';
 import { AFGHAN_STUDENT_SECTIONS } from '../config/afghanStudentFields';
 import './AfghanStudentFieldGrid.css';
 
@@ -50,7 +51,13 @@ export default function AfghanStudentFieldGrid({
                       ))}
                     </select>
                   ) : field.type === 'date' ? (
-                    <input type="date" {...common} />
+                    <AfghanDateInput
+                      id={common.id}
+                      value={value}
+                      disabled={readOnly}
+                      onChange={(next) => onChange && onChange(field.key, next)}
+                      showGregorianEquivalent
+                    />
                   ) : (
                     <input type="text" dir={field.type === 'latin' ? 'ltr' : undefined} {...common} />
                   )}
