@@ -244,8 +244,7 @@ const CardSheet = ({ settings, student, card, blank }) => {
 // ردیف‌های فرم B به همان ترتیبِ فرمِ رسمیِ وزارت معارف (sawaneh 1.pdf)
 const FORM_B_ROWS = [
   ['tafsir', 'تفسیر شریف / قرآن‌کریم'],
-  ['hifz', 'حفظ'],
-  ['tajweed', 'تجوید'],
+  ['hifz+tajweed', 'حفظ / تجوید'],
   ['hadith', 'حدیث شریف'],
   ['usul_hadith', 'اصول حدیث'],
   ['usul_fiqh', 'اصول فقه'],
@@ -283,8 +282,11 @@ const TranscriptSheet = ({ settings, student, transcripts, blank }) => {
   const cell = (grade, key) => {
     const t = byGrade.get(grade);
     if (!t) return '';
-    const r = rowFor(t, key);
-    return r && r.annualMark != null ? faDigit(r.annualMark) : '';
+    for (const k of key.split('+')) {
+      const r = rowFor(t, k);
+      if (r && r.annualMark != null) return faDigit(r.annualMark);
+    }
+    return '';
   };
   const summaryCell = (grade, kind) => {
     const t = byGrade.get(grade);
@@ -321,24 +323,24 @@ const TranscriptSheet = ({ settings, student, transcripts, blank }) => {
           </colgroup>
           <thead>
             <tr>
-              <th rowSpan={3}>مضامین</th>
-              <th colSpan={14}>صنوف / سال‌ها</th>
-              <th rowSpan={3}>ملاحظات</th>
-            </tr>
-            <tr>
+              <th className="sp-browlabel">اسم مدرسه / دارالعلوم</th>
               {FORM_B_GRADES.map((g) => (
                 <th key={g} className="sp-bmeta">{blank ? '' : (byGrade.get(g)?.schoolNameSnapshot || '')}</th>
               ))}
+              <th rowSpan={3} className="sp-bnote-head">ملاحظات</th>
             </tr>
             <tr>
+              <th className="sp-browlabel">سال ها</th>
               {FORM_B_GRADES.map((g) => (
                 <th key={g} className="sp-bmeta">{blank ? '' : (byGrade.get(g)?.yearLabel || '')}</th>
               ))}
             </tr>
             <tr className="sp-bgradehdr">
-              <th>صنف</th>
+              <th className="sp-bcorner">
+                <span className="sp-bcorner-top">صنوف</span>
+                <span className="sp-bcorner-bot">مضامین</span>
+              </th>
               {FORM_B_GRADES.map((g) => <th key={g}>{faDigit(g)}</th>)}
-              <th />
             </tr>
           </thead>
           <tbody>
