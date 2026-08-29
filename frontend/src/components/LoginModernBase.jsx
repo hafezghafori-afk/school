@@ -31,6 +31,38 @@ const SchoolIcon = () => (
   </svg>
 );
 
+const BookIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+  </svg>
+);
+
+const ChatIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z" />
+  </svg>
+);
+
+const ScheduleIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+    <rect x="3" y="4" width="18" height="18" rx="2" />
+    <path d="M16 2v4M8 2v4M3 10h18" />
+  </svg>
+);
+
+const ChevronIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+    <path d="M9 18l6-6-6-6" />
+  </svg>
+);
+
+const ArrowIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+    <path d="M5 12h14M13 6l6 6-6 6" />
+  </svg>
+);
+
 export default function LoginModernBase({
   title,
   subtitle,
@@ -262,6 +294,43 @@ export default function LoginModernBase({
         navItems={publicSettings?.mainMenu}
       />
       <main className="login-modern-container">
+        <div className="login-brand-panel">
+          <div className="login-brand-blob b1"></div>
+          <div className="login-brand-blob b2"></div>
+          <div className="login-brand-blob b3"></div>
+
+          <Link to="/" className="login-brand-back">
+            <ChevronIcon />
+            بازگشت به صفحهٔ اصلی
+          </Link>
+
+          <div className="login-brand-mid">
+            <div className="login-brand-mark">
+              <SchoolIcon />
+            </div>
+            <p className="login-brand-name">{publicSettings?.brandName || 'Iman Girls School'}</p>
+            <p className="login-brand-sub">{publicSettings?.brandSubtitle || 'مکتب دخترانه ایمان'}</p>
+            <p className="login-brand-copy">به فضای دیجیتال مکتب خوش آمدید. نمرات، حاضری، کارخانگی، برنامهٔ صنفی و وضعیت فیس — همه در یک حساب، همیشه در دسترس.</p>
+            <div className="login-feature-list">
+              <div className="login-feature-pill">
+                <span className="login-feature-ic"><BookIcon /></span>
+                نمرات و حاضری شاگرد به‌روز
+              </div>
+              <div className="login-feature-pill">
+                <span className="login-feature-ic"><ChatIcon /></span>
+                چت مستقیم با استاد و اداره
+              </div>
+              <div className="login-feature-pill">
+                <span className="login-feature-ic"><ScheduleIcon /></span>
+                برنامهٔ صنفی و پیگیری وضعیت فیس
+              </div>
+            </div>
+          </div>
+
+          <p className="login-brand-foot">© {publicSettings?.brandName || 'مکتب دخترانه ایمان'} — تمامی حقوق محفوظ است</p>
+        </div>
+
+        <div className="login-form-panel">
         <div className="animated-background" style={backgroundStyle} aria-hidden="true"></div>
         <div className="login-card">
         <div className="login-header">
@@ -269,8 +338,8 @@ export default function LoginModernBase({
             <SchoolLogo
               to={null}
               logoSrc={logoSrc && !logoBroken ? logoSrc : ''}
-              name="Iman Girls School"
-              subtitle="مکتب دخترانه ایمان"
+              name={publicSettings?.brandName || 'Iman Girls School'}
+              subtitle={publicSettings?.brandSubtitle || 'مکتب دخترانه ایمان'}
               className="login-school-logo"
             />
             {logoSrc && !logoBroken ? (
@@ -305,8 +374,8 @@ export default function LoginModernBase({
         <form className="login-form" onSubmit={handleSubmit} aria-busy={loading || resendBusy || settingsLoading}>
           {!twoFactorMode && (
             <div className={`input-group ${focusedField === 'email' ? 'focused' : ''}`}>
+              <label htmlFor={emailInputId} className="field-label">ایمیل یا نام کاربری</label>
               <div className="input-wrapper">
-                <label htmlFor={emailInputId} className="sr-only">ایمیل یا نام کاربری</label>
                 <UserIcon />
                 <input
                   id={emailInputId}
@@ -317,7 +386,7 @@ export default function LoginModernBase({
                   onChange={(event) => setEmail(event.target.value)}
                   onFocus={() => setFocusedField('email')}
                   onBlur={() => setFocusedField('')}
-                  placeholder="ایمیل یا نام کاربری"
+                  placeholder="name@example.com"
                   className="modern-input"
                   autoComplete="username"
                   spellCheck={false}
@@ -331,17 +400,16 @@ export default function LoginModernBase({
 
           {!twoFactorMode && !forgotPasswordMode && (
             <div className={`input-group ${focusedField === 'password' ? 'focused' : ''}`}>
+              <label htmlFor={passwordInputId} className="field-label">رمز عبور</label>
               <PasswordField
                 id={passwordInputId}
                 name="password"
-                label="رمز عبور"
-                labelClassName="sr-only"
                 required
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 onFocus={() => setFocusedField('password')}
                 onBlur={() => setFocusedField('')}
-                placeholder="رمز عبور"
+                placeholder="••••••••"
                 wrapperClassName="password-input-wrapper"
                 inputClassName="modern-input password-input"
                 toggleClassName="password-toggle"
@@ -389,8 +457,9 @@ export default function LoginModernBase({
             <span className="button-text">
               {loading
                 ? (forgotPasswordMode ? 'در حال ارسال...' : twoFactorMode ? 'در حال تایید...' : 'در حال ورود...')
-                : (forgotPasswordMode ? 'ارسال لینک بازیابی' : twoFactorMode ? 'تایید و ورود' : 'ورود')}
+                : (forgotPasswordMode ? 'ارسال لینک بازیابی' : twoFactorMode ? 'تایید و ورود' : 'ورود به سیستم')}
             </span>
+            {!loading && !forgotPasswordMode && !twoFactorMode && <ArrowIcon />}
             {loading && <div className="button-spinner" />}
           </button>
 
@@ -445,6 +514,11 @@ export default function LoginModernBase({
             </div>
           )}
         </form>
+
+        <p className="card-footnote">
+          ورود شما محافظت‌شده است — اطلاعات صرفاً برای دسترسی به حساب رسمی مکتب استفاده می‌شود.
+        </p>
+        </div>
         </div>
       </main>
       <PublicFooter
