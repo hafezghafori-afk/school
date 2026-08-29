@@ -183,59 +183,80 @@
   margin-bottom: 4px;
 }
 
-/* ---------- Form A: کارت سوانح متعلم (matches sawaneh shagerd 2.pdf) ---------- */
-.sp-asheet { font-size: 8pt; }
-.sp-asheet .sp-two { gap: 6px; margin-bottom: 4px; align-items: stretch; }
-.sp-atop > * { min-width: 0; }
-.sp-abox {
-  border: 0.6pt solid var(--sp-ink);
-  padding: 3px 5px 4px;
+/* ---------- Form A: کارت سوانح متعلم — every section is its own table ---------- */
+.sp-asheet { font-size: 7.5pt; }
+.sp-asheet .sp-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 6px;
+  margin: 0 0 4px;
+  align-items: start;
 }
-.sp-abox-h {
-  font-weight: 800;
-  font-size: 7.5pt;
-  background: #f0efe9;
-  margin: -3px -5px 3px;
-  padding: 1.5px 5px;
-  border-bottom: 0.6pt solid var(--sp-ink);
-}
-.sp-abox-h + .sp-abox-h { margin-top: 4px; }
-.sp-asec-h {
-  font-weight: 800;
-  font-size: 7.5pt;
-  background: #f0efe9;
-  border: 0.6pt solid var(--sp-ink);
-  padding: 1.5px 5px;
-  margin: 5px 0 2px;
-}
-.sp-arow-photo { display: flex; gap: 6px; align-items: stretch; }
-.sp-asheet .sp-photo {
-  width: 24mm;
-  min-height: 30mm;
-  flex: none;
-  font-size: 7pt;
-  line-height: 1.3;
-}
-.sp-asheet .sp-grid { gap: 2px 8px; margin-bottom: 2px; }
-.sp-grid-1 { grid-template-columns: 1fr; }
-.sp-grid-2 { grid-template-columns: repeat(2, 1fr); }
-.sp-grid-5 { grid-template-columns: repeat(5, 1fr); }
-.sp-asheet .sp-field { min-height: 15px; padding: 1px 0; font-size: 7.5pt; }
-.sp-asheet .sp-field-label { font-size: 7pt; }
+.sp-asheet .sp-two > * { min-width: 0; }
 
-.sp-atbl { font-size: 7pt; margin-bottom: 2px; }
-.sp-atbl th, .sp-atbl td {
-  border: 0.5pt solid var(--sp-ink);
-  padding: 1px 3px;
-  text-align: center;
+/* the shared mini-table */
+.sp-kv {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 4px;
+  font-size: 7.3pt;
+  line-height: 1.2;
 }
-.sp-atbl thead th { background: #f0efe9; }
-.sp-arel td { height: 6mm; }
+.sp-kv caption {
+  caption-side: top;
+  text-align: right;
+  font-weight: 800;
+  font-size: 7.3pt;
+  background: #f0efe9;
+  border: 0.6pt solid var(--sp-ink);
+  border-bottom: 0;
+  padding: 1.5px 5px;
+}
+.sp-kv th,
+.sp-kv td {
+  border: 0.5pt solid var(--sp-ink);
+  padding: 1.5px 4px;
+  vertical-align: middle;
+}
+/* vertical variant: label column on the right */
+.sp-kv > tbody > tr > th {
+  background: #f6f5ef;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+  width: 34%;
+}
+.sp-kv > tbody > tr > td { text-align: right; min-height: 4.6mm; }
+/* horizontal variant: header row of labels, one value row */
+.sp-kv-h > thead > tr > th {
+  background: #f6f5ef;
+  font-weight: 700;
+  text-align: center;
+  font-size: 7pt;
+}
+.sp-kv-h > tbody > tr > td { text-align: center; height: 5mm; }
+/* grid variant (multi-row data tables: اصلاح شهرت، شمولیت، نظریات) */
+.sp-kv-grid > thead > tr > th {
+  background: #f0efe9;
+  font-weight: 700;
+  text-align: center;
+  font-size: 7pt;
+}
+.sp-kv-grid > tbody > tr > td { text-align: center; height: 4.4mm; }
+
+.sp-photo-cell {
+  width: 24mm;
+  text-align: center !important;
+  font-size: 7pt;
+  vertical-align: middle;
+}
+.sp-father > tbody > tr > td { min-height: 4.4mm; }
+
+.sp-arel > tbody > tr > td { height: 6mm; }
 .sp-arem-g { width: 12mm; }
-.sp-arem-n { width: 26mm; }
-.sp-arem td { text-align: right; height: 4.4mm; padding: 0.5px 3px; }
-.sp-arem td:first-child { text-align: center; }
-.sp-ahealth { margin-top: 3px; }
+.sp-arem-n { width: 28mm; }
+.sp-arem > tbody > tr > td { height: 4.2mm; text-align: right; }
+.sp-arem > tbody > tr > td:first-child { text-align: center; }
 
 /* ---------- Form B: cumulative multi-year grid (matches sawaneh 1.pdf) ---------- */
 .sp-bhead {

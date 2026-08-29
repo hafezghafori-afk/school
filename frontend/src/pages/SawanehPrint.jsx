@@ -54,13 +54,6 @@ const provinceLabel = (v) => PROVINCES[String(v || '').toLowerCase()] || v || ''
 const dash = (v) => (v === 0 ? '۰' : (v || '—'));
 const dateLabel = (iso, local) => local || (iso ? formatAfghanStoredDateLabel(iso) : '') || '';
 
-const Field = ({ label, value }) => (
-  <div className="sp-field">
-    <span className="sp-field-label">{label}</span>
-    <span className="sp-field-value">{value || <span className="sp-blank" />}</span>
-  </div>
-);
-
 const Letterhead = ({ settings }) => {
   const { schoolLogoUrl, ministryLogoUrl } = getPrintLogoUrls(settings || {});
   const schoolName = normalizeBrandName(settings?.brandName) || 'اناثیه ایمان';
@@ -97,6 +90,22 @@ const splitBirth = (iso, local) => {
   return { year: label, month: '', day: '' };
 };
 
+// جدولِ افقی: یک ردیفِ برچسب + یک ردیفِ مقدار
+const HTable = ({ title, cols }) => (
+  <table className="sp-kv sp-kv-h">
+    {title ? <caption>{title}</caption> : null}
+    <thead><tr>{cols.map(([l], i) => <th key={i}>{l}</th>)}</tr></thead>
+    <tbody><tr>{cols.map(([, v], i) => <td key={i}>{v || ''}</td>)}</tr></tbody>
+  </table>
+);
+// جدولِ عمودی: هر ردیف = برچسب | مقدار
+const VTable = ({ title, rows }) => (
+  <table className="sp-kv">
+    {title ? <caption>{title}</caption> : null}
+    <tbody>{rows.map(([l, v], i) => <tr key={i}><th>{l}</th><td>{v || ''}</td></tr>)}</tbody>
+  </table>
+);
+
 const CardSheet = ({ settings, student, card, blank }) => {
   const p = student?.personalInfo || {};
   const idn = student?.identification || {};
@@ -111,67 +120,62 @@ const CardSheet = ({ settings, student, card, blank }) => {
   const bd = splitBirth(p.birthDate);
   const enroll = blank ? [] : (card?.enrollmentHistory || []);
   const corrections = blank ? [] : (card?.nameCorrections || []);
-  const padRows = (arr, min) => Array.from({ length: Math.max(0, min - arr.length) });
+  const pad = (arr, min) => Array.from({ length: Math.max(0, min - arr.length) });
 
   return (
     <section className="sp-sheet sp-asheet">
       <Letterhead settings={settings} />
-      <div className="sp-btitle">کارت سوانح متعلمین / محصلین</div>
 
-      {/* ۲ و ۳ — شهرت متعلم (راست) + معلومات پدر/ولی و عکس (چپ) */}
+      {/* شهرت متعلم (راست) + معلومات پدر/ولی و عکس (چپ) */}
       <div className="sp-two sp-atop">
-        <div className="sp-abox">
-          <div className="sp-abox-h">شهرت متعلم</div>
-          <div className="sp-grid sp-grid-3">
-            <Field label="نام" value={b([p.firstNameDari, p.lastNameDari].filter(Boolean).join(' '))} />
-            <Field label="نام پدر" value={b(p.fatherName)} />
-            <Field label="نام پدر کلان" value={b(p.grandfatherName)} />
-          </div>
-          <div className="sp-abox-h">شهرت متعلم به انگلیسی برویت تذکره</div>
-          <div className="sp-grid sp-grid-3">
-            <Field label="Name" value={b(p.firstName)} />
-            <Field label="Last name" value={b(p.lastName)} />
-            <Field label="Father name" value={b(p.fatherNameEnglish)} />
-          </div>
-          <div className="sp-grid sp-grid-2">
-            <Field label="تابعیت" value={b(p.nationality || 'افغان')} />
-            <Field label="جنسیت" value={b(p.gender === 'female' ? 'اناث' : p.gender === 'male' ? 'ذکور' : '')} />
-          </div>
+        <div>
+          <HTable title="شهرت متعلم" cols={[
+            ['نام', b([p.firstNameDari, p.lastNameDari].filter(Boolean).join(' '))],
+            ['نام پدر', b(p.fatherName)],
+            ['نام پدر کلان', b(p.grandfatherName)]
+          ]} />
+          <HTable title="شهرت متعلم به انگلیسی برویت تذکره" cols={[
+            ['Name', b(p.firstName)],
+            ['Last name', b(p.lastName)],
+            ['Father name', b(p.fatherNameEnglish)]
+          ]} />
+          <HTable cols={[
+            ['تابعیت', b(p.nationality || 'افغان')],
+            ['جنسیت', b(p.gender === 'female' ? 'اناث' : p.gender === 'male' ? 'ذکور' : '')]
+          ]} />
         </div>
-
-        <div className="sp-abox">
-          <div className="sp-abox-h">معلومات در مورد پدر / ولی متعلم</div>
-          <div className="sp-arow-photo">
-            <div className="sp-grid sp-grid-1 sp-grow">
-              <Field label="محل بود و باش" value={b(fam.fatherResidence)} />
-              <Field label="وظیفه" value={b(fam.fatherOccupation)} />
-              <Field label="محل وظیفه" value={b(fam.fatherWorkplace)} />
-              <Field label="نمبر تلفون" value={b(fam.fatherLandline)} />
-              <Field label="نمبر مبایل" value={b(fam.fatherPhone)} />
-              <Field label="نمبر تماس خودِ متعلم" value={b(contact.mobile)} />
-            </div>
-            <div className="sp-photo">عکس<br />۳×۴</div>
-          </div>
+        <div>
+          <table className="sp-kv sp-father">
+            <caption>معلومات در مورد پدر / ولی متعلم</caption>
+            <tbody>
+              <tr><th>محل بود و باش</th><td>{b(fam.fatherResidence)}</td><td rowSpan={6} className="sp-photo-cell">عکس ۳×۴</td></tr>
+              <tr><th>وظیفه</th><td>{b(fam.fatherOccupation)}</td></tr>
+              <tr><th>محل وظیفه</th><td>{b(fam.fatherWorkplace)}</td></tr>
+              <tr><th>نمبر تلفون</th><td>{b(fam.fatherLandline)}</td></tr>
+              <tr><th>نمبر مبایل</th><td>{b(fam.fatherPhone)}</td></tr>
+              <tr><th>نمبر تماس خودِ متعلم</th><td>{b(contact.mobile)}</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
-      {/* ۴ — توضیحات در صورت اصلاح شهرت متعلم */}
-      <div className="sp-asec-h">توضیحات در صورت اصلاح شهرت متعلم</div>
-      <table className="sp-table sp-atbl">
+      {/* توضیحات در صورت اصلاح شهرت متعلم */}
+      <table className="sp-kv sp-kv-grid">
+        <caption>توضیحات در صورت اصلاح شهرت متعلم</caption>
         <thead><tr><th>مورد</th><th>قبلی</th><th>جدید</th><th>نمبر مکتوب</th><th>تاریخ</th></tr></thead>
         <tbody>
           {corrections.map((r, i) => (
             <tr key={i}><td>{r.field}</td><td>{r.oldValue}</td><td>{r.newValue}</td><td>{r.letterNo}</td><td>{dateLabel(r.date, r.dateLocal)}</td></tr>
           ))}
-          {padRows(corrections, 2).map((_, i) => <tr key={`c${i}`}><td>&nbsp;</td><td /><td /><td /><td /></tr>)}
+          {pad(corrections, 2).map((_, i) => <tr key={`c${i}`}><td>&nbsp;</td><td /><td /><td /><td /></tr>)}
         </tbody>
       </table>
 
-      {/* ۵ و ۶ و ۷ — شمولیت (چپ) + سکونت اصلی/فعلی (راست) */}
+      {/* شمولیت + منفک (چپ)   /   سکونت‌ها + تذکره + تولد + زبان (راست) */}
       <div className="sp-two sp-atop">
-        <div className="sp-abox">
-          <div className="sp-abox-h">شمولیت (نمبر اساس متعلم در مکاتب)</div>
-          <table className="sp-table sp-atbl">
+        <div>
+          <table className="sp-kv sp-kv-grid">
+            <caption>شمولیت (نمبر اساس متعلم در مکاتب)</caption>
             <thead><tr><th>نام مدرسه</th><th>نمبر اساس</th><th>صنف</th><th>تاریخ</th><th>نمبر مکتوب</th></tr></thead>
             <tbody>
               {enroll.map((r, i) => (
@@ -180,91 +184,66 @@ const CardSheet = ({ settings, student, card, blank }) => {
                   <td>{r.grade ? gradeLabel(r.grade) : ''}</td><td>{dateLabel(r.date, r.dateLocal)}</td><td>{r.letterNo}</td>
                 </tr>
               ))}
-              {padRows(enroll, 4).map((_, i) => <tr key={`e${i}`}><td>&nbsp;</td><td /><td /><td /><td /></tr>)}
+              {pad(enroll, 4).map((_, i) => <tr key={`e${i}`}><td>&nbsp;</td><td /><td /><td /><td /></tr>)}
             </tbody>
           </table>
+          <VTable title="منفک شدن متعلم" rows={[
+            ['تاریخ', b(sep.isSeparated ? dateLabel(sep.date, sep.dateLocal) : '')],
+            ['نمبر مکتوب', b(sep.isSeparated ? sep.letterNo : '')],
+            ['صنف', b(sep.isSeparated && sep.grade ? gradeLabel(sep.grade) : '')],
+            ['علت', b(sep.isSeparated ? (SEPARATION_REASON[sep.reason] || sep.reasonText) : '')],
+            ['جریمه', b(sep.isSeparated && sep.penaltyAmount ? String(sep.penaltyAmount) : '')]
+          ]} />
         </div>
-        <div className="sp-abox">
-          <div className="sp-abox-h">سکونت اصلی</div>
-          <div className="sp-grid sp-grid-3">
-            <Field label="ولایت" value={b(provinceLabel(origin.province))} />
-            <Field label="ولسوالی / ناحیه" value={b(origin.district)} />
-            <Field label="قریه / گذر" value={b(origin.villageOrStreet)} />
-          </div>
-          <div className="sp-abox-h">سکونت فعلی</div>
-          <div className="sp-grid sp-grid-3">
-            <Field label="ولایت" value={b(provinceLabel(current.province))} />
-            <Field label="ولسوالی / ناحیه" value={b(current.district)} />
-            <Field label="قریه / گذر" value={b(current.villageOrStreet)} />
-          </div>
-        </div>
-      </div>
-
-      {/* ۸ و ۹ — معلومات تذکره + تاریخ تولد */}
-      <div className="sp-two sp-atop">
-        <div className="sp-abox">
-          <div className="sp-abox-h">معلومات تذکره هویت متعلم</div>
-          <div className="sp-grid sp-grid-3">
-            <Field label="نمبر" value={b(idn.tazkiraNumber)} />
-            <Field label="صفحه" value={b(idn.tazkiraPage)} />
-            <Field label="جلد" value={b(idn.tazkiraVolume)} />
-          </div>
-        </div>
-        <div className="sp-abox">
-          <div className="sp-abox-h">تاریخ تولد متعلم</div>
-          <div className="sp-grid sp-grid-3">
-            <Field label="روز" value={b(bd.day)} />
-            <Field label="ماه" value={b(bd.month)} />
-            <Field label="سال" value={b(bd.year)} />
-          </div>
+        <div>
+          <HTable title="سکونت اصلی" cols={[
+            ['ولایت', b(provinceLabel(origin.province))],
+            ['ولسوالی / ناحیه', b(origin.district)],
+            ['قریه / گذر', b(origin.villageOrStreet)]
+          ]} />
+          <HTable title="سکونت فعلی" cols={[
+            ['ولایت', b(provinceLabel(current.province))],
+            ['ولسوالی / ناحیه', b(current.district)],
+            ['قریه / گذر', b(current.villageOrStreet)]
+          ]} />
+          <HTable title="معلومات تذکره هویت متعلم" cols={[
+            ['نمبر', b(idn.tazkiraNumber)],
+            ['صفحه', b(idn.tazkiraPage)],
+            ['جلد', b(idn.tazkiraVolume)]
+          ]} />
+          <HTable title="تاریخ تولد متعلم" cols={[
+            ['روز', b(bd.day)], ['ماه', b(bd.month)], ['سال', b(bd.year)]
+          ]} />
+          <HTable title="زبان مادری" cols={[
+            ['زبان مادری', b(MOTHER_TONGUE[card?.motherTongue] || '')],
+            ['لسان سوم', b(card?.thirdLanguage)]
+          ]} />
         </div>
       </div>
 
-      {/* ۱۰ — منفک شدن متعلم */}
-      <div className="sp-asec-h">منفک شدن متعلم</div>
-      <div className="sp-grid sp-grid-5">
-        <Field label="تاریخ" value={b(sep.isSeparated ? dateLabel(sep.date, sep.dateLocal) : '')} />
-        <Field label="نمبر مکتوب" value={b(sep.isSeparated ? sep.letterNo : '')} />
-        <Field label="صنف" value={b(sep.isSeparated && sep.grade ? gradeLabel(sep.grade) : '')} />
-        <Field label="علت" value={b(sep.isSeparated ? (SEPARATION_REASON[sep.reason] || sep.reasonText) : '')} />
-        <Field label="جریمه" value={b(sep.isSeparated && sep.penaltyAmount ? String(sep.penaltyAmount) : '')} />
-      </div>
-
-      {/* ۱۱ — زبان مادری */}
-      <div className="sp-asec-h">زبان مادری</div>
-      <div className="sp-grid sp-grid-3">
-        <Field label="زبان مادری" value={b(MOTHER_TONGUE[card?.motherTongue] || '')} />
-        <Field label="لسان سوم" value={b(card?.thirdLanguage)} />
-        <Field label="" value="" />
-      </div>
-
-      {/* ۱۲ — اقارب نزدیک متعلم (۵ ستون) */}
-      <div className="sp-asec-h">اقارب نزدیک متعلم</div>
-      <table className="sp-table sp-atbl sp-arel">
+      {/* اقارب نزدیک متعلم (۵ ستون) */}
+      <table className="sp-kv sp-kv-h sp-arel">
+        <caption>اقارب نزدیک متعلم</caption>
         <thead><tr>{RELATIVES_5.map(([k, l]) => <th key={k}>{l}</th>)}</tr></thead>
         <tbody><tr>{RELATIVES_5.map(([k]) => <td key={k}>{blank ? '' : relByRelation(k)}</td>)}</tr></tbody>
       </table>
 
-      {/* ۱۳ — نظریات نگران صنف / اداره مدرسه (۱۲ صنف) */}
-      <div className="sp-asec-h">نظریات نگران صنف / اداره مدرسه / دارالعلوم در مورد متعلم</div>
-      <table className="sp-table sp-atbl sp-arem">
+      {/* نظریات نگران صنف / اداره مدرسه (۱۲ صنف) */}
+      <table className="sp-kv sp-kv-grid sp-arem">
+        <caption>نظریات نگران صنف / اداره مدرسه / دارالعلوم در مورد متعلم</caption>
         <thead><tr><th className="sp-arem-g">صنف</th><th className="sp-arem-n">اسم نگران</th><th>نظریات</th></tr></thead>
         <tbody>
           {GRADE_LABELS.map((label, i) => {
             const r = blank ? null : remarkByGrade.get(i + 1);
             return (
-              <tr key={label}>
-                <td>{label}</td><td>{r?.supervisorName || ''}</td><td>{r?.remark || ''}</td>
-              </tr>
+              <tr key={label}><td>{label}</td><td>{r?.supervisorName || ''}</td><td>{r?.remark || ''}</td></tr>
             );
           })}
         </tbody>
       </table>
 
-      {/* ۱۴ — وضع صحی */}
-      <div className="sp-grid sp-grid-1 sp-ahealth">
-        <Field label="وضع صحی" value={b(HEALTH[card?.healthStatus || ''] || '')} />
-      </div>
+      {/* وضع صحی */}
+      <VTable rows={[['وضع صحی', b(HEALTH[card?.healthStatus || ''] || '')]]} />
 
       <Signatures right="امضای نگران" left="امضای سرمعلم و مهر مکتب" />
     </section>
