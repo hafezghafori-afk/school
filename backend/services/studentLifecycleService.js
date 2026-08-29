@@ -17,6 +17,7 @@ const { syncStudentFinanceFromFinanceBill } = require('../utils/studentFinanceSy
 const { createFinanceRefundCase } = require('../utils/financeRefundCase');
 const { notifyFinanceOfLifecycleChange, broadcastFinanceLifecycleChange } = require('../utils/financeLifecycleNotifications');
 const { invalidateAll: invalidateFinanceReportCache } = require('../utils/financeReportCache');
+const sawanehCardService = require('./sawanehCardService');
 const {
   ACTIVE_STUDENT_MEMBERSHIP_STATUSES,
   CURRENT_STUDENT_MEMBERSHIP_STATUSES
@@ -720,6 +721,21 @@ async function executeStudentLifecycleAction(payload = {}, context = {}) {
   // status the debtor/legacy-arrears split reads - keep the cached finance
   // reports from showing a departed student as still active.
   invalidateFinanceReportCache();
+
+  // Best-effort: هم‌گام‌سازیِ کارت سوانحِ متعلم با رویدادِ چرخهٔ حیات (پس از commit).
+  if (result?.membership?.afghanStudentId) {
+    sawanehCardService.onLifecycleEvent({
+      afghanStudentId: result.membership.afghanStudentId,
+      action: result.action,
+      effectiveAt: result.effectiveAt,
+      eventId: result.event?._id || null,
+      membership: result.membership,
+      actorId: context.actor?.id || context.actor?._id || null
+    }).catch((error) => {
+      // eslint-disable-next-line no-console
+      console.error('sawaneh onLifecycleEvent failed:', error?.message || error);
+    });
+  }
 
   return result;
 }

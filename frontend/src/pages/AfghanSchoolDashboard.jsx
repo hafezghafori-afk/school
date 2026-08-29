@@ -58,11 +58,13 @@ const AfghanSchoolDashboard = () => {
         ? '/api/afghan-schools/dashboard'
         : `/api/afghan-schools/dashboard?province=${selectedProvince}`;
       
-      const response = await fetch(url);
+      const response = await fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } });
       const data = await response.json();
-      
+
       if (data.success) {
-        setDashboardData(data.data);
+        // بک‌اند فیلدها را در سطح بالای پاسخ می‌فرستد (نه زیر data)
+        const { success, message, ...rest } = data;
+        setDashboardData(data.data && typeof data.data === 'object' ? data.data : rest);
       } else {
         setError(data.message || 'خطا در دریافت اطلاعات');
       }
@@ -292,13 +294,20 @@ const AfghanSchoolDashboard = () => {
             <span className="btn-text">ثبت دانش‌آموز جدید</span>
           </button>
           <button 
-            onClick={() => navigate('/afghan-teachers/new')}
+            onClick={() => navigate('/teacher-registration')}
             className="action-btn secondary"
           >
             <span className="btn-icon">👩‍🏫</span>
             <span className="btn-text">ثبت معلم جدید</span>
           </button>
-          <button 
+          <button
+            onClick={() => navigate('/afghan-sawaneh')}
+            className="action-btn secondary"
+          >
+            <span className="btn-icon">🗂️</span>
+            <span className="btn-text">پرونده‌های سوانح</span>
+          </button>
+          <button
             onClick={() => navigate('/afghan-reports')}
             className="action-btn tertiary"
           >

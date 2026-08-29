@@ -95,6 +95,13 @@ const SIGNAL_TYPE_LABELS = {
   admission_missing: 'بل داخله صادر نشده'
 };
 
+// Shared frozen empty array so the `selectedOverview?.orders` fallback keeps a
+// stable identity across renders. Without this, `orders` (and therefore the
+// `payableOrders` useMemo built from it) got a brand-new `[]` every render, which
+// re-fired the payment-form sync effect on every render and triggered a
+// "Maximum update depth exceeded" loop for students with no finance membership.
+const EMPTY_ARRAY = Object.freeze([]);
+
 function statusClass(value = '') {
   return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
 }
@@ -340,7 +347,7 @@ export default function StudentFinance() {
   const summary = selectedOverview?.summary || {};
   const statement = selectedOverview?.statement || {};
   const eligibility = selectedOverview?.eligibilitySummary || {};
-  const orders = Array.isArray(selectedOverview?.orders) ? selectedOverview.orders : [];
+  const orders = Array.isArray(selectedOverview?.orders) ? selectedOverview.orders : EMPTY_ARRAY;
   const payments = Array.isArray(selectedOverview?.payments) ? selectedOverview.payments : [];
   const discounts = Array.isArray(selectedOverview?.discounts) ? selectedOverview.discounts : [];
   const exemptions = Array.isArray(selectedOverview?.exemptions) ? selectedOverview.exemptions : [];
@@ -356,17 +363,23 @@ export default function StudentFinance() {
   ), [payableOrders, paymentForm.feeOrderId]);
 
   useEffect(() => {
-    if (!payableOrders.length) {
-      setPaymentForm((current) => ({
-        ...current,
-        feeOrderId: '',
-        amount: '',
-        file: null
-      }));
-      return;
-    }
-
+    // Every branch below returns `current` untouched when nothing actually
+    // changed, so React bails out instead of scheduling another render. This
+    // keeps the effect safe even if `payableOrders` ever regains an unstable
+    // identity again.
     setPaymentForm((current) => {
+      if (!payableOrders.length) {
+        if (!current.feeOrderId && !current.amount && !current.file) {
+          return current;
+        }
+        return {
+          ...current,
+          feeOrderId: '',
+          amount: '',
+          file: null
+        };
+      }
+
       const nextOrderId = payableOrders.some((item) => String(item?.id || '') === String(current.feeOrderId || ''))
         ? current.feeOrderId
         : String(payableOrders[0]?.id || '');
@@ -374,6 +387,9 @@ export default function StudentFinance() {
       const nextAmount = current.amount
         ? current.amount
         : String(Number(activeOrder?.outstandingAmount || 0));
+      if (current.feeOrderId === nextOrderId && current.amount === nextAmount) {
+        return current;
+      }
       return {
         ...current,
         feeOrderId: nextOrderId,

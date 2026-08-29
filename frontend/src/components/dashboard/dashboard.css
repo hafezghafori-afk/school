@@ -1,3 +1,188 @@
+/* ===== نوار بالایی مشترک داشبوردها (استاد، شاگرد...) — مطابق طرح مصوب ===== */
+.dashboard-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dashboard-topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboard-topbar__mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 15px;
+  color: #062026;
+  background: linear-gradient(135deg, #5eead4, #0f766e);
+  box-shadow: 0 8px 18px rgba(20, 184, 166, 0.35);
+  flex: none;
+}
+
+.dashboard-topbar[data-tone="rose"] .dashboard-topbar__mark {
+  color: #1a0f2e;
+  background: linear-gradient(135deg, #f9a8d4, #38bdf8);
+  box-shadow: 0 8px 18px rgba(56, 189, 248, 0.32);
+}
+
+.dashboard-topbar__brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dashboard-topbar__brand-text strong {
+  font-size: 15px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.dashboard-topbar__brand-text small {
+  font-size: 12px;
+  color: rgba(246, 247, 251, 0.6);
+}
+
+.dashboard-topbar__crumb {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(246, 247, 251, 0.88);
+  white-space: nowrap;
+}
+
+.dashboard-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ===== افزوده‌های هیرو (نشان کوتاه، تاریخ، دکمه‌ها) — مطابق طرح مصوب ===== */
+.dashboard-hero-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #8fe6d6;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 6px 13px;
+  border-radius: 999px;
+  margin-bottom: 12px;
+}
+
+.student-dashboard-page .dashboard-hero-kicker {
+  color: #8fd6ff;
+}
+
+.dashboard-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.dashboard-meta-chip {
+  background: rgba(8, 13, 23, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 12.5px;
+  color: rgba(246, 247, 251, 0.85);
+}
+
+.dashboard-meta-chip b {
+  color: #fff;
+  font-weight: 800;
+  margin-inline-start: 5px;
+}
+
+.dashboard-hero-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  flex: none;
+}
+
+.dashboard-date-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(8, 13, 23, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.dashboard-hero-btn-row {
+  display: flex;
+  gap: 10px;
+}
+
+.dashboard-hero-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 12px;
+  padding: 11px 20px;
+  font-size: 13.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+
+.dashboard-hero-btn.primary {
+  background: #2dd4bf;
+  color: #052026;
+  box-shadow: 0 12px 22px rgba(45, 212, 191, 0.28);
+}
+
+.student-dashboard-page .dashboard-hero-btn.primary {
+  background: linear-gradient(135deg, #f9a8d4, #f472b6);
+  color: #1a0f2e;
+  box-shadow: 0 12px 22px rgba(244, 114, 182, 0.3);
+}
+
+.dashboard-hero-btn.ghost {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #f6f7fb;
+}
+
+.dashboard-quick-link__icon {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.14);
+  font-size: 15px;
+  color: #fff;
+}
+
 .dashboard-kpi-card {
   display: grid;
   grid-template-columns: 78px 1fr;

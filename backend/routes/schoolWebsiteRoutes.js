@@ -15,11 +15,11 @@ attachWriteActivityAudit(router, { targetType: 'SchoolWebsite', actionPrefix: 's
 
 const SUPPORTED_LANGUAGES = ['fa', 'en', 'ps'];
 const TRANSLATABLE_TEXT_FIELDS = [
-  'brandName', 'brandSubtitle', 'homeHeroBadge', 'homeHeroTitle', 'homeHeroText',
+  'brandName', 'brandSubtitle', 'homeHeroBadge', 'homeHeroTitle', 'homeHeroText', 'heroPanelTagline', 'programsIntro',
   'aboutTitle', 'aboutBody', 'missionTitle', 'missionBody', 'visionTitle', 'visionBody',
   'contactTitle', 'contactText', 'contactAddress', 'footerNote'
 ];
-const TRANSLATABLE_LIST_FIELDS = ['features', 'stats', 'menuItems', 'footerLinks', 'socialLinks'];
+const TRANSLATABLE_LIST_FIELDS = ['features', 'stats', 'menuItems', 'footerLinks', 'socialLinks', 'heroHighlights'];
 
 const TRANSLATION_MEMORY = {
   en: {
@@ -343,6 +343,9 @@ const serializeProfile = (profile, lang = 'fa', school = null) => {
     ministryLogoUrl: profile.ministryLogoUrl || '',
     departmentLogoUrl: profile.departmentLogoUrl || '',
     heroImageUrl: profile.heroImageUrl || '',
+    heroPanelTagline: pickText(profile.heroPanelTagline, language),
+    heroHighlights: localizeItems(profile.heroHighlights, language),
+    programsIntro: pickText(profile.programsIntro, language),
     brandName: officialSchoolName || pickText(profile.brandName, language, 'مکتب'),
     brandSubtitle: pickText(profile.brandSubtitle, language, ''),
     homeHeroBadge: pickText(profile.homeHeroBadge, language),
@@ -431,6 +434,21 @@ router.get('/admin/primary', requireAuth, requireRole(['admin']), requirePermiss
       }
     }
 
+    // The admin has no schoolId (or it points at a school that no longer exists).
+    // When the whole system only has one school, use it directly instead of
+    // guessing from "most recently updated active profile" — that guess can
+    // silently resolve to a stale/orphaned profile whose own schoolId no longer
+    // matches any real school, which then makes every save 404 with
+    // "School not found" even though the admin picked a real school's content.
+    const schoolCount = await School.countDocuments();
+    if (schoolCount === 1) {
+      const onlySchool = await School.findOne();
+      if (onlySchool) {
+        const profile = await ensureProfileForSchool(onlySchool);
+        return res.json({ success: true, profile });
+      }
+    }
+
     const existing = await SchoolWebsiteProfile.findOne({ siteStatus: 'active' }).sort({ updatedAt: -1 });
     if (existing) return res.json({ success: true, profile: existing });
 
@@ -481,7 +499,8 @@ router.put('/admin/:schoolId', requireAuth, requireRole(['admin']), requirePermi
     const profile = await ensureProfileForSchool(school);
     const allowed = [
       'siteStatus', 'primaryLanguage', 'enabledLanguages', 'primaryColor', 'schoolLogoUrl', 'ministryLogoUrl',
-      'departmentLogoUrl', 'heroImageUrl', 'brandName', 'brandSubtitle', 'homeHeroBadge', 'homeHeroTitle', 'homeHeroText',
+      'departmentLogoUrl', 'heroImageUrl', 'heroPanelTagline', 'heroHighlights', 'programsIntro',
+      'brandName', 'brandSubtitle', 'homeHeroBadge', 'homeHeroTitle', 'homeHeroText',
       'aboutTitle', 'aboutBody', 'missionTitle', 'missionBody', 'visionTitle', 'visionBody',
       'contactTitle', 'contactText', 'contactPhone', 'contactEmail', 'contactAddress',
       'features', 'stats', 'menuItems', 'footerLinks', 'socialLinks', 'footerNote', 'metadata'

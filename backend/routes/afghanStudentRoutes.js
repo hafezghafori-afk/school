@@ -25,6 +25,7 @@ const {
   assignStudentToClass,
   serializeTransferAdmissionBilling
 } = require('../services/studentClassAssignmentService');
+const sawanehCardService = require('../services/sawanehCardService');
 
 const router = express.Router();
 const auditWrite = (payload) => logActivity(payload);
@@ -528,6 +529,13 @@ router.post('/', requireAuth, requireRole(['admin', 'principal', 'registration_m
     );
     await syncManualStudentEnrollment({ student, studentData, req });
 
+    // کارت سوانحِ متعلم را همراه ثبت‌نام بساز (شکستش نباید ثبت شاگرد را خراب کند)
+    try {
+      await sawanehCardService.ensureCard(student._id, { actorId: req.user?.id || null });
+    } catch (sawanehError) {
+      console.error('ensureSawanehCard (create student) failed:', sawanehError?.message || sawanehError);
+    }
+
     // Populate school info for response
     await student.populate('academicInfo.currentSchool', 'name province district');
 
@@ -627,10 +635,17 @@ router.post('/:id/documents', requireAuth, requireRole(['admin', 'principal', 'r
 router.put('/:id', requireAuth, requireRole(['admin', 'principal', 'registration_manager']), requireAnyPermission(['manage_content', 'manage_users', 'manage_enrollments']), async (req, res) => {
   try {
     assertSafeStudentInput(req.body || {});
+    const nameCorrectionLetterNo = String(
+      req.body?.nameCorrectionLetterNo || req.body?.['personalInfo.nameCorrectionLetterNo'] || ''
+    ).trim();
+    const nameCorrectionNote = String(req.body?.nameCorrectionNote || '').trim();
     const rawStudentData = {
       ...req.body,
       lastUpdatedBy: req.user?.id || 'system'
     };
+    delete rawStudentData.nameCorrectionLetterNo;
+    delete rawStudentData.nameCorrectionNote;
+    delete rawStudentData['personalInfo.nameCorrectionLetterNo'];
     const studentData = expandDotNotationPayload(rawStudentData);
 
     // If updating school, validate it exists
@@ -660,10 +675,31 @@ router.put('/:id', requireAuth, requireRole(['admin', 'principal', 'registration
       );
     }
 
+    // اصلاح شهرت: تغییرِ نامِ شاگرد بدون «نمبر مکتوب» مجاز نیست (قاعدهٔ وزارت)
+    const nameDiffs = sawanehCardService.diffNameFields(
+      student.personalInfo ? student.personalInfo.toObject() : {},
+      studentData.personalInfo || {}
+    );
+    if (nameDiffs.length && !nameCorrectionLetterNo) {
+      return fail(res, 'برای اصلاح شهرتِ شاگرد، «نمبر مکتوب» الزامی است.', 400);
+    }
+
     Object.entries(rawStudentData).forEach(([key, value]) => {
       student.set(key, value);
     });
     await student.save();
+
+    if (nameDiffs.length) {
+      try {
+        await sawanehCardService.recordNameCorrections(student._id, nameDiffs, {
+          letterNo: nameCorrectionLetterNo,
+          note: nameCorrectionNote,
+          actorId: req.user?.id || null
+        });
+      } catch (correctionError) {
+        console.error('recordNameCorrections failed:', correctionError?.message || correctionError);
+      }
+    }
 
     const refreshedStudent = await populateAfghanStudentQuery(AfghanStudent.findById(student._id));
     await syncManualStudentEnrollment({ student: refreshedStudent, studentData: refreshedStudent.toObject(), req });

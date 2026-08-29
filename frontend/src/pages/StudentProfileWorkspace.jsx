@@ -15,6 +15,8 @@ import {
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, formatAfghanDateTime, toGregorianDateInputValue } from '../utils/afghanDate';
 import { API_ORIGIN } from '../config/api';
+import AfghanStudentFieldGrid from '../components/AfghanStudentFieldGrid';
+import { afghanStudentToValues, valuesToAfghanPayload } from '../config/afghanStudentFields';
 import { errorMessage, fetchBlob, fetchJson } from './adminWorkspaceUtils';
 import './StudentProfileWorkspace.css';
 
@@ -101,6 +103,9 @@ export default function StudentProfileWorkspace() {
   const [message, setMessage] = useState('');
   const [messageTone, setMessageTone] = useState('info');
   const [profileForm, setProfileForm] = useState(null);
+  const [afghanForm, setAfghanForm] = useState(null);
+  const [afghanOriginal, setAfghanOriginal] = useState(null);
+  const [nameLetterNo, setNameLetterNo] = useState('');
   const [lifecycleForm, setLifecycleForm] = useState(EMPTY_LIFECYCLE);
   const [documentForm, setDocumentForm] = useState({ kind: 'other', title: '', note: '', file: null, isPrimary: true });
   const [remarkForm, setRemarkForm] = useState({ type: 'general', title: '', text: '', visibility: 'admin' });
@@ -135,13 +140,23 @@ export default function StudentProfileWorkspace() {
           givenName: item.identity?.givenName || '', familyName: item.identity?.familyName || '',
           email: item.identity?.email || '', phone: item.identity?.phone || '', gender: item.identity?.gender || '',
           dateOfBirth: item.identity?.dateOfBirth ? String(item.identity.dateOfBirth).slice(0, 10) : '', note: item.identity?.note || '',
-          tazkiraNumber: item.identity?.tazkiraNumber || ''
+          tazkiraNumber: item.identity?.tazkiraNumber || '',
+          tazkiraVolume: item.identity?.tazkiraVolume || '',
+          tazkiraPage: item.identity?.tazkiraPage || ''
         },
-        family: { fatherName: '', motherName: '', guardianName: '', guardianRelation: '', ...(item.profile?.family || {}) },
+        family: {
+          fatherName: '', motherName: '', guardianName: '', guardianRelation: '',
+          fatherResidence: '', fatherWorkplace: '', fatherLandline: '',
+          ...(item.profile?.family || {})
+        },
         contact: { primaryPhone: '', alternatePhone: '', email: '', address: '', ...(item.profile?.contact || {}) },
         background: { previousSchool: '', emergencyPhone: '', ...(item.profile?.background || {}) },
         notes: { medical: '', administrative: '', ...(item.profile?.notes || {}) }
       });
+      const afghanValues = afghanStudentToValues(item.afghanStudent || {});
+      setAfghanForm(afghanValues);
+      setAfghanOriginal(afghanValues);
+      setNameLetterNo('');
     } catch (error) {
       showMessage(errorMessage(error, 'دریافت پروندهٔ شاگرد ناموفق بود.'), 'error');
       setData(null);
@@ -189,19 +204,58 @@ export default function StudentProfileWorkspace() {
   const updateFormSection = (section, key, value) => {
     setProfileForm((current) => ({ ...current, [section]: { ...(current?.[section] || {}), [key]: value } }));
   };
+  const setAfghanField = (key, value) => setAfghanForm((current) => ({ ...(current || {}), [key]: value }));
 
+  const afghanStudentId = data?.afghanStudent?._id || data?.identity?.afghanStudentId || '';
+  const afghanNameChanged = Boolean(
+    afghanForm && afghanOriginal
+    && valuesToAfghanPayload(afghanForm, { original: afghanOriginal }).nameChanged
+  );
+
+  // یادداشت‌ها + نام مورد استفاده روی StudentProfile می‌مانند (مخصوصِ صفحهٔ مدیریت)
   const saveProfile = async () => {
     try {
       setBusy('profile');
-      const response = await fetchJson(`/api/student-profiles/${studentRef}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(profileForm || {})
+      await fetchJson(`/api/student-profiles/${studentRef}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identity: {
+            preferredName: profileForm?.identity?.preferredName || '',
+            note: profileForm?.identity?.note || ''
+          },
+          notes: profileForm?.notes || {}
+        })
       });
-      setData(response.item || data);
-      showMessage('مشخصات شاگرد با موفقیت ذخیره شد.');
+      showMessage('یادداشت‌ها ذخیره شد.');
+      await loadWorkspace();
+    } catch (error) {
+      showMessage(errorMessage(error, 'ذخیرهٔ یادداشت‌ها ناموفق بود.'), 'error');
+    } finally { setBusy(''); }
+  };
+
+  // مشخصاتِ کارت سوانح مستقیم روی AfghanStudent ذخیره می‌شوند (StudentCore هم خودکار sync می‌شود)
+  const saveAfghanStudent = async () => {
+    if (!afghanStudentId || !afghanForm) {
+      return showMessage('این شاگرد به پروندهٔ افغانی وصل نیست.', 'error');
+    }
+    const { payload, nameChanged } = valuesToAfghanPayload(afghanForm, { original: afghanOriginal });
+    if (nameChanged && !nameLetterNo.trim()) {
+      return showMessage('برای تغییرِ نام/تخلص/نام پدر، «نمبر مکتوب» الزامی است.', 'error');
+    }
+    try {
+      setBusy('afghan');
+      if (nameChanged) payload.nameCorrectionLetterNo = nameLetterNo.trim();
+      await fetchJson(`/api/afghan-students/${afghanStudentId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      showMessage('مشخصات شاگرد ذخیره شد.');
+      setNameLetterNo('');
       await loadWorkspace();
     } catch (error) {
       showMessage(errorMessage(error, 'ذخیرهٔ مشخصات شاگرد ناموفق بود.'), 'error');
     } finally { setBusy(''); }
+    return undefined;
   };
 
   const submitLifecycle = async () => {
@@ -354,16 +408,70 @@ export default function StudentProfileWorkspace() {
         </div>
       </section> : null}
 
-      {activeTab === 'identity' && profileForm ? <section className="student-profile-section"><article className="student-profile-card"><div className="student-profile-section-head"><div><h2>مشخصات رسمی و شخصی</h2><p>هر تغییری اینجا مستقیماً روی پروندهٔ اصلی شاگرد ذخیره می‌شود.</p></div><button className="student-profile-button primary" onClick={saveProfile} disabled={busy === 'profile'}>{busy === 'profile' ? 'در حال ذخیره...' : 'ذخیره مشخصات'}</button></div><div className="student-profile-form-grid">
-        {[['fullName','نام مکمل'],['preferredName','نام مورد استفاده'],['givenName','نام'],['familyName','تخلص'],['admissionNo','شماره اساس'],['email','ایمیل'],['phone','شماره تماس']].map(([key,label]) => <label key={key}><span>{label}</span><input value={profileForm.identity[key] || ''} onChange={(e) => updateFormSection('identity', key, e.target.value)} /></label>)}
-        <label><span>جنسیت</span><select value={profileForm.identity.gender || ''} onChange={(e) => updateFormSection('identity','gender',e.target.value)}><option value="">انتخاب</option><option value="male">ذکور</option><option value="female">اناث</option><option value="other">دیگر</option></select></label>
-        <label><span>تاریخ تولد</span><AfghanDateInput value={profileForm.identity.dateOfBirth || ''} onChange={(value) => updateFormSection('identity','dateOfBirth',value)} showGregorianEquivalent /></label>
-        <label><span>شماره تذکره</span><input value={profileForm.identity.tazkiraNumber || ''} onChange={(e) => updateFormSection('identity','tazkiraNumber',e.target.value)} /></label>
-      </div></article></section> : null}
+      {activeTab === 'identity' && afghanForm ? (
+        <section className="student-profile-section">
+          <article className="student-profile-card">
+            <div className="student-profile-section-head">
+              <div><h2>مشخصات رسمی و شخصی</h2><p>همان فیلدهای «کارت سوانح متعلم» — مستقیماً روی پروندهٔ اصلی شاگرد ذخیره می‌شود.</p></div>
+              <button className="student-profile-button primary" onClick={saveAfghanStudent} disabled={busy === 'afghan' || !afghanStudentId}>
+                {busy === 'afghan' ? 'در حال ذخیره...' : 'ذخیره مشخصات'}
+              </button>
+            </div>
+            {!afghanStudentId ? <EmptyState>این شاگرد به پروندهٔ افغانی وصل نیست؛ ویرایش مشخصات از اینجا ممکن نیست.</EmptyState> : (
+              <>
+                <AfghanStudentFieldGrid theme="glass" sectionIds={['identity', 'birth']} values={afghanForm} onChange={setAfghanField} />
+                {afghanNameChanged ? (
+                  <label className="student-profile-name-letter">
+                    <span>نمبر مکتوبِ اصلاح شهرت (الزامی)</span>
+                    <input value={nameLetterNo} onChange={(e) => setNameLetterNo(e.target.value)} placeholder="نمبر و تاریخِ مکتوب رسمی" />
+                  </label>
+                ) : null}
+                <p className="student-profile-help">تغییر نام/تخلص/نام پدر بدون «نمبر مکتوب» ثبت نمی‌شود و در «اصلاح شهرت» کارت سوانح درج می‌گردد.</p>
+              </>
+            )}
+          </article>
+        </section>
+      ) : null}
 
-      {activeTab === 'family' && profileForm ? <section className="student-profile-section"><article className="student-profile-card"><div className="student-profile-section-head"><div><h2>خانواده، سرپرست و تماس</h2><p>معلومات ارتباطی و حالات ضروری شاگرد.</p></div><button className="student-profile-button primary" onClick={saveProfile} disabled={busy === 'profile'}>ذخیره معلومات</button></div><div className="student-profile-form-grid">
-        {[['family','fatherName','نام پدر'],['family','motherName','نام مادر'],['family','guardianName','نام سرپرست'],['family','guardianRelation','نسبت سرپرست'],['contact','primaryPhone','شماره تماس اصلی'],['contact','alternatePhone','شماره بدیل'],['contact','email','ایمیل'],['contact','address','آدرس'],['background','previousSchool','مکتب قبلی'],['background','emergencyPhone','تماس اضطراری'],['notes','medical','ملاحظات صحی'],['notes','administrative','ملاحظات اداری']].map(([section,key,label]) => <label key={`${section}-${key}`}><span>{label}</span><input value={profileForm[section]?.[key] || ''} onChange={(e) => updateFormSection(section,key,e.target.value)} /></label>)}
-      </div></article><article className="student-profile-card"><h2>سرپرستان وصل‌شده</h2>{data.profile?.guardians?.length ? data.profile.guardians.map((item) => <div className="student-profile-list-row" key={item.id}><div><b>{item.name || 'بدون نام'} {item.isPrimary ? <em>سرپرست اصلی</em> : null}</b><span>{item.relation || 'نسبت ثبت نشده'} · {item.phone || item.email || 'تماس ثبت نشده'}</span></div><span>{statusLabel(item.status)}</span></div>) : <EmptyState>سرپرست وصل‌شده وجود ندارد.</EmptyState>}</article></section> : null}
+      {activeTab === 'family' && afghanForm ? (
+        <section className="student-profile-section">
+          <article className="student-profile-card">
+            <div className="student-profile-section-head">
+              <div><h2>خانواده، سرپرست و تماس</h2><p>معلومات پدر/مادر/سرپرست، تماس، سکونت و سابقهٔ تحصیلی — روی پروندهٔ اصلی شاگرد.</p></div>
+              <button className="student-profile-button primary" onClick={saveAfghanStudent} disabled={busy === 'afghan' || !afghanStudentId}>
+                {busy === 'afghan' ? 'در حال ذخیره...' : 'ذخیره معلومات'}
+              </button>
+            </div>
+            {!afghanStudentId ? <EmptyState>این شاگرد به پروندهٔ افغانی وصل نیست.</EmptyState> : (
+              <>
+                <AfghanStudentFieldGrid theme="glass" sectionIds={['father', 'mother', 'guardian', 'contact', 'emergency', 'previous']} values={afghanForm} onChange={setAfghanField} />
+                {afghanNameChanged ? (
+                  <label className="student-profile-name-letter">
+                    <span>نمبر مکتوبِ اصلاح شهرت (الزامی)</span>
+                    <input value={nameLetterNo} onChange={(e) => setNameLetterNo(e.target.value)} placeholder="نمبر و تاریخِ مکتوب رسمی" />
+                  </label>
+                ) : null}
+              </>
+            )}
+          </article>
+          {profileForm ? (
+            <article className="student-profile-card">
+              <div className="student-profile-section-head">
+                <div><h2>یادداشت‌ها</h2><p>یادداشت‌های داخلیِ صفحهٔ مدیریت — روی فرم سوانح چاپ نمی‌شود.</p></div>
+                <button className="student-profile-button" onClick={saveProfile} disabled={busy === 'profile'}>
+                  {busy === 'profile' ? 'در حال ذخیره...' : 'ذخیره یادداشت‌ها'}
+                </button>
+              </div>
+              <div className="student-profile-form-grid">
+                <label><span>نام مورد استفاده</span><input value={profileForm.identity.preferredName || ''} onChange={(e) => updateFormSection('identity', 'preferredName', e.target.value)} /></label>
+                <label><span>ملاحظات صحی</span><input value={profileForm.notes.medical || ''} onChange={(e) => updateFormSection('notes', 'medical', e.target.value)} /></label>
+                <label><span>ملاحظات اداری</span><input value={profileForm.notes.administrative || ''} onChange={(e) => updateFormSection('notes', 'administrative', e.target.value)} /></label>
+              </div>
+            </article>
+          ) : null}
+          <article className="student-profile-card"><h2>سرپرستان وصل‌شده</h2>{data.profile?.guardians?.length ? data.profile.guardians.map((item) => <div className="student-profile-list-row" key={item.id}><div><b>{item.name || 'بدون نام'} {item.isPrimary ? <em>سرپرست اصلی</em> : null}</b><span>{item.relation || 'نسبت ثبت نشده'} · {item.phone || item.email || 'تماس ثبت نشده'}</span></div><span>{statusLabel(item.status)}</span></div>) : <EmptyState>سرپرست وصل‌شده وجود ندارد.</EmptyState>}</article>
+        </section>
+      ) : null}
 
       {activeTab === 'memberships' ? <section className="student-profile-section"><article className="student-profile-card"><div className="student-profile-section-head"><div><h2>تاریخچهٔ صنف‌ها و عضویت‌ها</h2><p>عضویت‌های پایان‌یافته حذف یا دوباره باز نمی‌شوند.</p></div><Link className="student-profile-button ghost" to="/admin-education?section=enrollments">مرکز مدیریت آموزش</Link></div>{memberships.length ? <div className="student-profile-table-wrap"><table><thead><tr><th>صنف</th><th>سال تعلیمی</th><th>وضعیت</th><th>نوع پذیرش</th><th>شمول</th><th>پایان</th></tr></thead><tbody>{memberships.map((item) => <tr key={item.id}><td>{item.schoolClass?.title || item.course?.title || '—'}</td><td>{item.academicYear?.label || '—'}</td><td><span className={`student-profile-badge ${item.isCurrent ? 'good' : 'muted'}`}>{statusLabel(item.status)}</span></td><td>{ADMISSION_LABELS[item.admissionType] || item.admissionType || 'عادی'}</td><td>{dateLabel(item.enrolledAt)}</td><td>{item.isCurrent ? 'فعلی' : dateLabel(item.endedAt)}</td></tr>)}</tbody></table></div> : <EmptyState>عضویت ثبت نشده است.</EmptyState>}</article></section> : null}
 

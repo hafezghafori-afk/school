@@ -525,3 +525,33 @@
 .leaflet-control-zoom a:hover {
   background: #f0f0f0 !important;
 }
+
+/* ===== dark-glass theme override (auto-appended) ===== */
+.afghan-map { background: transparent !important; color: #f6f7fb; }
+.afghan-map h1, .afghan-map h2, .afghan-map h3, .afghan-map h4, .afghan-map h5,
+.afghan-map strong, .afghan-map label, .afghan-map legend, .afghan-map dt, .afghan-map th { color: #f6f7fb !important; }
+.afghan-map p, .afghan-map span, .afghan-map li, .afghan-map td, .afghan-map dd, .afghan-map small { color: rgba(246, 247, 251, 0.82); }
+.afghan-map [class*="header"], .afghan-map [class*="card"], .afghan-map [class*="panel"],
+.afghan-map [class*="section"], .afghan-map [class*="box"], .afghan-map [class*="stat"],
+.afghan-map [class*="tile"], .afghan-map [class*="widget"], .afghan-map table, .afghan-map form {
+  background: rgba(255, 255, 255, 0.045) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+.afghan-map [class*="gradient"], .afghan-map [class*="hero"] { background: rgba(255, 255, 255, 0.045) !important; }
+.afghan-map input, .afghan-map select, .afghan-map textarea {
+  background: #15263a !important;
+  color: #f6f7fb !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+}
+.afghan-map select option { background: #15263a; color: #f6f7fb; }
+.afghan-map th, .afghan-map td { border-color: rgba(255, 255, 255, 0.12) !important; }
+.afghan-map thead th, .afghan-map table th { background: rgba(255, 255, 255, 0.06) !important; }
+.afghan-map button:not([class*="danger"]):not([class*="delete"]):not([class*="remove"]) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f6f7fb;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+.afghan-map a { color: #4fd0a8; }

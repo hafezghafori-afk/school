@@ -197,6 +197,21 @@ export const PERMISSION_GROUPS = [
       { key: 'access_school_manager', label: 'دسترسی پست مدیر مکتب' },
       { key: 'access_head_teacher', label: 'دسترسی پست سر معلم مکتب' }
     ]
+  },
+  {
+    key: 'sawaneh',
+    label: 'پروندهٔ سوانح شاگرد',
+    permissions: [
+      { key: 'sawaneh.card.view', label: 'مشاهدهٔ کارت سوانح', legacy: ['manage_content', 'manage_users', 'manage_enrollments', 'view_reports'] },
+      { key: 'sawaneh.card.edit', label: 'ویرایش کارت سوانح', legacy: ['manage_content', 'manage_users'] },
+      { key: 'sawaneh.card.supervisor_remark', label: 'ثبت نظریات نگرانِ صنف', legacy: ['manage_content', 'manage_users'] },
+      { key: 'sawaneh.card.name_correction', label: 'اصلاح شهرت در کارت سوانح', legacy: ['manage_users'] },
+      { key: 'sawaneh.card.separation', label: 'ثبت منفکی/جریمه در کارت سوانح', legacy: ['manage_users', 'manage_memberships'] },
+      { key: 'sawaneh.transcript.view', label: 'مشاهدهٔ سوانح تعلیمی (کارنامه)', legacy: ['manage_content', 'view_reports'] },
+      { key: 'sawaneh.transcript.build', label: 'تولید/ویرایش سوانح تعلیمی', legacy: ['manage_content'] },
+      { key: 'sawaneh.transcript.finalize', label: 'نهایی‌سازی سوانح تعلیمی', legacy: ['manage_content'] },
+      { key: 'sawaneh.transcript.lock', label: 'قفل و مهر سوانح تعلیمی', legacy: ['manage_content'] }
+    ]
   }
 ];
 

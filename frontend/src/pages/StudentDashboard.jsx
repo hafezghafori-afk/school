@@ -2,9 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './Dashboard.css';
 import '../components/dashboard/dashboard.css';
-import DashboardProfileCard from '../components/DashboardProfileCard';
-import NotificationBell from '../components/NotificationBell';
 import DashboardShell from '../components/dashboard/DashboardShell';
+import DashboardTopbar from '../components/dashboard/DashboardTopbar';
 import KpiRingCard from '../components/dashboard/KpiRingCard';
 import QuickActionRail from '../components/dashboard/QuickActionRail';
 import TaskAlertPanel from '../components/dashboard/TaskAlertPanel';
@@ -294,12 +293,12 @@ export default function StudentDashboard() {
   }, [financeSummary, requestStatus, weeklyAttendanceSummary]);
 
   const quickActions = [
-    { to: '/my-finance', label: 'پرداخت فیس', caption: 'بل‌ها و رسیدها', tone: 'copper' },
-    { to: '/my-grades', label: 'دیدن نتایج', caption: 'نمرات و کارنامه', tone: 'teal' },
-    { to: '/my-attendance', label: 'حاضری من', caption: 'فیلتر و گزارش فردی', tone: 'mint' },
-    { to: '/my-homework', label: 'کارخانگی', caption: 'تحویل و پیگیری', tone: 'slate' },
-    { to: '/schedule', label: 'تقسیم اوقات', caption: 'برنامه روز و هفته', tone: 'teal' },
-    { to: '/chat', label: 'چت صنفی', caption: 'ارتباط با صنف', tone: 'copper' }
+    { to: '/my-finance', label: 'پرداخت فیس', caption: 'بل‌ها و رسیدها', tone: 'copper', icon: 'fa-wallet' },
+    { to: '/my-grades', label: 'دیدن نتایج', caption: 'نمرات و کارنامه', tone: 'teal', icon: 'fa-file-lines' },
+    { to: '/my-attendance', label: 'حاضری من', caption: 'فیلتر و گزارش فردی', tone: 'mint', icon: 'fa-clipboard-check' },
+    { to: '/my-homework', label: 'کارخانگی', caption: 'تحویل و پیگیری', tone: 'slate', icon: 'fa-book' },
+    { to: '/schedule', label: 'تقسیم اوقات', caption: 'برنامه روز و هفته', tone: 'teal', icon: 'fa-calendar-days' },
+    { to: '/chat', label: 'چت صنفی', caption: 'ارتباط با صنف', tone: 'copper', icon: 'fa-comments' }
   ];
 
   const attendanceBreakdownItems = [
@@ -310,18 +309,40 @@ export default function StudentDashboard() {
   ].filter((item) => item.value > 0);
 
   const hero = (
-    <div className="dash-hero">
-      <div>
-        <h2>خوش آمدید، {getName()}</h2>
-        <p>داشبورد یکپارچه شاگرد برای نمرات، حاضری، مالی، کارخانگی و کارهای مهم روزانه.</p>
-        {user?.grade && <p>پایه/صنف: {user.grade}</p>}
-        {lastLogin && <p>آخرین ورود: {lastLogin}</p>}
+    <>
+      <DashboardTopbar
+        crumb="داشبورد شاگرد"
+        tone="rose"
+        user={user}
+        fallbackName={getName()}
+        apiBase={API_BASE}
+        notificationTitle="اعلان‌های شاگرد"
+      />
+
+      <div className="dash-hero">
+        <div>
+          <span className="dashboard-hero-kicker">
+            داشبورد شاگرد{user?.grade ? ` • صنف: ${user.grade}` : ''}
+          </span>
+          <h2>خوش آمدید، {getName()}</h2>
+          <p>داشبورد یکپارچه شاگرد برای نمرات، حاضری، مالی، کارخانگی و کارهای مهم روزانه.</p>
+          <div className="dashboard-hero-meta">
+            {user?.grade && <div className="dashboard-meta-chip">پایه/صنف<b>{user.grade}</b></div>}
+            {lastLogin && <div className="dashboard-meta-chip">آخرین ورود<b>{lastLogin}</b></div>}
+          </div>
+        </div>
+        <div className="dashboard-hero-side">
+          <div className="dashboard-date-pill">
+            <i className="fa-regular fa-calendar" aria-hidden="true" />
+            {formatAfghanDate(new Date(), { weekday: 'long', day: 'numeric', month: 'long' })}
+          </div>
+          <div className="dashboard-hero-btn-row">
+            <Link className="dashboard-hero-btn ghost" to="/schedule">برنامه امروز</Link>
+            <Link className="dashboard-hero-btn primary" to="/my-homework">کارخانگی من</Link>
+          </div>
+        </div>
       </div>
-      <div className="dash-hero-actions">
-        <NotificationBell apiBase={API_BASE} />
-        <DashboardProfileCard user={user} fallbackName={getName()} apiBase={API_BASE} />
-      </div>
-    </div>
+    </>
   );
 
   const stats = (
@@ -331,7 +352,7 @@ export default function StudentDashboard() {
             label="صنف‌های فعال"
             value={activeCoursesCount.toLocaleString('fa-AF-u-ca-persian')}
             hint="صنف‌های آموزشی جاری"
-            progress={Math.min(activeCoursesCount * 20, 100)}
+            progress={activeCoursesCount > 0 ? 100 : 0}
             tone="teal"
           />
         </div>
@@ -349,7 +370,7 @@ export default function StudentDashboard() {
             label="جلسات امروز"
             value={todaySchedule.length.toLocaleString('fa-AF-u-ca-persian')}
             hint="برنامه منتشرشده امروز"
-            progress={Math.min(todaySchedule.length * 25, 100)}
+            progress={todaySchedule.length > 0 ? 100 : 0}
             tone="mint"
           />
         </div>

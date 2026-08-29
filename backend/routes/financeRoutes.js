@@ -7730,6 +7730,8 @@ const FINANCE_REPORT_SUMMARY_LABELS = {
   monthKey: 'ماه گزارش',
   grossMonthlyIncome: 'عاید ماه',
   netMonthlyIncome: 'عاید خالص ماه',
+  payableThisMonth: 'مبلغ قابل پرداخت این ماه',
+  currentMonthApprovedCollection: 'پرداخت‌شده و تایید نهایی (همین ماه)',
   pastMonthsCollectedThisMonth: 'عاید ماه‌های گذشته در این ماه',
   futureMonthsCollectedThisMonth: 'عاید ماه‌های آینده در این ماه',
   partialPaymentStudents: 'شاگردان پرداخت ناقص',
@@ -7749,7 +7751,7 @@ const FINANCE_REPORT_MONEY_KEYS = new Set([
   'totalPaid', 'approvedAmount', 'pendingAmount', 'amount', 'fixedReliefAmount',
   'grossMonthlyIncome', 'netMonthlyIncome', 'pastMonthsCollectedThisMonth',
   'futureMonthsCollectedThisMonth', 'outstandingThisMonth', 'discountExemptionDeducted',
-  'refundsDeducted'
+  'refundsDeducted', 'payableThisMonth', 'currentMonthApprovedCollection'
 ]);
 const FINANCE_REPORT_DATE_KEYS = new Set([
   'lastDueDate', 'createdAt', 'startDate', 'endDate', 'referenceDate', 'dueDate', 'date', 'paidAt'

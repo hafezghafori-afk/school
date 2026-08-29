@@ -101,6 +101,10 @@ const afghanStudentSchema = new mongoose.Schema({
       enum: ['illiterate', 'primary', 'secondary', 'high', 'university', 'other']
     },
     fatherPhone: { type: String, trim: true },
+    // فیلدهای کارت سوانح متعلم (بخش «معلومات پدر/ولی») — منبع واحد روی خود شاگرد
+    fatherResidence: { type: String, trim: true, maxlength: 200 }, // محل بود و باش
+    fatherWorkplace: { type: String, trim: true, maxlength: 200 }, // محل وظیفه
+    fatherLandline: { type: String, trim: true },                 // نمبر تلفن (ثابت)
     motherName: {
       type: String,
       required: true,

@@ -4,6 +4,7 @@ const User = require('../models/User');
 const AfghanStudent = require('../models/AfghanStudent');
 const AfghanTeacher = require('../models/AfghanTeacher');
 const StudentMembership = require('../models/StudentMembership');
+const StudentProfile = require('../models/StudentProfile');
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
 const Attendance = require('../models/Attendance');
@@ -152,6 +153,8 @@ async function getOfficialPeopleCounts() {
     totalInstructors,
     directoryStudentUsers,
     directoryInstructorUsers,
+    directoryParentUsers,
+    linkedParentUserIds,
     activeMembershipStudents,
     pendingMembershipStudents,
     suspendedMembershipStudents
@@ -160,6 +163,9 @@ async function getOfficialPeopleCounts() {
     AfghanTeacher.countDocuments({ status: 'active' }),
     User.countDocuments({ role: 'student', status: 'active' }),
     User.countDocuments({ role: 'instructor', status: 'active' }),
+    User.countDocuments({ role: 'parent', status: 'active' }),
+    // یک والد «رسمی» یعنی حداقل در یک پروفایل شاگرد، به‌عنوان guardian با userId وصل شده باشد.
+    StudentProfile.distinct('guardians.userId', { 'guardians.userId': { $ne: null } }),
     StudentMembership.distinct('student', {
       status: { $in: ACTIVE_STUDENT_MEMBERSHIP_STATUSES },
       isCurrent: true
@@ -180,11 +186,14 @@ async function getOfficialPeopleCounts() {
     totalInstructors,
     directoryStudentUsers,
     directoryInstructorUsers,
+    directoryParentUsers,
+    linkedParentUsers: linkedParentUserIds.length,
     activeMembershipStudents: activeMembershipStudents.length,
     pendingMembershipStudents: pendingMembershipStudents.length,
     suspendedMembershipStudents: suspendedMembershipStudents.length,
     orphanStudentUsers: Math.max(0, directoryStudentUsers - registeredStudentProfiles),
-    orphanInstructorUsers: Math.max(0, directoryInstructorUsers - totalInstructors)
+    orphanInstructorUsers: Math.max(0, directoryInstructorUsers - totalInstructors),
+    orphanParentUsers: Math.max(0, directoryParentUsers - linkedParentUserIds.length)
   };
 }
 
@@ -532,12 +541,15 @@ async function getAdminDashboard() {
       directoryHealth: {
         studentUsers: officialPeopleCounts.directoryStudentUsers,
         instructorUsers: officialPeopleCounts.directoryInstructorUsers,
+        parentUsers: officialPeopleCounts.directoryParentUsers,
         activeMembershipStudents: officialPeopleCounts.activeMembershipStudents,
         pendingMembershipStudents: officialPeopleCounts.pendingMembershipStudents,
         suspendedMembershipStudents: officialPeopleCounts.suspendedMembershipStudents,
         registeredStudentProfiles: officialPeopleCounts.registeredStudentProfiles,
+        linkedParentUsers: officialPeopleCounts.linkedParentUsers,
         orphanStudentUsers: officialPeopleCounts.orphanStudentUsers,
-        orphanInstructorUsers: officialPeopleCounts.orphanInstructorUsers
+        orphanInstructorUsers: officialPeopleCounts.orphanInstructorUsers,
+        orphanParentUsers: officialPeopleCounts.orphanParentUsers
       }
     },
     studentGrowth,

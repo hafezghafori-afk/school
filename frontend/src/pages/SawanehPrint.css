@@ -1,0 +1,391 @@
+.sawaneh-print {
+  --sp-ink: #111;
+  --sp-line: #333;
+  --sp-muted: #555;
+  direction: rtl;
+  font-family: 'Vazirmatn', 'B Nazanin', 'B Mitra', Tahoma, sans-serif;
+  color: var(--sp-ink);
+  background: #e9e9e9;
+  padding: 12px;
+}
+
+.sp-loading {
+  padding: 3rem;
+  text-align: center;
+  font-family: 'Vazirmatn', Tahoma, sans-serif;
+  direction: rtl;
+}
+.sp-error { color: #9e3b2e; }
+.sp-muted { color: var(--sp-muted); }
+
+.sp-toolbar {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  max-width: 190mm;
+  margin: 0 auto 12px;
+}
+.sp-toolbar button {
+  padding: 0.45rem 1.1rem;
+  border: 1px solid #1f6f4a;
+  background: #1f6f4a;
+  color: #fff;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sp-toolbar button:last-of-type {
+  background: #fff;
+  color: #1f6f4a;
+}
+.sp-toolbar span { color: var(--sp-muted); font-size: 0.85rem; }
+
+/* ---------- A4 sheet ---------- */
+.sp-sheet {
+  width: 190mm;
+  min-height: 273mm;
+  margin: 0 auto 12px;
+  padding: 10mm 12mm;
+  background: #fff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.2);
+  box-sizing: border-box;
+  font-size: 10.5pt;
+  line-height: 1.7;
+}
+
+.sp-sheet h3 {
+  font-size: 11pt;
+  margin: 10px 0 4px;
+  padding: 2px 6px;
+  background: #f0efe9;
+  border-inline-start: 3px solid #1f6f4a;
+}
+
+/* ---------- letterhead ---------- */
+.sp-letterhead {
+  display: grid;
+  grid-template-columns: 46px 1fr 46px;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1.5px solid var(--sp-ink);
+  padding-bottom: 5px;
+  margin-bottom: 6px;
+  text-align: center;
+}
+.sp-logo {
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 6pt;
+  color: var(--sp-muted);
+  border: 1px dashed #bbb;
+}
+.sp-logo img { max-width: 100%; max-height: 100%; }
+.sp-letterhead-text { display: flex; flex-direction: column; gap: 1px; }
+.sp-letterhead-text span { font-size: 8.5pt; color: var(--sp-ink); line-height: 1.25; }
+.sp-doc-title {
+  margin-top: 2px;
+  font-size: 10.5pt;
+  font-weight: 800;
+  color: var(--sp-ink);
+}
+.sp-btitle {
+  text-align: center;
+  font-weight: 800;
+  font-size: 11pt;
+  border: 1px solid var(--sp-ink);
+  background: #f0efe9;
+  padding: 2px 0;
+  margin-bottom: 4px;
+}
+
+/* ---------- fields ---------- */
+.sp-row-top { display: flex; gap: 10px; align-items: stretch; }
+.sp-grow { flex: 1; }
+.sp-photo {
+  width: 30mm;
+  min-height: 40mm;
+  border: 1px solid var(--sp-line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8pt;
+  color: var(--sp-muted);
+}
+
+.sp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px 12px;
+  margin-bottom: 6px;
+}
+.sp-grid-3 { grid-template-columns: repeat(3, 1fr); }
+
+.sp-field {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  border-bottom: 1px dotted #999;
+  padding: 2px 0;
+  min-height: 20px;
+}
+.sp-field-label { color: var(--sp-muted); font-size: 9pt; white-space: nowrap; }
+.sp-field-value { font-weight: 600; flex: 1; }
+.sp-blank { display: inline-block; min-width: 60px; }
+
+.sp-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+/* ---------- tables ---------- */
+.sp-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 8px;
+  font-size: 9.5pt;
+}
+.sp-table th,
+.sp-table td {
+  border: 1px solid var(--sp-line);
+  padding: 3px 5px;
+  text-align: right;
+  vertical-align: top;
+}
+.sp-table thead th { background: #f0efe9; font-weight: 700; }
+.sp-table tfoot td { background: #f7f6f1; font-weight: 700; }
+.sp-marks td, .sp-marks th { text-align: center; }
+.sp-marks .sp-subj { text-align: right; }
+.sp-table .sp-cat td { background: #eef4f0; font-weight: 800; text-align: right; }
+
+.sp-notes {
+  border: 1px solid var(--sp-line);
+  min-height: 60px;
+  padding: 5px;
+  font-size: 9.5pt;
+}
+
+/* ---------- signatures ---------- */
+.sp-signatures {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 24px;
+  padding-top: 6px;
+}
+.sp-signatures > div {
+  text-align: center;
+  font-size: 9.5pt;
+  width: 45%;
+}
+.sp-sign-line {
+  display: block;
+  border-top: 1px solid var(--sp-ink);
+  margin-bottom: 4px;
+}
+
+/* ---------- Form A: کارت سوانح متعلم — every section is its own table ---------- */
+.sp-asheet { font-size: 7.5pt; }
+.sp-asheet .sp-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 6px;
+  margin: 0 0 4px;
+  align-items: start;
+}
+.sp-asheet .sp-two > * { min-width: 0; }
+
+/* the shared mini-table */
+.sp-kv {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 4px;
+  font-size: 7.3pt;
+  line-height: 1.2;
+}
+.sp-kv caption {
+  caption-side: top;
+  text-align: right;
+  font-weight: 800;
+  font-size: 7.3pt;
+  background: #f0efe9;
+  border: 0.6pt solid var(--sp-ink);
+  border-bottom: 0;
+  padding: 1.5px 5px;
+}
+.sp-kv th,
+.sp-kv td {
+  border: 0.5pt solid var(--sp-ink);
+  padding: 1.5px 4px;
+  vertical-align: middle;
+}
+/* vertical variant: label column on the right */
+.sp-kv > tbody > tr > th {
+  background: #f6f5ef;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+  width: 34%;
+}
+.sp-kv > tbody > tr > td { text-align: right; min-height: 4.6mm; }
+/* horizontal variant: header row of labels, one value row */
+.sp-kv-h > thead > tr > th {
+  background: #f6f5ef;
+  font-weight: 700;
+  text-align: center;
+  font-size: 7pt;
+}
+.sp-kv-h > tbody > tr > td { text-align: center; height: 5mm; }
+/* grid variant (multi-row data tables: اصلاح شهرت، شمولیت، نظریات) */
+.sp-kv-grid > thead > tr > th {
+  background: #f0efe9;
+  font-weight: 700;
+  text-align: center;
+  font-size: 7pt;
+}
+.sp-kv-grid > tbody > tr > td { text-align: center; height: 4.4mm; }
+
+.sp-photo-cell {
+  width: 24mm;
+  text-align: center !important;
+  font-size: 7pt;
+  vertical-align: middle;
+}
+.sp-photo-img {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  max-height: 32mm;
+  object-fit: contain;
+}
+.sp-father > tbody > tr > td { min-height: 4.4mm; }
+
+.sp-arel > tbody > tr > td { height: 6mm; }
+.sp-arem-g { width: 12mm; }
+.sp-arem-n { width: 28mm; }
+.sp-arem > tbody > tr > td { height: 4.2mm; text-align: right; }
+.sp-arem > tbody > tr > td:first-child { text-align: center; }
+
+/* ---------- Form B: cumulative multi-year grid (matches sawaneh 1.pdf) ---------- */
+.sp-bhead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 16px;
+  font-size: 8pt;
+  margin-bottom: 4px;
+}
+
+.sp-btable-wrap { width: 100%; }
+
+.sp-btable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 5.9pt;
+  line-height: 1.1;
+}
+.sp-btable th,
+.sp-btable td {
+  border: 0.4pt solid var(--sp-ink);
+  padding: 0.6px 1px;
+  text-align: center;
+  vertical-align: middle;
+  overflow: hidden;
+  word-break: break-word;
+}
+.sp-btable thead th { background: #f0efe9; font-weight: 700; }
+.sp-bcol-subj { width: 30mm; }
+.sp-bcol-grade { width: 10.2mm; }
+.sp-bcol-note { width: 14mm; }
+.sp-bsubj { text-align: right !important; font-weight: 600; padding-right: 2px !important; }
+.sp-bmeta { font-weight: 400 !important; font-size: 5.2pt; height: 5mm; }
+.sp-browlabel { text-align: right !important; font-weight: 700; padding-right: 2px !important; }
+.sp-bschool { text-align: right !important; }
+.sp-bschool-name { font-weight: 800; }
+.sp-bnote-head { width: 14mm; }
+.sp-bgradehdr th { background: #e7ede9; font-weight: 800; }
+
+/* diagonal-split corner cell: line from TOP-RIGHT to BOTTOM-LEFT,
+   صنوف in the upper-left triangle, مضامین in the lower-right triangle.
+   Drawn with an SVG <line> (not a background-gradient) so it prints even
+   when "Background graphics" is off. */
+.sp-bcorner {
+  position: relative;
+  height: 8mm;
+  padding: 0 !important;
+}
+.sp-bcorner-line {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.sp-bcorner-top {
+  position: absolute;
+  top: 0.4mm;
+  left: 1mm;
+  font-weight: 800;
+}
+.sp-bcorner-bot {
+  position: absolute;
+  bottom: 0.4mm;
+  right: 1mm;
+  font-weight: 800;
+}
+.sp-btable .sp-bsum td { background: #f7f6f1; font-weight: 700; }
+.sp-btable .sp-batt td { background: #fafafa; }
+.sp-btable tbody td { height: 4mm; }
+
+.sp-bsign {
+  display: flex;
+  justify-content: space-between;
+  gap: 18mm;
+  margin-top: 8px;
+}
+.sp-sign-cell {
+  flex: 1;
+  text-align: center;
+  font-size: 8.5pt;
+}
+.sp-sign-cell .sp-sign-line { margin-top: 12px; }
+
+.sp-bnotes-title {
+  margin: 8px 0 3px;
+  font-size: 9pt;
+  font-weight: 800;
+}
+.sp-bnotes { font-size: 7.5pt; }
+.sp-bnote-label { width: 13mm; background: #f0efe9; font-weight: 700; white-space: nowrap; }
+.sp-bnote-text { text-align: right !important; height: 6mm; }
+
+/* ---------- print ---------- */
+@page { size: A4 portrait; margin: 6mm; }
+
+@media print {
+  html, body { background: #fff !important; }
+  /* keep the header shading / summary tints when printing */
+  .sawaneh-print, .sawaneh-print * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  /* hide the app shell chrome so only the sheet prints */
+  [class*="api-health"],
+  header.site-header, .site-header, .topbar,
+  footer, .site-footer, .app-footer,
+  .route-loading { display: none !important; }
+
+  .sawaneh-print { background: #fff; padding: 0; }
+  .no-print { display: none !important; }
+  .sp-sheet {
+    box-shadow: none;
+    margin: 0;
+    width: auto;
+    min-height: auto;
+    padding: 0;
+  }
+  .sp-sheet + .sp-sheet { page-break-before: always; }
+  .sp-table { page-break-inside: auto; }
+  .sp-table tr { page-break-inside: avoid; }
+  /* Form B must fit exactly one A4 page */
+  .sp-bsheet { page-break-inside: avoid; page-break-after: auto; }
+  .sp-bsheet .sp-btable tr { page-break-inside: avoid; }
+}

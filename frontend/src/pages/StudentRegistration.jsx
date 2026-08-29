@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import AfghanStudentFieldGrid from '../components/AfghanStudentFieldGrid';
+import { provinceLabel, genderLabel, GUARDIAN_RELATION_OPTIONS } from '../config/afghanStudentFields';
 import { useToast } from '../components/ui/toast';
 import {
   DEFAULT_SCHOOL_ID,
@@ -12,47 +14,46 @@ import {
 import './AfghanSchoolManagement.css';
 import './StudentRegistration.css';
 
-const PROVINCES = [
-  { value: 'kabul', label: 'کابل' },
-  { value: 'herat', label: 'هرات' },
-  { value: 'kandahar', label: 'کندهار' },
-  { value: 'balkh', label: 'بلخ' },
-  { value: 'nangarhar', label: 'ننگرهار' },
-  { value: 'badakhshan', label: 'بدخشان' },
-  { value: 'takhar', label: 'تخار' },
-  { value: 'samangan', label: 'سمنگان' },
-  { value: 'kunduz', label: 'قندوز' },
-  { value: 'baghlan', label: 'بغلان' },
-  { value: 'farah', label: 'فراه' },
-  { value: 'nimroz', label: 'نیمروز' },
-  { value: 'helmand', label: 'هلمند' },
-  { value: 'ghor', label: 'غور' },
-  { value: 'daykundi', label: 'دایکندی' },
-  { value: 'uruzgan', label: 'ارزگان' },
-  { value: 'zabul', label: 'زابل' },
-  { value: 'paktika', label: 'پکتیکا' },
-  { value: 'khost', label: 'خوست' },
-  { value: 'paktia', label: 'پکتیا' },
-  { value: 'logar', label: 'لوگر' },
-  { value: 'parwan', label: 'پروان' },
-  { value: 'kapisa', label: 'کاپیسا' },
-  { value: 'panjshir', label: 'پنجشیر' },
-  { value: 'badghis', label: 'بادغیس' },
-  { value: 'faryab', label: 'فاریاب' },
-  { value: 'jowzjan', label: 'جوزجان' },
-  { value: 'saripul', label: 'سرپل' },
-  { value: 'bamyan', label: 'بامیان' },
-  { value: 'ghazni', label: 'غزنی' },
-  { value: 'wardak', label: 'میدان وردک' },
-  { value: 'laghman', label: 'لغمان' },
-  { value: 'kunar', label: 'کنر' },
-  { value: 'nuristan', label: 'نورستان' }
-];
-
-const BLOOD_TYPES = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
-
 const trimValue = (value) => String(value || '').trim();
 const displayText = (value) => repairDisplayText(value);
+
+// شش گامِ ویزارد ثبت شاگرد — هر گام یک زیرمجموعهٔ منطقی از همان فیلدهای موجود است،
+// چیزی اضافه یا حذف نشده، فقط گروه‌بندی و چیدمان تغییر کرده.
+const REGISTRATION_STEPS = [
+  { key: 'personal', title: 'مشخصات شخصی', caption: 'نام، تذکره، اسناد', sectionIds: ['identity', 'birth'] },
+  { key: 'contact', title: 'تماس و آدرس', caption: 'ولایت، آدرس، شماره', sectionIds: ['contact', 'emergency'] },
+  { key: 'academic', title: 'اطلاعات تعلیمی', caption: 'صنف، نوبت، سال تعلیمی' },
+  { key: 'family', title: 'خانواده و سرپرست', caption: 'پدر، مادر، سرپرست', sectionIds: ['father', 'mother', 'guardian'] },
+  { key: 'health', title: 'صحی و اضافی', caption: 'حساسیت، ترانسپورت' },
+  { key: 'review', title: 'بازبینی و ثبت', caption: 'تأیید نهایی' }
+];
+
+// پیام‌های الزامیِ هر گام — همان پیام‌ها و همان فیلدهایی که validateForm در نهایت بررسی می‌کند؛
+// فقط برای راهنماییِ زودهنگام هنگام «گام بعدی»، نه جایگزینِ بررسی نهایی.
+const STEP_REQUIRED_MESSAGES = [
+  {
+    firstName: 'نام شاگرد الزامی است.',
+    lastName: 'تخلص شاگرد الزامی است.',
+    fatherName: 'نام پدر الزامی است.',
+    nationalId: 'شماره تذکره الزامی است.',
+    birthDate: 'تاریخ تولد الزامی است.',
+    gender: 'جنسیت الزامی است.'
+  },
+  {
+    province: 'ولایت الزامی است.',
+    address: 'آدرس الزامی است.'
+  },
+  {
+    academicYearId: 'سال تعلیمی الزامی است.',
+    classId: 'صنف الزامی است.',
+    shiftId: 'نوبت الزامی است.'
+  },
+  {
+    fatherPhone: 'شماره تماس پدر الزامی است.'
+  },
+  {},
+  {}
+];
 
 async function fetchStudentRegistrationJson(path, headers = {}) {
   const response = await fetch(path, {
@@ -151,6 +152,29 @@ const gradeFromClass = (schoolClass = {}) => {
   return `grade${boundedGrade}`;
 };
 
+// نگاشتِ کلیدِ کاتالوگِ مشترک → کلیدِ formDataِ این فرم (نام‌گذاریِ تاریخیِ فرمِ ثبت‌نام)
+const REG_FIELD_MAP = {
+  firstNameDari: 'firstName', lastNameDari: 'lastName',
+  firstName: 'firstNameEnglish', lastName: 'lastNameEnglish',
+  fatherName: 'fatherName', fatherNameEnglish: 'fatherNameEnglish', grandfatherName: 'grandfatherName',
+  gender: 'gender', nationality: 'nationality',
+  birthDate: 'birthDate', birthPlace: 'birthPlace',
+  tazkiraNumber: 'nationalId', tazkiraVolume: 'tazkiraVolume', tazkiraPage: 'tazkiraPage',
+  bloodGroup: 'bloodType',
+  fatherOccupation: 'fatherOccupation', fatherResidence: 'fatherResidence',
+  fatherWorkplace: 'fatherWorkplace', fatherLandline: 'fatherLandline', fatherPhone: 'fatherPhone',
+  motherName: 'motherName', motherOccupation: 'motherOccupation', motherPhone: 'motherPhone',
+  guardianName: 'guardianName', guardianRelation: 'guardianRelation', guardianPhone: 'guardianPhone',
+  province: 'province', district: 'city', village: 'village', address: 'address',
+  phone: 'phone', mobile: 'mobile', email: 'email',
+  emergencyName: 'emergencyContact', emergencyRelation: 'emergencyRelation', emergencyPhone: 'emergencyPhone'
+};
+const REG_GRID_ERROR_MAP = {
+  firstNameDari: 'firstName', lastNameDari: 'lastName', fatherName: 'fatherName',
+  tazkiraNumber: 'nationalId', gender: 'gender', birthDate: 'birthDate',
+  province: 'province', address: 'address', fatherPhone: 'fatherPhone'
+};
+
 const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedYear, schoolId }) => {
   const classSchoolId = getEntityId(selectedClass?.schoolId);
   const yearSchoolId = getEntityId(selectedYear?.schoolId);
@@ -159,7 +183,7 @@ const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedY
   const district = trimValue(formData.city) || trimValue(formData.address) || 'نامشخص';
   const emergencyName = trimValue(formData.emergencyContact) || trimValue(formData.guardianName) || trimValue(formData.fatherName);
   const emergencyPhone = trimValue(formData.emergencyPhone) || trimValue(formData.guardianPhone) || trimValue(formData.fatherPhone) || trimValue(formData.phone);
-  const emergencyRelation = trimValue(formData.guardianRelation) || 'سرپرست';
+  const emergencyRelation = trimValue(formData.emergencyRelation) || trimValue(formData.guardianRelation) || 'سرپرست';
   const shiftCode = normalizeShiftCode(selectedClass?.shift || selectedShift?.code || selectedShift?.name || selectedShift?.title);
   const previousSchoolName = trimValue(formData.previousSchool);
   const previousGrade = trimValue(formData.previousGrade);
@@ -177,28 +201,34 @@ const buildStudentPayload = ({ formData, selectedClass, selectedShift, selectedY
       grandfatherName: trimValue(formData.grandfatherName),
       gender: formData.gender,
       birthDate: formData.birthDate,
-      birthPlace: district,
-      nationality: 'Afghan'
+      birthPlace: trimValue(formData.birthPlace) || district,
+      nationality: trimValue(formData.nationality) || 'Afghan'
     },
     identification: {
-      tazkiraNumber: trimValue(formData.nationalId)
+      tazkiraNumber: trimValue(formData.nationalId),
+      tazkiraVolume: trimValue(formData.tazkiraVolume),
+      tazkiraPage: trimValue(formData.tazkiraPage)
     },
     familyInfo: {
       fatherOccupation: trimValue(formData.fatherOccupation),
       fatherPhone: trimValue(formData.fatherPhone),
+      fatherResidence: trimValue(formData.fatherResidence),
+      fatherWorkplace: trimValue(formData.fatherWorkplace),
+      fatherLandline: trimValue(formData.fatherLandline),
       motherName: trimValue(formData.motherName) || 'ثبت نشده',
       motherOccupation: trimValue(formData.motherOccupation),
       motherPhone: trimValue(formData.motherPhone),
       guardianName: trimValue(formData.guardianName),
-      guardianRelation: trimValue(formData.guardianRelation) ? 'other' : undefined,
+      guardianRelation: trimValue(formData.guardianRelation) || undefined,
       guardianPhone: trimValue(formData.guardianPhone)
     },
     contactInfo: {
       phone: trimValue(formData.phone),
-      mobile: trimValue(formData.phone),
+      mobile: trimValue(formData.mobile) || trimValue(formData.phone),
       email: trimValue(formData.email),
       province: formData.province,
       district,
+      village: trimValue(formData.village),
       address: trimValue(formData.address),
       emergencyContact: {
         name: emergencyName,
@@ -269,13 +299,19 @@ const createEmptyForm = (academicYearId = '') => ({
   fatherNameEnglish: '',
   grandfatherName: '',
   nationalId: '',
+  tazkiraVolume: '',
+  tazkiraPage: '',
   birthDate: '',
+  birthPlace: '',
   gender: '',
+  nationality: 'Afghan',
   bloodType: '',
   phone: '',
+  mobile: '',
   email: '',
   address: '',
   city: '',
+  village: '',
   province: '',
   previousSchool: '',
   previousGrade: '',
@@ -285,6 +321,9 @@ const createEmptyForm = (academicYearId = '') => ({
   shiftId: '',
   fatherPhone: '',
   fatherOccupation: '',
+  fatherResidence: '',
+  fatherWorkplace: '',
+  fatherLandline: '',
   motherName: '',
   motherPhone: '',
   motherOccupation: '',
@@ -294,6 +333,7 @@ const createEmptyForm = (academicYearId = '') => ({
   medicalConditions: '',
   allergies: '',
   emergencyContact: '',
+  emergencyRelation: '',
   emergencyPhone: '',
   transportation: '',
   lunchProgram: '',
@@ -325,6 +365,7 @@ const StudentRegistration = () => {
   const [errors, setErrors] = useState({});
   const [submitStatus, setSubmitStatus] = useState({ type: '', text: '' });
   const [lastRegisteredStudent, setLastRegisteredStudent] = useState(null);
+  const [currentStep, setCurrentStep] = useState(0);
   const requiresSchoolSelection = Boolean(activeSchoolContext?.requiresSelection || !activeSchoolContext?.schoolId);
 
   const defaultAcademicYearId = useMemo(
@@ -442,6 +483,19 @@ const StudentRegistration = () => {
     }
   };
 
+  // آداپترِ گریدِ مشترک ↔ formDataِ این فرم
+  const handleGridChange = (catalogKey, value) => handleInputChange(REG_FIELD_MAP[catalogKey] || catalogKey, value);
+  const afghanGridValues = useMemo(() => {
+    const out = {};
+    Object.entries(REG_FIELD_MAP).forEach(([catalogKey, formKey]) => { out[catalogKey] = formData[formKey] || ''; });
+    return out;
+  }, [formData]);
+  const afghanGridErrors = useMemo(() => {
+    const out = {};
+    Object.entries(REG_GRID_ERROR_MAP).forEach(([catalogKey, errKey]) => { if (errors[errKey]) out[catalogKey] = errors[errKey]; });
+    return out;
+  }, [errors]);
+
   const openEnrollmentDesk = (candidateRef) => {
     if (!candidateRef) return;
     window.location.assign(`/admin-education?section=enrollments&candidate=${encodeURIComponent(candidateRef)}`);
@@ -490,6 +544,43 @@ const StudentRegistration = () => {
     }));
     window.location.reload();
   };
+
+  const validateStep = (stepIndex) => {
+    const messages = STEP_REQUIRED_MESSAGES[stepIndex] || {};
+    const nextErrors = {};
+
+    Object.keys(messages).forEach((field) => {
+      if (!String(formData[field] || '').trim()) nextErrors[field] = messages[field];
+    });
+
+    if (stepIndex === 0 && formData.birthDate && new Date(formData.birthDate) > new Date()) {
+      nextErrors.birthDate = 'تاریخ تولد نمی‌تواند در آینده باشد.';
+    }
+    if (stepIndex === 2 && formData.registrationType === 'transfer' && !formData.previousSchool.trim()) {
+      nextErrors.previousSchool = 'مکتب قبلی برای تبدیلی آمد الزامی است.';
+    }
+    if (stepIndex === 2 && formData.classId && !selectedClass) {
+      nextErrors.classId = 'صنف انتخاب‌شده معتبر نیست.';
+    }
+
+    if (Object.keys(nextErrors).length) {
+      setErrors((current) => ({ ...current, ...nextErrors }));
+      return false;
+    }
+    return true;
+  };
+
+  const goToStep = (index) => setCurrentStep(Math.min(REGISTRATION_STEPS.length - 1, Math.max(0, index)));
+
+  const handleNextStep = () => {
+    if (validateStep(currentStep)) {
+      goToStep(currentStep + 1);
+    } else {
+      toast.error('لطفاً فیلدهای الزامی این بخش را تکمیل کنید.');
+    }
+  };
+
+  const handlePrevStep = () => goToStep(currentStep - 1);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -602,6 +693,7 @@ const StudentRegistration = () => {
       setFormData(createEmptyForm(defaultAcademicYearId));
       setStudentFiles({ tazkira: null, fatherTazkira: null, photo: null, seParcha: null });
       setFileInputResetKey((current) => current + 1);
+      setCurrentStep(0);
 
       if (documentUploadWarning) {
         toastRef.current.error(documentUploadWarning.trim());
@@ -631,36 +723,26 @@ const StudentRegistration = () => {
     }
   };
 
+  const uploadedDocCount = [studentFiles.tazkira, studentFiles.fatherTazkira, studentFiles.photo].filter(Boolean).length;
+  const guardianRelationLabel = GUARDIAN_RELATION_OPTIONS.find((option) => option.value === formData.guardianRelation)?.label;
+
   return (
-    <div className="school-management" style={{ minHeight: '100vh' }}>
-      <form className="school-form" onSubmit={handleSubmit} noValidate style={{ maxWidth: 900, margin: '40px auto', background: 'white', borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.08)', padding: 32 }}>
-        <h2 style={{ textAlign: 'center', color: '#2c3e50', marginBottom: 8 }}>ثبت شاگرد جدید</h2>
-        <p className="form-subtitle" style={{ textAlign: 'center', color: '#666', marginBottom: 24 }}>معلومات شاگرد را وارد کنید و پس از تکمیل، ذخیره نمایید.</p>
-        {requiresSchoolSelection && (
-          <div className="student-registration-alert" role="alert">
-            اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید. ثبت شاگرد بدون مکتب واقعی در دیتابیس ذخیره نمی‌شود.
-            {Array.isArray(activeSchoolContext?.schools) && activeSchoolContext.schools.length > 0 && (
-              <select
-                className="student-registration-school-select"
-                defaultValue=""
-                onChange={(event) => handleActiveSchoolSelect(event.target.value)}
-              >
-                <option value="">انتخاب مکتب فعال</option>
-                {activeSchoolContext.schools.map((school) => (
-                  <option key={school._id || school.id} value={school._id || school.id}>
-                    {school.nameDari || school.name || school.schoolCode}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-        )}
+    <div className="student-registration-page">
+      <div className="sr-hero">
+        <div className="sr-hero-blob" aria-hidden="true"></div>
+        <div className="sr-hero-text">
+          <h1>ثبت شاگرد جدید</h1>
+          <p>معلومات شاگرد را در {REGISTRATION_STEPS.length} گام تکمیل کنید — در پایان همه‌چیز را پیش از ثبت بازبینی می‌کنید.</p>
+        </div>
         {!requiresSchoolSelection && activeSchoolContext?.school && (
-          <div className="student-registration-school-context">
-            <strong>مکتب فعال: {activeSchoolContext.school.nameDari || activeSchoolContext.school.name || 'مکتب'}</strong>
+          <div className="sr-hero-chips">
+            <span className="sr-hero-chip">مکتب فعال: {activeSchoolContext.school.nameDari || activeSchoolContext.school.name || 'مکتب'}</span>
+            <span className="sr-hero-chip">کد: {activeSchoolContext.school.schoolCode || '-'}</span>
+            <span className="sr-hero-chip">شاگردان: {Number(activeSchoolContext.scopeSummary?.students?.count || 0).toLocaleString('fa-AF')}</span>
+            <span className="sr-hero-chip">سال تعلیمی: {Number(activeSchoolContext.scopeSummary?.academicYears?.count || academicYears.length || 0).toLocaleString('fa-AF')}</span>
             {Array.isArray(activeSchoolContext?.schools) && activeSchoolContext.schools.length > 1 && (
               <select
-                className="student-registration-school-select student-registration-school-switcher"
+                className="student-registration-school-select student-registration-school-switcher sr-hero-switcher"
                 value={schoolId}
                 onChange={(event) => handleActiveSchoolSelect(event.target.value)}
               >
@@ -671,299 +753,323 @@ const StudentRegistration = () => {
                 ))}
               </select>
             )}
-            <span>کد: {activeSchoolContext.school.schoolCode || '-'}</span>
-            <span>شاگردان: {Number(activeSchoolContext.scopeSummary?.students?.count || 0).toLocaleString('fa-AF')}</span>
-            <span>استادان: {Number(activeSchoolContext.scopeSummary?.teachers?.count || 0).toLocaleString('fa-AF')}</span>
-            <span>صنف‌ها: {Number(activeSchoolContext.scopeSummary?.classes?.count || 0).toLocaleString('fa-AF')}</span>
-            <span>سال تعلیمی: {Number(activeSchoolContext.scopeSummary?.academicYears?.count || academicYears.length || 0).toLocaleString('fa-AF')}</span>
-            <span>شقه‌ها: {Number(activeSchoolContext.scopeSummary?.sheetTemplates?.count || 0).toLocaleString('fa-AF')}</span>
-            <span>سال مالی: {Number(activeSchoolContext.scopeSummary?.financialYears?.count || 0).toLocaleString('fa-AF')}</span>
           </div>
         )}
-        {!!submitStatus.text && (
-          <div className={`student-registration-submit-status ${submitStatus.type || 'info'}`} role="status">
-            {submitStatus.text}
-          </div>
-        )}
+      </div>
 
-        {/* مشخصات شخصی */}
-        <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>مشخصات شخصی</h3>
-          {/* بارگذاری اسناد شاگرد - قطار افقی */}
-          <div style={{ display: 'flex', flexDirection: 'row', gap: 24, marginTop: 16, marginBottom: 8, justifyContent: 'center' }}>
-            <div className="form-group" style={{ minWidth: 170 }}>
-              <label>تذکره شاگرد<br /><span style={{ fontSize: 12, color: '#888' }}>(JPG, PNG, PDF)</span></label>
-              <input key={`tazkira-${fileInputResetKey}`} type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={e => handleFileChange('tazkira', e.target.files?.[0])} />
-            </div>
-            <div className="form-group" style={{ minWidth: 170 }}>
-              <label>تذکره پدر<br /><span style={{ fontSize: 12, color: '#888' }}>(JPG, PNG, PDF)</span></label>
-              <input key={`fatherTazkira-${fileInputResetKey}`} type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={e => handleFileChange('fatherTazkira', e.target.files?.[0])} />
-            </div>
-            <div className="form-group" style={{ minWidth: 170 }}>
-              <label>عکس شاگرد<br /><span style={{ fontSize: 12, color: '#888' }}>(JPG, PNG)</span></label>
-              <input key={`photo-${fileInputResetKey}`} type="file" accept=".jpg,.jpeg,.png" onChange={e => handleFileChange('photo', e.target.files?.[0])} />
-            </div>
-          </div>
-          <div className="form-grid">
-            <div className="form-group">
-              <label htmlFor="firstName">نام *</label>
-              <input id="firstName" value={formData.firstName} onChange={e => handleInputChange('firstName', e.target.value)} required className={errors.firstName ? 'border-red-500' : ''} />
-              {errors.firstName && <span className="text-red-500">{errors.firstName}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="lastName">تخلص *</label>
-              <input id="lastName" value={formData.lastName} onChange={e => handleInputChange('lastName', e.target.value)} required className={errors.lastName ? 'border-red-500' : ''} />
-              {errors.lastName && <span className="text-red-500">{errors.lastName}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="firstNameEnglish">نام به انگلیسی</label>
-              <input id="firstNameEnglish" dir="ltr" value={formData.firstNameEnglish} onChange={e => handleInputChange('firstNameEnglish', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="lastNameEnglish">تخلص به انگلیسی</label>
-              <input id="lastNameEnglish" dir="ltr" value={formData.lastNameEnglish} onChange={e => handleInputChange('lastNameEnglish', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="fatherName">نام پدر *</label>
-              <input id="fatherName" value={formData.fatherName} onChange={e => handleInputChange('fatherName', e.target.value)} required className={errors.fatherName ? 'border-red-500' : ''} />
-              {errors.fatherName && <span className="text-red-500">{errors.fatherName}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="fatherNameEnglish">نام پدر به انگلیسی</label>
-              <input id="fatherNameEnglish" dir="ltr" value={formData.fatherNameEnglish} onChange={e => handleInputChange('fatherNameEnglish', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="grandfatherName">نام پدرکلان</label>
-              <input id="grandfatherName" value={formData.grandfatherName} onChange={e => handleInputChange('grandfatherName', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="nationalId">شماره تذکره *</label>
-              <input id="nationalId" value={formData.nationalId} onChange={e => handleInputChange('nationalId', e.target.value)} required className={errors.nationalId ? 'border-red-500' : ''} />
-              {errors.nationalId && <span className="text-red-500">{errors.nationalId}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="birthDate">تاریخ تولد *</label>
-              <AfghanDateInput id="birthDate" value={formData.birthDate} onChange={value => handleInputChange('birthDate', value)} required inputClassName={errors.birthDate ? 'border-red-500' : ''} showGregorianEquivalent />
-              {errors.birthDate && <span className="text-red-500">{errors.birthDate}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="gender">جنسیت *</label>
-              <select id="gender" value={formData.gender} onChange={e => handleInputChange('gender', e.target.value)} required className={errors.gender ? 'border-red-500' : ''}>
-                <option value="">انتخاب کنید</option>
-                <option value="male">ذکور</option>
-                <option value="female">اناث</option>
-              </select>
-              {errors.gender && <span className="text-red-500">{errors.gender}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="bloodType">گروپ خونی</label>
-              <select id="bloodType" value={formData.bloodType} onChange={e => handleInputChange('bloodType', e.target.value)}>
-                <option value="">انتخاب کنید</option>
-                {BLOOD_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
-              </select>
-            </div>
-          </div>
+      {requiresSchoolSelection && (
+        <div className="student-registration-alert" role="alert">
+          اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید. ثبت شاگرد بدون مکتب واقعی در دیتابیس ذخیره نمی‌شود.
+          {Array.isArray(activeSchoolContext?.schools) && activeSchoolContext.schools.length > 0 && (
+            <select
+              className="student-registration-school-select"
+              defaultValue=""
+              onChange={(event) => handleActiveSchoolSelect(event.target.value)}
+            >
+              <option value="">انتخاب مکتب فعال</option>
+              {activeSchoolContext.schools.map((school) => (
+                <option key={school._id || school.id} value={school._id || school.id}>
+                  {school.nameDari || school.name || school.schoolCode}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
-
-        {/* اطلاعات تماس و آدرس */}
-        <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>اطلاعات تماس و آدرس</h3>
-          <div className="form-grid">
-            <div className="form-group">
-              <label htmlFor="province">ولایت *</label>
-              <select id="province" value={formData.province} onChange={e => handleInputChange('province', e.target.value)} required className={errors.province ? 'border-red-500' : ''}>
-                <option value="">انتخاب کنید</option>
-                {PROVINCES.map(province => <option key={province.value} value={province.value}>{province.label}</option>)}
-              </select>
-              {errors.province && <span className="text-red-500">{errors.province}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="city">ولسوالی/ناحیه</label>
-              <input id="city" value={formData.city} onChange={e => handleInputChange('city', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="address">آدرس کامل *</label>
-              <input id="address" value={formData.address} onChange={e => handleInputChange('address', e.target.value)} required className={errors.address ? 'border-red-500' : ''} />
-              {errors.address && <span className="text-red-500">{errors.address}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="phone">شماره تماس شاگرد/خانه</label>
-              <input id="phone" value={formData.phone} onChange={e => handleInputChange('phone', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="email">ایمیل</label>
-              <input id="email" type="email" value={formData.email} onChange={e => handleInputChange('email', e.target.value)} />
-            </div>
-          </div>
+      )}
+      {!!submitStatus.text && (
+        <div className={`student-registration-submit-status ${submitStatus.type || 'info'}`} role="status">
+          {submitStatus.text}
         </div>
+      )}
 
-        {/* اطلاعات تعلیمی */}
-        <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>اطلاعات تعلیمی</h3>
-          <div className="form-grid">
-            <div className="form-group">
-              <label htmlFor="registrationType">نوع ثبت‌نام *</label>
-              <select id="registrationType" value={formData.registrationType} onChange={e => handleInputChange('registrationType', e.target.value)} required>
-                <option value="new">ثبت‌نام جدید</option>
-                <option value="transfer">تبدیلی آمد</option>
-              </select>
-              <small className="form-subtitle">تبدیلی آمد از همین فورم ثبت می‌شود و فورم جدا ندارد.</small>
-            </div>
-            <div className="form-group">
-              <label htmlFor="academicYearId">سال تعلیمی *</label>
-              <select id="academicYearId" value={formData.academicYearId} onChange={e => handleInputChange('academicYearId', e.target.value)} required className={errors.academicYearId ? 'border-red-500' : ''}>
-                <option value="">انتخاب کنید</option>
-                {academicYears.map(year => <option key={year._id} value={year._id}>{getAcademicYearLabel(year)}</option>)}
-              </select>
-              {!referenceLoading && !academicYears.length && !requiresSchoolSelection && (
-                <span className="text-red-500">برای مکتب فعال سال تعلیمی تعریف نشده است. اول سال تعلیمی این مکتب را بسازید.</span>
+      <form onSubmit={handleSubmit} noValidate>
+        <div className="sr-body">
+          <nav className="sr-stepper" aria-label="گام‌های ثبت شاگرد">
+            {REGISTRATION_STEPS.map((step, index) => {
+              const status = index === currentStep ? 'active' : index < currentStep ? 'done' : '';
+              return (
+                <button
+                  type="button"
+                  key={step.key}
+                  className={`sr-step ${status}`}
+                  onClick={() => index <= currentStep && goToStep(index)}
+                  disabled={index > currentStep}
+                >
+                  <span className="sr-step-dot">
+                    {index < currentStep ? (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                    ) : (index + 1).toLocaleString('fa-AF')}
+                  </span>
+                  <span className="sr-step-label">
+                    <strong>{step.title}</strong>
+                    <span>{index < currentStep ? 'تکمیل شد' : step.caption}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="sr-card-wrap">
+            <div className="sr-card">
+              {currentStep === 0 && (
+                <>
+                  <h2><span className="sr-card-num">۱</span>مشخصات شخصی</h2>
+                  <p className="sr-card-sub">اسناد و معلومات هویتی شاگرد را وارد کنید</p>
+                  <div className="sr-uploads">
+                    <div className="sr-upload-tile">
+                      <input key={`tazkira-${fileInputResetKey}`} className="sr-upload-input" type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={e => handleFileChange('tazkira', e.target.files?.[0])} />
+                      <span className="sr-upload-ic">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><path d="M17 8l-5-5-5 5" /><path d="M12 3v12" /></svg>
+                      </span>
+                      <strong>تذکره شاگرد</strong>
+                      <small>JPG, PNG, PDF</small>
+                      <span className="sr-upload-name">{studentFiles.tazkira?.name || 'انتخاب فایل'}</span>
+                    </div>
+                    <div className="sr-upload-tile">
+                      <input key={`fatherTazkira-${fileInputResetKey}`} className="sr-upload-input" type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={e => handleFileChange('fatherTazkira', e.target.files?.[0])} />
+                      <span className="sr-upload-ic">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><path d="M17 8l-5-5-5 5" /><path d="M12 3v12" /></svg>
+                      </span>
+                      <strong>تذکره پدر</strong>
+                      <small>JPG, PNG, PDF</small>
+                      <span className="sr-upload-name">{studentFiles.fatherTazkira?.name || 'انتخاب فایل'}</span>
+                    </div>
+                    <div className="sr-upload-tile">
+                      <input key={`photo-${fileInputResetKey}`} className="sr-upload-input" type="file" accept=".jpg,.jpeg,.png" onChange={e => handleFileChange('photo', e.target.files?.[0])} />
+                      <span className="sr-upload-ic">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7" /></svg>
+                      </span>
+                      <strong>عکس شاگرد</strong>
+                      <small>JPG, PNG</small>
+                      <span className="sr-upload-name">{studentFiles.photo?.name || 'انتخاب فایل'}</span>
+                    </div>
+                  </div>
+                  <AfghanStudentFieldGrid
+                    theme="teal"
+                    sectionIds={REGISTRATION_STEPS[0].sectionIds}
+                    values={afghanGridValues}
+                    onChange={handleGridChange}
+                    errors={afghanGridErrors}
+                  />
+                </>
               )}
-              {errors.academicYearId && <span className="text-red-500">{errors.academicYearId}</span>}
+
+              {currentStep === 1 && (
+                <>
+                  <h2><span className="sr-card-num">۲</span>تماس و آدرس</h2>
+                  <p className="sr-card-sub">ولایت، آدرس سکونت و راه‌های تماس با شاگرد</p>
+                  <AfghanStudentFieldGrid
+                    theme="teal"
+                    sectionIds={REGISTRATION_STEPS[1].sectionIds}
+                    values={afghanGridValues}
+                    onChange={handleGridChange}
+                    errors={afghanGridErrors}
+                  />
+                </>
+              )}
+
+              {currentStep === 2 && (
+                <>
+                  <h2><span className="sr-card-num">۳</span>اطلاعات تعلیمی</h2>
+                  <p className="sr-card-sub">نوع ثبت‌نام، صنف، نوبت و سال تعلیمی</p>
+                  <div className="form-grid">
+                    <div className="form-group">
+                      <label htmlFor="registrationType">نوع ثبت‌نام *</label>
+                      <select id="registrationType" value={formData.registrationType} onChange={e => handleInputChange('registrationType', e.target.value)} required>
+                        <option value="new">ثبت‌نام جدید</option>
+                        <option value="transfer">تبدیلی آمد</option>
+                      </select>
+                      <small className="form-subtitle">تبدیلی آمد از همین فورم ثبت می‌شود و فورم جدا ندارد.</small>
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="academicYearId">سال تعلیمی *</label>
+                      <select id="academicYearId" value={formData.academicYearId} onChange={e => handleInputChange('academicYearId', e.target.value)} required className={errors.academicYearId ? 'border-red-500' : ''}>
+                        <option value="">انتخاب کنید</option>
+                        {academicYears.map(year => <option key={year._id} value={year._id}>{getAcademicYearLabel(year)}</option>)}
+                      </select>
+                      {!referenceLoading && !academicYears.length && !requiresSchoolSelection && (
+                        <span className="text-red-500">برای مکتب فعال سال تعلیمی تعریف نشده است. اول سال تعلیمی این مکتب را بسازید.</span>
+                      )}
+                      {errors.academicYearId && <span className="text-red-500">{errors.academicYearId}</span>}
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="classId">صنف *</label>
+                      <select id="classId" value={formData.classId} onChange={e => handleInputChange('classId', e.target.value)} required className={errors.classId ? 'border-red-500' : ''}>
+                        <option value="">انتخاب کنید</option>
+                        {classes.map(item => <option key={item._id} value={item._id}>{classLabelById.get(String(item._id))}</option>)}
+                      </select>
+                      {errors.classId && <span className="text-red-500">{errors.classId}</span>}
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="shiftId">نوبت *</label>
+                      <select id="shiftId" value={formData.shiftId} onChange={e => handleInputChange('shiftId', e.target.value)} required className={errors.shiftId ? 'border-red-500' : ''}>
+                        <option value="">انتخاب کنید</option>
+                        {shifts.map(item => <option key={item._id} value={item._id}>{getShiftLabel(item)}</option>)}
+                      </select>
+                      {errors.shiftId && <span className="text-red-500">{errors.shiftId}</span>}
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="enrollmentDate">تاریخ ثبت‌نام</label>
+                      <AfghanDateInput id="enrollmentDate" value={formData.enrollmentDate} onChange={value => handleInputChange('enrollmentDate', value)} showGregorianEquivalent />
+                    </div>
+                    {formData.registrationType === 'transfer' ? (
+                      <>
+                        <div className="form-group">
+                          <label htmlFor="previousSchool">مکتب قبلی *</label>
+                          <input id="previousSchool" value={formData.previousSchool} onChange={e => handleInputChange('previousSchool', e.target.value)} required className={errors.previousSchool ? 'border-red-500' : ''} />
+                          {errors.previousSchool && <span className="text-red-500">{errors.previousSchool}</span>}
+                        </div>
+                        <div className="form-group">
+                          <label htmlFor="previousGrade">صنف قبلی</label>
+                          <input id="previousGrade" value={formData.previousGrade} onChange={e => handleInputChange('previousGrade', e.target.value)} />
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                  {/* سه پارچه فقط برای شاگردان تبدیلی */}
+                  {formData.registrationType === 'transfer' && (
+                    <div className="sr-uploads sr-uploads-single">
+                      <div className="sr-upload-tile">
+                        <input key={`seParcha-${fileInputResetKey}`} className="sr-upload-input" type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => handleFileChange('seParcha', e.target.files?.[0])} />
+                        <span className="sr-upload-ic">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><path d="M17 8l-5-5-5 5" /><path d="M12 3v12" /></svg>
+                        </span>
+                        <strong>سه پارچه</strong>
+                        <small>ویژه شاگردان تبدیلی — PDF, JPG, PNG</small>
+                        <span className="sr-upload-name">{studentFiles.seParcha?.name || 'انتخاب فایل'}</span>
+                      </div>
+                      {errors.seParcha && <span className="text-red-500">{errors.seParcha}</span>}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {currentStep === 3 && (
+                <>
+                  <h2><span className="sr-card-num">۴</span>خانواده و سرپرست</h2>
+                  <p className="sr-card-sub">معلومات پدر، مادر و سرپرست شاگرد</p>
+                  <AfghanStudentFieldGrid
+                    theme="teal"
+                    sectionIds={REGISTRATION_STEPS[3].sectionIds}
+                    values={afghanGridValues}
+                    onChange={handleGridChange}
+                    errors={afghanGridErrors}
+                  />
+                </>
+              )}
+
+              {currentStep === 4 && (
+                <>
+                  <h2><span className="sr-card-num">۵</span>صحی و اضافی</h2>
+                  <p className="sr-card-sub">حالات صحی، حساسیت‌ها و نیازهای ویژه (اختیاری)</p>
+                  <div className="form-grid">
+                    <div className="form-group">
+                      <label htmlFor="medicalConditions">حالات صحی مزمن</label>
+                      <textarea id="medicalConditions" rows={3} value={formData.medicalConditions} onChange={e => handleInputChange('medicalConditions', e.target.value)} />
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="allergies">حساسیت‌ها</label>
+                      <textarea id="allergies" rows={3} value={formData.allergies} onChange={e => handleInputChange('allergies', e.target.value)} />
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="transportation">نوع ترانسپورت</label>
+                      <select id="transportation" value={formData.transportation} onChange={e => handleInputChange('transportation', e.target.value)}>
+                        <option value="">انتخاب کنید</option>
+                        <option value="walking">پیاده</option>
+                        <option value="school_bus">ترانسپورت مکتب</option>
+                        <option value="private">شخصی</option>
+                        <option value="parent">با والدین</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="lunchProgram">برنامه ناهار</label>
+                      <select id="lunchProgram" value={formData.lunchProgram} onChange={e => handleInputChange('lunchProgram', e.target.value)}>
+                        <option value="">انتخاب کنید</option>
+                        <option value="included">شامل ناهار</option>
+                        <option value="excluded">شامل نیست</option>
+                        <option value="special">رژیم خاص</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="specialNeeds">نیازهای خاص</label>
+                      <input id="specialNeeds" value={formData.specialNeeds} onChange={e => handleInputChange('specialNeeds', e.target.value)} />
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="notes">یادداشت‌ها</label>
+                      <textarea id="notes" rows={4} value={formData.notes} onChange={e => handleInputChange('notes', e.target.value)} />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {currentStep === 5 && (
+                <>
+                  <h2><span className="sr-card-num">۶</span>بازبینی و ثبت</h2>
+                  <p className="sr-card-sub">اگر مورد نادرستی دیدید، روی «ویرایش» همان بخش بزنید</p>
+                  <div className="sr-review-grid">
+                    <div className="sr-review-section">
+                      <div className="sr-review-head"><strong>مشخصات شخصی</strong><button type="button" onClick={() => goToStep(0)}>ویرایش</button></div>
+                      <div className="sr-review-row"><span>نام و تخلص</span><span>{[formData.firstName, formData.lastName].filter(Boolean).join(' ') || '—'}</span></div>
+                      <div className="sr-review-row"><span>نام پدر</span><span>{formData.fatherName || '—'}</span></div>
+                      <div className="sr-review-row"><span>شماره تذکره</span><span>{formData.nationalId || '—'}</span></div>
+                      <div className="sr-review-row"><span>تاریخ تولد</span><span>{formData.birthDate || '—'}</span></div>
+                      <div className="sr-review-row"><span>جنسیت</span><span>{genderLabel(formData.gender) || '—'}</span></div>
+                      <div className="sr-review-row"><span>اسناد بارگذاری‌شده</span><span>{uploadedDocCount.toLocaleString('fa-AF')} از ۳</span></div>
+                    </div>
+                    <div className="sr-review-section">
+                      <div className="sr-review-head"><strong>تماس و آدرس</strong><button type="button" onClick={() => goToStep(1)}>ویرایش</button></div>
+                      <div className="sr-review-row"><span>ولایت</span><span>{provinceLabel(formData.province) || '—'}</span></div>
+                      <div className="sr-review-row"><span>آدرس کامل</span><span>{formData.address || '—'}</span></div>
+                      <div className="sr-review-row"><span>شماره تماس</span><span>{formData.phone || formData.mobile || '—'}</span></div>
+                    </div>
+                    <div className="sr-review-section">
+                      <div className="sr-review-head"><strong>اطلاعات تعلیمی</strong><button type="button" onClick={() => goToStep(2)}>ویرایش</button></div>
+                      <div className="sr-review-row"><span>نوع ثبت‌نام</span><span>{formData.registrationType === 'transfer' ? 'تبدیلی آمد' : 'ثبت‌نام جدید'}</span></div>
+                      <div className="sr-review-row"><span>سال تعلیمی</span><span>{yearLabelById.get(String(formData.academicYearId)) || '—'}</span></div>
+                      <div className="sr-review-row"><span>صنف</span><span>{classLabelById.get(String(formData.classId)) || '—'}</span></div>
+                      <div className="sr-review-row"><span>نوبت</span><span>{selectedShift ? getShiftLabel(selectedShift) : '—'}</span></div>
+                    </div>
+                    <div className="sr-review-section">
+                      <div className="sr-review-head"><strong>خانواده و سرپرست</strong><button type="button" onClick={() => goToStep(3)}>ویرایش</button></div>
+                      <div className="sr-review-row"><span>شماره تماس پدر</span><span>{formData.fatherPhone || '—'}</span></div>
+                      <div className="sr-review-row"><span>نام مادر</span><span>{formData.motherName || '—'}</span></div>
+                      <div className="sr-review-row"><span>نسبت سرپرست</span><span>{guardianRelationLabel || '—'}</span></div>
+                    </div>
+                  </div>
+                  <div className="sr-confirm-note">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 8v5M12 16h.01" /></svg>
+                    با «ثبت و تخصیص صنف» پس از ثبت مستقیماً به صفحهٔ تخصیص عضویت صنف منتقل می‌شوید.
+                  </div>
+                </>
+              )}
             </div>
-            <div className="form-group">
-              <label htmlFor="classId">صنف *</label>
-              <select id="classId" value={formData.classId} onChange={e => handleInputChange('classId', e.target.value)} required className={errors.classId ? 'border-red-500' : ''}>
-                <option value="">انتخاب کنید</option>
-                {classes.map(item => <option key={item._id} value={item._id}>{classLabelById.get(String(item._id))}</option>)}
-              </select>
-              {errors.classId && <span className="text-red-500">{errors.classId}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="shiftId">نوبت *</label>
-              <select id="shiftId" value={formData.shiftId} onChange={e => handleInputChange('shiftId', e.target.value)} required className={errors.shiftId ? 'border-red-500' : ''}>
-                <option value="">انتخاب کنید</option>
-                {shifts.map(item => <option key={item._id} value={item._id}>{getShiftLabel(item)}</option>)}
-              </select>
-              {errors.shiftId && <span className="text-red-500">{errors.shiftId}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="enrollmentDate">تاریخ ثبت‌نام</label>
-              <AfghanDateInput id="enrollmentDate" value={formData.enrollmentDate} onChange={value => handleInputChange('enrollmentDate', value)} showGregorianEquivalent />
-            </div>
-            {formData.registrationType === 'transfer' ? (
-              <>
-                <div className="form-group">
-                  <label htmlFor="previousSchool">مکتب قبلی *</label>
-                  <input id="previousSchool" value={formData.previousSchool} onChange={e => handleInputChange('previousSchool', e.target.value)} required className={errors.previousSchool ? 'border-red-500' : ''} />
-                  {errors.previousSchool && <span className="text-red-500">{errors.previousSchool}</span>}
-                </div>
-                <div className="form-group">
-                  <label htmlFor="previousGrade">صنف قبلی</label>
-                  <input id="previousGrade" value={formData.previousGrade} onChange={e => handleInputChange('previousGrade', e.target.value)} />
-                </div>
-              </>
-            ) : null}
-            {/* سه پارچه فقط برای شاگردان تبدیلی */}
-            {formData.registrationType === 'transfer' && (
-              <div className="form-group" style={{ minWidth: 170 }}>
-                <label>سه پارچه<br /><span style={{ fontSize: 12, color: '#888' }}>(ویژه شاگردان تبدیلی) (PDF, JPG, PNG)</span></label>
-                <input key={`seParcha-${fileInputResetKey}`} type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => handleFileChange('seParcha', e.target.files?.[0])} />
-                {errors.seParcha && <span className="text-red-500">{errors.seParcha}</span>}
+
+            <div className="sr-footer">
+              <span className="sr-footer-progress">گام {(currentStep + 1).toLocaleString('fa-AF')} از {REGISTRATION_STEPS.length.toLocaleString('fa-AF')} — {REGISTRATION_STEPS[currentStep].title}</span>
+              <div className="sr-footer-btns">
+                <button type="button" className="sr-btn sr-btn-ghost" onClick={() => window.history.back()}>انصراف</button>
+                {currentStep > 0 && (
+                  <button type="button" className="sr-btn sr-btn-ghost" onClick={handlePrevStep}>قبلی</button>
+                )}
+                {currentStep < REGISTRATION_STEPS.length - 1 && (
+                  <button type="button" className="sr-btn sr-btn-primary" onClick={handleNextStep}>
+                    گام بعدی
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6" /></svg>
+                  </button>
+                )}
+                {currentStep === REGISTRATION_STEPS.length - 1 && (
+                  <>
+                    <button type="submit" value="save" className="sr-btn sr-btn-secondary" disabled={loading || referenceLoading || requiresSchoolSelection}>
+                      {loading ? 'در حال ذخیره...' : 'ثبت شاگرد'}
+                    </button>
+                    <button type="submit" value="assign" className="sr-btn sr-btn-primary" disabled={loading || referenceLoading || requiresSchoolSelection}>
+                      {loading ? 'در حال پردازش...' : 'ثبت و تخصیص صنف'}
+                    </button>
+                  </>
+                )}
               </div>
-            )}
-          </div>
-        </div>
-
-        {/* خانواده و سرپرست */}
-        <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>معلومات خانواده و سرپرست</h3>
-          <div className="form-grid">
-            <div className="form-group">
-              <label htmlFor="fatherPhone">شماره تماس پدر *</label>
-              <input id="fatherPhone" value={formData.fatherPhone} onChange={e => handleInputChange('fatherPhone', e.target.value)} required className={errors.fatherPhone ? 'border-red-500' : ''} />
-              {errors.fatherPhone && <span className="text-red-500">{errors.fatherPhone}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="fatherOccupation">مسلک پدر</label>
-              <input id="fatherOccupation" value={formData.fatherOccupation} onChange={e => handleInputChange('fatherOccupation', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="motherName">نام مادر</label>
-              <input id="motherName" value={formData.motherName} onChange={e => handleInputChange('motherName', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="motherPhone">شماره تماس مادر</label>
-              <input id="motherPhone" value={formData.motherPhone} onChange={e => handleInputChange('motherPhone', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="motherOccupation">مسلک مادر</label>
-              <input id="motherOccupation" value={formData.motherOccupation} onChange={e => handleInputChange('motherOccupation', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="guardianName">نام سرپرست</label>
-              <input id="guardianName" value={formData.guardianName} onChange={e => handleInputChange('guardianName', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="guardianPhone">شماره تماس سرپرست</label>
-              <input id="guardianPhone" value={formData.guardianPhone} onChange={e => handleInputChange('guardianPhone', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="guardianRelation">نسبت سرپرست</label>
-              <input id="guardianRelation" value={formData.guardianRelation} onChange={e => handleInputChange('guardianRelation', e.target.value)} />
             </div>
           </div>
-        </div>
-
-        {/* صحی و اضافی */}
-        <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>معلومات صحی و اضافی</h3>
-          <div className="form-grid">
-            <div className="form-group">
-              <label htmlFor="medicalConditions">حالات صحی مزمن</label>
-              <textarea id="medicalConditions" rows={3} value={formData.medicalConditions} onChange={e => handleInputChange('medicalConditions', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="allergies">حساسیت‌ها</label>
-              <textarea id="allergies" rows={3} value={formData.allergies} onChange={e => handleInputChange('allergies', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="emergencyContact">نام اضطراری</label>
-              <input id="emergencyContact" value={formData.emergencyContact} onChange={e => handleInputChange('emergencyContact', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="emergencyPhone">شماره اضطراری</label>
-              <input id="emergencyPhone" value={formData.emergencyPhone} onChange={e => handleInputChange('emergencyPhone', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="transportation">نوع ترانسپورت</label>
-              <select id="transportation" value={formData.transportation} onChange={e => handleInputChange('transportation', e.target.value)}>
-                <option value="">انتخاب کنید</option>
-                <option value="walking">پیاده</option>
-                <option value="school_bus">ترانسپورت مکتب</option>
-                <option value="private">شخصی</option>
-                <option value="parent">با والدین</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <label htmlFor="lunchProgram">برنامه ناهار</label>
-              <select id="lunchProgram" value={formData.lunchProgram} onChange={e => handleInputChange('lunchProgram', e.target.value)}>
-                <option value="">انتخاب کنید</option>
-                <option value="included">شامل ناهار</option>
-                <option value="excluded">شامل نیست</option>
-                <option value="special">رژیم خاص</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <label htmlFor="specialNeeds">نیازهای خاص</label>
-              <input id="specialNeeds" value={formData.specialNeeds} onChange={e => handleInputChange('specialNeeds', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="notes">یادداشت‌ها</label>
-              <textarea id="notes" rows={4} value={formData.notes} onChange={e => handleInputChange('notes', e.target.value)} />
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: 16, marginTop: 32, flexWrap: 'wrap', justifyContent: 'center' }}>
-          <button type="submit" value="save" className="add-btn" disabled={loading || referenceLoading || requiresSchoolSelection}>
-            {loading ? 'در حال ذخیره...' : 'ثبت شاگرد'}
-          </button>
-          <button type="submit" value="assign" className="save-btn" disabled={loading || referenceLoading || requiresSchoolSelection}>
-            {loading ? 'در حال پردازش...' : 'ثبت و تخصیص صنف'}
-          </button>
-          <button type="button" className="cancel-btn" onClick={() => window.history.back()}>
-            انصراف
-          </button>
         </div>
       </form>
     </div>

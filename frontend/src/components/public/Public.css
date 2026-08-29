@@ -1,19 +1,26 @@
 /* Vazirmatn is self-hosted via the @font-face in src/index.css - no external
    Google Fonts dependency, so this keeps working offline. */
 :root {
-  --public-primary: #6d4aff;
-  --public-primary-dark: #5633df;
-  --public-pink: #f3a6c8;
-  --public-bg: #f8f9fc;
+  --public-primary: #7c5cff;
+  --public-primary-dark: #5a35e0;
+  --public-accent: #22d3ee;
+  --public-pink: #ff8fd6;
+  --public-bg: #f5f3ff;
   --public-surface: #ffffff;
-  --public-ink: #1c2333;
-  --public-muted: #667085;
-  --public-soft: #f0edff;
-  --public-border: rgba(109, 74, 255, 0.14);
-  --public-radius: 8px;
-  --public-shadow: 0 18px 45px rgba(42, 35, 92, 0.12);
-  --public-shadow-soft: 0 10px 28px rgba(42, 35, 92, 0.08);
-  --public-gradient: linear-gradient(135deg, rgba(109, 74, 255, 0.94), rgba(243, 166, 200, 0.92));
+  --public-ink: #14152b;
+  --public-muted: #5c6079;
+  --public-soft: #efe9ff;
+  --public-border: rgba(124, 92, 255, 0.16);
+  --public-radius: 20px;
+  --public-radius-lg: 28px;
+  --public-shadow: 0 30px 80px rgba(45, 24, 110, 0.18);
+  --public-shadow-soft: 0 14px 40px rgba(45, 24, 110, 0.1);
+  --public-gradient: linear-gradient(135deg, #7c5cff 0%, #a06bff 45%, #ff8fd6 100%);
+  --public-gradient-alt: linear-gradient(135deg, #22d3ee 0%, #7c5cff 100%);
+  --public-glass-bg: rgba(255, 255, 255, 0.55);
+  --public-glass-bg-strong: rgba(255, 255, 255, 0.74);
+  --public-glass-border: rgba(255, 255, 255, 0.6);
+  --public-glass-blur: blur(22px);
   --public-font: 'Vazirmatn', Tahoma, 'Segoe UI', sans-serif;
 }
 
@@ -28,9 +35,22 @@
   min-height: 100vh;
   direction: rtl;
   color: var(--public-ink);
+  position: relative;
+  isolation: isolate;
+  background: var(--public-bg);
+  overflow-x: clip;
+}
+
+.public-layout::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background:
-    radial-gradient(circle at 12% 10%, rgba(243, 166, 200, 0.28), transparent 30%),
-    radial-gradient(circle at 86% 0%, rgba(109, 74, 255, 0.18), transparent 28%),
+    radial-gradient(ellipse 900px 700px at 6% -8%, rgba(124, 92, 255, 0.38), transparent 60%),
+    radial-gradient(ellipse 820px 640px at 102% 4%, rgba(34, 211, 238, 0.3), transparent 55%),
+    radial-gradient(ellipse 760px 680px at 46% 108%, rgba(255, 143, 214, 0.26), transparent 58%),
     var(--public-bg);
 }
 
@@ -43,9 +63,11 @@
   position: sticky;
   top: 0;
   z-index: 50;
-  border-bottom: 1px solid rgba(109, 74, 255, 0.12);
-  background: rgba(248, 249, 252, 0.88);
-  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--public-glass-border);
+  background: var(--public-glass-bg);
+  backdrop-filter: var(--public-glass-blur);
+  -webkit-backdrop-filter: var(--public-glass-blur);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset, 0 12px 32px rgba(45, 24, 110, 0.06);
 }
 
 .public-header-inner {
@@ -71,11 +93,21 @@
   flex: 0 0 48px;
   display: grid;
   place-items: center;
-  border-radius: var(--public-radius);
+  border-radius: 14px;
   color: #ffffff;
   background: var(--public-gradient);
-  box-shadow: 0 12px 26px rgba(109, 74, 255, 0.24);
+  box-shadow: 0 12px 26px rgba(124, 92, 255, 0.32), 0 0 0 1px rgba(255, 255, 255, 0.4) inset;
   overflow: hidden;
+  position: relative;
+}
+
+.school-logo-mark::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.55), transparent 55%);
+  pointer-events: none;
 }
 
 .school-logo-mark img {
@@ -122,31 +154,39 @@
   gap: 4px;
   flex-wrap: nowrap;
   justify-content: center;
+  padding: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.35);
+  border: 1px solid var(--public-glass-border);
 }
 
 .public-nav-link {
   width: auto;
-  min-height: 40px;
+  min-height: 38px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 8px 12px;
-  border-radius: var(--public-radius);
+  padding: 8px 14px;
+  border-radius: 999px;
   color: #3f4658;
   background: transparent;
   border: 1px solid transparent;
   font-size: 13px;
   font-weight: 800;
   text-decoration: none;
-  transition: color 160ms ease, background 160ms ease, border-color 160ms ease, transform 160ms ease;
+  transition: color 160ms ease, background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
-.public-nav-link:hover,
-.public-nav-link.active {
+.public-nav-link:hover {
   color: var(--public-primary);
-  background: rgba(109, 74, 255, 0.09);
-  border-color: rgba(109, 74, 255, 0.16);
+  background: rgba(255, 255, 255, 0.6);
   transform: translateY(-1px);
+}
+
+.public-nav-link.active {
+  color: #ffffff;
+  background: var(--public-gradient);
+  box-shadow: 0 8px 20px rgba(124, 92, 255, 0.35);
 }
 
 .public-actions {
@@ -158,42 +198,47 @@
 
 .public-button {
   width: auto;
-  min-height: 44px;
+  min-height: 46px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 10px 16px;
-  border-radius: var(--public-radius);
+  padding: 11px 20px;
+  border-radius: 999px;
   border: 1px solid transparent;
   font-size: 14px;
   font-weight: 900;
   line-height: 1.35;
   text-decoration: none;
   cursor: pointer;
-  transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease, border-color 160ms ease;
+  transition: transform 200ms ease, box-shadow 200ms ease, background 200ms ease, border-color 200ms ease;
 }
 
 .public-button:hover {
-  transform: translateY(-1px);
+  transform: translateY(-2px);
 }
 
 .public-button.primary {
   color: #ffffff;
-  background: var(--public-primary);
-  box-shadow: 0 14px 28px rgba(109, 74, 255, 0.25);
+  background: var(--public-gradient);
+  box-shadow: 0 16px 34px rgba(124, 92, 255, 0.35);
 }
 
 .public-button.primary:hover {
-  background: var(--public-primary-dark);
-  box-shadow: 0 16px 32px rgba(109, 74, 255, 0.3);
+  box-shadow: 0 20px 42px rgba(124, 92, 255, 0.44);
 }
 
 .public-button.secondary {
-  color: var(--public-primary);
-  background: #ffffff;
-  border-color: rgba(109, 74, 255, 0.22);
+  color: var(--public-ink);
+  background: var(--public-glass-bg-strong);
+  backdrop-filter: var(--public-glass-blur);
+  -webkit-backdrop-filter: var(--public-glass-blur);
+  border-color: var(--public-glass-border);
   box-shadow: var(--public-shadow-soft);
+}
+
+.public-button.secondary:hover {
+  border-color: rgba(124, 92, 255, 0.35);
 }
 
 .public-section-title {
@@ -204,11 +249,11 @@
 .public-section-kicker {
   display: inline-flex;
   margin-bottom: 8px;
-  padding: 6px 10px;
+  padding: 6px 12px;
   border-radius: 999px;
   color: var(--public-primary);
-  background: rgba(109, 74, 255, 0.09);
-  border: 1px solid rgba(109, 74, 255, 0.14);
+  background: rgba(124, 92, 255, 0.1);
+  border: 1px solid rgba(124, 92, 255, 0.18);
   font-size: 12px;
   font-weight: 900;
 }
@@ -231,8 +276,10 @@
 .public-footer {
   margin-top: 54px;
   padding: 34px 0 28px;
-  border-top: 1px solid rgba(109, 74, 255, 0.12);
-  background: rgba(255, 255, 255, 0.58);
+  border-top: 1px solid var(--public-glass-border);
+  background: var(--public-glass-bg);
+  backdrop-filter: var(--public-glass-blur);
+  -webkit-backdrop-filter: var(--public-glass-blur);
 }
 
 .public-footer-inner {

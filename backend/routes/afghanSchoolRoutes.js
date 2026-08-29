@@ -651,7 +651,7 @@ router.get('/:id', optionalAuth, async (req, res) => {
 });
 
 // POST /api/afghan-schools - Create new school
-router.post('/', requireFields(['name', 'nameDari', 'schoolCode', 'province', 'district', 'schoolType', 'schoolLevel', 'ownership', 'establishmentDate']), async (req, res) => {
+router.post('/', requireAuth, requireRole(['admin']), requirePermission('schools.create'), requireFields(['name', 'nameDari', 'schoolCode', 'province', 'district', 'schoolType', 'schoolLevel', 'ownership', 'establishmentDate']), async (req, res) => {
   try {
     const schoolData = {
       ...req.body,
@@ -715,7 +715,7 @@ router.post('/', requireFields(['name', 'nameDari', 'schoolCode', 'province', 'd
 });
 
 // PUT /api/afghan-schools/:id - Update school
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireAuth, requireRole(['admin']), requirePermission('schools.edit'), async (req, res) => {
   try {
     const school = await AfghanSchool.findById(req.params.id);
     if (!school) {
@@ -826,7 +826,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE /api/afghan-schools/:id - Delete school
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAuth, requireRole(['admin']), requirePermission('schools.manage'), async (req, res) => {
   try {
     const school = await AfghanSchool.findById(req.params.id);
     if (!school) {
@@ -902,7 +902,7 @@ router.get('/map-data', async (req, res) => {
 });
 
 // POST /api/afghan-schools/:id/upload-document - Upload school document
-router.post('/:id/upload-document', requireFields(['type', 'title', 'url']), async (req, res) => {
+router.post('/:id/upload-document', requireAuth, requireRole(['admin']), requirePermission('schools.documents.manage'), requireFields(['type', 'title', 'url']), async (req, res) => {
   try {
     const { type, title, url } = req.body;
     

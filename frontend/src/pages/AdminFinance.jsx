@@ -11182,6 +11182,74 @@ export default function AdminFinance() {
           )}
         </div>
 
+        <div className="finance-monthly-summary-card" data-testid="finance-month-specific-report-card">
+          <div className="finance-card-head">
+            <div>
+              <h3>گزارش مخصوص ماه</h3>
+              <p className="muted">
+                تنها فیس همان ماه انتخاب‌شده را می‌شمارد. پیش‌پرداختِ ماه‌های بعد و باقیاتِ ماه‌های گذشته که در جریان این ماه وصول شده، در ارقام زیر حساب نمی‌شود؛ فقط پرداخت‌های تاییدشده منظور می‌گردد.
+              </p>
+            </div>
+            <label className="finance-inline-filter">
+              <span>ماه</span>
+              <select
+                value={monthlySummaryMonth}
+                onChange={(e) => setMonthlySummaryMonth(e.target.value)}
+                data-testid="month-specific-month-select"
+              >
+                {!billMonthOptions.length && <option value="">ماهی برای انتخاب نیست</option>}
+                {billMonthOptions.map((item) => (
+                  <option key={`month-specific-${item.key}`} value={item.key}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {monthlySummaryLoading && <p className="muted" role="status">در حال دریافت گزارش مخصوص ماه...</p>}
+          {!monthlySummaryLoading && monthlySummaryError && <p className="finance-monthly-summary-error">{monthlySummaryError}</p>}
+
+          {!monthlySummaryLoading && !monthlySummaryError && monthlySummaryData && (
+            <>
+              <div className="finance-smart-kpi-grid" data-testid="month-specific-stats">
+                <div className="finance-smart-kpi finance-smart-kpi-slate">
+                  <span>تعداد شاگردان</span>
+                  <strong>{fmt(monthlySummaryData.totalStudents || 0)}</strong>
+                  <small>شاگردان دارای بل برای این ماه</small>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-slate">
+                  <span>تعداد بل‌ها</span>
+                  <strong>{fmt(monthlySummaryData.totalOrders || 0)}</strong>
+                  <small>بل‌های صادرشده برای این ماه</small>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-cyan">
+                  <span>مبلغ قابل پرداخت</span>
+                  <strong>{fmt(monthlySummaryData.payableThisMonth || 0)} <small>AFN</small></strong>
+                  <small>مجموع فیس قابل پرداختِ همین ماه</small>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-emerald">
+                  <span>پرداخت‌شده و تایید نهایی</span>
+                  <strong>{fmt(monthlySummaryData.currentMonthApprovedCollection || 0)} <small>AFN</small></strong>
+                  <small>فقط پرداخت‌های تاییدشده‌ی همین ماه</small>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-rose">
+                  <span>باقیمانده وصول‌نشده</span>
+                  <strong>{fmt(monthlySummaryData.outstandingThisMonth || 0)} <small>AFN</small></strong>
+                  <small>فیس همین ماه که هنوز وصول نشده</small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => downloadFinanceReportPdf('monthly_summary', { month: monthlySummaryMonth })}
+                disabled={reportPdfBusyKey !== '' || !monthlySummaryMonth}
+                data-testid="download-finance-report-month-specific"
+              >
+                {reportPdfBusyKey === 'monthly_summary' ? 'در حال آماده‌سازی...' : 'دانلود PDF گزارش مخصوص ماه'}
+              </button>
+            </>
+          )}
+        </div>
+
         <div className="finance-report-download-grid">
           {FINANCE_REPORT_CARDS.map((item) => (
             <div key={item.key} className="finance-report-download-row">

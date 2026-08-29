@@ -991,6 +991,51 @@ export default function AcademyManagement() {
                 <StatCard label="کل باقی‌داری" value={`${fmt(reports?.summary?.outstandingTotal || summary.outstandingTotal)} ${currency}`} tone="amber" />
                 <StatCard label="مفاد ماه جاری" value={`${fmt((reports?.summary?.monthIncome || summary.monthIncome || 0) - (reports?.summary?.monthExpenses || summary.monthExpenses || 0))} ${currency}`} />
               </div>
+              <div className="academy-panel">
+                <div className="academy-panel-head">
+                  <h2>
+                    یادآوری فیس ماه جاری
+                    {reports?.feeReminderMonth ? ` (${formatMonthLabel(reports.feeReminderMonth)})` : ''}
+                  </h2>
+                  <button
+                    type="button"
+                    className="academy-inline-button"
+                    onClick={() => exportCsv(
+                      'academy-fee-reminders.csv',
+                      ['Student', 'Code', 'Phone', 'Course', 'Class', 'Balance', 'LastPayment'],
+                      (reports?.feeReminders || []).map((item) => [
+                        item.studentId?.fullName,
+                        item.studentId?.studentCode,
+                        item.studentId?.phone || item.studentId?.guardianPhone,
+                        item.courseId?.name,
+                        item.classId?.name,
+                        item.balance,
+                        item.lastPaymentAt ? new Date(item.lastPaymentAt).toISOString().slice(0, 10) : ''
+                      ])
+                    )}
+                    disabled={!(reports?.feeReminders || []).length}
+                  >
+                    Excel/CSV
+                  </button>
+                </div>
+                <p className="academy-form-hint">
+                  شاگردان دارای باقی‌داری که در ماه جاری هجری شمسی هنوز هیچ پرداختی ثبت نکرده‌اند.
+                  {' '}
+                  {`مجموع: ${fmt(reports?.feeReminderCount || 0)} شاگرد`}
+                </p>
+                <Table
+                  columns={['شاگرد', 'کد', 'تماس', 'کورس', 'صنف', 'باقی', 'آخرین پرداخت']}
+                  rows={(reports?.feeReminders || []).map((item) => [
+                    text(item.studentId?.fullName),
+                    text(item.studentId?.studentCode),
+                    text(item.studentId?.phone || item.studentId?.guardianPhone),
+                    text(item.courseId?.name),
+                    text(item.classId?.name),
+                    `${fmt(item.balance)} ${currency}`,
+                    item.lastPaymentAt ? formatAfghanStoredDateLabel(item.lastPaymentAt) : 'بدون پرداخت'
+                  ])}
+                />
+              </div>
               <div className="academy-grid">
                 <div className="academy-panel">
                   <div className="academy-panel-head">

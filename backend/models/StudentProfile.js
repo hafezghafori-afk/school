@@ -87,7 +87,11 @@ const studentProfileSchema = new mongoose.Schema({
     fatherName: { type: String, default: '' },
     motherName: { type: String, default: '' },
     guardianName: { type: String, default: '' },
-    guardianRelation: { type: String, default: '' }
+    guardianRelation: { type: String, default: '' },
+    // آینهٔ فیلدهای «معلومات پدر / ولی» کارت سوانح — منبع اصلی AfghanStudent.familyInfo
+    fatherResidence: { type: String, default: '' },
+    fatherWorkplace: { type: String, default: '' },
+    fatherLandline: { type: String, default: '' }
   },
   contact: {
     primaryPhone: { type: String, default: '' },

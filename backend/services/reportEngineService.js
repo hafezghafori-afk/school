@@ -1191,19 +1191,36 @@ async function buildFeeMonthlySummaryReport(filters) {
   await applySchoolClassScope(filters, orderFilter);
 
   const candidateOrders = await FeeOrder.find(orderFilter)
-    .select('student studentId periodLabel dueDate outstandingAmount status adjustments')
+    .select('student studentId periodLabel dueDate amountDue amountPaid outstandingAmount status adjustments')
     .lean();
   const monthOrders = candidateOrders.filter((order) => resolveFeeOrderMonthKey(order) === monthKey);
 
   const partialStudents = new Set();
   const paidStudents = new Set();
+  // Every distinct student who carries at least one bill FOR this fee month,
+  // regardless of payment status - this is the "تعداد شاگردان" headline of
+  // the month-specific report.
+  const monthStudents = new Set();
   let outstandingTotal = 0;
   let discountExemptionTotal = 0;
+  // "مبلغ قابل پرداخت این ماه": net payable of this month's own bills.
+  let payableThisMonth = 0;
+  // "پرداخت‌شده و تایید نهایی (همین ماه)": approved money applied to this
+  // month's own bills. FeeOrder.amountPaid only advances on payment approval
+  // (see financeAdminActionService), and it lives on the bill for this fee
+  // month - so an advance payment (booked on a later month's bill) or arrears
+  // cleared this calendar month (booked on an earlier month's bill) never
+  // land here. Clamped to amountDue so a rare overpayment can't inflate it.
+  let currentMonthApprovedCollection = 0;
   for (const order of monthOrders) {
     const studentKey = String(order.student || order.studentId || '');
+    if (studentKey) monthStudents.add(studentKey);
     if (order.status === 'partial') partialStudents.add(studentKey);
     if (order.status === 'paid') paidStudents.add(studentKey);
     outstandingTotal += Number(order.outstandingAmount || 0);
+    const orderDue = Math.max(0, Number(order.amountDue || 0));
+    payableThisMonth += orderDue;
+    currentMonthApprovedCollection += Math.min(Math.max(0, Number(order.amountPaid || 0)), orderDue);
     for (const adjustment of (Array.isArray(order.adjustments) ? order.adjustments : [])) {
       if (['discount', 'waiver'].includes(normalizeText(adjustment.type))) {
         discountExemptionTotal += Number(adjustment.amount || 0);
@@ -1260,6 +1277,9 @@ async function buildFeeMonthlySummaryReport(filters) {
     pastMonthsCollectedThisMonth: roundMoney(pastMonthsCollected),
     futureMonthsCollectedThisMonth: roundMoney(futureMonthsCollected),
     totalOrders: monthOrders.length,
+    totalStudents: monthStudents.size,
+    payableThisMonth: roundMoney(payableThisMonth),
+    currentMonthApprovedCollection: roundMoney(currentMonthApprovedCollection),
     partialPaymentStudents: partialStudents.size,
     fullPaymentStudents: paidStudents.size,
     outstandingThisMonth: roundMoney(outstandingTotal),
