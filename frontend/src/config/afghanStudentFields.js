@@ -171,8 +171,9 @@ export const valuesToAfghanPayload = (values = {}, { original = null } = {}) => 
       const before = String(original[field.key] || '').trim();
       if (before !== String(value || '')) nameChanged = true;
     }
-    // فیلدهای الزامیِ مدل فقط وقتی مقدار دارند فرستاده شوند — تا خالی‌شدنِ سهوی خطای اعتبارسنجی نسازد
-    if (field.required && !value) return;
+    // فیلدهای الزامیِ مدل و همچنین select/enumها فقط وقتی مقدار دارند فرستاده شوند —
+    // چون '' برای مسیرِ enumدارِ mongoose خطای اعتبارسنجی می‌سازد و خالی‌شدنِ سهوی هم بد است.
+    if ((field.required || field.type === 'select') && !value) return;
     payload[field.path] = value == null ? '' : value;
   });
   return { payload, nameChanged };
