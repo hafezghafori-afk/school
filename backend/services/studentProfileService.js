@@ -605,6 +605,20 @@ async function resolveStudentCore(studentRef) {
       ];
       afghanStudent = afghanStudentRefs.length ? await AfghanStudent.findOne({ $or: afghanStudentRefs }) : null;
     }
+    if (!afghanStudent) {
+      // پلِ مطمئن: عضویتِ صنفی هم studentCore و هم afghanStudent را نگه می‌دارد
+      // (شاگردِ ثبت‌نام‌شده معمولاً linkedUserId ندارد و admissionNo ≠ asasNumber است).
+      const linkedMembership = await StudentMembership.findOne({
+        $or: [
+          { studentId: studentCore._id },
+          ...(user?._id ? [{ student: user._id }] : [])
+        ],
+        afghanStudentId: { $ne: null }
+      }).sort({ isCurrent: -1, updatedAt: -1, createdAt: -1 });
+      if (linkedMembership?.afghanStudentId) {
+        afghanStudent = await AfghanStudent.findById(linkedMembership.afghanStudentId);
+      }
+    }
     return { studentCore, user, afghanStudent };
   }
 
