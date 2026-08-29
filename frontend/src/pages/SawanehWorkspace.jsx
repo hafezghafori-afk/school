@@ -101,6 +101,44 @@ const contactToAddress = (contactInfo = {}) => ({
   villageOrStreet: contactInfo.village || contactInfo.address || ''
 });
 
+// فیلدهای نام که تغییرشان «نمبر مکتوب» می‌خواهد (قاعدهٔ وزارت — بک‌اند هم اجبار می‌کند)
+const STUDENT_NAME_KEYS = [
+  'firstNameDari', 'lastNameDari', 'fatherName', 'grandfatherName',
+  'firstName', 'lastName', 'fatherNameEnglish'
+];
+
+// فیلدهای متنیِ سادهٔ ادیتور (جنسیت/تاریخ تولد/ولایت جدا رندر می‌شوند)
+const STUDENT_EDIT_FIELDS = [
+  ['firstNameDari', 'نام (دری)'], ['lastNameDari', 'تخلص (دری)'],
+  ['fatherName', 'نام پدر'], ['grandfatherName', 'نام پدرکلان'],
+  ['firstName', 'نام (انگلیسی)'], ['lastName', 'تخلص (انگلیسی)'], ['fatherNameEnglish', 'نام پدر (انگلیسی)'],
+  ['nationality', 'تابعیت'], ['birthPlace', 'محل تولد'],
+  ['tazkiraNumber', 'نمبر تذکره'], ['tazkiraVolume', 'جلد تذکره'], ['tazkiraPage', 'صفحهٔ تذکره'],
+  ['fatherOccupation', 'مسلک پدر'], ['fatherResidence', 'محل بودوباش پدر'],
+  ['fatherWorkplace', 'محل وظیفهٔ پدر'], ['fatherLandline', 'تلفن ثابت پدر'], ['fatherPhone', 'موبایل پدر'],
+  ['phone', 'تماس متعلم'], ['mobile', 'موبایل متعلم'],
+  ['district', 'سکونت اصلی — ولسوالی/ناحیه'], ['village', 'سکونت اصلی — قریه/گذر'], ['address', 'آدرس کامل']
+];
+
+const buildStudentDraft = (student = {}) => {
+  const p = student.personalInfo || {};
+  const idn = student.identification || {};
+  const fam = student.familyInfo || {};
+  const ci = student.contactInfo || {};
+  return {
+    firstNameDari: p.firstNameDari || '', lastNameDari: p.lastNameDari || '',
+    fatherName: p.fatherName || '', grandfatherName: p.grandfatherName || '',
+    firstName: p.firstName || '', lastName: p.lastName || '', fatherNameEnglish: p.fatherNameEnglish || '',
+    gender: p.gender || '', nationality: p.nationality || '', birthPlace: p.birthPlace || '',
+    birthDate: p.birthDate ? String(p.birthDate).slice(0, 10) : '',
+    tazkiraNumber: idn.tazkiraNumber || '', tazkiraVolume: idn.tazkiraVolume || '', tazkiraPage: idn.tazkiraPage || '',
+    fatherOccupation: fam.fatherOccupation || '', fatherResidence: fam.fatherResidence || '',
+    fatherWorkplace: fam.fatherWorkplace || '', fatherLandline: fam.fatherLandline || '', fatherPhone: fam.fatherPhone || '',
+    phone: ci.phone || '', mobile: ci.mobile || '',
+    province: ci.province || '', district: ci.district || '', village: ci.village || '', address: ci.address || ''
+  };
+};
+
 const shamsiDate = (value) => {
   if (!value) return '';
   try {
@@ -144,6 +182,12 @@ const SawanehWorkspace = () => {
 
   const [sepDraft, setSepDraft] = useState({ letterNo: '', penaltyAmount: '', penaltyPaid: false });
   const [sepSaving, setSepSaving] = useState(false);
+
+  // ویرایشِ مشخصاتِ خودِ شاگرد از داخلِ سوانح (برای حساب‌هایی که به «مدیریت شاگردان» دسترسی ندارند)
+  const [editStudent, setEditStudent] = useState(false);
+  const [studentDraft, setStudentDraft] = useState(null);
+  const [nameLetterNo, setNameLetterNo] = useState('');
+  const [studentSaving, setStudentSaving] = useState(false);
 
   // تب سوانح تعلیمی
   const [activeTab, setActiveTab] = useState('card');
@@ -357,6 +401,88 @@ const SawanehWorkspace = () => {
       setCardError(err.message || 'خطا در ذخیرهٔ منفکی');
     } finally {
       setSepSaving(false);
+    }
+  };
+
+  const startEditStudent = () => {
+    setStudentDraft(buildStudentDraft(cardStudent || {}));
+    setNameLetterNo('');
+    setCardError('');
+    setEditStudent(true);
+  };
+  const cancelEditStudent = () => {
+    setEditStudent(false);
+    setStudentDraft(null);
+    setNameLetterNo('');
+  };
+  const updateStudentDraft = (patch) => setStudentDraft((prev) => ({ ...prev, ...patch }));
+
+  const studentNameChanged = Boolean(
+    editStudent && studentDraft && cardStudent
+    && STUDENT_NAME_KEYS.some((key) => {
+      const original = buildStudentDraft(cardStudent)[key] || '';
+      return (studentDraft[key] || '').trim() !== original.trim();
+    })
+  );
+
+  const saveStudent = async () => {
+    if (!cardStudent?._id || !studentDraft) return;
+    if (studentNameChanged && !nameLetterNo.trim()) {
+      setCardError('برای تغییرِ نام/تخلص/نام پدر، «نمبر مکتوب» الزامی است.');
+      return;
+    }
+    setStudentSaving(true);
+    setCardError('');
+    try {
+      const d = studentDraft;
+      const payload = {
+        'personalInfo.grandfatherName': d.grandfatherName.trim(),
+        'personalInfo.fatherNameEnglish': d.fatherNameEnglish.trim(),
+        'personalInfo.nationality': d.nationality.trim() || 'Afghan',
+        'identification.tazkiraVolume': d.tazkiraVolume.trim(),
+        'identification.tazkiraPage': d.tazkiraPage.trim(),
+        'familyInfo.fatherOccupation': d.fatherOccupation.trim(),
+        'familyInfo.fatherResidence': d.fatherResidence.trim(),
+        'familyInfo.fatherWorkplace': d.fatherWorkplace.trim(),
+        'familyInfo.fatherLandline': d.fatherLandline.trim(),
+        'familyInfo.fatherPhone': d.fatherPhone.trim(),
+        'contactInfo.phone': d.phone.trim(),
+        'contactInfo.mobile': d.mobile.trim(),
+        'contactInfo.village': d.village.trim()
+      };
+      // فیلدهای الزامیِ مدل: فقط وقتی مقدار دارند فرستاده شوند تا خالی‌کردنِ سهویْ خطای اعتبارسنجی نسازد
+      const setRequired = (key, value) => { if (String(value || '').trim()) payload[key] = String(value).trim(); };
+      setRequired('personalInfo.firstNameDari', d.firstNameDari);
+      setRequired('personalInfo.lastNameDari', d.lastNameDari);
+      setRequired('personalInfo.firstName', d.firstName || d.firstNameDari);
+      setRequired('personalInfo.lastName', d.lastName || d.lastNameDari);
+      setRequired('personalInfo.fatherName', d.fatherName);
+      setRequired('personalInfo.gender', d.gender);
+      setRequired('personalInfo.birthPlace', d.birthPlace);
+      setRequired('personalInfo.birthDate', d.birthDate);
+      setRequired('identification.tazkiraNumber', d.tazkiraNumber);
+      setRequired('contactInfo.province', d.province);
+      setRequired('contactInfo.district', d.district);
+      setRequired('contactInfo.address', d.address);
+      if (studentNameChanged) payload.nameCorrectionLetterNo = nameLetterNo.trim();
+
+      const res = await fetch(`${API_BASE}/api/afghan-students/${cardStudent._id}`, {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.message || 'ذخیرهٔ مشخصات شاگرد ناموفق بود');
+      flash('مشخصات شاگرد ذخیره شد.');
+      setEditStudent(false);
+      setStudentDraft(null);
+      setNameLetterNo('');
+      await loadCard(selectedId);
+      fetchList();
+    } catch (err) {
+      setCardError(err.message || 'خطا در ذخیرهٔ مشخصات شاگرد');
+    } finally {
+      setStudentSaving(false);
     }
   };
 
@@ -743,19 +869,91 @@ const SawanehWorkspace = () => {
                 <div className="sw-ro-head">
                   <h3>معلومات از پروندهٔ شاگرد</h3>
                   <div className="sw-ro-head-actions">
-                    <span className="sw-hint">فقط‌خواندنی — از «مدیریت شاگردان» و فورم ثبت‌نام پر می‌شود.</span>
-                    {cardStudent?._id && (
-                      <button
-                        type="button"
-                        className="sw-btn sw-btn-ghost"
-                        onClick={() => window.open(`/student-management/${cardStudent._id}`, '_blank', 'noopener')}
-                      >
-                        ویرایش در مدیریت شاگرد
-                      </button>
+                    {!editStudent && (
+                      <>
+                        <span className="sw-hint">روی پروندهٔ اصلیِ شاگرد ذخیره می‌شود.</span>
+                        <button type="button" className="sw-btn" onClick={startEditStudent}>ویرایش مشخصات</button>
+                        {cardStudent?._id && (
+                          <button
+                            type="button"
+                            className="sw-btn sw-btn-ghost"
+                            onClick={() => window.open(`/student-management/${cardStudent._id}`, '_blank', 'noopener')}
+                          >
+                            بازکردن در مدیریت شاگرد
+                          </button>
+                        )}
+                      </>
+                    )}
+                    {editStudent && (
+                      <>
+                        <button type="button" className="sw-btn sw-btn-primary" onClick={saveStudent} disabled={studentSaving}>
+                          {studentSaving ? 'در حال ذخیره…' : 'ذخیرهٔ مشخصات'}
+                        </button>
+                        <button type="button" className="sw-btn sw-btn-ghost" onClick={cancelEditStudent} disabled={studentSaving}>
+                          انصراف
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
-                {(() => {
+
+                {editStudent && studentDraft && (
+                  <>
+                    <div className="sw-ro-grid sw-ro-edit">
+                      {STUDENT_EDIT_FIELDS.map(([key, label]) => (
+                        <label className="sw-ro-item" key={key}>
+                          <span className="sw-ro-label">{label}</span>
+                          <input
+                            type="text"
+                            value={studentDraft[key]}
+                            onChange={(event) => updateStudentDraft({ [key]: event.target.value })}
+                          />
+                        </label>
+                      ))}
+                      <label className="sw-ro-item">
+                        <span className="sw-ro-label">جنسیت</span>
+                        <select value={studentDraft.gender} onChange={(event) => updateStudentDraft({ gender: event.target.value })}>
+                          <option value="">—</option>
+                          <option value="male">ذکور</option>
+                          <option value="female">اناث</option>
+                        </select>
+                      </label>
+                      <label className="sw-ro-item">
+                        <span className="sw-ro-label">تاریخ تولد (میلادی)</span>
+                        <input
+                          type="date"
+                          value={studentDraft.birthDate}
+                          onChange={(event) => updateStudentDraft({ birthDate: event.target.value })}
+                        />
+                      </label>
+                      <label className="sw-ro-item">
+                        <span className="sw-ro-label">سکونت اصلی — ولایت</span>
+                        <select value={studentDraft.province} onChange={(event) => updateStudentDraft({ province: event.target.value })}>
+                          <option value="">—</option>
+                          {Object.entries(PROVINCE_LABELS).map(([value, label]) => (
+                            <option key={value} value={value}>{label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    {studentNameChanged && (
+                      <label className="sw-ro-letter">
+                        <span>نمبر مکتوبِ اصلاح شهرت (الزامی)</span>
+                        <input
+                          type="text"
+                          value={nameLetterNo}
+                          onChange={(event) => setNameLetterNo(event.target.value)}
+                          placeholder="نمبر و تاریخِ مکتوب رسمی"
+                        />
+                      </label>
+                    )}
+                    <p className="sw-hint">
+                      تغییرِ نام/تخلص/نام پدر بدون «نمبر مکتوب» ثبت نمی‌شود و به‌صورت خودکار در «اصلاح شهرت» کارت درج می‌گردد.
+                    </p>
+                  </>
+                )}
+
+                {!editStudent && (() => {
                   const p = cardStudent?.personalInfo || {};
                   const idn = cardStudent?.identification || {};
                   const fam = cardStudent?.familyInfo || {};
