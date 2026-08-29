@@ -2,10 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './Dashboard.css';
 import '../components/dashboard/dashboard.css';
-import './InstructorDashboard.css';
-import DashboardProfileCard from '../components/DashboardProfileCard';
-import NotificationBell from '../components/NotificationBell';
 import QuickActionRail from '../components/dashboard/QuickActionRail';
+import DashboardTopbar from '../components/dashboard/DashboardTopbar';
+import KpiRingCard from '../components/dashboard/KpiRingCard';
 
 import { API_BASE } from '../config/api';
 import { formatAfghanDate, formatAfghanDateTime } from '../utils/afghanDate';
@@ -387,13 +386,13 @@ export default function InstructorDashboard() {
   };
 
   const teacherQuickActions = [
-    { to: '/attendance-manager', label: 'ثبت حضور', caption: 'حاضری روزانه صنف‌ها', tone: 'teal' },
-    { to: '/grade-manager', label: 'وارد کردن نمره', caption: 'ثبت نمره و نتایج', tone: 'mint' },
-    { to: '/chat?tab=direct', label: 'چت', caption: 'چت مستقیم و گروهی صنف', tone: 'copper' },
-    { to: '/chat?tab=live', label: 'صنف‌های آنلاین', caption: 'جلسات آنلاین و لینک‌های صنف', tone: 'teal' },
-    { to: '/recordings', label: 'آرشیف ضبط جلسات', caption: 'بازبینی جلسه‌های ثبت‌شده', tone: 'slate' },
-    { to: '/homework-manager', label: 'کارخانگی', caption: 'مدیریت تکالیف و تحویل‌ها', tone: 'slate' },
-    { to: '/quiz-builder', label: 'ایجاد امتحان', caption: 'ساخت امتحان و کوییز', tone: 'copper' }
+    { to: '/attendance-manager', label: 'ثبت حضور', caption: 'حاضری روزانه صنف‌ها', tone: 'teal', icon: 'fa-clipboard-check' },
+    { to: '/grade-manager', label: 'وارد کردن نمره', caption: 'ثبت نمره و نتایج', tone: 'mint', icon: 'fa-file-signature' },
+    { to: '/chat?tab=direct', label: 'چت صنفی', caption: 'چت مستقیم و گروهی صنف', tone: 'copper', icon: 'fa-comments' },
+    { to: '/chat?tab=live', label: 'صنف‌های آنلاین', caption: 'جلسات آنلاین و لینک‌های صنف', tone: 'teal', icon: 'fa-video' },
+    { to: '/recordings', label: 'آرشیف ضبط جلسات', caption: 'بازبینی جلسه‌های ثبت‌شده', tone: 'slate', icon: 'fa-clock-rotate-left' },
+    { to: '/homework-manager', label: 'کارخانگی', caption: 'مدیریت تکالیف و تحویل‌ها', tone: 'slate', icon: 'fa-book' },
+    { to: '/quiz-builder', label: 'ایجاد امتحان', caption: 'ساخت امتحان و کوییز', tone: 'copper', icon: 'fa-square-poll-vertical' }
   ];
 
   const teacherAlerts = (teacherDashboard?.alerts || []).map((item) => ({
@@ -404,22 +403,41 @@ export default function InstructorDashboard() {
 
   return (
     <section className="dash-page instructor-dash-page">
+      <DashboardTopbar
+        crumb="داشبورد استاد"
+        tone="teal"
+        user={user}
+        fallbackName={getName()}
+        apiBase={API_BASE}
+        notificationTitle="اعلان‌های استاد"
+        notificationPanelPath="/instructor-dashboard"
+      />
+
       <div className="dash-hero">
         <div>
+          <span className="dashboard-hero-kicker">
+            داشبورد استاد • صنوف واگذارشده: {Number(myCourses.length || 0).toLocaleString('fa-AF-u-ca-persian')}
+          </span>
           <h2>داشبورد استاد</h2>
           <p>
             {`خوش آمدید ${user?.name || getName()}. در این صفحه فقط ابزارهای ضروری روزانه، برنامه امروز،
             صنف‌های واگذارشده، وضعیت حضور هفتگی و وظایف رسمی شما نمایش داده می‌شود.`}
           </p>
-          <div className="dash-meta">
-            <span>آخرین ورود: {lastLogin ? toFaDateTime(lastLogin) : 'ثبت نشده'}</span>
-            <span>حساب کاربری: {user?.email || 'استاد'}</span>
+          <div className="dashboard-hero-meta">
+            <div className="dashboard-meta-chip">آخرین ورود<b>{lastLogin ? toFaDateTime(lastLogin) : 'ثبت نشده'}</b></div>
+            <div className="dashboard-meta-chip">حساب کاربری<b>{user?.email || 'استاد'}</b></div>
           </div>
         </div>
 
-        <div className="dash-hero-actions">
-          <NotificationBell title="اعلان‌های استاد" panelPath="/instructor-dashboard" />
-          <DashboardProfileCard user={user} fallbackName={getName()} apiBase={API_BASE} variant="dropdown" />
+        <div className="dashboard-hero-side">
+          <div className="dashboard-date-pill">
+            <i className="fa-regular fa-calendar" aria-hidden="true" />
+            {formatAfghanDate(new Date(), { weekday: 'long', day: 'numeric', month: 'long' })}
+          </div>
+          <div className="dashboard-hero-btn-row">
+            <Link className="dashboard-hero-btn ghost" to="/grade-manager">ثبت نمرات</Link>
+            <Link className="dashboard-hero-btn primary" to="/attendance-manager">ثبت حضور امروز</Link>
+          </div>
         </div>
       </div>
 
@@ -436,20 +454,49 @@ export default function InstructorDashboard() {
 
       <div className="dash-stats">
         <div>
-          <span>برنامه‌های امروز</span>
-          <strong>{Number(todayScheduleCount || 0).toLocaleString('fa-AF-u-ca-persian')}</strong>
+          <KpiRingCard
+            label="برنامه‌های امروز"
+            value={`${Number(todayScheduleCount || 0).toLocaleString('fa-AF-u-ca-persian')} جلسه`}
+            hint="تقسیم اوقات منتشرشده امروز"
+            progress={todayScheduleCount > 0 ? 100 : 0}
+            tone="teal"
+          />
         </div>
         <div>
-          <span>صنف‌های فعال</span>
-          <strong>{Number(teacherSummary.activeClasses || 0).toLocaleString('fa-AF-u-ca-persian')}</strong>
+          <KpiRingCard
+            label="صنف‌های فعال"
+            value={`${Number(teacherSummary.activeClasses || 0).toLocaleString('fa-AF-u-ca-persian')} صنف`}
+            hint="صنوف واگذارشده به شما"
+            progress={Number(teacherSummary.activeClasses || 0) > 0 ? 100 : 0}
+            tone="mint"
+          />
         </div>
         <div>
-          <span>متعلمین فعال</span>
-          <strong>{Number(teacherSummary.activeStudents || 0).toLocaleString('fa-AF-u-ca-persian')}</strong>
+          <KpiRingCard
+            label="متعلمین فعال"
+            value={`${Number(teacherSummary.activeStudents || 0).toLocaleString('fa-AF-u-ca-persian')} نفر`}
+            hint="در صنوف واگذارشده"
+            progress={Number(teacherSummary.activeStudents || 0) > 0 ? 100 : 0}
+            tone="slate"
+          />
         </div>
         <div>
-          <span>وظایف رسمی باز</span>
-          <strong>{Number(officialTaskCount || 0).toLocaleString('fa-AF-u-ca-persian')}</strong>
+          <KpiRingCard
+            label="وظایف رسمی باز"
+            value={`${Number(officialTaskCount || 0).toLocaleString('fa-AF-u-ca-persian')} مورد`}
+            hint={officialTaskCount ? 'نیازمند اقدام شما' : 'صف کارها تمیز است'}
+            progress={officialTaskCount > 0 ? 100 : 0}
+            tone="copper"
+          />
+        </div>
+        <div>
+          <KpiRingCard
+            label="نرخ حضور هفتگی"
+            value={`${Number(weeklyAttendanceSummary?.attendanceRate || 0).toLocaleString('fa-AF-u-ca-persian')}٪`}
+            hint="میانگین صنف انتخاب‌شده"
+            progress={Number(weeklyAttendanceSummary?.attendanceRate || 0)}
+            tone="teal"
+          />
         </div>
       </div>
 

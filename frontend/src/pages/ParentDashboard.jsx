@@ -2,9 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import './Dashboard.css';
 import '../components/dashboard/dashboard.css';
-import DashboardProfileCard from '../components/DashboardProfileCard';
-import NotificationBell from '../components/NotificationBell';
 import DashboardShell from '../components/dashboard/DashboardShell';
+import DashboardTopbar from '../components/dashboard/DashboardTopbar';
 import KpiRingCard from '../components/dashboard/KpiRingCard';
 import QuickActionRail from '../components/dashboard/QuickActionRail';
 import TaskAlertPanel from '../components/dashboard/TaskAlertPanel';
@@ -13,6 +12,7 @@ import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { downloadBlob, errorMessage, fetchBlob } from './adminWorkspaceUtils';
 import { formatFinanceCode } from '../utils/latinFinanceCode';
+import { formatAfghanDate } from '../utils/afghanDate';
 
 const ORDER_STATUS_LABELS = {
   new: 'پرداخت نشده',
@@ -542,18 +542,18 @@ export default function ParentDashboard() {
 
   const quickActions = role === 'parent'
     ? [
-        { to: `${location.pathname}${location.search}#finance`, label: 'وضعیت فیس', caption: 'بدهی، رسید و باقی‌مانده', tone: 'copper' },
-        { to: `${location.pathname}${location.search}#finance-workbench`, label: 'بل‌ها و رسیدها', caption: 'پیگیری آخرین حرکت‌های مالی', tone: 'teal' },
-        { to: `${location.pathname}${location.search}#attendance`, label: 'حاضری و پیشرفت', caption: 'حضور، نمرات و درس‌های امروز', tone: 'mint' },
-        { to: `${location.pathname}${location.search}#reliefs`, label: 'تسهیلات مالی', caption: 'بورسیه، تخفیف و حمایت', tone: 'mint' },
-        { to: `${location.pathname}${location.search}#tasks`, label: 'کارهای باز', caption: 'هشدارها و پیگیری‌ها', tone: 'slate' },
-        { to: '/profile', label: 'پروفایل', caption: 'حساب کاربری و رمز عبور', tone: 'teal' }
+        { to: `${location.pathname}${location.search}#finance`, label: 'وضعیت فیس', caption: 'بدهی، رسید و باقی‌مانده', tone: 'copper', icon: 'fa-wallet' },
+        { to: `${location.pathname}${location.search}#finance-workbench`, label: 'بل‌ها و رسیدها', caption: 'پیگیری آخرین حرکت‌های مالی', tone: 'teal', icon: 'fa-file-invoice' },
+        { to: `${location.pathname}${location.search}#attendance`, label: 'حاضری و پیشرفت', caption: 'حضور، نمرات و درس‌های امروز', tone: 'mint', icon: 'fa-clipboard-check' },
+        { to: `${location.pathname}${location.search}#reliefs`, label: 'تسهیلات مالی', caption: 'بورسیه، تخفیف و حمایت', tone: 'mint', icon: 'fa-hand-holding-heart' },
+        { to: `${location.pathname}${location.search}#tasks`, label: 'کارهای باز', caption: 'هشدارها و پیگیری‌ها', tone: 'slate', icon: 'fa-list-check' },
+        { to: '/profile', label: 'پروفایل', caption: 'حساب کاربری و رمز عبور', tone: 'teal', icon: 'fa-user' }
       ]
     : [
-        { to: '/student-report', label: 'گزارش شاگرد', caption: 'مرکز گزارش شاگردان', tone: 'teal' },
-        { to: '/admin-finance', label: 'مرکز مالی', caption: 'پیگیری فیس و پرداخت', tone: 'copper' },
-        { to: '/admin-reports', label: 'گزارش‌های مدیریتی', caption: 'تحلیل و خروجی', tone: 'mint' },
-        { to: '/profile', label: 'حساب کاربری', caption: 'تنظیمات حساب', tone: 'slate' }
+        { to: '/student-report', label: 'گزارش شاگرد', caption: 'مرکز گزارش شاگردان', tone: 'teal', icon: 'fa-id-card' },
+        { to: '/admin-finance', label: 'مرکز مالی', caption: 'پیگیری فیس و پرداخت', tone: 'copper', icon: 'fa-wallet' },
+        { to: '/admin-reports', label: 'گزارش‌های مدیریتی', caption: 'تحلیل و خروجی', tone: 'mint', icon: 'fa-chart-column' },
+        { to: '/profile', label: 'حساب کاربری', caption: 'تنظیمات حساب', tone: 'slate', icon: 'fa-user' }
       ];
 
   const stats = (
@@ -616,46 +616,66 @@ export default function ParentDashboard() {
   );
 
   const hero = (
-    <div className="dash-hero">
-      <div>
-        <h2>داشبورد والدین و سرپرستان</h2>
-        <p>
-          {dashboard?.setupNeeded
-            ? (dashboard?.message || 'برای این حساب هنوز متعلمی وصل نشده است. از دفتر گزارش شاگرد، حساب والد را به متعلم وصل کنید.')
-            : `سلام ${getName()}، وضعیت آموزشی و مالی ${linkedStudent?.name || 'متعلم'} را به شکل یک‌جا ببینید و موارد مهم را سریع پیگیری کنید.`}
-        </p>
-        <div className="dash-meta">
-          <span>متعلم فعال: {linkedStudent?.name || '—'}</span>
-          <span>صنف: {linkedStudent?.classTitle || '—'}</span>
-          <span>سال تعلیمی: {linkedStudent?.academicYearTitle || '—'}</span>
-          <span>رابطه: {linkedStudent?.relation || '—'}</span>
+    <>
+      <DashboardTopbar
+        crumb="داشبورد والدین"
+        tone="mint"
+        user={parentUser}
+        fallbackName={getName()}
+        apiBase={API_BASE}
+        notificationTitle="اعلان‌های والدین"
+        notificationPanelPath="/parent-dashboard"
+      />
+
+      <div className="dash-hero">
+        <div>
+          <span className="dashboard-hero-kicker">
+            داشبورد والدین/سرپرستان{linkedStudent?.name ? ` • متعلم: ${linkedStudent.name}` : ''}
+          </span>
+          <h2>داشبورد والدین و سرپرستان</h2>
+          <p>
+            {dashboard?.setupNeeded
+              ? (dashboard?.message || 'برای این حساب هنوز متعلمی وصل نشده است. از دفتر گزارش شاگرد، حساب والد را به متعلم وصل کنید.')
+              : `سلام ${getName()}، وضعیت آموزشی و مالی ${linkedStudent?.name || 'متعلم'} را به شکل یک‌جا ببینید و موارد مهم را سریع پیگیری کنید.`}
+          </p>
+          <div className="dashboard-hero-meta">
+            <div className="dashboard-meta-chip">متعلم فعال<b>{linkedStudent?.name || '—'}</b></div>
+            <div className="dashboard-meta-chip">صنف<b>{linkedStudent?.classTitle || '—'}</b></div>
+            <div className="dashboard-meta-chip">سال تعلیمی<b>{linkedStudent?.academicYearTitle || '—'}</b></div>
+            <div className="dashboard-meta-chip">رابطه<b>{linkedStudent?.relation || '—'}</b></div>
+          </div>
+        </div>
+
+        <div className="dashboard-hero-side">
+          <div className="dashboard-date-pill">
+            <i className="fa-regular fa-calendar" aria-hidden="true" />
+            {formatAfghanDate(new Date(), { weekday: 'long', day: 'numeric', month: 'long' })}
+          </div>
+          <div className="dashboard-hero-btn-row">
+            <Link className="dashboard-hero-btn ghost" to={`${location.pathname}${location.search}#tasks`}>کارهای باز</Link>
+            <Link className="dashboard-hero-btn primary" to={`${location.pathname}${location.search}#finance`}>وضعیت فیس</Link>
+          </div>
+          {linkedStudents.length > 1 ? (
+            <label className="dash-form-grid">
+              <span className="muted">انتخاب متعلم</span>
+              <select value={buildStudentTarget(linkedStudent)} onChange={handleStudentChange}>
+                {linkedStudents.map((item) => (
+                  <option key={buildStudentTarget(item)} value={buildStudentTarget(item)}>
+                    {item.name}{item.classTitle ? ` - ${item.classTitle}` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {!loading && dashboard?.message ? <div className="dash-note">{dashboard.message}</div> : null}
+          {role !== 'parent' ? (
+            <Link className="dash-btn ghost" to="/student-report">
+              بازگشت به گزارش شاگرد
+            </Link>
+          ) : null}
         </div>
       </div>
-      <div className="dash-hero-actions dash-form-grid">
-        <div className="parent-dashboard-toolbar">
-          <NotificationBell apiBase={API_BASE} title="اعلان‌های والدین" panelPath="/parent-dashboard" />
-          <DashboardProfileCard user={parentUser} fallbackName={getName()} apiBase={API_BASE} variant="dropdown" />
-        </div>
-        {linkedStudents.length > 1 ? (
-          <label className="dash-form-grid">
-            <span className="muted">انتخاب متعلم</span>
-            <select value={buildStudentTarget(linkedStudent)} onChange={handleStudentChange}>
-              {linkedStudents.map((item) => (
-                <option key={buildStudentTarget(item)} value={buildStudentTarget(item)}>
-                  {item.name}{item.classTitle ? ` - ${item.classTitle}` : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-        {!loading && dashboard?.message ? <div className="dash-note">{dashboard.message}</div> : null}
-        {role !== 'parent' ? (
-          <Link className="dash-btn ghost" to="/student-report">
-            بازگشت به گزارش شاگرد
-          </Link>
-        ) : null}
-      </div>
-    </div>
+    </>
   );
 
   const main = (
