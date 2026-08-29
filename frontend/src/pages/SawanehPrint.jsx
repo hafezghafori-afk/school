@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import useSiteSettings from '../hooks/useSiteSettings';
-import { normalizeBrandName, normalizeBrandSubtitle } from '../utils/brand';
+import { normalizeBrandName } from '../utils/brand';
 import { getOfficialPrintLogoImageClass, getPrintLogoUrls } from '../utils/printLogos';
 import { formatAfghanStoredDateLabel } from '../utils/afghanDate';
 import { API_BASE } from '../config/api';
@@ -56,19 +56,20 @@ const Field = ({ label, value }) => (
   </div>
 );
 
-const Letterhead = ({ settings, title }) => {
+const Letterhead = ({ settings }) => {
   const { schoolLogoUrl, ministryLogoUrl } = getPrintLogoUrls(settings || {});
-  const brandName = normalizeBrandName(settings?.brandName);
-  const brandSubtitle = normalizeBrandSubtitle(settings?.brandSubtitle);
+  const schoolName = normalizeBrandName(settings?.brandName) || 'اناثیه ایمان';
   return (
     <header className="sp-letterhead">
       <div className="sp-logo">
         {schoolLogoUrl ? <img className={getOfficialPrintLogoImageClass(schoolLogoUrl)} src={schoolLogoUrl} alt="" /> : <span>لوگو مکتب</span>}
       </div>
       <div className="sp-letterhead-text">
-        <strong>امارت اسلامی افغانستان — وزارت معارف</strong>
-        <span>{brandName}{brandSubtitle ? ` — ${brandSubtitle}` : ''}</span>
-        <span className="sp-doc-title">{title}</span>
+        <span>امارت اسلامی افغانستان</span>
+        <span>وزارت معارف</span>
+        <span>ریاست معارف شهر کابل</span>
+        <span>{`مدیریت مدرسه ${schoolName}`}</span>
+        <strong className="sp-doc-title">کارت سوانح متعلمین / محصلین</strong>
       </div>
       <div className="sp-logo">
         {ministryLogoUrl ? <img className={getOfficialPrintLogoImageClass(ministryLogoUrl)} src={ministryLogoUrl} alt="" /> : <span>لوگو وزارت</span>}
@@ -97,7 +98,7 @@ const CardSheet = ({ settings, student, card, blank }) => {
 
   return (
     <section className="sp-sheet">
-      <Letterhead settings={settings} title="کارت سوانح متعلمی / محصلی" />
+      <Letterhead settings={settings} />
 
       <div className="sp-row-top">
         <div className="sp-grid sp-grow">
@@ -301,7 +302,8 @@ const TranscriptSheet = ({ settings, student, transcripts, blank }) => {
 
   return (
     <section className="sp-sheet sp-bsheet">
-      <Letterhead settings={settings} title="نتیجه امتحانات متعلم — سوانح تعلیمی" />
+      <Letterhead settings={settings} />
+      <div className="sp-btitle">نتیجه امتحانات متعلم</div>
 
       <div className="sp-bhead">
         <span>نام متعلم: <b>{[p.firstNameDari, p.lastNameDari].filter(Boolean).join(' ') || '—'}</b></span>
@@ -362,21 +364,20 @@ const TranscriptSheet = ({ settings, student, transcripts, blank }) => {
 
       <div className="sp-bsign">
         <span className="sp-sign-cell"><span className="sp-sign-line" />امضای نگران</span>
-        <span className="sp-sign-cell"><span className="sp-sign-line" />امضای معلم و مهر مکتب</span>
+        <span className="sp-sign-cell"><span className="sp-sign-line" />امضای سرمعلم و مهر مکتب</span>
       </div>
 
-      <h3 className="sp-bnotes-title">توضیحات در مورد امتحانات متعلم</h3>
+      <div className="sp-bnotes-title">توضیحات در مورد امتحانات متعلم</div>
       <table className="sp-btable sp-bnotes">
         <tbody>
-          {NOTE_PAIRS.map(([a, b]) => {
-            const t = blank ? null : (byGrade.get(a) || byGrade.get(b));
-            return (
-              <tr key={a}>
-                <td className="sp-bnote-label">{`${gradeLabel(a)} / ${gradeLabel(b)}`}</td>
-                <td className="sp-bnote-text">{t?.examNotes || ''}</td>
-              </tr>
-            );
-          })}
+          {NOTE_PAIRS.map(([a, b]) => (
+            <tr key={a}>
+              <td className="sp-bnote-label">{gradeLabel(a)}</td>
+              <td className="sp-bnote-text">{blank ? '' : (byGrade.get(a)?.examNotes || '')}</td>
+              <td className="sp-bnote-label">{gradeLabel(b)}</td>
+              <td className="sp-bnote-text">{blank ? '' : (byGrade.get(b)?.examNotes || '')}</td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </section>

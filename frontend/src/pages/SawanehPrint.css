@@ -65,33 +65,41 @@
 /* ---------- letterhead ---------- */
 .sp-letterhead {
   display: grid;
-  grid-template-columns: 60px 1fr 60px;
+  grid-template-columns: 46px 1fr 46px;
   align-items: center;
-  gap: 10px;
-  border-bottom: 2px solid var(--sp-ink);
-  padding-bottom: 8px;
-  margin-bottom: 10px;
+  gap: 8px;
+  border-bottom: 1.5px solid var(--sp-ink);
+  padding-bottom: 5px;
+  margin-bottom: 6px;
   text-align: center;
 }
 .sp-logo {
-  width: 60px;
-  height: 60px;
+  width: 46px;
+  height: 46px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 7pt;
+  font-size: 6pt;
   color: var(--sp-muted);
   border: 1px dashed #bbb;
 }
 .sp-logo img { max-width: 100%; max-height: 100%; }
-.sp-letterhead-text { display: flex; flex-direction: column; gap: 2px; }
-.sp-letterhead-text strong { font-size: 12pt; }
-.sp-letterhead-text span { font-size: 9pt; color: var(--sp-muted); }
+.sp-letterhead-text { display: flex; flex-direction: column; gap: 1px; }
+.sp-letterhead-text span { font-size: 8.5pt; color: var(--sp-ink); line-height: 1.25; }
 .sp-doc-title {
-  margin-top: 4px;
-  font-size: 12pt !important;
+  margin-top: 2px;
+  font-size: 10.5pt;
   font-weight: 800;
-  color: var(--sp-ink) !important;
+  color: var(--sp-ink);
+}
+.sp-btitle {
+  text-align: center;
+  font-weight: 800;
+  font-size: 11pt;
+  border: 1px solid var(--sp-ink);
+  background: #f0efe9;
+  padding: 2px 0;
+  margin-bottom: 4px;
 }
 
 /* ---------- fields ---------- */
@@ -179,9 +187,9 @@
 .sp-bhead {
   display: flex;
   flex-wrap: wrap;
-  gap: 3px 18px;
-  font-size: 9pt;
-  margin-bottom: 6px;
+  gap: 2px 16px;
+  font-size: 8pt;
+  margin-bottom: 4px;
 }
 
 .sp-btable-wrap { width: 100%; }
@@ -190,53 +198,62 @@
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
-  font-size: 6.6pt;
-  line-height: 1.15;
+  font-size: 5.9pt;
+  line-height: 1.1;
 }
 .sp-btable th,
 .sp-btable td {
-  border: 0.5pt solid var(--sp-ink);
-  padding: 1px 1.5px;
+  border: 0.4pt solid var(--sp-ink);
+  padding: 0.6px 1px;
   text-align: center;
   vertical-align: middle;
   overflow: hidden;
   word-break: break-word;
 }
 .sp-btable thead th { background: #f0efe9; font-weight: 700; }
-.sp-bcol-subj { width: 30mm; }
-.sp-bcol-grade { width: 10mm; }
-.sp-bcol-note { width: 16mm; }
-.sp-bsubj { text-align: right !important; font-weight: 600; padding-right: 3px !important; }
-.sp-bmeta { font-weight: 400 !important; font-size: 5.6pt; height: 12mm; }
+.sp-bcol-subj { width: 29mm; }
+.sp-bcol-grade { width: 10.4mm; }
+.sp-bcol-note { width: 15mm; }
+.sp-bsubj { text-align: right !important; font-weight: 600; padding-right: 2px !important; }
+.sp-bmeta { font-weight: 400 !important; font-size: 5.2pt; height: 5mm; }
 .sp-bgradehdr th { background: #e7ede9; font-weight: 800; }
 .sp-btable .sp-bsum td { background: #f7f6f1; font-weight: 700; }
 .sp-btable .sp-batt td { background: #fafafa; }
+.sp-btable tbody td { height: 4mm; }
 
 .sp-bsign {
   display: flex;
   justify-content: space-between;
-  gap: 20mm;
-  margin-top: 14px;
+  gap: 18mm;
+  margin-top: 8px;
 }
 .sp-sign-cell {
   flex: 1;
   text-align: center;
-  font-size: 9pt;
+  font-size: 8.5pt;
 }
-.sp-sign-cell .sp-sign-line { margin-top: 16px; }
+.sp-sign-cell .sp-sign-line { margin-top: 12px; }
 
 .sp-bnotes-title {
-  margin: 12px 0 4px;
-  font-size: 10pt;
+  margin: 8px 0 3px;
+  font-size: 9pt;
+  font-weight: 800;
 }
-.sp-bnotes { font-size: 8.5pt; }
-.sp-bnote-label { width: 26mm; background: #f0efe9; font-weight: 700; white-space: nowrap; }
-.sp-bnote-text { text-align: right !important; height: 9mm; }
+.sp-bnotes { font-size: 7.5pt; }
+.sp-bnote-label { width: 13mm; background: #f0efe9; font-weight: 700; white-space: nowrap; }
+.sp-bnote-text { text-align: right !important; height: 6mm; }
 
 /* ---------- print ---------- */
-@page { size: A4 portrait; margin: 10mm; }
+@page { size: A4 portrait; margin: 6mm; }
 
 @media print {
+  html, body { background: #fff !important; }
+  /* hide the app shell chrome so only the sheet prints */
+  [class*="api-health"],
+  header.site-header, .site-header, .topbar,
+  footer, .site-footer, .app-footer,
+  .route-loading { display: none !important; }
+
   .sawaneh-print { background: #fff; padding: 0; }
   .no-print { display: none !important; }
   .sp-sheet {
@@ -245,11 +262,11 @@
     width: auto;
     min-height: auto;
     padding: 0;
-    page-break-after: always;
   }
-  .sp-sheet:last-child { page-break-after: auto; }
+  .sp-sheet + .sp-sheet { page-break-before: always; }
   .sp-table { page-break-inside: auto; }
   .sp-table tr { page-break-inside: avoid; }
-  .sp-bsheet { page-break-after: auto; }
-  .sp-btable { page-break-inside: avoid; }
+  /* Form B must fit exactly one A4 page */
+  .sp-bsheet { page-break-inside: avoid; page-break-after: auto; }
+  .sp-bsheet .sp-btable tr { page-break-inside: avoid; }
 }
