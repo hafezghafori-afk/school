@@ -15,7 +15,7 @@ const AcademyExpenseCategory = require('../models/AcademyExpenseCategory');
 const AcademyAttendance = require('../models/AcademyAttendance');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
-const { buildShamsiMonthlyReport, currentShamsiMonthRange } = require('../utils/shamsiMonthlyReport');
+const { buildShamsiMonthlyReport, currentShamsiMonthRange, lastShamsiMonthKeys } = require('../utils/shamsiMonthlyReport');
 
 const router = express.Router();
 
@@ -505,12 +505,56 @@ router.get('/reports/overview', async (_req, res) => {
     const courseIds = byCourse.map((item) => item._id).filter(Boolean);
     const courses = await AcademyCourse.find({ _id: { $in: courseIds } }).select('name').lean();
     const courseMap = new Map(courses.map((item) => [String(item._id), item.name]));
+
+    // "یادآوری فیس ماه جاری": every active registration that still carries a
+    // balance AND has taken no payment inside the current Shamsi month - i.e.
+    // the students to chase this month. paidAt is stored Gregorian, so match
+    // against the current Shamsi month's Gregorian [start, end) window.
+    const currentMonthKey = lastShamsiMonthKeys(1)[0];
+    const { start: monthStart, endExclusive: monthEnd } = currentShamsiMonthRange();
+    const monthStartDate = new Date(`${monthStart}T00:00:00.000Z`);
+    const monthEndDate = new Date(`${monthEnd}T00:00:00.000Z`);
+    const [outstandingRegs, paidThisMonthAgg, lastPaymentAgg] = await Promise.all([
+      AcademyRegistration.find({ balance: { $gt: 0 }, status: 'active' })
+        .sort({ balance: -1 })
+        .limit(500)
+        .populate('studentId', 'fullName studentCode phone guardianPhone')
+        .populate('courseId', 'name')
+        .populate('classId', 'name')
+        .lean(),
+      AcademyPayment.aggregate([
+        { $match: { paidAt: { $gte: monthStartDate, $lt: monthEndDate } } },
+        { $group: { _id: '$registrationId', paidThisMonth: { $sum: '$amount' } } }
+      ]),
+      AcademyPayment.aggregate([
+        { $group: { _id: '$registrationId', lastPaymentAt: { $max: '$paidAt' } } }
+      ])
+    ]);
+    const paidThisMonthSet = new Set(paidThisMonthAgg.map((item) => String(item._id)));
+    const lastPaymentMap = new Map(lastPaymentAgg.map((item) => [String(item._id), item.lastPaymentAt]));
+    const feeReminders = outstandingRegs
+      .filter((reg) => !paidThisMonthSet.has(String(reg._id)))
+      .map((reg) => ({
+        _id: reg._id,
+        studentId: reg.studentId,
+        courseId: reg.courseId,
+        classId: reg.classId,
+        paymentPlan: reg.paymentPlan,
+        totalPayable: reg.totalPayable,
+        paidAmount: reg.paidAmount,
+        balance: reg.balance,
+        lastPaymentAt: lastPaymentMap.get(String(reg._id)) || null
+      }));
+
     res.json({
       success: true,
       summary,
       debtors,
       byCourse: byCourse.map((item) => ({ ...item, courseName: courseMap.get(String(item._id)) || 'کورس' })),
-      attendanceSummary: byTeacherAttendance
+      attendanceSummary: byTeacherAttendance,
+      feeReminderMonth: currentMonthKey,
+      feeReminderCount: feeReminders.length,
+      feeReminders
     });
   } catch {
     res.status(500).json({ success: false, message: 'گزارش آموزشگاه ناموفق بود.' });

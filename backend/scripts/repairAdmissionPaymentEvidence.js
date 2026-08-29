@@ -1,8 +1,26 @@
 require('dotenv').config();
+const dns = require('dns');
 const mongoose = require('mongoose');
 
 mongoose.set('autoIndex', false);
 mongoose.set('autoCreate', false);
+
+const readFlag = (name) => {
+  for (const token of process.argv.slice(2)) {
+    if (token.startsWith(`--${name}=`)) return token.slice(name.length + 3).trim();
+  }
+  return '';
+};
+
+// Register every model - FeePayment's pre-validate hook (applySchoolOwnership)
+// resolves SchoolClass / AfghanSchool by name, which throws MissingSchemaError
+// if those files were never required.
+const fs = require('node:fs');
+const path = require('node:path');
+const modelsDir = path.join(__dirname, '..', 'models');
+for (const file of fs.readdirSync(modelsDir)) {
+  if (file.endsWith('.js')) require(path.join(modelsDir, file));
+}
 
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
@@ -22,9 +40,17 @@ function buildRepairPaymentNumber(orderId = '') {
 }
 
 async function run() {
-  await mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/school_db', {
+  const dnsServers = readFlag('dns');
+  if (dnsServers) {
+    dns.setServers(dnsServers.split(',').map((s) => s.trim()).filter(Boolean));
+    console.log(`[repair:admission-payment-evidence] DNS servers: ${dns.getServers().join(', ')}`);
+  }
+  const uri = readFlag('uri') || process.env.PROD_MONGO_URI || process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/school_db';
+  console.log(`[repair:admission-payment-evidence] connecting to ${uri.replace(/\/\/[^@]*@/, '//***@')} (${shouldApply ? 'APPLY' : 'dry-run'})`);
+  await mongoose.connect(uri, {
     autoIndex: false,
-    autoCreate: false
+    autoCreate: false,
+    serverSelectionTimeoutMS: 20000
   });
 
   const summary = {
