@@ -94,6 +94,13 @@ const studentSawanehCardSchema = new mongoose.Schema({
   motherTongue: { type: String, enum: ['dari', 'pashto', 'other'], default: 'dari' },
   thirdLanguage: { type: String, default: '', trim: true },
 
+  // ۱۴ — وضع صحیِ متعلم (یک ردیفِ کارت، مطابق فرمِ رسمی)
+  healthStatus: {
+    type: String,
+    enum: ['good', 'needs_followup', 'chronic_condition', ''],
+    default: ''
+  },
+
   // ۱۱ — منفک شدن (آخرین وضعیت + snapshot رویداد)
   separation: {
     isSeparated: { type: Boolean, default: false },

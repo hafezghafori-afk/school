@@ -25,6 +25,11 @@ const RELATION = {
   brother: 'برادر', paternal_uncle: 'کاکا', maternal_uncle: 'ماما',
   paternal_cousin: 'پسر کاکا', maternal_cousin: 'پسر ماما', other: 'سایر'
 };
+// اقاربِ فرمِ رسمی — ۵ ستونِ ثابت به همان ترتیب
+const RELATIVES_5 = [
+  ['brother', 'برادر'], ['paternal_uncle', 'کاکا'], ['maternal_uncle', 'ماما'],
+  ['paternal_cousin', 'پسر کاکا'], ['maternal_cousin', 'پسر ماما']
+];
 const HEALTH = { good: 'خوب', needs_followup: 'نیازمند پیگیری', chronic_condition: 'بیماری مزمن', '': '' };
 const SEPARATION_REASON = {
   transfer: 'تبدیلی', dropout: 'ترک تحصیل', expulsion: 'اخراج',
@@ -85,74 +90,108 @@ const Signatures = ({ left, right }) => (
   </div>
 );
 
+const splitBirth = (iso, local) => {
+  const label = local || (iso ? dateLabel(iso) : '');
+  const parts = String(label || '').trim().split(/\s+/);
+  if (parts.length === 3) return { year: parts[0], month: parts[1], day: parts[2] };
+  return { year: label, month: '', day: '' };
+};
+
 const CardSheet = ({ settings, student, card, blank }) => {
   const p = student?.personalInfo || {};
-  const id = student?.identification || {};
+  const idn = student?.identification || {};
   const fam = student?.familyInfo || {};
   const contact = student?.contactInfo || {};
-  const b = (v) => (blank ? '' : v);
+  const b = (v) => (blank ? '' : (v ?? ''));
   const origin = card?.originAddress || {};
   const current = card?.currentSameAsOrigin ? origin : (card?.currentAddress || {});
   const remarkByGrade = new Map((card?.supervisorRemarks || []).map((r) => [Number(r.grade), r]));
+  const relByRelation = (k) => (card?.relatives || []).find((r) => r.relation === k)?.name || '';
   const sep = card?.separation || {};
+  const bd = splitBirth(p.birthDate);
+  const enroll = blank ? [] : (card?.enrollmentHistory || []);
+  const corrections = blank ? [] : (card?.nameCorrections || []);
+  const padRows = (arr, min) => Array.from({ length: Math.max(0, min - arr.length) });
 
   return (
-    <section className="sp-sheet">
+    <section className="sp-sheet sp-asheet">
       <Letterhead settings={settings} />
+      <div className="sp-btitle">کارت سوانح متعلمین / محصلین</div>
 
-      <div className="sp-row-top">
-        <div className="sp-grid sp-grow">
-          <Field label="نام" value={b([p.firstNameDari, p.lastNameDari].filter(Boolean).join(' '))} />
-          <Field label="نام پدر" value={b(p.fatherName)} />
-          <Field label="نام پدر کلان" value={b(p.grandfatherName)} />
-          <Field label="Name" value={b(p.firstName)} />
-          <Field label="Last name" value={b(p.lastName)} />
-          <Field label="Father name" value={b(p.fatherNameEnglish)} />
-          <Field label="تابعیت" value={b(p.nationality || 'افغان')} />
-          <Field label="جنسیت" value={b(p.gender === 'female' ? 'اناث' : p.gender === 'male' ? 'ذکور' : '')} />
-        </div>
-        <div className="sp-photo">عکس ۳×۴</div>
-      </div>
-
-      <h3>معلومات پدر / ولی</h3>
-      <div className="sp-grid">
-        <Field label="محل بود و باش" value={b(fam.fatherResidence)} />
-        <Field label="وظیفه" value={b(fam.fatherOccupation)} />
-        <Field label="محل وظیفه" value={b(fam.fatherWorkplace)} />
-        <Field label="نمبر تلفن" value={b(fam.fatherLandline)} />
-        <Field label="نمبر مبایل" value={b(fam.fatherPhone)} />
-        <Field label="نمبر تماس خودِ متعلم" value={b(contact.mobile)} />
-      </div>
-
-      <div className="sp-two">
-        <div>
-          <h3>معلومات تذکرهٔ هویت</h3>
+      {/* ۲ و ۳ — شهرت متعلم (راست) + معلومات پدر/ولی و عکس (چپ) */}
+      <div className="sp-two sp-atop">
+        <div className="sp-abox">
+          <div className="sp-abox-h">شهرت متعلم</div>
           <div className="sp-grid sp-grid-3">
-            <Field label="نمبر" value={b(id.tazkiraNumber)} />
-            <Field label="صفحه" value={b(id.tazkiraPage)} />
-            <Field label="جلد" value={b(id.tazkiraVolume)} />
+            <Field label="نام" value={b([p.firstNameDari, p.lastNameDari].filter(Boolean).join(' '))} />
+            <Field label="نام پدر" value={b(p.fatherName)} />
+            <Field label="نام پدر کلان" value={b(p.grandfatherName)} />
+          </div>
+          <div className="sp-abox-h">شهرت متعلم به انگلیسی برویت تذکره</div>
+          <div className="sp-grid sp-grid-3">
+            <Field label="Name" value={b(p.firstName)} />
+            <Field label="Last name" value={b(p.lastName)} />
+            <Field label="Father name" value={b(p.fatherNameEnglish)} />
+          </div>
+          <div className="sp-grid sp-grid-2">
+            <Field label="تابعیت" value={b(p.nationality || 'افغان')} />
+            <Field label="جنسیت" value={b(p.gender === 'female' ? 'اناث' : p.gender === 'male' ? 'ذکور' : '')} />
           </div>
         </div>
-        <div>
-          <h3>تاریخ تولد</h3>
-          <div className="sp-grid">
-            <Field label="تاریخ" value={b(dateLabel(p.birthDate))} />
-            <Field label="محل تولد" value={b(p.birthPlace)} />
+
+        <div className="sp-abox">
+          <div className="sp-abox-h">معلومات در مورد پدر / ولی متعلم</div>
+          <div className="sp-arow-photo">
+            <div className="sp-grid sp-grid-1 sp-grow">
+              <Field label="محل بود و باش" value={b(fam.fatherResidence)} />
+              <Field label="وظیفه" value={b(fam.fatherOccupation)} />
+              <Field label="محل وظیفه" value={b(fam.fatherWorkplace)} />
+              <Field label="نمبر تلفون" value={b(fam.fatherLandline)} />
+              <Field label="نمبر مبایل" value={b(fam.fatherPhone)} />
+              <Field label="نمبر تماس خودِ متعلم" value={b(contact.mobile)} />
+            </div>
+            <div className="sp-photo">عکس<br />۳×۴</div>
           </div>
         </div>
       </div>
 
-      <div className="sp-two">
-        <div>
-          <h3>سکونت اصلی</h3>
+      {/* ۴ — توضیحات در صورت اصلاح شهرت متعلم */}
+      <div className="sp-asec-h">توضیحات در صورت اصلاح شهرت متعلم</div>
+      <table className="sp-table sp-atbl">
+        <thead><tr><th>مورد</th><th>قبلی</th><th>جدید</th><th>نمبر مکتوب</th><th>تاریخ</th></tr></thead>
+        <tbody>
+          {corrections.map((r, i) => (
+            <tr key={i}><td>{r.field}</td><td>{r.oldValue}</td><td>{r.newValue}</td><td>{r.letterNo}</td><td>{dateLabel(r.date, r.dateLocal)}</td></tr>
+          ))}
+          {padRows(corrections, 2).map((_, i) => <tr key={`c${i}`}><td>&nbsp;</td><td /><td /><td /><td /></tr>)}
+        </tbody>
+      </table>
+
+      {/* ۵ و ۶ و ۷ — شمولیت (چپ) + سکونت اصلی/فعلی (راست) */}
+      <div className="sp-two sp-atop">
+        <div className="sp-abox">
+          <div className="sp-abox-h">شمولیت (نمبر اساس متعلم در مکاتب)</div>
+          <table className="sp-table sp-atbl">
+            <thead><tr><th>نام مدرسه</th><th>نمبر اساس</th><th>صنف</th><th>تاریخ</th><th>نمبر مکتوب</th></tr></thead>
+            <tbody>
+              {enroll.map((r, i) => (
+                <tr key={i}>
+                  <td>{r.schoolName}</td><td>{r.asasNumber}</td>
+                  <td>{r.grade ? gradeLabel(r.grade) : ''}</td><td>{dateLabel(r.date, r.dateLocal)}</td><td>{r.letterNo}</td>
+                </tr>
+              ))}
+              {padRows(enroll, 4).map((_, i) => <tr key={`e${i}`}><td>&nbsp;</td><td /><td /><td /><td /></tr>)}
+            </tbody>
+          </table>
+        </div>
+        <div className="sp-abox">
+          <div className="sp-abox-h">سکونت اصلی</div>
           <div className="sp-grid sp-grid-3">
             <Field label="ولایت" value={b(provinceLabel(origin.province))} />
             <Field label="ولسوالی / ناحیه" value={b(origin.district)} />
             <Field label="قریه / گذر" value={b(origin.villageOrStreet)} />
           </div>
-        </div>
-        <div>
-          <h3>سکونت فعلی</h3>
+          <div className="sp-abox-h">سکونت فعلی</div>
           <div className="sp-grid sp-grid-3">
             <Field label="ولایت" value={b(provinceLabel(current.province))} />
             <Field label="ولسوالی / ناحیه" value={b(current.district)} />
@@ -161,82 +200,73 @@ const CardSheet = ({ settings, student, card, blank }) => {
         </div>
       </div>
 
-      <h3>زبان مادری</h3>
+      {/* ۸ و ۹ — معلومات تذکره + تاریخ تولد */}
+      <div className="sp-two sp-atop">
+        <div className="sp-abox">
+          <div className="sp-abox-h">معلومات تذکره هویت متعلم</div>
+          <div className="sp-grid sp-grid-3">
+            <Field label="نمبر" value={b(idn.tazkiraNumber)} />
+            <Field label="صفحه" value={b(idn.tazkiraPage)} />
+            <Field label="جلد" value={b(idn.tazkiraVolume)} />
+          </div>
+        </div>
+        <div className="sp-abox">
+          <div className="sp-abox-h">تاریخ تولد متعلم</div>
+          <div className="sp-grid sp-grid-3">
+            <Field label="روز" value={b(bd.day)} />
+            <Field label="ماه" value={b(bd.month)} />
+            <Field label="سال" value={b(bd.year)} />
+          </div>
+        </div>
+      </div>
+
+      {/* ۱۰ — منفک شدن متعلم */}
+      <div className="sp-asec-h">منفک شدن متعلم</div>
+      <div className="sp-grid sp-grid-5">
+        <Field label="تاریخ" value={b(sep.isSeparated ? dateLabel(sep.date, sep.dateLocal) : '')} />
+        <Field label="نمبر مکتوب" value={b(sep.isSeparated ? sep.letterNo : '')} />
+        <Field label="صنف" value={b(sep.isSeparated && sep.grade ? gradeLabel(sep.grade) : '')} />
+        <Field label="علت" value={b(sep.isSeparated ? (SEPARATION_REASON[sep.reason] || sep.reasonText) : '')} />
+        <Field label="جریمه" value={b(sep.isSeparated && sep.penaltyAmount ? String(sep.penaltyAmount) : '')} />
+      </div>
+
+      {/* ۱۱ — زبان مادری */}
+      <div className="sp-asec-h">زبان مادری</div>
       <div className="sp-grid sp-grid-3">
         <Field label="زبان مادری" value={b(MOTHER_TONGUE[card?.motherTongue] || '')} />
         <Field label="لسان سوم" value={b(card?.thirdLanguage)} />
         <Field label="" value="" />
       </div>
 
-      <h3>اقارب نزدیک متعلم</h3>
-      <table className="sp-table">
-        <thead><tr><th>نسبت</th><th>نام</th><th>نمبر تماس</th><th>ملاحظات</th></tr></thead>
-        <tbody>
-          {(blank ? [] : (card?.relatives || [])).map((r, i) => (
-            <tr key={i}><td>{RELATION[r.relation] || r.relation}</td><td>{r.name}</td><td>{r.phone}</td><td>{r.note}</td></tr>
-          ))}
-          {Array.from({ length: Math.max(0, 4 - (blank ? 0 : (card?.relatives || []).length)) }).map((_, i) => (
-            <tr key={`e${i}`}><td>&nbsp;</td><td /><td /><td /></tr>
-          ))}
-        </tbody>
+      {/* ۱۲ — اقارب نزدیک متعلم (۵ ستون) */}
+      <div className="sp-asec-h">اقارب نزدیک متعلم</div>
+      <table className="sp-table sp-atbl sp-arel">
+        <thead><tr>{RELATIVES_5.map(([k, l]) => <th key={k}>{l}</th>)}</tr></thead>
+        <tbody><tr>{RELATIVES_5.map(([k]) => <td key={k}>{blank ? '' : relByRelation(k)}</td>)}</tr></tbody>
       </table>
 
-      <h3>شمولیت (نمبر اساس متعلم در مکاتب)</h3>
-      <table className="sp-table">
-        <thead><tr><th>نام مدرسه</th><th>نمبر اساس</th><th>صنف</th><th>تاریخ</th><th>نمبر مکتوب</th></tr></thead>
-        <tbody>
-          {(blank ? [] : (card?.enrollmentHistory || [])).map((r, i) => (
-            <tr key={i}>
-              <td>{r.schoolName}</td><td>{r.asasNumber}</td>
-              <td>{gradeLabel(r.grade)}</td><td>{dateLabel(r.date, r.dateLocal)}</td><td>{r.letterNo}</td>
-            </tr>
-          ))}
-          {Array.from({ length: Math.max(0, 4 - (blank ? 0 : (card?.enrollmentHistory || []).length)) }).map((_, i) => (
-            <tr key={`e${i}`}><td>&nbsp;</td><td /><td /><td /><td /></tr>
-          ))}
-        </tbody>
-      </table>
-
-      {!blank && (card?.nameCorrections || []).length > 0 && (
-        <>
-          <h3>توضیحات در صورت اصلاح شهرت متعلم</h3>
-          <table className="sp-table">
-            <thead><tr><th>مورد</th><th>قبلی</th><th>جدید</th><th>نمبر مکتوب</th><th>تاریخ</th></tr></thead>
-            <tbody>
-              {card.nameCorrections.map((r, i) => (
-                <tr key={i}><td>{r.field}</td><td>{r.oldValue}</td><td>{r.newValue}</td><td>{r.letterNo}</td><td>{dateLabel(r.date, r.dateLocal)}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-
-      <h3>نظریات نگرانِ صنف / ادارهٔ مدرسه در مورد متعلم</h3>
-      <table className="sp-table">
-        <thead><tr><th style={{ width: '12%' }}>صنف</th><th style={{ width: '22%' }}>اسم نگران</th><th>نظریات</th><th style={{ width: '16%' }}>وضع صحی</th></tr></thead>
+      {/* ۱۳ — نظریات نگران صنف / اداره مدرسه (۱۲ صنف) */}
+      <div className="sp-asec-h">نظریات نگران صنف / اداره مدرسه / دارالعلوم در مورد متعلم</div>
+      <table className="sp-table sp-atbl sp-arem">
+        <thead><tr><th className="sp-arem-g">صنف</th><th className="sp-arem-n">اسم نگران</th><th>نظریات</th></tr></thead>
         <tbody>
           {GRADE_LABELS.map((label, i) => {
             const r = blank ? null : remarkByGrade.get(i + 1);
             return (
               <tr key={label}>
-                <td>{label}</td><td>{r?.supervisorName || ''}</td>
-                <td>{r?.remark || ''}</td><td>{HEALTH[r?.healthStatus || ''] || ''}</td>
+                <td>{label}</td><td>{r?.supervisorName || ''}</td><td>{r?.remark || ''}</td>
               </tr>
             );
           })}
         </tbody>
       </table>
 
-      <h3>منفک شدن متعلم</h3>
-      <div className="sp-grid">
-        <Field label="تاریخ" value={b(sep.isSeparated ? dateLabel(sep.date, sep.dateLocal) : '')} />
-        <Field label="نمبر مکتوب" value={b(sep.isSeparated ? sep.letterNo : '')} />
-        <Field label="صنف" value={b(sep.isSeparated ? gradeLabel(sep.grade) : '')} />
-        <Field label="علت" value={b(sep.isSeparated ? (SEPARATION_REASON[sep.reason] || sep.reasonText) : '')} />
-        <Field label="جریمه" value={b(sep.isSeparated && sep.penaltyAmount ? String(sep.penaltyAmount) : '')} />
+      {/* ۱۴ — وضع صحی */}
+      <div className="sp-grid sp-grid-1 sp-ahealth">
+        <Field label="وضع صحی" value={b(HEALTH[card?.healthStatus || ''] || '')} />
       </div>
 
-      <Signatures right="امضای نگرانِ صنف" left="امضای مدیر و مهر مکتب" />
+      <Signatures right="امضای نگران" left="امضای سرمعلم و مهر مکتب" />
     </section>
   );
 };

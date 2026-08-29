@@ -169,6 +169,7 @@ const SawanehWorkspace = () => {
       setForm({
         motherTongue: nextCard.motherTongue || 'dari',
         thirdLanguage: nextCard.thirdLanguage || '',
+        healthStatus: nextCard.healthStatus || '',
         currentSameAsOrigin: nextCard.currentSameAsOrigin !== false,
         originAddress: { ...emptyAddress(), ...(nextCard.originAddress || {}) },
         currentAddress: { ...emptyAddress(), ...(nextCard.currentAddress || {}) },
@@ -238,6 +239,7 @@ const SawanehWorkspace = () => {
       const payload = {
         motherTongue: form.motherTongue,
         thirdLanguage: form.thirdLanguage,
+        healthStatus: form.healthStatus,
         currentSameAsOrigin: form.currentSameAsOrigin,
         originAddress: form.originAddress,
         currentAddress: form.currentSameAsOrigin ? form.originAddress : form.currentAddress,
@@ -717,6 +719,17 @@ const SawanehWorkspace = () => {
                       value={form.thirdLanguage}
                       onChange={(event) => updateForm({ thirdLanguage: event.target.value })}
                     />
+                  </label>
+                  <label>
+                    وضع صحی
+                    <select
+                      value={form.healthStatus}
+                      onChange={(event) => updateForm({ healthStatus: event.target.value })}
+                    >
+                      {HEALTH_STATUSES.map((item) => (
+                        <option key={item.value} value={item.value}>{item.label}</option>
+                      ))}
+                    </select>
                   </label>
                 </fieldset>
 

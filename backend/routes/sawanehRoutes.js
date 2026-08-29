@@ -43,6 +43,9 @@ const cardResponsePopulate = (query) => query
 const applyEditableFields = (card, body = {}) => {
   if (typeof body.motherTongue === 'string') card.motherTongue = body.motherTongue;
   if (typeof body.thirdLanguage === 'string') card.thirdLanguage = body.thirdLanguage;
+  if (['good', 'needs_followup', 'chronic_condition', ''].includes(body.healthStatus)) {
+    card.healthStatus = body.healthStatus;
+  }
   if (typeof body.currentSameAsOrigin === 'boolean') card.currentSameAsOrigin = body.currentSameAsOrigin;
 
   const setAddress = (target, source) => {
