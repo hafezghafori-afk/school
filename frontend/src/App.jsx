@@ -19,6 +19,10 @@ const AfghanSchoolDashboard = lazy(() => import('./pages/AfghanSchoolDashboard')
 const AfghanSchoolMap = lazy(() => import('./pages/AfghanSchoolMap'));
 const AfghanSchoolManagement = lazy(() => import('./pages/AfghanSchoolManagement'));
 const AfghanReports = lazy(() => import('./pages/AfghanReports'));
+const SawanehWorkspace = lazy(() => import('./pages/SawanehWorkspace'));
+const SawanehPrint = lazy(() => import('./pages/SawanehPrint'));
+const SawanehReports = lazy(() => import('./pages/SawanehReports'));
+const SawanehDashboard = lazy(() => import('./pages/SawanehDashboard'));
 const CourseList = lazy(() => import('./pages/CourseList'));
 const AddCourse = lazy(() => import('./pages/AddCourse'));
 const Home = lazy(() => import('./pages/Home'));
@@ -96,6 +100,7 @@ const AdminSheetTemplates = lazy(() => import('./pages/AdminSheetTemplates'));
 const AdminExamsDashboard = lazy(() => import('./pages/AdminExamsDashboard'));
 const ParentDashboard = lazy(() => import('./pages/ParentDashboard'));
 const StudentRegistration = lazy(() => import('./pages/StudentRegistration'));
+const TeacherRegistration = lazy(() => import('./pages/TeacherRegistration'));
 const OnlineRegistrations = lazy(() => import('./pages/OnlineRegistrations'));
 const StudentManagement = lazy(() => import('./pages/StudentManagement'));
 const StudentProfileWorkspace = lazy(() => import('./pages/StudentProfileWorkspace'));
@@ -161,6 +166,7 @@ const routePrefetchers = {
     parentDashboard: () => import('./pages/ParentDashboard'),
     myFinance: () => import('./pages/StudentFinance'),
   studentRegistration: () => import('./pages/StudentRegistration'),
+  teacherRegistration: () => import('./pages/TeacherRegistration'),
   onlineRegistrations: () => import('./pages/OnlineRegistrations'),
   studentManagement: () => import('./pages/StudentManagement')
 };
@@ -1153,6 +1159,7 @@ function AppShell() {
     path === '/dashboard' ||
     path === '/parent-dashboard' ||
     path.startsWith('/admin') ||
+    path.startsWith('/afghan') ||
     path.startsWith('/academy') ||
     path.startsWith('/short-term-center') ||
     path.startsWith('/timetable') ||
@@ -1175,6 +1182,7 @@ function AppShell() {
     path === '/student-report' ||
     path === '/instructor-report' ||
     path === '/student-registration' ||
+    path === '/teacher-registration' ||
     path === '/online-registrations' ||
     /^\/student-management(?:\/|$)/.test(path)
   );
@@ -1187,7 +1195,14 @@ function AppShell() {
     || path === '/news'
     || path.startsWith('/news/')
     || path.startsWith('/schools/');
-  const hideMainNav = isDashboardArea || usesPublicRedesign;
+  // Every guarded route (PermissionAccessGuard) renders its own <Login/> — which already
+  // wraps itself in the glass PublicHeader/PublicFooter — the moment a visitor isn't
+  // authenticated, regardless of which URL they landed on. Without this, a logged-out visit
+  // to e.g. /admin-users kept path-based hideMainNav false (since "/admin-users" isn't a
+  // public-redesign path and isDashboardArea requires authed), so the old dashboard-era
+  // header/topbar and the old dark Footer.jsx rendered around that glass login card too —
+  // two visibly different design systems stacked on the same page.
+  const hideMainNav = isDashboardArea || usesPublicRedesign || !authed;
   const useCompactAdminApiHealth = role === 'admin' && (
     path === '/dashboard'
     || path.startsWith('/admin')
@@ -3301,10 +3316,15 @@ function AppShell() {
             <Route path="/login" element={<Login />} />
             <Route path="/admin-login" element={<Navigate to="/login" replace />} />
             <Route path="/instructor-login" element={<Navigate to="/login" replace />} />
-            <Route path="/afghan-dashboard" element={<AfghanSchoolDashboard />} />
+            <Route path="/afghan-dashboard" element={<SawanehDashboard />} />
+            <Route path="/afghan-schools-stats" element={<AfghanSchoolDashboard />} />
             <Route path="/afghan-map" element={<AfghanSchoolMap />} />
             <Route path="/afghan-schools" element={<AfghanSchoolManagement />} />
             <Route path="/afghan-reports" element={<AfghanReports />} />
+            <Route path="/afghan-sawaneh" element={<SawanehWorkspace />} />
+            <Route path="/afghan-sawaneh/reports" element={<SawanehReports />} />
+            <Route path="/afghan-sawaneh/:studentId" element={<SawanehWorkspace />} />
+            <Route path="/afghan-sawaneh/:studentId/print" element={<SawanehPrint />} />
             <Route path="/login-modern" element={<Navigate to="/login" replace />} />
             <Route path="/login-demo" element={<Navigate to="/login" replace />} />
             <Route path="/login-showcase" element={<Navigate to="/login" replace />} />
@@ -3525,6 +3545,7 @@ function AppShell() {
             <Route path="/demo-request" element={<Navigate to="/contact" replace />} />
             <Route path="/demo" element={<Navigate to="/contact" replace />} />
             <Route path="/student-registration" element={adminRoute(['students.register', 'users.manage'], <StudentRegistration />, 'دسترسی ثبت دانش‌آموز برای این حساب فعال نیست.')} />
+            <Route path="/teacher-registration" element={adminRoute(['teachers.manage', 'users.manage'], <TeacherRegistration />, 'دسترسی ثبت پروندهٔ رسمی استاد برای این حساب فعال نیست.')} />
             <Route path="/online-registrations" element={adminRoute(['enrollments.online.manage', 'enrollments.manage'], <OnlineRegistrations />, 'دسترسی مدیریت ثبت‌نام‌های آنلاین برای این حساب فعال نیست.')} />
             <Route path="/student-management" element={adminRoute(['students.manage', 'users.manage'], <StudentManagement />, 'دسترسی مدیریت دانش‌آموزان برای این حساب فعال نیست.')} />
             <Route path="/student-management/:studentRef" element={adminRoute(['students.manage', 'users.manage'], <StudentProfileWorkspace />, 'دسترسی پروندهٔ شاگرد برای این حساب فعال نیست.')} />
@@ -3534,7 +3555,9 @@ function AppShell() {
           </Routes>
         </Suspense>
       </div>
-      {!isDashboardArea && !usesPublicRedesign && <Footer settings={settings} />}
+      {/* Reuse the exact same condition as the header above (not a separately re-derived one) so the old
+          Footer.jsx can never end up shown on a page where the old header is already hidden, or vice versa. */}
+      {!hideMainNav && <Footer settings={settings} />}
     </div>
   );
 }
