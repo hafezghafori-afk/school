@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useSearchParams } from 'react-router-dom';
 import useSiteSettings from '../hooks/useSiteSettings';
 import { normalizeBrandName } from '../utils/brand';
@@ -455,10 +456,20 @@ const SawanehPrint = () => {
 
   const hasTranscripts = transcripts.length > 0;
 
+  // پوستهٔ اپ (`.App` / `.content` با `overflow: clip` و `min-height: 100vh`) باعث می‌شود
+  // کروم این صفحه را سفید چاپ کند. با پرتال، ورق مستقیم فرزندِ <body> می‌شود و `#root`
+  // مخفی می‌گردد (CSS) — پس هیچ والدِ مزاحمی بین body و ورق نمی‌ماند. کلاس فقط بعد از
+  // آماده‌شدن اضافه می‌شود تا پیامِ «در حال آماده‌سازی» داخلِ #root دیده شود.
+  useEffect(() => {
+    if (!ready) return undefined;
+    document.body.classList.add('has-sawaneh-print');
+    return () => document.body.classList.remove('has-sawaneh-print');
+  }, [ready]);
+
   if (!ready) return <div className="sp-loading">در حال آماده‌سازی چاپ…</div>;
   if (error) return <div className="sp-loading sp-error">{error}</div>;
 
-  return (
+  return createPortal(
     <div className="sawaneh-print" dir="rtl">
       <div className="sp-toolbar no-print">
         <button type="button" onClick={() => window.print()}>چاپ</button>
@@ -477,7 +488,8 @@ const SawanehPrint = () => {
           <section className="sp-sheet"><p className="sp-muted">برای این شاگرد سوانح تعلیمی ساخته نشده است.</p></section>
         )
       )}
-    </div>
+    </div>,
+    document.body
   );
 };
 

@@ -1,3 +1,10 @@
+/* The print route portals `.sawaneh-print` straight onto <body> (see SawanehPrint.jsx)
+   and tags <body>. The React shell (`#root` → `.App` with min-height:100vh, overflow:clip,
+   dark gradient) has no purpose here and — critically — breaks printing, so hide it
+   entirely on this route, on screen and on paper. */
+body.has-sawaneh-print > #root { display: none !important; }
+body.has-sawaneh-print { background: #e9e9e9; }
+
 .sawaneh-print {
   --sp-ink: #111;
   --sp-line: #333;
@@ -361,36 +368,25 @@
 @page { size: A4 portrait; margin: 6mm; }
 
 @media print {
-  html, body { background: #fff !important; }
-
-  /* The app shell wraps this route in nested `overflow-x: clip` + `min-height: 100vh`
-     containers with a dark gradient. Chrome then prints the sawaneh sheet as a blank
-     page (the clip context swallows anything past the first viewport). Flatten every
-     ancestor for print so the sheet is the whole document. Scoped with :has() so these
-     global-looking rules never touch any other printed page. */
-  html:has(.sawaneh-print),
-  body:has(.sawaneh-print),
-  body:has(.sawaneh-print) #root,
-  body:has(.sawaneh-print) .App,
-  body:has(.sawaneh-print) .content,
-  body:has(.sawaneh-print) .dashboard-content,
-  body:has(.sawaneh-print) .public-content {
+  /* The app shell wraps every route in `.App` / `.content` with `overflow: clip` +
+     `min-height: 100vh` and `overflow-x: hidden` on html/body/#root (which makes <body>
+     a scroll container) — Chrome then prints the sawaneh sheet as a BLANK page.
+     The component portals `.sawaneh-print` to <body> and adds `body.has-sawaneh-print`;
+     here we hide the whole React tree and flatten html/body so the sheet is the
+     entire printed document. This file only loads on the sawaneh print route. */
+  html, body {
     overflow: visible !important;
     overflow-x: visible !important;
     height: auto !important;
     min-height: 0 !important;
     max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
     background: #fff !important;
     display: block !important;
   }
-  body:has(.sawaneh-print) .App,
-  body:has(.sawaneh-print) .content,
-  body:has(.sawaneh-print) .dashboard-content,
-  body:has(.sawaneh-print) .public-content {
-    padding: 0 !important;
-    margin: 0 !important;
-  }
-  body:has(.sawaneh-print) .App { background: none !important; }
+  body.has-sawaneh-print > #root { display: none !important; }
+  body.has-sawaneh-print > .sawaneh-print { display: block !important; }
   .sawaneh-print { position: static !important; }
 
   /* keep the header shading / summary tints when printing */
