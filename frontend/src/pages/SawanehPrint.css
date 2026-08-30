@@ -362,12 +362,42 @@
 
 @media print {
   html, body { background: #fff !important; }
+
+  /* The app shell wraps this route in nested `overflow-x: clip` + `min-height: 100vh`
+     containers with a dark gradient. Chrome then prints the sawaneh sheet as a blank
+     page (the clip context swallows anything past the first viewport). Flatten every
+     ancestor for print so the sheet is the whole document. Scoped with :has() so these
+     global-looking rules never touch any other printed page. */
+  html:has(.sawaneh-print),
+  body:has(.sawaneh-print),
+  body:has(.sawaneh-print) #root,
+  body:has(.sawaneh-print) .App,
+  body:has(.sawaneh-print) .content,
+  body:has(.sawaneh-print) .dashboard-content,
+  body:has(.sawaneh-print) .public-content {
+    overflow: visible !important;
+    overflow-x: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    background: #fff !important;
+    display: block !important;
+  }
+  body:has(.sawaneh-print) .App,
+  body:has(.sawaneh-print) .content,
+  body:has(.sawaneh-print) .dashboard-content,
+  body:has(.sawaneh-print) .public-content {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  body:has(.sawaneh-print) .App { background: none !important; }
+  .sawaneh-print { position: static !important; }
+
   /* keep the header shading / summary tints when printing */
   .sawaneh-print, .sawaneh-print * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
-  /* hide the app shell chrome so only the sheet prints */
   [class*="api-health"],
   header.site-header, .site-header, .topbar,
   footer, .site-footer, .app-footer,
