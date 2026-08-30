@@ -389,6 +389,14 @@ body.has-sawaneh-print { background: #e9e9e9; }
   body.has-sawaneh-print > .sawaneh-print { display: block !important; }
   .sawaneh-print { position: static !important; }
 
+  /* Other pages' print stylesheets (AcademyManagement / AdminFinance / ShortTermCenter)
+     ship a leaky `@media print { body * { visibility: hidden } }` that stays in the SPA
+     document after visiting them and blanks THIS sheet too. Force ours back visible. */
+  .sawaneh-print,
+  .sawaneh-print * {
+    visibility: visible !important;
+  }
+
   /* keep the header shading / summary tints when printing */
   .sawaneh-print, .sawaneh-print * {
     -webkit-print-color-adjust: exact !important;
