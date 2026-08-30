@@ -409,16 +409,19 @@
     margin: 12mm;
   }
 
-  html,
-  body,
-  #root {
+  /* Scoped with :has(.stc-print) — this stylesheet stays loaded in the SPA after
+     leaving the page, and unscoped `body *` / `#root` print rules were blanking
+     OTHER pages' printouts. */
+  html:has(.stc-print),
+  body:has(.stc-print),
+  body:has(.stc-print) #root {
     width: 100%;
     min-height: 0;
     margin: 0;
     background: #fff;
   }
 
-  body * {
+  body:has(.stc-print) * {
     visibility: hidden;
   }
 
@@ -429,7 +432,7 @@
      invisible but still taking up its own layout height, which was just
      enough extra height to spill the one-page receipt onto a second,
      otherwise-blank page. Collapse that level too. */
-  .dashboard-content > :not(.stc-page) {
+  body:has(.stc-print) .dashboard-content > :not(.stc-page) {
     display: none !important;
   }
 
