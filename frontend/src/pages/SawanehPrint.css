@@ -408,6 +408,23 @@ body.has-sawaneh-print { background: #e9e9e9; }
     min-height: auto;
     padding: 0;
   }
+
+  /* Chrome/Chromium print + CSS grid = intermittent blank output. The whole card is
+     built on `display: grid` two-column rows — swap them to flex for print. */
+  .sp-two,
+  .sp-asheet .sp-two {
+    display: flex !important;
+    gap: 6px !important;
+    align-items: flex-start !important;
+  }
+  .sp-two > * { flex: 1 1 0 !important; min-width: 0 !important; }
+  .sp-letterhead {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+  }
+  .sp-letterhead .sp-logo { flex: 0 0 46px !important; }
+  .sp-letterhead-text { flex: 1 1 auto !important; }
   .sp-sheet + .sp-sheet { page-break-before: always; }
   .sp-table { page-break-inside: auto; }
   .sp-table tr { page-break-inside: avoid; }
