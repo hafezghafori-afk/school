@@ -4880,20 +4880,23 @@
     margin: 12mm;
   }
 
-  html,
-  body,
-  #root {
+  /* Scoped with :has(.finance-print-sheet) — this stylesheet stays loaded in the
+     SPA after leaving the page, and unscoped `body *` / `#root` print rules were
+     blanking OTHER pages' printouts. */
+  html:has(.finance-print-sheet),
+  body:has(.finance-print-sheet),
+  body:has(.finance-print-sheet) #root {
     width: 100%;
     min-height: 0;
     margin: 0;
     background: #fff;
   }
 
-  body * {
+  body:has(.finance-print-sheet) * {
     visibility: hidden;
   }
 
-  .finance-page > :not(.finance-print-sheet) {
+  body:has(.finance-print-sheet) .finance-page > :not(.finance-print-sheet) {
     display: none !important;
   }
 
