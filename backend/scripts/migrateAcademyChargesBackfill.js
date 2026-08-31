@@ -13,6 +13,9 @@
  * تستِ صحت: بعد از مهاجرت باید balanceِ جدید == balanceِ قدیم باشد (± ۰٫۰۱).
  * در حالتِ --apply هر ثبت‌نامی که مغایرت داشته باشد رد می‌شود و در گزارش می‌آید.
  *
+ * اضافه‌پرداخت (sumPayments > فیس): پیش‌فرض رد می‌شود؛ با --absorb-overpay یک قلمِ
+ * manual «اضافه‌پرداختِ پیشین» به‌اندازهٔ مازاد ساخته می‌شود تا کاملاً allocate شود.
+ *
  * اجرا:
  *   node backend/scripts/migrateAcademyChargesBackfill.js               # dry-run
  *   node backend/scripts/migrateAcademyChargesBackfill.js --apply
@@ -53,6 +56,7 @@ const nowMonthKey = () => {
 
 async function run() {
   const APPLY = hasFlag('apply');
+  const ABSORB_OVERPAY = hasFlag('absorb-overpay');
   const LIMIT = Math.max(0, Number(readArg('limit', '0')) || 0);
   const uri = readArg('uri') || process.env.PROD_MONGO_URI || process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/school_db';
   const dnsServers = readArg('dns');
@@ -91,11 +95,13 @@ async function run() {
     const payments = await AcademyPayment.find({ registrationId: reg._id, status: { $ne: 'void' } }).sort({ paidAt: 1, createdAt: 1 });
     const sumPayments = round(payments.reduce((s, p) => s + num(p.amount), 0));
 
-    if (sumPayments > net + 0.01 && fee > 0) {
-      report.skippedOverpaid += 1;
+    const overpay = round(sumPayments - net);
+    if (overpay > 0.01 && fee > 0) {
       report.overpaid.push({ id: String(reg._id), net, sumPayments, oldPaid, oldBalance });
-      if (!APPLY) continue;
-      continue; // نیازِ بررسیِ دستی — رد
+      if (!ABSORB_OVERPAY) {
+        report.skippedOverpaid += 1;
+        continue; // بدونِ --absorb-overpay رد می‌شود (نیازِ تصمیمِ دستی)
+      }
     }
 
     if (!APPLY) {
@@ -111,6 +117,14 @@ async function run() {
         title: 'فیس / شمولیت', amount: fee, discountAmount: discount,
         dueDate, currency: reg.currency || 'AFN', createdBy: null,
         note: 'مهاجرت — قلمِ اولیه از فیسِ ثبت‌نام'
+      });
+    }
+    if (overpay > 0.01 && fee > 0 && ABSORB_OVERPAY) {
+      await AcademyCharge.create({
+        registrationId: reg._id, studentId: reg.studentId, kind: 'manual',
+        title: 'اضافه‌پرداختِ پیشین', amount: overpay,
+        dueDate, currency: reg.currency || 'AFN', createdBy: null,
+        note: 'مهاجرت — جذبِ پرداختِ مازاد بر فیس'
       });
     }
     if (plan === 'monthly' && String(reg.lastMonthlyChargeKey || '') !== monthKey) {
