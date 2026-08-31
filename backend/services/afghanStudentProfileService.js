@@ -4,6 +4,23 @@ const AfghanSchool = require('../models/AfghanSchool');
 const normalizeText = (value = '') => String(value || '').trim();
 const isValidEmail = (value = '') => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 
+// یک شماره تلفنِ قابل‌قبول باید ۷ تا ۱۵ رقم داشته باشد و با هیچ‌کدام از شناسه‌های
+// هویتی (تذکره/نمبر ثبت/نمبر اساس) برابر نباشد — تا مثلاً شماره تذکره اشتباهاً در
+// «موبایل پدر» ننشیند و بعداً هم کلیدِ تطبیقِ هویت نشود.
+const sanitizePhone = (value = '', reject = []) => {
+  const raw = normalizeText(value);
+  if (!raw) return '';
+  const digits = raw.replace(/[^0-9]/g, '');
+  if (digits.length < 7 || digits.length > 15) return '';
+  const rejectDigits = new Set(
+    (Array.isArray(reject) ? reject : [reject])
+      .map((item) => normalizeText(item).replace(/[^0-9]/g, ''))
+      .filter(Boolean)
+  );
+  if (rejectDigits.has(digits)) return '';
+  return raw;
+};
+
 const splitFullName = (value = '') => {
   const parts = normalizeText(value).split(/\s+/).filter(Boolean);
   return {
@@ -20,7 +37,7 @@ const gradeFromClass = (schoolClass = {}, fallback = '') => {
 
 const compactUnique = (items = []) => Array.from(new Set(items.map(normalizeText).filter(Boolean)));
 
-const buildTrustedIdentityFilter = ({ tazkiraNumber = '', registrationId = '', asasNumber = '', email = '', phone = '' } = {}) => {
+const buildTrustedIdentityFilter = ({ tazkiraNumber = '', registrationId = '', asasNumber = '', email = '' } = {}) => {
   const or = [];
   compactUnique([tazkiraNumber, registrationId, asasNumber]).forEach((value) => {
     or.push({ 'identification.tazkiraNumber': value });
@@ -28,12 +45,8 @@ const buildTrustedIdentityFilter = ({ tazkiraNumber = '', registrationId = '', a
     or.push({ asasNumber: value });
   });
   if (isValidEmail(email)) or.push({ 'contactInfo.email': normalizeText(email).toLowerCase() });
-  compactUnique([phone]).forEach((value) => {
-    or.push({ 'contactInfo.phone': value });
-    or.push({ 'contactInfo.mobile': value });
-    or.push({ 'familyInfo.fatherPhone': value });
-    or.push({ 'familyInfo.guardianPhone': value });
-  });
+  // تطبیقِ هویت بر اساس شماره تلفن انجام نمی‌شود: خواهر و برادرها یک شماره دارند و این
+  // باعثِ ادغامِ اشتباهِ دو پروندهٔ جدا (و درهم‌ریختنِ بل‌ها) می‌شد. فقط شناسه‌های یکتا.
   return or.length ? { $or: or, status: { $ne: 'deleted' } } : null;
 };
 
@@ -63,10 +76,14 @@ async function ensureAfghanStudentProfile({
   );
   const { firstName, lastName } = splitFullName(fullName);
   const email = normalizeText(defaults.email || sourceEnrollment.email || user?.email || '').toLowerCase();
-  const phone = normalizeText(defaults.phone || sourceEnrollment.phone || sourceEnrollment.emergencyPhone || '');
   const registrationId = normalizeText(defaults.registrationId || sourceEnrollment.registrationId || '');
   const asasNumber = normalizeText(defaults.asasNumber || sourceEnrollment.asasNumber || '');
   const tazkiraNumber = normalizeText(defaults.tazkiraNumber || sourceEnrollment.nationalId || sourceEnrollment.tazkiraNumber || registrationId || asasNumber);
+  const identityValues = [tazkiraNumber, registrationId, asasNumber, sourceEnrollment.nationalId];
+  // شمارهٔ تماسِ عمومی (متعلق به متقاضی/سرپرست) — نه شمارهٔ اختصاصیِ پدر.
+  const contactPhone = sanitizePhone(defaults.phone || sourceEnrollment.phone || sourceEnrollment.emergencyPhone, identityValues);
+  // «موبایل پدر» فقط وقتی پر شود که واقعاً شمارهٔ پدر داده شده باشد؛ وگرنه خالی بماند.
+  const fatherPhone = sanitizePhone(defaults.fatherPhone || sourceEnrollment.fatherPhone, identityValues);
   const effectiveSchoolId = schoolId || schoolClass?.schoolId || defaults.schoolId || null;
   const school = effectiveSchoolId ? await AfghanSchool.findById(effectiveSchoolId).select('province district address') : null;
   const district = normalizeText(defaults.district || sourceEnrollment.district || school?.district || sourceEnrollment.address || 'نامشخص');
@@ -77,8 +94,7 @@ async function ensureAfghanStudentProfile({
     tazkiraNumber,
     registrationId,
     asasNumber,
-    email,
-    phone
+    email
   });
   const wasCreated = !student;
 
@@ -100,15 +116,15 @@ async function ensureAfghanStudentProfile({
         tazkiraNumber: tazkiraNumber || registrationId || asasNumber || `PROFILE-${Date.now()}`
       },
       familyInfo: {
-        fatherPhone: phone,
+        fatherPhone,
         motherName: normalizeText(defaults.motherName || sourceEnrollment.motherName || 'ثبت نشده'),
         guardianName: normalizeText(defaults.guardianName || sourceEnrollment.fatherName || fullName || 'سرپرست'),
         guardianRelation: 'father',
-        guardianPhone: phone || '0000000000'
+        guardianPhone: contactPhone
       },
       contactInfo: {
-        phone,
-        mobile: phone,
+        phone: contactPhone,
+        mobile: contactPhone,
         email: isValidEmail(email) ? email : '',
         province,
         district,
@@ -116,7 +132,7 @@ async function ensureAfghanStudentProfile({
         emergencyContact: {
           name: normalizeText(defaults.guardianName || sourceEnrollment.fatherName || fullName || 'سرپرست'),
           relation: 'سرپرست',
-          phone: phone || '0000000000'
+          phone: contactPhone || '0000000000'
         }
       },
       academicInfo: {

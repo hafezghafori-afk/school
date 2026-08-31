@@ -2,6 +2,12 @@ import AfghanDateInput from './ui/AfghanDateInput';
 import { AFGHAN_STUDENT_SECTIONS } from '../config/afghanStudentFields';
 import './AfghanStudentFieldGrid.css';
 
+// خانه‌های type: 'latin' باید «انگلیسی برویت تذکره» باشند. خیلی از پرونده‌ها اصلاً
+// نامِ انگلیسی ندارند و هنگام ثبت‌نام نامِ دری در این خانه نشسته؛ در حالتِ نمایش
+// (latinGuard) به‌جای نشان‌دادنِ متنِ دری به‌عنوانِ «انگلیسی»، خانه را خالی نشان بده.
+const hasArabicScript = (value = '') => /\p{Script=Arabic}/u.test(String(value || ''));
+const isDariInLatinField = (field, value) => field.type === 'latin' && hasArabicScript(value) && !/[A-Za-z]/.test(String(value || ''));
+
 /**
  * گریدِ مشترکِ فیلدهای «کارت سوانح متعلم». همان فیلدها/برچسب‌ها/ترتیب در هر سه فرم.
  * @param {object}   props.values      { fieldKey: string }
@@ -10,6 +16,7 @@ import './AfghanStudentFieldGrid.css';
  * @param {boolean}  [props.readOnly]
  * @param {string[]} [props.sectionIds] محدودکردن به بخش‌های مشخص (پیش‌فرض: همه)
  * @param {object}   [props.errors]    { fieldKey: string } پیامِ خطای هر فیلد
+ * @param {boolean}  [props.latinGuard] خانه‌های انگلیسیِ حاویِ متنِ دری را خالی نشان بده (فقط نمایش)
  */
 export default function AfghanStudentFieldGrid({
   values = {},
@@ -17,7 +24,8 @@ export default function AfghanStudentFieldGrid({
   theme = 'light',
   readOnly = false,
   sectionIds = null,
-  errors = {}
+  errors = {},
+  latinGuard = false
 }) {
   const sections = sectionIds
     ? AFGHAN_STUDENT_SECTIONS.filter((section) => sectionIds.includes(section.id))
@@ -30,11 +38,14 @@ export default function AfghanStudentFieldGrid({
           <legend>{section.title}</legend>
           <div className="asf-fields">
             {section.fields.map((field) => {
-              const value = values[field.key] ?? '';
+              const rawValue = values[field.key] ?? '';
+              const guarded = latinGuard && isDariInLatinField(field, rawValue);
+              const value = guarded ? '' : rawValue;
               const common = {
                 id: `asf-${field.key}`,
                 value,
                 disabled: readOnly,
+                ...(guarded ? { placeholder: 'ثبت نشده' } : {}),
                 onChange: (event) => onChange && onChange(field.key, event.target.value)
               };
               return (
@@ -61,6 +72,9 @@ export default function AfghanStudentFieldGrid({
                   ) : (
                     <input type="text" dir={field.type === 'latin' ? 'ltr' : undefined} {...common} />
                   )}
+                  {guarded ? (
+                    <em className="asf-warn">نامِ انگلیسی برویت تذکره ثبت نشده (مقدارِ قبلی دری بود).</em>
+                  ) : null}
                   {errors[field.key] ? <em className="asf-error">{errors[field.key]}</em> : null}
                 </label>
               );
