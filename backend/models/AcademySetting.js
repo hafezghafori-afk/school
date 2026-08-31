@@ -12,6 +12,11 @@ const academySettingSchema = new mongoose.Schema({
   studentCodePrefix: { type: String, default: 'AST', trim: true, uppercase: true },
   invoiceFooter: { type: String, default: 'تشکر از پرداخت شما', trim: true },
   receiptSize: { type: String, enum: ['a4', 'half', 'small'], default: 'half' },
+  // روزِ ماهِ شمسی که شارژِ ماهانه سررسید می‌شود (پیش‌فرض ۲۰)
+  monthlyChargeDueDay: { type: Number, default: 20, min: 1, max: 31 },
+  // پالیسیِ کمیسیونِ استاد (فاز ۲) — پایه/درصد؛ فعلاً فقط نگه‌داری می‌شود
+  teacherCommissionBase: { type: String, enum: ['collected', 'billed'], default: 'collected' },
+  teacherCommissionPercent: { type: Number, default: 0, min: 0, max: 100 },
   isActive: { type: Boolean, default: true },
   updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { timestamps: true });
@@ -26,6 +31,8 @@ academySettingSchema.pre('validate', function normalizeAcademySetting() {
   this.invoicePrefix = String(this.invoicePrefix || 'ACD').trim().toUpperCase() || 'ACD';
   this.studentCodePrefix = String(this.studentCodePrefix || 'AST').trim().toUpperCase() || 'AST';
   this.invoiceFooter = String(this.invoiceFooter || '').trim();
+  this.monthlyChargeDueDay = Math.min(31, Math.max(1, Math.round(Number(this.monthlyChargeDueDay || 20)) || 20));
+  this.teacherCommissionPercent = Math.min(100, Math.max(0, Number(this.teacherCommissionPercent || 0)));
 });
 
 module.exports = academyConnection.model('AcademySetting', academySettingSchema);

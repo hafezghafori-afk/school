@@ -14,7 +14,20 @@ const academyPaymentSchema = new mongoose.Schema({
   paidAt: { type: Date, default: Date.now, index: true },
   receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
   referenceNo: { type: String, default: '', trim: true },
-  note: { type: String, default: '', trim: true }
+  note: { type: String, default: '', trim: true },
+  // تخصیصِ این پرداخت روی اقلامِ بدهی (FIFO یا دستی)
+  allocations: {
+    type: [new mongoose.Schema({
+      chargeId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademyCharge', required: true },
+      amount: { type: Number, required: true, min: 0 }
+    }, { _id: false })],
+    default: []
+  },
+  status: { type: String, enum: ['active', 'void'], default: 'active', index: true },
+  reversalOfId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademyPayment', default: null },
+  voidedAt: { type: Date, default: null },
+  voidedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  voidReason: { type: String, default: '', trim: true }
 }, { timestamps: true });
 
 academyPaymentSchema.pre('validate', function normalizeAcademyPayment() {
