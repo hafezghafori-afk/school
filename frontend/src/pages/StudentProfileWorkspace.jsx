@@ -419,7 +419,7 @@ export default function StudentProfileWorkspace() {
             </div>
             {!afghanStudentId ? <EmptyState>این شاگرد به پروندهٔ افغانی وصل نیست؛ ویرایش مشخصات از اینجا ممکن نیست.</EmptyState> : (
               <>
-                <AfghanStudentFieldGrid theme="glass" sectionIds={['identity', 'birth']} values={afghanForm} onChange={setAfghanField} />
+                <AfghanStudentFieldGrid theme="glass" latinGuard sectionIds={['identity', 'birth']} values={afghanForm} onChange={setAfghanField} />
                 {afghanNameChanged ? (
                   <label className="student-profile-name-letter">
                     <span>نمبر مکتوبِ اصلاح شهرت (الزامی)</span>
@@ -444,7 +444,7 @@ export default function StudentProfileWorkspace() {
             </div>
             {!afghanStudentId ? <EmptyState>این شاگرد به پروندهٔ افغانی وصل نیست.</EmptyState> : (
               <>
-                <AfghanStudentFieldGrid theme="glass" sectionIds={['father', 'mother', 'guardian', 'contact', 'emergency', 'previous']} values={afghanForm} onChange={setAfghanField} />
+                <AfghanStudentFieldGrid theme="glass" latinGuard sectionIds={['father', 'mother', 'guardian', 'contact', 'emergency', 'previous']} values={afghanForm} onChange={setAfghanField} />
                 {afghanNameChanged ? (
                   <label className="student-profile-name-letter">
                     <span>نمبر مکتوبِ اصلاح شهرت (الزامی)</span>
