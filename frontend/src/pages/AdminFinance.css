@@ -4908,9 +4908,11 @@
     overflow: visible !important;
   }
 
+  /* !important: `body:has(.finance-print-sheet) *` (0,1,1) above would otherwise
+     outrank `.finance-print-sheet *` (0,1,0) and keep the sheet itself hidden. */
   .finance-print-sheet,
   .finance-print-sheet * {
-    visibility: visible;
+    visibility: visible !important;
   }
 
   .finance-print-sheet {
