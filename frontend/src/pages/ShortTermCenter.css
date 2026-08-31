@@ -455,9 +455,11 @@
     overflow: visible !important;
   }
 
+  /* !important: `body:has(.stc-print) *` (0,1,1) above would otherwise outrank
+     `.stc-print *` (0,1,0) and keep the sheet itself hidden. */
   .stc-print,
   .stc-print * {
-    visibility: visible;
+    visibility: visible !important;
   }
 
   .stc-print {

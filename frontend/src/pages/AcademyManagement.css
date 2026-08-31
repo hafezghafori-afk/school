@@ -447,9 +447,12 @@
     overflow: visible !important;
   }
 
+  /* !important: the scoped hide rule above is `body:has(.academy-print) *`
+     (specificity 0,1,1) which would otherwise outrank `.academy-print *` (0,1,0)
+     and keep the receipt itself hidden. */
   .academy-print,
   .academy-print * {
-    visibility: visible;
+    visibility: visible !important;
   }
 
   .academy-print {
