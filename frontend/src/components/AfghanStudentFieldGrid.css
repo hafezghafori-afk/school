@@ -41,6 +41,7 @@
 
 .asf-req { color: var(--asf-req); font-style: normal; }
 .asf-error { font-size: 0.72rem; color: var(--asf-req); font-style: normal; }
+.asf-warn { font-size: 0.72rem; color: #b45309; font-style: normal; }
 
 .asf-field input,
 .asf-field select {

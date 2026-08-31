@@ -2,6 +2,10 @@ import AfghanDateInput from './ui/AfghanDateInput';
 import { AFGHAN_STUDENT_SECTIONS } from '../config/afghanStudentFields';
 import './AfghanStudentFieldGrid.css';
 
+// خانه‌های type: 'latin' باید «انگلیسی برویت تذکره» باشند. اگر متنِ ذخیره‌شده حروف
+// عربی/فارسی داشته باشد یعنی هنگام ثبت‌نام نامِ دری اشتباهاً این‌جا نشسته — هشدار بده.
+const hasArabicScript = (value = '') => /\p{Script=Arabic}/u.test(String(value || ''));
+
 /**
  * گریدِ مشترکِ فیلدهای «کارت سوانح متعلم». همان فیلدها/برچسب‌ها/ترتیب در هر سه فرم.
  * @param {object}   props.values      { fieldKey: string }
@@ -61,6 +65,9 @@ export default function AfghanStudentFieldGrid({
                   ) : (
                     <input type="text" dir={field.type === 'latin' ? 'ltr' : undefined} {...common} />
                   )}
+                  {field.type === 'latin' && hasArabicScript(value) ? (
+                    <em className="asf-warn">این خانه باید انگلیسی (برویت تذکره) باشد؛ مقدار فعلی فارسی/دری است.</em>
+                  ) : null}
                   {errors[field.key] ? <em className="asf-error">{errors[field.key]}</em> : null}
                 </label>
               );

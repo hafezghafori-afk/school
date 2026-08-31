@@ -21,7 +21,7 @@ const ExamResult = require('../models/ExamResult');
 const ActivityLog = require('../models/ActivityLog');
 const { serializeUserIdentity } = require('../utils/userRole');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
-const { deriveFinanceOrderStatus } = require('../utils/financeLineItems');
+const { deriveFinanceOrderStatus, normalizeFinanceLineItems, roundMoney } = require('../utils/financeLineItems');
 const { normalizeStudentSearchText, studentMatchesSearch } = require('../utils/studentSearch');
 
 function toPlain(doc) {
@@ -225,11 +225,28 @@ function formatBill(billDoc) {
   const bill = toPlain(billDoc);
   if (!bill) return null;
   const academicYear = formatAcademicYear(bill.academicYearId);
+
+  // مبالغ را از خطوطِ سند بازمحاسبه کن — همان الگوی studentFinanceService.formatFeeOrder —
+  // تا رکوردهای قدیمی/ناهمگام (که amountDue/amountPaidِ ذخیره‌شده‌شان کهنه است) هم درست نشان داده شوند.
+  const normalizedLineItems = normalizeFinanceLineItems({
+    lineItems: bill.lineItems,
+    amountOriginal: bill.amountOriginal,
+    adjustments: bill.adjustments,
+    amountPaid: bill.amountPaid,
+    paymentBreakdown: bill.paymentBreakdown,
+    defaultType: bill.orderType
+  });
+  const amountOriginal = roundMoney(normalizedLineItems.reduce((sum, entry) => sum + Number(entry?.grossAmount || 0), 0));
+  const amountDue = roundMoney(normalizedLineItems.reduce((sum, entry) => sum + Number(entry?.netAmount || 0), 0));
+  const amountPaid = roundMoney(Number(bill.amountPaid || 0));
+  // «باقیات» = مبلغِ قابل پرداخت منهای پرداخت‌شده. amountDue کلِ قابل پرداخت (بعد از تخفیف) است، نه باقیمانده.
+  const amountRemaining = Math.max(0, roundMoney(amountDue - amountPaid));
+
   const status = deriveFinanceOrderStatus({
     currentStatus: bill.status,
-    amountOriginal: bill.amountOriginal,
-    amountDue: bill.amountDue,
-    amountPaid: bill.amountPaid,
+    amountOriginal,
+    amountDue,
+    amountPaid,
     dueDate: bill.dueDate
   });
 
@@ -242,9 +259,11 @@ function formatBill(billDoc) {
     periodType: normalizeText(bill.periodType),
     periodLabel: normalizeText(bill.periodLabel),
     currency: normalizeText(bill.currency) || 'AFN',
-    amountOriginal: Number(bill.amountOriginal || 0),
-    amountDue: Number(bill.amountDue || 0),
-    amountPaid: Number(bill.amountPaid || 0),
+    amountOriginal,
+    amountDue,
+    amountPaid,
+    amountRemaining,
+    outstandingAmount: amountRemaining,
     issuedAt: bill.issuedAt || bill.createdAt || null,
     dueDate: bill.dueDate || null,
     paidAt: status === 'paid' ? (bill.paidAt || null) : null,
@@ -338,7 +357,9 @@ function buildFinanceSummary(bills, receipts) {
     pendingReceiptCount: receipts.filter((item) => item.status === 'pending').length,
     approvedReceiptCount: receipts.filter((item) => item.status === 'approved').length,
     totalBilled: bills.reduce((sum, item) => sum + Number(item.amountOriginal || 0), 0),
+    // totalDue = کلِ قابل پرداخت (بعد از تخفیف). برای «باقیات»ِ واقعی از totalRemaining استفاده شود.
     totalDue: bills.reduce((sum, item) => sum + Number(item.amountDue || 0), 0),
+    totalRemaining: bills.reduce((sum, item) => sum + Number(item.amountRemaining ?? Math.max(0, Number(item.amountDue || 0) - Number(item.amountPaid || 0))), 0),
     totalPaid: bills.reduce((sum, item) => sum + Number(item.amountPaid || 0), 0)
   };
 }
