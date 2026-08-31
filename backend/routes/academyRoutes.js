@@ -10,6 +10,8 @@ const AcademyClass = require('../models/AcademyClass');
 const AcademyRegistration = require('../models/AcademyRegistration');
 const AcademyPayment = require('../models/AcademyPayment');
 const AcademyInvoice = require('../models/AcademyInvoice');
+const AcademyCharge = require('../models/AcademyCharge');
+const academyLedger = require('../services/academyLedger');
 const AcademyExpense = require('../models/AcademyExpense');
 const AcademyExpenseCategory = require('../models/AcademyExpenseCategory');
 const AcademyAttendance = require('../models/AcademyAttendance');
@@ -74,6 +76,7 @@ async function buildSummary() {
   const monthIncome = await AcademyPayment.aggregate([
     {
       $match: {
+        status: { $ne: 'void' },
         paidAt: {
           $gte: new Date(`${shamsiMonthStart}T00:00:00.000Z`),
           $lt: new Date(`${shamsiMonthEnd}T00:00:00.000Z`)
@@ -104,7 +107,15 @@ async function buildSummary() {
 }
 
 async function listPayload() {
-  const [settings, students, courses, teachers, classes, registrations, payments, invoices, expenses, expenseCategories, attendance, summary] = await Promise.all([
+  // شارژِ ماهانهٔ ماه‌های سررسیدشده را بی‌سروصدا بساز (idempotent)
+  try {
+    const s = await getSettings();
+    await academyLedger.generateMonthlyCharges({ dueDay: s.monthlyChargeDueDay || 20 });
+  } catch (error) {
+    console.error('academy generateMonthlyCharges (lazy) failed:', error?.message || error);
+  }
+
+  const [settings, students, courses, teachers, classes, registrations, payments, invoices, charges, expenses, expenseCategories, attendance, summary] = await Promise.all([
     getSettings(),
     AcademyStudent.find().sort({ createdAt: -1 }).limit(250).lean(),
     AcademyCourse.find().sort({ createdAt: -1 }).limit(250).lean(),
@@ -122,6 +133,7 @@ async function listPayload() {
     AcademyInvoice.find().sort({ issuedAt: -1 }).limit(200)
       .populate('studentId', 'fullName studentCode')
       .lean(),
+    AcademyCharge.find({ status: { $ne: 'void' } }).sort({ dueDate: 1, createdAt: 1 }).limit(2000).lean(),
     AcademyExpense.find().sort({ expenseDate: -1, createdAt: -1 }).limit(200).lean(),
     AcademyExpenseCategory.find().sort({ name: 1 }).lean(),
     AcademyAttendance.find().sort({ attendanceDate: -1, createdAt: -1 }).limit(120)
@@ -131,7 +143,11 @@ async function listPayload() {
     buildSummary()
   ]);
 
-  return { settings, students, courses, teachers, classes, registrations, payments, invoices, expenses, expenseCategories, attendance, summary };
+  // اقلامِ بدهی را با پرچمِ isOverdue محاسبه‌ای بفرست
+  const today = academyLedger.todayKey();
+  const chargesOut = charges.map((c) => ({ ...c, isOverdue: academyLedger.isOverdue(c, today) }));
+
+  return { settings, students, courses, teachers, classes, registrations, payments, invoices, charges: chargesOut, expenses, expenseCategories, attendance, summary };
 }
 
 router.get('/bootstrap', async (_req, res) => {
@@ -286,14 +302,57 @@ router.get('/registrations', async (req, res) => {
 
 router.post('/registrations', async (req, res) => {
   try {
-    const item = await AcademyRegistration.create({ ...req.body, createdBy: userId(req), updatedBy: userId(req) });
-    const populated = await AcademyRegistration.findById(item._id)
+    const settings = await getSettings();
+    const currency = req.body.currency || settings.currency || 'AFN';
+    const reg = await AcademyRegistration.create({
+      ...req.body,
+      currency,
+      ledgerManaged: true,
+      createdBy: userId(req),
+      updatedBy: userId(req)
+    });
+
+    // اقلامِ بدهیِ اولیه بر اساسِ نوعِ پرداخت
+    const fee = toNumber(reg.feeAmount);
+    const discount = Math.min(fee, toNumber(reg.discountAmount));
+    const installments = Array.isArray(req.body.installments) ? req.body.installments : [];
+
+    if (reg.paymentPlan === 'installment' && installments.length) {
+      let idx = 0;
+      for (const row of installments) {
+        idx += 1;
+        const amount = toNumber(row.amount);
+        if (amount <= 0) continue;
+        await AcademyCharge.create({
+          registrationId: reg._id, studentId: reg.studentId, kind: 'installment',
+          title: String(row.title || `قسط ${idx}`).trim(),
+          amount, dueDate: String(row.dueDate || '').slice(0, 10), currency, createdBy: userId(req)
+        });
+      }
+    } else if (reg.paymentPlan === 'monthly') {
+      // شارژِ ماهانه با lazy generate ساخته می‌شود — اگر feeAmount داده شده و monthlyFee خالی است، همان را بگذار
+      if (!toNumber(reg.monthlyFee) && fee > 0) { reg.monthlyFee = fee; await reg.save(); }
+    } else if (fee > 0) {
+      await AcademyCharge.create({
+        registrationId: reg._id, studentId: reg.studentId, kind: 'enrollment',
+        title: 'فیس / شمولیت', amount: fee, discountAmount: discount,
+        dueDate: String(reg.startDate || reg.registrationDate || '').slice(0, 10),
+        currency, createdBy: userId(req)
+      });
+    }
+
+    if (reg.paymentPlan === 'monthly') {
+      try { await academyLedger.generateMonthlyCharges({ dueDay: settings.monthlyChargeDueDay || 20, registrationId: reg._id }); } catch (e) { console.error(e?.message); }
+    }
+    await academyLedger.recomputeRegistration(reg._id);
+
+    const populated = await AcademyRegistration.findById(reg._id)
       .populate('studentId', 'fullName studentCode phone')
       .populate('courseId', 'name defaultFee level')
       .populate('classId', 'name');
     res.status(201).json({ success: true, item: populated, message: 'ثبت‌نام آموزشگاه انجام شد.' });
-  } catch {
-    res.status(400).json({ success: false, message: 'ثبت‌نام آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ثبت‌نام آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -309,7 +368,34 @@ router.post('/payments', async (req, res) => {
     if (!registration) return res.status(404).json({ success: false, message: 'ثبت‌نام انتخاب‌شده پیدا نشد.' });
 
     const settings = await getSettings();
+
+    // اطمینان از این‌که ثبت‌نامِ قدیمی حداقل یک قلمِ بدهی دارد (دادهٔ پیش از مهاجرت)
+    await academyLedger.recomputeRegistration(registration._id);
+    let openCharges = await AcademyCharge.find({ registrationId: registration._id, status: { $ne: 'void' } })
+      .sort({ dueDate: 1, createdAt: 1 });
+    if (!openCharges.length) {
+      const fee = toNumber(registration.feeAmount);
+      if (fee > 0) {
+        await AcademyCharge.create({
+          registrationId: registration._id, studentId: registration.studentId._id, kind: 'enrollment',
+          title: 'فیس / شمولیت', amount: fee, discountAmount: Math.min(fee, toNumber(registration.discountAmount)),
+          dueDate: String(registration.registrationDate || '').slice(0, 10),
+          currency: settings.currency || 'AFN', createdBy: userId(req)
+        });
+        await academyLedger.recomputeRegistration(registration._id);
+        openCharges = await AcademyCharge.find({ registrationId: registration._id, status: { $ne: 'void' } }).sort({ dueDate: 1, createdAt: 1 });
+      }
+    }
+
     const previousBalance = toNumber(registration.balance);
+    if (amount > previousBalance + 0.001) {
+      return res.status(400).json({ success: false, message: `مبلغ از باقیِ این ثبت‌نام (${previousBalance}) بیشتر است.` });
+    }
+
+    const { allocations, unallocated } = academyLedger.fifoAllocate(amount, openCharges);
+    if (unallocated > 0.001) {
+      return res.status(400).json({ success: false, message: 'قلمِ بدهیِ بازی برای تخصیصِ این مبلغ نیست.' });
+    }
     const remainingBalance = Math.max(0, previousBalance - amount);
     const paymentNumber = await nextSequence('academy_payment', 'APY');
     const invoiceNumber = await nextSequence('academy_invoice', settings.invoicePrefix || 'ACD');
@@ -319,6 +405,7 @@ router.post('/payments', async (req, res) => {
       registrationId: registration._id,
       paymentNumber,
       amount,
+      allocations,
       previousBalance,
       remainingBalance,
       currency: settings.currency || 'AFN',
@@ -329,6 +416,9 @@ router.post('/payments', async (req, res) => {
       note: req.body.note || ''
     });
 
+    await academyLedger.recomputeRegistration(registration._id);
+    const freshReg = await AcademyRegistration.findById(registration._id).lean();
+
     const invoice = await AcademyInvoice.create({
       invoiceNumber,
       studentId: registration.studentId._id,
@@ -336,11 +426,11 @@ router.post('/payments', async (req, res) => {
       paymentId: payment._id,
       courseName: registration.courseId?.name || '',
       className: registration.classId?.name || '',
-      feeAmount: registration.feeAmount,
+      feeAmount: academyLedger.num(freshReg?.totalPayable ?? registration.feeAmount),
       discountAmount: registration.discountAmount,
       paidAmount: amount,
       previousBalance,
-      remainingBalance,
+      remainingBalance: academyLedger.num(freshReg?.balance ?? remainingBalance),
       currency: settings.currency || 'AFN',
       paymentMethod: payment.paymentMethod,
       referenceNo: payment.referenceNo,
@@ -351,11 +441,6 @@ router.post('/payments', async (req, res) => {
 
     payment.invoiceId = invoice._id;
     await payment.save();
-
-    registration.paidAmount = toNumber(registration.paidAmount) + amount;
-    registration.balance = remainingBalance;
-    registration.updatedBy = userId(req);
-    await registration.save();
 
     const populatedPayment = await AcademyPayment.findById(payment._id)
       .populate('studentId', 'fullName studentCode')
@@ -382,6 +467,185 @@ router.get('/invoices/:id', async (req, res) => {
     res.json({ success: true, item, settings });
   } catch {
     res.status(400).json({ success: false, message: 'دریافت بل ناموفق بود.' });
+  }
+});
+
+// ---- اقلامِ بدهی و ابطال (فاز ۱) ----
+
+// ابطالِ یک پرداخت: پرداخت void، بلش void، بلِ ابطالی صادر، ثبت‌نام بازمحاسبه
+router.post('/payments/:id/void', async (req, res) => {
+  try {
+    const reason = String(req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ success: false, message: 'برای ابطالِ پرداخت، دلیل الزامی است.' });
+
+    const payment = await AcademyPayment.findById(req.params.id);
+    if (!payment) return res.status(404).json({ success: false, message: 'پرداخت پیدا نشد.' });
+    if (payment.status === 'void') return res.status(400).json({ success: false, message: 'این پرداخت قبلاً ابطال شده است.' });
+
+    payment.status = 'void';
+    payment.voidedAt = new Date();
+    payment.voidedBy = userId(req);
+    payment.voidReason = reason;
+    await payment.save();
+
+    const origInvoice = payment.invoiceId ? await AcademyInvoice.findById(payment.invoiceId) : null;
+    if (origInvoice && origInvoice.status !== 'void') {
+      origInvoice.status = 'void';
+      await origInvoice.save();
+    }
+
+    const settings = await getSettings();
+    const creditNumber = await nextSequence('academy_invoice', settings.invoicePrefix || 'ACD');
+    const creditNote = await AcademyInvoice.create({
+      invoiceNumber: creditNumber,
+      studentId: payment.studentId,
+      registrationId: payment.registrationId,
+      paymentId: payment._id,
+      kind: 'credit_note',
+      status: 'issued',
+      voidOfId: origInvoice?._id || null,
+      courseName: origInvoice?.courseName || '',
+      className: origInvoice?.className || '',
+      paidAmount: academyLedger.num(payment.amount),
+      currency: payment.currency || settings.currency || 'AFN',
+      paymentMethod: payment.paymentMethod,
+      issuedAt: new Date(),
+      receivedBy: userId(req),
+      note: `ابطالِ پرداخت ${payment.paymentNumber} — ${reason}`
+    });
+
+    const reg = await academyLedger.recomputeRegistration(payment.registrationId);
+    res.json({ success: true, item: payment.toObject(), creditNote: creditNote.toObject(), registration: reg?.toObject() || null, message: 'پرداخت ابطال شد و بلِ ابطالی صادر گردید.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ابطالِ پرداخت ناموفق بود.' });
+  }
+});
+
+// افزودنِ قلم(های) بدهی به یک ثبت‌نام
+router.post('/registrations/:id/charges', async (req, res) => {
+  try {
+    const reg = await AcademyRegistration.findById(req.params.id);
+    if (!reg) return res.status(404).json({ success: false, message: 'ثبت‌نام پیدا نشد.' });
+    const settings = await getSettings();
+    const currency = reg.currency || settings.currency || 'AFN';
+    const rows = Array.isArray(req.body.installments) && req.body.installments.length
+      ? req.body.installments
+      : [req.body];
+
+    const created = [];
+    let idx = 0;
+    for (const row of rows) {
+      idx += 1;
+      const amount = toNumber(row.amount);
+      if (amount <= 0) continue;
+      const kind = ['installment', 'manual', 'late_fee'].includes(row.kind) ? row.kind : 'manual';
+      const c = await AcademyCharge.create({
+        registrationId: reg._id, studentId: reg.studentId, kind,
+        title: String(row.title || (kind === 'installment' ? `قسط ${idx}` : kind === 'late_fee' ? 'جریمهٔ دیرکرد' : 'قلمِ دستی')).trim(),
+        amount,
+        discountAmount: Math.min(amount, toNumber(row.discountAmount)),
+        discountReason: String(row.discountReason || '').trim(),
+        dueDate: String(row.dueDate || '').slice(0, 10),
+        currency, note: String(row.note || '').trim(), createdBy: userId(req)
+      });
+      created.push(c._id);
+    }
+    if (!created.length) return res.status(400).json({ success: false, message: 'قلمی برای افزودن نبود.' });
+
+    const updated = await academyLedger.recomputeRegistration(reg._id);
+    res.status(201).json({ success: true, registration: updated?.toObject() || null, message: `${created.length} قلمِ بدهی افزوده شد.` });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'افزودنِ قلمِ بدهی ناموفق بود.' });
+  }
+});
+
+// ویرایشِ قلمِ بدهیِ پرداخت‌نشده
+router.put('/charges/:id', async (req, res) => {
+  try {
+    const charge = await AcademyCharge.findById(req.params.id);
+    if (!charge) return res.status(404).json({ success: false, message: 'قلمِ بدهی پیدا نشد.' });
+    if (charge.status === 'void') return res.status(400).json({ success: false, message: 'این قلم ابطال شده است.' });
+    if (academyLedger.num(charge.paidAmount) > 0) return res.status(400).json({ success: false, message: 'قلمی که پرداخت دارد قابلِ ویرایش نیست؛ آن را ابطال و از نو بسازید.' });
+
+    if (req.body.title !== undefined) charge.title = String(req.body.title || '').trim();
+    if (req.body.amount !== undefined) charge.amount = toNumber(req.body.amount);
+    if (req.body.discountAmount !== undefined) charge.discountAmount = Math.min(charge.amount, toNumber(req.body.discountAmount));
+    if (req.body.discountReason !== undefined) charge.discountReason = String(req.body.discountReason || '').trim();
+    if (req.body.dueDate !== undefined) charge.dueDate = String(req.body.dueDate || '').slice(0, 10);
+    if (req.body.note !== undefined) charge.note = String(req.body.note || '').trim();
+    charge.updatedBy = userId(req);
+    await charge.save();
+
+    const updated = await academyLedger.recomputeRegistration(charge.registrationId);
+    res.json({ success: true, registration: updated?.toObject() || null, message: 'قلمِ بدهی به‌روزرسانی شد.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ویرایشِ قلمِ بدهی ناموفق بود.' });
+  }
+});
+
+// ابطالِ قلمِ بدهی
+router.post('/charges/:id/void', async (req, res) => {
+  try {
+    const charge = await AcademyCharge.findById(req.params.id);
+    if (!charge) return res.status(404).json({ success: false, message: 'قلمِ بدهی پیدا نشد.' });
+    if (charge.status === 'void') return res.status(400).json({ success: false, message: 'این قلم قبلاً ابطال شده است.' });
+    if (academyLedger.num(charge.paidAmount) > 0) return res.status(400).json({ success: false, message: 'قلمی که پرداخت دارد قابلِ ابطال نیست؛ اول پرداختش را ابطال کنید.' });
+
+    charge.status = 'void';
+    charge.voidedAt = new Date();
+    charge.voidedBy = userId(req);
+    charge.voidReason = String(req.body.reason || '').trim();
+    await charge.save();
+
+    const updated = await academyLedger.recomputeRegistration(charge.registrationId);
+    res.json({ success: true, registration: updated?.toObject() || null, message: 'قلمِ بدهی ابطال شد.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ابطالِ قلمِ بدهی ناموفق بود.' });
+  }
+});
+
+// ساختِ شارژِ ماهانهٔ ماه‌های سررسیدشده (دستی — علاوه بر اجرای lazy)
+router.post('/generate-monthly', async (req, res) => {
+  try {
+    const settings = await getSettings();
+    const result = await academyLedger.generateMonthlyCharges({
+      dueDay: settings.monthlyChargeDueDay || 20,
+      registrationId: req.body.registrationId || null
+    });
+    res.json({ success: true, ...result, message: `${result.created} شارژِ ماهانه ساخته شد.` });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ساختِ شارژِ ماهانه ناموفق بود.' });
+  }
+});
+
+// کشف‌حسابِ کاملِ یک شاگرد
+router.get('/students/:id/statement', async (req, res) => {
+  try {
+    const studentId = req.params.id;
+    const student = await AcademyStudent.findById(studentId).lean();
+    if (!student) return res.status(404).json({ success: false, message: 'شاگرد پیدا نشد.' });
+
+    const [registrations, charges, payments, invoices, settings] = await Promise.all([
+      AcademyRegistration.find({ studentId }).sort({ createdAt: 1 })
+        .populate('courseId', 'name').populate('classId', 'name').lean(),
+      AcademyCharge.find({ studentId }).sort({ dueDate: 1, createdAt: 1 }).lean(),
+      AcademyPayment.find({ studentId }).sort({ paidAt: 1, createdAt: 1 }).lean(),
+      AcademyInvoice.find({ studentId }).sort({ issuedAt: 1 }).lean(),
+      getSettings()
+    ]);
+
+    const today = academyLedger.todayKey();
+    const chargesOut = charges.map((c) => ({ ...c, isOverdue: academyLedger.isOverdue(c, today) }));
+    const totals = {
+      billed: registrations.reduce((s, r) => s + academyLedger.num(r.totalPayable), 0),
+      paid: registrations.reduce((s, r) => s + academyLedger.num(r.paidAmount), 0),
+      balance: registrations.reduce((s, r) => s + academyLedger.num(r.balance), 0),
+      overdue: chargesOut.filter((c) => c.isOverdue).reduce((s, c) => s + academyLedger.num(c.balance), 0)
+    };
+
+    res.json({ success: true, student, registrations, charges: chargesOut, payments, invoices, totals, settings });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'دریافتِ کشف‌حساب ناموفق بود.' });
   }
 });
 
@@ -523,10 +787,11 @@ router.get('/reports/overview', async (_req, res) => {
         .populate('classId', 'name')
         .lean(),
       AcademyPayment.aggregate([
-        { $match: { paidAt: { $gte: monthStartDate, $lt: monthEndDate } } },
+        { $match: { status: { $ne: 'void' }, paidAt: { $gte: monthStartDate, $lt: monthEndDate } } },
         { $group: { _id: '$registrationId', paidThisMonth: { $sum: '$amount' } } }
       ]),
       AcademyPayment.aggregate([
+        { $match: { status: { $ne: 'void' } } },
         { $group: { _id: '$registrationId', lastPaymentAt: { $max: '$paidAt' } } }
       ])
     ]);
