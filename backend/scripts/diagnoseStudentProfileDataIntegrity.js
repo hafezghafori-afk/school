@@ -10,9 +10,11 @@
  * اجرا:
  *   node backend/scripts/diagnoseStudentProfileDataIntegrity.js
  *   node backend/scripts/diagnoseStudentProfileDataIntegrity.js --limit=25 --json
- *   MONGO_URI="mongodb+srv://..." node backend/scripts/diagnoseStudentProfileDataIntegrity.js
+ *   node backend/scripts/diagnoseStudentProfileDataIntegrity.js --uri='mongodb+srv://...' --dns=8.8.8.8,1.1.1.1
+ *   PROD_MONGO_URI="mongodb+srv://..." node backend/scripts/diagnoseStudentProfileDataIntegrity.js
  */
 require('dotenv').config();
+const dns = require('dns');
 const mongoose = require('mongoose');
 
 mongoose.set('autoIndex', false);
@@ -47,9 +49,15 @@ const asasOf = (s) => text(s.asasNumber) || text(s.registrationId) || String(s._
 async function run() {
   const LIMIT = Math.max(1, Number(readArg('limit', '15')) || 15);
   const JSON_OUT = hasFlag('json');
-  const uri = process.env.MONGO_URI || readArg('uri') || 'mongodb://127.0.0.1:27017/school_db';
+  const uri = readArg('uri') || process.env.PROD_MONGO_URI || process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/school_db';
 
-  await mongoose.connect(uri, { autoIndex: false, autoCreate: false, serverSelectionTimeoutMS: 15000 });
+  const dnsServers = readArg('dns');
+  if (dnsServers) {
+    dns.setServers(dnsServers.split(',').map((s) => s.trim()).filter(Boolean));
+    console.log(`using DNS servers: ${dns.getServers().join(', ')}`);
+  }
+
+  await mongoose.connect(uri, { autoIndex: false, autoCreate: false, serverSelectionTimeoutMS: 20000 });
 
   const report = {
     mode: 'read-only',
