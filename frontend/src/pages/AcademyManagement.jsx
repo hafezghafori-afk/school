@@ -59,11 +59,22 @@ const emptyRegistration = {
   classId: '',
   registrationDate: new Date().toISOString().slice(0, 10),
   startDate: '',
+  endDate: '',
   feeAmount: '',
   discountAmount: '',
+  monthlyFee: '',
   paymentPlan: 'full',
   status: 'active',
-  note: ''
+  note: '',
+  installments: []
+};
+
+const CHARGE_KIND_LABELS = {
+  enrollment: 'شمولیت',
+  installment: 'قسط',
+  monthly: 'ماهانه',
+  manual: 'دستی',
+  late_fee: 'جریمهٔ دیرکرد'
 };
 
 const emptyPayment = {
@@ -200,6 +211,7 @@ export default function AcademyManagement() {
     studentCodePrefix: 'AST',
     invoiceFooter: 'تشکر از پرداخت شما',
     receiptSize: 'half',
+    monthlyChargeDueDay: 20,
     isActive: true
   });
   const [summary, setSummary] = useState({});
@@ -210,6 +222,9 @@ export default function AcademyManagement() {
   const [registrations, setRegistrations] = useState([]);
   const [payments, setPayments] = useState([]);
   const [invoices, setInvoices] = useState([]);
+  const [charges, setCharges] = useState([]);
+  const [statement, setStatement] = useState(null);
+  const [printStatement, setPrintStatement] = useState(null);
   const [expenses, setExpenses] = useState([]);
   const [expenseCategories, setExpenseCategories] = useState([]);
   const [expenseCategoryForm, setExpenseCategoryForm] = useState({ name: '' });
@@ -250,6 +265,7 @@ export default function AcademyManagement() {
       setRegistrations(data.registrations || []);
       setPayments(data.payments || []);
       setInvoices(data.invoices || []);
+      setCharges(data.charges || []);
       setExpenses(data.expenses || []);
       setExpenseCategories(data.expenseCategories || []);
       setAttendance(data.attendance || []);
@@ -472,6 +488,63 @@ export default function AcademyManagement() {
     setPrintInvoice(null);
     setPrintClass(item);
     window.setTimeout(() => window.print(), 80);
+  };
+
+  const chargesByReg = useMemo(() => {
+    const map = new Map();
+    for (const c of charges) {
+      const key = String(c.registrationId);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(c);
+    }
+    return map;
+  }, [charges]);
+
+  const voidPayment = async (payment) => {
+    const reason = window.prompt(`ابطالِ پرداخت ${payment.paymentNumber} به مبلغ ${fmt(payment.amount)} ${currency}؟\nدلیل را بنویسید:`);
+    if (reason == null || !reason.trim()) return;
+    setBusy(true);
+    try {
+      const data = await requestJson(`/api/academy/payments/${payment._id}/void`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: reason.trim() })
+      });
+      toast.success(data.message || 'پرداخت ابطال شد.');
+      await loadData();
+      if (monthlyReport) setMonthlyReport(null);
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const generateMonthly = async () => {
+    setBusy(true);
+    try {
+      const data = await requestJson('/api/academy/generate-monthly', { method: 'POST', body: '{}' });
+      toast.success(data.message || 'انجام شد.');
+      await loadData();
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openStatement = async (studentId, { print = false } = {}) => {
+    try {
+      const data = await requestJson(`/api/academy/students/${studentId}/statement`);
+      setStatement(data);
+      if (print) {
+        setPrintInvoice(null);
+        setPrintClass(null);
+        setPrintStatement(data);
+        window.setTimeout(() => window.print(), 120);
+      }
+    } catch (error) {
+      toast.error(error.message);
+    }
   };
 
   const saveAttendance = async (event) => {
@@ -787,20 +860,53 @@ export default function AcademyManagement() {
                     <option value="monthly">ماهانه</option>
                   </select>
                 </Field>
+                {registrationForm.paymentPlan === 'monthly' && (
+                  <>
+                    <Field label="فیس ثابتِ هر ماه"><input type="number" min="0" value={registrationForm.monthlyFee} onChange={(e) => setRegistrationForm({ ...registrationForm, monthlyFee: e.target.value })} /></Field>
+                    <Field label="تاریخ پایان (اختیاری)"><AfghanDateInput value={registrationForm.endDate} onChange={(value) => setRegistrationForm({ ...registrationForm, endDate: value })} /></Field>
+                    <p className="academy-form-hint">هر ماهِ شمسی یک شارژِ تازه به همین مبلغ ساخته می‌شود (سررسید روزِ {settings.monthlyChargeDueDay || 20}). با «تاریخ پایان» یا تغییرِ وضعیت به «تمام‌شده» متوقف می‌شود.</p>
+                  </>
+                )}
+                {registrationForm.paymentPlan === 'installment' && (
+                  <div className="academy-installments">
+                    <span className="academy-field-label">جدولِ اقساط</span>
+                    {(registrationForm.installments || []).map((row, i) => (
+                      <div className="academy-installment-row" key={i}>
+                        <input type="number" min="0" placeholder="مبلغ" value={row.amount}
+                          onChange={(e) => setRegistrationForm((prev) => ({ ...prev, installments: prev.installments.map((r, ri) => ri === i ? { ...r, amount: e.target.value } : r) }))} />
+                        <AfghanDateInput value={row.dueDate || ''}
+                          onChange={(value) => setRegistrationForm((prev) => ({ ...prev, installments: prev.installments.map((r, ri) => ri === i ? { ...r, dueDate: value } : r) }))} />
+                        <button type="button" className="academy-inline-button" onClick={() => setRegistrationForm((prev) => ({ ...prev, installments: prev.installments.filter((_, ri) => ri !== i) }))}>حذف</button>
+                      </div>
+                    ))}
+                    <button type="button" className="academy-inline-button" onClick={() => setRegistrationForm((prev) => ({ ...prev, installments: [...(prev.installments || []), { amount: '', dueDate: '' }] }))}>+ افزودن قسط</button>
+                  </div>
+                )}
                 <button type="submit" disabled={busy}>ثبت‌نام</button>
               </form>
               <div className="academy-panel">
-                <h2>لیست ثبت‌نام‌ها</h2>
+                <div className="academy-panel-head">
+                  <h2>لیست ثبت‌نام‌ها</h2>
+                  <button type="button" className="academy-inline-button" onClick={generateMonthly} disabled={busy}>ساختِ شارژِ ماهانه</button>
+                </div>
                 <Table
-                  columns={['شاگرد', 'کورس', 'صنف', 'فیس', 'پرداخت', 'باقی']}
-                  rows={filteredRegistrations.map((item) => [
-                    text(item.studentId?.fullName),
-                    text(item.courseId?.name),
-                    text(item.classId?.name),
-                    fmt(item.totalPayable),
-                    fmt(item.paidAmount),
-                    fmt(item.balance)
-                  ])}
+                  columns={['شاگرد', 'کورس', 'نوع', 'فیس', 'پرداخت', 'باقی', 'اقلام']}
+                  rows={filteredRegistrations.map((item) => {
+                    const list = chargesByReg.get(String(item._id)) || [];
+                    const overdue = list.filter((c) => c.isOverdue);
+                    const nextDue = list.filter((c) => c.balance > 0 && c.dueDate).sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)))[0];
+                    return [
+                      text(item.studentId?.fullName),
+                      text(item.courseId?.name),
+                      item.paymentPlan === 'monthly' ? `ماهانه${item.monthlyFee ? ` (${fmt(item.monthlyFee)})` : ' — مبلغ تعیین نشده'}` : item.paymentPlan === 'installment' ? 'قسطی' : 'کامل',
+                      fmt(item.totalPayable),
+                      fmt(item.paidAmount),
+                      fmt(item.balance),
+                      <span className={overdue.length ? 'academy-chip academy-chip-bad' : nextDue ? 'academy-chip' : 'academy-chip academy-chip-ok'}>
+                        {list.length ? (overdue.length ? `معوق ${overdue.length}` : nextDue ? `سررسیدِ بعدی ${formatAfghanStoredDateLabel(nextDue.dueDate)}` : 'تسویه') : '—'}
+                      </span>
+                    ];
+                  })}
                 />
               </div>
             </div>
@@ -853,12 +959,31 @@ export default function AcademyManagement() {
                 <Table
                   columns={['شماره', 'شاگرد', 'کورس', 'این پرداخت', 'باقی', 'رسید']}
                   rows={filteredInvoices.map((item) => [
-                    item.invoiceNumber,
+                    <span className={item.status === 'void' ? 'academy-void' : (item.kind === 'credit_note' ? 'academy-credit' : '')}>
+                      {item.invoiceNumber}{item.kind === 'credit_note' ? ' (ابطالی)' : ''}
+                    </span>,
                     text(item.studentId?.fullName),
                     text(item.courseName),
                     `${fmt(item.paidAmount)} ${item.currency || currency}`,
                     fmt(item.remainingBalance),
-                    <button type="button" className="academy-inline-button" onClick={() => printCurrentInvoice(item)}>چاپ رسید</button>
+                    item.status === 'void' ? <span className="academy-void">ابطال‌شده</span>
+                      : <button type="button" className="academy-inline-button" onClick={() => printCurrentInvoice(item)}>چاپ رسید</button>
+                  ])}
+                />
+              </div>
+              <div className="academy-panel">
+                <h2>پرداخت‌های ثبت‌شده</h2>
+                <Table
+                  columns={['شماره', 'شاگرد', 'مبلغ', 'روش', 'تاریخ', '']}
+                  rows={payments.map((item) => [
+                    <span className={item.status === 'void' ? 'academy-void' : ''}>{item.paymentNumber}</span>,
+                    text(item.studentId?.fullName),
+                    `${fmt(item.amount)} ${item.currency || currency}`,
+                    paymentMethodLabels[item.paymentMethod] || item.paymentMethod,
+                    item.paidAt ? formatAfghanStoredDateLabel(item.paidAt) : '—',
+                    item.status === 'void'
+                      ? <span className="academy-void" title={item.voidReason}>ابطال‌شده</span>
+                      : <button type="button" className="academy-inline-button academy-danger" onClick={() => voidPayment(item)} disabled={busy}>ابطال</button>
                   ])}
                 />
               </div>
@@ -1141,6 +1266,10 @@ export default function AcademyManagement() {
                 <input value={settings.studentCodePrefix || 'AST'} onChange={(e) => setSettings({ ...settings, studentCodePrefix: e.target.value })} />
               </Field>
               <Field label="متن پایین بل"><textarea value={settings.invoiceFooter || ''} onChange={(e) => setSettings({ ...settings, invoiceFooter: e.target.value })} /></Field>
+              <Field label="سررسیدِ شارژِ ماهانه (روزِ ماهِ شمسی)">
+                <input type="number" min="1" max="31" value={settings.monthlyChargeDueDay ?? 20}
+                  onChange={(e) => setSettings({ ...settings, monthlyChargeDueDay: e.target.value })} />
+              </Field>
               <button type="submit" disabled={busy}>ذخیره تنظیمات</button>
             </form>
           )}
@@ -1149,11 +1278,13 @@ export default function AcademyManagement() {
 
       <InvoicePrint invoice={printInvoice} settings={settings} />
       <ClassListPrint classItem={printClass} registrations={registrations} settings={settings} />
+      <StatementPrint data={printStatement} settings={settings} />
       <StudentProfileModal
         student={selectedStudent}
         currency={currency}
         onClose={() => setSelectedStudent(null)}
         onPrintInvoice={printCurrentInvoice}
+        onPrintStatement={(id) => openStatement(id, { print: true })}
       />
       <MonthlyReportDetailModal
         detail={monthlyReportDetail}
@@ -1308,7 +1439,57 @@ function ClassListPrint({ classItem, registrations = [], settings }) {
   );
 }
 
-function StudentProfileModal({ student, currency, onClose, onPrintInvoice }) {
+function AcademyStatementRows({ charges = [], payments = [], currency }) {
+  const events = [
+    ...charges.filter((c) => c.status !== 'void').map((c) => ({ at: c.dueDate || c.createdAt, kind: 'charge', label: `${CHARGE_KIND_LABELS[c.kind] || c.kind}${c.title ? ` — ${c.title}` : ''}`, debit: Math.max(0, Number(c.amount || 0) - Number(c.discountAmount || 0)), credit: 0, overdue: c.isOverdue })),
+    ...payments.filter((p) => p.status !== 'void').map((p) => ({ at: p.paidAt, kind: 'payment', label: `پرداخت ${p.paymentNumber}`, debit: 0, credit: Number(p.amount || 0) }))
+  ].sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+  let running = 0;
+  return events.map((e, i) => {
+    running += e.debit - e.credit;
+    return (
+      <tr key={i} className={e.overdue ? 'academy-row-bad' : ''}>
+        <td>{e.at ? formatAfghanStoredDateLabel(e.at) : '—'}</td>
+        <td>{e.label}</td>
+        <td>{e.debit ? `${fmt(e.debit)} ${currency}` : ''}</td>
+        <td>{e.credit ? `${fmt(e.credit)} ${currency}` : ''}</td>
+        <td>{fmt(running)} {currency}</td>
+      </tr>
+    );
+  });
+}
+
+function StatementPrint({ data, settings }) {
+  if (!data) return null;
+  const { student, charges = [], payments = [], totals = {} } = data;
+  const currency = settings?.currency || 'AFN';
+  return (
+    <div className="academy-print academy-class-print">
+      <div className="academy-print-paper">
+        <header>
+          <div>
+            <h2>{text(settings?.name, 'آموزشگاه')}</h2>
+            <p>کشف‌حسابِ شاگرد</p>
+          </div>
+          <strong>{text(student?.fullName)}{student?.studentCode ? ` — ${student.studentCode}` : ''}</strong>
+        </header>
+        <dl>
+          <div><dt>کل فیس</dt><dd>{fmt(totals.billed)} {currency}</dd></div>
+          <div><dt>کل پرداخت</dt><dd>{fmt(totals.paid)} {currency}</dd></div>
+          <div><dt>باقی</dt><dd>{fmt(totals.balance)} {currency}</dd></div>
+          <div><dt>معوق</dt><dd>{fmt(totals.overdue)} {currency}</dd></div>
+        </dl>
+        <table>
+          <thead><tr><th>تاریخ</th><th>شرح</th><th>بدهکار</th><th>بستانکار</th><th>مانده</th></tr></thead>
+          <tbody><AcademyStatementRows charges={charges} payments={payments} currency={currency} /></tbody>
+        </table>
+        <footer><span>{text(settings?.invoiceFooter)}</span><span>{new Date().toLocaleDateString('fa-AF-u-ca-persian')}</span></footer>
+      </div>
+    </div>
+  );
+}
+
+function StudentProfileModal({ student, currency, onClose, onPrintInvoice, onPrintStatement }) {
   if (!student) return null;
   const totalPaid = (student.payments || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const totalBalance = (student.registrations || []).reduce((sum, item) => sum + Number(item.balance || 0), 0);
@@ -1316,7 +1497,10 @@ function StudentProfileModal({ student, currency, onClose, onPrintInvoice }) {
     <div className="academy-modal-backdrop" role="presentation" onClick={onClose}>
       <section className="academy-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
         <button type="button" className="academy-modal-close" onClick={onClose}>بستن</button>
-        <h2>{text(student.fullName)}</h2>
+        <div className="academy-modal-actions">
+          <h2>{text(student.fullName)}</h2>
+          <button type="button" className="academy-inline-button" onClick={() => onPrintStatement?.(student._id)}>چاپ کشف‌حساب</button>
+        </div>
         <div className="academy-profile-grid">
           <span>کد: {text(student.studentCode)}</span>
           <span>نام پدر: {text(student.fatherName)}</span>
