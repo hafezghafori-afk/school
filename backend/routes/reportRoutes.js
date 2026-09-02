@@ -418,7 +418,9 @@ router.get('/consolidated-finance', requireAuth, requirePermission('finance.repo
   try {
     const report = await buildConsolidatedFinanceReport({
       year: req.query.year,
-      months: req.query.months
+      months: req.query.months,
+      from: req.query.from,
+      to: req.query.to
     });
     await logActivity({
       req,

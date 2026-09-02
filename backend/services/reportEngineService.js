@@ -206,7 +206,7 @@ const REPORT_DEFINITIONS = Object.freeze([
     title: 'گزارش مالی یکپارچه مکتب - ماهوار',
     category: 'finance',
     requiredPermissions: ['finance.reports.consolidated.view'],
-    supportedFilters: ['shamsiYear', 'rollingMonths'],
+    supportedFilters: ['shamsiYear', 'rollingMonths', 'shamsiFrom', 'shamsiTo'],
     description: 'عواید و مصارف ماه‌به‌ماه شمسی برای هر سه بخش (مرکز مالی مکتب، شاگردان موقت، آموزشگاه) و مجموع آن‌ها'
   }
 ]);
@@ -269,9 +269,11 @@ function normalizeFilters(input = {}) {
     schoolId: normalizeNullableId(input.schoolId),
     dateFrom: normalizeDateKey(input.dateFrom || input.from),
     dateTo: normalizeDateKey(input.dateTo || input.to),
-    // گزارش مالی یکپارچه: سالِ شمسیِ کامل یا پنجرهٔ غلتانِ N ماه اخیر
+    // گزارش مالی یکپارچه: بازهٔ صریحِ شمسی (jy-jm)، سالِ شمسیِ کامل، یا پنجرهٔ غلتانِ N ماه
     shamsiYear: Math.max(0, Number(input.shamsiYear || input.year) || 0) || null,
-    rollingMonths: Math.max(0, Math.min(24, Number(input.rollingMonths || input.months) || 0)) || null
+    rollingMonths: Math.max(0, Math.min(24, Number(input.rollingMonths || input.months) || 0)) || null,
+    shamsiFrom: /^\d{3,4}-\d{1,2}$/.test(String(input.shamsiFrom || '').trim()) ? String(input.shamsiFrom).trim() : '',
+    shamsiTo: /^\d{3,4}-\d{1,2}$/.test(String(input.shamsiTo || '').trim()) ? String(input.shamsiTo).trim() : ''
   };
 }
 
@@ -2368,7 +2370,9 @@ async function buildConsolidatedFinanceMonthlyReport(filters) {
   const definition = getReportDefinition('consolidated_finance_monthly');
   const payload = await buildConsolidatedFinanceReport({
     year: filters.shamsiYear || undefined,
-    months: filters.rollingMonths || undefined
+    months: filters.rollingMonths || undefined,
+    from: filters.shamsiFrom || undefined,
+    to: filters.shamsiTo || undefined
   });
 
   const rows = (payload.monthlyTrend || []).map((item) => ({

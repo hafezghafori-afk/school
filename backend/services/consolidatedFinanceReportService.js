@@ -302,24 +302,45 @@ async function buildCenterDomain({
   };
 }
 
-function resolveMonthKeys({ year, months }) {
+// فهرستِ کلیدهای ماهِ شمسی (jy-jm) از fromKey تا toKey به‌صورتِ شمولی. برای بازهٔ
+// نامعتبر یا بیش از ۴۸ ماه null برمی‌گرداند.
+function monthKeysBetween(fromKey, toKey) {
+  const [fy, fm] = String(fromKey || '').split('-').map(Number);
+  const [ty, tm] = String(toKey || '').split('-').map(Number);
+  if (!fy || !fm || !ty || !tm || fm < 1 || fm > 12 || tm < 1 || tm > 12) return null;
+  const start = fy * 12 + (fm - 1);
+  const end = ty * 12 + (tm - 1);
+  if (end < start || end - start > 47) return null;
+  const keys = [];
+  for (let index = start; index <= end; index += 1) {
+    keys.push(`${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, '0')}`);
+  }
+  return keys;
+}
+
+function resolveMonthKeys({ year, months, from, to } = {}) {
+  const explicit = from && to ? monthKeysBetween(from, to) : null;
+  if (explicit && explicit.length) {
+    return { monthKeys: explicit, isFullYear: false, parsedYear: null, rangeMode: 'custom' };
+  }
   const parsedYear = Number(year);
   const isFullYear = Number.isFinite(parsedYear) && parsedYear >= 1300 && parsedYear <= 1600;
   const monthKeys = isFullYear
     ? yearShamsiMonthKeys(parsedYear)
     : lastShamsiMonthKeys(Math.min(24, Math.max(1, Number(months) || 12)));
-  return { monthKeys, isFullYear, parsedYear };
+  return { monthKeys, isFullYear, parsedYear, rangeMode: isFullYear ? 'year' : 'rolling' };
 }
 
 /**
  * گزارشِ مالیِ یکپارچه برای بازهٔ ماهِ شمسی.
- * @param {{ year?: number|string, months?: number|string, debtorLimit?: number }} [options]
- *   year: اگر یک سالِ شمسیِ معتبر (۱۳۰۰–۱۶۰۰) باشد، هر ۱۲ ماهِ آن سال؛ در غیرِ
- *   این صورت پنجرهٔ غلتانِ `months` ماهِ اخیر (پیش‌فرض ۱۲، بیشینه ۲۴).
+ * @param {{ year?: number|string, months?: number|string, from?: string, to?: string, debtorLimit?: number }} [options]
+ *   from/to: کلیدِ ماهِ شمسی «jy-jm» (مثلاً `1404-01` تا `1404-12`) — بازهٔ صریح.
+ *   year: اگر بازهٔ صریح نبود و یک سالِ شمسیِ معتبر (۱۳۰۰–۱۶۰۰) بود، هر ۱۲ ماهِ آن سال؛
+ *   وگرنه پنجرهٔ غلتانِ `months` ماهِ اخیر (پیش‌فرض ۱۲، بیشینه ۲۴).
  *   debtorLimit: چند بدهکارِ برتر در هر حوزه برگردانده شود (پیش‌فرض ۲۵؛ برای «همه» عددِ بزرگ بده).
  */
-async function buildConsolidatedFinanceReport({ year, months, debtorLimit } = {}) {
-  const { monthKeys, isFullYear, parsedYear } = resolveMonthKeys({ year, months });
+async function buildConsolidatedFinanceReport({ year, months, from, to, debtorLimit } = {}) {
+  const { monthKeys, isFullYear, parsedYear, rangeMode } = resolveMonthKeys({ year, months, from, to });
   const limit = Number.isFinite(Number(debtorLimit)) && Number(debtorLimit) > 0
     ? Number(debtorLimit)
     : DEFAULT_DEBTOR_LIMIT;
@@ -397,6 +418,7 @@ async function buildConsolidatedFinanceReport({ year, months, debtorLimit } = {}
     currency: 'AFN',
     period: {
       year: isFullYear ? parsedYear : null,
+      rangeMode,
       monthKeys,
       from: startKey,
       to: endKey,
