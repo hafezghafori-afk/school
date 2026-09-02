@@ -55,6 +55,15 @@ const {
   collectOfficialSnapshotGate
 } = require('../services/governmentSnapshotIntegrity');
 const {
+  GOVERNMENT_SNAPSHOT_RATIFY_LEVELS,
+  normalizeGovernmentSnapshotType,
+  resolveGovernmentReportKey,
+  serializeGovernmentFinanceSnapshot,
+  checkGovernmentSnapshotRatifier,
+  applyGovernmentSnapshotRatification,
+  applyGovernmentSnapshotRejection
+} = require('../services/governmentSnapshotService');
+const {
   listCourseMemberships,
   findClassMemberships,
   resolveMembershipTransactionLink
@@ -1617,54 +1626,6 @@ const populateExpenseEntryQuery = (query) => query
   .populate('rejectedBy', 'name')
   .populate('updatedBy', 'name');
 
-const serializeGovernmentFinanceSnapshotActor = (actor = null) => {
-  if (!actor) return null;
-  if (actor?._id) return { _id: actor._id, name: actor.name || '' };
-  return actor;
-};
-
-const serializeGovernmentFinanceSnapshot = (value = null) => {
-  if (!value) return null;
-  const plain = value?.toObject ? value.toObject() : { ...(value || {}) };
-  // Records created before the two-person flow carry isOfficial:true and no
-  // meaningful officialStage; surface them as already-ratified so the archive
-  // UI doesn't mistake them for pending drafts.
-  let officialStage = ['draft', 'ratified', 'rejected'].includes(plain.officialStage)
-    ? plain.officialStage
-    : 'draft';
-  if (plain.isOfficial && officialStage !== 'ratified') officialStage = 'ratified';
-  return {
-    ...plain,
-    officialStage,
-    financialYearId: plain.financialYearId?._id || plain.financialYearId || null,
-    academicYearId: plain.academicYearId?._id || plain.academicYearId || null,
-    classId: plain.classId?._id || plain.classId || null,
-    schoolClass: serializeSchoolClassLite(plain.classId || null),
-    ratifiedBy: serializeGovernmentFinanceSnapshotActor(plain.ratifiedBy || null),
-    rejectedBy: serializeGovernmentFinanceSnapshotActor(plain.rejectedBy || null),
-    financialYear: plain.financialYearId?._id
-      ? {
-          _id: plain.financialYearId._id,
-          title: plain.financialYearId.title || '',
-          code: plain.financialYearId.code || '',
-          status: plain.financialYearId.status || '',
-          isActive: Boolean(plain.financialYearId.isActive),
-          isClosed: Boolean(plain.financialYearId.isClosed)
-        }
-      : null,
-    academicYear: plain.academicYearId?._id
-      ? {
-          _id: plain.academicYearId._id,
-          title: plain.academicYearId.title || '',
-          code: plain.academicYearId.code || ''
-        }
-      : null,
-    generatedBy: plain.generatedBy?._id
-      ? { _id: plain.generatedBy._id, name: plain.generatedBy.name || '' }
-      : (plain.generatedBy || null)
-  };
-};
-
 const parseBooleanInput = (value, fallback = false) => {
   if (typeof value === 'boolean') return value;
   if (value == null) return fallback;
@@ -2103,22 +2064,10 @@ const serializeFinancialYearBudgetApproval = (value = null) => {
   };
 };
 
-const normalizeGovernmentSnapshotType = (value = '') => {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'annual') return 'annual';
-  if (normalized === 'monthly') return 'monthly';
-  return 'quarterly';
-};
-
-const resolveGovernmentReportKey = (reportType = '') => {
-  const normalized = normalizeGovernmentSnapshotType(reportType);
-  if (normalized === 'annual') return 'government_finance_annual';
-  if (normalized === 'monthly') return 'government_finance_monthly';
-  return 'government_finance_quarterly';
-};
-
-// P7/P8 integrity helpers (digest chain + official-snapshot gate) live in
-// services/governmentSnapshotIntegrity.js so they can be unit tested standalone.
+// Government-snapshot pure logic (type/key normalizers, serializer, ratify/reject
+// state transitions) lives in services/governmentSnapshotService.js; the P7/P8
+// integrity helpers (digest chain + official-snapshot gate) in
+// services/governmentSnapshotIntegrity.js — both unit tested standalone.
 
 const resolveFinancialYearErrorStatus = (error) => {
   if (Number.isFinite(Number(error?.statusCode)) && Number(error?.statusCode) > 0) {
@@ -4587,8 +4536,6 @@ router.get('/admin/government-snapshots/:id/export.pdf', requireAuth, requireRol
   }
 });
 
-const GOVERNMENT_SNAPSHOT_RATIFY_LEVELS = ['finance_lead', 'general_president'];
-
 const loadSchoolOwnedGovernmentSnapshot = async (req, id) => {
   const schoolContext = await resolveActiveSchool(req, { payload: req.body || req.query || {}, allowSingleFallback: true });
   if (!schoolContext.schoolId) {
@@ -4691,11 +4638,15 @@ router.post('/admin/government-snapshots/:id/ratify', requireAuth, requireRole([
     }
 
     const actorLevel = normalizeAdminLevel(await resolveAdminActorLevel(req.user.id));
-    if (!GOVERNMENT_SNAPSHOT_RATIFY_LEVELS.includes(actorLevel)) {
-      return res.status(403).json({ success: false, code: 'finance_government_ratify_level_invalid', message: 'ثبت رسمی نسخهٔ گزارش مالی دولت فقط توسط مدیر ارشد مالی یا ریاست عمومی مجاز است.' });
-    }
-    if (FINANCE_FOUR_EYES_ENABLED && String(snapshot.generatedBy || '') === String(req.user.id)) {
-      return res.status(409).json({ success: false, code: 'finance_government_ratify_self', message: 'سازندهٔ پیش‌نویس نمی‌تواند همان نسخه را رسمی ثبت کند؛ به تایید مقام دوم نیاز است.' });
+    const ratifierError = checkGovernmentSnapshotRatifier({
+      actorLevel,
+      generatorId: snapshot.generatedBy,
+      actorId: req.user.id,
+      fourEyesEnabled: FINANCE_FOUR_EYES_ENABLED,
+      action: 'ratify'
+    });
+    if (ratifierError) {
+      return res.status(ratifierError.statusCode).json({ success: false, code: ratifierError.code, message: ratifierError.message });
     }
 
     const closeReadiness = await buildFinancialYearCloseReadiness({ financialYearId: String(snapshot.financialYearId || '') });
@@ -4710,17 +4661,12 @@ router.post('/admin/government-snapshots/:id/ratify', requireAuth, requireRole([
       });
     }
 
-    const note = String(req.body?.note || '').trim();
-    snapshot.isOfficial = true;
-    snapshot.officialStage = 'ratified';
-    snapshot.ratifiedBy = req.user.id;
-    snapshot.ratifiedAt = new Date();
-    snapshot.rejectedBy = null;
-    snapshot.rejectedAt = null;
-    snapshot.rejectReason = '';
-    snapshot.readinessAtRatification = closeReadiness || null;
-    if (!Array.isArray(snapshot.officialTrail)) snapshot.officialTrail = [];
-    snapshot.officialTrail.push({ action: 'ratify', by: req.user.id, at: new Date(), level: actorLevel, note });
+    applyGovernmentSnapshotRatification(snapshot, {
+      actorId: req.user.id,
+      actorLevel,
+      note: req.body?.note,
+      closeReadiness
+    });
     await snapshot.save();
 
     await logActivity({
@@ -4754,21 +4700,16 @@ router.post('/admin/government-snapshots/:id/reject', requireAuth, requireRole([
     }
 
     const actorLevel = normalizeAdminLevel(await resolveAdminActorLevel(req.user.id));
-    if (!GOVERNMENT_SNAPSHOT_RATIFY_LEVELS.includes(actorLevel)) {
-      return res.status(403).json({ success: false, code: 'finance_government_ratify_level_invalid', message: 'رد پیش‌نویس نسخهٔ رسمی فقط توسط مدیر ارشد مالی یا ریاست عمومی مجاز است.' });
+    const ratifierError = checkGovernmentSnapshotRatifier({ actorLevel, actorId: req.user.id, action: 'reject' });
+    if (ratifierError) {
+      return res.status(ratifierError.statusCode).json({ success: false, code: ratifierError.code, message: ratifierError.message });
     }
     const reason = String(req.body?.reason || '').trim();
     if (!reason) {
       return res.status(400).json({ success: false, code: 'finance_government_reject_reason_required', message: 'برای رد پیش‌نویس، ذکر دلیل الزامی است.' });
     }
 
-    snapshot.isOfficial = false;
-    snapshot.officialStage = 'rejected';
-    snapshot.rejectedBy = req.user.id;
-    snapshot.rejectedAt = new Date();
-    snapshot.rejectReason = reason;
-    if (!Array.isArray(snapshot.officialTrail)) snapshot.officialTrail = [];
-    snapshot.officialTrail.push({ action: 'reject', by: req.user.id, at: new Date(), level: actorLevel, reason });
+    applyGovernmentSnapshotRejection(snapshot, { actorId: req.user.id, actorLevel, reason });
     await snapshot.save();
 
     await logActivity({
