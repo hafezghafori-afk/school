@@ -1028,68 +1028,100 @@ router.get('/reports/aging', async (_req, res) => {
   }
 });
 
-// همهٔ باقی‌داران — هر ثبت‌نامی که قلمِ بازِ غیرِ ابطالی دارد، با تفکیکِ ماهِ سررسید.
-// فیلترِ اختیاریِ بازهٔ سررسید: ?from=YYYY-MM-DD&to=YYYY-MM-DD
+// همهٔ باقی‌داران — هر ثبت‌نامی که باقیِ مثبت دارد (رول‌آپِ ثبت‌نام؛ روی دادهٔ
+// پیش از مهاجرت هم کار می‌کند)، غنی‌شده با اقلامِ بازِ آن برای تفکیکِ ماه و معوق.
+// فیلترِ اختیاریِ بازهٔ سررسید: ?from=YYYY-MM-DD&to=YYYY-MM-DD — فقط ثبت‌نام‌هایی
+// که قلمی با سررسید در این بازه دارند نمایش داده می‌شوند.
 router.get('/reports/debtors', async (req, res) => {
   try {
     const today = academyLedger.todayKey();
     const from = req.query.from ? String(req.query.from).slice(0, 10) : '';
     const to = req.query.to ? String(req.query.to).slice(0, 10) : '';
+    const dateFiltered = Boolean(from || to);
 
-    const filter = { status: { $ne: 'void' }, balance: { $gt: 0 } };
-    if (from || to) {
-      filter.dueDate = { $gt: '' };
-      if (from) filter.dueDate.$gte = from;
-      if (to) filter.dueDate.$lte = to;
-    }
-
-    const charges = await AcademyCharge.find(filter)
-      .populate('studentId', 'fullName studentCode phone')
-      .populate({ path: 'registrationId', select: 'courseId classId paymentPlan status', populate: [{ path: 'courseId', select: 'name' }, { path: 'classId', select: 'name' }] })
-      .sort({ dueDate: 1, createdAt: 1 })
+    const regs = await AcademyRegistration.find({ balance: { $gt: 0 } })
+      .sort({ balance: -1 })
+      .limit(2000)
+      .populate('studentId', 'fullName studentCode phone guardianPhone')
+      .populate('courseId', 'name')
+      .populate('classId', 'name')
       .lean();
 
-    const byReg = new Map();
-    const byMonth = new Map();
+    const regIds = regs.map((r) => r._id);
+    const charges = regIds.length
+      ? await AcademyCharge.find({ registrationId: { $in: regIds }, status: { $ne: 'void' }, balance: { $gt: 0 } })
+        .sort({ dueDate: 1, createdAt: 1 })
+        .lean()
+      : [];
+
+    const chargesByReg = new Map();
     for (const c of charges) {
-      const bal = toNumber(c.balance);
-      const overdue = Boolean(c.dueDate) && String(c.dueDate) < today;
-      const monthKey = c.kind === 'monthly' && c.periodKey
-        ? c.periodKey
-        : (c.dueDate ? academyLedger.shamsiMonthKey(c.dueDate) : 'بدون سررسید');
-
-      const m = byMonth.get(monthKey) || { periodKey: monthKey, total: 0, count: 0, overdue: 0 };
-      m.total += bal; m.count += 1; if (overdue) m.overdue += bal;
-      byMonth.set(monthKey, m);
-
-      const rid = String(c.registrationId?._id || c.registrationId);
-      const r = byReg.get(rid) || {
-        registrationId: rid,
-        student: c.studentId,
-        courseName: c.registrationId?.courseId?.name || '',
-        className: c.registrationId?.classId?.name || '',
-        paymentPlan: c.registrationId?.paymentPlan || '',
-        balance: 0, overdue: 0, openCount: 0, oldestDue: null, months: [], lines: []
-      };
-      r.balance += bal;
-      if (overdue) r.overdue += bal;
-      r.openCount += 1;
-      if (c.dueDate && (!r.oldestDue || c.dueDate < r.oldestDue)) r.oldestDue = c.dueDate;
-      if (!r.months.includes(monthKey)) r.months.push(monthKey);
-      r.lines.push({
-        _id: c._id, kind: c.kind, title: c.title, periodKey: monthKey,
-        dueDate: c.dueDate || '', amount: toNumber(c.amount), discountAmount: toNumber(c.discountAmount),
-        paidAmount: toNumber(c.paidAmount), balance: bal, isOverdue: overdue
-      });
-      byReg.set(rid, r);
+      const rid = String(c.registrationId);
+      if (!chargesByReg.has(rid)) chargesByReg.set(rid, []);
+      chargesByReg.get(rid).push(c);
     }
 
-    const rows = [...byReg.values()].sort((a, b) => b.balance - a.balance).slice(0, 1000);
+    const byMonth = new Map();
+    const bumpMonth = (key, bal, overdue) => {
+      const m = byMonth.get(key) || { periodKey: key, total: 0, count: 0, overdue: 0 };
+      m.total += bal; m.count += 1; if (overdue) m.overdue += bal;
+      byMonth.set(key, m);
+    };
+
+    const rows = [];
+    for (const reg of regs) {
+      const rid = String(reg._id);
+      const list = chargesByReg.get(rid) || [];
+      const regBalance = toNumber(reg.balance);
+
+      let overdueSum = 0;
+      let oldestDue = null;
+      const months = [];
+      const lines = [];
+      let inRange = !dateFiltered;
+
+      for (const c of list) {
+        const bal = toNumber(c.balance);
+        const isOverdue = Boolean(c.dueDate) && String(c.dueDate) < today;
+        const monthKey = c.kind === 'monthly' && c.periodKey
+          ? c.periodKey
+          : (c.dueDate ? academyLedger.shamsiMonthKey(c.dueDate) : 'بدون سررسید');
+        if (isOverdue) overdueSum += bal;
+        if (c.dueDate && (!oldestDue || c.dueDate < oldestDue)) oldestDue = c.dueDate;
+        if (!months.includes(monthKey)) months.push(monthKey);
+        lines.push({ _id: c._id, kind: c.kind, title: c.title, periodKey: monthKey, dueDate: c.dueDate || '', balance: bal, isOverdue });
+        if (dateFiltered && c.dueDate && (!from || c.dueDate >= from) && (!to || c.dueDate <= to)) inRange = true;
+        bumpMonth(monthKey, bal, isOverdue);
+      }
+
+      if (!list.length) {
+        // دادهٔ پیش از مهاجرت: قلمی نیست — کلِ باقیِ ثبت‌نام را زیرِ «بدون تفکیکِ ماه»
+        bumpMonth('بدون تفکیکِ ماه', regBalance, false);
+        months.push('بدون تفکیکِ ماه');
+      }
+
+      if (!inRange) continue;
+
+      rows.push({
+        registrationId: rid,
+        student: reg.studentId,
+        courseName: reg.courseId?.name || '',
+        className: reg.classId?.name || '',
+        paymentPlan: reg.paymentPlan || '',
+        balance: regBalance,
+        overdue: Math.round(overdueSum * 100) / 100,
+        openCount: list.length,
+        oldestDue,
+        months,
+        lines
+      });
+    }
+
     const months = [...byMonth.values()].sort((a, b) => String(a.periodKey).localeCompare(String(b.periodKey)));
     const totalOutstanding = rows.reduce((s, r) => s + r.balance, 0);
     const studentCount = new Set(rows.map((r) => String(r.student?._id || r.student))).size;
 
-    res.json({ success: true, from, to, rows, months, totalOutstanding, studentCount });
+    res.json({ success: true, from, to, rows, months, totalOutstanding, studentCount, hasLedger: charges.length > 0 });
   } catch (error) {
     res.status(500).json({ success: false, message: error?.message || 'گزارشِ باقی‌داران ناموفق بود.' });
   }

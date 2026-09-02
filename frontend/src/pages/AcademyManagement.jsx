@@ -285,10 +285,11 @@ export default function AcademyManagement() {
   const [printInvoice, setPrintInvoice] = useState(null);
   const [printClass, setPrintClass] = useState(null);
   const [invoiceMethodFilter, setInvoiceMethodFilter] = useState('all');
-  const [invoiceOnlyDue, setInvoiceOnlyDue] = useState(false);
+  const [invoiceStatus, setInvoiceStatus] = useState('all');
   const [invoiceFrom, setInvoiceFrom] = useState('');
   const [invoiceTo, setInvoiceTo] = useState('');
   const [invoiceSort, setInvoiceSort] = useState('newest');
+  const [invoiceSearch, setInvoiceSearch] = useState('');
 
   const currency = settings?.currency || 'AFN';
 
@@ -491,13 +492,21 @@ export default function AcademyManagement() {
 
   const filteredInvoices = useMemo(() => {
     const issuedKey = (item) => String(item.issuedAt || item.createdAt || '').slice(0, 10);
-    const rows = invoices.filter((item) => (
-      studentMatchesSearch(item.studentId || item, searchTerm, [item.invoiceNumber, item.courseName, item.className])
-      && (invoiceMethodFilter === 'all' || item.paymentMethod === invoiceMethodFilter)
-      && (!invoiceOnlyDue || Number(item.remainingBalance || 0) > 0)
-      && (!invoiceFrom || issuedKey(item) >= invoiceFrom)
-      && (!invoiceTo || issuedKey(item) <= invoiceTo)
-    ));
+    const q = invoiceSearch.trim().toLowerCase();
+    const rows = invoices.filter((item) => {
+      if (!studentMatchesSearch(item.studentId || item, searchTerm, [item.invoiceNumber, item.courseName, item.className])) return false;
+      if (invoiceMethodFilter !== 'all' && item.paymentMethod !== invoiceMethodFilter) return false;
+      const rem = Number(item.remainingBalance || 0);
+      if (invoiceStatus === 'due' && !(rem > 0)) return false;
+      if (invoiceStatus === 'settled' && rem > 0) return false;
+      if (invoiceStatus === 'void' && item.status !== 'void') return false;
+      if (invoiceStatus !== 'void' && invoiceStatus !== 'all' && item.status === 'void') return false;
+      if (invoiceFrom && issuedKey(item) < invoiceFrom) return false;
+      if (invoiceTo && issuedKey(item) > invoiceTo) return false;
+      if (q && ![item.invoiceNumber, item.studentId?.fullName, item.studentId?.studentCode, item.courseName, item.className, item.referenceNo]
+        .some((v) => String(v || '').toLowerCase().includes(q))) return false;
+      return true;
+    });
     const cmp = {
       newest: (a, b) => issuedKey(b).localeCompare(issuedKey(a)),
       oldest: (a, b) => issuedKey(a).localeCompare(issuedKey(b)),
@@ -505,7 +514,7 @@ export default function AcademyManagement() {
       balance_desc: (a, b) => Number(b.remainingBalance || 0) - Number(a.remainingBalance || 0)
     }[invoiceSort] || (() => 0);
     return [...rows].sort(cmp);
-  }, [invoices, searchTerm, invoiceMethodFilter, invoiceOnlyDue, invoiceFrom, invoiceTo, invoiceSort]);
+  }, [invoices, searchTerm, invoiceSearch, invoiceMethodFilter, invoiceStatus, invoiceFrom, invoiceTo, invoiceSort]);
 
   const filteredExpenses = useMemo(
     () => expenses.filter((item) => includesSearch([item.title, item.category, item.paidTo, item.expenseDate], searchTerm)),
@@ -1268,34 +1277,50 @@ export default function AcademyManagement() {
                 <button type="submit" disabled={busy}>ثبت پرداخت و صدور بل</button>
               </form>
               <div className="academy-panel">
-                <h2>رسیدهای پرداخت / بل‌های صادرشده</h2>
-                <div className="academy-filter-row">
-                  <select value={invoiceMethodFilter} onChange={(e) => setInvoiceMethodFilter(e.target.value)}>
-                    <option value="all">همهٔ روش‌ها</option>
-                    {Object.entries(paymentMethodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                  </select>
-                  <select value={invoiceSort} onChange={(e) => setInvoiceSort(e.target.value)}>
-                    <option value="newest">جدیدترین</option>
-                    <option value="oldest">قدیمی‌ترین</option>
-                    <option value="paid_desc">مبلغِ پرداخت (زیاد→کم)</option>
-                    <option value="balance_desc">باقی (زیاد→کم)</option>
-                  </select>
-                  <label className="academy-checkbox">
-                    <span>از</span>
-                    <AfghanDateInput value={invoiceFrom} onChange={setInvoiceFrom} />
-                  </label>
-                  <label className="academy-checkbox">
-                    <span>تا</span>
-                    <AfghanDateInput value={invoiceTo} onChange={setInvoiceTo} />
-                  </label>
-                  <label className="academy-checkbox">
-                    <input type="checkbox" checked={invoiceOnlyDue} onChange={(e) => setInvoiceOnlyDue(e.target.checked)} />
-                    <span>فقط باقی‌دار</span>
-                  </label>
-                  {(invoiceFrom || invoiceTo || invoiceOnlyDue || invoiceMethodFilter !== 'all') && (
-                    <button type="button" className="academy-inline-button" onClick={() => { setInvoiceFrom(''); setInvoiceTo(''); setInvoiceOnlyDue(false); setInvoiceMethodFilter('all'); }}>پاک‌کردنِ فیلترها</button>
-                  )}
+                <div className="academy-panel-head">
+                  <h2>رسیدهای پرداخت / بل‌های صادرشده</h2>
                   <span className="academy-field-label">{filteredInvoices.length} از {invoices.length}</span>
+                </div>
+                <div className="academy-filterbar">
+                  <div className="academy-fb-field">
+                    <span>وضعیت</span>
+                    <div className="academy-segment">
+                      {[['all', 'همه'], ['due', 'باقی‌دار'], ['settled', 'تسویه'], ['void', 'ابطالی']].map(([v, l]) => (
+                        <button key={v} type="button" className={invoiceStatus === v ? 'is-active' : ''} onClick={() => setInvoiceStatus(v)}>{l}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <label className="academy-fb-field"><span>روشِ پرداخت</span>
+                    <select value={invoiceMethodFilter} onChange={(e) => setInvoiceMethodFilter(e.target.value)}>
+                      <option value="all">همهٔ روش‌ها</option>
+                      {Object.entries(paymentMethodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                  </label>
+                  <label className="academy-fb-field"><span>تاریخِ صدور از</span><AfghanDateInput value={invoiceFrom} onChange={setInvoiceFrom} /></label>
+                  <label className="academy-fb-field"><span>تاریخِ صدور تا</span><AfghanDateInput value={invoiceTo} onChange={setInvoiceTo} /></label>
+                  <label className="academy-fb-field"><span>جستجو (شماره / نام / مرجع)</span>
+                    <input value={invoiceSearch} onChange={(e) => setInvoiceSearch(e.target.value)} placeholder="شمارهٔ بل یا نامِ شاگرد…" />
+                  </label>
+                  <label className="academy-fb-field"><span>مرتب‌سازی</span>
+                    <select value={invoiceSort} onChange={(e) => setInvoiceSort(e.target.value)}>
+                      <option value="newest">جدیدترین</option>
+                      <option value="oldest">قدیمی‌ترین</option>
+                      <option value="paid_desc">مبلغِ پرداخت (زیاد→کم)</option>
+                      <option value="balance_desc">باقی (زیاد→کم)</option>
+                    </select>
+                  </label>
+                  <div className="academy-fb-field">
+                    <span>&nbsp;</span>
+                    <div className="academy-fb-actions">
+                      <button
+                        type="button"
+                        className="academy-inline-button"
+                        onClick={() => { setInvoiceFrom(''); setInvoiceTo(''); setInvoiceStatus('all'); setInvoiceMethodFilter('all'); setInvoiceSearch(''); setInvoiceSort('newest'); }}
+                      >
+                        پاک‌کردنِ فیلترها
+                      </button>
+                    </div>
+                  </div>
                 </div>
                 <Table
                   columns={['شماره', 'شاگرد', 'کورس', 'این پرداخت', 'باقی', 'رسید']}
@@ -1535,13 +1560,16 @@ export default function AcademyManagement() {
                   </button>
                   <button type="button" className="academy-inline-button" onClick={() => copyPhones(visibleDebtorRows.map((r) => r.student))} disabled={!visibleDebtorRows.length}>کپیِ شماره‌ها</button>
                 </div>
-                <p className="academy-form-hint">هر ثبت‌نامی که قلمِ بازِ پرداخت‌نشده دارد — از هر ماهی. فیلترِ «سررسید از/تا» روی سرور اعمال می‌شود؛ وضعیت، جستجو و مرتب‌سازی بلافاصله.</p>
+                <p className="academy-form-hint">
+                  هر ثبت‌نامی که باقیِ پرداخت‌نشده دارد — از هر ماهی. فیلترِ «سررسید از/تا» روی سرور؛ وضعیت، جستجو و مرتب‌سازی بلافاصله.
+                  {debtors && debtors.hasLedger === false && ' — تفکیکِ ماهِ سررسید پس از اجرای مهاجرتِ دفترِ اقلام کامل می‌شود؛ فعلاً کلِ باقیِ هر ثبت‌نام نمایش داده می‌شود.'}
+                </p>
 
                 <div className="academy-filterbar">
                   <div className="academy-fb-field">
                     <span>وضعیت</span>
                     <div className="academy-segment">
-                      {[['all', 'همه'], ['overdue', 'فقط معوق'], ['notdue', 'سررسیدنشده']].map(([v, l]) => (
+                      {[['all', 'همه'], ['overdue', 'فقط معوق'], ['notdue', 'بدون معوق']].map(([v, l]) => (
                         <button key={v} type="button" className={debtorStatus === v ? 'is-active' : ''} onClick={() => setDebtorStatus(v)}>{l}</button>
                       ))}
                     </div>
