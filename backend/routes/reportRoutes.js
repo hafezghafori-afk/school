@@ -21,7 +21,7 @@ const { buildReportPdfBuffer } = require('../services/sheetTemplatePdfService');
 const { renderReportPrintHtml } = require('../services/sheetTemplatePrintService');
 const { resolvePermissions } = require('../utils/permissions');
 const { logActivity } = require('../utils/activity');
-const { resolveActiveSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
+const { resolveActiveSchool, writeSchoolContextHeaders, serializeSchoolBranding } = require('../services/schoolContextService');
 
 const router = express.Router();
 
@@ -445,13 +445,23 @@ router.get('/consolidated-finance/print', requireAuth, requirePermission('financ
     const proto = String(req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
     const origin = `${proto}://${req.get('host')}`;
     const wantHtml = String(req.query.format || '').toLowerCase() === 'html';
+
+    // سربرگ = نامِ مکتبِ فعالِ کاربر (نه برندِ پلتفرم)
+    let branding = null;
+    try {
+      const { school } = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+      const b = serializeSchoolBranding(school);
+      if (b?.brandName) branding = { name: b.brandName, subtitle: b.brandSubtitle, principalName: b.principalName };
+    } catch { branding = null; }
+
     const { html, filename } = await buildConsolidatedFinancePrintHtml({
       section: req.query.section,
       year: req.query.year,
       months: req.query.months,
       from: req.query.from,
       to: req.query.to,
-      origin
+      origin,
+      branding
     });
     const baseName = filename.replace(/\.html$/i, '');
 

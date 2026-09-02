@@ -89,7 +89,7 @@ function debtorTable(debtors) {
     </tr>`).join('');
   const total = list.reduce((sum, row) => sum + Number(row.balance || 0), 0);
   return `<table>
-    <thead><tr><th class="num">#</th><th>شاگرد</th><th>شماره اساس</th><th>صنف / کورس</th><th>ماه</th><th class="num">باقیات</th></tr></thead>
+    <thead><tr><th class="num">شماره</th><th>شاگرد</th><th>شماره اساس</th><th>صنف / کورس</th><th>ماه</th><th class="num">باقیات</th></tr></thead>
     <tbody>${rows}
       <tr class="total"><td colspan="5">جمع باقیات</td><td class="num">${fa(total)}</td></tr>
     </tbody>
@@ -120,18 +120,21 @@ function domainSection(domain, { pageBreak }) {
 }
 
 /**
- * @param {{ section?: string, year?, months?, from?, to?, origin?: string }} opts
+ * @param {{ section?: string, year?, months?, from?, to?, origin?: string,
+ *   branding?: { name?: string, subtitle?: string, principalName?: string } }} opts
  * @returns {Promise<{ html: string, filename: string }>}
  */
-async function buildConsolidatedFinancePrintHtml({ section = 'all', year, months, from, to, origin = '' } = {}) {
+async function buildConsolidatedFinancePrintHtml({ section = 'all', year, months, from, to, origin = '', branding = null } = {}) {
   const report = await buildConsolidatedFinanceReport({ year, months, from, to });
 
   let settings = null;
   if (SiteSettings) {
     try { settings = await SiteSettings.findOne().lean(); } catch { settings = null; }
   }
-  const brandName = String(settings?.brandName || 'مکتب').trim();
-  const brandSubtitle = String(settings?.brandSubtitle || '').trim();
+  // نامِ مکتب از «مکتبِ فعال» (branding) می‌آید؛ اگر نبود، از تنظیماتِ برند.
+  const brandName = String(branding?.name || settings?.brandName || 'مکتب').trim();
+  const brandSubtitle = String(branding?.subtitle || settings?.brandSubtitle || '').trim();
+  const principalName = String(branding?.principalName || '').trim();
   let logo = String(settings?.logoUrl || '').trim();
   if (logo && logo.startsWith('/') && origin) logo = `${origin}${logo}`;
 
@@ -175,45 +178,45 @@ async function buildConsolidatedFinancePrintHtml({ section = 'all', year, months
 <style>
   @page { size: A4; margin: 0; }
   * { box-sizing: border-box; }
-  html, body { background: #ffffff; }
-  body { font-family: 'Vazirmatn', 'B Nazanin', Tahoma, Arial, sans-serif; color: #111; font-size: 11px; direction: rtl; margin: 0; }
+  html, body { background: #ffffff; direction: rtl; }
+  body { font-family: 'Vazirmatn', 'B Nazanin', Tahoma, Arial, sans-serif; color: #111; font-size: 11px; direction: rtl; text-align: right; margin: 0; }
   .toolbar { margin: 10px 12px; }
   .toolbar button { font: inherit; padding: 8px 16px; border: 1px solid #0f766e; background: #0f766e; color: #fff; border-radius: 8px; cursor: pointer; }
   .wrap { padding: 4px 4px 30px; }
-  .doc-head { display: flex; align-items: center; gap: 14px; border-bottom: 2px solid #0f766e; padding-bottom: 10px; margin-bottom: 14px; }
+  .doc-head { display: flex; flex-direction: row; align-items: center; gap: 14px; border-bottom: 2px solid #0f766e; padding-bottom: 10px; margin-bottom: 14px; }
   .doc-head img { height: 54px; width: auto; }
+  .doc-head .brand { flex: 1; }
   .doc-head .t1 { font-size: 17px; font-weight: 800; }
   .doc-head .t2 { font-size: 11px; color: #555; margin-top: 3px; }
-  .doc-head .meta { margin-inline-start: auto; text-align: left; font-size: 10px; color: #444; line-height: 1.7; }
-  h2 { font-size: 15px; margin: 0 0 10px; color: #0f403b; border-right: 4px solid #0f766e; padding-right: 8px; }
-  h3 { font-size: 12px; margin: 14px 0 6px; color: #444; }
+  .doc-head .meta { text-align: left; font-size: 10px; color: #444; line-height: 1.8; white-space: nowrap; }
+  h2 { font-size: 15px; margin: 0 0 10px; color: #0f403b; border-right: 4px solid #0f766e; padding-right: 8px; text-align: right; }
+  h3 { font-size: 12px; margin: 14px 0 6px; color: #444; text-align: right; }
   .sec { margin-bottom: 16px; }
   .sec.brk { page-break-before: always; }
-  .kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
-  .kpis .kpi:only-child { grid-column: auto; }
-  .kpi { border: 1px solid #dcdcdc; border-radius: 6px; padding: 6px 8px; }
+  .kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; direction: rtl; }
+  .kpi { border: 1px solid #dcdcdc; border-radius: 6px; padding: 6px 8px; text-align: right; }
   .kpi .l { font-size: 9px; color: #666; }
   .kpi .v { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 4px; direction: rtl; }
   thead { display: table-header-group; }
   th, td { border: 1px solid #d8d8d8; padding: 4px 6px; text-align: right; }
   th { background: #eef3f2; }
-  td.num, th.num { text-align: left; font-variant-numeric: tabular-nums; }
+  td.num, th.num { font-variant-numeric: tabular-nums; }
   tr.total td { font-weight: 700; background: #f6f6f6; }
-  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; direction: rtl; }
   .muted { color: #888; font-size: 10px; }
-  .sign { margin-top: 30px; display: flex; justify-content: space-around; }
+  .sign { margin-top: 30px; display: flex; justify-content: space-around; direction: rtl; }
   .sign div { text-align: center; font-size: 10px; color: #333; }
   .sign .line { margin: 34px auto 0; border-top: 1px solid #999; width: 160px; }
   @media print { .toolbar { display: none; } .wrap { padding: 0; } }
 </style>
 </head>
-<body>
+<body dir="rtl">
   <div class="toolbar"><button type="button" onclick="window.print()">چاپ / ذخیرهٔ PDF</button></div>
   <div class="wrap">
     <div class="doc-head">
       ${logo ? `<img src="${esc(logo)}" alt="" onerror="this.style.display='none'" />` : ''}
-      <div>
+      <div class="brand">
         <div class="t1">${esc(brandName)}</div>
         ${brandSubtitle ? `<div class="t2">${esc(brandSubtitle)}</div>` : ''}
         <div class="t2">گزارش مالی یکپارچه — ${esc(sectionLabel)}</div>
@@ -226,7 +229,7 @@ async function buildConsolidatedFinancePrintHtml({ section = 'all', year, months
     </div>
     ${sectionsHtml}
     <div class="sign">
-      <div>مدیر مکتب<div class="line"></div></div>
+      <div>مدیر مکتب${principalName ? `<div class="t2">${esc(principalName)}</div>` : ''}<div class="line"></div></div>
       <div>مدیر مالی<div class="line"></div></div>
     </div>
   </div>
