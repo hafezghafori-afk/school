@@ -7,6 +7,8 @@ const academyTeacherSchema = new mongoose.Schema({
   specialty: { type: String, default: '', trim: true },
   paymentType: { type: String, enum: ['salary', 'percent', 'contract'], default: 'salary' },
   paymentAmount: { type: Number, default: 0, min: 0 },
+  // override per-استاد برای پالیسیِ کمیسیون (خالی = از settings)
+  commissionPercent: { type: Number, default: null, min: 0, max: 100 },
   status: { type: String, enum: ['active', 'inactive'], default: 'active', index: true },
   note: { type: String, default: '', trim: true },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
@@ -19,6 +21,9 @@ academyTeacherSchema.pre('validate', function normalizeAcademyTeacher() {
   this.specialty = String(this.specialty || '').trim();
   this.note = String(this.note || '').trim();
   this.paymentAmount = Math.max(0, Number(this.paymentAmount || 0));
+  if (this.commissionPercent != null) {
+    this.commissionPercent = Math.min(100, Math.max(0, Number(this.commissionPercent) || 0));
+  }
 });
 
 module.exports = academyConnection.model('AcademyTeacher', academyTeacherSchema);
