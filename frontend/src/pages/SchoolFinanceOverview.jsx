@@ -190,6 +190,38 @@ function DebtorTable({ rows }) {
   );
 }
 
+const EXPENSE_STATUS_LABELS = { draft: 'پیش‌نویس', pending_review: 'در انتظار تأیید' };
+
+function ExpenseTable({ rows }) {
+  if (!rows.length) return <p className="sfo-empty">مصرفی در این بازه ثبت نشده است.</p>;
+  return (
+    <div className="sfo-tablewrap">
+      <table className="sfo-table">
+        <thead>
+          <tr>
+            <th>شرح</th>
+            <th>دسته</th>
+            <th>ماه</th>
+            <th>وضعیت</th>
+            <th className="sfo-num">مبلغ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={`${row.title}-${index}`}>
+              <td>{repairDisplayText(row.title)}</td>
+              <td className="sfo-dim">{repairDisplayText(row.category) || '—'}</td>
+              <td className="sfo-dim">{repairDisplayText(row.monthLabel) || monthKeyLabel(row.monthKey) || '—'}</td>
+              <td className="sfo-dim">{row.status && row.status !== 'approved' ? (EXPENSE_STATUS_LABELS[row.status] || row.status) : 'تأییدشده'}</td>
+              <td className="sfo-num sfo-strong">{formatNumber(row.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function Pager({ page, pageCount, onChange }) {
   if (pageCount <= 1) return null;
   const items = [];
@@ -198,7 +230,7 @@ function Pager({ page, pageCount, onChange }) {
     else if (items[items.length - 1] !== '…') items.push('…');
   }
   return (
-    <nav className="sfo-pager" aria-label="صفحه‌بندی بدهکاران">
+    <nav className="sfo-pager" aria-label="صفحه‌بندی">
       <button type="button" className="sfo-page-btn" disabled={page <= 1} onClick={() => onChange(page - 1)}>قبلی</button>
       {items.map((n, idx) => (n === '…'
         ? <span key={`e${idx}`} className="sfo-page-gap">…</span>
@@ -220,8 +252,9 @@ function Pager({ page, pageCount, onChange }) {
 
 function DomainPanel({ domain, onPrint, printBusy }) {
   const [page, setPage] = useState(1);
+  const [expPage, setExpPage] = useState(1);
 
-  useEffect(() => { setPage(1); }, [domain]);
+  useEffect(() => { setPage(1); setExpPage(1); }, [domain]);
 
   if (!domain) return null;
   const totals = domain.totals || {};
@@ -231,6 +264,12 @@ function DomainPanel({ domain, onPrint, printBusy }) {
   const safePage = Math.min(page, pageCount);
   const pageRows = rows.slice((safePage - 1) * DEBTORS_PER_PAGE, safePage * DEBTORS_PER_PAGE);
   const netNegative = Number(totals.net) < 0;
+
+  const expRows = Array.isArray(domain.expenses) ? domain.expenses : [];
+  const expCount = Number(totals.expenseCount ?? expRows.length);
+  const expPageCount = Math.max(1, Math.ceil(expRows.length / DEBTORS_PER_PAGE));
+  const expSafePage = Math.min(expPage, expPageCount);
+  const expPageRows = expRows.slice((expSafePage - 1) * DEBTORS_PER_PAGE, expSafePage * DEBTORS_PER_PAGE);
 
   return (
     <section className={`sfo-panel sfo-domain ${DOMAIN_TONE[domain.key] || ''}`}>
@@ -273,6 +312,17 @@ function DomainPanel({ domain, onPrint, printBusy }) {
       {totals.expenseCount && (domain.byExpenseCategory || []).length > 8 ? (
         <p className="sfo-note">فقط ۸ دستهٔ بزرگ نمایش داده شده؛ کل {formatNumber(totals.expense)} افغانی در {formatNumber((domain.byExpenseCategory || []).length)} دسته.</p>
       ) : null}
+
+      <div className="sfo-debtors-head">
+        <h4>
+          فهرست مصارف بازه <span className="sfo-dim">({formatNumber(expCount)} فقره · {formatNumber(totals.expense)} افغانی)</span>
+        </h4>
+        {expPageCount > 1 ? (
+          <span className="sfo-dim">صفحهٔ {faDigits(expSafePage)} از {faDigits(expPageCount)}</span>
+        ) : null}
+      </div>
+      <ExpenseTable rows={expPageRows} />
+      <Pager page={expSafePage} pageCount={expPageCount} onChange={setExpPage} />
 
       <div className="sfo-debtors-head">
         <h4>
