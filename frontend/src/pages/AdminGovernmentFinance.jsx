@@ -804,6 +804,45 @@ function resolveExpenseStageLabel(stage = '') {
   return EXPENSE_STAGE_LABELS[String(stage || '').trim()] || String(stage || 'پیش‌نویس داخلی').trim();
 }
 
+// Which admin level a pending expense is waiting on, and whether the current
+// user can act — mirrors backend canReviewExpenseStage / getNextExpenseStage.
+const EXPENSE_STAGE_WAIT_LABEL = {
+  finance_manager_review: 'مدیر مالی',
+  finance_lead_review: 'مدیر ارشد مالی',
+  general_president_review: 'ریاست عمومی — تاییدِ نهایی'
+};
+const OPEN_EXPENSE_STAGES = new Set(Object.keys(EXPENSE_STAGE_WAIT_LABEL));
+
+function expenseStageWaitLabel(stage = '') {
+  return EXPENSE_STAGE_WAIT_LABEL[String(stage || '').trim()] || 'مرحلهٔ نامشخص';
+}
+
+// Can this level ADVANCE the stage (backend getNextExpenseStage returns a stage)?
+function canApproveExpenseStage(adminLevel = '', stage = '') {
+  const s = String(stage || '').trim();
+  if (!OPEN_EXPENSE_STAGES.has(s)) return false;
+  if (adminLevel === 'general_president') return true;
+  if (adminLevel === 'finance_manager') return s === 'finance_manager_review' || s === 'finance_lead_review';
+  if (adminLevel === 'finance_lead') return s === 'finance_lead_review';
+  return false;
+}
+
+// Can this level REJECT at the stage (backend canReviewExpenseStage, broader)?
+function canRejectExpenseStage(adminLevel = '', stage = '') {
+  const s = String(stage || '').trim();
+  if (!OPEN_EXPENSE_STAGES.has(s)) return false;
+  if (adminLevel === 'general_president' || adminLevel === 'finance_manager') return true;
+  if (adminLevel === 'finance_lead') return s === 'finance_lead_review';
+  return false;
+}
+
+function actorAlreadyReviewedExpense(trail, actorId = '') {
+  return Array.isArray(trail) && trail.some((entry) => (
+    String(entry?.by?._id || entry?.by || '') === String(actorId || '')
+    && ['approve', 'reject'].includes(String(entry?.action || '').trim().toLowerCase())
+  ));
+}
+
 function resolveTreasuryAccountTypeLabel(accountType = '') {
   return TREASURY_ACCOUNT_TYPE_LABELS[String(accountType || '').trim()] || String(accountType || 'سایر').trim();
 }
@@ -1691,6 +1730,25 @@ export default function AdminGovernmentFinance() {
       ? buildTablePreview(payload.expenseAnalytics.queue, 10)
       : buildTablePreview((payload.expenses || []).filter((item) => !['approved', 'void'].includes(String(item.status || '').trim())), 10)
   ), [payload.expenseAnalytics, payload.expenses]);
+  const currentAdminLevel = useMemo(() => {
+    try {
+      return String(window.localStorage.getItem('adminLevel') || window.localStorage.getItem('orgRole') || '').trim().toLowerCase();
+    } catch {
+      return '';
+    }
+  }, []);
+  const currentUserId = useMemo(() => {
+    try {
+      return String(window.localStorage.getItem('userId') || '');
+    } catch {
+      return '';
+    }
+  }, []);
+  const currentAdminLevelLabel = ({
+    finance_manager: 'مدیر مالی',
+    finance_lead: 'مدیر ارشد مالی',
+    general_president: 'ریاست عمومی'
+  })[currentAdminLevel] || 'بدون سطحِ تاییدِ مالی';
   const editingExpenseCategory = useMemo(() => (
     expenseCategoryRegistry.find((item) => String(item._id || item.id) === String(categoryDraft.id || '')) || null
   ), [categoryDraft.id, expenseCategoryRegistry]);
@@ -5110,6 +5168,8 @@ export default function AdminGovernmentFinance() {
               <div className="gov-approval-rule">
                 تاییدِ نهاییِ یک مصرف فقط توسط <strong>ریاست عمومی</strong> انجام می‌شود. مدیر مالی و مدیر ارشد مالی
                 فقط مصرف را به مرحلهٔ بعد می‌برند. هیچ کاربری نمی‌تواند دو بار در زنجیرهٔ یک مصرف تایید یا رد کند.
+                <br />
+                سطحِ حسابِ شما: <strong>{currentAdminLevelLabel}</strong>.
               </div>
               {!expenseQueueRows.length ? (
                 <div className="gov-empty-state">در محدوده فعلی هیچ ردیف مصرفی در انتظار اقدام نیست.</div>
@@ -5123,11 +5183,20 @@ export default function AdminGovernmentFinance() {
                         <th>مبلغ</th>
                         <th>وضعیت</th>
                         <th>مرحله</th>
+                        <th>منتظرِ چه کسی</th>
                         <th>اقدام</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {expenseQueueRows.map((row) => (
+                      {expenseQueueRows.map((row) => {
+                        const isPending = row.status === 'pending_review';
+                        const alreadyReviewed = actorAlreadyReviewedExpense(row.approvalTrail, currentUserId);
+                        const canApprove = isPending && !alreadyReviewed && canApproveExpenseStage(currentAdminLevel, row.approvalStage);
+                        const canReject = isPending && !alreadyReviewed && canRejectExpenseStage(currentAdminLevel, row.approvalStage);
+                        const blockedReason = alreadyReviewed
+                          ? 'شما قبلاً روی این مصرف اقدام کرده‌اید.'
+                          : `این مرحله منتظرِ ${expenseStageWaitLabel(row.approvalStage)} است؛ سطحِ حسابِ شما مجاز نیست.`;
+                        return (
                         <tr key={`queue-${row._id}`}>
                           <td>
                             <div className="gov-table-stack">
@@ -5139,6 +5208,13 @@ export default function AdminGovernmentFinance() {
                           <td>{formatMoney(row.amount)}</td>
                           <td><ExpenseStatusBadge status={row.status} /></td>
                           <td><ExpenseStageBadge stage={row.approvalStage} /></td>
+                          <td>
+                            {isPending
+                              ? expenseStageWaitLabel(row.approvalStage)
+                              : row.status === 'rejected'
+                                ? 'ردشده — نیازِ اصلاح'
+                                : 'هنوز ارسال نشده'}
+                          </td>
                           <td>
                             <div className="gov-action-stack">
                               {(row.status === 'draft' || row.status === 'rejected') ? (
@@ -5152,22 +5228,24 @@ export default function AdminGovernmentFinance() {
                                   ارسال برای بررسی
                                 </button>
                               ) : null}
-                              {row.status === 'pending_review' ? (
+                              {isPending ? (
                                 <>
                                   <button
                                     type="button"
                                     className="gov-inline-action"
                                     data-expense-review-approve={row._id}
-                                    disabled={!!busyAction}
+                                    disabled={!!busyAction || !canApprove}
+                                    title={canApprove ? undefined : blockedReason}
                                     onClick={() => reviewExpense(row._id, 'approve')}
                                   >
-                                    تایید مرحله
+                                    {row.approvalStage === 'general_president_review' ? 'تاییدِ نهایی' : 'تایید مرحله'}
                                   </button>
                                   <button
                                     type="button"
                                     className="gov-inline-action"
                                     data-expense-review-reject={row._id}
-                                    disabled={!!busyAction}
+                                    disabled={!!busyAction || !canReject}
+                                    title={canReject ? undefined : blockedReason}
                                     onClick={() => reviewExpense(row._id, 'reject')}
                                   >
                                     رد
@@ -5188,7 +5266,8 @@ export default function AdminGovernmentFinance() {
                             </div>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
