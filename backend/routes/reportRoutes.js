@@ -6,6 +6,7 @@ const {
   buildConsolidatedFinanceReport,
   buildConsolidatedFinanceDebtors
 } = require('../services/consolidatedFinanceReportService');
+const { buildConsolidatedFinancePrintHtml } = require('../services/consolidatedFinancePrintService');
 const User = require('../models/User');
 const {
   getReportDefinition,
@@ -433,6 +434,35 @@ router.get('/consolidated-finance', requireAuth, requirePermission('finance.repo
   } catch (error) {
     console.error('consolidated finance report failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'ساخت گزارش مالی یکپارچه ناموفق بود.' });
+  }
+});
+
+// سندِ چاپیِ HTML (مرورگر → PDF) برای «همه بخش‌ها» یا یک بخشِ مشخص.
+router.get('/consolidated-finance/print', requireAuth, requirePermission('finance.reports.consolidated.view'), async (req, res) => {
+  try {
+    const proto = String(req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
+    const origin = `${proto}://${req.get('host')}`;
+    const { html, filename } = await buildConsolidatedFinancePrintHtml({
+      section: req.query.section,
+      year: req.query.year,
+      months: req.query.months,
+      from: req.query.from,
+      to: req.query.to,
+      origin
+    });
+    await logActivity({
+      req,
+      action: 'report_print_consolidated_finance',
+      targetType: 'report',
+      targetId: 'consolidated_finance',
+      meta: { section: req.query.section || 'all' }
+    });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    return res.status(200).send(html);
+  } catch (error) {
+    console.error('consolidated finance print failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'ساخت نسخهٔ چاپی ناموفق بود.' });
   }
 });
 

@@ -219,7 +219,7 @@ function Pager({ page, pageCount, onChange }) {
   );
 }
 
-function DomainPanel({ domain }) {
+function DomainPanel({ domain, onPrint, printBusy }) {
   const [page, setPage] = useState(1);
 
   useEffect(() => { setPage(1); }, [domain]);
@@ -237,9 +237,14 @@ function DomainPanel({ domain }) {
     <section className={`sfo-panel sfo-domain ${DOMAIN_TONE[domain.key] || ''}`}>
       <header className="sfo-panel-head">
         <h3>{repairDisplayText(domain.label)}</h3>
-        <span className={`sfo-chip ${netNegative ? 'is-neg' : 'is-pos'}`}>
-          خالص بازه: {formatNumber(totals.net)} افغانی
-        </span>
+        <div className="sfo-panel-head-side">
+          <span className={`sfo-chip ${netNegative ? 'is-neg' : 'is-pos'}`}>
+            خالص بازه: {formatNumber(totals.net)} افغانی
+          </span>
+          <button type="button" className="sfo-linkbtn" onClick={onPrint} disabled={printBusy}>
+            {printBusy ? 'در حال ساخت…' : 'چاپ / PDF'}
+          </button>
+        </div>
       </header>
 
       <div className="sfo-kpi-grid">
@@ -329,20 +334,30 @@ export default function SchoolFinanceOverview() {
     load();
   }, [load]);
 
-  const runExport = async (kind) => {
-    setExporting(kind);
+  const exportExcel = async () => {
+    setExporting('xlsx');
     setExportError('');
     try {
-      if (kind === 'xlsx') {
-        const { blob, filename } = await fetchBlob('/api/reports/export.xlsx', { reportKey: REPORT_KEY, filters: exportFilters });
-        downloadBlob(blob, filename || 'consolidated-finance.xlsx');
-      } else {
-        const { text, filename, contentType } = await fetchText('/api/reports/export.print', { reportKey: REPORT_KEY, filters: exportFilters });
-        const opened = openHtmlDocument(text, filename);
-        if (!opened) downloadBlob(new Blob([text], { type: contentType }), filename || 'consolidated-finance.html');
-      }
+      const { blob, filename } = await fetchBlob('/api/reports/export.xlsx', { reportKey: REPORT_KEY, filters: exportFilters });
+      downloadBlob(blob, filename || 'consolidated-finance.xlsx');
     } catch (err) {
-      setExportError(errorMessage(err, kind === 'xlsx' ? 'دریافت خروجی اکسل ناموفق بود.' : 'آماده‌سازی نسخهٔ چاپی ناموفق بود.'));
+      setExportError(errorMessage(err, 'دریافت خروجی اکسل ناموفق بود.'));
+    } finally {
+      setExporting('');
+    }
+  };
+
+  // سندِ چاپیِ HTML (مرورگر → PDF) — بخش = 'all' یا کلیدِ حوزه.
+  const printSection = async (section) => {
+    setExporting(`print-${section}`);
+    setExportError('');
+    try {
+      const url = `/api/reports/consolidated-finance/print${queryString}&section=${encodeURIComponent(section)}`;
+      const { text, filename, contentType } = await fetchText(url, {}, { method: 'GET' });
+      const opened = openHtmlDocument(text, filename);
+      if (!opened) downloadBlob(new Blob([text], { type: contentType || 'text/html' }), filename || 'consolidated-finance.html');
+    } catch (err) {
+      setExportError(errorMessage(err, 'آماده‌سازی نسخهٔ چاپی ناموفق بود.'));
     } finally {
       setExporting('');
     }
@@ -404,11 +419,11 @@ export default function SchoolFinanceOverview() {
           <button type="button" className="sfo-btn" onClick={load} disabled={loading || customInvalid}>
             {loading ? 'در حال بارگذاری…' : 'تازه‌سازی'}
           </button>
-          <button type="button" className="sfo-btn sfo-btn-ghost" onClick={() => runExport('xlsx')} disabled={!report || Boolean(exporting)}>
+          <button type="button" className="sfo-btn sfo-btn-ghost" onClick={exportExcel} disabled={!report || Boolean(exporting)}>
             {exporting === 'xlsx' ? 'در حال ساخت…' : 'خروجی Excel'}
           </button>
-          <button type="button" className="sfo-btn sfo-btn-ghost" onClick={() => runExport('print')} disabled={!report || Boolean(exporting)}>
-            {exporting === 'print' ? 'در حال ساخت…' : 'چاپ / PDF'}
+          <button type="button" className="sfo-btn sfo-btn-ghost" onClick={() => printSection('all')} disabled={!report || Boolean(exporting)}>
+            {exporting === 'print-all' ? 'در حال ساخت…' : 'چاپ گزارش کامل'}
           </button>
           {period?.from ? (
             <span className="sfo-range-tag">{monthKeyLabel(period.from)} — {monthKeyLabel(period.to)}</span>
@@ -472,7 +487,12 @@ export default function SchoolFinanceOverview() {
 
           <div className="sfo-panels">
             {DOMAIN_ORDER.map((key) => (
-              <DomainPanel key={key} domain={domains[key]} />
+              <DomainPanel
+                key={key}
+                domain={domains[key]}
+                onPrint={() => printSection(key)}
+                printBusy={exporting === `print-${key}`}
+              />
             ))}
           </div>
 

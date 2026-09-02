@@ -329,6 +329,13 @@
 
 .sfo-panel-head h3 { font-size: 1.06rem; }
 
+.sfo-panel-head-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .sfo-chip {
   font-size: 0.8rem;
   padding: 5px 12px;
