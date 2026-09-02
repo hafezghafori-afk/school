@@ -18,6 +18,7 @@ const AcademyRegistration = require('../models/AcademyRegistration');
 const AcademyStudent = require('../models/AcademyStudent');
 const AcademyCourse = require('../models/AcademyCourse');
 const AcademyClass = require('../models/AcademyClass');
+const AcademyCharge = require('../models/AcademyCharge');
 
 const ShortTermPayment = require('../models/ShortTermPayment');
 const ShortTermExpense = require('../models/ShortTermExpense');
@@ -26,6 +27,7 @@ const ShortTermStudent = require('../models/ShortTermStudent');
 const ShortTermClass = require('../models/ShortTermClass');
 
 const { sumPaidRefunds } = require('../utils/financeRefundRecognition');
+const { resolveAsasNumberMapForDocs, pickAdmissionNo } = require('../utils/studentAdmissionNumber');
 const {
   lastShamsiMonthKeys,
   yearShamsiMonthKeys,
@@ -35,7 +37,35 @@ const {
 } = require('../utils/shamsiMonthlyReport');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const DEFAULT_DEBTOR_LIMIT = 25;
+// همهٔ بدهکاران در payload می‌آیند (صفحه‌بندی سمتِ کلاینت است)؛ فقط یک سقفِ
+// ایمنی برای جلوگیری از payloadِ غول‌آسا.
+const DEFAULT_DEBTOR_LIMIT = 2000;
+
+// نرمال‌سازی کلیدِ ماهِ شمسی: «1405-7» → «1405-07»
+function normMonthKey(value) {
+  const match = String(value || '').match(/^(\d{3,4})-(\d{1,2})/);
+  return match ? `${Number(match[1])}-${String(Number(match[2])).padStart(2, '0')}` : '';
+}
+
+// کلیدِ ماهِ شمسی از یک تاریخِ میلادی
+function shamsiMonthOfDate(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return shamsiMonthKeyOf(date) || '';
+}
+
+// «تاریخِ ثبت‌نامِ» آموزشگاه/موقت گاهی رشتهٔ شمسیِ 'YYYY-MM-DD' و گاهی تاریخِ
+// میلادیِ ISO است — هر دو حالت را به کلیدِ ماهِ شمسی تبدیل می‌کند.
+function shamsiMonthFromRegDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const match = raw.match(/^(\d{3,4})-(\d{1,2})/);
+  if (match) {
+    const year = Number(match[1]);
+    if (year >= 1300 && year <= 1500) return `${year}-${String(Number(match[2])).padStart(2, '0')}`;
+  }
+  return shamsiMonthOfDate(raw);
+}
 const DOMAIN_KEYS = ['school', 'shortTerm', 'academy'];
 const DOMAIN_LABELS = {
   school: 'مرکز مالی مکتب',
@@ -81,11 +111,14 @@ function finalizeMonthly(monthlyMap, monthKeys) {
 
 async function loadSchoolDebtors() {
   const standingOrders = await FeeOrder.find({ status: { $ne: 'void' } })
-    .select('amountDue amountPaid outstandingAmount student studentId classId dueDate issuedAt')
+    .select('amountDue amountPaid outstandingAmount student studentId classId dueDate issuedAt periodLabel')
     .populate('studentId', 'fullName admissionNo')
     .populate('student', 'name')
     .populate('classId', 'title')
     .lean();
+
+  // نمبرِ اساس: StudentCore.admissionNo اول، وگرنه AfghanStudent.asasNumber
+  const asasMap = await resolveAsasNumberMapForDocs(standingOrders);
 
   const now = Date.now();
   let dueSum = 0;
@@ -101,26 +134,40 @@ async function loadSchoolDebtors() {
     const holderId = String(order.studentId?._id || order.student?._id || order.student || '');
     if (holderId && (outstanding > 0 || toNumber(order.amountPaid) > 0)) activeStudentIds.add(holderId);
     if (outstanding <= 0) return;
-    const id = String(order.studentId?._id || order.student?._id || order.student || 'unknown');
+    const id = holderId || 'unknown';
+    const asas = pickAdmissionNo(order, asasMap);
     const row = map.get(id) || {
       studentName: order.studentId?.fullName || order.student?.name || 'شاگرد',
-      studentCode: order.studentId?.admissionNo || '',
+      studentCode: asas,
+      asasNumber: asas,
       groupName: order.classId?.title || 'بدون صنف',
       balance: 0,
       orderCount: 0,
       overdueCount: 0,
-      maxLateDays: 0
+      maxLateDays: 0,
+      monthKey: '',
+      monthLabel: '',
+      _oldestDue: Infinity
     };
     row.balance = round(row.balance + outstanding);
     row.orderCount += 1;
-    const due = new Date(order.dueDate || order.issuedAt || now);
-    const lateDays = Number.isNaN(due.getTime()) ? 0 : Math.max(0, Math.floor((now - due.getTime()) / DAY_MS));
+    const dueTs = new Date(order.dueDate || order.issuedAt || now).getTime();
+    const dueSafe = Number.isNaN(dueTs) ? now : dueTs;
+    const lateDays = Math.max(0, Math.floor((now - dueSafe) / DAY_MS));
     if (lateDays > 0) row.overdueCount += 1;
     row.maxLateDays = Math.max(row.maxLateDays, lateDays);
+    // «ماهِ شاگرد» = ماهِ قدیمی‌ترین بلِ بازِ او
+    if (dueSafe < row._oldestDue) {
+      row._oldestDue = dueSafe;
+      row.monthKey = shamsiMonthOfDate(order.dueDate || order.issuedAt);
+      row.monthLabel = String(order.periodLabel || '').trim();
+    }
     map.set(id, row);
   });
 
-  const debtors = Array.from(map.values()).sort((left, right) => right.balance - left.balance);
+  const debtors = Array.from(map.values())
+    .map(({ _oldestDue, ...rest }) => rest)
+    .sort((left, right) => right.balance - left.balance);
   return {
     debtors,
     count: debtors.length,
@@ -131,15 +178,29 @@ async function loadSchoolDebtors() {
   };
 }
 
-async function loadCenterDebtors({ RegistrationModel, CourseModel }) {
+async function loadCenterDebtors({ RegistrationModel, CourseModel, ChargeModel }) {
   const regPopulate = [{ path: 'studentId', select: 'fullName studentCode phone guardianPhone' }];
   if (CourseModel) regPopulate.push({ path: 'courseId', select: 'name' });
   regPopulate.push({ path: 'classId', select: 'name' });
 
   const registrations = await RegistrationModel.find({ status: { $ne: 'cancelled' } })
-    .select('totalPayable paidAmount balance status paymentPlan studentId courseId classId')
+    .select('totalPayable paidAmount balance status paymentPlan studentId courseId classId startDate registrationDate')
     .populate(regPopulate)
     .lean();
+
+  // آموزشگاه: «ماهِ شاگرد» = قدیمی‌ترین قلمِ بدهیِ بازِ همان ثبت‌نام (AcademyCharge.periodKey).
+  let oldestOpenChargeByReg = new Map();
+  if (ChargeModel) {
+    try {
+      const rows = await ChargeModel.aggregate([
+        { $match: { status: { $ne: 'void' }, balance: { $gt: 0 } } },
+        { $group: { _id: '$registrationId', minPeriod: { $min: '$periodKey' } } }
+      ]);
+      oldestOpenChargeByReg = new Map(rows.map((item) => [String(item._id), normMonthKey(item.minPeriod)]));
+    } catch {
+      oldestOpenChargeByReg = new Map();
+    }
+  }
 
   let dueSum = 0;
   let paidSum = 0;
@@ -149,13 +210,20 @@ async function loadCenterDebtors({ RegistrationModel, CourseModel }) {
     paidSum += toNumber(reg.paidAmount);
     const balance = toNumber(reg.balance);
     if (balance > 0 && reg.status === 'active') {
+      const code = reg.studentId?.studentCode || '';
+      const monthKey = oldestOpenChargeByReg.get(String(reg._id))
+        || shamsiMonthFromRegDate(reg.startDate)
+        || shamsiMonthFromRegDate(reg.registrationDate);
       debtors.push({
         studentName: reg.studentId?.fullName || 'شاگرد',
-        studentCode: reg.studentId?.studentCode || '',
+        studentCode: code,
+        asasNumber: code,
         groupName: reg.courseId?.name || reg.classId?.name || 'بدون صنف',
         balance: round(balance),
         paymentPlan: reg.paymentPlan || '',
-        phone: reg.studentId?.phone || reg.studentId?.guardianPhone || ''
+        phone: reg.studentId?.phone || reg.studentId?.guardianPhone || '',
+        monthKey: monthKey || '',
+        monthLabel: ''
       });
     }
   });
@@ -225,7 +293,7 @@ async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKe
     monthly,
     byPaymentMethod: toSortedList(methodMap, 'method'),
     byExpenseCategory: toSortedList(categoryMap, 'category'),
-    topDebtors: debtorData.debtors.slice(0, debtorLimit),
+    debtors: debtorData.debtors.slice(0, debtorLimit),
     debtorCount: debtorData.count
   };
 }
@@ -238,6 +306,7 @@ async function buildCenterDomain({
   RegistrationModel,
   StudentModel,
   CourseModel,
+  ChargeModel,
   paymentMatch,
   monthKeys,
   gregStart,
@@ -261,7 +330,7 @@ async function buildCenterDomain({
       .select('amount expenseDate category')
       .lean(),
     StudentModel.countDocuments({ status: 'active' }),
-    loadCenterDebtors({ RegistrationModel, CourseModel })
+    loadCenterDebtors({ RegistrationModel, CourseModel, ChargeModel })
   ]);
 
   payments.forEach((item) => {
@@ -297,7 +366,7 @@ async function buildCenterDomain({
     monthly,
     byPaymentMethod: toSortedList(methodMap, 'method'),
     byExpenseCategory: toSortedList(categoryMap, 'category'),
-    topDebtors: debtorData.debtors.slice(0, debtorLimit),
+    debtors: debtorData.debtors.slice(0, debtorLimit),
     debtorCount: debtorData.count
   };
 }
@@ -378,6 +447,7 @@ async function buildConsolidatedFinanceReport({ year, months, from, to, debtorLi
       RegistrationModel: AcademyRegistration,
       StudentModel: AcademyStudent,
       CourseModel: AcademyCourse,
+      ChargeModel: AcademyCharge,
       paymentMatch: { status: { $ne: 'void' } },
       monthKeys,
       gregStart,
@@ -457,7 +527,7 @@ async function buildConsolidatedFinanceDebtors({ domain } = {}) {
   if (key === 'school') {
     data = await loadSchoolDebtors();
   } else if (key === 'academy') {
-    data = await loadCenterDebtors({ RegistrationModel: AcademyRegistration, CourseModel: AcademyCourse });
+    data = await loadCenterDebtors({ RegistrationModel: AcademyRegistration, CourseModel: AcademyCourse, ChargeModel: AcademyCharge });
   } else {
     data = await loadCenterDebtors({ RegistrationModel: ShortTermRegistration, CourseModel: null });
   }

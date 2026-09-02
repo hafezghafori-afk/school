@@ -24,15 +24,14 @@ const PAYMENT_METHOD_LABELS = {
   other: 'سایر'
 };
 
-const PAYMENT_PLAN_LABELS = {
-  full: 'یک‌جا',
-  installment: 'قسطی',
-  monthly: 'ماهانه'
-};
-
 const DOMAIN_ORDER = ['school', 'shortTerm', 'academy'];
 const DOMAIN_TONE = { school: 'tone-school', shortTerm: 'tone-short', academy: 'tone-academy' };
 const REPORT_KEY = 'consolidated_finance_monthly';
+const DEBTORS_PER_PAGE = 10;
+
+function faDigits(value) {
+  return Number(value || 0).toLocaleString('fa-AF-u-ca-persian', { useGrouping: false });
+}
 
 const MONTH_PRESETS = [
   { key: '3', label: '۳ ماه اخیر' },
@@ -162,8 +161,7 @@ function BreakdownList({ title, items, labelKey, labelFn }) {
   );
 }
 
-function DebtorTable({ debtors, expanded }) {
-  const rows = Array.isArray(debtors) ? debtors : [];
+function DebtorTable({ rows }) {
   if (!rows.length) return <p className="sfo-empty">بدهکاری باز ثبت نشده است.</p>;
   return (
     <div className="sfo-tablewrap">
@@ -171,11 +169,9 @@ function DebtorTable({ debtors, expanded }) {
         <thead>
           <tr>
             <th>شاگرد</th>
-            <th>شماره</th>
+            <th>شماره اساس</th>
             <th>صنف / کورس</th>
-            {expanded ? <th>پلان</th> : null}
-            {expanded ? <th>تماس</th> : null}
-            {expanded ? <th className="sfo-num">تأخیر (روز)</th> : null}
+            <th>ماه</th>
             <th className="sfo-num">باقیات</th>
           </tr>
         </thead>
@@ -183,11 +179,9 @@ function DebtorTable({ debtors, expanded }) {
           {rows.map((row, index) => (
             <tr key={`${row.studentName}-${index}`}>
               <td>{repairDisplayText(row.studentName)}</td>
-              <td className="sfo-dim">{repairDisplayText(row.studentCode) || '—'}</td>
+              <td className="sfo-dim">{repairDisplayText(row.asasNumber || row.studentCode) || '—'}</td>
               <td>{repairDisplayText(row.groupName)}</td>
-              {expanded ? <td>{PAYMENT_PLAN_LABELS[row.paymentPlan] || (row.overdueCount != null ? `${row.orderCount || 0} بل` : '—')}</td> : null}
-              {expanded ? <td className="sfo-dim">{repairDisplayText(row.phone) || '—'}</td> : null}
-              {expanded ? <td className="sfo-num">{row.maxLateDays ? formatNumber(row.maxLateDays) : '—'}</td> : null}
+              <td className="sfo-dim">{repairDisplayText(row.monthLabel) || monthKeyLabel(row.monthKey) || '—'}</td>
               <td className="sfo-num sfo-strong">{formatNumber(row.balance)}</td>
             </tr>
           ))}
@@ -197,35 +191,47 @@ function DebtorTable({ debtors, expanded }) {
   );
 }
 
+function Pager({ page, pageCount, onChange }) {
+  if (pageCount <= 1) return null;
+  const items = [];
+  for (let n = 1; n <= pageCount; n += 1) {
+    if (n === 1 || n === pageCount || (n >= page - 1 && n <= page + 1)) items.push(n);
+    else if (items[items.length - 1] !== '…') items.push('…');
+  }
+  return (
+    <nav className="sfo-pager" aria-label="صفحه‌بندی بدهکاران">
+      <button type="button" className="sfo-page-btn" disabled={page <= 1} onClick={() => onChange(page - 1)}>قبلی</button>
+      {items.map((n, idx) => (n === '…'
+        ? <span key={`e${idx}`} className="sfo-page-gap">…</span>
+        : (
+          <button
+            key={n}
+            type="button"
+            className={`sfo-page-btn ${n === page ? 'is-active' : ''}`}
+            aria-current={n === page ? 'page' : undefined}
+            onClick={() => onChange(n)}
+          >
+            {faDigits(n)}
+          </button>
+        )))}
+      <button type="button" className="sfo-page-btn" disabled={page >= pageCount} onClick={() => onChange(page + 1)}>بعدی</button>
+    </nav>
+  );
+}
+
 function DomainPanel({ domain }) {
-  const [fullList, setFullList] = useState(null);
-  const [showAll, setShowAll] = useState(false);
-  const [loadingAll, setLoadingAll] = useState(false);
-  const [listError, setListError] = useState('');
+  const [page, setPage] = useState(1);
+
+  useEffect(() => { setPage(1); }, [domain]);
 
   if (!domain) return null;
   const totals = domain.totals || {};
-  const debtorCount = Number(domain.debtorCount ?? (domain.topDebtors || []).length);
-  const hasMore = debtorCount > (domain.topDebtors || []).length;
+  const rows = Array.isArray(domain.debtors) ? domain.debtors : [];
+  const debtorCount = Number(domain.debtorCount ?? rows.length);
+  const pageCount = Math.max(1, Math.ceil(rows.length / DEBTORS_PER_PAGE));
+  const safePage = Math.min(page, pageCount);
+  const pageRows = rows.slice((safePage - 1) * DEBTORS_PER_PAGE, safePage * DEBTORS_PER_PAGE);
   const netNegative = Number(totals.net) < 0;
-
-  const toggleAll = async () => {
-    if (showAll) { setShowAll(false); return; }
-    if (fullList) { setShowAll(true); return; }
-    setLoadingAll(true);
-    setListError('');
-    try {
-      const data = await fetchJson(`/api/reports/consolidated-finance/debtors?domain=${encodeURIComponent(domain.key)}`);
-      setFullList(Array.isArray(data?.debtors) ? data.debtors : []);
-      setShowAll(true);
-    } catch (err) {
-      setListError(errorMessage(err, 'دریافت لیست کامل بدهکاران ناموفق بود.'));
-    } finally {
-      setLoadingAll(false);
-    }
-  };
-
-  const debtorsToShow = showAll && fullList ? fullList : domain.topDebtors;
 
   return (
     <section className={`sfo-panel sfo-domain ${DOMAIN_TONE[domain.key] || ''}`}>
@@ -256,19 +262,14 @@ function DomainPanel({ domain }) {
 
       <div className="sfo-debtors-head">
         <h4>
-          بدهکاران{' '}
-          <span className="sfo-dim">
-            {showAll ? `(همه — ${formatNumber(debtorCount)})` : `(برتر — تا ۲۵ از ${formatNumber(debtorCount)})`}
-          </span>
+          بدهکاران <span className="sfo-dim">({formatNumber(debtorCount)} نفر)</span>
         </h4>
-        {(hasMore || showAll) ? (
-          <button type="button" className="sfo-linkbtn" onClick={toggleAll} disabled={loadingAll}>
-            {loadingAll ? 'در حال بارگذاری…' : showAll ? 'نمایش فقط برترها' : 'نمایش همه بدهکاران'}
-          </button>
+        {pageCount > 1 ? (
+          <span className="sfo-dim">صفحهٔ {faDigits(safePage)} از {faDigits(pageCount)}</span>
         ) : null}
       </div>
-      {listError ? <p className="sfo-empty">{listError}</p> : null}
-      <DebtorTable debtors={debtorsToShow} expanded={showAll} />
+      <DebtorTable rows={pageRows} />
+      <Pager page={safePage} pageCount={pageCount} onChange={setPage} />
     </section>
   );
 }

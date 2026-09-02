@@ -494,6 +494,55 @@
   color: var(--sfo-faint);
 }
 
+/* ── Pager ───────────────────────────────────────────── */
+.sfo-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.sfo-page-btn {
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 34px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--sfo-border);
+  background: var(--sfo-glass-2);
+  color: var(--sfo-text);
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.sfo-page-btn:not(:disabled):hover {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(125, 211, 252, 0.5);
+  transform: translateY(-1px);
+}
+
+.sfo-page-btn.is-active {
+  color: #04121f;
+  background: linear-gradient(135deg, #7dd3fc, #38bdf8);
+  border-color: transparent;
+  font-weight: 800;
+}
+
+.sfo-page-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.sfo-page-gap {
+  color: var(--sfo-faint);
+  padding: 0 2px;
+}
+
 .sfo-generated {
   margin: 20px 2px 0;
   font-size: 0.78rem;
