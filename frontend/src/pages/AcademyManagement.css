@@ -923,21 +923,18 @@
   box-sizing: border-box;
 }
 .academy-minifilter > input[type="text"] { width: 150px; }
-.academy-minifilter .afghan-date-field { display: inline-flex; align-items: center; }
-.academy-minifilter .afghan-date-input-grid { display: inline-flex; gap: 3px; }
-.academy-minifilter .afghan-date-year { width: 48px; }
-.academy-minifilter .afghan-date-day { width: 40px; }
-.academy-minifilter .afghan-date-month { width: 78px; }
-.academy-minifilter .afghan-date-equivalent { display: none; }
+/* AfghanDateInput یک ویجتِ سه‌بخشی است — عرضِ ثابت بده تا بالای بریک‌پوینتِ
+   container-query (۱۹۰px) بماند و سه‌ستونه و درست بچیند */
+.academy-minifilter .afghan-date-field { width: 264px; gap: 2px; }
+.academy-minifilter .afghan-date-input-grid { gap: 4px; }
+.academy-minifilter .afghan-date-input { text-align: center; padding-inline: 4px; }
 .academy-minifilter .academy-segment button { padding: 4px 8px; font-size: 10px; }
 .academy-minifilter .academy-inline-button { padding: 3px 8px; font-size: 10px; }
 
-/* تاریخِ شمسیِ فشرده در مودالِ شیشه‌ای */
-.academy-glass-modal .afghan-date-input-grid { display: flex; gap: 4px; }
-.academy-glass-modal .afghan-date-year { flex: 0 0 52px; }
-.academy-glass-modal .afghan-date-day { flex: 0 0 46px; }
-.academy-glass-modal .afghan-date-month { flex: 1 1 auto; min-width: 70px; }
-.academy-glass-modal .afghan-date-equivalent { font-size: 9px; opacity: 0.7; margin-top: 2px; }
+/* تاریخِ شمسی در مودالِ شیشه‌ای — کمی جمع‌وجورتر ولی همان چیدمانِ سه‌ستونه */
+.academy-glass-modal .academy-field .afghan-date-field { gap: 3px; }
+.academy-glass-modal .academy-field .afghan-date-input-grid { gap: 4px; }
+.academy-glass-modal .academy-field .afghan-date-input { padding-inline: 6px; text-align: center; }
 
 .academy-bucket-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
 .academy-bucket-chip {

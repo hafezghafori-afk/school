@@ -1352,12 +1352,13 @@ export default function AcademyManagement() {
                   )}
                 </div>
                 <Table
-                  columns={['شماره', 'شاگرد', 'کورس', 'این پرداخت', 'باقی', 'رسید']}
+                  columns={['شماره', 'تاریخِ صدور', 'شاگرد', 'کورس', 'این پرداخت', 'باقی', 'رسید']}
                   rows={filteredInvoices.map((item) => [
                     <span className={item.status === 'void' ? 'academy-void' : (item.kind === 'credit_note' ? 'academy-credit' : '')}>
                       {item.invoiceNumber}{item.kind === 'credit_note' ? ' (ابطالی)' : ''}
-                      {Number(item.printCount || 0) > 0 && <span className="academy-chip academy-chip-muted" title={item.lastPrintedAt ? formatAfghanStoredDateLabel(String(item.lastPrintedAt).slice(0, 10)) : ''}>قبلاً چاپ شده ×{item.printCount}</span>}
+                      {Number(item.printCount || 0) > 0 && <span className="academy-chip academy-chip-muted" title={item.lastPrintedAt ? formatAfghanStoredDateLabel(item.lastPrintedAt) : ''}>قبلاً چاپ شده ×{item.printCount}</span>}
                     </span>,
+                    item.issuedAt ? formatAfghanStoredDateLabel(item.issuedAt) : '—',
                     text(item.studentId?.fullName),
                     text(item.courseName),
                     `${fmt(item.paidAmount)} ${item.currency || currency}`,
