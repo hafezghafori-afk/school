@@ -290,6 +290,56 @@ function resolveSnapshotStageLabel(stage = '') {
   return SNAPSHOT_STAGE_LABELS[normalized] || 'پیش‌نویس';
 }
 
+// Phase 4 redesign — a glass panel whose header button opens/closes its body.
+// Open state is remembered per (tab, panel) in localStorage.
+function readPanelState(storageKey, fallback) {
+  try {
+    const stored = window.localStorage.getItem(storageKey);
+    if (stored === 'open') return true;
+    if (stored === 'closed') return false;
+  } catch {
+    /* storage unavailable — fall back */
+  }
+  return fallback;
+}
+
+function CollapsiblePanel({ tabKey, panelKey, title, hint = '', defaultOpen = false, span = '12', children }) {
+  const storageKey = `govfin.panel.${tabKey}.${panelKey}`;
+  const [open, setOpen] = useState(() => readPanelState(storageKey, defaultOpen));
+  const bodyId = `govpanel-${tabKey}-${panelKey}`;
+
+  const toggle = () => {
+    setOpen((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(storageKey, next ? 'open' : 'closed');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
+  return (
+    <article className={`gov-panel ${open ? 'is-open' : ''}`} data-span={span}>
+      <button
+        type="button"
+        className="gov-panel__head"
+        onClick={toggle}
+        aria-expanded={open}
+        aria-controls={bodyId}
+      >
+        <span className="gov-panel__chevron" aria-hidden="true">▾</span>
+        <span className="gov-panel__title">{title}</span>
+        {hint ? <span className="gov-panel__hint">{hint}</span> : null}
+      </button>
+      <div className="gov-panel__body" id={bodyId} hidden={!open}>
+        <div className="gov-panel__inner">{children}</div>
+      </div>
+    </article>
+  );
+}
+
 // Phase 4 (P14) — what changed between the latest official record and the one
 // before it, plus a one-click digest-chain check.
 const SNAPSHOT_DELTA_KEYS = [
@@ -4996,12 +5046,17 @@ export default function AdminGovernmentFinance() {
               </div>
             </article>
 
-            <article className="gov-card" data-span="12">
-              <div className="gov-card-head">
-                <div>
-                  <strong>صف بررسی مصارف</strong>
-                  <span>پیش‌نویس‌ها، موارد ردشده، و ثبت‌های در انتظار بررسی</span>
-                </div>
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="review-queue"
+              title="صف تایید مصارف"
+              hint={`${formatNumber(expenseQueueRows.length)} مورد`}
+              defaultOpen
+              span="12"
+            >
+              <div className="gov-approval-rule">
+                تاییدِ نهاییِ یک مصرف فقط توسط <strong>ریاست عمومی</strong> انجام می‌شود. مدیر مالی و مدیر ارشد مالی
+                فقط مصرف را به مرحلهٔ بعد می‌برند. هیچ کاربری نمی‌تواند دو بار در زنجیرهٔ یک مصرف تایید یا رد کند.
               </div>
               {!expenseQueueRows.length ? (
                 <div className="gov-empty-state">در محدوده فعلی هیچ ردیف مصرفی در انتظار اقدام نیست.</div>
@@ -5085,15 +5140,16 @@ export default function AdminGovernmentFinance() {
                   </table>
                 </div>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="12">
-              <div className="gov-card-head">
-                <div>
-                  <strong>دفتر ثبت مصارف</strong>
-                  <span>ثبت ردیف تازه و مرور آخرین ردیف‌های محدوده فعلی</span>
-                </div>
-              </div>
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="expense-ledger"
+              title="دفتر ثبت مصارف"
+              hint="ثبت ردیف تازه + مرور اخیر"
+              defaultOpen
+              span="12"
+            >
               <div className="gov-form-grid">
                 <label className="gov-field">
                   <span>دسته</span>
@@ -5220,7 +5276,7 @@ export default function AdminGovernmentFinance() {
                   </table>
                 </div>
               )}
-            </article>
+            </CollapsiblePanel>
               </section>
             ) : null}
 
