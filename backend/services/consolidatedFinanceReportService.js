@@ -54,9 +54,9 @@ function shamsiMonthOfDate(value) {
   return shamsiMonthKeyOf(date) || '';
 }
 
-// «تاریخِ ثبت‌نامِ» آموزشگاه/موقت گاهی رشتهٔ شمسیِ 'YYYY-MM-DD' و گاهی تاریخِ
-// میلادیِ ISO است — هر دو حالت را به کلیدِ ماهِ شمسی تبدیل می‌کند.
-function shamsiMonthFromRegDate(value) {
+// تاریخ‌های آموزشگاه/موقت (ثبت‌نام، مصرف، …) گاهی رشتهٔ شمسیِ 'YYYY-MM-DD' و گاهی
+// تاریخِ میلادیِ ISO ذخیره شده‌اند — هر دو حالت را به کلیدِ ماهِ شمسی (jy-jm) تبدیل می‌کند.
+function shamsiMonthFromDateString(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
   const match = raw.match(/^(\d{3,4})-(\d{1,2})/);
@@ -66,6 +66,8 @@ function shamsiMonthFromRegDate(value) {
   }
   return shamsiMonthOfDate(raw);
 }
+// نامِ قدیمی برای سازگاری در همین فایل
+const shamsiMonthFromRegDate = shamsiMonthFromDateString;
 const DOMAIN_KEYS = ['school', 'shortTerm', 'academy'];
 const DOMAIN_LABELS = {
   school: 'مرکز مالی مکتب',
@@ -294,7 +296,8 @@ async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKe
       currentMonthIncome: round(currentRow.income),
       currentMonthExpense: round(currentRow.expense),
       refundTotal: round(refundSummary?.total || 0),
-      pendingExpense: round(pendingExpense)
+      pendingExpense: round(pendingExpense),
+      expenseCount: expenses.length
     },
     monthly,
     byPaymentMethod: toSortedList(methodMap, 'method'),
@@ -330,10 +333,13 @@ async function buildCenterDomain({
     PaymentModel.find({ ...(paymentMatch || {}), paidAt: { $gte: gregStart, $lt: gregEnd } })
       .select('amount paidAt paymentMethod')
       .lean(),
-    // expenseDate در این دیتابیس‌ها رشتهٔ 'YYYY-MM-DD' است (نه Date) — مقایسهٔ
-    // لغوی با مرزهای میلادیِ رشته‌ای همان کاری را می‌کند که buildShamsiMonthlyReport می‌کند.
-    ExpenseModel.find({ expenseDate: { $gte: gregStartStr, $lt: gregEndStr } })
+    // expenseDate در این دیتابیس‌ها رشته است و بسته به فورمِ ورودی گاهی میلادی
+    // ('2026-08-08') و گاهی شمسی ('1405-05-18') ذخیره شده. پس فیلترِ لغویِ بازه
+    // قابل‌اعتماد نیست — همه را می‌گیریم و در JS با تبدیلِ هر تاریخ به کلیدِ ماهِ
+    // شمسی و تطبیق با monthKeys فیلتر می‌کنیم.
+    ExpenseModel.find({})
       .select('amount expenseDate category')
+      .limit(20000)
       .lean(),
     StudentModel.countDocuments({ status: 'active' }),
     loadCenterDebtors({ RegistrationModel, CourseModel, ChargeModel })
@@ -344,8 +350,14 @@ async function buildCenterDomain({
     const method = item.paymentMethod || 'other';
     methodMap.set(method, round((methodMap.get(method) || 0) + toNumber(item.amount)));
   });
+  const monthKeySet = new Set(monthKeys);
+  let expenseCount = 0;
   expenses.forEach((item) => {
-    bucket(monthlyMap, item.expenseDate, 'expense', item.amount);
+    const key = shamsiMonthFromDateString(item.expenseDate);
+    if (!key || !monthKeySet.has(key)) return;
+    expenseCount += 1;
+    const row = monthlyMap.get(key);
+    if (row) row.expense = round(row.expense + toNumber(item.amount));
     const category = item.category || 'other';
     categoryMap.set(category, round((categoryMap.get(category) || 0) + toNumber(item.amount)));
   });
@@ -368,7 +380,8 @@ async function buildCenterDomain({
       currentMonthIncome: round(currentRow.income),
       currentMonthExpense: round(currentRow.expense),
       refundTotal: 0,
-      pendingExpense: 0
+      pendingExpense: 0,
+      expenseCount
     },
     monthly,
     byPaymentMethod: toSortedList(methodMap, 'method'),

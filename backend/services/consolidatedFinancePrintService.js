@@ -113,7 +113,7 @@ function domainSection(domain, { pageBreak }) {
     ${monthlyTable(domain.monthly)}
     <div class="cols">
       ${breakdownTable('درآمد بر اساس روش پرداخت', domain.byPaymentMethod, 'method', (value) => METHOD_LABELS[value] || value || 'سایر')}
-      ${breakdownTable('مصرف بر اساس دسته', domain.byExpenseCategory, 'category', null)}
+      ${breakdownTable(`مصرف بر اساس دسته${Number(totals.expenseCount) ? ` — ${fa(totals.expenseCount)} فقره` : ''}`, domain.byExpenseCategory, 'category', null)}
     </div>
     <h3>بدهکاران (${fa(domain.debtorCount)} نفر)</h3>
     ${debtorTable(domain.debtors)}

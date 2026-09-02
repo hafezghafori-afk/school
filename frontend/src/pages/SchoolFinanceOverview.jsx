@@ -264,8 +264,15 @@ function DomainPanel({ domain, onPrint, printBusy }) {
 
       <div className="sfo-panel-breakdowns">
         <BreakdownList title="درآمد بر اساس روش پرداخت" items={domain.byPaymentMethod} labelKey="method" labelFn={methodLabel} />
-        <BreakdownList title="مصرف بر اساس دسته" items={domain.byExpenseCategory} labelKey="category" />
+        <BreakdownList
+          title={`مصرف بر اساس دسته${totals.expenseCount ? ` — ${formatNumber(totals.expenseCount)} فقره` : ''}`}
+          items={domain.byExpenseCategory}
+          labelKey="category"
+        />
       </div>
+      {totals.expenseCount && (domain.byExpenseCategory || []).length > 8 ? (
+        <p className="sfo-note">فقط ۸ دستهٔ بزرگ نمایش داده شده؛ کل {formatNumber(totals.expense)} افغانی در {formatNumber((domain.byExpenseCategory || []).length)} دسته.</p>
+      ) : null}
 
       <div className="sfo-debtors-head">
         <h4>
