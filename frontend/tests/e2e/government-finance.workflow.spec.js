@@ -1999,7 +1999,7 @@ test.describe('government finance workflow', () => {
     await expect(page.locator('.gov-finance-badge.info')).toContainText('متصل به هسته مالی و موتور گزارش');
     await expect(page.locator('.gov-kpi-grid')).toContainText('AFN');
 
-    await page.getByRole('tab', { name: 'عملیات مصارف' }).click();
+    await page.getByRole('tab', { name: 'مصارف', exact: true }).click();
     await expect.poll(() => new URL(page.url()).searchParams.get('tab') || '').toBe('operations');
     await page.getByRole('button', { name: 'باز کردن همه' }).click();
     const categoryFormCard = page.locator('[data-expense-category-save="true"]').locator('xpath=ancestor::article[1]');
@@ -2113,7 +2113,7 @@ test.describe('government finance workflow', () => {
     await expect(queueCard.locator('.gov-table')).toContainText('Atlas Supplies');
     await expect(queueCard.locator('.gov-table')).toContainText('در انتظار بررسی');
 
-    await page.getByRole('tab', { name: 'مدیریت سال مالی' }).click();
+    await page.getByRole('tab', { name: 'سال مالی', exact: true }).click();
     await page.getByRole('button', { name: 'باز کردن همه' }).click();
     const yearLedger = page.locator('.gov-panel', { hasText: 'دفتر سال‌های مالی' });
     await expect(page.locator('[data-budget-summary-card="true"]')).toContainText('بودجه مصارف');
@@ -2146,7 +2146,7 @@ test.describe('government finance workflow', () => {
     await expect.poll(() => counters.closeBlocked).toBe(1);
     await expect(page.locator('.gov-finance-message.error')).toContainText('بستن سال مالی متوقف شد');
 
-    await page.getByRole('tab', { name: 'عملیات مصارف' }).click();
+    await page.getByRole('tab', { name: 'مصارف', exact: true }).click();
     await page.getByRole('button', { name: 'باز کردن همه' }).click();
     const pendingQueueRow = queueCard.locator('tbody tr', { hasText: 'Atlas Supplies' });
     await expect(pendingQueueRow).toContainText('در انتظار بررسی');
@@ -2165,12 +2165,12 @@ test.describe('government finance workflow', () => {
     await expect(settlementCard).toContainText('۵۰۰');
     await expect(ledgerCard.locator('.gov-table')).toContainText('تایید شده');
 
-    await page.getByRole('tab', { name: 'مدیریت سال مالی' }).click();
+    await page.getByRole('tab', { name: 'سال مالی', exact: true }).click();
     await page.getByRole('button', { name: 'باز کردن همه' }).click();
     await yearLedger.locator('.gov-year-card.selected .gov-card-actions button').last().click();
     await expect.poll(() => counters.closeSuccess).toBe(1);
 
-    await page.getByRole('tab', { name: 'آرشیف رسمی' }).click();
+    await page.getByRole('tab', { name: 'آرشیف', exact: true }).click();
     await page.getByRole('button', { name: 'باز کردن همه' }).click();
     await page.getByRole('button', { name: 'ساخت پیش‌نویس ربعوار' }).click();
     await page.getByRole('button', { name: 'ساخت پیش‌نویس سالانه' }).click();

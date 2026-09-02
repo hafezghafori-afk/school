@@ -30,13 +30,13 @@ void LEGACY_GARBLED_TABS;
 
 const TABS = [
   { key: 'dashboard', label: 'نمای کلی' },
-  { key: 'year', label: 'مدیریت سال مالی' },
-  { key: 'operations', label: 'عملیات مصارف' },
-  { key: 'treasury', label: 'خزانه و صندوق' },
-  { key: 'monthly', label: 'گزارش ماهانه' },
-  { key: 'quarterly', label: 'گزارش ربع‌وار' },
-  { key: 'annual', label: 'گزارش سالانه' },
-  { key: 'archive', label: 'آرشیف رسمی' }
+  { key: 'year', label: 'سال مالی' },
+  { key: 'operations', label: 'مصارف' },
+  { key: 'treasury', label: 'خزانه' },
+  { key: 'monthly', label: 'ماهانه' },
+  { key: 'quarterly', label: 'ربع‌وار' },
+  { key: 'annual', label: 'سالانه' },
+  { key: 'archive', label: 'آرشیف' }
 ];
 
 const QUARTER_OPTIONS = [
