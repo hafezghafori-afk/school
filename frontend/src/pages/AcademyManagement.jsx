@@ -681,38 +681,79 @@ export default function AcademyManagement() {
       paidAmount: c.paidAmount ?? 0,
       balance: c.balance ?? 0
     });
+    const enrollmentCharge = list.find((c) => c.kind === 'enrollment');
+    const installmentRows = list.filter((c) => c.kind === 'installment')
+      .map((c) => ({ amount: c.amount ?? '', dueDate: c.dueDate ? String(c.dueDate).slice(0, 10) : '', title: c.title || '' }));
+    const finance = {
+      paymentPlan: reg.paymentPlan || 'full',
+      feeAmount: enrollmentCharge ? (enrollmentCharge.amount ?? '') : (reg.feeAmount ?? ''),
+      discountAmount: enrollmentCharge ? (enrollmentCharge.discountAmount ?? '') : (reg.discountAmount ?? ''),
+      discountType: enrollmentCharge?.discountType || reg.discountType || '',
+      discountReason: enrollmentCharge?.discountReason || reg.discountReason || '',
+      monthlyFee: reg.monthlyFee ?? '',
+      installments: installmentRows
+    };
     setEditingRegistration({
       _id: reg._id,
       studentName: reg.studentId?.fullName || '',
       courseName: reg.courseId?.name || '',
-      paymentPlan: reg.paymentPlan,
+      paidAmount: reg.paidAmount ?? 0,
+      hasPaidCharge: list.some((c) => Number(c.paidAmount || 0) > 0),
       status: reg.status || 'active',
+      startDate: reg.startDate ? String(reg.startDate).slice(0, 10) : '',
+      endDate: reg.endDate ? String(reg.endDate).slice(0, 10) : '',
+      note: reg.note || '',
+      ...finance,
       original: {
         status: reg.status || 'active',
         startDate: reg.startDate ? String(reg.startDate).slice(0, 10) : '',
         endDate: reg.endDate ? String(reg.endDate).slice(0, 10) : '',
-        monthlyFee: reg.monthlyFee ?? ''
+        note: reg.note || '',
+        ...finance,
+        installments: installmentRows.map((r) => ({ ...r }))
       },
-      startDate: reg.startDate ? String(reg.startDate).slice(0, 10) : '',
-      endDate: reg.endDate ? String(reg.endDate).slice(0, 10) : '',
-      monthlyFee: reg.monthlyFee ?? '',
-      note: reg.note || '',
       charges: list.map(norm),
       originalCharges: list.map(norm),
       newCharge: { kind: 'manual', title: '', amount: '', dueDate: '', discountAmount: '', discountType: '', discountReason: '' }
     });
   };
 
-  const saveRegistrationEdit = async () => {
+  const saveRegBasics = async () => {
     if (!editingRegistration) return;
     setBusy(true);
     try {
       const r = editingRegistration;
       const data = await requestJson(`/api/academy/registrations/${r._id}`, {
         method: 'PUT',
-        body: JSON.stringify({ status: r.status, startDate: r.startDate, endDate: r.endDate, note: r.note, monthlyFee: r.monthlyFee })
+        body: JSON.stringify({ status: r.status, startDate: r.startDate, endDate: r.endDate, note: r.note })
       });
       toast.success(data.message || 'ثبت‌نام به‌روزرسانی شد.');
+      setEditingRegistration(null);
+      await loadData();
+      if (reports) { setReports(null); setDebtors(null); }
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveRegFinance = async () => {
+    if (!editingRegistration) return;
+    setBusy(true);
+    try {
+      const r = editingRegistration;
+      const payload = {
+        paymentPlan: r.paymentPlan,
+        feeAmount: r.feeAmount,
+        discountAmount: r.discountAmount,
+        discountType: r.discountType,
+        discountReason: r.discountReason
+      };
+      if (r.paymentPlan === 'monthly') payload.monthlyFee = r.monthlyFee;
+      if (r.paymentPlan === 'installment') payload.installments = (r.installments || []).filter((i) => Number(i.amount) > 0);
+      const data = await requestJson(`/api/academy/registrations/${r._id}`, { method: 'PUT', body: JSON.stringify(payload) });
+      toast.success(data.message || 'مالیِ ثبت‌نام به‌روزرسانی شد.');
       setEditingRegistration(null);
       await loadData();
       if (reports) { setReports(null); setDebtors(null); }
@@ -1835,7 +1876,8 @@ export default function AcademyManagement() {
         currency={currency}
         busy={busy}
         dueDayHint={settings.monthlyChargeDueDay || 20}
-        onSaveRegistration={saveRegistrationEdit}
+        onSaveBasics={saveRegBasics}
+        onSaveFinance={saveRegFinance}
         onSaveCharge={saveChargeEdit}
         onVoidCharge={voidCharge}
         onAddCharge={addChargeToRegistration}
@@ -1845,6 +1887,7 @@ export default function AcademyManagement() {
 }
 
 const REG_STATUS_LABELS = { active: 'فعال', completed: 'تمام‌شده', paused: 'متوقف', cancelled: 'لغوشده' };
+const PLAN_LABELS = { full: 'کامل (یک‌جا)', installment: 'قسطی', monthly: 'ماهانه' };
 const NEW_CHARGE_KIND_HINT = {
   manual: 'قلمِ دستی — هر بدهیِ اضافه (مواد، کتاب، …).',
   installment: 'یک قسطِ تازه به جدولِ اقساط.',
@@ -1873,7 +1916,7 @@ function describeChargeChange(orig, cur) {
   return out;
 }
 
-function RegistrationEditModal({ state, setState, currency, busy, dueDayHint, onSaveRegistration, onSaveCharge, onVoidCharge, onAddCharge }) {
+function RegistrationEditModal({ state, setState, currency, busy, dueDayHint, onSaveBasics, onSaveFinance, onSaveCharge, onVoidCharge, onAddCharge }) {
   if (!state) return null;
   const close = () => setState(null);
   const patch = (fields) => setState((prev) => ({ ...prev, ...fields }));
@@ -1882,16 +1925,43 @@ function RegistrationEditModal({ state, setState, currency, busy, dueDayHint, on
     charges: prev.charges.map((c) => (String(c._id) === String(id) ? { ...c, ...fields } : c))
   }));
   const patchNew = (fields) => setState((prev) => ({ ...prev, newCharge: { ...prev.newCharge, ...fields } }));
+  const patchInst = (i, fields) => setState((prev) => ({
+    ...prev,
+    installments: (prev.installments || []).map((r, ri) => (ri === i ? { ...r, ...fields } : r))
+  }));
 
   const origById = new Map((state.originalCharges || []).map((c) => [String(c._id), c]));
   const o = state.original || {};
-  const regChanges = [];
-  if (o.status !== state.status) regChanges.push({ t: 't-title', label: `وضعیت: ${REG_STATUS_LABELS[state.status] || state.status}` });
-  if ((o.startDate || '') !== (state.startDate || '')) regChanges.push({ t: 't-due', label: 'تغییرِ تاریخِ شروع' });
-  if ((o.endDate || '') !== (state.endDate || '')) regChanges.push({ t: 't-due', label: 'تغییرِ تاریخِ پایان' });
-  if (state.paymentPlan === 'monthly' && Number(o.monthlyFee || 0) !== Number(state.monthlyFee || 0)) {
-    const up = Number(state.monthlyFee || 0) > Number(o.monthlyFee || 0);
-    regChanges.push({ t: up ? 't-fee-up' : 't-fee-down', label: `فیسِ ماهانه: ${fmt(o.monthlyFee)} ← ${fmt(state.monthlyFee)}` });
+
+  // --- تغییرهای «وضعیت و تاریخ» ---
+  const basicChanges = [];
+  if (o.status !== state.status) basicChanges.push({ t: 't-title', label: `وضعیت: ${REG_STATUS_LABELS[state.status] || state.status}` });
+  if ((o.startDate || '') !== (state.startDate || '')) basicChanges.push({ t: 't-due', label: 'تغییرِ تاریخِ شروع' });
+  if ((o.endDate || '') !== (state.endDate || '')) basicChanges.push({ t: 't-due', label: 'تغییرِ تاریخِ پایان' });
+  if ((o.note || '') !== (state.note || '')) basicChanges.push({ t: 't-title', label: 'تغییرِ یادداشت' });
+
+  // --- تغییرهای «پرداخت، فیس و تخفیف» ---
+  const financeChanges = [];
+  const num = (v) => Number(v || 0);
+  if ((o.paymentPlan || 'full') !== (state.paymentPlan || 'full')) {
+    financeChanges.push({ t: 't-new', label: `نوعِ پرداخت: ${PLAN_LABELS[state.paymentPlan] || state.paymentPlan}` });
+  }
+  if (state.paymentPlan === 'full') {
+    if (num(o.feeAmount) !== num(state.feeAmount)) {
+      financeChanges.push({ t: num(state.feeAmount) > num(o.feeAmount) ? 't-fee-up' : 't-fee-down', label: `فیس: ${fmt(o.feeAmount)} ← ${fmt(state.feeAmount)}` });
+    }
+    const od = num(o.discountAmount);
+    const cd = num(state.discountAmount);
+    if (od <= 0 && cd > 0) financeChanges.push({ t: 't-discount-add', label: `ثبتِ تخفیف (${fmt(cd)})` });
+    else if (od > 0 && cd <= 0) financeChanges.push({ t: 't-discount-remove', label: 'لغوِ تخفیف' });
+    else if (od !== cd) financeChanges.push({ t: 't-discount-change', label: `تغییرِ تخفیف (${fmt(od)} ← ${fmt(cd)})` });
+    if ((o.discountType || '') !== (state.discountType || '') && cd > 0) financeChanges.push({ t: 't-discount-change', label: `دستهٔ تخفیف: ${DISCOUNT_TYPE_LABELS[state.discountType || ''] || '—'}` });
+  }
+  if (state.paymentPlan === 'monthly' && num(o.monthlyFee) !== num(state.monthlyFee)) {
+    financeChanges.push({ t: num(state.monthlyFee) > num(o.monthlyFee) ? 't-fee-up' : 't-fee-down', label: `فیسِ ماهانه: ${fmt(o.monthlyFee)} ← ${fmt(state.monthlyFee)}` });
+  }
+  if (state.paymentPlan === 'installment' && JSON.stringify(o.installments || []) !== JSON.stringify(state.installments || [])) {
+    financeChanges.push({ t: 't-new', label: `جدولِ اقساط (${(state.installments || []).filter((r) => Number(r.amount) > 0).length} قسط)` });
   }
 
   const chargeChangeChips = [];
@@ -1903,14 +1973,15 @@ function RegistrationEditModal({ state, setState, currency, busy, dueDayHint, on
   const newChargePending = Number(state.newCharge.amount) > 0
     ? [{ t: 't-new', label: `قلمِ تازه: ${CHARGE_KIND_LABELS[state.newCharge.kind] || state.newCharge.kind} ${fmt(state.newCharge.amount)}` }]
     : [];
-  const allPending = [...regChanges, ...chargeChangeChips, ...newChargePending];
+  const allPending = [...basicChanges, ...financeChanges, ...chargeChangeChips, ...newChargePending];
+  const financeLocked = state.hasPaidCharge;
 
   return (
     <div className="academy-modal-backdrop is-glass" role="presentation" onClick={close}>
       <section className="academy-modal academy-glass-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
         <button type="button" className="academy-modal-close" onClick={close}>بستن</button>
         <h2>ویرایشِ ثبت‌نام — {text(state.studentName)}</h2>
-        <p className="academy-form-hint">{text(state.courseName)} · نوعِ پرداخت: {state.paymentPlan === 'monthly' ? 'ماهانه' : state.paymentPlan === 'installment' ? 'قسطی' : 'کامل'}</p>
+        <p className="academy-form-hint">{text(state.courseName)} · نوعِ پرداختِ فعلی: {PLAN_LABELS[state.paymentPlan] || state.paymentPlan}{Number(state.paidAmount) > 0 ? ` · پرداخت‌شده تا کنون: ${fmt(state.paidAmount)} ${currency}` : ''}</p>
 
         <div className={`academy-change-summary${allPending.length ? '' : ' is-empty'}`}>
           {allPending.length
@@ -1919,6 +1990,7 @@ function RegistrationEditModal({ state, setState, currency, busy, dueDayHint, on
         </div>
 
         <div className="academy-glass-card">
+          <h3 style={{ marginTop: 0 }}>۱) وضعیت و تاریخ‌ها</h3>
           <div className="academy-form academy-edit-grid">
             <Field label="وضعیت">
               <select value={state.status} onChange={(e) => patch({ status: e.target.value })}>
@@ -1927,23 +1999,82 @@ function RegistrationEditModal({ state, setState, currency, busy, dueDayHint, on
             </Field>
             <Field label="تاریخ شروع"><AfghanDateInput value={state.startDate} onChange={(v) => patch({ startDate: v })} /></Field>
             <Field label="تاریخ پایان"><AfghanDateInput value={state.endDate} onChange={(v) => patch({ endDate: v })} /></Field>
-            {state.paymentPlan === 'monthly' && (
-              <Field label="فیس ثابتِ هر ماه">
-                <input type="number" min="0" value={state.monthlyFee} onChange={(e) => patch({ monthlyFee: e.target.value })} />
-              </Field>
-            )}
             <Field label="یادداشت"><input value={state.note} onChange={(e) => patch({ note: e.target.value })} /></Field>
           </div>
-          {state.paymentPlan === 'monthly' && (
-            <p className="academy-form-hint">تغییرِ «فیس ثابتِ هر ماه» فقط قلم‌های ماهانهٔ <b>پرداخت‌نشده</b> را به مبلغِ تازه می‌برد و ماه‌های عقب‌مانده را می‌سازد (سررسید روزِ {dueDayHint}).</p>
-          )}
-          <button type="button" onClick={onSaveRegistration} disabled={busy || !regChanges.length}>ذخیرهٔ مشخصاتِ ثبت‌نام</button>
+          <button type="button" onClick={onSaveBasics} disabled={busy || !basicChanges.length}>ذخیرهٔ وضعیت و تاریخ‌ها</button>
         </div>
 
-        <h3>اقلامِ بدهی — فیس و تخفیف این‌جاست</h3>
+        <div className="academy-glass-card">
+          <h3 style={{ marginTop: 0 }}>۲) پرداخت، فیس و تخفیف</h3>
+          {financeLocked && (
+            <p className="academy-form-hint" style={{ color: '#fca5a5' }}>
+              این ثبت‌نام قلمِ <b>پرداخت‌شده</b> دارد؛ نوعِ پرداخت/فیس/تخفیف این‌جا قفل است. اول پرداخت را در تب «پرداخت و بل» ابطال کنید، یا در بخشِ «اقلامِ بدهی» پایین یک قلمِ اصلاحی بیفزایید.
+            </p>
+          )}
+          <div className="academy-form academy-edit-grid">
+            <Field label="نوعِ پرداخت">
+              <select value={state.paymentPlan} disabled={financeLocked} onChange={(e) => patch({ paymentPlan: e.target.value })}>
+                {Object.entries(PLAN_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </Field>
+            {state.paymentPlan === 'full' && (
+              <>
+                <Field label={`فیس (${currency})`}>
+                  <input type="number" min="0" value={state.feeAmount} disabled={financeLocked} onChange={(e) => patch({ feeAmount: e.target.value })} />
+                </Field>
+                <Field label={`تخفیف (${currency})`}>
+                  <input type="number" min="0" value={state.discountAmount} disabled={financeLocked} onChange={(e) => patch({ discountAmount: e.target.value })} />
+                </Field>
+                {Number(state.discountAmount) > 0 && (
+                  <>
+                    <Field label="دستهٔ تخفیف">
+                      <select value={state.discountType} disabled={financeLocked} onChange={(e) => patch({ discountType: e.target.value })}>
+                        {Object.entries(DISCOUNT_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      </select>
+                    </Field>
+                    <Field label="دلیلِ تخفیف">
+                      <input value={state.discountReason} disabled={financeLocked} onChange={(e) => patch({ discountReason: e.target.value })} />
+                    </Field>
+                  </>
+                )}
+              </>
+            )}
+            {state.paymentPlan === 'monthly' && (
+              <Field label={`فیس ثابتِ هر ماه (${currency})`}>
+                <input type="number" min="0" value={state.monthlyFee} disabled={financeLocked} onChange={(e) => patch({ monthlyFee: e.target.value })} />
+              </Field>
+            )}
+          </div>
+
+          {state.paymentPlan === 'installment' && (
+            <div className="academy-installments">
+              <span className="academy-field-label">جدولِ اقساط</span>
+              {(state.installments || []).map((row, i) => (
+                <div className="academy-installment-row" key={i}>
+                  <input type="number" min="0" placeholder="مبلغ" value={row.amount} disabled={financeLocked}
+                    onChange={(e) => patchInst(i, { amount: e.target.value })} />
+                  <AfghanDateInput value={row.dueDate || ''} onChange={(v) => patchInst(i, { dueDate: v })} />
+                  <button type="button" className="academy-inline-button" disabled={financeLocked}
+                    onClick={() => setState((prev) => ({ ...prev, installments: prev.installments.filter((_, ri) => ri !== i) }))}>حذف</button>
+                </div>
+              ))}
+              <button type="button" className="academy-inline-button" disabled={financeLocked}
+                onClick={() => setState((prev) => ({ ...prev, installments: [...(prev.installments || []), { amount: '', dueDate: '' }] }))}>+ افزودن قسط</button>
+            </div>
+          )}
+
+          <p className="academy-form-hint">
+            {state.paymentPlan === 'monthly'
+              ? `با ذخیره، فیسِ ماهانه تنظیم و شارژِ ماه‌های سررسیدشده ساخته می‌شود (سررسید روزِ ${dueDayHint}).`
+              : 'با ذخیره، اقلامِ بدهیِ پرداخت‌نشدهٔ قبلی ابطال و ساختارِ تازه از نو ساخته می‌شود.'}
+          </p>
+          <button type="button" onClick={onSaveFinance} disabled={busy || financeLocked || !financeChanges.length}>ذخیرهٔ پرداخت، فیس و تخفیف</button>
+        </div>
+
+        <h3>۳) اقلامِ بدهی — تنظیمِ دقیقِ هر قلم</h3>
         <p className="academy-form-hint">هر ردیف یک قلمِ بدهی است. برچسبِ رنگیِ بالای هر ردیف می‌گوید چه اتفاقی می‌افتد: «ثبتِ تخفیف»، «لغوِ تخفیف»، «افزایش/کاهشِ فیس»، «تغییرِ سررسید». قلمی که پرداخت خورده <b>قفل</b> است — اول پرداختش را در تب «پرداخت و بل» ابطال کنید.</p>
         <div className="academy-charge-edit-list">
-          {(state.charges || []).length === 0 && <p className="academy-empty">قلمی نیست.</p>}
+          {(state.charges || []).length === 0 && <p className="academy-empty">هنوز قلمِ بدهیِ جداگانه‌ای نیست — از بخشِ «۲) پرداخت، فیس و تخفیف» بالا استفاده کنید (با ذخیره، اقلام ساخته می‌شوند).</p>}
           {(state.charges || []).map((c) => {
             const locked = Number(c.paidAmount || 0) > 0;
             const rowChanges = describeChargeChange(origById.get(String(c._id)), c);
@@ -1989,7 +2120,7 @@ function RegistrationEditModal({ state, setState, currency, busy, dueDayHint, on
         </div>
 
         <div className="academy-glass-card">
-          <h3 style={{ marginTop: 0 }}>افزودنِ قلمِ تازه</h3>
+          <h3 style={{ marginTop: 0 }}>۴) افزودنِ قلمِ تازه</h3>
           <div className="academy-charge-edit-row">
             <label className="academy-cer-field"><span>نوع</span>
               <select value={state.newCharge.kind} onChange={(e) => patchNew({ kind: e.target.value })}>

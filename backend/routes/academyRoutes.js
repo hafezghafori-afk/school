@@ -304,6 +304,43 @@ router.get('/registrations', async (req, res) => {
   }
 });
 
+// اقلامِ بدهیِ اولیهٔ یک ثبت‌نام را بر اساسِ نوعِ پرداخت می‌سازد (برای POST و
+// برای بازسازی هنگامِ ویرایش). فرض: هیچ قلمِ پرداخت‌شده‌ای باقی نمانده است.
+async function buildInitialCharges(reg, body, currency, settings, uid) {
+  const fee = toNumber(reg.feeAmount);
+  const discount = Math.min(fee, toNumber(reg.discountAmount));
+  const installments = Array.isArray(body.installments) ? body.installments : [];
+  const discountType = ['sibling', 'scholarship', 'staff', 'hardship', 'other'].includes(body.discountType) ? body.discountType : '';
+  const discountReason = String(body.discountReason || '').trim();
+
+  if (reg.paymentPlan === 'installment' && installments.length) {
+    let idx = 0;
+    for (const row of installments) {
+      idx += 1;
+      const amount = toNumber(row.amount);
+      if (amount <= 0) continue;
+      await AcademyCharge.create({
+        registrationId: reg._id, studentId: reg.studentId, kind: 'installment',
+        title: String(row.title || `قسط ${idx}`).trim(),
+        amount, dueDate: String(row.dueDate || '').slice(0, 10), currency, createdBy: uid
+      });
+    }
+  } else if (reg.paymentPlan === 'monthly') {
+    if (!toNumber(reg.monthlyFee) && fee > 0) { reg.monthlyFee = fee; }
+    await reg.save();
+    try { await academyLedger.generateMonthlyCharges({ dueDay: settings.monthlyChargeDueDay || 20, registrationId: reg._id }); } catch (e) { console.error(e?.message); }
+  } else if (fee > 0) {
+    await AcademyCharge.create({
+      registrationId: reg._id, studentId: reg.studentId, kind: 'enrollment',
+      title: 'فیس / شمولیت', amount: fee, discountAmount: discount,
+      discountReason, discountType,
+      discountApprovedBy: discount > 0 ? uid : null,
+      dueDate: String(reg.startDate || reg.registrationDate || '').slice(0, 10),
+      currency, createdBy: uid
+    });
+  }
+}
+
 router.post('/registrations', async (req, res) => {
   try {
     const settings = await getSettings();
@@ -316,41 +353,7 @@ router.post('/registrations', async (req, res) => {
       updatedBy: userId(req)
     });
 
-    // اقلامِ بدهیِ اولیه بر اساسِ نوعِ پرداخت
-    const fee = toNumber(reg.feeAmount);
-    const discount = Math.min(fee, toNumber(reg.discountAmount));
-    const installments = Array.isArray(req.body.installments) ? req.body.installments : [];
-
-    if (reg.paymentPlan === 'installment' && installments.length) {
-      let idx = 0;
-      for (const row of installments) {
-        idx += 1;
-        const amount = toNumber(row.amount);
-        if (amount <= 0) continue;
-        await AcademyCharge.create({
-          registrationId: reg._id, studentId: reg.studentId, kind: 'installment',
-          title: String(row.title || `قسط ${idx}`).trim(),
-          amount, dueDate: String(row.dueDate || '').slice(0, 10), currency, createdBy: userId(req)
-        });
-      }
-    } else if (reg.paymentPlan === 'monthly') {
-      // شارژِ ماهانه با lazy generate ساخته می‌شود — اگر feeAmount داده شده و monthlyFee خالی است، همان را بگذار
-      if (!toNumber(reg.monthlyFee) && fee > 0) { reg.monthlyFee = fee; await reg.save(); }
-    } else if (fee > 0) {
-      await AcademyCharge.create({
-        registrationId: reg._id, studentId: reg.studentId, kind: 'enrollment',
-        title: 'فیس / شمولیت', amount: fee, discountAmount: discount,
-        discountReason: String(req.body.discountReason || '').trim(),
-        discountType: ['sibling', 'scholarship', 'staff', 'hardship', 'other'].includes(req.body.discountType) ? req.body.discountType : '',
-        discountApprovedBy: discount > 0 ? userId(req) : null,
-        dueDate: String(reg.startDate || reg.registrationDate || '').slice(0, 10),
-        currency, createdBy: userId(req)
-      });
-    }
-
-    if (reg.paymentPlan === 'monthly') {
-      try { await academyLedger.generateMonthlyCharges({ dueDay: settings.monthlyChargeDueDay || 20, registrationId: reg._id }); } catch (e) { console.error(e?.message); }
-    }
+    await buildInitialCharges(reg, req.body, currency, settings, userId(req));
     await academyLedger.recomputeRegistration(reg._id);
 
     const populated = await AcademyRegistration.findById(reg._id)
@@ -363,49 +366,82 @@ router.post('/registrations', async (req, res) => {
   }
 });
 
-// ویرایشِ یک ثبت‌نام — فیلدهای امنِ ثبت‌نام؛ فیس/تخفیفِ واقعی روی اقلامِ بدهی
-// ویرایش می‌شود (PUT /charges/:id). تغییرِ monthlyFee فقط اقلامِ ماهانهٔ
-// پرداخت‌نشده را به مبلغِ تازه می‌برد و ماه‌های عقب‌افتاده را می‌سازد.
+// ویرایشِ یک ثبت‌نام. فیلدهای سبک (وضعیت/تاریخ/یادداشت) همیشه.
+// نوعِ پرداخت / فیس / تخفیف / فیسِ ماهانه / اقساط فقط وقتی هیچ قلمِ پرداخت‌شده‌ای
+// نیست: اقلامِ بازِ قبلی ابطال و ساختارِ تازه از نو ساخته می‌شود. اگر روی خودِ
+// ثبت‌نام پرداختِ ثبت‌شده باشد ولی قلمی نباشد (دادهٔ پیش از مهاجرت)، فقط
+// feeAmount/discountAmount به‌روز می‌شود و محاسبهٔ legacy کار را می‌کند.
 router.put('/registrations/:id', async (req, res) => {
   try {
     const reg = await AcademyRegistration.findById(req.params.id);
     if (!reg) return res.status(404).json({ success: false, message: 'ثبت‌نام پیدا نشد.' });
     const settings = await getSettings();
+    const currency = reg.currency || settings.currency || 'AFN';
 
     if (req.body.status !== undefined && ['active', 'completed', 'cancelled', 'paused'].includes(req.body.status)) reg.status = req.body.status;
     if (req.body.startDate !== undefined) reg.startDate = String(req.body.startDate || '').slice(0, 10);
     if (req.body.endDate !== undefined) reg.endDate = String(req.body.endDate || '').slice(0, 10);
     if (req.body.note !== undefined) reg.note = String(req.body.note || '').trim();
 
-    let regenMonthly = false;
-    if (req.body.monthlyFee !== undefined && reg.paymentPlan === 'monthly') {
-      const newFee = toNumber(req.body.monthlyFee);
-      if (newFee !== toNumber(reg.monthlyFee)) {
-        reg.monthlyFee = newFee;
-        regenMonthly = true;
-        // اقلامِ ماهانهٔ پرداخت‌نشده را به مبلغِ تازه ببر
-        const monthlyCharges = await AcademyCharge.find({ registrationId: reg._id, kind: 'monthly', status: { $ne: 'void' }, paidAmount: 0 });
-        for (const c of monthlyCharges) {
-          c.amount = newFee;
-          c.updatedBy = userId(req);
+    const financeKeys = ['paymentPlan', 'feeAmount', 'discountAmount', 'monthlyFee', 'discountType', 'discountReason'];
+    const wantsFinanceEdit = financeKeys.some((k) => req.body[k] !== undefined) || Array.isArray(req.body.installments);
+    let legacyDirectEdit = false;
+
+    if (wantsFinanceEdit) {
+      const charges = await AcademyCharge.find({ registrationId: reg._id, status: { $ne: 'void' } });
+      const paidCharge = charges.find((c) => toNumber(c.paidAmount) > 0);
+      if (paidCharge) {
+        return res.status(400).json({
+          success: false,
+          message: 'این ثبت‌نام قلمِ پرداخت‌شده دارد؛ برای تغییرِ نوعِ پرداخت/فیس/تخفیف اول پرداخت‌ها را در تب «پرداخت و بل» ابطال کنید، یا همان قلم را جداگانه ویرایش کنید.'
+        });
+      }
+
+      if (req.body.paymentPlan !== undefined && ['full', 'installment', 'monthly'].includes(req.body.paymentPlan)) reg.paymentPlan = req.body.paymentPlan;
+      if (req.body.feeAmount !== undefined) reg.feeAmount = toNumber(req.body.feeAmount);
+      if (req.body.discountAmount !== undefined) reg.discountAmount = Math.min(toNumber(reg.feeAmount), toNumber(req.body.discountAmount));
+      if (req.body.monthlyFee !== undefined) reg.monthlyFee = toNumber(req.body.monthlyFee);
+
+      const paidOnReg = toNumber(reg.paidAmount);
+      if (charges.length === 0 && paidOnReg > 0) {
+        // دادهٔ پیش از مهاجرت با پرداختِ ثبت‌شده روی ثبت‌نام — دفترِ اقلام را اینجا اتخاذ نکن،
+        // فقط اعداد را به‌روز کن و بگذار pre-validate ِ legacy جمع بزند.
+        reg.ledgerManaged = false;
+        legacyDirectEdit = true;
+      } else {
+        // اقلامِ بازِ قبلی (همه پرداخت‌نشده) را ابطال و ساختارِ تازه بساز
+        for (const c of charges) {
+          c.status = 'void';
+          c.voidedAt = new Date();
+          c.voidedBy = userId(req);
+          c.voidReason = 'بازسازی هنگامِ ویرایشِ ثبت‌نام';
           await c.save();
         }
+        reg.ledgerManaged = true;
+        await reg.save();
+        await buildInitialCharges(reg, req.body, currency, settings, userId(req));
       }
+    } else if (req.body.monthlyFee !== undefined && reg.paymentPlan === 'monthly') {
+      // مسیرِ ساده: فقط تغییرِ فیسِ ماهانه (سازگاریِ عقب‌رو)
+      reg.monthlyFee = toNumber(req.body.monthlyFee);
+      const monthlyCharges = await AcademyCharge.find({ registrationId: reg._id, kind: 'monthly', status: { $ne: 'void' }, paidAmount: 0 });
+      for (const c of monthlyCharges) { c.amount = reg.monthlyFee; c.updatedBy = userId(req); await c.save(); }
+      reg.ledgerManaged = true;
+      await reg.save();
+      try { await academyLedger.generateMonthlyCharges({ dueDay: settings.monthlyChargeDueDay || 20, registrationId: reg._id }); } catch (e) { console.error(e?.message); }
     }
 
     reg.updatedBy = userId(req);
-    reg.ledgerManaged = true;
     await reg.save();
 
-    if (regenMonthly) {
-      try { await academyLedger.generateMonthlyCharges({ dueDay: settings.monthlyChargeDueDay || 20, registrationId: reg._id }); } catch (e) { console.error(e?.message); }
-    }
-    const updated = await academyLedger.recomputeRegistration(reg._id);
+    // در حالتِ legacy (بدون قلم، با پرداختِ ثبت‌شده) recompute اعداد را صفر می‌کند —
+    // فقط وقتی دفترِ اقلام فعال است بازمحاسبه کن.
+    const updated = legacyDirectEdit ? reg : await academyLedger.recomputeRegistration(reg._id);
     const populated = await AcademyRegistration.findById(reg._id)
       .populate('studentId', 'fullName studentCode phone')
       .populate('courseId', 'name defaultFee level')
       .populate('classId', 'name');
-    res.json({ success: true, item: populated, registration: updated?.toObject() || null, message: 'ثبت‌نام به‌روزرسانی شد.' });
+    res.json({ success: true, item: populated, registration: updated?.toObject ? updated.toObject() : updated, message: 'ثبت‌نام به‌روزرسانی شد.' });
   } catch (error) {
     res.status(400).json({ success: false, message: error?.message || 'ویرایشِ ثبت‌نام ناموفق بود.' });
   }
