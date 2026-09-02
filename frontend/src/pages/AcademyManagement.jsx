@@ -36,6 +36,7 @@ const emptyTeacher = {
   specialty: '',
   paymentType: 'salary',
   paymentAmount: '',
+  commissionPercent: '',
   status: 'active'
 };
 
@@ -112,6 +113,7 @@ const tabs = [
   { key: 'expenses', label: 'مصارف' },
   { key: 'attendance', label: 'حاضری' },
   { key: 'reports', label: 'گزارش‌ها' },
+  { key: 'payroll', label: 'معاش' },
   { key: 'settings', label: 'تنظیمات' }
 ];
 
@@ -122,6 +124,7 @@ const paymentMethodLabels = {
   hawala: 'حواله',
   other: 'سایر'
 };
+const METHOD_ROWS = [['cash', 'نقدی'], ['card', 'کارت'], ['bank_transfer', 'بانک'], ['hawala', 'حواله'], ['other', 'سایر']];
 
 const expenseCategoryLabels = {
   teacher_salary: 'معاش استادان',
@@ -230,6 +233,14 @@ export default function AcademyManagement() {
   const [expenseCategoryForm, setExpenseCategoryForm] = useState({ name: '' });
   const [attendance, setAttendance] = useState([]);
   const [reports, setReports] = useState(null);
+  const [cashDaily, setCashDaily] = useState(null);
+  const [cashDate, setCashDate] = useState(new Date().toISOString().slice(0, 10));
+  const [aging, setAging] = useState(null);
+  const [payroll, setPayroll] = useState(null);
+  const [payrollPeriod, setPayrollPeriod] = useState(() => {
+    const s = gregorianToAfghanSolar(new Date());
+    return s ? `${s.jy}-${String(s.jm).padStart(2, '0')}` : '';
+  });
   const [monthlyReport, setMonthlyReport] = useState(null);
   const [monthlyReportLoading, setMonthlyReportLoading] = useState(false);
   const [monthlyReportDetail, setMonthlyReportDetail] = useState(null);
@@ -282,11 +293,63 @@ export default function AcademyManagement() {
 
   const loadReports = async () => {
     try {
-      const data = await requestJson('/api/academy/reports/overview');
-      setReports(data);
+      const [ov, ag] = await Promise.all([
+        requestJson('/api/academy/reports/overview'),
+        requestJson('/api/academy/reports/aging').catch(() => null)
+      ]);
+      setReports(ov);
+      setAging(ag);
     } catch (error) {
       toast.error(error.message);
     }
+  };
+
+  const loadCashDaily = async (date = cashDate) => {
+    try {
+      setCashDaily(await requestJson(`/api/academy/reports/cash-daily?date=${date}`));
+    } catch (error) {
+      toast.error(error.message);
+    }
+  };
+
+  const loadPayroll = async (periodKey = payrollPeriod) => {
+    try {
+      setPayroll(await requestJson(`/api/academy/payroll?periodKey=${periodKey}`));
+    } catch (error) {
+      toast.error(error.message);
+    }
+  };
+
+  const payTeacher = async (row) => {
+    if (!window.confirm(`پرداختِ معاشِ ${row.teacher?.fullName} برای دورهٔ ${row.periodKey} به مبلغِ ${fmt(row.netAmount)} ${currency}؟ (یک مصرف صادر می‌شود)`)) return;
+    setBusy(true);
+    try {
+      const data = await requestJson('/api/academy/payroll/pay', {
+        method: 'POST',
+        body: JSON.stringify({
+          teacherId: row.teacher?._id || row.teacherId,
+          periodKey: row.periodKey,
+          baseAmount: row.baseAmount, commissionAmount: row.commissionAmount,
+          commissionBase: row.commissionBase, commissionPercent: row.commissionPercent,
+          commissionOn: row.commissionOn, deductions: row.deductions || 0
+        })
+      });
+      toast.success(data.message || 'انجام شد.');
+      await Promise.all([loadPayroll(), loadData()]);
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copyPhones = (list) => {
+    const phones = [...new Set((list || []).map((x) => x.studentId?.phone || x.studentId?.guardianPhone).filter(Boolean))];
+    if (!phones.length) { toast.error('شماره‌ای نیست.'); return; }
+    navigator.clipboard?.writeText(phones.join('\n')).then(
+      () => toast.success(`${phones.length} شماره کپی شد.`),
+      () => toast.error('کپی ناموفق بود.')
+    );
   };
 
   const loadMonthlyReport = async (year = monthlyReportYear) => {
@@ -329,7 +392,14 @@ export default function AcademyManagement() {
     if (activeTab === 'reports' && !monthlyReport) {
       loadMonthlyReport();
     }
-  }, [activeTab, reports, monthlyReport]);
+    if (activeTab === 'reports' && !cashDaily) {
+      loadCashDaily();
+    }
+    if (activeTab === 'payroll' && !payroll) {
+      loadPayroll();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, reports, monthlyReport, cashDaily, payroll]);
 
   const activeRegistrations = useMemo(
     () => registrations.filter((item) => item.status === 'active'),
@@ -754,6 +824,7 @@ export default function AcademyManagement() {
                   </select>
                 </Field>
                 <Field label="مبلغ/فیصدی"><input type="number" min="0" value={teacherForm.paymentAmount} onChange={(e) => setTeacherForm({ ...teacherForm, paymentAmount: e.target.value })} /></Field>
+                <Field label="درصدِ کمیسیون (override — خالی = پیش‌فرض)"><input type="number" min="0" max="100" value={teacherForm.commissionPercent} onChange={(e) => setTeacherForm({ ...teacherForm, commissionPercent: e.target.value })} /></Field>
                 <button type="submit" disabled={busy}>ثبت استاد</button>
               </form>
               <div className="academy-panel">
@@ -1142,6 +1213,9 @@ export default function AcademyManagement() {
                   >
                     Excel/CSV
                   </button>
+                  <button type="button" className="academy-inline-button" onClick={() => copyPhones(reports?.feeReminders)} disabled={!(reports?.feeReminders || []).length}>
+                    کپیِ شماره‌ها
+                  </button>
                 </div>
                 <p className="academy-form-hint">
                   شاگردان دارای باقی‌داری که در ماه جاری هجری شمسی هنوز هیچ پرداختی ثبت نکرده‌اند.
@@ -1200,6 +1274,56 @@ export default function AcademyManagement() {
                   />
                 </div>
               </div>
+
+              <div className="academy-grid">
+                <div className="academy-panel">
+                  <div className="academy-panel-head">
+                    <h2>بستنِ صندوق</h2>
+                    <AfghanDateInput value={cashDate} onChange={(v) => { setCashDate(v); loadCashDaily(v); }} />
+                  </div>
+                  <Table
+                    columns={['روش', 'دریافتی', 'پرداختی']}
+                    rows={METHOD_ROWS.map(([k, label]) => {
+                      const inc = (cashDaily?.income?.rows || []).find((r) => r.method === k) || {};
+                      const exp = (cashDaily?.expense?.rows || []).find((r) => r.method === k) || {};
+                      return [label, `${fmt(inc.total)} ${currency}`, `${fmt(exp.total)} ${currency}`];
+                    })}
+                  />
+                  <p className="academy-form-hint">
+                    مجموع دریافتی {fmt(cashDaily?.income?.total)} · پرداختی {fmt(cashDaily?.expense?.total)} · <b>خالص {fmt(cashDaily?.net)} {currency}</b>
+                  </p>
+                </div>
+                <div className="academy-panel">
+                  <h2>رده‌بندی سنیِ باقی‌داری</h2>
+                  <Table
+                    columns={['بازه', 'مبلغ', 'تعداد قلم']}
+                    rows={['notdue', 'd0_30', 'd31_60', 'd61_90', 'd90'].map((k) => {
+                      const b = aging?.buckets?.[k] || {};
+                      return [b.label || k, `${fmt(b.total)} ${currency}`, fmt(b.count)];
+                    })}
+                  />
+                  <p className="academy-form-hint">کل باقی‌داری: <b>{fmt(aging?.totalOutstanding)} {currency}</b></p>
+                </div>
+              </div>
+
+              <div className="academy-panel">
+                <div className="academy-panel-head">
+                  <h2>باقی‌دارانِ معوق</h2>
+                  <button type="button" className="academy-inline-button" onClick={() => copyPhones(aging?.students)} disabled={!(aging?.students || []).length}>کپیِ شماره‌ها</button>
+                </div>
+                <Table
+                  columns={['شاگرد', 'کد', 'تماس', 'معوق', 'کل باقی', 'قدیمی‌ترین سررسید']}
+                  rows={(aging?.students || []).filter((s) => s.overdue > 0).map((s) => [
+                    text(s.student?.fullName),
+                    text(s.student?.studentCode),
+                    text(s.student?.phone),
+                    `${fmt(s.overdue)} ${currency}`,
+                    `${fmt(s.balance)} ${currency}`,
+                    s.oldestDue ? formatAfghanStoredDateLabel(s.oldestDue) : '—'
+                  ])}
+                />
+              </div>
+
               <div className="academy-panel">
                 <div className="academy-panel-head">
                   <h2>گزارش ماهانه عاید و مصرف</h2>
@@ -1253,6 +1377,40 @@ export default function AcademyManagement() {
             </div>
           )}
 
+          {activeTab === 'payroll' && (
+            <div className="academy-stack">
+              <div className="academy-panel">
+                <div className="academy-panel-head">
+                  <h2>معاش و کمیسیونِ استادان</h2>
+                  <span className="academy-field">
+                    <span>دوره (ماهِ شمسی)</span>
+                    <input value={payrollPeriod} placeholder="1405-07"
+                      onChange={(e) => setPayrollPeriod(e.target.value)}
+                      onBlur={() => loadPayroll()} />
+                  </span>
+                </div>
+                <p className="academy-form-hint">
+                  کمیسیون = درصدِ {payroll?.settings?.teacherCommissionBase === 'billed' ? 'فیسِ ثبت‌نام‌شده' : 'دریافتیِ وصول‌شده'}ی کورس‌های استاد در این ماه. درصدِ پیش‌فرض {fmt(payroll?.settings?.teacherCommissionPercent)}٪ (قابلِ override per استاد در تب کورس و استاد).
+                </p>
+                <Table
+                  columns={['استاد', 'پایه', 'مبنای کمیسیون', 'درصد', 'کمیسیون', 'خالص', 'وضعیت', '']}
+                  rows={(payroll?.items || []).map((row) => [
+                    text(row.teacher?.fullName),
+                    `${fmt(row.baseAmount)} ${currency}`,
+                    `${fmt(row.commissionOn)} ${currency}`,
+                    `${fmt(row.commissionPercent)}٪`,
+                    `${fmt(row.commissionAmount)} ${currency}`,
+                    `${fmt(row.netAmount)} ${currency}`,
+                    row.status === 'paid' ? <span className="academy-chip academy-chip-ok">پرداخت‌شده</span> : <span className="academy-chip">پیش‌نویس</span>,
+                    row.status === 'paid'
+                      ? '—'
+                      : <button type="button" className="academy-inline-button" onClick={() => payTeacher(row)} disabled={busy || row.netAmount <= 0}>پرداخت</button>
+                  ])}
+                />
+              </div>
+            </div>
+          )}
+
           {activeTab === 'settings' && (
             <form className="academy-panel academy-form academy-settings-form" onSubmit={saveSettings}>
               <h2>تنظیمات آموزشگاه</h2>
@@ -1269,6 +1427,16 @@ export default function AcademyManagement() {
               <Field label="سررسیدِ شارژِ ماهانه (روزِ ماهِ شمسی)">
                 <input type="number" min="1" max="31" value={settings.monthlyChargeDueDay ?? 20}
                   onChange={(e) => setSettings({ ...settings, monthlyChargeDueDay: e.target.value })} />
+              </Field>
+              <Field label="مبنای کمیسیونِ استاد">
+                <select value={settings.teacherCommissionBase || 'collected'} onChange={(e) => setSettings({ ...settings, teacherCommissionBase: e.target.value })}>
+                  <option value="collected">دریافتیِ وصول‌شده</option>
+                  <option value="billed">فیسِ ثبت‌نام‌شده</option>
+                </select>
+              </Field>
+              <Field label="درصدِ کمیسیونِ پیش‌فرض">
+                <input type="number" min="0" max="100" value={settings.teacherCommissionPercent ?? 0}
+                  onChange={(e) => setSettings({ ...settings, teacherCommissionPercent: e.target.value })} />
               </Field>
               <button type="submit" disabled={busy}>ذخیره تنظیمات</button>
             </form>
