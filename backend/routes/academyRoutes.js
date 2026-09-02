@@ -340,6 +340,9 @@ router.post('/registrations', async (req, res) => {
       await AcademyCharge.create({
         registrationId: reg._id, studentId: reg.studentId, kind: 'enrollment',
         title: 'فیس / شمولیت', amount: fee, discountAmount: discount,
+        discountReason: String(req.body.discountReason || '').trim(),
+        discountType: ['sibling', 'scholarship', 'staff', 'hardship', 'other'].includes(req.body.discountType) ? req.body.discountType : '',
+        discountApprovedBy: discount > 0 ? userId(req) : null,
         dueDate: String(reg.startDate || reg.registrationDate || '').slice(0, 10),
         currency, createdBy: userId(req)
       });

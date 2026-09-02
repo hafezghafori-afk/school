@@ -63,11 +63,22 @@ const emptyRegistration = {
   endDate: '',
   feeAmount: '',
   discountAmount: '',
+  discountType: '',
+  discountReason: '',
   monthlyFee: '',
   paymentPlan: 'full',
   status: 'active',
   note: '',
   installments: []
+};
+
+const DISCOUNT_TYPE_LABELS = {
+  '': 'بدونِ دسته',
+  sibling: 'خواهر/برادر',
+  scholarship: 'بورسیه',
+  staff: 'کارمند',
+  hardship: 'تنگدستی',
+  other: 'سایر'
 };
 
 const CHARGE_KIND_LABELS = {
@@ -268,6 +279,9 @@ export default function AcademyManagement() {
   const [printClass, setPrintClass] = useState(null);
   const [invoiceMethodFilter, setInvoiceMethodFilter] = useState('all');
   const [invoiceOnlyDue, setInvoiceOnlyDue] = useState(false);
+  const [invoiceFrom, setInvoiceFrom] = useState('');
+  const [invoiceTo, setInvoiceTo] = useState('');
+  const [invoiceSort, setInvoiceSort] = useState('newest');
 
   const currency = settings?.currency || 'AFN';
 
@@ -450,14 +464,23 @@ export default function AcademyManagement() {
     [registrations, searchTerm]
   );
 
-  const filteredInvoices = useMemo(
-    () => invoices.filter((item) => (
+  const filteredInvoices = useMemo(() => {
+    const issuedKey = (item) => String(item.issuedAt || item.createdAt || '').slice(0, 10);
+    const rows = invoices.filter((item) => (
       studentMatchesSearch(item.studentId || item, searchTerm, [item.invoiceNumber, item.courseName, item.className])
       && (invoiceMethodFilter === 'all' || item.paymentMethod === invoiceMethodFilter)
       && (!invoiceOnlyDue || Number(item.remainingBalance || 0) > 0)
-    )),
-    [invoices, searchTerm, invoiceMethodFilter, invoiceOnlyDue]
-  );
+      && (!invoiceFrom || issuedKey(item) >= invoiceFrom)
+      && (!invoiceTo || issuedKey(item) <= invoiceTo)
+    ));
+    const cmp = {
+      newest: (a, b) => issuedKey(b).localeCompare(issuedKey(a)),
+      oldest: (a, b) => issuedKey(a).localeCompare(issuedKey(b)),
+      paid_desc: (a, b) => Number(b.paidAmount || 0) - Number(a.paidAmount || 0),
+      balance_desc: (a, b) => Number(b.remainingBalance || 0) - Number(a.remainingBalance || 0)
+    }[invoiceSort] || (() => 0);
+    return [...rows].sort(cmp);
+  }, [invoices, searchTerm, invoiceMethodFilter, invoiceOnlyDue, invoiceFrom, invoiceTo, invoiceSort]);
 
   const filteredExpenses = useMemo(
     () => expenses.filter((item) => includesSearch([item.title, item.category, item.paidTo, item.expenseDate], searchTerm)),
@@ -960,6 +983,17 @@ export default function AcademyManagement() {
                 <Field label="تاریخ شروع"><AfghanDateInput value={registrationForm.startDate} onChange={(value) => setRegistrationForm({ ...registrationForm, startDate: value })} /></Field>
                 <Field label="فیس اصلی"><input type="number" min="0" value={registrationForm.feeAmount} onChange={(e) => setRegistrationForm({ ...registrationForm, feeAmount: e.target.value })} /></Field>
                 <Field label="تخفیف"><input type="number" min="0" value={registrationForm.discountAmount} onChange={(e) => setRegistrationForm({ ...registrationForm, discountAmount: e.target.value })} /></Field>
+                {Number(registrationForm.discountAmount) > 0 && (
+                  <>
+                    <Field label="دستهٔ تخفیف">
+                      <select value={registrationForm.discountType} onChange={(e) => setRegistrationForm({ ...registrationForm, discountType: e.target.value })}>
+                        {Object.entries(DISCOUNT_TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      </select>
+                    </Field>
+                    <Field label="دلیلِ تخفیف"><input value={registrationForm.discountReason} onChange={(e) => setRegistrationForm({ ...registrationForm, discountReason: e.target.value })} placeholder="مثلاً: دو خواهر در یک کورس" /></Field>
+                    <p className="academy-form-hint">تأییدکنندهٔ تخفیف، همین کاربرِ واردشده ثبت می‌شود.</p>
+                  </>
+                )}
                 <Field label="نوع پرداخت">
                   <select value={registrationForm.paymentPlan} onChange={(e) => setRegistrationForm({ ...registrationForm, paymentPlan: e.target.value })}>
                     <option value="full">کامل</option>
@@ -1068,10 +1102,27 @@ export default function AcademyManagement() {
                     <option value="all">همهٔ روش‌ها</option>
                     {Object.entries(paymentMethodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
+                  <select value={invoiceSort} onChange={(e) => setInvoiceSort(e.target.value)}>
+                    <option value="newest">جدیدترین</option>
+                    <option value="oldest">قدیمی‌ترین</option>
+                    <option value="paid_desc">مبلغِ پرداخت (زیاد→کم)</option>
+                    <option value="balance_desc">باقی (زیاد→کم)</option>
+                  </select>
+                  <label className="academy-checkbox">
+                    <span>از</span>
+                    <AfghanDateInput value={invoiceFrom} onChange={setInvoiceFrom} />
+                  </label>
+                  <label className="academy-checkbox">
+                    <span>تا</span>
+                    <AfghanDateInput value={invoiceTo} onChange={setInvoiceTo} />
+                  </label>
                   <label className="academy-checkbox">
                     <input type="checkbox" checked={invoiceOnlyDue} onChange={(e) => setInvoiceOnlyDue(e.target.checked)} />
                     <span>فقط باقی‌دار</span>
                   </label>
+                  {(invoiceFrom || invoiceTo || invoiceOnlyDue || invoiceMethodFilter !== 'all') && (
+                    <button type="button" className="academy-inline-button" onClick={() => { setInvoiceFrom(''); setInvoiceTo(''); setInvoiceOnlyDue(false); setInvoiceMethodFilter('all'); }}>پاک‌کردنِ فیلترها</button>
+                  )}
                   <span className="academy-field-label">{filteredInvoices.length} از {invoices.length}</span>
                 </div>
                 <Table
