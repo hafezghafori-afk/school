@@ -112,8 +112,11 @@ async function listPayload() {
   try {
     const s = await getSettings();
     await academyLedger.generateMonthlyCharges({ dueDay: s.monthlyChargeDueDay || 20 });
+    if (s.lateFeeMode && s.lateFeeMode !== 'none') {
+      await academyLedger.generateLateFees({ mode: s.lateFeeMode, amount: s.lateFeeAmount, graceDays: s.lateFeeGraceDays });
+    }
   } catch (error) {
-    console.error('academy generateMonthlyCharges (lazy) failed:', error?.message || error);
+    console.error('academy lazy charge generation failed:', error?.message || error);
   }
 
   const [settings, students, courses, teachers, classes, registrations, payments, invoices, charges, expenses, expenseCategories, attendance, summary] = await Promise.all([
@@ -155,15 +158,15 @@ router.get('/bootstrap', async (_req, res) => {
   try {
     res.json({ success: true, ...(await listPayload()) });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'دریافت اطلاعات آموزشگاه ناموفق بود.' });
+    res.status(500).json({ success: false, message: error?.message || 'دریافت اطلاعات آموزشگاه ناموفق بود.' });
   }
 });
 
 router.get('/settings', async (_req, res) => {
   try {
     res.json({ success: true, settings: await getSettings() });
-  } catch {
-    res.status(500).json({ success: false, message: 'دریافت تنظیمات آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافت تنظیمات آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -176,7 +179,7 @@ router.put('/settings', async (req, res) => {
       : await AcademySetting.create(payload);
     res.json({ success: true, settings, message: 'تنظیمات آموزشگاه ذخیره شد.' });
   } catch (error) {
-    res.status(400).json({ success: false, message: 'ذخیره تنظیمات آموزشگاه ناموفق بود.' });
+    res.status(400).json({ success: false, message: error?.message || 'ذخیره تنظیمات آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -184,8 +187,8 @@ router.get('/students', async (req, res) => {
   try {
     const items = await AcademyStudent.find(mapListQuery(req.query)).sort({ createdAt: -1 }).lean();
     res.json({ success: true, items });
-  } catch {
-    res.status(500).json({ success: false, message: 'دریافت شاگردان آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافت شاگردان آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -207,8 +210,8 @@ router.put('/students/:id', async (req, res) => {
     const item = await AcademyStudent.findByIdAndUpdate(req.params.id, { ...req.body, updatedBy: userId(req) }, { new: true, runValidators: true });
     if (!item) return res.status(404).json({ success: false, message: 'شاگرد پیدا نشد.' });
     res.json({ success: true, item, message: 'شاگرد آموزشگاه به‌روزرسانی شد.' });
-  } catch {
-    res.status(400).json({ success: false, message: 'ویرایش شاگرد آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ویرایش شاگرد آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -216,8 +219,8 @@ router.get('/courses', async (req, res) => {
   try {
     const items = await AcademyCourse.find(mapListQuery(req.query)).sort({ createdAt: -1 }).lean();
     res.json({ success: true, items });
-  } catch {
-    res.status(500).json({ success: false, message: 'دریافت کورس‌ها ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافت کورس‌ها ناموفق بود.' });
   }
 });
 
@@ -225,8 +228,8 @@ router.post('/courses', async (req, res) => {
   try {
     const item = await AcademyCourse.create({ ...req.body, createdBy: userId(req), updatedBy: userId(req) });
     res.status(201).json({ success: true, item, message: 'کورس آموزشگاه ثبت شد.' });
-  } catch {
-    res.status(400).json({ success: false, message: 'ثبت کورس آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ثبت کورس آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -235,8 +238,8 @@ router.put('/courses/:id', async (req, res) => {
     const item = await AcademyCourse.findByIdAndUpdate(req.params.id, { ...req.body, updatedBy: userId(req) }, { new: true, runValidators: true });
     if (!item) return res.status(404).json({ success: false, message: 'کورس پیدا نشد.' });
     res.json({ success: true, item, message: 'کورس آموزشگاه به‌روزرسانی شد.' });
-  } catch {
-    res.status(400).json({ success: false, message: 'ویرایش کورس آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ویرایش کورس آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -244,8 +247,8 @@ router.get('/teachers', async (req, res) => {
   try {
     const items = await AcademyTeacher.find(mapListQuery(req.query)).sort({ createdAt: -1 }).lean();
     res.json({ success: true, items });
-  } catch {
-    res.status(500).json({ success: false, message: 'دریافت استادان ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافت استادان ناموفق بود.' });
   }
 });
 
@@ -253,8 +256,8 @@ router.post('/teachers', async (req, res) => {
   try {
     const item = await AcademyTeacher.create({ ...req.body, createdBy: userId(req), updatedBy: userId(req) });
     res.status(201).json({ success: true, item, message: 'استاد آموزشگاه ثبت شد.' });
-  } catch {
-    res.status(400).json({ success: false, message: 'ثبت استاد آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ثبت استاد آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -265,8 +268,8 @@ router.get('/classes', async (req, res) => {
       .populate('teacherId', 'fullName')
       .lean();
     res.json({ success: true, items });
-  } catch {
-    res.status(500).json({ success: false, message: 'دریافت پلان صنف ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافت پلان صنف ناموفق بود.' });
   }
 });
 
@@ -283,8 +286,8 @@ router.post('/classes', async (req, res) => {
       updatedBy: userId(req)
     });
     res.status(201).json({ success: true, item, message: 'پلان صنف آموزشگاه ثبت شد.' });
-  } catch {
-    res.status(400).json({ success: false, message: 'ثبت پلان صنف ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ثبت پلان صنف ناموفق بود.' });
   }
 });
 
@@ -296,8 +299,8 @@ router.get('/registrations', async (req, res) => {
       .populate('classId', 'name')
       .lean();
     res.json({ success: true, items });
-  } catch {
-    res.status(500).json({ success: false, message: 'دریافت ثبت‌نام‌ها ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافت ثبت‌نام‌ها ناموفق بود.' });
   }
 });
 
@@ -456,7 +459,7 @@ router.post('/payments', async (req, res) => {
       message: 'پرداخت فیس ثبت و بل آموزشگاه صادر شد.'
     });
   } catch (error) {
-    res.status(400).json({ success: false, message: 'ثبت پرداخت فیس آموزشگاه ناموفق بود.' });
+    res.status(400).json({ success: false, message: error?.message || 'ثبت پرداخت فیس آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -466,8 +469,23 @@ router.get('/invoices/:id', async (req, res) => {
     if (!item) return res.status(404).json({ success: false, message: 'بل پیدا نشد.' });
     const settings = await getSettings();
     res.json({ success: true, item, settings });
-  } catch {
-    res.status(400).json({ success: false, message: 'دریافت بل ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'دریافت بل ناموفق بود.' });
+  }
+});
+
+// ثبتِ این‌که یک بل چاپ شد — شمارنده و زمانِ آخرین چاپ (فاز ۳)
+router.post('/invoices/:id/mark-printed', async (req, res) => {
+  try {
+    const item = await AcademyInvoice.findByIdAndUpdate(
+      req.params.id,
+      { $inc: { printCount: 1 }, $set: { lastPrintedAt: new Date() } },
+      { new: true }
+    ).lean();
+    if (!item) return res.status(404).json({ success: false, message: 'بل پیدا نشد.' });
+    res.json({ success: true, item, printCount: item.printCount, lastPrintedAt: item.lastPrintedAt });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ثبتِ چاپِ بل ناموفق بود.' });
   }
 });
 
@@ -546,6 +564,8 @@ router.post('/registrations/:id/charges', async (req, res) => {
         amount,
         discountAmount: Math.min(amount, toNumber(row.discountAmount)),
         discountReason: String(row.discountReason || '').trim(),
+        discountType: ['sibling', 'scholarship', 'staff', 'hardship', 'other'].includes(row.discountType) ? row.discountType : '',
+        discountApprovedBy: row.discountApprovedBy || (toNumber(row.discountAmount) > 0 ? userId(req) : null),
         dueDate: String(row.dueDate || '').slice(0, 10),
         currency, note: String(row.note || '').trim(), createdBy: userId(req)
       });
@@ -572,6 +592,11 @@ router.put('/charges/:id', async (req, res) => {
     if (req.body.amount !== undefined) charge.amount = toNumber(req.body.amount);
     if (req.body.discountAmount !== undefined) charge.discountAmount = Math.min(charge.amount, toNumber(req.body.discountAmount));
     if (req.body.discountReason !== undefined) charge.discountReason = String(req.body.discountReason || '').trim();
+    if (req.body.discountType !== undefined) {
+      charge.discountType = ['sibling', 'scholarship', 'staff', 'hardship', 'other'].includes(req.body.discountType) ? req.body.discountType : '';
+    }
+    if (req.body.discountApprovedBy !== undefined) charge.discountApprovedBy = req.body.discountApprovedBy || null;
+    if (academyLedger.num(charge.discountAmount) > 0 && !charge.discountApprovedBy) charge.discountApprovedBy = userId(req);
     if (req.body.dueDate !== undefined) charge.dueDate = String(req.body.dueDate || '').slice(0, 10);
     if (req.body.note !== undefined) charge.note = String(req.body.note || '').trim();
     charge.updatedBy = userId(req);
@@ -619,6 +644,24 @@ router.post('/generate-monthly', async (req, res) => {
   }
 });
 
+// ساختِ جریمهٔ دیرکردِ خودکار برای اقلامِ معوق (فاز ۳)
+router.post('/generate-late-fees', async (_req, res) => {
+  try {
+    const settings = await getSettings();
+    if (!settings.lateFeeMode || settings.lateFeeMode === 'none') {
+      return res.status(400).json({ success: false, message: 'حالتِ جریمهٔ دیرکرد در تنظیمات غیرفعال است.' });
+    }
+    const result = await academyLedger.generateLateFees({
+      mode: settings.lateFeeMode,
+      amount: settings.lateFeeAmount,
+      graceDays: settings.lateFeeGraceDays
+    });
+    res.json({ success: true, ...result, message: `${result.created} جریمهٔ دیرکرد ساخته شد.` });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ساختِ جریمهٔ دیرکرد ناموفق بود.' });
+  }
+});
+
 // کشف‌حسابِ کاملِ یک شاگرد
 router.get('/students/:id/statement', async (req, res) => {
   try {
@@ -650,13 +693,29 @@ router.get('/students/:id/statement', async (req, res) => {
   }
 });
 
+const EXPENSE_EDITABLE = ['title', 'category', 'amount', 'currency', 'expenseDate', 'paymentMethod', 'paidTo', 'vendor', 'attachmentUrl', 'recurring', 'recurrenceKey', 'approvedBy', 'note'];
+
 router.post('/expenses', async (req, res) => {
   try {
     const settings = await getSettings();
     const item = await AcademyExpense.create({ ...req.body, currency: req.body.currency || settings.currency || 'AFN', createdBy: userId(req) });
     res.status(201).json({ success: true, item, message: 'مصرف آموزشگاه ثبت شد.' });
-  } catch {
-    res.status(400).json({ success: false, message: 'ثبت مصرف آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ثبت مصرف آموزشگاه ناموفق بود.' });
+  }
+});
+
+router.put('/expenses/:id', async (req, res) => {
+  try {
+    const update = {};
+    for (const key of EXPENSE_EDITABLE) {
+      if (req.body[key] !== undefined) update[key] = req.body[key];
+    }
+    const item = await AcademyExpense.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
+    if (!item) return res.status(404).json({ success: false, message: 'مصرف پیدا نشد.' });
+    res.json({ success: true, item, message: 'مصرف آموزشگاه به‌روزرسانی شد.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ویرایش مصرف آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -664,8 +723,8 @@ router.get('/expense-categories', async (_req, res) => {
   try {
     const items = await AcademyExpenseCategory.find().sort({ name: 1 }).lean();
     res.json({ success: true, items });
-  } catch {
-    res.status(500).json({ success: false, message: 'دریافت دسته‌بندی‌های مصرف ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافت دسته‌بندی‌های مصرف ناموفق بود.' });
   }
 });
 
@@ -706,8 +765,8 @@ router.get('/attendance', async (req, res) => {
       .populate('students.studentId', 'fullName studentCode')
       .lean();
     res.json({ success: true, items });
-  } catch {
-    res.status(500).json({ success: false, message: 'دریافت حاضری آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافت حاضری آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -741,8 +800,8 @@ router.post('/attendance', async (req, res) => {
       .populate('students.studentId', 'fullName studentCode');
 
     res.status(201).json({ success: true, item, message: 'حاضری آموزشگاه ذخیره شد.' });
-  } catch {
-    res.status(400).json({ success: false, message: 'ثبت حاضری آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ثبت حاضری آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -822,8 +881,8 @@ router.get('/reports/overview', async (_req, res) => {
       feeReminderCount: feeReminders.length,
       feeReminders
     });
-  } catch {
-    res.status(500).json({ success: false, message: 'گزارش آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'گزارش آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -837,8 +896,8 @@ router.get('/reports/monthly', async (req, res) => {
     });
 
     res.json({ success: true, months: result });
-  } catch {
-    res.status(500).json({ success: false, message: 'گزارش ماهانه آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'گزارش ماهانه آموزشگاه ناموفق بود.' });
   }
 });
 

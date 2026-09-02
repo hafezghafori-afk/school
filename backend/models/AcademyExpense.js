@@ -17,6 +17,11 @@ const academyExpenseSchema = new mongoose.Schema({
   expenseDate: { type: String, default: '', trim: true, index: true },
   paymentMethod: { type: String, enum: ['cash', 'card', 'bank_transfer', 'hawala', 'other'], default: 'cash' },
   paidTo: { type: String, default: '', trim: true },
+  vendor: { type: String, default: '', trim: true },
+  attachmentUrl: { type: String, default: '', trim: true },
+  recurring: { type: Boolean, default: false },
+  recurrenceKey: { type: String, default: '', trim: true },
+  approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   note: { type: String, default: '', trim: true },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { timestamps: true });
@@ -27,6 +32,9 @@ academyExpenseSchema.pre('validate', function normalizeAcademyExpense() {
   this.currency = String(this.currency || 'AFN').trim().toUpperCase() || 'AFN';
   this.expenseDate = String(this.expenseDate || '').trim() || new Date().toISOString().slice(0, 10);
   this.paidTo = String(this.paidTo || '').trim();
+  this.vendor = String(this.vendor || '').trim();
+  this.attachmentUrl = String(this.attachmentUrl || '').trim();
+  this.recurrenceKey = String(this.recurrenceKey || '').trim();
   this.note = String(this.note || '').trim();
 });
 

@@ -11,6 +11,8 @@ const num = (value) => Math.max(0, Number(value || 0));
 const round = (value) => Math.round(num(value) * 100) / 100;
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
+const CHARGE_TITLE_FALLBACK = 'قلم';
+
 const chargeNet = (charge) => round(num(charge.amount) - num(charge.discountAmount));
 const chargeOpen = (charge) => round(chargeNet(charge) - num(charge.paidAmount));
 
@@ -180,10 +182,55 @@ async function generateMonthlyCharges({ dueDay = 20, registrationId = null } = {
   return { created, registrations: touched.size };
 }
 
+/**
+ * برای هر قلمِ بازِ معوق که «graceDays» از سررسیدش گذشته و هنوز جریمهٔ دیرکرد نگرفته،
+ * یک قلمِ late_fee می‌سازد. idempotent — با کلیدِ `lf:<chargeId>` در periodKey.
+ * @param {{ mode:'fixed'|'percent', amount:number, graceDays:number }} policy
+ * @returns {Promise<{ created:number }>}
+ */
+async function generateLateFees({ mode = 'none', amount = 0, graceDays = 7 } = {}) {
+  if (mode !== 'fixed' && mode !== 'percent') return { created: 0 };
+  const today = todayKey();
+  const cutoff = new Date(today);
+  cutoff.setDate(cutoff.getDate() - Math.max(0, Number(graceDays) || 0));
+  const cutoffKey = cutoff.toISOString().slice(0, 10);
+
+  const overdue = await AcademyCharge.find({
+    status: { $in: ['pending', 'partial'] },
+    kind: { $ne: 'late_fee' },
+    balance: { $gt: 0 },
+    dueDate: { $gt: '', $lte: cutoffKey }
+  });
+
+  let created = 0;
+  const touched = new Set();
+  for (const c of overdue) {
+    const marker = `lf:${c._id}`;
+    const exists = await AcademyCharge.findOne({ registrationId: c.registrationId, kind: 'late_fee', periodKey: marker }).lean();
+    if (exists) continue;
+    const fee = mode === 'percent'
+      ? round((round(num(c.amount) - num(c.discountAmount))) * num(amount) / 100)
+      : round(num(amount));
+    if (fee <= 0) continue;
+    await AcademyCharge.create({
+      registrationId: c.registrationId, studentId: c.studentId, kind: 'late_fee',
+      title: `جریمهٔ دیرکرد — ${c.title || CHARGE_TITLE_FALLBACK}`,
+      amount: fee, dueDate: today, periodKey: marker,
+      currency: c.currency || 'AFN', createdBy: null,
+      note: `خودکار — سررسیدِ ${c.dueDate} گذشته`
+    });
+    created += 1;
+    touched.add(String(c.registrationId));
+  }
+  for (const id of touched) await recomputeRegistration(id);
+  return { created };
+}
+
 module.exports = {
   num,
   round,
   todayKey,
+  generateLateFees,
   chargeNet,
   chargeOpen,
   isOverdue,

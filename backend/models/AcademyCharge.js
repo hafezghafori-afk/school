@@ -19,6 +19,8 @@ const academyChargeSchema = new mongoose.Schema({
   amount: { type: Number, default: 0, min: 0 },
   discountAmount: { type: Number, default: 0, min: 0 },
   discountReason: { type: String, default: '', trim: true },
+  discountType: { type: String, enum: ['', 'sibling', 'scholarship', 'staff', 'hardship', 'other'], default: '' },
+  discountApprovedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   // تاریخِ سررسید — رشتهٔ ISO میلادی مثل بقیهٔ تاریخ‌های آموزشگاه (YYYY-MM-DD)
   dueDate: { type: String, default: '', trim: true },
   // فقط برای kind=monthly: کلیدِ ماهِ شمسی «1405-07» — یکتا per ثبت‌نام، ضدِ دوبار شارژ

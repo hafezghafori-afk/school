@@ -17,6 +17,10 @@ const academySettingSchema = new mongoose.Schema({
   // پالیسیِ کمیسیونِ استاد (فاز ۲) — پایه/درصد؛ فعلاً فقط نگه‌داری می‌شود
   teacherCommissionBase: { type: String, enum: ['collected', 'billed'], default: 'collected' },
   teacherCommissionPercent: { type: Number, default: 0, min: 0, max: 100 },
+  // جریمهٔ دیرکردِ خودکار (فاز ۳)
+  lateFeeMode: { type: String, enum: ['none', 'fixed', 'percent'], default: 'none' },
+  lateFeeAmount: { type: Number, default: 0, min: 0 },
+  lateFeeGraceDays: { type: Number, default: 7, min: 0 },
   isActive: { type: Boolean, default: true },
   updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { timestamps: true });
@@ -33,6 +37,8 @@ academySettingSchema.pre('validate', function normalizeAcademySetting() {
   this.invoiceFooter = String(this.invoiceFooter || '').trim();
   this.monthlyChargeDueDay = Math.min(31, Math.max(1, Math.round(Number(this.monthlyChargeDueDay || 20)) || 20));
   this.teacherCommissionPercent = Math.min(100, Math.max(0, Number(this.teacherCommissionPercent || 0)));
+  this.lateFeeAmount = Math.max(0, Number(this.lateFeeAmount || 0));
+  this.lateFeeGraceDays = Math.max(0, Math.round(Number(this.lateFeeGraceDays || 0)));
 });
 
 module.exports = academyConnection.model('AcademySetting', academySettingSchema);
