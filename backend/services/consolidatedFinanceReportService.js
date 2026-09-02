@@ -54,18 +54,33 @@ function shamsiMonthOfDate(value) {
   return shamsiMonthKeyOf(date) || '';
 }
 
-// «تاریخِ ثبت‌نامِ» آموزشگاه/موقت گاهی رشتهٔ شمسیِ 'YYYY-MM-DD' و گاهی تاریخِ
-// میلادیِ ISO است — هر دو حالت را به کلیدِ ماهِ شمسی تبدیل می‌کند.
-function shamsiMonthFromRegDate(value) {
-  const raw = String(value || '').trim();
+// ارقامِ فارسی/عربی → لاتین
+function toAsciiDigits(value) {
+  return String(value == null ? '' : value)
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06F0))
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660));
+}
+
+// تاریخ‌های آموزشگاه/موقت (ثبت‌نام، مصرف، …) رشته‌اند و بسته به فورمِ ورودی
+// می‌توانند شمسی یا میلادی، با «-» یا «/» یا «.»، و با ارقامِ فارسی باشند.
+// این تابع هر حالت را به کلیدِ ماهِ شمسی (jy-jm) تبدیل می‌کند؛ اگر نشد '' برمی‌گرداند.
+function shamsiMonthFromDateString(value) {
+  const raw = toAsciiDigits(value).trim().replace(/[.،/\\]+/g, '-').replace(/-+/g, '-');
   if (!raw) return '';
-  const match = raw.match(/^(\d{3,4})-(\d{1,2})/);
+  const match = raw.match(/^(\d{3,4})-(\d{1,2})(?:-(\d{1,2}))?/);
   if (match) {
     const year = Number(match[1]);
-    if (year >= 1300 && year <= 1500) return `${year}-${String(Number(match[2])).padStart(2, '0')}`;
+    const month = String(Math.min(12, Math.max(1, Number(match[2]) || 1))).padStart(2, '0');
+    if (year >= 1300 && year <= 1500) return `${year}-${month}`;
+    if (year >= 1900 && year <= 2200) {
+      const day = String(Math.min(28, Math.max(1, Number(match[3]) || 1))).padStart(2, '0');
+      return shamsiMonthOfDate(`${year}-${month}-${day}T00:00:00.000Z`);
+    }
   }
   return shamsiMonthOfDate(raw);
 }
+// نامِ قدیمی برای سازگاری در همین فایل
+const shamsiMonthFromRegDate = shamsiMonthFromDateString;
 const DOMAIN_KEYS = ['school', 'shortTerm', 'academy'];
 const DOMAIN_LABELS = {
   school: 'مرکز مالی مکتب',
@@ -248,8 +263,11 @@ async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKe
     FeePayment.find({ status: 'approved', paidAt: { $gte: gregStart, $lt: gregEnd } })
       .select('amount paidAt paymentMethod')
       .lean(),
-    ExpenseEntry.find({ status: 'approved', expenseDate: { $gte: gregStart, $lt: gregEnd } })
-      .select('amount expenseDate category subCategory')
+    // «مصارفِ مکمل» = هر مصرفِ ثبت‌شده که ابطال/ردنشده — شاملِ draft و
+    // pending_review، نه فقط approved — تا با آموزشگاه/موقت (که همه را می‌شمارند)
+    // هم‌خوان باشد. سهمِ در انتظار تأیید جدا گزارش می‌شود.
+    ExpenseEntry.find({ status: { $nin: ['void', 'rejected'] }, expenseDate: { $gte: gregStart, $lt: gregEnd } })
+      .select('amount expenseDate category subCategory status vendorName referenceNo')
       .lean(),
     sumPaidRefunds({ startAt: gregStart, endAt: gregEnd }),
     loadSchoolDebtors()
@@ -260,11 +278,23 @@ async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKe
     const method = item.paymentMethod || 'other';
     methodMap.set(method, round((methodMap.get(method) || 0) + toNumber(item.amount)));
   });
+  let pendingExpense = 0;
+  const expenseList = [];
   expenses.forEach((item) => {
     bucket(monthlyMap, item.expenseDate, 'expense', item.amount);
     const category = item.category || item.subCategory || 'other';
     categoryMap.set(category, round((categoryMap.get(category) || 0) + toNumber(item.amount)));
+    if (item.status !== 'approved') pendingExpense += toNumber(item.amount);
+    expenseList.push({
+      title: String(item.subCategory || item.vendorName || item.category || 'مصرف').trim(),
+      category,
+      monthKey: shamsiMonthOfDate(item.expenseDate),
+      monthLabel: '',
+      amount: round(toNumber(item.amount)),
+      status: item.status || 'approved'
+    });
   });
+  expenseList.sort((a, b) => (b.monthKey || '').localeCompare(a.monthKey || '') || b.amount - a.amount);
   // پولِ برگشت‌داده‌شده به شاگرد (FinanceRefund.status==='paid') از درآمدِ همان
   // ماهِ پرداختِ برگشت کم می‌شود؛ آموزشگاه/موقت مدلِ refund ندارند.
   (refundSummary?.rows || []).forEach((item) => {
@@ -288,11 +318,14 @@ async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKe
       activeStudents: debtorData.activeStudentCount,
       currentMonthIncome: round(currentRow.income),
       currentMonthExpense: round(currentRow.expense),
-      refundTotal: round(refundSummary?.total || 0)
+      refundTotal: round(refundSummary?.total || 0),
+      pendingExpense: round(pendingExpense),
+      expenseCount: expenses.length
     },
     monthly,
     byPaymentMethod: toSortedList(methodMap, 'method'),
     byExpenseCategory: toSortedList(categoryMap, 'category'),
+    expenses: expenseList.slice(0, 2000),
     debtors: debtorData.debtors.slice(0, debtorLimit),
     debtorCount: debtorData.count
   };
@@ -324,10 +357,13 @@ async function buildCenterDomain({
     PaymentModel.find({ ...(paymentMatch || {}), paidAt: { $gte: gregStart, $lt: gregEnd } })
       .select('amount paidAt paymentMethod')
       .lean(),
-    // expenseDate در این دیتابیس‌ها رشتهٔ 'YYYY-MM-DD' است (نه Date) — مقایسهٔ
-    // لغوی با مرزهای میلادیِ رشته‌ای همان کاری را می‌کند که buildShamsiMonthlyReport می‌کند.
-    ExpenseModel.find({ expenseDate: { $gte: gregStartStr, $lt: gregEndStr } })
-      .select('amount expenseDate category')
+    // expenseDate در این دیتابیس‌ها رشته است و بسته به فورمِ ورودی گاهی میلادی
+    // ('2026-08-08') و گاهی شمسی ('1405-05-18') ذخیره شده. پس فیلترِ لغویِ بازه
+    // قابل‌اعتماد نیست — همه را می‌گیریم و در JS با تبدیلِ هر تاریخ به کلیدِ ماهِ
+    // شمسی و تطبیق با monthKeys فیلتر می‌کنیم.
+    ExpenseModel.find({})
+      .select('amount expenseDate category title paidTo')
+      .limit(20000)
       .lean(),
     StudentModel.countDocuments({ status: 'active' }),
     loadCenterDebtors({ RegistrationModel, CourseModel, ChargeModel })
@@ -338,11 +374,27 @@ async function buildCenterDomain({
     const method = item.paymentMethod || 'other';
     methodMap.set(method, round((methodMap.get(method) || 0) + toNumber(item.amount)));
   });
+  const monthKeySet = new Set(monthKeys);
+  let expenseCount = 0;
+  const expenseList = [];
   expenses.forEach((item) => {
-    bucket(monthlyMap, item.expenseDate, 'expense', item.amount);
+    const key = shamsiMonthFromDateString(item.expenseDate);
+    if (!key || !monthKeySet.has(key)) return;
+    expenseCount += 1;
+    const row = monthlyMap.get(key);
+    if (row) row.expense = round(row.expense + toNumber(item.amount));
     const category = item.category || 'other';
     categoryMap.set(category, round((categoryMap.get(category) || 0) + toNumber(item.amount)));
+    expenseList.push({
+      title: String(item.title || item.paidTo || item.category || 'مصرف').trim(),
+      category,
+      monthKey: key,
+      monthLabel: '',
+      amount: round(toNumber(item.amount)),
+      status: ''
+    });
   });
+  expenseList.sort((a, b) => (b.monthKey || '').localeCompare(a.monthKey || '') || b.amount - a.amount);
 
   const monthly = finalizeMonthly(monthlyMap, monthKeys);
   const incomeTotal = round(monthly.reduce((sum, row) => sum + row.income, 0));
@@ -361,11 +413,14 @@ async function buildCenterDomain({
       activeStudents,
       currentMonthIncome: round(currentRow.income),
       currentMonthExpense: round(currentRow.expense),
-      refundTotal: 0
+      refundTotal: 0,
+      pendingExpense: 0,
+      expenseCount
     },
     monthly,
     byPaymentMethod: toSortedList(methodMap, 'method'),
     byExpenseCategory: toSortedList(categoryMap, 'category'),
+    expenses: expenseList.slice(0, 2000),
     debtors: debtorData.debtors.slice(0, debtorLimit),
     debtorCount: debtorData.count
   };
@@ -481,6 +536,7 @@ async function buildConsolidatedFinanceReport({ year, months, from, to, debtorLi
   const combinedIncome = round(domains.reduce((sum, domain) => sum + domain.totals.income, 0));
   const combinedExpense = round(domains.reduce((sum, domain) => sum + domain.totals.expense, 0));
   const combinedOutstanding = round(domains.reduce((sum, domain) => sum + domain.totals.outstanding, 0));
+  const combinedPendingExpense = round(domains.reduce((sum, domain) => sum + (domain.totals.pendingExpense || 0), 0));
 
   return {
     generatedAt: new Date().toISOString(),
@@ -497,6 +553,7 @@ async function buildConsolidatedFinanceReport({ year, months, from, to, debtorLi
     combined: {
       income: combinedIncome,
       expense: combinedExpense,
+      pendingExpense: combinedPendingExpense,
       net: round(combinedIncome - combinedExpense),
       outstanding: combinedOutstanding,
       activeStudents: domains.reduce((sum, domain) => sum + (domain.totals.activeStudents || 0), 0),

@@ -96,6 +96,29 @@ function debtorTable(debtors) {
   </table>`;
 }
 
+const EXPENSE_STATUS_LABELS = { draft: 'پیش‌نویس', pending_review: 'در انتظار تأیید' };
+
+function expenseListTable(expenses) {
+  const list = Array.isArray(expenses) ? expenses : [];
+  if (!list.length) return '<p class="muted">مصرفی در این بازه ثبت نشده است.</p>';
+  const rows = list.map((row, index) => `
+    <tr>
+      <td class="num">${fa(index + 1)}</td>
+      <td>${esc(row.title || 'مصرف')}</td>
+      <td>${esc(row.category || '—')}</td>
+      <td>${esc(row.monthLabel || monthKeyLabel(row.monthKey) || '—')}</td>
+      <td>${esc(row.status && row.status !== 'approved' ? (EXPENSE_STATUS_LABELS[row.status] || row.status) : 'تأییدشده')}</td>
+      <td class="num">${fa(row.amount)}</td>
+    </tr>`).join('');
+  const total = list.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  return `<table>
+    <thead><tr><th class="num">شماره</th><th>شرح</th><th>دسته</th><th>ماه</th><th>وضعیت</th><th class="num">مبلغ</th></tr></thead>
+    <tbody>${rows}
+      <tr class="total"><td colspan="5">جمع مصارف</td><td class="num">${fa(total)}</td></tr>
+    </tbody>
+  </table>`;
+}
+
 function domainSection(domain, { pageBreak }) {
   const totals = domain.totals || {};
   return `<section class="sec${pageBreak ? ' brk' : ''}">
@@ -108,12 +131,15 @@ function domainSection(domain, { pageBreak }) {
       { label: 'نرخ وصول', value: Math.round(Number(totals.collectionRate) || 0), suffix: '٪' },
       { label: 'شاگردان فعال', value: totals.activeStudents }
     ])}
+    ${Number(totals.pendingExpense) > 0 ? `<p class="muted">مصرف بازه شاملِ ${fa(totals.pendingExpense)} افغانی مصرفِ در انتظار تأیید است.</p>` : ''}
     <h3>جدول ماهانه</h3>
     ${monthlyTable(domain.monthly)}
     <div class="cols">
       ${breakdownTable('درآمد بر اساس روش پرداخت', domain.byPaymentMethod, 'method', (value) => METHOD_LABELS[value] || value || 'سایر')}
-      ${breakdownTable('مصرف بر اساس دسته', domain.byExpenseCategory, 'category', null)}
+      ${breakdownTable(`مصرف بر اساس دسته${Number(totals.expenseCount) ? ` — ${fa(totals.expenseCount)} فقره` : ''}`, domain.byExpenseCategory, 'category', null)}
     </div>
+    <h3>فهرست مصارف بازه (${fa(Number(totals.expenseCount) || (domain.expenses || []).length)} فقره)</h3>
+    ${expenseListTable(domain.expenses)}
     <h3>بدهکاران (${fa(domain.debtorCount)} نفر)</h3>
     ${debtorTable(domain.debtors)}
   </section>`;
@@ -156,6 +182,7 @@ async function buildConsolidatedFinancePrintHtml({ section = 'all', year, months
       { label: 'کل باقیات باز', value: combined.outstanding },
       { label: 'شاگردان فعال', value: combined.activeStudents }
     ])}
+    ${Number(combined.pendingExpense) > 0 ? `<p class="muted">کل مصرف شاملِ ${fa(combined.pendingExpense)} افغانی مصرفِ در انتظار تأیید است.</p>` : ''}
     <h3>روند خالص ماهانهٔ ترکیبی</h3>
     ${monthlyTable((report.monthlyTrend || []).map((row) => ({
       month: row.month,

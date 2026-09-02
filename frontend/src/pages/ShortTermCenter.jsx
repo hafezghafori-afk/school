@@ -362,6 +362,7 @@ export default function ShortTermCenter() {
   const [monthlyReportMonth, setMonthlyReportMonth] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStudent, setSelectedStudent] = useState(null);
+  const [showInactiveStudents, setShowInactiveStudents] = useState(true);
   const [studentForm, setStudentForm] = useState(emptyStudent);
   const [classForm, setClassForm] = useState(emptyClass);
   const [registrationForm, setRegistrationForm] = useState(emptyRegistration);
@@ -444,9 +445,18 @@ export default function ShortTermCenter() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, reports, monthlyReport]);
 
-  const activeRegistrations = useMemo(() => registrations.filter((item) => item.status === 'active'), [registrations]);
+  const activeRegistrations = useMemo(
+    () => registrations.filter((item) => item.status === 'active' && (item.studentId?.status || 'active') !== 'inactive'),
+    [registrations]
+  );
 
-  const filteredStudents = useMemo(() => students.filter((item) => studentMatchesSearch(item, searchTerm)), [students, searchTerm]);
+  const filteredStudents = useMemo(
+    () => students.filter((item) => (
+      studentMatchesSearch(item, searchTerm)
+      && (showInactiveStudents || item.status !== 'inactive')
+    )),
+    [students, searchTerm, showInactiveStudents]
+  );
 
   const registrationStudentOptions = useMemo(() => {
     const matches = students.filter((item) => studentMatchesSearch(item, registrationStudentSearch));
@@ -489,7 +499,11 @@ export default function ShortTermCenter() {
   }, [expenseCategories]);
 
   const selectedAttendanceClassRegistrations = useMemo(
-    () => registrations.filter((item) => item.status === 'active' && String(item.classId?._id || item.classId || '') === String(attendanceForm.classId || '')),
+    () => registrations.filter((item) => (
+      item.status === 'active'
+      && (item.studentId?.status || 'active') !== 'inactive'
+      && String(item.classId?._id || item.classId || '') === String(attendanceForm.classId || '')
+    )),
     [registrations, attendanceForm.classId]
   );
 
@@ -625,6 +639,25 @@ export default function ShortTermCenter() {
     setSelectedStudent({ ...student, registrations: studentRegistrations, invoices: studentInvoices });
   };
 
+  const toggleStudentStatus = async (student) => {
+    const next = student.status === 'inactive' ? 'active' : 'inactive';
+    if (next === 'inactive' && !window.confirm(`«${student.fullName || student.studentCode}» غیرفعال شود؟\nاز لیستِ صنف، حاضری و باقی‌داران کنار می‌رود (سابقهٔ مالی‌اش می‌ماند).`)) return;
+    setBusy(true);
+    try {
+      const data = await requestJson(`/api/short-term-center/students/${student._id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: next })
+      });
+      toast.success(data.message || (next === 'inactive' ? 'شاگرد غیرفعال شد.' : 'شاگرد فعال شد.'));
+      await loadData();
+      if (reports) setReports(null);
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="stc-page" dir="rtl">
       <div className="stc-topbar">
@@ -713,15 +746,34 @@ export default function ShortTermCenter() {
                 <button type="submit" disabled={busy}>ثبت شاگرد</button>
               </form>
               <div className="stc-panel">
-                <h2>لیست شاگردان</h2>
+                <div className="stc-panel-head">
+                  <h2>لیست شاگردان</h2>
+                  <label className="stc-checkbox">
+                    <input type="checkbox" checked={showInactiveStudents} onChange={(e) => setShowInactiveStudents(e.target.checked)} />
+                    <span>نمایشِ غیرفعال‌ها</span>
+                  </label>
+                </div>
+                <p className="stc-form-hint">غیرفعال‌کردن، شاگرد را از لیستِ صنف، حاضری و باقی‌داران کنار می‌گذارد؛ سابقهٔ مالی‌اش می‌ماند و با «فعال‌سازی» برمی‌گردد.</p>
                 <Table
-                  columns={['کد', 'نام', 'تماس', 'وضعیت', 'پروفایل']}
+                  columns={['کد', 'نام', 'تماس', 'وضعیت', 'اقدام']}
                   rows={filteredStudents.map((item) => [
                     item.studentCode,
-                    text(item.fullName),
+                    <span className={item.status === 'inactive' ? 'stc-void' : ''}>{text(item.fullName)}</span>,
                     text(item.phone),
-                    item.status,
-                    <button type="button" className="stc-inline-button" onClick={() => openStudentProfile(item)}>مشاهده</button>
+                    <span className={`stc-chip ${item.status === 'inactive' ? 'stc-chip-bad' : item.status === 'completed' ? 'stc-chip-muted' : 'stc-chip-ok'}`}>
+                      {item.status === 'inactive' ? 'غیرفعال' : item.status === 'completed' ? 'فارغ' : 'فعال'}
+                    </span>,
+                    <div className="stc-row-actions">
+                      <button type="button" className="stc-inline-button" onClick={() => openStudentProfile(item)}>مشاهده</button>
+                      <button
+                        type="button"
+                        className={`stc-inline-button${item.status === 'inactive' ? '' : ' stc-danger'}`}
+                        onClick={() => toggleStudentStatus(item)}
+                        disabled={busy}
+                      >
+                        {item.status === 'inactive' ? 'فعال‌سازی' : 'غیرفعال‌سازی'}
+                      </button>
+                    </div>
                   ])}
                 />
               </div>

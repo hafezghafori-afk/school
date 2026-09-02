@@ -1999,8 +1999,9 @@ test.describe('government finance workflow', () => {
     await expect(page.locator('.gov-finance-badge.info')).toContainText('متصل به هسته مالی و موتور گزارش');
     await expect(page.locator('.gov-kpi-grid')).toContainText('AFN');
 
-    await page.getByRole('tab', { name: 'عملیات مصارف' }).click();
+    await page.getByRole('tab', { name: 'مصارف', exact: true }).click();
     await expect.poll(() => new URL(page.url()).searchParams.get('tab') || '').toBe('operations');
+    await page.getByRole('button', { name: 'باز کردن همه' }).click();
     const categoryFormCard = page.locator('[data-expense-category-save="true"]').locator('xpath=ancestor::article[1]');
     await categoryFormCard.locator('input[name="label"]').fill('Technology');
     await categoryFormCard.locator('input[name="key"]').fill('technology');
@@ -2011,6 +2012,7 @@ test.describe('government finance workflow', () => {
     await expect.poll(() => counters.saveCategory).toBe(1);
     await page.getByRole('tab').nth(3).click();
     await expect.poll(() => new URL(page.url()).searchParams.get('tab') || '').toBe('treasury');
+    await page.getByRole('button', { name: 'باز کردن همه' }).click();
     const treasuryAccountFormCard = page.locator('[data-treasury-account-save="true"]').locator('xpath=ancestor::article[1]');
     await treasuryAccountFormCard.locator('input[name="title"]').fill('Reserve Bank');
     await treasuryAccountFormCard.locator('input[name="code"]').fill('BANK-01');
@@ -2066,7 +2068,8 @@ test.describe('government finance workflow', () => {
     await expect(page.locator('[data-treasury-variance-card="true"]')).toContainText('Main Cashbox');
     await page.getByRole('tab').nth(2).click();
     await expect.poll(() => new URL(page.url()).searchParams.get('tab') || '').toBe('operations');
-    await expect(page.locator('.gov-card', { hasText: 'رجیستری رسمی دسته‌های مصرف' })).toContainText('Technology');
+    await page.getByRole('button', { name: 'باز کردن همه' }).click();
+    await expect(page.locator('.gov-panel', { hasText: 'رجیستری رسمی دسته‌های مصرف' })).toContainText('Technology');
 
     const procurementCard = page.locator('[data-procurement-save="true"]').locator('xpath=ancestor::article[1]');
     await procurementCard.locator('input[name="title"]').fill('Technology Lab Devices');
@@ -2090,9 +2093,10 @@ test.describe('government finance workflow', () => {
     await expect.poll(() => counters.reviewProcurement).toBe(1);
     await expect(page.locator('[data-procurement-registry-card="true"]')).toContainText('تایید شده');
 
-    const ledgerCard = page.locator('.gov-card', { hasText: 'دفتر ثبت مصارف' });
+    const ledgerCard = page.locator('.gov-panel', { hasText: 'دفتر ثبت مصارف' });
     await page.getByRole('tab').nth(2).click();
     await expect.poll(() => new URL(page.url()).searchParams.get('tab') || '').toBe('operations');
+    await page.getByRole('button', { name: 'باز کردن همه' }).click();
     await ledgerCard.locator('select[name="category"]').selectOption('technology');
     await ledgerCard.locator('select[name="procurementCommitmentId"]').selectOption('proc-1');
     await ledgerCard.locator('select[name="subCategory"]').selectOption('devices');
@@ -2105,12 +2109,13 @@ test.describe('government finance workflow', () => {
     await ledgerCard.locator('.gov-primary-btn').click();
 
     await expect.poll(() => counters.createExpense).toBe(1);
-    const queueCard = page.locator('.gov-card', { hasText: 'صف بررسی مصارف' });
+    const queueCard = page.locator('.gov-panel', { hasText: 'صف تایید مصارف' });
     await expect(queueCard.locator('.gov-table')).toContainText('Atlas Supplies');
     await expect(queueCard.locator('.gov-table')).toContainText('در انتظار بررسی');
 
-    await page.getByRole('tab', { name: 'مدیریت سال مالی' }).click();
-    const yearLedger = page.locator('.gov-card', { hasText: 'دفتر سال‌های مالی' });
+    await page.getByRole('tab', { name: 'سال مالی', exact: true }).click();
+    await page.getByRole('button', { name: 'باز کردن همه' }).click();
+    const yearLedger = page.locator('.gov-panel', { hasText: 'دفتر سال‌های مالی' });
     await expect(page.locator('[data-budget-summary-card="true"]')).toContainText('بودجه مصارف');
     await page.locator('input[name="annualExpenseBudget"]').fill('1800');
     await page.locator('[data-budget-annual="admin"]').fill('1250');
@@ -2141,7 +2146,8 @@ test.describe('government finance workflow', () => {
     await expect.poll(() => counters.closeBlocked).toBe(1);
     await expect(page.locator('.gov-finance-message.error')).toContainText('بستن سال مالی متوقف شد');
 
-    await page.getByRole('tab', { name: 'عملیات مصارف' }).click();
+    await page.getByRole('tab', { name: 'مصارف', exact: true }).click();
+    await page.getByRole('button', { name: 'باز کردن همه' }).click();
     const pendingQueueRow = queueCard.locator('tbody tr', { hasText: 'Atlas Supplies' });
     await expect(pendingQueueRow).toContainText('در انتظار بررسی');
     await pendingQueueRow.locator('[data-expense-review-approve]').click();
@@ -2159,13 +2165,17 @@ test.describe('government finance workflow', () => {
     await expect(settlementCard).toContainText('۵۰۰');
     await expect(ledgerCard.locator('.gov-table')).toContainText('تایید شده');
 
-    await page.getByRole('tab', { name: 'مدیریت سال مالی' }).click();
+    await page.getByRole('tab', { name: 'سال مالی', exact: true }).click();
+    await page.getByRole('button', { name: 'باز کردن همه' }).click();
     await yearLedger.locator('.gov-year-card.selected .gov-card-actions button').last().click();
     await expect.poll(() => counters.closeSuccess).toBe(1);
 
-    await page.getByRole('tab', { name: 'آرشیف رسمی' }).click();
-    await page.getByRole('button', { name: 'ساخت نسخه رسمی ربعوار' }).click();
-    await page.getByRole('button', { name: 'ساخت نسخه رسمی سالانه' }).click();
+    await page.getByRole('tab', { name: 'گزارش‌ها', exact: true }).click();
+    await page.getByRole('tab', { name: 'آرشیف رسمی', exact: true }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('rmode') || '').toBe('archive');
+    await page.getByRole('button', { name: 'باز کردن همه' }).click();
+    await page.getByRole('button', { name: 'ساخت پیش‌نویس ربعوار' }).click();
+    await page.getByRole('button', { name: 'ساخت پیش‌نویس سالانه' }).click();
 
     await expect.poll(() => counters.snapshot).toBe(2);
     await expect(page.locator('.gov-stack-section .gov-table').first()).toContainText('quarterly');

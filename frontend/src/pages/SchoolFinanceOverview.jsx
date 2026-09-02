@@ -37,7 +37,8 @@ const MONTH_PRESETS = [
   { key: '6', label: '۶ ماه اخیر' },
   { key: '12', label: '۱۲ ماه اخیر' },
   { key: '24', label: '۲۴ ماه اخیر' },
-  { key: 'year', label: 'امسال (شمسی)' },
+  { key: 'month', label: 'یک ماه مشخص' },
+  { key: 'year', label: 'یک سال مشخص' },
   { key: 'custom', label: 'بازهٔ دلخواه' }
 ];
 
@@ -190,6 +191,38 @@ function DebtorTable({ rows }) {
   );
 }
 
+const EXPENSE_STATUS_LABELS = { draft: 'پیش‌نویس', pending_review: 'در انتظار تأیید' };
+
+function ExpenseTable({ rows }) {
+  if (!rows.length) return <p className="sfo-empty">مصرفی در این بازه ثبت نشده است.</p>;
+  return (
+    <div className="sfo-tablewrap">
+      <table className="sfo-table">
+        <thead>
+          <tr>
+            <th>شرح</th>
+            <th>دسته</th>
+            <th>ماه</th>
+            <th>وضعیت</th>
+            <th className="sfo-num">مبلغ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={`${row.title}-${index}`}>
+              <td>{repairDisplayText(row.title)}</td>
+              <td className="sfo-dim">{repairDisplayText(row.category) || '—'}</td>
+              <td className="sfo-dim">{repairDisplayText(row.monthLabel) || monthKeyLabel(row.monthKey) || '—'}</td>
+              <td className="sfo-dim">{row.status && row.status !== 'approved' ? (EXPENSE_STATUS_LABELS[row.status] || row.status) : 'تأییدشده'}</td>
+              <td className="sfo-num sfo-strong">{formatNumber(row.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function Pager({ page, pageCount, onChange }) {
   if (pageCount <= 1) return null;
   const items = [];
@@ -198,7 +231,7 @@ function Pager({ page, pageCount, onChange }) {
     else if (items[items.length - 1] !== '…') items.push('…');
   }
   return (
-    <nav className="sfo-pager" aria-label="صفحه‌بندی بدهکاران">
+    <nav className="sfo-pager" aria-label="صفحه‌بندی">
       <button type="button" className="sfo-page-btn" disabled={page <= 1} onClick={() => onChange(page - 1)}>قبلی</button>
       {items.map((n, idx) => (n === '…'
         ? <span key={`e${idx}`} className="sfo-page-gap">…</span>
@@ -220,8 +253,9 @@ function Pager({ page, pageCount, onChange }) {
 
 function DomainPanel({ domain, onPrint, printBusy }) {
   const [page, setPage] = useState(1);
+  const [expPage, setExpPage] = useState(1);
 
-  useEffect(() => { setPage(1); }, [domain]);
+  useEffect(() => { setPage(1); setExpPage(1); }, [domain]);
 
   if (!domain) return null;
   const totals = domain.totals || {};
@@ -231,6 +265,12 @@ function DomainPanel({ domain, onPrint, printBusy }) {
   const safePage = Math.min(page, pageCount);
   const pageRows = rows.slice((safePage - 1) * DEBTORS_PER_PAGE, safePage * DEBTORS_PER_PAGE);
   const netNegative = Number(totals.net) < 0;
+
+  const expRows = Array.isArray(domain.expenses) ? domain.expenses : [];
+  const expCount = Number(totals.expenseCount ?? expRows.length);
+  const expPageCount = Math.max(1, Math.ceil(expRows.length / DEBTORS_PER_PAGE));
+  const expSafePage = Math.min(expPage, expPageCount);
+  const expPageRows = expRows.slice((expSafePage - 1) * DEBTORS_PER_PAGE, expSafePage * DEBTORS_PER_PAGE);
 
   return (
     <section className={`sfo-panel sfo-domain ${DOMAIN_TONE[domain.key] || ''}`}>
@@ -255,18 +295,39 @@ function DomainPanel({ domain, onPrint, printBusy }) {
         <KpiCard label="شاگردان فعال" value={totals.activeStudents} />
       </div>
 
+      {totals.pendingExpense ? (
+        <p className="sfo-note">مصرف بازه شاملِ {formatNumber(totals.pendingExpense)} افغانی مصرفِ ثبت‌شده اما در انتظار تأیید است.</p>
+      ) : null}
       {totals.refundTotal ? (
         <p className="sfo-note">بازپرداخت‌های پرداخت‌شده در بازه: {formatNumber(totals.refundTotal)} افغانی (از درآمد کسر شده).</p>
       ) : null}
 
       <div className="sfo-panel-breakdowns">
         <BreakdownList title="درآمد بر اساس روش پرداخت" items={domain.byPaymentMethod} labelKey="method" labelFn={methodLabel} />
-        <BreakdownList title="مصرف بر اساس دسته" items={domain.byExpenseCategory} labelKey="category" />
+        <BreakdownList
+          title={`مصرف بر اساس دسته${totals.expenseCount ? ` — ${formatNumber(totals.expenseCount)} فقره` : ''}`}
+          items={domain.byExpenseCategory}
+          labelKey="category"
+        />
       </div>
+      {totals.expenseCount && (domain.byExpenseCategory || []).length > 8 ? (
+        <p className="sfo-note">فقط ۸ دستهٔ بزرگ نمایش داده شده؛ کل {formatNumber(totals.expense)} افغانی در {formatNumber((domain.byExpenseCategory || []).length)} دسته.</p>
+      ) : null}
 
       <div className="sfo-debtors-head">
         <h4>
-          بدهکاران <span className="sfo-dim">({formatNumber(debtorCount)} نفر)</span>
+          فهرست مصارف بازه <span className="sfo-dim">({formatNumber(expCount)} فقره · {formatNumber(totals.expense)} افغانی)</span>
+        </h4>
+        {expPageCount > 1 ? (
+          <span className="sfo-dim">صفحهٔ {faDigits(expSafePage)} از {faDigits(expPageCount)}</span>
+        ) : null}
+      </div>
+      <ExpenseTable rows={expPageRows} />
+      <Pager page={expSafePage} pageCount={expPageCount} onChange={setExpPage} />
+
+      <div className="sfo-debtors-head">
+        <h4>
+          بدهکاران <span className="sfo-dim">({formatNumber(debtorCount)} نفر · باقیاتِ باز تا امروز، مستقل از بازه)</span>
         </h4>
         {pageCount > 1 ? (
           <span className="sfo-dim">صفحهٔ {faDigits(safePage)} از {faDigits(pageCount)}</span>
@@ -285,12 +346,26 @@ export default function SchoolFinanceOverview() {
     [now.jy]
   );
   const defaultFrom = useMemo(() => shiftShamsi(now.jy, now.jm, -11), [now.jy, now.jm]);
+  // آخرین انتخابِ فیلتر را از localStorage برمی‌گردانیم تا با هر بازدید از نو تنظیم نشود
+  const saved = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('sfo_filter_v1')) || {}; } catch { return {}; }
+  }, []);
 
-  const [preset, setPreset] = useState('12');
-  const [fromY, setFromY] = useState(defaultFrom.jy);
-  const [fromM, setFromM] = useState(defaultFrom.jm);
-  const [toY, setToY] = useState(now.jy);
-  const [toM, setToM] = useState(now.jm);
+  const [preset, setPreset] = useState(saved.preset || '12');
+  const [fromY, setFromY] = useState(saved.fromY || defaultFrom.jy);
+  const [fromM, setFromM] = useState(saved.fromM || defaultFrom.jm);
+  const [toY, setToY] = useState(saved.toY || now.jy);
+  const [toM, setToM] = useState(saved.toM || now.jm);
+  // انتخاب‌گرِ «یک ماه مشخص» و «یک سال مشخص»
+  const [pickY, setPickY] = useState(saved.pickY || now.jy);
+  const [pickM, setPickM] = useState(saved.pickM || now.jm);
+  const [yearPick, setYearPick] = useState(saved.yearPick || now.jy);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('sfo_filter_v1', JSON.stringify({ preset, fromY, fromM, toY, toM, pickY, pickM, yearPick }));
+    } catch { /* localStorage unavailable — بی‌خطر */ }
+  }, [preset, fromY, fromM, toY, toM, pickY, pickM, yearPick]);
 
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -300,19 +375,22 @@ export default function SchoolFinanceOverview() {
 
   const fromKey = `${fromY}-${pad2(fromM)}`;
   const toKey = `${toY}-${pad2(toM)}`;
+  const pickKey = `${pickY}-${pad2(pickM)}`;
   const customInvalid = preset === 'custom' && (fromY * 12 + fromM) > (toY * 12 + toM);
 
   const queryString = useMemo(() => {
     if (preset === 'custom') return `?from=${fromKey}&to=${toKey}`;
-    if (preset === 'year') return `?year=${now.jy}`;
+    if (preset === 'month') return `?from=${pickKey}&to=${pickKey}`;
+    if (preset === 'year') return `?year=${yearPick}`;
     return `?months=${preset}`;
-  }, [preset, fromKey, toKey, now.jy]);
+  }, [preset, fromKey, toKey, pickKey, yearPick]);
 
   const exportFilters = useMemo(() => {
     if (preset === 'custom') return { shamsiFrom: fromKey, shamsiTo: toKey };
-    if (preset === 'year') return { shamsiYear: now.jy };
+    if (preset === 'month') return { shamsiFrom: pickKey, shamsiTo: pickKey };
+    if (preset === 'year') return { shamsiYear: yearPick };
     return { rollingMonths: Number(preset) };
-  }, [preset, fromKey, toKey, now.jy]);
+  }, [preset, fromKey, toKey, pickKey, yearPick]);
 
   const load = useCallback(async () => {
     if (customInvalid) return;
@@ -333,14 +411,15 @@ export default function SchoolFinanceOverview() {
     load();
   }, [load]);
 
-  const exportExcel = async () => {
-    setExporting('xlsx');
+  const exportTable = async (kind) => {
+    setExporting(kind);
     setExportError('');
     try {
-      const { blob, filename } = await fetchBlob('/api/reports/export.xlsx', { reportKey: REPORT_KEY, filters: exportFilters });
-      downloadBlob(blob, filename || 'consolidated-finance.xlsx');
+      const endpoint = kind === 'csv' ? '/api/reports/export.csv' : '/api/reports/export.xlsx';
+      const { blob, filename } = await fetchBlob(endpoint, { reportKey: REPORT_KEY, filters: exportFilters });
+      downloadBlob(blob, filename || `consolidated-finance.${kind === 'csv' ? 'csv' : 'xlsx'}`);
     } catch (err) {
-      setExportError(errorMessage(err, 'دریافت خروجی اکسل ناموفق بود.'));
+      setExportError(errorMessage(err, kind === 'csv' ? 'دریافت خروجی CSV ناموفق بود.' : 'دریافت خروجی اکسل ناموفق بود.'));
     } finally {
       setExporting('');
     }
@@ -396,6 +475,30 @@ export default function SchoolFinanceOverview() {
           ))}
         </div>
 
+        {preset === 'month' ? (
+          <div className="sfo-range-row">
+            <span className="sfo-range-lbl">ماه</span>
+            <select value={pickM} onChange={(e) => setPickM(Number(e.target.value))}>
+              {AFGHAN_SOLAR_MONTHS.map((name, index) => (
+                <option key={name} value={index + 1}>{name}</option>
+              ))}
+            </select>
+            <span className="sfo-range-lbl">سال</span>
+            <select value={pickY} onChange={(e) => setPickY(Number(e.target.value))}>
+              {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+            </select>
+          </div>
+        ) : null}
+
+        {preset === 'year' ? (
+          <div className="sfo-range-row">
+            <span className="sfo-range-lbl">سال شمسی</span>
+            <select value={yearPick} onChange={(e) => setYearPick(Number(e.target.value))}>
+              {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+            </select>
+          </div>
+        ) : null}
+
         {preset === 'custom' ? (
           <div className="sfo-range-row">
             <span className="sfo-range-lbl">از</span>
@@ -424,14 +527,21 @@ export default function SchoolFinanceOverview() {
           <button type="button" className="sfo-btn" onClick={load} disabled={loading || customInvalid}>
             {loading ? 'در حال بارگذاری…' : 'تازه‌سازی'}
           </button>
-          <button type="button" className="sfo-btn sfo-btn-ghost" onClick={exportExcel} disabled={!report || Boolean(exporting)}>
+          <button type="button" className="sfo-btn sfo-btn-ghost" onClick={() => exportTable('xlsx')} disabled={!report || Boolean(exporting)}>
             {exporting === 'xlsx' ? 'در حال ساخت…' : 'خروجی Excel'}
+          </button>
+          <button type="button" className="sfo-btn sfo-btn-ghost" onClick={() => exportTable('csv')} disabled={!report || Boolean(exporting)}>
+            {exporting === 'csv' ? 'در حال ساخت…' : 'خروجی CSV'}
           </button>
           <button type="button" className="sfo-btn sfo-btn-ghost" onClick={() => printSection('all')} disabled={!report || Boolean(exporting)}>
             {exporting === 'print-all' ? 'در حال ساخت…' : 'PDF گزارش کامل'}
           </button>
           {period?.from ? (
-            <span className="sfo-range-tag">{monthKeyLabel(period.from)} — {monthKeyLabel(period.to)}</span>
+            <span className="sfo-range-tag">
+              {period.from === period.to
+                ? monthKeyLabel(period.from)
+                : `${monthKeyLabel(period.from)} — ${monthKeyLabel(period.to)}`}
+            </span>
           ) : null}
         </div>
       </div>
@@ -447,7 +557,12 @@ export default function SchoolFinanceOverview() {
             <h2>مجموع هر سه بخش</h2>
             <div className="sfo-kpi-grid sfo-kpi-grid-lg">
               <KpiCard label="کل درآمد" value={combined.income} tone="pos" />
-              <KpiCard label="کل مصرف" value={combined.expense} tone="neg" />
+              <KpiCard
+                label="کل مصرف"
+                value={combined.expense}
+                tone="neg"
+                hint={combined.pendingExpense ? `${formatNumber(combined.pendingExpense)} افغانی در انتظار تأیید` : ''}
+              />
               <KpiCard label="خالص" value={combined.net} tone={Number(combined.net) < 0 ? 'neg' : 'pos'} />
               <KpiCard label="کل باقیات باز" value={combined.outstanding} />
               <KpiCard

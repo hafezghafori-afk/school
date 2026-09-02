@@ -55,6 +55,15 @@ const {
   collectOfficialSnapshotGate
 } = require('../services/governmentSnapshotIntegrity');
 const {
+  GOVERNMENT_SNAPSHOT_RATIFY_LEVELS,
+  normalizeGovernmentSnapshotType,
+  resolveGovernmentReportKey,
+  serializeGovernmentFinanceSnapshot,
+  checkGovernmentSnapshotRatifier,
+  applyGovernmentSnapshotRatification,
+  applyGovernmentSnapshotRejection
+} = require('../services/governmentSnapshotService');
+const {
   listCourseMemberships,
   findClassMemberships,
   resolveMembershipTransactionLink
@@ -1617,54 +1626,6 @@ const populateExpenseEntryQuery = (query) => query
   .populate('rejectedBy', 'name')
   .populate('updatedBy', 'name');
 
-const serializeGovernmentFinanceSnapshotActor = (actor = null) => {
-  if (!actor) return null;
-  if (actor?._id) return { _id: actor._id, name: actor.name || '' };
-  return actor;
-};
-
-const serializeGovernmentFinanceSnapshot = (value = null) => {
-  if (!value) return null;
-  const plain = value?.toObject ? value.toObject() : { ...(value || {}) };
-  // Records created before the two-person flow carry isOfficial:true and no
-  // meaningful officialStage; surface them as already-ratified so the archive
-  // UI doesn't mistake them for pending drafts.
-  let officialStage = ['draft', 'ratified', 'rejected'].includes(plain.officialStage)
-    ? plain.officialStage
-    : 'draft';
-  if (plain.isOfficial && officialStage !== 'ratified') officialStage = 'ratified';
-  return {
-    ...plain,
-    officialStage,
-    financialYearId: plain.financialYearId?._id || plain.financialYearId || null,
-    academicYearId: plain.academicYearId?._id || plain.academicYearId || null,
-    classId: plain.classId?._id || plain.classId || null,
-    schoolClass: serializeSchoolClassLite(plain.classId || null),
-    ratifiedBy: serializeGovernmentFinanceSnapshotActor(plain.ratifiedBy || null),
-    rejectedBy: serializeGovernmentFinanceSnapshotActor(plain.rejectedBy || null),
-    financialYear: plain.financialYearId?._id
-      ? {
-          _id: plain.financialYearId._id,
-          title: plain.financialYearId.title || '',
-          code: plain.financialYearId.code || '',
-          status: plain.financialYearId.status || '',
-          isActive: Boolean(plain.financialYearId.isActive),
-          isClosed: Boolean(plain.financialYearId.isClosed)
-        }
-      : null,
-    academicYear: plain.academicYearId?._id
-      ? {
-          _id: plain.academicYearId._id,
-          title: plain.academicYearId.title || '',
-          code: plain.academicYearId.code || ''
-        }
-      : null,
-    generatedBy: plain.generatedBy?._id
-      ? { _id: plain.generatedBy._id, name: plain.generatedBy.name || '' }
-      : (plain.generatedBy || null)
-  };
-};
-
 const parseBooleanInput = (value, fallback = false) => {
   if (typeof value === 'boolean') return value;
   if (value == null) return fallback;
@@ -2103,22 +2064,10 @@ const serializeFinancialYearBudgetApproval = (value = null) => {
   };
 };
 
-const normalizeGovernmentSnapshotType = (value = '') => {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'annual') return 'annual';
-  if (normalized === 'monthly') return 'monthly';
-  return 'quarterly';
-};
-
-const resolveGovernmentReportKey = (reportType = '') => {
-  const normalized = normalizeGovernmentSnapshotType(reportType);
-  if (normalized === 'annual') return 'government_finance_annual';
-  if (normalized === 'monthly') return 'government_finance_monthly';
-  return 'government_finance_quarterly';
-};
-
-// P7/P8 integrity helpers (digest chain + official-snapshot gate) live in
-// services/governmentSnapshotIntegrity.js so they can be unit tested standalone.
+// Government-snapshot pure logic (type/key normalizers, serializer, ratify/reject
+// state transitions) lives in services/governmentSnapshotService.js; the P7/P8
+// integrity helpers (digest chain + official-snapshot gate) in
+// services/governmentSnapshotIntegrity.js — both unit tested standalone.
 
 const resolveFinancialYearErrorStatus = (error) => {
   if (Number.isFinite(Number(error?.statusCode)) && Number(error?.statusCode) > 0) {
@@ -2463,7 +2412,8 @@ router.get('/admin/treasury/analytics', requireAuth, requireRole(['admin']), req
       success: true,
       analytics
     });
-  } catch {
+  } catch (error) {
+    console.error('finance treasury analytics failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'دریافت تحلیل خزانه ناموفق بود.' });
   }
 });
@@ -2752,7 +2702,8 @@ router.get('/admin/expense-categories', requireAuth, requireRole(['admin']), req
       success: true,
       items: items.map((item) => serializeExpenseCategoryDefinition(item))
     });
-  } catch {
+  } catch (error) {
+    console.error('finance expense categories list failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'دریافت دسته‌بندی‌های رسمی مصرفات ناموفق بود.' });
   }
 });
@@ -2796,7 +2747,8 @@ router.post('/admin/expense-categories', requireAuth, requireRole(['admin']), re
       item: serializeExpenseCategoryDefinition(saved),
       message: 'دسته‌بندی مصرف ثبت شد.'
     });
-  } catch {
+  } catch (error) {
+    console.error('finance expense category create failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'ایجاد دسته‌بندی مصرف ناموفق بود.' });
   }
 });
@@ -2848,7 +2800,8 @@ router.patch('/admin/expense-categories/:id', requireAuth, requireRole(['admin']
       item: serializeExpenseCategoryDefinition(saved),
       message: 'دسته‌بندی مصرف ویرایش شد.'
     });
-  } catch {
+  } catch (error) {
+    console.error('finance expense category update failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'ویرایش دسته‌بندی مصرف ناموفق بود.' });
   }
 });
@@ -2884,7 +2837,8 @@ router.get('/admin/financial-years', requireAuth, requireRole(['admin']), requir
       success: true,
       items: items.map((item) => serializeFinancialYear(item))
     });
-  } catch {
+  } catch (error) {
+    console.error('finance financial years list failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'دریافت سال‌های مالی ناموفق بود.' });
   }
 });
@@ -3103,7 +3057,8 @@ router.post('/admin/financial-years/:id/activate', requireAuth, requireRole(['ad
       item: serializeFinancialYear(saved),
       message: 'سال مالی فعال شد.'
     });
-  } catch {
+  } catch (error) {
+    console.error('finance financial year activate failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'فعال‌سازی سال مالی ناموفق بود.' });
   }
 });
@@ -3121,7 +3076,8 @@ router.get('/admin/financial-years/:id/close-readiness', requireAuth, requireRol
       item: serializeFinancialYear(item),
       readiness
     });
-  } catch {
+  } catch (error) {
+    console.error('finance financial year close-readiness failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'بررسی آمادگی بستن سال مالی ناموفق بود.' });
   }
 });
@@ -3192,7 +3148,8 @@ router.post('/admin/financial-years/:id/close', requireAuth, requireRole(['admin
       item: serializeFinancialYear(saved),
       message: 'سال مالی بسته شد.'
     });
-  } catch {
+  } catch (error) {
+    console.error('finance financial year close failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'بستن سال مالی ناموفق بود.' });
   }
 });
@@ -3364,7 +3321,8 @@ router.get('/admin/expenses/analytics', requireAuth, requireRole(['admin']), req
       success: true,
       analytics
     });
-  } catch {
+  } catch (error) {
+    console.error('finance expense governance analytics failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'دریافت تحلیل کنترلی مصرفات ناموفق بود.' });
   }
 });
@@ -4273,7 +4231,8 @@ router.delete('/admin/expenses/:id', requireAuth, requireRole(['admin']), requir
     });
 
     return res.json({ success: true, message: 'مصرف پیش‌نویس حذف شد.' });
-  } catch {
+  } catch (error) {
+    console.error('finance expense delete failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'حذف مصرف ناموفق بود.' });
   }
 });
@@ -4587,7 +4546,74 @@ router.get('/admin/government-snapshots/:id/export.pdf', requireAuth, requireRol
   }
 });
 
-const GOVERNMENT_SNAPSHOT_RATIFY_LEVELS = ['finance_lead', 'general_president'];
+// P13 — the archived official figures as a tabular file. PDF is for reading; the
+// finance office needs the numbers back as data.
+router.get('/admin/government-snapshots/:id/export.csv', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    const snapshot = await GovernmentFinanceSnapshot.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId })
+      .populate('financialYearId', 'title code')
+      .populate('academicYearId', 'title code')
+      .populate('classId', 'title code')
+      .populate('generatedBy', 'name')
+      .populate('ratifiedBy', 'name')
+      .lean();
+    if (!snapshot) return res.status(404).json({ success: false, message: 'آرشیف رسمی پیدا نشد.' });
+
+    const columns = Array.isArray(snapshot.columns) && snapshot.columns.length
+      ? snapshot.columns
+      : Object.keys((snapshot.rows || [])[0] || {}).map((key) => ({ key, label: key }));
+    const stage = snapshot.isOfficial && snapshot.officialStage !== 'ratified' ? 'ratified' : (snapshot.officialStage || 'draft');
+
+    const lines = [];
+    const meta = [
+      ['reportType', snapshot.reportType || ''],
+      ['title', snapshot.title || ''],
+      ['financialYear', snapshot.financialYearId?.title || ''],
+      ['academicYear', snapshot.academicYearId?.title || ''],
+      ['class', snapshot.classId?.title || 'همه صنف‌ها'],
+      ['quarter', snapshot.quarter || ''],
+      ['month', snapshot.month || ''],
+      ['version', snapshot.version || 1],
+      ['officialStage', stage],
+      ['generatedAt', snapshot.generatedAt ? new Date(snapshot.generatedAt).toISOString() : ''],
+      ['generatedBy', snapshot.generatedBy?.name || ''],
+      ['ratifiedBy', snapshot.ratifiedBy?.name || ''],
+      ['sourceDigest', snapshot.sourceDigest || ''],
+      ['previousDigest', snapshot.previousDigest || ''],
+      ['periodBasis', snapshot.pack?.report?.meta?.periodBasis || snapshot.filters?.periodBasis || '']
+    ];
+    meta.forEach(([key, value]) => lines.push(`# ${sanitizeCsv(key)},${sanitizeCsv(value)}`));
+    lines.push('');
+    lines.push(columns.map((col) => sanitizeCsv(col.label || col.key)).join(','));
+    (snapshot.rows || []).forEach((row) => {
+      lines.push(columns.map((col) => sanitizeCsv(row?.[col.key] ?? '')).join(','));
+    });
+
+    const summaryEntries = Object.entries(snapshot.summary || {});
+    if (summaryEntries.length) {
+      lines.push('');
+      lines.push('# summary');
+      summaryEntries.forEach(([key, value]) => lines.push(`${sanitizeCsv(key)},${sanitizeCsv(value)}`));
+    }
+
+    await logActivity({
+      req,
+      action: 'finance_export_government_snapshot_csv',
+      targetType: 'GovernmentFinanceSnapshot',
+      targetId: String(snapshot._id),
+      meta: { reportType: snapshot.reportType || '', version: Number(snapshot.version || 1) }
+    });
+
+    const filename = `government-finance-${String(snapshot.reportType || 'snapshot')}-v${String(snapshot.version || 1)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.status(200).send(`﻿${lines.join('\n')}`);
+  } catch (error) {
+    console.error('government snapshot csv export failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'دریافت CSV آرشیف رسمی ناموفق بود.' });
+  }
+});
 
 const loadSchoolOwnedGovernmentSnapshot = async (req, id) => {
   const schoolContext = await resolveActiveSchool(req, { payload: req.body || req.query || {}, allowSingleFallback: true });
@@ -4691,11 +4717,15 @@ router.post('/admin/government-snapshots/:id/ratify', requireAuth, requireRole([
     }
 
     const actorLevel = normalizeAdminLevel(await resolveAdminActorLevel(req.user.id));
-    if (!GOVERNMENT_SNAPSHOT_RATIFY_LEVELS.includes(actorLevel)) {
-      return res.status(403).json({ success: false, code: 'finance_government_ratify_level_invalid', message: 'ثبت رسمی نسخهٔ گزارش مالی دولت فقط توسط مدیر ارشد مالی یا ریاست عمومی مجاز است.' });
-    }
-    if (FINANCE_FOUR_EYES_ENABLED && String(snapshot.generatedBy || '') === String(req.user.id)) {
-      return res.status(409).json({ success: false, code: 'finance_government_ratify_self', message: 'سازندهٔ پیش‌نویس نمی‌تواند همان نسخه را رسمی ثبت کند؛ به تایید مقام دوم نیاز است.' });
+    const ratifierError = checkGovernmentSnapshotRatifier({
+      actorLevel,
+      generatorId: snapshot.generatedBy,
+      actorId: req.user.id,
+      fourEyesEnabled: FINANCE_FOUR_EYES_ENABLED,
+      action: 'ratify'
+    });
+    if (ratifierError) {
+      return res.status(ratifierError.statusCode).json({ success: false, code: ratifierError.code, message: ratifierError.message });
     }
 
     const closeReadiness = await buildFinancialYearCloseReadiness({ financialYearId: String(snapshot.financialYearId || '') });
@@ -4710,17 +4740,12 @@ router.post('/admin/government-snapshots/:id/ratify', requireAuth, requireRole([
       });
     }
 
-    const note = String(req.body?.note || '').trim();
-    snapshot.isOfficial = true;
-    snapshot.officialStage = 'ratified';
-    snapshot.ratifiedBy = req.user.id;
-    snapshot.ratifiedAt = new Date();
-    snapshot.rejectedBy = null;
-    snapshot.rejectedAt = null;
-    snapshot.rejectReason = '';
-    snapshot.readinessAtRatification = closeReadiness || null;
-    if (!Array.isArray(snapshot.officialTrail)) snapshot.officialTrail = [];
-    snapshot.officialTrail.push({ action: 'ratify', by: req.user.id, at: new Date(), level: actorLevel, note });
+    applyGovernmentSnapshotRatification(snapshot, {
+      actorId: req.user.id,
+      actorLevel,
+      note: req.body?.note,
+      closeReadiness
+    });
     await snapshot.save();
 
     await logActivity({
@@ -4754,21 +4779,16 @@ router.post('/admin/government-snapshots/:id/reject', requireAuth, requireRole([
     }
 
     const actorLevel = normalizeAdminLevel(await resolveAdminActorLevel(req.user.id));
-    if (!GOVERNMENT_SNAPSHOT_RATIFY_LEVELS.includes(actorLevel)) {
-      return res.status(403).json({ success: false, code: 'finance_government_ratify_level_invalid', message: 'رد پیش‌نویس نسخهٔ رسمی فقط توسط مدیر ارشد مالی یا ریاست عمومی مجاز است.' });
+    const ratifierError = checkGovernmentSnapshotRatifier({ actorLevel, actorId: req.user.id, action: 'reject' });
+    if (ratifierError) {
+      return res.status(ratifierError.statusCode).json({ success: false, code: ratifierError.code, message: ratifierError.message });
     }
     const reason = String(req.body?.reason || '').trim();
     if (!reason) {
       return res.status(400).json({ success: false, code: 'finance_government_reject_reason_required', message: 'برای رد پیش‌نویس، ذکر دلیل الزامی است.' });
     }
 
-    snapshot.isOfficial = false;
-    snapshot.officialStage = 'rejected';
-    snapshot.rejectedBy = req.user.id;
-    snapshot.rejectedAt = new Date();
-    snapshot.rejectReason = reason;
-    if (!Array.isArray(snapshot.officialTrail)) snapshot.officialTrail = [];
-    snapshot.officialTrail.push({ action: 'reject', by: req.user.id, at: new Date(), level: actorLevel, reason });
+    applyGovernmentSnapshotRejection(snapshot, { actorId: req.user.id, actorLevel, reason });
     await snapshot.save();
 
     await logActivity({
@@ -5242,7 +5262,8 @@ router.get('/admin/summary', requireAuth, requireRole(['admin']), requirePermiss
       },
       topDebtors
     });
-  } catch {
+  } catch (error) {
+    console.error('finance summary failed:', error?.message || error);
     res.status(500).json({ success: false, message: 'خطا در دریافت خلاصه مالی' });
   }
 });

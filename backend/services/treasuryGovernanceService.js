@@ -6,8 +6,11 @@ const ExpenseEntry = require('../models/ExpenseEntry');
 const FeePayment = require('../models/FeePayment');
 const FeeOrder = require('../models/FeeOrder');
 const FinancialYear = require('../models/FinancialYear');
+const FinanceTreasuryCheckpoint = require('../models/FinanceTreasuryCheckpoint');
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
 const { assertFinancePeriodWritable } = require('./financePeriodGuardService');
+const { accumulateAccountMetrics } = require('./treasuryMetricsFold');
+const { findValidCheckpointSeedMap } = require('./treasuryCheckpointService');
 
 const TREASURY_ACCOUNT_TYPES = new Set(['cashbox', 'bank', 'hawala', 'mobile_money', 'other']);
 const TREASURY_TRANSACTION_TYPE_META = Object.freeze({
@@ -403,90 +406,16 @@ function serializeTreasuryTransaction(value = null, accountById = new Map()) {
   };
 }
 
-function accumulateAccountMetrics({
-  accounts = [],
-  transactions = [],
-  expenses = []
-} = {}) {
-  const metricsByAccountId = new Map(
-    (accounts || []).map((account) => [String(account._id), {
-      manualInflow: 0,
-      manualOutflow: 0,
-      transferIn: 0,
-      transferOut: 0,
-      expenseOutflow: 0,
-      transferCount: 0,
-      expenseCount: 0,
-      bookBalance: Number(account.openingBalance || 0),
-      lastTransactionAt: null
-    }])
-  );
-
-  (transactions || []).forEach((item) => {
-    const accountKey = String(item.accountId?._id || item.accountId || '');
-    if (!metricsByAccountId.has(accountKey)) return;
-    const bucket = metricsByAccountId.get(accountKey);
-    const amount = Number(item.amount || 0);
-    const type = normalizeText(item.transactionType).toLowerCase();
-    const direction = normalizeText(item.direction).toLowerCase();
-
-    if (type === 'transfer_in') {
-      bucket.transferIn += amount;
-      bucket.transferCount += 1;
-      bucket.bookBalance += amount;
-    } else if (type === 'transfer_out') {
-      bucket.transferOut += amount;
-      bucket.transferCount += 1;
-      bucket.bookBalance -= amount;
-    } else if (direction === 'in') {
-      bucket.manualInflow += amount;
-      bucket.bookBalance += amount;
-    } else {
-      bucket.manualOutflow += amount;
-      bucket.bookBalance -= amount;
-    }
-
-    const itemDate = toDate(item.transactionDate, null);
-    if (itemDate && (!bucket.lastTransactionAt || itemDate.getTime() > new Date(bucket.lastTransactionAt).getTime())) {
-      bucket.lastTransactionAt = itemDate.toISOString();
-    }
-  });
-
-  (expenses || []).forEach((item) => {
-    // A procurement-linked expense records the obligation/expense. Cash leaves the
-    // treasury only through its procurement settlement transaction, so counting
-    // both here would debit the same amount twice.
-    if (item.procurementCommitmentId) return;
-    const accountKey = String(item.treasuryAccountId?._id || item.treasuryAccountId || '');
-    if (!metricsByAccountId.has(accountKey)) return;
-    const bucket = metricsByAccountId.get(accountKey);
-    const amount = Number(item.amount || 0);
-    bucket.expenseOutflow += amount;
-    bucket.expenseCount += 1;
-    bucket.bookBalance -= amount;
-
-    const itemDate = toDate(item.expenseDate, null);
-    if (itemDate && (!bucket.lastTransactionAt || itemDate.getTime() > new Date(bucket.lastTransactionAt).getTime())) {
-      bucket.lastTransactionAt = itemDate.toISOString();
-    }
-  });
-
-  metricsByAccountId.forEach((bucket) => {
-    bucket.manualInflow = Number(bucket.manualInflow.toFixed(2));
-    bucket.manualOutflow = Number(bucket.manualOutflow.toFixed(2));
-    bucket.transferIn = Number(bucket.transferIn.toFixed(2));
-    bucket.transferOut = Number(bucket.transferOut.toFixed(2));
-    bucket.expenseOutflow = Number(bucket.expenseOutflow.toFixed(2));
-    bucket.bookBalance = Number(bucket.bookBalance.toFixed(2));
-  });
-
-  return metricsByAccountId;
-}
-
 async function loadTreasuryDataset({
   financialYearId = '',
   academicYearId = '',
-  accountId = ''
+  accountId = '',
+  // When set, per-account balance checkpoints at or before this date are used as
+  // the fold's starting point and only newer transactions/expenses are loaded
+  // (finding P9). Left null by callers that need the full ledger (e.g. the
+  // cashbook timeline). Safe when no checkpoints exist: every account falls back
+  // to a full recompute, identical to the pre-checkpoint behaviour.
+  checkpointAsOf = null
 } = {}) {
   const normalizedFinancialYearId = normalizeText(financialYearId);
   const normalizedAcademicYearId = normalizeText(academicYearId);
@@ -515,11 +444,32 @@ async function loadTreasuryDataset({
   const accountIds = accounts.map((item) => item._id);
   const accountIdFilter = accountIds.length ? { $in: accountIds } : { $in: [] };
 
-  const [transactions, approvedExpenses, unassignedApprovedExpenses] = await Promise.all([
+  let seedByAccountId = null;
+  let sinceByAccountId = new Map();
+  if (checkpointAsOf && accountIds.length) {
+    ({ seedByAccountId, sinceByAccountId } = await findValidCheckpointSeedMap({ accounts, asOf: checkpointAsOf }));
+  }
+
+  // Trusted (checkpointed) accounts only need transactions/expenses AFTER their
+  // cut-off; the rest still need the full history.
+  const buildScopedOr = (dateField, idField) => {
+    if (!sinceByAccountId.size) return null;
+    const clauses = [];
+    const untrusted = accountIds.filter((id) => !sinceByAccountId.has(String(id)));
+    if (untrusted.length) clauses.push({ [idField]: { $in: untrusted } });
+    sinceByAccountId.forEach((since, id) => {
+      clauses.push({ [idField]: id, [dateField]: { $gt: since } });
+    });
+    return clauses;
+  };
+  const txScopedOr = buildScopedOr('transactionDate', 'accountId');
+  const expenseScopedOr = buildScopedOr('expenseDate', 'treasuryAccountId');
+
+  const [transactions, approvedExpenses, unassignedApprovedExpenses, recentTransactionsFull] = await Promise.all([
     accountIds.length
       ? FinanceTreasuryTransaction.find({
-          accountId: accountIdFilter,
-          status: { $ne: 'void' }
+          status: { $ne: 'void' },
+          ...(txScopedOr ? { $or: txScopedOr } : { accountId: accountIdFilter })
         })
         .populate('accountId', 'title code accountType accountNo')
         .populate('counterAccountId', 'title code accountType accountNo')
@@ -529,8 +479,8 @@ async function loadTreasuryDataset({
       : [],
     accountIds.length
       ? ExpenseEntry.find({
-          treasuryAccountId: accountIdFilter,
-          status: 'approved'
+          status: 'approved',
+          ...(expenseScopedOr ? { $or: expenseScopedOr } : { treasuryAccountId: accountIdFilter })
         })
         .populate('treasuryAccountId', 'title code accountType accountNo')
         .sort({ expenseDate: -1, createdAt: -1 })
@@ -544,13 +494,25 @@ async function loadTreasuryDataset({
         { treasuryAccountId: null },
         { treasuryAccountId: { $exists: false } }
       ]
-    }).lean()
+    }).lean(),
+    // A checkpoint truncates `transactions` to the post-cut-off tail, so keep a
+    // small always-full query for the "recent activity" widget.
+    (checkpointAsOf && accountIds.length)
+      ? FinanceTreasuryTransaction.find({ accountId: accountIdFilter, status: { $ne: 'void' } })
+        .populate('accountId', 'title code accountType accountNo')
+        .populate('counterAccountId', 'title code accountType accountNo')
+        .populate('createdBy', 'name')
+        .populate('updatedBy', 'name')
+        .sort({ transactionDate: -1, createdAt: -1 })
+        .limit(12)
+      : null
   ]);
 
   const metricsByAccountId = accumulateAccountMetrics({
     accounts,
     transactions,
-    expenses: approvedExpenses
+    expenses: approvedExpenses,
+    seedByAccountId
   });
   const accountById = new Map(accounts.map((item) => [String(item._id), item]));
   const serializedAccounts = accounts.map((item) => serializeTreasuryAccount(item, metricsByAccountId));
@@ -560,6 +522,7 @@ async function loadTreasuryDataset({
     transactions,
     approvedExpenses,
     unassignedApprovedExpenses,
+    recentTransactionsFull,
     metricsByAccountId,
     accountById,
     serializedAccounts
@@ -847,15 +810,17 @@ async function buildTreasuryAnalytics({
 } = {}) {
   const {
     transactions,
+    recentTransactionsFull,
     unassignedApprovedExpenses,
     accountById,
     serializedAccounts
   } = await loadTreasuryDataset({
     financialYearId,
     academicYearId,
-    accountId
+    accountId,
+    checkpointAsOf: new Date()
   });
-  const recentTransactions = transactions
+  const recentTransactions = (recentTransactionsFull || transactions)
     .slice(0, 12)
     .map((item) => serializeTreasuryTransaction(item, accountById));
 

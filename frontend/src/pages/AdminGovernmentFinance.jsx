@@ -30,13 +30,26 @@ void LEGACY_GARBLED_TABS;
 
 const TABS = [
   { key: 'dashboard', label: 'نمای کلی' },
-  { key: 'year', label: 'مدیریت سال مالی' },
-  { key: 'operations', label: 'عملیات مصارف' },
-  { key: 'treasury', label: 'خزانه و صندوق' },
-  { key: 'quarterly', label: 'گزارش ربع‌وار' },
-  { key: 'annual', label: 'گزارش سالانه' },
+  { key: 'year', label: 'سال مالی' },
+  { key: 'operations', label: 'مصارف' },
+  { key: 'treasury', label: 'خزانه' },
+  { key: 'reports', label: 'گزارش‌ها' }
+];
+
+// The reports tab folds the old monthly / quarterly / annual / archive tabs
+// behind one segmented control.
+const REPORT_MODES = [
+  { key: 'monthly', label: 'ماهانه' },
+  { key: 'quarterly', label: 'ربع‌وار' },
+  { key: 'annual', label: 'سالانه' },
   { key: 'archive', label: 'آرشیف رسمی' }
 ];
+const LEGACY_REPORT_TABS = new Set(['monthly', 'quarterly', 'annual', 'archive']);
+const REPORT_MODE_KEYS = new Set(REPORT_MODES.map((item) => item.key));
+
+function sanitizeReportMode(value) {
+  return REPORT_MODE_KEYS.has(value) ? value : 'quarterly';
+}
 
 const QUARTER_OPTIONS = [
   { key: 1, label: 'ربع ۱' },
@@ -44,6 +57,17 @@ const QUARTER_OPTIONS = [
   { key: 3, label: 'ربع ۳' },
   { key: 4, label: 'ربع ۴' }
 ];
+
+const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => ({
+  key: index + 1,
+  label: `ماه ${index + 1}`
+}));
+
+function sanitizeMonth(value) {
+  const parsed = Number(value);
+  if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 12) return parsed;
+  return Math.min(12, Math.max(1, new Date().getMonth() + 1));
+}
 
 const EXPENSE_STATUS_LABELS = {
   draft: 'پیش‌نویس',
@@ -242,6 +266,7 @@ const EMPTY_DATA = {
   budgetVsActual: null,
   procurementAnalytics: null,
   expenses: [],
+  governmentMonthly: null,
   governmentQuarterly: null,
   governmentAnnual: null,
   snapshots: [],
@@ -275,6 +300,220 @@ const SNAPSHOT_STAGE_LABELS = {
 function resolveSnapshotStageLabel(stage = '') {
   const normalized = String(stage || '').trim();
   return SNAPSHOT_STAGE_LABELS[normalized] || 'پیش‌نویس';
+}
+
+// Phase 4 redesign — a glass panel whose header button opens/closes its body.
+// Open state is remembered per (tab, panel) in localStorage.
+function readPanelState(storageKey, fallback) {
+  try {
+    const stored = window.localStorage.getItem(storageKey);
+    if (stored === 'open') return true;
+    if (stored === 'closed') return false;
+  } catch {
+    /* storage unavailable — fall back */
+  }
+  return fallback;
+}
+
+function panelBulkEventName(tabKey) {
+  return `govfin:panels:${tabKey}`;
+}
+
+function CollapsiblePanel({ tabKey, panelKey, title, hint = '', defaultOpen = false, span = '12', cardAttr = '', children }) {
+  const storageKey = `govfin.panel.${tabKey}.${panelKey}`;
+  const [open, setOpen] = useState(() => readPanelState(storageKey, defaultOpen));
+  const bodyId = `govpanel-${tabKey}-${panelKey}`;
+
+  const persist = (next) => {
+    try {
+      window.localStorage.setItem(storageKey, next ? 'open' : 'closed');
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const toggle = () => {
+    setOpen((prev) => {
+      const next = !prev;
+      persist(next);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const handler = (event) => {
+      const next = !!event.detail?.open;
+      setOpen(next);
+      persist(next);
+    };
+    window.addEventListener(panelBulkEventName(tabKey), handler);
+    return () => window.removeEventListener(panelBulkEventName(tabKey), handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabKey, storageKey]);
+
+  return (
+    <article
+      className={`gov-panel ${open ? 'is-open' : ''}`}
+      data-span={span}
+      {...(cardAttr ? { [cardAttr]: 'true' } : {})}
+    >
+      <button
+        type="button"
+        className="gov-panel__head"
+        onClick={toggle}
+        aria-expanded={open}
+        aria-controls={bodyId}
+      >
+        <span className="gov-panel__chevron" aria-hidden="true">▾</span>
+        <span className="gov-panel__title">{title}</span>
+        {hint ? <span className="gov-panel__hint">{hint}</span> : null}
+      </button>
+      <div className="gov-panel__body" id={bodyId} aria-hidden={!open} inert={!open}>
+        <div className="gov-panel__clip">
+          <div className="gov-panel__inner">{children}</div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function PanelBulkControls({ tabKey }) {
+  const dispatch = (open) => {
+    window.dispatchEvent(new CustomEvent(panelBulkEventName(tabKey), { detail: { open } }));
+  };
+  return (
+    <div className="gov-panel-controls">
+      <button type="button" onClick={() => dispatch(true)}>باز کردن همه</button>
+      <button type="button" onClick={() => dispatch(false)}>بستن همه</button>
+    </div>
+  );
+}
+
+// Phase 4 (P14) — what changed between the latest official record and the one
+// before it, plus a one-click digest-chain check.
+const SNAPSHOT_DELTA_KEYS = [
+  { key: 'totalIncome', label: 'عواید' },
+  { key: 'totalExpense', label: 'مصارف' },
+  { key: 'balance', label: 'مانده' },
+  { key: 'netProfit', label: 'خالص' },
+  { key: 'encumbranceOutstanding', label: 'تعهدات باز' },
+  { key: 'unallocatedExpense', label: 'مصارف تخصیص‌نیافته' }
+];
+
+function sameSnapshotChain(a, b) {
+  return a && b
+    && String(a.reportType || '') === String(b.reportType || '')
+    && String(a.quarter || '') === String(b.quarter || '')
+    && String(a.month || '') === String(b.month || '')
+    && String(a.classId || '') === String(b.classId || '');
+}
+
+function SnapshotChainPanel({ snapshots = [], chainStatus, onVerify, busy }) {
+  const latest = snapshots[0] || null;
+  const previous = latest
+    ? snapshots.find((item) => sameSnapshotChain(item, latest) && Number(item.version) === Number(latest.version) - 1) || null
+    : null;
+  if (!latest) return null;
+
+  const deltas = previous
+    ? SNAPSHOT_DELTA_KEYS
+      .map(({ key, label }) => {
+        const to = Number(latest.summary?.[key]);
+        const from = Number(previous.summary?.[key]);
+        if (!Number.isFinite(to) && !Number.isFinite(from)) return null;
+        return { label, from: from || 0, to: to || 0, delta: (to || 0) - (from || 0) };
+      })
+      .filter(Boolean)
+    : [];
+
+  return (
+    <article className="gov-card" data-span="12">
+      <div className="gov-card-head spread">
+        <div>
+          <strong>مقایسهٔ نسخه‌ها و صحتِ زنجیره</strong>
+          <span>
+            {previous
+              ? `تغییرات نسخهٔ ${formatNumber(latest.version)} نسبت به نسخهٔ ${formatNumber(previous.version)}`
+              : 'هنوز نسخهٔ قبلی برای مقایسه وجود ندارد.'}
+          </span>
+        </div>
+        <button type="button" className="gov-ghost-btn" onClick={onVerify} disabled={busy}>
+          {busy ? 'در حال بررسی...' : 'بررسی زنجیرهٔ دایجست'}
+        </button>
+      </div>
+
+      {chainStatus ? (
+        <div className={`gov-chain-status ${chainStatus.ok ? 'ok' : 'broken'}`}>
+          {chainStatus.ok
+            ? `زنجیره سالم است — ${formatNumber(chainStatus.verifiableCount || 0)} نسخهٔ قابل‌راستی‌آزمایی`
+            : 'در زنجیره ناسازگاری پیدا شد؛ دایجست یا پیوندِ یک نسخه با محتوایش نمی‌خواند.'}
+          {chainStatus.legacyCount ? ` · ${formatNumber(chainStatus.legacyCount)} نسخهٔ قدیمی (پیش از زنجیره)` : ''}
+        </div>
+      ) : null}
+
+      {deltas.length ? (
+        <div className="gov-table-wrap">
+          <table className="gov-table">
+            <thead>
+              <tr><th>قلم</th><th>نسخهٔ قبلی</th><th>نسخهٔ جدید</th><th>Δ</th></tr>
+            </thead>
+            <tbody>
+              {deltas.map((row) => (
+                <tr key={row.label}>
+                  <td>{row.label}</td>
+                  <td>{formatMoney(row.from)}</td>
+                  <td>{formatMoney(row.to)}</td>
+                  <td data-delta={row.delta === 0 ? 'flat' : row.delta > 0 ? 'up' : 'down'}>
+                    {row.delta > 0 ? '+' : ''}{formatMoney(row.delta)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+// Phase 2 (P4/P5/P6) — the accounting basis and its caveats, shown alongside the
+// quarterly / annual government figures so the numbers aren't misread.
+function GovernmentBasisNote({ report }) {
+  const summary = report?.summary || null;
+  const meta = report?.meta || null;
+  if (!summary && !meta) return null;
+  const encumbrance = Number(summary?.encumbranceOutstanding || 0);
+  const balanceRaw = summary?.balance ?? summary?.netProfit;
+  const balanceAfter = summary?.balanceAfterEncumbrance;
+  const unallocated = Number(summary?.unallocatedExpense || 0);
+  const periodBasis = meta?.periodBasis === 'shamsi'
+    ? 'دوره‌بندی: تقویم شمسی (منطبق با سال مالی)'
+    : meta?.periodBasis === 'gregorian'
+      ? 'دوره‌بندی: میلادی (سال مالی با اول حمل منطبق نیست)'
+      : '';
+  return (
+    <article className="gov-card" data-span="12">
+      <div className="gov-card-head">
+        <div>
+          <strong>مبنای حسابداری و ملاحظات</strong>
+          <span>{meta?.basisNote || 'مبنای نقدی: درآمد در تاریخ وصول و مصرف در تاریخ مصرف، هر دو فقط تاییدشده.'}</span>
+        </div>
+      </div>
+      <ul className="gov-basis-list">
+        {periodBasis ? <li>{periodBasis}</li> : null}
+        <li>
+          تعهدات خرید باز (encumbrance): <strong>{formatMoney(encumbrance)}</strong>
+          {Number.isFinite(Number(balanceAfter)) ? (
+            <> — مانده پس از تعهدات: <strong>{formatMoney(balanceAfter)}</strong> (مانده نقدی: {formatMoney(balanceRaw || 0)})</>
+          ) : null}
+        </li>
+        <li>
+          {meta?.perClassNote || 'بیلانسِ هر صنف فقط مصارف مستقیمِ همان صنف را کسر می‌کند.'}
+          {unallocated > 0 ? <> مصارف عمومیِ تخصیص‌نیافته در این دوره: <strong>{formatMoney(unallocated)}</strong>.</> : null}
+        </li>
+      </ul>
+    </article>
+  );
 }
 
 function resolveDocumentTypeLabel(documentType) {
@@ -565,6 +804,45 @@ function resolveExpenseStageLabel(stage = '') {
   return EXPENSE_STAGE_LABELS[String(stage || '').trim()] || String(stage || 'پیش‌نویس داخلی').trim();
 }
 
+// Which admin level a pending expense is waiting on, and whether the current
+// user can act — mirrors backend canReviewExpenseStage / getNextExpenseStage.
+const EXPENSE_STAGE_WAIT_LABEL = {
+  finance_manager_review: 'مدیر مالی',
+  finance_lead_review: 'مدیر ارشد مالی',
+  general_president_review: 'ریاست عمومی — تاییدِ نهایی'
+};
+const OPEN_EXPENSE_STAGES = new Set(Object.keys(EXPENSE_STAGE_WAIT_LABEL));
+
+function expenseStageWaitLabel(stage = '') {
+  return EXPENSE_STAGE_WAIT_LABEL[String(stage || '').trim()] || 'مرحلهٔ نامشخص';
+}
+
+// Can this level ADVANCE the stage (backend getNextExpenseStage returns a stage)?
+function canApproveExpenseStage(adminLevel = '', stage = '') {
+  const s = String(stage || '').trim();
+  if (!OPEN_EXPENSE_STAGES.has(s)) return false;
+  if (adminLevel === 'general_president') return true;
+  if (adminLevel === 'finance_manager') return s === 'finance_manager_review' || s === 'finance_lead_review';
+  if (adminLevel === 'finance_lead') return s === 'finance_lead_review';
+  return false;
+}
+
+// Can this level REJECT at the stage (backend canReviewExpenseStage, broader)?
+function canRejectExpenseStage(adminLevel = '', stage = '') {
+  const s = String(stage || '').trim();
+  if (!OPEN_EXPENSE_STAGES.has(s)) return false;
+  if (adminLevel === 'general_president' || adminLevel === 'finance_manager') return true;
+  if (adminLevel === 'finance_lead') return s === 'finance_lead_review';
+  return false;
+}
+
+function actorAlreadyReviewedExpense(trail, actorId = '') {
+  return Array.isArray(trail) && trail.some((entry) => (
+    String(entry?.by?._id || entry?.by || '') === String(actorId || '')
+    && ['approve', 'reject'].includes(String(entry?.action || '').trim().toLowerCase())
+  ));
+}
+
 function resolveTreasuryAccountTypeLabel(accountType = '') {
   return TREASURY_ACCOUNT_TYPE_LABELS[String(accountType || '').trim()] || String(accountType || 'سایر').trim();
 }
@@ -700,7 +978,13 @@ function parseCategorySubCategoryText(value = '') {
 }
 
 function sanitizeTab(value) {
+  if (LEGACY_REPORT_TABS.has(value)) return 'reports';
   return TAB_KEYS.has(value) ? value : DEFAULT_TAB;
+}
+
+function resolveInitialReportMode(rawTab, rawMode) {
+  if (LEGACY_REPORT_TABS.has(rawTab)) return rawTab;
+  return sanitizeReportMode(rawMode);
 }
 
 function sanitizeQuarter(value) {
@@ -711,6 +995,7 @@ function sanitizeQuarter(value) {
 
 function buildGovernmentFinanceSearchParams({
   tab,
+  reportMode,
   financialYearId,
   academicYearId,
   classId,
@@ -721,19 +1006,23 @@ function buildGovernmentFinanceSearchParams({
   const nextQuarter = sanitizeQuarter(quarter);
 
   if (nextTab !== DEFAULT_TAB) nextParams.set('tab', nextTab);
+  if (nextTab === 'reports' && sanitizeReportMode(reportMode) !== 'quarterly') {
+    nextParams.set('rmode', sanitizeReportMode(reportMode));
+  }
   if (financialYearId) nextParams.set('financialYearId', financialYearId);
   if (academicYearId) nextParams.set('academicYearId', academicYearId);
   if (classId) nextParams.set('classId', classId);
-  if (nextQuarter !== DEFAULT_QUARTER || nextTab === 'quarterly' || nextTab === 'archive') {
+  if (nextQuarter !== DEFAULT_QUARTER || nextTab === 'reports') {
     nextParams.set('quarter', String(nextQuarter));
   }
 
   return nextParams;
 }
 
-function resolveReportLabel(tabKey) {
-  if (tabKey === 'quarterly') return 'government_finance_quarterly';
-  if (tabKey === 'annual' || tabKey === 'archive') return 'government_finance_annual';
+function resolveReportLabel(mode) {
+  if (mode === 'monthly') return 'government_finance_monthly';
+  if (mode === 'quarterly') return 'government_finance_quarterly';
+  if (mode === 'annual' || mode === 'archive') return 'government_finance_annual';
   return 'finance_overview';
 }
 
@@ -1158,7 +1447,7 @@ function FinanceLoadingCard({ span = '4', lines = 3 }) {
 }
 
 function GovernmentFinanceLoadingPanels({ activeTab }) {
-  if (activeTab === 'quarterly' || activeTab === 'annual') {
+  if (activeTab === 'reports') {
     return (
       <section className="gov-content-grid gov-content-loading" aria-label="وضعیت بارگذاری مرکز مالی">
         <FinanceLoadingCard span="12" lines={2} />
@@ -1172,7 +1461,7 @@ function GovernmentFinanceLoadingPanels({ activeTab }) {
     );
   }
 
-  if (activeTab === 'year' || activeTab === 'archive') {
+  if (activeTab === 'year') {
     return (
       <section className="gov-content-grid gov-content-loading" aria-label="وضعیت بارگذاری مرکز مالی">
         <FinanceLoadingCard span="7" lines={5} />
@@ -1220,6 +1509,11 @@ export default function AdminGovernmentFinance() {
   const [selectedFinancialYearId, setSelectedFinancialYearId] = useState(() => readInitialSearchValue(searchParams, 'financialYearId'));
   const [selectedClassId, setSelectedClassId] = useState(() => readInitialSearchValue(searchParams, 'classId'));
   const [selectedQuarter, setSelectedQuarter] = useState(() => sanitizeQuarter(readInitialSearchValue(searchParams, 'quarter')));
+  const [selectedMonth, setSelectedMonth] = useState(() => sanitizeMonth(readInitialSearchValue(searchParams, 'month')));
+  const [reportMode, setReportMode] = useState(() => resolveInitialReportMode(
+    readInitialSearchValue(searchParams, 'tab'),
+    readInitialSearchValue(searchParams, 'rmode')
+  ));
   const [selectedTreasuryReportAccountId, setSelectedTreasuryReportAccountId] = useState('');
   const [message, setMessage] = useState('');
   const [messageTone, setMessageTone] = useState('info');
@@ -1436,6 +1730,25 @@ export default function AdminGovernmentFinance() {
       ? buildTablePreview(payload.expenseAnalytics.queue, 10)
       : buildTablePreview((payload.expenses || []).filter((item) => !['approved', 'void'].includes(String(item.status || '').trim())), 10)
   ), [payload.expenseAnalytics, payload.expenses]);
+  const currentAdminLevel = useMemo(() => {
+    try {
+      return String(window.localStorage.getItem('adminLevel') || window.localStorage.getItem('orgRole') || '').trim().toLowerCase();
+    } catch {
+      return '';
+    }
+  }, []);
+  const currentUserId = useMemo(() => {
+    try {
+      return String(window.localStorage.getItem('userId') || '');
+    } catch {
+      return '';
+    }
+  }, []);
+  const currentAdminLevelLabel = ({
+    finance_manager: 'مدیر مالی',
+    finance_lead: 'مدیر ارشد مالی',
+    general_president: 'ریاست عمومی'
+  })[currentAdminLevel] || 'بدون سطحِ تاییدِ مالی';
   const editingExpenseCategory = useMemo(() => (
     expenseCategoryRegistry.find((item) => String(item._id || item.id) === String(categoryDraft.id || '')) || null
   ), [categoryDraft.id, expenseCategoryRegistry]);
@@ -1522,6 +1835,7 @@ export default function AdminGovernmentFinance() {
   const showInitialLoadingSkeleton = isWorkspaceLoading
     && !payload.summary
     && !payload.financeOverview
+    && !payload.governmentMonthly
     && !payload.governmentQuarterly
     && !payload.governmentAnnual
     && !payload.financialYears.length
@@ -1539,25 +1853,24 @@ export default function AdminGovernmentFinance() {
       {
         key: 'report',
         label: 'نوع گزارش',
-        value: activeTab === 'quarterly'
-          ? 'گزارش ربعوار'
-          : activeTab === 'annual'
-            ? 'گزارش سالانه'
-            : activeTab === 'archive'
-              ? 'آرشیف رسمی'
-              : activeTab === 'operations'
-                ? 'عملیات مصارف'
-                : 'نمای کلی'
+        value: activeTab === 'reports'
+          ? (REPORT_MODES.find((item) => item.key === reportMode)?.label || 'ربع‌وار')
+          : activeTab === 'operations'
+            ? 'عملیات مصارف'
+            : 'نمای کلی'
       },
       { key: 'fy', label: 'سال مالی', value: selectedFinancialYear?.title || 'همه / بدون محدودیت' },
       { key: 'ay', label: 'سال تعلیمی', value: selectedAcademicYear?.title || '---' },
       { key: 'class', label: 'صنف', value: selectedClass?.title || 'همه صنف‌ها' }
     ];
 
-    if (activeTab === 'quarterly' || activeTab === 'archive') {
+    if (activeTab === 'reports' && (reportMode === 'quarterly' || reportMode === 'archive')) {
       chips.push({ key: 'quarter', label: 'ربع', value: activeQuarterLabel });
     }
-    if (activeTab === 'archive') {
+    if (activeTab === 'reports' && reportMode === 'monthly') {
+      chips.push({ key: 'month', label: 'ماه', value: `ماه ${selectedMonth}` });
+    }
+    if (activeTab === 'reports' && reportMode === 'archive') {
       chips.push({ key: 'snapshots', label: 'اسنپ‌شات‌ها', value: formatNumber((payload.snapshots || []).length) });
     }
 
@@ -1570,7 +1883,7 @@ export default function AdminGovernmentFinance() {
     }
 
     return chips;
-  }, [activeQuarterLabel, activeTab, activeTabLabel, payload.snapshots, selectedAcademicYear, selectedClass, selectedFinancialYear, selectedTreasuryReportAccount]);
+  }, [activeQuarterLabel, activeTab, reportMode, selectedMonth, activeTabLabel, payload.snapshots, selectedAcademicYear, selectedClass, selectedFinancialYear, selectedTreasuryReportAccount]);
   const currentSearchText = useMemo(() => readInitialSearchText(searchParams), [searchParams]);
   const workspaceScopeKey = useMemo(() => buildWorkspaceScopeKey({
     financialYearId: selectedFinancialYearId,
@@ -1619,12 +1932,13 @@ export default function AdminGovernmentFinance() {
   const refreshButtonLabel = useMemo(() => {
     if (activeTab === 'dashboard') return 'بازخوانی نمای کلی';
     if (activeTab === 'operations') return 'بازخوانی عملیات مصارف';
-    if (activeTab === 'quarterly') return 'بازخوانی گزارش ربعوار';
-    if (activeTab === 'annual') return 'بازخوانی گزارش سالانه';
     if (activeTab === 'year') return 'بازخوانی مدیریت سال مالی';
-    if (activeTab === 'archive') return 'بازخوانی آرشیف رسمی';
+    if (activeTab === 'reports') {
+      const label = REPORT_MODES.find((item) => item.key === reportMode)?.label || 'گزارش';
+      return `بازخوانی ${label}`;
+    }
     return 'بازخوانی داده';
-  }, [activeTab]);
+  }, [activeTab, reportMode]);
   const effectiveRefreshButtonLabel = activeTab === 'treasury'
     ? 'بازخوانی خزانه و صندوق'
     : refreshButtonLabel;
@@ -1657,6 +1971,7 @@ export default function AdminGovernmentFinance() {
       if (selectedAcademicYearId) reportFilters.academicYearId = selectedAcademicYearId;
       if (selectedClassId) reportFilters.classId = selectedClassId;
       if (selectedQuarter) reportFilters.quarter = selectedQuarter;
+      if (selectedMonth) reportFilters.monthNumber = selectedMonth;
       const requestScopeKey = buildWorkspaceScopeKey({
         financialYearId: selectedFinancialYearId,
         academicYearId: selectedAcademicYearId,
@@ -1746,7 +2061,17 @@ export default function AdminGovernmentFinance() {
         }
       ];
 
-      if (resolvedTargetTab === 'quarterly') {
+      const isReports = resolvedTargetTab === 'reports';
+
+      if (isReports && reportMode === 'monthly') {
+        loaders.push({
+          key: 'governmentMonthly',
+          run: () => postJson('/api/reports/run', { reportKey: 'government_finance_monthly', filters: reportFilters }),
+          assign: (data, nextPayload) => { nextPayload.governmentMonthly = data.report || null; }
+        });
+      }
+
+      if (isReports && reportMode === 'quarterly') {
         loaders.push({
           key: 'governmentQuarterly',
           run: () => postJson('/api/reports/run', { reportKey: 'government_finance_quarterly', filters: reportFilters }),
@@ -1754,7 +2079,7 @@ export default function AdminGovernmentFinance() {
         });
       }
 
-      if (resolvedTargetTab === 'annual') {
+      if (isReports && reportMode === 'annual') {
         loaders.push({
           key: 'governmentAnnual',
           run: () => postJson('/api/reports/run', { reportKey: 'government_finance_annual', filters: reportFilters }),
@@ -1770,7 +2095,7 @@ export default function AdminGovernmentFinance() {
         });
       }
 
-      if (resolvedTargetTab === 'operations' || resolvedTargetTab === 'archive') {
+      if (resolvedTargetTab === 'operations' || (isReports && reportMode === 'archive')) {
         loaders.push({
           key: 'procurementAnalytics',
           run: () => fetchJson(scopedProcurementUrl),
@@ -1784,7 +2109,7 @@ export default function AdminGovernmentFinance() {
         });
       }
 
-      if (resolvedTargetTab === 'archive') {
+      if (isReports && reportMode === 'archive') {
         loaders.push({
           key: 'snapshots',
           run: () => fetchJson(scopedSnapshotUrl),
@@ -1889,7 +2214,7 @@ export default function AdminGovernmentFinance() {
   };
 
   const warmGovernmentFinanceTab = (tabKey) => {
-    if (!['quarterly', 'annual', 'archive'].includes(tabKey)) return;
+    if (tabKey !== 'reports') return;
     if (tabKey === activeTab) return;
     if (busyAction === 'load') return;
 
@@ -1917,7 +2242,7 @@ export default function AdminGovernmentFinance() {
 
   useEffect(() => {
     loadWorkspace();
-  }, [activeTab, selectedAcademicYearId, selectedFinancialYearId, selectedClassId, selectedQuarter, selectedTreasuryReportAccountId]);
+  }, [activeTab, reportMode, selectedAcademicYearId, selectedFinancialYearId, selectedClassId, selectedQuarter, selectedMonth, selectedTreasuryReportAccountId]);
 
   useEffect(() => {
     if (!selectedFinancialYear?.academicYearId) return;
@@ -2031,13 +2356,16 @@ export default function AdminGovernmentFinance() {
   }, [governmentDocumentArchive]);
 
   useEffect(() => {
-    const nextTab = sanitizeTab(readInitialSearchValue(searchParams, 'tab'));
+    const rawTab = readInitialSearchValue(searchParams, 'tab');
+    const nextTab = sanitizeTab(rawTab);
+    const nextReportMode = resolveInitialReportMode(rawTab, readInitialSearchValue(searchParams, 'rmode'));
     const nextFinancialYearId = readInitialSearchValue(searchParams, 'financialYearId');
     const nextAcademicYearId = readInitialSearchValue(searchParams, 'academicYearId');
     const nextClassId = readInitialSearchValue(searchParams, 'classId');
     const nextQuarter = sanitizeQuarter(readInitialSearchValue(searchParams, 'quarter'));
 
     setActiveTab((current) => (current === nextTab ? current : nextTab));
+    setReportMode((current) => (current === nextReportMode ? current : nextReportMode));
     setSelectedFinancialYearId((current) => (current === nextFinancialYearId ? current : nextFinancialYearId));
     setSelectedAcademicYearId((current) => (current === nextAcademicYearId ? current : nextAcademicYearId));
     setSelectedClassId((current) => (current === nextClassId ? current : nextClassId));
@@ -2047,6 +2375,7 @@ export default function AdminGovernmentFinance() {
   useEffect(() => {
     const nextParams = buildGovernmentFinanceSearchParams({
       tab: activeTab,
+      reportMode,
       financialYearId: selectedFinancialYearId,
       academicYearId: selectedAcademicYearId,
       classId: selectedClassId,
@@ -2058,6 +2387,7 @@ export default function AdminGovernmentFinance() {
     }
   }, [
     activeTab,
+    reportMode,
     currentSearchText,
     selectedAcademicYearId,
     selectedClassId,
@@ -2859,6 +3189,49 @@ export default function AdminGovernmentFinance() {
     }
   };
 
+  const [chainStatus, setChainStatus] = useState(null);
+
+  const verifySnapshotChain = async () => {
+    const latest = (payload.snapshots || [])[0];
+    if (!latest) return;
+    try {
+      setBusyAction('snapshot-verify-chain');
+      const params = new URLSearchParams();
+      params.set('financialYearId', String(latest.financialYearId || selectedFinancialYearId || ''));
+      params.set('reportType', String(latest.reportType || ''));
+      if (latest.quarter) params.set('quarter', String(latest.quarter));
+      if (latest.month) params.set('month', String(latest.month));
+      if (latest.classId) params.set('classId', String(latest.classId));
+      const data = await fetchJson(`/api/finance/admin/government-snapshots/verify-chain?${params.toString()}`);
+      setChainStatus({
+        ok: !!data.ok,
+        verifiableCount: data.verifiableCount || 0,
+        legacyCount: data.legacyCount || 0
+      });
+    } catch (error) {
+      showMessage(errorMessage(error, 'بررسی زنجیرهٔ نسخه‌ها ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const downloadSnapshotCsv = async (snapshotId) => {
+    if (!snapshotId) return;
+    try {
+      setBusyAction(`snapshot-csv-${snapshotId}`);
+      const { blob, filename } = await fetchBlob(
+        `/api/finance/admin/government-snapshots/${snapshotId}/export.csv`,
+        {},
+        { method: 'GET' }
+      );
+      downloadBlob(blob, filename || `government-finance-${snapshotId}.csv`);
+    } catch (error) {
+      showMessage(errorMessage(error, 'دریافت CSV آرشیف رسمی ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
   const rejectSnapshot = async (snapshotId) => {
     if (!snapshotId) return;
     const reason = (typeof window !== 'undefined' && window.prompt)
@@ -2881,8 +3254,7 @@ export default function AdminGovernmentFinance() {
   };
 
   const resolveActiveReportKey = () => {
-    if (activeTab === 'quarterly') return 'government_finance_quarterly';
-    if (activeTab === 'annual' || activeTab === 'archive') return 'government_finance_annual';
+    if (activeTab === 'reports') return resolveReportLabel(reportMode);
     return 'finance_overview';
   };
 
@@ -2891,7 +3263,8 @@ export default function AdminGovernmentFinance() {
     if (selectedFinancialYearId) filters.financialYearId = selectedFinancialYearId;
     if (selectedAcademicYearId) filters.academicYearId = selectedAcademicYearId;
     if (selectedClassId) filters.classId = selectedClassId;
-    if (activeTab === 'quarterly') filters.quarter = selectedQuarter;
+    if (activeTab === 'reports' && reportMode === 'quarterly') filters.quarter = selectedQuarter;
+    if (activeTab === 'reports' && reportMode === 'monthly') filters.monthNumber = selectedMonth;
     return filters;
   };
 
@@ -3361,7 +3734,113 @@ export default function AdminGovernmentFinance() {
           </section>
             ) : null}
 
-            {activeTab === 'quarterly' ? (
+            {activeTab === 'reports' ? (
+              <div className="gov-reports-switch">
+                <div className="gov-seg" role="tablist" aria-label="نوع گزارش">
+                  {REPORT_MODES.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      role="tab"
+                      aria-pressed={reportMode === item.key}
+                      onClick={() => setReportMode(item.key)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {activeTab === 'reports' && reportMode === 'monthly' ? (
+              <section className="gov-content-grid">
+                <article className="gov-card" data-span="12">
+                  <div className="gov-card-head spread">
+                    <div>
+                      <strong>فیلتر ماه</strong>
+                      <span>ماهِ سالِ مالی را انتخاب کنید. برای سالِ مالیِ منطبق با اول حمل، مرزها با تقویمِ شمسی هم‌تراز است.</span>
+                    </div>
+                    <div className="gov-quarter-switch">
+                      {MONTH_OPTIONS.map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          className={selectedMonth === item.key ? 'active' : ''}
+                          onClick={() => setSelectedMonth(item.key)}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </article>
+
+                <article className="gov-card" data-span="4">
+                  <div className="gov-kpi-card spotlight">
+                    <span>عواید ماه {selectedMonth}</span>
+                    <strong>{formatMoney(payload.governmentMonthly?.summary?.totalIncome || 0)}</strong>
+                    <small>{formatNumber(payload.governmentMonthly?.summary?.paymentCount || 0)} پرداخت</small>
+                  </div>
+                </article>
+                <article className="gov-card" data-span="4">
+                  <div className="gov-kpi-card spotlight" data-tone="mint">
+                    <span>مصارف ماه</span>
+                    <strong>{formatMoney(payload.governmentMonthly?.summary?.totalExpense || 0)}</strong>
+                    <small>{formatNumber(payload.governmentMonthly?.summary?.expenseCount || 0)} ردیف مصرف</small>
+                  </div>
+                </article>
+                <article className="gov-card" data-span="4">
+                  <div className="gov-kpi-card spotlight" data-tone="slate">
+                    <span>مانده ماه</span>
+                    <strong>{formatMoney(payload.governmentMonthly?.summary?.balance || 0)}</strong>
+                    <small>{formatNumber(payload.governmentMonthly?.summary?.classCount || 0)} ردیف صنفی</small>
+                  </div>
+                </article>
+
+                <article className="gov-card" data-span="12">
+                  <div className="gov-card-head">
+                    <div>
+                      <strong>جدول گزارش ماهانه</strong>
+                      <span>تفکیک صنفیِ عواید و مصارفِ همان ماه از موتور گزارش رسمی.</span>
+                    </div>
+                  </div>
+                  {!payload.governmentMonthly?.rows?.length ? (
+                    <div className="gov-empty-state">برای این ماه و فیلترها ردیفی پیدا نشد.</div>
+                  ) : (
+                    <div className="gov-table-wrap">
+                      <table className="gov-table">
+                        <thead>
+                          <tr>
+                            <th>صنف</th>
+                            <th>عواید</th>
+                            <th>مصارف</th>
+                            <th>بیلانس</th>
+                            <th>پرداخت‌ها</th>
+                            <th>ردیف‌های مصرف</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {payload.governmentMonthly.rows.map((row) => (
+                            <tr key={`${row.classTitle}-${row.totalIncome}-${row.totalExpense}`}>
+                              <td>{row.classTitle || '---'}</td>
+                              <td>{formatMoney(row.totalIncome)}</td>
+                              <td>{formatMoney(row.totalExpense)}</td>
+                              <td>{formatMoney(row.balance)}</td>
+                              <td>{formatNumber(row.paymentCount)}</td>
+                              <td>{formatNumber(row.expenseCount)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </article>
+
+                <GovernmentBasisNote report={payload.governmentMonthly} />
+              </section>
+            ) : null}
+
+            {activeTab === 'reports' && reportMode === 'quarterly' ? (
               <section className="gov-content-grid">
             <article className="gov-card" data-span="12">
               <div className="gov-card-head spread">
@@ -3568,10 +4047,12 @@ export default function AdminGovernmentFinance() {
                 </div>
               )}
             </article>
+
+            <GovernmentBasisNote report={payload.governmentQuarterly} />
               </section>
             ) : null}
 
-            {activeTab === 'annual' ? (
+            {activeTab === 'reports' && reportMode === 'annual' ? (
               <section className="gov-content-grid">
             <article className="gov-card" data-span="8">
               <QuarterCompare items={quarterSummaries} selectedQuarter={selectedQuarter} />
@@ -3622,18 +4103,15 @@ export default function AdminGovernmentFinance() {
                 </div>
               )}
             </article>
+
+            <GovernmentBasisNote report={payload.governmentAnnual} />
               </section>
             ) : null}
 
             {activeTab === 'year' ? (
               <section className="gov-content-grid">
-            <article className="gov-card" data-span="7">
-              <div className="gov-card-head">
-                <div>
-                  <strong>وضعیت سال مالی</strong>
-                  <span>تا تکمیل خدمات فاز ۱، سال تعلیمی فعال به عنوان مبنای نمایشی استفاده می‌شود.</span>
-                </div>
-              </div>
+            <PanelBulkControls tabKey="year" />
+            <CollapsiblePanel tabKey="year" panelKey="fy-status" title="وضعیت سال مالی" defaultOpen span="5">
               <div className="gov-help-note">
                 <div className="gov-help-note-copy">
                   <strong>سال تعلیمی را از کجا تعریف کنم؟</strong>
@@ -3677,15 +4155,9 @@ export default function AdminGovernmentFinance() {
                   </article>
                 ))}
               </div>
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="12">
-              <div className="gov-card-head">
-                <div>
-                  <strong>دفتر سال‌های مالی</strong>
-                  <span>مدیریت واقعی سال‌های مالی فعال، بسته و آرشیفی</span>
-                </div>
-              </div>
+            <CollapsiblePanel tabKey="year" panelKey="fy-register" title="دفتر سال‌های مالی" defaultOpen span="7">
               {!payload.financialYears.length ? (
                 <div className="gov-empty-state">هنوز هیچ سال مالی ثبت نشده است.</div>
               ) : (
@@ -3746,15 +4218,9 @@ export default function AdminGovernmentFinance() {
                   ))}
                 </div>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="7" data-budget-summary-card="true">
-              <div className="gov-card-head">
-                <div>
-                  <strong>بودجه در برابر عملکرد واقعی</strong>
-                  <span>اهداف سالانه، عملکرد زنده مصارف و درآمد، و وضعیت ذخیره خزانه برای سال مالی انتخاب شده.</span>
-                </div>
-              </div>
+            <CollapsiblePanel tabKey="year" panelKey="budget-vs-actual" title="بودجه در برابر عملکرد واقعی" span="7" cardAttr="data-budget-summary-card">
               <div className="gov-governance-grid">
                 <div className="gov-governance-stat" data-tone={(budgetVsActual.summary?.expenseVariance || 0) > 0 && (budgetVsActual.summary?.annualExpenseBudget || 0) > 0 ? 'rose' : 'teal'}>
                   <span>بودجه مصارف</span>
@@ -3792,15 +4258,9 @@ export default function AdminGovernmentFinance() {
                   })}
                 </ul>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="5" data-budget-config-card="true">
-              <div className="gov-card-head">
-                <div>
-                  <strong>کنترل‌های بودجه</strong>
-                  <span>اهداف بودجه برای سال مالی انتخاب شده را ذخیره کنید.</span>
-                </div>
-              </div>
+            <CollapsiblePanel tabKey="year" panelKey="budget-config" title="کنترل‌های بودجه" hint="ذخیرهٔ اهدافِ بودجه" span="5">
               <div className="gov-form-grid">
                 <label className="gov-field">
                   <span>هدف سالانه درآمد</span>
@@ -3838,15 +4298,9 @@ export default function AdminGovernmentFinance() {
                   {String(busyAction || '').startsWith('save-budget-') ? 'در حال ذخیره بودجه...' : 'ذخیره اهداف بودجه'}
                 </button>
               </div>
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="12" data-budget-approval-card="true">
-              <div className="gov-card-head">
-                <div>
-                  <strong>گردش کار تایید بودجه</strong>
-                  <span>ارسال برای بررسی، تایید مرحله‌ای، و ثبت ردپای رسمی بودجه سال مالی.</span>
-                </div>
-              </div>
+            <CollapsiblePanel tabKey="year" panelKey="budget-approval" title="گردش کار تایید بودجه" defaultOpen span="12" cardAttr="data-budget-approval-card">
               <div className="gov-governance-grid">
                 <div className="gov-governance-stat" data-tone={selectedBudgetApproved ? 'mint' : selectedBudgetStage === 'rejected' ? 'rose' : selectedBudgetInReview ? 'copper' : 'slate'}>
                   <span>مرحله فعلی</span>
@@ -3983,9 +4437,9 @@ export default function AdminGovernmentFinance() {
                   </table>
                 </div>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="12" data-budget-category-table="true">
+            <CollapsiblePanel tabKey="year" panelKey="budget-categories" title="بودجه بر اساس دسته‌بندی مصرف" span="12">
               <div className="gov-card-head">
                 <button
                   type="button"
@@ -4096,15 +4550,9 @@ export default function AdminGovernmentFinance() {
                   {String(busyAction || '').startsWith('budget-review-request-') ? 'در حال ارسال...' : 'ارسال بودجه برای بررسی'}
                 </button>
               </div>
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="12">
-              <div className="gov-card-head">
-                <div>
-                  <strong>ایجاد سال مالی جدید</strong>
-                  <span>ثبت سال مالی تازه برای همان سال تعلیمی انتخاب‌شده</span>
-                </div>
-              </div>
+            <CollapsiblePanel tabKey="year" panelKey="fy-create" title="ایجاد سال مالی جدید" span="6">
               <div className="gov-form-grid">
                 <label className="gov-field">
                   <span>عنوان</span>
@@ -4146,12 +4594,12 @@ export default function AdminGovernmentFinance() {
                   {busyAction === 'save-year' ? 'در حال ذخیره...' : 'ذخیره سال مالی'}
                 </button>
               </div>
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="7">
+            <CollapsiblePanel tabKey="year" panelKey="close-guard" title="گارد بستن سال" defaultOpen span="6">
               <div className="gov-card-head">
                 <div>
-                  <strong>گارد بستن سال</strong>
+                  <strong>موانعِ بستنِ سال</strong>
                   <span>موانعی که باید پیش از بستن سال مالی رفع شوند</span>
                 </div>
                 <button
@@ -4200,13 +4648,14 @@ export default function AdminGovernmentFinance() {
                   ))}
                 </ul>
               )}
-            </article>
+            </CollapsiblePanel>
 
               </section>
             ) : null}
 
             {activeTab === 'operations' ? (
               <section className="gov-content-grid">
+            <PanelBulkControls tabKey="operations" />
             <article className="gov-card" data-span="12">
               <div className="gov-card-head">
                 <div>
@@ -4260,13 +4709,14 @@ export default function AdminGovernmentFinance() {
               />
             </article>
 
-            <article className="gov-card" data-span="7" data-procurement-registry-card="true">
-              <div className="gov-card-head">
-                <div>
-                  <strong>تعهدات فروشنده</strong>
-                  <span>تعهدات خرید و فروشندگان با مبلغ تعهدشده، مبلغ پوشش‌شده و مانده تعهد.</span>
-                </div>
-              </div>
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="procurement-registry"
+              title="تعهدات فروشنده"
+              hint={`${formatNumber(procurementItems.length)} تعهد`}
+              span="7"
+              cardAttr="data-procurement-registry-card"
+            >
               <div className="gov-governance-grid">
                 <div className="gov-governance-stat" data-tone="teal">
                   <span>کل متعهد شده</span>
@@ -4367,15 +4817,16 @@ export default function AdminGovernmentFinance() {
                   </table>
                 </div>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="5" data-procurement-settlement-card="true">
-              <div className="gov-card-head">
-                <div>
-                  <strong>تصفیه فروشنده</strong>
-                  <span>تسویه مبتنی بر حساب خزانه را برای تعهدات تاییدشده و آماده پرداخت ثبت کنید.</span>
-                </div>
-              </div>
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="procurement-settlement"
+              title="تصفیه فروشنده"
+              hint="تسویه از حساب خزانه"
+              span="5"
+              cardAttr="data-procurement-settlement-card"
+            >
               {!settlementReadyProcurementOptions.length ? (
                 <div className="gov-empty-state">هیچ تعهد تدارکاتی تایید شده‌ای در حال حاضر برای تصفیه آماده نیست.</div>
               ) : (
@@ -4479,15 +4930,15 @@ export default function AdminGovernmentFinance() {
                   </div>
                 </>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="5" data-procurement-form-card="true">
-              <div className="gov-card-head">
-                <div>
-                  <strong>ثبت تعهد</strong>
-                  <span>تعهد خرید، فروشنده، مبلغ، و تاریخ مورد انتظار را ثبت کنید.</span>
-                </div>
-              </div>
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="procurement-form"
+              title="ثبت تعهد خرید"
+              hint="تعهد، فروشنده، مبلغ، تاریخ"
+              span="12"
+            >
               <div className="gov-form-grid">
                 <label className="gov-field">
                   <span>عنوان</span>
@@ -4591,15 +5042,15 @@ export default function AdminGovernmentFinance() {
                   {busyAction === 'save-procurement' ? 'در حال ذخیره...' : 'ثبت تعهد خرید'}
                 </button>
               </div>
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="7">
-              <div className="gov-card-head">
-                <div>
-                  <strong>رجیستری رسمی دسته‌های مصرف</strong>
-                  <span>دسته‌ها و زیردسته‌های معتبر برای ثبت و تحلیل مصارف</span>
-                </div>
-              </div>
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="category-registry"
+              title="رجیستری رسمی دسته‌های مصرف"
+              hint={`${formatNumber(expenseCategoryRegistry.length)} دسته`}
+              span="7"
+            >
               {!expenseCategoryRegistry.length ? (
                 <div className="gov-empty-state">هنوز هیچ دسته مصرف رسمی ثبت نشده است.</div>
               ) : (
@@ -4638,15 +5089,15 @@ export default function AdminGovernmentFinance() {
                   ))}
                 </div>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="5">
-              <div className="gov-card-head">
-                <div>
-                  <strong>{categoryDraft.id ? 'ویرایش دسته رسمی' : 'ایجاد دسته رسمی'}</strong>
-                  <span>این تغییرات فوراً روی اعتبارسنجی و تحلیل مصارف اثر می‌گذارند.</span>
-                </div>
-              </div>
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="category-form"
+              title={categoryDraft.id ? 'ویرایش دسته رسمی' : 'ایجاد دسته رسمی'}
+              hint="اثرِ فوری روی اعتبارسنجی و تحلیل"
+              span="5"
+            >
               <div className="gov-form-grid">
                 <label className="gov-field">
                   <span>عنوان</span>
@@ -4704,14 +5155,21 @@ export default function AdminGovernmentFinance() {
                   پاک‌کردن فرم
                 </button>
               </div>
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="12">
-              <div className="gov-card-head">
-                <div>
-                  <strong>صف بررسی مصارف</strong>
-                  <span>پیش‌نویس‌ها، موارد ردشده، و ثبت‌های در انتظار بررسی</span>
-                </div>
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="review-queue"
+              title="صف تایید مصارف"
+              hint={`${formatNumber(expenseQueueRows.length)} مورد`}
+              defaultOpen
+              span="12"
+            >
+              <div className="gov-approval-rule">
+                تاییدِ نهاییِ یک مصرف فقط توسط <strong>ریاست عمومی</strong> انجام می‌شود. مدیر مالی و مدیر ارشد مالی
+                فقط مصرف را به مرحلهٔ بعد می‌برند. هیچ کاربری نمی‌تواند دو بار در زنجیرهٔ یک مصرف تایید یا رد کند.
+                <br />
+                سطحِ حسابِ شما: <strong>{currentAdminLevelLabel}</strong>.
               </div>
               {!expenseQueueRows.length ? (
                 <div className="gov-empty-state">در محدوده فعلی هیچ ردیف مصرفی در انتظار اقدام نیست.</div>
@@ -4725,11 +5183,20 @@ export default function AdminGovernmentFinance() {
                         <th>مبلغ</th>
                         <th>وضعیت</th>
                         <th>مرحله</th>
+                        <th>منتظرِ چه کسی</th>
                         <th>اقدام</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {expenseQueueRows.map((row) => (
+                      {expenseQueueRows.map((row) => {
+                        const isPending = row.status === 'pending_review';
+                        const alreadyReviewed = actorAlreadyReviewedExpense(row.approvalTrail, currentUserId);
+                        const canApprove = isPending && !alreadyReviewed && canApproveExpenseStage(currentAdminLevel, row.approvalStage);
+                        const canReject = isPending && !alreadyReviewed && canRejectExpenseStage(currentAdminLevel, row.approvalStage);
+                        const blockedReason = alreadyReviewed
+                          ? 'شما قبلاً روی این مصرف اقدام کرده‌اید.'
+                          : `این مرحله منتظرِ ${expenseStageWaitLabel(row.approvalStage)} است؛ سطحِ حسابِ شما مجاز نیست.`;
+                        return (
                         <tr key={`queue-${row._id}`}>
                           <td>
                             <div className="gov-table-stack">
@@ -4741,6 +5208,13 @@ export default function AdminGovernmentFinance() {
                           <td>{formatMoney(row.amount)}</td>
                           <td><ExpenseStatusBadge status={row.status} /></td>
                           <td><ExpenseStageBadge stage={row.approvalStage} /></td>
+                          <td>
+                            {isPending
+                              ? expenseStageWaitLabel(row.approvalStage)
+                              : row.status === 'rejected'
+                                ? 'ردشده — نیازِ اصلاح'
+                                : 'هنوز ارسال نشده'}
+                          </td>
                           <td>
                             <div className="gov-action-stack">
                               {(row.status === 'draft' || row.status === 'rejected') ? (
@@ -4754,22 +5228,24 @@ export default function AdminGovernmentFinance() {
                                   ارسال برای بررسی
                                 </button>
                               ) : null}
-                              {row.status === 'pending_review' ? (
+                              {isPending ? (
                                 <>
                                   <button
                                     type="button"
                                     className="gov-inline-action"
                                     data-expense-review-approve={row._id}
-                                    disabled={!!busyAction}
+                                    disabled={!!busyAction || !canApprove}
+                                    title={canApprove ? undefined : blockedReason}
                                     onClick={() => reviewExpense(row._id, 'approve')}
                                   >
-                                    تایید مرحله
+                                    {row.approvalStage === 'general_president_review' ? 'تاییدِ نهایی' : 'تایید مرحله'}
                                   </button>
                                   <button
                                     type="button"
                                     className="gov-inline-action"
                                     data-expense-review-reject={row._id}
-                                    disabled={!!busyAction}
+                                    disabled={!!busyAction || !canReject}
+                                    title={canReject ? undefined : blockedReason}
                                     onClick={() => reviewExpense(row._id, 'reject')}
                                   >
                                     رد
@@ -4790,20 +5266,22 @@ export default function AdminGovernmentFinance() {
                             </div>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="12">
-              <div className="gov-card-head">
-                <div>
-                  <strong>دفتر ثبت مصارف</strong>
-                  <span>ثبت ردیف تازه و مرور آخرین ردیف‌های محدوده فعلی</span>
-                </div>
-              </div>
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="expense-ledger"
+              title="دفتر ثبت مصارف"
+              hint="ثبت ردیف تازه + مرور اخیر"
+              defaultOpen
+              span="12"
+            >
               <div className="gov-form-grid">
                 <label className="gov-field">
                   <span>دسته</span>
@@ -4930,19 +5408,14 @@ export default function AdminGovernmentFinance() {
                   </table>
                 </div>
               )}
-            </article>
+            </CollapsiblePanel>
               </section>
             ) : null}
 
             {activeTab === 'treasury' ? (
               <section className="gov-content-grid">
-                <article className="gov-card" data-span="12">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>فرماندهی خزانه و صندوق</strong>
-                      <span>مانده دفتری، حرکات دستی، انتقال بین حساب‌ها و تطبیق رسمی روی هسته مالی موجود.</span>
-                    </div>
-                  </div>
+                <PanelBulkControls tabKey="treasury" />
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-1" title="فرماندهی خزانه و صندوق" defaultOpen span="12">
                   <div className="gov-help-note compact">
                     <div className="gov-help-note-copy">
                       <strong>نمای هوشمند خزانه</strong>
@@ -5022,15 +5495,9 @@ export default function AdminGovernmentFinance() {
                       ))}
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="12">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>گزارش پرداخت‌های پیشرو تعهدات</strong>
-                      <span>تعهدات تاییدشده‌ای که باید از خزانه پرداخت یا تسویه شوند.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-2" title="گزارش پرداخت‌های پیشرو تعهدات" span="12">
                   {!approvedProcurementOptions.length && !settlementReadyProcurementOptions.length ? (
                     <div className="gov-empty-state compact">فعلاً تعهد تاییدشده یا پرداخت پیشرو برای خزانه وجود ندارد.</div>
                   ) : (
@@ -5066,15 +5533,9 @@ export default function AdminGovernmentFinance() {
                       </table>
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="12" data-auto-student-payment-treasury="true">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>حساب‌های خودکار پرداخت شاگردان</strong>
-                      <span>پرداخت‌های تاییدشده شاگردان به‌صورت خودکار وارد این حساب‌های خزانه می‌شوند.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-3" title="حساب‌های خودکار پرداخت شاگردان" span="12">
                   {!automaticStudentPaymentTreasuryAccounts.length ? (
                     <div className="gov-empty-state compact">
                       هنوز حساب خودکار پرداخت شاگردان ساخته نشده است. بعد از تایید پرداخت شاگرد یا بازخوانی تب خزانه، سیستم برای روش پرداخت مربوطه حساب خودکار می‌سازد.
@@ -5090,15 +5551,9 @@ export default function AdminGovernmentFinance() {
                       ))}
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="7">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>رجیستر حساب‌های خزانه</strong>
-                      <span>حساب‌های نقدی و بانکی فعال سال مالی با مانده دفتری و آخرین تطبیق.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-4" title="رجیستر حساب‌های خزانه" defaultOpen span="7">
                   {!treasuryAccounts.length ? (
                     <div className="gov-empty-state">هنوز هیچ حساب خزانه‌ای ثبت نشده است.</div>
                   ) : (
@@ -5144,15 +5599,9 @@ export default function AdminGovernmentFinance() {
                       ))}
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="5">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>{treasuryAccountDraft.id ? 'ویرایش حساب خزانه' : 'ایجاد حساب خزانه'}</strong>
-                      <span>ثبت صندوق نقدی، حساب بانکی یا حساب واسط در همان سال مالی.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-5" title="حساب خزانه" span="5">
                   <div className="gov-form-grid">
                     <label className="gov-field">
                       <span>عنوان</span>
@@ -5215,15 +5664,9 @@ export default function AdminGovernmentFinance() {
                       پاک‌کردن فرم
                     </button>
                   </div>
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="6">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>حرکت دستی خزانه</strong>
-                      <span>واریز، برداشت و اصلاح‌های دستی خارج از چرخه فیس.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-6" title="حرکت دستی خزانه" span="6">
                   <div className="gov-form-grid">
                     <label className="gov-field">
                       <span>حساب</span>
@@ -5271,15 +5714,9 @@ export default function AdminGovernmentFinance() {
                       {busyAction === 'create-treasury-transaction' ? 'در حال ثبت...' : 'ثبت حرکت'}
                     </button>
                   </div>
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="6">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>انتقال و تطبیق</strong>
-                      <span>جابجایی بین حساب‌ها و بستن فاصله بین مانده دفتری و صورتحساب.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-7" title="انتقال و تطبیق" span="6">
                   <div className="gov-form-grid">
                     <label className="gov-field">
                       <span>حساب مبدا</span>
@@ -5367,15 +5804,9 @@ export default function AdminGovernmentFinance() {
                       {String(busyAction).startsWith('reconcile-treasury-') ? 'در حال تطبیق...' : 'ثبت تطبیق'}
                     </button>
                   </div>
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="12">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>آخرین حرکات خزانه</strong>
-                      <span>خلاصه آخرین حرکت‌ها، انتقال‌ها و اصلاح‌های تطبیق.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-8" title="آخرین حرکات خزانه" defaultOpen span="12">
                   {!treasuryRecentTransactions.length ? (
                     <div className="gov-empty-state">هنوز حرکت خزانه‌ای ثبت نشده است.</div>
                   ) : (
@@ -5411,15 +5842,9 @@ export default function AdminGovernmentFinance() {
                       </table>
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="12" data-treasury-report-card="summary">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>گزارش‌های بستن خزانه</strong>
-                      <span>دفتر نقدی، خلاصه گردش، نمای تطبیق و پیگیری مغایرت برای حساب خزانه انتخاب‌شده.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-9" title="گزارش‌های بستن خزانه" span="12">
                   <div className="gov-form-grid">
                     <label className="gov-field">
                       <span>حساب گزارش</span>
@@ -5458,15 +5883,9 @@ export default function AdminGovernmentFinance() {
                       <small>{formatNumber(treasuryVarianceReport.summary?.totalIssues || 0)} مشکل</small>
                     </div>
                   </div>
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="7" data-treasury-cashbook-card="true">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>دفتر نقدی</strong>
-                      <span>موجودی جاری برای حساب خزانه انتخاب‌شده، شامل گردش‌های دستی خزانه و هزینه‌های تأییدشده.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-10" title="دفتر نقدی" span="7" cardAttr="data-treasury-cashbook-card">
                   {!treasuryCashbook.rows?.length ? (
                     <div className="gov-empty-state">هیچ ردیفی در دفتر نقدی برای حساب خزانه انتخاب‌شده یافت نشد.</div>
                   ) : (
@@ -5499,15 +5918,9 @@ export default function AdminGovernmentFinance() {
                       </table>
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="5" data-treasury-reconciliation-card="true">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>وضعیت تطبیق</strong>
-                      <span>مقایسه حساب به حساب بین مانده دفتری و آخرین مانده صورت‌حساب.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-11" title="وضعیت تطبیق" span="5" cardAttr="data-treasury-reconciliation-card">
                   <div className="gov-governance-grid">
                     <div className="gov-governance-stat" data-tone="teal">
                       <span>منطبق</span>
@@ -5562,15 +5975,9 @@ export default function AdminGovernmentFinance() {
                       </table>
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="7" data-treasury-movement-card="true">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>خلاصه گردش</strong>
-                      <span>افتتاحیه، گردش خزانه، هزینه‌ها و مانده پایانی به تفکیک حساب برای دوره انتخاب‌شده.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-12" title="خلاصه گردش" span="7">
                   {!treasuryMovementSummary.rows?.length ? (
                     <div className="gov-empty-state">هیچ خلاصه گردش خزانه‌ای برای فیلترهای انتخاب‌شده موجود نیست.</div>
                   ) : (
@@ -5604,15 +6011,9 @@ export default function AdminGovernmentFinance() {
                       </table>
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="5" data-treasury-variance-card="true">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>پیگیری مغایرت</strong>
-                      <span>حساب‌ها یا هزینه‌های تأییدشده که هنوز قبل از بسته شدن نیاز به پیگیری خزانه دارند.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-13" title="پیگیری مغایرت" span="5" cardAttr="data-treasury-variance-card">
                   {!treasuryVarianceReport.rows?.length ? (
                     <div className="gov-empty-state">برای فیلترهای انتخاب‌شده هیچ مغایرت خزانه شناسایی نشد.</div>
                   ) : (
@@ -5648,23 +6049,26 @@ export default function AdminGovernmentFinance() {
                       </table>
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
               </section>
             ) : null}
 
-            {activeTab === 'archive' ? (
+            {activeTab === 'reports' && reportMode === 'archive' ? (
               <section className="gov-content-grid">
-            <article className="gov-card" data-span="5">
-              <TimelineList items={(payload.closedMonths || []).slice(0, 12)} />
-            </article>
+            <PanelBulkControls tabKey="archive" />
 
-            <article className="gov-card" data-span="7">
-              <div className="gov-card-head">
-                <div>
-                  <strong>بسته خروجی رسمی</strong>
-                  <span>ابتدا پیش‌نویس ساخته می‌شود؛ ثبت رسمی به تایید مقام دوم (مدیر ارشد مالی یا ریاست عمومی) نیاز دارد.</span>
-                </div>
-              </div>
+            <CollapsiblePanel tabKey="archive" panelKey="closed-months" title="ماه‌های بسته" span="5">
+              <TimelineList items={(payload.closedMonths || []).slice(0, 12)} />
+            </CollapsiblePanel>
+
+            <CollapsiblePanel
+              tabKey="archive"
+              panelKey="official-package"
+              title="بستهٔ خروجی رسمی"
+              hint="پیش‌نویس ← ثبت رسمیِ مقام دوم"
+              defaultOpen
+              span="7"
+            >
               <div className="gov-card-actions">
                 <button
                   type="button"
@@ -5825,6 +6229,15 @@ export default function AdminGovernmentFinance() {
                                 >
                                   {busyAction === `snapshot-pdf-${item._id}` ? '...' : 'پی‌دی‌اف'}
                                 </button>
+                                <button
+                                  type="button"
+                                  className="gov-inline-action"
+                                  data-snapshot-csv={item._id}
+                                  onClick={() => downloadSnapshotCsv(item._id)}
+                                  disabled={!!busyAction}
+                                >
+                                  {busyAction === `snapshot-csv-${item._id}` ? '...' : 'CSV'}
+                                </button>
                               </div>
                             </td>
                           </tr>
@@ -5857,15 +6270,23 @@ export default function AdminGovernmentFinance() {
                   ) : null}
                 </div>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="7" data-government-archive-card="true">
-              <div className="gov-card-head">
-                <div>
-                  <strong>راجستر آرشیف دولتی</strong>
-                  <span>بسته‌های آرشیفی گزارش با وضعیت اعتبارسنجی و ارسال.</span>
-                </div>
-              </div>
+            <SnapshotChainPanel
+              snapshots={payload.snapshots || []}
+              chainStatus={chainStatus}
+              onVerify={verifySnapshotChain}
+              busy={busyAction === 'snapshot-verify-chain'}
+            />
+
+            <CollapsiblePanel
+              tabKey="archive"
+              panelKey="archive-register"
+              title="راجستر آرشیف دولتی"
+              hint="بسته‌های آرشیفی + اعتبارسنجی"
+              span="7"
+              cardAttr="data-government-archive-card"
+            >
               {!governmentDocumentArchive.length ? (
                 <div className="gov-empty-state">هنوز هیچ سند آرشیفی دولتی برای نسخه گزارش ساخته نشده است.</div>
               ) : (
@@ -5909,15 +6330,16 @@ export default function AdminGovernmentFinance() {
                   </table>
                 </div>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="5" data-government-archive-delivery-card="true">
-              <div className="gov-card-head">
-                <div>
-                  <strong>ارسال آرشیف</strong>
-                  <span>بسته آرشیفی گزارش مالی دولت را از مرکز ارسال مالی بفرستید.</span>
-                </div>
-              </div>
+            <CollapsiblePanel
+              tabKey="archive"
+              panelKey="archive-delivery"
+              title="ارسال آرشیف"
+              hint="ارسال از مرکز ارسال مالی"
+              span="5"
+              cardAttr="data-government-archive-delivery-card"
+            >
               {!selectedGovernmentArchive ? (
                 <div className="gov-empty-state">برای آغاز ارسال، ابتدا پی‌دی‌اف نسخه گزارش دولتی را بسازید یا خروجی بگیرید.</div>
               ) : (
@@ -6017,7 +6439,7 @@ export default function AdminGovernmentFinance() {
                   </div>
                 </>
               )}
-            </article>
+            </CollapsiblePanel>
 
               </section>
             ) : null}
