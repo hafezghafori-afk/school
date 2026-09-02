@@ -1694,6 +1694,12 @@
   color: #0b524c;
 }
 
+.gov-reports-switch {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
 /* segmented control (for the consolidated reports tab) */
 .gov-seg {
   display: inline-flex;

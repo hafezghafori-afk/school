@@ -33,11 +33,23 @@ const TABS = [
   { key: 'year', label: 'سال مالی' },
   { key: 'operations', label: 'مصارف' },
   { key: 'treasury', label: 'خزانه' },
+  { key: 'reports', label: 'گزارش‌ها' }
+];
+
+// The reports tab folds the old monthly / quarterly / annual / archive tabs
+// behind one segmented control.
+const REPORT_MODES = [
   { key: 'monthly', label: 'ماهانه' },
   { key: 'quarterly', label: 'ربع‌وار' },
   { key: 'annual', label: 'سالانه' },
-  { key: 'archive', label: 'آرشیف' }
+  { key: 'archive', label: 'آرشیف رسمی' }
 ];
+const LEGACY_REPORT_TABS = new Set(['monthly', 'quarterly', 'annual', 'archive']);
+const REPORT_MODE_KEYS = new Set(REPORT_MODES.map((item) => item.key));
+
+function sanitizeReportMode(value) {
+  return REPORT_MODE_KEYS.has(value) ? value : 'quarterly';
+}
 
 const QUARTER_OPTIONS = [
   { key: 1, label: 'ربع ۱' },
@@ -925,7 +937,13 @@ function parseCategorySubCategoryText(value = '') {
 }
 
 function sanitizeTab(value) {
+  if (LEGACY_REPORT_TABS.has(value)) return 'reports';
   return TAB_KEYS.has(value) ? value : DEFAULT_TAB;
+}
+
+function resolveInitialReportMode(rawTab, rawMode) {
+  if (LEGACY_REPORT_TABS.has(rawTab)) return rawTab;
+  return sanitizeReportMode(rawMode);
 }
 
 function sanitizeQuarter(value) {
@@ -936,6 +954,7 @@ function sanitizeQuarter(value) {
 
 function buildGovernmentFinanceSearchParams({
   tab,
+  reportMode,
   financialYearId,
   academicYearId,
   classId,
@@ -946,20 +965,23 @@ function buildGovernmentFinanceSearchParams({
   const nextQuarter = sanitizeQuarter(quarter);
 
   if (nextTab !== DEFAULT_TAB) nextParams.set('tab', nextTab);
+  if (nextTab === 'reports' && sanitizeReportMode(reportMode) !== 'quarterly') {
+    nextParams.set('rmode', sanitizeReportMode(reportMode));
+  }
   if (financialYearId) nextParams.set('financialYearId', financialYearId);
   if (academicYearId) nextParams.set('academicYearId', academicYearId);
   if (classId) nextParams.set('classId', classId);
-  if (nextQuarter !== DEFAULT_QUARTER || nextTab === 'quarterly' || nextTab === 'archive') {
+  if (nextQuarter !== DEFAULT_QUARTER || nextTab === 'reports') {
     nextParams.set('quarter', String(nextQuarter));
   }
 
   return nextParams;
 }
 
-function resolveReportLabel(tabKey) {
-  if (tabKey === 'monthly') return 'government_finance_monthly';
-  if (tabKey === 'quarterly') return 'government_finance_quarterly';
-  if (tabKey === 'annual' || tabKey === 'archive') return 'government_finance_annual';
+function resolveReportLabel(mode) {
+  if (mode === 'monthly') return 'government_finance_monthly';
+  if (mode === 'quarterly') return 'government_finance_quarterly';
+  if (mode === 'annual' || mode === 'archive') return 'government_finance_annual';
   return 'finance_overview';
 }
 
@@ -1384,7 +1406,7 @@ function FinanceLoadingCard({ span = '4', lines = 3 }) {
 }
 
 function GovernmentFinanceLoadingPanels({ activeTab }) {
-  if (activeTab === 'monthly' || activeTab === 'quarterly' || activeTab === 'annual') {
+  if (activeTab === 'reports') {
     return (
       <section className="gov-content-grid gov-content-loading" aria-label="وضعیت بارگذاری مرکز مالی">
         <FinanceLoadingCard span="12" lines={2} />
@@ -1398,7 +1420,7 @@ function GovernmentFinanceLoadingPanels({ activeTab }) {
     );
   }
 
-  if (activeTab === 'year' || activeTab === 'archive') {
+  if (activeTab === 'year') {
     return (
       <section className="gov-content-grid gov-content-loading" aria-label="وضعیت بارگذاری مرکز مالی">
         <FinanceLoadingCard span="7" lines={5} />
@@ -1447,6 +1469,10 @@ export default function AdminGovernmentFinance() {
   const [selectedClassId, setSelectedClassId] = useState(() => readInitialSearchValue(searchParams, 'classId'));
   const [selectedQuarter, setSelectedQuarter] = useState(() => sanitizeQuarter(readInitialSearchValue(searchParams, 'quarter')));
   const [selectedMonth, setSelectedMonth] = useState(() => sanitizeMonth(readInitialSearchValue(searchParams, 'month')));
+  const [reportMode, setReportMode] = useState(() => resolveInitialReportMode(
+    readInitialSearchValue(searchParams, 'tab'),
+    readInitialSearchValue(searchParams, 'rmode')
+  ));
   const [selectedTreasuryReportAccountId, setSelectedTreasuryReportAccountId] = useState('');
   const [message, setMessage] = useState('');
   const [messageTone, setMessageTone] = useState('info');
@@ -1767,25 +1793,24 @@ export default function AdminGovernmentFinance() {
       {
         key: 'report',
         label: 'نوع گزارش',
-        value: activeTab === 'quarterly'
-          ? 'گزارش ربعوار'
-          : activeTab === 'annual'
-            ? 'گزارش سالانه'
-            : activeTab === 'archive'
-              ? 'آرشیف رسمی'
-              : activeTab === 'operations'
-                ? 'عملیات مصارف'
-                : 'نمای کلی'
+        value: activeTab === 'reports'
+          ? (REPORT_MODES.find((item) => item.key === reportMode)?.label || 'ربع‌وار')
+          : activeTab === 'operations'
+            ? 'عملیات مصارف'
+            : 'نمای کلی'
       },
       { key: 'fy', label: 'سال مالی', value: selectedFinancialYear?.title || 'همه / بدون محدودیت' },
       { key: 'ay', label: 'سال تعلیمی', value: selectedAcademicYear?.title || '---' },
       { key: 'class', label: 'صنف', value: selectedClass?.title || 'همه صنف‌ها' }
     ];
 
-    if (activeTab === 'quarterly' || activeTab === 'archive') {
+    if (activeTab === 'reports' && (reportMode === 'quarterly' || reportMode === 'archive')) {
       chips.push({ key: 'quarter', label: 'ربع', value: activeQuarterLabel });
     }
-    if (activeTab === 'archive') {
+    if (activeTab === 'reports' && reportMode === 'monthly') {
+      chips.push({ key: 'month', label: 'ماه', value: `ماه ${selectedMonth}` });
+    }
+    if (activeTab === 'reports' && reportMode === 'archive') {
       chips.push({ key: 'snapshots', label: 'اسنپ‌شات‌ها', value: formatNumber((payload.snapshots || []).length) });
     }
 
@@ -1798,7 +1823,7 @@ export default function AdminGovernmentFinance() {
     }
 
     return chips;
-  }, [activeQuarterLabel, activeTab, activeTabLabel, payload.snapshots, selectedAcademicYear, selectedClass, selectedFinancialYear, selectedTreasuryReportAccount]);
+  }, [activeQuarterLabel, activeTab, reportMode, selectedMonth, activeTabLabel, payload.snapshots, selectedAcademicYear, selectedClass, selectedFinancialYear, selectedTreasuryReportAccount]);
   const currentSearchText = useMemo(() => readInitialSearchText(searchParams), [searchParams]);
   const workspaceScopeKey = useMemo(() => buildWorkspaceScopeKey({
     financialYearId: selectedFinancialYearId,
@@ -1847,13 +1872,13 @@ export default function AdminGovernmentFinance() {
   const refreshButtonLabel = useMemo(() => {
     if (activeTab === 'dashboard') return 'بازخوانی نمای کلی';
     if (activeTab === 'operations') return 'بازخوانی عملیات مصارف';
-    if (activeTab === 'monthly') return 'بازخوانی گزارش ماهانه';
-    if (activeTab === 'quarterly') return 'بازخوانی گزارش ربعوار';
-    if (activeTab === 'annual') return 'بازخوانی گزارش سالانه';
     if (activeTab === 'year') return 'بازخوانی مدیریت سال مالی';
-    if (activeTab === 'archive') return 'بازخوانی آرشیف رسمی';
+    if (activeTab === 'reports') {
+      const label = REPORT_MODES.find((item) => item.key === reportMode)?.label || 'گزارش';
+      return `بازخوانی ${label}`;
+    }
     return 'بازخوانی داده';
-  }, [activeTab]);
+  }, [activeTab, reportMode]);
   const effectiveRefreshButtonLabel = activeTab === 'treasury'
     ? 'بازخوانی خزانه و صندوق'
     : refreshButtonLabel;
@@ -1976,7 +2001,9 @@ export default function AdminGovernmentFinance() {
         }
       ];
 
-      if (resolvedTargetTab === 'monthly') {
+      const isReports = resolvedTargetTab === 'reports';
+
+      if (isReports && reportMode === 'monthly') {
         loaders.push({
           key: 'governmentMonthly',
           run: () => postJson('/api/reports/run', { reportKey: 'government_finance_monthly', filters: reportFilters }),
@@ -1984,7 +2011,7 @@ export default function AdminGovernmentFinance() {
         });
       }
 
-      if (resolvedTargetTab === 'quarterly') {
+      if (isReports && reportMode === 'quarterly') {
         loaders.push({
           key: 'governmentQuarterly',
           run: () => postJson('/api/reports/run', { reportKey: 'government_finance_quarterly', filters: reportFilters }),
@@ -1992,7 +2019,7 @@ export default function AdminGovernmentFinance() {
         });
       }
 
-      if (resolvedTargetTab === 'annual') {
+      if (isReports && reportMode === 'annual') {
         loaders.push({
           key: 'governmentAnnual',
           run: () => postJson('/api/reports/run', { reportKey: 'government_finance_annual', filters: reportFilters }),
@@ -2008,7 +2035,7 @@ export default function AdminGovernmentFinance() {
         });
       }
 
-      if (resolvedTargetTab === 'operations' || resolvedTargetTab === 'archive') {
+      if (resolvedTargetTab === 'operations' || (isReports && reportMode === 'archive')) {
         loaders.push({
           key: 'procurementAnalytics',
           run: () => fetchJson(scopedProcurementUrl),
@@ -2022,7 +2049,7 @@ export default function AdminGovernmentFinance() {
         });
       }
 
-      if (resolvedTargetTab === 'archive') {
+      if (isReports && reportMode === 'archive') {
         loaders.push({
           key: 'snapshots',
           run: () => fetchJson(scopedSnapshotUrl),
@@ -2127,7 +2154,7 @@ export default function AdminGovernmentFinance() {
   };
 
   const warmGovernmentFinanceTab = (tabKey) => {
-    if (!['monthly', 'quarterly', 'annual', 'archive'].includes(tabKey)) return;
+    if (tabKey !== 'reports') return;
     if (tabKey === activeTab) return;
     if (busyAction === 'load') return;
 
@@ -2155,7 +2182,7 @@ export default function AdminGovernmentFinance() {
 
   useEffect(() => {
     loadWorkspace();
-  }, [activeTab, selectedAcademicYearId, selectedFinancialYearId, selectedClassId, selectedQuarter, selectedMonth, selectedTreasuryReportAccountId]);
+  }, [activeTab, reportMode, selectedAcademicYearId, selectedFinancialYearId, selectedClassId, selectedQuarter, selectedMonth, selectedTreasuryReportAccountId]);
 
   useEffect(() => {
     if (!selectedFinancialYear?.academicYearId) return;
@@ -2269,13 +2296,16 @@ export default function AdminGovernmentFinance() {
   }, [governmentDocumentArchive]);
 
   useEffect(() => {
-    const nextTab = sanitizeTab(readInitialSearchValue(searchParams, 'tab'));
+    const rawTab = readInitialSearchValue(searchParams, 'tab');
+    const nextTab = sanitizeTab(rawTab);
+    const nextReportMode = resolveInitialReportMode(rawTab, readInitialSearchValue(searchParams, 'rmode'));
     const nextFinancialYearId = readInitialSearchValue(searchParams, 'financialYearId');
     const nextAcademicYearId = readInitialSearchValue(searchParams, 'academicYearId');
     const nextClassId = readInitialSearchValue(searchParams, 'classId');
     const nextQuarter = sanitizeQuarter(readInitialSearchValue(searchParams, 'quarter'));
 
     setActiveTab((current) => (current === nextTab ? current : nextTab));
+    setReportMode((current) => (current === nextReportMode ? current : nextReportMode));
     setSelectedFinancialYearId((current) => (current === nextFinancialYearId ? current : nextFinancialYearId));
     setSelectedAcademicYearId((current) => (current === nextAcademicYearId ? current : nextAcademicYearId));
     setSelectedClassId((current) => (current === nextClassId ? current : nextClassId));
@@ -2285,6 +2315,7 @@ export default function AdminGovernmentFinance() {
   useEffect(() => {
     const nextParams = buildGovernmentFinanceSearchParams({
       tab: activeTab,
+      reportMode,
       financialYearId: selectedFinancialYearId,
       academicYearId: selectedAcademicYearId,
       classId: selectedClassId,
@@ -2296,6 +2327,7 @@ export default function AdminGovernmentFinance() {
     }
   }, [
     activeTab,
+    reportMode,
     currentSearchText,
     selectedAcademicYearId,
     selectedClassId,
@@ -3162,9 +3194,7 @@ export default function AdminGovernmentFinance() {
   };
 
   const resolveActiveReportKey = () => {
-    if (activeTab === 'monthly') return 'government_finance_monthly';
-    if (activeTab === 'quarterly') return 'government_finance_quarterly';
-    if (activeTab === 'annual' || activeTab === 'archive') return 'government_finance_annual';
+    if (activeTab === 'reports') return resolveReportLabel(reportMode);
     return 'finance_overview';
   };
 
@@ -3173,8 +3203,8 @@ export default function AdminGovernmentFinance() {
     if (selectedFinancialYearId) filters.financialYearId = selectedFinancialYearId;
     if (selectedAcademicYearId) filters.academicYearId = selectedAcademicYearId;
     if (selectedClassId) filters.classId = selectedClassId;
-    if (activeTab === 'quarterly') filters.quarter = selectedQuarter;
-    if (activeTab === 'monthly') filters.monthNumber = selectedMonth;
+    if (activeTab === 'reports' && reportMode === 'quarterly') filters.quarter = selectedQuarter;
+    if (activeTab === 'reports' && reportMode === 'monthly') filters.monthNumber = selectedMonth;
     return filters;
   };
 
@@ -3644,7 +3674,25 @@ export default function AdminGovernmentFinance() {
           </section>
             ) : null}
 
-            {activeTab === 'monthly' ? (
+            {activeTab === 'reports' ? (
+              <div className="gov-reports-switch">
+                <div className="gov-seg" role="tablist" aria-label="نوع گزارش">
+                  {REPORT_MODES.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      role="tab"
+                      aria-pressed={reportMode === item.key}
+                      onClick={() => setReportMode(item.key)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {activeTab === 'reports' && reportMode === 'monthly' ? (
               <section className="gov-content-grid">
                 <article className="gov-card" data-span="12">
                   <div className="gov-card-head spread">
@@ -3732,7 +3780,7 @@ export default function AdminGovernmentFinance() {
               </section>
             ) : null}
 
-            {activeTab === 'quarterly' ? (
+            {activeTab === 'reports' && reportMode === 'quarterly' ? (
               <section className="gov-content-grid">
             <article className="gov-card" data-span="12">
               <div className="gov-card-head spread">
@@ -3944,7 +3992,7 @@ export default function AdminGovernmentFinance() {
               </section>
             ) : null}
 
-            {activeTab === 'annual' ? (
+            {activeTab === 'reports' && reportMode === 'annual' ? (
               <section className="gov-content-grid">
             <article className="gov-card" data-span="8">
               <QuarterCompare items={quarterSummaries} selectedQuarter={selectedQuarter} />
@@ -5924,7 +5972,7 @@ export default function AdminGovernmentFinance() {
               </section>
             ) : null}
 
-            {activeTab === 'archive' ? (
+            {activeTab === 'reports' && reportMode === 'archive' ? (
               <section className="gov-content-grid">
             <PanelBulkControls tabKey="archive" />
 

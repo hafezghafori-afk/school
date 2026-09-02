@@ -2170,7 +2170,9 @@ test.describe('government finance workflow', () => {
     await yearLedger.locator('.gov-year-card.selected .gov-card-actions button').last().click();
     await expect.poll(() => counters.closeSuccess).toBe(1);
 
-    await page.getByRole('tab', { name: 'آرشیف', exact: true }).click();
+    await page.getByRole('tab', { name: 'گزارش‌ها', exact: true }).click();
+    await page.getByRole('tab', { name: 'آرشیف رسمی', exact: true }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('rmode') || '').toBe('archive');
     await page.getByRole('button', { name: 'باز کردن همه' }).click();
     await page.getByRole('button', { name: 'ساخت پیش‌نویس ربعوار' }).click();
     await page.getByRole('button', { name: 'ساخت پیش‌نویس سالانه' }).click();
