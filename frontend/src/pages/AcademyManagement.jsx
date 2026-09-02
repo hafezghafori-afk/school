@@ -94,6 +94,9 @@ const emptyExpense = {
   expenseDate: new Date().toISOString().slice(0, 10),
   paymentMethod: 'cash',
   paidTo: '',
+  vendor: '',
+  attachmentUrl: '',
+  recurring: false,
   note: ''
 };
 
@@ -215,6 +218,9 @@ export default function AcademyManagement() {
     invoiceFooter: 'تشکر از پرداخت شما',
     receiptSize: 'half',
     monthlyChargeDueDay: 20,
+    lateFeeMode: 'none',
+    lateFeeAmount: 0,
+    lateFeeGraceDays: 7,
     isActive: true
   });
   const [summary, setSummary] = useState({});
@@ -260,6 +266,8 @@ export default function AcademyManagement() {
   const [attendanceForm, setAttendanceForm] = useState(emptyAttendance);
   const [printInvoice, setPrintInvoice] = useState(null);
   const [printClass, setPrintClass] = useState(null);
+  const [invoiceMethodFilter, setInvoiceMethodFilter] = useState('all');
+  const [invoiceOnlyDue, setInvoiceOnlyDue] = useState(false);
 
   const currency = settings?.currency || 'AFN';
 
@@ -443,8 +451,12 @@ export default function AcademyManagement() {
   );
 
   const filteredInvoices = useMemo(
-    () => invoices.filter((item) => studentMatchesSearch(item.studentId || item, searchTerm, [item.invoiceNumber, item.courseName, item.className])),
-    [invoices, searchTerm]
+    () => invoices.filter((item) => (
+      studentMatchesSearch(item.studentId || item, searchTerm, [item.invoiceNumber, item.courseName, item.className])
+      && (invoiceMethodFilter === 'all' || item.paymentMethod === invoiceMethodFilter)
+      && (!invoiceOnlyDue || Number(item.remainingBalance || 0) > 0)
+    )),
+    [invoices, searchTerm, invoiceMethodFilter, invoiceOnlyDue]
   );
 
   const filteredExpenses = useMemo(
@@ -552,6 +564,17 @@ export default function AcademyManagement() {
     setPrintClass(null);
     setPrintInvoice(invoice);
     window.setTimeout(() => window.print(), 80);
+    if (invoice?._id) {
+      requestJson(`/api/academy/invoices/${invoice._id}/mark-printed`, { method: 'POST', body: '{}' })
+        .then((data) => {
+          setInvoices((prev) => prev.map((it) => (
+            String(it._id) === String(invoice._id)
+              ? { ...it, printCount: data.printCount, lastPrintedAt: data.lastPrintedAt }
+              : it
+          )));
+        })
+        .catch(() => {});
+    }
   };
 
   const printClassList = (item) => {
@@ -593,6 +616,19 @@ export default function AcademyManagement() {
     setBusy(true);
     try {
       const data = await requestJson('/api/academy/generate-monthly', { method: 'POST', body: '{}' });
+      toast.success(data.message || 'انجام شد.');
+      await loadData();
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const generateLateFees = async () => {
+    setBusy(true);
+    try {
+      const data = await requestJson('/api/academy/generate-late-fees', { method: 'POST', body: '{}' });
       toast.success(data.message || 'انجام شد.');
       await loadData();
     } catch (error) {
@@ -1027,18 +1063,30 @@ export default function AcademyManagement() {
               </form>
               <div className="academy-panel">
                 <h2>رسیدهای پرداخت / بل‌های صادرشده</h2>
+                <div className="academy-filter-row">
+                  <select value={invoiceMethodFilter} onChange={(e) => setInvoiceMethodFilter(e.target.value)}>
+                    <option value="all">همهٔ روش‌ها</option>
+                    {Object.entries(paymentMethodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                  <label className="academy-checkbox">
+                    <input type="checkbox" checked={invoiceOnlyDue} onChange={(e) => setInvoiceOnlyDue(e.target.checked)} />
+                    <span>فقط باقی‌دار</span>
+                  </label>
+                  <span className="academy-field-label">{filteredInvoices.length} از {invoices.length}</span>
+                </div>
                 <Table
                   columns={['شماره', 'شاگرد', 'کورس', 'این پرداخت', 'باقی', 'رسید']}
                   rows={filteredInvoices.map((item) => [
                     <span className={item.status === 'void' ? 'academy-void' : (item.kind === 'credit_note' ? 'academy-credit' : '')}>
                       {item.invoiceNumber}{item.kind === 'credit_note' ? ' (ابطالی)' : ''}
+                      {Number(item.printCount || 0) > 0 && <span className="academy-chip academy-chip-muted" title={item.lastPrintedAt ? formatAfghanStoredDateLabel(String(item.lastPrintedAt).slice(0, 10)) : ''}>قبلاً چاپ شده ×{item.printCount}</span>}
                     </span>,
                     text(item.studentId?.fullName),
                     text(item.courseName),
                     `${fmt(item.paidAmount)} ${item.currency || currency}`,
                     fmt(item.remainingBalance),
                     item.status === 'void' ? <span className="academy-void">ابطال‌شده</span>
-                      : <button type="button" className="academy-inline-button" onClick={() => printCurrentInvoice(item)}>چاپ رسید</button>
+                      : <button type="button" className="academy-inline-button" onClick={() => printCurrentInvoice(item)}>{Number(item.printCount || 0) > 0 ? 'چاپ دوباره' : 'چاپ رسید'}</button>
                   ])}
                 />
               </div>
@@ -1077,6 +1125,14 @@ export default function AcademyManagement() {
                 <Field label="مبلغ"><input required type="number" min="1" value={expenseForm.amount} onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })} /></Field>
                 <Field label="تاریخ"><AfghanDateInput value={expenseForm.expenseDate} onChange={(value) => setExpenseForm({ ...expenseForm, expenseDate: value })} /></Field>
                 <Field label="پرداخت به"><input value={expenseForm.paidTo} onChange={(e) => setExpenseForm({ ...expenseForm, paidTo: e.target.value })} /></Field>
+                <Field label="فروشنده / طرفِ قرارداد"><input value={expenseForm.vendor} onChange={(e) => setExpenseForm({ ...expenseForm, vendor: e.target.value })} /></Field>
+                <Field label="لینکِ سند / رسید"><input value={expenseForm.attachmentUrl} onChange={(e) => setExpenseForm({ ...expenseForm, attachmentUrl: e.target.value })} placeholder="https://…" /></Field>
+                <Field label="مصرفِ تکرارشونده">
+                  <label className="academy-checkbox">
+                    <input type="checkbox" checked={!!expenseForm.recurring} onChange={(e) => setExpenseForm({ ...expenseForm, recurring: e.target.checked })} />
+                    <span>هر ماه تکرار می‌شود (کرایه، معاش و…)</span>
+                  </label>
+                </Field>
                 <Field label="یادداشت"><textarea value={expenseForm.note} onChange={(e) => setExpenseForm({ ...expenseForm, note: e.target.value })} /></Field>
                 <button type="submit" disabled={busy}>ثبت مصرف</button>
               </form>
@@ -1438,6 +1494,28 @@ export default function AcademyManagement() {
                 <input type="number" min="0" max="100" value={settings.teacherCommissionPercent ?? 0}
                   onChange={(e) => setSettings({ ...settings, teacherCommissionPercent: e.target.value })} />
               </Field>
+              <Field label="حالتِ جریمهٔ دیرکرد">
+                <select value={settings.lateFeeMode || 'none'} onChange={(e) => setSettings({ ...settings, lateFeeMode: e.target.value })}>
+                  <option value="none">غیرفعال</option>
+                  <option value="fixed">مبلغِ ثابت</option>
+                  <option value="percent">درصدِ قلمِ معوق</option>
+                </select>
+              </Field>
+              <Field label={settings.lateFeeMode === 'percent' ? 'درصدِ جریمهٔ دیرکرد' : 'مبلغِ جریمهٔ دیرکرد'}>
+                <input type="number" min="0" value={settings.lateFeeAmount ?? 0}
+                  onChange={(e) => setSettings({ ...settings, lateFeeAmount: e.target.value })} />
+              </Field>
+              <Field label="مهلتِ ارفاق پس از سررسید (روز)">
+                <input type="number" min="0" value={settings.lateFeeGraceDays ?? 7}
+                  onChange={(e) => setSettings({ ...settings, lateFeeGraceDays: e.target.value })} />
+              </Field>
+              {settings.lateFeeMode && settings.lateFeeMode !== 'none' && (
+                <p className="academy-form-hint">
+                  برای هر قلمِ معوق که بیش از {settings.lateFeeGraceDays ?? 7} روز از سررسیدش گذشته، یک‌بار قلمِ «جریمهٔ دیرکرد» ساخته می‌شود.
+                  {' '}
+                  <button type="button" className="academy-inline-button" onClick={generateLateFees} disabled={busy}>ساختِ جریمهٔ دیرکرد اکنون</button>
+                </p>
+              )}
               <button type="submit" disabled={busy}>ذخیره تنظیمات</button>
             </form>
           )}

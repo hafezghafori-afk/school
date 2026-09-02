@@ -695,3 +695,32 @@
   gap: 12px;
   flex-wrap: wrap;
 }
+
+/* ---------- P3 مالی: فیلترها، جریمهٔ دیرکرد، ردِ چاپ ---------- */
+.academy-chip-muted { background: rgba(148, 163, 184, 0.16); color: #94a3b8; margin-inline-start: 6px; }
+
+.academy-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.academy-filter-row select {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: inherit;
+}
+
+.academy-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+.academy-checkbox input { width: 16px; height: 16px; }
