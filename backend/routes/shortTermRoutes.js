@@ -119,7 +119,7 @@ async function listPayload() {
     ShortTermStudent.find().sort({ createdAt: -1 }).limit(250).lean(),
     ShortTermClass.find().sort({ createdAt: -1 }).limit(250).lean(),
     ShortTermRegistration.find().sort({ createdAt: -1 }).limit(300)
-      .populate('studentId', 'fullName studentCode phone')
+      .populate('studentId', 'fullName studentCode phone status')
       .populate('classId', 'name subject defaultFee')
       .lean(),
     ShortTermPayment.find().sort({ paidAt: -1 }).limit(200)
@@ -470,8 +470,8 @@ router.get('/reports/overview', async (_req, res) => {
       buildSummary(),
       ShortTermRegistration.find({ balance: { $gt: 0 }, status: 'active' })
         .sort({ balance: -1 })
-        .limit(25)
-        .populate('studentId', 'fullName studentCode phone')
+        .limit(50)
+        .populate('studentId', 'fullName studentCode phone status')
         .populate('classId', 'name')
         .lean(),
       ShortTermRegistration.aggregate([
@@ -486,7 +486,8 @@ router.get('/reports/overview', async (_req, res) => {
     res.json({
       success: true,
       summary,
-      debtors: debtors.map(withOverdueFlag),
+      // شاگردانِ غیرفعال از فهرستِ باقی‌داران کنار می‌روند
+      debtors: debtors.filter((r) => !r.studentId || r.studentId.status !== 'inactive').slice(0, 25).map(withOverdueFlag),
       byClass: byClass.map((item) => ({ ...item, className: classMap.get(String(item._id)) || 'صنف' }))
     });
   } catch {
