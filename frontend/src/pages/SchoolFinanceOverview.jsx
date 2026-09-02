@@ -7,7 +7,6 @@ import {
   errorMessage,
   fetchBlob,
   fetchJson,
-  fetchText,
   formatNumber,
   openHtmlDocument,
   repairDisplayText
@@ -242,7 +241,7 @@ function DomainPanel({ domain, onPrint, printBusy }) {
             خالص بازه: {formatNumber(totals.net)} افغانی
           </span>
           <button type="button" className="sfo-linkbtn" onClick={onPrint} disabled={printBusy}>
-            {printBusy ? 'در حال ساخت…' : 'چاپ / PDF'}
+            {printBusy ? 'در حال ساخت…' : 'دانلود PDF'}
           </button>
         </div>
       </header>
@@ -347,17 +346,23 @@ export default function SchoolFinanceOverview() {
     }
   };
 
-  // سندِ چاپیِ HTML (مرورگر → PDF) — بخش = 'all' یا کلیدِ حوزه.
+  // خروجی PDF — بخش = 'all' یا کلیدِ حوزه. اگر سرور نتواند PDF بسازد، HTML می‌دهد
+  // که در پنجرهٔ جدید باز می‌شود (کاربر Ctrl+P می‌زند).
   const printSection = async (section) => {
     setExporting(`print-${section}`);
     setExportError('');
     try {
       const url = `/api/reports/consolidated-finance/print${queryString}&section=${encodeURIComponent(section)}`;
-      const { text, filename, contentType } = await fetchText(url, {}, { method: 'GET' });
-      const opened = openHtmlDocument(text, filename);
-      if (!opened) downloadBlob(new Blob([text], { type: contentType || 'text/html' }), filename || 'consolidated-finance.html');
+      const { blob, filename, contentType } = await fetchBlob(url, {}, { method: 'GET' });
+      if ((contentType || '').includes('application/pdf')) {
+        downloadBlob(blob, filename || `consolidated-finance-${section}.pdf`);
+      } else {
+        const text = await blob.text();
+        const opened = openHtmlDocument(text, filename);
+        if (!opened) downloadBlob(blob, filename || `consolidated-finance-${section}.html`);
+      }
     } catch (err) {
-      setExportError(errorMessage(err, 'آماده‌سازی نسخهٔ چاپی ناموفق بود.'));
+      setExportError(errorMessage(err, 'آماده‌سازی خروجی PDF ناموفق بود.'));
     } finally {
       setExporting('');
     }
@@ -423,7 +428,7 @@ export default function SchoolFinanceOverview() {
             {exporting === 'xlsx' ? 'در حال ساخت…' : 'خروجی Excel'}
           </button>
           <button type="button" className="sfo-btn sfo-btn-ghost" onClick={() => printSection('all')} disabled={!report || Boolean(exporting)}>
-            {exporting === 'print-all' ? 'در حال ساخت…' : 'چاپ گزارش کامل'}
+            {exporting === 'print-all' ? 'در حال ساخت…' : 'PDF گزارش کامل'}
           </button>
           {period?.from ? (
             <span className="sfo-range-tag">{monthKeyLabel(period.from)} — {monthKeyLabel(period.to)}</span>

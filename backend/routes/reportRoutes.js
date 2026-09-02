@@ -7,6 +7,7 @@ const {
   buildConsolidatedFinanceDebtors
 } = require('../services/consolidatedFinanceReportService');
 const { buildConsolidatedFinancePrintHtml } = require('../services/consolidatedFinancePrintService');
+const { buildHtmlPdfBuffer, isMissingPlaywrightBrowserError } = require('../services/sheetTemplatePdfService');
 const User = require('../models/User');
 const {
   getReportDefinition,
@@ -437,11 +438,13 @@ router.get('/consolidated-finance', requireAuth, requirePermission('finance.repo
   }
 });
 
-// سندِ چاپیِ HTML (مرورگر → PDF) برای «همه بخش‌ها» یا یک بخشِ مشخص.
+// سندِ چاپیِ گزارشِ مالیِ یکپارچه برای «همه بخش‌ها» یا یک بخشِ مشخص.
+// پیش‌فرض PDF (رندرِ Chromium)؛ اگر مرورگرِ Playwright در دسترس نبود، به HTML برمی‌گردد.
 router.get('/consolidated-finance/print', requireAuth, requirePermission('finance.reports.consolidated.view'), async (req, res) => {
   try {
     const proto = String(req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
     const origin = `${proto}://${req.get('host')}`;
+    const wantHtml = String(req.query.format || '').toLowerCase() === 'html';
     const { html, filename } = await buildConsolidatedFinancePrintHtml({
       section: req.query.section,
       year: req.query.year,
@@ -450,15 +453,30 @@ router.get('/consolidated-finance/print', requireAuth, requirePermission('financ
       to: req.query.to,
       origin
     });
+    const baseName = filename.replace(/\.html$/i, '');
+
     await logActivity({
       req,
       action: 'report_print_consolidated_finance',
       targetType: 'report',
       targetId: 'consolidated_finance',
-      meta: { section: req.query.section || 'all' }
+      meta: { section: req.query.section || 'all', format: wantHtml ? 'html' : 'pdf' }
     });
+
+    if (!wantHtml) {
+      try {
+        const pdf = await buildHtmlPdfBuffer(html);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.pdf"`);
+        return res.status(200).send(pdf);
+      } catch (pdfError) {
+        if (!isMissingPlaywrightBrowserError(pdfError)) throw pdfError;
+        console.warn(`consolidated finance PDF unavailable, serving HTML: ${pdfError.message}`);
+      }
+    }
+
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${baseName}.html"`);
     return res.status(200).send(html);
   } catch (error) {
     console.error('consolidated finance print failed:', error?.message || error);

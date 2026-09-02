@@ -173,8 +173,7 @@ async function buildConsolidatedFinancePrintHtml({ section = 'all', year, months
 <meta charset="utf-8" />
 <title>گزارش مالی یکپارچه — ${esc(sectionLabel)}</title>
 <style>
-  @page { size: A4; margin: 14mm 12mm 18mm; }
-  @page { @bottom-center { content: "صفحه " counter(page) " از " counter(pages); font-size: 9px; color: #666; } }
+  @page { size: A4; margin: 0; }
   * { box-sizing: border-box; }
   html, body { background: #ffffff; }
   body { font-family: 'Vazirmatn', 'B Nazanin', Tahoma, Arial, sans-serif; color: #111; font-size: 11px; direction: rtl; margin: 0; }

@@ -1514,6 +1514,43 @@ async function buildReportPdfBufferWithFallback(args = {}) {
   }
 }
 
+/**
+ * یک رشتهٔ HTML کاملِ خودبسنده را با Chromiumِ Playwright به PDF (A4) تبدیل می‌کند.
+ * اگر مرورگرِ Playwright نصب نباشد و نصبِ خودکار هم شکست بخورد، خطا پرتاب می‌شود
+ * (فراخواننده باید به سرو کردنِ خودِ HTML برگردد). صفحه‌بندی/شکستِ صفحه از CSS
+ * خودِ سند (`page-break-*`, `@page`) می‌آید؛ شمارهٔ صفحه در پاورقی اضافه می‌شود.
+ * @param {string} html
+ * @param {{ landscape?: boolean }} [opts]
+ * @returns {Promise<Buffer>}
+ */
+async function buildHtmlPdfBuffer(html, { landscape = false } = {}) {
+  let browser = null;
+  try {
+    const { chromium } = require('playwright');
+    browser = await launchChromium(chromium);
+    const page = await browser.newPage({ locale: 'fa-AF' });
+    await page.setContent(String(html || ''), { waitUntil: 'load' });
+    await page.emulateMedia({ media: 'print' });
+    // eslint-disable-next-line no-undef -- اجرا داخل صفحهٔ Playwright (بافتِ مرورگر)
+    await page.evaluate(() => (document.fonts ? document.fonts.ready : Promise.resolve()));
+    return await page.pdf({
+      format: 'A4',
+      landscape,
+      printBackground: true,
+      displayHeaderFooter: true,
+      headerTemplate: '<span></span>',
+      footerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#777;font-family:Tahoma,sans-serif;">صفحه <span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+      margin: { top: '12mm', right: '10mm', bottom: '16mm', left: '10mm' }
+    });
+  } finally {
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
+  }
+}
+
 module.exports = {
-  buildReportPdfBuffer: buildReportPdfBufferWithFallback
+  buildReportPdfBuffer: buildReportPdfBufferWithFallback,
+  buildHtmlPdfBuffer,
+  isMissingPlaywrightBrowserError
 };
