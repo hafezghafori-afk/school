@@ -1486,3 +1486,41 @@
 .gov-basis-list strong {
   font-variant-numeric: tabular-nums;
 }
+
+/* Version compare + chain check (Phase 4 — P14) */
+.gov-chain-status {
+  margin: 10px 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  border: 1px solid var(--border);
+}
+
+.gov-chain-status.ok {
+  background: rgba(204, 251, 241, 0.55);
+  color: #115e59;
+  border-color: rgba(17, 94, 89, 0.25);
+}
+
+.gov-chain-status.broken {
+  background: rgba(254, 226, 226, 0.6);
+  color: var(--rose);
+  border-color: rgba(159, 18, 57, 0.25);
+}
+
+.gov-table td[data-delta] {
+  font-variant-numeric: tabular-nums;
+}
+
+.gov-table td[data-delta='up'] {
+  color: #115e59;
+}
+
+.gov-table td[data-delta='down'] {
+  color: var(--rose);
+}
+
+.gov-table td[data-delta='flat'] {
+  color: var(--slate);
+  opacity: 0.7;
+}

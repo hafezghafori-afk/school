@@ -33,6 +33,7 @@ const TABS = [
   { key: 'year', label: 'مدیریت سال مالی' },
   { key: 'operations', label: 'عملیات مصارف' },
   { key: 'treasury', label: 'خزانه و صندوق' },
+  { key: 'monthly', label: 'گزارش ماهانه' },
   { key: 'quarterly', label: 'گزارش ربع‌وار' },
   { key: 'annual', label: 'گزارش سالانه' },
   { key: 'archive', label: 'آرشیف رسمی' }
@@ -44,6 +45,17 @@ const QUARTER_OPTIONS = [
   { key: 3, label: 'ربع ۳' },
   { key: 4, label: 'ربع ۴' }
 ];
+
+const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => ({
+  key: index + 1,
+  label: `ماه ${index + 1}`
+}));
+
+function sanitizeMonth(value) {
+  const parsed = Number(value);
+  if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 12) return parsed;
+  return Math.min(12, Math.max(1, new Date().getMonth() + 1));
+}
 
 const EXPENSE_STATUS_LABELS = {
   draft: 'پیش‌نویس',
@@ -242,6 +254,7 @@ const EMPTY_DATA = {
   budgetVsActual: null,
   procurementAnalytics: null,
   expenses: [],
+  governmentMonthly: null,
   governmentQuarterly: null,
   governmentAnnual: null,
   snapshots: [],
@@ -275,6 +288,93 @@ const SNAPSHOT_STAGE_LABELS = {
 function resolveSnapshotStageLabel(stage = '') {
   const normalized = String(stage || '').trim();
   return SNAPSHOT_STAGE_LABELS[normalized] || 'پیش‌نویس';
+}
+
+// Phase 4 (P14) — what changed between the latest official record and the one
+// before it, plus a one-click digest-chain check.
+const SNAPSHOT_DELTA_KEYS = [
+  { key: 'totalIncome', label: 'عواید' },
+  { key: 'totalExpense', label: 'مصارف' },
+  { key: 'balance', label: 'مانده' },
+  { key: 'netProfit', label: 'خالص' },
+  { key: 'encumbranceOutstanding', label: 'تعهدات باز' },
+  { key: 'unallocatedExpense', label: 'مصارف تخصیص‌نیافته' }
+];
+
+function sameSnapshotChain(a, b) {
+  return a && b
+    && String(a.reportType || '') === String(b.reportType || '')
+    && String(a.quarter || '') === String(b.quarter || '')
+    && String(a.month || '') === String(b.month || '')
+    && String(a.classId || '') === String(b.classId || '');
+}
+
+function SnapshotChainPanel({ snapshots = [], chainStatus, onVerify, busy }) {
+  const latest = snapshots[0] || null;
+  const previous = latest
+    ? snapshots.find((item) => sameSnapshotChain(item, latest) && Number(item.version) === Number(latest.version) - 1) || null
+    : null;
+  if (!latest) return null;
+
+  const deltas = previous
+    ? SNAPSHOT_DELTA_KEYS
+      .map(({ key, label }) => {
+        const to = Number(latest.summary?.[key]);
+        const from = Number(previous.summary?.[key]);
+        if (!Number.isFinite(to) && !Number.isFinite(from)) return null;
+        return { label, from: from || 0, to: to || 0, delta: (to || 0) - (from || 0) };
+      })
+      .filter(Boolean)
+    : [];
+
+  return (
+    <article className="gov-card" data-span="12">
+      <div className="gov-card-head spread">
+        <div>
+          <strong>مقایسهٔ نسخه‌ها و صحتِ زنجیره</strong>
+          <span>
+            {previous
+              ? `تغییرات نسخهٔ ${formatNumber(latest.version)} نسبت به نسخهٔ ${formatNumber(previous.version)}`
+              : 'هنوز نسخهٔ قبلی برای مقایسه وجود ندارد.'}
+          </span>
+        </div>
+        <button type="button" className="gov-ghost-btn" onClick={onVerify} disabled={busy}>
+          {busy ? 'در حال بررسی...' : 'بررسی زنجیرهٔ دایجست'}
+        </button>
+      </div>
+
+      {chainStatus ? (
+        <div className={`gov-chain-status ${chainStatus.ok ? 'ok' : 'broken'}`}>
+          {chainStatus.ok
+            ? `زنجیره سالم است — ${formatNumber(chainStatus.verifiableCount || 0)} نسخهٔ قابل‌راستی‌آزمایی`
+            : 'در زنجیره ناسازگاری پیدا شد؛ دایجست یا پیوندِ یک نسخه با محتوایش نمی‌خواند.'}
+          {chainStatus.legacyCount ? ` · ${formatNumber(chainStatus.legacyCount)} نسخهٔ قدیمی (پیش از زنجیره)` : ''}
+        </div>
+      ) : null}
+
+      {deltas.length ? (
+        <div className="gov-table-wrap">
+          <table className="gov-table">
+            <thead>
+              <tr><th>قلم</th><th>نسخهٔ قبلی</th><th>نسخهٔ جدید</th><th>Δ</th></tr>
+            </thead>
+            <tbody>
+              {deltas.map((row) => (
+                <tr key={row.label}>
+                  <td>{row.label}</td>
+                  <td>{formatMoney(row.from)}</td>
+                  <td>{formatMoney(row.to)}</td>
+                  <td data-delta={row.delta === 0 ? 'flat' : row.delta > 0 ? 'up' : 'down'}>
+                    {row.delta > 0 ? '+' : ''}{formatMoney(row.delta)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </article>
+  );
 }
 
 // Phase 2 (P4/P5/P6) — the accounting basis and its caveats, shown alongside the
@@ -772,6 +872,7 @@ function buildGovernmentFinanceSearchParams({
 }
 
 function resolveReportLabel(tabKey) {
+  if (tabKey === 'monthly') return 'government_finance_monthly';
   if (tabKey === 'quarterly') return 'government_finance_quarterly';
   if (tabKey === 'annual' || tabKey === 'archive') return 'government_finance_annual';
   return 'finance_overview';
@@ -1198,7 +1299,7 @@ function FinanceLoadingCard({ span = '4', lines = 3 }) {
 }
 
 function GovernmentFinanceLoadingPanels({ activeTab }) {
-  if (activeTab === 'quarterly' || activeTab === 'annual') {
+  if (activeTab === 'monthly' || activeTab === 'quarterly' || activeTab === 'annual') {
     return (
       <section className="gov-content-grid gov-content-loading" aria-label="وضعیت بارگذاری مرکز مالی">
         <FinanceLoadingCard span="12" lines={2} />
@@ -1260,6 +1361,7 @@ export default function AdminGovernmentFinance() {
   const [selectedFinancialYearId, setSelectedFinancialYearId] = useState(() => readInitialSearchValue(searchParams, 'financialYearId'));
   const [selectedClassId, setSelectedClassId] = useState(() => readInitialSearchValue(searchParams, 'classId'));
   const [selectedQuarter, setSelectedQuarter] = useState(() => sanitizeQuarter(readInitialSearchValue(searchParams, 'quarter')));
+  const [selectedMonth, setSelectedMonth] = useState(() => sanitizeMonth(readInitialSearchValue(searchParams, 'month')));
   const [selectedTreasuryReportAccountId, setSelectedTreasuryReportAccountId] = useState('');
   const [message, setMessage] = useState('');
   const [messageTone, setMessageTone] = useState('info');
@@ -1562,6 +1664,7 @@ export default function AdminGovernmentFinance() {
   const showInitialLoadingSkeleton = isWorkspaceLoading
     && !payload.summary
     && !payload.financeOverview
+    && !payload.governmentMonthly
     && !payload.governmentQuarterly
     && !payload.governmentAnnual
     && !payload.financialYears.length
@@ -1659,6 +1762,7 @@ export default function AdminGovernmentFinance() {
   const refreshButtonLabel = useMemo(() => {
     if (activeTab === 'dashboard') return 'بازخوانی نمای کلی';
     if (activeTab === 'operations') return 'بازخوانی عملیات مصارف';
+    if (activeTab === 'monthly') return 'بازخوانی گزارش ماهانه';
     if (activeTab === 'quarterly') return 'بازخوانی گزارش ربعوار';
     if (activeTab === 'annual') return 'بازخوانی گزارش سالانه';
     if (activeTab === 'year') return 'بازخوانی مدیریت سال مالی';
@@ -1697,6 +1801,7 @@ export default function AdminGovernmentFinance() {
       if (selectedAcademicYearId) reportFilters.academicYearId = selectedAcademicYearId;
       if (selectedClassId) reportFilters.classId = selectedClassId;
       if (selectedQuarter) reportFilters.quarter = selectedQuarter;
+      if (selectedMonth) reportFilters.monthNumber = selectedMonth;
       const requestScopeKey = buildWorkspaceScopeKey({
         financialYearId: selectedFinancialYearId,
         academicYearId: selectedAcademicYearId,
@@ -1785,6 +1890,14 @@ export default function AdminGovernmentFinance() {
           assign: (data, nextPayload) => { nextPayload.treasuryAnalytics = data.analytics || null; }
         }
       ];
+
+      if (resolvedTargetTab === 'monthly') {
+        loaders.push({
+          key: 'governmentMonthly',
+          run: () => postJson('/api/reports/run', { reportKey: 'government_finance_monthly', filters: reportFilters }),
+          assign: (data, nextPayload) => { nextPayload.governmentMonthly = data.report || null; }
+        });
+      }
 
       if (resolvedTargetTab === 'quarterly') {
         loaders.push({
@@ -1929,7 +2042,7 @@ export default function AdminGovernmentFinance() {
   };
 
   const warmGovernmentFinanceTab = (tabKey) => {
-    if (!['quarterly', 'annual', 'archive'].includes(tabKey)) return;
+    if (!['monthly', 'quarterly', 'annual', 'archive'].includes(tabKey)) return;
     if (tabKey === activeTab) return;
     if (busyAction === 'load') return;
 
@@ -1957,7 +2070,7 @@ export default function AdminGovernmentFinance() {
 
   useEffect(() => {
     loadWorkspace();
-  }, [activeTab, selectedAcademicYearId, selectedFinancialYearId, selectedClassId, selectedQuarter, selectedTreasuryReportAccountId]);
+  }, [activeTab, selectedAcademicYearId, selectedFinancialYearId, selectedClassId, selectedQuarter, selectedMonth, selectedTreasuryReportAccountId]);
 
   useEffect(() => {
     if (!selectedFinancialYear?.academicYearId) return;
@@ -2899,6 +3012,49 @@ export default function AdminGovernmentFinance() {
     }
   };
 
+  const [chainStatus, setChainStatus] = useState(null);
+
+  const verifySnapshotChain = async () => {
+    const latest = (payload.snapshots || [])[0];
+    if (!latest) return;
+    try {
+      setBusyAction('snapshot-verify-chain');
+      const params = new URLSearchParams();
+      params.set('financialYearId', String(latest.financialYearId || selectedFinancialYearId || ''));
+      params.set('reportType', String(latest.reportType || ''));
+      if (latest.quarter) params.set('quarter', String(latest.quarter));
+      if (latest.month) params.set('month', String(latest.month));
+      if (latest.classId) params.set('classId', String(latest.classId));
+      const data = await fetchJson(`/api/finance/admin/government-snapshots/verify-chain?${params.toString()}`);
+      setChainStatus({
+        ok: !!data.ok,
+        verifiableCount: data.verifiableCount || 0,
+        legacyCount: data.legacyCount || 0
+      });
+    } catch (error) {
+      showMessage(errorMessage(error, 'بررسی زنجیرهٔ نسخه‌ها ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const downloadSnapshotCsv = async (snapshotId) => {
+    if (!snapshotId) return;
+    try {
+      setBusyAction(`snapshot-csv-${snapshotId}`);
+      const { blob, filename } = await fetchBlob(
+        `/api/finance/admin/government-snapshots/${snapshotId}/export.csv`,
+        {},
+        { method: 'GET' }
+      );
+      downloadBlob(blob, filename || `government-finance-${snapshotId}.csv`);
+    } catch (error) {
+      showMessage(errorMessage(error, 'دریافت CSV آرشیف رسمی ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
   const rejectSnapshot = async (snapshotId) => {
     if (!snapshotId) return;
     const reason = (typeof window !== 'undefined' && window.prompt)
@@ -2921,6 +3077,7 @@ export default function AdminGovernmentFinance() {
   };
 
   const resolveActiveReportKey = () => {
+    if (activeTab === 'monthly') return 'government_finance_monthly';
     if (activeTab === 'quarterly') return 'government_finance_quarterly';
     if (activeTab === 'annual' || activeTab === 'archive') return 'government_finance_annual';
     return 'finance_overview';
@@ -2932,6 +3089,7 @@ export default function AdminGovernmentFinance() {
     if (selectedAcademicYearId) filters.academicYearId = selectedAcademicYearId;
     if (selectedClassId) filters.classId = selectedClassId;
     if (activeTab === 'quarterly') filters.quarter = selectedQuarter;
+    if (activeTab === 'monthly') filters.monthNumber = selectedMonth;
     return filters;
   };
 
@@ -3399,6 +3557,94 @@ export default function AdminGovernmentFinance() {
               </div>
             </article>
           </section>
+            ) : null}
+
+            {activeTab === 'monthly' ? (
+              <section className="gov-content-grid">
+                <article className="gov-card" data-span="12">
+                  <div className="gov-card-head spread">
+                    <div>
+                      <strong>فیلتر ماه</strong>
+                      <span>ماهِ سالِ مالی را انتخاب کنید. برای سالِ مالیِ منطبق با اول حمل، مرزها با تقویمِ شمسی هم‌تراز است.</span>
+                    </div>
+                    <div className="gov-quarter-switch">
+                      {MONTH_OPTIONS.map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          className={selectedMonth === item.key ? 'active' : ''}
+                          onClick={() => setSelectedMonth(item.key)}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </article>
+
+                <article className="gov-card" data-span="4">
+                  <div className="gov-kpi-card spotlight">
+                    <span>عواید ماه {selectedMonth}</span>
+                    <strong>{formatMoney(payload.governmentMonthly?.summary?.totalIncome || 0)}</strong>
+                    <small>{formatNumber(payload.governmentMonthly?.summary?.paymentCount || 0)} پرداخت</small>
+                  </div>
+                </article>
+                <article className="gov-card" data-span="4">
+                  <div className="gov-kpi-card spotlight" data-tone="mint">
+                    <span>مصارف ماه</span>
+                    <strong>{formatMoney(payload.governmentMonthly?.summary?.totalExpense || 0)}</strong>
+                    <small>{formatNumber(payload.governmentMonthly?.summary?.expenseCount || 0)} ردیف مصرف</small>
+                  </div>
+                </article>
+                <article className="gov-card" data-span="4">
+                  <div className="gov-kpi-card spotlight" data-tone="slate">
+                    <span>مانده ماه</span>
+                    <strong>{formatMoney(payload.governmentMonthly?.summary?.balance || 0)}</strong>
+                    <small>{formatNumber(payload.governmentMonthly?.summary?.classCount || 0)} ردیف صنفی</small>
+                  </div>
+                </article>
+
+                <article className="gov-card" data-span="12">
+                  <div className="gov-card-head">
+                    <div>
+                      <strong>جدول گزارش ماهانه</strong>
+                      <span>تفکیک صنفیِ عواید و مصارفِ همان ماه از موتور گزارش رسمی.</span>
+                    </div>
+                  </div>
+                  {!payload.governmentMonthly?.rows?.length ? (
+                    <div className="gov-empty-state">برای این ماه و فیلترها ردیفی پیدا نشد.</div>
+                  ) : (
+                    <div className="gov-table-wrap">
+                      <table className="gov-table">
+                        <thead>
+                          <tr>
+                            <th>صنف</th>
+                            <th>عواید</th>
+                            <th>مصارف</th>
+                            <th>بیلانس</th>
+                            <th>پرداخت‌ها</th>
+                            <th>ردیف‌های مصرف</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {payload.governmentMonthly.rows.map((row) => (
+                            <tr key={`${row.classTitle}-${row.totalIncome}-${row.totalExpense}`}>
+                              <td>{row.classTitle || '---'}</td>
+                              <td>{formatMoney(row.totalIncome)}</td>
+                              <td>{formatMoney(row.totalExpense)}</td>
+                              <td>{formatMoney(row.balance)}</td>
+                              <td>{formatNumber(row.paymentCount)}</td>
+                              <td>{formatNumber(row.expenseCount)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </article>
+
+                <GovernmentBasisNote report={payload.governmentMonthly} />
+              </section>
             ) : null}
 
             {activeTab === 'quarterly' ? (
@@ -5869,6 +6115,15 @@ export default function AdminGovernmentFinance() {
                                 >
                                   {busyAction === `snapshot-pdf-${item._id}` ? '...' : 'پی‌دی‌اف'}
                                 </button>
+                                <button
+                                  type="button"
+                                  className="gov-inline-action"
+                                  data-snapshot-csv={item._id}
+                                  onClick={() => downloadSnapshotCsv(item._id)}
+                                  disabled={!!busyAction}
+                                >
+                                  {busyAction === `snapshot-csv-${item._id}` ? '...' : 'CSV'}
+                                </button>
                               </div>
                             </td>
                           </tr>
@@ -5902,6 +6157,13 @@ export default function AdminGovernmentFinance() {
                 </div>
               )}
             </article>
+
+            <SnapshotChainPanel
+              snapshots={payload.snapshots || []}
+              chainStatus={chainStatus}
+              onVerify={verifySnapshotChain}
+              busy={busyAction === 'snapshot-verify-chain'}
+            />
 
             <article className="gov-card" data-span="7" data-government-archive-card="true">
               <div className="gov-card-head">

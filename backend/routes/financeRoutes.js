@@ -2412,7 +2412,8 @@ router.get('/admin/treasury/analytics', requireAuth, requireRole(['admin']), req
       success: true,
       analytics
     });
-  } catch {
+  } catch (error) {
+    console.error('finance treasury analytics failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'دریافت تحلیل خزانه ناموفق بود.' });
   }
 });
@@ -2701,7 +2702,8 @@ router.get('/admin/expense-categories', requireAuth, requireRole(['admin']), req
       success: true,
       items: items.map((item) => serializeExpenseCategoryDefinition(item))
     });
-  } catch {
+  } catch (error) {
+    console.error('finance expense categories list failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'دریافت دسته‌بندی‌های رسمی مصرفات ناموفق بود.' });
   }
 });
@@ -2745,7 +2747,8 @@ router.post('/admin/expense-categories', requireAuth, requireRole(['admin']), re
       item: serializeExpenseCategoryDefinition(saved),
       message: 'دسته‌بندی مصرف ثبت شد.'
     });
-  } catch {
+  } catch (error) {
+    console.error('finance expense category create failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'ایجاد دسته‌بندی مصرف ناموفق بود.' });
   }
 });
@@ -2797,7 +2800,8 @@ router.patch('/admin/expense-categories/:id', requireAuth, requireRole(['admin']
       item: serializeExpenseCategoryDefinition(saved),
       message: 'دسته‌بندی مصرف ویرایش شد.'
     });
-  } catch {
+  } catch (error) {
+    console.error('finance expense category update failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'ویرایش دسته‌بندی مصرف ناموفق بود.' });
   }
 });
@@ -2833,7 +2837,8 @@ router.get('/admin/financial-years', requireAuth, requireRole(['admin']), requir
       success: true,
       items: items.map((item) => serializeFinancialYear(item))
     });
-  } catch {
+  } catch (error) {
+    console.error('finance financial years list failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'دریافت سال‌های مالی ناموفق بود.' });
   }
 });
@@ -3052,7 +3057,8 @@ router.post('/admin/financial-years/:id/activate', requireAuth, requireRole(['ad
       item: serializeFinancialYear(saved),
       message: 'سال مالی فعال شد.'
     });
-  } catch {
+  } catch (error) {
+    console.error('finance financial year activate failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'فعال‌سازی سال مالی ناموفق بود.' });
   }
 });
@@ -3070,7 +3076,8 @@ router.get('/admin/financial-years/:id/close-readiness', requireAuth, requireRol
       item: serializeFinancialYear(item),
       readiness
     });
-  } catch {
+  } catch (error) {
+    console.error('finance financial year close-readiness failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'بررسی آمادگی بستن سال مالی ناموفق بود.' });
   }
 });
@@ -3141,7 +3148,8 @@ router.post('/admin/financial-years/:id/close', requireAuth, requireRole(['admin
       item: serializeFinancialYear(saved),
       message: 'سال مالی بسته شد.'
     });
-  } catch {
+  } catch (error) {
+    console.error('finance financial year close failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'بستن سال مالی ناموفق بود.' });
   }
 });
@@ -3313,7 +3321,8 @@ router.get('/admin/expenses/analytics', requireAuth, requireRole(['admin']), req
       success: true,
       analytics
     });
-  } catch {
+  } catch (error) {
+    console.error('finance expense governance analytics failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'دریافت تحلیل کنترلی مصرفات ناموفق بود.' });
   }
 });
@@ -4222,7 +4231,8 @@ router.delete('/admin/expenses/:id', requireAuth, requireRole(['admin']), requir
     });
 
     return res.json({ success: true, message: 'مصرف پیش‌نویس حذف شد.' });
-  } catch {
+  } catch (error) {
+    console.error('finance expense delete failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'حذف مصرف ناموفق بود.' });
   }
 });
@@ -4533,6 +4543,75 @@ router.get('/admin/government-snapshots/:id/export.pdf', requireAuth, requireRol
       success: false,
       message: resolveFinancialYearMessage(error, 'دریافت PDF آرشیف رسمی ناموفق بود.')
     });
+  }
+});
+
+// P13 — the archived official figures as a tabular file. PDF is for reading; the
+// finance office needs the numbers back as data.
+router.get('/admin/government-snapshots/:id/export.csv', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    const snapshot = await GovernmentFinanceSnapshot.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId })
+      .populate('financialYearId', 'title code')
+      .populate('academicYearId', 'title code')
+      .populate('classId', 'title code')
+      .populate('generatedBy', 'name')
+      .populate('ratifiedBy', 'name')
+      .lean();
+    if (!snapshot) return res.status(404).json({ success: false, message: 'آرشیف رسمی پیدا نشد.' });
+
+    const columns = Array.isArray(snapshot.columns) && snapshot.columns.length
+      ? snapshot.columns
+      : Object.keys((snapshot.rows || [])[0] || {}).map((key) => ({ key, label: key }));
+    const stage = snapshot.isOfficial && snapshot.officialStage !== 'ratified' ? 'ratified' : (snapshot.officialStage || 'draft');
+
+    const lines = [];
+    const meta = [
+      ['reportType', snapshot.reportType || ''],
+      ['title', snapshot.title || ''],
+      ['financialYear', snapshot.financialYearId?.title || ''],
+      ['academicYear', snapshot.academicYearId?.title || ''],
+      ['class', snapshot.classId?.title || 'همه صنف‌ها'],
+      ['quarter', snapshot.quarter || ''],
+      ['month', snapshot.month || ''],
+      ['version', snapshot.version || 1],
+      ['officialStage', stage],
+      ['generatedAt', snapshot.generatedAt ? new Date(snapshot.generatedAt).toISOString() : ''],
+      ['generatedBy', snapshot.generatedBy?.name || ''],
+      ['ratifiedBy', snapshot.ratifiedBy?.name || ''],
+      ['sourceDigest', snapshot.sourceDigest || ''],
+      ['previousDigest', snapshot.previousDigest || ''],
+      ['periodBasis', snapshot.pack?.report?.meta?.periodBasis || snapshot.filters?.periodBasis || '']
+    ];
+    meta.forEach(([key, value]) => lines.push(`# ${sanitizeCsv(key)},${sanitizeCsv(value)}`));
+    lines.push('');
+    lines.push(columns.map((col) => sanitizeCsv(col.label || col.key)).join(','));
+    (snapshot.rows || []).forEach((row) => {
+      lines.push(columns.map((col) => sanitizeCsv(row?.[col.key] ?? '')).join(','));
+    });
+
+    const summaryEntries = Object.entries(snapshot.summary || {});
+    if (summaryEntries.length) {
+      lines.push('');
+      lines.push('# summary');
+      summaryEntries.forEach(([key, value]) => lines.push(`${sanitizeCsv(key)},${sanitizeCsv(value)}`));
+    }
+
+    await logActivity({
+      req,
+      action: 'finance_export_government_snapshot_csv',
+      targetType: 'GovernmentFinanceSnapshot',
+      targetId: String(snapshot._id),
+      meta: { reportType: snapshot.reportType || '', version: Number(snapshot.version || 1) }
+    });
+
+    const filename = `government-finance-${String(snapshot.reportType || 'snapshot')}-v${String(snapshot.version || 1)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.status(200).send(`﻿${lines.join('\n')}`);
+  } catch (error) {
+    console.error('government snapshot csv export failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'دریافت CSV آرشیف رسمی ناموفق بود.' });
   }
 });
 
@@ -5183,7 +5262,8 @@ router.get('/admin/summary', requireAuth, requireRole(['admin']), requirePermiss
       },
       topDebtors
     });
-  } catch {
+  } catch (error) {
+    console.error('finance summary failed:', error?.message || error);
     res.status(500).json({ success: false, message: 'خطا در دریافت خلاصه مالی' });
   }
 });

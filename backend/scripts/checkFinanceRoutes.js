@@ -6231,6 +6231,14 @@ async function run() {
         assertCase(String(leadRatify.data?.code || '') === 'finance_government_snapshot_blocked', 'expected blocked code');
         assertCase(Array.isArray(leadRatify.data?.ratificationGate?.blockers), 'expected structured blockers');
       }
+
+      const csvResponse = await request(server, `/api/finance/admin/government-snapshots/${snapshotId}/export.csv`, {
+        user: financeManagerUser
+      });
+      assertCase(csvResponse.status === 200, `expected 200, received ${csvResponse.status}: ${csvResponse.text}`);
+      assertCase(String(csvResponse.headers['content-type'] || '').includes('text/csv'), 'expected text/csv content type');
+      assertCase(/# reportType,quarterly/.test(csvResponse.text || ''), 'expected the snapshot meta block in the CSV');
+      assertCase(/# version,\d/.test(csvResponse.text || ''), 'expected the version line in the CSV meta block');
     });
 
     await check('route smoke: expense governance review chain blocks year close until approval is complete', async () => {
