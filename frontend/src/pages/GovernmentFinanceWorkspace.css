@@ -1468,3 +1468,21 @@
   color: var(--slate);
   opacity: 0.85;
 }
+
+/* Accounting-basis note (Phase 2 — P4/P5/P6) */
+.gov-basis-list {
+  margin: 10px 0 0;
+  padding-inline-start: 20px;
+  display: grid;
+  gap: 8px;
+  font-size: 0.92rem;
+  color: var(--ink);
+}
+
+.gov-basis-list li {
+  line-height: 1.7;
+}
+
+.gov-basis-list strong {
+  font-variant-numeric: tabular-nums;
+}

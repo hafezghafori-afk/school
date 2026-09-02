@@ -277,6 +277,46 @@ function resolveSnapshotStageLabel(stage = '') {
   return SNAPSHOT_STAGE_LABELS[normalized] || 'پیش‌نویس';
 }
 
+// Phase 2 (P4/P5/P6) — the accounting basis and its caveats, shown alongside the
+// quarterly / annual government figures so the numbers aren't misread.
+function GovernmentBasisNote({ report }) {
+  const summary = report?.summary || null;
+  const meta = report?.meta || null;
+  if (!summary && !meta) return null;
+  const encumbrance = Number(summary?.encumbranceOutstanding || 0);
+  const balanceRaw = summary?.balance ?? summary?.netProfit;
+  const balanceAfter = summary?.balanceAfterEncumbrance;
+  const unallocated = Number(summary?.unallocatedExpense || 0);
+  const periodBasis = meta?.periodBasis === 'shamsi'
+    ? 'دوره‌بندی: تقویم شمسی (منطبق با سال مالی)'
+    : meta?.periodBasis === 'gregorian'
+      ? 'دوره‌بندی: میلادی (سال مالی با اول حمل منطبق نیست)'
+      : '';
+  return (
+    <article className="gov-card" data-span="12">
+      <div className="gov-card-head">
+        <div>
+          <strong>مبنای حسابداری و ملاحظات</strong>
+          <span>{meta?.basisNote || 'مبنای نقدی: درآمد در تاریخ وصول و مصرف در تاریخ مصرف، هر دو فقط تاییدشده.'}</span>
+        </div>
+      </div>
+      <ul className="gov-basis-list">
+        {periodBasis ? <li>{periodBasis}</li> : null}
+        <li>
+          تعهدات خرید باز (encumbrance): <strong>{formatMoney(encumbrance)}</strong>
+          {Number.isFinite(Number(balanceAfter)) ? (
+            <> — مانده پس از تعهدات: <strong>{formatMoney(balanceAfter)}</strong> (مانده نقدی: {formatMoney(balanceRaw || 0)})</>
+          ) : null}
+        </li>
+        <li>
+          {meta?.perClassNote || 'بیلانسِ هر صنف فقط مصارف مستقیمِ همان صنف را کسر می‌کند.'}
+          {unallocated > 0 ? <> مصارف عمومیِ تخصیص‌نیافته در این دوره: <strong>{formatMoney(unallocated)}</strong>.</> : null}
+        </li>
+      </ul>
+    </article>
+  );
+}
+
 function resolveDocumentTypeLabel(documentType) {
   const normalized = String(documentType || '').trim();
   return DOCUMENT_TYPE_LABELS[normalized] || normalized || '---';
@@ -3568,6 +3608,8 @@ export default function AdminGovernmentFinance() {
                 </div>
               )}
             </article>
+
+            <GovernmentBasisNote report={payload.governmentQuarterly} />
               </section>
             ) : null}
 
@@ -3622,6 +3664,8 @@ export default function AdminGovernmentFinance() {
                 </div>
               )}
             </article>
+
+            <GovernmentBasisNote report={payload.governmentAnnual} />
               </section>
             ) : null}
 

@@ -6,7 +6,73 @@ const FeePayment = require('../models/FeePayment');
 const FinancialYear = require('../models/FinancialYear');
 const SchoolClass = require('../models/SchoolClass');
 const { buildTreasuryAnalytics } = require('./treasuryGovernanceService');
-const { getMonthRange, getQuarterRange, listQuarterRanges, startOfDay, endOfDay } = require('./financialPeriodService');
+const { startOfDay, endOfDay } = require('./financialPeriodService');
+const {
+  getShamsiMonthRange: getMonthRange,
+  getShamsiQuarterRange: getQuarterRange,
+  listShamsiQuarterRanges: listQuarterRanges,
+  isShamsiAlignedSource
+} = require('./shamsiPeriodService');
+const { buildProcurementCommitmentAnalytics } = require('./procurementCommitmentService');
+
+// Government reports are kept on a single, documented accounting basis: CASH.
+// Income is recognized at the approved payment's paidAt date, expense at the
+// approved ExpenseEntry's expenseDate. Procurement commitments are NOT folded
+// into `balance`; they are surfaced separately as an encumbrance memo line
+// (findings P5 / P6 of the مرکز مالی دولت review).
+const GOVERNMENT_FINANCE_BASIS = 'cash';
+const GOVERNMENT_FINANCE_BASIS_NOTE = 'مبنای نقدی: درآمد در تاریخ وصول (paidAt) و مصرف در تاریخ مصرف (expenseDate)، هر دو فقط تاییدشده. تعهدات خرید در «مانده» لحاظ نمی‌شوند و جداگانه به‌عنوان encumbrance نمایش داده می‌شوند.';
+const GOVERNMENT_FINANCE_PER_CLASS_NOTE = 'مصارف تنها زمانی به یک صنف نسبت داده می‌شوند که در ثبت مصرف، صنف مشخص شده باشد. مصارف عمومی مکتب (معاش، کرایه، انرژی) در ردیف «عمومی / بدون صنف» می‌آیند و در بیلانسِ هر صنف کسر نشده‌اند.';
+
+async function computeOpenEncumbrance({ schoolId = '', financialYearId = '', academicYearId = '', classId = '' } = {}) {
+  try {
+    const analytics = await buildProcurementCommitmentAnalytics({
+      schoolId: String(schoolId || ''),
+      financialYearId: String(financialYearId || ''),
+      academicYearId: String(academicYearId || ''),
+      classId: String(classId || '')
+    });
+    return {
+      outstanding: Number(analytics?.summary?.totalOutstandingAmount || 0),
+      committed: Number(analytics?.summary?.totalCommittedAmount || 0),
+      openCommitmentCount: Number(analytics?.summary?.openCommitmentCount || 0)
+    };
+  } catch {
+    return { outstanding: 0, committed: 0, openCommitmentCount: 0 };
+  }
+}
+
+function buildGovernmentBasisMeta(source = null) {
+  return {
+    basis: GOVERNMENT_FINANCE_BASIS,
+    basisNote: GOVERNMENT_FINANCE_BASIS_NOTE,
+    periodBasis: source && isShamsiAlignedSource(source) ? 'shamsi' : 'gregorian',
+    perClassBasis: 'direct_costs_only',
+    perClassNote: GOVERNMENT_FINANCE_PER_CLASS_NOTE
+  };
+}
+
+// Direct expense that could not be attributed to any class — the pool that makes
+// a naive per-class balance read as profit (P6). Surfaced so the caveat is
+// visible rather than implied.
+function summarizeUnallocatedExpense(rows = []) {
+  const unscoped = (rows || []).find((item) => !item.classId) || null;
+  return {
+    unallocatedExpense: Number(Number(unscoped?.totalExpense || 0).toFixed(2)),
+    unallocatedExpenseCount: Number(unscoped?.expenseCount || 0)
+  };
+}
+
+function applyEncumbranceToSummary(summary = {}, encumbrance = null) {
+  const outstanding = Number(encumbrance?.outstanding || 0);
+  const balance = Number(summary.balance || 0);
+  return {
+    ...summary,
+    encumbranceOutstanding: Number(outstanding.toFixed(2)),
+    encumbranceOpenCount: Number(encumbrance?.openCommitmentCount || 0),
+    balanceAfterEncumbrance: Number((balance - outstanding).toFixed(2))
+  };
+}
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
 const { sumPaidRefunds } = require('../utils/financeRefundRecognition');
 const {
@@ -305,11 +371,17 @@ async function buildQuarterlyGovernmentFinanceReport(filters = {}) {
   const totalIncome = rows.reduce((sum, item) => sum + Number(item.totalIncome || 0), 0);
   const totalExpense = rows.reduce((sum, item) => sum + Number(item.totalExpense || 0), 0);
   const totalRefunds = Number(refundSummary?.total || 0);
+  const encumbrance = await computeOpenEncumbrance({
+    schoolId: context.schoolId,
+    financialYearId: normalizeId(context.financialYear),
+    academicYearId: normalizeId(context.academicYear),
+    classId: normalizeText(filters.classId)
+  });
 
   return {
     range,
     rows,
-    summary: {
+    summary: applyEncumbranceToSummary({
       totalIncome: Number(totalIncome.toFixed(2)),
       totalRefunds: Number(totalRefunds.toFixed(2)),
       totalExpense: Number(totalExpense.toFixed(2)),
@@ -318,14 +390,16 @@ async function buildQuarterlyGovernmentFinanceReport(filters = {}) {
       classCount: rows.length,
       paymentCount: recognizedPaymentRows.filter((item) => Number(item.recognizedAmount || 0) > 0).length,
       refundCount: refundSummary?.count || 0,
-      expenseCount: rows.reduce((sum, item) => sum + Number(item.expenseCount || 0), 0)
-    },
+      expenseCount: rows.reduce((sum, item) => sum + Number(item.expenseCount || 0), 0),
+      ...summarizeUnallocatedExpense(rows)
+    }, encumbrance),
     feeTypeBreakdown,
     meta: {
       financialYearId: context.financialYear?._id ? String(context.financialYear._id) : '',
       academicYearId: context.academicYear?._id ? String(context.academicYear._id) : '',
       financialYearTitle: context.financialYear?.title || context.academicYear?.title || '',
-      quarter
+      quarter,
+      ...buildGovernmentBasisMeta({ startDate: context.baseStartDate, endDate: context.baseEndDate })
     }
   };
 }
@@ -420,11 +494,17 @@ async function buildMonthlyGovernmentFinanceReport(filters = {}) {
   const totalIncome = rows.reduce((sum, item) => sum + Number(item.totalIncome || 0), 0);
   const totalExpense = rows.reduce((sum, item) => sum + Number(item.totalExpense || 0), 0);
   const totalRefunds = Number(refundSummary?.total || 0);
+  const encumbrance = await computeOpenEncumbrance({
+    schoolId: context.schoolId,
+    financialYearId: normalizeId(context.financialYear),
+    academicYearId: normalizeId(context.academicYear),
+    classId: normalizeText(filters.classId)
+  });
 
   return {
     range,
     rows,
-    summary: {
+    summary: applyEncumbranceToSummary({
       totalIncome: Number(totalIncome.toFixed(2)),
       totalRefunds: Number(totalRefunds.toFixed(2)),
       totalExpense: Number(totalExpense.toFixed(2)),
@@ -433,14 +513,16 @@ async function buildMonthlyGovernmentFinanceReport(filters = {}) {
       classCount: rows.length,
       paymentCount: recognizedPaymentRows.filter((item) => Number(item.recognizedAmount || 0) > 0).length,
       refundCount: refundSummary?.count || 0,
-      expenseCount: rows.reduce((sum, item) => sum + Number(item.expenseCount || 0), 0)
-    },
+      expenseCount: rows.reduce((sum, item) => sum + Number(item.expenseCount || 0), 0),
+      ...summarizeUnallocatedExpense(rows)
+    }, encumbrance),
     feeTypeBreakdown,
     meta: {
       financialYearId: context.financialYear?._id ? String(context.financialYear._id) : '',
       academicYearId: context.academicYear?._id ? String(context.academicYear._id) : '',
       financialYearTitle: context.financialYear?.title || context.academicYear?.title || '',
-      month
+      month,
+      ...buildGovernmentBasisMeta({ startDate: context.baseStartDate, endDate: context.baseEndDate })
     }
   };
 }
@@ -470,6 +552,13 @@ async function buildAnnualGovernmentFinanceReport(filters = {}) {
   const totalIncome = quarterItems.reduce((sum, item) => sum + Number(item.totalIncome || 0), 0);
   const totalRefunds = quarterItems.reduce((sum, item) => sum + Number(item.totalRefunds || 0), 0);
   const totalExpense = quarterItems.reduce((sum, item) => sum + Number(item.totalExpense || 0), 0);
+  const netProfit = Number((totalIncome - totalRefunds - totalExpense).toFixed(2));
+  const encumbrance = await computeOpenEncumbrance({
+    schoolId: context.schoolId,
+    financialYearId: normalizeId(context.financialYear),
+    academicYearId: normalizeId(context.academicYear),
+    classId: normalizeText(filters.classId)
+  });
 
   return {
     range: source,
@@ -478,13 +567,17 @@ async function buildAnnualGovernmentFinanceReport(filters = {}) {
       totalIncome: Number(totalIncome.toFixed(2)),
       totalRefunds: Number(totalRefunds.toFixed(2)),
       totalExpense: Number(totalExpense.toFixed(2)),
-      netProfit: Number((totalIncome - totalRefunds - totalExpense).toFixed(2)),
-      quarterCount: quarterItems.length
+      netProfit,
+      quarterCount: quarterItems.length,
+      encumbranceOutstanding: Number(Number(encumbrance.outstanding || 0).toFixed(2)),
+      encumbranceOpenCount: Number(encumbrance.openCommitmentCount || 0),
+      balanceAfterEncumbrance: Number((netProfit - Number(encumbrance.outstanding || 0)).toFixed(2))
     },
     meta: {
       financialYearId: context.financialYear?._id ? String(context.financialYear._id) : '',
       academicYearId: context.academicYear?._id ? String(context.academicYear._id) : '',
-      financialYearTitle: context.financialYear?.title || context.academicYear?.title || ''
+      financialYearTitle: context.financialYear?.title || context.academicYear?.title || '',
+      ...buildGovernmentBasisMeta(source)
     }
   };
 }
@@ -707,7 +800,8 @@ async function buildGovernmentBudgetVsActualReport(filters = {}) {
       financialYearId: financialYear?._id ? String(financialYear._id) : '',
       academicYearId: academicYear?._id ? String(academicYear._id) : '',
       financialYearTitle: financialYear?.title || academicYear?.title || '',
-      budgetNote: budgetTargets.note || ''
+      budgetNote: budgetTargets.note || '',
+      ...buildGovernmentBasisMeta({ startDate: context.baseStartDate, endDate: context.baseEndDate })
     },
     summary,
     feeTypeBreakdown,
