@@ -1515,6 +1515,9 @@ export default function AdminGovernmentFinance() {
     readInitialSearchValue(searchParams, 'rmode')
   ));
   const [selectedTreasuryReportAccountId, setSelectedTreasuryReportAccountId] = useState('');
+  // Expense review/ledger date range (Gregorian YYYY-MM-DD from AfghanDateInput).
+  const [expenseDateFrom, setExpenseDateFrom] = useState('');
+  const [expenseDateTo, setExpenseDateTo] = useState('');
   const [message, setMessage] = useState('');
   const [messageTone, setMessageTone] = useState('info');
   const [busyAction, setBusyAction] = useState('');
@@ -1725,11 +1728,32 @@ export default function AdminGovernmentFinance() {
   const expenseCloseReadiness = useMemo(() => payload.expenseAnalytics?.closeReadiness || null, [payload.expenseAnalytics]);
   const expenseCloseReadinessBlockers = useMemo(() => expenseCloseReadiness?.blockers || [], [expenseCloseReadiness]);
 
+  // The full financial-year expense list (payload.expenses) is the source of
+  // truth — the analytics queue is capped at 12 newest, which hid older pending
+  // rows. Filter to actionable statuses + the chosen date range.
+  const filteredExpenseRows = useMemo(() => {
+    const inRange = (value) => {
+      const day = String(value || '').slice(0, 10);
+      if (!day) return !expenseDateFrom && !expenseDateTo;
+      if (expenseDateFrom && day < expenseDateFrom) return false;
+      if (expenseDateTo && day > expenseDateTo) return false;
+      return true;
+    };
+    const source = (payload.expenses || []).length
+      ? (payload.expenses || [])
+      : (payload.expenseAnalytics?.queue || []);
+    return source.filter((item) => inRange(item.expenseDate));
+  }, [payload.expenses, payload.expenseAnalytics, expenseDateFrom, expenseDateTo]);
   const expenseQueueRows = useMemo(() => (
-    (payload.expenseAnalytics?.queue || []).length
-      ? buildTablePreview(payload.expenseAnalytics.queue, 10)
-      : buildTablePreview((payload.expenses || []).filter((item) => !['approved', 'void'].includes(String(item.status || '').trim())), 10)
-  ), [payload.expenseAnalytics, payload.expenses]);
+    filteredExpenseRows
+      .filter((item) => !['approved', 'void'].includes(String(item.status || '').trim()))
+      .slice(0, 500)
+  ), [filteredExpenseRows]);
+  const expenseDateFilterActive = !!expenseDateFrom || !!expenseDateTo;
+  const clearExpenseDateFilter = () => {
+    setExpenseDateFrom('');
+    setExpenseDateTo('');
+  };
   const currentAdminLevel = useMemo(() => {
     try {
       return String(window.localStorage.getItem('adminLevel') || window.localStorage.getItem('orgRole') || '').trim().toLowerCase();
@@ -1753,7 +1777,7 @@ export default function AdminGovernmentFinance() {
     expenseCategoryRegistry.find((item) => String(item._id || item.id) === String(categoryDraft.id || '')) || null
   ), [categoryDraft.id, expenseCategoryRegistry]);
 
-  const archivePreview = useMemo(() => buildTablePreview(payload.expenses || [], 8), [payload.expenses]);
+  const archivePreview = useMemo(() => buildTablePreview(filteredExpenseRows, expenseDateFilterActive ? 200 : 12), [filteredExpenseRows, expenseDateFilterActive]);
   const treasurySummary = useMemo(() => payload.treasuryAnalytics?.summary || {}, [payload.treasuryAnalytics]);
   const treasuryAccounts = useMemo(() => payload.treasuryAnalytics?.accounts || [], [payload.treasuryAnalytics]);
   const automaticStudentPaymentTreasuryAccounts = useMemo(() => (
@@ -5171,8 +5195,32 @@ export default function AdminGovernmentFinance() {
                 <br />
                 سطحِ حسابِ شما: <strong>{currentAdminLevelLabel}</strong>.
               </div>
+
+              <div className="gov-expense-datefilter">
+                <label className="gov-field">
+                  <span>از تاریخ</span>
+                  <AfghanDateInput name="expenseDateFrom" value={expenseDateFrom} onChange={setExpenseDateFrom} showGregorianEquivalent />
+                </label>
+                <label className="gov-field">
+                  <span>تا تاریخ</span>
+                  <AfghanDateInput name="expenseDateTo" value={expenseDateTo} onChange={setExpenseDateTo} showGregorianEquivalent />
+                </label>
+                <button type="button" className="gov-ghost-btn slim" onClick={clearExpenseDateFilter} disabled={!expenseDateFilterActive}>
+                  پاک‌کردنِ تاریخ
+                </button>
+                <span className="gov-expense-datefilter__hint">
+                  {expenseDateFilterActive
+                    ? `${formatNumber(expenseQueueRows.length)} مورد در بازهٔ انتخابی`
+                    : 'برای دیدن و تاییدِ مصارفِ ماه‌های گذشته، بازهٔ تاریخ را انتخاب کنید.'}
+                </span>
+              </div>
+
               {!expenseQueueRows.length ? (
-                <div className="gov-empty-state">در محدوده فعلی هیچ ردیف مصرفی در انتظار اقدام نیست.</div>
+                <div className="gov-empty-state">
+                  {expenseDateFilterActive
+                    ? 'در این بازهٔ تاریخ هیچ مصرفِ در انتظار اقدامی پیدا نشد.'
+                    : 'در محدوده فعلی هیچ ردیف مصرفی در انتظار اقدام نیست.'}
+                </div>
               ) : (
                 <div className="gov-table-wrap">
                   <table className="gov-table">
@@ -5370,6 +5418,12 @@ export default function AdminGovernmentFinance() {
                   {busyAction === 'save-expense' ? 'در حال ذخیره...' : 'ثبت مصرف'}
                 </button>
               </div>
+
+              {expenseDateFilterActive ? (
+                <p className="gov-expense-datefilter__hint" style={{ margin: '4px 0 10px' }}>
+                  فهرست بر اساسِ بازهٔ تاریخِ «صف تایید مصارف» فیلتر شده است.
+                </p>
+              ) : null}
 
               {!archivePreview.length ? (
                 <div className="gov-empty-state">هنوز هیچ ردیف مصرفی برای این فیلترها ثبت نشده است.</div>

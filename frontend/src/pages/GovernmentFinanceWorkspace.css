@@ -239,7 +239,9 @@
 }
 
 .gov-card .gov-ghost-btn,
-.gov-card .gov-inline-link.card-link {
+.gov-panel .gov-ghost-btn,
+.gov-card .gov-inline-link.card-link,
+.gov-panel .gov-inline-link.card-link {
   color: var(--teal);
   background: linear-gradient(180deg, #effaf8, #f8fcfb);
   border: 1px solid #c8e3dd;
@@ -247,7 +249,9 @@
 }
 
 .gov-card .gov-ghost-btn:hover,
-.gov-card .gov-inline-link.card-link:hover {
+.gov-panel .gov-ghost-btn:hover,
+.gov-card .gov-inline-link.card-link:hover,
+.gov-panel .gov-inline-link.card-link:hover {
   background: linear-gradient(180deg, #e2f5f1, #f5fbfa);
 }
 
@@ -1698,6 +1702,28 @@
 
 .gov-approval-rule strong {
   color: #0b524c;
+}
+
+.gov-expense-datefilter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: var(--glass-hairline);
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.gov-expense-datefilter .gov-field {
+  min-width: 150px;
+}
+
+.gov-expense-datefilter__hint {
+  flex: 1 1 180px;
+  font-size: 0.85rem;
+  color: var(--ink-muted);
 }
 
 .gov-reports-switch {
