@@ -64,10 +64,26 @@ async function resolveUserPermissions(userId) {
   });
 }
 
+// Coarse "umbrella" permissions are granted as a single token that
+// resolvePermissions()/expandLegacyPermissions() always keeps in a user's
+// resolved set. hasPermissionMatch also treats "holds ANY fine-grained child of
+// the umbrella" as satisfying the umbrella — which is what the sawaneh.* keys in
+// LEGACY_PERMISSION_MAP rely on. For `manage_finance` that backward match is a
+// privilege-escalation hole: the read-only grants finance.reports.view /
+// reports.government_finance.view / finance.reports.consolidated.view (all handed
+// to school_manager / academic_manager / head_teacher via `view_reports`) each
+// satisfied `manage_finance`, so those roles passed EVERY
+// requirePermission('manage_finance') route — bills, payments, treasury moves,
+// month close, expense delete. The supported way to also admit a specific
+// granular grant on a route is requireAnyPermission([umbrella, granularKey]).
+// So: `manage_finance` is satisfied only by holding `manage_finance` itself.
+const UMBRELLA_LITERAL_ONLY = new Set(['manage_finance']);
+
 function hasPermissionMatch(permissions = [], requiredPermission = '') {
   const required = String(requiredPermission || '').trim();
   if (!required) return true;
   if (permissions.includes(required)) return true;
+  if (UMBRELLA_LITERAL_ONLY.has(required)) return false;
   return (LEGACY_PERMISSION_MAP[required] || []).some((permission) => permissions.includes(permission));
 }
 
@@ -112,4 +128,4 @@ function requireAnyPermission(permissionList = []) {
   };
 }
 
-module.exports = { applyDemoSchoolScope, requireAuth, optionalAuth, requireRole, requirePermission, requireAnyPermission };
+module.exports = { applyDemoSchoolScope, requireAuth, optionalAuth, requireRole, requirePermission, requireAnyPermission, hasPermissionMatch };
