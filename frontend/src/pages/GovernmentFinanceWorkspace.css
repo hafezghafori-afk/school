@@ -10,25 +10,32 @@
 
   /* Calm-glass design system (Phase 4 redesign). Body text always sits on one of
      these panels — never on the raw page background — so it stays solid --ink. */
-  --glass-bg: rgba(255, 255, 255, 0.6);
-  --glass-bg-strong: rgba(255, 255, 255, 0.74);
-  --glass-blur: blur(18px) saturate(135%);
-  --glass-border: 1px solid rgba(255, 255, 255, 0.65);
+  --glass-bg: linear-gradient(150deg, rgba(255, 255, 255, 0.66), rgba(243, 250, 248, 0.5));
+  --glass-bg-strong: rgba(255, 255, 255, 0.78);
+  --glass-blur: blur(26px) saturate(180%);
+  --glass-border: 1px solid rgba(255, 255, 255, 0.9);
   --glass-radius: 22px;
-  --glass-shadow: 0 10px 34px -12px rgba(20, 48, 43, 0.22);
-  --glass-hairline: 1px solid rgba(21, 48, 43, 0.08);
-  --ink-muted: #4a635f;
+  --glass-shadow: 0 26px 48px -22px rgba(14, 40, 36, 0.5), 0 2px 8px -2px rgba(14, 40, 36, 0.18);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 -1px 0 rgba(21, 48, 43, 0.05);
+  --glass-hairline: 1px solid rgba(21, 48, 43, 0.09);
+  --ink-muted: #42605b;
 
   --font-persian-ui: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
   --font-persian-display: "Vazirmatn", "B Nazanin", "B Mitra", "B Zar", Tahoma, sans-serif;
   min-height: 100vh;
   padding: 28px 18px 56px;
   color: var(--ink);
-  background:
-    radial-gradient(circle at top left, rgba(15, 118, 110, 0.09), transparent 26%),
-    radial-gradient(circle at 88% 12%, rgba(180, 83, 9, 0.1), transparent 24%),
-    radial-gradient(circle at 20% 90%, rgba(15, 118, 110, 0.06), transparent 30%),
-    linear-gradient(180deg, #f7faf8 0%, #eef4f2 44%, #f8f5ef 100%);
+  /* Deep, saturated colour pools + a faint grain so the frosted panels read as
+     glass rather than flat translucent sheets. */
+  background-color: #e6ecdf;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.35'/%3E%3C/svg%3E"),
+    radial-gradient(40rem 32rem at 0% -6%, rgba(13, 148, 136, 0.42), transparent),
+    radial-gradient(36rem 30rem at 104% 0%, rgba(202, 138, 4, 0.36), transparent),
+    radial-gradient(42rem 34rem at 92% 106%, rgba(15, 118, 110, 0.4), transparent),
+    radial-gradient(30rem 26rem at 4% 110%, rgba(159, 18, 57, 0.22), transparent),
+    linear-gradient(155deg, #dcece7 0%, #e6ecdf 46%, #f1e7da 100%);
+  background-attachment: fixed;
   font-family: var(--font-persian-ui);
   font-size: 1.08rem;
 }
@@ -791,6 +798,7 @@
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 16px;
+  align-items: start;
 }
 
 .gov-kpi-card,
@@ -802,7 +810,7 @@
   background: var(--glass-bg);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-shadow);
+  box-shadow: var(--glass-shadow), var(--glass-highlight);
 }
 
 .gov-kpi-card {
@@ -1558,6 +1566,17 @@
   grid-column: span 12;
   padding: 0;
   overflow: hidden;
+}
+
+.gov-panel[data-span='3'] { grid-column: span 3; }
+.gov-panel[data-span='4'] { grid-column: span 4; }
+.gov-panel[data-span='5'] { grid-column: span 5; }
+.gov-panel[data-span='6'] { grid-column: span 6; }
+.gov-panel[data-span='7'] { grid-column: span 7; }
+.gov-panel[data-span='8'] { grid-column: span 8; }
+
+@media (max-width: 900px) {
+  .gov-panel[data-span] { grid-column: span 12; }
 }
 
 .gov-panel__head {

@@ -4003,7 +4003,7 @@ export default function AdminGovernmentFinance() {
             {activeTab === 'year' ? (
               <section className="gov-content-grid">
             <PanelBulkControls tabKey="year" />
-            <CollapsiblePanel tabKey="year" panelKey="fy-status" title="وضعیت سال مالی" defaultOpen span="12">
+            <CollapsiblePanel tabKey="year" panelKey="fy-status" title="وضعیت سال مالی" defaultOpen span="5">
               <div className="gov-help-note">
                 <div className="gov-help-note-copy">
                   <strong>سال تعلیمی را از کجا تعریف کنم؟</strong>
@@ -4049,7 +4049,7 @@ export default function AdminGovernmentFinance() {
               </div>
             </CollapsiblePanel>
 
-            <CollapsiblePanel tabKey="year" panelKey="fy-register" title="دفتر سال‌های مالی" defaultOpen span="12">
+            <CollapsiblePanel tabKey="year" panelKey="fy-register" title="دفتر سال‌های مالی" defaultOpen span="7">
               {!payload.financialYears.length ? (
                 <div className="gov-empty-state">هنوز هیچ سال مالی ثبت نشده است.</div>
               ) : (
@@ -4112,7 +4112,7 @@ export default function AdminGovernmentFinance() {
               )}
             </CollapsiblePanel>
 
-            <CollapsiblePanel tabKey="year" panelKey="budget-vs-actual" title="بودجه در برابر عملکرد واقعی" span="12" cardAttr="data-budget-summary-card">
+            <CollapsiblePanel tabKey="year" panelKey="budget-vs-actual" title="بودجه در برابر عملکرد واقعی" span="7" cardAttr="data-budget-summary-card">
               <div className="gov-governance-grid">
                 <div className="gov-governance-stat" data-tone={(budgetVsActual.summary?.expenseVariance || 0) > 0 && (budgetVsActual.summary?.annualExpenseBudget || 0) > 0 ? 'rose' : 'teal'}>
                   <span>بودجه مصارف</span>
@@ -4152,7 +4152,7 @@ export default function AdminGovernmentFinance() {
               )}
             </CollapsiblePanel>
 
-            <CollapsiblePanel tabKey="year" panelKey="budget-config" title="کنترل‌های بودجه" hint="ذخیرهٔ اهدافِ بودجه" span="12">
+            <CollapsiblePanel tabKey="year" panelKey="budget-config" title="کنترل‌های بودجه" hint="ذخیرهٔ اهدافِ بودجه" span="5">
               <div className="gov-form-grid">
                 <label className="gov-field">
                   <span>هدف سالانه درآمد</span>
@@ -4444,7 +4444,7 @@ export default function AdminGovernmentFinance() {
               </div>
             </CollapsiblePanel>
 
-            <CollapsiblePanel tabKey="year" panelKey="fy-create" title="ایجاد سال مالی جدید" span="12">
+            <CollapsiblePanel tabKey="year" panelKey="fy-create" title="ایجاد سال مالی جدید" span="6">
               <div className="gov-form-grid">
                 <label className="gov-field">
                   <span>عنوان</span>
@@ -4488,7 +4488,7 @@ export default function AdminGovernmentFinance() {
               </div>
             </CollapsiblePanel>
 
-            <CollapsiblePanel tabKey="year" panelKey="close-guard" title="گارد بستن سال" defaultOpen span="12">
+            <CollapsiblePanel tabKey="year" panelKey="close-guard" title="گارد بستن سال" defaultOpen span="6">
               <div className="gov-card-head">
                 <div>
                   <strong>موانعِ بستنِ سال</strong>
@@ -4606,7 +4606,7 @@ export default function AdminGovernmentFinance() {
               panelKey="procurement-registry"
               title="تعهدات فروشنده"
               hint={`${formatNumber(procurementItems.length)} تعهد`}
-              span="12"
+              span="7"
               cardAttr="data-procurement-registry-card"
             >
               <div className="gov-governance-grid">
@@ -4716,7 +4716,7 @@ export default function AdminGovernmentFinance() {
               panelKey="procurement-settlement"
               title="تصفیه فروشنده"
               hint="تسویه از حساب خزانه"
-              span="12"
+              span="5"
               cardAttr="data-procurement-settlement-card"
             >
               {!settlementReadyProcurementOptions.length ? (
@@ -4941,7 +4941,7 @@ export default function AdminGovernmentFinance() {
               panelKey="category-registry"
               title="رجیستری رسمی دسته‌های مصرف"
               hint={`${formatNumber(expenseCategoryRegistry.length)} دسته`}
-              span="12"
+              span="7"
             >
               {!expenseCategoryRegistry.length ? (
                 <div className="gov-empty-state">هنوز هیچ دسته مصرف رسمی ثبت نشده است.</div>
@@ -4988,7 +4988,7 @@ export default function AdminGovernmentFinance() {
               panelKey="category-form"
               title={categoryDraft.id ? 'ویرایش دسته رسمی' : 'ایجاد دسته رسمی'}
               hint="اثرِ فوری روی اعتبارسنجی و تحلیل"
-              span="12"
+              span="5"
             >
               <div className="gov-form-grid">
                 <label className="gov-field">
@@ -5424,7 +5424,7 @@ export default function AdminGovernmentFinance() {
                   )}
                 </CollapsiblePanel>
 
-                <CollapsiblePanel tabKey="treasury" panelKey="tr-4" title="رجیستر حساب‌های خزانه" defaultOpen span="12">
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-4" title="رجیستر حساب‌های خزانه" defaultOpen span="7">
                   {!treasuryAccounts.length ? (
                     <div className="gov-empty-state">هنوز هیچ حساب خزانه‌ای ثبت نشده است.</div>
                   ) : (
@@ -5472,7 +5472,7 @@ export default function AdminGovernmentFinance() {
                   )}
                 </CollapsiblePanel>
 
-                <CollapsiblePanel tabKey="treasury" panelKey="tr-5" title="حساب خزانه" span="12">
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-5" title="حساب خزانه" span="5">
                   <div className="gov-form-grid">
                     <label className="gov-field">
                       <span>عنوان</span>
@@ -5537,7 +5537,7 @@ export default function AdminGovernmentFinance() {
                   </div>
                 </CollapsiblePanel>
 
-                <CollapsiblePanel tabKey="treasury" panelKey="tr-6" title="حرکت دستی خزانه" span="12">
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-6" title="حرکت دستی خزانه" span="6">
                   <div className="gov-form-grid">
                     <label className="gov-field">
                       <span>حساب</span>
@@ -5587,7 +5587,7 @@ export default function AdminGovernmentFinance() {
                   </div>
                 </CollapsiblePanel>
 
-                <CollapsiblePanel tabKey="treasury" panelKey="tr-7" title="انتقال و تطبیق" span="12">
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-7" title="انتقال و تطبیق" span="6">
                   <div className="gov-form-grid">
                     <label className="gov-field">
                       <span>حساب مبدا</span>
@@ -5756,7 +5756,7 @@ export default function AdminGovernmentFinance() {
                   </div>
                 </CollapsiblePanel>
 
-                <CollapsiblePanel tabKey="treasury" panelKey="tr-10" title="دفتر نقدی" span="12" cardAttr="data-treasury-cashbook-card">
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-10" title="دفتر نقدی" span="7" cardAttr="data-treasury-cashbook-card">
                   {!treasuryCashbook.rows?.length ? (
                     <div className="gov-empty-state">هیچ ردیفی در دفتر نقدی برای حساب خزانه انتخاب‌شده یافت نشد.</div>
                   ) : (
@@ -5791,7 +5791,7 @@ export default function AdminGovernmentFinance() {
                   )}
                 </CollapsiblePanel>
 
-                <CollapsiblePanel tabKey="treasury" panelKey="tr-11" title="وضعیت تطبیق" span="12" cardAttr="data-treasury-reconciliation-card">
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-11" title="وضعیت تطبیق" span="5" cardAttr="data-treasury-reconciliation-card">
                   <div className="gov-governance-grid">
                     <div className="gov-governance-stat" data-tone="teal">
                       <span>منطبق</span>
@@ -5848,7 +5848,7 @@ export default function AdminGovernmentFinance() {
                   )}
                 </CollapsiblePanel>
 
-                <CollapsiblePanel tabKey="treasury" panelKey="tr-12" title="خلاصه گردش" span="12">
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-12" title="خلاصه گردش" span="7">
                   {!treasuryMovementSummary.rows?.length ? (
                     <div className="gov-empty-state">هیچ خلاصه گردش خزانه‌ای برای فیلترهای انتخاب‌شده موجود نیست.</div>
                   ) : (
@@ -5884,7 +5884,7 @@ export default function AdminGovernmentFinance() {
                   )}
                 </CollapsiblePanel>
 
-                <CollapsiblePanel tabKey="treasury" panelKey="tr-13" title="پیگیری مغایرت" span="12" cardAttr="data-treasury-variance-card">
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-13" title="پیگیری مغایرت" span="5" cardAttr="data-treasury-variance-card">
                   {!treasuryVarianceReport.rows?.length ? (
                     <div className="gov-empty-state">برای فیلترهای انتخاب‌شده هیچ مغایرت خزانه شناسایی نشد.</div>
                   ) : (
@@ -5928,7 +5928,7 @@ export default function AdminGovernmentFinance() {
               <section className="gov-content-grid">
             <PanelBulkControls tabKey="archive" />
 
-            <CollapsiblePanel tabKey="archive" panelKey="closed-months" title="ماه‌های بسته" span="12">
+            <CollapsiblePanel tabKey="archive" panelKey="closed-months" title="ماه‌های بسته" span="5">
               <TimelineList items={(payload.closedMonths || []).slice(0, 12)} />
             </CollapsiblePanel>
 
@@ -5938,7 +5938,7 @@ export default function AdminGovernmentFinance() {
               title="بستهٔ خروجی رسمی"
               hint="پیش‌نویس ← ثبت رسمیِ مقام دوم"
               defaultOpen
-              span="12"
+              span="7"
             >
               <div className="gov-card-actions">
                 <button
@@ -6155,7 +6155,7 @@ export default function AdminGovernmentFinance() {
               panelKey="archive-register"
               title="راجستر آرشیف دولتی"
               hint="بسته‌های آرشیفی + اعتبارسنجی"
-              span="12"
+              span="7"
               cardAttr="data-government-archive-card"
             >
               {!governmentDocumentArchive.length ? (
@@ -6208,7 +6208,7 @@ export default function AdminGovernmentFinance() {
               panelKey="archive-delivery"
               title="ارسال آرشیف"
               hint="ارسال از مرکز ارسال مالی"
-              span="12"
+              span="5"
               cardAttr="data-government-archive-delivery-card"
             >
               {!selectedGovernmentArchive ? (
