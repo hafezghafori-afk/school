@@ -5197,17 +5197,19 @@ export default function AdminGovernmentFinance() {
               </div>
 
               <div className="gov-expense-datefilter">
-                <label className="gov-field">
-                  <span>از تاریخ</span>
-                  <AfghanDateInput name="expenseDateFrom" value={expenseDateFrom} onChange={setExpenseDateFrom} showGregorianEquivalent />
-                </label>
-                <label className="gov-field">
-                  <span>تا تاریخ</span>
-                  <AfghanDateInput name="expenseDateTo" value={expenseDateTo} onChange={setExpenseDateTo} showGregorianEquivalent />
-                </label>
-                <button type="button" className="gov-ghost-btn slim" onClick={clearExpenseDateFilter} disabled={!expenseDateFilterActive}>
-                  پاک‌کردنِ تاریخ
-                </button>
+                <div className="gov-expense-datefilter__row">
+                  <label className="gov-field">
+                    <span>از تاریخ</span>
+                    <AfghanDateInput name="expenseDateFrom" value={expenseDateFrom} onChange={setExpenseDateFrom} />
+                  </label>
+                  <label className="gov-field">
+                    <span>تا تاریخ</span>
+                    <AfghanDateInput name="expenseDateTo" value={expenseDateTo} onChange={setExpenseDateTo} />
+                  </label>
+                  <button type="button" className="gov-ghost-btn slim" onClick={clearExpenseDateFilter} disabled={!expenseDateFilterActive}>
+                    پاک‌کردنِ تاریخ
+                  </button>
+                </div>
                 <span className="gov-expense-datefilter__hint">
                   {expenseDateFilterActive
                     ? `${formatNumber(expenseQueueRows.length)} مورد در بازهٔ انتخابی`
