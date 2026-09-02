@@ -724,3 +724,21 @@
   cursor: pointer;
 }
 .academy-checkbox input { width: 16px; height: 16px; }
+
+/* ---------- P3+ ویرایشِ ثبت‌نام و اقلامِ بدهی ---------- */
+.academy-edit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.academy-charge-edit-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.academy-charge-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+}
+.academy-charge-edit-row.is-locked { opacity: 0.72; background: rgba(148, 163, 184, 0.08); }
+.academy-charge-edit-row input,
+.academy-charge-edit-row select { padding: 5px 8px; border-radius: 8px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.3); color: inherit; }
+.academy-charge-edit-row input[type="number"] { width: 92px; }
+.academy-charge-edit-row input[placeholder="عنوان"] { min-width: 130px; flex: 1 1 130px; }

@@ -363,6 +363,54 @@ router.post('/registrations', async (req, res) => {
   }
 });
 
+// ویرایشِ یک ثبت‌نام — فیلدهای امنِ ثبت‌نام؛ فیس/تخفیفِ واقعی روی اقلامِ بدهی
+// ویرایش می‌شود (PUT /charges/:id). تغییرِ monthlyFee فقط اقلامِ ماهانهٔ
+// پرداخت‌نشده را به مبلغِ تازه می‌برد و ماه‌های عقب‌افتاده را می‌سازد.
+router.put('/registrations/:id', async (req, res) => {
+  try {
+    const reg = await AcademyRegistration.findById(req.params.id);
+    if (!reg) return res.status(404).json({ success: false, message: 'ثبت‌نام پیدا نشد.' });
+    const settings = await getSettings();
+
+    if (req.body.status !== undefined && ['active', 'completed', 'cancelled', 'paused'].includes(req.body.status)) reg.status = req.body.status;
+    if (req.body.startDate !== undefined) reg.startDate = String(req.body.startDate || '').slice(0, 10);
+    if (req.body.endDate !== undefined) reg.endDate = String(req.body.endDate || '').slice(0, 10);
+    if (req.body.note !== undefined) reg.note = String(req.body.note || '').trim();
+
+    let regenMonthly = false;
+    if (req.body.monthlyFee !== undefined && reg.paymentPlan === 'monthly') {
+      const newFee = toNumber(req.body.monthlyFee);
+      if (newFee !== toNumber(reg.monthlyFee)) {
+        reg.monthlyFee = newFee;
+        regenMonthly = true;
+        // اقلامِ ماهانهٔ پرداخت‌نشده را به مبلغِ تازه ببر
+        const monthlyCharges = await AcademyCharge.find({ registrationId: reg._id, kind: 'monthly', status: { $ne: 'void' }, paidAmount: 0 });
+        for (const c of monthlyCharges) {
+          c.amount = newFee;
+          c.updatedBy = userId(req);
+          await c.save();
+        }
+      }
+    }
+
+    reg.updatedBy = userId(req);
+    reg.ledgerManaged = true;
+    await reg.save();
+
+    if (regenMonthly) {
+      try { await academyLedger.generateMonthlyCharges({ dueDay: settings.monthlyChargeDueDay || 20, registrationId: reg._id }); } catch (e) { console.error(e?.message); }
+    }
+    const updated = await academyLedger.recomputeRegistration(reg._id);
+    const populated = await AcademyRegistration.findById(reg._id)
+      .populate('studentId', 'fullName studentCode phone')
+      .populate('courseId', 'name defaultFee level')
+      .populate('classId', 'name');
+    res.json({ success: true, item: populated, registration: updated?.toObject() || null, message: 'ثبت‌نام به‌روزرسانی شد.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ویرایشِ ثبت‌نام ناموفق بود.' });
+  }
+});
+
 router.post('/payments', async (req, res) => {
   try {
     const amount = toNumber(req.body.amount);
@@ -977,6 +1025,73 @@ router.get('/reports/aging', async (_req, res) => {
     res.json({ success: true, buckets, students, totalOutstanding: Object.values(buckets).reduce((s, b) => s + b.total, 0) });
   } catch (error) {
     res.status(500).json({ success: false, message: error?.message || 'گزارشِ رده‌بندیِ سنی ناموفق بود.' });
+  }
+});
+
+// همهٔ باقی‌داران — هر ثبت‌نامی که قلمِ بازِ غیرِ ابطالی دارد، با تفکیکِ ماهِ سررسید.
+// فیلترِ اختیاریِ بازهٔ سررسید: ?from=YYYY-MM-DD&to=YYYY-MM-DD
+router.get('/reports/debtors', async (req, res) => {
+  try {
+    const today = academyLedger.todayKey();
+    const from = req.query.from ? String(req.query.from).slice(0, 10) : '';
+    const to = req.query.to ? String(req.query.to).slice(0, 10) : '';
+
+    const filter = { status: { $ne: 'void' }, balance: { $gt: 0 } };
+    if (from || to) {
+      filter.dueDate = { $gt: '' };
+      if (from) filter.dueDate.$gte = from;
+      if (to) filter.dueDate.$lte = to;
+    }
+
+    const charges = await AcademyCharge.find(filter)
+      .populate('studentId', 'fullName studentCode phone')
+      .populate({ path: 'registrationId', select: 'courseId classId paymentPlan status', populate: [{ path: 'courseId', select: 'name' }, { path: 'classId', select: 'name' }] })
+      .sort({ dueDate: 1, createdAt: 1 })
+      .lean();
+
+    const byReg = new Map();
+    const byMonth = new Map();
+    for (const c of charges) {
+      const bal = toNumber(c.balance);
+      const overdue = Boolean(c.dueDate) && String(c.dueDate) < today;
+      const monthKey = c.kind === 'monthly' && c.periodKey
+        ? c.periodKey
+        : (c.dueDate ? academyLedger.shamsiMonthKey(c.dueDate) : 'بدون سررسید');
+
+      const m = byMonth.get(monthKey) || { periodKey: monthKey, total: 0, count: 0, overdue: 0 };
+      m.total += bal; m.count += 1; if (overdue) m.overdue += bal;
+      byMonth.set(monthKey, m);
+
+      const rid = String(c.registrationId?._id || c.registrationId);
+      const r = byReg.get(rid) || {
+        registrationId: rid,
+        student: c.studentId,
+        courseName: c.registrationId?.courseId?.name || '',
+        className: c.registrationId?.classId?.name || '',
+        paymentPlan: c.registrationId?.paymentPlan || '',
+        balance: 0, overdue: 0, openCount: 0, oldestDue: null, months: [], lines: []
+      };
+      r.balance += bal;
+      if (overdue) r.overdue += bal;
+      r.openCount += 1;
+      if (c.dueDate && (!r.oldestDue || c.dueDate < r.oldestDue)) r.oldestDue = c.dueDate;
+      if (!r.months.includes(monthKey)) r.months.push(monthKey);
+      r.lines.push({
+        _id: c._id, kind: c.kind, title: c.title, periodKey: monthKey,
+        dueDate: c.dueDate || '', amount: toNumber(c.amount), discountAmount: toNumber(c.discountAmount),
+        paidAmount: toNumber(c.paidAmount), balance: bal, isOverdue: overdue
+      });
+      byReg.set(rid, r);
+    }
+
+    const rows = [...byReg.values()].sort((a, b) => b.balance - a.balance).slice(0, 1000);
+    const months = [...byMonth.values()].sort((a, b) => String(a.periodKey).localeCompare(String(b.periodKey)));
+    const totalOutstanding = rows.reduce((s, r) => s + r.balance, 0);
+    const studentCount = new Set(rows.map((r) => String(r.student?._id || r.student))).size;
+
+    res.json({ success: true, from, to, rows, months, totalOutstanding, studentCount });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'گزارشِ باقی‌داران ناموفق بود.' });
   }
 });
 
