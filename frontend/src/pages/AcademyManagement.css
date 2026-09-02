@@ -725,20 +725,157 @@
 }
 .academy-checkbox input { width: 16px; height: 16px; }
 
-/* ---------- P3+ ویرایشِ ثبت‌نام و اقلامِ بدهی ---------- */
-.academy-edit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-.academy-charge-edit-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+/* ---------- P3+ ویرایشِ ثبت‌نام — دیزاینِ شیشه‌ای ---------- */
+.academy-modal-backdrop.is-glass {
+  background: rgba(2, 6, 23, 0.55);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+.academy-glass-modal {
+  width: min(100%, 940px);
+  max-height: 90vh;
+  overflow: auto;
+  border-radius: 22px;
+  padding: 22px 22px 26px;
+  color: #ecfeff;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background:
+    linear-gradient(135deg, rgba(56, 189, 248, 0.14), rgba(129, 140, 248, 0.10) 45%, rgba(15, 23, 42, 0.30)),
+    rgba(15, 23, 42, 0.62);
+  -webkit-backdrop-filter: blur(26px) saturate(150%);
+  backdrop-filter: blur(26px) saturate(150%);
+  box-shadow: 0 24px 70px -20px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+.academy-glass-modal h2 { margin: 4px 34px 2px 0; font-size: 22px; }
+.academy-glass-modal h3 { margin: 18px 0 8px; font-size: 15px; color: #a5f3fc; }
+.academy-glass-modal .academy-modal-close {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  padding: 7px 14px;
+}
+.academy-glass-card {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 16px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.academy-glass-card > .academy-edit-grid { margin: 0; }
+.academy-edit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.academy-glass-modal .academy-form button[type],
+.academy-glass-modal > button {
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.9), rgba(99, 102, 241, 0.9));
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  font-weight: 800;
+}
+
+/* summary of pending changes */
+.academy-change-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px dashed rgba(165, 243, 252, 0.4);
+  background: rgba(56, 189, 248, 0.08);
+  margin-bottom: 12px;
+}
+.academy-change-summary.is-empty { border-style: solid; border-color: rgba(148, 163, 184, 0.25); background: rgba(148, 163, 184, 0.06); color: #94a3b8; }
+
+.academy-change-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.academy-change-chip.t-fee-up { background: rgba(248, 113, 113, 0.18); color: #fca5a5; }
+.academy-change-chip.t-fee-down { background: rgba(34, 197, 94, 0.18); color: #86efac; }
+.academy-change-chip.t-discount-add { background: rgba(56, 189, 248, 0.2); color: #7dd3fc; }
+.academy-change-chip.t-discount-remove { background: rgba(251, 191, 36, 0.2); color: #fcd34d; }
+.academy-change-chip.t-discount-change { background: rgba(129, 140, 248, 0.2); color: #c7d2fe; }
+.academy-change-chip.t-due { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; }
+.academy-change-chip.t-title { background: rgba(148, 163, 184, 0.16); color: #cbd5e1; }
+.academy-change-chip.t-new { background: rgba(45, 212, 191, 0.2); color: #5eead4; }
+.academy-change-chip.t-void { background: rgba(248, 113, 113, 0.22); color: #fca5a5; }
+
+.academy-charge-edit-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
 .academy-charge-edit-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
-  padding: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
 }
-.academy-charge-edit-row.is-locked { opacity: 0.72; background: rgba(148, 163, 184, 0.08); }
+.academy-charge-edit-row.is-dirty { border-color: rgba(125, 211, 252, 0.55); box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.25); }
+.academy-charge-edit-row.is-locked { opacity: 0.7; background: rgba(148, 163, 184, 0.08); }
+.academy-charge-edit-row .academy-cer-field { display: flex; flex-direction: column; gap: 3px; }
+.academy-charge-edit-row .academy-cer-field > span { font-size: 10px; font-weight: 800; color: #94a3b8; }
 .academy-charge-edit-row input,
-.academy-charge-edit-row select { padding: 5px 8px; border-radius: 8px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.3); color: inherit; }
-.academy-charge-edit-row input[type="number"] { width: 92px; }
-.academy-charge-edit-row input[placeholder="عنوان"] { min-width: 130px; flex: 1 1 130px; }
+.academy-charge-edit-row select {
+  padding: 7px 9px;
+  border-radius: 9px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: inherit;
+}
+.academy-charge-edit-row input[type="number"] { width: 100px; }
+.academy-cer-row-changes { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 5px; }
+.academy-cer-actions { display: flex; gap: 6px; margin-inline-start: auto; }
+
+/* ---------- گزارش‌ها: نوارِ فیلترِ بزرگِ باقی‌داران ---------- */
+.academy-filterbar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px 16px;
+  align-items: end;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  margin-bottom: 14px;
+}
+.academy-filterbar .academy-fb-field { display: flex; flex-direction: column; gap: 5px; }
+.academy-filterbar .academy-fb-field > span { font-size: 11px; font-weight: 800; color: #a5f3fc; }
+.academy-filterbar input,
+.academy-filterbar select {
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: inherit;
+  width: 100%;
+}
+.academy-segment { display: inline-flex; border-radius: 10px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.16); }
+.academy-segment button {
+  border: 0;
+  border-radius: 0;
+  padding: 9px 12px;
+  background: rgba(15, 23, 42, 0.4);
+  color: #cbd5e1;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.academy-segment button.is-active { background: linear-gradient(135deg, rgba(56, 189, 248, 0.85), rgba(99, 102, 241, 0.85)); color: #fff; }
+.academy-fb-actions { display: flex; gap: 8px; align-items: end; }
+
+.academy-bucket-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
+.academy-bucket-chip {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.academy-bucket-chip b { display: block; font-size: 14px; }
+.academy-bucket-chip.is-hot { border-color: rgba(248, 113, 113, 0.4); background: rgba(248, 113, 113, 0.1); }

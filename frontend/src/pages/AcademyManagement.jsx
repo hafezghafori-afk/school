@@ -256,6 +256,9 @@ export default function AcademyManagement() {
   const [debtors, setDebtors] = useState(null);
   const [debtorsFrom, setDebtorsFrom] = useState('');
   const [debtorsTo, setDebtorsTo] = useState('');
+  const [debtorStatus, setDebtorStatus] = useState('all');
+  const [debtorSearch, setDebtorSearch] = useState('');
+  const [debtorSort, setDebtorSort] = useState('balance');
   const [editingRegistration, setEditingRegistration] = useState(null);
   const [payroll, setPayroll] = useState(null);
   const [payrollPeriod, setPayrollPeriod] = useState(() => {
@@ -514,6 +517,24 @@ export default function AcademyManagement() {
     [courses, registrationForm.courseId]
   );
 
+  const visibleDebtorRows = useMemo(() => {
+    const q = debtorSearch.trim().toLowerCase();
+    const rows = (debtors?.rows || []).filter((r) => {
+      if (debtorStatus === 'overdue' && !(Number(r.overdue) > 0)) return false;
+      if (debtorStatus === 'notdue' && Number(r.overdue) > 0) return false;
+      if (!q) return true;
+      return [r.student?.fullName, r.student?.studentCode, r.student?.phone, r.courseName, r.className]
+        .some((v) => String(v || '').toLowerCase().includes(q));
+    });
+    const cmp = {
+      balance: (a, b) => Number(b.balance || 0) - Number(a.balance || 0),
+      overdue: (a, b) => Number(b.overdue || 0) - Number(a.overdue || 0),
+      oldest: (a, b) => String(a.oldestDue || '9999').localeCompare(String(b.oldestDue || '9999')),
+      name: (a, b) => String(a.student?.fullName || '').localeCompare(String(b.student?.fullName || ''), 'fa')
+    }[debtorSort] || (() => 0);
+    return [...rows].sort(cmp);
+  }, [debtors, debtorStatus, debtorSearch, debtorSort]);
+
   // Built-in categories (hardcoded, always offered) plus whatever the
   // academy has defined for itself and left active - custom names are used
   // verbatim as both the option value and its label, since AcademyExpense
@@ -640,17 +661,35 @@ export default function AcademyManagement() {
 
   const openRegEdit = (reg) => {
     const list = (chargesByReg.get(String(reg._id)) || []).filter((c) => c.status !== 'void');
+    const norm = (c) => ({
+      _id: c._id, kind: c.kind, status: c.status,
+      title: c.title || '',
+      amount: c.amount ?? 0,
+      discountAmount: c.discountAmount ?? 0,
+      discountType: c.discountType || '',
+      discountReason: c.discountReason || '',
+      dueDate: c.dueDate ? String(c.dueDate).slice(0, 10) : '',
+      paidAmount: c.paidAmount ?? 0,
+      balance: c.balance ?? 0
+    });
     setEditingRegistration({
       _id: reg._id,
       studentName: reg.studentId?.fullName || '',
       courseName: reg.courseId?.name || '',
       paymentPlan: reg.paymentPlan,
       status: reg.status || 'active',
+      original: {
+        status: reg.status || 'active',
+        startDate: reg.startDate ? String(reg.startDate).slice(0, 10) : '',
+        endDate: reg.endDate ? String(reg.endDate).slice(0, 10) : '',
+        monthlyFee: reg.monthlyFee ?? ''
+      },
       startDate: reg.startDate ? String(reg.startDate).slice(0, 10) : '',
       endDate: reg.endDate ? String(reg.endDate).slice(0, 10) : '',
       monthlyFee: reg.monthlyFee ?? '',
       note: reg.note || '',
-      charges: list.map((c) => ({ ...c })),
+      charges: list.map(norm),
+      originalCharges: list.map(norm),
       newCharge: { kind: 'manual', title: '', amount: '', dueDate: '', discountAmount: '', discountType: '', discountReason: '' }
     });
   };
@@ -1475,44 +1514,102 @@ export default function AcademyManagement() {
                   ])}
                 />
               </div>
-              <div className="academy-grid">
-                <div className="academy-panel">
-                  <div className="academy-panel-head">
-                    <h2>باقی‌داران</h2>
-                    <button
-                      type="button"
-                      className="academy-inline-button"
-                      onClick={() => exportCsv(
-                        'academy-debtors.csv',
-                        ['Student', 'Course', 'Class', 'Balance'],
-                        (reports?.debtors || []).map((item) => [item.studentId?.fullName, item.courseId?.name, item.classId?.name, item.balance])
-                      )}
-                    >
-                      Excel/CSV
-                    </button>
+              <div className="academy-panel">
+                <div className="academy-panel-head">
+                  <h2>باقی‌داران — همهٔ ماه‌ها</h2>
+                  <button
+                    type="button"
+                    className="academy-inline-button"
+                    onClick={() => exportCsv(
+                      'academy-debtors.csv',
+                      ['Student', 'Code', 'Phone', 'Course', 'Class', 'OpenItems', 'Overdue', 'Balance', 'Months', 'OldestDue'],
+                      visibleDebtorRows.map((r) => [
+                        r.student?.fullName, r.student?.studentCode, r.student?.phone,
+                        r.courseName, r.className, r.openCount, r.overdue, r.balance,
+                        (r.months || []).join(' '), r.oldestDue || ''
+                      ])
+                    )}
+                    disabled={!visibleDebtorRows.length}
+                  >
+                    Excel/CSV
+                  </button>
+                  <button type="button" className="academy-inline-button" onClick={() => copyPhones(visibleDebtorRows.map((r) => r.student))} disabled={!visibleDebtorRows.length}>کپیِ شماره‌ها</button>
+                </div>
+                <p className="academy-form-hint">هر ثبت‌نامی که قلمِ بازِ پرداخت‌نشده دارد — از هر ماهی. فیلترِ «سررسید از/تا» روی سرور اعمال می‌شود؛ وضعیت، جستجو و مرتب‌سازی بلافاصله.</p>
+
+                <div className="academy-filterbar">
+                  <div className="academy-fb-field">
+                    <span>وضعیت</span>
+                    <div className="academy-segment">
+                      {[['all', 'همه'], ['overdue', 'فقط معوق'], ['notdue', 'سررسیدنشده']].map(([v, l]) => (
+                        <button key={v} type="button" className={debtorStatus === v ? 'is-active' : ''} onClick={() => setDebtorStatus(v)}>{l}</button>
+                      ))}
+                    </div>
                   </div>
-                  <Table
-                    columns={['شاگرد', 'کورس', 'صنف', 'باقی']}
-                    rows={(reports?.debtors || []).map((item) => [
-                      text(item.studentId?.fullName),
-                      text(item.courseId?.name),
-                      text(item.classId?.name),
-                      `${fmt(item.balance)} ${currency}`
-                    ])}
-                  />
+                  <label className="academy-fb-field"><span>سررسید از</span><AfghanDateInput value={debtorsFrom} onChange={setDebtorsFrom} /></label>
+                  <label className="academy-fb-field"><span>سررسید تا</span><AfghanDateInput value={debtorsTo} onChange={setDebtorsTo} /></label>
+                  <label className="academy-fb-field"><span>جستجو (نام / کد / کورس)</span>
+                    <input value={debtorSearch} onChange={(e) => setDebtorSearch(e.target.value)} placeholder="نامِ شاگرد…" />
+                  </label>
+                  <label className="academy-fb-field"><span>مرتب‌سازی</span>
+                    <select value={debtorSort} onChange={(e) => setDebtorSort(e.target.value)}>
+                      <option value="balance">بیشترین باقی</option>
+                      <option value="overdue">بیشترین معوق</option>
+                      <option value="oldest">قدیمی‌ترین سررسید</option>
+                      <option value="name">نامِ شاگرد</option>
+                    </select>
+                  </label>
+                  <div className="academy-fb-field">
+                    <span>&nbsp;</span>
+                    <div className="academy-fb-actions">
+                      <button type="button" className="academy-inline-button" onClick={() => loadDebtors()} disabled={busy}>اعمالِ تاریخ</button>
+                      <button
+                        type="button"
+                        className="academy-inline-button"
+                        onClick={() => { setDebtorsFrom(''); setDebtorsTo(''); setDebtorStatus('all'); setDebtorSearch(''); setDebtorSort('balance'); loadDebtors('', ''); }}
+                      >
+                        پاک‌کردن
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div className="academy-panel">
-                  <h2>گزارش کورس‌ها</h2>
-                  <Table
-                    columns={['کورس', 'ثبت‌نام', 'دریافت', 'باقی']}
-                    rows={(reports?.byCourse || []).map((item) => [
-                      text(item.courseName),
-                      fmt(item.registrations),
-                      `${fmt(item.paid)} ${currency}`,
-                      `${fmt(item.balance)} ${currency}`
-                    ])}
-                  />
+
+                <div className="academy-bucket-chips">
+                  <span className="academy-bucket-chip"><b>{fmt(debtors?.studentCount || 0)}</b>شاگرد</span>
+                  <span className="academy-bucket-chip"><b>{fmt(visibleDebtorRows.length)}</b>ثبت‌نام (نمایش)</span>
+                  <span className="academy-bucket-chip"><b>{fmt(debtors?.totalOutstanding)} {currency}</b>کل باقی</span>
+                  {['notdue', 'd0_30', 'd31_60', 'd61_90', 'd90'].map((k) => {
+                    const b = aging?.buckets?.[k] || {};
+                    return <span key={k} className={`academy-bucket-chip${(k !== 'notdue' && Number(b.total) > 0) ? ' is-hot' : ''}`}><b>{fmt(b.total)} {currency}</b>{b.label || k} ({fmt(b.count)})</span>;
+                  })}
                 </div>
+
+                <h3>تفکیکِ ماهِ سررسید</h3>
+                <Table
+                  columns={['ماه', 'کل باقی', 'معوق', 'تعداد قلم']}
+                  rows={(debtors?.months || []).map((m) => [
+                    m.periodKey && m.periodKey.includes('-') ? formatMonthLabel(m.periodKey) : text(m.periodKey),
+                    `${fmt(m.total)} ${currency}`,
+                    `${fmt(m.overdue)} ${currency}`,
+                    fmt(m.count)
+                  ])}
+                />
+                <h3>به تفکیکِ ثبت‌نام</h3>
+                <Table
+                  columns={['شاگرد', 'کد', 'تماس', 'کورس', 'صنف', 'اقلامِ باز', 'معوق', 'کل باقی', 'ماه‌ها', 'قدیمی‌ترین سررسید']}
+                  rows={visibleDebtorRows.map((r) => [
+                    text(r.student?.fullName),
+                    text(r.student?.studentCode),
+                    text(r.student?.phone),
+                    text(r.courseName),
+                    text(r.className),
+                    fmt(r.openCount),
+                    `${fmt(r.overdue)} ${currency}`,
+                    `${fmt(r.balance)} ${currency}`,
+                    (r.months || []).map((k) => (k && k.includes('-') ? formatMonthLabel(k) : k)).join('، '),
+                    r.oldestDue ? formatAfghanStoredDateLabel(r.oldestDue) : '—'
+                  ])}
+                />
               </div>
 
               <div className="academy-grid">
@@ -1534,94 +1631,17 @@ export default function AcademyManagement() {
                   </p>
                 </div>
                 <div className="academy-panel">
-                  <h2>رده‌بندی سنیِ باقی‌داری</h2>
+                  <h2>گزارش کورس‌ها</h2>
                   <Table
-                    columns={['بازه', 'مبلغ', 'تعداد قلم']}
-                    rows={['notdue', 'd0_30', 'd31_60', 'd61_90', 'd90'].map((k) => {
-                      const b = aging?.buckets?.[k] || {};
-                      return [b.label || k, `${fmt(b.total)} ${currency}`, fmt(b.count)];
-                    })}
+                    columns={['کورس', 'ثبت‌نام', 'دریافت', 'باقی']}
+                    rows={(reports?.byCourse || []).map((item) => [
+                      text(item.courseName),
+                      fmt(item.registrations),
+                      `${fmt(item.paid)} ${currency}`,
+                      `${fmt(item.balance)} ${currency}`
+                    ])}
                   />
-                  <p className="academy-form-hint">کل باقی‌داری: <b>{fmt(aging?.totalOutstanding)} {currency}</b></p>
                 </div>
-              </div>
-
-              <div className="academy-panel">
-                <div className="academy-panel-head">
-                  <h2>باقی‌دارانِ معوق</h2>
-                  <button type="button" className="academy-inline-button" onClick={() => copyPhones(aging?.students)} disabled={!(aging?.students || []).length}>کپیِ شماره‌ها</button>
-                </div>
-                <Table
-                  columns={['شاگرد', 'کد', 'تماس', 'معوق', 'کل باقی', 'قدیمی‌ترین سررسید']}
-                  rows={(aging?.students || []).filter((s) => s.overdue > 0).map((s) => [
-                    text(s.student?.fullName),
-                    text(s.student?.studentCode),
-                    text(s.student?.phone),
-                    `${fmt(s.overdue)} ${currency}`,
-                    `${fmt(s.balance)} ${currency}`,
-                    s.oldestDue ? formatAfghanStoredDateLabel(s.oldestDue) : '—'
-                  ])}
-                />
-              </div>
-
-              <div className="academy-panel">
-                <div className="academy-panel-head">
-                  <h2>همهٔ باقی‌داران — از همهٔ ماه‌ها</h2>
-                  <button
-                    type="button"
-                    className="academy-inline-button"
-                    onClick={() => exportCsv(
-                      'academy-all-debtors.csv',
-                      ['Student', 'Code', 'Phone', 'Course', 'Class', 'OpenItems', 'Overdue', 'Balance', 'Months', 'OldestDue'],
-                      (debtors?.rows || []).map((r) => [
-                        r.student?.fullName, r.student?.studentCode, r.student?.phone,
-                        r.courseName, r.className, r.openCount, r.overdue, r.balance,
-                        (r.months || []).join(' '), r.oldestDue || ''
-                      ])
-                    )}
-                    disabled={!(debtors?.rows || []).length}
-                  >
-                    Excel/CSV
-                  </button>
-                  <button type="button" className="academy-inline-button" onClick={() => copyPhones((debtors?.rows || []).map((r) => r.student))} disabled={!(debtors?.rows || []).length}>کپیِ شماره‌ها</button>
-                </div>
-                <div className="academy-filter-row">
-                  <label className="academy-checkbox"><span>سررسید از</span><AfghanDateInput value={debtorsFrom} onChange={setDebtorsFrom} /></label>
-                  <label className="academy-checkbox"><span>تا</span><AfghanDateInput value={debtorsTo} onChange={setDebtorsTo} /></label>
-                  <button type="button" className="academy-inline-button" onClick={() => loadDebtors()} disabled={busy}>نمایش</button>
-                  {(debtorsFrom || debtorsTo) && (
-                    <button type="button" className="academy-inline-button" onClick={() => { setDebtorsFrom(''); setDebtorsTo(''); loadDebtors('', ''); }}>پاک‌کردنِ تاریخ</button>
-                  )}
-                  <span className="academy-field-label">
-                    {fmt(debtors?.studentCount || 0)} شاگرد · {fmt((debtors?.rows || []).length)} ثبت‌نام · کل باقی <b>{fmt(debtors?.totalOutstanding)} {currency}</b>
-                  </span>
-                </div>
-                <h3>تفکیکِ ماهِ سررسید</h3>
-                <Table
-                  columns={['ماه', 'کل باقی', 'معوق', 'تعداد قلم']}
-                  rows={(debtors?.months || []).map((m) => [
-                    m.periodKey && m.periodKey.includes('-') ? formatMonthLabel(m.periodKey) : text(m.periodKey),
-                    `${fmt(m.total)} ${currency}`,
-                    `${fmt(m.overdue)} ${currency}`,
-                    fmt(m.count)
-                  ])}
-                />
-                <h3>باقی‌داران به تفکیکِ ثبت‌نام</h3>
-                <Table
-                  columns={['شاگرد', 'کد', 'تماس', 'کورس', 'صنف', 'اقلامِ باز', 'معوق', 'کل باقی', 'ماه‌ها', 'قدیمی‌ترین سررسید']}
-                  rows={(debtors?.rows || []).map((r) => [
-                    text(r.student?.fullName),
-                    text(r.student?.studentCode),
-                    text(r.student?.phone),
-                    text(r.courseName),
-                    text(r.className),
-                    fmt(r.openCount),
-                    `${fmt(r.overdue)} ${currency}`,
-                    `${fmt(r.balance)} ${currency}`,
-                    (r.months || []).map((k) => (k && k.includes('-') ? formatMonthLabel(k) : k)).join('، '),
-                    r.oldestDue ? formatAfghanStoredDateLabel(r.oldestDue) : '—'
-                  ])}
-                />
               </div>
 
               <div className="academy-panel">
@@ -1797,6 +1817,33 @@ export default function AcademyManagement() {
 }
 
 const REG_STATUS_LABELS = { active: 'فعال', completed: 'تمام‌شده', paused: 'متوقف', cancelled: 'لغوشده' };
+const NEW_CHARGE_KIND_HINT = {
+  manual: 'قلمِ دستی — هر بدهیِ اضافه (مواد، کتاب، …).',
+  installment: 'یک قسطِ تازه به جدولِ اقساط.',
+  late_fee: 'جریمهٔ دیرکردِ دستی روی این ثبت‌نام.'
+};
+
+// تفاوتِ یک قلم با نسخهٔ اصلی‌اش را به چیپ‌های «چه اتفاقی می‌افتد» تبدیل می‌کند:
+// ثبتِ تخفیف / لغوِ تخفیف / تغییرِ تخفیف / افزایش یا کاهشِ فیس / تغییرِ سررسید / تغییرِ عنوان.
+function describeChargeChange(orig, cur) {
+  if (!orig) return [];
+  const out = [];
+  const oAmt = Number(orig.amount || 0);
+  const cAmt = Number(cur.amount || 0);
+  const oDisc = Number(orig.discountAmount || 0);
+  const cDisc = Number(cur.discountAmount || 0);
+  if (cAmt > oAmt) out.push({ t: 't-fee-up', label: `افزایشِ فیس (${fmt(oAmt)} ← ${fmt(cAmt)})` });
+  if (cAmt < oAmt) out.push({ t: 't-fee-down', label: `کاهشِ فیس (${fmt(oAmt)} ← ${fmt(cAmt)})` });
+  if (oDisc <= 0 && cDisc > 0) out.push({ t: 't-discount-add', label: `ثبتِ تخفیف (${fmt(cDisc)})` });
+  else if (oDisc > 0 && cDisc <= 0) out.push({ t: 't-discount-remove', label: 'لغوِ تخفیف' });
+  else if (oDisc !== cDisc) out.push({ t: 't-discount-change', label: `تغییرِ تخفیف (${fmt(oDisc)} ← ${fmt(cDisc)})` });
+  if ((orig.discountType || '') !== (cur.discountType || '') && cDisc > 0) {
+    out.push({ t: 't-discount-change', label: `دستهٔ تخفیف: ${DISCOUNT_TYPE_LABELS[cur.discountType || ''] || '—'}` });
+  }
+  if ((orig.dueDate || '') !== (cur.dueDate || '')) out.push({ t: 't-due', label: 'تغییرِ سررسید' });
+  if ((orig.title || '') !== (cur.title || '')) out.push({ t: 't-title', label: 'تغییرِ عنوان' });
+  return out;
+}
 
 function RegistrationEditModal({ state, setState, currency, busy, dueDayHint, onSaveRegistration, onSaveCharge, onVoidCharge, onAddCharge }) {
   if (!state) return null;
@@ -1808,75 +1855,138 @@ function RegistrationEditModal({ state, setState, currency, busy, dueDayHint, on
   }));
   const patchNew = (fields) => setState((prev) => ({ ...prev, newCharge: { ...prev.newCharge, ...fields } }));
 
+  const origById = new Map((state.originalCharges || []).map((c) => [String(c._id), c]));
+  const o = state.original || {};
+  const regChanges = [];
+  if (o.status !== state.status) regChanges.push({ t: 't-title', label: `وضعیت: ${REG_STATUS_LABELS[state.status] || state.status}` });
+  if ((o.startDate || '') !== (state.startDate || '')) regChanges.push({ t: 't-due', label: 'تغییرِ تاریخِ شروع' });
+  if ((o.endDate || '') !== (state.endDate || '')) regChanges.push({ t: 't-due', label: 'تغییرِ تاریخِ پایان' });
+  if (state.paymentPlan === 'monthly' && Number(o.monthlyFee || 0) !== Number(state.monthlyFee || 0)) {
+    const up = Number(state.monthlyFee || 0) > Number(o.monthlyFee || 0);
+    regChanges.push({ t: up ? 't-fee-up' : 't-fee-down', label: `فیسِ ماهانه: ${fmt(o.monthlyFee)} ← ${fmt(state.monthlyFee)}` });
+  }
+
+  const chargeChangeChips = [];
+  for (const c of state.charges || []) {
+    for (const ch of describeChargeChange(origById.get(String(c._id)), c)) {
+      chargeChangeChips.push({ ...ch, label: `${CHARGE_KIND_LABELS[c.kind] || c.kind}: ${ch.label}` });
+    }
+  }
+  const newChargePending = Number(state.newCharge.amount) > 0
+    ? [{ t: 't-new', label: `قلمِ تازه: ${CHARGE_KIND_LABELS[state.newCharge.kind] || state.newCharge.kind} ${fmt(state.newCharge.amount)}` }]
+    : [];
+  const allPending = [...regChanges, ...chargeChangeChips, ...newChargePending];
+
   return (
-    <div className="academy-modal-backdrop" role="presentation" onClick={close}>
-      <section className="academy-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+    <div className="academy-modal-backdrop is-glass" role="presentation" onClick={close}>
+      <section className="academy-modal academy-glass-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
         <button type="button" className="academy-modal-close" onClick={close}>بستن</button>
         <h2>ویرایشِ ثبت‌نام — {text(state.studentName)}</h2>
         <p className="academy-form-hint">{text(state.courseName)} · نوعِ پرداخت: {state.paymentPlan === 'monthly' ? 'ماهانه' : state.paymentPlan === 'installment' ? 'قسطی' : 'کامل'}</p>
 
-        <div className="academy-form academy-edit-grid">
-          <Field label="وضعیت">
-            <select value={state.status} onChange={(e) => patch({ status: e.target.value })}>
-              {Object.entries(REG_STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </Field>
-          <Field label="تاریخ شروع"><AfghanDateInput value={state.startDate} onChange={(v) => patch({ startDate: v })} /></Field>
-          <Field label="تاریخ پایان"><AfghanDateInput value={state.endDate} onChange={(v) => patch({ endDate: v })} /></Field>
-          {state.paymentPlan === 'monthly' && (
-            <Field label="فیس ثابتِ هر ماه">
-              <input type="number" min="0" value={state.monthlyFee} onChange={(e) => patch({ monthlyFee: e.target.value })} />
-            </Field>
-          )}
-          <Field label="یادداشت"><input value={state.note} onChange={(e) => patch({ note: e.target.value })} /></Field>
+        <div className={`academy-change-summary${allPending.length ? '' : ' is-empty'}`}>
+          {allPending.length
+            ? <><b>در انتظارِ ذخیره:</b>{allPending.map((ch, i) => <span key={i} className={`academy-change-chip ${ch.t}`}>{ch.label}</span>)}</>
+            : <span>هیچ تغییری اعمال نشده — یک مقدار را ویرایش کنید تا این‌جا نمایش داده شود.</span>}
         </div>
-        {state.paymentPlan === 'monthly' && (
-          <p className="academy-form-hint">تغییرِ «فیس ثابتِ هر ماه» فقط قلم‌های ماهانهٔ <b>پرداخت‌نشده</b> را به مبلغِ تازه می‌برد و ماه‌های عقب‌مانده را می‌سازد (سررسید روزِ {dueDayHint}).</p>
-        )}
-        <button type="button" onClick={onSaveRegistration} disabled={busy}>ذخیرهٔ مشخصاتِ ثبت‌نام</button>
 
-        <h3>اقلامِ بدهی</h3>
-        <p className="academy-form-hint">فیس و تخفیف روی همین اقلام است. قلمی که پرداخت خورده باشد قفل است — اول پرداختش را در تب «پرداخت و بل» ابطال کنید.</p>
+        <div className="academy-glass-card">
+          <div className="academy-form academy-edit-grid">
+            <Field label="وضعیت">
+              <select value={state.status} onChange={(e) => patch({ status: e.target.value })}>
+                {Object.entries(REG_STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </Field>
+            <Field label="تاریخ شروع"><AfghanDateInput value={state.startDate} onChange={(v) => patch({ startDate: v })} /></Field>
+            <Field label="تاریخ پایان"><AfghanDateInput value={state.endDate} onChange={(v) => patch({ endDate: v })} /></Field>
+            {state.paymentPlan === 'monthly' && (
+              <Field label="فیس ثابتِ هر ماه">
+                <input type="number" min="0" value={state.monthlyFee} onChange={(e) => patch({ monthlyFee: e.target.value })} />
+              </Field>
+            )}
+            <Field label="یادداشت"><input value={state.note} onChange={(e) => patch({ note: e.target.value })} /></Field>
+          </div>
+          {state.paymentPlan === 'monthly' && (
+            <p className="academy-form-hint">تغییرِ «فیس ثابتِ هر ماه» فقط قلم‌های ماهانهٔ <b>پرداخت‌نشده</b> را به مبلغِ تازه می‌برد و ماه‌های عقب‌مانده را می‌سازد (سررسید روزِ {dueDayHint}).</p>
+          )}
+          <button type="button" onClick={onSaveRegistration} disabled={busy || !regChanges.length}>ذخیرهٔ مشخصاتِ ثبت‌نام</button>
+        </div>
+
+        <h3>اقلامِ بدهی — فیس و تخفیف این‌جاست</h3>
+        <p className="academy-form-hint">هر ردیف یک قلمِ بدهی است. برچسبِ رنگیِ بالای هر ردیف می‌گوید چه اتفاقی می‌افتد: «ثبتِ تخفیف»، «لغوِ تخفیف»، «افزایش/کاهشِ فیس»، «تغییرِ سررسید». قلمی که پرداخت خورده <b>قفل</b> است — اول پرداختش را در تب «پرداخت و بل» ابطال کنید.</p>
         <div className="academy-charge-edit-list">
           {(state.charges || []).length === 0 && <p className="academy-empty">قلمی نیست.</p>}
           {(state.charges || []).map((c) => {
             const locked = Number(c.paidAmount || 0) > 0;
+            const rowChanges = describeChargeChange(origById.get(String(c._id)), c);
             return (
-              <div className={`academy-charge-edit-row${locked ? ' is-locked' : ''}`} key={c._id}>
+              <div className={`academy-charge-edit-row${locked ? ' is-locked' : ''}${rowChanges.length ? ' is-dirty' : ''}`} key={c._id}>
+                {rowChanges.length > 0 && (
+                  <div className="academy-cer-row-changes">
+                    {rowChanges.map((ch, i) => <span key={i} className={`academy-change-chip ${ch.t}`}>{ch.label}</span>)}
+                  </div>
+                )}
                 <span className="academy-chip">{CHARGE_KIND_LABELS[c.kind] || c.kind}</span>
-                <input placeholder="عنوان" value={c.title || ''} disabled={locked} onChange={(e) => patchCharge(c._id, { title: e.target.value })} />
-                <input type="number" min="0" placeholder="مبلغ" value={c.amount ?? ''} disabled={locked} onChange={(e) => patchCharge(c._id, { amount: e.target.value })} />
-                <input type="number" min="0" placeholder="تخفیف" value={c.discountAmount ?? ''} disabled={locked} onChange={(e) => patchCharge(c._id, { discountAmount: e.target.value })} />
-                <select value={c.discountType || ''} disabled={locked || !(Number(c.discountAmount) > 0)} onChange={(e) => patchCharge(c._id, { discountType: e.target.value })}>
-                  {Object.entries(DISCOUNT_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
-                <AfghanDateInput value={c.dueDate ? String(c.dueDate).slice(0, 10) : ''} onChange={(v) => patchCharge(c._id, { dueDate: v })} />
+                <label className="academy-cer-field"><span>عنوان</span>
+                  <input placeholder="عنوان" value={c.title || ''} disabled={locked} onChange={(e) => patchCharge(c._id, { title: e.target.value })} />
+                </label>
+                <label className="academy-cer-field"><span>فیس</span>
+                  <input type="number" min="0" value={c.amount ?? ''} disabled={locked} onChange={(e) => patchCharge(c._id, { amount: e.target.value })} />
+                </label>
+                <label className="academy-cer-field"><span>تخفیف</span>
+                  <input type="number" min="0" value={c.discountAmount ?? ''} disabled={locked} onChange={(e) => patchCharge(c._id, { discountAmount: e.target.value })} />
+                </label>
+                <label className="academy-cer-field"><span>دستهٔ تخفیف</span>
+                  <select value={c.discountType || ''} disabled={locked || !(Number(c.discountAmount) > 0)} onChange={(e) => patchCharge(c._id, { discountType: e.target.value })}>
+                    {Object.entries(DISCOUNT_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </label>
+                <label className="academy-cer-field"><span>سررسید</span>
+                  <AfghanDateInput value={c.dueDate ? String(c.dueDate).slice(0, 10) : ''} onChange={(v) => patchCharge(c._id, { dueDate: v })} />
+                </label>
                 <span className="academy-field-label">باقی {fmt(c.balance)} {currency}</span>
-                {locked
-                  ? <span className="academy-chip academy-chip-muted">قفل (پرداخت‌شده)</span>
-                  : (
-                    <>
-                      <button type="button" className="academy-inline-button" onClick={() => onSaveCharge(c)} disabled={busy}>ذخیره</button>
-                      <button type="button" className="academy-inline-button academy-danger" onClick={() => onVoidCharge(c)} disabled={busy}>ابطال</button>
-                    </>
-                  )}
+                <div className="academy-cer-actions">
+                  {locked
+                    ? <span className="academy-chip academy-chip-muted">قفل (پرداخت‌شده)</span>
+                    : (
+                      <>
+                        <button type="button" className="academy-inline-button" onClick={() => onSaveCharge(c)} disabled={busy || !rowChanges.length}>ذخیره</button>
+                        <button type="button" className="academy-inline-button academy-danger" onClick={() => onVoidCharge(c)} disabled={busy}>ابطال</button>
+                      </>
+                    )}
+                </div>
               </div>
             );
           })}
         </div>
 
-        <h3>افزودنِ قلمِ تازه</h3>
-        <div className="academy-charge-edit-row">
-          <select value={state.newCharge.kind} onChange={(e) => patchNew({ kind: e.target.value })}>
-            <option value="manual">دستی</option>
-            <option value="installment">قسط</option>
-            <option value="late_fee">جریمهٔ دیرکرد</option>
-          </select>
-          <input placeholder="عنوان" value={state.newCharge.title} onChange={(e) => patchNew({ title: e.target.value })} />
-          <input type="number" min="0" placeholder="مبلغ" value={state.newCharge.amount} onChange={(e) => patchNew({ amount: e.target.value })} />
-          <input type="number" min="0" placeholder="تخفیف" value={state.newCharge.discountAmount} onChange={(e) => patchNew({ discountAmount: e.target.value })} />
-          <AfghanDateInput value={state.newCharge.dueDate} onChange={(v) => patchNew({ dueDate: v })} />
-          <button type="button" className="academy-inline-button" onClick={onAddCharge} disabled={busy}>افزودن</button>
+        <div className="academy-glass-card">
+          <h3 style={{ marginTop: 0 }}>افزودنِ قلمِ تازه</h3>
+          <div className="academy-charge-edit-row">
+            <label className="academy-cer-field"><span>نوع</span>
+              <select value={state.newCharge.kind} onChange={(e) => patchNew({ kind: e.target.value })}>
+                <option value="manual">دستی</option>
+                <option value="installment">قسط</option>
+                <option value="late_fee">جریمهٔ دیرکرد</option>
+              </select>
+            </label>
+            <label className="academy-cer-field"><span>عنوان</span>
+              <input placeholder="عنوان" value={state.newCharge.title} onChange={(e) => patchNew({ title: e.target.value })} />
+            </label>
+            <label className="academy-cer-field"><span>مبلغ</span>
+              <input type="number" min="0" value={state.newCharge.amount} onChange={(e) => patchNew({ amount: e.target.value })} />
+            </label>
+            <label className="academy-cer-field"><span>تخفیف</span>
+              <input type="number" min="0" value={state.newCharge.discountAmount} onChange={(e) => patchNew({ discountAmount: e.target.value })} />
+            </label>
+            <label className="academy-cer-field"><span>سررسید</span>
+              <AfghanDateInput value={state.newCharge.dueDate} onChange={(v) => patchNew({ dueDate: v })} />
+            </label>
+            <div className="academy-cer-actions">
+              <button type="button" className="academy-inline-button" onClick={onAddCharge} disabled={busy || !(Number(state.newCharge.amount) > 0)}>افزودن</button>
+            </div>
+          </div>
+          <p className="academy-form-hint">{NEW_CHARGE_KIND_HINT[state.newCharge.kind]}</p>
         </div>
       </section>
     </div>
