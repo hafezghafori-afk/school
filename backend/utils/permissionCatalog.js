@@ -58,7 +58,8 @@ const LEGACY_PERMISSION_MAP = Object.freeze({
     'finance.month_close.manage',
     'finance.documents.manage',
     'finance.lifecycle_effects.manage',
-    'reports.government_finance.view'
+    'reports.government_finance.view',
+    'finance.reports.consolidated.view'
   ],
   manage_content: [
     'education.core.manage',
@@ -106,6 +107,7 @@ const LEGACY_PERMISSION_MAP = Object.freeze({
     'reports.logs.view',
     'reports.alerts.view',
     'reports.admin_search.use',
+    'finance.reports.consolidated.view',
     'schools.dashboard.view',
     'schools.map.view',
     'schools.reports.view',
@@ -327,6 +329,7 @@ const PERMISSION_GROUPS = Object.freeze([
       'reports.students.view',
       'reports.teachers.view',
       'reports.government_finance.view',
+      'finance.reports.consolidated.view',
       'reports.schools.view',
       'reports.logs.view',
       'reports.alerts.view',

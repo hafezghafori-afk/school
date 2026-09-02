@@ -1,7 +1,11 @@
 const express = require('express');
 const ExcelJS = require('exceljs');
 
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requirePermission } = require('../middleware/auth');
+const {
+  buildConsolidatedFinanceReport,
+  buildConsolidatedFinanceDebtors
+} = require('../services/consolidatedFinanceReportService');
 const User = require('../models/User');
 const {
   getReportDefinition,
@@ -404,6 +408,44 @@ router.post('/export.print', requireAuth, async (req, res) => {
   } catch (error) {
     const code = String(error?.message || '');
     return res.status(getReportErrorStatus(code)).json({ success: false, message: code || 'Failed to export printable report.' });
+  }
+});
+
+// گزارشِ مالیِ یکپارچهٔ مکتب (مرکز مالی مکتب + آموزشگاه + شاگردانِ موقت) — فقط‌خواندنی.
+// دسترسی: هرکس permissionِ `finance.reports.consolidated.view` را داشته باشد؛ این
+// permission در باندلِ `view_reports` قرار دارد، پس «مدیر مکتب» خودکار می‌بیند.
+router.get('/consolidated-finance', requireAuth, requirePermission('finance.reports.consolidated.view'), async (req, res) => {
+  try {
+    const report = await buildConsolidatedFinanceReport({
+      year: req.query.year,
+      months: req.query.months
+    });
+    await logActivity({
+      req,
+      action: 'report_view_consolidated_finance',
+      targetType: 'report',
+      targetId: 'consolidated_finance',
+      meta: { year: req.query.year || '', months: req.query.months || '', from: report.period.from, to: report.period.to }
+    });
+    return res.json({ success: true, report });
+  } catch (error) {
+    console.error('consolidated finance report failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'ساخت گزارش مالی یکپارچه ناموفق بود.' });
+  }
+});
+
+// drill-down فقط‌خواندنی: لیستِ کاملِ بدهکارانِ یک بخش (school | shortTerm | academy).
+router.get('/consolidated-finance/debtors', requireAuth, requirePermission('finance.reports.consolidated.view'), async (req, res) => {
+  try {
+    const payload = await buildConsolidatedFinanceDebtors({ domain: req.query.domain });
+    return res.json({ success: true, ...payload });
+  } catch (error) {
+    const status = error?.statusCode === 400 ? 400 : 500;
+    if (status === 400) {
+      return res.status(400).json({ success: false, message: 'بخش نامعتبر است.' });
+    }
+    console.error('consolidated finance debtors failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'دریافت لیست بدهکاران ناموفق بود.' });
   }
 });
 

@@ -145,5 +145,11 @@ module.exports = {
   lastShamsiMonthKeys,
   yearShamsiMonthKeys,
   buildShamsiMonthlyReport,
-  currentShamsiMonthRange
+  currentShamsiMonthRange,
+  // Exposed for callers that need to bucket rows onto a Shamsi-month axis
+  // themselves (e.g. the cross-database consolidated finance report) instead
+  // of going through buildShamsiMonthlyReport's fixed two-model shape.
+  shamsiMonthKeyOf,
+  shamsiMonthKeyToGregorianStart,
+  shamsiMonthKeyToGregorianEnd
 };

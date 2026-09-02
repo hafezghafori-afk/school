@@ -1,0 +1,319 @@
+.sfo-page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px 18px 60px;
+  color: var(--text-primary, #1f2937);
+}
+
+.sfo-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.sfo-page h1 {
+  margin: 0 0 6px;
+  font-size: 1.5rem;
+}
+
+.sfo-sub {
+  margin: 0;
+  color: var(--text-secondary, #6b7280);
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+
+.sfo-back {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--surface-muted, #f3f4f6);
+  color: inherit;
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.sfo-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 18px 0;
+}
+
+.sfo-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.sfo-controls select,
+.sfo-controls button {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #d1d5db);
+  background: var(--surface, #fff);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sfo-controls button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.sfo-range {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #6b7280);
+}
+
+.sfo-controls-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border-color, #d1d5db);
+  margin: 2px 4px;
+}
+
+.sfo-debtors-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.sfo-linkbtn {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 0.82rem;
+  color: #2563eb;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.sfo-linkbtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.sfo-error {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  margin-bottom: 16px;
+}
+
+.sfo-loading {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-secondary, #6b7280);
+}
+
+.sfo-combined {
+  margin-top: 8px;
+  padding: 18px;
+  border-radius: 14px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-color, #e5e7eb);
+}
+
+.sfo-combined h2 {
+  margin: 0 0 14px;
+  font-size: 1.1rem;
+}
+
+.sfo-kpi-row,
+.sfo-panel-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.sfo-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--surface-muted, #f9fafb);
+  border: 1px solid var(--border-color, #e5e7eb);
+}
+
+.sfo-kpi-label {
+  font-size: 0.78rem;
+  color: var(--text-secondary, #6b7280);
+}
+
+.sfo-kpi-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.sfo-kpi-hint {
+  font-size: 0.72rem;
+  color: var(--text-secondary, #9ca3af);
+}
+
+.sfo-kpi.pos .sfo-kpi-value { color: #15803d; }
+.sfo-kpi.neg .sfo-kpi-value { color: #b91c1c; }
+
+.sfo-trend-title,
+.sfo-generated {
+  margin: 20px 0 10px;
+  font-size: 0.95rem;
+}
+
+.sfo-chart-wrap {
+  overflow-x: auto;
+  padding: 4px 0 10px;
+}
+
+.sfo-chart {
+  width: 100%;
+  min-width: 320px;
+  height: 150px;
+}
+
+.sfo-chart-axis {
+  stroke: var(--border-color, #d1d5db);
+  stroke-width: 1;
+}
+
+.sfo-bar-pos { fill: #22c55e; }
+.sfo-bar-neg { fill: #ef4444; }
+
+.sfo-trend-table-wrap,
+.sfo-debtors {
+  overflow-x: auto;
+  margin-top: 10px;
+}
+
+.sfo-trend-table,
+.sfo-debtors table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.sfo-trend-table th,
+.sfo-trend-table td,
+.sfo-debtors th,
+.sfo-debtors td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-color, #eef0f2);
+  text-align: right;
+}
+
+.sfo-trend-table thead th,
+.sfo-debtors thead th {
+  background: var(--surface-muted, #f3f4f6);
+  font-weight: 600;
+}
+
+.sfo-num {
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.sfo-neg { color: #b91c1c; }
+
+.sfo-panels {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.sfo-panel {
+  padding: 18px;
+  border-radius: 14px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-inline-start: 4px solid var(--border-color, #cbd5e1);
+}
+
+.sfo-panel.tone-school { border-inline-start-color: #2563eb; }
+.sfo-panel.tone-short { border-inline-start-color: #d97706; }
+.sfo-panel.tone-academy { border-inline-start-color: #7c3aed; }
+
+.sfo-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.sfo-panel-head h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.sfo-panel-net {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #6b7280);
+}
+
+.sfo-note {
+  margin: 10px 0 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #6b7280);
+}
+
+.sfo-panel-breakdowns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.sfo-breakdown h4,
+.sfo-debtors-title {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+}
+
+.sfo-debtors-title {
+  margin: 0;
+}
+
+.sfo-breakdown ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.83rem;
+}
+
+.sfo-breakdown li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--border-color, #eef0f2);
+}
+
+.sfo-empty {
+  font-size: 0.83rem;
+  color: var(--text-secondary, #9ca3af);
+}
+
+@media (prefers-color-scheme: dark) {
+  .sfo-page { color: var(--text-primary, #e5e7eb); }
+  .sfo-combined,
+  .sfo-panel { background: var(--surface, #111827); border-color: var(--border-color, #1f2937); }
+  .sfo-kpi { background: var(--surface-muted, #1f2937); border-color: var(--border-color, #374151); }
+  .sfo-trend-table thead th,
+  .sfo-debtors thead th { background: var(--surface-muted, #1f2937); }
+  .sfo-back { background: var(--surface-muted, #1f2937); }
+  .sfo-error { background: #7f1d1d33; border-color: #7f1d1d; color: #fca5a5; }
+}
