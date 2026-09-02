@@ -6170,6 +6170,69 @@ async function run() {
       assertCase((archiveResponse.data?.items || []).some((item) => String(item.documentType || '') === 'government_snapshot_pack'), 'expected government snapshot archive item');
     });
 
+    await check('route smoke: government snapshot generation is a draft with a chained canonical digest, ratified by a second admin', async () => {
+      const createResponse = await request(server, '/api/finance/admin/government-snapshots', {
+        method: 'POST',
+        user: financeManagerUser,
+        body: {
+          reportType: 'quarterly',
+          quarter: 2,
+          financialYearId: 'fy-1',
+          academicYearId: 'academic-year-1',
+          classId: IDS.class1,
+          isOfficial: true
+        }
+      });
+      assertCase(createResponse.status === 201, `expected 201, received ${createResponse.status}: ${createResponse.text}`);
+      const draft = createResponse.data?.item;
+      assertCase(Boolean(draft?._id), 'expected snapshot id');
+      assertCase(draft?.officialStage === 'draft', `expected draft stage, got ${draft?.officialStage}`);
+      assertCase(draft?.isOfficial === false, 'expected isOfficial false on generation');
+      assertCase(draft?.digestAlgo === 'canonical-sha256-v1', `expected canonical digest algo, got ${draft?.digestAlgo}`);
+      assertCase(typeof draft?.sourceDigest === 'string' && draft.sourceDigest.length === 64, 'expected 64-hex sourceDigest');
+      assertCase(Boolean(createResponse.data?.ratificationGate), 'expected ratificationGate in response');
+      const snapshotId = draft._id;
+
+      const verifyResponse = await request(server, '/api/finance/admin/government-snapshots/verify-chain?financialYearId=fy-1&reportType=quarterly&quarter=2&classId=' + IDS.class1, {
+        user: financeManagerUser
+      });
+      assertCase(verifyResponse.status === 200, `expected 200, received ${verifyResponse.status}: ${verifyResponse.text}`);
+      const chainRow = (verifyResponse.data?.chain || []).find((row) => String(row._id) === String(snapshotId));
+      assertCase(Boolean(chainRow), 'expected generated snapshot in verify chain');
+      assertCase(chainRow.digestMatches === true, 'expected recomputed digest to match stored sourceDigest');
+      assertCase(chainRow.linkMatches === true, 'expected previousDigest link to match');
+
+      // Generator is a finance_manager — not a ratifying level.
+      const managerRatify = await request(server, `/api/finance/admin/government-snapshots/${snapshotId}/ratify`, {
+        method: 'POST', user: financeManagerUser, body: {}
+      });
+      assertCase(managerRatify.status === 403, `expected 403, received ${managerRatify.status}`);
+      assertCase(String(managerRatify.data?.code || '') === 'finance_government_ratify_level_invalid', 'expected ratify level-invalid code');
+
+      // Reject needs a reason and a ratifying level.
+      const noReasonReject = await request(server, `/api/finance/admin/government-snapshots/${snapshotId}/reject`, {
+        method: 'POST', user: financeLeadUser, body: {}
+      });
+      assertCase(noReasonReject.status === 400, `expected 400, received ${noReasonReject.status}`);
+      assertCase(String(noReasonReject.data?.code || '') === 'finance_government_reject_reason_required', 'expected reject reason-required code');
+
+      // A finance_lead who is not the generator may ratify; whether it succeeds
+      // depends on the fixture's close-readiness, so accept either the official
+      // record or a structured blocker response.
+      const leadRatify = await request(server, `/api/finance/admin/government-snapshots/${snapshotId}/ratify`, {
+        method: 'POST', user: financeLeadUser, body: { note: 'Second-person ratification.' }
+      });
+      assertCase([200, 409].includes(leadRatify.status), `expected 200 or 409, received ${leadRatify.status}: ${leadRatify.text}`);
+      if (leadRatify.status === 200) {
+        assertCase(leadRatify.data?.item?.officialStage === 'ratified', 'expected ratified stage');
+        assertCase(leadRatify.data?.item?.isOfficial === true, 'expected isOfficial true after ratification');
+        assertCase(Boolean(leadRatify.data?.item?.ratifiedBy), 'expected ratifiedBy recorded');
+      } else {
+        assertCase(String(leadRatify.data?.code || '') === 'finance_government_snapshot_blocked', 'expected blocked code');
+        assertCase(Array.isArray(leadRatify.data?.ratificationGate?.blockers), 'expected structured blockers');
+      }
+    });
+
     await check('route smoke: expense governance review chain blocks year close until approval is complete', async () => {
       const createResponse = await request(server, '/api/finance/admin/expenses', {
         method: 'POST',
@@ -6200,9 +6263,19 @@ async function run() {
       assertCase(Number(analyticsResponse.data?.analytics?.summary?.queueCount || 0) >= 1, 'expected analytics queue count');
       assertCase((analyticsResponse.data?.analytics?.registry || []).some((item) => item.key === 'technology'), 'expected technology in analytics registry');
 
-      const blockedCloseResponse = await request(server, '/api/finance/admin/financial-years/fy-1/close', {
+      // Year close is gated to general_president (P2). A finance_manager is
+      // rejected before the readiness check even runs.
+      const levelBlockedClose = await request(server, '/api/finance/admin/financial-years/fy-1/close', {
         method: 'POST',
         user: financeManagerUser,
+        body: { note: 'Manager cannot close the year.' }
+      });
+      assertCase(levelBlockedClose.status === 403, `expected 403, received ${levelBlockedClose.status}`);
+      assertCase(String(levelBlockedClose.data?.code || '') === 'finance_financial_year_close_level_invalid', 'expected close level-invalid code');
+
+      const blockedCloseResponse = await request(server, '/api/finance/admin/financial-years/fy-1/close', {
+        method: 'POST',
+        user: presidentUser,
         body: { note: 'Attempting close with pending queue.' }
       });
       assertCase(blockedCloseResponse.status === 409, `expected 409, received ${blockedCloseResponse.status}`);
@@ -6242,7 +6315,7 @@ async function run() {
 
       const closeResponse = await request(server, '/api/finance/admin/financial-years/fy-1/close', {
         method: 'POST',
-        user: financeManagerUser,
+        user: presidentUser,
         body: { note: 'Queue resolved.' }
       });
       assertCase(closeResponse.status === 200, `expected 200, received ${closeResponse.status}: ${closeResponse.text}`);
