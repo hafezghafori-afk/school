@@ -307,7 +307,7 @@ function panelBulkEventName(tabKey) {
   return `govfin:panels:${tabKey}`;
 }
 
-function CollapsiblePanel({ tabKey, panelKey, title, hint = '', defaultOpen = false, span = '12', children }) {
+function CollapsiblePanel({ tabKey, panelKey, title, hint = '', defaultOpen = false, span = '12', cardAttr = '', children }) {
   const storageKey = `govfin.panel.${tabKey}.${panelKey}`;
   const [open, setOpen] = useState(() => readPanelState(storageKey, defaultOpen));
   const bodyId = `govpanel-${tabKey}-${panelKey}`;
@@ -340,7 +340,11 @@ function CollapsiblePanel({ tabKey, panelKey, title, hint = '', defaultOpen = fa
   }, [tabKey, storageKey]);
 
   return (
-    <article className={`gov-panel ${open ? 'is-open' : ''}`} data-span={span}>
+    <article
+      className={`gov-panel ${open ? 'is-open' : ''}`}
+      data-span={span}
+      {...(cardAttr ? { [cardAttr]: 'true' } : {})}
+    >
       <button
         type="button"
         className="gov-panel__head"
@@ -4108,7 +4112,7 @@ export default function AdminGovernmentFinance() {
               )}
             </CollapsiblePanel>
 
-            <CollapsiblePanel tabKey="year" panelKey="budget-vs-actual" title="بودجه در برابر عملکرد واقعی" span="12">
+            <CollapsiblePanel tabKey="year" panelKey="budget-vs-actual" title="بودجه در برابر عملکرد واقعی" span="12" cardAttr="data-budget-summary-card">
               <div className="gov-governance-grid">
                 <div className="gov-governance-stat" data-tone={(budgetVsActual.summary?.expenseVariance || 0) > 0 && (budgetVsActual.summary?.annualExpenseBudget || 0) > 0 ? 'rose' : 'teal'}>
                   <span>بودجه مصارف</span>
@@ -4188,7 +4192,7 @@ export default function AdminGovernmentFinance() {
               </div>
             </CollapsiblePanel>
 
-            <CollapsiblePanel tabKey="year" panelKey="budget-approval" title="گردش کار تایید بودجه" defaultOpen span="12">
+            <CollapsiblePanel tabKey="year" panelKey="budget-approval" title="گردش کار تایید بودجه" defaultOpen span="12" cardAttr="data-budget-approval-card">
               <div className="gov-governance-grid">
                 <div className="gov-governance-stat" data-tone={selectedBudgetApproved ? 'mint' : selectedBudgetStage === 'rejected' ? 'rose' : selectedBudgetInReview ? 'copper' : 'slate'}>
                   <span>مرحله فعلی</span>
@@ -4603,6 +4607,7 @@ export default function AdminGovernmentFinance() {
               title="تعهدات فروشنده"
               hint={`${formatNumber(procurementItems.length)} تعهد`}
               span="12"
+              cardAttr="data-procurement-registry-card"
             >
               <div className="gov-governance-grid">
                 <div className="gov-governance-stat" data-tone="teal">
@@ -4712,6 +4717,7 @@ export default function AdminGovernmentFinance() {
               title="تصفیه فروشنده"
               hint="تسویه از حساب خزانه"
               span="12"
+              cardAttr="data-procurement-settlement-card"
             >
               {!settlementReadyProcurementOptions.length ? (
                 <div className="gov-empty-state">هیچ تعهد تدارکاتی تایید شده‌ای در حال حاضر برای تصفیه آماده نیست.</div>
@@ -5279,13 +5285,8 @@ export default function AdminGovernmentFinance() {
 
             {activeTab === 'treasury' ? (
               <section className="gov-content-grid">
-                <article className="gov-card" data-span="12">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>فرماندهی خزانه و صندوق</strong>
-                      <span>مانده دفتری، حرکات دستی، انتقال بین حساب‌ها و تطبیق رسمی روی هسته مالی موجود.</span>
-                    </div>
-                  </div>
+                <PanelBulkControls tabKey="treasury" />
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-1" title="فرماندهی خزانه و صندوق" defaultOpen span="12">
                   <div className="gov-help-note compact">
                     <div className="gov-help-note-copy">
                       <strong>نمای هوشمند خزانه</strong>
@@ -5365,15 +5366,9 @@ export default function AdminGovernmentFinance() {
                       ))}
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="12">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>گزارش پرداخت‌های پیشرو تعهدات</strong>
-                      <span>تعهدات تاییدشده‌ای که باید از خزانه پرداخت یا تسویه شوند.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-2" title="گزارش پرداخت‌های پیشرو تعهدات" span="12">
                   {!approvedProcurementOptions.length && !settlementReadyProcurementOptions.length ? (
                     <div className="gov-empty-state compact">فعلاً تعهد تاییدشده یا پرداخت پیشرو برای خزانه وجود ندارد.</div>
                   ) : (
@@ -5409,15 +5404,9 @@ export default function AdminGovernmentFinance() {
                       </table>
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="12" data-auto-student-payment-treasury="true">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>حساب‌های خودکار پرداخت شاگردان</strong>
-                      <span>پرداخت‌های تاییدشده شاگردان به‌صورت خودکار وارد این حساب‌های خزانه می‌شوند.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-3" title="حساب‌های خودکار پرداخت شاگردان" span="12">
                   {!automaticStudentPaymentTreasuryAccounts.length ? (
                     <div className="gov-empty-state compact">
                       هنوز حساب خودکار پرداخت شاگردان ساخته نشده است. بعد از تایید پرداخت شاگرد یا بازخوانی تب خزانه، سیستم برای روش پرداخت مربوطه حساب خودکار می‌سازد.
@@ -5433,15 +5422,9 @@ export default function AdminGovernmentFinance() {
                       ))}
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="7">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>رجیستر حساب‌های خزانه</strong>
-                      <span>حساب‌های نقدی و بانکی فعال سال مالی با مانده دفتری و آخرین تطبیق.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-4" title="رجیستر حساب‌های خزانه" defaultOpen span="12">
                   {!treasuryAccounts.length ? (
                     <div className="gov-empty-state">هنوز هیچ حساب خزانه‌ای ثبت نشده است.</div>
                   ) : (
@@ -5487,15 +5470,9 @@ export default function AdminGovernmentFinance() {
                       ))}
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="5">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>{treasuryAccountDraft.id ? 'ویرایش حساب خزانه' : 'ایجاد حساب خزانه'}</strong>
-                      <span>ثبت صندوق نقدی، حساب بانکی یا حساب واسط در همان سال مالی.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-5" title="حساب خزانه" span="12">
                   <div className="gov-form-grid">
                     <label className="gov-field">
                       <span>عنوان</span>
@@ -5558,15 +5535,9 @@ export default function AdminGovernmentFinance() {
                       پاک‌کردن فرم
                     </button>
                   </div>
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="6">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>حرکت دستی خزانه</strong>
-                      <span>واریز، برداشت و اصلاح‌های دستی خارج از چرخه فیس.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-6" title="حرکت دستی خزانه" span="12">
                   <div className="gov-form-grid">
                     <label className="gov-field">
                       <span>حساب</span>
@@ -5614,15 +5585,9 @@ export default function AdminGovernmentFinance() {
                       {busyAction === 'create-treasury-transaction' ? 'در حال ثبت...' : 'ثبت حرکت'}
                     </button>
                   </div>
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="6">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>انتقال و تطبیق</strong>
-                      <span>جابجایی بین حساب‌ها و بستن فاصله بین مانده دفتری و صورتحساب.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-7" title="انتقال و تطبیق" span="12">
                   <div className="gov-form-grid">
                     <label className="gov-field">
                       <span>حساب مبدا</span>
@@ -5710,15 +5675,9 @@ export default function AdminGovernmentFinance() {
                       {String(busyAction).startsWith('reconcile-treasury-') ? 'در حال تطبیق...' : 'ثبت تطبیق'}
                     </button>
                   </div>
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="12">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>آخرین حرکات خزانه</strong>
-                      <span>خلاصه آخرین حرکت‌ها، انتقال‌ها و اصلاح‌های تطبیق.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-8" title="آخرین حرکات خزانه" defaultOpen span="12">
                   {!treasuryRecentTransactions.length ? (
                     <div className="gov-empty-state">هنوز حرکت خزانه‌ای ثبت نشده است.</div>
                   ) : (
@@ -5754,15 +5713,9 @@ export default function AdminGovernmentFinance() {
                       </table>
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="12" data-treasury-report-card="summary">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>گزارش‌های بستن خزانه</strong>
-                      <span>دفتر نقدی، خلاصه گردش، نمای تطبیق و پیگیری مغایرت برای حساب خزانه انتخاب‌شده.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-9" title="گزارش‌های بستن خزانه" span="12">
                   <div className="gov-form-grid">
                     <label className="gov-field">
                       <span>حساب گزارش</span>
@@ -5801,15 +5754,9 @@ export default function AdminGovernmentFinance() {
                       <small>{formatNumber(treasuryVarianceReport.summary?.totalIssues || 0)} مشکل</small>
                     </div>
                   </div>
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="7" data-treasury-cashbook-card="true">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>دفتر نقدی</strong>
-                      <span>موجودی جاری برای حساب خزانه انتخاب‌شده، شامل گردش‌های دستی خزانه و هزینه‌های تأییدشده.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-10" title="دفتر نقدی" span="12" cardAttr="data-treasury-cashbook-card">
                   {!treasuryCashbook.rows?.length ? (
                     <div className="gov-empty-state">هیچ ردیفی در دفتر نقدی برای حساب خزانه انتخاب‌شده یافت نشد.</div>
                   ) : (
@@ -5842,15 +5789,9 @@ export default function AdminGovernmentFinance() {
                       </table>
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="5" data-treasury-reconciliation-card="true">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>وضعیت تطبیق</strong>
-                      <span>مقایسه حساب به حساب بین مانده دفتری و آخرین مانده صورت‌حساب.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-11" title="وضعیت تطبیق" span="12" cardAttr="data-treasury-reconciliation-card">
                   <div className="gov-governance-grid">
                     <div className="gov-governance-stat" data-tone="teal">
                       <span>منطبق</span>
@@ -5905,15 +5846,9 @@ export default function AdminGovernmentFinance() {
                       </table>
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="7" data-treasury-movement-card="true">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>خلاصه گردش</strong>
-                      <span>افتتاحیه، گردش خزانه، هزینه‌ها و مانده پایانی به تفکیک حساب برای دوره انتخاب‌شده.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-12" title="خلاصه گردش" span="12">
                   {!treasuryMovementSummary.rows?.length ? (
                     <div className="gov-empty-state">هیچ خلاصه گردش خزانه‌ای برای فیلترهای انتخاب‌شده موجود نیست.</div>
                   ) : (
@@ -5947,15 +5882,9 @@ export default function AdminGovernmentFinance() {
                       </table>
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
 
-                <article className="gov-card" data-span="5" data-treasury-variance-card="true">
-                  <div className="gov-card-head">
-                    <div>
-                      <strong>پیگیری مغایرت</strong>
-                      <span>حساب‌ها یا هزینه‌های تأییدشده که هنوز قبل از بسته شدن نیاز به پیگیری خزانه دارند.</span>
-                    </div>
-                  </div>
+                <CollapsiblePanel tabKey="treasury" panelKey="tr-13" title="پیگیری مغایرت" span="12" cardAttr="data-treasury-variance-card">
                   {!treasuryVarianceReport.rows?.length ? (
                     <div className="gov-empty-state">برای فیلترهای انتخاب‌شده هیچ مغایرت خزانه شناسایی نشد.</div>
                   ) : (
@@ -5991,7 +5920,7 @@ export default function AdminGovernmentFinance() {
                       </table>
                     </div>
                   )}
-                </article>
+                </CollapsiblePanel>
               </section>
             ) : null}
 
@@ -6227,6 +6156,7 @@ export default function AdminGovernmentFinance() {
               title="راجستر آرشیف دولتی"
               hint="بسته‌های آرشیفی + اعتبارسنجی"
               span="12"
+              cardAttr="data-government-archive-card"
             >
               {!governmentDocumentArchive.length ? (
                 <div className="gov-empty-state">هنوز هیچ سند آرشیفی دولتی برای نسخه گزارش ساخته نشده است.</div>
@@ -6279,6 +6209,7 @@ export default function AdminGovernmentFinance() {
               title="ارسال آرشیف"
               hint="ارسال از مرکز ارسال مالی"
               span="12"
+              cardAttr="data-government-archive-delivery-card"
             >
               {!selectedGovernmentArchive ? (
                 <div className="gov-empty-state">برای آغاز ارسال، ابتدا پی‌دی‌اف نسخه گزارش دولتی را بسازید یا خروجی بگیرید.</div>
