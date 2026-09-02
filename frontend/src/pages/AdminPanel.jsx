@@ -570,6 +570,7 @@ const QUICK_LINK_ITEMS = [
 ];
 
 const REQUIRED_QUICK_LINK_ITEMS = [
+  { to: '/school-finance-overview', label: 'گزارش مالی یکپارچه مکتب', permission: 'finance.reports.consolidated.view' },
   { to: '/admin-exams-dashboard', label: 'داشبورد امتحانات', permission: 'manage_content' },
   { to: '/admin-education?section=enrollments&lifecycle=transfer-in', label: 'تبدیلی آمد', permission: 'students.transfers.manage' },
   { to: '/admin-education?section=enrollments&lifecycle=end', label: 'تبدیلی، ترک تحصیل و منفکی', permission: 'students.lifecycle.manage' },
