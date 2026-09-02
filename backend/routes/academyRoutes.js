@@ -15,6 +15,7 @@ const academyLedger = require('../services/academyLedger');
 const AcademyExpense = require('../models/AcademyExpense');
 const AcademyExpenseCategory = require('../models/AcademyExpenseCategory');
 const AcademyAttendance = require('../models/AcademyAttendance');
+const AcademyPayrollRun = require('../models/AcademyPayrollRun');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
 const { buildShamsiMonthlyReport, currentShamsiMonthRange, lastShamsiMonthKeys } = require('../utils/shamsiMonthlyReport');
@@ -838,6 +839,210 @@ router.get('/reports/monthly', async (req, res) => {
     res.json({ success: true, months: result });
   } catch {
     res.status(500).json({ success: false, message: 'گزارش ماهانه آموزشگاه ناموفق بود.' });
+  }
+});
+
+// ---- گزارش‌های فاز ۲ ----
+
+const dayStart = (iso) => new Date(`${String(iso).slice(0, 10)}T00:00:00.000Z`);
+const dayEndExclusive = (iso) => { const d = dayStart(iso); d.setUTCDate(d.getUTCDate() + 1); return d; };
+const METHOD_KEYS = ['cash', 'card', 'bank_transfer', 'hawala', 'other'];
+
+// بازهٔ میلادیِ یک ماهِ شمسی «1405-07»
+function academyMonthRange(periodKey) {
+  const [jy, jm] = String(periodKey).split('-').map(Number);
+  const { afghanSolarToGregorianInput } = require('../utils/afghanDate');
+  const startIso = afghanSolarToGregorianInput(jy || 1400, jm || 1, 1) || new Date().toISOString().slice(0, 10);
+  const nextY = jm >= 12 ? jy + 1 : jy;
+  const nextM = jm >= 12 ? 1 : (jm || 1) + 1;
+  const endIso = afghanSolarToGregorianInput(nextY || 1400, nextM, 1) || startIso;
+  return { start: dayStart(startIso), endExclusive: dayStart(endIso) };
+}
+
+// بستنِ صندوقِ روزانه — دریافتی و پرداختیِ یک روز به تفکیکِ روش
+router.get('/reports/cash-daily', async (req, res) => {
+  try {
+    const date = String(req.query.date || todayKey()).slice(0, 10);
+    const [incomeAgg, expenseAgg] = await Promise.all([
+      AcademyPayment.aggregate([
+        { $match: { status: { $ne: 'void' }, paidAt: { $gte: dayStart(date), $lt: dayEndExclusive(date) } } },
+        { $group: { _id: '$paymentMethod', count: { $sum: 1 }, total: { $sum: '$amount' } } }
+      ]),
+      AcademyExpense.aggregate([
+        { $match: { expenseDate: date } },
+        { $group: { _id: '$paymentMethod', count: { $sum: 1 }, total: { $sum: '$amount' } } }
+      ])
+    ]);
+    const shape = (agg) => {
+      const map = new Map(agg.map((r) => [r._id || 'other', r]));
+      const rows = METHOD_KEYS.map((k) => ({ method: k, count: toNumber(map.get(k)?.count), total: toNumber(map.get(k)?.total) }));
+      return { rows, total: rows.reduce((s, r) => s + r.total, 0) };
+    };
+    const income = shape(incomeAgg);
+    const expense = shape(expenseAgg);
+    res.json({ success: true, date, income, expense, net: income.total - expense.total });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'گزارشِ صندوقِ روزانه ناموفق بود.' });
+  }
+});
+
+// رده‌بندی سنیِ باقی‌داری — از اقلامِ بدهیِ بازِ غیرِ ابطالی
+router.get('/reports/aging', async (_req, res) => {
+  try {
+    const today = academyLedger.todayKey();
+    const charges = await AcademyCharge.find({ status: { $ne: 'void' }, balance: { $gt: 0 } })
+      .populate('studentId', 'fullName studentCode phone')
+      .lean();
+    const buckets = { notdue: { label: 'سررسید نشده', total: 0, count: 0 }, d0_30: { label: '۰–۳۰ روز', total: 0, count: 0 }, d31_60: { label: '۳۱–۶۰ روز', total: 0, count: 0 }, d61_90: { label: '۶۱–۹۰ روز', total: 0, count: 0 }, d90: { label: 'بیش از ۹۰ روز', total: 0, count: 0 } };
+    const byStudent = new Map();
+    for (const c of charges) {
+      const bal = toNumber(c.balance);
+      let key = 'notdue';
+      if (c.dueDate && String(c.dueDate) < today) {
+        const days = Math.floor((dayStart(today) - dayStart(c.dueDate)) / 86400000);
+        key = days <= 30 ? 'd0_30' : days <= 60 ? 'd31_60' : days <= 90 ? 'd61_90' : 'd90';
+      }
+      buckets[key].total += bal;
+      buckets[key].count += 1;
+      const sid = String(c.studentId?._id || c.studentId);
+      const s = byStudent.get(sid) || { student: c.studentId, balance: 0, oldestDue: null, overdue: 0 };
+      s.balance += bal;
+      if (key !== 'notdue') s.overdue += bal;
+      if (c.dueDate && (!s.oldestDue || c.dueDate < s.oldestDue)) s.oldestDue = c.dueDate;
+      byStudent.set(sid, s);
+    }
+    const students = [...byStudent.values()].sort((a, b) => b.overdue - a.overdue || b.balance - a.balance).slice(0, 100);
+    res.json({ success: true, buckets, students, totalOutstanding: Object.values(buckets).reduce((s, b) => s + b.total, 0) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'گزارشِ رده‌بندیِ سنی ناموفق بود.' });
+  }
+});
+
+// تفکیکِ روشِ پرداخت در یک بازه
+router.get('/reports/payment-methods', async (req, res) => {
+  try {
+    const from = req.query.from ? dayStart(req.query.from) : new Date(0);
+    const to = req.query.to ? dayEndExclusive(req.query.to) : new Date();
+    const agg = await AcademyPayment.aggregate([
+      { $match: { status: { $ne: 'void' }, paidAt: { $gte: from, $lt: to } } },
+      { $group: { _id: '$paymentMethod', count: { $sum: 1 }, total: { $sum: '$amount' } } }
+    ]);
+    const map = new Map(agg.map((r) => [r._id || 'other', r]));
+    const rows = METHOD_KEYS.map((k) => ({ method: k, count: toNumber(map.get(k)?.count), total: toNumber(map.get(k)?.total) }));
+    const grand = rows.reduce((s, r) => s + r.total, 0);
+    res.json({ success: true, rows: rows.map((r) => ({ ...r, share: grand ? Math.round((r.total / grand) * 1000) / 10 : 0 })), total: grand });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'گزارشِ روشِ پرداخت ناموفق بود.' });
+  }
+});
+
+// معاش/کمیسیونِ استادان برای یک ماهِ شمسی — draftها را در‌جا محاسبه و برمی‌گرداند
+router.get('/payroll', async (req, res) => {
+  try {
+    const periodKey = String(req.query.periodKey || academyLedger.shamsiMonthKey(new Date()));
+    const settings = await getSettings();
+    const [teachers, runs, classes] = await Promise.all([
+      AcademyTeacher.find({ status: 'active' }).sort({ fullName: 1 }).lean(),
+      AcademyPayrollRun.find({ periodKey }).lean(),
+      AcademyClass.find().select('_id courseId teacherId').lean()
+    ]);
+    const runByTeacher = new Map(runs.map((r) => [String(r.teacherId), r]));
+
+    // پرداختیِ وصول‌شده و فیسِ ثبت‌نام‌شدهٔ کورس‌های هر استاد را از classId → courseId → registration پیدا کن
+    const courseIdsByTeacher = new Map();
+    for (const c of classes) {
+      if (!c.teacherId) continue;
+      const t = String(c.teacherId);
+      if (!courseIdsByTeacher.has(t)) courseIdsByTeacher.set(t, new Set());
+      if (c.courseId) courseIdsByTeacher.get(t).add(String(c.courseId));
+    }
+
+    // پرداخت‌های این ماه به تفکیکِ courseId (از registration)
+    const { start, endExclusive } = academyMonthRange(periodKey);
+    const paidAgg = await AcademyPayment.aggregate([
+      { $match: { status: { $ne: 'void' }, paidAt: { $gte: start, $lt: endExclusive } } },
+      { $lookup: { from: 'academyregistrations', localField: 'registrationId', foreignField: '_id', as: 'reg' } },
+      { $unwind: '$reg' },
+      { $group: { _id: '$reg.courseId', total: { $sum: '$amount' } } }
+    ]);
+    const paidByCourse = new Map(paidAgg.map((r) => [String(r._id), toNumber(r.total)]));
+    const billedAgg = await AcademyRegistration.aggregate([
+      { $match: { registrationDate: { $gte: start.toISOString().slice(0, 10), $lt: endExclusive.toISOString().slice(0, 10) } } },
+      { $group: { _id: '$courseId', total: { $sum: '$totalPayable' } } }
+    ]);
+    const billedByCourse = new Map(billedAgg.map((r) => [String(r._id), toNumber(r.total)]));
+
+    const items = teachers.map((t) => {
+      const existing = runByTeacher.get(String(t._id));
+      if (existing) return { ...existing, teacher: t, computed: false };
+      const courseIds = [...(courseIdsByTeacher.get(String(t._id)) || [])];
+      const base = ['collected', 'billed'].includes(settings.teacherCommissionBase) ? settings.teacherCommissionBase : 'collected';
+      const pct = t.commissionPercent != null ? t.commissionPercent : toNumber(settings.teacherCommissionPercent);
+      const commissionOn = courseIds.reduce((s, cid) => s + (base === 'billed' ? (billedByCourse.get(cid) || 0) : (paidByCourse.get(cid) || 0)), 0);
+      const baseAmount = t.paymentType === 'salary' || t.paymentType === 'contract' ? toNumber(t.paymentAmount) : 0;
+      const commissionPercent = t.paymentType === 'percent' ? (t.paymentAmount || pct) : pct;
+      const commissionAmount = Math.round((commissionOn * commissionPercent) / 100 * 100) / 100;
+      return {
+        teacher: t, teacherId: t._id, periodKey, status: 'draft', computed: true,
+        baseAmount, commissionBase: base, commissionPercent, commissionOn, commissionAmount,
+        deductions: 0, netAmount: Math.max(0, baseAmount + commissionAmount),
+        currency: settings.currency || 'AFN'
+      };
+    });
+    res.json({ success: true, periodKey, items, settings: { teacherCommissionBase: settings.teacherCommissionBase, teacherCommissionPercent: settings.teacherCommissionPercent } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'محاسبهٔ معاش ناموفق بود.' });
+  }
+});
+
+// ثبت/پرداختِ یک ردیفِ معاش — رانِ draft را می‌سازد/به‌روز و مصرف صادر می‌کند
+router.post('/payroll/pay', async (req, res) => {
+  try {
+    const { teacherId, periodKey } = req.body;
+    if (!teacherId || !periodKey) return res.status(400).json({ success: false, message: 'استاد و دوره لازم است.' });
+    const settings = await getSettings();
+    const teacher = await AcademyTeacher.findById(teacherId).lean();
+    if (!teacher) return res.status(404).json({ success: false, message: 'استاد پیدا نشد.' });
+
+    const baseAmount = toNumber(req.body.baseAmount);
+    const commissionAmount = toNumber(req.body.commissionAmount);
+    const deductions = toNumber(req.body.deductions);
+    const netAmount = Math.max(0, baseAmount + commissionAmount - deductions);
+    if (netAmount <= 0) return res.status(400).json({ success: false, message: 'مبلغِ خالصِ معاش باید بزرگ‌تر از صفر باشد.' });
+
+    let run = await AcademyPayrollRun.findOne({ teacherId, periodKey });
+    if (run && run.status === 'paid') return res.status(400).json({ success: false, message: 'معاشِ این استاد در این دوره قبلاً پرداخت شده است.' });
+
+    const expense = await AcademyExpense.create({
+      title: `معاش ${teacher.fullName} — ${periodKey}`,
+      category: 'teacher_salary',
+      amount: netAmount,
+      currency: settings.currency || 'AFN',
+      expenseDate: todayKey(),
+      paymentMethod: req.body.paymentMethod || 'cash',
+      paidTo: teacher.fullName,
+      note: `پایه ${baseAmount} + کمیسیون ${commissionAmount} − کسر ${deductions}`,
+      createdBy: userId(req)
+    });
+
+    const payload = {
+      teacherId, periodKey,
+      baseAmount, commissionBase: req.body.commissionBase || settings.teacherCommissionBase || 'collected',
+      commissionPercent: toNumber(req.body.commissionPercent),
+      commissionOn: toNumber(req.body.commissionOn),
+      commissionAmount, deductions, netAmount,
+      currency: settings.currency || 'AFN',
+      status: 'paid', paidExpenseId: expense._id, paidAt: new Date(),
+      updatedBy: userId(req)
+    };
+    run = run
+      ? await AcademyPayrollRun.findByIdAndUpdate(run._id, payload, { new: true, runValidators: true })
+      : await AcademyPayrollRun.create({ ...payload, createdBy: userId(req) });
+
+    res.status(201).json({ success: true, item: run.toObject ? run.toObject() : run, expense: expense.toObject(), message: 'معاش ثبت و مصرف صادر شد.' });
+  } catch (error) {
+    const message = error?.code === 11000 ? 'برای این استاد و دوره یک رانِ معاش موجود است.' : (error?.message || 'ثبتِ معاش ناموفق بود.');
+    res.status(400).json({ success: false, message });
   }
 });
 
