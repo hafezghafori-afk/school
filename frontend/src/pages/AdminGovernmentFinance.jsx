@@ -303,22 +303,41 @@ function readPanelState(storageKey, fallback) {
   return fallback;
 }
 
+function panelBulkEventName(tabKey) {
+  return `govfin:panels:${tabKey}`;
+}
+
 function CollapsiblePanel({ tabKey, panelKey, title, hint = '', defaultOpen = false, span = '12', children }) {
   const storageKey = `govfin.panel.${tabKey}.${panelKey}`;
   const [open, setOpen] = useState(() => readPanelState(storageKey, defaultOpen));
   const bodyId = `govpanel-${tabKey}-${panelKey}`;
 
+  const persist = (next) => {
+    try {
+      window.localStorage.setItem(storageKey, next ? 'open' : 'closed');
+    } catch {
+      /* ignore */
+    }
+  };
+
   const toggle = () => {
     setOpen((prev) => {
       const next = !prev;
-      try {
-        window.localStorage.setItem(storageKey, next ? 'open' : 'closed');
-      } catch {
-        /* ignore */
-      }
+      persist(next);
       return next;
     });
   };
+
+  useEffect(() => {
+    const handler = (event) => {
+      const next = !!event.detail?.open;
+      setOpen(next);
+      persist(next);
+    };
+    window.addEventListener(panelBulkEventName(tabKey), handler);
+    return () => window.removeEventListener(panelBulkEventName(tabKey), handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabKey, storageKey]);
 
   return (
     <article className={`gov-panel ${open ? 'is-open' : ''}`} data-span={span}>
@@ -337,6 +356,18 @@ function CollapsiblePanel({ tabKey, panelKey, title, hint = '', defaultOpen = fa
         <div className="gov-panel__inner">{children}</div>
       </div>
     </article>
+  );
+}
+
+function PanelBulkControls({ tabKey }) {
+  const dispatch = (open) => {
+    window.dispatchEvent(new CustomEvent(panelBulkEventName(tabKey), { detail: { open } }));
+  };
+  return (
+    <div className="gov-panel-controls">
+      <button type="button" onClick={() => dispatch(true)}>باز کردن همه</button>
+      <button type="button" onClick={() => dispatch(false)}>بستن همه</button>
+    </div>
   );
 }
 
@@ -3967,13 +3998,8 @@ export default function AdminGovernmentFinance() {
 
             {activeTab === 'year' ? (
               <section className="gov-content-grid">
-            <article className="gov-card" data-span="7">
-              <div className="gov-card-head">
-                <div>
-                  <strong>وضعیت سال مالی</strong>
-                  <span>تا تکمیل خدمات فاز ۱، سال تعلیمی فعال به عنوان مبنای نمایشی استفاده می‌شود.</span>
-                </div>
-              </div>
+            <PanelBulkControls tabKey="year" />
+            <CollapsiblePanel tabKey="year" panelKey="fy-status" title="وضعیت سال مالی" defaultOpen span="12">
               <div className="gov-help-note">
                 <div className="gov-help-note-copy">
                   <strong>سال تعلیمی را از کجا تعریف کنم؟</strong>
@@ -4017,15 +4043,9 @@ export default function AdminGovernmentFinance() {
                   </article>
                 ))}
               </div>
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="12">
-              <div className="gov-card-head">
-                <div>
-                  <strong>دفتر سال‌های مالی</strong>
-                  <span>مدیریت واقعی سال‌های مالی فعال، بسته و آرشیفی</span>
-                </div>
-              </div>
+            <CollapsiblePanel tabKey="year" panelKey="fy-register" title="دفتر سال‌های مالی" defaultOpen span="12">
               {!payload.financialYears.length ? (
                 <div className="gov-empty-state">هنوز هیچ سال مالی ثبت نشده است.</div>
               ) : (
@@ -4086,15 +4106,9 @@ export default function AdminGovernmentFinance() {
                   ))}
                 </div>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="7" data-budget-summary-card="true">
-              <div className="gov-card-head">
-                <div>
-                  <strong>بودجه در برابر عملکرد واقعی</strong>
-                  <span>اهداف سالانه، عملکرد زنده مصارف و درآمد، و وضعیت ذخیره خزانه برای سال مالی انتخاب شده.</span>
-                </div>
-              </div>
+            <CollapsiblePanel tabKey="year" panelKey="budget-vs-actual" title="بودجه در برابر عملکرد واقعی" span="12">
               <div className="gov-governance-grid">
                 <div className="gov-governance-stat" data-tone={(budgetVsActual.summary?.expenseVariance || 0) > 0 && (budgetVsActual.summary?.annualExpenseBudget || 0) > 0 ? 'rose' : 'teal'}>
                   <span>بودجه مصارف</span>
@@ -4132,15 +4146,9 @@ export default function AdminGovernmentFinance() {
                   })}
                 </ul>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="5" data-budget-config-card="true">
-              <div className="gov-card-head">
-                <div>
-                  <strong>کنترل‌های بودجه</strong>
-                  <span>اهداف بودجه برای سال مالی انتخاب شده را ذخیره کنید.</span>
-                </div>
-              </div>
+            <CollapsiblePanel tabKey="year" panelKey="budget-config" title="کنترل‌های بودجه" hint="ذخیرهٔ اهدافِ بودجه" span="12">
               <div className="gov-form-grid">
                 <label className="gov-field">
                   <span>هدف سالانه درآمد</span>
@@ -4178,15 +4186,9 @@ export default function AdminGovernmentFinance() {
                   {String(busyAction || '').startsWith('save-budget-') ? 'در حال ذخیره بودجه...' : 'ذخیره اهداف بودجه'}
                 </button>
               </div>
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="12" data-budget-approval-card="true">
-              <div className="gov-card-head">
-                <div>
-                  <strong>گردش کار تایید بودجه</strong>
-                  <span>ارسال برای بررسی، تایید مرحله‌ای، و ثبت ردپای رسمی بودجه سال مالی.</span>
-                </div>
-              </div>
+            <CollapsiblePanel tabKey="year" panelKey="budget-approval" title="گردش کار تایید بودجه" defaultOpen span="12">
               <div className="gov-governance-grid">
                 <div className="gov-governance-stat" data-tone={selectedBudgetApproved ? 'mint' : selectedBudgetStage === 'rejected' ? 'rose' : selectedBudgetInReview ? 'copper' : 'slate'}>
                   <span>مرحله فعلی</span>
@@ -4323,9 +4325,9 @@ export default function AdminGovernmentFinance() {
                   </table>
                 </div>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="12" data-budget-category-table="true">
+            <CollapsiblePanel tabKey="year" panelKey="budget-categories" title="بودجه بر اساس دسته‌بندی مصرف" span="12">
               <div className="gov-card-head">
                 <button
                   type="button"
@@ -4436,15 +4438,9 @@ export default function AdminGovernmentFinance() {
                   {String(busyAction || '').startsWith('budget-review-request-') ? 'در حال ارسال...' : 'ارسال بودجه برای بررسی'}
                 </button>
               </div>
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="12">
-              <div className="gov-card-head">
-                <div>
-                  <strong>ایجاد سال مالی جدید</strong>
-                  <span>ثبت سال مالی تازه برای همان سال تعلیمی انتخاب‌شده</span>
-                </div>
-              </div>
+            <CollapsiblePanel tabKey="year" panelKey="fy-create" title="ایجاد سال مالی جدید" span="12">
               <div className="gov-form-grid">
                 <label className="gov-field">
                   <span>عنوان</span>
@@ -4486,12 +4482,12 @@ export default function AdminGovernmentFinance() {
                   {busyAction === 'save-year' ? 'در حال ذخیره...' : 'ذخیره سال مالی'}
                 </button>
               </div>
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="7">
+            <CollapsiblePanel tabKey="year" panelKey="close-guard" title="گارد بستن سال" defaultOpen span="12">
               <div className="gov-card-head">
                 <div>
-                  <strong>گارد بستن سال</strong>
+                  <strong>موانعِ بستنِ سال</strong>
                   <span>موانعی که باید پیش از بستن سال مالی رفع شوند</span>
                 </div>
                 <button
@@ -4540,13 +4536,14 @@ export default function AdminGovernmentFinance() {
                   ))}
                 </ul>
               )}
-            </article>
+            </CollapsiblePanel>
 
               </section>
             ) : null}
 
             {activeTab === 'operations' ? (
               <section className="gov-content-grid">
+            <PanelBulkControls tabKey="operations" />
             <article className="gov-card" data-span="12">
               <div className="gov-card-head">
                 <div>
@@ -6000,17 +5997,20 @@ export default function AdminGovernmentFinance() {
 
             {activeTab === 'archive' ? (
               <section className="gov-content-grid">
-            <article className="gov-card" data-span="5">
-              <TimelineList items={(payload.closedMonths || []).slice(0, 12)} />
-            </article>
+            <PanelBulkControls tabKey="archive" />
 
-            <article className="gov-card" data-span="7">
-              <div className="gov-card-head">
-                <div>
-                  <strong>بسته خروجی رسمی</strong>
-                  <span>ابتدا پیش‌نویس ساخته می‌شود؛ ثبت رسمی به تایید مقام دوم (مدیر ارشد مالی یا ریاست عمومی) نیاز دارد.</span>
-                </div>
-              </div>
+            <CollapsiblePanel tabKey="archive" panelKey="closed-months" title="ماه‌های بسته" span="12">
+              <TimelineList items={(payload.closedMonths || []).slice(0, 12)} />
+            </CollapsiblePanel>
+
+            <CollapsiblePanel
+              tabKey="archive"
+              panelKey="official-package"
+              title="بستهٔ خروجی رسمی"
+              hint="پیش‌نویس ← ثبت رسمیِ مقام دوم"
+              defaultOpen
+              span="12"
+            >
               <div className="gov-card-actions">
                 <button
                   type="button"
@@ -6212,7 +6212,7 @@ export default function AdminGovernmentFinance() {
                   ) : null}
                 </div>
               )}
-            </article>
+            </CollapsiblePanel>
 
             <SnapshotChainPanel
               snapshots={payload.snapshots || []}
@@ -6221,13 +6221,13 @@ export default function AdminGovernmentFinance() {
               busy={busyAction === 'snapshot-verify-chain'}
             />
 
-            <article className="gov-card" data-span="7" data-government-archive-card="true">
-              <div className="gov-card-head">
-                <div>
-                  <strong>راجستر آرشیف دولتی</strong>
-                  <span>بسته‌های آرشیفی گزارش با وضعیت اعتبارسنجی و ارسال.</span>
-                </div>
-              </div>
+            <CollapsiblePanel
+              tabKey="archive"
+              panelKey="archive-register"
+              title="راجستر آرشیف دولتی"
+              hint="بسته‌های آرشیفی + اعتبارسنجی"
+              span="12"
+            >
               {!governmentDocumentArchive.length ? (
                 <div className="gov-empty-state">هنوز هیچ سند آرشیفی دولتی برای نسخه گزارش ساخته نشده است.</div>
               ) : (
@@ -6271,15 +6271,15 @@ export default function AdminGovernmentFinance() {
                   </table>
                 </div>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="5" data-government-archive-delivery-card="true">
-              <div className="gov-card-head">
-                <div>
-                  <strong>ارسال آرشیف</strong>
-                  <span>بسته آرشیفی گزارش مالی دولت را از مرکز ارسال مالی بفرستید.</span>
-                </div>
-              </div>
+            <CollapsiblePanel
+              tabKey="archive"
+              panelKey="archive-delivery"
+              title="ارسال آرشیف"
+              hint="ارسال از مرکز ارسال مالی"
+              span="12"
+            >
               {!selectedGovernmentArchive ? (
                 <div className="gov-empty-state">برای آغاز ارسال، ابتدا پی‌دی‌اف نسخه گزارش دولتی را بسازید یا خروجی بگیرید.</div>
               ) : (
@@ -6379,7 +6379,7 @@ export default function AdminGovernmentFinance() {
                   </div>
                 </>
               )}
-            </article>
+            </CollapsiblePanel>
 
               </section>
             ) : null}
