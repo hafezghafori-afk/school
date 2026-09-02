@@ -216,7 +216,7 @@ const routePrefetchersByPath = {
   '/academy-supplies': routePrefetchers.academySupplies,
   '/short-term-center': routePrefetchers.shortTermCenter,
   '/admin-government-finance': routePrefetchers.adminGovernmentFinance,
-  '/school-finance-overview': routePrefetchers.schoolFinanceOverview,
+  '/admin-school-finance': routePrefetchers.schoolFinanceOverview,
   '/admin-education': routePrefetchers.adminEducation,
   '/timetable': routePrefetchers.timetableConfig,
   '/timetable/timetable-configurations/index': routePrefetchers.timetableConfig,
@@ -3440,7 +3440,7 @@ function AppShell() {
               element={adminRoute('finance.government.view', <AdminGovernmentFinance />, 'دسترسی گزارش مالی دولت برای این حساب فعال نیست.')}
             />
             <Route
-              path="/school-finance-overview"
+              path="/admin-school-finance"
               element={adminRoute('finance.reports.consolidated.view', <SchoolFinanceOverview />, 'دسترسی گزارش مالی یکپارچه برای این حساب فعال نیست.')}
             />
             <Route
