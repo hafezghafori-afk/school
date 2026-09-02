@@ -557,7 +557,7 @@ const QUICK_LINK_ITEMS = [
   { to: '/admin-education?section=enrollments', label: 'ممبرشیپ آموزشی', permission: 'manage_memberships' },
   { to: '/admin-financial-memberships', label: 'عضویت‌ها', permission: 'manage_finance' },
   { to: '/admin-finance', label: 'مرکز مالی', permission: 'manage_finance' },
-  { to: '/school-finance-overview', label: 'گزارش مالی یکپارچه مکتب', permission: 'finance.reports.consolidated.view' },
+  { to: '/school-finance-overview', label: 'گزارش مالی یکپارچه مکتب', permission: 'view_reports' },
   { to: '/admin-reports', label: 'گزارش‌ساز', permission: 'view_reports' },
   { to: '/admin-promotions', label: 'ارتقا صنف', permission: 'education.promotions.manage' },
   { to: '/admin-result-tables', label: 'جدول نتایج', permission: 'manage_content' },
@@ -570,7 +570,7 @@ const QUICK_LINK_ITEMS = [
 ];
 
 const REQUIRED_QUICK_LINK_ITEMS = [
-  { to: '/school-finance-overview', label: 'گزارش مالی یکپارچه مکتب', permission: 'finance.reports.consolidated.view' },
+  { to: '/school-finance-overview', label: 'گزارش مالی یکپارچه مکتب', permission: 'view_reports' },
   { to: '/admin-exams-dashboard', label: 'داشبورد امتحانات', permission: 'manage_content' },
   { to: '/admin-education?section=enrollments&lifecycle=transfer-in', label: 'تبدیلی آمد', permission: 'students.transfers.manage' },
   { to: '/admin-education?section=enrollments&lifecycle=end', label: 'تبدیلی، ترک تحصیل و منفکی', permission: 'students.lifecycle.manage' },
