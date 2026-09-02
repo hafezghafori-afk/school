@@ -4600,13 +4600,13 @@ export default function AdminGovernmentFinance() {
               />
             </article>
 
-            <article className="gov-card" data-span="7" data-procurement-registry-card="true">
-              <div className="gov-card-head">
-                <div>
-                  <strong>تعهدات فروشنده</strong>
-                  <span>تعهدات خرید و فروشندگان با مبلغ تعهدشده، مبلغ پوشش‌شده و مانده تعهد.</span>
-                </div>
-              </div>
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="procurement-registry"
+              title="تعهدات فروشنده"
+              hint={`${formatNumber(procurementItems.length)} تعهد`}
+              span="12"
+            >
               <div className="gov-governance-grid">
                 <div className="gov-governance-stat" data-tone="teal">
                   <span>کل متعهد شده</span>
@@ -4707,15 +4707,15 @@ export default function AdminGovernmentFinance() {
                   </table>
                 </div>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="5" data-procurement-settlement-card="true">
-              <div className="gov-card-head">
-                <div>
-                  <strong>تصفیه فروشنده</strong>
-                  <span>تسویه مبتنی بر حساب خزانه را برای تعهدات تاییدشده و آماده پرداخت ثبت کنید.</span>
-                </div>
-              </div>
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="procurement-settlement"
+              title="تصفیه فروشنده"
+              hint="تسویه از حساب خزانه"
+              span="12"
+            >
               {!settlementReadyProcurementOptions.length ? (
                 <div className="gov-empty-state">هیچ تعهد تدارکاتی تایید شده‌ای در حال حاضر برای تصفیه آماده نیست.</div>
               ) : (
@@ -4819,15 +4819,15 @@ export default function AdminGovernmentFinance() {
                   </div>
                 </>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="5" data-procurement-form-card="true">
-              <div className="gov-card-head">
-                <div>
-                  <strong>ثبت تعهد</strong>
-                  <span>تعهد خرید، فروشنده، مبلغ، و تاریخ مورد انتظار را ثبت کنید.</span>
-                </div>
-              </div>
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="procurement-form"
+              title="ثبت تعهد خرید"
+              hint="تعهد، فروشنده، مبلغ، تاریخ"
+              span="12"
+            >
               <div className="gov-form-grid">
                 <label className="gov-field">
                   <span>عنوان</span>
@@ -4931,15 +4931,15 @@ export default function AdminGovernmentFinance() {
                   {busyAction === 'save-procurement' ? 'در حال ذخیره...' : 'ثبت تعهد خرید'}
                 </button>
               </div>
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="7">
-              <div className="gov-card-head">
-                <div>
-                  <strong>رجیستری رسمی دسته‌های مصرف</strong>
-                  <span>دسته‌ها و زیردسته‌های معتبر برای ثبت و تحلیل مصارف</span>
-                </div>
-              </div>
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="category-registry"
+              title="رجیستری رسمی دسته‌های مصرف"
+              hint={`${formatNumber(expenseCategoryRegistry.length)} دسته`}
+              span="12"
+            >
               {!expenseCategoryRegistry.length ? (
                 <div className="gov-empty-state">هنوز هیچ دسته مصرف رسمی ثبت نشده است.</div>
               ) : (
@@ -4978,15 +4978,15 @@ export default function AdminGovernmentFinance() {
                   ))}
                 </div>
               )}
-            </article>
+            </CollapsiblePanel>
 
-            <article className="gov-card" data-span="5">
-              <div className="gov-card-head">
-                <div>
-                  <strong>{categoryDraft.id ? 'ویرایش دسته رسمی' : 'ایجاد دسته رسمی'}</strong>
-                  <span>این تغییرات فوراً روی اعتبارسنجی و تحلیل مصارف اثر می‌گذارند.</span>
-                </div>
-              </div>
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="category-form"
+              title={categoryDraft.id ? 'ویرایش دسته رسمی' : 'ایجاد دسته رسمی'}
+              hint="اثرِ فوری روی اعتبارسنجی و تحلیل"
+              span="12"
+            >
               <div className="gov-form-grid">
                 <label className="gov-field">
                   <span>عنوان</span>
@@ -5044,7 +5044,7 @@ export default function AdminGovernmentFinance() {
                   پاک‌کردن فرم
                 </button>
               </div>
-            </article>
+            </CollapsiblePanel>
 
             <CollapsiblePanel
               tabKey="operations"
