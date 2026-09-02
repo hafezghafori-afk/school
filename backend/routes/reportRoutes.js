@@ -1,7 +1,13 @@
 const express = require('express');
 const ExcelJS = require('exceljs');
 
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requirePermission } = require('../middleware/auth');
+const {
+  buildConsolidatedFinanceReport,
+  buildConsolidatedFinanceDebtors
+} = require('../services/consolidatedFinanceReportService');
+const { buildConsolidatedFinancePrintHtml } = require('../services/consolidatedFinancePrintService');
+const { buildHtmlPdfBuffer, isMissingPlaywrightBrowserError } = require('../services/sheetTemplatePdfService');
 const User = require('../models/User');
 const {
   getReportDefinition,
@@ -15,7 +21,7 @@ const { buildReportPdfBuffer } = require('../services/sheetTemplatePdfService');
 const { renderReportPrintHtml } = require('../services/sheetTemplatePrintService');
 const { resolvePermissions } = require('../utils/permissions');
 const { logActivity } = require('../utils/activity');
-const { resolveActiveSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
+const { resolveActiveSchool, writeSchoolContextHeaders, serializeSchoolBranding } = require('../services/schoolContextService');
 
 const router = express.Router();
 
@@ -404,6 +410,102 @@ router.post('/export.print', requireAuth, async (req, res) => {
   } catch (error) {
     const code = String(error?.message || '');
     return res.status(getReportErrorStatus(code)).json({ success: false, message: code || 'Failed to export printable report.' });
+  }
+});
+
+// گزارشِ مالیِ یکپارچهٔ مکتب (مرکز مالی مکتب + آموزشگاه + شاگردانِ موقت) — فقط‌خواندنی.
+// دسترسی: هرکس permissionِ `finance.reports.consolidated.view` را داشته باشد؛ این
+// permission در باندلِ `view_reports` قرار دارد، پس «مدیر مکتب» خودکار می‌بیند.
+router.get('/consolidated-finance', requireAuth, requirePermission('finance.reports.consolidated.view'), async (req, res) => {
+  try {
+    const report = await buildConsolidatedFinanceReport({
+      year: req.query.year,
+      months: req.query.months,
+      from: req.query.from,
+      to: req.query.to
+    });
+    await logActivity({
+      req,
+      action: 'report_view_consolidated_finance',
+      targetType: 'report',
+      targetId: 'consolidated_finance',
+      meta: { year: req.query.year || '', months: req.query.months || '', from: report.period.from, to: report.period.to }
+    });
+    return res.json({ success: true, report });
+  } catch (error) {
+    console.error('consolidated finance report failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'ساخت گزارش مالی یکپارچه ناموفق بود.' });
+  }
+});
+
+// سندِ چاپیِ گزارشِ مالیِ یکپارچه برای «همه بخش‌ها» یا یک بخشِ مشخص.
+// پیش‌فرض PDF (رندرِ Chromium)؛ اگر مرورگرِ Playwright در دسترس نبود، به HTML برمی‌گردد.
+router.get('/consolidated-finance/print', requireAuth, requirePermission('finance.reports.consolidated.view'), async (req, res) => {
+  try {
+    const proto = String(req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
+    const origin = `${proto}://${req.get('host')}`;
+    const wantHtml = String(req.query.format || '').toLowerCase() === 'html';
+
+    // سربرگ = نامِ مکتبِ فعالِ کاربر (نه برندِ پلتفرم)
+    let branding = null;
+    try {
+      const { school } = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+      const b = serializeSchoolBranding(school);
+      if (b?.brandName) branding = { name: b.brandName, subtitle: b.brandSubtitle, principalName: b.principalName };
+    } catch { branding = null; }
+
+    const { html, filename } = await buildConsolidatedFinancePrintHtml({
+      section: req.query.section,
+      year: req.query.year,
+      months: req.query.months,
+      from: req.query.from,
+      to: req.query.to,
+      origin,
+      branding
+    });
+    const baseName = filename.replace(/\.html$/i, '');
+
+    await logActivity({
+      req,
+      action: 'report_print_consolidated_finance',
+      targetType: 'report',
+      targetId: 'consolidated_finance',
+      meta: { section: req.query.section || 'all', format: wantHtml ? 'html' : 'pdf' }
+    });
+
+    if (!wantHtml) {
+      try {
+        const pdf = await buildHtmlPdfBuffer(html);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.pdf"`);
+        return res.status(200).send(pdf);
+      } catch (pdfError) {
+        if (!isMissingPlaywrightBrowserError(pdfError)) throw pdfError;
+        console.warn(`consolidated finance PDF unavailable, serving HTML: ${pdfError.message}`);
+      }
+    }
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `inline; filename="${baseName}.html"`);
+    return res.status(200).send(html);
+  } catch (error) {
+    console.error('consolidated finance print failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'ساخت نسخهٔ چاپی ناموفق بود.' });
+  }
+});
+
+// drill-down فقط‌خواندنی: لیستِ کاملِ بدهکارانِ یک بخش (school | shortTerm | academy).
+router.get('/consolidated-finance/debtors', requireAuth, requirePermission('finance.reports.consolidated.view'), async (req, res) => {
+  try {
+    const payload = await buildConsolidatedFinanceDebtors({ domain: req.query.domain });
+    return res.json({ success: true, ...payload });
+  } catch (error) {
+    const status = error?.statusCode === 400 ? 400 : 500;
+    if (status === 400) {
+      return res.status(400).json({ success: false, message: 'بخش نامعتبر است.' });
+    }
+    console.error('consolidated finance debtors failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'دریافت لیست بدهکاران ناموفق بود.' });
   }
 });
 

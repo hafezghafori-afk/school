@@ -50,6 +50,11 @@ const { suppressAutomaticFinanceBillSync } = require('../utils/financeSyncContro
 const { hasStudentLeft, getStudentStatusBadge } = require('../utils/financeStudentLifecycleStatus');
 const { withReportCache, buildCacheKey, invalidateAll: invalidateFinanceReportCache } = require('../utils/financeReportCache');
 const {
+  GOVERNMENT_SNAPSHOT_DIGEST_ALGO,
+  computeGovernmentSnapshotDigest,
+  collectOfficialSnapshotGate
+} = require('../services/governmentSnapshotIntegrity');
+const {
   listCourseMemberships,
   findClassMemberships,
   resolveMembershipTransactionLink
@@ -1612,15 +1617,31 @@ const populateExpenseEntryQuery = (query) => query
   .populate('rejectedBy', 'name')
   .populate('updatedBy', 'name');
 
+const serializeGovernmentFinanceSnapshotActor = (actor = null) => {
+  if (!actor) return null;
+  if (actor?._id) return { _id: actor._id, name: actor.name || '' };
+  return actor;
+};
+
 const serializeGovernmentFinanceSnapshot = (value = null) => {
   if (!value) return null;
   const plain = value?.toObject ? value.toObject() : { ...(value || {}) };
+  // Records created before the two-person flow carry isOfficial:true and no
+  // meaningful officialStage; surface them as already-ratified so the archive
+  // UI doesn't mistake them for pending drafts.
+  let officialStage = ['draft', 'ratified', 'rejected'].includes(plain.officialStage)
+    ? plain.officialStage
+    : 'draft';
+  if (plain.isOfficial && officialStage !== 'ratified') officialStage = 'ratified';
   return {
     ...plain,
+    officialStage,
     financialYearId: plain.financialYearId?._id || plain.financialYearId || null,
     academicYearId: plain.academicYearId?._id || plain.academicYearId || null,
     classId: plain.classId?._id || plain.classId || null,
     schoolClass: serializeSchoolClassLite(plain.classId || null),
+    ratifiedBy: serializeGovernmentFinanceSnapshotActor(plain.ratifiedBy || null),
+    rejectedBy: serializeGovernmentFinanceSnapshotActor(plain.rejectedBy || null),
     financialYear: plain.financialYearId?._id
       ? {
           _id: plain.financialYearId._id,
@@ -2095,6 +2116,9 @@ const resolveGovernmentReportKey = (reportType = '') => {
   if (normalized === 'monthly') return 'government_finance_monthly';
   return 'government_finance_quarterly';
 };
+
+// P7/P8 integrity helpers (digest chain + official-snapshot gate) live in
+// services/governmentSnapshotIntegrity.js so they can be unit tested standalone.
 
 const resolveFinancialYearErrorStatus = (error) => {
   if (Number.isFinite(Number(error?.statusCode)) && Number(error?.statusCode) > 0) {
@@ -3114,6 +3138,18 @@ router.post('/admin/financial-years/:id/close', requireAuth, requireRole(['admin
         success: true,
         item: serializeFinancialYear(current),
         message: 'سال مالی قبلاً بسته شده است.'
+      });
+    }
+
+    // P2 — closing a financial year is the highest-stakes finance action and is
+    // irreversible from this endpoint; only the top authority may finalize it,
+    // matching how month-close completes at general_president.
+    const actorLevel = normalizeAdminLevel(await resolveAdminActorLevel(req.user.id));
+    if (actorLevel !== 'general_president') {
+      return res.status(403).json({
+        success: false,
+        code: 'finance_financial_year_close_level_invalid',
+        message: 'بستن سال مالی فقط توسط ریاست عمومی مجاز است.'
       });
     }
 
@@ -4266,13 +4302,16 @@ router.get('/admin/government-snapshots', requireAuth, requireRole(['admin']), r
       .populate('academicYearId', 'title code')
       .populate('classId', 'title code gradeLevel section')
       .populate('generatedBy', 'name')
+      .populate('ratifiedBy', 'name')
+      .populate('rejectedBy', 'name')
       .sort({ generatedAt: -1, version: -1 });
 
     return res.json({
       success: true,
       items: items.map((item) => serializeGovernmentFinanceSnapshot(item))
     });
-  } catch {
+  } catch (error) {
+    console.error('government snapshot list failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'دریافت آرشیف مالی دولت ناموفق بود.' });
   }
 });
@@ -4309,19 +4348,11 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
     if (!month) delete filters.monthNumber;
 
     const reportKey = resolveGovernmentReportKey(reportType);
-    const isOfficial = parseBooleanInput(payload.isOfficial, true);
+    // Generation always produces a DRAFT (P2). A draft can be built at any time —
+    // it is how staff preview the period — so nothing blocks it here. The
+    // close-readiness gate (P7) is enforced later, at ratification, and is also
+    // captured now so the archive UI can show what still stands in the way.
     const closeReadiness = await buildFinancialYearCloseReadiness({ financialYearId: String(financialYear._id) });
-    if (isOfficial && (
-      Number(closeReadiness?.counts?.pendingPayments || 0) > 0
-      || Number(closeReadiness?.counts?.actionableAnomalies || 0) > 0
-    )) {
-      return res.status(409).json({
-        success: false,
-        code: 'finance_government_snapshot_blocked',
-        readiness: closeReadiness,
-        message: 'تا تعیین تکلیف پرداخت‌های منتظر و ناهنجاری‌های عملیاتی، نسخه رسمی ساخته نمی‌شود.'
-      });
-    }
     const [report, expenseAnalytics, treasuryAnalytics, treasuryReports, budgetVsActual, procurementAnalytics] = await Promise.all([
       runReport(reportKey, filters),
       buildExpenseGovernanceAnalytics({
@@ -4371,17 +4402,17 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
     }).sort({ version: -1 });
 
     const version = Number(latest?.version || 0) + 1;
-    const sourceDigest = crypto
-      .createHash('sha256')
-      .update(JSON.stringify({
-        reportKey,
-        filters,
-        columns: report?.columns || [],
-        summary: report?.summary || {},
-        rows: report?.rows || [],
-        pack: snapshotPack
-      }))
-      .digest('hex');
+    const previousDigest = String(latest?.sourceDigest || '');
+    const sourceDigest = computeGovernmentSnapshotDigest({
+      previousDigest,
+      reportKey,
+      filters,
+      columns: report?.columns || [],
+      summary: report?.summary || {},
+      rows: report?.rows || [],
+      pack: snapshotPack
+    });
+    const ratificationGate = collectOfficialSnapshotGate(closeReadiness, reportType);
 
     const snapshot = await GovernmentFinanceSnapshot.create({
       schoolId: financialYear.schoolId,
@@ -4399,8 +4430,12 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
       rows: Array.isArray(report?.rows) ? report.rows : [],
       pack: snapshotPack,
       sourceDigest,
+      previousDigest,
+      digestAlgo: GOVERNMENT_SNAPSHOT_DIGEST_ALGO,
       version,
-      isOfficial,
+      isOfficial: false,
+      officialStage: 'draft',
+      readinessAtGeneration: closeReadiness || null,
       generatedAt: new Date(),
       generatedBy: req.user.id
     });
@@ -4423,6 +4458,8 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
         classId: classId || '',
         quarter: quarter || '',
         version,
+        stage: 'draft',
+        blockerCount: ratificationGate.blockers.length,
         rowCount: Array.isArray(report?.rows) ? report.rows.length : 0,
         packSections: ['expenseAnalytics', 'treasuryAnalytics', 'treasuryReports', 'budgetVsActual', 'budgetApproval', 'procurementAnalytics']
       }
@@ -4432,7 +4469,10 @@ router.post('/admin/government-snapshots', requireAuth, requireRole(['admin']), 
       success: true,
       item: serializeGovernmentFinanceSnapshot(saved),
       report,
-      message: 'نسخه رسمی گزارش مالی دولت ساخته شد.'
+      ratificationGate,
+      message: ratificationGate.blockers.length
+        ? 'پیش‌نویس نسخهٔ رسمی ساخته شد؛ برای ثبت رسمی ابتدا موانع زیر باید رفع شود.'
+        : 'پیش‌نویس نسخهٔ رسمی ساخته شد؛ آمادهٔ ثبت رسمی توسط مقام دوم است.'
     });
   } catch (error) {
     const code = String(error?.message || '');
@@ -4543,6 +4583,211 @@ router.get('/admin/government-snapshots/:id/export.pdf', requireAuth, requireRol
     return res.status(resolveFinancialYearErrorStatus(error)).json({
       success: false,
       message: resolveFinancialYearMessage(error, 'دریافت PDF آرشیف رسمی ناموفق بود.')
+    });
+  }
+});
+
+const GOVERNMENT_SNAPSHOT_RATIFY_LEVELS = ['finance_lead', 'general_president'];
+
+const loadSchoolOwnedGovernmentSnapshot = async (req, id) => {
+  const schoolContext = await resolveActiveSchool(req, { payload: req.body || req.query || {}, allowSingleFallback: true });
+  if (!schoolContext.schoolId) {
+    throw createRouteError(400, 'مکتب فعال را انتخاب کنید.');
+  }
+  return GovernmentFinanceSnapshot.findOne({ _id: id, schoolId: schoolContext.schoolId });
+};
+
+const populateGovernmentSnapshot = (id) => GovernmentFinanceSnapshot.findById(id)
+  .populate('financialYearId', 'title code status isActive isClosed')
+  .populate('academicYearId', 'title code')
+  .populate('classId', 'title code gradeLevel section')
+  .populate('generatedBy', 'name')
+  .populate('ratifiedBy', 'name')
+  .populate('rejectedBy', 'name');
+
+// P8 — verify a version chain: recompute each canonical-algo snapshot's digest
+// from its stored content and confirm it both matches its own sourceDigest and
+// links to the previous version's sourceDigest.
+router.get('/admin/government-snapshots/verify-chain', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+
+    const filter = { schoolId: schoolContext.schoolId };
+    const financialYearId = String(req.query?.financialYearId || '').trim();
+    const classId = String(req.query?.classId || '').trim();
+    const reportType = String(req.query?.reportType || '').trim().toLowerCase();
+    const quarter = Math.max(0, Math.min(4, Number(req.query?.quarter) || 0));
+    const month = Math.max(0, Math.min(12, Number(req.query?.month) || 0));
+    if (!financialYearId) return res.status(400).json({ success: false, message: 'سال مالی را انتخاب کنید.' });
+    filter.financialYearId = financialYearId;
+    if (reportType) filter.reportType = normalizeGovernmentSnapshotType(reportType);
+    filter.classId = classId || null;
+    if (quarter) filter.quarter = quarter;
+    if (month) filter.month = month;
+
+    const rows = await GovernmentFinanceSnapshot.find(filter).sort({ version: 1 }).lean();
+
+    let previousSourceDigest = '';
+    let legacyCount = 0;
+    const chain = rows.map((item) => {
+      const isCanonical = item.digestAlgo === GOVERNMENT_SNAPSHOT_DIGEST_ALGO;
+      if (!isCanonical) legacyCount += 1;
+      const recomputed = isCanonical
+        ? computeGovernmentSnapshotDigest({
+            previousDigest: item.previousDigest || '',
+            reportKey: item.reportKey || '',
+            filters: item.filters || {},
+            columns: item.columns || [],
+            summary: item.summary || {},
+            rows: item.rows || [],
+            pack: item.pack || null
+          })
+        : '';
+      const digestMatches = isCanonical ? recomputed === String(item.sourceDigest || '') : null;
+      const linkMatches = isCanonical ? String(item.previousDigest || '') === previousSourceDigest : null;
+      previousSourceDigest = String(item.sourceDigest || '');
+      return {
+        _id: item._id,
+        version: item.version,
+        reportType: item.reportType,
+        quarter: item.quarter || null,
+        month: item.month || null,
+        officialStage: item.isOfficial && item.officialStage !== 'ratified' ? 'ratified' : (item.officialStage || 'draft'),
+        digestAlgo: item.digestAlgo || 'legacy-json',
+        sourceDigest: item.sourceDigest || '',
+        previousDigest: item.previousDigest || '',
+        digestMatches,
+        linkMatches,
+        generatedAt: item.generatedAt
+      };
+    });
+
+    const canonicalRows = chain.filter((item) => item.digestAlgo === GOVERNMENT_SNAPSHOT_DIGEST_ALGO);
+    const ok = canonicalRows.length > 0 && canonicalRows.every((item) => item.digestMatches && item.linkMatches);
+
+    return res.json({
+      success: true,
+      ok,
+      legacyCount,
+      verifiableCount: canonicalRows.length,
+      chain
+    });
+  } catch (error) {
+    console.error('government snapshot verify-chain failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'بررسی زنجیرهٔ نسخه‌های رسمی ناموفق بود.' });
+  }
+});
+
+// P2 — a second admin (finance_lead / general_president, not the generator)
+// ratifies a draft snapshot into the official record. Re-checks the P7 gate at
+// ratification time because the numbers may have moved since generation.
+router.post('/admin/government-snapshots/:id/ratify', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const snapshot = await loadSchoolOwnedGovernmentSnapshot(req, req.params.id);
+    if (!snapshot) return res.status(404).json({ success: false, message: 'آرشیف رسمی پیدا نشد.' });
+    if (snapshot.isOfficial && snapshot.officialStage === 'ratified') {
+      return res.json({ success: true, item: serializeGovernmentFinanceSnapshot(await populateGovernmentSnapshot(snapshot._id)), message: 'این نسخه قبلاً رسمی ثبت شده است.' });
+    }
+
+    const actorLevel = normalizeAdminLevel(await resolveAdminActorLevel(req.user.id));
+    if (!GOVERNMENT_SNAPSHOT_RATIFY_LEVELS.includes(actorLevel)) {
+      return res.status(403).json({ success: false, code: 'finance_government_ratify_level_invalid', message: 'ثبت رسمی نسخهٔ گزارش مالی دولت فقط توسط مدیر ارشد مالی یا ریاست عمومی مجاز است.' });
+    }
+    if (FINANCE_FOUR_EYES_ENABLED && String(snapshot.generatedBy || '') === String(req.user.id)) {
+      return res.status(409).json({ success: false, code: 'finance_government_ratify_self', message: 'سازندهٔ پیش‌نویس نمی‌تواند همان نسخه را رسمی ثبت کند؛ به تایید مقام دوم نیاز است.' });
+    }
+
+    const closeReadiness = await buildFinancialYearCloseReadiness({ financialYearId: String(snapshot.financialYearId || '') });
+    const gate = collectOfficialSnapshotGate(closeReadiness, snapshot.reportType);
+    if (gate.blockers.length) {
+      return res.status(409).json({
+        success: false,
+        code: 'finance_government_snapshot_blocked',
+        readiness: closeReadiness,
+        ratificationGate: gate,
+        message: 'تا رفع موانع زیر، نسخهٔ رسمی ثبت نمی‌شود.'
+      });
+    }
+
+    const note = String(req.body?.note || '').trim();
+    snapshot.isOfficial = true;
+    snapshot.officialStage = 'ratified';
+    snapshot.ratifiedBy = req.user.id;
+    snapshot.ratifiedAt = new Date();
+    snapshot.rejectedBy = null;
+    snapshot.rejectedAt = null;
+    snapshot.rejectReason = '';
+    snapshot.readinessAtRatification = closeReadiness || null;
+    if (!Array.isArray(snapshot.officialTrail)) snapshot.officialTrail = [];
+    snapshot.officialTrail.push({ action: 'ratify', by: req.user.id, at: new Date(), level: actorLevel, note });
+    await snapshot.save();
+
+    await logActivity({
+      req,
+      action: 'finance_ratify_government_snapshot',
+      targetType: 'GovernmentFinanceSnapshot',
+      targetId: String(snapshot._id),
+      meta: { reportType: snapshot.reportType || '', version: Number(snapshot.version || 1), actorLevel, warningCount: gate.warnings.length }
+    });
+
+    return res.json({
+      success: true,
+      item: serializeGovernmentFinanceSnapshot(await populateGovernmentSnapshot(snapshot._id)),
+      ratificationGate: gate,
+      message: 'نسخهٔ رسمی گزارش مالی دولت ثبت شد.'
+    });
+  } catch (error) {
+    return res.status(resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: resolveFinancialYearMessage(error, 'ثبت رسمی نسخهٔ گزارش مالی دولت ناموفق بود.')
+    });
+  }
+});
+
+router.post('/admin/government-snapshots/:id/reject', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const snapshot = await loadSchoolOwnedGovernmentSnapshot(req, req.params.id);
+    if (!snapshot) return res.status(404).json({ success: false, message: 'آرشیف رسمی پیدا نشد.' });
+    if (snapshot.isOfficial && snapshot.officialStage === 'ratified') {
+      return res.status(409).json({ success: false, code: 'finance_government_snapshot_ratified', message: 'نسخهٔ رسمی‌شده قابل رد نیست؛ در صورت نیاز نسخهٔ جدید بسازید.' });
+    }
+
+    const actorLevel = normalizeAdminLevel(await resolveAdminActorLevel(req.user.id));
+    if (!GOVERNMENT_SNAPSHOT_RATIFY_LEVELS.includes(actorLevel)) {
+      return res.status(403).json({ success: false, code: 'finance_government_ratify_level_invalid', message: 'رد پیش‌نویس نسخهٔ رسمی فقط توسط مدیر ارشد مالی یا ریاست عمومی مجاز است.' });
+    }
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) {
+      return res.status(400).json({ success: false, code: 'finance_government_reject_reason_required', message: 'برای رد پیش‌نویس، ذکر دلیل الزامی است.' });
+    }
+
+    snapshot.isOfficial = false;
+    snapshot.officialStage = 'rejected';
+    snapshot.rejectedBy = req.user.id;
+    snapshot.rejectedAt = new Date();
+    snapshot.rejectReason = reason;
+    if (!Array.isArray(snapshot.officialTrail)) snapshot.officialTrail = [];
+    snapshot.officialTrail.push({ action: 'reject', by: req.user.id, at: new Date(), level: actorLevel, reason });
+    await snapshot.save();
+
+    await logActivity({
+      req,
+      action: 'finance_reject_government_snapshot',
+      targetType: 'GovernmentFinanceSnapshot',
+      targetId: String(snapshot._id),
+      meta: { reportType: snapshot.reportType || '', version: Number(snapshot.version || 1), actorLevel }
+    });
+
+    return res.json({
+      success: true,
+      item: serializeGovernmentFinanceSnapshot(await populateGovernmentSnapshot(snapshot._id)),
+      message: 'پیش‌نویس نسخهٔ رسمی رد شد.'
+    });
+  } catch (error) {
+    return res.status(resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: resolveFinancialYearMessage(error, 'رد پیش‌نویس نسخهٔ رسمی ناموفق بود.')
     });
   }
 });

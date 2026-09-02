@@ -221,6 +221,7 @@ const PERMISSION_LABELS = {
   'education.promotions.manage': 'ارتقای صنف',
   manage_finance: 'مدیریت مالی',
   'finance.lifecycle_effects.manage': 'اثر مالی تغییرات آموزشی',
+  'finance.reports.consolidated.view': 'گزارش مالی یکپارچه مکتب',
   manage_content: 'مدیریت محتوا',
   view_reports: 'مشاهده گزارشات',
   view_schedule: 'مشاهده تقسیم اوقات',
@@ -244,14 +245,14 @@ const ADMIN_LEVEL_GROUP_ACCESS = {
   general_president: null,
   // «ساختار مکتب» فقط شامل کارت «مکاتب» (ایجاد/تعویض مکتب در سیستم چندمکتبه) است — مخصوص ریاست
   // عمومی؛ مدیر یک مکتب نباید بتواند مکتب جدید بسازد یا بین مکاتب دیگر جابه‌جا شود.
-  school_manager: new Set(['ثبت‌نام و شاگردان', 'کاربران و دسترسی', 'سیستم و تنظیمات']),
+  school_manager: new Set(['ثبت‌نام و شاگردان', 'کاربران و دسترسی', 'سیستم و تنظیمات', 'گزارش مالی']),
   // مدیر تدریسی/سر معلم واقعاً صلاحیت ثبت‌نام، تبدیلی، ارتقای صنف و مدیریت شاگردان را دارند
   // (students.manage, students.transfers.manage, education.promotions.manage, manage_enrollments...)
   // پس باید گروه «ثبت‌نام و شاگردان» را هم ببینند، نه فقط «آموزش و برنامه».
   academic_manager: new Set(['آموزش و برنامه', 'ثبت‌نام و شاگردان']),
   head_teacher: new Set(['آموزش و برنامه', 'ثبت‌نام و شاگردان']),
-  finance_manager: new Set(['مالی']),
-  finance_lead: new Set(['مالی'])
+  finance_manager: new Set(['مالی', 'گزارش مالی']),
+  finance_lead: new Set(['مالی', 'گزارش مالی'])
 };
 
 // «هشدارهای فوری» (urgentAlerts) قبلاً بدون فیلتر به همهٔ نقش‌ها نشان داده می‌شد — مثلاً «بل‌های مالی
@@ -295,6 +296,7 @@ const MANAGEMENT_SECTION_ICONS = {
   academy: 'fa-school',
   'short-term-center': 'fa-clock',
   reports: 'fa-chart-column',
+  'consolidated-finance': 'fa-layer-group',
   'student-report': 'fa-id-card',
   'instructor-report': 'fa-user-tie',
   logs: 'fa-list',
@@ -556,6 +558,7 @@ const QUICK_LINK_ITEMS = [
   { to: '/admin-education?section=enrollments', label: 'ممبرشیپ آموزشی', permission: 'manage_memberships' },
   { to: '/admin-financial-memberships', label: 'عضویت‌ها', permission: 'manage_finance' },
   { to: '/admin-finance', label: 'مرکز مالی', permission: 'manage_finance' },
+  { to: '/admin-school-finance', label: 'گزارش مالی یکپارچه مکتب', permission: 'view_reports' },
   { to: '/admin-reports', label: 'گزارش‌ساز', permission: 'view_reports' },
   { to: '/admin-promotions', label: 'ارتقا صنف', permission: 'education.promotions.manage' },
   { to: '/admin-result-tables', label: 'جدول نتایج', permission: 'manage_content' },
@@ -568,6 +571,7 @@ const QUICK_LINK_ITEMS = [
 ];
 
 const REQUIRED_QUICK_LINK_ITEMS = [
+  { to: '/admin-school-finance', label: 'گزارش مالی یکپارچه مکتب', permission: 'view_reports' },
   { to: '/admin-exams-dashboard', label: 'داشبورد امتحانات', permission: 'manage_content' },
   { to: '/admin-education?section=enrollments&lifecycle=transfer-in', label: 'تبدیلی آمد', permission: 'students.transfers.manage' },
   { to: '/admin-education?section=enrollments&lifecycle=end', label: 'تبدیلی، ترک تحصیل و منفکی', permission: 'students.lifecycle.manage' },
@@ -597,6 +601,7 @@ const ALLOWED_QUICK_LINK_PERMISSIONS = new Set([
   'education.promotions.manage',
   'manage_finance',
   'finance.lifecycle_effects.manage',
+  'finance.reports.consolidated.view',
   'manage_content',
   'view_reports',
   'view_schedule',
@@ -3969,6 +3974,14 @@ export default function AdminPanel() {
       subtitle: 'خروجی‌ها، وضعیت مدیریتی و گزارش دولت',
       count: reportActivityItems.length,
       to: canViewReports ? '/admin-reports' : ''
+    },
+    {
+      key: 'consolidated-finance',
+      title: 'گزارش مالی یکپارچه مکتب',
+      group: 'گزارش مالی',
+      subtitle: 'عواید، مصارف و بدهکاران هر سه بخش: مکتب، آموزشگاه و شاگردان موقت',
+      count: 0,
+      to: canViewReports ? '/admin-school-finance' : ''
     },
     {
       key: 'student-report',

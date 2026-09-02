@@ -112,8 +112,11 @@ async function listPayload() {
   try {
     const s = await getSettings();
     await academyLedger.generateMonthlyCharges({ dueDay: s.monthlyChargeDueDay || 20 });
+    if (s.lateFeeMode && s.lateFeeMode !== 'none') {
+      await academyLedger.generateLateFees({ mode: s.lateFeeMode, amount: s.lateFeeAmount, graceDays: s.lateFeeGraceDays });
+    }
   } catch (error) {
-    console.error('academy generateMonthlyCharges (lazy) failed:', error?.message || error);
+    console.error('academy lazy charge generation failed:', error?.message || error);
   }
 
   const [settings, students, courses, teachers, classes, registrations, payments, invoices, charges, expenses, expenseCategories, attendance, summary] = await Promise.all([
@@ -123,7 +126,7 @@ async function listPayload() {
     AcademyTeacher.find().sort({ createdAt: -1 }).limit(250).lean(),
     AcademyClass.find().sort({ createdAt: -1 }).limit(250).populate('courseId', 'name defaultFee level').populate('teacherId', 'fullName').lean(),
     AcademyRegistration.find().sort({ createdAt: -1 }).limit(300)
-      .populate('studentId', 'fullName studentCode phone')
+      .populate('studentId', 'fullName studentCode phone status')
       .populate('courseId', 'name defaultFee level')
       .populate('classId', 'name')
       .lean(),
@@ -155,15 +158,15 @@ router.get('/bootstrap', async (_req, res) => {
   try {
     res.json({ success: true, ...(await listPayload()) });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'دریافت اطلاعات آموزشگاه ناموفق بود.' });
+    res.status(500).json({ success: false, message: error?.message || 'دریافت اطلاعات آموزشگاه ناموفق بود.' });
   }
 });
 
 router.get('/settings', async (_req, res) => {
   try {
     res.json({ success: true, settings: await getSettings() });
-  } catch {
-    res.status(500).json({ success: false, message: 'دریافت تنظیمات آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافت تنظیمات آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -176,7 +179,7 @@ router.put('/settings', async (req, res) => {
       : await AcademySetting.create(payload);
     res.json({ success: true, settings, message: 'تنظیمات آموزشگاه ذخیره شد.' });
   } catch (error) {
-    res.status(400).json({ success: false, message: 'ذخیره تنظیمات آموزشگاه ناموفق بود.' });
+    res.status(400).json({ success: false, message: error?.message || 'ذخیره تنظیمات آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -184,8 +187,8 @@ router.get('/students', async (req, res) => {
   try {
     const items = await AcademyStudent.find(mapListQuery(req.query)).sort({ createdAt: -1 }).lean();
     res.json({ success: true, items });
-  } catch {
-    res.status(500).json({ success: false, message: 'دریافت شاگردان آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافت شاگردان آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -207,8 +210,8 @@ router.put('/students/:id', async (req, res) => {
     const item = await AcademyStudent.findByIdAndUpdate(req.params.id, { ...req.body, updatedBy: userId(req) }, { new: true, runValidators: true });
     if (!item) return res.status(404).json({ success: false, message: 'شاگرد پیدا نشد.' });
     res.json({ success: true, item, message: 'شاگرد آموزشگاه به‌روزرسانی شد.' });
-  } catch {
-    res.status(400).json({ success: false, message: 'ویرایش شاگرد آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ویرایش شاگرد آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -216,8 +219,8 @@ router.get('/courses', async (req, res) => {
   try {
     const items = await AcademyCourse.find(mapListQuery(req.query)).sort({ createdAt: -1 }).lean();
     res.json({ success: true, items });
-  } catch {
-    res.status(500).json({ success: false, message: 'دریافت کورس‌ها ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافت کورس‌ها ناموفق بود.' });
   }
 });
 
@@ -225,8 +228,8 @@ router.post('/courses', async (req, res) => {
   try {
     const item = await AcademyCourse.create({ ...req.body, createdBy: userId(req), updatedBy: userId(req) });
     res.status(201).json({ success: true, item, message: 'کورس آموزشگاه ثبت شد.' });
-  } catch {
-    res.status(400).json({ success: false, message: 'ثبت کورس آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ثبت کورس آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -235,8 +238,8 @@ router.put('/courses/:id', async (req, res) => {
     const item = await AcademyCourse.findByIdAndUpdate(req.params.id, { ...req.body, updatedBy: userId(req) }, { new: true, runValidators: true });
     if (!item) return res.status(404).json({ success: false, message: 'کورس پیدا نشد.' });
     res.json({ success: true, item, message: 'کورس آموزشگاه به‌روزرسانی شد.' });
-  } catch {
-    res.status(400).json({ success: false, message: 'ویرایش کورس آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ویرایش کورس آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -244,8 +247,8 @@ router.get('/teachers', async (req, res) => {
   try {
     const items = await AcademyTeacher.find(mapListQuery(req.query)).sort({ createdAt: -1 }).lean();
     res.json({ success: true, items });
-  } catch {
-    res.status(500).json({ success: false, message: 'دریافت استادان ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافت استادان ناموفق بود.' });
   }
 });
 
@@ -253,8 +256,8 @@ router.post('/teachers', async (req, res) => {
   try {
     const item = await AcademyTeacher.create({ ...req.body, createdBy: userId(req), updatedBy: userId(req) });
     res.status(201).json({ success: true, item, message: 'استاد آموزشگاه ثبت شد.' });
-  } catch {
-    res.status(400).json({ success: false, message: 'ثبت استاد آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ثبت استاد آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -265,8 +268,8 @@ router.get('/classes', async (req, res) => {
       .populate('teacherId', 'fullName')
       .lean();
     res.json({ success: true, items });
-  } catch {
-    res.status(500).json({ success: false, message: 'دریافت پلان صنف ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافت پلان صنف ناموفق بود.' });
   }
 });
 
@@ -283,8 +286,8 @@ router.post('/classes', async (req, res) => {
       updatedBy: userId(req)
     });
     res.status(201).json({ success: true, item, message: 'پلان صنف آموزشگاه ثبت شد.' });
-  } catch {
-    res.status(400).json({ success: false, message: 'ثبت پلان صنف ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ثبت پلان صنف ناموفق بود.' });
   }
 });
 
@@ -296,10 +299,47 @@ router.get('/registrations', async (req, res) => {
       .populate('classId', 'name')
       .lean();
     res.json({ success: true, items });
-  } catch {
-    res.status(500).json({ success: false, message: 'دریافت ثبت‌نام‌ها ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافت ثبت‌نام‌ها ناموفق بود.' });
   }
 });
+
+// اقلامِ بدهیِ اولیهٔ یک ثبت‌نام را بر اساسِ نوعِ پرداخت می‌سازد (برای POST و
+// برای بازسازی هنگامِ ویرایش). فرض: هیچ قلمِ پرداخت‌شده‌ای باقی نمانده است.
+async function buildInitialCharges(reg, body, currency, settings, uid) {
+  const fee = toNumber(reg.feeAmount);
+  const discount = Math.min(fee, toNumber(reg.discountAmount));
+  const installments = Array.isArray(body.installments) ? body.installments : [];
+  const discountType = ['sibling', 'scholarship', 'staff', 'hardship', 'other'].includes(body.discountType) ? body.discountType : '';
+  const discountReason = String(body.discountReason || '').trim();
+
+  if (reg.paymentPlan === 'installment' && installments.length) {
+    let idx = 0;
+    for (const row of installments) {
+      idx += 1;
+      const amount = toNumber(row.amount);
+      if (amount <= 0) continue;
+      await AcademyCharge.create({
+        registrationId: reg._id, studentId: reg.studentId, kind: 'installment',
+        title: String(row.title || `قسط ${idx}`).trim(),
+        amount, dueDate: String(row.dueDate || '').slice(0, 10), currency, createdBy: uid
+      });
+    }
+  } else if (reg.paymentPlan === 'monthly') {
+    if (!toNumber(reg.monthlyFee) && fee > 0) { reg.monthlyFee = fee; }
+    await reg.save();
+    try { await academyLedger.generateMonthlyCharges({ dueDay: settings.monthlyChargeDueDay || 20, registrationId: reg._id }); } catch (e) { console.error(e?.message); }
+  } else if (fee > 0) {
+    await AcademyCharge.create({
+      registrationId: reg._id, studentId: reg.studentId, kind: 'enrollment',
+      title: 'فیس / شمولیت', amount: fee, discountAmount: discount,
+      discountReason, discountType,
+      discountApprovedBy: discount > 0 ? uid : null,
+      dueDate: String(reg.startDate || reg.registrationDate || '').slice(0, 10),
+      currency, createdBy: uid
+    });
+  }
+}
 
 router.post('/registrations', async (req, res) => {
   try {
@@ -313,38 +353,7 @@ router.post('/registrations', async (req, res) => {
       updatedBy: userId(req)
     });
 
-    // اقلامِ بدهیِ اولیه بر اساسِ نوعِ پرداخت
-    const fee = toNumber(reg.feeAmount);
-    const discount = Math.min(fee, toNumber(reg.discountAmount));
-    const installments = Array.isArray(req.body.installments) ? req.body.installments : [];
-
-    if (reg.paymentPlan === 'installment' && installments.length) {
-      let idx = 0;
-      for (const row of installments) {
-        idx += 1;
-        const amount = toNumber(row.amount);
-        if (amount <= 0) continue;
-        await AcademyCharge.create({
-          registrationId: reg._id, studentId: reg.studentId, kind: 'installment',
-          title: String(row.title || `قسط ${idx}`).trim(),
-          amount, dueDate: String(row.dueDate || '').slice(0, 10), currency, createdBy: userId(req)
-        });
-      }
-    } else if (reg.paymentPlan === 'monthly') {
-      // شارژِ ماهانه با lazy generate ساخته می‌شود — اگر feeAmount داده شده و monthlyFee خالی است، همان را بگذار
-      if (!toNumber(reg.monthlyFee) && fee > 0) { reg.monthlyFee = fee; await reg.save(); }
-    } else if (fee > 0) {
-      await AcademyCharge.create({
-        registrationId: reg._id, studentId: reg.studentId, kind: 'enrollment',
-        title: 'فیس / شمولیت', amount: fee, discountAmount: discount,
-        dueDate: String(reg.startDate || reg.registrationDate || '').slice(0, 10),
-        currency, createdBy: userId(req)
-      });
-    }
-
-    if (reg.paymentPlan === 'monthly') {
-      try { await academyLedger.generateMonthlyCharges({ dueDay: settings.monthlyChargeDueDay || 20, registrationId: reg._id }); } catch (e) { console.error(e?.message); }
-    }
+    await buildInitialCharges(reg, req.body, currency, settings, userId(req));
     await academyLedger.recomputeRegistration(reg._id);
 
     const populated = await AcademyRegistration.findById(reg._id)
@@ -354,6 +363,87 @@ router.post('/registrations', async (req, res) => {
     res.status(201).json({ success: true, item: populated, message: 'ثبت‌نام آموزشگاه انجام شد.' });
   } catch (error) {
     res.status(400).json({ success: false, message: error?.message || 'ثبت‌نام آموزشگاه ناموفق بود.' });
+  }
+});
+
+// ویرایشِ یک ثبت‌نام. فیلدهای سبک (وضعیت/تاریخ/یادداشت) همیشه.
+// نوعِ پرداخت / فیس / تخفیف / فیسِ ماهانه / اقساط فقط وقتی هیچ قلمِ پرداخت‌شده‌ای
+// نیست: اقلامِ بازِ قبلی ابطال و ساختارِ تازه از نو ساخته می‌شود. اگر روی خودِ
+// ثبت‌نام پرداختِ ثبت‌شده باشد ولی قلمی نباشد (دادهٔ پیش از مهاجرت)، فقط
+// feeAmount/discountAmount به‌روز می‌شود و محاسبهٔ legacy کار را می‌کند.
+router.put('/registrations/:id', async (req, res) => {
+  try {
+    const reg = await AcademyRegistration.findById(req.params.id);
+    if (!reg) return res.status(404).json({ success: false, message: 'ثبت‌نام پیدا نشد.' });
+    const settings = await getSettings();
+    const currency = reg.currency || settings.currency || 'AFN';
+
+    if (req.body.status !== undefined && ['active', 'completed', 'cancelled', 'paused'].includes(req.body.status)) reg.status = req.body.status;
+    if (req.body.startDate !== undefined) reg.startDate = String(req.body.startDate || '').slice(0, 10);
+    if (req.body.endDate !== undefined) reg.endDate = String(req.body.endDate || '').slice(0, 10);
+    if (req.body.note !== undefined) reg.note = String(req.body.note || '').trim();
+
+    const financeKeys = ['paymentPlan', 'feeAmount', 'discountAmount', 'monthlyFee', 'discountType', 'discountReason'];
+    const wantsFinanceEdit = financeKeys.some((k) => req.body[k] !== undefined) || Array.isArray(req.body.installments);
+    let legacyDirectEdit = false;
+
+    if (wantsFinanceEdit) {
+      const charges = await AcademyCharge.find({ registrationId: reg._id, status: { $ne: 'void' } });
+      const paidCharge = charges.find((c) => toNumber(c.paidAmount) > 0);
+      if (paidCharge) {
+        return res.status(400).json({
+          success: false,
+          message: 'این ثبت‌نام قلمِ پرداخت‌شده دارد؛ برای تغییرِ نوعِ پرداخت/فیس/تخفیف اول پرداخت‌ها را در تب «پرداخت و بل» ابطال کنید، یا همان قلم را جداگانه ویرایش کنید.'
+        });
+      }
+
+      if (req.body.paymentPlan !== undefined && ['full', 'installment', 'monthly'].includes(req.body.paymentPlan)) reg.paymentPlan = req.body.paymentPlan;
+      if (req.body.feeAmount !== undefined) reg.feeAmount = toNumber(req.body.feeAmount);
+      if (req.body.discountAmount !== undefined) reg.discountAmount = Math.min(toNumber(reg.feeAmount), toNumber(req.body.discountAmount));
+      if (req.body.monthlyFee !== undefined) reg.monthlyFee = toNumber(req.body.monthlyFee);
+
+      const paidOnReg = toNumber(reg.paidAmount);
+      if (charges.length === 0 && paidOnReg > 0) {
+        // دادهٔ پیش از مهاجرت با پرداختِ ثبت‌شده روی ثبت‌نام — دفترِ اقلام را اینجا اتخاذ نکن،
+        // فقط اعداد را به‌روز کن و بگذار pre-validate ِ legacy جمع بزند.
+        reg.ledgerManaged = false;
+        legacyDirectEdit = true;
+      } else {
+        // اقلامِ بازِ قبلی (همه پرداخت‌نشده) را ابطال و ساختارِ تازه بساز
+        for (const c of charges) {
+          c.status = 'void';
+          c.voidedAt = new Date();
+          c.voidedBy = userId(req);
+          c.voidReason = 'بازسازی هنگامِ ویرایشِ ثبت‌نام';
+          await c.save();
+        }
+        reg.ledgerManaged = true;
+        await reg.save();
+        await buildInitialCharges(reg, req.body, currency, settings, userId(req));
+      }
+    } else if (req.body.monthlyFee !== undefined && reg.paymentPlan === 'monthly') {
+      // مسیرِ ساده: فقط تغییرِ فیسِ ماهانه (سازگاریِ عقب‌رو)
+      reg.monthlyFee = toNumber(req.body.monthlyFee);
+      const monthlyCharges = await AcademyCharge.find({ registrationId: reg._id, kind: 'monthly', status: { $ne: 'void' }, paidAmount: 0 });
+      for (const c of monthlyCharges) { c.amount = reg.monthlyFee; c.updatedBy = userId(req); await c.save(); }
+      reg.ledgerManaged = true;
+      await reg.save();
+      try { await academyLedger.generateMonthlyCharges({ dueDay: settings.monthlyChargeDueDay || 20, registrationId: reg._id }); } catch (e) { console.error(e?.message); }
+    }
+
+    reg.updatedBy = userId(req);
+    await reg.save();
+
+    // در حالتِ legacy (بدون قلم، با پرداختِ ثبت‌شده) recompute اعداد را صفر می‌کند —
+    // فقط وقتی دفترِ اقلام فعال است بازمحاسبه کن.
+    const updated = legacyDirectEdit ? reg : await academyLedger.recomputeRegistration(reg._id);
+    const populated = await AcademyRegistration.findById(reg._id)
+      .populate('studentId', 'fullName studentCode phone')
+      .populate('courseId', 'name defaultFee level')
+      .populate('classId', 'name');
+    res.json({ success: true, item: populated, registration: updated?.toObject ? updated.toObject() : updated, message: 'ثبت‌نام به‌روزرسانی شد.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ویرایشِ ثبت‌نام ناموفق بود.' });
   }
 });
 
@@ -456,7 +546,7 @@ router.post('/payments', async (req, res) => {
       message: 'پرداخت فیس ثبت و بل آموزشگاه صادر شد.'
     });
   } catch (error) {
-    res.status(400).json({ success: false, message: 'ثبت پرداخت فیس آموزشگاه ناموفق بود.' });
+    res.status(400).json({ success: false, message: error?.message || 'ثبت پرداخت فیس آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -466,8 +556,23 @@ router.get('/invoices/:id', async (req, res) => {
     if (!item) return res.status(404).json({ success: false, message: 'بل پیدا نشد.' });
     const settings = await getSettings();
     res.json({ success: true, item, settings });
-  } catch {
-    res.status(400).json({ success: false, message: 'دریافت بل ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'دریافت بل ناموفق بود.' });
+  }
+});
+
+// ثبتِ این‌که یک بل چاپ شد — شمارنده و زمانِ آخرین چاپ (فاز ۳)
+router.post('/invoices/:id/mark-printed', async (req, res) => {
+  try {
+    const item = await AcademyInvoice.findByIdAndUpdate(
+      req.params.id,
+      { $inc: { printCount: 1 }, $set: { lastPrintedAt: new Date() } },
+      { new: true }
+    ).lean();
+    if (!item) return res.status(404).json({ success: false, message: 'بل پیدا نشد.' });
+    res.json({ success: true, item, printCount: item.printCount, lastPrintedAt: item.lastPrintedAt });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ثبتِ چاپِ بل ناموفق بود.' });
   }
 });
 
@@ -546,6 +651,8 @@ router.post('/registrations/:id/charges', async (req, res) => {
         amount,
         discountAmount: Math.min(amount, toNumber(row.discountAmount)),
         discountReason: String(row.discountReason || '').trim(),
+        discountType: ['sibling', 'scholarship', 'staff', 'hardship', 'other'].includes(row.discountType) ? row.discountType : '',
+        discountApprovedBy: row.discountApprovedBy || (toNumber(row.discountAmount) > 0 ? userId(req) : null),
         dueDate: String(row.dueDate || '').slice(0, 10),
         currency, note: String(row.note || '').trim(), createdBy: userId(req)
       });
@@ -572,6 +679,11 @@ router.put('/charges/:id', async (req, res) => {
     if (req.body.amount !== undefined) charge.amount = toNumber(req.body.amount);
     if (req.body.discountAmount !== undefined) charge.discountAmount = Math.min(charge.amount, toNumber(req.body.discountAmount));
     if (req.body.discountReason !== undefined) charge.discountReason = String(req.body.discountReason || '').trim();
+    if (req.body.discountType !== undefined) {
+      charge.discountType = ['sibling', 'scholarship', 'staff', 'hardship', 'other'].includes(req.body.discountType) ? req.body.discountType : '';
+    }
+    if (req.body.discountApprovedBy !== undefined) charge.discountApprovedBy = req.body.discountApprovedBy || null;
+    if (academyLedger.num(charge.discountAmount) > 0 && !charge.discountApprovedBy) charge.discountApprovedBy = userId(req);
     if (req.body.dueDate !== undefined) charge.dueDate = String(req.body.dueDate || '').slice(0, 10);
     if (req.body.note !== undefined) charge.note = String(req.body.note || '').trim();
     charge.updatedBy = userId(req);
@@ -619,6 +731,24 @@ router.post('/generate-monthly', async (req, res) => {
   }
 });
 
+// ساختِ جریمهٔ دیرکردِ خودکار برای اقلامِ معوق (فاز ۳)
+router.post('/generate-late-fees', async (_req, res) => {
+  try {
+    const settings = await getSettings();
+    if (!settings.lateFeeMode || settings.lateFeeMode === 'none') {
+      return res.status(400).json({ success: false, message: 'حالتِ جریمهٔ دیرکرد در تنظیمات غیرفعال است.' });
+    }
+    const result = await academyLedger.generateLateFees({
+      mode: settings.lateFeeMode,
+      amount: settings.lateFeeAmount,
+      graceDays: settings.lateFeeGraceDays
+    });
+    res.json({ success: true, ...result, message: `${result.created} جریمهٔ دیرکرد ساخته شد.` });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ساختِ جریمهٔ دیرکرد ناموفق بود.' });
+  }
+});
+
 // کشف‌حسابِ کاملِ یک شاگرد
 router.get('/students/:id/statement', async (req, res) => {
   try {
@@ -650,13 +780,29 @@ router.get('/students/:id/statement', async (req, res) => {
   }
 });
 
+const EXPENSE_EDITABLE = ['title', 'category', 'amount', 'currency', 'expenseDate', 'paymentMethod', 'paidTo', 'vendor', 'attachmentUrl', 'recurring', 'recurrenceKey', 'approvedBy', 'note'];
+
 router.post('/expenses', async (req, res) => {
   try {
     const settings = await getSettings();
     const item = await AcademyExpense.create({ ...req.body, currency: req.body.currency || settings.currency || 'AFN', createdBy: userId(req) });
     res.status(201).json({ success: true, item, message: 'مصرف آموزشگاه ثبت شد.' });
-  } catch {
-    res.status(400).json({ success: false, message: 'ثبت مصرف آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ثبت مصرف آموزشگاه ناموفق بود.' });
+  }
+});
+
+router.put('/expenses/:id', async (req, res) => {
+  try {
+    const update = {};
+    for (const key of EXPENSE_EDITABLE) {
+      if (req.body[key] !== undefined) update[key] = req.body[key];
+    }
+    const item = await AcademyExpense.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
+    if (!item) return res.status(404).json({ success: false, message: 'مصرف پیدا نشد.' });
+    res.json({ success: true, item, message: 'مصرف آموزشگاه به‌روزرسانی شد.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ویرایش مصرف آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -664,8 +810,8 @@ router.get('/expense-categories', async (_req, res) => {
   try {
     const items = await AcademyExpenseCategory.find().sort({ name: 1 }).lean();
     res.json({ success: true, items });
-  } catch {
-    res.status(500).json({ success: false, message: 'دریافت دسته‌بندی‌های مصرف ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافت دسته‌بندی‌های مصرف ناموفق بود.' });
   }
 });
 
@@ -706,8 +852,8 @@ router.get('/attendance', async (req, res) => {
       .populate('students.studentId', 'fullName studentCode')
       .lean();
     res.json({ success: true, items });
-  } catch {
-    res.status(500).json({ success: false, message: 'دریافت حاضری آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافت حاضری آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -741,8 +887,8 @@ router.post('/attendance', async (req, res) => {
       .populate('students.studentId', 'fullName studentCode');
 
     res.status(201).json({ success: true, item, message: 'حاضری آموزشگاه ذخیره شد.' });
-  } catch {
-    res.status(400).json({ success: false, message: 'ثبت حاضری آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ثبت حاضری آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -783,7 +929,7 @@ router.get('/reports/overview', async (_req, res) => {
       AcademyRegistration.find({ balance: { $gt: 0 }, status: 'active' })
         .sort({ balance: -1 })
         .limit(500)
-        .populate('studentId', 'fullName studentCode phone guardianPhone')
+        .populate('studentId', 'fullName studentCode phone guardianPhone status')
         .populate('courseId', 'name')
         .populate('classId', 'name')
         .lean(),
@@ -800,6 +946,7 @@ router.get('/reports/overview', async (_req, res) => {
     const lastPaymentMap = new Map(lastPaymentAgg.map((item) => [String(item._id), item.lastPaymentAt]));
     const feeReminders = outstandingRegs
       .filter((reg) => !paidThisMonthSet.has(String(reg._id)))
+      .filter((reg) => !reg.studentId || reg.studentId.status !== 'inactive')
       .map((reg) => ({
         _id: reg._id,
         studentId: reg.studentId,
@@ -822,8 +969,8 @@ router.get('/reports/overview', async (_req, res) => {
       feeReminderCount: feeReminders.length,
       feeReminders
     });
-  } catch {
-    res.status(500).json({ success: false, message: 'گزارش آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'گزارش آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -837,8 +984,8 @@ router.get('/reports/monthly', async (req, res) => {
     });
 
     res.json({ success: true, months: result });
-  } catch {
-    res.status(500).json({ success: false, message: 'گزارش ماهانه آموزشگاه ناموفق بود.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'گزارش ماهانه آموزشگاه ناموفق بود.' });
   }
 });
 
@@ -915,6 +1062,107 @@ router.get('/reports/aging', async (_req, res) => {
     res.json({ success: true, buckets, students, totalOutstanding: Object.values(buckets).reduce((s, b) => s + b.total, 0) });
   } catch (error) {
     res.status(500).json({ success: false, message: error?.message || 'گزارشِ رده‌بندیِ سنی ناموفق بود.' });
+  }
+});
+
+// همهٔ باقی‌داران — هر ثبت‌نامی که باقیِ مثبت دارد (رول‌آپِ ثبت‌نام؛ روی دادهٔ
+// پیش از مهاجرت هم کار می‌کند)، غنی‌شده با اقلامِ بازِ آن برای تفکیکِ ماه و معوق.
+// فیلترِ اختیاریِ بازهٔ سررسید: ?from=YYYY-MM-DD&to=YYYY-MM-DD — فقط ثبت‌نام‌هایی
+// که قلمی با سررسید در این بازه دارند نمایش داده می‌شوند.
+router.get('/reports/debtors', async (req, res) => {
+  try {
+    const today = academyLedger.todayKey();
+    const from = req.query.from ? String(req.query.from).slice(0, 10) : '';
+    const to = req.query.to ? String(req.query.to).slice(0, 10) : '';
+    const dateFiltered = Boolean(from || to);
+
+    const allRegs = await AcademyRegistration.find({ balance: { $gt: 0 } })
+      .sort({ balance: -1 })
+      .limit(2000)
+      .populate('studentId', 'fullName studentCode phone guardianPhone status')
+      .populate('courseId', 'name')
+      .populate('classId', 'name')
+      .lean();
+    // شاگردانِ غیرفعال از فهرستِ باقی‌داران کنار می‌روند
+    const regs = allRegs.filter((r) => !r.studentId || r.studentId.status !== 'inactive');
+
+    const regIds = regs.map((r) => r._id);
+    const charges = regIds.length
+      ? await AcademyCharge.find({ registrationId: { $in: regIds }, status: { $ne: 'void' }, balance: { $gt: 0 } })
+        .sort({ dueDate: 1, createdAt: 1 })
+        .lean()
+      : [];
+
+    const chargesByReg = new Map();
+    for (const c of charges) {
+      const rid = String(c.registrationId);
+      if (!chargesByReg.has(rid)) chargesByReg.set(rid, []);
+      chargesByReg.get(rid).push(c);
+    }
+
+    const byMonth = new Map();
+    const bumpMonth = (key, bal, overdue) => {
+      const m = byMonth.get(key) || { periodKey: key, total: 0, count: 0, overdue: 0 };
+      m.total += bal; m.count += 1; if (overdue) m.overdue += bal;
+      byMonth.set(key, m);
+    };
+
+    const rows = [];
+    for (const reg of regs) {
+      const rid = String(reg._id);
+      const list = chargesByReg.get(rid) || [];
+      const regBalance = toNumber(reg.balance);
+
+      let overdueSum = 0;
+      let oldestDue = null;
+      const months = [];
+      const lines = [];
+      let inRange = !dateFiltered;
+
+      for (const c of list) {
+        const bal = toNumber(c.balance);
+        const isOverdue = Boolean(c.dueDate) && String(c.dueDate) < today;
+        const monthKey = c.kind === 'monthly' && c.periodKey
+          ? c.periodKey
+          : (c.dueDate ? academyLedger.shamsiMonthKey(c.dueDate) : 'بدون سررسید');
+        if (isOverdue) overdueSum += bal;
+        if (c.dueDate && (!oldestDue || c.dueDate < oldestDue)) oldestDue = c.dueDate;
+        if (!months.includes(monthKey)) months.push(monthKey);
+        lines.push({ _id: c._id, kind: c.kind, title: c.title, periodKey: monthKey, dueDate: c.dueDate || '', balance: bal, isOverdue });
+        if (dateFiltered && c.dueDate && (!from || c.dueDate >= from) && (!to || c.dueDate <= to)) inRange = true;
+        bumpMonth(monthKey, bal, isOverdue);
+      }
+
+      if (!list.length) {
+        // دادهٔ پیش از مهاجرت: قلمی نیست — کلِ باقیِ ثبت‌نام را زیرِ «بدون تفکیکِ ماه»
+        bumpMonth('بدون تفکیکِ ماه', regBalance, false);
+        months.push('بدون تفکیکِ ماه');
+      }
+
+      if (!inRange) continue;
+
+      rows.push({
+        registrationId: rid,
+        student: reg.studentId,
+        courseName: reg.courseId?.name || '',
+        className: reg.classId?.name || '',
+        paymentPlan: reg.paymentPlan || '',
+        balance: regBalance,
+        overdue: Math.round(overdueSum * 100) / 100,
+        openCount: list.length,
+        oldestDue,
+        months,
+        lines
+      });
+    }
+
+    const months = [...byMonth.values()].sort((a, b) => String(a.periodKey).localeCompare(String(b.periodKey)));
+    const totalOutstanding = rows.reduce((s, r) => s + r.balance, 0);
+    const studentCount = new Set(rows.map((r) => String(r.student?._id || r.student))).size;
+
+    res.json({ success: true, from, to, rows, months, totalOutstanding, studentCount, hasLedger: charges.length > 0 });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'گزارشِ باقی‌داران ناموفق بود.' });
   }
 });
 

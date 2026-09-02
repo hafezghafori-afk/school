@@ -1435,3 +1435,36 @@
     min-height: 120px;
   }
 }
+
+/* Official-record two-person flow (Phase 1 — P2) */
+.gov-snapshot-stage {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  line-height: 1;
+  border: 1px solid var(--border);
+  background: rgba(237, 245, 243, 0.9);
+  color: var(--slate);
+}
+
+.gov-snapshot-stage[data-stage='ratified'] {
+  background: rgba(204, 251, 241, 0.95);
+  color: #115e59;
+  border-color: rgba(17, 94, 89, 0.25);
+}
+
+.gov-snapshot-stage[data-stage='rejected'] {
+  background: rgba(254, 226, 226, 0.95);
+  color: var(--rose);
+  border-color: rgba(159, 18, 57, 0.25);
+}
+
+.gov-snapshot-stage-by {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: var(--slate);
+  opacity: 0.85;
+}

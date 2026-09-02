@@ -695,3 +695,255 @@
   gap: 12px;
   flex-wrap: wrap;
 }
+
+/* ---------- P3 مالی: فیلترها، جریمهٔ دیرکرد، ردِ چاپ ---------- */
+.academy-chip-muted { background: rgba(148, 163, 184, 0.16); color: #94a3b8; margin-inline-start: 6px; }
+
+.academy-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+.academy-checkbox input { width: 16px; height: 16px; }
+
+/* ---------- P3+ ویرایشِ ثبت‌نام — دیزاینِ شیشه‌ای (فشرده) ---------- */
+.academy-modal-backdrop.is-glass {
+  background: rgba(2, 6, 23, 0.55);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+.academy-glass-modal {
+  width: min(100%, 900px);
+  max-height: 90vh;
+  overflow: auto;
+  border-radius: 18px;
+  padding: 16px 16px 20px;
+  color: #ecfeff;
+  font-size: 12.5px;
+  line-height: 1.5;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background:
+    linear-gradient(135deg, rgba(56, 189, 248, 0.13), rgba(129, 140, 248, 0.09) 45%, rgba(15, 23, 42, 0.30)),
+    rgba(15, 23, 42, 0.64);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: 0 24px 70px -20px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+.academy-glass-modal h2 { margin: 2px 32px 2px 0; font-size: 15px; }
+.academy-glass-modal h3 { margin: 10px 0 6px; font-size: 12.5px; font-weight: 800; color: #a5f3fc; }
+.academy-glass-modal p.academy-form-hint { font-size: 11px; margin: 4px 0; }
+.academy-glass-modal .academy-modal-close {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 11px;
+}
+.academy-glass-card {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 11px;
+  margin-bottom: 9px;
+}
+.academy-glass-card > .academy-edit-grid { margin: 0; }
+
+/* فیلدها: همه هم‌اندازه، منظم کنارِ هم */
+.academy-glass-modal .academy-edit-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.academy-glass-modal .academy-edit-grid > .academy-field {
+  flex: 0 1 168px;
+  min-width: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+}
+.academy-glass-modal .academy-edit-grid > .academy-field > span {
+  font-size: 10px;
+  font-weight: 800;
+  color: #a5f3fc;
+}
+.academy-glass-modal .academy-field input,
+.academy-glass-modal .academy-field select,
+.academy-glass-modal .academy-field textarea,
+.academy-glass-modal .academy-charge-edit-row input,
+.academy-glass-modal .academy-charge-edit-row select,
+.academy-glass-modal .academy-installment-row input {
+  height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+.academy-glass-modal .academy-form button[type],
+.academy-glass-modal .academy-glass-card > button {
+  width: auto;
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 7px 14px;
+  font-size: 12px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.9), rgba(99, 102, 241, 0.9));
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  font-weight: 800;
+}
+.academy-glass-modal .academy-inline-button { padding: 5px 10px; font-size: 11px; }
+
+/* summary of pending changes */
+.academy-change-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px dashed rgba(165, 243, 252, 0.4);
+  background: rgba(56, 189, 248, 0.08);
+  margin-bottom: 10px;
+  font-size: 11px;
+}
+.academy-change-summary.is-empty { border-style: solid; border-color: rgba(148, 163, 184, 0.25); background: rgba(148, 163, 184, 0.06); color: #94a3b8; }
+
+.academy-change-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.academy-change-chip.t-fee-up { background: rgba(248, 113, 113, 0.18); color: #fca5a5; }
+.academy-change-chip.t-fee-down { background: rgba(34, 197, 94, 0.18); color: #86efac; }
+.academy-change-chip.t-discount-add { background: rgba(56, 189, 248, 0.2); color: #7dd3fc; }
+.academy-change-chip.t-discount-remove { background: rgba(251, 191, 36, 0.2); color: #fcd34d; }
+.academy-change-chip.t-discount-change { background: rgba(129, 140, 248, 0.2); color: #c7d2fe; }
+.academy-change-chip.t-due { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; }
+.academy-change-chip.t-title { background: rgba(148, 163, 184, 0.16); color: #cbd5e1; }
+.academy-change-chip.t-new { background: rgba(45, 212, 191, 0.2); color: #5eead4; }
+.academy-change-chip.t-void { background: rgba(248, 113, 113, 0.22); color: #fca5a5; }
+
+.academy-charge-edit-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 10px; }
+.academy-charge-edit-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+}
+.academy-charge-edit-row.is-dirty { border-color: rgba(125, 211, 252, 0.55); box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.25); }
+.academy-charge-edit-row.is-locked { opacity: 0.7; background: rgba(148, 163, 184, 0.08); }
+.academy-charge-edit-row .academy-cer-field { display: flex; flex-direction: column; gap: 3px; flex: 0 1 128px; min-width: 96px; }
+.academy-charge-edit-row .academy-cer-field > span { font-size: 9px; font-weight: 800; color: #94a3b8; }
+.academy-charge-edit-row > .academy-chip { align-self: center; }
+.academy-cer-row-changes { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 5px; }
+.academy-cer-actions { display: flex; gap: 6px; margin-inline-start: auto; align-self: center; }
+
+/* ---------- گزارش‌ها: نوارِ فیلترِ باقی‌داران ---------- */
+.academy-filterbar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px 12px;
+  align-items: end;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  margin-bottom: 12px;
+}
+.academy-filterbar .academy-fb-field { display: flex; flex-direction: column; gap: 4px; }
+.academy-filterbar .academy-fb-field > span { font-size: 10px; font-weight: 800; color: #a5f3fc; }
+.academy-filterbar input,
+.academy-filterbar select {
+  padding: 7px 9px;
+  font-size: 12px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: inherit;
+  width: 100%;
+}
+.academy-segment { display: inline-flex; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.16); }
+.academy-segment button {
+  border: 0;
+  border-radius: 0;
+  padding: 6px 10px;
+  font-size: 11px;
+  background: rgba(15, 23, 42, 0.4);
+  color: #cbd5e1;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.academy-segment button.is-active { background: linear-gradient(135deg, rgba(56, 189, 248, 0.85), rgba(99, 102, 241, 0.85)); color: #fff; }
+.academy-fb-actions { display: flex; gap: 8px; align-items: end; }
+
+/* فیلترِ فشردهٔ سربرگِ کارتِ رسیدها — دو قطارِ کوچک کنارِ هم */
+.academy-minifilter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  margin: 6px 0 10px;
+  font-size: 11px;
+}
+.academy-minifilter > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #94a3b8;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.academy-minifilter > input,
+.academy-minifilter > select,
+.academy-minifilter .afghan-date-input {
+  height: 26px;
+  padding: 2px 6px;
+  font-size: 11px;
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: inherit;
+  box-sizing: border-box;
+}
+.academy-minifilter > input[type="text"] { width: 150px; }
+/* AfghanDateInput یک ویجتِ سه‌بخشی است — عرضِ ثابت بده تا بالای بریک‌پوینتِ
+   container-query (۱۹۰px) بماند و سه‌ستونه و درست بچیند */
+.academy-minifilter .afghan-date-field { width: 264px; gap: 2px; }
+.academy-minifilter .afghan-date-input-grid { gap: 4px; }
+.academy-minifilter .afghan-date-input { text-align: center; padding-inline: 4px; }
+.academy-minifilter .academy-segment button { padding: 4px 8px; font-size: 10px; }
+.academy-minifilter .academy-inline-button { padding: 3px 8px; font-size: 10px; }
+
+/* تاریخِ شمسی در مودالِ شیشه‌ای — کمی جمع‌وجورتر ولی همان چیدمانِ سه‌ستونه */
+.academy-glass-modal .academy-field .afghan-date-field { gap: 3px; }
+.academy-glass-modal .academy-field .afghan-date-input-grid { gap: 4px; }
+.academy-glass-modal .academy-field .afghan-date-input { padding-inline: 6px; text-align: center; }
+
+.academy-bucket-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
+.academy-bucket-chip {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.academy-bucket-chip b { display: block; font-size: 14px; }
+.academy-bucket-chip.is-hot { border-color: rgba(248, 113, 113, 0.4); background: rgba(248, 113, 113, 0.1); }

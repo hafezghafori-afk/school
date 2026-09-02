@@ -21,7 +21,9 @@ const academyInvoiceSchema = new mongoose.Schema({
   note: { type: String, default: '', trim: true },
   kind: { type: String, enum: ['payment', 'credit_note'], default: 'payment', index: true },
   status: { type: String, enum: ['issued', 'void'], default: 'issued', index: true },
-  voidOfId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademyInvoice', default: null }
+  voidOfId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademyInvoice', default: null },
+  printCount: { type: Number, default: 0, min: 0 },
+  lastPrintedAt: { type: Date, default: null }
 }, { timestamps: true });
 
 academyInvoiceSchema.pre('validate', function normalizeAcademyInvoice() {

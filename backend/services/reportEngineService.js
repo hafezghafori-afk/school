@@ -62,6 +62,7 @@ const {
   buildMonthlyGovernmentFinanceReport,
   buildQuarterlyGovernmentFinanceReport
 } = require('./governmentFinanceReportService');
+const { buildConsolidatedFinanceReport } = require('./consolidatedFinanceReportService');
 
 const REPORT_DEFINITIONS = Object.freeze([
   {
@@ -199,6 +200,14 @@ const REPORT_DEFINITIONS = Object.freeze([
     requiredPermissions: ['manage_finance'],
     supportedFilters: ['financialYearId', 'academicYearId', 'classId', 'dateFrom', 'dateTo'],
     description: 'خلاصه سالانه مالی دولت'
+  },
+  {
+    key: 'consolidated_finance_monthly',
+    title: 'گزارش مالی یکپارچه مکتب - ماهوار',
+    category: 'finance',
+    requiredPermissions: ['finance.reports.consolidated.view'],
+    supportedFilters: ['shamsiYear', 'rollingMonths', 'shamsiFrom', 'shamsiTo'],
+    description: 'عواید و مصارف ماه‌به‌ماه شمسی برای هر سه بخش (مرکز مالی مکتب، شاگردان موقت، آموزشگاه) و مجموع آن‌ها'
   }
 ]);
 
@@ -259,7 +268,12 @@ function normalizeFilters(input = {}) {
     teacherId: normalizeNullableId(input.teacherId || input.teacherUserId),
     schoolId: normalizeNullableId(input.schoolId),
     dateFrom: normalizeDateKey(input.dateFrom || input.from),
-    dateTo: normalizeDateKey(input.dateTo || input.to)
+    dateTo: normalizeDateKey(input.dateTo || input.to),
+    // گزارش مالی یکپارچه: بازهٔ صریحِ شمسی (jy-jm)، سالِ شمسیِ کامل، یا پنجرهٔ غلتانِ N ماه
+    shamsiYear: Math.max(0, Number(input.shamsiYear || input.year) || 0) || null,
+    rollingMonths: Math.max(0, Math.min(24, Number(input.rollingMonths || input.months) || 0)) || null,
+    shamsiFrom: /^\d{3,4}-\d{1,2}$/.test(String(input.shamsiFrom || '').trim()) ? String(input.shamsiFrom).trim() : '',
+    shamsiTo: /^\d{3,4}-\d{1,2}$/.test(String(input.shamsiTo || '').trim()) ? String(input.shamsiTo).trim() : ''
   };
 }
 
@@ -2342,6 +2356,74 @@ async function buildGovernmentFinanceAnnualReport(filters) {
   });
 }
 
+const AFGHAN_SOLAR_MONTH_NAMES = ['حمل', 'ثور', 'جوزا', 'سرطان', 'اسد', 'سنبله', 'میزان', 'عقرب', 'قوس', 'جدی', 'دلو', 'حوت'];
+
+function shamsiMonthKeyLabel(key = '') {
+  const [jy, jm] = String(key).split('-').map(Number);
+  if (!jy || !jm) return String(key || '');
+  return `${AFGHAN_SOLAR_MONTH_NAMES[jm - 1] || jm} ${jy}`;
+}
+
+// گزارش مالی یکپارچه مکتب، صافِ جدولی برای خروجی CSV/Excel/PDF — یک سطر برای هر
+// ماهِ شمسی، ستون‌های عواید/مصارف هر بخش و مجموع.
+async function buildConsolidatedFinanceMonthlyReport(filters) {
+  const definition = getReportDefinition('consolidated_finance_monthly');
+  const payload = await buildConsolidatedFinanceReport({
+    year: filters.shamsiYear || undefined,
+    months: filters.rollingMonths || undefined,
+    from: filters.shamsiFrom || undefined,
+    to: filters.shamsiTo || undefined
+  });
+
+  const rows = (payload.monthlyTrend || []).map((item) => ({
+    month: shamsiMonthKeyLabel(item.month),
+    schoolIncome: Number(item.school?.income || 0),
+    schoolExpense: Number(item.school?.expense || 0),
+    shortTermIncome: Number(item.shortTerm?.income || 0),
+    shortTermExpense: Number(item.shortTerm?.expense || 0),
+    academyIncome: Number(item.academy?.income || 0),
+    academyExpense: Number(item.academy?.expense || 0),
+    totalIncome: Number(item.combined?.income || 0),
+    totalExpense: Number(item.combined?.expense || 0),
+    net: Number(item.combined?.net || 0)
+  }));
+
+  const domains = payload.domains || {};
+  return buildBaseReport(definition, filters, {
+    columns: [
+      { key: 'month', label: 'ماه' },
+      { key: 'schoolIncome', label: 'عواید مکتب' },
+      { key: 'schoolExpense', label: 'مصارف مکتب' },
+      { key: 'shortTermIncome', label: 'عواید موقت' },
+      { key: 'shortTermExpense', label: 'مصارف موقت' },
+      { key: 'academyIncome', label: 'عواید آموزشگاه' },
+      { key: 'academyExpense', label: 'مصارف آموزشگاه' },
+      { key: 'totalIncome', label: 'کل عواید' },
+      { key: 'totalExpense', label: 'کل مصارف' },
+      { key: 'net', label: 'خالص' }
+    ],
+    rows,
+    summary: {
+      from: shamsiMonthKeyLabel(payload.period?.from),
+      to: shamsiMonthKeyLabel(payload.period?.to),
+      combinedIncome: Number(payload.combined?.income || 0),
+      combinedExpense: Number(payload.combined?.expense || 0),
+      combinedNet: Number(payload.combined?.net || 0),
+      combinedOutstanding: Number(payload.combined?.outstanding || 0),
+      schoolNet: Number(domains.school?.totals?.net || 0),
+      shortTermNet: Number(domains.shortTerm?.totals?.net || 0),
+      academyNet: Number(domains.academy?.totals?.net || 0),
+      activeStudents: Number(payload.combined?.activeStudents || 0)
+    },
+    meta: {
+      totalRows: rows.length,
+      basis: payload.basis,
+      currency: payload.currency,
+      generatedAt: payload.generatedAt
+    }
+  });
+}
+
 function sanitizeCsv(value) {
   const text = value == null ? '' : String(value);
   const escaped = text.replace(/"/g, '""');
@@ -2396,6 +2478,8 @@ async function runReport(reportKey, rawFilters = {}) {
       return buildGovernmentFinanceQuarterlyReport(filters);
     case 'government_finance_annual':
       return buildGovernmentFinanceAnnualReport(filters);
+    case 'consolidated_finance_monthly':
+      return buildConsolidatedFinanceMonthlyReport(filters);
     default:
       throw new Error('report_not_implemented');
   }

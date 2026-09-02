@@ -266,6 +266,17 @@ function resolveReportTypeLabel(reportType) {
   return REPORT_TYPE_LABELS[normalized] || normalized || '---';
 }
 
+const SNAPSHOT_STAGE_LABELS = {
+  draft: 'پیش‌نویس',
+  ratified: 'رسمی',
+  rejected: 'ردشده'
+};
+
+function resolveSnapshotStageLabel(stage = '') {
+  const normalized = String(stage || '').trim();
+  return SNAPSHOT_STAGE_LABELS[normalized] || 'پیش‌نویس';
+}
+
 function resolveDocumentTypeLabel(documentType) {
   const normalized = String(documentType || '').trim();
   return DOCUMENT_TYPE_LABELS[normalized] || normalized || '---';
@@ -2804,18 +2815,66 @@ export default function AdminGovernmentFinance() {
       }
       const actionKey = `snapshot-${reportType}`;
       setBusyAction(actionKey);
-      await postJson('/api/finance/admin/government-snapshots', {
+      const response = await postJson('/api/finance/admin/government-snapshots', {
         reportType,
         financialYearId: selectedFinancialYearId,
         academicYearId: selectedAcademicYearId,
         classId: selectedClassId || '',
-        quarter: reportType === 'quarterly' ? selectedQuarter : undefined,
-        isOfficial: true
+        quarter: reportType === 'quarterly' ? selectedQuarter : undefined
       });
-      showMessage(`نسخه رسمی ${reportType === 'quarterly' ? 'ربعوار' : 'سالانه'} ساخته شد.`);
+      const blockers = response?.ratificationGate?.blockers || [];
+      if (blockers.length) {
+        showMessage(
+          `پیش‌نویس ${reportType === 'quarterly' ? 'ربعوار' : 'سالانه'} ساخته شد. برای ثبت رسمی ابتدا رفع شود: ${blockers.map((item) => item.label).join(' • ')}`,
+          'info'
+        );
+      } else {
+        showMessage(`پیش‌نویس نسخهٔ رسمی ${reportType === 'quarterly' ? 'ربعوار' : 'سالانه'} ساخته شد؛ آمادهٔ ثبت رسمی توسط مقام دوم است.`);
+      }
       await loadWorkspace();
     } catch (error) {
-      showMessage(errorMessage(error, 'ساخت نسخه رسمی گزارش ناموفق بود.'), 'error');
+      showMessage(errorMessage(error, 'ساخت پیش‌نویس نسخهٔ رسمی ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const ratifySnapshot = async (snapshotId) => {
+    if (!snapshotId) return;
+    try {
+      setBusyAction(`snapshot-ratify-${snapshotId}`);
+      await postJson(`/api/finance/admin/government-snapshots/${snapshotId}/ratify`, {});
+      showMessage('نسخهٔ رسمی گزارش مالی دولت ثبت شد.');
+      await loadWorkspace();
+    } catch (error) {
+      const blockers = error?.data?.ratificationGate?.blockers || [];
+      showMessage(
+        blockers.length
+          ? `ثبت رسمی ممکن نشد؛ ابتدا رفع شود: ${blockers.map((item) => item.label).join(' • ')}`
+          : errorMessage(error, 'ثبت رسمی نسخهٔ گزارش مالی دولت ناموفق بود.'),
+        'error'
+      );
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const rejectSnapshot = async (snapshotId) => {
+    if (!snapshotId) return;
+    const reason = (typeof window !== 'undefined' && window.prompt)
+      ? window.prompt('دلیل رد پیش‌نویس نسخهٔ رسمی:')
+      : '';
+    if (!reason || !reason.trim()) {
+      showMessage('برای رد پیش‌نویس، ذکر دلیل الزامی است.', 'error');
+      return;
+    }
+    try {
+      setBusyAction(`snapshot-reject-${snapshotId}`);
+      await postJson(`/api/finance/admin/government-snapshots/${snapshotId}/reject`, { reason: reason.trim() });
+      showMessage('پیش‌نویس نسخهٔ رسمی رد شد.');
+      await loadWorkspace();
+    } catch (error) {
+      showMessage(errorMessage(error, 'رد پیش‌نویس نسخهٔ رسمی ناموفق بود.'), 'error');
     } finally {
       setBusyAction('');
     }
@@ -5603,27 +5662,27 @@ export default function AdminGovernmentFinance() {
               <div className="gov-card-head">
                 <div>
                   <strong>بسته خروجی رسمی</strong>
-                  <span>اینجا نسخه رسمی ربع‌وار و سالانه با شماره نسخه واقعی آرشیف می‌شود.</span>
+                  <span>ابتدا پیش‌نویس ساخته می‌شود؛ ثبت رسمی به تایید مقام دوم (مدیر ارشد مالی یا ریاست عمومی) نیاز دارد.</span>
                 </div>
               </div>
               <div className="gov-card-actions">
                 <button
                   type="button"
                   className="gov-primary-btn"
-                  aria-label="ساخت نسخه رسمی ربعوار"
+                  aria-label="ساخت پیش‌نویس نسخهٔ رسمی ربعوار"
                   onClick={() => generateSnapshot('quarterly')}
                   disabled={!!busyAction}
                 >
-                  {busyAction === 'snapshot-quarterly' ? 'در حال ساخت...' : 'ساخت نسخه رسمی ربعوار'}
+                  {busyAction === 'snapshot-quarterly' ? 'در حال ساخت...' : 'ساخت پیش‌نویس ربعوار'}
                 </button>
                 <button
                   type="button"
                   className="gov-ghost-btn"
-                  aria-label="ساخت نسخه رسمی سالانه"
+                  aria-label="ساخت پیش‌نویس نسخهٔ رسمی سالانه"
                   onClick={() => generateSnapshot('annual')}
                   disabled={!!busyAction}
                 >
-                  {busyAction === 'snapshot-annual' ? 'در حال ساخت...' : 'ساخت نسخه رسمی سالانه'}
+                  {busyAction === 'snapshot-annual' ? 'در حال ساخت...' : 'ساخت پیش‌نویس سالانه'}
                 </button>
               </div>
               <button
@@ -5656,7 +5715,8 @@ export default function AdminGovernmentFinance() {
               <div className="gov-archive-note">
                 <strong>وضعیت فعلی آرشیف</strong>
                 <p>
-                  آخرین نسخه رسمی: {latestSnapshot?.title || '---'} | نسخه {formatNumber(latestSnapshot?.version || 0)} | تولیدکننده {latestSnapshot?.generatedBy?.name || '---'}
+                  آخرین رکورد: {latestSnapshot?.title || '---'} | نسخه {formatNumber(latestSnapshot?.version || 0)} | {resolveSnapshotStageLabel(latestSnapshot?.officialStage)} | تولیدکننده {latestSnapshot?.generatedBy?.name || '---'}
+                  {latestSnapshot?.officialStage === 'ratified' && latestSnapshot?.ratifiedBy?.name ? ` | ثبت رسمی: ${latestSnapshot.ratifiedBy.name}` : ''}
                 </p>
               </div>
 
@@ -5696,7 +5756,7 @@ export default function AdminGovernmentFinance() {
               ) : null}
 
               {!payload.snapshots?.length ? (
-                <div className="gov-empty-state">هنوز نسخه رسمی برای این سال مالی ساخته نشده است.</div>
+                <div className="gov-empty-state">هنوز پیش‌نویس یا نسخهٔ رسمی برای این سال مالی ساخته نشده است.</div>
               ) : (
                 <div className="gov-stack-section">
                   <div className="gov-table-wrap">
@@ -5706,6 +5766,7 @@ export default function AdminGovernmentFinance() {
                           <th>نوع</th>
                           <th>ربع</th>
                           <th>نسخه</th>
+                          <th>وضعیت</th>
                           <th>تولید</th>
                           <th>تولیدکننده</th>
                           <th>خالص</th>
@@ -5717,11 +5778,44 @@ export default function AdminGovernmentFinance() {
                             <td>{resolveReportTypeLabel(item.reportType)}</td>
                             <td>{item.quarter || '---'}</td>
                             <td>{formatNumber(item.version || 1)}</td>
+                            <td>
+                              <span className="gov-snapshot-stage" data-stage={item.officialStage || 'draft'}>
+                                {resolveSnapshotStageLabel(item.officialStage)}
+                              </span>
+                              {item.officialStage === 'ratified' && item.ratifiedBy?.name ? (
+                                <small className="gov-snapshot-stage-by">با تایید {item.ratifiedBy.name}</small>
+                              ) : null}
+                              {item.officialStage === 'rejected' && item.rejectReason ? (
+                                <small className="gov-snapshot-stage-by">دلیل: {item.rejectReason}</small>
+                              ) : null}
+                            </td>
                             <td>{toLocaleDateTime(item.generatedAt)}</td>
                             <td>{item.generatedBy?.name || '---'}</td>
                             <td>
                               <div className="gov-table-stack">
                                 <strong>{formatMoney(item.summary?.balance ?? item.summary?.netProfit ?? 0)}</strong>
+                                {item.officialStage === 'draft' ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="gov-inline-action"
+                                      data-snapshot-ratify={item._id}
+                                      onClick={() => ratifySnapshot(item._id)}
+                                      disabled={!!busyAction}
+                                    >
+                                      {busyAction === `snapshot-ratify-${item._id}` ? '...' : 'ثبت رسمی'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="gov-inline-action"
+                                      data-snapshot-reject={item._id}
+                                      onClick={() => rejectSnapshot(item._id)}
+                                      disabled={!!busyAction}
+                                    >
+                                      {busyAction === `snapshot-reject-${item._id}` ? '...' : 'رد'}
+                                    </button>
+                                  </>
+                                ) : null}
                                 <button
                                   type="button"
                                   className="gov-inline-action"

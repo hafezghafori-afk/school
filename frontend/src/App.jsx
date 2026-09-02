@@ -75,6 +75,7 @@ const AdminFinance = lazy(() => import('./pages/AdminFinance'));
 const AdminFinanceProfile = lazy(() => import('./pages/AdminFinanceProfile'));
 const AdminFinancialMemberships = lazy(() => import('./pages/AdminFinancialMemberships'));
 const AdminGovernmentFinance = lazy(() => import('./pages/AdminGovernmentFinance'));
+const SchoolFinanceOverview = lazy(() => import('./pages/SchoolFinanceOverview'));
 const AcademyManagement = lazy(() => import('./pages/AcademyManagement'));
 const AcademySupplies = lazy(() => import('./pages/AcademySupplies'));
 const ShortTermCenter = lazy(() => import('./pages/ShortTermCenter'));
@@ -148,6 +149,7 @@ const routePrefetchers = {
   academySupplies: () => import('./pages/AcademySupplies'),
   shortTermCenter: () => import('./pages/ShortTermCenter'),
   adminGovernmentFinance: () => import('./pages/AdminGovernmentFinance'),
+  schoolFinanceOverview: () => import('./pages/SchoolFinanceOverview'),
   adminEducation: () => import('./pages/AdminEducationCore'),
   timetableConfig: () => import('./pages/TimetableConfiguration'),
   shiftManagement: () => import('./pages/ShiftManagement'),
@@ -214,6 +216,7 @@ const routePrefetchersByPath = {
   '/academy-supplies': routePrefetchers.academySupplies,
   '/short-term-center': routePrefetchers.shortTermCenter,
   '/admin-government-finance': routePrefetchers.adminGovernmentFinance,
+  '/admin-school-finance': routePrefetchers.schoolFinanceOverview,
   '/admin-education': routePrefetchers.adminEducation,
   '/timetable': routePrefetchers.timetableConfig,
   '/timetable/timetable-configurations/index': routePrefetchers.timetableConfig,
@@ -3435,6 +3438,10 @@ function AppShell() {
             <Route
               path="/admin-government-finance"
               element={adminRoute('finance.government.view', <AdminGovernmentFinance />, 'دسترسی گزارش مالی دولت برای این حساب فعال نیست.')}
+            />
+            <Route
+              path="/admin-school-finance"
+              element={adminRoute('finance.reports.consolidated.view', <SchoolFinanceOverview />, 'دسترسی گزارش مالی یکپارچه برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-exams-dashboard"
