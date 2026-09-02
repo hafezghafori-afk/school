@@ -37,7 +37,8 @@ const MONTH_PRESETS = [
   { key: '6', label: '۶ ماه اخیر' },
   { key: '12', label: '۱۲ ماه اخیر' },
   { key: '24', label: '۲۴ ماه اخیر' },
-  { key: 'year', label: 'امسال (شمسی)' },
+  { key: 'month', label: 'یک ماه مشخص' },
+  { key: 'year', label: 'یک سال مشخص' },
   { key: 'custom', label: 'بازهٔ دلخواه' }
 ];
 
@@ -326,7 +327,7 @@ function DomainPanel({ domain, onPrint, printBusy }) {
 
       <div className="sfo-debtors-head">
         <h4>
-          بدهکاران <span className="sfo-dim">({formatNumber(debtorCount)} نفر)</span>
+          بدهکاران <span className="sfo-dim">({formatNumber(debtorCount)} نفر · باقیاتِ باز تا امروز، مستقل از بازه)</span>
         </h4>
         {pageCount > 1 ? (
           <span className="sfo-dim">صفحهٔ {faDigits(safePage)} از {faDigits(pageCount)}</span>
@@ -351,6 +352,10 @@ export default function SchoolFinanceOverview() {
   const [fromM, setFromM] = useState(defaultFrom.jm);
   const [toY, setToY] = useState(now.jy);
   const [toM, setToM] = useState(now.jm);
+  // انتخاب‌گرِ «یک ماه مشخص» و «یک سال مشخص»
+  const [pickY, setPickY] = useState(now.jy);
+  const [pickM, setPickM] = useState(now.jm);
+  const [yearPick, setYearPick] = useState(now.jy);
 
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -360,19 +365,22 @@ export default function SchoolFinanceOverview() {
 
   const fromKey = `${fromY}-${pad2(fromM)}`;
   const toKey = `${toY}-${pad2(toM)}`;
+  const pickKey = `${pickY}-${pad2(pickM)}`;
   const customInvalid = preset === 'custom' && (fromY * 12 + fromM) > (toY * 12 + toM);
 
   const queryString = useMemo(() => {
     if (preset === 'custom') return `?from=${fromKey}&to=${toKey}`;
-    if (preset === 'year') return `?year=${now.jy}`;
+    if (preset === 'month') return `?from=${pickKey}&to=${pickKey}`;
+    if (preset === 'year') return `?year=${yearPick}`;
     return `?months=${preset}`;
-  }, [preset, fromKey, toKey, now.jy]);
+  }, [preset, fromKey, toKey, pickKey, yearPick]);
 
   const exportFilters = useMemo(() => {
     if (preset === 'custom') return { shamsiFrom: fromKey, shamsiTo: toKey };
-    if (preset === 'year') return { shamsiYear: now.jy };
+    if (preset === 'month') return { shamsiFrom: pickKey, shamsiTo: pickKey };
+    if (preset === 'year') return { shamsiYear: yearPick };
     return { rollingMonths: Number(preset) };
-  }, [preset, fromKey, toKey, now.jy]);
+  }, [preset, fromKey, toKey, pickKey, yearPick]);
 
   const load = useCallback(async () => {
     if (customInvalid) return;
@@ -456,6 +464,30 @@ export default function SchoolFinanceOverview() {
           ))}
         </div>
 
+        {preset === 'month' ? (
+          <div className="sfo-range-row">
+            <span className="sfo-range-lbl">ماه</span>
+            <select value={pickM} onChange={(e) => setPickM(Number(e.target.value))}>
+              {AFGHAN_SOLAR_MONTHS.map((name, index) => (
+                <option key={name} value={index + 1}>{name}</option>
+              ))}
+            </select>
+            <span className="sfo-range-lbl">سال</span>
+            <select value={pickY} onChange={(e) => setPickY(Number(e.target.value))}>
+              {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+            </select>
+          </div>
+        ) : null}
+
+        {preset === 'year' ? (
+          <div className="sfo-range-row">
+            <span className="sfo-range-lbl">سال شمسی</span>
+            <select value={yearPick} onChange={(e) => setYearPick(Number(e.target.value))}>
+              {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+            </select>
+          </div>
+        ) : null}
+
         {preset === 'custom' ? (
           <div className="sfo-range-row">
             <span className="sfo-range-lbl">از</span>
@@ -491,7 +523,11 @@ export default function SchoolFinanceOverview() {
             {exporting === 'print-all' ? 'در حال ساخت…' : 'PDF گزارش کامل'}
           </button>
           {period?.from ? (
-            <span className="sfo-range-tag">{monthKeyLabel(period.from)} — {monthKeyLabel(period.to)}</span>
+            <span className="sfo-range-tag">
+              {period.from === period.to
+                ? monthKeyLabel(period.from)
+                : `${monthKeyLabel(period.from)} — ${monthKeyLabel(period.to)}`}
+            </span>
           ) : null}
         </div>
       </div>
