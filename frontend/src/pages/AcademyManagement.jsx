@@ -1322,46 +1322,34 @@ export default function AcademyManagement() {
                   <h2>رسیدهای پرداخت / بل‌های صادرشده</h2>
                   <span className="academy-field-label">{filteredInvoices.length} از {invoices.length}</span>
                 </div>
-                <div className="academy-filterbar">
-                  <div className="academy-fb-field">
-                    <span>وضعیت</span>
-                    <div className="academy-segment">
-                      {[['all', 'همه'], ['due', 'باقی‌دار'], ['settled', 'تسویه'], ['void', 'ابطالی']].map(([v, l]) => (
-                        <button key={v} type="button" className={invoiceStatus === v ? 'is-active' : ''} onClick={() => setInvoiceStatus(v)}>{l}</button>
-                      ))}
-                    </div>
+                <div className="academy-minifilter">
+                  <div className="academy-segment">
+                    {[['all', 'همه'], ['due', 'باقی‌دار'], ['settled', 'تسویه'], ['void', 'ابطالی']].map(([v, l]) => (
+                      <button key={v} type="button" className={invoiceStatus === v ? 'is-active' : ''} onClick={() => setInvoiceStatus(v)}>{l}</button>
+                    ))}
                   </div>
-                  <label className="academy-fb-field"><span>روشِ پرداخت</span>
-                    <select value={invoiceMethodFilter} onChange={(e) => setInvoiceMethodFilter(e.target.value)}>
-                      <option value="all">همهٔ روش‌ها</option>
-                      {Object.entries(paymentMethodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                    </select>
-                  </label>
-                  <label className="academy-fb-field"><span>تاریخِ صدور از</span><AfghanDateInput value={invoiceFrom} onChange={setInvoiceFrom} /></label>
-                  <label className="academy-fb-field"><span>تاریخِ صدور تا</span><AfghanDateInput value={invoiceTo} onChange={setInvoiceTo} /></label>
-                  <label className="academy-fb-field"><span>جستجو (شماره / نام / مرجع)</span>
-                    <input value={invoiceSearch} onChange={(e) => setInvoiceSearch(e.target.value)} placeholder="شمارهٔ بل یا نامِ شاگرد…" />
-                  </label>
-                  <label className="academy-fb-field"><span>مرتب‌سازی</span>
-                    <select value={invoiceSort} onChange={(e) => setInvoiceSort(e.target.value)}>
-                      <option value="newest">جدیدترین</option>
-                      <option value="oldest">قدیمی‌ترین</option>
-                      <option value="paid_desc">مبلغِ پرداخت (زیاد→کم)</option>
-                      <option value="balance_desc">باقی (زیاد→کم)</option>
-                    </select>
-                  </label>
-                  <div className="academy-fb-field">
-                    <span>&nbsp;</span>
-                    <div className="academy-fb-actions">
-                      <button
-                        type="button"
-                        className="academy-inline-button"
-                        onClick={() => { setInvoiceFrom(''); setInvoiceTo(''); setInvoiceStatus('all'); setInvoiceMethodFilter('all'); setInvoiceSearch(''); setInvoiceSort('newest'); }}
-                      >
-                        پاک‌کردنِ فیلترها
-                      </button>
-                    </div>
-                  </div>
+                  <select value={invoiceMethodFilter} onChange={(e) => setInvoiceMethodFilter(e.target.value)} title="روشِ پرداخت">
+                    <option value="all">همهٔ روش‌ها</option>
+                    {Object.entries(paymentMethodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                  <select value={invoiceSort} onChange={(e) => setInvoiceSort(e.target.value)} title="مرتب‌سازی">
+                    <option value="newest">جدیدترین</option>
+                    <option value="oldest">قدیمی‌ترین</option>
+                    <option value="paid_desc">مبلغِ پرداخت ↓</option>
+                    <option value="balance_desc">باقی ↓</option>
+                  </select>
+                  <input type="text" value={invoiceSearch} onChange={(e) => setInvoiceSearch(e.target.value)} placeholder="شماره / نام / مرجع" />
+                  <label>از<AfghanDateInput value={invoiceFrom} onChange={setInvoiceFrom} /></label>
+                  <label>تا<AfghanDateInput value={invoiceTo} onChange={setInvoiceTo} /></label>
+                  {(invoiceFrom || invoiceTo || invoiceSearch || invoiceStatus !== 'all' || invoiceMethodFilter !== 'all' || invoiceSort !== 'newest') && (
+                    <button
+                      type="button"
+                      className="academy-inline-button"
+                      onClick={() => { setInvoiceFrom(''); setInvoiceTo(''); setInvoiceStatus('all'); setInvoiceMethodFilter('all'); setInvoiceSearch(''); setInvoiceSort('newest'); }}
+                    >
+                      پاک‌کردن
+                    </button>
+                  )}
                 </div>
                 <Table
                   columns={['شماره', 'شاگرد', 'کورس', 'این پرداخت', 'باقی', 'رسید']}
