@@ -368,8 +368,10 @@ function CollapsiblePanel({ tabKey, panelKey, title, hint = '', defaultOpen = fa
         <span className="gov-panel__title">{title}</span>
         {hint ? <span className="gov-panel__hint">{hint}</span> : null}
       </button>
-      <div className="gov-panel__body" id={bodyId} hidden={!open}>
-        <div className="gov-panel__inner">{children}</div>
+      <div className="gov-panel__body" id={bodyId} aria-hidden={!open} inert={!open}>
+        <div className="gov-panel__clip">
+          <div className="gov-panel__inner">{children}</div>
+        </div>
       </div>
     </article>
   );

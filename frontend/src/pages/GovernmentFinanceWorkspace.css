@@ -1635,21 +1635,27 @@
 }
 
 .gov-panel__body {
-  border-top: var(--glass-hairline);
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 260ms ease;
+}
+
+.gov-panel.is-open .gov-panel__body {
+  grid-template-rows: 1fr;
+}
+
+.gov-panel__clip {
+  overflow: hidden;
+  min-height: 0;
 }
 
 .gov-panel__inner {
   padding: 18px;
+  border-top: var(--glass-hairline);
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .gov-panel:not([hidden]) .gov-panel__body:not([hidden]) .gov-panel__inner {
-    animation: gov-panel-reveal 220ms ease both;
-  }
-  @keyframes gov-panel-reveal {
-    from { opacity: 0; transform: translateY(-4px); }
-    to { opacity: 1; transform: none; }
-  }
+@media (prefers-reduced-motion: reduce) {
+  .gov-panel__body { transition: none; }
 }
 
 /* expand / collapse all */
