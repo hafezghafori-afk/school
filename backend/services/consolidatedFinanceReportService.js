@@ -248,8 +248,11 @@ async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKe
     FeePayment.find({ status: 'approved', paidAt: { $gte: gregStart, $lt: gregEnd } })
       .select('amount paidAt paymentMethod')
       .lean(),
-    ExpenseEntry.find({ status: 'approved', expenseDate: { $gte: gregStart, $lt: gregEnd } })
-      .select('amount expenseDate category subCategory')
+    // «مصارفِ مکمل» = هر مصرفِ ثبت‌شده که ابطال/ردنشده — شاملِ draft و
+    // pending_review، نه فقط approved — تا با آموزشگاه/موقت (که همه را می‌شمارند)
+    // هم‌خوان باشد. سهمِ در انتظار تأیید جدا گزارش می‌شود.
+    ExpenseEntry.find({ status: { $nin: ['void', 'rejected'] }, expenseDate: { $gte: gregStart, $lt: gregEnd } })
+      .select('amount expenseDate category subCategory status')
       .lean(),
     sumPaidRefunds({ startAt: gregStart, endAt: gregEnd }),
     loadSchoolDebtors()
@@ -260,10 +263,12 @@ async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKe
     const method = item.paymentMethod || 'other';
     methodMap.set(method, round((methodMap.get(method) || 0) + toNumber(item.amount)));
   });
+  let pendingExpense = 0;
   expenses.forEach((item) => {
     bucket(monthlyMap, item.expenseDate, 'expense', item.amount);
     const category = item.category || item.subCategory || 'other';
     categoryMap.set(category, round((categoryMap.get(category) || 0) + toNumber(item.amount)));
+    if (item.status !== 'approved') pendingExpense += toNumber(item.amount);
   });
   // پولِ برگشت‌داده‌شده به شاگرد (FinanceRefund.status==='paid') از درآمدِ همان
   // ماهِ پرداختِ برگشت کم می‌شود؛ آموزشگاه/موقت مدلِ refund ندارند.
@@ -288,7 +293,8 @@ async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKe
       activeStudents: debtorData.activeStudentCount,
       currentMonthIncome: round(currentRow.income),
       currentMonthExpense: round(currentRow.expense),
-      refundTotal: round(refundSummary?.total || 0)
+      refundTotal: round(refundSummary?.total || 0),
+      pendingExpense: round(pendingExpense)
     },
     monthly,
     byPaymentMethod: toSortedList(methodMap, 'method'),
@@ -361,7 +367,8 @@ async function buildCenterDomain({
       activeStudents,
       currentMonthIncome: round(currentRow.income),
       currentMonthExpense: round(currentRow.expense),
-      refundTotal: 0
+      refundTotal: 0,
+      pendingExpense: 0
     },
     monthly,
     byPaymentMethod: toSortedList(methodMap, 'method'),
@@ -481,6 +488,7 @@ async function buildConsolidatedFinanceReport({ year, months, from, to, debtorLi
   const combinedIncome = round(domains.reduce((sum, domain) => sum + domain.totals.income, 0));
   const combinedExpense = round(domains.reduce((sum, domain) => sum + domain.totals.expense, 0));
   const combinedOutstanding = round(domains.reduce((sum, domain) => sum + domain.totals.outstanding, 0));
+  const combinedPendingExpense = round(domains.reduce((sum, domain) => sum + (domain.totals.pendingExpense || 0), 0));
 
   return {
     generatedAt: new Date().toISOString(),
@@ -497,6 +505,7 @@ async function buildConsolidatedFinanceReport({ year, months, from, to, debtorLi
     combined: {
       income: combinedIncome,
       expense: combinedExpense,
+      pendingExpense: combinedPendingExpense,
       net: round(combinedIncome - combinedExpense),
       outstanding: combinedOutstanding,
       activeStudents: domains.reduce((sum, domain) => sum + (domain.totals.activeStudents || 0), 0),

@@ -108,6 +108,7 @@ function domainSection(domain, { pageBreak }) {
       { label: 'نرخ وصول', value: Math.round(Number(totals.collectionRate) || 0), suffix: '٪' },
       { label: 'شاگردان فعال', value: totals.activeStudents }
     ])}
+    ${Number(totals.pendingExpense) > 0 ? `<p class="muted">مصرف بازه شاملِ ${fa(totals.pendingExpense)} افغانی مصرفِ در انتظار تأیید است.</p>` : ''}
     <h3>جدول ماهانه</h3>
     ${monthlyTable(domain.monthly)}
     <div class="cols">
@@ -156,6 +157,7 @@ async function buildConsolidatedFinancePrintHtml({ section = 'all', year, months
       { label: 'کل باقیات باز', value: combined.outstanding },
       { label: 'شاگردان فعال', value: combined.activeStudents }
     ])}
+    ${Number(combined.pendingExpense) > 0 ? `<p class="muted">کل مصرف شاملِ ${fa(combined.pendingExpense)} افغانی مصرفِ در انتظار تأیید است.</p>` : ''}
     <h3>روند خالص ماهانهٔ ترکیبی</h3>
     ${monthlyTable((report.monthlyTrend || []).map((row) => ({
       month: row.month,

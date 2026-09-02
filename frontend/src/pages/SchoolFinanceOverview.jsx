@@ -255,6 +255,9 @@ function DomainPanel({ domain, onPrint, printBusy }) {
         <KpiCard label="شاگردان فعال" value={totals.activeStudents} />
       </div>
 
+      {totals.pendingExpense ? (
+        <p className="sfo-note">مصرف بازه شاملِ {formatNumber(totals.pendingExpense)} افغانی مصرفِ ثبت‌شده اما در انتظار تأیید است.</p>
+      ) : null}
       {totals.refundTotal ? (
         <p className="sfo-note">بازپرداخت‌های پرداخت‌شده در بازه: {formatNumber(totals.refundTotal)} افغانی (از درآمد کسر شده).</p>
       ) : null}
@@ -447,7 +450,12 @@ export default function SchoolFinanceOverview() {
             <h2>مجموع هر سه بخش</h2>
             <div className="sfo-kpi-grid sfo-kpi-grid-lg">
               <KpiCard label="کل درآمد" value={combined.income} tone="pos" />
-              <KpiCard label="کل مصرف" value={combined.expense} tone="neg" />
+              <KpiCard
+                label="کل مصرف"
+                value={combined.expense}
+                tone="neg"
+                hint={combined.pendingExpense ? `${formatNumber(combined.pendingExpense)} افغانی در انتظار تأیید` : ''}
+              />
               <KpiCard label="خالص" value={combined.net} tone={Number(combined.net) < 0 ? 'neg' : 'pos'} />
               <KpiCard label="کل باقیات باز" value={combined.outstanding} />
               <KpiCard
