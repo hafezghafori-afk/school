@@ -346,16 +346,26 @@ export default function SchoolFinanceOverview() {
     [now.jy]
   );
   const defaultFrom = useMemo(() => shiftShamsi(now.jy, now.jm, -11), [now.jy, now.jm]);
+  // آخرین انتخابِ فیلتر را از localStorage برمی‌گردانیم تا با هر بازدید از نو تنظیم نشود
+  const saved = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('sfo_filter_v1')) || {}; } catch { return {}; }
+  }, []);
 
-  const [preset, setPreset] = useState('12');
-  const [fromY, setFromY] = useState(defaultFrom.jy);
-  const [fromM, setFromM] = useState(defaultFrom.jm);
-  const [toY, setToY] = useState(now.jy);
-  const [toM, setToM] = useState(now.jm);
+  const [preset, setPreset] = useState(saved.preset || '12');
+  const [fromY, setFromY] = useState(saved.fromY || defaultFrom.jy);
+  const [fromM, setFromM] = useState(saved.fromM || defaultFrom.jm);
+  const [toY, setToY] = useState(saved.toY || now.jy);
+  const [toM, setToM] = useState(saved.toM || now.jm);
   // انتخاب‌گرِ «یک ماه مشخص» و «یک سال مشخص»
-  const [pickY, setPickY] = useState(now.jy);
-  const [pickM, setPickM] = useState(now.jm);
-  const [yearPick, setYearPick] = useState(now.jy);
+  const [pickY, setPickY] = useState(saved.pickY || now.jy);
+  const [pickM, setPickM] = useState(saved.pickM || now.jm);
+  const [yearPick, setYearPick] = useState(saved.yearPick || now.jy);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('sfo_filter_v1', JSON.stringify({ preset, fromY, fromM, toY, toM, pickY, pickM, yearPick }));
+    } catch { /* localStorage unavailable — بی‌خطر */ }
+  }, [preset, fromY, fromM, toY, toM, pickY, pickM, yearPick]);
 
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -401,14 +411,15 @@ export default function SchoolFinanceOverview() {
     load();
   }, [load]);
 
-  const exportExcel = async () => {
-    setExporting('xlsx');
+  const exportTable = async (kind) => {
+    setExporting(kind);
     setExportError('');
     try {
-      const { blob, filename } = await fetchBlob('/api/reports/export.xlsx', { reportKey: REPORT_KEY, filters: exportFilters });
-      downloadBlob(blob, filename || 'consolidated-finance.xlsx');
+      const endpoint = kind === 'csv' ? '/api/reports/export.csv' : '/api/reports/export.xlsx';
+      const { blob, filename } = await fetchBlob(endpoint, { reportKey: REPORT_KEY, filters: exportFilters });
+      downloadBlob(blob, filename || `consolidated-finance.${kind === 'csv' ? 'csv' : 'xlsx'}`);
     } catch (err) {
-      setExportError(errorMessage(err, 'دریافت خروجی اکسل ناموفق بود.'));
+      setExportError(errorMessage(err, kind === 'csv' ? 'دریافت خروجی CSV ناموفق بود.' : 'دریافت خروجی اکسل ناموفق بود.'));
     } finally {
       setExporting('');
     }
@@ -516,8 +527,11 @@ export default function SchoolFinanceOverview() {
           <button type="button" className="sfo-btn" onClick={load} disabled={loading || customInvalid}>
             {loading ? 'در حال بارگذاری…' : 'تازه‌سازی'}
           </button>
-          <button type="button" className="sfo-btn sfo-btn-ghost" onClick={exportExcel} disabled={!report || Boolean(exporting)}>
+          <button type="button" className="sfo-btn sfo-btn-ghost" onClick={() => exportTable('xlsx')} disabled={!report || Boolean(exporting)}>
             {exporting === 'xlsx' ? 'در حال ساخت…' : 'خروجی Excel'}
+          </button>
+          <button type="button" className="sfo-btn sfo-btn-ghost" onClick={() => exportTable('csv')} disabled={!report || Boolean(exporting)}>
+            {exporting === 'csv' ? 'در حال ساخت…' : 'خروجی CSV'}
           </button>
           <button type="button" className="sfo-btn sfo-btn-ghost" onClick={() => printSection('all')} disabled={!report || Boolean(exporting)}>
             {exporting === 'print-all' ? 'در حال ساخت…' : 'PDF گزارش کامل'}
