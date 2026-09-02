@@ -126,7 +126,7 @@ async function listPayload() {
     AcademyTeacher.find().sort({ createdAt: -1 }).limit(250).lean(),
     AcademyClass.find().sort({ createdAt: -1 }).limit(250).populate('courseId', 'name defaultFee level').populate('teacherId', 'fullName').lean(),
     AcademyRegistration.find().sort({ createdAt: -1 }).limit(300)
-      .populate('studentId', 'fullName studentCode phone')
+      .populate('studentId', 'fullName studentCode phone status')
       .populate('courseId', 'name defaultFee level')
       .populate('classId', 'name')
       .lean(),
@@ -929,7 +929,7 @@ router.get('/reports/overview', async (_req, res) => {
       AcademyRegistration.find({ balance: { $gt: 0 }, status: 'active' })
         .sort({ balance: -1 })
         .limit(500)
-        .populate('studentId', 'fullName studentCode phone guardianPhone')
+        .populate('studentId', 'fullName studentCode phone guardianPhone status')
         .populate('courseId', 'name')
         .populate('classId', 'name')
         .lean(),
@@ -946,6 +946,7 @@ router.get('/reports/overview', async (_req, res) => {
     const lastPaymentMap = new Map(lastPaymentAgg.map((item) => [String(item._id), item.lastPaymentAt]));
     const feeReminders = outstandingRegs
       .filter((reg) => !paidThisMonthSet.has(String(reg._id)))
+      .filter((reg) => !reg.studentId || reg.studentId.status !== 'inactive')
       .map((reg) => ({
         _id: reg._id,
         studentId: reg.studentId,
@@ -1075,13 +1076,15 @@ router.get('/reports/debtors', async (req, res) => {
     const to = req.query.to ? String(req.query.to).slice(0, 10) : '';
     const dateFiltered = Boolean(from || to);
 
-    const regs = await AcademyRegistration.find({ balance: { $gt: 0 } })
+    const allRegs = await AcademyRegistration.find({ balance: { $gt: 0 } })
       .sort({ balance: -1 })
       .limit(2000)
-      .populate('studentId', 'fullName studentCode phone guardianPhone')
+      .populate('studentId', 'fullName studentCode phone guardianPhone status')
       .populate('courseId', 'name')
       .populate('classId', 'name')
       .lean();
+    // شاگردانِ غیرفعال از فهرستِ باقی‌داران کنار می‌روند
+    const regs = allRegs.filter((r) => !r.studentId || r.studentId.status !== 'inactive');
 
     const regIds = regs.map((r) => r._id);
     const charges = regIds.length

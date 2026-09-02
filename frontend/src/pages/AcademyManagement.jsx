@@ -272,6 +272,7 @@ export default function AcademyManagement() {
   const [monthlyReportMonth, setMonthlyReportMonth] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStudent, setSelectedStudent] = useState(null);
+  const [showInactiveStudents, setShowInactiveStudents] = useState(true);
   const [studentForm, setStudentForm] = useState(emptyStudent);
   const [courseForm, setCourseForm] = useState(emptyCourse);
   const [teacherForm, setTeacherForm] = useState(emptyTeacher);
@@ -450,13 +451,16 @@ export default function AcademyManagement() {
   }, [activeTab, reports, monthlyReport, cashDaily, debtors, payroll]);
 
   const activeRegistrations = useMemo(
-    () => registrations.filter((item) => item.status === 'active'),
+    () => registrations.filter((item) => item.status === 'active' && (item.studentId?.status || 'active') !== 'inactive'),
     [registrations]
   );
 
   const filteredStudents = useMemo(
-    () => students.filter((item) => studentMatchesSearch(item, searchTerm)),
-    [students, searchTerm]
+    () => students.filter((item) => (
+      studentMatchesSearch(item, searchTerm)
+      && (showInactiveStudents || item.status !== 'inactive')
+    )),
+    [students, searchTerm, showInactiveStudents]
   );
 
   // آی‌دی/نام/نام پدر/تذکره - all live inside studentMatchesSearch's generic
@@ -559,6 +563,7 @@ export default function AcademyManagement() {
   const selectedAttendanceClassRegistrations = useMemo(
     () => registrations.filter((item) => (
       item.status === 'active'
+      && (item.studentId?.status || 'active') !== 'inactive'
       && String(item.classId?._id || item.classId || '') === String(attendanceForm.classId || '')
     )),
     [registrations, attendanceForm.classId]
@@ -945,6 +950,25 @@ export default function AcademyManagement() {
     setSelectedStudent({ ...student, registrations: studentRegistrations, payments: studentPayments, invoices: studentInvoices });
   };
 
+  const toggleStudentStatus = async (student) => {
+    const next = student.status === 'inactive' ? 'active' : 'inactive';
+    if (next === 'inactive' && !window.confirm(`«${student.fullName || student.studentCode}» غیرفعال شود؟\nاز لیستِ صنف، حاضری، یادآوریِ فیس و باقی‌داران کنار می‌رود (بدهی‌اش برای سابقه می‌ماند).`)) return;
+    setBusy(true);
+    try {
+      const data = await requestJson(`/api/academy/students/${student._id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: next })
+      });
+      toast.success(data.message || (next === 'inactive' ? 'شاگرد غیرفعال شد.' : 'شاگرد فعال شد.'));
+      await loadData();
+      if (reports) { setReports(null); setDebtors(null); }
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="academy-page" dir="rtl">
       <div className="academy-topbar">
@@ -1048,15 +1072,34 @@ export default function AcademyManagement() {
                 <button type="submit" disabled={busy}>ثبت شاگرد</button>
               </form>
               <div className="academy-panel">
-                <h2>لیست شاگردان آموزشگاه</h2>
+                <div className="academy-panel-head">
+                  <h2>لیست شاگردان آموزشگاه</h2>
+                  <label className="academy-checkbox">
+                    <input type="checkbox" checked={showInactiveStudents} onChange={(e) => setShowInactiveStudents(e.target.checked)} />
+                    <span>نمایشِ غیرفعال‌ها</span>
+                  </label>
+                </div>
+                <p className="academy-form-hint">غیرفعال‌کردن، شاگرد را از لیستِ صنف، حاضری، یادآوریِ فیس و باقی‌داران کنار می‌گذارد؛ سابقهٔ مالی‌اش می‌ماند و با «فعال‌سازی» برمی‌گردد.</p>
                 <Table
-                  columns={['کد', 'نام', 'تماس', 'وضعیت', 'پروفایل']}
+                  columns={['کد', 'نام', 'تماس', 'وضعیت', 'اقدام']}
                   rows={filteredStudents.map((item) => [
                     item.studentCode,
-                    text(item.fullName),
+                    <span className={item.status === 'inactive' ? 'academy-void' : ''}>{text(item.fullName)}</span>,
                     text(item.phone),
-                    item.status,
-                    <button type="button" className="academy-inline-button" onClick={() => openStudentProfile(item)}>مشاهده</button>
+                    <span className={`academy-chip ${item.status === 'inactive' ? 'academy-chip-bad' : item.status === 'completed' ? 'academy-chip-muted' : 'academy-chip-ok'}`}>
+                      {item.status === 'inactive' ? 'غیرفعال' : item.status === 'completed' ? 'فارغ' : 'فعال'}
+                    </span>,
+                    <div className="academy-cer-actions" style={{ marginInlineStart: 0 }}>
+                      <button type="button" className="academy-inline-button" onClick={() => openStudentProfile(item)}>مشاهده</button>
+                      <button
+                        type="button"
+                        className={`academy-inline-button${item.status === 'inactive' ? '' : ' academy-danger'}`}
+                        onClick={() => toggleStudentStatus(item)}
+                        disabled={busy}
+                      >
+                        {item.status === 'inactive' ? 'فعال‌سازی' : 'غیرفعال‌سازی'}
+                      </button>
+                    </div>
                   ])}
                 />
               </div>
@@ -2247,7 +2290,11 @@ function InvoicePrint({ invoice, settings }) {
 function ClassListPrint({ classItem, registrations = [], settings }) {
   if (!classItem) return null;
   const classId = String(classItem._id || '');
-  const rows = registrations.filter((item) => String(item.classId?._id || item.classId || '') === classId);
+  const rows = registrations.filter((item) => (
+    String(item.classId?._id || item.classId || '') === classId
+    && item.status === 'active'
+    && (item.studentId?.status || 'active') !== 'inactive'
+  ));
   return (
     <div className="academy-print academy-class-print">
       <div className="academy-print-paper">
