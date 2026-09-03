@@ -3,26 +3,19 @@ import useSiteSettings from '../hooks/useSiteSettings';
 import { getPublicWebsiteLocale } from '../i18n/publicWebsite';
 import { normalizeBrandName } from '../utils/brand';
 import { PublicLayout } from '../components/public';
+import { normalizeCardList, normalizeStats, normalizeTimeline } from '../utils/publicContent';
 import './About.css';
 
-const stats = [
-  { value: '50+', label: 'صنف فعال' },
-  { value: '1200+', label: 'شاگرد' },
-  { value: '80+', label: 'استاد حرفه‌ای' },
-  { value: '24/7', label: 'پشتیبانی' }
-];
-
+// Fallbacks for content that is now editable from Admin Settings →
+// «وب‌سایت مکتب» → بخش «درباره مکتب». The stats bar and the timeline are
+// school-specific, so they simply stay hidden until the school fills them
+// instead of showing demo numbers. The value cards are generic enough to keep
+// as a default.
 const values = [
   { title: 'کیفیت آموزش', text: 'تمرکز بر محتوای استاندارد و استادان باتجربه.' },
   { title: 'شفافیت', text: 'گزارش دقیق پیشرفت و دسترسی روشن برای شاگرد و خانواده.' },
   { title: 'نوآوری', text: 'استفاده از ابزارهای آنلاین برای آموزش بهتر.' },
   { title: 'پشتیبانی', text: 'همراهی دائم برای حل مشکلات آموزشی و فنی.' }
-];
-
-const timeline = [
-  { year: '1398', text: 'آغاز فعالیت مدرسه با برنامه‌های حضوری.' },
-  { year: '1401', text: 'راه‌اندازی سامانه آموزش آنلاین و مدیریت صنف‌ها.' },
-  { year: '1403', text: 'افزودن کارخانگی، چت و کارنامه دیجیتال.' }
 ];
 
 const labels = {
@@ -42,9 +35,19 @@ export default function About() {
   const missionBody = settings?.missionBody || 'ایجاد محیط یادگیری منظم، شفاف و قابل پیگیری برای همه صنف‌ها.';
   const visionTitle = settings?.visionTitle || 'چشم‌انداز ما';
   const visionBody = settings?.visionBody || 'تبدیل شدن به مرجع آموزش دیجیتال در سطح مکاتب افغانستان.';
-  const featureValues = isSchoolWebsite && Array.isArray(settings?.salesQuickCards) && settings.salesQuickCards.length
-    ? settings.salesQuickCards.map((item) => ({ title: item.title, text: item.text || item.desc || '' })).filter((item) => item.title && item.text)
-    : values;
+  const whyTitle = settings?.aboutWhyTitle || t.why;
+  const whyBody = settings?.aboutWhyBody
+    || (isSchoolWebsite ? aboutBody : 'ترکیب استادان باتجربه با فناوری آموزشی برای تجربه یادگیری بهتر.');
+  const valuesTitle = settings?.aboutValuesTitle || t.values;
+  const timelineTitle = settings?.aboutTimelineTitle || t.growth;
+
+  const statItems = normalizeStats(settings?.aboutStats, []);
+  const valueItems = normalizeCardList(
+    settings?.aboutValues
+      || (isSchoolWebsite ? settings?.salesQuickCards : null),
+    values
+  );
+  const timelineItems = normalizeTimeline(settings?.aboutTimeline, []);
 
   return (
     <PublicLayout active="درباره مکتب" settings={settings}>
@@ -60,14 +63,16 @@ export default function About() {
         </div>
       </div>
 
-      <div className="about-stats">
-        {stats.map(item => (
-          <div key={item.label}>
-            <strong>{item.value}</strong>
-            <span>{item.label}</span>
-          </div>
-        ))}
-      </div>
+      {statItems.length ? (
+        <div className="about-stats">
+          {statItems.map((item, index) => (
+            <div key={`${item.value}-${item.label}-${index}`}>
+              <strong>{item.value}</strong>
+              {item.label ? <span>{item.label}</span> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="about-grid">
         <div className="about-card">
@@ -75,34 +80,38 @@ export default function About() {
           <p>{missionBody}</p>
         </div>
         <div className="about-card">
-          <h3>{t.why}</h3>
-          <p>{isSchoolWebsite ? aboutBody : 'ترکیب استادان باتجربه با فناوری آموزشی برای تجربه یادگیری بهتر.'}</p>
+          <h3>{whyTitle}</h3>
+          <p>{whyBody}</p>
         </div>
       </div>
 
-      <div className="about-values">
-        <h2>{t.values}</h2>
-        <div className="about-values-grid">
-          {featureValues.map(item => (
-            <div key={item.title}>
-              <h4>{item.title}</h4>
-              <p>{item.text}</p>
-            </div>
-          ))}
+      {valueItems.length ? (
+        <div className="about-values">
+          <h2>{valuesTitle}</h2>
+          <div className="about-values-grid">
+            {valueItems.map((item, index) => (
+              <div key={`${item.title}-${index}`}>
+                <h4>{item.title}</h4>
+                <p>{item.text}</p>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : null}
 
-      <div className="about-timeline">
-        <h2>{t.growth}</h2>
-        <div className="about-timeline-grid">
-          {timeline.map(item => (
-            <div key={item.year}>
-              <span>{item.year}</span>
-              <p>{item.text}</p>
-            </div>
-          ))}
+      {timelineItems.length ? (
+        <div className="about-timeline">
+          <h2>{timelineTitle}</h2>
+          <div className="about-timeline-grid">
+            {timelineItems.map((item, index) => (
+              <div key={`${item.year}-${index}`}>
+                <span>{item.year}</span>
+                <p>{item.text}</p>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : null}
       </section>
     </PublicLayout>
   );

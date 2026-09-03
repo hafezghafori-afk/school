@@ -106,8 +106,19 @@ const WEBSITE_TEXT_FIELDS = [
   ['homeHeroText', 'متن معرفی صفحه خانه'],
   ['heroPanelTagline', 'شعار کوتاه پنل هیرو'],
   ['programsIntro', 'متن معرفی بخش برنامه‌های آموزشی'],
+  ['featuresSectionKicker', 'برچسب بالای بخش امکانات'],
+  ['featuresSectionTitle', 'عنوان بخش امکانات'],
+  ['programsSectionKicker', 'برچسب بالای بخش برنامه‌های آموزشی'],
+  ['programsSectionTitle', 'عنوان بخش برنامه‌های آموزشی'],
+  ['newsSectionKicker', 'برچسب بالای بخش اخبار'],
+  ['newsSectionTitle', 'عنوان بخش اخبار'],
+  ['ctaSectionKicker', 'برچسب بخش دسترسی سریع'],
   ['aboutTitle', 'عنوان درباره مکتب'],
   ['aboutBody', 'متن درباره مکتب'],
+  ['aboutWhyTitle', 'عنوان بخش «چرا ما؟»'],
+  ['aboutWhyBody', 'متن بخش «چرا ما؟»'],
+  ['aboutValuesTitle', 'عنوان بخش ارزش‌ها و امکانات'],
+  ['aboutTimelineTitle', 'عنوان بخش مسیر رشد'],
   ['missionTitle', 'عنوان ماموریت'],
   ['missionBody', 'متن ماموریت'],
   ['visionTitle', 'عنوان چشم‌انداز'],
@@ -120,7 +131,7 @@ const WEBSITE_TEXT_FIELDS = [
 
 const WEBSITE_EDITOR_SECTIONS = [
   { key: 'home', title: 'خانه', icon: 'fa-house', description: 'Hero، معرفی، امکانات و آمار' },
-  { key: 'about', title: 'درباره مکتب', icon: 'fa-circle-info', description: 'متن معرفی، ماموریت و چشم‌انداز' },
+  { key: 'about', title: 'درباره مکتب', icon: 'fa-circle-info', description: 'معرفی، ماموریت، چشم‌انداز، آمار، ارزش‌ها و مسیر رشد' },
   { key: 'programs', title: 'برنامه‌های آموزشی', icon: 'fa-layer-group', description: 'کارت‌ها و خدمات آموزشی' },
   { key: 'news', title: 'اخبار', icon: 'fa-newspaper', description: 'لینک منو و مدیریت خبرها' },
   { key: 'gallery', title: 'گالری', icon: 'fa-images', description: 'لینک منو و مدیریت تصاویر' },
@@ -218,7 +229,7 @@ const normalizeWebsiteProfile = (profile = null) => {
   WEBSITE_TEXT_FIELDS.forEach(([field]) => {
     next[field] = localized(next[field]);
   });
-  ['features', 'stats', 'menuItems', 'footerLinks', 'socialLinks', 'heroHighlights'].forEach((field) => {
+  ['features', 'programs', 'stats', 'menuItems', 'footerLinks', 'socialLinks', 'heroHighlights', 'heroTrustPoints', 'aboutStats', 'aboutValues', 'aboutTimeline'].forEach((field) => {
     next[field] = (Array.isArray(next[field]) ? next[field] : []).map((item) => ({
       ...item,
       title: localized(item?.title),
@@ -750,15 +761,31 @@ export default function AdminSettings() {
                 ['missionTitle', 'عنوان ماموریت'],
                 ['missionBody', 'متن ماموریت'],
                 ['visionTitle', 'عنوان چشم‌انداز'],
-                ['visionBody', 'متن چشم‌انداز']
+                ['visionBody', 'متن چشم‌انداز'],
+                ['aboutWhyTitle', 'عنوان بخش «چرا ما؟»'],
+                ['aboutWhyBody', 'متن بخش «چرا ما؟»'],
+                ['aboutValuesTitle', 'عنوان بخش ارزش‌ها و امکانات'],
+                ['aboutTimelineTitle', 'عنوان بخش مسیر رشد']
               ])}
             </section>
+            {renderWebsiteRowsField('aboutStats', 'آمار صفحه درباره مکتب', 'هر خط: برچسب|توضیح کوتاه|مقدار|آیکن. «مقدار» عدد بزرگ است (مثال: ۱۲۰۰+). اگر خالی بماند، نوار آمار در صفحه درباره نمایش داده نمی‌شود.', ['title', 'text', 'value', 'icon'])}
+            {renderWebsiteRowsField('aboutValues', 'ارزش‌ها و امکانات (کارت‌ها)', 'هر خط: عنوان|متن. اگر خالی بماند، فهرست پیش‌فرض نمایش داده می‌شود.')}
+            {renderWebsiteRowsField('aboutTimeline', 'مسیر رشد / تایم‌لاین', 'هر خط: سال|توضیح. مثال: ۱۴۰۱|راه‌اندازی سامانه آموزش آنلاین. اگر خالی بماند، این بخش پنهان می‌شود.')}
           </>
         );
       case 'programs':
         return (
           <>
-            {renderWebsiteRowsField('features', 'برنامه‌ها و کارت‌های آموزشی', 'هر خط: عنوان|متن|لینک اختیاری|آیکن. این موارد در صفحه خانه و بخش برنامه‌های آموزشی استفاده می‌شود.')}
+            <section className="settings-card">
+              <h3>عنوان بخش برنامه‌های آموزشی</h3>
+              <p className="settings-muted">زبان فعلی: {languageLabel}</p>
+              {renderWebsiteFieldGroup([
+                ['programsSectionKicker', 'برچسب بالای بخش (مثال: برنامه‌های آموزشی)'],
+                ['programsSectionTitle', 'عنوان بخش'],
+                ['programsIntro', 'متن زیر عنوان']
+              ])}
+            </section>
+            {renderWebsiteRowsField('programs', 'لیست برنامه‌های آموزشی', 'هر خط یک برنامه (فقط عنوان لازم است). اگر خالی بماند، همان کارت‌های «امکانات» نمایش داده می‌شود.')}
           </>
         );
       case 'news':
@@ -832,12 +859,25 @@ export default function AdminSettings() {
               ])}
             </section>
             {renderWebsiteRowsField('heroHighlights', 'نکات کوتاه پنل هیرو', 'هر خط یک نکته (فقط عنوان لازم است). حداکثر ۴ مورد در پنل کنار هیرو نمایش داده می‌شود، مثال: صنف‌های منظم')}
-            {renderWebsiteRowsField('features', 'امکانات / کارت‌های صفحه خانه', 'هر خط: عنوان|متن|لینک اختیاری|آیکن')}
-            {renderWebsiteRowsField('stats', 'آمار صفحه خانه', 'هر خط: عنوان|متن یا توضیح|مقدار|آیکن', ['title', 'text', 'value', 'icon'])}
+            {renderWebsiteRowsField('heroTrustPoints', 'نوار اعتماد زیر دکمه‌های Hero', 'هر خط یک عبارت کوتاه (فقط عنوان لازم است). اگر خالی بماند این نوار پنهان می‌شود. مثال: بدون نیاز به نصب')}
+            {renderWebsiteRowsField('features', 'امکانات / کارت‌های صفحه خانه', 'هر خط: عنوان|متن|لینک اختیاری|آیکن. این کارت‌ها در بخش امکانات صفحه خانه نمایش داده می‌شوند.')}
             <section className="settings-card">
-              <h3>معرفی بخش برنامه‌های آموزشی</h3>
+              <h3>عنوان بخش امکانات</h3>
               <p className="settings-muted">زبان فعلی: {languageLabel}</p>
-              {renderWebsiteFieldGroup([['programsIntro', 'متن زیر عنوان «برنامه‌های آموزشی»']])}
+              {renderWebsiteFieldGroup([
+                ['featuresSectionKicker', 'برچسب بالای بخش (مثال: ویژگی‌ها)'],
+                ['featuresSectionTitle', 'عنوان بخش']
+              ])}
+            </section>
+            {renderWebsiteRowsField('stats', 'آمار صفحه خانه', 'هر خط: برچسب|توضیح کوتاه|مقدار|آیکن. «مقدار» عدد بزرگ است (مثال: ۴۵۰+) و «توضیح» زیر آن نوشته می‌شود. اگر همه خط‌ها خالی بماند، عددهای نمونه نمایش داده می‌شود.', ['title', 'text', 'value', 'icon'])}
+            <section className="settings-card">
+              <h3>عنوان بخش اخبار و دسترسی سریع</h3>
+              <p className="settings-muted">زبان فعلی: {languageLabel}</p>
+              {renderWebsiteFieldGroup([
+                ['newsSectionKicker', 'برچسب بالای بخش اخبار (مثال: آخرین اخبار)'],
+                ['newsSectionTitle', 'عنوان بخش اخبار'],
+                ['ctaSectionKicker', 'برچسب بخش دسترسی سریع (پایین صفحه)']
+              ])}
             </section>
           </>
         );
