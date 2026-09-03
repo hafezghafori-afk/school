@@ -110,6 +110,13 @@ function fifoAllocate(amount, openCharges = []) {
   return { allocations, unallocated: round(left) };
 }
 
+/** ماهِ شمسیِ بعد از «jy-jm». */
+function bumpShamsiMonth(key) {
+  const [jy, jm] = String(key).split('-').map(Number);
+  if (!jy || !jm) return key;
+  return jm >= 12 ? `${jy + 1}-01` : `${jy}-${String(jm + 1).padStart(2, '0')}`;
+}
+
 /**
  * شارژِ ماهانهٔ ماه‌های سررسیدشده را برای ثبت‌نام‌های فعالِ ماهانه می‌سازد (idempotent).
  * @param {{ dueDay?: number, registrationId?: string }} [opts]
@@ -132,10 +139,14 @@ async function generateMonthlyCharges({ dueDay = 20, registrationId = null } = {
   const touched = new Set();
 
   for (const reg of regs) {
-    // از ماهِ startDate (یا ثبت‌نام) تا ماهِ جاری، هر ماهی که هنوز شارژ نشده
     const startISO = String(reg.startDate || reg.registrationDate || '').slice(0, 10) || todayKey();
     const endISO = String(reg.endDate || '').slice(0, 10);
-    let cursorKey = shamsiMonthKey(startISO);
+    const startMonthKey = shamsiMonthKey(startISO);
+    // اگر lastMonthlyChargeKey ثبت شده (backfill آن را روی ماهِ جاری می‌گذارد، یا
+    // اجرای قبلی تا آن ماه شارژ ساخته)، از ماهِ *بعدِ* آن شروع کن — نه از ماهِ
+    // شروع — تا ماه‌های گذشته دوباره یا عقب‌افتاده شارژ نشوند.
+    const lastKey = String(reg.lastMonthlyChargeKey || '');
+    let cursorKey = (lastKey && lastKey >= startMonthKey) ? bumpShamsiMonth(lastKey) : startMonthKey;
     // نگذار بیش از ۳۶ ماه عقب برود (محافظ)
     let guard = 0;
     while (cursorKey <= nowKey && guard < 36) {
@@ -164,9 +175,7 @@ async function generateMonthlyCharges({ dueDay = 20, registrationId = null } = {
           if (!(error && error.code === 11000)) throw error;
         }
       }
-      // ماهِ بعدِ شمسی
-      const [jy, jm] = cursorKey.split('-').map(Number);
-      cursorKey = jm >= 12 ? `${jy + 1}-01` : `${jy}-${String(jm + 1).padStart(2, '0')}`;
+      cursorKey = bumpShamsiMonth(cursorKey);
     }
 
     if (String(reg.lastMonthlyChargeKey || '') !== nowKey) {
