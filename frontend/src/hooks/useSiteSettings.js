@@ -58,6 +58,12 @@ const pickSchoolName = (school, language = 'fa') => {
   return school.nameDari || school.name || school.namePashto || '';
 };
 
+// The school website profile is spread over the base site settings. Fields the
+// school has not filled yet come back as '' or [] from serializeProfile; that is
+// fine because Home.jsx already falls back to its own school-flavoured literals
+// for every one of those keys. We deliberately do NOT fall through to the base
+// settings object for home content here, so the SaaS/marketing defaults on the
+// base settings never leak onto a school's public site.
 const mergeSchoolWebsiteSettings = (settings, profile, activeSchool, language = 'fa') => {
   const schoolName = pickSchoolName(activeSchool, language);
   const schoolContact = activeSchool?.contactInfo || {};

@@ -3,6 +3,7 @@ import useSiteSettings from '../hooks/useSiteSettings';
 import { PublicLayout, PrimaryButton, SecondaryButton, SectionTitle } from '../components/public';
 import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
+import { normalizeCardList, normalizeStats, normalizeHighlights } from '../utils/publicContent';
 import './Home.css';
 
 const features = [
@@ -39,39 +40,23 @@ const stats = [
 
 const heroHighlights = ['صنف‌های منظم', 'استادان متعهد', 'گزارش‌دهی شفاف', 'ارتباط با خانواده'];
 
+// Defaults for text that used to be hard-coded inline in the JSX. Every one of
+// these is now overridable from Admin Settings → «وب‌سایت مکتب» → بخش «خانه».
+const heroTrustPoints = ['بدون نیاز به نصب', 'مدیریت آنلاین و امن', 'پشتیبانی مکتب'];
+const sectionText = {
+  featuresKicker: 'ویژگی‌ها',
+  featuresTitle: 'آنچه تجربه آموزشی را منظم‌تر می‌کند',
+  programsKicker: 'برنامه‌های آموزشی',
+  programsTitle: 'مسیرهای آموزشی روشن برای رشد شاگردان',
+  newsKicker: 'آخرین اخبار',
+  newsTitle: 'تازه‌ترین اطلاعیه‌ها و رویدادهای مکتب',
+  ctaKicker: 'دسترسی سریع'
+};
+
 const resolveNewsImage = (url) => {
   if (!url) return '';
   if (url.startsWith('http')) return url;
   return `${API_BASE}/${url.replace(/^\//, '')}`;
-};
-
-const normalizeCardList = (items, fallback) => {
-  if (!Array.isArray(items) || !items.length) return fallback;
-  const normalized = items
-    .map((item, index) => ({
-      title: String(item?.title || '').trim(),
-      text: String(item?.text || item?.desc || '').trim(),
-      icon: String(item?.value || item?.icon || fallback[index]?.icon || 'fa-circle-check').trim()
-    }))
-    .filter((item) => item.title && item.text);
-  return normalized.length ? normalized : fallback;
-};
-
-const normalizeStats = (items, fallback) => {
-  if (!Array.isArray(items) || !items.length) return fallback;
-  const normalized = items
-    .map((item) => ({
-      value: String(item?.value || item?.title || '').trim(),
-      label: String(item?.label || item?.text || item?.desc || '').trim()
-    }))
-    .filter((item) => item.value && item.label);
-  return normalized.length ? normalized : fallback;
-};
-
-const normalizeHighlights = (items, fallback) => {
-  if (!Array.isArray(items) || !items.length) return fallback;
-  const normalized = items.map((item) => String(item?.title || '').trim()).filter(Boolean);
-  return normalized.length ? normalized.slice(0, 4) : fallback;
 };
 
 export default function Home() {
@@ -88,9 +73,21 @@ export default function Home() {
   const secondaryLabel = settings?.homeHeroPrimaryLabel || 'تماس با ما';
   const secondaryHref = settings?.homeHeroPrimaryHref || '/contact';
   const featureItems = normalizeCardList(settings?.salesQuickCards, features);
-  const programItems = normalizeCardList(settings?.salesModules, programs.map((title) => ({ title, text: title }))).map((item) => item.title);
+  const programItems = normalizeCardList(
+    settings?.salesModules,
+    programs.map((title) => ({ title, text: title })),
+    { requireText: false }
+  ).map((item) => item.title).filter(Boolean);
   const statItems = normalizeStats(settings?.homeStats || settings?.stats, stats);
   const highlightItems = normalizeHighlights(settings?.heroHighlights, heroHighlights);
+  const trustItems = normalizeHighlights(settings?.heroTrustPoints, heroTrustPoints);
+  const featuresKicker = settings?.featuresSectionKicker || sectionText.featuresKicker;
+  const featuresTitle = settings?.featuresSectionTitle || sectionText.featuresTitle;
+  const programsKicker = settings?.programsSectionKicker || sectionText.programsKicker;
+  const programsTitle = settings?.programsSectionTitle || sectionText.programsTitle;
+  const newsKicker = settings?.newsSectionKicker || sectionText.newsKicker;
+  const newsTitle = settings?.newsSectionTitle || sectionText.newsTitle;
+  const ctaKicker = settings?.ctaSectionKicker || sectionText.ctaKicker;
   const heroPanelTagline = settings?.heroPanelTagline || 'تعلیم، تربیه، اعتماد';
   const heroImage = settings?.heroImageUrl ? resolveNewsImage(settings.heroImageUrl) : '';
   const programsIntro = settings?.programsIntro || 'برنامه‌ها با توجه به سطح درسی، نیازهای تربیتی و آمادگی آینده شاگردان تنظیم می‌شوند.';
@@ -142,11 +139,11 @@ export default function Home() {
               <PrimaryButton to={primaryHref}>{primaryLabel}</PrimaryButton>
               <SecondaryButton to={secondaryHref}>{secondaryLabel}</SecondaryButton>
             </div>
-            <div className="home-hero-trust">
-              <span>بدون نیاز به نصب</span>
-              <span>مدیریت آنلاین و امن</span>
-              <span>پشتیبانی مکتب</span>
-            </div>
+            {trustItems.length ? (
+              <div className="home-hero-trust">
+                {trustItems.map((item, index) => <span key={`${item}-${index}`}>{item}</span>)}
+              </div>
+            ) : null}
           </div>
 
           <div className={`home-hero-panel${heroImage ? ' has-image' : ''}`} aria-label="نمای معرفی مکتب">
@@ -156,7 +153,7 @@ export default function Home() {
               <strong>{heroPanelTagline}</strong>
             </div>
             <div className="hero-panel-grid">
-              {highlightItems.map((item) => <span key={item}>{item}</span>)}
+              {highlightItems.map((item, index) => <span key={`${item}-${index}`}>{item}</span>)}
             </div>
           </div>
         </div>
@@ -174,10 +171,10 @@ export default function Home() {
       </section>
 
       <section className="home-section public-container" id="programs">
-        <SectionTitle kicker="ویژگی‌ها" title="آنچه تجربه آموزشی را منظم‌تر می‌کند" />
+        <SectionTitle kicker={featuresKicker} title={featuresTitle} />
         <div className="home-feature-grid">
-          {featureItems.map((item) => (
-            <article className="home-card" key={item.title}>
+          {featureItems.map((item, index) => (
+            <article className="home-card" key={`${item.title}-${index}`}>
               <span className="home-card-icon"><i className={`fa ${item.icon}`} aria-hidden="true" /></span>
               <h3>{item.title}</h3>
               <p>{item.text}</p>
@@ -188,28 +185,28 @@ export default function Home() {
 
       <section className="home-section home-program-band">
         <div className="public-container home-program-inner">
-          <SectionTitle kicker="برنامه‌های آموزشی" title="مسیرهای آموزشی روشن برای رشد شاگردان">
+          <SectionTitle kicker={programsKicker} title={programsTitle}>
             {programsIntro}
           </SectionTitle>
           <div className="home-program-list">
-            {programItems.map((item) => <span key={item}>{item}</span>)}
+            {programItems.map((item, index) => <span key={`${item}-${index}`}>{item}</span>)}
           </div>
         </div>
       </section>
 
       <section className="home-section public-container">
         <div className="home-stats-grid">
-          {statItems.map((item) => (
-            <div className="home-stat" key={item.label}>
+          {statItems.map((item, index) => (
+            <div className="home-stat" key={`${item.value}-${item.label}-${index}`}>
               <strong>{item.value}</strong>
-              <span>{item.label}</span>
+              {item.label ? <span>{item.label}</span> : null}
             </div>
           ))}
         </div>
       </section>
 
       <section className="home-section public-container">
-        <SectionTitle kicker="آخرین اخبار" title="تازه‌ترین اطلاعیه‌ها و رویدادهای مکتب" />
+        <SectionTitle kicker={newsKicker} title={newsTitle} />
         {newsItems === null ? null : newsItems.length ? (
           <div className="home-news-grid">
             {newsItems.map((item) => (
@@ -230,7 +227,7 @@ export default function Home() {
       <section className="home-section public-container">
         <div className="home-login-cta">
           <div>
-            <span className="home-kicker">دسترسی سریع</span>
+            <span className="home-kicker">{ctaKicker}</span>
             <h2>{ctaTitle}</h2>
             <p>{ctaText}</p>
           </div>

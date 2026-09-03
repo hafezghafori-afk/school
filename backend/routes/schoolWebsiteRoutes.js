@@ -16,10 +16,16 @@ attachWriteActivityAudit(router, { targetType: 'SchoolWebsite', actionPrefix: 's
 const SUPPORTED_LANGUAGES = ['fa', 'en', 'ps'];
 const TRANSLATABLE_TEXT_FIELDS = [
   'brandName', 'brandSubtitle', 'homeHeroBadge', 'homeHeroTitle', 'homeHeroText', 'heroPanelTagline', 'programsIntro',
-  'aboutTitle', 'aboutBody', 'missionTitle', 'missionBody', 'visionTitle', 'visionBody',
+  'featuresSectionKicker', 'featuresSectionTitle', 'programsSectionKicker', 'programsSectionTitle',
+  'newsSectionKicker', 'newsSectionTitle', 'ctaSectionKicker',
+  'aboutTitle', 'aboutBody', 'aboutWhyTitle', 'aboutWhyBody', 'aboutValuesTitle', 'aboutTimelineTitle',
+  'missionTitle', 'missionBody', 'visionTitle', 'visionBody',
   'contactTitle', 'contactText', 'contactAddress', 'footerNote'
 ];
-const TRANSLATABLE_LIST_FIELDS = ['features', 'stats', 'menuItems', 'footerLinks', 'socialLinks', 'heroHighlights'];
+const TRANSLATABLE_LIST_FIELDS = [
+  'features', 'programs', 'stats', 'menuItems', 'footerLinks', 'socialLinks', 'heroHighlights', 'heroTrustPoints',
+  'aboutStats', 'aboutValues', 'aboutTimeline'
+];
 
 const TRANSLATION_MEMORY = {
   en: {
@@ -241,6 +247,21 @@ const buildFallbackProfile = (school) => {
       en: 'Improving education quality and school-family communication.',
       ps: 'د زده کړې کیفیت او د ښوونځي، زده کوونکي او کورنۍ اړیکې ښه کول.'
     },
+    aboutWhyTitle: { fa: 'چرا ما؟', en: 'Why us?', ps: 'ولې موږ؟' },
+    aboutWhyBody: {
+      fa: 'ترکیب استادان باتجربه با مدیریت منظم و ارتباط شفاف با خانواده‌ها.',
+      en: 'Experienced teachers, organized management, and clear family communication.',
+      ps: 'تجربه لرونکي ښوونکي، منظم مدیریت او له کورنیو سره روښانه اړیکه.'
+    },
+    aboutValuesTitle: { fa: 'ارزش‌ها و امکانات', en: 'Values and facilities', ps: 'ارزښتونه او امکانات' },
+    aboutTimelineTitle: { fa: 'مسیر رشد', en: 'Growth path', ps: 'د ودې لاره' },
+    aboutValues: [
+      { title: { fa: 'کیفیت آموزش', en: 'Teaching quality', ps: 'د ښوونې کیفیت' }, text: { fa: 'تمرکز بر محتوای استاندارد و استادان باتجربه.', en: 'Standard content and experienced teachers.', ps: 'معیاري محتوا او تجربه لرونکي ښوونکي.' } },
+      { title: { fa: 'شفافیت', en: 'Transparency', ps: 'روڼتیا' }, text: { fa: 'گزارش دقیق پیشرفت و دسترسی روشن برای شاگرد و خانواده.', en: 'Accurate progress reports and clear access for students and families.', ps: 'دقیق راپورونه او د زده کوونکو او کورنیو لپاره روښانه لاسرسی.' } },
+      { title: { fa: 'نظم اداری', en: 'Administrative order', ps: 'اداري نظم' }, text: { fa: 'حاضری، نمرات، فیس و اطلاعیه‌ها در یک سیستم منظم.', en: 'Attendance, grades, fees, and notices in one organized system.', ps: 'حاضري، نمرې، فیس او خبرتیاوې په یو منظم سیستم کې.' } },
+      { title: { fa: 'همراهی خانواده', en: 'Family partnership', ps: 'د کورنۍ همکاري' }, text: { fa: 'ارتباط دائم با والدین برای پیگیری وضعیت شاگرد.', en: 'Ongoing contact with parents to follow each student.', ps: 'له والدینو سره دوامداره اړیکه د زده کوونکي د وضعیت لپاره.' } }
+    ],
+    aboutTimeline: [],
     contactTitle: { fa: 'تماس با مکتب', en: 'Contact the school', ps: 'له ښوونځي سره اړیکه' },
     contactText: {
       fa: 'برای معلومات بیشتر، پیشنهاد یا پیام رسمی با اداره مکتب تماس بگیرید.',
@@ -250,10 +271,40 @@ const buildFallbackProfile = (school) => {
     contactPhone: school.contactInfo?.phone || school.contactInfo?.mobile || '',
     contactEmail: school.contactInfo?.email || '',
     contactAddress: { fa: address, en: address, ps: address },
+    heroTrustPoints: [
+      { title: { fa: 'بدون نیاز به نصب', en: 'No installation needed', ps: 'د نصبولو اړتیا نشته' } },
+      { title: { fa: 'مدیریت آنلاین و امن', en: 'Secure online management', ps: 'خوندي آنلاین مدیریت' } },
+      { title: { fa: 'پشتیبانی مکتب', en: 'School support', ps: 'د ښوونځي ملاتړ' } }
+    ],
+    featuresSectionKicker: { fa: 'ویژگی‌ها', en: 'Features', ps: 'ځانګړتیاوې' },
+    featuresSectionTitle: {
+      fa: 'آنچه تجربه آموزشی را منظم‌تر می‌کند',
+      en: 'What makes the learning experience more organized',
+      ps: 'هغه څه چې زده کړه منظمه کوي'
+    },
+    programsSectionKicker: { fa: 'برنامه‌های آموزشی', en: 'Programs', ps: 'تعلیمي پروګرامونه' },
+    programsSectionTitle: {
+      fa: 'مسیرهای آموزشی روشن برای رشد شاگردان',
+      en: 'Clear learning paths for student growth',
+      ps: 'د زده کوونکو د ودې لپاره روښانه تعلیمي لارې'
+    },
+    newsSectionKicker: { fa: 'آخرین اخبار', en: 'Latest news', ps: 'وروستي خبرونه' },
+    newsSectionTitle: {
+      fa: 'تازه‌ترین اطلاعیه‌ها و رویدادهای مکتب',
+      en: 'Latest school announcements and events',
+      ps: 'د ښوونځي وروستي اعلانونه او پېښې'
+    },
+    ctaSectionKicker: { fa: 'دسترسی سریع', en: 'Quick access', ps: 'چټک لاسرسی' },
     features: [
       { title: { fa: 'مدیریت آموزشی', en: 'Academic management', ps: 'تعلیمي مدیریت' }, text: { fa: 'صنف‌ها، مضامین، نمرات و گزارش‌های آموزشی.', en: 'Classes, subjects, grades, and academic reports.', ps: 'صنفونه، مضمونونه، نمرې او تعلیمي راپورونه.' }, icon: 'fa-graduation-cap' },
       { title: { fa: 'امور مالی', en: 'Finance', ps: 'مالي چارې' }, text: { fa: 'فیس، رسیدها، تخفیف‌ها و گزارش مالی.', en: 'Fees, receipts, discounts, and finance reports.', ps: 'فیس، رسیدونه، تخفیفونه او مالي راپورونه.' }, icon: 'fa-wallet' },
       { title: { fa: 'ارتباط با خانواده', en: 'Family communication', ps: 'له کورنۍ سره اړیکه' }, text: { fa: 'اطلاع‌رسانی و دسترسی روشن برای والدین.', en: 'Clear updates and access for parents.', ps: 'د والدینو لپاره روښانه خبرتیاوې او لاسرسی.' }, icon: 'fa-people-roof' }
+    ],
+    programs: [
+      { title: { fa: 'تعلیمات پایه و متوسطه', en: 'Primary and secondary education', ps: 'ابتدايي او منځنۍ زده کړه' } },
+      { title: { fa: 'تقویت زبان و مهارت‌های ارتباطی', en: 'Language and communication skills', ps: 'د ژبې او اړیکو مهارتونه' } },
+      { title: { fa: 'آمادگی امتحانات و ارزیابی منظم', en: 'Exam preparation and regular assessment', ps: 'د ازموینو چمتووالی او منظمه ارزونه' } },
+      { title: { fa: 'فعالیت‌های فرهنگی و تربیتی', en: 'Cultural and educational activities', ps: 'کلتوري او روزنیز فعالیتونه' } }
     ],
     stats: [
       { title: { fa: 'شاگردان', en: 'Students', ps: 'زده کوونکي' }, value: String(school.academicInfo?.totalStudents || 0) },
@@ -345,7 +396,15 @@ const serializeProfile = (profile, lang = 'fa', school = null) => {
     heroImageUrl: profile.heroImageUrl || '',
     heroPanelTagline: pickText(profile.heroPanelTagline, language),
     heroHighlights: localizeItems(profile.heroHighlights, language),
+    heroTrustPoints: localizeItems(profile.heroTrustPoints, language),
     programsIntro: pickText(profile.programsIntro, language),
+    featuresSectionKicker: pickText(profile.featuresSectionKicker, language),
+    featuresSectionTitle: pickText(profile.featuresSectionTitle, language),
+    programsSectionKicker: pickText(profile.programsSectionKicker, language),
+    programsSectionTitle: pickText(profile.programsSectionTitle, language),
+    newsSectionKicker: pickText(profile.newsSectionKicker, language),
+    newsSectionTitle: pickText(profile.newsSectionTitle, language),
+    ctaSectionKicker: pickText(profile.ctaSectionKicker, language),
     brandName: officialSchoolName || pickText(profile.brandName, language, 'مکتب'),
     brandSubtitle: pickText(profile.brandSubtitle, language, ''),
     homeHeroBadge: pickText(profile.homeHeroBadge, language),
@@ -361,6 +420,13 @@ const serializeProfile = (profile, lang = 'fa', school = null) => {
     homeCtaHref: withLanguage(`${basePath}/contact`),
     aboutTitle: pickText(profile.aboutTitle, language),
     aboutBody: pickText(profile.aboutBody, language),
+    aboutWhyTitle: pickText(profile.aboutWhyTitle, language),
+    aboutWhyBody: pickText(profile.aboutWhyBody, language),
+    aboutValuesTitle: pickText(profile.aboutValuesTitle, language),
+    aboutTimelineTitle: pickText(profile.aboutTimelineTitle, language),
+    aboutStats: localizeItems(profile.aboutStats, language),
+    aboutValues: localizeItems(profile.aboutValues, language),
+    aboutTimeline: localizeItems(profile.aboutTimeline, language),
     missionTitle: pickText(profile.missionTitle, language),
     missionBody: pickText(profile.missionBody, language),
     visionTitle: pickText(profile.visionTitle, language),
@@ -371,7 +437,9 @@ const serializeProfile = (profile, lang = 'fa', school = null) => {
     contactEmail,
     contactAddress,
     salesQuickCards: localizeItems(profile.features, language),
-    salesModules: localizeItems(profile.features, language),
+    salesModules: localizeItems(profile.programs, language).length
+      ? localizeItems(profile.programs, language)
+      : localizeItems(profile.features, language),
     homeStats: localizeItems(profile.stats, language),
     footerLinks: localizeItems(profile.footerLinks, language).length
       ? localizeItems(profile.footerLinks, language)
@@ -499,11 +567,15 @@ router.put('/admin/:schoolId', requireAuth, requireRole(['admin']), requirePermi
     const profile = await ensureProfileForSchool(school);
     const allowed = [
       'siteStatus', 'primaryLanguage', 'enabledLanguages', 'primaryColor', 'schoolLogoUrl', 'ministryLogoUrl',
-      'departmentLogoUrl', 'heroImageUrl', 'heroPanelTagline', 'heroHighlights', 'programsIntro',
+      'departmentLogoUrl', 'heroImageUrl', 'heroPanelTagline', 'heroHighlights', 'heroTrustPoints', 'programsIntro',
+      'featuresSectionKicker', 'featuresSectionTitle', 'programsSectionKicker', 'programsSectionTitle',
+      'newsSectionKicker', 'newsSectionTitle', 'ctaSectionKicker',
+      'aboutWhyTitle', 'aboutWhyBody', 'aboutValuesTitle', 'aboutTimelineTitle',
+      'aboutStats', 'aboutValues', 'aboutTimeline',
       'brandName', 'brandSubtitle', 'homeHeroBadge', 'homeHeroTitle', 'homeHeroText',
       'aboutTitle', 'aboutBody', 'missionTitle', 'missionBody', 'visionTitle', 'visionBody',
       'contactTitle', 'contactText', 'contactPhone', 'contactEmail', 'contactAddress',
-      'features', 'stats', 'menuItems', 'footerLinks', 'socialLinks', 'footerNote', 'metadata'
+      'features', 'programs', 'stats', 'menuItems', 'footerLinks', 'socialLinks', 'footerNote', 'metadata'
     ];
     allowed.forEach((key) => {
       if (req.body && Object.prototype.hasOwnProperty.call(req.body, key)) profile[key] = req.body[key];
