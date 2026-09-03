@@ -20,6 +20,7 @@ const ProfileUpdateRequest = require('../models/ProfileUpdateRequest');
 const AccessRequest = require('../models/AccessRequest');
 const SchoolClass = require('../models/SchoolClass');
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
+const { sumPaidRefunds } = require('../utils/financeRefundRecognition');
 const { ACTIVE_STUDENT_MEMBERSHIP_STATUSES } = require('../utils/studentMembershipStatus');
 
 function startOfDay(date = new Date()) {
@@ -489,18 +490,31 @@ async function getAdminDashboard() {
   const totalInstructors = officialPeopleCounts.totalInstructors;
   const financeSummary = outstandingStats[0] || { totalDue: 0, outstandingAmount: 0 };
   const recognizedPayments = await recognizePayments(approvedPayments);
-  const monthlyRevenue = sumBy(
-    recognizedPayments.filter((row) => row.payment?.paidAt && new Date(row.payment.paidAt) >= monthStart),
+  // «عواید» در این داشبورد = عواید تاییدشدهٔ نهایی: پرداخت‌های تاییدشده منهای
+  // بازپرداخت‌های پرداخت‌شده در همان بازه (هم‌راستا با کارت «عواید خالص» داشبورد
+  // مالی - financeDashboardService.buildFinanceDashboardOverview → netRevenue).
+  const recognizedRevenueRows = recognizedPayments.filter((row) => Number(row?.recognizedAmount || 0) > 0);
+  const paidRefundRows = (await sumPaidRefunds({}))?.rows || [];
+  const inWindow = (value, start, end) => {
+    const at = value ? new Date(value) : null;
+    if (!at || Number.isNaN(at.getTime())) return false;
+    if (start && at < start) return false;
+    if (end && at > end) return false;
+    return true;
+  };
+  const revenueInWindow = (start, end) => sumBy(
+    recognizedRevenueRows.filter((row) => inWindow(row.payment?.paidAt, start, end)),
     (row) => row.recognizedAmount
   );
-  const previousMonthRevenue = sumBy(
-    recognizedPayments.filter((row) => {
-      const paidAt = row.payment?.paidAt ? new Date(row.payment.paidAt) : null;
-      return paidAt && paidAt >= previousMonthStart && paidAt <= previousMonthEnd;
-    }),
-    (row) => row.recognizedAmount
+  const refundsInWindow = (start, end) => sumBy(
+    paidRefundRows.filter((row) => inWindow(row?.paidAt, start, end)),
+    (row) => row.amount
   );
-  const totalRevenue = sumBy(recognizedPayments, (row) => row.recognizedAmount);
+  const monthlyRevenue = revenueInWindow(monthStart, null) - refundsInWindow(monthStart, null);
+  const previousMonthRevenue = revenueInWindow(previousMonthStart, previousMonthEnd)
+    - refundsInWindow(previousMonthStart, previousMonthEnd);
+  const totalRevenue = sumBy(recognizedRevenueRows, (row) => row.recognizedAmount)
+    - sumBy(paidRefundRows, (row) => row.amount);
   const todayPayments = recognizedPayments.filter((row) => {
     const paidAt = row.payment?.paidAt ? new Date(row.payment.paidAt) : null;
     return row.recognizedAmount > 0 && paidAt && paidAt >= todayStart && paidAt <= todayEnd;
@@ -513,14 +527,15 @@ async function getAdminDashboard() {
     meta: 'عضویت'
   }));
 
-  const revenueTrend = buildRecentMonthBuckets(6).map((bucket) => ({
-    label: bucket.label,
-    value: Number(sumBy(
-      recognizedPayments.filter((row) => monthKey(row.payment?.paidAt || new Date(0)) === bucket.key),
-      (row) => row.recognizedAmount
-    ).toFixed(0)),
-    meta: 'افغانی'
-  }));
+  const revenueTrend = buildRecentMonthBuckets(6).map((bucket) => {
+    const bucketStart = new Date(bucket.value.getFullYear(), bucket.value.getMonth(), 1);
+    const bucketEnd = new Date(bucket.value.getFullYear(), bucket.value.getMonth() + 1, 0, 23, 59, 59, 999);
+    return {
+      label: bucket.label,
+      value: Number((revenueInWindow(bucketStart, bucketEnd) - refundsInWindow(bucketStart, bucketEnd)).toFixed(0)),
+      meta: 'افغانی'
+    };
+  });
 
   return {
     generatedAt: new Date().toISOString(),

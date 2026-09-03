@@ -8463,7 +8463,10 @@ export default function AdminFinance() {
           <div className="finance-subcard-list">
             {(financeOverview?.recent?.expenses || []).map((item) => (
               <div key={`overview-recent-expense-${item.id}`} className="mini-row">
-                <span className="finance-cell-stack"><strong>{item.title}</strong><small>{item.vendorName || item.referenceNo || 'بدون مرجع'}</small></span>
+                <span className="finance-cell-stack">
+                  <strong>{[item.categoryLabel, item.subCategoryLabel].filter(Boolean).join(' · ') || item.title}</strong>
+                  <small>{item.note || item.vendorName || item.referenceNo || 'بدون توضیح'}</small>
+                </span>
                 <span className="finance-cell-stack"><strong>{fmt(item.amount)} AFN</strong><small>{toFaDate(item.occurredAt)}</small></span>
               </div>
             ))}
