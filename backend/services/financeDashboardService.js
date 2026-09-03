@@ -1,6 +1,7 @@
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
 const ExpenseEntry = require('../models/ExpenseEntry');
+const ExpenseCategoryDefinition = require('../models/ExpenseCategoryDefinition');
 const FinanceTreasuryTransaction = require('../models/FinanceTreasuryTransaction');
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
 const { sumPaidRefunds } = require('../utils/financeRefundRecognition');
@@ -279,6 +280,34 @@ function buildDebtorGroups(orders = [], limit = 10, asOf = new Date(), statusMap
   };
 }
 
+// ExpenseEntry.category / ExpenseEntry.subCategory store the *keys*
+// ("salary" / "teachers", "کرایه" / "item_2"), while the human-readable
+// Persian text lives on ExpenseCategoryDefinition. Without this map the
+// "recent expenses" card prints raw keys like "item_1" / "teachers".
+async function loadExpenseCategoryLabelMap() {
+  const definitions = await ExpenseCategoryDefinition.find({})
+    .select('key label subCategories.key subCategories.label')
+    .lean();
+  const categoryLabels = new Map();
+  const subCategoryLabels = new Map();
+  for (const definition of definitions) {
+    const categoryKey = String(definition?.key || '').trim();
+    if (categoryKey) categoryLabels.set(categoryKey, String(definition?.label || '').trim() || categoryKey);
+    for (const sub of Array.isArray(definition?.subCategories) ? definition.subCategories : []) {
+      const subKey = String(sub?.key || '').trim();
+      if (subKey) {
+        subCategoryLabels.set(`${categoryKey}::${subKey}`, String(sub?.label || '').trim() || subKey);
+      }
+    }
+  }
+  return {
+    category: (key) => categoryLabels.get(String(key || '').trim()) || String(key || '').trim(),
+    subCategory: (categoryKey, subKey) => subCategoryLabels.get(
+      `${String(categoryKey || '').trim()}::${String(subKey || '').trim()}`
+    ) || ''
+  };
+}
+
 async function buildFinanceDashboardOverview(options = {}) {
   const { startAt, endAt, asOf } = normalizeDateRange(options);
   const scope = buildScopeFilter(options);
@@ -350,9 +379,10 @@ async function buildFinanceDashboardOverview(options = {}) {
     })
   ]);
 
-  const [approvedRecognition, pendingRecognition] = await Promise.all([
+  const [approvedRecognition, pendingRecognition, expenseCategoryLabels] = await Promise.all([
     recognizePayments(approvedRaw),
-    recognizePayments(pendingRaw)
+    recognizePayments(pendingRaw),
+    loadExpenseCategoryLabelMap()
   ]);
   const approvedPayments = approvedRecognition
     .filter((row) => Number(row?.recognizedAmount || 0) > 0)
@@ -491,15 +521,22 @@ async function buildFinanceDashboardOverview(options = {}) {
         status: item?.status || '',
         occurredAt: item?.paidAt || null
       }, item?.student, lifecycleStatusMap)),
-      expenses: approvedExpenses.slice(0, recentLimit).map((item) => ({
-        id: normalizeText(item?._id),
-        title: item?.subCategory || item?.category || 'مصرف',
-        vendorName: item?.vendorName || '',
-        referenceNo: formatFinanceCode(item?.referenceNo || ''),
-        amount: roundMoney(item?.amount),
-        status: item?.status || '',
-        occurredAt: item?.expenseDate || null
-      }))
+      expenses: approvedExpenses.slice(0, recentLimit).map((item) => {
+        const categoryLabel = expenseCategoryLabels.category(item?.category);
+        const subCategoryLabel = expenseCategoryLabels.subCategory(item?.category, item?.subCategory);
+        return {
+          id: normalizeText(item?._id),
+          title: subCategoryLabel || categoryLabel || 'مصرف',
+          categoryLabel,
+          subCategoryLabel,
+          note: String(item?.note || '').trim(),
+          vendorName: item?.vendorName || '',
+          referenceNo: formatFinanceCode(item?.referenceNo || ''),
+          amount: roundMoney(item?.amount),
+          status: item?.status || '',
+          occurredAt: item?.expenseDate || null
+        };
+      })
     }
   };
 }
