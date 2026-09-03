@@ -17,7 +17,10 @@ const ExpenseEntry = require('../models/ExpenseEntry');
 const ExpenseCategoryDefinition = require('../models/ExpenseCategoryDefinition');
 const GovernmentFinanceSnapshot = require('../models/GovernmentFinanceSnapshot');
 const FinanceProcurementCommitment = require('../models/FinanceProcurementCommitment');
+const StaffAdvance = require('../models/StaffAdvance');
+const StaffSalaryPayment = require('../models/StaffSalaryPayment');
 const AfghanStudent = require('../models/AfghanStudent');
+const AfghanTeacher = require('../models/AfghanTeacher');
 const User = require('../models/User');
 const StudentCore = require('../models/StudentCore');
 const StudentProfile = require('../models/StudentProfile');
@@ -107,6 +110,19 @@ const {
   updateTreasuryAccount
 } = require('../services/treasuryGovernanceService');
 const { buildGovernmentBudgetVsActualReport } = require('../services/governmentFinanceReportService');
+const {
+  assertAdvanceWithinCap,
+  postAdvanceTreasuryDebit,
+  voidAdvanceTreasuryDebit,
+  serializeStaffAdvance,
+  buildStaffAdvanceAnalytics,
+  computeSalaryDeduction,
+  listOpenAdvancesForStaff,
+  serializeStaffSalaryPayment,
+  finalizeSalaryPayment,
+  writeOffAdvance,
+  refundAdvance
+} = require('../services/staffAdvanceService');
 const {
   PROCUREMENT_APPROVAL_STAGES,
   buildProcurementCommitmentAnalytics,
@@ -4234,6 +4250,784 @@ router.delete('/admin/expenses/:id', requireAuth, requireRole(['admin']), requir
   } catch (error) {
     console.error('finance expense delete failed:', error?.message || error);
     return res.status(500).json({ success: false, message: 'حذف مصرف ناموفق بود.' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Staff advances & withdrawals (پیشکی و برداشت کارمندان) — Phase 1.
+// The approval chain reuses the ExpenseEntry helpers verbatim; final approval
+// debits the treasury in full through staffAdvanceService.
+// ---------------------------------------------------------------------------
+
+const STAFF_ADVANCE_KINDS = ['salary_advance', 'principal_withdrawal', 'owner_withdrawal', 'staff_loan'];
+const STAFF_ADVANCE_PAYMENT_METHODS = ['cash', 'bank_transfer', 'hawala', 'manual'];
+
+const resolveStaffAdvanceFinancialYear = async ({ schoolId, financialYearId, academicYearId }) => {
+  const normalizedId = String(financialYearId || '').trim();
+  if (normalizedId) {
+    return FinancialYear.findOne({ _id: normalizedId, schoolId });
+  }
+  return FinancialYear.findOne({
+    schoolId,
+    academicYearId: academicYearId || undefined,
+    status: { $ne: 'archived' }
+  }).sort({ isActive: -1, createdAt: -1 });
+};
+
+router.get('/admin/staff-advances/staff', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const teachers = await AfghanTeacher.find({
+      'employmentInfo.currentSchool': schoolContext.schoolId,
+      status: 'active'
+    })
+      .select('personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari employmentInfo.employeeId employmentInfo.position financialInfo.salary status')
+      .sort({ 'employmentInfo.position': 1, 'personalInfo.lastName': 1 })
+      .lean();
+    const items = teachers.map((item) => {
+      const salary = item.financialInfo?.salary || {};
+      const salaryTotal = Number(salary.total)
+        || (Number(salary.base || 0) + Number(salary.housing || 0) + Number(salary.transport || 0) + Number(salary.other || 0));
+      const dari = `${item.personalInfo?.firstNameDari || ''} ${item.personalInfo?.lastNameDari || ''}`.trim();
+      const latin = `${item.personalInfo?.firstName || ''} ${item.personalInfo?.lastName || ''}`.trim();
+      const name = dari || latin;
+      return {
+        _id: String(item._id),
+        name: name || 'بدون نام',
+        employeeId: String(item.employmentInfo?.employeeId || ''),
+        position: String(item.employmentInfo?.position || ''),
+        salaryTotal: Number(salaryTotal.toFixed(2))
+      };
+    });
+    return res.json({ success: true, items });
+  } catch (error) {
+    console.error('staff advance staff list failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'دریافت فهرست کارمندان ناموفق بود.' });
+  }
+});
+
+router.get('/admin/staff-advances/analytics', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const analytics = await buildStaffAdvanceAnalytics({
+      schoolId: schoolContext.schoolId,
+      financialYearId: String(req.query?.financialYearId || '').trim(),
+      academicYearId: String(req.query?.academicYearId || '').trim()
+    });
+    return res.json({ success: true, analytics });
+  } catch (error) {
+    console.error('staff advance analytics failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'دریافت آمار پیشکی ناموفق بود.' });
+  }
+});
+
+router.get('/admin/staff-advances', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const { financialYearId = '', academicYearId = '', staffId = '', status = '', kind = '' } = req.query || {};
+    const filter = { schoolId: schoolContext.schoolId };
+    if (String(financialYearId || '').trim()) filter.financialYearId = String(financialYearId).trim();
+    if (String(academicYearId || '').trim()) filter.academicYearId = String(academicYearId).trim();
+    if (String(staffId || '').trim()) filter.staffId = String(staffId).trim();
+    if (STAFF_ADVANCE_KINDS.includes(String(kind || '').trim())) filter.kind = String(kind).trim();
+    if (String(status || '').trim()) filter.status = String(status).trim();
+    const items = await StaffAdvance.find(filter).sort({ issueDate: -1, createdAt: -1 }).lean();
+    return res.json({ success: true, items: items.map((item) => serializeStaffAdvance(item)) });
+  } catch (error) {
+    console.error('staff advance list failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'دریافت پیشکی‌ها ناموفق بود.' });
+  }
+});
+
+router.post('/admin/staff-advances', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const schoolContext = await resolveActiveSchool(req, { payload, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+
+    const kind = STAFF_ADVANCE_KINDS.includes(String(payload.kind || '').trim())
+      ? String(payload.kind).trim()
+      : 'salary_advance';
+    if (['principal_withdrawal', 'owner_withdrawal'].includes(kind) && !String(payload.reason || '').trim()) {
+      return res.status(400).json({ success: false, message: 'برای برداشتِ مدیر یا صاحب امتیاز، دلیل اجباری است.' });
+    }
+
+    const financialYear = await resolveStaffAdvanceFinancialYear({
+      schoolId: schoolContext.schoolId,
+      financialYearId: payload.financialYearId,
+      academicYearId: payload.academicYearId
+    });
+    assertFinancialYearWritable(financialYear);
+
+    const issueDate = parseDateSafe(payload.issueDate, null);
+    assertDateWithinFinancialYear(financialYear, issueDate);
+    await assertFinancePeriodWritable({
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      dateValue: issueDate
+    });
+
+    const amount = normalizeMoneyInput(payload.amount, 0);
+    const monthlySalaryBasis = normalizeMoneyInput(payload.monthlySalaryBasis, 0);
+    assertAdvanceWithinCap({ kind, amount, monthlySalaryBasis });
+
+    const treasuryAccount = await resolveTreasuryAccountSelection({
+      accountId: payload.treasuryAccountId,
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId
+    });
+    if (!treasuryAccount?._id) {
+      return res.status(400).json({ success: false, message: 'حسابِ خزانه را انتخاب کنید.' });
+    }
+
+    let staffSnapshot = {
+      name: String(payload.staffName || '').trim(),
+      employeeId: String(payload.staffEmployeeId || '').trim(),
+      position: String(payload.staffPosition || '').trim()
+    };
+    const staffId = String(payload.staffId || '').trim();
+    if (staffId) {
+      const teacher = await AfghanTeacher.findOne({
+        _id: staffId,
+        'employmentInfo.currentSchool': schoolContext.schoolId
+      }).select('personalInfo employmentInfo').lean();
+      if (!teacher) return res.status(400).json({ success: false, message: 'کارمندِ انتخاب‌شده به مکتب فعال تعلق ندارد.' });
+      const name = `${teacher.personalInfo?.firstNameDari || ''} ${teacher.personalInfo?.lastNameDari || ''}`.trim()
+        || `${teacher.personalInfo?.firstName || ''} ${teacher.personalInfo?.lastName || ''}`.trim();
+      staffSnapshot = {
+        name: name || staffSnapshot.name || 'بدون نام',
+        employeeId: String(teacher.employmentInfo?.employeeId || ''),
+        position: String(teacher.employmentInfo?.position || '')
+      };
+    }
+    if (!staffSnapshot.name) {
+      return res.status(400).json({ success: false, message: 'کارمند یا نامِ گیرنده را مشخص کنید.' });
+    }
+
+    const requestedStatus = String(payload.status || '').trim().toLowerCase() === 'pending_review'
+      ? 'pending_review'
+      : 'draft';
+    const planMode = String(payload.repaymentMode || '').trim() === 'installments' ? 'installments' : 'next_salary';
+    const months = planMode === 'installments' ? Math.max(1, Math.min(36, Number(payload.repaymentMonths) || 1)) : 1;
+
+    const item = await StaffAdvance.create({
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      staffId: staffId || null,
+      staffSnapshot,
+      kind,
+      amount,
+      currency: String(payload.currency || 'AFN').trim().toUpperCase() || 'AFN',
+      monthlySalaryBasis,
+      issueDate,
+      reason: String(payload.reason || '').trim(),
+      note: String(payload.note || '').trim(),
+      treasuryAccountId: treasuryAccount._id,
+      paymentMethod: STAFF_ADVANCE_PAYMENT_METHODS.includes(String(payload.paymentMethod || '').trim())
+        ? String(payload.paymentMethod).trim()
+        : 'manual',
+      repaymentPlan: {
+        mode: planMode,
+        installmentAmount: planMode === 'installments'
+          ? normalizeMoneyInput(payload.installmentAmount, Number((amount / months).toFixed(2)))
+          : 0,
+        months
+      },
+      status: requestedStatus,
+      approvalStage: requestedStatus === 'pending_review' ? EXPENSE_APPROVAL_STAGES.financeManager : EXPENSE_APPROVAL_STAGES.draft,
+      submittedBy: requestedStatus === 'pending_review' ? req.user.id : null,
+      submittedAt: requestedStatus === 'pending_review' ? new Date() : null,
+      createdBy: req.user.id,
+      updatedBy: req.user.id,
+      approvalTrail: requestedStatus === 'pending_review'
+        ? [{ level: 'finance_manager', action: 'submit', by: req.user.id, at: new Date(), note: 'Submitted from staff advances panel.', reason: '' }]
+        : []
+    });
+
+    await logActivity({
+      req,
+      action: 'finance_create_staff_advance',
+      targetType: 'StaffAdvance',
+      targetId: item._id.toString(),
+      meta: { financialYearId: String(financialYear._id), kind, amount, status: requestedStatus }
+    });
+
+    return res.status(201).json({
+      success: true,
+      item: serializeStaffAdvance(item),
+      message: 'پیشکی/برداشت ثبت شد.'
+    });
+  } catch (error) {
+    return res.status(error?.statusCode || resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: error?.userMessage || resolveFinancialYearMessage(error, 'ثبت پیشکی ناموفق بود.')
+    });
+  }
+});
+
+router.post('/admin/staff-advances/:id/submit', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await StaffAdvance.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
+    if (!item) return res.status(404).json({ success: false, message: 'رکورد پیشکی پیدا نشد.' });
+    if (['approved', 'settled', 'void', 'written_off', 'refunded'].includes(item.status)) {
+      return res.status(409).json({ success: false, message: 'این پیشکی دوباره برای بررسی فرستاده نمی‌شود.' });
+    }
+
+    const financialYear = await FinancialYear.findById(item.financialYearId);
+    assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: item.schoolId,
+      financialYearId: item.financialYearId,
+      academicYearId: item.academicYearId,
+      dateValue: item.issueDate
+    });
+
+    submitExpenseEntryForReview(item, req.user.id, String(req.body?.note || '').trim());
+    await item.save();
+
+    await logActivity({
+      req,
+      action: 'finance_submit_staff_advance',
+      targetType: 'StaffAdvance',
+      targetId: item._id.toString(),
+      meta: { financialYearId: String(item.financialYearId || ''), amount: Number(item.amount || 0), stage: item.approvalStage || '' }
+    });
+
+    return res.json({ success: true, item: serializeStaffAdvance(item), nextStage: item.approvalStage, message: 'پیشکی برای بررسی ارسال شد.' });
+  } catch (error) {
+    return res.status(error?.statusCode || resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: error?.userMessage || resolveFinancialYearMessage(error, 'ارسال پیشکی برای بررسی ناموفق بود.')
+    });
+  }
+});
+
+router.post('/admin/staff-advances/:id/review', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await StaffAdvance.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
+    if (!item) return res.status(404).json({ success: false, message: 'رکورد پیشکی پیدا نشد.' });
+
+    const financialYear = await FinancialYear.findById(item.financialYearId);
+    assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: item.schoolId,
+      financialYearId: item.financialYearId,
+      academicYearId: item.academicYearId,
+      dateValue: item.issueDate
+    });
+
+    const actorLevel = await resolveAdminActorLevel(req.user.id);
+    const outcome = reviewExpenseEntryTransition({
+      item,
+      actorId: req.user.id,
+      actorLevel,
+      action: req.body?.action,
+      note: String(req.body?.note || '').trim(),
+      reason: String(req.body?.reason || '').trim()
+    });
+
+    // Final approval — the money leaves the treasury now, before the record is
+    // persisted, so a failed debit leaves the advance un-approved.
+    if (outcome.completed) {
+      await postAdvanceTreasuryDebit({ advance: item, actorId: req.user.id });
+    }
+    await item.save();
+
+    await logActivity({
+      req,
+      action: req.body?.action === 'reject' ? 'finance_reject_staff_advance' : 'finance_review_staff_advance',
+      targetType: 'StaffAdvance',
+      targetId: item._id.toString(),
+      meta: { financialYearId: String(item.financialYearId || ''), amount: Number(item.amount || 0), nextStage: outcome.nextStage || '', actorLevel }
+    });
+
+    invalidateFinanceReportCache();
+    return res.json({
+      success: true,
+      item: serializeStaffAdvance(item),
+      nextStage: outcome.nextStage,
+      message: req.body?.action === 'reject'
+        ? 'پیشکی رد شد.'
+        : (outcome.completed ? 'پیشکی تایید نهایی شد و از خزانه کسر گردید.' : 'پیشکی به مرحلهٔ بعدی بررسی منتقل شد.')
+    });
+  } catch (error) {
+    return res.status(error?.statusCode || resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: error?.userMessage || resolveFinancialYearMessage(error, 'بررسی پیشکی ناموفق بود.')
+    });
+  }
+});
+
+router.post('/admin/staff-advances/:id/void', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await StaffAdvance.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
+    if (!item) return res.status(404).json({ success: false, message: 'رکورد پیشکی پیدا نشد.' });
+    if (['settled', 'written_off', 'refunded'].includes(item.status)) {
+      return res.status(409).json({ success: false, message: 'این پیشکی قابل باطل‌سازی نیست.' });
+    }
+    if (item.status === 'approved' && (item.repayments || []).length) {
+      return res.status(409).json({ success: false, message: 'برای پیشکیِ دارای قسطِ بازگشت، از بازپرداختِ نقدی استفاده کنید.' });
+    }
+
+    const financialYear = await FinancialYear.findById(item.financialYearId);
+    assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: item.schoolId,
+      financialYearId: item.financialYearId,
+      academicYearId: item.academicYearId,
+      dateValue: item.issueDate
+    });
+
+    await voidAdvanceTreasuryDebit({ advance: item, actorId: req.user.id });
+    item.status = 'void';
+    item.approvalStage = EXPENSE_APPROVAL_STAGES.void;
+    item.updatedBy = req.user.id;
+    appendExpenseApprovalTrail(item, {
+      level: normalizeAdminLevel(await resolveAdminActorLevel(req.user.id)),
+      action: 'void',
+      by: req.user.id,
+      note: String(req.body?.note || '').trim()
+    });
+    await item.save();
+
+    await logActivity({
+      req,
+      action: 'finance_void_staff_advance',
+      targetType: 'StaffAdvance',
+      targetId: item._id.toString(),
+      meta: { financialYearId: String(item.financialYearId || ''), amount: Number(item.amount || 0) }
+    });
+
+    invalidateFinanceReportCache();
+    return res.json({ success: true, item: serializeStaffAdvance(item), message: 'پیشکی باطل شد.' });
+  } catch (error) {
+    return res.status(error?.statusCode || resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: error?.userMessage || resolveFinancialYearMessage(error, 'باطل‌سازی پیشکی ناموفق بود.')
+    });
+  }
+});
+
+router.post('/admin/staff-advances/:id/write-off', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const actorLevel = normalizeAdminLevel(await resolveAdminActorLevel(req.user.id));
+    if (actorLevel !== 'general_president') {
+      return res.status(403).json({ success: false, message: 'حذفِ طلبِ پیشکی فقط توسط ریاست عمومی انجام می‌شود.' });
+    }
+    if (!String(req.body?.reason || '').trim()) {
+      return res.status(400).json({ success: false, message: 'دلیلِ حذفِ طلب اجباری است.' });
+    }
+    const item = await StaffAdvance.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
+    if (!item) return res.status(404).json({ success: false, message: 'رکورد پیشکی پیدا نشد.' });
+
+    const financialYear = await FinancialYear.findById(item.financialYearId);
+    assertFinancialYearWritable(financialYear);
+
+    writeOffAdvance({ advance: item, actorId: req.user.id, reason: String(req.body.reason).trim() });
+    appendExpenseApprovalTrail(item, { level: actorLevel, action: 'write_off', by: req.user.id, reason: String(req.body.reason).trim() });
+    await item.save();
+
+    await logActivity({
+      req,
+      action: 'finance_write_off_staff_advance',
+      targetType: 'StaffAdvance',
+      targetId: item._id.toString(),
+      meta: { financialYearId: String(item.financialYearId || ''), amount: Number(item.amount || 0), outstanding: Number(item.outstandingAmount || 0) }
+    });
+
+    invalidateFinanceReportCache();
+    return res.json({ success: true, item: serializeStaffAdvance(item), message: 'ماندهٔ پیشکی حذفِ طلب شد.' });
+  } catch (error) {
+    return res.status(error?.statusCode || resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: error?.userMessage || resolveFinancialYearMessage(error, 'حذفِ طلبِ پیشکی ناموفق بود.')
+    });
+  }
+});
+
+router.post('/admin/staff-advances/:id/refund', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const schoolContext = await resolveActiveSchool(req, { payload, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await StaffAdvance.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
+    if (!item) return res.status(404).json({ success: false, message: 'رکورد پیشکی پیدا نشد.' });
+
+    const financialYear = await FinancialYear.findById(item.financialYearId);
+    assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: item.schoolId,
+      financialYearId: item.financialYearId,
+      academicYearId: item.academicYearId,
+      dateValue: new Date()
+    });
+
+    let treasuryAccountId = item.treasuryAccountId;
+    if (String(payload.treasuryAccountId || '').trim()) {
+      const account = await resolveTreasuryAccountSelection({
+        accountId: payload.treasuryAccountId,
+        schoolId: financialYear.schoolId,
+        financialYearId: financialYear._id,
+        academicYearId: financialYear.academicYearId
+      });
+      if (account?._id) treasuryAccountId = account._id;
+    }
+
+    await refundAdvance({
+      advance: item,
+      amount: normalizeMoneyInput(payload.amount, 0),
+      treasuryAccountId,
+      actorId: req.user.id,
+      note: String(payload.note || '').trim()
+    });
+    appendExpenseApprovalTrail(item, {
+      level: normalizeAdminLevel(await resolveAdminActorLevel(req.user.id)),
+      action: 'refund',
+      by: req.user.id,
+      note: String(payload.note || '').trim()
+    });
+    await item.save();
+
+    await logActivity({
+      req,
+      action: 'finance_refund_staff_advance',
+      targetType: 'StaffAdvance',
+      targetId: item._id.toString(),
+      meta: { financialYearId: String(item.financialYearId || ''), amount: normalizeMoneyInput(payload.amount, 0), outstanding: Number(item.outstandingAmount || 0) }
+    });
+
+    invalidateFinanceReportCache();
+    return res.json({ success: true, item: serializeStaffAdvance(item), message: 'بازپرداختِ نقدیِ پیشکی ثبت و به خزانه افزوده شد.' });
+  } catch (error) {
+    return res.status(error?.statusCode || resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: error?.userMessage || resolveFinancialYearMessage(error, 'بازپرداختِ پیشکی ناموفق بود.')
+    });
+  }
+});
+
+// --- Phase 2: individual salary payment with automatic advance deduction ---
+
+const monthKeyOf = (value) => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const resolveStaffForSalaryPayment = async (schoolId, payload) => {
+  const staffId = String(payload.staffId || '').trim();
+  let snapshot = {
+    name: String(payload.staffName || '').trim(),
+    employeeId: String(payload.staffEmployeeId || '').trim(),
+    position: String(payload.staffPosition || '').trim()
+  };
+  if (staffId) {
+    const teacher = await AfghanTeacher.findOne({
+      _id: staffId,
+      'employmentInfo.currentSchool': schoolId
+    }).select('personalInfo employmentInfo').lean();
+    if (!teacher) {
+      const error = new Error('staff_salary_staff_scope_invalid');
+      error.statusCode = 400;
+      error.userMessage = 'کارمندِ انتخاب‌شده به مکتب فعال تعلق ندارد.';
+      throw error;
+    }
+    const name = `${teacher.personalInfo?.firstNameDari || ''} ${teacher.personalInfo?.lastNameDari || ''}`.trim()
+      || `${teacher.personalInfo?.firstName || ''} ${teacher.personalInfo?.lastName || ''}`.trim();
+    snapshot = {
+      name: name || snapshot.name || 'بدون نام',
+      employeeId: String(teacher.employmentInfo?.employeeId || ''),
+      position: String(teacher.employmentInfo?.position || '')
+    };
+  }
+  return { staffId: staffId || null, snapshot };
+};
+
+router.get('/admin/staff-advances/salary-preview', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const grossSalary = normalizeMoneyInput(req.query?.grossSalary, 0);
+    const openAdvances = await listOpenAdvancesForStaff({
+      schoolId: schoolContext.schoolId,
+      financialYearId: String(req.query?.financialYearId || '').trim(),
+      staffId: String(req.query?.staffId || '').trim(),
+      staffName: String(req.query?.staffName || '').trim()
+    });
+    const plan = computeSalaryDeduction({ openAdvances, grossSalary });
+    return res.json({
+      success: true,
+      grossSalary,
+      openAdvances: openAdvances.map((item) => serializeStaffAdvance(item)),
+      deductions: plan.deductions,
+      deductionTotal: plan.deductionTotal,
+      netAmount: plan.netAmount
+    });
+  } catch (error) {
+    return res.status(error?.statusCode || 500).json({
+      success: false,
+      message: error?.userMessage || 'محاسبهٔ کسرِ پیشکی ناموفق بود.'
+    });
+  }
+});
+
+router.get('/admin/staff-advances/salary-payments', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const { financialYearId = '', academicYearId = '', staffId = '', status = '' } = req.query || {};
+    const filter = { schoolId: schoolContext.schoolId };
+    if (String(financialYearId || '').trim()) filter.financialYearId = String(financialYearId).trim();
+    if (String(academicYearId || '').trim()) filter.academicYearId = String(academicYearId).trim();
+    if (String(staffId || '').trim()) filter.staffId = String(staffId).trim();
+    if (String(status || '').trim()) filter.status = String(status).trim();
+    const items = await StaffSalaryPayment.find(filter).sort({ paymentDate: -1, createdAt: -1 }).lean();
+    return res.json({ success: true, items: items.map((item) => serializeStaffSalaryPayment(item)) });
+  } catch (error) {
+    console.error('staff salary payment list failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'دریافت پرداخت‌های معاش ناموفق بود.' });
+  }
+});
+
+router.post('/admin/staff-advances/salary-payments', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const schoolContext = await resolveActiveSchool(req, { payload, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+
+    const financialYear = await resolveStaffAdvanceFinancialYear({
+      schoolId: schoolContext.schoolId,
+      financialYearId: payload.financialYearId,
+      academicYearId: payload.academicYearId
+    });
+    assertFinancialYearWritable(financialYear);
+
+    const paymentDate = parseDateSafe(payload.paymentDate, null);
+    assertDateWithinFinancialYear(financialYear, paymentDate);
+    await assertFinancePeriodWritable({
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      dateValue: paymentDate
+    });
+
+    const grossSalary = normalizeMoneyInput(payload.grossSalary, 0);
+    if (grossSalary <= 0) return res.status(400).json({ success: false, message: 'معاشِ ناخالص را وارد کنید.' });
+
+    const treasuryAccount = await resolveTreasuryAccountSelection({
+      accountId: payload.treasuryAccountId,
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId
+    });
+    if (!treasuryAccount?._id) return res.status(400).json({ success: false, message: 'حسابِ خزانه را انتخاب کنید.' });
+
+    const { staffId, snapshot } = await resolveStaffForSalaryPayment(schoolContext.schoolId, payload);
+    if (!snapshot.name) return res.status(400).json({ success: false, message: 'کارمند یا نامِ گیرنده را مشخص کنید.' });
+
+    // Deductions are recomputed from the person's CURRENT open advances — the
+    // client preview is advisory only.
+    const openAdvances = await listOpenAdvancesForStaff({
+      schoolId: schoolContext.schoolId,
+      financialYearId: String(financialYear._id),
+      staffId: staffId || '',
+      staffName: staffId ? '' : snapshot.name
+    });
+    const plan = computeSalaryDeduction({ openAdvances, grossSalary });
+
+    const requestedStatus = String(payload.status || '').trim().toLowerCase() === 'pending_review'
+      ? 'pending_review'
+      : 'draft';
+
+    const item = await StaffSalaryPayment.create({
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      staffId: staffId || null,
+      staffSnapshot: snapshot,
+      period: monthKeyOf(paymentDate),
+      paymentDate,
+      grossSalary,
+      deductions: plan.deductions,
+      treasuryAccountId: treasuryAccount._id,
+      paymentMethod: ['cash', 'bank_transfer', 'hawala', 'manual'].includes(String(payload.paymentMethod || '').trim())
+        ? String(payload.paymentMethod).trim()
+        : 'manual',
+      note: String(payload.note || '').trim(),
+      status: requestedStatus,
+      approvalStage: requestedStatus === 'pending_review' ? EXPENSE_APPROVAL_STAGES.financeManager : EXPENSE_APPROVAL_STAGES.draft,
+      submittedBy: requestedStatus === 'pending_review' ? req.user.id : null,
+      submittedAt: requestedStatus === 'pending_review' ? new Date() : null,
+      createdBy: req.user.id,
+      updatedBy: req.user.id,
+      approvalTrail: requestedStatus === 'pending_review'
+        ? [{ level: 'finance_manager', action: 'submit', by: req.user.id, at: new Date(), note: 'Submitted from staff salary panel.', reason: '' }]
+        : []
+    });
+
+    await logActivity({
+      req,
+      action: 'finance_create_staff_salary_payment',
+      targetType: 'StaffSalaryPayment',
+      targetId: item._id.toString(),
+      meta: { financialYearId: String(financialYear._id), gross: grossSalary, deduction: plan.deductionTotal, net: plan.netAmount, status: requestedStatus }
+    });
+
+    return res.status(201).json({ success: true, item: serializeStaffSalaryPayment(item), message: 'پرداختِ معاش ثبت شد.' });
+  } catch (error) {
+    return res.status(error?.statusCode || resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: error?.userMessage || resolveFinancialYearMessage(error, 'ثبت پرداخت معاش ناموفق بود.')
+    });
+  }
+});
+
+router.post('/admin/staff-advances/salary-payments/:id/submit', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await StaffSalaryPayment.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
+    if (!item) return res.status(404).json({ success: false, message: 'رکورد پرداختِ معاش پیدا نشد.' });
+    if (['approved', 'void'].includes(item.status)) {
+      return res.status(409).json({ success: false, message: 'این پرداخت دوباره برای بررسی فرستاده نمی‌شود.' });
+    }
+
+    const financialYear = await FinancialYear.findById(item.financialYearId);
+    assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: item.schoolId,
+      financialYearId: item.financialYearId,
+      academicYearId: item.academicYearId,
+      dateValue: item.paymentDate
+    });
+
+    submitExpenseEntryForReview(item, req.user.id, String(req.body?.note || '').trim());
+    await item.save();
+
+    await logActivity({
+      req,
+      action: 'finance_submit_staff_salary_payment',
+      targetType: 'StaffSalaryPayment',
+      targetId: item._id.toString(),
+      meta: { financialYearId: String(item.financialYearId || ''), net: Number(item.netAmount || 0), stage: item.approvalStage || '' }
+    });
+
+    return res.json({ success: true, item: serializeStaffSalaryPayment(item), nextStage: item.approvalStage, message: 'پرداختِ معاش برای بررسی ارسال شد.' });
+  } catch (error) {
+    return res.status(error?.statusCode || resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: error?.userMessage || resolveFinancialYearMessage(error, 'ارسال پرداختِ معاش برای بررسی ناموفق بود.')
+    });
+  }
+});
+
+router.post('/admin/staff-advances/salary-payments/:id/review', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await StaffSalaryPayment.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
+    if (!item) return res.status(404).json({ success: false, message: 'رکورد پرداختِ معاش پیدا نشد.' });
+
+    const financialYear = await FinancialYear.findById(item.financialYearId);
+    assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: item.schoolId,
+      financialYearId: item.financialYearId,
+      academicYearId: item.academicYearId,
+      dateValue: item.paymentDate
+    });
+
+    const actorLevel = await resolveAdminActorLevel(req.user.id);
+    const outcome = reviewExpenseEntryTransition({
+      item,
+      actorId: req.user.id,
+      actorLevel,
+      action: req.body?.action,
+      note: String(req.body?.note || '').trim(),
+      reason: String(req.body?.reason || '').trim()
+    });
+
+    // Final approval — book the net salary expense and post advance repayments
+    // before persisting, so a failure leaves the payment un-approved.
+    if (outcome.completed) {
+      await finalizeSalaryPayment({ payment: item, financialYear, actorId: req.user.id });
+    }
+    await item.save();
+
+    await logActivity({
+      req,
+      action: req.body?.action === 'reject' ? 'finance_reject_staff_salary_payment' : 'finance_review_staff_salary_payment',
+      targetType: 'StaffSalaryPayment',
+      targetId: item._id.toString(),
+      meta: { financialYearId: String(item.financialYearId || ''), net: Number(item.netAmount || 0), nextStage: outcome.nextStage || '', actorLevel }
+    });
+
+    invalidateFinanceReportCache();
+    return res.json({
+      success: true,
+      item: serializeStaffSalaryPayment(item),
+      nextStage: outcome.nextStage,
+      message: req.body?.action === 'reject'
+        ? 'پرداختِ معاش رد شد.'
+        : (outcome.completed ? 'پرداختِ معاش تایید شد؛ خالص از خزانه کسر و قسطِ پیشکی ثبت گردید.' : 'پرداختِ معاش به مرحلهٔ بعدی بررسی منتقل شد.')
+    });
+  } catch (error) {
+    return res.status(error?.statusCode || resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: error?.userMessage || resolveFinancialYearMessage(error, 'بررسی پرداختِ معاش ناموفق بود.')
+    });
+  }
+});
+
+router.post('/admin/staff-advances/salary-payments/:id/void', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await StaffSalaryPayment.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
+    if (!item) return res.status(404).json({ success: false, message: 'رکورد پرداختِ معاش پیدا نشد.' });
+    if (item.status === 'approved') {
+      return res.status(409).json({ success: false, message: 'پرداختِ معاشِ تاییدشده باطل نمی‌شود؛ از باطل‌سازیِ ردیفِ مصرف و بازپرداخت استفاده کنید.' });
+    }
+
+    item.status = 'void';
+    item.approvalStage = EXPENSE_APPROVAL_STAGES.void;
+    item.updatedBy = req.user.id;
+    appendExpenseApprovalTrail(item, {
+      level: normalizeAdminLevel(await resolveAdminActorLevel(req.user.id)),
+      action: 'void',
+      by: req.user.id,
+      note: String(req.body?.note || '').trim()
+    });
+    await item.save();
+
+    await logActivity({
+      req,
+      action: 'finance_void_staff_salary_payment',
+      targetType: 'StaffSalaryPayment',
+      targetId: item._id.toString(),
+      meta: { financialYearId: String(item.financialYearId || ''), net: Number(item.netAmount || 0) }
+    });
+
+    return res.json({ success: true, item: serializeStaffSalaryPayment(item), message: 'پرداختِ معاش باطل شد.' });
+  } catch (error) {
+    return res.status(error?.statusCode || resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: error?.userMessage || resolveFinancialYearMessage(error, 'باطل‌سازی پرداختِ معاش ناموفق بود.')
+    });
   }
 });
 

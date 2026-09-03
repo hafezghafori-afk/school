@@ -266,11 +266,27 @@ const EMPTY_DATA = {
   budgetVsActual: null,
   procurementAnalytics: null,
   expenses: [],
+  staffAdvances: [],
+  staffAdvanceAnalytics: null,
+  staffList: [],
   governmentMonthly: null,
   governmentQuarterly: null,
   governmentAnnual: null,
   snapshots: [],
   governmentDocumentArchive: []
+};
+
+const STAFF_ADVANCE_KIND_LABELS = {
+  salary_advance: 'پیشکیِ معاش',
+  principal_withdrawal: 'برداشتِ مدیر مکتب',
+  owner_withdrawal: 'برداشتِ صاحب امتیاز',
+  staff_loan: 'قرضِ کارمند'
+};
+const STAFF_ADVANCE_CAP_MULTIPLIER = {
+  salary_advance: 1,
+  principal_withdrawal: 1,
+  owner_withdrawal: 1,
+  staff_loan: 3
 };
 
 function formatMoney(value) {
@@ -1242,18 +1258,22 @@ function QuarterCompare({ items = [], selectedQuarter = 1 }) {
 }
 
 function ExpenseMonthlyBars({ items = [] }) {
-  const maxValue = Math.max(1, ...items.map((item) => toNumber(item.amount)));
+  // Only *approved* expenses count toward the monthly trend - draft /
+  // pending_review / rejected rows are still under review and must not move
+  // this chart (backend supplies approvedAmount per month alongside amount).
+  const maxValue = Math.max(1, ...items.map((item) => toNumber(item.approvedAmount)));
+  const hasApproved = items.some((item) => toNumber(item.approvedAmount) > 0);
 
   return (
     <div className="gov-chart-card">
       <div className="gov-chart-head">
         <div>
           <strong>روند ماهانه مصارف</strong>
-          <span>حرکت ماهانه ردیف‌های ثبت‌شده مصرف</span>
+          <span>حرکت ماهانه مصارف تاییدشده</span>
         </div>
       </div>
-      {!items.length ? (
-        <div className="gov-empty-state compact">برای این محدوده هنوز داده ماهانه مصرف ثبت نشده است.</div>
+      {!items.length || !hasApproved ? (
+        <div className="gov-empty-state compact">برای این محدوده هنوز مصرف تاییدشده‌ای ثبت نشده است.</div>
       ) : (
         <div className="gov-month-bars">
           {items.slice(-6).map((item) => (
@@ -1261,11 +1281,11 @@ function ExpenseMonthlyBars({ items = [] }) {
               <div className="gov-month-bar-track">
                 <span
                   className="gov-month-bar-fill"
-                  style={{ height: `${Math.max(10, (toNumber(item.amount) / maxValue) * 100)}%` }}
+                  style={{ height: `${Math.max(10, (toNumber(item.approvedAmount) / maxValue) * 100)}%` }}
                 />
               </div>
               <strong>{item.label}</strong>
-              <span>{formatMoney(item.amount)}</span>
+              <span>{formatMoney(item.approvedAmount)}</span>
             </article>
           ))}
         </div>
@@ -1301,6 +1321,32 @@ function ExpenseStageBadge({ stage = '' }) {
   return (
     <span className="gov-status-badge subtle" data-tone={tone}>
       {resolveExpenseStageLabel(normalized)}
+    </span>
+  );
+}
+
+const STAFF_ADVANCE_STATUS_LABELS = {
+  draft: 'پیش‌نویس',
+  pending_review: 'در صفِ تایید',
+  approved: 'فعال (در حالِ بازگشت)',
+  settled: 'تسویه‌شده',
+  rejected: 'ردشده',
+  void: 'باطل',
+  written_off: 'حذفِ طلب',
+  refunded: 'بازپرداخت‌شده'
+};
+
+function StaffAdvanceStatusBadge({ status = '' }) {
+  const normalized = String(status || '').trim() || 'draft';
+  let tone = 'slate';
+  if (normalized === 'approved') tone = 'teal';
+  else if (normalized === 'settled') tone = 'mint';
+  else if (normalized === 'pending_review') tone = 'copper';
+  else if (normalized === 'rejected' || normalized === 'written_off') tone = 'rose';
+  else if (normalized === 'void' || normalized === 'refunded') tone = 'sand';
+  return (
+    <span className="gov-status-badge" data-tone={tone}>
+      {STAFF_ADVANCE_STATUS_LABELS[normalized] || normalized}
     </span>
   );
 }
@@ -1545,6 +1591,32 @@ export default function AdminGovernmentFinance() {
     note: '',
     status: 'draft'
   });
+  const [staffAdvanceDraft, setStaffAdvanceDraft] = useState({
+    kind: 'salary_advance',
+    staffId: '',
+    staffName: '',
+    monthlySalaryBasis: '',
+    amount: '',
+    issueDate: '',
+    treasuryAccountId: '',
+    paymentMethod: 'manual',
+    repaymentMode: 'next_salary',
+    repaymentMonths: '3',
+    reason: '',
+    note: '',
+    status: 'draft'
+  });
+  const [salaryPaymentDraft, setSalaryPaymentDraft] = useState({
+    staffId: '',
+    staffName: '',
+    grossSalary: '',
+    paymentDate: '',
+    treasuryAccountId: '',
+    paymentMethod: 'cash',
+    note: '',
+    status: 'draft'
+  });
+  const [salaryPreview, setSalaryPreview] = useState(null);
   const [procurementDraft, setProcurementDraft] = useState({
     title: '',
     vendorName: '',
@@ -1657,6 +1729,28 @@ export default function AdminGovernmentFinance() {
     expenseCategoryRegistry.find((item) => item.key === expenseDraft.category) || expenseCategoryRegistry[0] || null
   ), [expenseCategoryRegistry, expenseDraft.category]);
 
+  // ExpenseEntry stores category / subCategory as keys ("salary" / "teachers",
+  // "کرایه" / "item_2"); the readable Persian text lives on the category
+  // registry. Tables must resolve keys -> labels or they print "item_1".
+  const expenseLabels = useMemo(() => {
+    const categoryMap = new Map();
+    const subCategoryMap = new Map();
+    (expenseCategoryRegistry || []).forEach((cat) => {
+      const categoryKey = String(cat?.key || '').trim();
+      if (categoryKey) categoryMap.set(categoryKey, String(cat?.label || '').trim() || categoryKey);
+      (cat?.subCategories || []).forEach((sub) => {
+        const subKey = String(sub?.key || '').trim();
+        if (subKey) subCategoryMap.set(`${categoryKey}::${subKey}`, String(sub?.label || '').trim() || subKey);
+      });
+    });
+    return {
+      category: (key) => categoryMap.get(String(key || '').trim()) || String(key || '').trim() || '---',
+      subCategory: (categoryKey, subKey) => subCategoryMap.get(
+        `${String(categoryKey || '').trim()}::${String(subKey || '').trim()}`
+      ) || String(subKey || '').trim() || 'بدون زیردسته'
+    };
+  }, [expenseCategoryRegistry]);
+
   const expenseSubCategoryOptions = useMemo(() => (
     (selectedExpenseCategory?.subCategories || []).filter((item) => item.isActive !== false)
   ), [selectedExpenseCategory]);
@@ -1714,7 +1808,8 @@ export default function AdminGovernmentFinance() {
           due: item.amount
         }))
       : expenseCategorySummary(payload.expenses || []).slice(0, 6)
-  ), [payload.expenseAnalytics, payload.expenses]);
+          .map((row) => ({ ...row, label: expenseLabels.category(row.label) }))
+  ), [payload.expenseAnalytics, payload.expenses, expenseLabels]);
 
   const expenseVendorBreakdown = useMemo(() => (
     (payload.expenseAnalytics?.vendors || []).map((item) => ({
@@ -1779,6 +1874,20 @@ export default function AdminGovernmentFinance() {
 
   const archivePreview = useMemo(() => buildTablePreview(filteredExpenseRows, expenseDateFilterActive ? 200 : 12), [filteredExpenseRows, expenseDateFilterActive]);
   const treasurySummary = useMemo(() => payload.treasuryAnalytics?.summary || {}, [payload.treasuryAnalytics]);
+  const staffAdvanceSummary = useMemo(() => payload.staffAdvanceAnalytics?.summary || {}, [payload.staffAdvanceAnalytics]);
+  const staffAdvanceQueue = useMemo(() => payload.staffAdvanceAnalytics?.queue || [], [payload.staffAdvanceAnalytics]);
+  const staffAdvanceLedger = useMemo(() => payload.staffAdvanceAnalytics?.ledger || [], [payload.staffAdvanceAnalytics]);
+  const staffAdvanceRecent = useMemo(() => payload.staffAdvanceAnalytics?.recent || payload.staffAdvances || [], [payload.staffAdvanceAnalytics, payload.staffAdvances]);
+  const salaryPaymentQueue = useMemo(() => payload.staffAdvanceAnalytics?.salaryPayments?.queue || [], [payload.staffAdvanceAnalytics]);
+  const salaryPaymentRecent = useMemo(() => payload.staffAdvanceAnalytics?.salaryPayments?.recent || [], [payload.staffAdvanceAnalytics]);
+  const staffAdvanceAging = useMemo(() => payload.staffAdvanceAnalytics?.aging || [], [payload.staffAdvanceAnalytics]);
+  const staffAdvanceRepaymentPeriods = useMemo(() => payload.staffAdvanceAnalytics?.repaymentsByPeriod || [], [payload.staffAdvanceAnalytics]);
+  const staffAdvanceOpen = useMemo(() => payload.staffAdvanceAnalytics?.openAdvances || [], [payload.staffAdvanceAnalytics]);
+  const staffAdvanceCapHint = useMemo(() => {
+    const basis = Number(staffAdvanceDraft.monthlySalaryBasis) || 0;
+    const mult = STAFF_ADVANCE_CAP_MULTIPLIER[staffAdvanceDraft.kind] || 1;
+    return basis > 0 ? Math.round(basis * mult) : 0;
+  }, [staffAdvanceDraft.monthlySalaryBasis, staffAdvanceDraft.kind]);
   const treasuryAccounts = useMemo(() => payload.treasuryAnalytics?.accounts || [], [payload.treasuryAnalytics]);
   const automaticStudentPaymentTreasuryAccounts = useMemo(() => (
     treasuryAccounts.filter((item) => String(item?.code || '').trim().toUpperCase().startsWith('AUTO-'))
@@ -2012,6 +2121,8 @@ export default function AdminGovernmentFinance() {
       const scopedProcurementUrl = `/api/finance/admin/procurements${expenseParams.toString() ? `?${expenseParams.toString()}` : ''}`;
       const scopedExpenseCategoryUrl = '/api/finance/admin/expense-categories';
       const scopedExpenseAnalyticsUrl = `/api/finance/admin/expenses/analytics${expenseParams.toString() ? `?${expenseParams.toString()}` : ''}`;
+      const scopedStaffAdvanceUrl = `/api/finance/admin/staff-advances${expenseParams.toString() ? `?${expenseParams.toString()}` : ''}`;
+      const scopedStaffAdvanceAnalyticsUrl = `/api/finance/admin/staff-advances/analytics${expenseParams.toString() ? `?${expenseParams.toString()}` : ''}`;
       const scopedTreasuryAnalyticsUrl = `/api/finance/admin/treasury/analytics${expenseParams.toString() ? `?${expenseParams.toString()}` : ''}`;
       const treasuryReportParams = new URLSearchParams(expenseParams);
       if (selectedTreasuryReportAccountId) treasuryReportParams.set('accountId', selectedTreasuryReportAccountId);
@@ -2077,6 +2188,21 @@ export default function AdminGovernmentFinance() {
           key: 'expenseAnalytics',
           run: () => fetchJson(scopedExpenseAnalyticsUrl),
           assign: (data, nextPayload) => { nextPayload.expenseAnalytics = data.analytics || null; }
+        },
+        {
+          key: 'staffAdvances',
+          run: () => fetchJson(scopedStaffAdvanceUrl),
+          assign: (data, nextPayload) => { nextPayload.staffAdvances = data.items || []; }
+        },
+        {
+          key: 'staffAdvanceAnalytics',
+          run: () => fetchJson(scopedStaffAdvanceAnalyticsUrl),
+          assign: (data, nextPayload) => { nextPayload.staffAdvanceAnalytics = data.analytics || null; }
+        },
+        {
+          key: 'staffList',
+          run: () => fetchJson('/api/finance/admin/staff-advances/staff'),
+          assign: (data, nextPayload) => { nextPayload.staffList = data.items || []; }
         },
         {
           key: 'treasuryAnalytics',
@@ -3008,6 +3134,253 @@ export default function AdminGovernmentFinance() {
     }
   };
 
+  const handleStaffAdvanceDraftChange = (event) => {
+    const { name, value } = event.target;
+    setStaffAdvanceDraft((current) => {
+      if (name === 'staffId') {
+        const picked = (payload.staffList || []).find((item) => String(item._id) === String(value));
+        return {
+          ...current,
+          staffId: value,
+          staffName: picked ? picked.name : current.staffName,
+          monthlySalaryBasis: picked && Number(picked.salaryTotal) > 0
+            ? String(picked.salaryTotal)
+            : current.monthlySalaryBasis
+        };
+      }
+      return { ...current, [name]: value };
+    });
+  };
+
+  const submitStaffAdvance = async () => {
+    try {
+      if (!selectedFinancialYearId) {
+        showMessage('ابتدا یک سال مالی را برای ثبت پیشکی انتخاب کنید.', 'error');
+        return;
+      }
+      setBusyAction('save-staff-advance');
+      await postJson('/api/finance/admin/staff-advances', {
+        financialYearId: selectedFinancialYearId,
+        kind: staffAdvanceDraft.kind,
+        staffId: staffAdvanceDraft.staffId,
+        staffName: staffAdvanceDraft.staffName,
+        monthlySalaryBasis: staffAdvanceDraft.monthlySalaryBasis,
+        amount: staffAdvanceDraft.amount,
+        issueDate: staffAdvanceDraft.issueDate,
+        treasuryAccountId: staffAdvanceDraft.treasuryAccountId,
+        paymentMethod: staffAdvanceDraft.paymentMethod,
+        repaymentMode: staffAdvanceDraft.repaymentMode,
+        repaymentMonths: staffAdvanceDraft.repaymentMonths,
+        reason: staffAdvanceDraft.reason,
+        note: staffAdvanceDraft.note,
+        status: staffAdvanceDraft.status
+      });
+      setStaffAdvanceDraft((current) => ({ ...current, amount: '', reason: '', note: '' }));
+      showMessage('پیشکی/برداشت ثبت شد.');
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'ثبت پیشکی ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const submitStaffAdvanceForReview = async (advanceId) => {
+    try {
+      setBusyAction(`submit-staff-advance-${advanceId}`);
+      await postJson(`/api/finance/admin/staff-advances/${advanceId}/submit`, {});
+      showMessage('پیشکی برای بررسی به صف تایید ارسال شد.');
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'ارسال پیشکی برای بررسی ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const reviewStaffAdvance = async (advanceId, action = 'approve') => {
+    try {
+      const reason = action === 'reject' ? window.prompt('دلیل رد را بنویسید:', '') : '';
+      if (action === 'reject' && reason === null) return;
+      setBusyAction(`${action}-staff-advance-${advanceId}`);
+      await postJson(`/api/finance/admin/staff-advances/${advanceId}/review`, {
+        action,
+        reason: reason || '',
+        note: action === 'reject' ? 'از مرکز مالی رد شد.' : 'از مرکز مالی تایید شد.'
+      });
+      showMessage(action === 'reject' ? 'پیشکی رد شد.' : 'پیشکی بررسی و ثبت شد.');
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'بررسی پیشکی ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const voidStaffAdvance = async (advanceId) => {
+    try {
+      setBusyAction(`void-staff-advance-${advanceId}`);
+      await postJson(`/api/finance/admin/staff-advances/${advanceId}/void`, { note: 'از مرکز مالی باطل شد.' });
+      showMessage('پیشکی باطل شد.');
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'باطل‌سازی پیشکی ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const refundStaffAdvance = async (advance) => {
+    try {
+      const raw = window.prompt(`مبلغِ بازپرداختِ نقدی (ماندهٔ باز: ${formatMoney(advance.outstandingAmount)}):`, String(advance.outstandingAmount || ''));
+      if (raw === null) return;
+      const amount = Number(String(raw).replace(/[^\d.]/g, ''));
+      if (!(amount > 0)) {
+        showMessage('مبلغ نامعتبر است.', 'error');
+        return;
+      }
+      setBusyAction(`refund-staff-advance-${advance._id}`);
+      await postJson(`/api/finance/admin/staff-advances/${advance._id}/refund`, { amount, note: 'بازپرداختِ نقدی از مرکز مالی.' });
+      showMessage('بازپرداختِ نقدی ثبت شد.');
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'بازپرداختِ پیشکی ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const writeOffStaffAdvance = async (advance) => {
+    try {
+      const reason = window.prompt('دلیلِ حذفِ طلب (فقط ریاست عمومی):', '');
+      if (reason === null) return;
+      if (!reason.trim()) {
+        showMessage('دلیل اجباری است.', 'error');
+        return;
+      }
+      setBusyAction(`writeoff-staff-advance-${advance._id}`);
+      await postJson(`/api/finance/admin/staff-advances/${advance._id}/write-off`, { reason: reason.trim() });
+      showMessage('ماندهٔ پیشکی حذفِ طلب شد.');
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'حذفِ طلبِ پیشکی ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const handleSalaryPaymentDraftChange = (event) => {
+    const { name, value } = event.target;
+    setSalaryPaymentDraft((current) => {
+      if (name === 'staffId') {
+        const picked = (payload.staffList || []).find((item) => String(item._id) === String(value));
+        return {
+          ...current,
+          staffId: value,
+          staffName: picked ? picked.name : current.staffName,
+          grossSalary: picked && Number(picked.salaryTotal) > 0 ? String(picked.salaryTotal) : current.grossSalary
+        };
+      }
+      return { ...current, [name]: value };
+    });
+    setSalaryPreview(null);
+  };
+
+  const fetchSalaryPreview = async () => {
+    try {
+      if (!(Number(salaryPaymentDraft.grossSalary) > 0)) {
+        showMessage('معاشِ ناخالص را وارد کنید.', 'error');
+        return;
+      }
+      setBusyAction('salary-preview');
+      const params = new URLSearchParams();
+      if (selectedFinancialYearId) params.set('financialYearId', selectedFinancialYearId);
+      if (salaryPaymentDraft.staffId) params.set('staffId', salaryPaymentDraft.staffId);
+      else if (salaryPaymentDraft.staffName) params.set('staffName', salaryPaymentDraft.staffName);
+      params.set('grossSalary', salaryPaymentDraft.grossSalary);
+      const data = await fetchJson(`/api/finance/admin/staff-advances/salary-preview?${params.toString()}`);
+      setSalaryPreview(data || null);
+    } catch (error) {
+      showMessage(errorMessage(error, 'محاسبهٔ کسر ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const submitSalaryPayment = async () => {
+    try {
+      if (!selectedFinancialYearId) {
+        showMessage('ابتدا یک سال مالی را انتخاب کنید.', 'error');
+        return;
+      }
+      setBusyAction('save-salary-payment');
+      await postJson('/api/finance/admin/staff-advances/salary-payments', {
+        financialYearId: selectedFinancialYearId,
+        staffId: salaryPaymentDraft.staffId,
+        staffName: salaryPaymentDraft.staffName,
+        grossSalary: salaryPaymentDraft.grossSalary,
+        paymentDate: salaryPaymentDraft.paymentDate,
+        treasuryAccountId: salaryPaymentDraft.treasuryAccountId,
+        paymentMethod: salaryPaymentDraft.paymentMethod,
+        note: salaryPaymentDraft.note,
+        status: salaryPaymentDraft.status
+      });
+      setSalaryPaymentDraft((current) => ({ ...current, grossSalary: '', note: '' }));
+      setSalaryPreview(null);
+      showMessage('پرداختِ معاش ثبت شد.');
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'ثبت پرداختِ معاش ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const submitSalaryPaymentForReview = async (paymentId) => {
+    try {
+      setBusyAction(`submit-salary-payment-${paymentId}`);
+      await postJson(`/api/finance/admin/staff-advances/salary-payments/${paymentId}/submit`, {});
+      showMessage('پرداختِ معاش برای بررسی ارسال شد.');
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'ارسال پرداختِ معاش ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const reviewSalaryPayment = async (paymentId, action = 'approve') => {
+    try {
+      const reason = action === 'reject' ? window.prompt('دلیل رد را بنویسید:', '') : '';
+      if (action === 'reject' && reason === null) return;
+      setBusyAction(`${action}-salary-payment-${paymentId}`);
+      await postJson(`/api/finance/admin/staff-advances/salary-payments/${paymentId}/review`, {
+        action,
+        reason: reason || '',
+        note: action === 'reject' ? 'از مرکز مالی رد شد.' : 'از مرکز مالی تایید شد.'
+      });
+      showMessage(action === 'reject' ? 'پرداختِ معاش رد شد.' : 'پرداختِ معاش بررسی و ثبت شد.');
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'بررسی پرداختِ معاش ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const voidSalaryPayment = async (paymentId) => {
+    try {
+      setBusyAction(`void-salary-payment-${paymentId}`);
+      await postJson(`/api/finance/admin/staff-advances/salary-payments/${paymentId}/void`, { note: 'از مرکز مالی باطل شد.' });
+      showMessage('پرداختِ معاش باطل شد.');
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'باطل‌سازی پرداختِ معاش ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
   const submitExpenseCategory = async () => {
     try {
       const payload = {
@@ -3747,6 +4120,11 @@ export default function AdminGovernmentFinance() {
                   <span>در بررسی</span>
                   <strong>{formatMoney(expenseGovernanceSummary.pendingAmount || 0)}</strong>
                   <small>{formatNumber(expenseGovernanceSummary.queueCount || 0)} مورد</small>
+                </div>
+                <div className="gov-governance-stat" data-tone="rose">
+                  <span>ردشده</span>
+                  <strong>{formatMoney(expenseGovernanceSummary.rejectedAmount || 0)}</strong>
+                  <small>{formatNumber(expenseGovernanceSummary.statusCounts?.rejected || 0)} ردیف</small>
                 </div>
                 <div className="gov-governance-stat" data-tone={expenseCloseReadiness?.canClose ? 'mint' : 'rose'}>
                   <span>آمادگی بستن سال</span>
@@ -4703,6 +5081,11 @@ export default function AdminGovernmentFinance() {
                   <strong>{formatMoney(expenseGovernanceSummary.pendingAmount || 0)}</strong>
                   <small>{formatNumber(expenseGovernanceSummary.queueCount || 0)} مورد</small>
                 </div>
+                <div className="gov-governance-stat" data-tone="rose">
+                  <span>ردشده</span>
+                  <strong>{formatMoney(expenseGovernanceSummary.rejectedAmount || 0)}</strong>
+                  <small>{formatNumber(expenseGovernanceSummary.statusCounts?.rejected || 0)} ردیف</small>
+                </div>
                 <div className="gov-governance-stat" data-tone={expenseCloseReadiness?.canClose ? 'mint' : 'rose'}>
                   <span>گارد بستن سال</span>
                   <strong>{expenseCloseReadiness?.canClose ? 'آماده' : 'متوقف'}</strong>
@@ -5250,8 +5633,8 @@ export default function AdminGovernmentFinance() {
                         <tr key={`queue-${row._id}`}>
                           <td>
                             <div className="gov-table-stack">
-                              <strong>{row.category || '---'}</strong>
-                              <span>{row.subCategory || 'بدون زیردسته'}</span>
+                              <strong>{expenseLabels.category(row.category)}</strong>
+                              <span>{expenseLabels.subCategory(row.category, row.subCategory)}</span>
                             </div>
                           </td>
                           <td>{row.vendorName || 'بدون فروشنده'}</td>
@@ -5448,8 +5831,8 @@ export default function AdminGovernmentFinance() {
                         <tr key={row._id}>
                           <td>
                             <div className="gov-table-stack">
-                              <strong>{row.category || '---'}</strong>
-                              <span>{row.subCategory || 'بدون زیردسته'}</span>
+                              <strong>{expenseLabels.category(row.category)}</strong>
+                              <span>{expenseLabels.subCategory(row.category, row.subCategory)}</span>
                             </div>
                           </td>
                           <td>{row.vendorName || 'بدون فروشنده'}</td>
@@ -5464,6 +5847,576 @@ export default function AdminGovernmentFinance() {
                   </table>
                 </div>
               )}
+            </CollapsiblePanel>
+
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="staff-advances"
+              title="پیشکی و برداشت کارمندان"
+              hint={`${formatNumber(staffAdvanceSummary.openCount || 0)} پیشکیِ باز`}
+              defaultOpen
+              span="12"
+            >
+              <div className="gov-governance-grid">
+                <div className="gov-governance-stat" data-tone="copper">
+                  <span>پیشکیِ باز</span>
+                  <strong>{formatMoney(staffAdvanceSummary.totalOutstanding || 0)}</strong>
+                  <small>{formatNumber(staffAdvanceSummary.openCount || 0)} مورد · {formatNumber(staffAdvanceSummary.staffCount || 0)} کارمند</small>
+                </div>
+                <div className="gov-governance-stat" data-tone="teal">
+                  <span>کل پرداخت‌شده</span>
+                  <strong>{formatMoney(staffAdvanceSummary.totalAdvanced || 0)}</strong>
+                  <small>از خزانه کسر شده</small>
+                </div>
+                <div className="gov-governance-stat" data-tone="mint">
+                  <span>بازگشته از معاش</span>
+                  <strong>{formatMoney(staffAdvanceSummary.totalRepaid || 0)}</strong>
+                  <small>مجموعِ اقساط</small>
+                </div>
+                <div
+                  className="gov-governance-stat"
+                  data-tone={(staffAdvanceSummary.departedOutstanding?.amount || 0) > 0 ? 'rose' : 'sand'}
+                >
+                  <span>پیشکیِ کارمندِ رفته</span>
+                  <strong>{formatMoney(staffAdvanceSummary.departedOutstanding?.amount || 0)}</strong>
+                  <small>{formatNumber(staffAdvanceSummary.departedOutstanding?.count || 0)} نفر — مانعِ بستن سال</small>
+                </div>
+              </div>
+
+              <div className="gov-form-grid">
+                <label className="gov-field">
+                  <span>نوع</span>
+                  <select name="kind" value={staffAdvanceDraft.kind} onChange={handleStaffAdvanceDraftChange}>
+                    <option value="salary_advance">پیشکیِ معاش (سقف ۱× معاش)</option>
+                    <option value="principal_withdrawal">برداشتِ مدیر مکتب (سقف ۱×)</option>
+                    <option value="owner_withdrawal">برداشتِ صاحب امتیاز (سقف ۱×)</option>
+                    <option value="staff_loan">قرضِ کارمند (سقف ۳×)</option>
+                  </select>
+                </label>
+                <label className="gov-field">
+                  <span>کارمند</span>
+                  <select name="staffId" value={staffAdvanceDraft.staffId} onChange={handleStaffAdvanceDraftChange}>
+                    <option value="">— بدون رکورد (نام دستی) —</option>
+                    {(payload.staffList || []).map((item) => (
+                      <option key={item._id} value={item._id}>{item.name}{item.position ? ` · ${item.position}` : ''}</option>
+                    ))}
+                  </select>
+                </label>
+                {!staffAdvanceDraft.staffId ? (
+                  <label className="gov-field">
+                    <span>نامِ گیرنده</span>
+                    <input name="staffName" value={staffAdvanceDraft.staffName} onChange={handleStaffAdvanceDraftChange} />
+                  </label>
+                ) : null}
+                <label className="gov-field">
+                  <span>معاشِ ماهانهٔ مبنا</span>
+                  <input name="monthlySalaryBasis" value={staffAdvanceDraft.monthlySalaryBasis} onChange={handleStaffAdvanceDraftChange} inputMode="numeric" />
+                  <small>{staffAdvanceCapHint > 0 ? `سقفِ این نوع: ${formatMoney(staffAdvanceCapHint)}` : 'برای اجرای سقف لازم است.'}</small>
+                </label>
+                <label className="gov-field">
+                  <span>مبلغ</span>
+                  <input name="amount" value={staffAdvanceDraft.amount} onChange={handleStaffAdvanceDraftChange} inputMode="numeric" />
+                </label>
+                <label className="gov-field">
+                  <span>تاریخِ پرداخت</span>
+                  <AfghanDateInput name="issueDate" value={staffAdvanceDraft.issueDate} onChange={(value) => setStaffAdvanceDraft((current) => ({ ...current, issueDate: value }))} showGregorianEquivalent />
+                </label>
+                <label className="gov-field">
+                  <span>حسابِ خزانه</span>
+                  <select name="treasuryAccountId" value={staffAdvanceDraft.treasuryAccountId} onChange={handleStaffAdvanceDraftChange}>
+                    <option value="">انتخاب حساب…</option>
+                    {treasuryAccounts.map((item) => (
+                      <option key={item._id || item.id} value={item._id || item.id}>{item.title || item.code || item._id}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="gov-field">
+                  <span>روشِ پرداخت</span>
+                  <select name="paymentMethod" value={staffAdvanceDraft.paymentMethod} onChange={handleStaffAdvanceDraftChange}>
+                    <option value="manual">دستی</option>
+                    <option value="cash">نقدی</option>
+                    <option value="bank_transfer">انتقال بانکی</option>
+                    <option value="hawala">حواله</option>
+                  </select>
+                </label>
+                <label className="gov-field">
+                  <span>پلانِ بازگشت</span>
+                  <select name="repaymentMode" value={staffAdvanceDraft.repaymentMode} onChange={handleStaffAdvanceDraftChange}>
+                    <option value="next_salary">یک‌جا از معاشِ بعدی</option>
+                    <option value="installments">اقساطِ ماهانه</option>
+                  </select>
+                </label>
+                {staffAdvanceDraft.repaymentMode === 'installments' ? (
+                  <label className="gov-field">
+                    <span>تعدادِ ماه</span>
+                    <input name="repaymentMonths" value={staffAdvanceDraft.repaymentMonths} onChange={handleStaffAdvanceDraftChange} inputMode="numeric" />
+                  </label>
+                ) : null}
+                <label className="gov-field">
+                  <span>دلیل {['principal_withdrawal', 'owner_withdrawal'].includes(staffAdvanceDraft.kind) ? '(اجباری)' : ''}</span>
+                  <input name="reason" value={staffAdvanceDraft.reason} onChange={handleStaffAdvanceDraftChange} />
+                </label>
+                <label className="gov-field gov-field-full">
+                  <span>یادداشت</span>
+                  <input name="note" value={staffAdvanceDraft.note} onChange={handleStaffAdvanceDraftChange} />
+                </label>
+                <label className="gov-field">
+                  <span>وضعیت</span>
+                  <select name="status" value={staffAdvanceDraft.status} onChange={handleStaffAdvanceDraftChange}>
+                    <option value="draft">پیش‌نویس</option>
+                    <option value="pending_review">ارسال برای بررسی</option>
+                  </select>
+                </label>
+              </div>
+              <div className="gov-card-actions">
+                <button type="button" className="gov-primary-btn" onClick={submitStaffAdvance} disabled={busyAction === 'save-staff-advance'}>
+                  {busyAction === 'save-staff-advance' ? 'در حال ذخیره…' : 'ثبت پیشکی'}
+                </button>
+              </div>
+
+              <div className="gov-approval-rule">
+                تاییدِ نهاییِ پیشکی فقط توسط <strong>ریاست عمومی</strong> انجام می‌شود و در همان لحظه کلِ مبلغ از حسابِ خزانه کسر می‌گردد.
+                کسر از معاش در فازِ بعدی اضافه می‌شود.
+              </div>
+
+              {!staffAdvanceQueue.length ? (
+                <div className="gov-empty-state">در صفِ تاییدِ پیشکی موردی نیست.</div>
+              ) : (
+                <div className="gov-table-wrap">
+                  <table className="gov-table">
+                    <thead>
+                      <tr>
+                        <th>گیرنده</th>
+                        <th>نوع</th>
+                        <th>مبلغ</th>
+                        <th>وضعیت</th>
+                        <th>مرحله</th>
+                        <th>اقدام</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {staffAdvanceQueue.map((row) => {
+                        const isPending = row.status === 'pending_review';
+                        const alreadyReviewed = actorAlreadyReviewedExpense(row.approvalTrail, currentUserId);
+                        const canApprove = isPending && !alreadyReviewed && canApproveExpenseStage(currentAdminLevel, row.approvalStage);
+                        const canReject = isPending && !alreadyReviewed && canRejectExpenseStage(currentAdminLevel, row.approvalStage);
+                        return (
+                          <tr key={`staff-advance-queue-${row._id}`}>
+                            <td>
+                              <div className="gov-table-stack">
+                                <strong>{row.staff?.name || 'بدون نام'}</strong>
+                                <span>{row.staff?.position || '—'}{row.reason ? ` · ${row.reason}` : ''}</span>
+                              </div>
+                            </td>
+                            <td>{row.kindLabel || row.kind}</td>
+                            <td>
+                              <div className="gov-table-stack">
+                                <strong>{formatMoney(row.amount)}</strong>
+                                <span>سقف: {formatMoney(row.cap)}</span>
+                              </div>
+                            </td>
+                            <td><StaffAdvanceStatusBadge status={row.status} /></td>
+                            <td><ExpenseStageBadge stage={row.approvalStage} /></td>
+                            <td>
+                              <div className="gov-action-stack">
+                                {(row.status === 'draft' || row.status === 'rejected') ? (
+                                  <button type="button" className="gov-inline-action" disabled={!!busyAction} onClick={() => submitStaffAdvanceForReview(row._id)}>
+                                    ارسال برای بررسی
+                                  </button>
+                                ) : null}
+                                {isPending ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="gov-inline-action"
+                                      disabled={!!busyAction || !canApprove}
+                                      title={canApprove ? undefined : `این مرحله منتظرِ ${expenseStageWaitLabel(row.approvalStage)} است.`}
+                                      onClick={() => reviewStaffAdvance(row._id, 'approve')}
+                                    >
+                                      {row.approvalStage === 'general_president_review' ? 'تاییدِ نهایی' : 'تاییدِ مرحله'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="gov-inline-action"
+                                      disabled={!!busyAction || !canReject}
+                                      onClick={() => reviewStaffAdvance(row._id, 'reject')}
+                                    >
+                                      رد
+                                    </button>
+                                  </>
+                                ) : null}
+                                {row.status !== 'void' ? (
+                                  <button type="button" className="gov-inline-action" disabled={!!busyAction} onClick={() => voidStaffAdvance(row._id)}>
+                                    باطل
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {staffAdvanceLedger.length ? (
+                <>
+                  <h4 className="gov-subhead">دفترِ پیشکیِ کارمندان</h4>
+                  <div className="gov-table-wrap">
+                    <table className="gov-table">
+                      <thead>
+                        <tr>
+                          <th>کارمند</th>
+                          <th>پرداخت‌شده</th>
+                          <th>بازگشته</th>
+                          <th>ماندهٔ باز</th>
+                          <th>پیشکیِ باز</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {staffAdvanceLedger.map((row) => (
+                          <tr key={`staff-advance-ledger-${row.staffId || row.name}`}>
+                            <td>
+                              <div className="gov-table-stack">
+                                <strong>{row.name}</strong>
+                                <span>{row.position || '—'}{row.employeeId ? ` · ${row.employeeId}` : ''}</span>
+                              </div>
+                            </td>
+                            <td>{formatMoney(row.advanced)}</td>
+                            <td>{formatMoney(row.repaid)}</td>
+                            <td><strong>{formatMoney(row.outstanding)}</strong></td>
+                            <td>{formatNumber(row.openCount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : null}
+
+              {staffAdvanceOpen.length ? (
+                <>
+                  <h4 className="gov-subhead">پیشکی‌های فعال — تعیین تکلیف</h4>
+                  <div className="gov-table-wrap">
+                    <table className="gov-table">
+                      <thead>
+                        <tr>
+                          <th>گیرنده</th>
+                          <th>نوع</th>
+                          <th>مبلغ</th>
+                          <th>مانده</th>
+                          <th>تاریخ</th>
+                          <th>اقدام</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {staffAdvanceOpen.map((row) => (
+                          <tr key={`staff-advance-open-${row._id}`}>
+                            <td>
+                              <div className="gov-table-stack">
+                                <strong>{row.staff?.name || 'بدون نام'}</strong>
+                                <span>{row.staff?.position || '—'}</span>
+                              </div>
+                            </td>
+                            <td>{row.kindLabel || row.kind}</td>
+                            <td>{formatMoney(row.amount)}</td>
+                            <td><strong>{formatMoney(row.outstandingAmount)}</strong></td>
+                            <td>{toFaDate(row.issueDate)}</td>
+                            <td>
+                              <div className="gov-action-stack">
+                                <button type="button" className="gov-inline-action" disabled={!!busyAction} onClick={() => refundStaffAdvance(row)}>
+                                  بازپرداختِ نقدی
+                                </button>
+                                {currentAdminLevel === 'general_president' ? (
+                                  <button type="button" className="gov-inline-action" disabled={!!busyAction} onClick={() => writeOffStaffAdvance(row)}>
+                                    حذفِ طلب
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : null}
+
+              {staffAdvanceAging.some((row) => Number(row.value) > 0) ? (
+                <>
+                  <h4 className="gov-subhead">عمرِ ماندهٔ پیشکی</h4>
+                  <div className="gov-governance-grid">
+                    {staffAdvanceAging.map((row) => (
+                      <div key={`staff-advance-aging-${row.key}`} className="gov-governance-stat" data-tone={row.key === 'd61_plus' && Number(row.value) > 0 ? 'rose' : 'sand'}>
+                        <span>{row.label}</span>
+                        <strong>{formatMoney(row.value)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+
+              {staffAdvanceRepaymentPeriods.length ? (
+                <>
+                  <h4 className="gov-subhead">تطبیقِ ماهانهٔ اقساط</h4>
+                  <div className="gov-table-wrap">
+                    <table className="gov-table">
+                      <thead>
+                        <tr><th>ماه</th><th>جمعِ کسر</th><th>تعداد قسط</th></tr>
+                      </thead>
+                      <tbody>
+                        {staffAdvanceRepaymentPeriods.map((row) => (
+                          <tr key={`staff-advance-repay-${row.period}`}>
+                            <td>{row.period === 'refund' ? 'بازپرداختِ نقدی' : row.period}</td>
+                            <td>{formatMoney(row.amount)}</td>
+                            <td>{formatNumber(row.count)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : null}
+
+              {staffAdvanceRecent.length ? (
+                <>
+                  <h4 className="gov-subhead">آخرین پیشکی‌ها</h4>
+                  <div className="gov-table-wrap">
+                    <table className="gov-table">
+                      <thead>
+                        <tr>
+                          <th>گیرنده</th>
+                          <th>نوع</th>
+                          <th>مبلغ</th>
+                          <th>مانده</th>
+                          <th>تاریخ</th>
+                          <th>وضعیت</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {staffAdvanceRecent.map((row) => (
+                          <tr key={`staff-advance-recent-${row._id}`}>
+                            <td>
+                              <div className="gov-table-stack">
+                                <strong>{row.staff?.name || 'بدون نام'}</strong>
+                                <span>{row.reason || row.note || '—'}</span>
+                              </div>
+                            </td>
+                            <td>{row.kindLabel || row.kind}</td>
+                            <td>{formatMoney(row.amount)}</td>
+                            <td>{formatMoney(row.outstandingAmount)}</td>
+                            <td>{toFaDate(row.issueDate)}</td>
+                            <td><StaffAdvanceStatusBadge status={row.status} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : null}
+            </CollapsiblePanel>
+
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="staff-salary-payments"
+              title="پرداخت معاش با تسویهٔ پیشکی"
+              hint={`${formatNumber(salaryPaymentQueue.length)} در صفِ تایید`}
+              span="12"
+            >
+              <div className="gov-form-grid">
+                <label className="gov-field">
+                  <span>کارمند</span>
+                  <select name="staffId" value={salaryPaymentDraft.staffId} onChange={handleSalaryPaymentDraftChange}>
+                    <option value="">— بدون رکورد (نام دستی) —</option>
+                    {(payload.staffList || []).map((item) => (
+                      <option key={item._id} value={item._id}>{item.name}{item.position ? ` · ${item.position}` : ''}</option>
+                    ))}
+                  </select>
+                </label>
+                {!salaryPaymentDraft.staffId ? (
+                  <label className="gov-field">
+                    <span>نامِ گیرنده</span>
+                    <input name="staffName" value={salaryPaymentDraft.staffName} onChange={handleSalaryPaymentDraftChange} />
+                  </label>
+                ) : null}
+                <label className="gov-field">
+                  <span>معاشِ ناخالص</span>
+                  <input name="grossSalary" value={salaryPaymentDraft.grossSalary} onChange={handleSalaryPaymentDraftChange} inputMode="numeric" />
+                  <small>دستی وارد می‌شود.</small>
+                </label>
+                <label className="gov-field">
+                  <span>تاریخِ پرداخت</span>
+                  <AfghanDateInput name="paymentDate" value={salaryPaymentDraft.paymentDate} onChange={(value) => setSalaryPaymentDraft((current) => ({ ...current, paymentDate: value }))} showGregorianEquivalent />
+                </label>
+                <label className="gov-field">
+                  <span>حسابِ خزانه</span>
+                  <select name="treasuryAccountId" value={salaryPaymentDraft.treasuryAccountId} onChange={handleSalaryPaymentDraftChange}>
+                    <option value="">انتخاب حساب…</option>
+                    {treasuryAccounts.map((item) => (
+                      <option key={item._id || item.id} value={item._id || item.id}>{item.title || item.code || item._id}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="gov-field">
+                  <span>روشِ پرداخت</span>
+                  <select name="paymentMethod" value={salaryPaymentDraft.paymentMethod} onChange={handleSalaryPaymentDraftChange}>
+                    <option value="cash">نقدی</option>
+                    <option value="bank_transfer">انتقال بانکی</option>
+                    <option value="hawala">حواله</option>
+                    <option value="manual">دستی</option>
+                  </select>
+                </label>
+                <label className="gov-field gov-field-full">
+                  <span>یادداشت</span>
+                  <input name="note" value={salaryPaymentDraft.note} onChange={handleSalaryPaymentDraftChange} />
+                </label>
+                <label className="gov-field">
+                  <span>وضعیت</span>
+                  <select name="status" value={salaryPaymentDraft.status} onChange={handleSalaryPaymentDraftChange}>
+                    <option value="draft">پیش‌نویس</option>
+                    <option value="pending_review">ارسال برای بررسی</option>
+                  </select>
+                </label>
+              </div>
+              <div className="gov-card-actions">
+                <button type="button" className="gov-inline-action" onClick={fetchSalaryPreview} disabled={busyAction === 'salary-preview'}>
+                  {busyAction === 'salary-preview' ? 'در حال محاسبه…' : 'محاسبهٔ کسرِ پیشکی'}
+                </button>
+                <button type="button" className="gov-primary-btn" onClick={submitSalaryPayment} disabled={busyAction === 'save-salary-payment'}>
+                  {busyAction === 'save-salary-payment' ? 'در حال ذخیره…' : 'ثبتِ پرداختِ معاش'}
+                </button>
+              </div>
+
+              {salaryPreview ? (
+                <div className="gov-governance-grid">
+                  <div className="gov-governance-stat" data-tone="teal">
+                    <span>معاشِ ناخالص</span>
+                    <strong>{formatMoney(salaryPreview.grossSalary || 0)}</strong>
+                    <small>{formatNumber((salaryPreview.openAdvances || []).length)} پیشکیِ باز</small>
+                  </div>
+                  <div className="gov-governance-stat" data-tone="copper">
+                    <span>کسرِ پیشکی</span>
+                    <strong>{formatMoney(salaryPreview.deductionTotal || 0)}</strong>
+                    <small>اولویت با قدیمی‌ترین پیشکی</small>
+                  </div>
+                  <div className="gov-governance-stat" data-tone="mint">
+                    <span>نقدِ خالص</span>
+                    <strong>{formatMoney(salaryPreview.netAmount || 0)}</strong>
+                    <small>از خزانه کسر می‌شود</small>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="gov-approval-rule">
+                هنگامِ تاییدِ نهایی، یک ردیفِ مصرفِ «معاش» برای مبلغِ <strong>خالص</strong> ساخته می‌شود (خزانه فقط خالص را کم می‌کند)
+                و قسطِ کسرشده روی پیشکیِ همان شخص ثبت می‌گردد.
+              </div>
+
+              {!salaryPaymentQueue.length ? (
+                <div className="gov-empty-state">در صفِ تاییدِ پرداختِ معاش موردی نیست.</div>
+              ) : (
+                <div className="gov-table-wrap">
+                  <table className="gov-table">
+                    <thead>
+                      <tr>
+                        <th>گیرنده</th>
+                        <th>ناخالص</th>
+                        <th>کسرِ پیشکی</th>
+                        <th>خالص</th>
+                        <th>وضعیت</th>
+                        <th>مرحله</th>
+                        <th>اقدام</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {salaryPaymentQueue.map((row) => {
+                        const isPending = row.status === 'pending_review';
+                        const alreadyReviewed = actorAlreadyReviewedExpense(row.approvalTrail, currentUserId);
+                        const canApprove = isPending && !alreadyReviewed && canApproveExpenseStage(currentAdminLevel, row.approvalStage);
+                        const canReject = isPending && !alreadyReviewed && canRejectExpenseStage(currentAdminLevel, row.approvalStage);
+                        return (
+                          <tr key={`salary-payment-queue-${row._id}`}>
+                            <td>
+                              <div className="gov-table-stack">
+                                <strong>{row.staff?.name || 'بدون نام'}</strong>
+                                <span>{row.period || '—'}</span>
+                              </div>
+                            </td>
+                            <td>{formatMoney(row.grossSalary)}</td>
+                            <td>{formatMoney(row.deductionTotal)}</td>
+                            <td><strong>{formatMoney(row.netAmount)}</strong></td>
+                            <td><StaffAdvanceStatusBadge status={row.status} /></td>
+                            <td><ExpenseStageBadge stage={row.approvalStage} /></td>
+                            <td>
+                              <div className="gov-action-stack">
+                                {(row.status === 'draft' || row.status === 'rejected') ? (
+                                  <button type="button" className="gov-inline-action" disabled={!!busyAction} onClick={() => submitSalaryPaymentForReview(row._id)}>
+                                    ارسال برای بررسی
+                                  </button>
+                                ) : null}
+                                {isPending ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="gov-inline-action"
+                                      disabled={!!busyAction || !canApprove}
+                                      title={canApprove ? undefined : `این مرحله منتظرِ ${expenseStageWaitLabel(row.approvalStage)} است.`}
+                                      onClick={() => reviewSalaryPayment(row._id, 'approve')}
+                                    >
+                                      {row.approvalStage === 'general_president_review' ? 'تاییدِ نهایی' : 'تاییدِ مرحله'}
+                                    </button>
+                                    <button type="button" className="gov-inline-action" disabled={!!busyAction || !canReject} onClick={() => reviewSalaryPayment(row._id, 'reject')}>
+                                      رد
+                                    </button>
+                                  </>
+                                ) : null}
+                                {row.status !== 'void' ? (
+                                  <button type="button" className="gov-inline-action" disabled={!!busyAction} onClick={() => voidSalaryPayment(row._id)}>
+                                    باطل
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {salaryPaymentRecent.length ? (
+                <>
+                  <h4 className="gov-subhead">آخرین پرداخت‌های معاش</h4>
+                  <div className="gov-table-wrap">
+                    <table className="gov-table">
+                      <thead>
+                        <tr>
+                          <th>گیرنده</th>
+                          <th>ماه</th>
+                          <th>ناخالص</th>
+                          <th>کسرِ پیشکی</th>
+                          <th>خالص</th>
+                          <th>وضعیت</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {salaryPaymentRecent.map((row) => (
+                          <tr key={`salary-payment-recent-${row._id}`}>
+                            <td>{row.staff?.name || 'بدون نام'}</td>
+                            <td>{row.period || '—'}</td>
+                            <td>{formatMoney(row.grossSalary)}</td>
+                            <td>{formatMoney(row.deductionTotal)}</td>
+                            <td>{formatMoney(row.netAmount)}</td>
+                            <td><StaffAdvanceStatusBadge status={row.status} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : null}
             </CollapsiblePanel>
               </section>
             ) : null}
