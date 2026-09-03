@@ -1880,6 +1880,9 @@ export default function AdminGovernmentFinance() {
   const staffAdvanceRecent = useMemo(() => payload.staffAdvanceAnalytics?.recent || payload.staffAdvances || [], [payload.staffAdvanceAnalytics, payload.staffAdvances]);
   const salaryPaymentQueue = useMemo(() => payload.staffAdvanceAnalytics?.salaryPayments?.queue || [], [payload.staffAdvanceAnalytics]);
   const salaryPaymentRecent = useMemo(() => payload.staffAdvanceAnalytics?.salaryPayments?.recent || [], [payload.staffAdvanceAnalytics]);
+  const staffAdvanceAging = useMemo(() => payload.staffAdvanceAnalytics?.aging || [], [payload.staffAdvanceAnalytics]);
+  const staffAdvanceRepaymentPeriods = useMemo(() => payload.staffAdvanceAnalytics?.repaymentsByPeriod || [], [payload.staffAdvanceAnalytics]);
+  const staffAdvanceOpen = useMemo(() => payload.staffAdvanceAnalytics?.openAdvances || [], [payload.staffAdvanceAnalytics]);
   const staffAdvanceCapHint = useMemo(() => {
     const basis = Number(staffAdvanceDraft.monthlySalaryBasis) || 0;
     const mult = STAFF_ADVANCE_CAP_MULTIPLIER[staffAdvanceDraft.kind] || 1;
@@ -3222,6 +3225,45 @@ export default function AdminGovernmentFinance() {
       await loadWorkspace('operations');
     } catch (error) {
       showMessage(errorMessage(error, 'باطل‌سازی پیشکی ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const refundStaffAdvance = async (advance) => {
+    try {
+      const raw = window.prompt(`مبلغِ بازپرداختِ نقدی (ماندهٔ باز: ${formatMoney(advance.outstandingAmount)}):`, String(advance.outstandingAmount || ''));
+      if (raw === null) return;
+      const amount = Number(String(raw).replace(/[^\d.]/g, ''));
+      if (!(amount > 0)) {
+        showMessage('مبلغ نامعتبر است.', 'error');
+        return;
+      }
+      setBusyAction(`refund-staff-advance-${advance._id}`);
+      await postJson(`/api/finance/admin/staff-advances/${advance._id}/refund`, { amount, note: 'بازپرداختِ نقدی از مرکز مالی.' });
+      showMessage('بازپرداختِ نقدی ثبت شد.');
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'بازپرداختِ پیشکی ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const writeOffStaffAdvance = async (advance) => {
+    try {
+      const reason = window.prompt('دلیلِ حذفِ طلب (فقط ریاست عمومی):', '');
+      if (reason === null) return;
+      if (!reason.trim()) {
+        showMessage('دلیل اجباری است.', 'error');
+        return;
+      }
+      setBusyAction(`writeoff-staff-advance-${advance._id}`);
+      await postJson(`/api/finance/admin/staff-advances/${advance._id}/write-off`, { reason: reason.trim() });
+      showMessage('ماندهٔ پیشکی حذفِ طلب شد.');
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'حذفِ طلبِ پیشکی ناموفق بود.'), 'error');
     } finally {
       setBusyAction('');
     }
@@ -6045,6 +6087,90 @@ export default function AdminGovernmentFinance() {
                             <td>{formatMoney(row.repaid)}</td>
                             <td><strong>{formatMoney(row.outstanding)}</strong></td>
                             <td>{formatNumber(row.openCount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : null}
+
+              {staffAdvanceOpen.length ? (
+                <>
+                  <h4 className="gov-subhead">پیشکی‌های فعال — تعیین تکلیف</h4>
+                  <div className="gov-table-wrap">
+                    <table className="gov-table">
+                      <thead>
+                        <tr>
+                          <th>گیرنده</th>
+                          <th>نوع</th>
+                          <th>مبلغ</th>
+                          <th>مانده</th>
+                          <th>تاریخ</th>
+                          <th>اقدام</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {staffAdvanceOpen.map((row) => (
+                          <tr key={`staff-advance-open-${row._id}`}>
+                            <td>
+                              <div className="gov-table-stack">
+                                <strong>{row.staff?.name || 'بدون نام'}</strong>
+                                <span>{row.staff?.position || '—'}</span>
+                              </div>
+                            </td>
+                            <td>{row.kindLabel || row.kind}</td>
+                            <td>{formatMoney(row.amount)}</td>
+                            <td><strong>{formatMoney(row.outstandingAmount)}</strong></td>
+                            <td>{toFaDate(row.issueDate)}</td>
+                            <td>
+                              <div className="gov-action-stack">
+                                <button type="button" className="gov-inline-action" disabled={!!busyAction} onClick={() => refundStaffAdvance(row)}>
+                                  بازپرداختِ نقدی
+                                </button>
+                                {currentAdminLevel === 'general_president' ? (
+                                  <button type="button" className="gov-inline-action" disabled={!!busyAction} onClick={() => writeOffStaffAdvance(row)}>
+                                    حذفِ طلب
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : null}
+
+              {staffAdvanceAging.some((row) => Number(row.value) > 0) ? (
+                <>
+                  <h4 className="gov-subhead">عمرِ ماندهٔ پیشکی</h4>
+                  <div className="gov-governance-grid">
+                    {staffAdvanceAging.map((row) => (
+                      <div key={`staff-advance-aging-${row.key}`} className="gov-governance-stat" data-tone={row.key === 'd61_plus' && Number(row.value) > 0 ? 'rose' : 'sand'}>
+                        <span>{row.label}</span>
+                        <strong>{formatMoney(row.value)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+
+              {staffAdvanceRepaymentPeriods.length ? (
+                <>
+                  <h4 className="gov-subhead">تطبیقِ ماهانهٔ اقساط</h4>
+                  <div className="gov-table-wrap">
+                    <table className="gov-table">
+                      <thead>
+                        <tr><th>ماه</th><th>جمعِ کسر</th><th>تعداد قسط</th></tr>
+                      </thead>
+                      <tbody>
+                        {staffAdvanceRepaymentPeriods.map((row) => (
+                          <tr key={`staff-advance-repay-${row.period}`}>
+                            <td>{row.period === 'refund' ? 'بازپرداختِ نقدی' : row.period}</td>
+                            <td>{formatMoney(row.amount)}</td>
+                            <td>{formatNumber(row.count)}</td>
                           </tr>
                         ))}
                       </tbody>

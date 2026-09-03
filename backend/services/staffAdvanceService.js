@@ -285,6 +285,40 @@ async function buildStaffAdvanceAnalytics({ schoolId = '', financialYearId = '',
     departed.amount = roundMoney(departed.amount);
   }
 
+  // Aging of the open balance by advance age (issue date -> now).
+  const now = Date.now();
+  const agingBuckets = { current: 0, d1_30: 0, d31_60: 0, d61_plus: 0 };
+  openAdvances.forEach((row) => {
+    const outstanding = roundMoney(row.outstandingAmount);
+    const issued = new Date(row.issueDate || row.createdAt || now).getTime();
+    const ageDays = Math.max(0, Math.floor((now - issued) / (24 * 60 * 60 * 1000)));
+    if (ageDays <= 30) agingBuckets.current += outstanding;
+    else if (ageDays <= 60) agingBuckets.d1_30 += outstanding;
+    else if (ageDays <= 90) agingBuckets.d31_60 += outstanding;
+    else agingBuckets.d61_plus += outstanding;
+  });
+  const aging = [
+    { key: 'current', label: 'تا ۳۰ روز', value: roundMoney(agingBuckets.current) },
+    { key: 'd1_30', label: '۳۱ تا ۶۰ روز', value: roundMoney(agingBuckets.d1_30) },
+    { key: 'd31_60', label: '۶۱ تا ۹۰ روز', value: roundMoney(agingBuckets.d31_60) },
+    { key: 'd61_plus', label: 'بیش از ۹۰ روز', value: roundMoney(agingBuckets.d61_plus) }
+  ];
+
+  // Monthly repayment reconciliation — every installment/refund grouped by period.
+  const repaymentPeriodMap = new Map();
+  rows.forEach((row) => {
+    (Array.isArray(row.repayments) ? row.repayments : []).forEach((item) => {
+      const period = normalizeText(item?.period) || '—';
+      const bucket = repaymentPeriodMap.get(period) || { period, amount: 0, count: 0 };
+      bucket.amount += roundMoney(item?.amount);
+      bucket.count += 1;
+      repaymentPeriodMap.set(period, bucket);
+    });
+  });
+  const repaymentsByPeriod = [...repaymentPeriodMap.values()]
+    .map((item) => ({ ...item, amount: roundMoney(item.amount) }))
+    .sort((left, right) => String(right.period).localeCompare(String(left.period)));
+
   const salaryFilter = {};
   if (normalizeText(schoolId)) salaryFilter.schoolId = normalizeText(schoolId);
   if (normalizeText(financialYearId)) salaryFilter.financialYearId = normalizeText(financialYearId);
@@ -308,6 +342,9 @@ async function buildStaffAdvanceAnalytics({ schoolId = '', financialYearId = '',
       statusCounts
     },
     ledger: ledger.slice(0, 60),
+    aging,
+    repaymentsByPeriod: repaymentsByPeriod.slice(0, 18),
+    openAdvances: openAdvances.slice(0, 60).map(serializeStaffAdvance),
     queue: rows
       .filter((row) => QUEUE_STATUSES.includes(normalizeText(row.status).toLowerCase()))
       .slice(0, 60)
@@ -494,6 +531,83 @@ async function finalizeSalaryPayment({ payment, financialYear, actorId = null } 
   return expense._id;
 }
 
+// --- Phase 3: write-off (forgive) and cash refund ---
+
+// Forgive the remaining balance of an advance whose holder has left. The
+// already-disbursed cash is NOT returned to the treasury; the school is simply
+// accepting the loss. Restricted to the general president at the route layer.
+function writeOffAdvance({ advance, actorId = null, reason = '' } = {}) {
+  if (!advance) return;
+  if (advance.status !== 'approved' || roundMoney(advance.outstandingAmount) <= 0) {
+    const error = new Error('staff_advance_writeoff_invalid');
+    error.statusCode = 409;
+    error.userMessage = 'فقط پیشکیِ فعال با ماندهٔ باز قابلِ حذفِ طلب است.';
+    throw error;
+  }
+  advance.status = 'written_off';
+  advance.writeOff = { at: new Date(), by: actorId || null, reason: normalizeText(reason) };
+  advance.updatedBy = actorId || null;
+}
+
+// The person hands cash back. Posts a treasury credit and reduces the
+// outstanding balance; a full return marks the advance `refunded`.
+async function refundAdvance({ advance, amount = 0, treasuryAccountId = null, actorId = null, note = '' } = {}) {
+  if (!advance) return null;
+  if (advance.status !== 'approved') {
+    const error = new Error('staff_advance_refund_invalid');
+    error.statusCode = 409;
+    error.userMessage = 'فقط پیشکیِ فعال قابلِ بازپرداخت است.';
+    throw error;
+  }
+  const value = roundMoney(amount);
+  const outstanding = roundMoney(advance.outstandingAmount);
+  if (value <= 0 || value > outstanding + 0.001) {
+    const error = new Error('staff_advance_refund_amount_invalid');
+    error.statusCode = 400;
+    error.userMessage = `مبلغِ بازپرداخت باید بین ۱ و ${outstanding.toLocaleString('fa-AF')} افغانی باشد.`;
+    throw error;
+  }
+  const accountId = treasuryAccountId || advance.treasuryAccountId;
+  const now = new Date();
+  const groupKey = `staff_advance_refund:${advance._id}:${(advance.repayments || []).length}`;
+  const txn = await FinanceTreasuryTransaction.create({
+    schoolId: advance.schoolId,
+    financialYearId: advance.financialYearId,
+    academicYearId: advance.academicYearId,
+    accountId,
+    transactionGroupKey: groupKey,
+    transactionType: 'deposit',
+    direction: 'in',
+    amount: value,
+    currency: normalizeText(advance.currency).toUpperCase() || 'AFN',
+    transactionDate: now,
+    sourceType: 'manual',
+    referenceNo: groupKey,
+    note: `بازپرداختِ نقدیِ پیشکیِ ${normalizeText(advance.staffSnapshot?.name)}`.trim(),
+    createdBy: actorId || null,
+    updatedBy: actorId || null
+  });
+  advance.repayments.push({
+    period: 'refund',
+    amount: value,
+    salaryExpenseId: null,
+    by: actorId || null,
+    at: now,
+    note: normalizeText(note)
+  });
+  advance.refund = {
+    at: now,
+    by: actorId || null,
+    amount: roundMoney((advance.refund?.amount || 0) + value),
+    treasuryTransactionId: txn._id,
+    note: normalizeText(note)
+  };
+  advance.updatedBy = actorId || null;
+  const repaidAfter = advance.repayments.reduce((sum, item) => sum + Math.max(0, Number(item?.amount) || 0), 0);
+  if (roundMoney(advance.amount - repaidAfter) <= 0) advance.status = 'refunded';
+  return txn._id;
+}
+
 module.exports = {
   KIND_CAP_MULTIPLIER,
   KIND_LABELS,
@@ -506,5 +620,7 @@ module.exports = {
   computeSalaryDeduction,
   listOpenAdvancesForStaff,
   serializeStaffSalaryPayment,
-  finalizeSalaryPayment
+  finalizeSalaryPayment,
+  writeOffAdvance,
+  refundAdvance
 };

@@ -7,6 +7,9 @@ const FinanceAnomalyCase = require('../models/FinanceAnomalyCase');
 const FinanceMonthClose = require('../models/FinanceMonthClose');
 const FinanceProcurementCommitment = require('../models/FinanceProcurementCommitment');
 const FinanceTreasuryAccount = require('../models/FinanceTreasuryAccount');
+const StaffAdvance = require('../models/StaffAdvance');
+const StaffSalaryPayment = require('../models/StaffSalaryPayment');
+const AfghanTeacher = require('../models/AfghanTeacher');
 
 const DEFAULT_EXPENSE_CATEGORIES = [
   {
@@ -299,6 +302,57 @@ async function buildFinancialYearCloseReadiness({ financialYearId = '', items = 
   if (procurementCounts.unsettledApproved > 0) blockers.push(`${procurementCounts.unsettledApproved} تعهد خرید تاییدشده هنوز تسویه کامل نشده است.`);
   if (configuredBudget && financialYear.budgetApprovalStage !== 'approved') blockers.push('بودجه تنظیم‌شده سال مالی هنوز تایید نهایی نشده است.');
   if (missingClosedMonths.length > 0) blockers.push(`${missingClosedMonths.length} ماه این سال مالی هنوز بسته نشده است.`);
+
+  // Phase 3 — staff advances & withdrawals must be resolved before close.
+  const [staffAdvanceRows, staffSalaryRows] = await Promise.all([
+    StaffAdvance.find({ financialYearId: normalizedFinancialYearId })
+      .select('status outstandingAmount staffId staffSnapshot')
+      .lean(),
+    StaffSalaryPayment.find({ financialYearId: normalizedFinancialYearId })
+      .select('status')
+      .lean()
+  ]);
+  const advanceCounts = { draft: 0, pendingReview: 0, rejected: 0 };
+  const openAdvances = [];
+  staffAdvanceRows.forEach((item) => {
+    const status = normalizeText(item?.status).toLowerCase();
+    if (status === 'draft') advanceCounts.draft += 1;
+    else if (status === 'pending_review') advanceCounts.pendingReview += 1;
+    else if (status === 'rejected') advanceCounts.rejected += 1;
+    else if (status === 'approved' && Number(item?.outstandingAmount || 0) > 0) openAdvances.push(item);
+  });
+  const salaryCounts = { draft: 0, pendingReview: 0, rejected: 0 };
+  staffSalaryRows.forEach((item) => {
+    const status = normalizeText(item?.status).toLowerCase();
+    if (status === 'draft') salaryCounts.draft += 1;
+    else if (status === 'pending_review') salaryCounts.pendingReview += 1;
+    else if (status === 'rejected') salaryCounts.rejected += 1;
+  });
+
+  let departedAdvanceCount = 0;
+  let departedAdvanceAmount = 0;
+  const openAdvanceStaffIds = [...new Set(openAdvances.map((item) => String(item.staffId || '')).filter(Boolean))];
+  if (openAdvanceStaffIds.length) {
+    const activeTeacherRows = await AfghanTeacher.find({ _id: { $in: openAdvanceStaffIds }, status: 'active' })
+      .select('_id')
+      .lean();
+    const activeTeacherSet = new Set(activeTeacherRows.map((item) => String(item._id)));
+    openAdvances.forEach((item) => {
+      if (String(item.staffId || '') && !activeTeacherSet.has(String(item.staffId))) {
+        departedAdvanceCount += 1;
+        departedAdvanceAmount += Number(item.outstandingAmount || 0);
+      }
+    });
+  }
+  departedAdvanceAmount = Math.round(departedAdvanceAmount * 100) / 100;
+
+  if (advanceCounts.draft > 0) blockers.push(`${advanceCounts.draft} پیشکی پیش‌نویس هنوز تعیین تکلیف نشده است.`);
+  if (advanceCounts.pendingReview > 0) blockers.push(`${advanceCounts.pendingReview} پیشکی هنوز در صف بررسی است.`);
+  if (advanceCounts.rejected > 0) blockers.push(`${advanceCounts.rejected} پیشکی ردشده باید اصلاح یا باطل شود.`);
+  if (salaryCounts.draft > 0) blockers.push(`${salaryCounts.draft} پرداخت معاش پیش‌نویس هنوز تعیین تکلیف نشده است.`);
+  if (salaryCounts.pendingReview > 0) blockers.push(`${salaryCounts.pendingReview} پرداخت معاش هنوز در صف بررسی است.`);
+  if (salaryCounts.rejected > 0) blockers.push(`${salaryCounts.rejected} پرداخت معاش ردشده باید اصلاح یا باطل شود.`);
+  if (departedAdvanceCount > 0) blockers.push(`${departedAdvanceCount} پیشکیِ تسویه‌نشدهٔ کارمندِ رفته (${departedAdvanceAmount.toLocaleString('fa-AF')} افغانی) باید تعیین تکلیف شود: کسر از تصفیه، تبدیل به طلب، یا حذف طلب.`);
   if (openOrders > 0) warnings.push(`${openOrders} بل رسمی دارای باقیات است؛ این مورد مانع بستن نیست اما در گزارش اختتامیه درج می‌شود.`);
   if (unreconciledTreasuryAccounts > 0) warnings.push(`${unreconciledTreasuryAccounts} حساب خزانه هنوز تطبیق بانکی/صندوقی نشده است.`);
   if (reconciliationVariances > 0) warnings.push(`${reconciliationVariances} حساب خزانه دارای تفاوت تطبیق است.`);
@@ -317,6 +371,13 @@ async function buildFinancialYearCloseReadiness({ financialYearId = '', items = 
       pendingPayments,
       actionableAnomalies,
       procurements: procurementCounts,
+      staffAdvances: {
+        ...advanceCounts,
+        openCount: openAdvances.length,
+        departedCount: departedAdvanceCount,
+        departedAmount: departedAdvanceAmount
+      },
+      staffSalaryPayments: salaryCounts,
       openOrders,
       treasuryAccounts: treasuryAccounts.length,
       unreconciledTreasuryAccounts,

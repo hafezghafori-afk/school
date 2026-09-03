@@ -119,7 +119,9 @@ const {
   computeSalaryDeduction,
   listOpenAdvancesForStaff,
   serializeStaffSalaryPayment,
-  finalizeSalaryPayment
+  finalizeSalaryPayment,
+  writeOffAdvance,
+  refundAdvance
 } = require('../services/staffAdvanceService');
 const {
   PROCUREMENT_APPROVAL_STAGES,
@@ -4614,6 +4616,106 @@ router.post('/admin/staff-advances/:id/void', requireAuth, requireRole(['admin']
     return res.status(error?.statusCode || resolveFinancialYearErrorStatus(error)).json({
       success: false,
       message: error?.userMessage || resolveFinancialYearMessage(error, 'باطل‌سازی پیشکی ناموفق بود.')
+    });
+  }
+});
+
+router.post('/admin/staff-advances/:id/write-off', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const actorLevel = normalizeAdminLevel(await resolveAdminActorLevel(req.user.id));
+    if (actorLevel !== 'general_president') {
+      return res.status(403).json({ success: false, message: 'حذفِ طلبِ پیشکی فقط توسط ریاست عمومی انجام می‌شود.' });
+    }
+    if (!String(req.body?.reason || '').trim()) {
+      return res.status(400).json({ success: false, message: 'دلیلِ حذفِ طلب اجباری است.' });
+    }
+    const item = await StaffAdvance.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
+    if (!item) return res.status(404).json({ success: false, message: 'رکورد پیشکی پیدا نشد.' });
+
+    const financialYear = await FinancialYear.findById(item.financialYearId);
+    assertFinancialYearWritable(financialYear);
+
+    writeOffAdvance({ advance: item, actorId: req.user.id, reason: String(req.body.reason).trim() });
+    appendExpenseApprovalTrail(item, { level: actorLevel, action: 'write_off', by: req.user.id, reason: String(req.body.reason).trim() });
+    await item.save();
+
+    await logActivity({
+      req,
+      action: 'finance_write_off_staff_advance',
+      targetType: 'StaffAdvance',
+      targetId: item._id.toString(),
+      meta: { financialYearId: String(item.financialYearId || ''), amount: Number(item.amount || 0), outstanding: Number(item.outstandingAmount || 0) }
+    });
+
+    invalidateFinanceReportCache();
+    return res.json({ success: true, item: serializeStaffAdvance(item), message: 'ماندهٔ پیشکی حذفِ طلب شد.' });
+  } catch (error) {
+    return res.status(error?.statusCode || resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: error?.userMessage || resolveFinancialYearMessage(error, 'حذفِ طلبِ پیشکی ناموفق بود.')
+    });
+  }
+});
+
+router.post('/admin/staff-advances/:id/refund', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const schoolContext = await resolveActiveSchool(req, { payload, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await StaffAdvance.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
+    if (!item) return res.status(404).json({ success: false, message: 'رکورد پیشکی پیدا نشد.' });
+
+    const financialYear = await FinancialYear.findById(item.financialYearId);
+    assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable({
+      schoolId: item.schoolId,
+      financialYearId: item.financialYearId,
+      academicYearId: item.academicYearId,
+      dateValue: new Date()
+    });
+
+    let treasuryAccountId = item.treasuryAccountId;
+    if (String(payload.treasuryAccountId || '').trim()) {
+      const account = await resolveTreasuryAccountSelection({
+        accountId: payload.treasuryAccountId,
+        schoolId: financialYear.schoolId,
+        financialYearId: financialYear._id,
+        academicYearId: financialYear.academicYearId
+      });
+      if (account?._id) treasuryAccountId = account._id;
+    }
+
+    await refundAdvance({
+      advance: item,
+      amount: normalizeMoneyInput(payload.amount, 0),
+      treasuryAccountId,
+      actorId: req.user.id,
+      note: String(payload.note || '').trim()
+    });
+    appendExpenseApprovalTrail(item, {
+      level: normalizeAdminLevel(await resolveAdminActorLevel(req.user.id)),
+      action: 'refund',
+      by: req.user.id,
+      note: String(payload.note || '').trim()
+    });
+    await item.save();
+
+    await logActivity({
+      req,
+      action: 'finance_refund_staff_advance',
+      targetType: 'StaffAdvance',
+      targetId: item._id.toString(),
+      meta: { financialYearId: String(item.financialYearId || ''), amount: normalizeMoneyInput(payload.amount, 0), outstanding: Number(item.outstandingAmount || 0) }
+    });
+
+    invalidateFinanceReportCache();
+    return res.json({ success: true, item: serializeStaffAdvance(item), message: 'بازپرداختِ نقدیِ پیشکی ثبت و به خزانه افزوده شد.' });
+  } catch (error) {
+    return res.status(error?.statusCode || resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: error?.userMessage || resolveFinancialYearMessage(error, 'بازپرداختِ پیشکی ناموفق بود.')
     });
   }
 });
