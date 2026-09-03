@@ -1,6 +1,10 @@
 const StaffAdvance = require('../models/StaffAdvance');
+const StaffSalaryPayment = require('../models/StaffSalaryPayment');
 const AfghanTeacher = require('../models/AfghanTeacher');
+const ExpenseEntry = require('../models/ExpenseEntry');
 const FinanceTreasuryTransaction = require('../models/FinanceTreasuryTransaction');
+const { resolveExpenseCategorySelection } = require('./expenseGovernanceService');
+const { resolveQuarterForDate } = require('./financialPeriodService');
 
 // Hard caps by kind (user decision): advances / withdrawals may not exceed one
 // month of the person's salary basis; a staff loan may reach three months.
@@ -281,6 +285,17 @@ async function buildStaffAdvanceAnalytics({ schoolId = '', financialYearId = '',
     departed.amount = roundMoney(departed.amount);
   }
 
+  const salaryFilter = {};
+  if (normalizeText(schoolId)) salaryFilter.schoolId = normalizeText(schoolId);
+  if (normalizeText(financialYearId)) salaryFilter.financialYearId = normalizeText(financialYearId);
+  if (normalizeText(academicYearId)) salaryFilter.academicYearId = normalizeText(academicYearId);
+  const salaryRows = await StaffSalaryPayment.find(salaryFilter)
+    .sort({ paymentDate: -1, createdAt: -1 })
+    .lean();
+  const salaryPaidTotal = salaryRows
+    .filter((row) => normalizeText(row.status).toLowerCase() === 'approved')
+    .reduce((sum, row) => sum + roundMoney(row.deductionTotal), 0);
+
   return {
     summary: {
       totalAdvanced: roundMoney(totalAdvanced),
@@ -289,6 +304,7 @@ async function buildStaffAdvanceAnalytics({ schoolId = '', financialYearId = '',
       openCount: openAdvances.length,
       staffCount: ledger.filter((item) => item.outstanding > 0).length,
       departedOutstanding: departed,
+      salaryDeductedTotal: roundMoney(salaryPaidTotal),
       statusCounts
     },
     ledger: ledger.slice(0, 60),
@@ -296,8 +312,186 @@ async function buildStaffAdvanceAnalytics({ schoolId = '', financialYearId = '',
       .filter((row) => QUEUE_STATUSES.includes(normalizeText(row.status).toLowerCase()))
       .slice(0, 60)
       .map(serializeStaffAdvance),
-    recent: rows.slice(0, 12).map(serializeStaffAdvance)
+    recent: rows.slice(0, 12).map(serializeStaffAdvance),
+    salaryPayments: {
+      queue: salaryRows
+        .filter((row) => ['draft', 'pending_review', 'rejected'].includes(normalizeText(row.status).toLowerCase()))
+        .slice(0, 40)
+        .map(serializeStaffSalaryPayment),
+      recent: salaryRows.slice(0, 12).map(serializeStaffSalaryPayment)
+    }
   };
+}
+
+// --- Phase 2: individual salary payment with automatic advance deduction ---
+
+// Suggested repayment for a person's next salary. Oldest advance first; each
+// takes its planned installment (or the whole outstanding for a `next_salary`
+// plan), never more than what is left in the gross salary — so a short month
+// simply carries the rest to the next payment.
+function computeSalaryDeduction({ openAdvances = [], grossSalary = 0 } = {}) {
+  const gross = Math.max(0, Number(grossSalary) || 0);
+  const sorted = (Array.isArray(openAdvances) ? openAdvances : [])
+    .filter((advance) => roundMoney(advance?.outstandingAmount) > 0)
+    .sort((left, right) => new Date(left.issueDate || 0).getTime() - new Date(right.issueDate || 0).getTime());
+  let remaining = gross;
+  const deductions = [];
+  for (const advance of sorted) {
+    if (remaining <= 0.001) break;
+    const outstanding = roundMoney(advance.outstandingAmount);
+    const installment = advance.repaymentPlan?.mode === 'installments'
+      ? (roundMoney(advance.repaymentPlan.installmentAmount) || outstanding)
+      : outstanding;
+    const take = roundMoney(Math.min(outstanding, installment, remaining));
+    if (take > 0) {
+      deductions.push({ advanceId: String(advance._id), amount: take, kind: advance.kind || '' });
+      remaining = roundMoney(remaining - take);
+    }
+  }
+  const deductionTotal = roundMoney(gross - remaining);
+  return { deductions, deductionTotal, netAmount: roundMoney(gross - deductionTotal) };
+}
+
+async function listOpenAdvancesForStaff({ schoolId, financialYearId = '', staffId = '', staffName = '' } = {}) {
+  const filter = { schoolId, status: 'approved', outstandingAmount: { $gt: 0 } };
+  if (normalizeText(financialYearId)) filter.financialYearId = normalizeText(financialYearId);
+  if (normalizeText(staffId)) filter.staffId = normalizeText(staffId);
+  else if (normalizeText(staffName)) filter['staffSnapshot.name'] = normalizeText(staffName);
+  else return [];
+  return StaffAdvance.find(filter).sort({ issueDate: 1, createdAt: 1 });
+}
+
+function serializeStaffSalaryPayment(doc = {}) {
+  const d = doc && typeof doc.toObject === 'function' ? doc.toObject() : (doc || {});
+  return {
+    _id: String(d._id || ''),
+    staffId: d.staffId ? String(d.staffId._id || d.staffId) : '',
+    staff: {
+      name: normalizeText(d.staffSnapshot?.name),
+      employeeId: normalizeText(d.staffSnapshot?.employeeId),
+      position: normalizeText(d.staffSnapshot?.position)
+    },
+    period: d.period || '',
+    paymentDate: d.paymentDate || null,
+    grossSalary: roundMoney(d.grossSalary),
+    deductionTotal: roundMoney(d.deductionTotal),
+    netAmount: roundMoney(d.netAmount),
+    deductions: (Array.isArray(d.deductions) ? d.deductions : []).map((item) => ({
+      advanceId: String(item.advanceId || ''),
+      amount: roundMoney(item.amount),
+      kind: item.kind || '',
+      kindLabel: KIND_LABELS[item.kind] || item.kind || ''
+    })),
+    treasuryAccountId: d.treasuryAccountId ? String(d.treasuryAccountId._id || d.treasuryAccountId) : '',
+    paymentMethod: d.paymentMethod || 'manual',
+    salaryExpenseId: d.salaryExpenseId ? String(d.salaryExpenseId) : '',
+    note: d.note || '',
+    status: d.status || 'draft',
+    approvalStage: d.approvalStage || 'draft',
+    approvalTrail: Array.isArray(d.approvalTrail) ? d.approvalTrail : [],
+    createdAt: d.createdAt || null
+  };
+}
+
+async function resolveSalaryExpenseCategory(position = '') {
+  const sub = normalizeText(position) === 'teacher' ? 'teachers' : 'staff';
+  const attempts = [
+    { category: 'salary', subCategory: sub },
+    { category: 'salary', subCategory: '' },
+    { category: 'other', subCategory: '' }
+  ];
+  for (const attempt of attempts) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const resolved = await resolveExpenseCategorySelection(attempt);
+      return { category: resolved.category, subCategory: resolved.subCategory };
+    } catch {
+      // try the next fallback
+    }
+  }
+  return { category: 'other', subCategory: '' };
+}
+
+// Runs when a salary payment reaches its final approval: books the NET salary
+// as an approved ExpenseEntry (treasury debited by net) and posts one
+// repayment installment onto each linked advance. Idempotent on
+// payment.salaryExpenseId.
+async function finalizeSalaryPayment({ payment, financialYear, actorId = null } = {}) {
+  if (!payment) return null;
+  if (payment.salaryExpenseId) return payment.salaryExpenseId;
+
+  const advanceIds = (payment.deductions || []).map((item) => String(item.advanceId)).filter(Boolean);
+  const advances = advanceIds.length
+    ? await StaffAdvance.find({ _id: { $in: advanceIds }, schoolId: payment.schoolId })
+    : [];
+  const advanceById = new Map(advances.map((advance) => [String(advance._id), advance]));
+
+  for (const deduction of payment.deductions || []) {
+    const advance = advanceById.get(String(deduction.advanceId));
+    if (!advance || advance.status !== 'approved') {
+      const error = new Error('staff_salary_deduction_target_invalid');
+      error.statusCode = 409;
+      error.userMessage = 'یکی از پیشکی‌های مرتبط دیگر فعال نیست؛ پرداختِ معاش را دوباره بسازید.';
+      throw error;
+    }
+    if (roundMoney(deduction.amount) > roundMoney(advance.outstandingAmount) + 0.001) {
+      const error = new Error('staff_salary_deduction_exceeds_outstanding');
+      error.statusCode = 409;
+      error.userMessage = 'ماندهٔ یکی از پیشکی‌ها تغییر کرده؛ پرداختِ معاش را دوباره بسازید.';
+      throw error;
+    }
+  }
+
+  const { category, subCategory } = await resolveSalaryExpenseCategory(payment.staffSnapshot?.position);
+  const now = new Date();
+  const staffName = normalizeText(payment.staffSnapshot?.name);
+  const expense = await ExpenseEntry.create({
+    schoolId: payment.schoolId,
+    financialYearId: payment.financialYearId,
+    academicYearId: payment.academicYearId,
+    classId: null,
+    category,
+    subCategory,
+    amount: roundMoney(payment.netAmount),
+    currency: 'AFN',
+    expenseDate: payment.paymentDate,
+    periodQuarter: resolveQuarterForDate(financialYear, payment.paymentDate),
+    paymentMethod: payment.paymentMethod || 'manual',
+    treasuryAccountId: payment.treasuryAccountId || null,
+    procurementCommitmentId: null,
+    vendorName: staffName,
+    referenceNo: `staff_salary:${payment._id}`,
+    note: `معاشِ ${payment.period}${staffName ? ` — ${staffName}` : ''}: ناخالص ${roundMoney(payment.grossSalary)} − پیشکی ${roundMoney(payment.deductionTotal)} = خالص ${roundMoney(payment.netAmount)}`,
+    status: 'approved',
+    approvalStage: 'completed',
+    submittedBy: actorId || null,
+    submittedAt: now,
+    approvedBy: actorId || null,
+    approvedAt: now,
+    createdBy: actorId || null,
+    updatedBy: actorId || null,
+    approvalTrail: [
+      { level: 'finance_manager', action: 'submit', by: actorId || null, at: now, note: 'Auto-created from staff salary payment.', reason: '' },
+      { level: 'general_president', action: 'approve', by: actorId || null, at: now, note: 'Salary payment approved.', reason: '' }
+    ]
+  });
+  payment.salaryExpenseId = expense._id;
+
+  for (const deduction of payment.deductions || []) {
+    const advance = advanceById.get(String(deduction.advanceId));
+    advance.repayments.push({
+      period: payment.period,
+      amount: roundMoney(deduction.amount),
+      salaryExpenseId: expense._id,
+      by: actorId || null,
+      at: now
+    });
+    advance.updatedBy = actorId || null;
+    // eslint-disable-next-line no-await-in-loop
+    await advance.save();
+  }
+
+  return expense._id;
 }
 
 module.exports = {
@@ -308,5 +502,9 @@ module.exports = {
   postAdvanceTreasuryDebit,
   voidAdvanceTreasuryDebit,
   serializeStaffAdvance,
-  buildStaffAdvanceAnalytics
+  buildStaffAdvanceAnalytics,
+  computeSalaryDeduction,
+  listOpenAdvancesForStaff,
+  serializeStaffSalaryPayment,
+  finalizeSalaryPayment
 };

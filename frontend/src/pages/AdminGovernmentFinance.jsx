@@ -1606,7 +1606,17 @@ export default function AdminGovernmentFinance() {
     note: '',
     status: 'draft'
   });
-  const [staffLedgerOpenId, setStaffLedgerOpenId] = useState('');
+  const [salaryPaymentDraft, setSalaryPaymentDraft] = useState({
+    staffId: '',
+    staffName: '',
+    grossSalary: '',
+    paymentDate: '',
+    treasuryAccountId: '',
+    paymentMethod: 'cash',
+    note: '',
+    status: 'draft'
+  });
+  const [salaryPreview, setSalaryPreview] = useState(null);
   const [procurementDraft, setProcurementDraft] = useState({
     title: '',
     vendorName: '',
@@ -1868,6 +1878,8 @@ export default function AdminGovernmentFinance() {
   const staffAdvanceQueue = useMemo(() => payload.staffAdvanceAnalytics?.queue || [], [payload.staffAdvanceAnalytics]);
   const staffAdvanceLedger = useMemo(() => payload.staffAdvanceAnalytics?.ledger || [], [payload.staffAdvanceAnalytics]);
   const staffAdvanceRecent = useMemo(() => payload.staffAdvanceAnalytics?.recent || payload.staffAdvances || [], [payload.staffAdvanceAnalytics, payload.staffAdvances]);
+  const salaryPaymentQueue = useMemo(() => payload.staffAdvanceAnalytics?.salaryPayments?.queue || [], [payload.staffAdvanceAnalytics]);
+  const salaryPaymentRecent = useMemo(() => payload.staffAdvanceAnalytics?.salaryPayments?.recent || [], [payload.staffAdvanceAnalytics]);
   const staffAdvanceCapHint = useMemo(() => {
     const basis = Number(staffAdvanceDraft.monthlySalaryBasis) || 0;
     const mult = STAFF_ADVANCE_CAP_MULTIPLIER[staffAdvanceDraft.kind] || 1;
@@ -3210,6 +3222,118 @@ export default function AdminGovernmentFinance() {
       await loadWorkspace('operations');
     } catch (error) {
       showMessage(errorMessage(error, 'باطل‌سازی پیشکی ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const handleSalaryPaymentDraftChange = (event) => {
+    const { name, value } = event.target;
+    setSalaryPaymentDraft((current) => {
+      if (name === 'staffId') {
+        const picked = (payload.staffList || []).find((item) => String(item._id) === String(value));
+        return {
+          ...current,
+          staffId: value,
+          staffName: picked ? picked.name : current.staffName,
+          grossSalary: picked && Number(picked.salaryTotal) > 0 ? String(picked.salaryTotal) : current.grossSalary
+        };
+      }
+      return { ...current, [name]: value };
+    });
+    setSalaryPreview(null);
+  };
+
+  const fetchSalaryPreview = async () => {
+    try {
+      if (!(Number(salaryPaymentDraft.grossSalary) > 0)) {
+        showMessage('معاشِ ناخالص را وارد کنید.', 'error');
+        return;
+      }
+      setBusyAction('salary-preview');
+      const params = new URLSearchParams();
+      if (selectedFinancialYearId) params.set('financialYearId', selectedFinancialYearId);
+      if (salaryPaymentDraft.staffId) params.set('staffId', salaryPaymentDraft.staffId);
+      else if (salaryPaymentDraft.staffName) params.set('staffName', salaryPaymentDraft.staffName);
+      params.set('grossSalary', salaryPaymentDraft.grossSalary);
+      const data = await fetchJson(`/api/finance/admin/staff-advances/salary-preview?${params.toString()}`);
+      setSalaryPreview(data || null);
+    } catch (error) {
+      showMessage(errorMessage(error, 'محاسبهٔ کسر ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const submitSalaryPayment = async () => {
+    try {
+      if (!selectedFinancialYearId) {
+        showMessage('ابتدا یک سال مالی را انتخاب کنید.', 'error');
+        return;
+      }
+      setBusyAction('save-salary-payment');
+      await postJson('/api/finance/admin/staff-advances/salary-payments', {
+        financialYearId: selectedFinancialYearId,
+        staffId: salaryPaymentDraft.staffId,
+        staffName: salaryPaymentDraft.staffName,
+        grossSalary: salaryPaymentDraft.grossSalary,
+        paymentDate: salaryPaymentDraft.paymentDate,
+        treasuryAccountId: salaryPaymentDraft.treasuryAccountId,
+        paymentMethod: salaryPaymentDraft.paymentMethod,
+        note: salaryPaymentDraft.note,
+        status: salaryPaymentDraft.status
+      });
+      setSalaryPaymentDraft((current) => ({ ...current, grossSalary: '', note: '' }));
+      setSalaryPreview(null);
+      showMessage('پرداختِ معاش ثبت شد.');
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'ثبت پرداختِ معاش ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const submitSalaryPaymentForReview = async (paymentId) => {
+    try {
+      setBusyAction(`submit-salary-payment-${paymentId}`);
+      await postJson(`/api/finance/admin/staff-advances/salary-payments/${paymentId}/submit`, {});
+      showMessage('پرداختِ معاش برای بررسی ارسال شد.');
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'ارسال پرداختِ معاش ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const reviewSalaryPayment = async (paymentId, action = 'approve') => {
+    try {
+      const reason = action === 'reject' ? window.prompt('دلیل رد را بنویسید:', '') : '';
+      if (action === 'reject' && reason === null) return;
+      setBusyAction(`${action}-salary-payment-${paymentId}`);
+      await postJson(`/api/finance/admin/staff-advances/salary-payments/${paymentId}/review`, {
+        action,
+        reason: reason || '',
+        note: action === 'reject' ? 'از مرکز مالی رد شد.' : 'از مرکز مالی تایید شد.'
+      });
+      showMessage(action === 'reject' ? 'پرداختِ معاش رد شد.' : 'پرداختِ معاش بررسی و ثبت شد.');
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'بررسی پرداختِ معاش ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const voidSalaryPayment = async (paymentId) => {
+    try {
+      setBusyAction(`void-salary-payment-${paymentId}`);
+      await postJson(`/api/finance/admin/staff-advances/salary-payments/${paymentId}/void`, { note: 'از مرکز مالی باطل شد.' });
+      showMessage('پرداختِ معاش باطل شد.');
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'باطل‌سازی پرداختِ معاش ناموفق بود.'), 'error');
     } finally {
       setBusyAction('');
     }
@@ -5957,6 +6081,208 @@ export default function AdminGovernmentFinance() {
                             <td>{formatMoney(row.amount)}</td>
                             <td>{formatMoney(row.outstandingAmount)}</td>
                             <td>{toFaDate(row.issueDate)}</td>
+                            <td><StaffAdvanceStatusBadge status={row.status} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : null}
+            </CollapsiblePanel>
+
+            <CollapsiblePanel
+              tabKey="operations"
+              panelKey="staff-salary-payments"
+              title="پرداخت معاش با تسویهٔ پیشکی"
+              hint={`${formatNumber(salaryPaymentQueue.length)} در صفِ تایید`}
+              span="12"
+            >
+              <div className="gov-form-grid">
+                <label className="gov-field">
+                  <span>کارمند</span>
+                  <select name="staffId" value={salaryPaymentDraft.staffId} onChange={handleSalaryPaymentDraftChange}>
+                    <option value="">— بدون رکورد (نام دستی) —</option>
+                    {(payload.staffList || []).map((item) => (
+                      <option key={item._id} value={item._id}>{item.name}{item.position ? ` · ${item.position}` : ''}</option>
+                    ))}
+                  </select>
+                </label>
+                {!salaryPaymentDraft.staffId ? (
+                  <label className="gov-field">
+                    <span>نامِ گیرنده</span>
+                    <input name="staffName" value={salaryPaymentDraft.staffName} onChange={handleSalaryPaymentDraftChange} />
+                  </label>
+                ) : null}
+                <label className="gov-field">
+                  <span>معاشِ ناخالص</span>
+                  <input name="grossSalary" value={salaryPaymentDraft.grossSalary} onChange={handleSalaryPaymentDraftChange} inputMode="numeric" />
+                  <small>دستی وارد می‌شود.</small>
+                </label>
+                <label className="gov-field">
+                  <span>تاریخِ پرداخت</span>
+                  <AfghanDateInput name="paymentDate" value={salaryPaymentDraft.paymentDate} onChange={(value) => setSalaryPaymentDraft((current) => ({ ...current, paymentDate: value }))} showGregorianEquivalent />
+                </label>
+                <label className="gov-field">
+                  <span>حسابِ خزانه</span>
+                  <select name="treasuryAccountId" value={salaryPaymentDraft.treasuryAccountId} onChange={handleSalaryPaymentDraftChange}>
+                    <option value="">انتخاب حساب…</option>
+                    {treasuryAccounts.map((item) => (
+                      <option key={item._id || item.id} value={item._id || item.id}>{item.title || item.code || item._id}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="gov-field">
+                  <span>روشِ پرداخت</span>
+                  <select name="paymentMethod" value={salaryPaymentDraft.paymentMethod} onChange={handleSalaryPaymentDraftChange}>
+                    <option value="cash">نقدی</option>
+                    <option value="bank_transfer">انتقال بانکی</option>
+                    <option value="hawala">حواله</option>
+                    <option value="manual">دستی</option>
+                  </select>
+                </label>
+                <label className="gov-field gov-field-full">
+                  <span>یادداشت</span>
+                  <input name="note" value={salaryPaymentDraft.note} onChange={handleSalaryPaymentDraftChange} />
+                </label>
+                <label className="gov-field">
+                  <span>وضعیت</span>
+                  <select name="status" value={salaryPaymentDraft.status} onChange={handleSalaryPaymentDraftChange}>
+                    <option value="draft">پیش‌نویس</option>
+                    <option value="pending_review">ارسال برای بررسی</option>
+                  </select>
+                </label>
+              </div>
+              <div className="gov-card-actions">
+                <button type="button" className="gov-inline-action" onClick={fetchSalaryPreview} disabled={busyAction === 'salary-preview'}>
+                  {busyAction === 'salary-preview' ? 'در حال محاسبه…' : 'محاسبهٔ کسرِ پیشکی'}
+                </button>
+                <button type="button" className="gov-primary-btn" onClick={submitSalaryPayment} disabled={busyAction === 'save-salary-payment'}>
+                  {busyAction === 'save-salary-payment' ? 'در حال ذخیره…' : 'ثبتِ پرداختِ معاش'}
+                </button>
+              </div>
+
+              {salaryPreview ? (
+                <div className="gov-governance-grid">
+                  <div className="gov-governance-stat" data-tone="teal">
+                    <span>معاشِ ناخالص</span>
+                    <strong>{formatMoney(salaryPreview.grossSalary || 0)}</strong>
+                    <small>{formatNumber((salaryPreview.openAdvances || []).length)} پیشکیِ باز</small>
+                  </div>
+                  <div className="gov-governance-stat" data-tone="copper">
+                    <span>کسرِ پیشکی</span>
+                    <strong>{formatMoney(salaryPreview.deductionTotal || 0)}</strong>
+                    <small>اولویت با قدیمی‌ترین پیشکی</small>
+                  </div>
+                  <div className="gov-governance-stat" data-tone="mint">
+                    <span>نقدِ خالص</span>
+                    <strong>{formatMoney(salaryPreview.netAmount || 0)}</strong>
+                    <small>از خزانه کسر می‌شود</small>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="gov-approval-rule">
+                هنگامِ تاییدِ نهایی، یک ردیفِ مصرفِ «معاش» برای مبلغِ <strong>خالص</strong> ساخته می‌شود (خزانه فقط خالص را کم می‌کند)
+                و قسطِ کسرشده روی پیشکیِ همان شخص ثبت می‌گردد.
+              </div>
+
+              {!salaryPaymentQueue.length ? (
+                <div className="gov-empty-state">در صفِ تاییدِ پرداختِ معاش موردی نیست.</div>
+              ) : (
+                <div className="gov-table-wrap">
+                  <table className="gov-table">
+                    <thead>
+                      <tr>
+                        <th>گیرنده</th>
+                        <th>ناخالص</th>
+                        <th>کسرِ پیشکی</th>
+                        <th>خالص</th>
+                        <th>وضعیت</th>
+                        <th>مرحله</th>
+                        <th>اقدام</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {salaryPaymentQueue.map((row) => {
+                        const isPending = row.status === 'pending_review';
+                        const alreadyReviewed = actorAlreadyReviewedExpense(row.approvalTrail, currentUserId);
+                        const canApprove = isPending && !alreadyReviewed && canApproveExpenseStage(currentAdminLevel, row.approvalStage);
+                        const canReject = isPending && !alreadyReviewed && canRejectExpenseStage(currentAdminLevel, row.approvalStage);
+                        return (
+                          <tr key={`salary-payment-queue-${row._id}`}>
+                            <td>
+                              <div className="gov-table-stack">
+                                <strong>{row.staff?.name || 'بدون نام'}</strong>
+                                <span>{row.period || '—'}</span>
+                              </div>
+                            </td>
+                            <td>{formatMoney(row.grossSalary)}</td>
+                            <td>{formatMoney(row.deductionTotal)}</td>
+                            <td><strong>{formatMoney(row.netAmount)}</strong></td>
+                            <td><StaffAdvanceStatusBadge status={row.status} /></td>
+                            <td><ExpenseStageBadge stage={row.approvalStage} /></td>
+                            <td>
+                              <div className="gov-action-stack">
+                                {(row.status === 'draft' || row.status === 'rejected') ? (
+                                  <button type="button" className="gov-inline-action" disabled={!!busyAction} onClick={() => submitSalaryPaymentForReview(row._id)}>
+                                    ارسال برای بررسی
+                                  </button>
+                                ) : null}
+                                {isPending ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="gov-inline-action"
+                                      disabled={!!busyAction || !canApprove}
+                                      title={canApprove ? undefined : `این مرحله منتظرِ ${expenseStageWaitLabel(row.approvalStage)} است.`}
+                                      onClick={() => reviewSalaryPayment(row._id, 'approve')}
+                                    >
+                                      {row.approvalStage === 'general_president_review' ? 'تاییدِ نهایی' : 'تاییدِ مرحله'}
+                                    </button>
+                                    <button type="button" className="gov-inline-action" disabled={!!busyAction || !canReject} onClick={() => reviewSalaryPayment(row._id, 'reject')}>
+                                      رد
+                                    </button>
+                                  </>
+                                ) : null}
+                                {row.status !== 'void' ? (
+                                  <button type="button" className="gov-inline-action" disabled={!!busyAction} onClick={() => voidSalaryPayment(row._id)}>
+                                    باطل
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {salaryPaymentRecent.length ? (
+                <>
+                  <h4 className="gov-subhead">آخرین پرداخت‌های معاش</h4>
+                  <div className="gov-table-wrap">
+                    <table className="gov-table">
+                      <thead>
+                        <tr>
+                          <th>گیرنده</th>
+                          <th>ماه</th>
+                          <th>ناخالص</th>
+                          <th>کسرِ پیشکی</th>
+                          <th>خالص</th>
+                          <th>وضعیت</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {salaryPaymentRecent.map((row) => (
+                          <tr key={`salary-payment-recent-${row._id}`}>
+                            <td>{row.staff?.name || 'بدون نام'}</td>
+                            <td>{row.period || '—'}</td>
+                            <td>{formatMoney(row.grossSalary)}</td>
+                            <td>{formatMoney(row.deductionTotal)}</td>
+                            <td>{formatMoney(row.netAmount)}</td>
                             <td><StaffAdvanceStatusBadge status={row.status} /></td>
                           </tr>
                         ))}
