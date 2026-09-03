@@ -356,6 +356,7 @@ async function buildExpenseGovernanceAnalytics({ schoolId = '', financialYearId 
   let totalAmount = 0;
   let approvedAmount = 0;
   let pendingAmount = 0;
+  let rejectedAmount = 0;
   let treasuryAssignedAmount = 0;
   let treasuryAssignedCount = 0;
   let treasuryUnassignedAmount = 0;
@@ -372,6 +373,7 @@ async function buildExpenseGovernanceAnalytics({ schoolId = '', financialYearId 
     totalAmount += amount;
     if (status === 'approved') approvedAmount += amount;
     if (status === 'pending_review') pendingAmount += amount;
+    if (status === 'rejected') rejectedAmount += amount;
     if (status === 'approved') {
       if (item?.treasuryAccountId) {
         treasuryAssignedAmount += amount;
@@ -435,6 +437,7 @@ async function buildExpenseGovernanceAnalytics({ schoolId = '', financialYearId 
       totalAmount: Number(totalAmount.toFixed(2)),
       approvedAmount: Number(approvedAmount.toFixed(2)),
       pendingAmount: Number(pendingAmount.toFixed(2)),
+      rejectedAmount: Number(rejectedAmount.toFixed(2)),
       queueCount: statusCounts.draft + statusCounts.pendingReview + statusCounts.rejected,
       vendorCount: vendorMap.size,
       categoryCount: categoryTotals.size,

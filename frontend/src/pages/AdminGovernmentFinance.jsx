@@ -1242,18 +1242,22 @@ function QuarterCompare({ items = [], selectedQuarter = 1 }) {
 }
 
 function ExpenseMonthlyBars({ items = [] }) {
-  const maxValue = Math.max(1, ...items.map((item) => toNumber(item.amount)));
+  // Only *approved* expenses count toward the monthly trend - draft /
+  // pending_review / rejected rows are still under review and must not move
+  // this chart (backend supplies approvedAmount per month alongside amount).
+  const maxValue = Math.max(1, ...items.map((item) => toNumber(item.approvedAmount)));
+  const hasApproved = items.some((item) => toNumber(item.approvedAmount) > 0);
 
   return (
     <div className="gov-chart-card">
       <div className="gov-chart-head">
         <div>
           <strong>روند ماهانه مصارف</strong>
-          <span>حرکت ماهانه ردیف‌های ثبت‌شده مصرف</span>
+          <span>حرکت ماهانه مصارف تاییدشده</span>
         </div>
       </div>
-      {!items.length ? (
-        <div className="gov-empty-state compact">برای این محدوده هنوز داده ماهانه مصرف ثبت نشده است.</div>
+      {!items.length || !hasApproved ? (
+        <div className="gov-empty-state compact">برای این محدوده هنوز مصرف تاییدشده‌ای ثبت نشده است.</div>
       ) : (
         <div className="gov-month-bars">
           {items.slice(-6).map((item) => (
@@ -1261,11 +1265,11 @@ function ExpenseMonthlyBars({ items = [] }) {
               <div className="gov-month-bar-track">
                 <span
                   className="gov-month-bar-fill"
-                  style={{ height: `${Math.max(10, (toNumber(item.amount) / maxValue) * 100)}%` }}
+                  style={{ height: `${Math.max(10, (toNumber(item.approvedAmount) / maxValue) * 100)}%` }}
                 />
               </div>
               <strong>{item.label}</strong>
-              <span>{formatMoney(item.amount)}</span>
+              <span>{formatMoney(item.approvedAmount)}</span>
             </article>
           ))}
         </div>
@@ -3748,6 +3752,11 @@ export default function AdminGovernmentFinance() {
                   <strong>{formatMoney(expenseGovernanceSummary.pendingAmount || 0)}</strong>
                   <small>{formatNumber(expenseGovernanceSummary.queueCount || 0)} مورد</small>
                 </div>
+                <div className="gov-governance-stat" data-tone="rose">
+                  <span>ردشده</span>
+                  <strong>{formatMoney(expenseGovernanceSummary.rejectedAmount || 0)}</strong>
+                  <small>{formatNumber(expenseGovernanceSummary.statusCounts?.rejected || 0)} ردیف</small>
+                </div>
                 <div className="gov-governance-stat" data-tone={expenseCloseReadiness?.canClose ? 'mint' : 'rose'}>
                   <span>آمادگی بستن سال</span>
                   <strong>{expenseCloseReadiness?.canClose ? 'آماده' : 'متوقف'}</strong>
@@ -4702,6 +4711,11 @@ export default function AdminGovernmentFinance() {
                   <span>در انتظار بررسی</span>
                   <strong>{formatMoney(expenseGovernanceSummary.pendingAmount || 0)}</strong>
                   <small>{formatNumber(expenseGovernanceSummary.queueCount || 0)} مورد</small>
+                </div>
+                <div className="gov-governance-stat" data-tone="rose">
+                  <span>ردشده</span>
+                  <strong>{formatMoney(expenseGovernanceSummary.rejectedAmount || 0)}</strong>
+                  <small>{formatNumber(expenseGovernanceSummary.statusCounts?.rejected || 0)} ردیف</small>
                 </div>
                 <div className="gov-governance-stat" data-tone={expenseCloseReadiness?.canClose ? 'mint' : 'rose'}>
                   <span>گارد بستن سال</span>
