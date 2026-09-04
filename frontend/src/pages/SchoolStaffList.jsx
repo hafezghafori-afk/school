@@ -10,7 +10,6 @@ import {
   repairDisplayText,
   resolveActiveSchoolContext
 } from './adminWorkspaceUtils';
-import './AfghanSchoolManagement.css';
 
 const readAdminLevel = () => {
   if (typeof window === 'undefined') return '';
@@ -87,6 +86,11 @@ const roleOrJobLabel = (item) => {
     : [];
   return subjects.length ? displayText(subjects.join('، ')) : '—';
 };
+
+const filterFieldStyle = { display: 'flex', flexDirection: 'column', gap: 5, margin: 0 };
+const filterLabelStyle = { fontSize: 13, fontWeight: 700, color: '#334155' };
+const filterInputStyle = { padding: '9px 11px', borderRadius: 10, border: '1.5px solid rgba(15, 118, 110, 0.24)', background: '#fff', color: '#102033', fontFamily: 'inherit', fontSize: 13.5 };
+const errorBannerStyle = { marginBottom: 12, padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(220, 38, 38, 0.32)', background: '#fef2f2', color: '#991b1b', fontWeight: 700, textAlign: 'center' };
 
 const SchoolStaffList = () => {
   const toast = useToast();
@@ -254,7 +258,7 @@ const SchoolStaffList = () => {
   };
 
   return (
-    <div className="school-management" style={{ minHeight: '100vh' }}>
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #eefcf8 0%, #f8fafc 45%, #edf5ff 100%)' }}>
       <div style={{ maxWidth: 1100, margin: '40px auto', background: 'white', borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.08)', padding: 32 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
           <div>
@@ -289,27 +293,27 @@ const SchoolStaffList = () => {
         </div>
 
         <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 16 }}>
-          <div className="form-group" style={{ margin: 0 }}>
-            <label htmlFor="positionFilter">سمت</label>
-            <select id="positionFilter" value={positionFilter} onChange={(e) => setPositionFilter(e.target.value)}>
+          <div style={filterFieldStyle}>
+            <label htmlFor="positionFilter" style={filterLabelStyle}>سمت</label>
+            <select id="positionFilter" value={positionFilter} onChange={(e) => setPositionFilter(e.target.value)} style={filterInputStyle}>
               {POSITION_FILTER_OPTIONS.map((item) => <option key={item.value || 'all'} value={item.value}>{item.label}</option>)}
             </select>
           </div>
-          <div className="form-group" style={{ margin: 0 }}>
-            <label htmlFor="statusFilter">وضعیت</label>
-            <select id="statusFilter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <div style={filterFieldStyle}>
+            <label htmlFor="statusFilter" style={filterLabelStyle}>وضعیت</label>
+            <select id="statusFilter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={filterInputStyle}>
               {STATUS_FILTER_OPTIONS.map((item) => <option key={item.value || 'all'} value={item.value}>{item.label}</option>)}
             </select>
           </div>
-          <div className="form-group" style={{ margin: 0, flex: 1, minWidth: 200 }}>
-            <label htmlFor="staffSearch">جستجو (نام، تذکره، کد کارمندی)</label>
-            <input id="staffSearch" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="تایپ کنید و «جستجو» را بزنید..." />
+          <div style={{ ...filterFieldStyle, flex: 1, minWidth: 200 }}>
+            <label htmlFor="staffSearch" style={filterLabelStyle}>جستجو (نام، تذکره، کد کارمندی)</label>
+            <input id="staffSearch" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="تایپ کنید و «جستجو» را بزنید..." style={filterInputStyle} />
           </div>
-          <button type="submit" style={{ padding: '10px 18px', borderRadius: 8, border: 0, background: '#2c3e50', color: 'white', cursor: 'pointer' }}>جستجو</button>
+          <button type="submit" style={{ padding: '10px 18px', borderRadius: 10, border: 0, background: '#0f766e', color: 'white', fontWeight: 700, cursor: 'pointer' }}>جستجو</button>
         </form>
 
         {loadError && (
-          <div className="student-registration-submit-status error" role="alert" style={{ marginBottom: 12 }}>{loadError}</div>
+          <div role="alert" style={errorBannerStyle}>{loadError}</div>
         )}
 
         <details style={{ border: '1px solid #eef2f6', borderRadius: 8, padding: '12px 16px', marginBottom: 16, background: '#fbfcfe' }}>

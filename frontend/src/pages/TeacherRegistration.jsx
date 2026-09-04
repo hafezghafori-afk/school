@@ -12,8 +12,7 @@ import {
   repairDisplayText,
   resolveActiveSchoolContext
 } from './adminWorkspaceUtils';
-import './AfghanSchoolManagement.css';
-import './StudentRegistration.css';
+import './TeacherRegistration.css';
 
 const PROVINCES = [
   { value: 'kabul', label: 'کابل' },
@@ -499,42 +498,45 @@ const TeacherRegistration = () => {
 
   if (isEditMode && editLoading) {
     return (
-      <div className="school-management" style={{ minHeight: '100vh' }}>
-        <div style={{ maxWidth: 900, margin: '40px auto', background: 'white', borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.08)', padding: 32, textAlign: 'center', color: '#666' }}>
-          در حال بارگذاریِ پروندهٔ کارمند...
-        </div>
+      <div className="staff-registration">
+        <div className="staff-shell">در حال بارگذاریِ پروندهٔ کارمند...</div>
       </div>
     );
   }
 
   if (isEditMode && editLoadError) {
     return (
-      <div className="school-management" style={{ minHeight: '100vh' }}>
-        <div style={{ maxWidth: 900, margin: '40px auto', background: 'white', borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.08)', padding: 32 }}>
-          <div className="student-registration-submit-status error" role="alert">{editLoadError}</div>
+      <div className="staff-registration">
+        <div className="staff-shell">
+          <div className="staff-banner error" role="alert">{editLoadError}</div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="school-management" style={{ minHeight: '100vh' }}>
-      <form className="school-form" onSubmit={handleSubmit} noValidate style={{ maxWidth: 900, margin: '40px auto', background: 'white', borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.08)', padding: 32 }}>
-        <h2 style={{ textAlign: 'center', color: '#2c3e50', marginBottom: 8 }}>
-          {isEditMode ? `ویرایشِ پروندهٔ ${editDisplayName || 'کارمند'}` : 'ثبت پروندهٔ کارکنان مکتب'}
-        </h2>
-        <p className="form-subtitle" style={{ textAlign: 'center', color: '#666', marginBottom: 24 }}>
-          {isEditMode
-            ? 'معلوماتِ این پروندهٔ رسمی را ویرایش و ذخیره کنید.'
-            : 'پروندهٔ رسمی استاد یا کارمند (اداری/خدماتی) مکتب را وارد کنید. این پرونده جدا از حساب کاربری (ورود به سیستم) است؛ اگر شخص از قبل حساب کاربری دارد، آن را از بخش پایین انتخاب کنید تا پرونده به همان حساب وصل شود.'}
-        </p>
+    <div className="staff-registration">
+      <div className="staff-hero">
+        <div className="staff-hero-inner">
+          <div className="staff-hero-icon">{isEditMode ? '✏️' : '🧑‍💼'}</div>
+          <div>
+            <h1>{isEditMode ? `ویرایشِ پروندهٔ ${editDisplayName || 'کارمند'}` : 'ثبت پروندهٔ کارکنان مکتب'}</h1>
+            <p>
+              {isEditMode
+                ? 'معلوماتِ این پروندهٔ رسمی را ویرایش و ذخیره کنید.'
+                : 'پروندهٔ رسمی استاد یا کارمند (اداری/خدماتی) مکتب را وارد کنید. اگر شخص از قبل حساب کاربری دارد، آن را از بخش پایین انتخاب کنید تا پرونده به همان حساب وصل شود.'}
+            </p>
+          </div>
+        </div>
+      </div>
 
+      <form onSubmit={handleSubmit} noValidate>
         {!isEditMode && requiresSchoolSelection && !referenceLoading && (
-          <div className="student-registration-alert" role="alert">
+          <div className="staff-banner warn" role="alert">
             اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید. ثبت پرونده بدون مکتب واقعی در دیتابیس ذخیره نمی‌شود.
             {Array.isArray(activeSchoolContext?.schools) && activeSchoolContext.schools.length > 0 && (
               <select
-                className="student-registration-school-select"
+                className="staff-select"
                 defaultValue=""
                 onChange={(event) => handleActiveSchoolSelect(event.target.value)}
               >
@@ -549,11 +551,11 @@ const TeacherRegistration = () => {
           </div>
         )}
         {!requiresSchoolSelection && activeSchoolContext?.school && (
-          <div className="student-registration-school-context">
+          <div className="staff-banner context">
             <strong>مکتب فعال: {activeSchoolContext.school.nameDari || activeSchoolContext.school.name || 'مکتب'}</strong>
             {Array.isArray(activeSchoolContext?.schools) && activeSchoolContext.schools.length > 1 && (
               <select
-                className="student-registration-school-select student-registration-school-switcher"
+                className="staff-select"
                 value={schoolId}
                 onChange={(event) => handleActiveSchoolSelect(event.target.value)}
               >
@@ -568,32 +570,34 @@ const TeacherRegistration = () => {
         )}
 
         {!!submitStatus.text && (
-          <div className={`student-registration-submit-status ${submitStatus.type || 'info'}`} role="status">
+          <div className={`staff-banner ${submitStatus.type || 'info'}`} role="status">
             {submitStatus.text}
           </div>
         )}
 
         {!!lastRegisteredTeacher && (
-          <div className="student-registration-submit-status success" role="status">
+          <div className="staff-banner success" role="status">
             آخرین ثبت: {lastRegisteredTeacher.displayName}{lastRegisteredTeacher.linked ? ' (وصل به حساب کاربری موجود)' : ''}
           </div>
         )}
 
         {/* اتصال به حساب کاربری موجود — فقط در حالتِ ثبتِ جدید؛ در ویرایش دست‌نخورده می‌ماند */}
         {!isEditMode && (
-          <div className="form-section">
-            <h3 style={{ color: '#3498db', marginBottom: 4 }}>اتصال به حساب کاربری موجود (اختیاری)</h3>
-            <p style={{ fontSize: 13, color: '#888', marginTop: 0, marginBottom: 12 }}>
-              اگر این استاد از قبل حساب کاربری (ورود به سیستم) دارد اما هیچ پروندهٔ رسمی برایش ثبت نشده،
-              او را از این لیست انتخاب کنید تا پروندهٔ جدید مستقیماً به همان حساب وصل شود — به‌جای ساخت حساب تکراری.
-            </p>
+          <section className="staff-card">
+            <div className="staff-card__head">
+              <h2>اتصال به حساب کاربری موجود (اختیاری)</h2>
+              <p>
+                اگر این استاد از قبل حساب کاربری (ورود به سیستم) دارد اما هیچ پروندهٔ رسمی برایش ثبت نشده،
+                او را از این لیست انتخاب کنید تا پروندهٔ جدید مستقیماً به همان حساب وصل شود — به‌جای ساخت حساب تکراری.
+              </p>
+            </div>
             {orphanLoading ? (
-              <p style={{ fontSize: 13, color: '#888' }}>در حال بارگذاری حساب‌های بدون پرونده...</p>
+              <p className="staff-orphan-msg">در حال بارگذاری حساب‌های بدون پرونده...</p>
             ) : orphanCandidates.length === 0 ? (
-              <p style={{ fontSize: 13, color: '#2e7d32' }}>در حال حاضر هیچ حساب استاد بدون پروندهٔ رسمی پیدا نشد.</p>
+              <p className="staff-orphan-msg">در حال حاضر هیچ حساب استاد بدون پروندهٔ رسمی پیدا نشد.</p>
             ) : (
-              <div className="form-grid">
-                <div className="form-group full-width">
+              <div className="staff-grid">
+                <div className="staff-field staff-field--full">
                   <label htmlFor="orphanSearch">جستجوی حساب (نام یا ایمیل) — {orphanCandidates.length.toLocaleString('fa-AF')} حساب بدون پرونده</label>
                   <input
                     id="orphanSearch"
@@ -602,7 +606,7 @@ const TeacherRegistration = () => {
                     placeholder="نام یا ایمیل را تایپ کنید..."
                   />
                 </div>
-                <div className="form-group full-width">
+                <div className="staff-field staff-field--full">
                   <label htmlFor="linkedUserId">حساب کاربری</label>
                   <select
                     id="linkedUserId"
@@ -618,247 +622,250 @@ const TeacherRegistration = () => {
                   </select>
                 </div>
                 {selectedCandidate && (
-                  <div className="form-group full-width" style={{ fontSize: 13, color: '#2e7d32' }}>
-                    انتخاب شد: {selectedCandidate.name || 'بدون نام'} ({selectedCandidate.email || 'بدون ایمیل'})
+                  <div className="staff-field staff-field--full">
+                    <span className="staff-orphan-picked">انتخاب شد: {selectedCandidate.name || 'بدون نام'} ({selectedCandidate.email || 'بدون ایمیل'})</span>
                   </div>
                 )}
               </div>
             )}
-          </div>
+          </section>
         )}
 
         {/* مشخصات شخصی */}
-        <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>مشخصات شخصی</h3>
-          <div className="form-grid">
-            <div className="form-group">
+        <section className="staff-card">
+          <div className="staff-card__head"><h2>مشخصات شخصی</h2></div>
+          <div className="staff-grid">
+            <div className="staff-field">
               <label htmlFor="firstName">نام *</label>
-              <input id="firstName" value={formData.firstName} onChange={(e) => handleInputChange('firstName', e.target.value)} required className={errors.firstName ? 'border-red-500' : ''} />
-              {errors.firstName && <span className="text-red-500">{errors.firstName}</span>}
+              <input id="firstName" value={formData.firstName} onChange={(e) => handleInputChange('firstName', e.target.value)} required className={errors.firstName ? 'has-error' : ''} />
+              {errors.firstName && <span className="staff-error">{errors.firstName}</span>}
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="lastName">تخلص *</label>
-              <input id="lastName" value={formData.lastName} onChange={(e) => handleInputChange('lastName', e.target.value)} required className={errors.lastName ? 'border-red-500' : ''} />
-              {errors.lastName && <span className="text-red-500">{errors.lastName}</span>}
+              <input id="lastName" value={formData.lastName} onChange={(e) => handleInputChange('lastName', e.target.value)} required className={errors.lastName ? 'has-error' : ''} />
+              {errors.lastName && <span className="staff-error">{errors.lastName}</span>}
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="firstNameDari">نام به انگلیسی</label>
               <input id="firstNameDari" dir="ltr" value={formData.firstNameDari} onChange={(e) => handleInputChange('firstNameDari', e.target.value)} placeholder={formData.firstName} />
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="lastNameDari">تخلص به انگلیسی</label>
               <input id="lastNameDari" dir="ltr" value={formData.lastNameDari} onChange={(e) => handleInputChange('lastNameDari', e.target.value)} placeholder={formData.lastName} />
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="fatherName">نام پدر *</label>
-              <input id="fatherName" value={formData.fatherName} onChange={(e) => handleInputChange('fatherName', e.target.value)} required className={errors.fatherName ? 'border-red-500' : ''} />
-              {errors.fatherName && <span className="text-red-500">{errors.fatherName}</span>}
+              <input id="fatherName" value={formData.fatherName} onChange={(e) => handleInputChange('fatherName', e.target.value)} required className={errors.fatherName ? 'has-error' : ''} />
+              {errors.fatherName && <span className="staff-error">{errors.fatherName}</span>}
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="gender">جنسیت *</label>
-              <select id="gender" value={formData.gender} onChange={(e) => handleInputChange('gender', e.target.value)} required className={errors.gender ? 'border-red-500' : ''}>
+              <select id="gender" value={formData.gender} onChange={(e) => handleInputChange('gender', e.target.value)} required className={errors.gender ? 'has-error' : ''}>
                 <option value="">انتخاب کنید</option>
                 <option value="male">ذکور</option>
                 <option value="female">اناث</option>
               </select>
-              {errors.gender && <span className="text-red-500">{errors.gender}</span>}
+              {errors.gender && <span className="staff-error">{errors.gender}</span>}
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="birthDate">تاریخ تولد *</label>
-              <AfghanDateInput id="birthDate" value={formData.birthDate} onChange={(value) => handleInputChange('birthDate', value)} required inputClassName={errors.birthDate ? 'border-red-500' : ''} showGregorianEquivalent />
-              {errors.birthDate && <span className="text-red-500">{errors.birthDate}</span>}
+              <AfghanDateInput id="birthDate" value={formData.birthDate} onChange={(value) => handleInputChange('birthDate', value)} required inputClassName={errors.birthDate ? 'has-error' : ''} showGregorianEquivalent />
+              {errors.birthDate && <span className="staff-error">{errors.birthDate}</span>}
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="birthPlace">محل تولد *</label>
-              <input id="birthPlace" value={formData.birthPlace} onChange={(e) => handleInputChange('birthPlace', e.target.value)} required className={errors.birthPlace ? 'border-red-500' : ''} />
-              {errors.birthPlace && <span className="text-red-500">{errors.birthPlace}</span>}
+              <input id="birthPlace" value={formData.birthPlace} onChange={(e) => handleInputChange('birthPlace', e.target.value)} required className={errors.birthPlace ? 'has-error' : ''} />
+              {errors.birthPlace && <span className="staff-error">{errors.birthPlace}</span>}
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="tazkiraNumber">شماره تذکره *</label>
-              <input id="tazkiraNumber" value={formData.tazkiraNumber} onChange={(e) => handleInputChange('tazkiraNumber', e.target.value)} required className={errors.tazkiraNumber ? 'border-red-500' : ''} />
-              {errors.tazkiraNumber && <span className="text-red-500">{errors.tazkiraNumber}</span>}
+              <input id="tazkiraNumber" value={formData.tazkiraNumber} onChange={(e) => handleInputChange('tazkiraNumber', e.target.value)} required className={errors.tazkiraNumber ? 'has-error' : ''} />
+              {errors.tazkiraNumber && <span className="staff-error">{errors.tazkiraNumber}</span>}
             </div>
-            <div className="form-group">
-              <label htmlFor="teacherLicenseNumber">
-                <input type="checkbox" checked={formData.hasTeacherLicense} onChange={(e) => handleInputChange('hasTeacherLicense', e.target.checked)} style={{ width: 'auto', marginLeft: 6 }} />
-                جواز تدریس دارد
-              </label>
+            <div className="staff-field">
+              <div className="staff-checkbox-field">
+                <input id="hasTeacherLicense" type="checkbox" checked={formData.hasTeacherLicense} onChange={(e) => handleInputChange('hasTeacherLicense', e.target.checked)} />
+                <label htmlFor="hasTeacherLicense">جواز تدریس دارد</label>
+              </div>
               {formData.hasTeacherLicense && (
                 <input id="teacherLicenseNumber" placeholder="شماره جواز تدریس" value={formData.teacherLicenseNumber} onChange={(e) => handleInputChange('teacherLicenseNumber', e.target.value)} />
               )}
             </div>
           </div>
-        </div>
+        </section>
 
         {/* اطلاعات تماس و آدرس */}
-        <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>اطلاعات تماس و آدرس</h3>
-          <div className="form-grid">
-            <div className="form-group">
+        <section className="staff-card">
+          <div className="staff-card__head"><h2>اطلاعات تماس و آدرس</h2></div>
+          <div className="staff-grid">
+            <div className="staff-field">
               <label htmlFor="mobile">شماره موبایل *</label>
-              <input id="mobile" value={formData.mobile} onChange={(e) => handleInputChange('mobile', e.target.value)} required className={errors.mobile ? 'border-red-500' : ''} />
-              {errors.mobile && <span className="text-red-500">{errors.mobile}</span>}
+              <input id="mobile" value={formData.mobile} onChange={(e) => handleInputChange('mobile', e.target.value)} required className={errors.mobile ? 'has-error' : ''} />
+              {errors.mobile && <span className="staff-error">{errors.mobile}</span>}
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="phone">شماره تماس بدیل</label>
               <input id="phone" value={formData.phone} onChange={(e) => handleInputChange('phone', e.target.value)} />
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="email">ایمیل</label>
               <input id="email" type="email" value={formData.email} onChange={(e) => handleInputChange('email', e.target.value)} />
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="province">ولایت *</label>
-              <select id="province" value={formData.province} onChange={(e) => handleInputChange('province', e.target.value)} required className={errors.province ? 'border-red-500' : ''}>
+              <select id="province" value={formData.province} onChange={(e) => handleInputChange('province', e.target.value)} required className={errors.province ? 'has-error' : ''}>
                 <option value="">انتخاب کنید</option>
                 {PROVINCES.map((province) => <option key={province.value} value={province.value}>{province.label}</option>)}
               </select>
-              {errors.province && <span className="text-red-500">{errors.province}</span>}
+              {errors.province && <span className="staff-error">{errors.province}</span>}
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="district">ولسوالی/ناحیه *</label>
-              <input id="district" value={formData.district} onChange={(e) => handleInputChange('district', e.target.value)} required className={errors.district ? 'border-red-500' : ''} />
-              {errors.district && <span className="text-red-500">{errors.district}</span>}
+              <input id="district" value={formData.district} onChange={(e) => handleInputChange('district', e.target.value)} required className={errors.district ? 'has-error' : ''} />
+              {errors.district && <span className="staff-error">{errors.district}</span>}
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="village">قریه/گذر</label>
               <input id="village" value={formData.village} onChange={(e) => handleInputChange('village', e.target.value)} />
             </div>
-            <div className="form-group full-width">
+            <div className="staff-field staff-field--full">
               <label htmlFor="address">آدرس کامل *</label>
-              <input id="address" value={formData.address} onChange={(e) => handleInputChange('address', e.target.value)} required className={errors.address ? 'border-red-500' : ''} />
-              {errors.address && <span className="text-red-500">{errors.address}</span>}
+              <input id="address" value={formData.address} onChange={(e) => handleInputChange('address', e.target.value)} required className={errors.address ? 'has-error' : ''} />
+              {errors.address && <span className="staff-error">{errors.address}</span>}
             </div>
           </div>
-        </div>
+        </section>
 
         {/* اطلاعات تحصیلی */}
-        <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>
-            اطلاعات تحصیلی{isNonTeaching ? ' (اختیاری برای کارمند اداری/خدماتی)' : ''}
-          </h3>
-          <div className="form-grid">
-            <div className="form-group">
+        <section className="staff-card">
+          <div className="staff-card__head">
+            <h2>اطلاعات تحصیلی</h2>
+            {isNonTeaching && <p>اختیاری برای کارمند اداری/خدماتی</p>}
+          </div>
+          <div className="staff-grid">
+            <div className="staff-field">
               <label htmlFor="highestEducation">سطح تحصیلات {isNonTeaching ? '' : '*'}</label>
-              <select id="highestEducation" value={formData.highestEducation} onChange={(e) => handleInputChange('highestEducation', e.target.value)} className={errors.highestEducation ? 'border-red-500' : ''}>
+              <select id="highestEducation" value={formData.highestEducation} onChange={(e) => handleInputChange('highestEducation', e.target.value)} className={errors.highestEducation ? 'has-error' : ''}>
                 <option value="">انتخاب کنید</option>
                 {HIGHEST_EDUCATION_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
-              {errors.highestEducation && <span className="text-red-500">{errors.highestEducation}</span>}
+              {errors.highestEducation && <span className="staff-error">{errors.highestEducation}</span>}
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="fieldOfStudy">رشتهٔ تحصیلی {isNonTeaching ? '' : '*'}</label>
-              <input id="fieldOfStudy" value={formData.fieldOfStudy} onChange={(e) => handleInputChange('fieldOfStudy', e.target.value)} className={errors.fieldOfStudy ? 'border-red-500' : ''} />
-              {errors.fieldOfStudy && <span className="text-red-500">{errors.fieldOfStudy}</span>}
+              <input id="fieldOfStudy" value={formData.fieldOfStudy} onChange={(e) => handleInputChange('fieldOfStudy', e.target.value)} className={errors.fieldOfStudy ? 'has-error' : ''} />
+              {errors.fieldOfStudy && <span className="staff-error">{errors.fieldOfStudy}</span>}
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="university">دانشگاه/موسسه {isNonTeaching ? '' : '*'}</label>
-              <input id="university" value={formData.university} onChange={(e) => handleInputChange('university', e.target.value)} className={errors.university ? 'border-red-500' : ''} />
-              {errors.university && <span className="text-red-500">{errors.university}</span>}
+              <input id="university" value={formData.university} onChange={(e) => handleInputChange('university', e.target.value)} className={errors.university ? 'has-error' : ''} />
+              {errors.university && <span className="staff-error">{errors.university}</span>}
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="graduationYear">سال فراغت {isNonTeaching ? '' : '*'}</label>
-              <input id="graduationYear" type="number" value={formData.graduationYear} onChange={(e) => handleInputChange('graduationYear', e.target.value)} className={errors.graduationYear ? 'border-red-500' : ''} />
-              {errors.graduationYear && <span className="text-red-500">{errors.graduationYear}</span>}
+              <input id="graduationYear" type="number" value={formData.graduationYear} onChange={(e) => handleInputChange('graduationYear', e.target.value)} className={errors.graduationYear ? 'has-error' : ''} />
+              {errors.graduationYear && <span className="staff-error">{errors.graduationYear}</span>}
             </div>
           </div>
-        </div>
+        </section>
 
         {/* اطلاعات شغلی */}
-        <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>اطلاعات شغلی</h3>
-          <div className="form-grid">
-            <div className="form-group">
+        <section className="staff-card">
+          <div className="staff-card__head"><h2>اطلاعات شغلی</h2></div>
+          <div className="staff-grid">
+            <div className="staff-field">
               <label htmlFor="employeeId">شماره/کد کارمندی *</label>
-              <input id="employeeId" value={formData.employeeId} onChange={(e) => handleInputChange('employeeId', e.target.value)} required className={errors.employeeId ? 'border-red-500' : ''} />
-              {errors.employeeId && <span className="text-red-500">{errors.employeeId}</span>}
+              <input id="employeeId" value={formData.employeeId} onChange={(e) => handleInputChange('employeeId', e.target.value)} required className={errors.employeeId ? 'has-error' : ''} />
+              {errors.employeeId && <span className="staff-error">{errors.employeeId}</span>}
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="position">سمت *</label>
-              <select id="position" value={formData.position} onChange={(e) => handleInputChange('position', e.target.value)} required className={errors.position ? 'border-red-500' : ''}>
+              <select id="position" value={formData.position} onChange={(e) => handleInputChange('position', e.target.value)} required className={errors.position ? 'has-error' : ''}>
                 {allowedPositions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
-              {errors.position && <span className="text-red-500">{errors.position}</span>}
+              {errors.position && <span className="staff-error">{errors.position}</span>}
               {allowedPositions.length < POSITION_OPTIONS.length && (
-                <span style={{ fontSize: 12, color: '#888' }}>ثبت مدیر و صاحب امتیاز فقط از حساب ریاست عمومی امکان‌پذیر است.</span>
+                <span className="staff-hint">ثبت مدیر و صاحب امتیاز فقط از حساب ریاست عمومی امکان‌پذیر است.</span>
               )}
             </div>
             {isNonTeaching && (
               <>
-                <div className="form-group">
+                <div className="staff-field">
                   <label htmlFor="jobTitle">عنوان وظیفه *</label>
-                  <input id="jobTitle" value={formData.jobTitle} onChange={(e) => handleInputChange('jobTitle', e.target.value)} placeholder="مثال: محاسب، نگهبان، راننده" className={errors.jobTitle ? 'border-red-500' : ''} />
-                  {errors.jobTitle && <span className="text-red-500">{errors.jobTitle}</span>}
+                  <input id="jobTitle" value={formData.jobTitle} onChange={(e) => handleInputChange('jobTitle', e.target.value)} placeholder="مثال: محاسب، نگهبان، راننده" className={errors.jobTitle ? 'has-error' : ''} />
+                  {errors.jobTitle && <span className="staff-error">{errors.jobTitle}</span>}
                 </div>
-                <div className="form-group">
+                <div className="staff-field">
                   <label htmlFor="department">بخش/دیپارتمنت</label>
                   <input id="department" value={formData.department} onChange={(e) => handleInputChange('department', e.target.value)} placeholder="مثال: محاسبه، حراست، ترانسپورت، نظافت" />
                 </div>
               </>
             )}
             {canFlagOwner && (
-              <div className="form-group full-width" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input id="isOwner" type="checkbox" checked={formData.isOwner} onChange={(e) => handleInputChange('isOwner', e.target.checked)} style={{ width: 'auto' }} />
-                <label htmlFor="isOwner" style={{ margin: 0 }}>این مدیر، صاحب امتیاز مکتب است (owner)</label>
+              <div className="staff-field staff-field--full">
+                <div className="staff-owner-field">
+                  <input id="isOwner" type="checkbox" checked={formData.isOwner} onChange={(e) => handleInputChange('isOwner', e.target.checked)} />
+                  <label htmlFor="isOwner">این مدیر، صاحب امتیاز مکتب است (owner)</label>
+                </div>
               </div>
             )}
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="employmentType">نوع استخدام *</label>
-              <select id="employmentType" value={formData.employmentType} onChange={(e) => handleInputChange('employmentType', e.target.value)} required className={errors.employmentType ? 'border-red-500' : ''}>
+              <select id="employmentType" value={formData.employmentType} onChange={(e) => handleInputChange('employmentType', e.target.value)} required className={errors.employmentType ? 'has-error' : ''}>
                 {EMPLOYMENT_TYPE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
-              {errors.employmentType && <span className="text-red-500">{errors.employmentType}</span>}
+              {errors.employmentType && <span className="staff-error">{errors.employmentType}</span>}
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="workSchedule">نوع اوقات کاری</label>
               <select id="workSchedule" value={formData.workSchedule} onChange={(e) => handleInputChange('workSchedule', e.target.value)}>
                 {WORK_SCHEDULE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
             </div>
-            <div className="form-group">
+            <div className="staff-field">
               <label htmlFor="hireDate">تاریخ آغاز به کار *</label>
-              <AfghanDateInput id="hireDate" value={formData.hireDate} onChange={(value) => handleInputChange('hireDate', value)} required inputClassName={errors.hireDate ? 'border-red-500' : ''} showGregorianEquivalent />
-              {errors.hireDate && <span className="text-red-500">{errors.hireDate}</span>}
+              <AfghanDateInput id="hireDate" value={formData.hireDate} onChange={(value) => handleInputChange('hireDate', value)} required inputClassName={errors.hireDate ? 'has-error' : ''} showGregorianEquivalent />
+              {errors.hireDate && <span className="staff-error">{errors.hireDate}</span>}
             </div>
           </div>
-        </div>
+        </section>
 
         {/* اطلاعات مالی — R2: فقط ریاست عمومی */}
         {canEditFinance ? (
-          <div className="form-section">
-            <h3 style={{ color: '#3498db', marginBottom: 12 }}>اطلاعات مالی</h3>
-            <div className="form-grid">
-              <div className="form-group">
+          <section className="staff-card">
+            <div className="staff-card__head"><h2>اطلاعات مالی</h2></div>
+            <div className="staff-grid">
+              <div className="staff-field">
                 <label htmlFor="salaryBase">معاش اساسی (افغانی) *</label>
-                <input id="salaryBase" type="number" min="0" value={formData.salaryBase} onChange={(e) => handleInputChange('salaryBase', e.target.value)} required className={errors.salaryBase ? 'border-red-500' : ''} />
-                {errors.salaryBase && <span className="text-red-500">{errors.salaryBase}</span>}
+                <input id="salaryBase" type="number" min="0" value={formData.salaryBase} onChange={(e) => handleInputChange('salaryBase', e.target.value)} required className={errors.salaryBase ? 'has-error' : ''} />
+                {errors.salaryBase && <span className="staff-error">{errors.salaryBase}</span>}
               </div>
-              <div className="form-group">
+              <div className="staff-field">
                 <label htmlFor="salaryHousing">بدل کرایه خانه</label>
                 <input id="salaryHousing" type="number" min="0" value={formData.salaryHousing} onChange={(e) => handleInputChange('salaryHousing', e.target.value)} />
               </div>
-              <div className="form-group">
+              <div className="staff-field">
                 <label htmlFor="salaryTransport">بدل ترانسپورت</label>
                 <input id="salaryTransport" type="number" min="0" value={formData.salaryTransport} onChange={(e) => handleInputChange('salaryTransport', e.target.value)} />
               </div>
-              <div className="form-group">
+              <div className="staff-field">
                 <label htmlFor="salaryOther">سایر امتیازات</label>
                 <input id="salaryOther" type="number" min="0" value={formData.salaryOther} onChange={(e) => handleInputChange('salaryOther', e.target.value)} />
               </div>
             </div>
-          </div>
+          </section>
         ) : (
-          <div className="form-section">
-            <h3 style={{ color: '#3498db', marginBottom: 12 }}>اطلاعات مالی</h3>
-            <p style={{ fontSize: 13, color: '#888', margin: 0 }}>
-              بخش مالی (معاش و حساب بانکی) توسط مدیریت مالی روی همین پرونده تکمیل می‌شود.
-            </p>
-          </div>
+          <section className="staff-card">
+            <div className="staff-card__head"><h2>اطلاعات مالی</h2></div>
+            <p className="staff-note">بخش مالی (معاش و حساب بانکی) توسط مدیریت مالی روی همین پرونده تکمیل می‌شود.</p>
+          </section>
         )}
 
-        <button type="submit" disabled={loading || (!isEditMode && referenceLoading)} style={{ width: '100%', marginTop: 12 }}>
-          {loading ? (isEditMode ? 'در حال ذخیره...' : 'در حال ثبت...') : (isEditMode ? 'ذخیرهٔ تغییرات' : 'ثبت پروندهٔ کارمند')}
-        </button>
+        <div className="staff-footer">
+          <button type="submit" className="staff-btn-primary" disabled={loading || (!isEditMode && referenceLoading)}>
+            {loading ? (isEditMode ? 'در حال ذخیره...' : 'در حال ثبت...') : (isEditMode ? 'ذخیرهٔ تغییرات' : 'ثبت پروندهٔ کارمند')}
+          </button>
+        </div>
       </form>
     </div>
   );
