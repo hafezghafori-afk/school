@@ -109,6 +109,15 @@ const WORK_SCHEDULE_OPTIONS = [
 
 const trimValue = (value) => String(value || '').trim();
 const displayText = (value) => repairDisplayText(value);
+
+// حساب کاربری فقط نام و ایمیل دارد (نه تذکره/تولد/آدرس/تحصیلات/معاش — آن‌ها فقط
+// در پروندهٔ رسمی هستند)، پس با انتخابِ حساب فقط همین دو مورد قابلِ خانه‌پرکردن‌اند.
+const splitPersonName = (value = '') => {
+  const parts = String(value || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return { first: '', last: '' };
+  if (parts.length === 1) return { first: parts[0], last: '' };
+  return { first: parts[0], last: parts.slice(1).join(' ') };
+};
 const toNumberOrUndefined = (value) => {
   const trimmed = trimValue(value);
   if (!trimmed) return undefined;
@@ -393,9 +402,26 @@ const TeacherRegistration = () => {
   const handleSelectCandidate = (userId) => {
     handleInputChange('linkedUserId', userId);
     const candidate = orphanCandidates.find((item) => item._id === userId);
-    if (candidate && !trimValue(formData.email)) {
-      handleInputChange('email', candidate.email);
-    }
+    if (!candidate) return;
+
+    // حسابِ کاربری فقط «نام» و «ایمیل» را نگه می‌دارد (نه تذکره/تولد/آدرس/تحصیلات —
+    // این‌ها فقط بعد از ساختِ پروندهٔ رسمی وجود خواهند داشت)، پس همین دو با انتخابِ
+    // حساب اتوماتیک خانه‌پری می‌شوند — بدون رونویسیِ چیزی که از قبل تایپ شده.
+    const { first, last } = splitPersonName(candidate.name);
+    setFormData((prev) => ({
+      ...prev,
+      email: trimValue(prev.email) ? prev.email : candidate.email,
+      firstName: trimValue(prev.firstName) ? prev.firstName : first,
+      lastName: trimValue(prev.lastName) ? prev.lastName : last
+    }));
+    setErrors((prev) => {
+      if (!prev.email && !prev.firstName && !prev.lastName) return prev;
+      const next = { ...prev };
+      delete next.email;
+      delete next.firstName;
+      delete next.lastName;
+      return next;
+    });
   };
 
   const validateForm = () => {
@@ -589,6 +615,7 @@ const TeacherRegistration = () => {
               <p>
                 اگر این استاد از قبل حساب کاربری (ورود به سیستم) دارد اما هیچ پروندهٔ رسمی برایش ثبت نشده،
                 او را از این لیست انتخاب کنید تا پروندهٔ جدید مستقیماً به همان حساب وصل شود — به‌جای ساخت حساب تکراری.
+                با انتخاب، «نام» و «ایمیل» خودکار پر می‌شود؛ حساب کاربری چیزِ دیگری (تذکره، تولد، آدرس، تحصیلات، معاش...) نگه نمی‌دارد — بقیهٔ فورم را خودتان تکمیل کنید.
               </p>
             </div>
             {orphanLoading ? (
