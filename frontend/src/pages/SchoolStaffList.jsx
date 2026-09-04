@@ -92,6 +92,7 @@ const SchoolStaffList = () => {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [savingId, setSavingId] = useState('');
 
   useEffect(() => {
     const loadContext = async () => {
@@ -154,6 +155,33 @@ const SchoolStaffList = () => {
   const handleSearchSubmit = (event) => {
     event.preventDefault();
     setAppliedSearch(trimValue(searchInput));
+  };
+
+  const DEPARTED_STATUSES = new Set(['inactive', 'terminated', 'retired']);
+
+  const handleStatusChange = async (item, nextStatus) => {
+    if (!nextStatus || nextStatus === item.status) return;
+    if (DEPARTED_STATUSES.has(nextStatus)) {
+      const label = STATUS_LABELS[nextStatus] || nextStatus;
+      // eslint-disable-next-line no-alert
+      if (!window.confirm(`وضعیتِ «${staffFullName(item)}» به «${label}» تغییر کند؟ اگر پیشکیِ بازِ تسویه‌نشده داشته باشد، سیستم اجازه نمی‌دهد.`)) {
+        return;
+      }
+    }
+    setSavingId(item._id);
+    try {
+      await fetchJson(`/api/afghan-teachers/${item._id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus })
+      });
+      toastRef.current.success('وضعیت به‌روزرسانی شد.');
+      loadStaff();
+    } catch (error) {
+      toastRef.current.error(displayText(error?.message || 'به‌روزرسانی وضعیت ناموفق بود.'));
+    } finally {
+      setSavingId('');
+    }
   };
 
   const goToRegistration = () => {
@@ -251,7 +279,18 @@ const SchoolStaffList = () => {
                       <td style={{ padding: '10px 12px' }}>{roleOrJobLabel(item)}</td>
                       <td style={{ padding: '10px 12px' }}>{displayText(item?.employmentInfo?.employeeId) || '—'}</td>
                       <td style={{ padding: '10px 12px' }}>{salaryTotalOf(item).toLocaleString('fa-AF')}</td>
-                      <td style={{ padding: '10px 12px' }}>{STATUS_LABELS[item?.status] || item?.status || '—'}</td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <select
+                          value={item?.status || 'active'}
+                          disabled={savingId === item._id}
+                          onChange={(e) => handleStatusChange(item, e.target.value)}
+                          style={{ padding: '4px 6px', borderRadius: 6, border: '1px solid #d7dee6' }}
+                        >
+                          {STATUS_FILTER_OPTIONS.filter((opt) => opt.value).map((opt) => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                          ))}
+                        </select>
+                      </td>
                       <td style={{ padding: '10px 12px' }}>{linked ? 'دارد' : '—'}</td>
                     </tr>
                   );

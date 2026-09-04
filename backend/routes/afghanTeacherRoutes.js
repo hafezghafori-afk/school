@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const AfghanTeacher = require('../models/AfghanTeacher');
 const AfghanSchool = require('../models/AfghanSchool');
+const StaffAdvance = require('../models/StaffAdvance');
 const { requireFields } = require('../middleware/validate');
 const { ok, fail } = require('../utils/response');
 const { logActivity } = require('../utils/activity');
@@ -302,6 +303,71 @@ router.put('/:id', async (req, res) => {
       }
     }
     return fail(res, 'Failed to update teacher', 500);
+  }
+});
+
+// PATCH /api/afghan-teachers/:id/status - Change employment status with a guard
+// that blocks marking a staff member as departed while they still owe an advance.
+const STAFF_STATUSES = ['active', 'inactive', 'on_leave', 'suspended', 'terminated', 'retired'];
+const DEPARTED_STATUSES = new Set(['inactive', 'terminated', 'retired']);
+
+router.patch('/:id/status', async (req, res) => {
+  try {
+    const status = String(req.body?.status || '').trim();
+    const note = String(req.body?.note || '').trim();
+    if (!STAFF_STATUSES.includes(status)) {
+      return fail(res, 'وضعیت نامعتبر است.', 400);
+    }
+
+    const teacher = await AfghanTeacher.findById(req.params.id);
+    if (!teacher) {
+      return fail(res, 'Teacher not found', 404);
+    }
+
+    if (teacher.status === status) {
+      return ok(res, teacher, 'Status unchanged');
+    }
+
+    if (DEPARTED_STATUSES.has(status)) {
+      const dari = `${teacher.personalInfo?.firstNameDari || ''} ${teacher.personalInfo?.lastNameDari || ''}`.trim();
+      const latin = `${teacher.personalInfo?.firstName || ''} ${teacher.personalInfo?.lastName || ''}`.trim();
+      const names = [dari, latin].filter(Boolean);
+      const openAdvances = await StaffAdvance.find({
+        status: 'approved',
+        outstandingAmount: { $gt: 0 },
+        $or: [
+          { staffId: teacher._id },
+          ...(names.length ? [{ staffId: null, 'staffSnapshot.name': { $in: names } }] : [])
+        ]
+      }).select('outstandingAmount kind').lean();
+
+      if (openAdvances.length) {
+        const totalOutstanding = openAdvances.reduce((sum, item) => sum + (Number(item.outstandingAmount) || 0), 0);
+        return fail(
+          res,
+          `این کارمند ${openAdvances.length} پیشکیِ بازِ تسویه‌نشده با مجموع ${totalOutstanding.toLocaleString('fa-AF')} افغانی دارد. پیش از تغییرِ وضعیت به «رفته»، پیشکی‌ها باید تسویه، حذف یا در بخشِ مالی «سوخت» ثبت شوند.`,
+          409
+        );
+      }
+    }
+
+    teacher.status = status;
+    teacher.lastUpdatedBy = req.user?.id || 'system';
+    if (note) {
+      const stamp = new Date().toISOString().slice(0, 10);
+      teacher.notes.general = `${teacher.notes.general ? `${teacher.notes.general}\n` : ''}[${stamp}] وضعیت → ${status}: ${note}`;
+    }
+    await teacher.save();
+    await teacher.populate('employmentInfo.currentSchool', 'name province district');
+
+    return ok(res, teacher, 'Status updated successfully');
+  } catch (error) {
+    console.error('Update Teacher Status Error:', error);
+    if (error.name === 'ValidationError') {
+      const first = Object.values(error.errors || {})[0];
+      return fail(res, first?.message || 'به‌روزرسانی وضعیت ناموفق بود.', 400);
+    }
+    return fail(res, 'Failed to update teacher status', 500);
   }
 });
 
