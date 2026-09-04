@@ -70,9 +70,12 @@ const POSITION_OPTIONS = [
 // R2 — top-down registration. Only ریاست عمومی can register a principal / owner
 // and fill the financial section; مدیر مکتب registers teaching + non-teaching
 // staff without finance; every other admin level can register teachers only.
+// Admin-level keys here are the values stored in localStorage('adminLevel')
+// (see AdminPanel.jsx's ADMIN_LEVEL_LABELS) — 'school_manager' is the مدیر
+// مکتب level; 'principal' is only a *position* value in employmentInfo.position.
 const POSITIONS_BY_ADMIN_LEVEL = {
   general_president: ['teacher', 'principal', 'vice_principal', 'admin_staff', 'support_staff'],
-  principal: ['teacher', 'vice_principal', 'admin_staff', 'support_staff']
+  school_manager: ['teacher', 'vice_principal', 'admin_staff', 'support_staff']
 };
 const DEFAULT_ALLOWED_POSITIONS = ['teacher'];
 

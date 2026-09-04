@@ -245,12 +245,13 @@ const ADMIN_LEVEL_GROUP_ACCESS = {
   general_president: null,
   // «ساختار مکتب» فقط شامل کارت «مکاتب» (ایجاد/تعویض مکتب در سیستم چندمکتبه) است — مخصوص ریاست
   // عمومی؛ مدیر یک مکتب نباید بتواند مکتب جدید بسازد یا بین مکاتب دیگر جابه‌جا شود.
-  school_manager: new Set(['ثبت‌نام و شاگردان', 'کاربران و دسترسی', 'سیستم و تنظیمات', 'گزارش مالی']),
+  school_manager: new Set(['ثبت‌نام و شاگردان', 'کاربران و دسترسی', 'سیستم و تنظیمات', 'گزارش مالی', 'کارکنان مکتب']),
   // مدیر تدریسی/سر معلم واقعاً صلاحیت ثبت‌نام، تبدیلی، ارتقای صنف و مدیریت شاگردان را دارند
   // (students.manage, students.transfers.manage, education.promotions.manage, manage_enrollments...)
-  // پس باید گروه «ثبت‌نام و شاگردان» را هم ببینند، نه فقط «آموزش و برنامه».
-  academic_manager: new Set(['آموزش و برنامه', 'ثبت‌نام و شاگردان']),
-  head_teacher: new Set(['آموزش و برنامه', 'ثبت‌نام و شاگردان']),
+  // پس باید گروه «ثبت‌نام و شاگردان» را هم ببینند، نه فقط «آموزش و برنامه». همچنین طبق R2 اجازهٔ
+  // ثبت استاد را دارند، پس «کارکنان مکتب» هم برایشان باز است (فرم خودش سمت‌ها را به «استاد» محدود می‌کند).
+  academic_manager: new Set(['آموزش و برنامه', 'ثبت‌نام و شاگردان', 'کارکنان مکتب']),
+  head_teacher: new Set(['آموزش و برنامه', 'ثبت‌نام و شاگردان', 'کارکنان مکتب']),
   finance_manager: new Set(['مالی', 'گزارش مالی']),
   finance_lead: new Set(['مالی', 'گزارش مالی'])
 };
@@ -3806,6 +3807,22 @@ export default function AdminPanel() {
       subtitle: 'وصل شاگرد به صنف و سال تعلیمی',
       count: 0,
       to: canManageMemberships ? '/admin-education?section=enrollments' : ''
+    },
+    {
+      key: 'school-staff',
+      title: 'کارکنان مکتب',
+      group: 'کارکنان مکتب',
+      subtitle: 'فهرست استادان و کارمندان اداری/خدماتی، فیلتر و ورودِ گروهی از اکسل',
+      count: 0,
+      to: canManageUsers ? '/school-staff' : ''
+    },
+    {
+      key: 'teacher-registration',
+      title: 'ثبت کارمند جدید',
+      group: 'کارکنان مکتب',
+      subtitle: 'ثبت پروندهٔ رسمی استاد یا کارمند اداری/خدماتی',
+      count: 0,
+      to: canManageUsers ? '/teacher-registration' : ''
     },
     {
       key: 'sawaneh',
