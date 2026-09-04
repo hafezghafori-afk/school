@@ -315,17 +315,25 @@ const TeacherRegistration = () => {
     const values = POSITIONS_BY_ADMIN_LEVEL[adminLevel] || DEFAULT_ALLOWED_POSITIONS;
     return POSITION_OPTIONS.filter((item) => values.includes(item.value));
   }, [adminLevel]);
-  const canEditFinance = adminLevel === 'general_president';
+  // مدیرِ مالی/آمریتِ مالی حقِ ثبتِ پروندهٔ تازه ندارند (مسیرِ ایجاد برایشان بسته
+  // است)؛ فقط در حالتِ ویرایش می‌رسند و فقط بخشِ مالیِ همان پروندهٔ موجود را
+  // می‌بینند — بقیهٔ فرم برایشان فقط‌خواندنی است.
+  const isFinanceOnlyRole = adminLevel === 'finance_manager' || adminLevel === 'finance_lead';
+  const canEditFinance = adminLevel === 'general_president' || adminLevel === 'school_manager' || isFinanceOnlyRole;
   const isNonTeaching = NON_TEACHING_POSITIONS.has(formData.position);
   const canFlagOwner = adminLevel === 'general_president' && formData.position === 'principal';
 
-  // Keep the selected سمت inside what this registrant is allowed to create.
+  // Keep the selected سمت inside what this registrant is allowed to create — only
+  // in create mode. In edit mode an existing record's سمت must never be silently
+  // rewritten just because the viewer (e.g. a finance-only editor) isn't allowed
+  // to *create* that سمت.
   useEffect(() => {
+    if (isEditMode) return;
     if (allowedPositions.length === 0) return;
     if (!allowedPositions.some((item) => item.value === formData.position)) {
       setFormData((prev) => ({ ...prev, position: allowedPositions[0].value }));
     }
-  }, [allowedPositions, formData.position]);
+  }, [allowedPositions, formData.position, isEditMode]);
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -607,6 +615,17 @@ const TeacherRegistration = () => {
           </div>
         )}
 
+        {isFinanceOnlyRole && (
+          <div className="staff-banner info" role="status">
+            شما فقط بخشِ «اطلاعات مالی» را می‌بینید و ویرایش می‌کنید — بقیهٔ پرونده فقط‌خواندنی است.
+          </div>
+        )}
+
+        {/* بخش‌های غیرِمالی — برای مدیریتِ مالی فقط‌خواندنی (fieldset disabled؛
+            display:contents یعنی خودِ fieldset در چیدمانِ فلکسِ فرم جایی نمی‌گیرد،
+            فقط بچه‌هایش را غیرفعال می‌کند). */}
+        <fieldset disabled={isFinanceOnlyRole} style={{ border: 0, padding: 0, margin: 0, display: 'contents' }}>
+
         {/* اتصال به حساب کاربری موجود — فقط در حالتِ ثبتِ جدید؛ در ویرایش دست‌نخورده می‌ماند */}
         {!isEditMode && (
           <section className="staff-card">
@@ -857,7 +876,9 @@ const TeacherRegistration = () => {
           </div>
         </section>
 
-        {/* اطلاعات مالی — R2: فقط ریاست عمومی */}
+        </fieldset>
+
+        {/* اطلاعات مالی — R2: ریاست عمومی، مدیر مکتب، و مدیریتِ مالی (فقط در ویرایش) */}
         {canEditFinance ? (
           <section className="staff-card">
             <div className="staff-card__head"><h2>اطلاعات مالی</h2></div>
