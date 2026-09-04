@@ -10,6 +10,7 @@ import {
   repairDisplayText,
   resolveActiveSchoolContext
 } from './adminWorkspaceUtils';
+import './SchoolStaffList.css';
 
 const readAdminLevel = () => {
   if (typeof window === 'undefined') return '';
@@ -49,14 +50,18 @@ const POSITION_FILTER_OPTIONS = [
 ];
 
 const STATUS_FILTER_OPTIONS = [
+  { value: '', label: 'همهٔ وضعیت‌ها' },
   { value: 'active', label: 'فعال' },
   { value: 'on_leave', label: 'رخصتی' },
   { value: 'suspended', label: 'معطل' },
   { value: 'terminated', label: 'منفک' },
   { value: 'retired', label: 'متقاعد' },
-  { value: 'inactive', label: 'غیرفعال' },
-  { value: '', label: 'همهٔ وضعیت‌ها' }
+  { value: 'inactive', label: 'غیرفعال' }
 ];
+
+// همان گزینه‌ها بدونِ «همهٔ وضعیت‌ها» — برای دراپ‌داونِ تغییرِ وضعیتِ هر ردیف، که
+// همیشه باید یک وضعیتِ مشخص را نشان بدهد، نه گزینهٔ «همه».
+const STATUS_CHANGE_OPTIONS = STATUS_FILTER_OPTIONS.filter((opt) => opt.value);
 
 const trimValue = (value) => String(value || '').trim();
 const displayText = (value) => repairDisplayText(value);
@@ -87,10 +92,6 @@ const roleOrJobLabel = (item) => {
   return subjects.length ? displayText(subjects.join('، ')) : '—';
 };
 
-const filterFieldStyle = { display: 'flex', flexDirection: 'column', gap: 5, margin: 0 };
-const filterLabelStyle = { fontSize: 13, fontWeight: 700, color: '#334155' };
-const filterInputStyle = { padding: '9px 11px', borderRadius: 10, border: '1.5px solid rgba(15, 118, 110, 0.24)', background: '#fff', color: '#102033', fontFamily: 'inherit', fontSize: 13.5 };
-const errorBannerStyle = { marginBottom: 12, padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(220, 38, 38, 0.32)', background: '#fef2f2', color: '#991b1b', fontWeight: 700, textAlign: 'center' };
 
 const SchoolStaffList = () => {
   const toast = useToast();
@@ -144,7 +145,9 @@ const SchoolStaffList = () => {
       params.set('schoolId', schoolId);
       params.set('limit', '200');
       if (positionFilter) params.set('position', positionFilter);
-      if (statusFilter) params.set('status', statusFilter);
+      // همیشه فرستاده می‌شود، حتی وقتی خالی است («همهٔ وضعیت‌ها») — چون نبودِ این
+      // پارامتر یعنی مقدارِ پیش‌فرضِ سرور (فقط «فعال»)، نه «بدون فیلتر».
+      params.set('status', statusFilter);
       if (appliedSearch) params.set('search', appliedSearch);
       const response = await fetchJson(`/api/afghan-teachers/?${params.toString()}`);
       setRows(Array.isArray(response?.teachers) ? response.teachers : []);
@@ -258,170 +261,172 @@ const SchoolStaffList = () => {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #eefcf8 0%, #f8fafc 45%, #edf5ff 100%)' }}>
-      <div style={{ maxWidth: 1100, margin: '40px auto', background: 'white', borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.08)', padding: 32 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
-          <div>
-            <h2 style={{ color: '#2c3e50', margin: 0 }}>کارکنان مکتب</h2>
-            <p style={{ color: '#666', marginTop: 6, marginBottom: 0 }}>
+    <div className="staff-list">
+      <div className="staff-list-inner">
+        <div className="staff-list-hero">
+          <div className="staff-list-hero-text">
+            <h1>کارکنان مکتب</h1>
+            <p>
               فهرست پروندهٔ رسمی استادان و کارمندان اداری/خدماتی مکتب فعال.
               {schoolContext?.school ? ` — ${displayText(schoolContext.school.nameDari || schoolContext.school.name || 'مکتب')}` : ''}
             </p>
           </div>
-          <button type="button" onClick={goToRegistration} style={{ background: '#3498db', color: 'white', border: 0, borderRadius: 8, padding: '10px 18px', cursor: 'pointer' }}>
-            + ثبت کارمندِ جدید
-          </button>
+          <button type="button" onClick={goToRegistration} className="staff-btn-add">+ ثبت کارمندِ جدید</button>
         </div>
 
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', margin: '20px 0' }}>
-          <div style={{ background: '#f5f8fb', borderRadius: 8, padding: '10px 16px', minWidth: 120 }}>
-            <div style={{ fontSize: 12, color: '#888' }}>نمایش داده‌شده</div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: '#2c3e50' }}>{summary.shown.toLocaleString('fa-AF')}</div>
+        <div className="staff-list-kpis">
+          <div className="staff-kpi">
+            <div className="staff-kpi-label">نمایش داده‌شده</div>
+            <div className="staff-kpi-value">{summary.shown.toLocaleString('fa-AF')}</div>
           </div>
-          <div style={{ background: '#f5f8fb', borderRadius: 8, padding: '10px 16px', minWidth: 120 }}>
-            <div style={{ fontSize: 12, color: '#888' }}>استاد</div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: '#2c3e50' }}>{summary.teachers.toLocaleString('fa-AF')}</div>
+          <div className="staff-kpi">
+            <div className="staff-kpi-label">استاد</div>
+            <div className="staff-kpi-value">{summary.teachers.toLocaleString('fa-AF')}</div>
           </div>
-          <div style={{ background: '#f5f8fb', borderRadius: 8, padding: '10px 16px', minWidth: 120 }}>
-            <div style={{ fontSize: 12, color: '#888' }}>اداری/خدماتی</div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: '#2c3e50' }}>{summary.nonTeaching.toLocaleString('fa-AF')}</div>
+          <div className="staff-kpi">
+            <div className="staff-kpi-label">اداری/خدماتی</div>
+            <div className="staff-kpi-value">{summary.nonTeaching.toLocaleString('fa-AF')}</div>
           </div>
-          <div style={{ background: '#f5f8fb', borderRadius: 8, padding: '10px 16px', minWidth: 120 }}>
-            <div style={{ fontSize: 12, color: '#888' }}>مدیر/معاون</div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: '#2c3e50' }}>{summary.leadership.toLocaleString('fa-AF')}</div>
+          <div className="staff-kpi">
+            <div className="staff-kpi-label">مدیر/معاون</div>
+            <div className="staff-kpi-value">{summary.leadership.toLocaleString('fa-AF')}</div>
           </div>
         </div>
 
-        <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 16 }}>
-          <div style={filterFieldStyle}>
-            <label htmlFor="positionFilter" style={filterLabelStyle}>سمت</label>
-            <select id="positionFilter" value={positionFilter} onChange={(e) => setPositionFilter(e.target.value)} style={filterInputStyle}>
-              {POSITION_FILTER_OPTIONS.map((item) => <option key={item.value || 'all'} value={item.value}>{item.label}</option>)}
-            </select>
-          </div>
-          <div style={filterFieldStyle}>
-            <label htmlFor="statusFilter" style={filterLabelStyle}>وضعیت</label>
-            <select id="statusFilter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={filterInputStyle}>
-              {STATUS_FILTER_OPTIONS.map((item) => <option key={item.value || 'all'} value={item.value}>{item.label}</option>)}
-            </select>
-          </div>
-          <div style={{ ...filterFieldStyle, flex: 1, minWidth: 200 }}>
-            <label htmlFor="staffSearch" style={filterLabelStyle}>جستجو (نام، تذکره، کد کارمندی)</label>
-            <input id="staffSearch" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="تایپ کنید و «جستجو» را بزنید..." style={filterInputStyle} />
-          </div>
-          <button type="submit" style={{ padding: '10px 18px', borderRadius: 10, border: 0, background: '#0f766e', color: 'white', fontWeight: 700, cursor: 'pointer' }}>جستجو</button>
-        </form>
+        <div className="staff-list-card">
+          <form onSubmit={handleSearchSubmit} className="staff-toolbar-form">
+            <div className="staff-toolbar-field">
+              <label htmlFor="positionFilter">سمت</label>
+              <select id="positionFilter" value={positionFilter} onChange={(e) => setPositionFilter(e.target.value)}>
+                {POSITION_FILTER_OPTIONS.map((item) => <option key={item.value || 'all'} value={item.value}>{item.label}</option>)}
+              </select>
+            </div>
+            <div className="staff-toolbar-field">
+              <label htmlFor="statusFilter">وضعیت</label>
+              <select id="statusFilter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                {STATUS_FILTER_OPTIONS.map((item) => <option key={item.value || 'all'} value={item.value}>{item.label}</option>)}
+              </select>
+            </div>
+            <div className="staff-toolbar-field" style={{ flex: 1, minWidth: 220 }}>
+              <label htmlFor="staffSearch">جستجو (نام، تذکره، کد کارمندی)</label>
+              <input id="staffSearch" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="تایپ کنید و «جستجو» را بزنید..." />
+            </div>
+            <button type="submit" className="staff-btn-search">جستجو</button>
+          </form>
+        </div>
 
         {loadError && (
-          <div role="alert" style={errorBannerStyle}>{loadError}</div>
+          <div role="alert" className="staff-list-error">{loadError}</div>
         )}
 
-        <details style={{ border: '1px solid #eef2f6', borderRadius: 8, padding: '12px 16px', marginBottom: 16, background: '#fbfcfe' }}>
-          <summary style={{ cursor: 'pointer', fontWeight: 600, color: '#2c3e50' }}>ورودِ گروهی از اکسل</summary>
-          <p style={{ fontSize: 13, color: '#666', marginBottom: 12 }}>
-            قالب را دانلود کنید، ردیف‌ها را پر کنید (هر ردیف یک کارمند، حداکثر ۵۰ ردیف)، سپس فایل را بارگذاری کنید.
-            ستون‌های الزامی و مقادیرِ مجاز در برگهٔ «راهنما» است. سمتِ تدریسی به اطلاعاتِ تحصیلی نیاز دارد؛ کارمندِ اداری/خدماتی خیر.
-          </p>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-            <button type="button" onClick={handleTemplateDownload} style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #3498db', background: 'white', color: '#3498db', cursor: 'pointer' }}>
-              دانلودِ قالبِ اکسل
-            </button>
-            <input
-              ref={importInputRef}
-              type="file"
-              accept=".xlsx"
-              onChange={(e) => { setImportFile(e.target.files?.[0] || null); setImportResult(null); }}
-            />
-            <button type="button" onClick={handleImport} disabled={importing || !importFile} style={{ padding: '8px 14px', borderRadius: 8, border: 0, background: importing || !importFile ? '#9db8cc' : '#2c3e50', color: 'white', cursor: importing || !importFile ? 'default' : 'pointer' }}>
-              {importing ? 'در حال پردازش...' : 'بارگذاری و ثبت'}
-            </button>
-          </div>
-          {importResult && (
-            <div style={{ marginTop: 12, fontSize: 13 }}>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                مجموع {Number(importResult?.summary?.total || 0).toLocaleString('fa-AF')} ردیف —
-                <span style={{ color: '#2e7d32' }}> {Number(importResult?.summary?.successful || 0).toLocaleString('fa-AF')} ثبت‌شده</span> ·
-                <span style={{ color: '#c62828' }}> {Number(importResult?.summary?.failed || 0).toLocaleString('fa-AF')} خطا</span>
-              </div>
-              {Array.isArray(importResult?.failed) && importResult.failed.length > 0 && (
-                <ul style={{ margin: 0, paddingInlineStart: 18, color: '#c62828' }}>
-                  {importResult.failed.map((row) => (
-                    <li key={`imp-fail-${row.row}`}>سطر {Number(row.row).toLocaleString('fa-AF')} — {row.label ? `${row.label}: ` : ''}{displayText(row.error)}</li>
-                  ))}
-                </ul>
-              )}
+        <details className="staff-import">
+          <summary>ورودِ گروهی از اکسل</summary>
+          <div className="staff-import-body">
+            <p>
+              قالب را دانلود کنید، ردیف‌ها را پر کنید (هر ردیف یک کارمند، حداکثر ۵۰ ردیف)، سپس فایل را بارگذاری کنید.
+              ستون‌های الزامی و مقادیرِ مجاز در برگهٔ «راهنما» است. سمتِ تدریسی به اطلاعاتِ تحصیلی نیاز دارد؛ کارمندِ اداری/خدماتی خیر.
+            </p>
+            <div className="staff-import-actions">
+              <button type="button" onClick={handleTemplateDownload} className="staff-btn-ghost">دانلودِ قالبِ اکسل</button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".xlsx"
+                onChange={(e) => { setImportFile(e.target.files?.[0] || null); setImportResult(null); }}
+              />
+              <button type="button" onClick={handleImport} disabled={importing || !importFile} className="staff-btn-solid">
+                {importing ? 'در حال پردازش...' : 'بارگذاری و ثبت'}
+              </button>
             </div>
-          )}
+            {importResult && (
+              <div className="staff-import-result">
+                <div className="staff-import-summary">
+                  مجموع {Number(importResult?.summary?.total || 0).toLocaleString('fa-AF')} ردیف —
+                  <span className="staff-import-ok"> {Number(importResult?.summary?.successful || 0).toLocaleString('fa-AF')} ثبت‌شده</span> ·
+                  <span className="staff-import-fail"> {Number(importResult?.summary?.failed || 0).toLocaleString('fa-AF')} خطا</span>
+                </div>
+                {Array.isArray(importResult?.failed) && importResult.failed.length > 0 && (
+                  <ul className="staff-import-errors">
+                    {importResult.failed.map((row) => (
+                      <li key={`imp-fail-${row.row}`}>سطر {Number(row.row).toLocaleString('fa-AF')} — {row.label ? `${row.label}: ` : ''}{displayText(row.error)}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
         </details>
 
-        <div style={{ overflowX: 'auto', border: '1px solid #eef2f6', borderRadius: 8 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-            <thead>
-              <tr style={{ background: '#f5f8fb', textAlign: 'right' }}>
-                <th style={{ padding: '10px 12px' }}>نام</th>
-                <th style={{ padding: '10px 12px' }}>سمت</th>
-                <th style={{ padding: '10px 12px' }}>وظیفه / مضامین</th>
-                <th style={{ padding: '10px 12px' }}>کد کارمندی</th>
-                {canSeeFinance && <th style={{ padding: '10px 12px' }}>مجموع معاش</th>}
-                <th style={{ padding: '10px 12px' }}>وضعیت</th>
-                <th style={{ padding: '10px 12px' }}>حساب ورود</th>
-                <th style={{ padding: '10px 12px' }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={columnCount} style={{ padding: 24, textAlign: 'center', color: '#888' }}>در حال بارگذاری...</td></tr>
-              ) : rows.length === 0 ? (
-                <tr><td colSpan={columnCount} style={{ padding: 24, textAlign: 'center', color: '#888' }}>کارمندی با این فیلترها پیدا نشد.</td></tr>
-              ) : (
-                rows.map((item) => {
-                  const position = item?.employmentInfo?.position;
-                  const linked = Boolean(item?.linkedUserId?._id || item?.linkedUserId);
-                  return (
-                    <tr key={item._id} style={{ borderTop: '1px solid #eef2f6' }}>
-                      <td style={{ padding: '10px 12px', fontWeight: 600 }}>
-                        {staffFullName(item)}
-                        {item.isOwner && <span style={{ marginRight: 6, fontSize: 11, background: '#fff4e0', color: '#b26a00', borderRadius: 4, padding: '1px 6px' }}>owner</span>}
-                      </td>
-                      <td style={{ padding: '10px 12px' }}>{POSITION_LABELS[position] || position || '—'}</td>
-                      <td style={{ padding: '10px 12px' }}>{roleOrJobLabel(item)}</td>
-                      <td style={{ padding: '10px 12px' }}>{displayText(item?.employmentInfo?.employeeId) || '—'}</td>
-                      {canSeeFinance && <td style={{ padding: '10px 12px' }}>{salaryTotalOf(item).toLocaleString('fa-AF')}</td>}
-                      <td style={{ padding: '10px 12px' }}>
-                        <select
-                          value={item?.status || 'active'}
-                          disabled={savingId === item._id}
-                          onChange={(e) => handleStatusChange(item, e.target.value)}
-                          style={{ padding: '4px 6px', borderRadius: 6, border: '1px solid #d7dee6' }}
-                        >
-                          {STATUS_FILTER_OPTIONS.filter((opt) => opt.value).map((opt) => (
-                            <option key={opt.value} value={opt.value}>{opt.label}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td style={{ padding: '10px 12px' }}>{linked ? 'دارد' : '—'}</td>
-                      <td style={{ padding: '10px 12px' }}>
-                        <button
-                          type="button"
-                          onClick={() => window.location.assign(`/teacher-registration/${item._id}`)}
-                          style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #3498db', background: 'white', color: '#3498db', cursor: 'pointer', fontSize: 12 }}
-                        >
-                          ویرایش
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+        <div className="staff-list-card">
+          <div className="staff-table-wrap">
+            <table className="staff-table">
+              <thead>
+                <tr>
+                  <th>نام</th>
+                  <th>سمت</th>
+                  <th>وظیفه / مضامین</th>
+                  <th>کد کارمندی</th>
+                  {canSeeFinance && <th>مجموع معاش</th>}
+                  <th>وضعیت</th>
+                  <th>حساب ورود</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={columnCount} className="staff-table-empty">در حال بارگذاری...</td></tr>
+                ) : rows.length === 0 ? (
+                  <tr><td colSpan={columnCount} className="staff-table-empty">کارمندی با این فیلترها پیدا نشد.</td></tr>
+                ) : (
+                  rows.map((item) => {
+                    const position = item?.employmentInfo?.position;
+                    const linked = Boolean(item?.linkedUserId?._id || item?.linkedUserId);
+                    return (
+                      <tr key={item._id}>
+                        <td className="staff-name-cell">
+                          {staffFullName(item)}
+                          {item.isOwner && <span className="staff-owner-badge">owner</span>}
+                        </td>
+                        <td><span className="staff-position-badge">{POSITION_LABELS[position] || position || '—'}</span></td>
+                        <td>{roleOrJobLabel(item)}</td>
+                        <td>{displayText(item?.employmentInfo?.employeeId) || '—'}</td>
+                        {canSeeFinance && <td>{salaryTotalOf(item).toLocaleString('fa-AF')}</td>}
+                        <td>
+                          <select
+                            value={item?.status || 'active'}
+                            disabled={savingId === item._id}
+                            onChange={(e) => handleStatusChange(item, e.target.value)}
+                            className="staff-status-select"
+                          >
+                            {STATUS_CHANGE_OPTIONS.map((opt) => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>{linked ? 'دارد' : '—'}</td>
+                        <td>
+                          <button
+                            type="button"
+                            onClick={() => window.location.assign(`/teacher-registration/${item._id}`)}
+                            className="staff-edit-btn"
+                          >
+                            ویرایش
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
 
-        {total > rows.length && (
-          <p style={{ fontSize: 12, color: '#888', marginTop: 10 }}>
-            {total.toLocaleString('fa-AF')} پرونده مطابقت دارد؛ {rows.length.toLocaleString('fa-AF')} مورد نمایش داده شد. برای دیدن بقیه، فیلتر یا جستجو را دقیق‌تر کنید.
-          </p>
-        )}
+          {total > rows.length && (
+            <p className="staff-table-note">
+              {total.toLocaleString('fa-AF')} پرونده مطابقت دارد؛ {rows.length.toLocaleString('fa-AF')} مورد نمایش داده شد. برای دیدن بقیه، فیلتر یا جستجو را دقیق‌تر کنید.
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

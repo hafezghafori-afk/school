@@ -141,12 +141,18 @@ router.get('/', async (req, res) => {
       province,
       district,
       education,
-      status = 'active',
       search,
       experienceRange
     } = req.query;
 
-    const query = { status };
+    // A caller that omits `status` gets the historical default (active only).
+    // A caller that explicitly sends status='' means "همهٔ وضعیت‌ها" — no status
+    // filter at all, not literally status equal to an empty string.
+    const statusParamSent = Object.prototype.hasOwnProperty.call(req.query, 'status');
+    const status = statusParamSent ? req.query.status : 'active';
+
+    const query = {};
+    if (status) query.status = status;
 
     if (schoolId) query['employmentInfo.currentSchool'] = schoolId;
     if (position) query['employmentInfo.position'] = position;
