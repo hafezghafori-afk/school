@@ -12,6 +12,17 @@ import {
 } from './adminWorkspaceUtils';
 import './AfghanSchoolManagement.css';
 
+const readAdminLevel = () => {
+  if (typeof window === 'undefined') return '';
+  try {
+    return String(
+      window.localStorage.getItem('adminLevel') || window.localStorage.getItem('orgRole') || ''
+    ).trim();
+  } catch {
+    return '';
+  }
+};
+
 const POSITION_LABELS = {
   teacher: 'استاد',
   principal: 'مدیر مکتب',
@@ -81,6 +92,9 @@ const SchoolStaffList = () => {
   const toast = useToast();
   const toastRef = useRef(toast);
   useEffect(() => { toastRef.current = toast; }, [toast]);
+
+  // R2 — معاش/حساب بانکی فقط برای ریاست عمومی قابل مشاهده است.
+  const canSeeFinance = useMemo(() => readAdminLevel() === 'general_president', []);
 
   const [schoolId, setSchoolId] = useState(() => readStoredSchoolId() || DEFAULT_SCHOOL_ID);
   const [schoolContext, setSchoolContext] = useState(null);
@@ -158,6 +172,9 @@ const SchoolStaffList = () => {
       leadership: (byPosition.principal || 0) + (byPosition.vice_principal || 0)
     };
   }, [rows]);
+
+  // نام، سمت، وظیفه/مضامین، کد کارمندی، وضعیت، حساب ورود، ویرایش (+ معاش فقط برای ریاست عمومی)
+  const columnCount = canSeeFinance ? 8 : 7;
 
   const handleSearchSubmit = (event) => {
     event.preventDefault();
@@ -341,16 +358,17 @@ const SchoolStaffList = () => {
                 <th style={{ padding: '10px 12px' }}>سمت</th>
                 <th style={{ padding: '10px 12px' }}>وظیفه / مضامین</th>
                 <th style={{ padding: '10px 12px' }}>کد کارمندی</th>
-                <th style={{ padding: '10px 12px' }}>مجموع معاش</th>
+                {canSeeFinance && <th style={{ padding: '10px 12px' }}>مجموع معاش</th>}
                 <th style={{ padding: '10px 12px' }}>وضعیت</th>
                 <th style={{ padding: '10px 12px' }}>حساب ورود</th>
+                <th style={{ padding: '10px 12px' }}></th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: '#888' }}>در حال بارگذاری...</td></tr>
+                <tr><td colSpan={columnCount} style={{ padding: 24, textAlign: 'center', color: '#888' }}>در حال بارگذاری...</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: '#888' }}>کارمندی با این فیلترها پیدا نشد.</td></tr>
+                <tr><td colSpan={columnCount} style={{ padding: 24, textAlign: 'center', color: '#888' }}>کارمندی با این فیلترها پیدا نشد.</td></tr>
               ) : (
                 rows.map((item) => {
                   const position = item?.employmentInfo?.position;
@@ -364,7 +382,7 @@ const SchoolStaffList = () => {
                       <td style={{ padding: '10px 12px' }}>{POSITION_LABELS[position] || position || '—'}</td>
                       <td style={{ padding: '10px 12px' }}>{roleOrJobLabel(item)}</td>
                       <td style={{ padding: '10px 12px' }}>{displayText(item?.employmentInfo?.employeeId) || '—'}</td>
-                      <td style={{ padding: '10px 12px' }}>{salaryTotalOf(item).toLocaleString('fa-AF')}</td>
+                      {canSeeFinance && <td style={{ padding: '10px 12px' }}>{salaryTotalOf(item).toLocaleString('fa-AF')}</td>}
                       <td style={{ padding: '10px 12px' }}>
                         <select
                           value={item?.status || 'active'}
@@ -378,6 +396,15 @@ const SchoolStaffList = () => {
                         </select>
                       </td>
                       <td style={{ padding: '10px 12px' }}>{linked ? 'دارد' : '—'}</td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <button
+                          type="button"
+                          onClick={() => window.location.assign(`/teacher-registration/${item._id}`)}
+                          style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #3498db', background: 'white', color: '#3498db', cursor: 'pointer', fontSize: 12 }}
+                        >
+                          ویرایش
+                        </button>
+                      </td>
                     </tr>
                   );
                 })

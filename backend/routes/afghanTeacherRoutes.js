@@ -21,6 +21,14 @@ attachWriteActivityAudit(router, { targetType: 'AfghanTeacher', actionPrefix: 'a
 router.use(optionalAuth);
 const actorId = (req) => (mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : undefined);
 
+// ok(res, data) spreads `data` flat onto the response body. Passing a Mongoose
+// document instance there spreads its internal own-properties ($__, _doc,
+// $isNew) instead of the schema fields, so every single-teacher response must
+// go through this — nested under `teacher`, and converted to a plain object
+// first (JSON.stringify only calls a Document's toJSON when it is nested, not
+// when its own properties are spread onto another object).
+const serializeTeacher = (doc) => (doc && typeof doc.toObject === 'function' ? doc.toObject({ virtuals: true }) : doc);
+
 // Helper functions
 const calculateAge = (birthDate) => {
   const today = new Date();
@@ -203,7 +211,7 @@ router.get('/:id', async (req, res) => {
       return fail(res, 'Teacher not found', 404);
     }
 
-    return ok(res, teacher, 'Teacher retrieved successfully');
+    return ok(res, { teacher: serializeTeacher(teacher) }, 'Teacher retrieved successfully');
   } catch (error) {
     console.error('Get Teacher Error:', error);
     return fail(res, 'Failed to retrieve teacher', 500);
@@ -255,7 +263,7 @@ router.post('/', requireFields([
     // Populate school info for response
     await teacher.populate('employmentInfo.currentSchool', 'name province district');
 
-    return ok(res, teacher, 'Teacher created successfully', 201);
+    return ok(res, { teacher: serializeTeacher(teacher) }, 'Teacher created successfully');
   } catch (error) {
     console.error('Create Teacher Error:', error);
     if (error.code === 11000) {
@@ -300,7 +308,7 @@ router.put('/:id', async (req, res) => {
       return fail(res, 'Teacher not found', 404);
     }
 
-    return ok(res, teacher, 'Teacher updated successfully');
+    return ok(res, { teacher: serializeTeacher(teacher) }, 'Teacher updated successfully');
   } catch (error) {
     console.error('Update Teacher Error:', error);
     if (error.code === 11000) {
@@ -334,7 +342,7 @@ router.patch('/:id/status', async (req, res) => {
     }
 
     if (teacher.status === status) {
-      return ok(res, teacher, 'Status unchanged');
+      return ok(res, { teacher: serializeTeacher(teacher) }, 'Status unchanged');
     }
 
     if (DEPARTED_STATUSES.has(status)) {
@@ -369,7 +377,7 @@ router.patch('/:id/status', async (req, res) => {
     await teacher.save();
     await teacher.populate('employmentInfo.currentSchool', 'name province district');
 
-    return ok(res, teacher, 'Status updated successfully');
+    return ok(res, { teacher: serializeTeacher(teacher) }, 'Status updated successfully');
   } catch (error) {
     console.error('Update Teacher Status Error:', error);
     if (error.name === 'ValidationError') {
@@ -388,7 +396,7 @@ router.delete('/:id', async (req, res) => {
       return fail(res, 'Teacher not found', 404);
     }
 
-    return ok(res, teacher, 'Teacher deleted successfully');
+    return ok(res, { teacher: serializeTeacher(teacher) }, 'Teacher deleted successfully');
   } catch (error) {
     console.error('Delete Teacher Error:', error);
     return fail(res, 'Failed to delete teacher', 500);

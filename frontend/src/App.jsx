@@ -1187,7 +1187,7 @@ function AppShell() {
     path === '/student-report' ||
     path === '/instructor-report' ||
     path === '/student-registration' ||
-    path === '/teacher-registration' ||
+    /^\/teacher-registration(?:\/|$)/.test(path) ||
     path === '/school-staff' ||
     path === '/online-registrations' ||
     /^\/student-management(?:\/|$)/.test(path)
@@ -3556,6 +3556,7 @@ function AppShell() {
             <Route path="/demo" element={<Navigate to="/contact" replace />} />
             <Route path="/student-registration" element={adminRoute(['students.register', 'users.manage'], <StudentRegistration />, 'دسترسی ثبت دانش‌آموز برای این حساب فعال نیست.')} />
             <Route path="/teacher-registration" element={adminRoute(['teachers.manage', 'users.manage'], <TeacherRegistration />, 'دسترسی ثبت پروندهٔ رسمی استاد برای این حساب فعال نیست.')} />
+            <Route path="/teacher-registration/:id" element={adminRoute(['teachers.manage', 'users.manage'], <TeacherRegistration />, 'دسترسی ویرایش پروندهٔ رسمی کارمند برای این حساب فعال نیست.')} />
             <Route path="/school-staff" element={adminRoute(['teachers.manage', 'users.manage'], <SchoolStaffList />, 'دسترسی مدیریت کارکنان مکتب برای این حساب فعال نیست.')} />
             <Route path="/online-registrations" element={adminRoute(['enrollments.online.manage', 'enrollments.manage'], <OnlineRegistrations />, 'دسترسی مدیریت ثبت‌نام‌های آنلاین برای این حساب فعال نیست.')} />
             <Route path="/student-management" element={adminRoute(['students.manage', 'users.manage'], <StudentManagement />, 'دسترسی مدیریت دانش‌آموزان برای این حساب فعال نیست.')} />

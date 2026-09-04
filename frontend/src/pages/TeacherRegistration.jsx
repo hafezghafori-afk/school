@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { useToast } from '../components/ui/toast';
 import {
@@ -116,6 +117,43 @@ const toNumberOrUndefined = (value) => {
   return Number.isFinite(num) ? num : undefined;
 };
 
+const toDateInputValue = (value) => (value ? String(value).slice(0, 10) : '');
+
+// Inverse of buildTeacherPayload — maps a fetched AfghanTeacher record (edit
+// mode) back onto the flat formData shape the form's inputs are bound to.
+const populateFormFromTeacher = (teacher = {}) => {
+  const p = teacher.personalInfo || {};
+  const idf = teacher.identification || {};
+  const c = teacher.contactInfo || {};
+  const edu = teacher.educationInfo || {};
+  const emp = teacher.employmentInfo || {};
+  const fin = teacher.financialInfo || {};
+  const salary = fin.salary || {};
+  const bank = fin.bankAccount || {};
+  const linkedUserId = teacher.linkedUserId?._id || teacher.linkedUserId || '';
+  return {
+    firstName: p.firstName || '', lastName: p.lastName || '', firstNameDari: p.firstNameDari || '', lastNameDari: p.lastNameDari || '',
+    firstNamePashto: p.firstNamePashto || '', lastNamePashto: p.lastNamePashto || '', fatherName: p.fatherName || '', gender: p.gender || '',
+    birthDate: toDateInputValue(p.birthDate), birthPlace: p.birthPlace || '', nationality: p.nationality || 'Afghan',
+
+    tazkiraNumber: idf.tazkiraNumber || '', hasTeacherLicense: Boolean(idf.hasTeacherLicense), teacherLicenseNumber: idf.teacherLicenseNumber || '', teacherLicenseExpiry: toDateInputValue(idf.teacherLicenseExpiry),
+
+    phone: c.phone || '', mobile: c.mobile || '', email: c.email || '', province: c.province || '', district: c.district || '', village: c.village || '', address: c.address || '',
+
+    highestEducation: edu.highestEducation || '', fieldOfStudy: edu.fieldOfStudy || '', university: edu.university || '', graduationYear: edu.graduationYear || '', gpa: edu.gpa ?? '',
+    hasTeachingCertificate: Boolean(edu.hasTeachingCertificate), teachingCertificateType: edu.teachingCertificateType || '', teachingCertificateYear: edu.teachingCertificateYear || '',
+
+    employeeId: emp.employeeId || '', position: emp.position || 'teacher', employmentType: emp.employmentType || 'permanent', hireDate: toDateInputValue(emp.hireDate),
+    contractExpiry: toDateInputValue(emp.contractExpiry), workSchedule: emp.workSchedule || 'full_time', jobTitle: emp.jobTitle || '', department: emp.department || '',
+    isOwner: Boolean(teacher.isOwner),
+
+    salaryBase: salary.base ?? '', salaryHousing: salary.housing ?? '', salaryTransport: salary.transport ?? '', salaryOther: salary.other ?? '',
+    bankName: bank.bankName || '', accountNumber: bank.accountNumber || '', accountHolder: bank.accountHolder || '', receivesBonus: Boolean(fin.receivesBonus), bonusCriteria: fin.bonusCriteria || '',
+
+    linkedUserId: linkedUserId ? String(linkedUserId) : ''
+  };
+};
+
 const createEmptyForm = () => ({
   firstName: '', lastName: '', firstNameDari: '', lastNameDari: '',
   firstNamePashto: '', lastNamePashto: '', fatherName: '', gender: '',
@@ -212,6 +250,10 @@ const TeacherRegistration = () => {
   const toastRef = useRef(toast);
   useEffect(() => { toastRef.current = toast; }, [toast]);
 
+  const { id: editId } = useParams();
+  const isEditMode = Boolean(editId);
+  const navigate = useNavigate();
+
   const [schoolId, setSchoolId] = useState(() => readStoredSchoolId() || DEFAULT_SCHOOL_ID);
   const [activeSchoolContext, setActiveSchoolContext] = useState(null);
   const [referenceLoading, setReferenceLoading] = useState(true);
@@ -221,6 +263,35 @@ const TeacherRegistration = () => {
   const [loading, setLoading] = useState(false);
   const [submitStatus, setSubmitStatus] = useState({ type: '', text: '' });
   const [lastRegisteredTeacher, setLastRegisteredTeacher] = useState(null);
+
+  const [editLoading, setEditLoading] = useState(isEditMode);
+  const [editLoadError, setEditLoadError] = useState('');
+  const [editDisplayName, setEditDisplayName] = useState('');
+
+  useEffect(() => {
+    if (!isEditMode) return;
+    let cancelled = false;
+    const loadForEdit = async () => {
+      setEditLoading(true);
+      setEditLoadError('');
+      try {
+        const response = await fetchJson(`/api/afghan-teachers/${editId}`);
+        const teacher = response?.teacher || response?.data || {};
+        if (cancelled) return;
+        if (!teacher?._id) throw new Error('پرونده پیدا نشد.');
+        setFormData(populateFormFromTeacher(teacher));
+        setEditDisplayName([teacher.personalInfo?.firstNameDari, teacher.personalInfo?.lastNameDari].filter(Boolean).join(' '));
+        const recordSchoolId = teacher.employmentInfo?.currentSchool?._id || teacher.employmentInfo?.currentSchool;
+        if (recordSchoolId) setSchoolId(String(recordSchoolId));
+      } catch (error) {
+        if (!cancelled) setEditLoadError(displayText(error?.message || 'دریافتِ پروندهٔ کارمند ناموفق بود.'));
+      } finally {
+        if (!cancelled) setEditLoading(false);
+      }
+    };
+    loadForEdit();
+    return () => { cancelled = true; };
+  }, [isEditMode, editId]);
 
   // حساب‌های استاد که یک حساب کاربری (ورود به سیستم) دارند اما به هیچ پروندهٔ رسمی استاد وصل نیستند.
   const [orphanCandidates, setOrphanCandidates] = useState([]);
@@ -365,7 +436,7 @@ const TeacherRegistration = () => {
     event.preventDefault();
     setSubmitStatus({ type: 'info', text: 'در حال بررسی معلومات فرم...' });
 
-    if (requiresSchoolSelection) {
+    if (!isEditMode && requiresSchoolSelection) {
       const message = 'اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید.';
       setSubmitStatus({ type: 'error', text: message });
       toastRef.current.error(message);
@@ -382,9 +453,22 @@ const TeacherRegistration = () => {
     setLoading(true);
     try {
       const payload = buildTeacherPayload({ formData, schoolId });
+
+      if (isEditMode) {
+        setSubmitStatus({ type: 'info', text: 'در حال ذخیرهٔ تغییرات...' });
+        await fetchJson(`/api/afghan-teachers/${editId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        toast.success('تغییراتِ پروندهٔ کارمند ذخیره شد.');
+        navigate('/school-staff');
+        return;
+      }
+
       setSubmitStatus({ type: 'info', text: 'در حال ارسال معلومات به سرور...' });
       const response = await postJson('/api/afghan-teachers', payload);
-      const createdTeacher = response?.data || response?.teacher || {};
+      const createdTeacher = response?.teacher || response?.data || {};
       const displayName = [
         createdTeacher?.personalInfo?.firstNameDari || formData.firstNameDari || formData.firstName,
         createdTeacher?.personalInfo?.lastNameDari || formData.lastNameDari || formData.lastName
@@ -405,7 +489,7 @@ const TeacherRegistration = () => {
       setSubmitStatus({ type: 'success', text: `پروندهٔ ${displayName} با موفقیت ثبت شد.${linkedNotice}` });
       toast.success(`پرونده با موفقیت ثبت شد.${linkedNotice}`);
     } catch (error) {
-      const message = displayText(error?.message || 'ثبت پرونده ناموفق بود.');
+      const message = displayText(error?.message || (isEditMode ? 'ذخیرهٔ تغییرات ناموفق بود.' : 'ثبت پرونده ناموفق بود.'));
       setSubmitStatus({ type: 'error', text: message });
       toastRef.current.error(message);
     } finally {
@@ -413,16 +497,39 @@ const TeacherRegistration = () => {
     }
   };
 
+  if (isEditMode && editLoading) {
+    return (
+      <div className="school-management" style={{ minHeight: '100vh' }}>
+        <div style={{ maxWidth: 900, margin: '40px auto', background: 'white', borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.08)', padding: 32, textAlign: 'center', color: '#666' }}>
+          در حال بارگذاریِ پروندهٔ کارمند...
+        </div>
+      </div>
+    );
+  }
+
+  if (isEditMode && editLoadError) {
+    return (
+      <div className="school-management" style={{ minHeight: '100vh' }}>
+        <div style={{ maxWidth: 900, margin: '40px auto', background: 'white', borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.08)', padding: 32 }}>
+          <div className="student-registration-submit-status error" role="alert">{editLoadError}</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="school-management" style={{ minHeight: '100vh' }}>
       <form className="school-form" onSubmit={handleSubmit} noValidate style={{ maxWidth: 900, margin: '40px auto', background: 'white', borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.08)', padding: 32 }}>
-        <h2 style={{ textAlign: 'center', color: '#2c3e50', marginBottom: 8 }}>ثبت پروندهٔ کارکنان مکتب</h2>
+        <h2 style={{ textAlign: 'center', color: '#2c3e50', marginBottom: 8 }}>
+          {isEditMode ? `ویرایشِ پروندهٔ ${editDisplayName || 'کارمند'}` : 'ثبت پروندهٔ کارکنان مکتب'}
+        </h2>
         <p className="form-subtitle" style={{ textAlign: 'center', color: '#666', marginBottom: 24 }}>
-          پروندهٔ رسمی استاد یا کارمند (اداری/خدماتی) مکتب را وارد کنید. این پرونده جدا از حساب کاربری
-          (ورود به سیستم) است؛ اگر شخص از قبل حساب کاربری دارد، آن را از بخش پایین انتخاب کنید تا پرونده به همان حساب وصل شود.
+          {isEditMode
+            ? 'معلوماتِ این پروندهٔ رسمی را ویرایش و ذخیره کنید.'
+            : 'پروندهٔ رسمی استاد یا کارمند (اداری/خدماتی) مکتب را وارد کنید. این پرونده جدا از حساب کاربری (ورود به سیستم) است؛ اگر شخص از قبل حساب کاربری دارد، آن را از بخش پایین انتخاب کنید تا پرونده به همان حساب وصل شود.'}
         </p>
 
-        {requiresSchoolSelection && !referenceLoading && (
+        {!isEditMode && requiresSchoolSelection && !referenceLoading && (
           <div className="student-registration-alert" role="alert">
             اول یک مکتب فعال و معتبر انتخاب یا ایجاد کنید. ثبت پرونده بدون مکتب واقعی در دیتابیس ذخیره نمی‌شود.
             {Array.isArray(activeSchoolContext?.schools) && activeSchoolContext.schools.length > 0 && (
@@ -472,51 +579,53 @@ const TeacherRegistration = () => {
           </div>
         )}
 
-        {/* اتصال به حساب کاربری موجود */}
-        <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 4 }}>اتصال به حساب کاربری موجود (اختیاری)</h3>
-          <p style={{ fontSize: 13, color: '#888', marginTop: 0, marginBottom: 12 }}>
-            اگر این استاد از قبل حساب کاربری (ورود به سیستم) دارد اما هیچ پروندهٔ رسمی برایش ثبت نشده،
-            او را از این لیست انتخاب کنید تا پروندهٔ جدید مستقیماً به همان حساب وصل شود — به‌جای ساخت حساب تکراری.
-          </p>
-          {orphanLoading ? (
-            <p style={{ fontSize: 13, color: '#888' }}>در حال بارگذاری حساب‌های بدون پرونده...</p>
-          ) : orphanCandidates.length === 0 ? (
-            <p style={{ fontSize: 13, color: '#2e7d32' }}>در حال حاضر هیچ حساب استاد بدون پروندهٔ رسمی پیدا نشد.</p>
-          ) : (
-            <div className="form-grid">
-              <div className="form-group full-width">
-                <label htmlFor="orphanSearch">جستجوی حساب (نام یا ایمیل) — {orphanCandidates.length.toLocaleString('fa-AF')} حساب بدون پرونده</label>
-                <input
-                  id="orphanSearch"
-                  value={orphanSearch}
-                  onChange={(e) => setOrphanSearch(e.target.value)}
-                  placeholder="نام یا ایمیل را تایپ کنید..."
-                />
-              </div>
-              <div className="form-group full-width">
-                <label htmlFor="linkedUserId">حساب کاربری</label>
-                <select
-                  id="linkedUserId"
-                  value={formData.linkedUserId}
-                  onChange={(e) => handleSelectCandidate(e.target.value)}
-                >
-                  <option value="">— بدون اتصال؛ فقط پروندهٔ رسمی جدید بساز —</option>
-                  {filteredOrphanCandidates.map((item) => (
-                    <option key={item._id} value={item._id}>
-                      {item.name || 'بدون نام'} {item.email ? `— ${item.email}` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {selectedCandidate && (
-                <div className="form-group full-width" style={{ fontSize: 13, color: '#2e7d32' }}>
-                  انتخاب شد: {selectedCandidate.name || 'بدون نام'} ({selectedCandidate.email || 'بدون ایمیل'})
+        {/* اتصال به حساب کاربری موجود — فقط در حالتِ ثبتِ جدید؛ در ویرایش دست‌نخورده می‌ماند */}
+        {!isEditMode && (
+          <div className="form-section">
+            <h3 style={{ color: '#3498db', marginBottom: 4 }}>اتصال به حساب کاربری موجود (اختیاری)</h3>
+            <p style={{ fontSize: 13, color: '#888', marginTop: 0, marginBottom: 12 }}>
+              اگر این استاد از قبل حساب کاربری (ورود به سیستم) دارد اما هیچ پروندهٔ رسمی برایش ثبت نشده،
+              او را از این لیست انتخاب کنید تا پروندهٔ جدید مستقیماً به همان حساب وصل شود — به‌جای ساخت حساب تکراری.
+            </p>
+            {orphanLoading ? (
+              <p style={{ fontSize: 13, color: '#888' }}>در حال بارگذاری حساب‌های بدون پرونده...</p>
+            ) : orphanCandidates.length === 0 ? (
+              <p style={{ fontSize: 13, color: '#2e7d32' }}>در حال حاضر هیچ حساب استاد بدون پروندهٔ رسمی پیدا نشد.</p>
+            ) : (
+              <div className="form-grid">
+                <div className="form-group full-width">
+                  <label htmlFor="orphanSearch">جستجوی حساب (نام یا ایمیل) — {orphanCandidates.length.toLocaleString('fa-AF')} حساب بدون پرونده</label>
+                  <input
+                    id="orphanSearch"
+                    value={orphanSearch}
+                    onChange={(e) => setOrphanSearch(e.target.value)}
+                    placeholder="نام یا ایمیل را تایپ کنید..."
+                  />
                 </div>
-              )}
-            </div>
-          )}
-        </div>
+                <div className="form-group full-width">
+                  <label htmlFor="linkedUserId">حساب کاربری</label>
+                  <select
+                    id="linkedUserId"
+                    value={formData.linkedUserId}
+                    onChange={(e) => handleSelectCandidate(e.target.value)}
+                  >
+                    <option value="">— بدون اتصال؛ فقط پروندهٔ رسمی جدید بساز —</option>
+                    {filteredOrphanCandidates.map((item) => (
+                      <option key={item._id} value={item._id}>
+                        {item.name || 'بدون نام'} {item.email ? `— ${item.email}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {selectedCandidate && (
+                  <div className="form-group full-width" style={{ fontSize: 13, color: '#2e7d32' }}>
+                    انتخاب شد: {selectedCandidate.name || 'بدون نام'} ({selectedCandidate.email || 'بدون ایمیل'})
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* مشخصات شخصی */}
         <div className="form-section">
@@ -747,8 +856,8 @@ const TeacherRegistration = () => {
           </div>
         )}
 
-        <button type="submit" disabled={loading || referenceLoading} style={{ width: '100%', marginTop: 12 }}>
-          {loading ? 'در حال ثبت...' : 'ثبت پروندهٔ کارمند'}
+        <button type="submit" disabled={loading || (!isEditMode && referenceLoading)} style={{ width: '100%', marginTop: 12 }}>
+          {loading ? (isEditMode ? 'در حال ذخیره...' : 'در حال ثبت...') : (isEditMode ? 'ذخیرهٔ تغییرات' : 'ثبت پروندهٔ کارمند')}
         </button>
       </form>
     </div>
