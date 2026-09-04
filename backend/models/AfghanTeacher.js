@@ -135,6 +135,11 @@ const afghanTeacherSchema = new mongoose.Schema({
     },
     hireDate: { type: Date, required: true },
     contractExpiry: { type: Date },
+    // Non-teaching staff (admin_staff / support_staff): job title and the
+    // department they belong to (محاسبه، حراست، نظافت، ترانسپورت …). Left blank
+    // for teachers, who use `subjects` / `classes` instead.
+    jobTitle: { type: String, default: '', trim: true },
+    department: { type: String, default: '', trim: true },
     workSchedule: {
       type: String,
       enum: ['full_time', 'part_time', 'flexible'],
@@ -247,6 +252,10 @@ const afghanTeacherSchema = new mongoose.Schema({
     enum: ['pending', 'verified', 'rejected'],
     default: 'pending'
   },
+  // The school licence holder (صاحب امتیاز). Not a separate position — this is
+  // the same person who holds the general-president role, flagged so finance
+  // (owner_withdrawal) and reports can single them out.
+  isOwner: { type: Boolean, default: false },
   
   // اسناد و مدارک
   documents: [{

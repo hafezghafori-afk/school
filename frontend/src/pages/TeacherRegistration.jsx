@@ -67,6 +67,30 @@ const POSITION_OPTIONS = [
   { value: 'support_staff', label: 'کارمند خدماتی' }
 ];
 
+// R2 — top-down registration. Only ریاست عمومی can register a principal / owner
+// and fill the financial section; مدیر مکتب registers teaching + non-teaching
+// staff without finance; every other admin level can register teachers only.
+const POSITIONS_BY_ADMIN_LEVEL = {
+  general_president: ['teacher', 'principal', 'vice_principal', 'admin_staff', 'support_staff'],
+  principal: ['teacher', 'vice_principal', 'admin_staff', 'support_staff']
+};
+const DEFAULT_ALLOWED_POSITIONS = ['teacher'];
+
+// Positions that are non-teaching staff — they carry a free-text job title and a
+// department instead of subjects/classes.
+const NON_TEACHING_POSITIONS = new Set(['admin_staff', 'support_staff']);
+
+const readAdminLevel = () => {
+  if (typeof window === 'undefined') return '';
+  try {
+    return String(
+      window.localStorage.getItem('adminLevel') || window.localStorage.getItem('orgRole') || ''
+    ).trim();
+  } catch {
+    return '';
+  }
+};
+
 const EMPLOYMENT_TYPE_OPTIONS = [
   { value: 'permanent', label: 'دایمی' },
   { value: 'contract', label: 'قراردادی' },
@@ -103,6 +127,7 @@ const createEmptyForm = () => ({
 
   employeeId: '', position: 'teacher', employmentType: 'permanent', hireDate: '',
   contractExpiry: '', workSchedule: 'full_time',
+  jobTitle: '', department: '', isOwner: false,
 
   salaryBase: '', salaryHousing: '', salaryTransport: '', salaryOther: '',
   bankName: '', accountNumber: '', accountHolder: '', receivesBonus: false, bonusCriteria: '',
@@ -156,8 +181,11 @@ const buildTeacherPayload = ({ formData, schoolId }) => ({
     employmentType: formData.employmentType,
     hireDate: formData.hireDate,
     contractExpiry: formData.contractExpiry || undefined,
-    workSchedule: formData.workSchedule || 'full_time'
+    workSchedule: formData.workSchedule || 'full_time',
+    jobTitle: NON_TEACHING_POSITIONS.has(formData.position) ? trimValue(formData.jobTitle) : '',
+    department: NON_TEACHING_POSITIONS.has(formData.position) ? trimValue(formData.department) : ''
   },
+  isOwner: formData.position === 'principal' ? Boolean(formData.isOwner) : false,
   financialInfo: {
     salary: {
       base: toNumberOrUndefined(formData.salaryBase) || 0,
@@ -197,6 +225,25 @@ const TeacherRegistration = () => {
   const [orphanSearch, setOrphanSearch] = useState('');
 
   const requiresSchoolSelection = Boolean(activeSchoolContext?.requiresSelection || !activeSchoolContext?.schoolId);
+
+  // R2 — the registrant's admin level decides which سمت‌ها can be created here and
+  // whether the financial section is theirs to fill.
+  const adminLevel = useMemo(() => readAdminLevel(), []);
+  const allowedPositions = useMemo(() => {
+    const values = POSITIONS_BY_ADMIN_LEVEL[adminLevel] || DEFAULT_ALLOWED_POSITIONS;
+    return POSITION_OPTIONS.filter((item) => values.includes(item.value));
+  }, [adminLevel]);
+  const canEditFinance = adminLevel === 'general_president';
+  const isNonTeaching = NON_TEACHING_POSITIONS.has(formData.position);
+  const canFlagOwner = adminLevel === 'general_president' && formData.position === 'principal';
+
+  // Keep the selected سمت inside what this registrant is allowed to create.
+  useEffect(() => {
+    if (allowedPositions.length === 0) return;
+    if (!allowedPositions.some((item) => item.value === formData.position)) {
+      setFormData((prev) => ({ ...prev, position: allowedPositions[0].value }));
+    }
+  }, [allowedPositions, formData.position]);
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -302,7 +349,8 @@ const TeacherRegistration = () => {
     if (!formData.position) nextErrors.position = 'سمت الزامی است.';
     if (!formData.employmentType) nextErrors.employmentType = 'نوع استخدام الزامی است.';
     if (!formData.hireDate) nextErrors.hireDate = 'تاریخ آغاز به کار الزامی است.';
-    if (!trimValue(formData.salaryBase)) nextErrors.salaryBase = 'معاش اساسی الزامی است.';
+    if (canEditFinance && !trimValue(formData.salaryBase)) nextErrors.salaryBase = 'معاش اساسی الزامی است.';
+    if (isNonTeaching && !trimValue(formData.jobTitle)) nextErrors.jobTitle = 'عنوان وظیفه الزامی است.';
 
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -349,10 +397,10 @@ const TeacherRegistration = () => {
       const linkedNotice = formData.linkedUserId
         ? ' این پروندهٔ رسمی به حساب کاربری موجود وصل شد؛ آن حساب دیگر «یتیم» نیست.'
         : '';
-      setSubmitStatus({ type: 'success', text: `پروندهٔ استاد ${displayName} با موفقیت ثبت شد.${linkedNotice}` });
-      toast.success(`پروندهٔ استاد با موفقیت ثبت شد.${linkedNotice}`);
+      setSubmitStatus({ type: 'success', text: `پروندهٔ ${displayName} با موفقیت ثبت شد.${linkedNotice}` });
+      toast.success(`پرونده با موفقیت ثبت شد.${linkedNotice}`);
     } catch (error) {
-      const message = displayText(error?.message || 'ثبت پروندهٔ استاد ناموفق بود.');
+      const message = displayText(error?.message || 'ثبت پرونده ناموفق بود.');
       setSubmitStatus({ type: 'error', text: message });
       toastRef.current.error(message);
     } finally {
@@ -363,10 +411,10 @@ const TeacherRegistration = () => {
   return (
     <div className="school-management" style={{ minHeight: '100vh' }}>
       <form className="school-form" onSubmit={handleSubmit} noValidate style={{ maxWidth: 900, margin: '40px auto', background: 'white', borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.08)', padding: 32 }}>
-        <h2 style={{ textAlign: 'center', color: '#2c3e50', marginBottom: 8 }}>ثبت پروندهٔ رسمی استاد</h2>
+        <h2 style={{ textAlign: 'center', color: '#2c3e50', marginBottom: 8 }}>ثبت پروندهٔ کارکنان مکتب</h2>
         <p className="form-subtitle" style={{ textAlign: 'center', color: '#666', marginBottom: 24 }}>
-          معلومات رسمی استاد را وارد کنید. این پرونده جدا از حساب کاربری (ورود به سیستم) استاد است؛
-          اگر استاد از قبل حساب کاربری دارد، آن را از بخش پایین انتخاب کنید تا پرونده به همان حساب وصل شود.
+          پروندهٔ رسمی استاد یا کارمند (اداری/خدماتی) مکتب را وارد کنید. این پرونده جدا از حساب کاربری
+          (ورود به سیستم) است؛ اگر شخص از قبل حساب کاربری دارد، آن را از بخش پایین انتخاب کنید تا پرونده به همان حساب وصل شود.
         </p>
 
         {requiresSchoolSelection && !referenceLoading && (
@@ -612,10 +660,32 @@ const TeacherRegistration = () => {
             <div className="form-group">
               <label htmlFor="position">سمت *</label>
               <select id="position" value={formData.position} onChange={(e) => handleInputChange('position', e.target.value)} required className={errors.position ? 'border-red-500' : ''}>
-                {POSITION_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                {allowedPositions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
               {errors.position && <span className="text-red-500">{errors.position}</span>}
+              {allowedPositions.length < POSITION_OPTIONS.length && (
+                <span style={{ fontSize: 12, color: '#888' }}>ثبت مدیر و صاحب امتیاز فقط از حساب ریاست عمومی امکان‌پذیر است.</span>
+              )}
             </div>
+            {isNonTeaching && (
+              <>
+                <div className="form-group">
+                  <label htmlFor="jobTitle">عنوان وظیفه *</label>
+                  <input id="jobTitle" value={formData.jobTitle} onChange={(e) => handleInputChange('jobTitle', e.target.value)} placeholder="مثال: محاسب، نگهبان، راننده" className={errors.jobTitle ? 'border-red-500' : ''} />
+                  {errors.jobTitle && <span className="text-red-500">{errors.jobTitle}</span>}
+                </div>
+                <div className="form-group">
+                  <label htmlFor="department">بخش/دیپارتمنت</label>
+                  <input id="department" value={formData.department} onChange={(e) => handleInputChange('department', e.target.value)} placeholder="مثال: محاسبه، حراست، ترانسپورت، نظافت" />
+                </div>
+              </>
+            )}
+            {canFlagOwner && (
+              <div className="form-group full-width" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input id="isOwner" type="checkbox" checked={formData.isOwner} onChange={(e) => handleInputChange('isOwner', e.target.checked)} style={{ width: 'auto' }} />
+                <label htmlFor="isOwner" style={{ margin: 0 }}>این مدیر، صاحب امتیاز مکتب است (owner)</label>
+              </div>
+            )}
             <div className="form-group">
               <label htmlFor="employmentType">نوع استخدام *</label>
               <select id="employmentType" value={formData.employmentType} onChange={(e) => handleInputChange('employmentType', e.target.value)} required className={errors.employmentType ? 'border-red-500' : ''}>
@@ -637,32 +707,41 @@ const TeacherRegistration = () => {
           </div>
         </div>
 
-        {/* اطلاعات مالی */}
-        <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>اطلاعات مالی</h3>
-          <div className="form-grid">
-            <div className="form-group">
-              <label htmlFor="salaryBase">معاش اساسی (افغانی) *</label>
-              <input id="salaryBase" type="number" min="0" value={formData.salaryBase} onChange={(e) => handleInputChange('salaryBase', e.target.value)} required className={errors.salaryBase ? 'border-red-500' : ''} />
-              {errors.salaryBase && <span className="text-red-500">{errors.salaryBase}</span>}
-            </div>
-            <div className="form-group">
-              <label htmlFor="salaryHousing">بدل کرایه خانه</label>
-              <input id="salaryHousing" type="number" min="0" value={formData.salaryHousing} onChange={(e) => handleInputChange('salaryHousing', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="salaryTransport">بدل ترانسپورت</label>
-              <input id="salaryTransport" type="number" min="0" value={formData.salaryTransport} onChange={(e) => handleInputChange('salaryTransport', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label htmlFor="salaryOther">سایر امتیازات</label>
-              <input id="salaryOther" type="number" min="0" value={formData.salaryOther} onChange={(e) => handleInputChange('salaryOther', e.target.value)} />
+        {/* اطلاعات مالی — R2: فقط ریاست عمومی */}
+        {canEditFinance ? (
+          <div className="form-section">
+            <h3 style={{ color: '#3498db', marginBottom: 12 }}>اطلاعات مالی</h3>
+            <div className="form-grid">
+              <div className="form-group">
+                <label htmlFor="salaryBase">معاش اساسی (افغانی) *</label>
+                <input id="salaryBase" type="number" min="0" value={formData.salaryBase} onChange={(e) => handleInputChange('salaryBase', e.target.value)} required className={errors.salaryBase ? 'border-red-500' : ''} />
+                {errors.salaryBase && <span className="text-red-500">{errors.salaryBase}</span>}
+              </div>
+              <div className="form-group">
+                <label htmlFor="salaryHousing">بدل کرایه خانه</label>
+                <input id="salaryHousing" type="number" min="0" value={formData.salaryHousing} onChange={(e) => handleInputChange('salaryHousing', e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="salaryTransport">بدل ترانسپورت</label>
+                <input id="salaryTransport" type="number" min="0" value={formData.salaryTransport} onChange={(e) => handleInputChange('salaryTransport', e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="salaryOther">سایر امتیازات</label>
+                <input id="salaryOther" type="number" min="0" value={formData.salaryOther} onChange={(e) => handleInputChange('salaryOther', e.target.value)} />
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="form-section">
+            <h3 style={{ color: '#3498db', marginBottom: 12 }}>اطلاعات مالی</h3>
+            <p style={{ fontSize: 13, color: '#888', margin: 0 }}>
+              بخش مالی (معاش و حساب بانکی) توسط مدیریت مالی روی همین پرونده تکمیل می‌شود.
+            </p>
+          </div>
+        )}
 
         <button type="submit" disabled={loading || referenceLoading} style={{ width: '100%', marginTop: 12 }}>
-          {loading ? 'در حال ثبت...' : 'ثبت پروندهٔ استاد'}
+          {loading ? 'در حال ثبت...' : 'ثبت پروندهٔ کارمند'}
         </button>
       </form>
     </div>
