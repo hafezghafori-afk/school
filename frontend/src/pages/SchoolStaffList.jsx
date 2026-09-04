@@ -79,17 +79,22 @@ const salaryTotalOf = (item) => {
   return parts.reduce((sum, value) => sum + value, 0);
 };
 
-const roleOrJobLabel = (item) => {
+// برای کارمند اداری/خدماتی همان «عنوان وظیفه»ای که در فرم پر می‌شود؛ برای استاد
+// اسمِ صنف(های)ی که «نگران» آن است — از تعریفِ نگران در مرکز آموزش مکتب گرفته
+// می‌شود (SchoolClass.homeroomTeacherUserId)، نه یک فیلدِ جداگانه در این فرم.
+const roleOrJobLabel = (item, homeroomClassTitlesByUserId) => {
   const position = item?.employmentInfo?.position;
   if (position === 'admin_staff' || position === 'support_staff') {
     const job = trimValue(item?.employmentInfo?.jobTitle);
     const dept = trimValue(item?.employmentInfo?.department);
     return displayText([job, dept].filter(Boolean).join(' — ')) || '—';
   }
-  const subjects = Array.isArray(item?.employmentInfo?.subjects)
-    ? item.employmentInfo.subjects.map((s) => s?.subjectName).filter(Boolean)
-    : [];
-  return subjects.length ? displayText(subjects.join('، ')) : '—';
+  if (position === 'teacher') {
+    const linkedUserId = trimValue(item?.linkedUserId?._id || item?.linkedUserId);
+    const titles = linkedUserId ? (homeroomClassTitlesByUserId?.get(linkedUserId) || []) : [];
+    return titles.length ? `نگرانِ صنف: ${displayText(titles.join('، '))}` : '—';
+  }
+  return '—';
 };
 
 
@@ -135,6 +140,35 @@ const SchoolStaffList = () => {
     };
     loadContext();
   }, []);
+
+  // «نگرانِ صنف» برای هر استاد از همین‌جا خوانده می‌شود — همان تعریفِ نگران که در
+  // «مرکز آموزش مکتب» روی هر صنف ثبت می‌شود (SchoolClass.homeroomTeacherUserId)،
+  // نه یک فیلدِ جداگانه در فرمِ ثبتِ کارمند. اختیاری است: اگر نگرفت، فقط «—» می‌ماند.
+  const [homeroomClassesByUserId, setHomeroomClassesByUserId] = useState(() => new Map());
+
+  useEffect(() => {
+    if (!schoolId) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetchJson(`/api/education/school-classes?schoolId=${encodeURIComponent(schoolId)}&status=active`);
+        if (cancelled) return;
+        const map = new Map();
+        (response?.items || []).forEach((cls) => {
+          const uid = trimValue(cls?.homeroomTeacherUserId);
+          const title = displayText(trimValue(cls?.title) || [cls?.gradeLevel, cls?.section].filter(Boolean).join(' '));
+          if (!uid || !title) return;
+          const list = map.get(uid) || [];
+          list.push(title);
+          map.set(uid, list);
+        });
+        setHomeroomClassesByUserId(map);
+      } catch {
+        setHomeroomClassesByUserId(new Map());
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [schoolId]);
 
   const loadStaff = useCallback(async () => {
     if (!schoolId) return;
@@ -364,7 +398,7 @@ const SchoolStaffList = () => {
                 <tr>
                   <th>نام</th>
                   <th>سمت</th>
-                  <th>وظیفه / مضامین</th>
+                  <th>وظیفه / نگرانیِ صنف</th>
                   <th>کد کارمندی</th>
                   {canSeeFinance && <th>مجموع معاش</th>}
                   <th>وضعیت</th>
@@ -388,7 +422,7 @@ const SchoolStaffList = () => {
                           {item.isOwner && <span className="staff-owner-badge">owner</span>}
                         </td>
                         <td><span className="staff-position-badge">{POSITION_LABELS[position] || position || '—'}</span></td>
-                        <td>{roleOrJobLabel(item)}</td>
+                        <td>{roleOrJobLabel(item, homeroomClassesByUserId)}</td>
                         <td>{displayText(item?.employmentInfo?.employeeId) || '—'}</td>
                         {canSeeFinance && <td>{salaryTotalOf(item).toLocaleString('fa-AF')}</td>}
                         <td>
