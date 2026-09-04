@@ -206,7 +206,8 @@ router.post('/', requireFields([
   'personalInfo.fatherName', 'personalInfo.gender', 'personalInfo.birthDate', 'personalInfo.birthPlace',
   'identification.tazkiraNumber',
   'contactInfo.mobile', 'contactInfo.province', 'contactInfo.district', 'contactInfo.address',
-  'educationInfo.highestEducation', 'educationInfo.fieldOfStudy', 'educationInfo.university', 'educationInfo.graduationYear',
+  // educationInfo.* is required by the model only for teaching roles
+  // (principal / vice_principal / teacher); admin_staff / support_staff omit it.
   'employmentInfo.currentSchool', 'employmentInfo.employeeId', 'employmentInfo.position', 'employmentInfo.employmentType', 'employmentInfo.hireDate',
   'financialInfo.salary.base'
 ]), async (req, res) => {
@@ -254,6 +255,10 @@ router.post('/', requireFields([
       } else if (field.includes('employeeId')) {
         return fail(res, 'Employee ID already exists', 400);
       }
+    }
+    if (error.name === 'ValidationError') {
+      const first = Object.values(error.errors || {})[0];
+      return fail(res, first?.message || 'اطلاعات پرونده ناقص یا نامعتبر است.', 400);
     }
     return fail(res, 'Failed to create teacher', 500);
   }

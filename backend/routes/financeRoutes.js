@@ -4282,7 +4282,7 @@ router.get('/admin/staff-advances/staff', requireAuth, requireRole(['admin']), r
       'employmentInfo.currentSchool': schoolContext.schoolId,
       status: 'active'
     })
-      .select('personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari employmentInfo.employeeId employmentInfo.position financialInfo.salary status')
+      .select('personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari employmentInfo.employeeId employmentInfo.position employmentInfo.jobTitle employmentInfo.department financialInfo.salary isOwner status')
       .sort({ 'employmentInfo.position': 1, 'personalInfo.lastName': 1 })
       .lean();
     const items = teachers.map((item) => {
@@ -4297,6 +4297,9 @@ router.get('/admin/staff-advances/staff', requireAuth, requireRole(['admin']), r
         name: name || 'بدون نام',
         employeeId: String(item.employmentInfo?.employeeId || ''),
         position: String(item.employmentInfo?.position || ''),
+        jobTitle: String(item.employmentInfo?.jobTitle || ''),
+        department: String(item.employmentInfo?.department || ''),
+        isOwner: Boolean(item.isOwner),
         salaryTotal: Number(salaryTotal.toFixed(2))
       };
     });

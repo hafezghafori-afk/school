@@ -165,9 +165,9 @@ const buildTeacherPayload = ({ formData, schoolId }) => ({
     address: trimValue(formData.address)
   },
   educationInfo: {
-    highestEducation: formData.highestEducation,
-    fieldOfStudy: trimValue(formData.fieldOfStudy),
-    university: trimValue(formData.university),
+    highestEducation: formData.highestEducation || undefined,
+    fieldOfStudy: trimValue(formData.fieldOfStudy) || undefined,
+    university: trimValue(formData.university) || undefined,
     graduationYear: toNumberOrUndefined(formData.graduationYear),
     gpa: toNumberOrUndefined(formData.gpa),
     hasTeachingCertificate: Boolean(formData.hasTeachingCertificate),
@@ -341,10 +341,12 @@ const TeacherRegistration = () => {
     if (!formData.province) nextErrors.province = 'ولایت الزامی است.';
     if (!formData.district.trim()) nextErrors.district = 'ولسوالی/ناحیه الزامی است.';
     if (!formData.address.trim()) nextErrors.address = 'آدرس الزامی است.';
-    if (!formData.highestEducation) nextErrors.highestEducation = 'سطح تحصیلات الزامی است.';
-    if (!formData.fieldOfStudy.trim()) nextErrors.fieldOfStudy = 'رشتهٔ تحصیلی الزامی است.';
-    if (!formData.university.trim()) nextErrors.university = 'نام دانشگاه/موسسه الزامی است.';
-    if (!formData.graduationYear) nextErrors.graduationYear = 'سال فراغت الزامی است.';
+    if (!isNonTeaching) {
+      if (!formData.highestEducation) nextErrors.highestEducation = 'سطح تحصیلات الزامی است.';
+      if (!formData.fieldOfStudy.trim()) nextErrors.fieldOfStudy = 'رشتهٔ تحصیلی الزامی است.';
+      if (!formData.university.trim()) nextErrors.university = 'نام دانشگاه/موسسه الزامی است.';
+      if (!formData.graduationYear) nextErrors.graduationYear = 'سال فراغت الزامی است.';
+    }
     if (!formData.employeeId.trim()) nextErrors.employeeId = 'شماره/کد کارمندی الزامی است.';
     if (!formData.position) nextErrors.position = 'سمت الزامی است.';
     if (!formData.employmentType) nextErrors.employmentType = 'نوع استخدام الزامی است.';
@@ -620,29 +622,31 @@ const TeacherRegistration = () => {
 
         {/* اطلاعات تحصیلی */}
         <div className="form-section">
-          <h3 style={{ color: '#3498db', marginBottom: 12 }}>اطلاعات تحصیلی</h3>
+          <h3 style={{ color: '#3498db', marginBottom: 12 }}>
+            اطلاعات تحصیلی{isNonTeaching ? ' (اختیاری برای کارمند اداری/خدماتی)' : ''}
+          </h3>
           <div className="form-grid">
             <div className="form-group">
-              <label htmlFor="highestEducation">سطح تحصیلات *</label>
-              <select id="highestEducation" value={formData.highestEducation} onChange={(e) => handleInputChange('highestEducation', e.target.value)} required className={errors.highestEducation ? 'border-red-500' : ''}>
+              <label htmlFor="highestEducation">سطح تحصیلات {isNonTeaching ? '' : '*'}</label>
+              <select id="highestEducation" value={formData.highestEducation} onChange={(e) => handleInputChange('highestEducation', e.target.value)} className={errors.highestEducation ? 'border-red-500' : ''}>
                 <option value="">انتخاب کنید</option>
                 {HIGHEST_EDUCATION_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
               {errors.highestEducation && <span className="text-red-500">{errors.highestEducation}</span>}
             </div>
             <div className="form-group">
-              <label htmlFor="fieldOfStudy">رشتهٔ تحصیلی *</label>
-              <input id="fieldOfStudy" value={formData.fieldOfStudy} onChange={(e) => handleInputChange('fieldOfStudy', e.target.value)} required className={errors.fieldOfStudy ? 'border-red-500' : ''} />
+              <label htmlFor="fieldOfStudy">رشتهٔ تحصیلی {isNonTeaching ? '' : '*'}</label>
+              <input id="fieldOfStudy" value={formData.fieldOfStudy} onChange={(e) => handleInputChange('fieldOfStudy', e.target.value)} className={errors.fieldOfStudy ? 'border-red-500' : ''} />
               {errors.fieldOfStudy && <span className="text-red-500">{errors.fieldOfStudy}</span>}
             </div>
             <div className="form-group">
-              <label htmlFor="university">دانشگاه/موسسه *</label>
-              <input id="university" value={formData.university} onChange={(e) => handleInputChange('university', e.target.value)} required className={errors.university ? 'border-red-500' : ''} />
+              <label htmlFor="university">دانشگاه/موسسه {isNonTeaching ? '' : '*'}</label>
+              <input id="university" value={formData.university} onChange={(e) => handleInputChange('university', e.target.value)} className={errors.university ? 'border-red-500' : ''} />
               {errors.university && <span className="text-red-500">{errors.university}</span>}
             </div>
             <div className="form-group">
-              <label htmlFor="graduationYear">سال فراغت *</label>
-              <input id="graduationYear" type="number" value={formData.graduationYear} onChange={(e) => handleInputChange('graduationYear', e.target.value)} required className={errors.graduationYear ? 'border-red-500' : ''} />
+              <label htmlFor="graduationYear">سال فراغت {isNonTeaching ? '' : '*'}</label>
+              <input id="graduationYear" type="number" value={formData.graduationYear} onChange={(e) => handleInputChange('graduationYear', e.target.value)} className={errors.graduationYear ? 'border-red-500' : ''} />
               {errors.graduationYear && <span className="text-red-500">{errors.graduationYear}</span>}
             </div>
           </div>
