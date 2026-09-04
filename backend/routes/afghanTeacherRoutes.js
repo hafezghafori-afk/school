@@ -1,8 +1,12 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const multer = require('multer');
 const AfghanTeacher = require('../models/AfghanTeacher');
 const AfghanSchool = require('../models/AfghanSchool');
+const StaffAdvance = require('../models/StaffAdvance');
 const { requireFields } = require('../middleware/validate');
+const { optionalAuth } = require('../middleware/auth');
+const { buildTemplateWorkbook, parseStaffWorkbook } = require('../services/staffImportService');
 const { ok, fail } = require('../utils/response');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
@@ -10,6 +14,20 @@ const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
 const router = express.Router();
 const auditWrite = (payload) => logActivity(payload);
 attachWriteActivityAudit(router, { targetType: 'AfghanTeacher', actionPrefix: 'afghan_teacher', audit: auditWrite });
+
+// Capture the acting user's id when a token is present (this router has no hard
+// auth gate). Returns undefined for anonymous / invalid callers so createdBy /
+// lastUpdatedBy are simply left unset rather than failing the ObjectId cast.
+router.use(optionalAuth);
+const actorId = (req) => (mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : undefined);
+
+// ok(res, data) spreads `data` flat onto the response body. Passing a Mongoose
+// document instance there spreads its internal own-properties ($__, _doc,
+// $isNew) instead of the schema fields, so every single-teacher response must
+// go through this — nested under `teacher`, and converted to a plain object
+// first (JSON.stringify only calls a Document's toJSON when it is nested, not
+// when its own properties are spread onto another object).
+const serializeTeacher = (doc) => (doc && typeof doc.toObject === 'function' ? doc.toObject({ virtuals: true }) : doc);
 
 // Helper functions
 const calculateAge = (birthDate) => {
@@ -123,12 +141,18 @@ router.get('/', async (req, res) => {
       province,
       district,
       education,
-      status = 'active',
       search,
       experienceRange
     } = req.query;
 
-    const query = { status };
+    // A caller that omits `status` gets the historical default (active only).
+    // A caller that explicitly sends status='' means "همهٔ وضعیت‌ها" — no status
+    // filter at all, not literally status equal to an empty string.
+    const statusParamSent = Object.prototype.hasOwnProperty.call(req.query, 'status');
+    const status = statusParamSent ? req.query.status : 'active';
+
+    const query = {};
+    if (status) query.status = status;
 
     if (schoolId) query['employmentInfo.currentSchool'] = schoolId;
     if (position) query['employmentInfo.position'] = position;
@@ -193,7 +217,7 @@ router.get('/:id', async (req, res) => {
       return fail(res, 'Teacher not found', 404);
     }
 
-    return ok(res, teacher, 'Teacher retrieved successfully');
+    return ok(res, { teacher: serializeTeacher(teacher) }, 'Teacher retrieved successfully');
   } catch (error) {
     console.error('Get Teacher Error:', error);
     return fail(res, 'Failed to retrieve teacher', 500);
@@ -206,14 +230,15 @@ router.post('/', requireFields([
   'personalInfo.fatherName', 'personalInfo.gender', 'personalInfo.birthDate', 'personalInfo.birthPlace',
   'identification.tazkiraNumber',
   'contactInfo.mobile', 'contactInfo.province', 'contactInfo.district', 'contactInfo.address',
-  'educationInfo.highestEducation', 'educationInfo.fieldOfStudy', 'educationInfo.university', 'educationInfo.graduationYear',
+  // educationInfo.* is required by the model only for teaching roles
+  // (principal / vice_principal / teacher); admin_staff / support_staff omit it.
   'employmentInfo.currentSchool', 'employmentInfo.employeeId', 'employmentInfo.position', 'employmentInfo.employmentType', 'employmentInfo.hireDate',
   'financialInfo.salary.base'
 ]), async (req, res) => {
   try {
     const teacherData = {
       ...req.body,
-      createdBy: req.user?.id || 'system'
+      createdBy: actorId(req)
     };
 
     // Check if tazkira number already exists
@@ -244,7 +269,7 @@ router.post('/', requireFields([
     // Populate school info for response
     await teacher.populate('employmentInfo.currentSchool', 'name province district');
 
-    return ok(res, teacher, 'Teacher created successfully', 201);
+    return ok(res, { teacher: serializeTeacher(teacher) }, 'Teacher created successfully');
   } catch (error) {
     console.error('Create Teacher Error:', error);
     if (error.code === 11000) {
@@ -255,6 +280,10 @@ router.post('/', requireFields([
         return fail(res, 'Employee ID already exists', 400);
       }
     }
+    if (error.name === 'ValidationError') {
+      const first = Object.values(error.errors || {})[0];
+      return fail(res, first?.message || 'اطلاعات پرونده ناقص یا نامعتبر است.', 400);
+    }
     return fail(res, 'Failed to create teacher', 500);
   }
 });
@@ -264,7 +293,7 @@ router.put('/:id', async (req, res) => {
   try {
     const teacherData = {
       ...req.body,
-      lastUpdatedBy: req.user?.id || 'system'
+      lastUpdatedBy: actorId(req)
     };
 
     // If updating school, validate it exists
@@ -285,7 +314,7 @@ router.put('/:id', async (req, res) => {
       return fail(res, 'Teacher not found', 404);
     }
 
-    return ok(res, teacher, 'Teacher updated successfully');
+    return ok(res, { teacher: serializeTeacher(teacher) }, 'Teacher updated successfully');
   } catch (error) {
     console.error('Update Teacher Error:', error);
     if (error.code === 11000) {
@@ -300,6 +329,71 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// PATCH /api/afghan-teachers/:id/status - Change employment status with a guard
+// that blocks marking a staff member as departed while they still owe an advance.
+const STAFF_STATUSES = ['active', 'inactive', 'on_leave', 'suspended', 'terminated', 'retired'];
+const DEPARTED_STATUSES = new Set(['inactive', 'terminated', 'retired']);
+
+router.patch('/:id/status', async (req, res) => {
+  try {
+    const status = String(req.body?.status || '').trim();
+    const note = String(req.body?.note || '').trim();
+    if (!STAFF_STATUSES.includes(status)) {
+      return fail(res, 'وضعیت نامعتبر است.', 400);
+    }
+
+    const teacher = await AfghanTeacher.findById(req.params.id);
+    if (!teacher) {
+      return fail(res, 'Teacher not found', 404);
+    }
+
+    if (teacher.status === status) {
+      return ok(res, { teacher: serializeTeacher(teacher) }, 'Status unchanged');
+    }
+
+    if (DEPARTED_STATUSES.has(status)) {
+      const dari = `${teacher.personalInfo?.firstNameDari || ''} ${teacher.personalInfo?.lastNameDari || ''}`.trim();
+      const latin = `${teacher.personalInfo?.firstName || ''} ${teacher.personalInfo?.lastName || ''}`.trim();
+      const names = [dari, latin].filter(Boolean);
+      const openAdvances = await StaffAdvance.find({
+        status: 'approved',
+        outstandingAmount: { $gt: 0 },
+        $or: [
+          { staffId: teacher._id },
+          ...(names.length ? [{ staffId: null, 'staffSnapshot.name': { $in: names } }] : [])
+        ]
+      }).select('outstandingAmount kind').lean();
+
+      if (openAdvances.length) {
+        const totalOutstanding = openAdvances.reduce((sum, item) => sum + (Number(item.outstandingAmount) || 0), 0);
+        return fail(
+          res,
+          `این کارمند ${openAdvances.length} پیشکیِ بازِ تسویه‌نشده با مجموع ${totalOutstanding.toLocaleString('fa-AF')} افغانی دارد. پیش از تغییرِ وضعیت به «رفته»، پیشکی‌ها باید تسویه، حذف یا در بخشِ مالی «سوخت» ثبت شوند.`,
+          409
+        );
+      }
+    }
+
+    teacher.status = status;
+    teacher.lastUpdatedBy = actorId(req);
+    if (note) {
+      const stamp = new Date().toISOString().slice(0, 10);
+      teacher.notes.general = `${teacher.notes.general ? `${teacher.notes.general}\n` : ''}[${stamp}] وضعیت → ${status}: ${note}`;
+    }
+    await teacher.save();
+    await teacher.populate('employmentInfo.currentSchool', 'name province district');
+
+    return ok(res, { teacher: serializeTeacher(teacher) }, 'Status updated successfully');
+  } catch (error) {
+    console.error('Update Teacher Status Error:', error);
+    if (error.name === 'ValidationError') {
+      const first = Object.values(error.errors || {})[0];
+      return fail(res, first?.message || 'به‌روزرسانی وضعیت ناموفق بود.', 400);
+    }
+    return fail(res, 'Failed to update teacher status', 500);
+  }
+});
+
 // DELETE /api/afghan-teachers/:id - Delete teacher
 router.delete('/:id', async (req, res) => {
   try {
@@ -308,7 +402,7 @@ router.delete('/:id', async (req, res) => {
       return fail(res, 'Teacher not found', 404);
     }
 
-    return ok(res, teacher, 'Teacher deleted successfully');
+    return ok(res, { teacher: serializeTeacher(teacher) }, 'Teacher deleted successfully');
   } catch (error) {
     console.error('Delete Teacher Error:', error);
     return fail(res, 'Failed to delete teacher', 500);
@@ -341,7 +435,7 @@ router.post('/bulk', requireFields(['teachers']), async (req, res) => {
     for (let i = 0; i < teachers.length; i++) {
       const teacherData = {
         ...teachers[i],
-        createdBy: req.user?.id || 'system'
+        createdBy: actorId(req)
       };
 
       try {
@@ -407,6 +501,113 @@ router.post('/bulk', requireFields(['teachers']), async (req, res) => {
     console.error('Bulk Create Teachers Error:', error);
     return fail(res, 'Failed to create teachers in bulk', 500);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Excel bulk import — download a template, then upload a filled workbook.
+// ---------------------------------------------------------------------------
+const staffImportUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 3 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok3 = /\.xlsx$/i.test(file.originalname || '')
+      || file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    cb(ok3 ? null : new Error('فقط فایلِ .xlsx پذیرفته می‌شود.'), ok3);
+  }
+});
+
+// GET /api/afghan-teachers/bulk-import/template - Download the .xlsx template
+router.get('/bulk-import/template', async (_req, res) => {
+  try {
+    const workbook = buildTemplateWorkbook();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="staff-import-template.xlsx"');
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error('Staff import template error:', error);
+    return fail(res, 'ساختِ قالبِ اکسل ناموفق بود.', 500);
+  }
+});
+
+// POST /api/afghan-teachers/bulk-import - Upload a filled workbook (field: file)
+router.post('/bulk-import', (req, res) => {
+  staffImportUpload.single('file')(req, res, async (uploadError) => {
+    if (uploadError) {
+      return fail(res, uploadError.message || 'بارگذاریِ فایل ناموفق بود.', 400);
+    }
+    try {
+      if (!req.file || !req.file.buffer) {
+        return fail(res, 'فایلی انتخاب نشده است.', 400);
+      }
+      const schoolId = String(req.body?.schoolId || req.query?.schoolId || '').trim();
+      if (!mongoose.Types.ObjectId.isValid(schoolId)) {
+        return fail(res, 'شناسهٔ مکتب معتبر نیست.', 400);
+      }
+      const school = await AfghanSchool.findById(schoolId).select('_id').lean();
+      if (!school) {
+        return fail(res, 'مکتب یافت نشد.', 400);
+      }
+
+      const parsed = await parseStaffWorkbook(req.file.buffer, { schoolId });
+      if (parsed.headerErrors.length) {
+        return fail(res, parsed.headerErrors.join(' '), 400);
+      }
+      if (parsed.rows.length === 0) {
+        return fail(res, 'هیچ ردیفِ داده‌ای در فایل نیست.', 400);
+      }
+      if (parsed.rows.length > 50) {
+        return fail(res, `حداکثر ۵۰ ردیف در هر بار؛ این فایل ${parsed.rows.length} ردیف دارد.`, 400);
+      }
+
+      const results = {
+        successful: [],
+        failed: [],
+        summary: { total: parsed.rows.length, successful: 0, failed: 0 }
+      };
+
+      for (const row of parsed.rows) {
+        const label = row.label || `سطر ${row.rowNumber}`;
+        if (row.errors.length) {
+          results.failed.push({ row: row.rowNumber, label, error: row.errors.join('؛ ') });
+          results.summary.failed += 1;
+          continue;
+        }
+        try {
+          const tazkira = row.payload.identification.tazkiraNumber;
+          const employeeId = row.payload.employmentInfo.employeeId;
+          if (await AfghanTeacher.exists({ 'identification.tazkiraNumber': tazkira })) {
+            results.failed.push({ row: row.rowNumber, label, error: `شماره تذکره تکراری است (${tazkira})` });
+            results.summary.failed += 1;
+            continue;
+          }
+          if (await AfghanTeacher.exists({ 'employmentInfo.employeeId': employeeId })) {
+            results.failed.push({ row: row.rowNumber, label, error: `کد کارمندی تکراری است (${employeeId})` });
+            results.summary.failed += 1;
+            continue;
+          }
+          const teacher = new AfghanTeacher({ ...row.payload, createdBy: actorId(req) });
+          await teacher.save();
+          results.successful.push({ row: row.rowNumber, label, teacherId: String(teacher._id), employeeId });
+          results.summary.successful += 1;
+        } catch (rowError) {
+          let message = rowError.message;
+          if (rowError.name === 'ValidationError') {
+            message = Object.values(rowError.errors || {}).map((e) => e.message).join('؛ ');
+          } else if (rowError.code === 11000) {
+            message = 'مقدارِ یکتا تکراری است (تذکره یا کد کارمندی).';
+          }
+          results.failed.push({ row: row.rowNumber, label, error: message || 'ثبت ناموفق بود.' });
+          results.summary.failed += 1;
+        }
+      }
+
+      return ok(res, results, 'وارد کردنِ گروهیِ کارکنان انجام شد.');
+    } catch (error) {
+      console.error('Staff bulk-import error:', error);
+      return fail(res, 'پردازشِ فایلِ اکسل ناموفق بود.', 500);
+    }
+  });
 });
 
 // GET /api/afghan-teachers/performance/:schoolId - Get teacher performance statistics
@@ -586,7 +787,7 @@ router.post('/:id/evaluation', requireFields(['date', 'evaluator', 'criteria']),
 
     teacher.performanceInfo.evaluations.push(newEvaluation);
     teacher.performanceInfo.lastEvaluationDate = new Date(date);
-    teacher.lastUpdatedBy = req.user?.id || 'system';
+    teacher.lastUpdatedBy = actorId(req);
     
     await teacher.save();
 
@@ -617,7 +818,7 @@ router.post('/:id/training', requireFields(['title', 'provider', 'startDate', 'e
     };
 
     teacher.professionalDevelopment.trainings.push(newTraining);
-    teacher.lastUpdatedBy = req.user?.id || 'system';
+    teacher.lastUpdatedBy = actorId(req);
     
     await teacher.save();
 

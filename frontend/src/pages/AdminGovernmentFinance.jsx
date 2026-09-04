@@ -282,6 +282,19 @@ const STAFF_ADVANCE_KIND_LABELS = {
   owner_withdrawal: 'برداشتِ صاحب امتیاز',
   staff_loan: 'قرضِ کارمند'
 };
+const STAFF_POSITION_LABELS = {
+  teacher: 'استاد',
+  principal: 'مدیر مکتب',
+  vice_principal: 'معاون مکتب',
+  admin_staff: 'کارمند اداری',
+  support_staff: 'کارمند خدماتی'
+};
+const staffPickerLabel = (item) => {
+  if (!item) return '';
+  const role = STAFF_POSITION_LABELS[item.position] || item.position || '';
+  const detail = item.jobTitle || item.department || role;
+  return `${item.name}${detail ? ` · ${detail}` : ''}${item.isOwner ? ' · صاحب امتیاز' : ''}`;
+};
 const STAFF_ADVANCE_CAP_MULTIPLIER = {
   salary_advance: 1,
   principal_withdrawal: 1,
@@ -5898,7 +5911,7 @@ export default function AdminGovernmentFinance() {
                   <select name="staffId" value={staffAdvanceDraft.staffId} onChange={handleStaffAdvanceDraftChange}>
                     <option value="">— بدون رکورد (نام دستی) —</option>
                     {(payload.staffList || []).map((item) => (
-                      <option key={item._id} value={item._id}>{item.name}{item.position ? ` · ${item.position}` : ''}</option>
+                      <option key={item._id} value={item._id}>{staffPickerLabel(item)}</option>
                     ))}
                   </select>
                 </label>
@@ -6230,7 +6243,7 @@ export default function AdminGovernmentFinance() {
                   <select name="staffId" value={salaryPaymentDraft.staffId} onChange={handleSalaryPaymentDraftChange}>
                     <option value="">— بدون رکورد (نام دستی) —</option>
                     {(payload.staffList || []).map((item) => (
-                      <option key={item._id} value={item._id}>{item.name}{item.position ? ` · ${item.position}` : ''}</option>
+                      <option key={item._id} value={item._id}>{staffPickerLabel(item)}</option>
                     ))}
                   </select>
                 </label>

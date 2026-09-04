@@ -1,5 +1,12 @@
 const mongoose = require('mongoose');
 
+// Teaching roles carry academic credentials; non-teaching staff (admin_staff /
+// support_staff) do not, so the educationInfo block is required only for these.
+const TEACHING_POSITIONS = ['principal', 'vice_principal', 'teacher'];
+function educationRequired() {
+  return TEACHING_POSITIONS.includes(this?.employmentInfo?.position);
+}
+
 // مدل معلم افغانستانی
 const afghanTeacherSchema = new mongoose.Schema({
   // اطلاعات شخصی
@@ -103,12 +110,15 @@ const afghanTeacherSchema = new mongoose.Schema({
   educationInfo: {
     highestEducation: {
       type: String,
-      required: true,
-      enum: ['high_school', 'bachelor', 'master', 'phd', 'other']
+      required: educationRequired,
+      enum: {
+        values: ['high_school', 'bachelor', 'master', 'phd', 'other', ''],
+        message: 'سطح تحصیلات نامعتبر است.'
+      }
     },
-    fieldOfStudy: { type: String, required: true, trim: true },
-    university: { type: String, required: true, trim: true },
-    graduationYear: { type: Number, required: true },
+    fieldOfStudy: { type: String, required: educationRequired, trim: true },
+    university: { type: String, required: educationRequired, trim: true },
+    graduationYear: { type: Number, required: educationRequired },
     gpa: { type: Number, min: 0, max: 4 },
     hasTeachingCertificate: { type: Boolean, default: false },
     teachingCertificateType: { type: String, trim: true },
@@ -135,6 +145,11 @@ const afghanTeacherSchema = new mongoose.Schema({
     },
     hireDate: { type: Date, required: true },
     contractExpiry: { type: Date },
+    // Non-teaching staff (admin_staff / support_staff): job title and the
+    // department they belong to (محاسبه، حراست، نظافت، ترانسپورت …). Left blank
+    // for teachers, who use `subjects` / `classes` instead.
+    jobTitle: { type: String, default: '', trim: true },
+    department: { type: String, default: '', trim: true },
     workSchedule: {
       type: String,
       enum: ['full_time', 'part_time', 'flexible'],
@@ -247,6 +262,10 @@ const afghanTeacherSchema = new mongoose.Schema({
     enum: ['pending', 'verified', 'rejected'],
     default: 'pending'
   },
+  // The school licence holder (صاحب امتیاز). Not a separate position — this is
+  // the same person who holds the general-president role, flagged so finance
+  // (owner_withdrawal) and reports can single them out.
+  isOwner: { type: Boolean, default: false },
   
   // اسناد و مدارک
   documents: [{

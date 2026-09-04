@@ -102,6 +102,7 @@ const AdminExamsDashboard = lazy(() => import('./pages/AdminExamsDashboard'));
 const ParentDashboard = lazy(() => import('./pages/ParentDashboard'));
 const StudentRegistration = lazy(() => import('./pages/StudentRegistration'));
 const TeacherRegistration = lazy(() => import('./pages/TeacherRegistration'));
+const SchoolStaffList = lazy(() => import('./pages/SchoolStaffList'));
 const OnlineRegistrations = lazy(() => import('./pages/OnlineRegistrations'));
 const StudentManagement = lazy(() => import('./pages/StudentManagement'));
 const StudentProfileWorkspace = lazy(() => import('./pages/StudentProfileWorkspace'));
@@ -169,6 +170,7 @@ const routePrefetchers = {
     myFinance: () => import('./pages/StudentFinance'),
   studentRegistration: () => import('./pages/StudentRegistration'),
   teacherRegistration: () => import('./pages/TeacherRegistration'),
+  schoolStaffList: () => import('./pages/SchoolStaffList'),
   onlineRegistrations: () => import('./pages/OnlineRegistrations'),
   studentManagement: () => import('./pages/StudentManagement')
 };
@@ -1185,7 +1187,8 @@ function AppShell() {
     path === '/student-report' ||
     path === '/instructor-report' ||
     path === '/student-registration' ||
-    path === '/teacher-registration' ||
+    /^\/teacher-registration(?:\/|$)/.test(path) ||
+    path === '/school-staff' ||
     path === '/online-registrations' ||
     /^\/student-management(?:\/|$)/.test(path)
   );
@@ -3553,6 +3556,8 @@ function AppShell() {
             <Route path="/demo" element={<Navigate to="/contact" replace />} />
             <Route path="/student-registration" element={adminRoute(['students.register', 'users.manage'], <StudentRegistration />, 'دسترسی ثبت دانش‌آموز برای این حساب فعال نیست.')} />
             <Route path="/teacher-registration" element={adminRoute(['teachers.manage', 'users.manage'], <TeacherRegistration />, 'دسترسی ثبت پروندهٔ رسمی استاد برای این حساب فعال نیست.')} />
+            <Route path="/teacher-registration/:id" element={adminRoute(['teachers.manage', 'users.manage'], <TeacherRegistration />, 'دسترسی ویرایش پروندهٔ رسمی کارمند برای این حساب فعال نیست.')} />
+            <Route path="/school-staff" element={adminRoute(['teachers.manage', 'users.manage'], <SchoolStaffList />, 'دسترسی مدیریت کارکنان مکتب برای این حساب فعال نیست.')} />
             <Route path="/online-registrations" element={adminRoute(['enrollments.online.manage', 'enrollments.manage'], <OnlineRegistrations />, 'دسترسی مدیریت ثبت‌نام‌های آنلاین برای این حساب فعال نیست.')} />
             <Route path="/student-management" element={adminRoute(['students.manage', 'users.manage'], <StudentManagement />, 'دسترسی مدیریت دانش‌آموزان برای این حساب فعال نیست.')} />
             <Route path="/student-management/:studentRef" element={adminRoute(['students.manage', 'users.manage'], <StudentProfileWorkspace />, 'دسترسی پروندهٔ شاگرد برای این حساب فعال نیست.')} />

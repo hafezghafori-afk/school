@@ -293,12 +293,19 @@ const AfghanSchoolDashboard = () => {
             <span className="btn-icon">👨‍🎓</span>
             <span className="btn-text">ثبت دانش‌آموز جدید</span>
           </button>
-          <button 
+          <button
             onClick={() => navigate('/teacher-registration')}
             className="action-btn secondary"
           >
             <span className="btn-icon">👩‍🏫</span>
             <span className="btn-text">ثبت معلم جدید</span>
+          </button>
+          <button
+            onClick={() => navigate('/school-staff')}
+            className="action-btn secondary"
+          >
+            <span className="btn-icon">🧑‍💼</span>
+            <span className="btn-text">کارکنان مکتب</span>
           </button>
           <button
             onClick={() => navigate('/afghan-sawaneh')}

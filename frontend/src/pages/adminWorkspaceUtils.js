@@ -194,6 +194,17 @@ export async function postJson(path, body = {}, options = {}) {
   });
 }
 
+// Multipart POST — the browser sets the Content-Type (with boundary) itself, so
+// only the auth headers are attached here.
+export async function postForm(path, formData, options = {}) {
+  return fetchJson(path, {
+    method: 'POST',
+    ...options,
+    headers: { ...(options.headers || {}) },
+    body: formData
+  });
+}
+
 function readFilename(disposition = '', fallback = 'download.bin') {
   const match = /filename\*?=(?:UTF-8''|\")?([^\";]+)/i.exec(disposition || '');
   if (!match?.[1]) return fallback;
