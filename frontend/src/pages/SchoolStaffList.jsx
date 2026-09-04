@@ -103,8 +103,16 @@ const SchoolStaffList = () => {
   const toastRef = useRef(toast);
   useEffect(() => { toastRef.current = toast; }, [toast]);
 
-  // R2 — معاش/حساب بانکی فقط برای ریاست عمومی قابل مشاهده است.
-  const canSeeFinance = useMemo(() => readAdminLevel() === 'general_president', []);
+  // R2 — معاش/حساب بانکی برای ریاست عمومی، مدیر مکتب، و مدیریتِ مالی قابل مشاهده
+  // است (بقیه — مدیر تدریسی/سر معلم — نمی‌بینند).
+  const adminLevel = useMemo(() => readAdminLevel(), []);
+  const canSeeFinance = useMemo(
+    () => ['general_president', 'school_manager', 'finance_manager', 'finance_lead'].includes(adminLevel),
+    [adminLevel]
+  );
+  // مدیریتِ مالی حقِ ثبتِ کارمندِ تازه، تغییرِ وضعیت، یا ورودِ گروهی ندارد — فقط
+  // فهرست را می‌بیند تا با «ویرایش» به بخشِ مالیِ یک پروندهٔ موجود برسد.
+  const isFinanceOnlyRole = adminLevel === 'finance_manager' || adminLevel === 'finance_lead';
 
   const [schoolId, setSchoolId] = useState(() => readStoredSchoolId() || DEFAULT_SCHOOL_ID);
   const [schoolContext, setSchoolContext] = useState(null);
@@ -305,7 +313,9 @@ const SchoolStaffList = () => {
               {schoolContext?.school ? ` — ${displayText(schoolContext.school.nameDari || schoolContext.school.name || 'مکتب')}` : ''}
             </p>
           </div>
-          <button type="button" onClick={goToRegistration} className="staff-btn-add">+ ثبت کارمندِ جدید</button>
+          {!isFinanceOnlyRole && (
+            <button type="button" onClick={goToRegistration} className="staff-btn-add">+ ثبت کارمندِ جدید</button>
+          )}
         </div>
 
         <div className="staff-list-kpis">
@@ -353,6 +363,7 @@ const SchoolStaffList = () => {
           <div role="alert" className="staff-list-error">{loadError}</div>
         )}
 
+        {!isFinanceOnlyRole && (
         <details className="staff-import">
           <summary>ورودِ گروهی از اکسل</summary>
           <div className="staff-import-body">
@@ -390,6 +401,7 @@ const SchoolStaffList = () => {
             )}
           </div>
         </details>
+        )}
 
         <div className="staff-list-card">
           <div className="staff-table-wrap">
@@ -428,7 +440,7 @@ const SchoolStaffList = () => {
                         <td>
                           <select
                             value={item?.status || 'active'}
-                            disabled={savingId === item._id}
+                            disabled={savingId === item._id || isFinanceOnlyRole}
                             onChange={(e) => handleStatusChange(item, e.target.value)}
                             className="staff-status-select"
                           >
