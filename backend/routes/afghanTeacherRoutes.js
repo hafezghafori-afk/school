@@ -1,9 +1,12 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const multer = require('multer');
 const AfghanTeacher = require('../models/AfghanTeacher');
 const AfghanSchool = require('../models/AfghanSchool');
 const StaffAdvance = require('../models/StaffAdvance');
 const { requireFields } = require('../middleware/validate');
+const { optionalAuth } = require('../middleware/auth');
+const { buildTemplateWorkbook, parseStaffWorkbook } = require('../services/staffImportService');
 const { ok, fail } = require('../utils/response');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
@@ -11,6 +14,12 @@ const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
 const router = express.Router();
 const auditWrite = (payload) => logActivity(payload);
 attachWriteActivityAudit(router, { targetType: 'AfghanTeacher', actionPrefix: 'afghan_teacher', audit: auditWrite });
+
+// Capture the acting user's id when a token is present (this router has no hard
+// auth gate). Returns undefined for anonymous / invalid callers so createdBy /
+// lastUpdatedBy are simply left unset rather than failing the ObjectId cast.
+router.use(optionalAuth);
+const actorId = (req) => (mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : undefined);
 
 // Helper functions
 const calculateAge = (birthDate) => {
@@ -215,7 +224,7 @@ router.post('/', requireFields([
   try {
     const teacherData = {
       ...req.body,
-      createdBy: req.user?.id || 'system'
+      createdBy: actorId(req)
     };
 
     // Check if tazkira number already exists
@@ -270,7 +279,7 @@ router.put('/:id', async (req, res) => {
   try {
     const teacherData = {
       ...req.body,
-      lastUpdatedBy: req.user?.id || 'system'
+      lastUpdatedBy: actorId(req)
     };
 
     // If updating school, validate it exists
@@ -352,7 +361,7 @@ router.patch('/:id/status', async (req, res) => {
     }
 
     teacher.status = status;
-    teacher.lastUpdatedBy = req.user?.id || 'system';
+    teacher.lastUpdatedBy = actorId(req);
     if (note) {
       const stamp = new Date().toISOString().slice(0, 10);
       teacher.notes.general = `${teacher.notes.general ? `${teacher.notes.general}\n` : ''}[${stamp}] وضعیت → ${status}: ${note}`;
@@ -412,7 +421,7 @@ router.post('/bulk', requireFields(['teachers']), async (req, res) => {
     for (let i = 0; i < teachers.length; i++) {
       const teacherData = {
         ...teachers[i],
-        createdBy: req.user?.id || 'system'
+        createdBy: actorId(req)
       };
 
       try {
@@ -478,6 +487,113 @@ router.post('/bulk', requireFields(['teachers']), async (req, res) => {
     console.error('Bulk Create Teachers Error:', error);
     return fail(res, 'Failed to create teachers in bulk', 500);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Excel bulk import — download a template, then upload a filled workbook.
+// ---------------------------------------------------------------------------
+const staffImportUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 3 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok3 = /\.xlsx$/i.test(file.originalname || '')
+      || file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    cb(ok3 ? null : new Error('فقط فایلِ .xlsx پذیرفته می‌شود.'), ok3);
+  }
+});
+
+// GET /api/afghan-teachers/bulk-import/template - Download the .xlsx template
+router.get('/bulk-import/template', async (_req, res) => {
+  try {
+    const workbook = buildTemplateWorkbook();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="staff-import-template.xlsx"');
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error('Staff import template error:', error);
+    return fail(res, 'ساختِ قالبِ اکسل ناموفق بود.', 500);
+  }
+});
+
+// POST /api/afghan-teachers/bulk-import - Upload a filled workbook (field: file)
+router.post('/bulk-import', (req, res) => {
+  staffImportUpload.single('file')(req, res, async (uploadError) => {
+    if (uploadError) {
+      return fail(res, uploadError.message || 'بارگذاریِ فایل ناموفق بود.', 400);
+    }
+    try {
+      if (!req.file || !req.file.buffer) {
+        return fail(res, 'فایلی انتخاب نشده است.', 400);
+      }
+      const schoolId = String(req.body?.schoolId || req.query?.schoolId || '').trim();
+      if (!mongoose.Types.ObjectId.isValid(schoolId)) {
+        return fail(res, 'شناسهٔ مکتب معتبر نیست.', 400);
+      }
+      const school = await AfghanSchool.findById(schoolId).select('_id').lean();
+      if (!school) {
+        return fail(res, 'مکتب یافت نشد.', 400);
+      }
+
+      const parsed = await parseStaffWorkbook(req.file.buffer, { schoolId });
+      if (parsed.headerErrors.length) {
+        return fail(res, parsed.headerErrors.join(' '), 400);
+      }
+      if (parsed.rows.length === 0) {
+        return fail(res, 'هیچ ردیفِ داده‌ای در فایل نیست.', 400);
+      }
+      if (parsed.rows.length > 50) {
+        return fail(res, `حداکثر ۵۰ ردیف در هر بار؛ این فایل ${parsed.rows.length} ردیف دارد.`, 400);
+      }
+
+      const results = {
+        successful: [],
+        failed: [],
+        summary: { total: parsed.rows.length, successful: 0, failed: 0 }
+      };
+
+      for (const row of parsed.rows) {
+        const label = row.label || `سطر ${row.rowNumber}`;
+        if (row.errors.length) {
+          results.failed.push({ row: row.rowNumber, label, error: row.errors.join('؛ ') });
+          results.summary.failed += 1;
+          continue;
+        }
+        try {
+          const tazkira = row.payload.identification.tazkiraNumber;
+          const employeeId = row.payload.employmentInfo.employeeId;
+          if (await AfghanTeacher.exists({ 'identification.tazkiraNumber': tazkira })) {
+            results.failed.push({ row: row.rowNumber, label, error: `شماره تذکره تکراری است (${tazkira})` });
+            results.summary.failed += 1;
+            continue;
+          }
+          if (await AfghanTeacher.exists({ 'employmentInfo.employeeId': employeeId })) {
+            results.failed.push({ row: row.rowNumber, label, error: `کد کارمندی تکراری است (${employeeId})` });
+            results.summary.failed += 1;
+            continue;
+          }
+          const teacher = new AfghanTeacher({ ...row.payload, createdBy: actorId(req) });
+          await teacher.save();
+          results.successful.push({ row: row.rowNumber, label, teacherId: String(teacher._id), employeeId });
+          results.summary.successful += 1;
+        } catch (rowError) {
+          let message = rowError.message;
+          if (rowError.name === 'ValidationError') {
+            message = Object.values(rowError.errors || {}).map((e) => e.message).join('؛ ');
+          } else if (rowError.code === 11000) {
+            message = 'مقدارِ یکتا تکراری است (تذکره یا کد کارمندی).';
+          }
+          results.failed.push({ row: row.rowNumber, label, error: message || 'ثبت ناموفق بود.' });
+          results.summary.failed += 1;
+        }
+      }
+
+      return ok(res, results, 'وارد کردنِ گروهیِ کارکنان انجام شد.');
+    } catch (error) {
+      console.error('Staff bulk-import error:', error);
+      return fail(res, 'پردازشِ فایلِ اکسل ناموفق بود.', 500);
+    }
+  });
 });
 
 // GET /api/afghan-teachers/performance/:schoolId - Get teacher performance statistics
@@ -657,7 +773,7 @@ router.post('/:id/evaluation', requireFields(['date', 'evaluator', 'criteria']),
 
     teacher.performanceInfo.evaluations.push(newEvaluation);
     teacher.performanceInfo.lastEvaluationDate = new Date(date);
-    teacher.lastUpdatedBy = req.user?.id || 'system';
+    teacher.lastUpdatedBy = actorId(req);
     
     await teacher.save();
 
@@ -688,7 +804,7 @@ router.post('/:id/training', requireFields(['title', 'provider', 'startDate', 'e
     };
 
     teacher.professionalDevelopment.trainings.push(newTraining);
-    teacher.lastUpdatedBy = req.user?.id || 'system';
+    teacher.lastUpdatedBy = actorId(req);
     
     await teacher.save();
 

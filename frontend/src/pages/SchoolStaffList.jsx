@@ -2,7 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../components/ui/toast';
 import {
   DEFAULT_SCHOOL_ID,
+  downloadBlob,
+  fetchBlob,
   fetchJson,
+  postForm,
   readStoredSchoolId,
   repairDisplayText,
   resolveActiveSchoolContext
@@ -93,6 +96,10 @@ const SchoolStaffList = () => {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [savingId, setSavingId] = useState('');
+  const [importFile, setImportFile] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const importInputRef = useRef(null);
 
   useEffect(() => {
     const loadContext = async () => {
@@ -188,6 +195,47 @@ const SchoolStaffList = () => {
     window.location.assign('/teacher-registration');
   };
 
+  const handleTemplateDownload = async () => {
+    try {
+      const { blob, filename } = await fetchBlob('/api/afghan-teachers/bulk-import/template', {}, { method: 'GET' });
+      downloadBlob(blob, filename || 'staff-import-template.xlsx');
+    } catch (error) {
+      toastRef.current.error(displayText(error?.message || 'دانلودِ قالب ناموفق بود.'));
+    }
+  };
+
+  const handleImport = async () => {
+    if (!importFile) {
+      toastRef.current.error('اول یک فایلِ .xlsx انتخاب کنید.');
+      return;
+    }
+    if (!schoolId) {
+      toastRef.current.error('مکتب فعال مشخص نیست.');
+      return;
+    }
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const form = new FormData();
+      form.append('file', importFile);
+      form.append('schoolId', schoolId);
+      const response = await postForm('/api/afghan-teachers/bulk-import', form);
+      const data = response?.data || response || {};
+      setImportResult(data);
+      const okCount = data?.summary?.successful || 0;
+      const failCount = data?.summary?.failed || 0;
+      if (okCount) toastRef.current.success(`${okCount.toLocaleString('fa-AF')} کارمند ثبت شد.`);
+      if (failCount && !okCount) toastRef.current.error(`هیچ ردیفی ثبت نشد؛ ${failCount.toLocaleString('fa-AF')} خطا.`);
+      setImportFile(null);
+      if (importInputRef.current) importInputRef.current.value = '';
+      if (okCount) loadStaff();
+    } catch (error) {
+      toastRef.current.error(displayText(error?.message || 'وارد کردنِ اکسل ناموفق بود.'));
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <div className="school-management" style={{ minHeight: '100vh' }}>
       <div style={{ maxWidth: 1100, margin: '40px auto', background: 'white', borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.08)', padding: 32 }}>
@@ -246,6 +294,44 @@ const SchoolStaffList = () => {
         {loadError && (
           <div className="student-registration-submit-status error" role="alert" style={{ marginBottom: 12 }}>{loadError}</div>
         )}
+
+        <details style={{ border: '1px solid #eef2f6', borderRadius: 8, padding: '12px 16px', marginBottom: 16, background: '#fbfcfe' }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 600, color: '#2c3e50' }}>ورودِ گروهی از اکسل</summary>
+          <p style={{ fontSize: 13, color: '#666', marginBottom: 12 }}>
+            قالب را دانلود کنید، ردیف‌ها را پر کنید (هر ردیف یک کارمند، حداکثر ۵۰ ردیف)، سپس فایل را بارگذاری کنید.
+            ستون‌های الزامی و مقادیرِ مجاز در برگهٔ «راهنما» است. سمتِ تدریسی به اطلاعاتِ تحصیلی نیاز دارد؛ کارمندِ اداری/خدماتی خیر.
+          </p>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button type="button" onClick={handleTemplateDownload} style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #3498db', background: 'white', color: '#3498db', cursor: 'pointer' }}>
+              دانلودِ قالبِ اکسل
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".xlsx"
+              onChange={(e) => { setImportFile(e.target.files?.[0] || null); setImportResult(null); }}
+            />
+            <button type="button" onClick={handleImport} disabled={importing || !importFile} style={{ padding: '8px 14px', borderRadius: 8, border: 0, background: importing || !importFile ? '#9db8cc' : '#2c3e50', color: 'white', cursor: importing || !importFile ? 'default' : 'pointer' }}>
+              {importing ? 'در حال پردازش...' : 'بارگذاری و ثبت'}
+            </button>
+          </div>
+          {importResult && (
+            <div style={{ marginTop: 12, fontSize: 13 }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                مجموع {Number(importResult?.summary?.total || 0).toLocaleString('fa-AF')} ردیف —
+                <span style={{ color: '#2e7d32' }}> {Number(importResult?.summary?.successful || 0).toLocaleString('fa-AF')} ثبت‌شده</span> ·
+                <span style={{ color: '#c62828' }}> {Number(importResult?.summary?.failed || 0).toLocaleString('fa-AF')} خطا</span>
+              </div>
+              {Array.isArray(importResult?.failed) && importResult.failed.length > 0 && (
+                <ul style={{ margin: 0, paddingInlineStart: 18, color: '#c62828' }}>
+                  {importResult.failed.map((row) => (
+                    <li key={`imp-fail-${row.row}`}>سطر {Number(row.row).toLocaleString('fa-AF')} — {row.label ? `${row.label}: ` : ''}{displayText(row.error)}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </details>
 
         <div style={{ overflowX: 'auto', border: '1px solid #eef2f6', borderRadius: 8 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
