@@ -21,7 +21,6 @@ const AfghanSchoolManagement = lazy(() => import('./pages/AfghanSchoolManagement
 const AfghanReports = lazy(() => import('./pages/AfghanReports'));
 const SawanehWorkspace = lazy(() => import('./pages/SawanehWorkspace'));
 const SawanehPrint = lazy(() => import('./pages/SawanehPrint'));
-const IdCardPrint = lazy(() => import('./pages/IdCardPrint'));
 const SawanehReports = lazy(() => import('./pages/SawanehReports'));
 const SawanehDashboard = lazy(() => import('./pages/SawanehDashboard'));
 const CourseList = lazy(() => import('./pages/CourseList'));
@@ -3332,7 +3331,6 @@ function AppShell() {
             <Route path="/afghan-sawaneh/reports" element={<SawanehReports />} />
             <Route path="/afghan-sawaneh/:studentId" element={<SawanehWorkspace />} />
             <Route path="/afghan-sawaneh/:studentId/print" element={<SawanehPrint />} />
-            <Route path="/id-cards/preview" element={<IdCardPrint />} />
             <Route path="/login-modern" element={<Navigate to="/login" replace />} />
             <Route path="/login-demo" element={<Navigate to="/login" replace />} />
             <Route path="/login-showcase" element={<Navigate to="/login" replace />} />
