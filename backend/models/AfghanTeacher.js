@@ -271,8 +271,8 @@ const afghanTeacherSchema = new mongoose.Schema({
   documents: [{
     type: {
       type: String,
-      enum: ['tazkira', 'teacher_license', 'degree_certificate', 'transcript', 
-              'teaching_certificate', 'cv', 'contract', 'performance_review', 'other']
+      enum: ['tazkira', 'teacher_license', 'degree_certificate', 'transcript',
+              'teaching_certificate', 'cv', 'contract', 'performance_review', 'photo', 'other']
     },
     title: { type: String, required: true },
     url: { type: String, required: true },

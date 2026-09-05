@@ -213,6 +213,13 @@ export const PERMISSION_GROUPS = [
       { key: 'sawaneh.transcript.finalize', label: 'نهایی‌سازی سوانح تعلیمی', legacy: ['manage_content'] },
       { key: 'sawaneh.transcript.lock', label: 'قفل و مهر سوانح تعلیمی', legacy: ['manage_content'] }
     ]
+  },
+  {
+    key: 'id_cards',
+    label: 'کارت هویت',
+    permissions: [
+      { key: 'id_cards.manage', label: 'مدیریت و چاپ کارت هویت', legacy: ['manage_users', 'manage_content'] }
+    ]
   }
 ];
 

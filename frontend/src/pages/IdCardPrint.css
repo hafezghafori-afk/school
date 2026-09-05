@@ -1,0 +1,364 @@
+/* کارت هویتِ شاگردان/استادان/کارمندان — شیشه‌ای/سه‌بعدی با واترمارکِ ضدِ تقلب.
+   همان الگویِ SawanehPrint.css: پرتال روی <body>، مخفی‌کردنِ کاملِ اپ در چاپ. */
+
+body.has-idc-print > #root { display: none !important; }
+body.has-idc-print { background: #0b1120; }
+
+.idc-print {
+  direction: rtl;
+  font-family: 'Vazirmatn', 'B Nazanin', 'B Mitra', Tahoma, sans-serif;
+  color: #111;
+  min-height: 100vh;
+  padding: 18px 12px 40px;
+  background:
+    radial-gradient(circle at 14% 12%, rgba(13, 148, 136, 0.35), transparent 38%),
+    radial-gradient(circle at 86% 8%, rgba(217, 119, 6, 0.28), transparent 34%),
+    radial-gradient(circle at 50% 92%, rgba(29, 78, 216, 0.3), transparent 40%),
+    linear-gradient(160deg, #0b1120 0%, #111a30 60%, #0b1120 100%);
+}
+
+.idc-print * { box-sizing: border-box; }
+
+/* ---------- نوارِ ابزار ---------- */
+.idc-toolbar {
+  max-width: 900px;
+  margin: 0 auto 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  padding: 12px 16px;
+}
+
+.idc-tabs { display: flex; gap: 8px; }
+.idc-tab {
+  width: auto;
+  padding: 8px 18px;
+  border-radius: 999px;
+  border: 1.5px solid var(--idc-accent, #0d9488);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--idc-accent, #0d9488);
+  font-family: inherit;
+  font-weight: 800;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.idc-tab-active {
+  background: var(--idc-accent, #0d9488);
+  color: #fff;
+}
+
+.idc-toolbar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.idc-toolbar-actions button {
+  width: auto;
+  padding: 8px 16px;
+  border-radius: 10px;
+  border: 1px solid #0d9488;
+  background: #0d9488;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+.idc-toolbar-actions button.idc-side-btn { background: rgba(255,255,255,0.92); color: #0d9488; }
+.idc-toolbar-actions button:last-of-type { background: rgba(255,255,255,0.92); color: #64748b; border-color: #cbd5e1; }
+.idc-sheet-toggle { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #e2e8f0; }
+
+/* ---------- محلِ نمایشِ یک کارت (با پرسپکتیوِ سه‌بعدی) ---------- */
+.idc-stage { display: flex; justify-content: center; padding: 46px 0 60px; }
+.idc-tilt-stage { perspective: 1400px; }
+
+/* ---------- خودِ کارت: نسبتِ استانداردِ CR-80 (85.6×54mm)، شیشه‌ای + عمقِ سه‌بعدی ---------- */
+.idc-card {
+  width: 336px;
+  height: 212px;
+  border-radius: 18px;
+  overflow: hidden;
+  position: relative;
+  isolation: isolate;
+  color: #0f172a;
+
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.22) 55%, rgba(255, 255, 255, 0.4)),
+    linear-gradient(135deg, color-mix(in srgb, var(--idc-accent, #0d9488) 22%, transparent), transparent 60%);
+  backdrop-filter: blur(16px) saturate(170%);
+  -webkit-backdrop-filter: blur(16px) saturate(170%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+
+  box-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.5) inset,
+    0 -18px 30px rgba(0, 0, 0, 0.08) inset,
+    0 30px 60px -14px rgba(0, 0, 0, 0.55),
+    0 10px 24px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(0, 0, 0, 0.04);
+
+  transform: perspective(1400px) rotateX(var(--rx, 8deg)) rotateY(var(--ry, -12deg));
+  transition: transform 0.12s ease-out;
+}
+
+/* ---------- لایه‌های ضدِ تقلب: بافتِ گیوشه + کاشیِ لوگو + واترمارکِ بزرگِ نام ---------- */
+.idc-guilloche {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  opacity: 0.05;
+  background-image: repeating-linear-gradient(
+    115deg,
+    var(--idc-accent-dark, #0f3d3a) 0px,
+    var(--idc-accent-dark, #0f3d3a) 1px,
+    transparent 1px,
+    transparent 7px
+  );
+  pointer-events: none;
+}
+.idc-wm-tile {
+  position: absolute;
+  inset: -45%;
+  z-index: 1;
+  background-repeat: repeat;
+  background-size: 44px 44px;
+  opacity: 0.08;
+  transform: rotate(-26deg);
+  filter: grayscale(1);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+.idc-wm-ghost {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  white-space: nowrap;
+  color: var(--idc-accent-dark, #0f3d3a);
+  opacity: 0.07;
+  transform: rotate(-16deg);
+  pointer-events: none;
+}
+
+/* ---------- نوارِ هولوگرافیک (چسبِ ضدِ تقلب) — فقط گوشهٔ بالا، دورتر از QR و متنِ پایین ---------- */
+.idc-holo {
+  position: absolute;
+  top: 4px;
+  height: 64px;
+  width: 34px;
+  right: 8px;
+  z-index: 2;
+  border-radius: 8px;
+  background: linear-gradient(
+    115deg,
+    transparent 10%,
+    rgba(0, 255, 255, 0.35) 25%,
+    rgba(255, 0, 200, 0.32) 42%,
+    rgba(255, 230, 0, 0.32) 58%,
+    rgba(0, 255, 150, 0.32) 74%,
+    transparent 90%
+  );
+  background-size: 220% 220%;
+  mix-blend-mode: color-dodge;
+  opacity: 0.65;
+  animation: idc-holo-shift 5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes idc-holo-shift {
+  0% { background-position: 0% 0%; }
+  50% { background-position: 100% 100%; }
+  100% { background-position: 0% 0%; }
+}
+
+/* ---------- درخشش/انعکاسِ شیشه که با موس حرکت می‌کند ---------- */
+.idc-glare {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: radial-gradient(circle at var(--mx, 72%) var(--my, 18%), rgba(255, 255, 255, 0.65), transparent 42%);
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+
+/* ---------- محتوای کارت (بالای همهٔ لایه‌ها) ---------- */
+.idc-content { position: relative; z-index: 3; display: flex; flex-direction: column; height: 100%; }
+
+.idc-band {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: linear-gradient(135deg, var(--idc-accent, #0d9488), var(--idc-accent-dark, #0f3d3a));
+  color: #fff;
+  position: relative;
+}
+.idc-logo {
+  width: 27px; height: 27px;
+  border-radius: 7px;
+  background: rgba(255,255,255,0.94);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.idc-logo img { width: 100%; height: 100%; object-fit: contain; }
+.idc-logo span { font-size: 8px; color: #64748b; }
+.idc-band-text { display: flex; flex-direction: column; line-height: 1.3; flex: 1 1 auto; min-width: 0; }
+.idc-band-text strong { font-size: 12.5px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.idc-band-text span { font-size: 9.5px; opacity: 0.9; }
+.idc-role-badge {
+  font-size: 10px;
+  font-weight: 800;
+  background: rgba(255,255,255,0.22);
+  padding: 3px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.idc-body { display: flex; gap: 8px; padding: 7px 12px; flex: 1 1 auto; min-height: 0; }
+.idc-photo {
+  width: 62px; height: 74px;
+  border-radius: 7px;
+  border: 1.5px dashed rgba(15, 23, 42, 0.28);
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  color: #64748b;
+  font-size: 10px;
+  flex: 0 0 auto;
+}
+.idc-fields {
+  flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 4px 8px 4px 6px;
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 10px;
+  backdrop-filter: blur(3px);
+}
+.idc-name { font-size: 13.5px; font-weight: 900; color: #1e293b; margin-bottom: 1px; line-height: 1.2; }
+.idc-row { display: flex; gap: 6px; font-size: 10px; line-height: 1.3; }
+.idc-k { color: #64748b; flex: 0 0 auto; }
+.idc-v { color: #1e293b; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.idc-mono { font-family: 'Vazirmatn', Tahoma, sans-serif; letter-spacing: 0.3px; }
+
+.idc-foot {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 12px 6px;
+  border-top: 1px dashed rgba(15, 23, 42, 0.18);
+}
+.idc-foot-text { display: flex; flex-direction: column; font-size: 8.5px; color: #64748b; gap: 1px; flex: 1 1 auto; line-height: 1.3; }
+.idc-sign { font-weight: 700; color: #334155; }
+.idc-qr { flex: 0 0 auto; border: 1px solid rgba(15,23,42,0.12); border-radius: 3px; }
+
+/* میکروتکستِ ضدِ تقلب: نوارِ نازکِ سریال، جدا از جریانِ فلکس — دقیقاً روی لبهٔ پایینِ کارت */
+.idc-microtext {
+  position: absolute;
+  left: 12px; right: 12px; bottom: 3px;
+  z-index: 3;
+  font-size: 5.5px;
+  letter-spacing: 1.2px;
+  color: rgba(15, 23, 42, 0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* ---------- پشتِ کارت ---------- */
+.idc-card-back .idc-content { padding: 10px 12px; }
+.idc-back-head {
+  font-size: 11px; font-weight: 800; color: #fff;
+  background: linear-gradient(135deg, var(--idc-accent, #0d9488), var(--idc-accent-dark, #0f3d3a));
+  margin: -10px -12px 8px; padding: 6px 12px;
+}
+.idc-rules { margin: 0 0 5px; padding-inline-start: 16px; font-size: 8px; line-height: 1.4; color: #334155; }
+.idc-rules li { margin-bottom: 1px; }
+/* سه ردیفِ همتراز و تمام‌عرض — قبلاً دو تای اول در یک شبکهٔ دو‌ستونه فشرده می‌شدند
+   و مقدار (nowrap+ellipsis) می‌برید؛ حالا هرکدام عرضِ کامل دارد و مقدار می‌تواند
+   بشکند، تا تاریخِ تولد کامل بماند و آدرسِ طولانی سرریز نکند.
+   زمینهٔ سفیدِ کدر که قبلاً این‌جا بود، دقیقاً همین سه ردیف را از واترمارک بیرون
+   می‌برد (یک تکه‌ی صاف روی کارت که واترمارک ازش رد نمی‌شد) — به‌جایش حالا فقط
+   یک هالهٔ نرمِ سفید دورِ خودِ حروف است (text-shadow)، تا واترمارک زیرِ متن هم
+   دیده شود ولی نوشته هنوز روی آن خوانا بماند. */
+.idc-back-grid { display: flex; flex-direction: column; gap: 3px; font-size: 9px; margin-bottom: 6px; }
+.idc-back-grid > div { display: flex; gap: 5px; align-items: baseline; }
+.idc-back-grid .idc-k,
+.idc-back-grid .idc-v {
+  text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 0 5px rgba(255, 255, 255, 0.8);
+}
+.idc-back-grid .idc-k { flex: 0 0 60px; color: #334155; font-weight: 600; }
+.idc-back-grid .idc-v {
+  flex: 1 1 auto;
+  color: #0f172a;
+  font-weight: 700;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  line-height: 1.35;
+}
+.idc-back-foot { display: flex; align-items: center; justify-content: space-between; margin-top: auto; }
+.idc-stamp {
+  width: 60px; height: 60px; border-radius: 50%;
+  border: 1.5px dashed rgba(15, 23, 42, 0.3); color: #64748b;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; text-align: center;
+}
+
+/* ---------- چیدمانِ ورقِ A4 برای چاپِ دسته‌جمعی (۲×۵ = ۱۰ کارت) ---------- */
+.idc-sheet {
+  width: 190mm;
+  margin: 0 auto;
+  padding: 8mm;
+  background: #fff;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.2);
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6mm;
+  justify-items: center;
+}
+.idc-sheet-cell { outline: 1px dashed #cbd5e1; outline-offset: 4px; page-break-inside: avoid; break-inside: avoid; }
+/* روی ورقِ چاپ، کارت‌ها صاف می‌مانند (بدون کجیِ سه‌بعدی) تا مستطیلِ دقیق بریده شوند. */
+.idc-sheet .idc-card {
+  box-shadow: 0 6px 16px rgba(0,0,0,0.18);
+  border-radius: 12px;
+  transform: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.86)),
+    linear-gradient(135deg, color-mix(in srgb, var(--idc-accent, #0d9488) 16%, transparent), transparent 60%);
+}
+.idc-sheet .idc-holo, .idc-sheet .idc-glare { display: none; }
+
+/* ---------- چاپ ---------- */
+@page { size: A4 portrait; margin: 6mm; }
+
+@media print {
+  html, body {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+  .idc-print, .idc-print * { visibility: visible !important; }
+  .idc-print, .idc-print * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  header.site-header, .site-header, .topbar, footer, .site-footer, .app-footer, .route-loading {
+    display: none !important;
+  }
+  .idc-print { background: #fff; padding: 0; }
+  .no-print { display: none !important; }
+  .idc-stage { padding: 0; }
+  .idc-card { transform: none !important; }
+  .idc-holo { animation: none !important; opacity: 0.5; }
+  .idc-glare { display: none; }
+  .idc-sheet { box-shadow: none; margin: 0; width: auto; }
+}

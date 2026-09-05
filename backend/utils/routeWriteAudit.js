@@ -40,6 +40,7 @@ function extractRequestTargetId(req = {}, body = null) {
     req?.params?.ruleId,
     req?.params?.studentId,
     req?.params?.teacherId,
+    req?.params?.ownerId,
     req?.params?.schoolId,
     req?.params?.entryId,
     req?.params?.configId,

@@ -23,21 +23,29 @@ const LEGACY_PERMISSION_MAP = Object.freeze({
     'schools.manage',
     'schools.create',
     'schools.edit',
-    'schools.documents.manage'
+    'schools.documents.manage',
+    'id_cards.manage',
+    'sawaneh.card.view',
+    'sawaneh.card.edit',
+    'sawaneh.card.supervisor_remark',
+    'sawaneh.card.name_correction',
+    'sawaneh.card.separation'
   ],
   manage_enrollments: [
     'students.register',
     'enrollments.online.manage',
     'enrollments.manage',
     'enrollments.detail.view',
-    'enrollments.print'
+    'enrollments.print',
+    'sawaneh.card.view'
   ],
   manage_memberships: [
     'education.memberships.manage',
     'students.lifecycle.view',
     'students.lifecycle.manage',
     'students.transfers.manage',
-    'education.promotions.manage'
+    'education.promotions.manage',
+    'sawaneh.card.separation'
   ],
   manage_finance: [
     'finance.center.manage',
@@ -90,7 +98,15 @@ const LEGACY_PERMISSION_MAP = Object.freeze({
     'settings.general.manage',
     'settings.student_ids.manage',
     'settings.brand.manage',
-    'settings.academic.manage'
+    'settings.academic.manage',
+    'id_cards.manage',
+    'sawaneh.card.view',
+    'sawaneh.card.edit',
+    'sawaneh.card.supervisor_remark',
+    'sawaneh.transcript.view',
+    'sawaneh.transcript.build',
+    'sawaneh.transcript.finalize',
+    'sawaneh.transcript.lock'
   ],
   view_reports: [
     'dashboard.view',
@@ -111,7 +127,9 @@ const LEGACY_PERMISSION_MAP = Object.freeze({
     'schools.dashboard.view',
     'schools.map.view',
     'schools.reports.view',
-    'schools.province_stats.view'
+    'schools.province_stats.view',
+    'sawaneh.card.view',
+    'sawaneh.transcript.view'
   ],
   view_schedule: [
     'timetable.view',
@@ -138,39 +156,16 @@ const LEGACY_PERMISSION_MAP = Object.freeze({
   ],
   manage_platform_requests: [
     'content.contacts.manage'
-  ],
-  // پروندهٔ سوانح شاگرد (مکاتب افغانستان) — دارندگان permissionهای زیر خودکار مجازند
-  'sawaneh.card.view': [
-    'manage_content', 'manage_users', 'manage_enrollments',
-    'students.profile.view', 'students.manage', 'education.core.manage',
-    'schools.reports.view', 'teachers.dashboard.access'
-  ],
-  'sawaneh.card.edit': [
-    'manage_content', 'manage_users', 'students.manage', 'education.core.manage'
-  ],
-  'sawaneh.card.supervisor_remark': [
-    'manage_content', 'education.core.manage', 'education.exams.manage',
-    'teachers.dashboard.access'
-  ],
-  'sawaneh.card.name_correction': [
-    'manage_users', 'students.manage'
-  ],
-  'sawaneh.card.separation': [
-    'manage_users', 'students.transfers.manage', 'students.lifecycle.manage'
-  ],
-  'sawaneh.transcript.view': [
-    'manage_content', 'grades.detail.view', 'education.result_tables.manage',
-    'reports.students.view', 'teachers.dashboard.access'
-  ],
-  'sawaneh.transcript.build': [
-    'manage_content', 'education.exams.manage', 'education.result_tables.manage'
-  ],
-  'sawaneh.transcript.finalize': [
-    'manage_content', 'education.result_tables.manage'
-  ],
-  'sawaneh.transcript.lock': [
-    'manage_content', 'settings.academic.manage'
   ]
+  // پروندهٔ سوانح شاگرد (مکاتب افغانستان): پیش‌تر این‌جا یک بلوکِ معکوس بود — هر
+  // sawaneh.* خودش یک کلید بود که فهرستِ «چه چیزی راضی‌اش می‌کند» را نگه می‌داشت
+  // (شاملِ چند granular-permission ریز مثلِ education.core.manage/students.manage
+  // که خودشان هم آیتم‌هایِ مجازِ مستقل‌اند). آن شکل با الگویِ بقیهٔ این نقشه
+  // (umbrella → granular) ناسازگار بود و checkPermissionCatalogSync.js را رد
+  // می‌کرد. رابطه‌هایِ واقعاً استفاده‌شده (manage_content/manage_users/
+  // manage_enrollments/manage_memberships/view_reports) به آرایه‌هایِ همان
+  // umbrellaها بالا اضافه شدند؛ مجوزهایِ ریزِ اضافه (که کسی معمولاً بدونِ
+  // umbrellaشان نمی‌گیرد) حذف شدند تا هردو فایل دوباره هم‌خوان بمانند.
 });
 
 const PERMISSION_GROUPS = Object.freeze([
@@ -374,6 +369,12 @@ const PERMISSION_GROUPS = Object.freeze([
       'sawaneh.transcript.build',
       'sawaneh.transcript.finalize',
       'sawaneh.transcript.lock'
+    ]
+  },
+  {
+    key: 'id_cards',
+    permissions: [
+      'id_cards.manage'
     ]
   }
 ]);
