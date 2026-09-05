@@ -1,0 +1,114 @@
+/* مدیریتِ کارت‌های هویت — هم‌خانواده با SchoolStaffList.css (همان زبانِ بصری). */
+
+.idm-page {
+  --idm-ink: #102033;
+  --idm-muted: #64748b;
+  --idm-primary: #0f766e;
+  --idm-primary-strong: #115e59;
+  --idm-border: rgba(15, 118, 110, 0.18);
+  --idm-danger: #dc2626;
+  --idm-warn: #b45309;
+
+  direction: rtl;
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  padding: 32px 20px 60px;
+  font-family: "Vazirmatn", "B Zar", "B Mitra", "Noto Naskh Arabic", Tahoma, sans-serif;
+  color: var(--idm-ink);
+}
+
+.idm-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 16% 18%, rgba(20, 184, 166, 0.16), transparent 30%),
+    radial-gradient(circle at 84% 10%, rgba(29, 78, 216, 0.12), transparent 28%),
+    linear-gradient(135deg, #eefcf8 0%, #f8fafc 45%, #edf5ff 100%);
+}
+
+.idm-page * { box-sizing: border-box; }
+.idm-inner { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+
+.idm-hero {
+  border-radius: 26px;
+  padding: 24px 28px;
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, rgba(15, 118, 110, 0.96), rgba(22, 78, 99, 0.92)),
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.22), transparent 36%);
+  box-shadow: 0 22px 60px rgba(15, 23, 42, 0.18);
+}
+.idm-hero-text h1 { margin: 0 0 4px; font-size: 21px; font-weight: 900; color: #fff; }
+.idm-hero-text p { margin: 0; font-size: 13px; color: rgba(255, 255, 255, 0.82); line-height: 1.8; max-width: 620px; }
+
+.idm-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.idm-kpi { background: rgba(255, 255, 255, 0.92); border-radius: 16px; padding: 14px 16px; border: 1px solid var(--idm-border); }
+.idm-kpi-label { font-size: 11.5px; color: var(--idm-muted); margin-bottom: 4px; }
+.idm-kpi-value { font-size: 20px; font-weight: 900; color: var(--idm-primary-strong); }
+
+.idm-tabs { display: flex; gap: 8px; }
+.idm-tab {
+  width: auto;
+  padding: 9px 20px; border-radius: 999px; border: 1.5px solid var(--idm-primary);
+  background: #fff; color: var(--idm-primary); font-family: inherit; font-weight: 800;
+  font-size: 13px; cursor: pointer;
+}
+.idm-tab-active { background: var(--idm-primary); color: #fff; }
+
+.idm-card { background: rgba(255, 255, 255, 0.92); border-radius: 20px; padding: 18px 20px; border: 1px solid var(--idm-border); box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06); }
+
+.idm-toolbar-form { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.idm-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--idm-muted); }
+.idm-field input, .idm-field select {
+  padding: 8px 10px; border-radius: 10px; border: 1px solid #cbd5e1; font: inherit; font-size: 13px; min-width: 140px;
+}
+.idm-btn-search { width: auto; padding: 9px 20px; border-radius: 10px; border: none; background: var(--idm-primary); color: #fff; font-weight: 800; font-size: 13px; cursor: pointer; height: fit-content; }
+
+.idm-error { background: #fef2f2; color: var(--idm-danger); padding: 10px 14px; border-radius: 10px; margin-bottom: 12px; font-size: 13px; }
+
+.idm-actions { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; font-size: 13px; color: var(--idm-muted); }
+.idm-actions button { width: auto; padding: 8px 18px; border-radius: 10px; border: none; background: var(--idm-primary-strong); color: #fff; font-weight: 700; font-size: 13px; cursor: pointer; }
+.idm-actions button:disabled { background: #cbd5e1; cursor: not-allowed; }
+
+.idm-table-wrap { overflow-x: auto; }
+.idm-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.idm-table th { text-align: right; padding: 10px 8px; color: var(--idm-muted); font-weight: 700; border-bottom: 2px solid var(--idm-border); white-space: nowrap; }
+.idm-table td { padding: 10px 8px; border-bottom: 1px solid #eef2f6; white-space: nowrap; }
+.idm-table-empty { text-align: center; color: var(--idm-muted); padding: 24px !important; }
+.idm-name-cell { font-weight: 700; }
+.idm-row-actions { display: flex; gap: 6px; }
+.idm-row-actions button {
+  width: auto;
+  padding: 6px 12px; border-radius: 8px; border: 1px solid var(--idm-primary); background: #fff;
+  color: var(--idm-primary); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+
+.idm-badge { display: inline-block; padding: 3px 12px; border-radius: 999px; font-size: 11.5px; font-weight: 800; }
+.idm-badge-missing { background: #f1f5f9; color: #64748b; }
+.idm-badge-active { background: #dcfce7; color: #15803d; }
+.idm-badge-warn { background: #fef3c7; color: var(--idm-warn); }
+.idm-badge-danger { background: #fee2e2; color: var(--idm-danger); }
+
+/* ---------- مودالِ ویرایش ---------- */
+.idm-modal-overlay {
+  position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); z-index: 50;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.idm-modal {
+  background: #fff; border-radius: 18px; padding: 22px 24px; max-width: 420px; width: 100%;
+  max-height: 90vh; overflow-y: auto; box-shadow: 0 30px 60px rgba(0, 0, 0, 0.3);
+}
+.idm-modal h2 { margin: 0 0 4px; font-size: 16px; }
+.idm-modal-serial { margin: 0 0 14px; font-size: 12px; color: var(--idm-muted); }
+.idm-modal-field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--idm-muted); margin-bottom: 10px; }
+.idm-modal-field input, .idm-modal-field select, .idm-modal-field textarea {
+  padding: 8px 10px; border-radius: 10px; border: 1px solid #cbd5e1; font: inherit; font-size: 13px; color: var(--idm-ink);
+}
+.idm-modal-buttons { display: flex; gap: 8px; margin-top: 6px; }
+.idm-modal-buttons button { width: auto; padding: 8px 18px; border-radius: 10px; border: 1px solid #cbd5e1; background: #fff; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.idm-btn-primary { background: var(--idm-primary) !important; color: #fff !important; border-color: var(--idm-primary) !important; }
+.idm-btn-danger { background: var(--idm-danger) !important; color: #fff !important; border-color: var(--idm-danger) !important; }
+.idm-modal-hint { font-size: 12px; color: var(--idm-muted); margin: 12px 0 6px; }

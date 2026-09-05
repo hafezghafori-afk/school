@@ -23,7 +23,8 @@ const LEGACY_PERMISSION_MAP = Object.freeze({
     'schools.manage',
     'schools.create',
     'schools.edit',
-    'schools.documents.manage'
+    'schools.documents.manage',
+    'id_cards.manage'
   ],
   manage_enrollments: [
     'students.register',
@@ -90,7 +91,8 @@ const LEGACY_PERMISSION_MAP = Object.freeze({
     'settings.general.manage',
     'settings.student_ids.manage',
     'settings.brand.manage',
-    'settings.academic.manage'
+    'settings.academic.manage',
+    'id_cards.manage'
   ],
   view_reports: [
     'dashboard.view',
@@ -374,6 +376,12 @@ const PERMISSION_GROUPS = Object.freeze([
       'sawaneh.transcript.build',
       'sawaneh.transcript.finalize',
       'sawaneh.transcript.lock'
+    ]
+  },
+  {
+    key: 'id_cards',
+    permissions: [
+      'id_cards.manage'
     ]
   }
 ]);

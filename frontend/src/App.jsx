@@ -21,6 +21,9 @@ const AfghanSchoolManagement = lazy(() => import('./pages/AfghanSchoolManagement
 const AfghanReports = lazy(() => import('./pages/AfghanReports'));
 const SawanehWorkspace = lazy(() => import('./pages/SawanehWorkspace'));
 const SawanehPrint = lazy(() => import('./pages/SawanehPrint'));
+const IdCardPrint = lazy(() => import('./pages/IdCardPrint'));
+const IdCardManager = lazy(() => import('./pages/IdCardManager'));
+const IdCardDesignPreview = lazy(() => import('./pages/IdCardDesignPreview'));
 const SawanehReports = lazy(() => import('./pages/SawanehReports'));
 const SawanehDashboard = lazy(() => import('./pages/SawanehDashboard'));
 const CourseList = lazy(() => import('./pages/CourseList'));
@@ -1189,6 +1192,7 @@ function AppShell() {
     path === '/student-registration' ||
     /^\/teacher-registration(?:\/|$)/.test(path) ||
     path === '/school-staff' ||
+    path === '/id-cards' ||
     path === '/online-registrations' ||
     /^\/student-management(?:\/|$)/.test(path)
   );
@@ -3331,6 +3335,9 @@ function AppShell() {
             <Route path="/afghan-sawaneh/reports" element={<SawanehReports />} />
             <Route path="/afghan-sawaneh/:studentId" element={<SawanehWorkspace />} />
             <Route path="/afghan-sawaneh/:studentId/print" element={<SawanehPrint />} />
+            <Route path="/id-cards/preview" element={<IdCardDesignPreview />} />
+            <Route path="/id-cards" element={adminRoute(['id_cards.manage'], <IdCardManager />, 'دسترسی به کارت‌های هویت برای این حساب فعال نیست.')} />
+            <Route path="/id-cards/print" element={adminRoute(['id_cards.manage'], <IdCardPrint />, 'دسترسی به چاپِ کارتِ هویت برای این حساب فعال نیست.')} />
             <Route path="/login-modern" element={<Navigate to="/login" replace />} />
             <Route path="/login-demo" element={<Navigate to="/login" replace />} />
             <Route path="/login-showcase" element={<Navigate to="/login" replace />} />

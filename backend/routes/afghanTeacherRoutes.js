@@ -1,11 +1,13 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const fs = require('fs');
+const path = require('path');
 const multer = require('multer');
 const AfghanTeacher = require('../models/AfghanTeacher');
 const AfghanSchool = require('../models/AfghanSchool');
 const StaffAdvance = require('../models/StaffAdvance');
 const { requireFields } = require('../middleware/validate');
-const { optionalAuth } = require('../middleware/auth');
+const { optionalAuth, requireAuth, requirePermission } = require('../middleware/auth');
 const { buildTemplateWorkbook, parseStaffWorkbook } = require('../services/staffImportService');
 const { ok, fail } = require('../utils/response');
 const { logActivity } = require('../utils/activity');
@@ -28,6 +30,28 @@ const actorId = (req) => (mongoose.Types.ObjectId.isValid(req.user?.id) ? req.us
 // first (JSON.stringify only calls a Document's toJSON when it is nested, not
 // when its own properties are spread onto another object).
 const serializeTeacher = (doc) => (doc && typeof doc.toObject === 'function' ? doc.toObject({ virtuals: true }) : doc);
+
+// آپلودِ عکسِ استاد/کارمند — برای کارتِ هویت. همان الگویِ multer که برایِ اسنادِ
+// شاگرد در afghanStudentRoutes.js هست؛ این فایل عمداً requireAuth ندارد (سازگاریِ
+// قدیمی)، اما این روتِ تازه صریحاً گیت شده چون فایل روی دیسک می‌نویسد.
+const teacherUploadDir = path.join(__dirname, '..', 'uploads', 'afghan-teachers');
+if (!fs.existsSync(teacherUploadDir)) {
+  fs.mkdirSync(teacherUploadDir, { recursive: true });
+}
+const teacherPhotoUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, teacherUploadDir),
+    filename: (_req, file, cb) => {
+      const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '-');
+      cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}-${safeName}`);
+    }
+  }),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = new Set(['image/jpeg', 'image/png']);
+    cb(allowed.has(file.mimetype) ? null : new Error('invalid_teacher_photo_type'), allowed.has(file.mimetype));
+  }
+});
 
 // Helper functions
 const calculateAge = (birthDate) => {
@@ -392,6 +416,39 @@ router.patch('/:id/status', async (req, res) => {
     }
     return fail(res, 'Failed to update teacher status', 500);
   }
+});
+
+// POST /api/afghan-teachers/:id/photo - عکسِ استاد/کارمند (برای کارتِ هویت)
+router.post('/:id/photo', requireAuth, requirePermission('id_cards.manage'), (req, res) => {
+  teacherPhotoUpload.single('photo')(req, res, async (uploadError) => {
+    if (uploadError) {
+      const message = uploadError.message === 'invalid_teacher_photo_type'
+        ? 'نوعِ فایل معتبر نیست. فقط JPG و PNG پذیرفته می‌شود.'
+        : 'آپلودِ عکس ناموفق بود.';
+      return fail(res, message, 400);
+    }
+    try {
+      if (!req.file) return fail(res, 'فایلِ عکس انتخاب نشده است.', 400);
+      const teacher = await AfghanTeacher.findById(req.params.id);
+      if (!teacher) return fail(res, 'کارمند پیدا نشد.', 404);
+
+      teacher.documents = (teacher.documents || []).filter((d) => d?.type !== 'photo');
+      teacher.documents.push({
+        type: 'photo',
+        title: 'عکس کارمند',
+        url: `uploads/afghan-teachers/${req.file.filename}`,
+        uploadDate: new Date(),
+        verified: false
+      });
+      teacher.lastUpdatedBy = actorId(req) || teacher.lastUpdatedBy;
+      await teacher.save();
+
+      return ok(res, { teacher: serializeTeacher(teacher) }, 'عکس ثبت شد.');
+    } catch (error) {
+      console.error('Upload Teacher Photo Error:', error);
+      return fail(res, 'آپلودِ عکس ناموفق بود.', 500);
+    }
+  });
 });
 
 // DELETE /api/afghan-teachers/:id - Delete teacher
