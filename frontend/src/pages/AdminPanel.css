@@ -576,7 +576,7 @@ a.admin-modern-list-item:hover {
 
 .admin-modern-management-tabs {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-bottom: 16px;
@@ -787,6 +787,24 @@ a.admin-modern-list-item:hover {
   font-style: normal;
   font-size: 12px;
   font-weight: 900;
+}
+
+.admin-modern-management-card__actions {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.admin-modern-management-card__actions a {
+  width: 100%;
+  text-align: center;
+}
+
+.admin-modern-management-card__secondary {
+  background: transparent;
+  border-color: rgba(94, 234, 212, 0.35);
+  color: #5eead4;
 }
 
 .admin-modern-schools {

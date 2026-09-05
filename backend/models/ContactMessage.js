@@ -16,7 +16,16 @@ const contactMessageSchema = new mongoose.Schema({
     centerType: { type: String, default: '' },
     neededModules: { type: [String], default: [] }
   },
-  status: { type: String, enum: ['new', 'read'], default: 'new' },
+  status: { type: String, enum: ['new', 'read', 'archived'], default: 'new' },
+  replies: {
+    type: [{
+      subject: { type: String, default: '' },
+      body: { type: String, required: true },
+      sentBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+      sentAt: { type: Date, default: Date.now }
+    }],
+    default: []
+  },
   followUp: {
     assignedLevel: {
       type: String,

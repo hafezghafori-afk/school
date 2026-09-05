@@ -7,11 +7,15 @@ const { normalizeAdminLevel } = require('../utils/permissions');
 const { resolveAdminOrgRole } = require('../utils/userRole');
 const { logActivity } = require('../utils/activity');
 const { sendMail } = require('../utils/mailer');
-const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
+const { requireAuth, requireRole, requireAnyPermission } = require('../middleware/auth');
 
 const router = express.Router();
 const FOLLOW_UP_LEVELS = ['finance_manager', 'finance_lead', 'general_president'];
 const FOLLOW_UP_STATUSES = ['new', 'in_progress', 'on_hold', 'escalated', 'resolved'];
+
+// مرکزِ ارتباطات برای همان سطوحی باز است که به کاربران/استادان/مالی دسترسی
+// دارند — نه فقط general_president (که قبلاً تنها دارندهٔ manage_platform_requests بود).
+const commsGuard = [requireAuth, requireRole(['admin']), requireAnyPermission(['content.contacts.manage', 'manage_platform_requests', 'manage_finance', 'manage_users', 'teachers.manage'])];
 
 const normalizeFollowUpLevel = (value = '', fallback = 'finance_manager') => {
   const normalized = normalizeAdminLevel(value || fallback);
@@ -136,7 +140,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-router.get('/admin', requireAuth, requireRole(['admin']), requirePermission('manage_platform_requests'), async (req, res) => {
+router.get('/admin', ...commsGuard, async (req, res) => {
   try {
     const items = await ContactMessage.find()
       .populate('followUp.updatedBy', 'name orgRole adminLevel')
@@ -148,7 +152,7 @@ router.get('/admin', requireAuth, requireRole(['admin']), requirePermission('man
   }
 });
 
-router.put('/:id/read', requireAuth, requireRole(['admin']), requirePermission('manage_platform_requests'), async (req, res) => {
+router.put('/:id/read', ...commsGuard, async (req, res) => {
   try {
     const item = await ContactMessage.findByIdAndUpdate(req.params.id, { status: 'read' }, { new: true });
     if (!item) return res.status(404).json({ success: false, message: 'پیام یافت نشد' });
@@ -158,7 +162,55 @@ router.put('/:id/read', requireAuth, requireRole(['admin']), requirePermission('
   }
 });
 
-router.put('/:id/follow-up', requireAuth, requireRole(['admin']), requirePermission('manage_platform_requests'), async (req, res) => {
+// بایگانی — جایگزینِ حذفِ واقعی برای استفادهٔ روزمره؛ چیزی پاک نمی‌شود.
+router.put('/:id/archive', ...commsGuard, async (req, res) => {
+  try {
+    const item = await ContactMessage.findByIdAndUpdate(req.params.id, { status: 'archived' }, { new: true });
+    if (!item) return res.status(404).json({ success: false, message: 'پیام یافت نشد' });
+    await logActivity({ req, action: 'contact_archive', targetType: 'ContactMessage', targetId: item._id.toString() });
+    res.json({ success: true, item });
+  } catch {
+    res.status(500).json({ success: false, message: 'خطا در بایگانیِ پیام' });
+  }
+});
+
+router.put('/:id/unarchive', ...commsGuard, async (req, res) => {
+  try {
+    const item = await ContactMessage.findByIdAndUpdate(req.params.id, { status: 'read' }, { new: true });
+    if (!item) return res.status(404).json({ success: false, message: 'پیام یافت نشد' });
+    res.json({ success: true, item });
+  } catch {
+    res.status(500).json({ success: false, message: 'خطا در بازگردانیِ پیام' });
+  }
+});
+
+// پاسخ به فرستنده — ایمیلِ خروجی، در پروندهٔ همان پیام هم ثبت می‌شود.
+router.post('/:id/reply', ...commsGuard, async (req, res) => {
+  try {
+    const item = await ContactMessage.findById(req.params.id);
+    if (!item) return res.status(404).json({ success: false, message: 'پیام یافت نشد' });
+    if (!item.email) return res.status(400).json({ success: false, message: 'این پیام ایمیلی برای پاسخ ندارد.' });
+
+    const body = String(req.body?.body || '').trim();
+    if (!body) return res.status(400).json({ success: false, message: 'متنِ پاسخ الزامی است.' });
+    const subject = String(req.body?.subject || '').trim() || 'پاسخ به پیامِ شما';
+
+    const result = await sendMail({ to: item.email, subject, text: body, html: `<p>${body.replace(/\n/g, '<br/>')}</p>` });
+    if (!result?.ok) return res.status(502).json({ success: false, message: result?.message || 'ارسالِ ایمیل ناموفق بود.' });
+
+    item.replies = [...(item.replies || []), { subject, body, sentBy: req.user.id, sentAt: new Date() }];
+    if (item.status === 'new') item.status = 'read';
+    await item.save();
+
+    await logActivity({ req, action: 'contact_reply', targetType: 'ContactMessage', targetId: item._id.toString() });
+    res.json({ success: true, item });
+  } catch (error) {
+    console.error('contact reply error:', error?.message || error);
+    res.status(500).json({ success: false, message: 'ارسالِ پاسخ ناموفق بود.' });
+  }
+});
+
+router.put('/:id/follow-up', ...commsGuard, async (req, res) => {
   try {
     const item = await ContactMessage.findById(req.params.id);
     if (!item) return res.status(404).json({ success: false, message: 'پیام یافت نشد' });
@@ -216,7 +268,7 @@ router.put('/:id/follow-up', requireAuth, requireRole(['admin']), requirePermiss
   }
 });
 
-router.delete('/:id', requireAuth, requireRole(['admin']), requirePermission('manage_platform_requests'), async (req, res) => {
+router.delete('/:id', ...commsGuard, async (req, res) => {
   try {
     const item = await ContactMessage.findByIdAndDelete(req.params.id);
     if (!item) return res.status(404).json({ success: false, message: 'پیام یافت نشد' });

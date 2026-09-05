@@ -35,7 +35,7 @@ const AdminReports = lazy(() => import('./pages/AdminReports'));
 const CourseDetails = lazy(() => import('./pages/CourseDetails'));
 const InstructorPanel = lazy(() => import('./pages/InstructorPanel'));
 const InstructorPanelInline = lazy(() => import('./pages/InstructorPanelInline'));
-const AdminNotifications = lazy(() => import('./pages/AdminNotifications'));
+const AdminCommunications = lazy(() => import('./pages/AdminCommunications'));
 const Profile = lazy(() => import('./pages/Profile'));
 const QuizBuilder = lazy(() => import('./pages/QuizBuilder'));
 const GradeDetails = lazy(() => import('./pages/GradeDetails'));
@@ -65,7 +65,6 @@ const About = lazy(() => import('./pages/About'));
 const Contact = lazy(() => import('./pages/Contact'));
 const AdminNews = lazy(() => import('./pages/AdminNews'));
 const AdminGallery = lazy(() => import('./pages/AdminGallery'));
-const AdminContact = lazy(() => import('./pages/AdminContact'));
 const AdminEnrollments = lazy(() => import('./pages/AdminEnrollments'));
 const AdminEnrollmentDetail = lazy(() => import('./pages/AdminEnrollmentDetail'));
 const AdminEnrollmentPrint = lazy(() => import('./pages/AdminEnrollmentPrint'));
@@ -137,7 +136,7 @@ const routePrefetchers = {
   adminUsers: () => import('./pages/AdminUsers'),
   adminNews: () => import('./pages/AdminNews'),
   adminGallery: () => import('./pages/AdminGallery'),
-  adminContact: () => import('./pages/AdminContact'),
+  adminContact: () => import('./pages/AdminCommunications'),
   adminEnrollments: () => import('./pages/AdminEnrollments'),
   adminStats: () => import('./pages/AdminStats'),
   adminReports: () => import('./pages/AdminReports'),
@@ -205,6 +204,7 @@ const routePrefetchersByPath = {
   '/admin-news': routePrefetchers.adminNews,
   '/admin-gallery': routePrefetchers.adminGallery,
   '/admin-contact': routePrefetchers.adminContact,
+  '/admin-communications': routePrefetchers.adminContact,
   '/admin-enrollments': routePrefetchers.adminEnrollments,
   '/admin-stats': routePrefetchers.adminReports,
   '/admin-reports': routePrefetchers.adminReports,
@@ -3370,10 +3370,8 @@ function AppShell() {
               path="/instructor-inline"
               element={contentRoute(<InstructorPanelInline />, '\u062f\u0633\u062a\u0631\u0633\u06cc \u0633\u0627\u0632\u0646\u062f\u0647 \u0622\u0632\u0645\u0648\u0646 \u0628\u0631\u0627\u06cc \u0627\u06cc\u0646 \u062d\u0633\u0627\u0628 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a.')}
             />
-            <Route
-              path="/admin-notifications"
-              element={adminRoute('manage_finance', <AdminNotifications />, 'دسترسی مدیریت اعلان‌های مالی برای این حساب فعال نیست.')}
-            />
+            {/* «مرکز ارتباطات» جای این صفحه را گرفته — این آدرس مستقیم به تبِ اعلانِ همگانی هدایت می‌شود. */}
+            <Route path="/admin-notifications" element={<Navigate to="/admin-communications?tab=announce" replace />} />
             <Route
               path="/admin-users"
               element={adminRoute(['users.manage', 'users.access_requests.manage', 'users.profile_requests.manage'], <AdminUsers />, 'دسترسی مدیریت کاربران برای این حساب فعال نیست.')}
@@ -3386,13 +3384,16 @@ function AppShell() {
               path="/admin-gallery"
               element={adminRoute('content.gallery.manage', <AdminGallery />, 'دسترسی مدیریت گالری برای این حساب فعال نیست.')}
             />
+            {/* «مرکز ارتباطات» — صندوقِ ورودیِ سایت + اعلانِ همگانی + وظایف + بایگانی.
+                همان ۵ سطحی که به کارکنان/مالی/شاگردان دسترسی دارند اینجا را هم می‌بینند؛
+                ترکیب‌وارسالِ اعلان/وظیفه داخلِ خودِ صفحه به adminMessageService.SEND_LEVELS محدود است. */}
             <Route
               path="/admin-contact"
-              element={adminRoute('content.contacts.manage', <AdminContact />, 'دسترسی مرکز ارتباطات سیما برای این حساب فعال نیست.')}
+              element={adminRoute(['content.contacts.manage', 'manage_finance', 'manage_users', 'teachers.manage'], <AdminCommunications />, 'دسترسی مرکز ارتباطات برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-communications"
-              element={adminRoute('content.contacts.manage', <AdminContact />, 'دسترسی مرکز ارتباطات سیما برای این حساب فعال نیست.')}
+              element={adminRoute(['content.contacts.manage', 'manage_finance', 'manage_users', 'teachers.manage'], <AdminCommunications />, 'دسترسی مرکز ارتباطات برای این حساب فعال نیست.')}
             />
             <Route
               path="/admin-enrollments"

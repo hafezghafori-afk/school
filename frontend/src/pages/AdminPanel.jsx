@@ -243,19 +243,23 @@ const ADMIN_LEVEL_LABELS = {
 // ریاست عمومی به همه گروه‌ها دسترسی دارد (null = بدون فیلتر).
 const ADMIN_LEVEL_GROUP_ACCESS = {
   general_president: null,
-  // «ساختار مکتب» فقط شامل کارت «مکاتب» (ایجاد/تعویض مکتب در سیستم چندمکتبه) است — مخصوص ریاست
-  // عمومی؛ مدیر یک مکتب نباید بتواند مکتب جدید بسازد یا بین مکاتب دیگر جابه‌جا شود.
-  school_manager: new Set(['ثبت‌نام و شاگردان', 'کاربران و دسترسی', 'سیستم و تنظیمات', 'گزارش مالی', 'کارکنان مکتب', 'ثبتِ کارکنان']),
-  // مدیر تدریسی/سر معلم واقعاً صلاحیت ثبت‌نام، تبدیلی، ارتقای صنف و مدیریت شاگردان را دارند
-  // (students.manage, students.transfers.manage, education.promotions.manage, manage_enrollments...)
-  // پس باید گروه «ثبت‌نام و شاگردان» را هم ببینند، نه فقط «آموزش و برنامه». همچنین طبق R2 اجازهٔ
-  // ثبت استاد را دارند، پس «کارکنان مکتب»/«ثبتِ کارکنان» هم برایشان باز است (فرم خودش سمت‌ها را به «استاد» محدود می‌کند).
-  academic_manager: new Set(['آموزش و برنامه', 'ثبت‌نام و شاگردان', 'کارکنان مکتب', 'ثبتِ کارکنان']),
-  head_teacher: new Set(['آموزش و برنامه', 'ثبت‌نام و شاگردان', 'کارکنان مکتب', 'ثبتِ کارکنان']),
-  // مدیریتِ مالی فقط فهرستِ کارکنان را می‌بیند (برای ویرایشِ بخشِ مالیِ یک پروندهٔ
-  // موجود) — گروهِ «ثبتِ کارکنان» عمداً اینجا نیست، چون حقِ ساختِ پروندهٔ تازه ندارند.
-  finance_manager: new Set(['مالی', 'گزارش مالی', 'کارکنان مکتب']),
-  finance_lead: new Set(['مالی', 'گزارش مالی', 'کارکنان مکتب'])
+  // نامِ گروه‌ها با modernManagementSections یکی است (۶ گروه). این صافی فقط تعیین می‌کند
+  // کدام تب نمایش داده شود؛ اگر پستی به هیچ کارتِ قابلِ‌دسترسِ یک گروه `to` نداشته باشد،
+  // آن تب به‌صورتِ خودکار حذف می‌شود (roleManagementGroups). پس دادنِ نامِ یک گروه اینجا
+  // دسترسیِ تازه‌ای اضافه نمی‌کند — فقط تبِ مربوط را از حالتِ پنهان درمی‌آورد.
+  // «مکتب، کاربران و تنظیمات» شاملِ کارتِ «لیست و مدیریت مکاتب» هم هست (ایجاد/تعویضِ مکتب
+  // مخصوصِ ریاست عمومی است و با `to`/`onAction` خودِ کارت کنترل می‌شود، نه با این صافی).
+  school_manager: new Set(['ثبت‌نام و شاگردان', 'مکتب، کاربران و تنظیمات', 'گزارش‌ها و لاگ‌ها', 'ارتباطات']),
+  // مدیر تدریسی/سر معلم صلاحیتِ ثبت‌نام، تبدیلی، ارتقای صنف و مدیریت شاگردان را دارند و
+  // طبق R2 حقِ ثبتِ استاد را هم دارند (فرم خودش سمت‌ها را به «استاد» محدود می‌کند)، پس
+  // «ثبت‌نام و شاگردان» و «مکتب، کاربران و تنظیمات» (فهرست/ثبتِ کارکنان و کارتِ هویت) هم باز است.
+  academic_manager: new Set(['آموزش و برنامه', 'ثبت‌نام و شاگردان', 'مکتب، کاربران و تنظیمات', 'ارتباطات']),
+  head_teacher: new Set(['آموزش و برنامه', 'ثبت‌نام و شاگردان', 'مکتب، کاربران و تنظیمات', 'ارتباطات']),
+  // مدیریتِ مالی فهرستِ کارکنان را می‌بیند (برای ویرایشِ بخشِ مالیِ یک پروندهٔ موجود) —
+  // دکمهٔ «ثبت کارمند جدید» اکشنِ دومِ همان کارت است و با canManageUsers کنترل می‌شود،
+  // پس برای این پست پنهان می‌ماند.
+  finance_manager: new Set(['مالی', 'گزارش‌ها و لاگ‌ها', 'مکتب، کاربران و تنظیمات', 'ارتباطات']),
+  finance_lead: new Set(['مالی', 'گزارش‌ها و لاگ‌ها', 'مکتب، کاربران و تنظیمات', 'ارتباطات'])
 };
 
 // «هشدارهای فوری» (urgentAlerts) قبلاً بدون فیلتر به همهٔ نقش‌ها نشان داده می‌شد — مثلاً «بل‌های مالی
@@ -275,13 +279,11 @@ const MANAGEMENT_SECTION_ICONS = {
   schools: 'fa-building',
   registrations: 'fa-clipboard-check',
   'student-registration': 'fa-user-plus',
-  'online-registrations': 'fa-globe',
   students: 'fa-users',
   memberships: 'fa-link',
   sawaneh: 'fa-folder-open',
   'sawaneh-reports': 'fa-chart-pie',
-  'transfer-in': 'fa-right-to-bracket',
-  'transfer-out': 'fa-right-from-bracket',
+  'transfer-lifecycle': 'fa-right-left',
   promotions: 'fa-arrow-up-right-dots',
   users: 'fa-users-gear',
   education: 'fa-graduation-cap',
@@ -3760,207 +3762,215 @@ export default function AdminPanel() {
     }))
   ].slice(0, 5);
 
+  // ابزارها و بخش‌های مدیریتی در ۶ گروهِ اصلی چیده شده تا نوارِ تب‌ها کوتاه بماند
+  // (پیش‌تر ۱۱ گروه بود که هفت‌تای‌شان فقط یک کارت داشتند). عنوانِ هر کارت نامِ
+  // مکملِ همان بخش است، نه اختصار. صافیِ ADMIN_LEVEL_GROUP_ACCESS فقط تعیین می‌کند
+  // کدام تب برای کدام پست نمایش داده شود؛ دسترسیِ واقعیِ هر کارت همان `to` است.
+  const GROUP_SCHOOL = 'مکتب، کاربران و تنظیمات';
+  const GROUP_STUDENTS = 'ثبت‌نام و شاگردان';
+  const GROUP_EDUCATION = 'آموزش و برنامه';
+  const GROUP_FINANCE = 'مالی';
+  const GROUP_REPORTS = 'گزارش‌ها و لاگ‌ها';
+  const GROUP_COMMS = 'ارتباطات';
+
   const modernManagementSections = [
     {
       key: 'schools',
-      title: 'مکاتب',
-      group: 'ساختار مکتب',
+      title: 'لیست و مدیریت مکاتب',
+      group: GROUP_SCHOOL,
       subtitle: 'لیست، انتخاب مکتب فعال و ویرایش مشخصات',
       count: schoolOverviewStats.total,
       action: 'ایجاد مکتب',
       onAction: canManageContent ? () => setCreateSchoolOpen(true) : null
     },
     {
+      key: 'users',
+      title: 'کاربران و سطوح دسترسی',
+      group: GROUP_SCHOOL,
+      subtitle: 'حساب‌ها، نقش‌ها و سطح دسترسی',
+      count: stats.users,
+      to: canManageUsers ? '/admin-users' : ''
+    },
+    {
+      // «کارکنان مکتب» فهرستِ استادان و کارمندان است؛ مدیریتِ مالی هم باید این
+      // فهرست را ببیند و بتواند بخشِ مالیِ یک پروندهٔ موجود را ویرایش کند. دکمهٔ
+      // «ثبت کارمند جدید» به‌صورتِ اکشنِ دومِ همین کارت است (کارتِ جداگانه حذف شد)
+      // و فقط برای کسانی که حقِ ثبتِ پرونده دارند (canManageUsers) نمایان می‌شود.
+      key: 'school-staff',
+      title: 'فهرست کارکنان مکتب',
+      group: GROUP_SCHOOL,
+      subtitle: 'فهرست استادان و کارمندان اداری/خدماتی، فیلتر و ورودِ گروهی از اکسل',
+      count: 0,
+      to: (canManageUsers || canManageFinance) ? '/school-staff' : '',
+      secondaryTo: canManageUsers ? '/teacher-registration' : '',
+      secondaryLabel: 'ثبت کارمند جدید'
+    },
+    {
+      key: 'id-cards',
+      title: 'کارت‌های هویت کارکنان و شاگردان',
+      group: GROUP_SCHOOL,
+      subtitle: 'صدور، ویرایش و چاپِ کارتِ هویتِ شاگردان، استادان و کارمندان',
+      count: 0,
+      to: (canManageUsers || canManageContent) ? '/id-cards' : ''
+    },
+    {
+      key: 'settings',
+      title: 'تنظیمات سیستم و سایت',
+      group: GROUP_SCHOOL,
+      subtitle: 'تنظیمات سایت، منوها و شماره اساس',
+      count: 0,
+      to: canManageContent ? '/admin-settings' : ''
+    },
+    {
       key: 'registrations',
-      title: 'ثبت‌نام‌ها',
-      group: 'ثبت‌نام و شاگردان',
-      subtitle: 'درخواست‌های ثبت‌نام، بررسی و تایید',
+      title: 'درخواست‌های ثبت‌نام',
+      group: GROUP_STUDENTS,
+      subtitle: 'درخواست‌های ثبت‌نام (آنلاین و حضوری)، بررسی و تایید',
       count: inboxCounts?.enrollments || 0,
       to: canManageEnrollments ? '/admin-enrollments' : ''
     },
     {
       key: 'student-registration',
-      title: 'ثبت شاگرد جدید',
-      group: 'ثبت‌نام و شاگردان',
+      title: 'ثبت مستقیم شاگرد جدید',
+      group: GROUP_STUDENTS,
       subtitle: 'ثبت مستقیم شاگرد و معلومات اولیه',
       count: 0,
       to: canManageEnrollments || canManageUsers ? '/student-registration' : ''
     },
     {
-      key: 'online-registrations',
-      title: 'ثبت‌نام آنلاین',
-      group: 'ثبت‌نام و شاگردان',
-      subtitle: 'درخواست‌های آنلاین خانواده‌ها',
-      count: 0,
-      to: canManageEnrollments || canManageUsers ? '/online-registrations' : ''
-    },
-    {
       key: 'students',
       title: 'مدیریت شاگردان',
-      group: 'ثبت‌نام و شاگردان',
+      group: GROUP_STUDENTS,
       subtitle: 'لیست، جستجو و مدیریت شاگردان',
       count: stats.users,
       to: canManageUsers ? '/student-management' : ''
     },
     {
       key: 'memberships',
-      title: 'عضویت آموزشی',
-      group: 'ثبت‌نام و شاگردان',
+      title: 'عضویت آموزشی شاگردان',
+      group: GROUP_STUDENTS,
       subtitle: 'وصل شاگرد به صنف و سال تعلیمی',
       count: 0,
       to: canManageMemberships ? '/admin-education?section=enrollments' : ''
     },
     {
-      // «کارکنان مکتب» گروهِ خودش را دارد (نه «ثبتِ کارکنان») چون مدیریتِ مالی هم
-      // باید این فهرست را ببیند و بتواند بخشِ مالیِ یک پروندهٔ موجود را ویرایش کند —
-      // بدون این‌که دکمهٔ «ثبت کارمند جدید» (که حقِ ثبتِ پرونده نیست) برایش نمایان شود.
-      key: 'school-staff',
-      title: 'کارکنان مکتب',
-      group: 'کارکنان مکتب',
-      subtitle: 'فهرست استادان و کارمندان اداری/خدماتی، فیلتر و ورودِ گروهی از اکسل',
-      count: 0,
-      to: (canManageUsers || canManageFinance) ? '/school-staff' : ''
-    },
-    {
-      key: 'teacher-registration',
-      title: 'ثبت کارمند جدید',
-      group: 'ثبتِ کارکنان',
-      subtitle: 'ثبت پروندهٔ رسمی استاد یا کارمند اداری/خدماتی',
-      count: 0,
-      to: canManageUsers ? '/teacher-registration' : ''
-    },
-    {
       key: 'sawaneh',
       title: 'پرونده‌های سوانح شاگرد',
-      group: 'ثبت‌نام و شاگردان',
+      group: GROUP_STUDENTS,
       subtitle: 'کارت سوانح متعلم، سوانح تعلیمی (کارنامه) و چاپ فرم رسمی',
       count: 0,
       to: canViewSawaneh ? '/afghan-sawaneh' : ''
     },
     {
       key: 'sawaneh-reports',
-      title: 'گزارش‌های سوانح',
-      group: 'ثبت‌نام و شاگردان',
+      title: 'گزارش‌های پرونده سوانح',
+      group: GROUP_STUDENTS,
       subtitle: 'کارت‌های ناقص، وضعیت کارنامه‌ها و خروجی اکسل «لست اساس»',
       count: 0,
       to: canViewSawaneh ? '/afghan-sawaneh/reports' : ''
     },
     {
-      key: 'transfer-in',
-      title: 'تبدیلی آمد',
-      group: 'ثبت‌نام و شاگردان',
-      subtitle: 'ثبت شاگردان انتقالی به مکتب',
-      count: 0,
-      to: permissionAllows('students.transfers.manage', effectivePermissions) ? '/admin-education?section=enrollments&lifecycle=transfer-in' : ''
-    },
-    {
-      key: 'transfer-out',
+      // «تبدیلی آمد» و «تبدیلی رفت/منفکی» یک کارت شده — هر دو همان صفحهٔ عضویت‌های
+      // آموزشی را باز می‌کنند که خودش زبانهٔ چرخهٔ حیات دارد.
+      key: 'transfer-lifecycle',
       title: 'تبدیلی، ترک تحصیل و منفکی',
-      group: 'ثبت‌نام و شاگردان',
-      subtitle: 'خروج، انتقال یا ختم عضویت آموزشی',
+      group: GROUP_STUDENTS,
+      subtitle: 'تبدیلی آمد و رفت، ترک تحصیل و منفکیِ عضویت آموزشی',
       count: 0,
-      to: permissionAllows('students.lifecycle.manage', effectivePermissions) ? '/admin-education?section=enrollments&lifecycle=end' : ''
+      to: (permissionAllows('students.lifecycle.manage', effectivePermissions) || permissionAllows('students.transfers.manage', effectivePermissions)) ? '/admin-education?section=enrollments' : ''
     },
     {
       key: 'promotions',
-      title: 'ارتقای صنف',
-      group: 'ثبت‌نام و شاگردان',
+      title: 'ارتقای جمعی صنف',
+      group: GROUP_STUDENTS,
       subtitle: 'انتقال جمعی شاگردان به صنف بعدی',
       count: 0,
       to: permissionAllows('education.promotions.manage', effectivePermissions) ? '/admin-promotions' : ''
     },
     {
-      key: 'users',
-      title: 'کاربران',
-      group: 'کاربران و دسترسی',
-      subtitle: 'حساب‌ها، نقش‌ها و سطح دسترسی',
-      count: stats.users,
-      to: canManageUsers ? '/admin-users' : ''
-    },
-    {
       key: 'education',
-      title: 'آموزش',
-      group: 'آموزش و برنامه',
+      title: 'مدیریت آموزش و صنوف',
+      group: GROUP_EDUCATION,
       subtitle: 'صنف‌ها، مضمون‌ها، سال تعلیمی و شقه‌ها',
       count: stats.courses,
       to: canManageContent ? '/admin-education' : ''
     },
     {
       key: 'attendance',
-      title: 'حاضری',
-      group: 'آموزش و برنامه',
+      title: 'ثبت و بررسی حاضری',
+      group: GROUP_EDUCATION,
       subtitle: 'ثبت و بررسی حضور و غیاب',
       count: 0,
       to: canManageContent || canViewReports ? '/attendance-manager' : ''
     },
     {
       key: 'homework',
-      title: 'کارخانگی',
-      group: 'آموزش و برنامه',
+      title: 'مدیریت کارخانگی',
+      group: GROUP_EDUCATION,
       subtitle: 'ایجاد، پیگیری و بررسی کارخانگی',
       count: 0,
       to: canManageContent ? '/homework-manager' : ''
     },
     {
       key: 'exams',
-      title: 'امتحانات',
-      group: 'آموزش و برنامه',
+      title: 'مدیریت امتحانات',
+      group: GROUP_EDUCATION,
       subtitle: 'جلسه‌ها، نمرات و وضعیت امتحان',
       count: 0,
       to: canManageContent ? '/admin-exams-dashboard' : ''
     },
     {
       key: 'result-tables',
-      title: 'جدول نتایج',
-      group: 'آموزش و برنامه',
+      title: 'جدول نتایج امتحانات',
+      group: GROUP_EDUCATION,
       subtitle: 'ساخت، بررسی و چاپ جدول نتایج',
       count: 0,
       to: canManageContent ? '/admin-result-tables' : ''
     },
     {
       key: 'sheet-templates',
-      title: 'مدیریت شقه‌ها',
-      group: 'آموزش و برنامه',
+      title: 'مدیریت شقه‌ها و قالب‌های چاپ',
+      group: GROUP_EDUCATION,
       subtitle: 'قالب‌های چاپ، حاضری و گزارش',
       count: activeSchoolContext?.scopeSummary?.sheetTemplates?.count || 0,
       to: canManageContent ? '/admin-sheet-templates' : ''
     },
     {
       key: 'schedule',
-      title: 'تقسیم اوقات',
-      group: 'آموزش و برنامه',
+      title: 'تقسیم اوقات درسی',
+      group: GROUP_EDUCATION,
       subtitle: 'برنامه امروز، نشر و بررسی تداخل‌ها',
       count: todayScheduleSummary.total,
       to: canViewSchedule ? (canManageSchedule ? ADMIN_SCHEDULE_ROUTE : ADMIN_SCHEDULE_VIEW_ROUTE) : ''
     },
     {
       key: 'teacher-assignments',
-      title: 'تخصیص استاد',
-      group: 'آموزش و برنامه',
+      title: 'تخصیص استاد به صنف و مضمون',
+      group: GROUP_EDUCATION,
       subtitle: 'تعیین استاد برای صنف، مضمون و سال تعلیمی',
       count: activeSchoolContext?.scopeSummary?.teacherAssignments?.count || 0,
       to: canManageTeacherAssignments ? ADMIN_TEACHER_ASSIGNMENTS_ROUTE : ''
     },
     {
       key: 'schedule-reports',
-      title: 'گزارش تقسیم اوقات',
-      group: 'آموزش و برنامه',
+      title: 'گزارش تقسیم اوقات درسی',
+      group: GROUP_EDUCATION,
       subtitle: 'گزارش‌ها و وضعیت برنامه درسی',
       count: 0,
       to: canManageSchedule ? '/timetable/reports' : ''
     },
     {
       key: 'finance',
-      title: 'مالی',
-      group: 'مالی',
+      title: 'مدیریت مالی مکتب',
+      group: GROUP_FINANCE,
       subtitle: 'رسیدها، بل‌ها، صندوق و گزارش‌های رسمی',
       count: orders.length,
       to: canManageFinance ? '/admin-finance' : ''
     },
     {
       key: 'government-finance',
-      title: 'مالی دولت',
-      group: 'مالی',
+      title: 'مالی دولت و فورم‌های رسمی',
+      group: GROUP_FINANCE,
       subtitle: 'گزارش، آرشیف و فورم‌های رسمی',
       count: 0,
       to: canManageFinance ? '/admin-government-finance' : ''
@@ -3968,7 +3978,7 @@ export default function AdminPanel() {
     {
       key: 'financial-memberships',
       title: 'اثر مالی تغییرات آموزشی',
-      group: 'مالی',
+      group: GROUP_FINANCE,
       subtitle: 'اثر تبدیلی، ارتقا و تغییر عضویت روی مالی',
       count: 0,
       to: permissionAllows('finance.lifecycle_effects.manage', effectivePermissions) ? '/admin-financial-memberships' : ''
@@ -3976,7 +3986,7 @@ export default function AdminPanel() {
     {
       key: 'academy',
       title: 'مدیریت آموزشگاه',
-      group: 'مالی',
+      group: GROUP_FINANCE,
       subtitle: 'دوره‌ها، پرداخت‌ها و مدیریت آموزشگاه',
       count: 0,
       to: canManageFinance ? '/academy-management' : ''
@@ -3984,15 +3994,15 @@ export default function AdminPanel() {
     {
       key: 'short-term-center',
       title: 'مرکز آموزش کوتاه‌مدت',
-      group: 'مالی',
+      group: GROUP_FINANCE,
       subtitle: 'شاگردان موقت، صنف، فیس، بل و رسید - کاملاً جدا از مکتب و آموزشگاه',
       count: 0,
       to: canManageShortTermCenter ? '/short-term-center' : ''
     },
     {
       key: 'reports',
-      title: 'گزارش‌ها',
-      group: 'گزارش‌ها',
+      title: 'گزارش‌های مدیریتی',
+      group: GROUP_REPORTS,
       subtitle: 'خروجی‌ها، وضعیت مدیریتی و گزارش دولت',
       count: reportActivityItems.length,
       to: canViewReports ? '/admin-reports' : ''
@@ -4000,15 +4010,15 @@ export default function AdminPanel() {
     {
       key: 'consolidated-finance',
       title: 'گزارش مالی یکپارچه مکتب',
-      group: 'گزارش مالی',
+      group: GROUP_REPORTS,
       subtitle: 'عواید، مصارف و بدهکاران هر سه بخش: مکتب، آموزشگاه و شاگردان موقت',
       count: 0,
       to: canViewReports ? '/admin-school-finance' : ''
     },
     {
       key: 'student-report',
-      title: 'گزارش شاگرد',
-      group: 'گزارش‌ها',
+      title: 'گزارش جامع شاگرد',
+      group: GROUP_REPORTS,
       subtitle: 'پرونده و گزارش جامع شاگرد',
       count: 0,
       to: canViewReports ? '/student-report' : ''
@@ -4016,42 +4026,29 @@ export default function AdminPanel() {
     {
       key: 'instructor-report',
       title: 'گزارش فعالیت کاربر',
-      group: 'گزارش‌ها',
+      group: GROUP_REPORTS,
       subtitle: 'فعالیت یک استاد یا ادمین مشخص به‌همراه فیلتر و خروجی',
       count: 0,
       to: canViewReports ? '/instructor-report' : ''
     },
     {
       key: 'logs',
-      title: 'لاگ‌ها',
-      group: 'گزارش‌ها',
+      title: 'لاگ‌ها و ردیابی فعالیت سیستم',
+      group: GROUP_REPORTS,
       subtitle: 'ردیابی فعالیت‌ها و تغییرات سیستم',
       count: 0,
       to: canViewReports ? '/admin-logs' : ''
     },
     {
+      // مرکزِ ارتباطات (صندوقِ ورودی + اعلانِ همگانی + وظایف + بایگانی) یک صفحهٔ
+      // واحد شده؛ گروهِ خودش را دارد تا مدیرِ تدریسی/سرمعلم/مدیرِ مالی هم — نه فقط
+      // کسانی که «سیستم و تنظیمات» را می‌بینند — به آن برسند.
       key: 'communications',
-      title: 'ارتباطات',
-      group: 'سیستم و تنظیمات',
-      subtitle: 'دمو، تماس و پیام‌های پشتیبانی',
+      title: 'مرکز ارتباطات',
+      group: GROUP_COMMS,
+      subtitle: 'پیام‌های سایت، اعلانِ همگانی و وظایف',
       count: supportMessages.length,
-      to: canManagePlatformRequests ? '/admin-communications' : ''
-    },
-    {
-      key: 'notifications',
-      title: 'اعلان‌ها',
-      group: 'سیستم و تنظیمات',
-      subtitle: 'پیام‌های سیستم و یادآوری‌ها',
-      count: 0,
-      to: canManageFinance ? '/admin-notifications' : ''
-    },
-    {
-      key: 'settings',
-      title: 'تنظیمات',
-      group: 'سیستم و تنظیمات',
-      subtitle: 'تنظیمات سایت، منوها و شماره اساس',
-      count: 0,
-      to: canManageContent ? '/admin-settings' : ''
+      to: (canManagePlatformRequests || canManageFinance || canManageUsers || canManageTeacherAssignments) ? '/admin-communications' : ''
     }
   ];
 
@@ -4704,7 +4701,16 @@ export default function AdminPanel() {
                       <p>{item.subtitle}</p>
                     </div>
                     {item.to ? (
-                      <Link to={item.to}>باز کردن</Link>
+                      item.secondaryTo ? (
+                        <div className="admin-modern-management-card__actions">
+                          <Link to={item.to}>باز کردن</Link>
+                          <Link to={item.secondaryTo} className="admin-modern-management-card__secondary">
+                            {item.secondaryLabel || 'اقدام'}
+                          </Link>
+                        </div>
+                      ) : (
+                        <Link to={item.to}>باز کردن</Link>
+                      )
                     ) : item.onAction ? (
                       <button type="button" onClick={item.onAction}>{item.action || 'اقدام'}</button>
                     ) : (
