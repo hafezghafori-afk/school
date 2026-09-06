@@ -1570,6 +1570,7 @@ export default function AcademyManagement() {
                 <StatCard label="کل فیس قابل دریافت" value={`${fmt(reports?.summary?.dueTotal || summary.dueTotal)} ${currency}`} />
                 <StatCard label="کل دریافت‌شده" value={`${fmt(reports?.summary?.paidTotal || summary.paidTotal)} ${currency}`} tone="green" />
                 <StatCard label="کل باقی‌داری" value={`${fmt(reports?.summary?.outstandingTotal || summary.outstandingTotal)} ${currency}`} tone="amber" />
+                <StatCard label="اضافه‌پرداخت / اعتبار" value={`${fmt(reports?.summary?.overpaidTotal ?? summary.overpaidTotal)} ${currency}`} tone="blue" />
                 <StatCard label="مفاد ماه جاری" value={`${fmt((reports?.summary?.monthIncome || summary.monthIncome || 0) - (reports?.summary?.monthExpenses || summary.monthExpenses || 0))} ${currency}`} />
               </div>
               <div className="academy-panel">

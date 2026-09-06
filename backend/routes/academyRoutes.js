@@ -64,7 +64,11 @@ async function buildSummary() {
   ] = await Promise.all([
     AcademyStudent.countDocuments({ status: 'active' }),
     AcademyClass.countDocuments({ status: 'active' }),
-    AcademyRegistration.find().select('totalPayable paidAmount balance status paymentStatus createdAt').lean(),
+    // Only active registrations feed the money totals below - a cancelled or
+    // completed registration would otherwise keep inflating "کل فیس قابل
+    // دریافت" / "کل باقی‌داری" and put them out of step with the "باقی‌داران"
+    // list on the same tab, which is active-only.
+    AcademyRegistration.find({ status: 'active' }).select('totalPayable paidAmount balance status paymentStatus createdAt').lean(),
     AcademyPayment.find().sort({ paidAt: -1 }).limit(8).populate('studentId', 'fullName studentCode').lean(),
     AcademyExpense.find().sort({ expenseDate: -1, createdAt: -1 }).limit(8).lean(),
     AcademyInvoice.find().sort({ issuedAt: -1 }).limit(8).populate('studentId', 'fullName studentCode').lean()
@@ -73,6 +77,15 @@ async function buildSummary() {
   const paidTotal = registrations.reduce((sum, item) => sum + toNumber(item.paidAmount), 0);
   const outstandingTotal = registrations.reduce((sum, item) => sum + toNumber(item.balance), 0);
   const dueTotal = registrations.reduce((sum, item) => sum + toNumber(item.totalPayable), 0);
+  // A registration whose paidAmount exceeds its totalPayable (paid ahead, or a
+  // data-entry slip) floors balance at 0, so dueTotal - paidTotal -
+  // outstandingTotal would drift negative and the three cards stop
+  // reconciling. Surface that surplus on its own instead - then the books
+  // balance exactly: dueTotal + overpaidTotal === paidTotal + outstandingTotal.
+  const overpaidTotal = registrations.reduce(
+    (sum, item) => sum + Math.max(0, toNumber(item.paidAmount) - toNumber(item.totalPayable)),
+    0
+  );
   const { start: shamsiMonthStart, endExclusive: shamsiMonthEnd } = currentShamsiMonthRange();
   const monthIncome = await AcademyPayment.aggregate([
     {
@@ -99,6 +112,7 @@ async function buildSummary() {
     dueTotal,
     paidTotal,
     outstandingTotal,
+    overpaidTotal,
     monthIncome: toNumber(monthIncome?.[0]?.total),
     monthExpenses: toNumber(monthExpenses?.[0]?.total),
     recentPayments: payments,
