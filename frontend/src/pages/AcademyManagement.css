@@ -195,6 +195,10 @@
   border-color: rgba(251, 191, 36, 0.38);
 }
 
+.academy-stat.blue {
+  border-color: rgba(56, 189, 248, 0.38);
+}
+
 .academy-form {
   display: grid;
   gap: 12px;
