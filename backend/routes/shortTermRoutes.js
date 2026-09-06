@@ -83,6 +83,9 @@ async function buildSummary() {
   const outstandingTotal = registrations
     .filter((item) => item.status === 'active')
     .reduce((sum, item) => sum + toNumber(item.balance), 0);
+  // اضافه‌پرداخت/اعتبار: جایی که پرداختِ ثبت‌شده از فیسِ قابل‌پرداخت بیشتر است.
+  // با این، اتحادِ گزارش برقرار می‌شود: باقی‌داری = قابل‌دریافت − (دریافت‌شده − اعتبار).
+  const creditTotal = liveRegs.reduce((sum, item) => sum + Math.max(0, toNumber(item.paidAmount) - toNumber(item.totalPayable)), 0);
   const today = todayKey();
   const overdueCount = registrations.filter((item) => item.status === 'active' && item.endDate && item.endDate < today).length;
   const { start: shamsiMonthStart, endExclusive: shamsiMonthEnd } = currentShamsiMonthRange();
@@ -112,6 +115,7 @@ async function buildSummary() {
     dueTotal,
     paidTotal,
     outstandingTotal,
+    creditTotal,
     monthIncome: toNumber(monthIncome?.[0]?.total),
     monthExpenses: toNumber(monthExpenses?.[0]?.total),
     recentPayments: payments,
@@ -619,6 +623,7 @@ function reportRow(r) {
     totalPayable: toNumber(r.totalPayable),
     paidAmount: toNumber(r.paidAmount),
     balance: toNumber(r.balance),
+    credit: Math.max(0, toNumber(r.paidAmount) - toNumber(r.totalPayable)),
     monthsPaid,
     monthsRemaining: Math.max(0, toNumber(r.durationMonths) - monthsPaid),
     paymentStatus: r.paymentStatus,

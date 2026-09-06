@@ -1086,8 +1086,14 @@ export default function ShortTermCenter() {
                 <StatCard label="کل فیس قابل دریافت" value={`${fmt(reports?.summary?.dueTotal ?? summary.dueTotal)} ${currency}`} />
                 <StatCard label="کل دریافت‌شده" value={`${fmt(reports?.summary?.paidTotal ?? summary.paidTotal)} ${currency}`} tone="green" />
                 <StatCard label="کل باقی‌داری" value={`${fmt(reports?.summary?.outstandingTotal ?? summary.outstandingTotal)} ${currency}`} tone="amber" />
+                <StatCard label="اضافه‌پرداخت / اعتبار" value={`${fmt(reports?.summary?.creditTotal ?? summary.creditTotal ?? 0)} ${currency}`} tone={(reports?.summary?.creditTotal ?? summary.creditTotal) ? 'amber' : ''} />
                 <StatCard label="مفاد ماه جاری" value={`${fmt((reports?.summary?.monthIncome ?? summary.monthIncome ?? 0) - (reports?.summary?.monthExpenses ?? summary.monthExpenses ?? 0))} ${currency}`} />
               </div>
+              <p className="stc-form-hint">
+                باقی‌داری = قابل دریافت − (دریافت‌شده − اعتبار).
+                {' '}
+                {fmt(reports?.summary?.dueTotal ?? summary.dueTotal ?? 0)} − ({fmt(reports?.summary?.paidTotal ?? summary.paidTotal ?? 0)} − {fmt(reports?.summary?.creditTotal ?? summary.creditTotal ?? 0)}) = {fmt(reports?.summary?.outstandingTotal ?? summary.outstandingTotal ?? 0)} {currency}
+              </p>
 
               <div className="stc-panel">
                 <div className="stc-panel-head">
@@ -1114,11 +1120,11 @@ export default function ShortTermCenter() {
               <div className="stc-panel">
                 <div className="stc-panel-head">
                   <h2>شاگردان پرداخت‌کننده ({fmt((reports?.payers || []).length)})</h2>
-                  <button type="button" className="stc-inline-button" disabled={!(reports?.payers || []).length} onClick={() => exportCsv('short-term-payers.csv', ['Student', 'Code', 'Phone', 'Class', 'Months', 'MonthsPaid', 'Payable', 'Paid', 'Balance'], (reports?.payers || []).map((item) => [item.studentId?.fullName, item.studentId?.studentCode, item.studentId?.phone, item.classId?.name, item.durationMonths, item.monthsPaid, item.totalPayable, item.paidAmount, item.balance]))}>Excel/CSV</button>
+                  <button type="button" className="stc-inline-button" disabled={!(reports?.payers || []).length} onClick={() => exportCsv('short-term-payers.csv', ['Student', 'Code', 'Phone', 'Class', 'Months', 'MonthsPaid', 'Payable', 'Paid', 'Balance', 'Credit'], (reports?.payers || []).map((item) => [item.studentId?.fullName, item.studentId?.studentCode, item.studentId?.phone, item.classId?.name, item.durationMonths, item.monthsPaid, item.totalPayable, item.paidAmount, item.balance, item.credit || 0]))}>Excel/CSV</button>
                 </div>
-                <p className="stc-form-hint">هر شاگردی که پرداختِ ثبت‌شده دارد؛ «ماه‌های پرداخت‌شده» = پرداخت ÷ فیسِ هر ماه.</p>
+                <p className="stc-form-hint">هر شاگردی که پرداختِ ثبت‌شده دارد؛ «ماه‌های پرداخت‌شده» = پرداخت ÷ فیسِ هر ماه. «اعتبار» = پرداختِ بیشتر از فیس.</p>
                 <Table
-                  columns={['شاگرد', 'صنف', 'مدت', 'ماه‌های پرداخت‌شده', 'فیس کل', 'پرداخت', 'باقی', 'وضعیت']}
+                  columns={['شاگرد', 'صنف', 'مدت', 'ماه‌های پرداخت‌شده', 'فیس کل', 'پرداخت', 'باقی', 'اعتبار', 'وضعیت']}
                   rows={(reports?.payers || []).map((item) => [
                     text(item.studentId?.fullName),
                     text(item.classId?.name),
@@ -1127,9 +1133,12 @@ export default function ShortTermCenter() {
                     `${fmt(item.totalPayable)} ${currency}`,
                     <span className="stc-amount-positive">{`${fmt(item.paidAmount)} ${currency}`}</span>,
                     `${fmt(item.balance)} ${currency}`,
-                    item.balance <= 0
-                      ? <span className="stc-chip stc-chip-ok">تسویه</span>
-                      : <span className="stc-chip stc-chip-muted">نیمه‌پرداخت</span>
+                    item.credit > 0 ? <span className="stc-chip stc-chip-muted">{`${fmt(item.credit)} ${currency}`}</span> : '—',
+                    item.credit > 0
+                      ? <span className="stc-chip stc-chip-muted">اضافه‌پرداخت</span>
+                      : item.balance <= 0
+                        ? <span className="stc-chip stc-chip-ok">تسویه</span>
+                        : <span className="stc-chip stc-chip-muted">نیمه‌پرداخت</span>
                   ])}
                 />
               </div>
