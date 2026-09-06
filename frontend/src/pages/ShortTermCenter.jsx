@@ -172,6 +172,19 @@ function StatCard({ label, value, tone = '' }) {
   );
 }
 
+// تفکیکِ ماه‌به‌ماه: هر قلمِ ماهانه یک چیپ — سبز=پرداخت‌شده، سرخ=معوق، کهربایی=باقی.
+function MonthChips({ months = [] }) {
+  if (!months.length) return <span className="stc-empty" style={{ padding: 0 }}>—</span>;
+  return (
+    <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4 }}>
+      {months.map((m) => {
+        const cls = m.status === 'paid' ? 'stc-chip-ok' : m.overdue ? 'stc-chip-bad' : 'stc-chip-muted';
+        return <span key={m.periodKey} className={`stc-chip ${cls}`} title={`${m.periodKey} — پرداخت ${m.paid} از ${m.amount}`}>{formatMonthLabel(m.periodKey)}</span>;
+      })}
+    </span>
+  );
+}
+
 const TABLE_PAGE_SIZE = 10;
 
 function Table({ columns = [], rows = [] }) {
@@ -910,12 +923,12 @@ export default function ShortTermCenter() {
               <div className="stc-panel">
                 <h2>لیست ثبت‌نام‌ها</h2>
                 <Table
-                  columns={['شاگرد', 'صنف', 'مدت', 'ختم مدت', 'فیس', 'پرداخت', 'باقی', 'وضعیت', 'اقدام']}
+                  columns={['شاگرد', 'صنف', 'مدت', 'ماه‌ها', 'فیس کل', 'پرداخت', 'باقی', 'وضعیت', 'اقدام']}
                   rows={filteredRegistrations.map((item) => [
                     text(item.studentId?.fullName),
                     text(item.classId?.name),
                     `${fmt(item.durationMonths)} ماه`,
-                    <span className={item.overdue ? 'stc-amount-negative' : ''}>{text(item.endDate)}{item.overdue ? ' (سررسیده)' : ''}</span>,
+                    <MonthChips months={(item.charges || []).map((c) => ({ periodKey: c.periodKey, amount: (c.amount || 0) - (c.discountAmount || 0), paid: c.paidAmount || 0, status: c.status, overdue: c.isOverdue }))} />,
                     fmt(item.totalPayable),
                     fmt(item.paidAmount),
                     fmt(item.balance),
@@ -1098,20 +1111,19 @@ export default function ShortTermCenter() {
               <div className="stc-panel">
                 <div className="stc-panel-head">
                   <h2>شاگردان باقی‌دار ({fmt((reports?.debtors || []).length)})</h2>
-                  <button type="button" className="stc-inline-button" disabled={!(reports?.debtors || []).length} onClick={() => exportCsv('short-term-debtors.csv', ['Student', 'Code', 'Phone', 'Class', 'RegDate', 'Months', 'MonthsPaid', 'Payable', 'Paid', 'Balance', 'Overdue'], (reports?.debtors || []).map((item) => [item.studentId?.fullName, item.studentId?.studentCode, item.studentId?.phone, item.classId?.name, item.registrationDate, item.durationMonths, item.monthsPaid, item.totalPayable, item.paidAmount, item.balance, item.overdue ? 'yes' : '']))}>Excel/CSV</button>
+                  <button type="button" className="stc-inline-button" disabled={!(reports?.debtors || []).length} onClick={() => exportCsv('short-term-debtors.csv', ['Student', 'Code', 'Phone', 'Class', 'RegDate', 'Duration', 'Payable', 'Paid', 'Balance', 'PaidMonths', 'DueMonths', 'OverdueMonths'], (reports?.debtors || []).map((item) => [item.studentId?.fullName, item.studentId?.studentCode, item.studentId?.phone, item.classId?.name, item.registrationDate, item.durationMonths, item.totalPayable, item.paidAmount, item.balance, (item.paidMonths || []).join(' '), (item.dueMonths || []).join(' '), (item.overdueMonths || []).join(' ')]))}>Excel/CSV</button>
                 </div>
-                <p className="stc-form-hint">هر ثبت‌نامِ فعالی که هنوز باقیِ پرداخت‌نشده دارد — فیسِ کل از تاریخِ ثبت و مدتِ شاگرد حساب می‌شود.</p>
+                <p className="stc-form-hint">هر ثبت‌نامِ فعالی که هنوز باقیِ پرداخت‌نشده دارد. ستونِ «ماه‌ها» = دفترِ ماهانه (سبز پرداخت‌شده، سرخ معوق، کهربایی باقی).</p>
                 <Table
-                  columns={['شاگرد', 'صنف', 'تاریخ ثبت', 'مدت', 'فیس کل', 'پرداخت', 'باقی', 'ماه‌های مانده', 'وضعیت']}
+                  columns={['شاگرد', 'صنف', 'تاریخ ثبت', 'فیس کل', 'پرداخت', 'باقی', 'ماه‌ها', 'وضعیت']}
                   rows={(reports?.debtors || []).map((item) => [
                     text(item.studentId?.fullName),
                     text(item.classId?.name),
                     item.registrationDate ? formatAfghanStoredDateLabel(item.registrationDate) : '—',
-                    `${fmt(item.durationMonths)} ماه`,
                     `${fmt(item.totalPayable)} ${currency}`,
                     `${fmt(item.paidAmount)} ${currency}`,
                     <span className="stc-amount-negative">{`${fmt(item.balance)} ${currency}`}</span>,
-                    fmt(item.monthsRemaining),
+                    <MonthChips months={item.months} />,
                     item.overdue ? <span className="stc-chip stc-chip-bad">سررسیده</span> : <span className="stc-chip stc-chip-muted">در جریان</span>
                   ])}
                 />
@@ -1120,16 +1132,15 @@ export default function ShortTermCenter() {
               <div className="stc-panel">
                 <div className="stc-panel-head">
                   <h2>شاگردان پرداخت‌کننده ({fmt((reports?.payers || []).length)})</h2>
-                  <button type="button" className="stc-inline-button" disabled={!(reports?.payers || []).length} onClick={() => exportCsv('short-term-payers.csv', ['Student', 'Code', 'Phone', 'Class', 'Months', 'MonthsPaid', 'Payable', 'Paid', 'Balance', 'Credit'], (reports?.payers || []).map((item) => [item.studentId?.fullName, item.studentId?.studentCode, item.studentId?.phone, item.classId?.name, item.durationMonths, item.monthsPaid, item.totalPayable, item.paidAmount, item.balance, item.credit || 0]))}>Excel/CSV</button>
+                  <button type="button" className="stc-inline-button" disabled={!(reports?.payers || []).length} onClick={() => exportCsv('short-term-payers.csv', ['Student', 'Code', 'Phone', 'Class', 'Duration', 'Payable', 'Paid', 'Balance', 'Credit', 'PaidMonths', 'DueMonths'], (reports?.payers || []).map((item) => [item.studentId?.fullName, item.studentId?.studentCode, item.studentId?.phone, item.classId?.name, item.durationMonths, item.totalPayable, item.paidAmount, item.balance, item.credit || 0, (item.paidMonths || []).join(' '), (item.dueMonths || []).join(' ')]))}>Excel/CSV</button>
                 </div>
-                <p className="stc-form-hint">هر شاگردی که پرداختِ ثبت‌شده دارد؛ «ماه‌های پرداخت‌شده» = پرداخت ÷ فیسِ هر ماه. «اعتبار» = پرداختِ بیشتر از فیس.</p>
+                <p className="stc-form-hint">هر شاگردی که پرداختِ ثبت‌شده دارد. ستونِ «ماه‌ها» نشان می‌دهد فیسِ کدام ماه‌ها تسویه شده. «اعتبار» = پرداختِ بیشتر از فیس.</p>
                 <Table
-                  columns={['شاگرد', 'صنف', 'مدت', 'ماه‌های پرداخت‌شده', 'فیس کل', 'پرداخت', 'باقی', 'اعتبار', 'وضعیت']}
+                  columns={['شاگرد', 'صنف', 'ماه‌ها (پرداخت‌شده / باقی)', 'فیس کل', 'پرداخت', 'باقی', 'اعتبار', 'وضعیت']}
                   rows={(reports?.payers || []).map((item) => [
                     text(item.studentId?.fullName),
                     text(item.classId?.name),
-                    `${fmt(item.durationMonths)} ماه`,
-                    fmt(item.monthsPaid),
+                    <MonthChips months={item.months} />,
                     `${fmt(item.totalPayable)} ${currency}`,
                     <span className="stc-amount-positive">{`${fmt(item.paidAmount)} ${currency}`}</span>,
                     `${fmt(item.balance)} ${currency}`,

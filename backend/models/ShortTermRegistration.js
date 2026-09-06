@@ -25,6 +25,9 @@ const shortTermRegistrationSchema = new mongoose.Schema({
   paidAmount: { type: Number, default: 0, min: 0 },
   balance: { type: Number, default: 0, min: 0 },
   paymentPlan: { type: String, enum: ['full', 'installment', 'monthly'], default: 'full' },
+  // وقتی true، totalPayable/paidAmount/balance از ShortTermCharge رول‌آپ می‌شوند و
+  // pre-validate آن‌ها را از feeAmount/discountAmount×durationMonths بازنمی‌نویسد.
+  ledgerManaged: { type: Boolean, default: false },
   paymentStatus: { type: String, enum: ['unpaid', 'partial', 'paid'], default: 'unpaid', index: true },
   status: { type: String, enum: ['active', 'completed', 'cancelled'], default: 'active', index: true },
   note: { type: String, default: '', trim: true },
@@ -39,11 +42,17 @@ shortTermRegistrationSchema.pre('validate', function normalizeShortTermRegistrat
   this.endDate = addMonthsToDateKey(this.startDate, this.durationMonths);
   this.feeAmount = Math.max(0, Number(this.feeAmount || 0));
   this.discountAmount = Math.max(0, Number(this.discountAmount || 0));
-  // feeAmount/discountAmount مبلغِ *یک ماه* است؛ کلِ قابل‌پرداخت = یک ماه × مدت.
-  // (دادهٔ قدیمی همه durationMonths=1 دارد، پس × ۱ = بدون تغییر.)
-  this.totalPayable = Math.max(0, this.feeAmount - this.discountAmount) * this.durationMonths;
   this.paidAmount = Math.max(0, Number(this.paidAmount || 0));
-  this.balance = Math.max(0, this.totalPayable - this.paidAmount);
+  if (this.ledgerManaged) {
+    // مقادیر را services/shortTermLedger.js از قلم‌های ماهانه رول‌آپ کرده — فقط نرمال کن
+    this.totalPayable = Math.max(0, Number(this.totalPayable || 0));
+    this.balance = Math.max(0, Number(this.balance || 0));
+  } else {
+    // feeAmount/discountAmount مبلغِ *یک ماه* است؛ کلِ قابل‌پرداخت = یک ماه × مدت.
+    // (دادهٔ پیش از دفترِ ماهانه، یا ثبت‌نامِ تازه پیش از ساختِ قلم‌ها.)
+    this.totalPayable = Math.max(0, this.feeAmount - this.discountAmount) * this.durationMonths;
+    this.balance = Math.max(0, this.totalPayable - this.paidAmount);
+  }
   this.paymentStatus = this.balance <= 0 && this.totalPayable > 0
     ? 'paid'
     : this.paidAmount > 0
