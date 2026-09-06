@@ -17,7 +17,10 @@ const shortTermInvoiceSchema = new mongoose.Schema({
   referenceNo: { type: String, default: '', trim: true },
   issuedAt: { type: Date, default: Date.now, index: true },
   receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-  note: { type: String, default: '', trim: true }
+  note: { type: String, default: '', trim: true },
+  kind: { type: String, enum: ['payment', 'credit_note'], default: 'payment', index: true },
+  status: { type: String, enum: ['issued', 'void'], default: 'issued', index: true },
+  voidOfId: { type: mongoose.Schema.Types.ObjectId, ref: 'ShortTermInvoice', default: null }
 }, { timestamps: true });
 
 shortTermInvoiceSchema.pre('validate', function normalizeShortTermInvoice() {
