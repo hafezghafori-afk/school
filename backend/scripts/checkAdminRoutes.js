@@ -34,12 +34,17 @@ const IDS = {
   afghanStudent: '507f191e810c19729de86021'
 };
 
+// orgRole is persisted on real User docs by User.pre('validate') /
+// buildUserRoleState; the mock returns raw records, so seed it explicitly or
+// getActorOrgRole() reads '' and the canAssignOrgRole() hierarchy gate 403s
+// every create/edit (adminRoutes.js post-hierarchy access control).
 const users = [
   {
     _id: IDS.admin,
     role: 'admin',
     name: 'Admin Alpha',
     email: 'admin.alpha@example.com',
+    orgRole: 'general_president',
     adminLevel: 'general_president',
     permissions: ['view_reports', 'manage_content', 'manage_finance', 'manage_users', 'manage_schedule']
   },
@@ -47,13 +52,15 @@ const users = [
     _id: IDS.student,
     role: 'student',
     name: 'Alpha Student',
-    email: 'alpha.student@example.com'
+    email: 'alpha.student@example.com',
+    orgRole: 'student'
   },
   {
     _id: IDS.instructor,
     role: 'instructor',
     name: 'Instructor Alpha',
-    email: 'instructor.alpha@example.com'
+    email: 'instructor.alpha@example.com',
+    orgRole: 'instructor'
   }
 ];
 
