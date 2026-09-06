@@ -15,6 +15,14 @@ const shortTermPaymentSchema = new mongoose.Schema({
   receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
   referenceNo: { type: String, default: '', trim: true },
   note: { type: String, default: '', trim: true },
+  // تخصیصِ این پرداخت روی قلم‌های ماهانه (FIFO — قدیمی‌ترین ماهِ باز اول).
+  allocations: {
+    type: [new mongoose.Schema({
+      chargeId: { type: mongoose.Schema.Types.ObjectId, ref: 'ShortTermCharge', required: true },
+      amount: { type: Number, required: true, min: 0 }
+    }, { _id: false })],
+    default: []
+  },
   // ابطالِ پرداخت (اشتباه در ثبت / بازپرداخت). پرداختِ void در درآمد و مانده شمرده نمی‌شود.
   status: { type: String, enum: ['active', 'void'], default: 'active', index: true },
   voidedAt: { type: Date, default: null },

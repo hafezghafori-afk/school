@@ -7,7 +7,9 @@ const ShortTermStudent = require('../models/ShortTermStudent');
 const ShortTermClass = require('../models/ShortTermClass');
 const ShortTermRegistration = require('../models/ShortTermRegistration');
 const ShortTermPayment = require('../models/ShortTermPayment');
+const ShortTermCharge = require('../models/ShortTermCharge');
 const ShortTermInvoice = require('../models/ShortTermInvoice');
+const shortTermLedger = require('../services/shortTermLedger');
 const ShortTermExpense = require('../models/ShortTermExpense');
 const ShortTermExpenseCategory = require('../models/ShortTermExpenseCategory');
 const ShortTermAttendance = require('../models/ShortTermAttendance');
@@ -149,11 +151,23 @@ async function listPayload() {
     buildSummary()
   ]);
 
+  // قلم‌های ماهانهٔ ثبت‌نام‌های نمایش‌داده‌شده — برای تفکیکِ ماه‌به‌ماه در UI
+  const today = todayKey();
+  const regIds = registrations.map((r) => r._id);
+  const charges = await ShortTermCharge.find({ registrationId: { $in: regIds }, status: { $ne: 'void' } })
+    .sort({ periodKey: 1 }).lean();
+  const chargesByReg = new Map();
+  for (const c of charges) {
+    const k = String(c.registrationId);
+    if (!chargesByReg.has(k)) chargesByReg.set(k, []);
+    chargesByReg.get(k).push({ ...c, isOverdue: shortTermLedger.isOverdue(c, today) });
+  }
+
   return {
     settings,
     students,
     classes,
-    registrations: registrations.map(withOverdueFlag),
+    registrations: registrations.map((r) => ({ ...withOverdueFlag(r), charges: chargesByReg.get(String(r._id)) || [] })),
     payments,
     invoices,
     expenses,
@@ -297,7 +311,13 @@ router.post('/registrations', async (req, res) => {
       }
     }
 
+    const settings = await getSettings();
     const item = await ShortTermRegistration.create({ ...req.body, createdBy: userId(req), updatedBy: userId(req) });
+
+    // دفترِ ماهانه: durationMonths قلمِ «فیس ماه» از ماهِ ثبت‌نام
+    await shortTermLedger.generateChargesForRegistration(item, { dueDay: settings.monthlyChargeDueDay || 20 });
+    await shortTermLedger.recomputeRegistration(item._id);
+
     const populated = await ShortTermRegistration.findById(item._id)
       .populate('studentId', 'fullName studentCode phone')
       .populate('classId', 'name subject defaultFee')
@@ -344,6 +364,9 @@ router.put('/registrations/:id', async (req, res) => {
       }
       reg.status = req.body.status;
     }
+    const financeKeys = ['registrationDate', 'durationMonths', 'feeAmount', 'discountAmount'];
+    const financeChanged = financeKeys.some((k) => req.body[k] !== undefined);
+
     if (req.body.registrationDate !== undefined) reg.registrationDate = String(req.body.registrationDate || '').slice(0, 10);
     if (req.body.startDate !== undefined) reg.startDate = String(req.body.startDate || '').slice(0, 10);
     if (req.body.durationMonths !== undefined) reg.durationMonths = Math.max(1, toNumber(req.body.durationMonths));
@@ -354,16 +377,29 @@ router.put('/registrations/:id', async (req, res) => {
     reg.updatedBy = userId(req);
     await reg.save();
 
+    if (financeChanged) {
+      const settings = await getSettings();
+      // قلم‌های ماهانهٔ پرداخت‌نشده را باطل، سپس با مقادیرِ تازه از نو بساز.
+      // قلم‌هایی که پرداخت خورده‌اند دست‌نخورده می‌مانند.
+      await ShortTermCharge.updateMany(
+        { registrationId: reg._id, status: { $ne: 'void' }, paidAmount: { $lte: 0 } },
+        { $set: { status: 'void', voidedAt: new Date(), voidReason: `ویرایشِ مالیِ ثبت‌نام (${new Date().toISOString().slice(0, 10)})` } }
+      );
+      await shortTermLedger.generateChargesForRegistration(reg, { dueDay: settings.monthlyChargeDueDay || 20 });
+      await shortTermLedger.recomputeRegistration(reg._id);
+    }
+
+    const fresh = await ShortTermRegistration.findById(reg._id).lean();
     const item = await ShortTermRegistration.findById(reg._id)
       .populate('studentId', 'fullName studentCode phone')
       .populate('classId', 'name subject defaultFee')
       .lean();
-    const overpaid = toNumber(reg.paidAmount) > toNumber(reg.totalPayable);
+    const overpaid = toNumber(fresh?.paidAmount) > toNumber(fresh?.totalPayable);
     res.json({
       success: true,
       item: withOverdueFlag(item),
       message: overpaid
-        ? `ثبت‌نام به‌روزرسانی شد. توجه: پرداختِ ثبت‌شده (${toNumber(reg.paidAmount)}) از مبلغِ تازه بیشتر است.`
+        ? `ثبت‌نام به‌روزرسانی شد. توجه: پرداختِ ثبت‌شده (${toNumber(fresh?.paidAmount)}) از مبلغِ تازه بیشتر است — مازاد به‌عنوان اعتبار می‌ماند.`
         : 'ثبت‌نام به‌روزرسانی شد.'
     });
   } catch (error) {
@@ -394,11 +430,27 @@ router.post('/payments', async (req, res) => {
     const paymentNumber = await nextSequence('short_term_payment', settings.receiptPrefix || 'STC-RCP');
     const invoiceNumber = await nextSequence('short_term_invoice', settings.invoicePrefix || 'STC-INV');
 
+    // اگر این ثبت‌نامِ پیش از دفترِ ماهانه است و قلمی ندارد، همین‌جا بساز
+    if (!(await ShortTermCharge.exists({ registrationId: registration._id, status: { $ne: 'void' } }))) {
+      await shortTermLedger.generateChargesForRegistration(registration, { dueDay: settings.monthlyChargeDueDay || 20 });
+      await shortTermLedger.recomputeRegistration(registration._id);
+    }
+
+    // FIFO: مبلغ روی قدیمی‌ترین ماه‌های بازِ پرداخت‌نشده
+    const openCharges = await ShortTermCharge.find({ registrationId: registration._id, status: { $ne: 'void' } })
+      .sort({ dueDate: 1, periodKey: 1, createdAt: 1 });
+    const { allocations, unallocated } = shortTermLedger.fifoAllocate(amount, openCharges);
+    const coveredMonths = allocations
+      .map((a) => openCharges.find((c) => String(c._id) === String(a.chargeId)))
+      .filter(Boolean)
+      .map((c) => c.periodKey);
+
     const payment = await ShortTermPayment.create({
       studentId: registration.studentId._id,
       registrationId: registration._id,
       paymentNumber,
       amount,
+      allocations,
       previousBalance,
       remainingBalance,
       currency: settings.currency || 'AFN',
@@ -425,16 +477,14 @@ router.post('/payments', async (req, res) => {
       referenceNo: payment.referenceNo,
       issuedAt: payment.paidAt,
       receivedBy: userId(req),
-      note: req.body.note || ''
+      note: [req.body.note || '', coveredMonths.length ? `بابتِ ماه‌های: ${coveredMonths.join('، ')}` : '']
+        .filter(Boolean).join(' — ')
     });
 
     payment.invoiceId = invoice._id;
     await payment.save();
 
-    registration.paidAmount = toNumber(registration.paidAmount) + amount;
-    registration.balance = remainingBalance;
-    registration.updatedBy = userId(req);
-    await registration.save();
+    const freshReg = await shortTermLedger.recomputeRegistration(registration._id);
 
     const populatedPayment = await ShortTermPayment.findById(payment._id)
       .populate('studentId', 'fullName studentCode')
@@ -446,8 +496,12 @@ router.post('/payments', async (req, res) => {
       success: true,
       item: populatedPayment,
       invoice: populatedInvoice,
+      coveredMonths,
+      registration: freshReg?.toObject ? freshReg.toObject() : freshReg,
       settings,
-      message: 'پرداخت ثبت و بل صادر شد.'
+      message: coveredMonths.length
+        ? `پرداخت ثبت و بل صادر شد — بابتِ ماه‌های ${coveredMonths.join('، ')}.`
+        : 'پرداخت ثبت و بل صادر شد.'
     });
   } catch (error) {
     res.status(400).json({ success: false, message: 'ثبت پرداخت ناموفق بود.' });
@@ -497,13 +551,8 @@ router.post('/payments/:id/void', async (req, res) => {
       note: `ابطالِ پرداخت ${payment.paymentNumber} — ${reason}`
     });
 
-    const registration = await ShortTermRegistration.findById(payment.registrationId);
-    if (registration) {
-      registration.paidAmount = Math.max(0, toNumber(registration.paidAmount) - toNumber(payment.amount));
-      registration.balance = Math.max(0, toNumber(registration.totalPayable) - toNumber(registration.paidAmount));
-      registration.updatedBy = userId(req);
-      await registration.save();
-    }
+    // قلم‌های ماهانه از allocationهای پرداخت‌های باقی‌مانده از نو محاسبه می‌شوند
+    const registration = await shortTermLedger.recomputeRegistration(payment.registrationId);
 
     res.json({
       success: true,
@@ -608,10 +657,22 @@ router.post('/attendance', async (req, res) => {
 });
 
 // یک ردیفِ گزارشِ باقی‌دار/پرداخت‌کننده — الگوی مشترک با بخشِ آموزشگاه:
-// فیسِ کل از «تاریخِ ثبت» و مدت، پرداختِ واقعی، و ماه‌های پرداخت‌شده/باقی.
-function reportRow(r) {
+// فیسِ کل از «تاریخِ ثبت» و مدت، و تفکیکِ ماه‌به‌ماه از دفترِ ماهانه.
+function reportRow(r, chargeList = []) {
+  const today = todayKey();
   const monthlyNet = Math.max(0, toNumber(r.feeAmount) - toNumber(r.discountAmount));
   const monthsPaid = monthlyNet > 0 ? Math.round((toNumber(r.paidAmount) / monthlyNet) * 100) / 100 : 0;
+  const months = chargeList
+    .slice()
+    .sort((a, b) => String(a.periodKey).localeCompare(String(b.periodKey)))
+    .map((c) => ({
+      periodKey: c.periodKey,
+      amount: toNumber(c.amount) - toNumber(c.discountAmount),
+      paid: toNumber(c.paidAmount),
+      balance: toNumber(c.balance),
+      status: c.status,
+      overdue: shortTermLedger.isOverdue(c, today)
+    }));
   return {
     _id: r._id,
     studentId: r.studentId,
@@ -626,8 +687,12 @@ function reportRow(r) {
     credit: Math.max(0, toNumber(r.paidAmount) - toNumber(r.totalPayable)),
     monthsPaid,
     monthsRemaining: Math.max(0, toNumber(r.durationMonths) - monthsPaid),
+    months,
+    paidMonths: months.filter((m) => m.status === 'paid').map((m) => m.periodKey),
+    dueMonths: months.filter((m) => m.balance > 0).map((m) => m.periodKey),
+    overdueMonths: months.filter((m) => m.overdue).map((m) => m.periodKey),
     paymentStatus: r.paymentStatus,
-    overdue: r.status === 'active' && r.endDate && r.endDate < todayKey()
+    overdue: r.status === 'active' && r.endDate && r.endDate < today
   };
 }
 
@@ -660,8 +725,18 @@ router.get('/reports/overview', async (_req, res) => {
     const classMap = new Map(classes.map((item) => [String(item._id), item.name]));
     const notInactive = (r) => !r.studentId || r.studentId.status !== 'inactive';
 
-    const debtors = debtorRegs.filter(notInactive).map(reportRow);
-    const payers = payerRegs.filter(notInactive).map(reportRow);
+    // قلم‌های ماهانهٔ همهٔ ثبت‌نام‌های این گزارش — برای تفکیکِ ماه‌به‌ماهِ هر ردیف
+    const reportRegIds = [...new Set([...debtorRegs, ...payerRegs].map((r) => String(r._id)))];
+    const reportCharges = await ShortTermCharge.find({ registrationId: { $in: reportRegIds }, status: { $ne: 'void' } }).lean();
+    const chargeMap = new Map();
+    for (const c of reportCharges) {
+      const k = String(c.registrationId);
+      if (!chargeMap.has(k)) chargeMap.set(k, []);
+      chargeMap.get(k).push(c);
+    }
+
+    const debtors = debtorRegs.filter(notInactive).map((r) => reportRow(r, chargeMap.get(String(r._id)) || []));
+    const payers = payerRegs.filter(notInactive).map((r) => reportRow(r, chargeMap.get(String(r._id)) || []));
     res.json({
       success: true,
       summary,
