@@ -1083,29 +1083,63 @@ export default function ShortTermCenter() {
           {activeTab === 'reports' && (
             <div className="stc-stack">
               <div className="stc-stats">
-                <StatCard label="کل فیس قابل دریافت" value={`${fmt(reports?.summary?.dueTotal || summary.dueTotal)} ${currency}`} />
-                <StatCard label="کل دریافت‌شده" value={`${fmt(reports?.summary?.paidTotal || summary.paidTotal)} ${currency}`} tone="green" />
-                <StatCard label="کل باقی‌داری" value={`${fmt(reports?.summary?.outstandingTotal || summary.outstandingTotal)} ${currency}`} tone="amber" />
-                <StatCard label="مفاد ماه جاری" value={`${fmt((reports?.summary?.monthIncome || summary.monthIncome || 0) - (reports?.summary?.monthExpenses || summary.monthExpenses || 0))} ${currency}`} />
+                <StatCard label="کل فیس قابل دریافت" value={`${fmt(reports?.summary?.dueTotal ?? summary.dueTotal)} ${currency}`} />
+                <StatCard label="کل دریافت‌شده" value={`${fmt(reports?.summary?.paidTotal ?? summary.paidTotal)} ${currency}`} tone="green" />
+                <StatCard label="کل باقی‌داری" value={`${fmt(reports?.summary?.outstandingTotal ?? summary.outstandingTotal)} ${currency}`} tone="amber" />
+                <StatCard label="مفاد ماه جاری" value={`${fmt((reports?.summary?.monthIncome ?? summary.monthIncome ?? 0) - (reports?.summary?.monthExpenses ?? summary.monthExpenses ?? 0))} ${currency}`} />
               </div>
-              <div className="stc-grid">
-                <div className="stc-panel">
-                  <div className="stc-panel-head">
-                    <h2>باقی‌داران</h2>
-                    <button type="button" className="stc-inline-button" onClick={() => exportCsv('short-term-debtors.csv', ['Student', 'Class', 'Balance'], (reports?.debtors || []).map((item) => [item.studentId?.fullName, item.classId?.name, item.balance]))}>Excel/CSV</button>
-                  </div>
-                  <Table
-                    columns={['شاگرد', 'صنف', 'باقی']}
-                    rows={(reports?.debtors || []).map((item) => [text(item.studentId?.fullName), text(item.classId?.name), `${fmt(item.balance)} ${currency}`])}
-                  />
+
+              <div className="stc-panel">
+                <div className="stc-panel-head">
+                  <h2>شاگردان باقی‌دار ({fmt((reports?.debtors || []).length)})</h2>
+                  <button type="button" className="stc-inline-button" disabled={!(reports?.debtors || []).length} onClick={() => exportCsv('short-term-debtors.csv', ['Student', 'Code', 'Phone', 'Class', 'RegDate', 'Months', 'MonthsPaid', 'Payable', 'Paid', 'Balance', 'Overdue'], (reports?.debtors || []).map((item) => [item.studentId?.fullName, item.studentId?.studentCode, item.studentId?.phone, item.classId?.name, item.registrationDate, item.durationMonths, item.monthsPaid, item.totalPayable, item.paidAmount, item.balance, item.overdue ? 'yes' : '']))}>Excel/CSV</button>
                 </div>
-                <div className="stc-panel">
-                  <h2>گزارش صنف‌ها</h2>
-                  <Table
-                    columns={['صنف', 'ثبت‌نام', 'دریافت', 'باقی']}
-                    rows={(reports?.byClass || []).map((item) => [text(item.className), fmt(item.registrations), `${fmt(item.paid)} ${currency}`, `${fmt(item.balance)} ${currency}`])}
-                  />
+                <p className="stc-form-hint">هر ثبت‌نامِ فعالی که هنوز باقیِ پرداخت‌نشده دارد — فیسِ کل از تاریخِ ثبت و مدتِ شاگرد حساب می‌شود.</p>
+                <Table
+                  columns={['شاگرد', 'صنف', 'تاریخ ثبت', 'مدت', 'فیس کل', 'پرداخت', 'باقی', 'ماه‌های مانده', 'وضعیت']}
+                  rows={(reports?.debtors || []).map((item) => [
+                    text(item.studentId?.fullName),
+                    text(item.classId?.name),
+                    item.registrationDate ? formatAfghanStoredDateLabel(item.registrationDate) : '—',
+                    `${fmt(item.durationMonths)} ماه`,
+                    `${fmt(item.totalPayable)} ${currency}`,
+                    `${fmt(item.paidAmount)} ${currency}`,
+                    <span className="stc-amount-negative">{`${fmt(item.balance)} ${currency}`}</span>,
+                    fmt(item.monthsRemaining),
+                    item.overdue ? <span className="stc-chip stc-chip-bad">سررسیده</span> : <span className="stc-chip stc-chip-muted">در جریان</span>
+                  ])}
+                />
+              </div>
+
+              <div className="stc-panel">
+                <div className="stc-panel-head">
+                  <h2>شاگردان پرداخت‌کننده ({fmt((reports?.payers || []).length)})</h2>
+                  <button type="button" className="stc-inline-button" disabled={!(reports?.payers || []).length} onClick={() => exportCsv('short-term-payers.csv', ['Student', 'Code', 'Phone', 'Class', 'Months', 'MonthsPaid', 'Payable', 'Paid', 'Balance'], (reports?.payers || []).map((item) => [item.studentId?.fullName, item.studentId?.studentCode, item.studentId?.phone, item.classId?.name, item.durationMonths, item.monthsPaid, item.totalPayable, item.paidAmount, item.balance]))}>Excel/CSV</button>
                 </div>
+                <p className="stc-form-hint">هر شاگردی که پرداختِ ثبت‌شده دارد؛ «ماه‌های پرداخت‌شده» = پرداخت ÷ فیسِ هر ماه.</p>
+                <Table
+                  columns={['شاگرد', 'صنف', 'مدت', 'ماه‌های پرداخت‌شده', 'فیس کل', 'پرداخت', 'باقی', 'وضعیت']}
+                  rows={(reports?.payers || []).map((item) => [
+                    text(item.studentId?.fullName),
+                    text(item.classId?.name),
+                    `${fmt(item.durationMonths)} ماه`,
+                    fmt(item.monthsPaid),
+                    `${fmt(item.totalPayable)} ${currency}`,
+                    <span className="stc-amount-positive">{`${fmt(item.paidAmount)} ${currency}`}</span>,
+                    `${fmt(item.balance)} ${currency}`,
+                    item.balance <= 0
+                      ? <span className="stc-chip stc-chip-ok">تسویه</span>
+                      : <span className="stc-chip stc-chip-muted">نیمه‌پرداخت</span>
+                  ])}
+                />
+              </div>
+
+              <div className="stc-panel">
+                <h2>گزارش صنف‌ها</h2>
+                <Table
+                  columns={['صنف', 'ثبت‌نام', 'قابل دریافت', 'دریافت', 'باقی']}
+                  rows={(reports?.byClass || []).map((item) => [text(item.className), fmt(item.registrations), `${fmt(item.payable)} ${currency}`, `${fmt(item.paid)} ${currency}`, `${fmt(item.balance)} ${currency}`])}
+                />
               </div>
               <div className="stc-panel">
                 <div className="stc-panel-head">

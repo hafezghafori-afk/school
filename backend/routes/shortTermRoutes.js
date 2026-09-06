@@ -74,9 +74,15 @@ async function buildSummary() {
     ShortTermInvoice.find().sort({ issuedAt: -1 }).limit(8).populate('studentId', 'fullName studentCode').lean()
   ]);
 
-  const paidTotal = registrations.reduce((sum, item) => sum + toNumber(item.paidAmount), 0);
-  const outstandingTotal = registrations.reduce((sum, item) => sum + toNumber(item.balance), 0);
-  const dueTotal = registrations.reduce((sum, item) => sum + toNumber(item.totalPayable), 0);
+  // ثبت‌نامِ لغوشده (مثلاً یکی از دو ثبت‌نامِ تکراری) نه فیسِ قابل‌دریافت دارد نه
+  // پرداخت — از مجموع‌های خلاصه کنار می‌رود تا «قابل دریافت − دریافت‌شده» با
+  // «باقی‌داری» جور دربیاید.
+  const liveRegs = registrations.filter((item) => item.status !== 'cancelled');
+  const paidTotal = liveRegs.reduce((sum, item) => sum + toNumber(item.paidAmount), 0);
+  const dueTotal = liveRegs.reduce((sum, item) => sum + toNumber(item.totalPayable), 0);
+  const outstandingTotal = registrations
+    .filter((item) => item.status === 'active')
+    .reduce((sum, item) => sum + toNumber(item.balance), 0);
   const today = todayKey();
   const overdueCount = registrations.filter((item) => item.status === 'active' && item.endDate && item.endDate < today).length;
   const { start: shamsiMonthStart, endExclusive: shamsiMonthEnd } = currentShamsiMonthRange();
@@ -597,17 +603,48 @@ router.post('/attendance', async (req, res) => {
   }
 });
 
+// یک ردیفِ گزارشِ باقی‌دار/پرداخت‌کننده — الگوی مشترک با بخشِ آموزشگاه:
+// فیسِ کل از «تاریخِ ثبت» و مدت، پرداختِ واقعی، و ماه‌های پرداخت‌شده/باقی.
+function reportRow(r) {
+  const monthlyNet = Math.max(0, toNumber(r.feeAmount) - toNumber(r.discountAmount));
+  const monthsPaid = monthlyNet > 0 ? Math.round((toNumber(r.paidAmount) / monthlyNet) * 100) / 100 : 0;
+  return {
+    _id: r._id,
+    studentId: r.studentId,
+    classId: r.classId,
+    registrationDate: r.registrationDate,
+    startDate: r.startDate,
+    endDate: r.endDate,
+    durationMonths: r.durationMonths,
+    totalPayable: toNumber(r.totalPayable),
+    paidAmount: toNumber(r.paidAmount),
+    balance: toNumber(r.balance),
+    monthsPaid,
+    monthsRemaining: Math.max(0, toNumber(r.durationMonths) - monthsPaid),
+    paymentStatus: r.paymentStatus,
+    overdue: r.status === 'active' && r.endDate && r.endDate < todayKey()
+  };
+}
+
 router.get('/reports/overview', async (_req, res) => {
   try {
-    const [summary, debtors, byClass] = await Promise.all([
+    const liveFilter = { status: { $ne: 'cancelled' } };
+    const [summary, debtorRegs, payerRegs, byClass] = await Promise.all([
       buildSummary(),
+      // شاگردانِ باقی‌دار — هر ثبت‌نامِ فعالی که هنوز باقیِ پرداخت‌نشده دارد
       ShortTermRegistration.find({ balance: { $gt: 0 }, status: 'active' })
-        .sort({ balance: -1 })
-        .limit(50)
+        .sort({ balance: -1 }).limit(200)
         .populate('studentId', 'fullName studentCode phone status')
-        .populate('classId', 'name')
+        .populate('classId', 'name subject')
+        .lean(),
+      // شاگردانِ پرداخت‌کننده — هر ثبت‌نامِ غیرِلغوی که پرداختِ ثبت‌شده دارد
+      ShortTermRegistration.find({ paidAmount: { $gt: 0 }, ...liveFilter })
+        .sort({ paidAmount: -1 }).limit(300)
+        .populate('studentId', 'fullName studentCode phone status')
+        .populate('classId', 'name subject')
         .lean(),
       ShortTermRegistration.aggregate([
+        { $match: liveFilter },
         { $group: { _id: '$classId', registrations: { $sum: 1 }, payable: { $sum: '$totalPayable' }, paid: { $sum: '$paidAmount' }, balance: { $sum: '$balance' } } },
         { $sort: { paid: -1 } },
         { $limit: 20 }
@@ -616,11 +653,17 @@ router.get('/reports/overview', async (_req, res) => {
     const classIds = byClass.map((item) => item._id).filter(Boolean);
     const classes = await ShortTermClass.find({ _id: { $in: classIds } }).select('name').lean();
     const classMap = new Map(classes.map((item) => [String(item._id), item.name]));
+    const notInactive = (r) => !r.studentId || r.studentId.status !== 'inactive';
+
+    const debtors = debtorRegs.filter(notInactive).map(reportRow);
+    const payers = payerRegs.filter(notInactive).map(reportRow);
     res.json({
       success: true,
       summary,
-      // شاگردانِ غیرفعال از فهرستِ باقی‌داران کنار می‌روند
-      debtors: debtors.filter((r) => !r.studentId || r.studentId.status !== 'inactive').slice(0, 25).map(withOverdueFlag),
+      debtors,
+      payers,
+      debtorTotal: debtors.reduce((s, r) => s + r.balance, 0),
+      payerReceived: payers.reduce((s, r) => s + r.paidAmount, 0),
       byClass: byClass.map((item) => ({ ...item, className: classMap.get(String(item._id)) || 'صنف' }))
     });
   } catch {
