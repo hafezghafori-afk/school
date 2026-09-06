@@ -117,6 +117,19 @@ function bumpShamsiMonth(key) {
   return jm >= 12 ? `${jy + 1}-01` : `${jy}-${String(jm + 1).padStart(2, '0')}`;
 }
 
+/** تعدادِ ماه‌های شمسی از fromKey تا toKey (می‌تواند منفی باشد). */
+function shamsiMonthsBetween(fromKey, toKey) {
+  const [fy, fm] = String(fromKey).split('-').map(Number);
+  const [ty, tm] = String(toKey).split('-').map(Number);
+  if (!fy || !fm || !ty || !tm) return 0;
+  return (ty * 12 + tm) - (fy * 12 + fm);
+}
+
+// در یک اجرا حداکثر این تعداد ماهِ عقب‌افتاده به‌صورت خودکار شارژ می‌شود. اگر
+// بازهٔ کَچ‌آپ از این بیشتر شد (معمولاً به‌خاطرِ startDateِ کهنه)، فقط همین
+// تعداد ماهِ اخیر ساخته و بقیه با هشدار رد می‌شود تا دستی بررسی شود.
+const MAX_MONTHLY_CATCHUP = 3;
+
 /**
  * شارژِ ماهانهٔ ماه‌های سررسیدشده را برای ثبت‌نام‌های فعالِ ماهانه می‌سازد (idempotent).
  * @param {{ dueDay?: number, registrationId?: string }} [opts]
@@ -147,6 +160,19 @@ async function generateMonthlyCharges({ dueDay = 20, registrationId = null } = {
     // شروع — تا ماه‌های گذشته دوباره یا عقب‌افتاده شارژ نشوند.
     const lastKey = String(reg.lastMonthlyChargeKey || '');
     let cursorKey = (lastKey && lastKey >= startMonthKey) ? bumpShamsiMonth(lastKey) : startMonthKey;
+
+    // سقفِ امنِ کَچ‌آپ: بیش از MAX_MONTHLY_CATCHUP ماه عقب‌افتادگی را خودکار
+    // نساز — احتمالِ startDateِ اشتباه است. فقط ماه‌های اخیر ساخته می‌شود.
+    if (cursorKey && cursorKey <= nowKey && shamsiMonthsBetween(cursorKey, nowKey) > MAX_MONTHLY_CATCHUP) {
+      let clamped = nowKey;
+      for (let i = 0; i < MAX_MONTHLY_CATCHUP; i += 1) {
+        const [cy, cm] = clamped.split('-').map(Number);
+        clamped = cm <= 1 ? `${cy - 1}-12` : `${cy}-${String(cm - 1).padStart(2, '0')}`;
+      }
+      console.warn(`[academyLedger] ثبت‌نام ${reg._id}: بازهٔ فیسِ ماهانه از ${cursorKey} تا ${nowKey} بیش از ${MAX_MONTHLY_CATCHUP} ماه است — فقط از ${clamped} ساخته شد؛ ماه‌های قدیمی‌تر نیاز به بررسیِ دستی دارند.`);
+      cursorKey = clamped;
+    }
+
     // نگذار بیش از ۳۶ ماه عقب برود (محافظ)
     let guard = 0;
     while (cursorKey <= nowKey && guard < 36) {

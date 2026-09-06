@@ -52,4 +52,10 @@ shortTermRegistrationSchema.pre('validate', function normalizeShortTermRegistrat
 
 shortTermRegistrationSchema.index({ studentId: 1, classId: 1, status: 1 });
 
+// ضدِ ثبت‌نامِ تکراری در سطحِ دیتابیس: حداکثر یک ثبت‌نامِ فعال per (شاگرد، صنف).
+shortTermRegistrationSchema.index(
+  { studentId: 1, classId: 1 },
+  { unique: true, partialFilterExpression: { status: 'active' } }
+);
+
 module.exports = shortTermConnection.model('ShortTermRegistration', shortTermRegistrationSchema);

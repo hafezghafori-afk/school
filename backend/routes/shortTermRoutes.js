@@ -273,13 +273,29 @@ router.get('/registrations', async (req, res) => {
 
 router.post('/registrations', async (req, res) => {
   try {
+    // ضدِ ثبت‌نامِ تکراری: یک شاگردِ موقت در یک صنف فقط یک ثبت‌نامِ فعال.
+    if (req.body.studentId && req.body.classId) {
+      const dup = await ShortTermRegistration.findOne({
+        studentId: req.body.studentId, classId: req.body.classId, status: 'active'
+      }).select('_id').lean();
+      if (dup) {
+        return res.status(409).json({
+          success: false,
+          message: 'این شاگرد از قبل در همین صنف ثبت‌نامِ فعال دارد. اول ثبت‌نامِ قبلی را تکمیل یا لغو کنید.'
+        });
+      }
+    }
+
     const item = await ShortTermRegistration.create({ ...req.body, createdBy: userId(req), updatedBy: userId(req) });
     const populated = await ShortTermRegistration.findById(item._id)
       .populate('studentId', 'fullName studentCode phone')
       .populate('classId', 'name subject defaultFee')
       .lean();
     res.status(201).json({ success: true, item: withOverdueFlag(populated), message: 'ثبت‌نام و فیس شاگرد ثبت شد.' });
-  } catch {
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({ success: false, message: 'این شاگرد از قبل در همین صنف ثبت‌نامِ فعال دارد.' });
+    }
     res.status(400).json({ success: false, message: 'ثبت‌نام ناموفق بود.' });
   }
 });
