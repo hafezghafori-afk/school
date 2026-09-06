@@ -1258,7 +1258,7 @@ export default function AcademyManagement() {
                   <>
                     <Field label="فیس ثابتِ هر ماه"><input type="number" min="0" value={registrationForm.monthlyFee} onChange={(e) => setRegistrationForm({ ...registrationForm, monthlyFee: e.target.value })} /></Field>
                     <Field label="تاریخ پایان (اختیاری)"><AfghanDateInput value={registrationForm.endDate} onChange={(value) => setRegistrationForm({ ...registrationForm, endDate: value })} /></Field>
-                    <p className="academy-form-hint">هر ماهِ شمسی یک شارژِ تازه به همین مبلغ ساخته می‌شود (سررسید روزِ {settings.monthlyChargeDueDay || 20}). با «تاریخ پایان» یا تغییرِ وضعیت به «تمام‌شده» متوقف می‌شود.</p>
+                    <p className="academy-form-hint">هر ماهِ شمسی یک شارژِ تازه به همین مبلغ ساخته می‌شود (سررسید روزِ {settings.monthlyChargeDueDay || 20}). با «تاریخ پایان» یا تغییرِ وضعیت به «متوقف» / «تمام‌شده» متوقف می‌شود؛ «متوقف» برای غیبتِ موقت است و ماه‌های توقف فیس نمی‌گیرد.</p>
                   </>
                 )}
                 {registrationForm.paymentPlan === 'installment' && (
@@ -1301,7 +1301,14 @@ export default function AcademyManagement() {
                     const overdue = list.filter((c) => c.isOverdue);
                     const nextDue = list.filter((c) => c.balance > 0 && c.dueDate).sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)))[0];
                     return [
-                      text(item.studentId?.fullName),
+                      <span>
+                        {text(item.studentId?.fullName)}
+                        {item.status && item.status !== 'active' && (
+                          <span className="academy-chip academy-chip-muted" style={{ marginInlineStart: 6 }}>
+                            {REG_STATUS_LABELS[item.status] || item.status}
+                          </span>
+                        )}
+                      </span>,
                       text(item.courseId?.name),
                       item.paymentPlan === 'monthly' ? `ماهانه${item.monthlyFee ? ` (${fmt(item.monthlyFee)})` : ' — مبلغ تعیین نشده'}` : item.paymentPlan === 'installment' ? 'قسطی' : 'کامل',
                       fmt(item.totalPayable),

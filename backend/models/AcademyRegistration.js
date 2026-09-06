@@ -23,7 +23,9 @@ const academyRegistrationSchema = new mongoose.Schema({
   // pre-validate آن‌ها را از feeAmount/discountAmount بازنمی‌نویسد.
   ledgerManaged: { type: Boolean, default: false },
   paymentStatus: { type: String, enum: ['unpaid', 'partial', 'paid'], default: 'unpaid', index: true },
-  status: { type: String, enum: ['active', 'completed', 'cancelled'], default: 'active', index: true },
+  // paused = توقفِ موقت؛ generateMonthlyCharges فقط status='active' را شارژ می‌کند،
+  // پس ماه‌های توقف فیس نمی‌گیرند. با active-کردنِ دوباره از ماهِ جاری ادامه می‌یابد.
+  status: { type: String, enum: ['active', 'paused', 'completed', 'cancelled'], default: 'active', index: true },
   note: { type: String, default: '', trim: true },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
@@ -58,5 +60,11 @@ academyRegistrationSchema.pre('validate', function normalizeAcademyRegistration(
 });
 
 academyRegistrationSchema.index({ studentId: 1, classId: 1, status: 1 });
+
+// ضدِ ثبت‌نامِ تکراری در سطحِ دیتابیس: حداکثر یک ثبت‌نامِ فعال per (شاگرد، صنف).
+academyRegistrationSchema.index(
+  { studentId: 1, classId: 1 },
+  { unique: true, partialFilterExpression: { status: 'active' } }
+);
 
 module.exports = academyConnection.model('AcademyRegistration', academyRegistrationSchema);

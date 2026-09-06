@@ -345,6 +345,21 @@ router.post('/registrations', async (req, res) => {
   try {
     const settings = await getSettings();
     const currency = req.body.currency || settings.currency || 'AFN';
+
+    // ضدِ ثبت‌نامِ تکراری: یک شاگرد در یک صنف فقط یک ثبت‌نامِ فعال داشته باشد.
+    // (برای صنفِ دیگر یا پس از تکمیل/لغوِ قبلی آزاد است.)
+    if (req.body.studentId && req.body.classId) {
+      const dup = await AcademyRegistration.findOne({
+        studentId: req.body.studentId, classId: req.body.classId, status: 'active'
+      }).select('_id').lean();
+      if (dup) {
+        return res.status(409).json({
+          success: false,
+          message: 'این شاگرد از قبل در همین صنف ثبت‌نامِ فعال دارد. برای ثبت‌نامِ دوباره اول ثبت‌نامِ قبلی را تکمیل یا لغو کنید.'
+        });
+      }
+    }
+
     const reg = await AcademyRegistration.create({
       ...req.body,
       currency,
@@ -362,6 +377,9 @@ router.post('/registrations', async (req, res) => {
       .populate('classId', 'name');
     res.status(201).json({ success: true, item: populated, message: 'ثبت‌نام آموزشگاه انجام شد.' });
   } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({ success: false, message: 'این شاگرد از قبل در همین صنف ثبت‌نامِ فعال دارد.' });
+    }
     res.status(400).json({ success: false, message: error?.message || 'ثبت‌نام آموزشگاه ناموفق بود.' });
   }
 });
@@ -378,7 +396,16 @@ router.put('/registrations/:id', async (req, res) => {
     const settings = await getSettings();
     const currency = reg.currency || settings.currency || 'AFN';
 
-    if (req.body.status !== undefined && ['active', 'completed', 'cancelled', 'paused'].includes(req.body.status)) reg.status = req.body.status;
+    if (req.body.status !== undefined && ['active', 'completed', 'cancelled', 'paused'].includes(req.body.status)) {
+      const prevStatus = reg.status;
+      reg.status = req.body.status;
+      // خروج از توقف: ماه‌های دورهٔ توقف نباید فیس بگیرند — نشانگرِ شارژ را روی
+      // ماهِ *قبل* بگذار تا کَچ‌آپ از همین ماهِ جاری شروع شود (نه از ماهِ آخرِ فعال‌بودن).
+      if (prevStatus === 'paused' && reg.status === 'active') {
+        const [ny, nm] = academyLedger.shamsiMonthKey(new Date()).split('-').map(Number);
+        reg.lastMonthlyChargeKey = nm <= 1 ? `${ny - 1}-12` : `${ny}-${String(nm - 1).padStart(2, '0')}`;
+      }
+    }
     if (req.body.startDate !== undefined) reg.startDate = String(req.body.startDate || '').slice(0, 10);
     if (req.body.endDate !== undefined) reg.endDate = String(req.body.endDate || '').slice(0, 10);
     if (req.body.note !== undefined) reg.note = String(req.body.note || '').trim();
