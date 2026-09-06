@@ -67,6 +67,18 @@ const authMock = {
     } catch {
       return res.status(400).json({ success: false, message: 'Invalid test user.' });
     }
+  },
+  // reportRoutes.js gates /consolidated-finance with requirePermission(...);
+  // this smoke exercises route shapes, not permission enforcement, so the
+  // mocked factory just returns a pass-through middleware.
+  requirePermission() {
+    return (req, res, next) => next();
+  },
+  requireAnyPermission() {
+    return (req, res, next) => next();
+  },
+  requireRole() {
+    return (req, res, next) => next();
   }
 };
 
