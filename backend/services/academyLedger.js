@@ -152,7 +152,16 @@ async function generateMonthlyCharges({ dueDay = 20, registrationId = null } = {
   const touched = new Set();
 
   for (const reg of regs) {
-    const startISO = String(reg.startDate || reg.registrationDate || '').slice(0, 10) || todayKey();
+    // مبنای صدورِ فیسِ ماهانه = تاریخِ ثبت‌نام (registrationDate). startDate فقط
+    // وقتی به‌کار می‌رود که *بعد* از تاریخِ ثبت باشد (شاگردی که ثبت شده ولی
+    // دیرتر صنف را شروع می‌کند). startDateِ پیش از تاریخِ ثبت تقریباً همیشه
+    // مقدارِ پیش‌فرضِ غلطِ فرم است («۱ حمل / اولِ سال») و نادیده گرفته می‌شود —
+    // وگرنه شاگرد برای ماه‌هایی که اصلاً نیامده فیس و قرضداری می‌گیرد.
+    const regISO = String(reg.registrationDate || '').slice(0, 10);
+    const rawStartISO = String(reg.startDate || '').slice(0, 10);
+    const startISO = (rawStartISO && regISO && rawStartISO > regISO)
+      ? rawStartISO
+      : (regISO || rawStartISO || todayKey());
     const endISO = String(reg.endDate || '').slice(0, 10);
     const startMonthKey = shamsiMonthKey(startISO);
     // اگر lastMonthlyChargeKey ثبت شده (backfill آن را روی ماهِ جاری می‌گذارد، یا

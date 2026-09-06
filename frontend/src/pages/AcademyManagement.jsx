@@ -1233,7 +1233,8 @@ export default function AcademyManagement() {
                   </select>
                 </Field>
                 <Field label="تاریخ ثبت"><AfghanDateInput value={registrationForm.registrationDate} onChange={(value) => setRegistrationForm({ ...registrationForm, registrationDate: value })} /></Field>
-                <Field label="تاریخ شروع"><AfghanDateInput value={registrationForm.startDate} onChange={(value) => setRegistrationForm({ ...registrationForm, startDate: value })} /></Field>
+                <Field label="تاریخ شروع (اختیاری)"><AfghanDateInput value={registrationForm.startDate} onChange={(value) => setRegistrationForm({ ...registrationForm, startDate: value })} /></Field>
+                <p className="academy-form-hint">«تاریخ شروع» را فقط وقتی پر کنید که شاگرد دیرتر از تاریخِ ثبت صنف را شروع می‌کند. خالی بگذارید یا برابر تاریخِ ثبت = فیس از همان ماهِ ثبت‌نام. تاریخِ پیش از تاریخِ ثبت نادیده گرفته می‌شود.</p>
                 <Field label="فیس اصلی"><input type="number" min="0" value={registrationForm.feeAmount} onChange={(e) => setRegistrationForm({ ...registrationForm, feeAmount: e.target.value })} /></Field>
                 <Field label="تخفیف"><input type="number" min="0" value={registrationForm.discountAmount} onChange={(e) => setRegistrationForm({ ...registrationForm, discountAmount: e.target.value })} /></Field>
                 {Number(registrationForm.discountAmount) > 0 && (

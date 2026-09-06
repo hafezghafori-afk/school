@@ -335,7 +335,13 @@ async function buildInitialCharges(reg, body, currency, settings, uid) {
       title: 'فیس / شمولیت', amount: fee, discountAmount: discount,
       discountReason, discountType,
       discountApprovedBy: discount > 0 ? uid : null,
-      dueDate: String(reg.startDate || reg.registrationDate || '').slice(0, 10),
+      // سررسید = تاریخِ ثبت‌نام؛ startDate فقط اگر بعد از آن باشد (هم‌راستا با
+      // academyLedger.generateMonthlyCharges — startDateِ «۱ حمل» را نادیده بگیر).
+      dueDate: (() => {
+        const r = String(reg.registrationDate || '').slice(0, 10);
+        const s = String(reg.startDate || '').slice(0, 10);
+        return (s && r && s > r) ? s : (r || s);
+      })(),
       currency, createdBy: uid
     });
   }
