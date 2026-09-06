@@ -16,11 +16,15 @@ const criticalRoutes = ['/', '/login', '/register', '/contact', '/dashboard', '/
 // nav elements. This must mirror `usesPublicRedesign` in App.jsx.
 const publicRedesignRoutes = new Set(['/', '/login', '/contact']);
 
-// Routes that still render the legacy app-shell header (App.jsx, `header
-// className="site-header"`), which does have distinct mobile
-// (`.mobile-nav-toggle` / `.mobile-nav-drawer`) and desktop (`.desktop-nav`)
-// chrome. `/register` hasn't been migrated to the public redesign yet.
-const legacyHeaderRoutes = new Set(['/register']);
+// Routes that render the legacy app-shell header (App.jsx, `header
+// className="site-header"`) with distinct mobile (`.mobile-nav-toggle` /
+// `.mobile-nav-drawer`) and desktop (`.desktop-nav`) chrome. Since App.jsx
+// gained `hideMainNav = ... || !authed` (commit 59f08fb), that header only
+// renders for an authenticated, non-dashboard route — none of which are
+// reachable in this backend-less smoke job — so there is no anonymous
+// route left to assert it on. `/register` now renders chrome-less when
+// logged out and just gets the generic overflow/text checks below.
+const legacyHeaderRoutes = new Set();
 
 const readLayoutMetrics = async (page) => page.evaluate(() => {
   const doc = document.documentElement;
@@ -64,11 +68,15 @@ test.describe('responsive layout', () => {
     }
   });
 
-  test('responsive layout mobile drawer opens and closes on link click', async ({ page }) => {
+  // The legacy app-shell header (hamburger drawer + `.desktop-nav`) now only
+  // renders for an authenticated non-dashboard route (App.jsx `hideMainNav`
+  // hides it whenever `!authed`), and this smoke job runs the frontend with
+  // no backend to log in against. `/register` — the route these two used to
+  // drive — renders chrome-less when logged out. Skipped until the job
+  // seeds an authenticated session; the redesigned public header is still
+  // covered by the `.public-nav` assertions in the matrix test above.
+  test.skip('responsive layout mobile drawer opens and closes on link click', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 900 });
-    // /register still renders the legacy app-shell header with the
-    // hamburger/drawer; / now uses the redesigned PublicLayout header
-    // (see publicRedesignRoutes above), which has no drawer to open.
     await page.goto('/register', { waitUntil: 'domcontentloaded' });
 
     const toggle = page.locator('.mobile-nav-toggle').first();
@@ -85,13 +93,8 @@ test.describe('responsive layout', () => {
     await expect(page.locator('.mobile-nav-drawer.open')).toHaveCount(0);
   });
 
-  test('responsive layout desktop shows desktop nav', async ({ page }) => {
+  test.skip('responsive layout desktop shows desktop nav', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    // Same reasoning as above: /register is the anonymous-reachable route
-    // still on the legacy header. Its anonymous nav menu has no dropdown
-    // items (those are only populated for authenticated users), so this
-    // only asserts the layout split itself rather than mega-dropdown
-    // content that isn't reachable without logging in.
     await page.goto('/register', { waitUntil: 'domcontentloaded' });
 
     const desktopNav = page.locator('.desktop-nav').first();
