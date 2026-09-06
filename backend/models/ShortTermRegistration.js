@@ -39,7 +39,9 @@ shortTermRegistrationSchema.pre('validate', function normalizeShortTermRegistrat
   this.endDate = addMonthsToDateKey(this.startDate, this.durationMonths);
   this.feeAmount = Math.max(0, Number(this.feeAmount || 0));
   this.discountAmount = Math.max(0, Number(this.discountAmount || 0));
-  this.totalPayable = Math.max(0, this.feeAmount - this.discountAmount);
+  // feeAmount/discountAmount مبلغِ *یک ماه* است؛ کلِ قابل‌پرداخت = یک ماه × مدت.
+  // (دادهٔ قدیمی همه durationMonths=1 دارد، پس × ۱ = بدون تغییر.)
+  this.totalPayable = Math.max(0, this.feeAmount - this.discountAmount) * this.durationMonths;
   this.paidAmount = Math.max(0, Number(this.paidAmount || 0));
   this.balance = Math.max(0, this.totalPayable - this.paidAmount);
   this.paymentStatus = this.balance <= 0 && this.totalPayable > 0

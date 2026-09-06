@@ -105,6 +105,8 @@ const paymentMethodLabels = {
   other: 'سایر'
 };
 
+const REG_STATUS_LABELS = { active: 'فعال', completed: 'تکمیل‌شده', cancelled: 'لغوشده' };
+
 const expenseCategoryLabels = {
   teacher_salary: 'معاش استاد',
   rent: 'کرایه',
@@ -371,6 +373,8 @@ export default function ShortTermCenter() {
   const [paymentRegistrationSearch, setPaymentRegistrationSearch] = useState('');
   const [expenseForm, setExpenseForm] = useState(emptyExpense);
   const [attendanceForm, setAttendanceForm] = useState(emptyAttendance);
+  const [editingRegistration, setEditingRegistration] = useState(null);
+  const [regEditForm, setRegEditForm] = useState(null);
 
   const currency = settings?.currency || 'AFN';
 
@@ -599,6 +603,58 @@ export default function ShortTermCenter() {
     try {
       const data = await requestJson(`/api/short-term-center/registrations/${item._id}/complete`, { method: 'PUT' });
       toast.success(data.message || 'مدت شاگرد تکمیل شد.');
+      await loadData();
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openRegEdit = (item) => {
+    setEditingRegistration(item);
+    setRegEditForm({
+      status: item.status || 'active',
+      registrationDate: String(item.registrationDate || '').slice(0, 10),
+      startDate: String(item.startDate || '').slice(0, 10),
+      durationMonths: item.durationMonths || 1,
+      feeAmount: item.feeAmount ?? '',
+      discountAmount: item.discountAmount ?? '',
+      paymentPlan: item.paymentPlan || 'full',
+      note: item.note || ''
+    });
+  };
+
+  const saveRegEdit = async () => {
+    if (!editingRegistration || !regEditForm) return;
+    setBusy(true);
+    try {
+      const data = await requestJson(`/api/short-term-center/registrations/${editingRegistration._id}`, {
+        method: 'PUT',
+        body: JSON.stringify(regEditForm)
+      });
+      toast.success(data.message || 'ثبت‌نام به‌روزرسانی شد.');
+      setEditingRegistration(null);
+      setRegEditForm(null);
+      await loadData();
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const voidPayment = async (payment) => {
+    const reason = window.prompt('دلیلِ ابطالِ این پرداخت (مثلاً: ثبتِ اشتباه، بازپرداختِ نقدی به شاگرد):', '');
+    if (reason === null) return;
+    if (!reason.trim()) { toast.error('دلیل الزامی است.'); return; }
+    setBusy(true);
+    try {
+      const data = await requestJson(`/api/short-term-center/payments/${payment._id}/void`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: reason.trim() })
+      });
+      toast.success(data.message || 'پرداخت ابطال شد.');
       await loadData();
     } catch (error) {
       toast.error(error.message);
@@ -836,8 +892,12 @@ export default function ShortTermCenter() {
                 <Field label="تاریخ ثبت"><AfghanDateInput value={registrationForm.registrationDate} onChange={(value) => setRegistrationForm({ ...registrationForm, registrationDate: value })} /></Field>
                 <Field label="تاریخ شروع"><AfghanDateInput value={registrationForm.startDate} onChange={(value) => setRegistrationForm({ ...registrationForm, startDate: value })} /></Field>
                 <Field label="مدت شاگرد (به ماه)"><input type="number" min="1" value={registrationForm.durationMonths} onChange={(e) => setRegistrationForm({ ...registrationForm, durationMonths: e.target.value })} /></Field>
-                <Field label="فیس اصلی"><input type="number" min="0" value={registrationForm.feeAmount} onChange={(e) => setRegistrationForm({ ...registrationForm, feeAmount: e.target.value })} /></Field>
-                <Field label="تخفیف"><input type="number" min="0" value={registrationForm.discountAmount} onChange={(e) => setRegistrationForm({ ...registrationForm, discountAmount: e.target.value })} /></Field>
+                <Field label="فیس هر ماه"><input type="number" min="0" value={registrationForm.feeAmount} onChange={(e) => setRegistrationForm({ ...registrationForm, feeAmount: e.target.value })} /></Field>
+                <Field label="تخفیف (هر ماه)"><input type="number" min="0" value={registrationForm.discountAmount} onChange={(e) => setRegistrationForm({ ...registrationForm, discountAmount: e.target.value })} /></Field>
+                <p className="stc-form-hint">
+                  کل قابل پرداخت: <strong>{fmt(Math.max(0, (Number(registrationForm.feeAmount || 0) - Number(registrationForm.discountAmount || 0))) * Math.max(1, Number(registrationForm.durationMonths || 1)))} {currency}</strong>
+                  {' '}= (فیس هر ماه − تخفیف) × مدت. برای چند ماه، «مدت شاگرد» را زیاد کنید — نه ثبت‌نامِ جداگانه.
+                </p>
                 <Field label="نوع پرداخت">
                   <select value={registrationForm.paymentPlan} onChange={(e) => setRegistrationForm({ ...registrationForm, paymentPlan: e.target.value })}>
                     <option value="full">کامل</option>
@@ -850,7 +910,7 @@ export default function ShortTermCenter() {
               <div className="stc-panel">
                 <h2>لیست ثبت‌نام‌ها</h2>
                 <Table
-                  columns={['شاگرد', 'صنف', 'مدت', 'ختم مدت', 'فیس', 'پرداخت', 'باقی', 'وضعیت']}
+                  columns={['شاگرد', 'صنف', 'مدت', 'ختم مدت', 'فیس', 'پرداخت', 'باقی', 'وضعیت', 'اقدام']}
                   rows={filteredRegistrations.map((item) => [
                     text(item.studentId?.fullName),
                     text(item.classId?.name),
@@ -859,9 +919,13 @@ export default function ShortTermCenter() {
                     fmt(item.totalPayable),
                     fmt(item.paidAmount),
                     fmt(item.balance),
-                    item.status === 'active'
-                      ? <button type="button" className="stc-inline-button" onClick={() => completeRegistration(item)} disabled={busy}>تکمیل مدت</button>
-                      : 'تکمیل‌شده'
+                    REG_STATUS_LABELS[item.status] || item.status,
+                    <span style={{ display: 'inline-flex', gap: 6 }}>
+                      <button type="button" className="stc-inline-button" onClick={() => openRegEdit(item)} disabled={busy}>ویرایش</button>
+                      {item.status === 'active' && (
+                        <button type="button" className="stc-inline-button" onClick={() => completeRegistration(item)} disabled={busy}>تکمیل مدت</button>
+                      )}
+                    </span>
                   ])}
                 />
               </div>
@@ -907,15 +971,27 @@ export default function ShortTermCenter() {
               <div className="stc-panel">
                 <h2>بل‌های صادرشده</h2>
                 <Table
-                  columns={['شماره', 'شاگرد', 'صنف', 'این پرداخت', 'باقی', 'رسید']}
-                  rows={filteredInvoices.map((item) => [
-                    item.invoiceNumber,
-                    text(item.studentId?.fullName),
-                    text(item.className),
-                    `${fmt(item.paidAmount)} ${item.currency || currency}`,
-                    fmt(item.remainingBalance),
-                    <button type="button" className="stc-inline-button" onClick={() => printInvoiceById(item)}>چاپ رسید A4</button>
-                  ])}
+                  columns={['شماره', 'شاگرد', 'صنف', 'این پرداخت', 'باقی', 'وضعیت', 'اقدام']}
+                  rows={filteredInvoices.map((item) => {
+                    const isCredit = item.kind === 'credit_note';
+                    const isVoid = item.status === 'void';
+                    return [
+                      <span className={isVoid ? 'stc-void' : ''}>{item.invoiceNumber}</span>,
+                      text(item.studentId?.fullName),
+                      text(item.className),
+                      `${isCredit ? '−' : ''}${fmt(item.paidAmount)} ${item.currency || currency}`,
+                      fmt(item.remainingBalance),
+                      isCredit ? <span className="stc-chip stc-chip-muted">بلِ ابطالی</span>
+                        : isVoid ? <span className="stc-chip stc-chip-bad">ابطال‌شده</span>
+                          : <span className="stc-chip stc-chip-ok">معتبر</span>,
+                      <span style={{ display: 'inline-flex', gap: 6 }}>
+                        <button type="button" className="stc-inline-button" onClick={() => printInvoiceById(item)}>چاپ رسید A4</button>
+                        {!isCredit && !isVoid && item.paymentId && (
+                          <button type="button" className="stc-inline-button stc-danger" onClick={() => voidPayment({ _id: item.paymentId })} disabled={busy}>ابطال پرداخت</button>
+                        )}
+                      </span>
+                    ];
+                  })}
                 />
               </div>
             </div>
@@ -1090,7 +1166,58 @@ export default function ShortTermCenter() {
 
       <StudentProfileModal student={selectedStudent} currency={currency} onClose={() => setSelectedStudent(null)} onPrintInvoice={printInvoiceById} />
       <MonthlyReportDetailModal detail={monthlyReportDetail} currency={currency} onClose={() => setMonthlyReportDetail(null)} />
+      <RegistrationEditModal
+        registration={editingRegistration}
+        form={regEditForm}
+        setForm={setRegEditForm}
+        currency={currency}
+        busy={busy}
+        onClose={() => { setEditingRegistration(null); setRegEditForm(null); }}
+        onSave={saveRegEdit}
+      />
     </section>
+  );
+}
+
+function RegistrationEditModal({ registration, form, setForm, currency, busy, onClose, onSave }) {
+  if (!registration || !form) return null;
+  const set = (patch) => setForm({ ...form, ...patch });
+  const months = Math.max(1, Number(form.durationMonths || 1));
+  const perMonth = Math.max(0, Number(form.feeAmount || 0) - Number(form.discountAmount || 0));
+  const payable = perMonth * months;
+  const paid = Number(registration.paidAmount || 0);
+  return (
+    <div className="stc-modal-backdrop" role="presentation" onClick={onClose}>
+      <section className="stc-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+        <button type="button" className="stc-modal-close" onClick={onClose}>بستن</button>
+        <h2>ویرایش ثبت‌نام — {text(registration.studentId?.fullName)} / {text(registration.classId?.name)}</h2>
+        <div className="stc-form">
+          <Field label="وضعیت">
+            <select value={form.status} onChange={(e) => set({ status: e.target.value })}>
+              {Object.entries(REG_STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </Field>
+          <Field label="تاریخ ثبت"><AfghanDateInput value={form.registrationDate} onChange={(value) => set({ registrationDate: value })} /></Field>
+          <Field label="تاریخ شروع"><AfghanDateInput value={form.startDate} onChange={(value) => set({ startDate: value })} /></Field>
+          <Field label="مدت شاگرد (به ماه)"><input type="number" min="1" value={form.durationMonths} onChange={(e) => set({ durationMonths: e.target.value })} /></Field>
+          <Field label="فیس هر ماه"><input type="number" min="0" value={form.feeAmount} onChange={(e) => set({ feeAmount: e.target.value })} /></Field>
+          <Field label="تخفیف (هر ماه)"><input type="number" min="0" value={form.discountAmount} onChange={(e) => set({ discountAmount: e.target.value })} /></Field>
+          <Field label="نوع پرداخت">
+            <select value={form.paymentPlan} onChange={(e) => set({ paymentPlan: e.target.value })}>
+              <option value="full">کامل</option>
+              <option value="installment">قسطی</option>
+              <option value="monthly">ماهانه</option>
+            </select>
+          </Field>
+          <Field label="یادداشت"><textarea value={form.note} onChange={(e) => set({ note: e.target.value })} /></Field>
+          <p className="stc-form-hint">
+            کل قابل پرداخت: <strong>{fmt(payable)} {currency}</strong> — پرداختِ ثبت‌شده: {fmt(paid)} {currency}
+            {paid > payable && <><br /><span className="stc-amount-negative">هشدار: پرداختِ ثبت‌شده از مبلغ بیشتر است؛ برای اصلاح، پرداختِ اضافه را در تب «پرداخت» ابطال کنید.</span></>}
+          </p>
+          <button type="button" onClick={onSave} disabled={busy}>ذخیره</button>
+        </div>
+      </section>
+    </div>
   );
 }
 

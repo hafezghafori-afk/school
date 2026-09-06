@@ -69,7 +69,7 @@ async function buildSummary() {
     ShortTermStudent.countDocuments({ status: 'active' }),
     ShortTermClass.countDocuments({ status: 'active' }),
     ShortTermRegistration.find().select('totalPayable paidAmount balance status paymentStatus endDate createdAt').lean(),
-    ShortTermPayment.find().sort({ paidAt: -1 }).limit(8).populate('studentId', 'fullName studentCode').lean(),
+    ShortTermPayment.find({ status: { $ne: 'void' } }).sort({ paidAt: -1 }).limit(8).populate('studentId', 'fullName studentCode').lean(),
     ShortTermExpense.find().sort({ expenseDate: -1, createdAt: -1 }).limit(8).lean(),
     ShortTermInvoice.find().sort({ issuedAt: -1 }).limit(8).populate('studentId', 'fullName studentCode').lean()
   ]);
@@ -83,6 +83,7 @@ async function buildSummary() {
   const monthIncome = await ShortTermPayment.aggregate([
     {
       $match: {
+        status: { $ne: 'void' },
         paidAt: {
           $gte: new Date(`${shamsiMonthStart}T00:00:00.000Z`),
           $lt: new Date(`${shamsiMonthEnd}T00:00:00.000Z`)
@@ -314,6 +315,53 @@ router.put('/registrations/:id/complete', async (req, res) => {
   }
 });
 
+// ویرایشِ ثبت‌نامِ موقت: مدت / فیسِ ماه / تخفیف / تاریخ‌ها / وضعیت / یادداشت.
+// totalPayable و balance را pre-validate از روی این مقادیر و paidAmountِ فعلی
+// بازمحاسبه می‌کند. اگر مبلغِ تازه از پرداختِ ثبت‌شده کمتر شد، balance صفر می‌ماند
+// (اضافه‌پرداخت) و در پاسخ هشدار می‌آید — با ابطالِ پرداخت قابلِ اصلاح است.
+router.put('/registrations/:id', async (req, res) => {
+  try {
+    const reg = await ShortTermRegistration.findById(req.params.id);
+    if (!reg) return res.status(404).json({ success: false, message: 'ثبت‌نام پیدا نشد.' });
+
+    if (req.body.status !== undefined && ['active', 'completed', 'cancelled'].includes(req.body.status)) {
+      // فعال‌سازیِ دوباره نباید ثبت‌نامِ تکراریِ فعال بسازد
+      if (req.body.status === 'active' && reg.status !== 'active') {
+        const dup = await ShortTermRegistration.findOne({
+          _id: { $ne: reg._id }, studentId: reg.studentId, classId: reg.classId, status: 'active'
+        }).select('_id').lean();
+        if (dup) return res.status(409).json({ success: false, message: 'این شاگرد ثبت‌نامِ فعالِ دیگری در همین صنف دارد.' });
+      }
+      reg.status = req.body.status;
+    }
+    if (req.body.registrationDate !== undefined) reg.registrationDate = String(req.body.registrationDate || '').slice(0, 10);
+    if (req.body.startDate !== undefined) reg.startDate = String(req.body.startDate || '').slice(0, 10);
+    if (req.body.durationMonths !== undefined) reg.durationMonths = Math.max(1, toNumber(req.body.durationMonths));
+    if (req.body.feeAmount !== undefined) reg.feeAmount = toNumber(req.body.feeAmount);
+    if (req.body.discountAmount !== undefined) reg.discountAmount = toNumber(req.body.discountAmount);
+    if (req.body.paymentPlan !== undefined && ['full', 'installment', 'monthly'].includes(req.body.paymentPlan)) reg.paymentPlan = req.body.paymentPlan;
+    if (req.body.note !== undefined) reg.note = String(req.body.note || '').trim();
+    reg.updatedBy = userId(req);
+    await reg.save();
+
+    const item = await ShortTermRegistration.findById(reg._id)
+      .populate('studentId', 'fullName studentCode phone')
+      .populate('classId', 'name subject defaultFee')
+      .lean();
+    const overpaid = toNumber(reg.paidAmount) > toNumber(reg.totalPayable);
+    res.json({
+      success: true,
+      item: withOverdueFlag(item),
+      message: overpaid
+        ? `ثبت‌نام به‌روزرسانی شد. توجه: پرداختِ ثبت‌شده (${toNumber(reg.paidAmount)}) از مبلغِ تازه بیشتر است.`
+        : 'ثبت‌نام به‌روزرسانی شد.'
+    });
+  } catch (error) {
+    if (error?.code === 11000) return res.status(409).json({ success: false, message: 'این شاگرد از قبل در همین صنف ثبت‌نامِ فعال دارد.' });
+    res.status(400).json({ success: false, message: error?.message || 'ویرایشِ ثبت‌نام ناموفق بود.' });
+  }
+});
+
 router.post('/payments', async (req, res) => {
   try {
     const amount = toNumber(req.body.amount);
@@ -326,6 +374,12 @@ router.post('/payments', async (req, res) => {
 
     const settings = await getSettings();
     const previousBalance = toNumber(registration.balance);
+    if (amount > previousBalance + 0.001) {
+      return res.status(400).json({
+        success: false,
+        message: `مبلغ از باقیِ این ثبت‌نام (${previousBalance}) بیشتر است. اگر شاگرد چند ماه است، اول «مدت شاگرد» را در ویرایشِ ثبت‌نام زیاد کنید.`
+      });
+    }
     const remainingBalance = Math.max(0, previousBalance - amount);
     const paymentNumber = await nextSequence('short_term_payment', settings.receiptPrefix || 'STC-RCP');
     const invoiceNumber = await nextSequence('short_term_invoice', settings.invoicePrefix || 'STC-INV');
@@ -387,6 +441,69 @@ router.post('/payments', async (req, res) => {
     });
   } catch (error) {
     res.status(400).json({ success: false, message: 'ثبت پرداخت ناموفق بود.' });
+  }
+});
+
+// ابطالِ یک پرداخت (اشتباه در ثبت یا بازپرداختِ نقدی به شاگرد):
+// پرداخت void، بلش void، یک بلِ ابطالی (credit_note) صادر، و مبلغ از
+// paidAmount/balanceِ ثبت‌نام کم می‌شود. دلیل الزامی است.
+router.post('/payments/:id/void', async (req, res) => {
+  try {
+    const reason = String(req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ success: false, message: 'برای ابطالِ پرداخت، دلیل الزامی است.' });
+
+    const payment = await ShortTermPayment.findById(req.params.id);
+    if (!payment) return res.status(404).json({ success: false, message: 'پرداخت پیدا نشد.' });
+    if (payment.status === 'void') return res.status(400).json({ success: false, message: 'این پرداخت قبلاً ابطال شده است.' });
+
+    payment.status = 'void';
+    payment.voidedAt = new Date();
+    payment.voidedBy = userId(req);
+    payment.voidReason = reason;
+    await payment.save();
+
+    const origInvoice = payment.invoiceId ? await ShortTermInvoice.findById(payment.invoiceId) : null;
+    if (origInvoice && origInvoice.status !== 'void') {
+      origInvoice.status = 'void';
+      await origInvoice.save();
+    }
+
+    const settings = await getSettings();
+    const creditNumber = await nextSequence('short_term_invoice', settings.invoicePrefix || 'STC-INV');
+    const creditNote = await ShortTermInvoice.create({
+      invoiceNumber: creditNumber,
+      studentId: payment.studentId,
+      registrationId: payment.registrationId,
+      paymentId: payment._id,
+      kind: 'credit_note',
+      status: 'issued',
+      voidOfId: origInvoice?._id || null,
+      className: origInvoice?.className || '',
+      paidAmount: toNumber(payment.amount),
+      currency: payment.currency || settings.currency || 'AFN',
+      paymentMethod: payment.paymentMethod,
+      issuedAt: new Date(),
+      receivedBy: userId(req),
+      note: `ابطالِ پرداخت ${payment.paymentNumber} — ${reason}`
+    });
+
+    const registration = await ShortTermRegistration.findById(payment.registrationId);
+    if (registration) {
+      registration.paidAmount = Math.max(0, toNumber(registration.paidAmount) - toNumber(payment.amount));
+      registration.balance = Math.max(0, toNumber(registration.totalPayable) - toNumber(registration.paidAmount));
+      registration.updatedBy = userId(req);
+      await registration.save();
+    }
+
+    res.json({
+      success: true,
+      item: payment.toObject(),
+      creditNote: creditNote.toObject(),
+      registration: registration ? registration.toObject() : null,
+      message: 'پرداخت ابطال شد و بلِ ابطالی صادر گردید.'
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ابطالِ پرداخت ناموفق بود.' });
   }
 });
 
@@ -516,6 +633,7 @@ router.get('/reports/monthly', async (req, res) => {
     const result = await buildShamsiMonthlyReport({
       paymentModel: ShortTermPayment,
       expenseModel: ShortTermExpense,
+      paymentMatch: { status: { $ne: 'void' } },
       year: Number(req.query.year),
       months: req.query.months
     });

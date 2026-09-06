@@ -14,7 +14,12 @@ const shortTermPaymentSchema = new mongoose.Schema({
   paidAt: { type: Date, default: Date.now, index: true },
   receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
   referenceNo: { type: String, default: '', trim: true },
-  note: { type: String, default: '', trim: true }
+  note: { type: String, default: '', trim: true },
+  // ابطالِ پرداخت (اشتباه در ثبت / بازپرداخت). پرداختِ void در درآمد و مانده شمرده نمی‌شود.
+  status: { type: String, enum: ['active', 'void'], default: 'active', index: true },
+  voidedAt: { type: Date, default: null },
+  voidedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  voidReason: { type: String, default: '', trim: true }
 }, { timestamps: true });
 
 shortTermPaymentSchema.pre('validate', function normalizeShortTermPayment() {

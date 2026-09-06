@@ -65,6 +65,7 @@ async function buildShamsiMonthlyReport({
   paymentDateField = 'paidAt',
   paymentAmountField = 'amount',
   paymentGroupField = 'paymentMethod',
+  paymentMatch = {},
   expenseDateField = 'expenseDate',
   expenseAmountField = 'amount',
   expenseGroupField = 'category'
@@ -80,7 +81,7 @@ async function buildShamsiMonthlyReport({
 
   const [incomeDocs, expenseDocs] = await Promise.all([
     paymentModel.find(
-      { [paymentDateField]: { $gte: rangeStartDate, $lt: rangeEndDate } },
+      { ...paymentMatch, [paymentDateField]: { $gte: rangeStartDate, $lt: rangeEndDate } },
       { [paymentDateField]: 1, [paymentAmountField]: 1, [paymentGroupField]: 1 }
     ).lean(),
     expenseModel.find(
