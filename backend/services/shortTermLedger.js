@@ -1,14 +1,55 @@
-// دفترِ ماهانهٔ مرکزِ موقت — قلمِ فیس per ماهِ شمسی، تخصیصِ FIFOِ پرداخت‌ها،
-// و رول‌آپِ ثبت‌نام. الگو: services/academyLedger.js — نسخهٔ ساده‌شده برای
-// ثبت‌نامِ «مدت‌دار» (durationMonths ماه از تاریخِ ثبت).
+// دفترِ ماهانهٔ مرکزِ موقت — یک قلمِ فیس per (شاگرد، ماهِ شمسی)، رول‌شونده از
+// ماهِ عضویتِ شاگرد تا ماهِ جاری، تخصیصِ پرداخت‌ها (ماهِ مشخص یا FIFO)، و
+// رول‌آپِ ثبت‌نام. فیسِ ماهانه ثابت است (روی ثبت‌نامِ کانونیِ شاگرد).
 const ShortTermCharge = require('../models/ShortTermCharge');
 const ShortTermRegistration = require('../models/ShortTermRegistration');
 const ShortTermPayment = require('../models/ShortTermPayment');
-const { gregorianToAfghanSolar, afghanSolarToGregorianInput } = require('../utils/afghanDate');
+const ShortTermExpense = require('../models/ShortTermExpense');
+const { gregorianToAfghanSolar, afghanSolarToGregorianInput, AFGHAN_SOLAR_MONTHS } = require('../utils/afghanDate');
 
 const num = (v) => Math.max(0, Number(v || 0));
 const round = (v) => Math.round(num(v) * 100) / 100;
 const todayKey = () => new Date().toISOString().slice(0, 10);
+
+/** کلیدِ ماهِ شمسیِ جاری، مثلِ «1405-06». */
+const currentShamsiMonthKey = () => shamsiMonthKey(new Date());
+
+/** «1405-06» → «سنبله ۱۴۰۵» (نامِ ماه + سالِ فارسی). */
+function shamsiMonthLabel(periodKey) {
+  const [jy, jm] = String(periodKey || '').split('-').map(Number);
+  if (!jy || !jm || jm < 1 || jm > 12) return String(periodKey || '');
+  const name = AFGHAN_SOLAR_MONTHS[jm - 1] || String(jm);
+  let year = String(jy);
+  try { year = Number(jy).toLocaleString('fa-AF', { useGrouping: false }); } catch { /* keep latin */ }
+  return `${name} ${year}`;
+}
+
+/** شمارهٔ ترتیبیِ یک ماهِ شمسی (jy*12+jm) — برای مقایسه و فاصله. */
+function monthOrdinal(key) {
+  const [jy, jm] = String(key || '').split('-').map(Number);
+  return (jy && jm) ? (jy * 12) + jm : 0;
+}
+
+/** تعدادِ ماه‌های شاملِ fromKey تا toKey (هر دو شامل)؛ حداقل ۱. */
+function monthSpan(fromKey, toKey) {
+  const a = monthOrdinal(fromKey);
+  const b = monthOrdinal(toKey);
+  if (!a) return 1;
+  if (!b || b < a) return 1;
+  return (b - a) + 1;
+}
+
+/** بازهٔ میلادیِ [شروع، پایانِ انحصاری) یک ماهِ شمسی، به‌شکلِ 'YYYY-MM-DD'. */
+function monthGregorianRange(periodKey) {
+  const [jy, jm] = String(periodKey || '').split('-').map(Number);
+  if (!jy || !jm) return null;
+  const nextJy = jm >= 12 ? jy + 1 : jy;
+  const nextJm = jm >= 12 ? 1 : jm + 1;
+  const startISO = afghanSolarToGregorianInput(jy, jm, 1);
+  const endISO = afghanSolarToGregorianInput(nextJy, nextJm, 1);
+  if (typeof startISO !== 'string' || typeof endISO !== 'string') return null;
+  return { startISO: startISO.slice(0, 10), endExclusiveISO: endISO.slice(0, 10) };
+}
 
 const chargeNet = (c) => round(num(c.amount) - num(c.discountAmount));
 const chargeOpen = (c) => round(chargeNet(c) - num(c.paidAmount));
@@ -60,15 +101,19 @@ function monthKeysFrom(fromKey, count) {
 }
 
 /**
- * قلم‌های ماهانهٔ یک ثبت‌نام را می‌سازد: durationMonths ماهِ پیاپی از ماهِ شمسیِ
- * registrationDate. idempotent — ماهی که قلم دارد رد می‌شود.
- * @returns {Promise<{ created:number }>}
+ * قلم‌های ماهانهٔ یک ثبت‌نام را می‌سازد: یک قلم per ماهِ شمسی، از ماهِ عضویتِ
+ * شاگرد (startDate) تا `untilKey` (پیش‌فرض: ماهِ جاری). ماهِ نیامده ساخته
+ * نمی‌شود. فیس/تخفیفِ هر ماه = فیسِ ماهانهٔ ثابتِ ثبت‌نام. idempotent —
+ * ماهی که از قبل قلم دارد رد می‌شود.
+ * @returns {Promise<{ created:number, months:string[] }>}
  */
-async function generateChargesForRegistration(reg, { dueDay = 20 } = {}) {
-  if (!reg) return { created: 0 };
-  const anchorISO = String(reg.registrationDate || reg.startDate || '').slice(0, 10) || todayKey();
+async function generateChargesForRegistration(reg, { dueDay = 20, untilKey = '' } = {}) {
+  if (!reg) return { created: 0, months: [] };
+  // لنگرِ شروع = تاریخِ عضویتِ دستی (startDate)، بعد registrationDate.
+  const anchorISO = String(reg.startDate || reg.registrationDate || '').slice(0, 10) || todayKey();
   const anchorKey = shamsiMonthKey(anchorISO);
-  const months = monthKeysFrom(anchorKey, Math.max(1, Number(reg.durationMonths) || 1));
+  const until = String(untilKey || '').trim() || currentShamsiMonthKey();
+  const months = monthKeysFrom(anchorKey, monthSpan(anchorKey, until));
   const monthlyFee = round(num(reg.feeAmount));
   const monthlyDiscount = Math.min(monthlyFee, round(num(reg.discountAmount)));
   let created = 0;
@@ -80,7 +125,7 @@ async function generateChargesForRegistration(reg, { dueDay = 20 } = {}) {
         registrationId: reg._id,
         studentId: reg.studentId,
         kind: 'monthly',
-        title: `فیس ماه ${periodKey}`,
+        title: `فیسِ ماهِ ${shamsiMonthLabel(periodKey)}`,
         periodKey,
         amount: monthlyFee,
         discountAmount: monthlyDiscount,
@@ -93,7 +138,7 @@ async function generateChargesForRegistration(reg, { dueDay = 20 } = {}) {
       if (!(error && error.code === 11000)) throw error;
     }
   }
-  return { created };
+  return { created, months };
 }
 
 /**
@@ -162,11 +207,106 @@ function fifoAllocate(amount, openCharges = []) {
   return { allocations, unallocated: round(left) };
 }
 
+/**
+ * مثلِ fifoAllocate ولی اگر `targetChargeId` داده شود، آن قلم اول پر می‌شود و
+ * باقی‌ماندهٔ مبلغ به‌روشِ FIFO روی بقیهٔ ماه‌های باز می‌رود.
+ */
+function allocatePayment(amount, openCharges = [], targetChargeId = '') {
+  const target = String(targetChargeId || '');
+  if (!target) return fifoAllocate(amount, openCharges);
+  const ordered = [
+    ...openCharges.filter((c) => String(c._id) === target),
+    ...openCharges.filter((c) => String(c._id) !== target)
+  ];
+  return fifoAllocate(amount, ordered);
+}
+
+/** برای هر ثبت‌نامِ فعالِ دفتری، قلمِ هر ماه تا ماهِ جاری را می‌سازد و رول‌آپ می‌کند. */
+async function topUpAll({ dueDay = 20 } = {}) {
+  const until = currentShamsiMonthKey();
+  const regs = await ShortTermRegistration.find({ status: 'active' })
+    .select('_id studentId startDate registrationDate feeAmount discountAmount durationMonths createdBy')
+    .lean();
+  let createdTotal = 0;
+  let touched = 0;
+  for (const reg of regs) {
+    const { created } = await generateChargesForRegistration(reg, { dueDay, untilKey: until });
+    if (created > 0) {
+      createdTotal += created;
+      touched += 1;
+      await recomputeRegistration(reg._id);
+    }
+  }
+  return { untilKey: until, registrations: regs.length, touched, chargesCreated: createdTotal };
+}
+
+/**
+ * عاید، مصرف و مفادِ یک ماهِ شمسی — تعریفِ واحد برای داشبورد و گزارش‌ها.
+ * عاید = مجموعِ پرداخت‌های «ابطال‌نشده و دارای بلِ صادرشده» با paidAt در همان
+ * ماه. مصرف = مصارفِ همان ماه. مفاد = عاید − مصرف. همراهِ تفکیکِ «عاید بابتِ
+ * فیسِ کدام ماه‌ها».
+ */
+async function monthlyPnl(periodKey) {
+  const range = monthGregorianRange(periodKey);
+  if (!range) return { periodKey, income: 0, expenses: 0, net: 0, paymentCount: 0, expenseCount: 0, byFeeMonth: [] };
+  const start = new Date(`${range.startISO}T00:00:00.000Z`);
+  const endEx = new Date(`${range.endExclusiveISO}T00:00:00.000Z`);
+
+  // «ابطال‌نشده و دارای بل»: status != 'void' (پرداختِ قدیمی فیلدِ status ندارد،
+  // پس $ne:'void' درست است نه status:'active') و invoiceId پر.
+  const payments = await ShortTermPayment.find({
+    status: { $ne: 'void' },
+    invoiceId: { $ne: null },
+    paidAt: { $gte: start, $lt: endEx }
+  }).select('amount allocations').lean();
+
+  const income = round(payments.reduce((s, p) => s + num(p.amount), 0));
+
+  const expenseAgg = await ShortTermExpense.aggregate([
+    { $match: { expenseDate: { $gte: range.startISO, $lt: range.endExclusiveISO } } },
+    { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } }
+  ]);
+  const expenses = round(expenseAgg?.[0]?.total || 0);
+
+  // «عاید بابتِ فیسِ کدام ماه‌ها» — از allocationهای همین پرداخت‌ها
+  const allocChargeIds = [...new Set(payments.flatMap((p) => (p.allocations || []).map((a) => String(a.chargeId))))];
+  const chargeRows = allocChargeIds.length
+    ? await ShortTermCharge.find({ _id: { $in: allocChargeIds } }).select('periodKey').lean()
+    : [];
+  const keyByCharge = new Map(chargeRows.map((c) => [String(c._id), c.periodKey]));
+  const byFeeMonthMap = new Map();
+  for (const p of payments) {
+    for (const a of p.allocations || []) {
+      const k = keyByCharge.get(String(a.chargeId));
+      if (!k) continue;
+      byFeeMonthMap.set(k, round((byFeeMonthMap.get(k) || 0) + num(a.amount)));
+    }
+  }
+  const byFeeMonth = [...byFeeMonthMap.entries()]
+    .sort((a, b) => monthOrdinal(a[0]) - monthOrdinal(b[0]))
+    .map(([k, amount]) => ({ periodKey: k, label: shamsiMonthLabel(k), amount }));
+
+  return {
+    periodKey,
+    income,
+    expenses,
+    net: round(income - expenses),
+    paymentCount: payments.length,
+    expenseCount: expenseAgg?.[0]?.count || 0,
+    byFeeMonth
+  };
+}
+
 module.exports = {
   num,
   round,
   todayKey,
   shamsiMonthKey,
+  currentShamsiMonthKey,
+  shamsiMonthLabel,
+  monthOrdinal,
+  monthSpan,
+  monthGregorianRange,
   bumpShamsiMonth,
   monthlyDueDateISO,
   monthKeysFrom,
@@ -175,5 +315,8 @@ module.exports = {
   isOverdue,
   generateChargesForRegistration,
   recomputeRegistration,
-  fifoAllocate
+  fifoAllocate,
+  allocatePayment,
+  topUpAll,
+  monthlyPnl
 };

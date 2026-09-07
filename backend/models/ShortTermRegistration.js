@@ -29,7 +29,10 @@ const shortTermRegistrationSchema = new mongoose.Schema({
   // pre-validate آن‌ها را از feeAmount/discountAmount×durationMonths بازنمی‌نویسد.
   ledgerManaged: { type: Boolean, default: false },
   paymentStatus: { type: String, enum: ['unpaid', 'partial', 'paid'], default: 'unpaid', index: true },
-  status: { type: String, enum: ['active', 'completed', 'cancelled'], default: 'active', index: true },
+  // 'merged' = یکی از چند ثبت‌نامِ ماهانهٔ قدیمیِ یک شاگرد که در مهاجرتِ دفترِ
+  // ماهانه در ثبت‌نامِ کانونیِ همان شاگرد ادغام شد؛ برای تاریخچه می‌ماند ولی
+  // مثلِ 'cancelled' از جریان و رول‌آپ‌ها کنار است.
+  status: { type: String, enum: ['active', 'completed', 'cancelled', 'merged'], default: 'active', index: true },
   note: { type: String, default: '', trim: true },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }

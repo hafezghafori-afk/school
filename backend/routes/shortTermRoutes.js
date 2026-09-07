@@ -15,7 +15,7 @@ const ShortTermExpenseCategory = require('../models/ShortTermExpenseCategory');
 const ShortTermAttendance = require('../models/ShortTermAttendance');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
-const { buildShamsiMonthlyReport, currentShamsiMonthRange } = require('../utils/shamsiMonthlyReport');
+const { buildShamsiMonthlyReport } = require('../utils/shamsiMonthlyReport');
 
 const router = express.Router();
 
@@ -29,6 +29,22 @@ attachWriteActivityAudit(router, { targetType: 'ShortTermCenter', actionPrefix: 
 const todayKey = () => new Date().toISOString().slice(0, 10);
 const toNumber = (value) => Math.max(0, Number(value || 0));
 const userId = (req) => req.user?.id || null;
+
+// دفترِ ماهانه را حداکثر هر ۱۵ دقیقه یک‌بار «تا ماهِ جاری» می‌رساند تا هر بار
+// بازکردنِ صفحه یک اجرای نوشتنیِ سنگین نشود. idempotent است.
+let lastTopUpAt = 0;
+async function topUpMonthlyLedgerThrottled() {
+  const now = Date.now();
+  if (now - lastTopUpAt < 15 * 60 * 1000) return null;
+  lastTopUpAt = now;
+  try {
+    const settings = await getSettings();
+    return await shortTermLedger.topUpAll({ dueDay: settings.monthlyChargeDueDay || 20 });
+  } catch {
+    lastTopUpAt = 0; // اجازهٔ تلاشِ دوباره در درخواستِ بعدی
+    return null;
+  }
+}
 
 async function nextSequence(key, prefix) {
   const counter = await ShortTermCounter.findByIdAndUpdate(
@@ -76,10 +92,11 @@ async function buildSummary() {
     ShortTermInvoice.find().sort({ issuedAt: -1 }).limit(8).populate('studentId', 'fullName studentCode').lean()
   ]);
 
-  // ثبت‌نامِ لغوشده (مثلاً یکی از دو ثبت‌نامِ تکراری) نه فیسِ قابل‌دریافت دارد نه
-  // پرداخت — از مجموع‌های خلاصه کنار می‌رود تا «قابل دریافت − دریافت‌شده» با
-  // «باقی‌داری» جور دربیاید.
-  const liveRegs = registrations.filter((item) => item.status !== 'cancelled');
+  // ثبت‌نامِ لغوشده یا ادغام‌شده (یکی از چند ثبت‌نامِ ماهانهٔ قدیمی) نه فیسِ
+  // قابل‌دریافت دارد نه پرداخت — از مجموع‌های خلاصه کنار می‌رود تا «قابل دریافت
+  // − دریافت‌شده» با «باقی‌داری» جور دربیاید.
+  const dormant = new Set(['cancelled', 'merged']);
+  const liveRegs = registrations.filter((item) => !dormant.has(item.status));
   const paidTotal = liveRegs.reduce((sum, item) => sum + toNumber(item.paidAmount), 0);
   const dueTotal = liveRegs.reduce((sum, item) => sum + toNumber(item.totalPayable), 0);
   const outstandingTotal = registrations
@@ -90,23 +107,9 @@ async function buildSummary() {
   const creditTotal = liveRegs.reduce((sum, item) => sum + Math.max(0, toNumber(item.paidAmount) - toNumber(item.totalPayable)), 0);
   const today = todayKey();
   const overdueCount = registrations.filter((item) => item.status === 'active' && item.endDate && item.endDate < today).length;
-  const { start: shamsiMonthStart, endExclusive: shamsiMonthEnd } = currentShamsiMonthRange();
-  const monthIncome = await ShortTermPayment.aggregate([
-    {
-      $match: {
-        status: { $ne: 'void' },
-        paidAt: {
-          $gte: new Date(`${shamsiMonthStart}T00:00:00.000Z`),
-          $lt: new Date(`${shamsiMonthEnd}T00:00:00.000Z`)
-        }
-      }
-    },
-    { $group: { _id: null, total: { $sum: '$amount' } } }
-  ]);
-  const monthExpenses = await ShortTermExpense.aggregate([
-    { $match: { expenseDate: { $gte: shamsiMonthStart, $lt: shamsiMonthEnd } } },
-    { $group: { _id: null, total: { $sum: '$amount' } } }
-  ]);
+  // عاید/مصرف/مفادِ ماهِ جاری — تعریفِ واحد در shortTermLedger.monthlyPnl:
+  // عاید فقط از پرداختِ ابطال‌نشدهٔ دارای بلِ صادرشده، منهای مصارفِ همان ماه.
+  const pnl = await shortTermLedger.monthlyPnl(shortTermLedger.currentShamsiMonthKey());
 
   return {
     activeStudents,
@@ -118,8 +121,12 @@ async function buildSummary() {
     paidTotal,
     outstandingTotal,
     creditTotal,
-    monthIncome: toNumber(monthIncome?.[0]?.total),
-    monthExpenses: toNumber(monthExpenses?.[0]?.total),
+    monthIncome: pnl.income,
+    monthExpenses: pnl.expenses,
+    monthNet: pnl.net,
+    monthKey: pnl.periodKey,
+    monthLabel: shortTermLedger.shamsiMonthLabel(pnl.periodKey),
+    monthIncomeByFeeMonth: pnl.byFeeMonth,
     recentPayments: payments,
     recentExpenses: expenses,
     recentInvoices: invoices
@@ -127,6 +134,8 @@ async function buildSummary() {
 }
 
 async function listPayload() {
+  // پیش از خواندن، دفترِ ماهانه را تا ماهِ جاری برسان (با محدودیتِ زمانی).
+  await topUpMonthlyLedgerThrottled();
   const [settings, students, classes, registrations, payments, invoices, expenses, expenseCategories, attendance, summary] = await Promise.all([
     getSettings(),
     ShortTermStudent.find().sort({ createdAt: -1 }).limit(250).lean(),
@@ -364,7 +373,7 @@ router.put('/registrations/:id', async (req, res) => {
       }
       reg.status = req.body.status;
     }
-    const financeKeys = ['registrationDate', 'durationMonths', 'feeAmount', 'discountAmount'];
+    const financeKeys = ['registrationDate', 'startDate', 'durationMonths', 'feeAmount', 'discountAmount'];
     const financeChanged = financeKeys.some((k) => req.body[k] !== undefined);
 
     if (req.body.registrationDate !== undefined) reg.registrationDate = String(req.body.registrationDate || '').slice(0, 10);
@@ -419,31 +428,32 @@ router.post('/payments', async (req, res) => {
     if (!registration) return res.status(404).json({ success: false, message: 'ثبت‌نام انتخاب‌شده پیدا نشد.' });
 
     const settings = await getSettings();
-    const previousBalance = toNumber(registration.balance);
+
+    // اول دفترِ ماهانه را تا ماهِ جاری برسان و رول‌آپ کن، بعد باقیِ به‌روز را بخوان
+    // — تا گاردِ «مبلغ از باقی بیشتر است» ماه‌های تازه‌رسیده را هم به‌حساب بیاورد.
+    await shortTermLedger.generateChargesForRegistration(registration, { dueDay: settings.monthlyChargeDueDay || 20 });
+    const recomputed = await shortTermLedger.recomputeRegistration(registration._id);
+    const previousBalance = toNumber(recomputed?.balance ?? registration.balance);
     if (amount > previousBalance + 0.001) {
       return res.status(400).json({
         success: false,
-        message: `مبلغ از باقیِ این ثبت‌نام (${previousBalance}) بیشتر است. اگر شاگرد چند ماه است، اول «مدت شاگرد» را در ویرایشِ ثبت‌نام زیاد کنید.`
+        message: `مبلغ از باقیِ این شاگرد (${previousBalance}) بیشتر است. باقیِ فعلی همهٔ ماه‌های پرداخت‌نشده تا ماهِ جاری است.`
       });
     }
     const remainingBalance = Math.max(0, previousBalance - amount);
     const paymentNumber = await nextSequence('short_term_payment', settings.receiptPrefix || 'STC-RCP');
     const invoiceNumber = await nextSequence('short_term_invoice', settings.invoicePrefix || 'STC-INV');
 
-    // اگر این ثبت‌نامِ پیش از دفترِ ماهانه است و قلمی ندارد، همین‌جا بساز
-    if (!(await ShortTermCharge.exists({ registrationId: registration._id, status: { $ne: 'void' } }))) {
-      await shortTermLedger.generateChargesForRegistration(registration, { dueDay: settings.monthlyChargeDueDay || 20 });
-      await shortTermLedger.recomputeRegistration(registration._id);
-    }
-
-    // FIFO: مبلغ روی قدیمی‌ترین ماه‌های بازِ پرداخت‌نشده
+    // تخصیص: اگر «پرداختِ این ماه» زده شده روی همان ماهِ مشخص، وگرنه FIFO روی
+    // قدیمی‌ترین ماه‌های بازِ پرداخت‌نشده.
     const openCharges = await ShortTermCharge.find({ registrationId: registration._id, status: { $ne: 'void' } })
       .sort({ dueDate: 1, periodKey: 1, createdAt: 1 });
-    const { allocations, unallocated } = shortTermLedger.fifoAllocate(amount, openCharges);
-    const coveredMonths = allocations
+    const { allocations } = shortTermLedger.allocatePayment(amount, openCharges, req.body.targetChargeId || '');
+    const coveredMonthKeys = allocations
       .map((a) => openCharges.find((c) => String(c._id) === String(a.chargeId)))
       .filter(Boolean)
       .map((c) => c.periodKey);
+    const coveredMonthLabels = coveredMonthKeys.map((k) => shortTermLedger.shamsiMonthLabel(k));
 
     const payment = await ShortTermPayment.create({
       studentId: registration.studentId._id,
@@ -451,6 +461,7 @@ router.post('/payments', async (req, res) => {
       paymentNumber,
       amount,
       allocations,
+      coveredMonths: coveredMonthKeys,
       previousBalance,
       remainingBalance,
       currency: settings.currency || 'AFN',
@@ -477,7 +488,7 @@ router.post('/payments', async (req, res) => {
       referenceNo: payment.referenceNo,
       issuedAt: payment.paidAt,
       receivedBy: userId(req),
-      note: [req.body.note || '', coveredMonths.length ? `بابتِ ماه‌های: ${coveredMonths.join('، ')}` : '']
+      note: [req.body.note || '', coveredMonthLabels.length ? `بابتِ فیسِ ماهِ ${coveredMonthLabels.join('، ')}` : '']
         .filter(Boolean).join(' — ')
     });
 
@@ -496,11 +507,12 @@ router.post('/payments', async (req, res) => {
       success: true,
       item: populatedPayment,
       invoice: populatedInvoice,
-      coveredMonths,
+      coveredMonths: coveredMonthKeys,
+      coveredMonthLabels,
       registration: freshReg?.toObject ? freshReg.toObject() : freshReg,
       settings,
-      message: coveredMonths.length
-        ? `پرداخت ثبت و بل صادر شد — بابتِ ماه‌های ${coveredMonths.join('، ')}.`
+      message: coveredMonthLabels.length
+        ? `پرداخت ثبت و بل صادر شد — بابتِ فیسِ ماهِ ${coveredMonthLabels.join('، ')}.`
         : 'پرداخت ثبت و بل صادر شد.'
     });
   } catch (error) {
@@ -756,7 +768,8 @@ router.get('/reports/monthly', async (req, res) => {
     const result = await buildShamsiMonthlyReport({
       paymentModel: ShortTermPayment,
       expenseModel: ShortTermExpense,
-      paymentMatch: { status: { $ne: 'void' } },
+      // عاید فقط از پرداختِ ابطال‌نشده (status != void) و دارای بلِ صادرشده
+      paymentMatch: { status: { $ne: 'void' }, invoiceId: { $ne: null } },
       year: Number(req.query.year),
       months: req.query.months
     });
@@ -764,6 +777,127 @@ router.get('/reports/monthly', async (req, res) => {
     res.json({ success: true, months: result });
   } catch {
     res.status(500).json({ success: false, message: 'گزارش ماهانه ناموفق بود.' });
+  }
+});
+
+// عاید، مصرف و مفادِ یک ماهِ شمسی (پیش‌فرض: ماهِ جاری) — تعریفِ واحد:
+// عاید فقط از پرداختِ ابطال‌نشدهٔ دارای بلِ صادرشده، منهای مصارفِ همان ماه،
+// همراهِ تفکیکِ «عاید بابتِ فیسِ کدام ماه‌ها».
+router.get('/reports/monthly-pnl', async (req, res) => {
+  try {
+    const month = /^\d{3,4}-(0[1-9]|1[0-2])$/.test(String(req.query.month || ''))
+      ? String(req.query.month)
+      : shortTermLedger.currentShamsiMonthKey();
+    const pnl = await shortTermLedger.monthlyPnl(month);
+    res.json({ success: true, ...pnl, label: shortTermLedger.shamsiMonthLabel(month) });
+  } catch {
+    res.status(500).json({ success: false, message: 'گزارشِ عاید و مصرفِ ماه ناموفق بود.' });
+  }
+});
+
+// دفترِ باقیاتِ ماهانه — per شاگرد/ثبت‌نام: از ماهِ عضویت تا ماهِ جاری، هر ماه
+// پرداخت‌شده/باقی، با نامِ ماهِ شمسی، و مجموع پرداخت/باقیِ هر شاگرد + جمعِ کل.
+router.get('/reports/monthly-ledger', async (req, res) => {
+  try {
+    const L = shortTermLedger;
+    const onlyDebtors = ['1', 'true', 'yes'].includes(String(req.query.onlyDebtors || '').toLowerCase());
+    const classId = String(req.query.classId || '').trim();
+    const regFilter = { status: { $in: ['active', 'completed'] } };
+    if (classId) regFilter.classId = classId;
+
+    const regs = await ShortTermRegistration.find(regFilter)
+      .sort({ createdAt: 1 })
+      .populate('studentId', 'fullName studentCode phone status')
+      .populate('classId', 'name subject')
+      .lean();
+    const regIds = regs.map((r) => r._id);
+    const charges = await ShortTermCharge.find({ registrationId: { $in: regIds }, status: { $ne: 'void' } }).lean();
+    const byReg = new Map();
+    for (const c of charges) {
+      const k = String(c.registrationId);
+      if (!byReg.has(k)) byReg.set(k, []);
+      byReg.get(k).push(c);
+    }
+    const today = todayKey();
+
+    let rows = regs
+      .filter((r) => !r.studentId || r.studentId.status !== 'inactive')
+      .map((r) => {
+        const list = (byReg.get(String(r._id)) || [])
+          .slice()
+          .sort((a, b) => L.monthOrdinal(a.periodKey) - L.monthOrdinal(b.periodKey));
+        const months = list.map((c) => {
+          const net = Math.max(0, L.num(c.amount) - L.num(c.discountAmount));
+          return {
+            periodKey: c.periodKey,
+            label: L.shamsiMonthLabel(c.periodKey),
+            fee: L.num(c.amount),
+            discount: L.num(c.discountAmount),
+            net,
+            paid: L.num(c.paidAmount),
+            balance: L.num(c.balance),
+            status: c.status,
+            overdue: L.isOverdue(c, today)
+          };
+        });
+        const startKey = L.shamsiMonthKey(r.startDate || r.registrationDate);
+        const totalNet = L.round(months.reduce((s, m) => s + m.net, 0));
+        const totalPaid = L.round(months.reduce((s, m) => s + m.paid, 0));
+        const totalBalance = L.round(months.reduce((s, m) => s + m.balance, 0));
+        return {
+          registrationId: r._id,
+          studentId: r.studentId,
+          classId: r.classId,
+          status: r.status,
+          startMonthKey: startKey,
+          startMonthLabel: L.shamsiMonthLabel(startKey),
+          monthlyFee: L.num(r.feeAmount),
+          monthlyDiscount: L.num(r.discountAmount),
+          monthlyNet: Math.max(0, L.num(r.feeAmount) - L.num(r.discountAmount)),
+          months,
+          totalPayable: totalNet,
+          totalPaid,
+          totalBalance,
+          credit: Math.max(0, L.round(L.num(r.paidAmount) - totalNet)),
+          paidMonthLabels: months.filter((m) => m.status === 'paid').map((m) => m.label),
+          dueMonthLabels: months.filter((m) => m.balance > 0).map((m) => m.label),
+          overdueMonthLabels: months.filter((m) => m.overdue).map((m) => m.label)
+        };
+      });
+
+    if (onlyDebtors) rows = rows.filter((r) => r.totalBalance > 0.001);
+    rows.sort((a, b) => b.totalBalance - a.totalBalance);
+
+    res.json({
+      success: true,
+      currentMonth: { periodKey: L.currentShamsiMonthKey(), label: L.shamsiMonthLabel(L.currentShamsiMonthKey()) },
+      rows,
+      totals: {
+        rows: rows.length,
+        debtors: rows.filter((r) => r.totalBalance > 0.001).length,
+        totalPaid: L.round(rows.reduce((s, r) => s + r.totalPaid, 0)),
+        totalBalance: L.round(rows.reduce((s, r) => s + r.totalBalance, 0))
+      }
+    });
+  } catch {
+    res.status(500).json({ success: false, message: 'گزارشِ باقیاتِ ماهانه ناموفق بود.' });
+  }
+});
+
+// به‌روزرسانیِ دستیِ دفترِ ماهانه: برای هر ثبت‌نامِ فعال، قلمِ هر ماه تا ماهِ
+// جاری ساخته و رول‌آپ می‌شود.
+router.post('/ledger/topup', async (_req, res) => {
+  try {
+    const settings = await getSettings();
+    lastTopUpAt = 0;
+    const result = await shortTermLedger.topUpAll({ dueDay: settings.monthlyChargeDueDay || 20 });
+    res.json({
+      success: true,
+      ...result,
+      message: `دفترِ ماهانه تا ماهِ ${shortTermLedger.shamsiMonthLabel(result.untilKey)} به‌روز شد — ${result.chargesCreated} قلمِ تازه در ${result.touched} ثبت‌نام.`
+    });
+  } catch {
+    res.status(500).json({ success: false, message: 'به‌روزرسانیِ دفترِ ماهانه ناموفق بود.' });
   }
 });
 
