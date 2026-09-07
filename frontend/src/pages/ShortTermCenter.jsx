@@ -53,7 +53,11 @@ const emptyPayment = {
   paymentMethod: 'cash',
   paidAt: new Date().toISOString().slice(0, 10),
   referenceNo: '',
-  note: ''
+  note: '',
+  // وقتی از «باقیاتِ ماهانه» روی یک ماه «پرداخت» زده شود، این پرداخت مستقیم
+  // روی همان ماه می‌نشیند (وگرنه FIFO روی قدیمی‌ترین ماهِ باز).
+  targetChargeId: '',
+  targetChargeLabel: ''
 };
 
 const emptyExpense = {
@@ -90,6 +94,7 @@ const tabs = [
   { key: 'students', label: 'شاگردان' },
   { key: 'classes', label: 'صنف‌ها' },
   { key: 'registrations', label: 'ثبت‌نام و فیس' },
+  { key: 'ledger', label: 'باقیاتِ ماهانه' },
   { key: 'payments', label: 'پرداخت، بل و رسید' },
   { key: 'attendance', label: 'حاضری' },
   { key: 'expenses', label: 'مصارف' },
@@ -173,13 +178,18 @@ function StatCard({ label, value, tone = '' }) {
 }
 
 // تفکیکِ ماه‌به‌ماه: هر قلمِ ماهانه یک چیپ — سبز=پرداخت‌شده، سرخ=معوق، کهربایی=باقی.
-function MonthChips({ months = [] }) {
+function MonthChips({ months = [], onPick }) {
   if (!months.length) return <span className="stc-empty" style={{ padding: 0 }}>—</span>;
   return (
     <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4 }}>
       {months.map((m) => {
+        const net = m.net ?? m.amount ?? 0;
         const cls = m.status === 'paid' ? 'stc-chip-ok' : m.overdue ? 'stc-chip-bad' : 'stc-chip-muted';
-        return <span key={m.periodKey} className={`stc-chip ${cls}`} title={`${m.periodKey} — پرداخت ${m.paid} از ${m.amount}`}>{formatMonthLabel(m.periodKey)}</span>;
+        const label = m.label || formatMonthLabel(m.periodKey);
+        const title = `${label} — پرداخت ${fmt(m.paid)} از ${fmt(net)}${m.balance ? ` (باقی ${fmt(m.balance)})` : ''}`;
+        return onPick && m.status !== 'paid'
+          ? <button type="button" key={m.periodKey} className={`stc-chip ${cls}`} title={`${title} — کلیک: پرداختِ این ماه`} onClick={() => onPick(m)}>{label}</button>
+          : <span key={m.periodKey} className={`stc-chip ${cls}`} title={title}>{label}</span>;
       })}
     </span>
   );
@@ -375,6 +385,14 @@ export default function ShortTermCenter() {
   const [monthlyReportDetail, setMonthlyReportDetail] = useState(null);
   const [monthlyReportYear, setMonthlyReportYear] = useState(() => gregorianToAfghanSolar(new Date())?.jy || 1400);
   const [monthlyReportMonth, setMonthlyReportMonth] = useState('');
+  // تبِ «باقیاتِ ماهانه»
+  const [ledger, setLedger] = useState(null);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [ledgerOnlyDebtors, setLedgerOnlyDebtors] = useState(true);
+  const [ledgerClassId, setLedgerClassId] = useState('');
+  const [ledgerSearch, setLedgerSearch] = useState('');
+  const [ledgerOpenId, setLedgerOpenId] = useState('');
+  const [monthPnl, setMonthPnl] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [showInactiveStudents, setShowInactiveStudents] = useState(true);
@@ -461,6 +479,65 @@ export default function ShortTermCenter() {
     if (activeTab === 'reports' && !monthlyReport) loadMonthlyReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, reports, monthlyReport]);
+
+  const loadLedger = async () => {
+    setLedgerLoading(true);
+    try {
+      const q = new URLSearchParams();
+      if (ledgerOnlyDebtors) q.set('onlyDebtors', '1');
+      if (ledgerClassId) q.set('classId', ledgerClassId);
+      const [grid, pnl] = await Promise.all([
+        requestJson(`/api/short-term-center/reports/monthly-ledger?${q.toString()}`),
+        requestJson('/api/short-term-center/reports/monthly-pnl')
+      ]);
+      setLedger(grid);
+      setMonthPnl(pnl);
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setLedgerLoading(false);
+    }
+  };
+
+  const runLedgerTopUp = async () => {
+    setBusy(true);
+    try {
+      const data = await requestJson('/api/short-term-center/ledger/topup', { method: 'POST' });
+      toast.success(data.message || 'دفترِ ماهانه به‌روز شد.');
+      await loadLedger();
+      await loadData();
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const payLedgerMonth = (row, month) => {
+    setPaymentForm({
+      ...emptyPayment,
+      registrationId: String(row.registrationId),
+      amount: String(month.balance || month.net || ''),
+      targetChargeId: String(month.chargeId || ''),
+      targetChargeLabel: month.label || ''
+    });
+    setPaymentRegistrationSearch(text(row.studentId?.fullName, ''));
+    setActiveTab('payments');
+  };
+
+  useEffect(() => {
+    if (activeTab === 'ledger') loadLedger();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, ledgerOnlyDebtors, ledgerClassId]);
+
+  const visibleLedgerRows = useMemo(() => {
+    const rows = ledger?.rows || [];
+    const term = ledgerSearch.trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter((r) => includesSearch([
+      r.studentId?.fullName, r.studentId?.studentCode, r.studentId?.phone, r.classId?.name
+    ], term));
+  }, [ledger, ledgerSearch]);
 
   const activeRegistrations = useMemo(
     () => registrations.filter((item) => item.status === 'active' && (item.studentId?.status || 'active') !== 'inactive'),
@@ -564,8 +641,10 @@ export default function ShortTermCenter() {
       if (reset) reset();
       if (successTab) setActiveTab(successTab);
       await loadData();
-      if (monthlyReport && (path === '/api/short-term-center/payments' || path === '/api/short-term-center/expenses')) {
-        setMonthlyReport(null);
+      if (path === '/api/short-term-center/payments' || path === '/api/short-term-center/expenses') {
+        if (monthlyReport) setMonthlyReport(null);
+        setLedger(null);
+        setMonthPnl(null);
       }
     } catch (error) {
       toast.error(error.message);
@@ -945,6 +1024,128 @@ export default function ShortTermCenter() {
             </div>
           )}
 
+          {activeTab === 'ledger' && (
+            <div className="stc-stack">
+              <div className="stc-stats">
+                <StatCard label={`عایدِ ${monthPnl?.label || 'ماهِ جاری'}`} value={`${fmt(monthPnl?.income || 0)} ${currency}`} tone="green" />
+                <StatCard label={`مصرفِ ${monthPnl?.label || 'ماهِ جاری'}`} value={`${fmt(monthPnl?.expenses || 0)} ${currency}`} tone="amber" />
+                <StatCard label={`مفادِ ${monthPnl?.label || 'ماهِ جاری'}`} value={`${fmt(monthPnl?.net || 0)} ${currency}`} tone={(monthPnl?.net || 0) < 0 ? 'amber' : ''} />
+                <StatCard label="تعداد باقی‌داران" value={fmt(ledger?.totals?.debtors || 0)} />
+                <StatCard label="مجموع پرداخت‌ها" value={`${fmt(ledger?.totals?.totalPaid || 0)} ${currency}`} tone="green" />
+                <StatCard label="مجموع باقیات" value={`${fmt(ledger?.totals?.totalBalance || 0)} ${currency}`} tone="amber" />
+              </div>
+              <p className="stc-form-hint">
+                عاید فقط از پرداختِ ابطال‌نشده و دارای بلِ صادرشده، منهای مصارفِ همان ماه محاسبه می‌شود.
+                {monthPnl?.byFeeMonth?.length
+                  ? ` — عاید بابتِ فیسِ ماهِ: ${monthPnl.byFeeMonth.map((b) => `${b.label} (${fmt(b.amount)})`).join('، ')}`
+                  : ''}
+              </p>
+
+              <div className="stc-panel">
+                <div className="stc-panel-head">
+                  <h2>باقیاتِ ماهانه{ledger?.currentMonth?.label ? ` — تا ${ledger.currentMonth.label}` : ''}</h2>
+                  <div style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button type="button" className="stc-inline-button" onClick={runLedgerTopUp} disabled={busy || ledgerLoading}>به‌روزرسانیِ دفتر تا ماهِ جاری</button>
+                    <button
+                      type="button"
+                      className="stc-inline-button"
+                      disabled={!visibleLedgerRows.length}
+                      onClick={() => exportCsv(
+                        'short-term-monthly-ledger.csv',
+                        ['Student', 'Code', 'Phone', 'Class', 'StartMonth', 'Month', 'Fee', 'Discount', 'Net', 'Paid', 'Balance', 'Status'],
+                        visibleLedgerRows.flatMap((r) => (r.months || []).map((m) => [
+                          r.studentId?.fullName, r.studentId?.studentCode, r.studentId?.phone, r.classId?.name,
+                          r.startMonthLabel, m.label, m.fee, m.discount, m.net, m.paid, m.balance,
+                          m.status === 'paid' ? 'پرداخت‌شده' : m.overdue ? 'معوق' : 'باقی'
+                        ]))
+                      )}
+                    >
+                      Excel/CSV
+                    </button>
+                  </div>
+                </div>
+                <div className="stc-report-filters">
+                  <Field label="صنف">
+                    <select value={ledgerClassId} onChange={(e) => setLedgerClassId(e.target.value)}>
+                      <option value="">همه صنف‌ها</option>
+                      {classes.map((c) => <option key={c._id} value={c._id}>{text(c.name)}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="جستجو">
+                    <input value={ledgerSearch} onChange={(e) => setLedgerSearch(e.target.value)} placeholder="نام، کد، تماس یا صنف" />
+                  </Field>
+                  <label className="stc-field" style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <input type="checkbox" checked={ledgerOnlyDebtors} onChange={(e) => setLedgerOnlyDebtors(e.target.checked)} />
+                    <span>فقط باقی‌داران</span>
+                  </label>
+                </div>
+                <p className="stc-form-hint">
+                  هر شاگرد از ماهِ عضویت تا آخرِ سالِ شمسی، ماه‌به‌ماه. 🟩 پرداخت‌شده · 🟥 معوق (رسیده و پرداخت‌نشده) · 🟨 باقیِ ماه‌های نیامده —
+                  {' '}روی چیپِ باقی کلیک کنید تا پرداختِ همان ماه ثبت شود. باقیاتِ ماه‌های نیامده در «عاید» حساب نمی‌شود.
+                </p>
+                {ledgerLoading ? (
+                  <p className="stc-empty">در حال بارگذاری دفترِ ماهانه...</p>
+                ) : (
+                  <Table
+                    columns={['شاگرد', 'صنف', 'ماهِ عضویت', 'ماه‌ها', 'باقی از', 'فیسِ ماهانه', 'مجموع پرداخت', 'مجموع باقی', 'جزئیات']}
+                    rows={visibleLedgerRows.map((r) => [
+                      <span>
+                        {text(r.studentId?.fullName)}
+                        {r.studentId?.studentCode ? <><br /><small style={{ opacity: 0.65 }}>{r.studentId.studentCode}</small></> : null}
+                      </span>,
+                      text(r.classId?.name),
+                      r.startMonthLabel || '—',
+                      <MonthChips months={r.months} onPick={(m) => payLedgerMonth(r, m)} />,
+                      r.arrearsFromLabel
+                        ? <span className={r.overdueFromLabel ? 'stc-amount-negative' : ''}>{r.arrearsFromLabel}{r.overdueFromLabel && r.overdueFromLabel !== r.arrearsFromLabel ? '' : ''}</span>
+                        : <span className="stc-chip stc-chip-ok">تسویه</span>,
+                      `${fmt(r.monthlyNet)} ${currency}`,
+                      <span className="stc-amount-positive">{`${fmt(r.totalPaid)} ${currency}`}</span>,
+                      <span className={r.totalBalance > 0 ? 'stc-amount-negative' : ''}>{`${fmt(r.totalBalance)} ${currency}`}</span>,
+                      <button
+                        type="button"
+                        className="stc-inline-button"
+                        onClick={() => setLedgerOpenId(ledgerOpenId === String(r.registrationId) ? '' : String(r.registrationId))}
+                      >
+                        {ledgerOpenId === String(r.registrationId) ? 'بستن' : 'باز کردن'}
+                      </button>
+                    ])}
+                  />
+                )}
+                {ledgerOpenId ? (() => {
+                  const r = (ledger?.rows || []).find((x) => String(x.registrationId) === ledgerOpenId);
+                  if (!r) return null;
+                  return (
+                    <div className="stc-panel" style={{ marginTop: 12 }}>
+                      <h3>
+                        {text(r.studentId?.fullName)} — {text(r.classId?.name)} · فیسِ ماهانه {fmt(r.monthlyNet)} {currency}
+                        {r.credit ? ` · اعتبار ${fmt(r.credit)} ${currency}` : ''}
+                      </h3>
+                      <Table
+                        columns={['ماه', 'فیس', 'تخفیف', 'خالص', 'پرداخت‌شده', 'باقی', 'وضعیت', 'اقدام']}
+                        rows={(r.months || []).map((m) => [
+                          m.label,
+                          fmt(m.fee),
+                          fmt(m.discount),
+                          fmt(m.net),
+                          fmt(m.paid),
+                          <span className={m.balance > 0 ? 'stc-amount-negative' : ''}>{fmt(m.balance)}</span>,
+                          m.status === 'paid'
+                            ? <span className="stc-chip stc-chip-ok">پرداخت‌شده</span>
+                            : m.overdue ? <span className="stc-chip stc-chip-bad">معوق</span>
+                              : <span className="stc-chip stc-chip-muted">باقی</span>,
+                          m.status === 'paid'
+                            ? '—'
+                            : <button type="button" className="stc-inline-button" onClick={() => payLedgerMonth(r, m)}>پرداختِ این ماه</button>
+                        ])}
+                      />
+                    </div>
+                  );
+                })() : null}
+              </div>
+            </div>
+          )}
+
           {activeTab === 'payments' && (
             <div className="stc-grid">
               <form className="stc-panel stc-form" onSubmit={(event) => {
@@ -970,6 +1171,13 @@ export default function ShortTermCenter() {
                     ))}
                   </select>
                 </Field>
+                {paymentForm.targetChargeId ? (
+                  <p className="stc-form-hint" style={{ color: '#7dd3fc' }}>
+                    این پرداخت بابتِ فیسِ ماهِ <strong>{paymentForm.targetChargeLabel}</strong> ثبت می‌شود.
+                    {' '}
+                    <button type="button" className="stc-inline-button" onClick={() => setPaymentForm({ ...paymentForm, targetChargeId: '', targetChargeLabel: '' })}>حذفِ هدف</button>
+                  </p>
+                ) : null}
                 <Field label="مبلغ پرداخت"><input required type="number" min="1" value={paymentForm.amount} onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })} /></Field>
                 <Field label="تاریخ پرداخت"><AfghanDateInput value={paymentForm.paidAt} onChange={(value) => setPaymentForm({ ...paymentForm, paidAt: value })} /></Field>
                 <Field label="روش پرداخت">
@@ -984,14 +1192,16 @@ export default function ShortTermCenter() {
               <div className="stc-panel">
                 <h2>بل‌های صادرشده</h2>
                 <Table
-                  columns={['شماره', 'شاگرد', 'صنف', 'این پرداخت', 'باقی', 'وضعیت', 'اقدام']}
+                  columns={['شماره', 'شاگرد', 'صنف', 'ماهِ فیس', 'این پرداخت', 'باقی', 'وضعیت', 'اقدام']}
                   rows={filteredInvoices.map((item) => {
                     const isCredit = item.kind === 'credit_note';
                     const isVoid = item.status === 'void';
+                    const coveredLabel = (item.coveredMonths || []).map((k) => formatMonthLabel(k)).join('، ');
                     return [
                       <span className={isVoid ? 'stc-void' : ''}>{item.invoiceNumber}</span>,
                       text(item.studentId?.fullName),
                       text(item.className),
+                      coveredLabel || '—',
                       `${isCredit ? '−' : ''}${fmt(item.paidAmount)} ${item.currency || currency}`,
                       fmt(item.remainingBalance),
                       isCredit ? <span className="stc-chip stc-chip-muted">بلِ ابطالی</span>

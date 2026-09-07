@@ -43,6 +43,14 @@ function monthSpan(fromKey, toKey) {
   return (b - a) + 1;
 }
 
+/** «آخرِ سالِ شمسی» برای دفتر: حوت (ماه ۱۲) از بزرگ‌ترینِ سالِ لنگر و سالِ جاری. */
+function ledgerHorizonKey(anchorKey, curKey = currentShamsiMonthKey()) {
+  const ay = Number(String(anchorKey || '').split('-')[0]) || 0;
+  const cy = Number(String(curKey || '').split('-')[0]) || 0;
+  const y = Math.max(ay, cy) || cy || ay;
+  return `${y}-12`;
+}
+
 /** بازهٔ میلادیِ [شروع، پایانِ انحصاری) یک ماهِ شمسی، به‌شکلِ 'YYYY-MM-DD'. */
 function monthGregorianRange(periodKey) {
   const [jy, jm] = String(periodKey || '').split('-').map(Number);
@@ -118,16 +126,25 @@ function monthKeysFrom(fromKey, count) {
  */
 async function generateChargesForRegistration(reg, { dueDay = 20, untilKey = '' } = {}) {
   if (!reg) return { created: 0, months: [], anchorInvalid: false };
-  // لنگرِ شروع = تاریخِ عضویتِ دستی (startDate)، بعد registrationDate.
-  const anchorISO = String(reg.startDate || reg.registrationDate || '').slice(0, 10) || todayKey();
-  const until = String(untilKey || '').trim() || currentShamsiMonthKey();
-  const untilOrd = monthOrdinal(until);
-  const anchorKey = shamsiMonthKey(anchorISO);
-  const anchorOrd = monthOrdinal(anchorKey);
-  // لنگر معقول است اگر: پارس شده باشد، در گذشته‌ای نه دورتر از سقف، و حداکثر
-  // یک ماه جلوتر از ماهِ جاری. وگرنه (تاریخِ خراب/خالی) فقط ماهِ جاری ساخته می‌شود.
-  const anchorInvalid = !anchorOrd || anchorOrd < untilOrd - MAX_LEDGER_MONTHS || anchorOrd > untilOrd + 1;
-  const startKey = anchorInvalid ? until : anchorKey;
+  // لنگرِ شروع = بزرگ‌ترینِ (ماهِ «تاریخ شروع»، ماهِ «تاریخ ثبت») — ماهِ پیش از
+  // ثبت‌نام هیچ‌وقت قلم نمی‌گیرد.
+  const startMonthKey = shamsiMonthKey(String(reg.startDate || '').slice(0, 10) || todayKey());
+  const regMonthKey = shamsiMonthKey(String(reg.registrationDate || '').slice(0, 10) || todayKey());
+  const cur = currentShamsiMonthKey();
+  const curOrd = monthOrdinal(cur);
+  const startOrd = monthOrdinal(startMonthKey);
+  const regOrd = monthOrdinal(regMonthKey);
+  // اگر یکی خراب بود، از سالمِ دیگر استفاده کن؛ اگر هر دو خراب، ماهِ جاری.
+  const validStart = startOrd && startOrd >= curOrd - MAX_LEDGER_MONTHS && startOrd <= curOrd + 1 ? startOrd : 0;
+  const validReg = regOrd && regOrd >= curOrd - MAX_LEDGER_MONTHS && regOrd <= curOrd + 1 ? regOrd : 0;
+  const anchorInvalid = !validStart && !validReg;
+  const anchorKey = validStart >= validReg && validStart
+    ? startMonthKey
+    : (validReg ? regMonthKey : cur);
+  const startKey = anchorInvalid ? cur : anchorKey;
+  // افقِ دفتر = ماهِ صریح اگر داده شده، وگرنه آخرِ سالِ شمسی (حوت) — «تا آخرِ
+  // سال از هر ماه باقی نشان بده».
+  const until = String(untilKey || '').trim() || ledgerHorizonKey(startKey, cur);
   const span = Math.max(1, Math.min(MAX_LEDGER_MONTHS, monthSpan(startKey, until)));
   const months = monthKeysFrom(startKey, span);
   const monthlyFee = round(num(reg.feeAmount));
@@ -170,7 +187,25 @@ async function generateChargesForRegistration(reg, { dueDay = 20, untilKey = '' 
     await existing.save();
     if (wasVoid) revived += 1; else updated += 1;
   }
-  return { created, revived, updated, months, anchorInvalid };
+  // قلم‌های بیرونِ بازه (پیش از ماهِ لنگر یا بعد از افقِ سال) که پرداخت نخورده‌اند
+  // باطل می‌شوند — «بلِ ماهِ پیش از ثبت‌نام باید لغو شود».
+  let voided = 0;
+  if (months.length) {
+    const stale = await ShortTermCharge.find({
+      registrationId: reg._id,
+      status: { $ne: 'void' },
+      paidAmount: { $lte: 0 },
+      periodKey: { $nin: months }
+    });
+    for (const c of stale) {
+      c.status = 'void';
+      c.voidedAt = new Date();
+      c.voidReason = 'خارج از بازهٔ دفترِ ماهانه (پیش از ثبت‌نام یا بعد از پایانِ سال)';
+      await c.save();
+      voided += 1;
+    }
+  }
+  return { created, revived, updated, voided, months, anchorInvalid };
 }
 
 /**
@@ -255,21 +290,23 @@ function allocatePayment(amount, openCharges = [], targetChargeId = '') {
 
 /** برای هر ثبت‌نامِ فعالِ دفتری، قلمِ هر ماه تا ماهِ جاری را می‌سازد و رول‌آپ می‌کند. */
 async function topUpAll({ dueDay = 20 } = {}) {
-  const until = currentShamsiMonthKey();
+  const cur = currentShamsiMonthKey();
+  const horizon = ledgerHorizonKey(cur, cur);
   const regs = await ShortTermRegistration.find({ status: 'active' })
     .select('_id studentId startDate registrationDate feeAmount discountAmount durationMonths createdBy')
     .lean();
   let createdTotal = 0;
   let touched = 0;
   for (const reg of regs) {
-    const { created, revived, updated } = await generateChargesForRegistration(reg, { dueDay, untilKey: until });
-    if (created > 0 || revived > 0 || updated > 0) {
+    // untilKey را نمی‌فرستیم تا هر ثبت‌نام تا آخرِ سالِ خودش برود
+    const { created, revived, updated, voided } = await generateChargesForRegistration(reg, { dueDay });
+    if (created > 0 || revived > 0 || updated > 0 || voided > 0) {
       createdTotal += created;
       touched += 1;
       await recomputeRegistration(reg._id);
     }
   }
-  return { untilKey: until, registrations: regs.length, touched, chargesCreated: createdTotal };
+  return { untilKey: horizon, currentMonth: cur, registrations: regs.length, touched, chargesCreated: createdTotal };
 }
 
 /**
@@ -338,6 +375,7 @@ module.exports = {
   shamsiMonthLabel,
   monthOrdinal,
   monthSpan,
+  ledgerHorizonKey,
   monthGregorianRange,
   bumpShamsiMonth,
   monthlyDueDateISO,

@@ -41,6 +41,12 @@ const shortTermRegistrationSchema = new mongoose.Schema({
 shortTermRegistrationSchema.pre('validate', function normalizeShortTermRegistration() {
   this.registrationDate = String(this.registrationDate || '').trim() || new Date().toISOString().slice(0, 10);
   this.startDate = String(this.startDate || '').trim() || this.registrationDate;
+  // «تاریخ شروع» هیچ‌وقت پیش از «تاریخ ثبت» نیست — ماهِ پیش از ثبت‌نام معنی
+  // ندارد و نباید برایش بلِ فیس صادر شود.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(this.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(this.registrationDate)
+      && this.startDate < this.registrationDate) {
+    this.startDate = this.registrationDate;
+  }
   this.durationMonths = Math.max(1, Number(this.durationMonths || 1));
   this.endDate = addMonthsToDateKey(this.startDate, this.durationMonths);
   this.feeAmount = Math.max(0, Number(this.feeAmount || 0));

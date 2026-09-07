@@ -389,14 +389,9 @@ router.put('/registrations/:id', async (req, res) => {
     if (financeChanged) {
       const settings = await getSettings();
       // generateChargesForRegistration خودش قلمِ ماهِ پرداخت‌نشده را با مبلغ/تخفیفِ
-      // تازه به‌روز می‌کند و ماهِ گم‌شده را می‌سازد؛ قلمِ پرداخت‌شده دست‌نخورده.
-      // اگر بازهٔ ماه‌ها کوتاه‌تر شده (تاریخِ شروعِ جدیدتر)، ماه‌های بیرونِ بازه که
-      // پرداخت نخورده‌اند باطل می‌شوند.
-      const { months } = await shortTermLedger.generateChargesForRegistration(reg, { dueDay: settings.monthlyChargeDueDay || 20 });
-      await ShortTermCharge.updateMany(
-        { registrationId: reg._id, status: { $ne: 'void' }, paidAmount: { $lte: 0 }, periodKey: { $nin: months } },
-        { $set: { status: 'void', voidedAt: new Date(), voidReason: `خارج از بازهٔ ثبت‌نام پس از ویرایش (${new Date().toISOString().slice(0, 10)})` } }
-      );
+      // تازه به‌روز می‌کند، ماهِ گم‌شده را می‌سازد، و قلمِ بیرونِ بازه (پیش از ثبت‌نام
+      // یا بعد از پایانِ سال) که پرداخت نخورده را باطل می‌کند؛ قلمِ پرداخت‌شده دست‌نخورده.
+      await shortTermLedger.generateChargesForRegistration(reg, { dueDay: settings.monthlyChargeDueDay || 20 });
       await shortTermLedger.recomputeRegistration(reg._id);
     }
 
@@ -490,6 +485,7 @@ router.post('/payments', async (req, res) => {
       referenceNo: payment.referenceNo,
       issuedAt: payment.paidAt,
       receivedBy: userId(req),
+      coveredMonths: coveredMonthKeys,
       note: [req.body.note || '', coveredMonthLabels.length ? `بابتِ فیسِ ماهِ ${coveredMonthLabels.join('، ')}` : '']
         .filter(Boolean).join(' — ')
     });
@@ -821,6 +817,8 @@ router.get('/reports/monthly-ledger', async (req, res) => {
       byReg.get(k).push(c);
     }
     const today = todayKey();
+    const curKey = L.currentShamsiMonthKey();
+    const curOrd = L.monthOrdinal(curKey);
 
     let rows = regs
       .filter((r) => !r.studentId || r.studentId.status !== 'inactive')
@@ -830,6 +828,8 @@ router.get('/reports/monthly-ledger', async (req, res) => {
           .sort((a, b) => L.monthOrdinal(a.periodKey) - L.monthOrdinal(b.periodKey));
         const months = list.map((c) => {
           const net = Math.max(0, L.num(c.amount) - L.num(c.discountAmount));
+          const unpaid = c.status !== 'paid' && L.num(c.balance) > 0.001;
+          const isFuture = L.monthOrdinal(c.periodKey) > curOrd;
           return {
             chargeId: c._id,
             periodKey: c.periodKey,
@@ -840,7 +840,10 @@ router.get('/reports/monthly-ledger', async (req, res) => {
             paid: L.num(c.paidAmount),
             balance: L.num(c.balance),
             status: c.status,
-            overdue: L.isOverdue(c, today)
+            // معوق = پرداخت‌نشده و ماهش رسیده/گذشته؛ dueLater = پرداخت‌نشده ولی
+            // ماهش هنوز نیامده (این باقی هست ولی «معوق» نیست).
+            overdue: unpaid && !isFuture,
+            dueLater: unpaid && isFuture
           };
         });
         const startKey = L.shamsiMonthKey(r.startDate || r.registrationDate);
@@ -864,7 +867,12 @@ router.get('/reports/monthly-ledger', async (req, res) => {
           credit: Math.max(0, L.round(L.num(r.paidAmount) - totalNet)),
           paidMonthLabels: months.filter((m) => m.status === 'paid').map((m) => m.label),
           dueMonthLabels: months.filter((m) => m.balance > 0).map((m) => m.label),
-          overdueMonthLabels: months.filter((m) => m.overdue).map((m) => m.label)
+          overdueMonthLabels: months.filter((m) => m.overdue).map((m) => m.label),
+          dueLaterMonthLabels: months.filter((m) => m.dueLater).map((m) => m.label),
+          // «از کدام ماه باقی است» — اولین ماهِ پرداخت‌نشده
+          arrearsFromLabel: (months.find((m) => m.balance > 0.001) || {}).label || '',
+          // اولین ماهِ معوق (رسیده و پرداخت‌نشده)
+          overdueFromLabel: (months.find((m) => m.overdue) || {}).label || ''
         };
       });
 
