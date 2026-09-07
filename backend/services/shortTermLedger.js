@@ -11,6 +11,10 @@ const num = (v) => Math.max(0, Number(v || 0));
 const round = (v) => Math.round(num(v) * 100) / 100;
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
+// سقفِ سختِ تعدادِ قلم‌های ماهانهٔ یک ثبت‌نام — جلوی انفجارِ ردیف را می‌گیرد
+// وقتی startDate خراب باشد (مثلاً تاریخِ شمسی در فیلدِ میلادی → سالِ ۷۸۰).
+const MAX_LEDGER_MONTHS = 60;
+
 /** کلیدِ ماهِ شمسیِ جاری، مثلِ «1405-06». */
 const currentShamsiMonthKey = () => shamsiMonthKey(new Date());
 
@@ -101,44 +105,72 @@ function monthKeysFrom(fromKey, count) {
 }
 
 /**
- * قلم‌های ماهانهٔ یک ثبت‌نام را می‌سازد: یک قلم per ماهِ شمسی، از ماهِ عضویتِ
- * شاگرد (startDate) تا `untilKey` (پیش‌فرض: ماهِ جاری). ماهِ نیامده ساخته
- * نمی‌شود. فیس/تخفیفِ هر ماه = فیسِ ماهانهٔ ثابتِ ثبت‌نام. idempotent —
- * ماهی که از قبل قلم دارد رد می‌شود.
- * @returns {Promise<{ created:number, months:string[] }>}
+ * قلم‌های ماهانهٔ یک ثبت‌نام را می‌سازد/به‌روز می‌کند: یک قلم per ماهِ شمسی،
+ * از ماهِ عضویتِ شاگرد (startDate) تا `untilKey` (پیش‌فرض: ماهِ جاری). ماهِ
+ * نیامده ساخته نمی‌شود. فیس/تخفیفِ هر ماه = فیسِ ماهانهٔ ثابتِ ثبت‌نام.
+ *  - ماهِ بدونِ قلم → قلمِ تازه.
+ *  - ماهِ با قلمِ زندهٔ پرداخت‌نشده → مبلغ/تخفیف/سررسید به مقدارِ تازه به‌روز می‌شود.
+ *  - ماهِ با قلمِ ابطالی (از ویرایشِ مالیِ قبلی) → قلم دوباره زنده و به‌روز می‌شود.
+ *  - ماهِ با قلمی که پرداخت خورده → دست‌نخورده.
+ * (ایندکسِ یکتا اجازهٔ دو قلم برای یک (ثبت‌نام، ماه) را نمی‌دهد، پس همیشه
+ * همان یک ردیف به‌روز می‌شود نه ساختِ ردیفِ تازه.)
+ * @returns {Promise<{ created:number, revived:number, updated:number, months:string[], anchorInvalid:boolean }>}
  */
 async function generateChargesForRegistration(reg, { dueDay = 20, untilKey = '' } = {}) {
-  if (!reg) return { created: 0, months: [] };
+  if (!reg) return { created: 0, months: [], anchorInvalid: false };
   // لنگرِ شروع = تاریخِ عضویتِ دستی (startDate)، بعد registrationDate.
   const anchorISO = String(reg.startDate || reg.registrationDate || '').slice(0, 10) || todayKey();
-  const anchorKey = shamsiMonthKey(anchorISO);
   const until = String(untilKey || '').trim() || currentShamsiMonthKey();
-  const months = monthKeysFrom(anchorKey, monthSpan(anchorKey, until));
+  const untilOrd = monthOrdinal(until);
+  const anchorKey = shamsiMonthKey(anchorISO);
+  const anchorOrd = monthOrdinal(anchorKey);
+  // لنگر معقول است اگر: پارس شده باشد، در گذشته‌ای نه دورتر از سقف، و حداکثر
+  // یک ماه جلوتر از ماهِ جاری. وگرنه (تاریخِ خراب/خالی) فقط ماهِ جاری ساخته می‌شود.
+  const anchorInvalid = !anchorOrd || anchorOrd < untilOrd - MAX_LEDGER_MONTHS || anchorOrd > untilOrd + 1;
+  const startKey = anchorInvalid ? until : anchorKey;
+  const span = Math.max(1, Math.min(MAX_LEDGER_MONTHS, monthSpan(startKey, until)));
+  const months = monthKeysFrom(startKey, span);
   const monthlyFee = round(num(reg.feeAmount));
   const monthlyDiscount = Math.min(monthlyFee, round(num(reg.discountAmount)));
   let created = 0;
+  let revived = 0;
+  let updated = 0;
   for (const periodKey of months) {
-    const exists = await ShortTermCharge.findOne({ registrationId: reg._id, periodKey }).lean();
-    if (exists) continue;
-    try {
-      await ShortTermCharge.create({
-        registrationId: reg._id,
-        studentId: reg.studentId,
-        kind: 'monthly',
-        title: `فیسِ ماهِ ${shamsiMonthLabel(periodKey)}`,
-        periodKey,
-        amount: monthlyFee,
-        discountAmount: monthlyDiscount,
-        dueDate: monthlyDueDateISO(periodKey, dueDay),
-        currency: 'AFN',
-        createdBy: reg.createdBy || null
-      });
-      created += 1;
-    } catch (error) {
-      if (!(error && error.code === 11000)) throw error;
+    const existing = await ShortTermCharge.findOne({ registrationId: reg._id, periodKey });
+    if (!existing) {
+      try {
+        await ShortTermCharge.create({
+          registrationId: reg._id,
+          studentId: reg.studentId,
+          kind: 'monthly',
+          title: `فیسِ ماهِ ${shamsiMonthLabel(periodKey)}`,
+          periodKey,
+          amount: monthlyFee,
+          discountAmount: monthlyDiscount,
+          dueDate: monthlyDueDateISO(periodKey, dueDay),
+          currency: 'AFN',
+          createdBy: reg.createdBy || null
+        });
+        created += 1;
+      } catch (error) {
+        if (!(error && error.code === 11000)) throw error;
+      }
+      continue;
     }
+    // قلمی که پرداخت خورده دست‌نخورده می‌ماند
+    if (num(existing.paidAmount) > 0) continue;
+    const wasVoid = existing.status === 'void';
+    existing.status = 'pending';
+    existing.voidedAt = null;
+    existing.voidReason = '';
+    existing.amount = monthlyFee;
+    existing.discountAmount = monthlyDiscount;
+    existing.title = `فیسِ ماهِ ${shamsiMonthLabel(periodKey)}`;
+    if (!existing.dueDate) existing.dueDate = monthlyDueDateISO(periodKey, dueDay);
+    await existing.save();
+    if (wasVoid) revived += 1; else updated += 1;
   }
-  return { created, months };
+  return { created, revived, updated, months, anchorInvalid };
 }
 
 /**
@@ -230,8 +262,8 @@ async function topUpAll({ dueDay = 20 } = {}) {
   let createdTotal = 0;
   let touched = 0;
   for (const reg of regs) {
-    const { created } = await generateChargesForRegistration(reg, { dueDay, untilKey: until });
-    if (created > 0) {
+    const { created, revived, updated } = await generateChargesForRegistration(reg, { dueDay, untilKey: until });
+    if (created > 0 || revived > 0 || updated > 0) {
       createdTotal += created;
       touched += 1;
       await recomputeRegistration(reg._id);

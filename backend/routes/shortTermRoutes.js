@@ -388,13 +388,15 @@ router.put('/registrations/:id', async (req, res) => {
 
     if (financeChanged) {
       const settings = await getSettings();
-      // قلم‌های ماهانهٔ پرداخت‌نشده را باطل، سپس با مقادیرِ تازه از نو بساز.
-      // قلم‌هایی که پرداخت خورده‌اند دست‌نخورده می‌مانند.
+      // generateChargesForRegistration خودش قلمِ ماهِ پرداخت‌نشده را با مبلغ/تخفیفِ
+      // تازه به‌روز می‌کند و ماهِ گم‌شده را می‌سازد؛ قلمِ پرداخت‌شده دست‌نخورده.
+      // اگر بازهٔ ماه‌ها کوتاه‌تر شده (تاریخِ شروعِ جدیدتر)، ماه‌های بیرونِ بازه که
+      // پرداخت نخورده‌اند باطل می‌شوند.
+      const { months } = await shortTermLedger.generateChargesForRegistration(reg, { dueDay: settings.monthlyChargeDueDay || 20 });
       await ShortTermCharge.updateMany(
-        { registrationId: reg._id, status: { $ne: 'void' }, paidAmount: { $lte: 0 } },
-        { $set: { status: 'void', voidedAt: new Date(), voidReason: `ویرایشِ مالیِ ثبت‌نام (${new Date().toISOString().slice(0, 10)})` } }
+        { registrationId: reg._id, status: { $ne: 'void' }, paidAmount: { $lte: 0 }, periodKey: { $nin: months } },
+        { $set: { status: 'void', voidedAt: new Date(), voidReason: `خارج از بازهٔ ثبت‌نام پس از ویرایش (${new Date().toISOString().slice(0, 10)})` } }
       );
-      await shortTermLedger.generateChargesForRegistration(reg, { dueDay: settings.monthlyChargeDueDay || 20 });
       await shortTermLedger.recomputeRegistration(reg._id);
     }
 
@@ -829,6 +831,7 @@ router.get('/reports/monthly-ledger', async (req, res) => {
         const months = list.map((c) => {
           const net = Math.max(0, L.num(c.amount) - L.num(c.discountAmount));
           return {
+            chargeId: c._id,
             periodKey: c.periodKey,
             label: L.shamsiMonthLabel(c.periodKey),
             fee: L.num(c.amount),
