@@ -347,16 +347,17 @@ router.post('/registrations', async (req, res) => {
     const settings = await getSettings();
     const currency = req.body.currency || settings.currency || 'AFN';
 
-    // ضدِ ثبت‌نامِ تکراری: یک شاگرد در یک صنف فقط یک ثبت‌نامِ فعال داشته باشد.
-    // (برای صنفِ دیگر یا پس از تکمیل/لغوِ قبلی آزاد است.)
-    if (req.body.studentId && req.body.classId) {
+    // ضدِ ثبت‌نامِ تکراری: هر شاگرد در هر کورس فقط یک ثبت‌نامِ فعال — حتی اگر از
+    // راهِ صنفِ دیگری از همان کورس باشد. برای ثبتِ دوباره اول ثبت‌نامِ قبلی را
+    // تکمیل، لغو یا حذف کنید. (پس از تکمیل/لغو، ثبتِ تازه آزاد است.)
+    if (req.body.studentId && req.body.courseId) {
       const dup = await AcademyRegistration.findOne({
-        studentId: req.body.studentId, classId: req.body.classId, status: 'active'
-      }).select('_id').lean();
+        studentId: req.body.studentId, courseId: req.body.courseId, status: 'active'
+      }).populate('classId', 'name').lean();
       if (dup) {
         return res.status(409).json({
           success: false,
-          message: 'این شاگرد از قبل در همین صنف ثبت‌نامِ فعال دارد. برای ثبت‌نامِ دوباره اول ثبت‌نامِ قبلی را تکمیل یا لغو کنید.'
+          message: `این شاگرد از قبل در این کورس ثبت‌نامِ فعال دارد${dup.classId?.name ? ` (صنفِ ${dup.classId.name})` : ''}. برای ثبتِ دوباره اول ثبت‌نامِ قبلی را تکمیل، لغو یا حذف کنید.`
         });
       }
     }
@@ -399,6 +400,13 @@ router.put('/registrations/:id', async (req, res) => {
 
     if (req.body.status !== undefined && ['active', 'completed', 'cancelled', 'paused'].includes(req.body.status)) {
       const prevStatus = reg.status;
+      // فعال‌سازیِ دوباره نباید ثبت‌نامِ فعالِ دومی در همان کورس بسازد.
+      if (req.body.status === 'active' && prevStatus !== 'active') {
+        const dup = await AcademyRegistration.findOne({
+          _id: { $ne: reg._id }, studentId: reg.studentId, courseId: reg.courseId, status: 'active'
+        }).select('_id').lean();
+        if (dup) return res.status(409).json({ success: false, message: 'این شاگرد ثبت‌نامِ فعالِ دیگری در همین کورس دارد.' });
+      }
       reg.status = req.body.status;
       // خروج از توقف: ماه‌های دورهٔ توقف نباید فیس بگیرند — نشانگرِ شارژ را روی
       // ماهِ *قبل* بگذار تا کَچ‌آپ از همین ماهِ جاری شروع شود (نه از ماهِ آخرِ فعال‌بودن).
@@ -472,6 +480,38 @@ router.put('/registrations/:id', async (req, res) => {
     res.json({ success: true, item: populated, registration: updated?.toObject ? updated.toObject() : updated, message: 'ثبت‌نام به‌روزرسانی شد.' });
   } catch (error) {
     res.status(400).json({ success: false, message: error?.message || 'ویرایشِ ثبت‌نام ناموفق بود.' });
+  }
+});
+
+// حذفِ کاملِ یک ثبت‌نام — فقط برای ثبت‌نامِ اشتباهِ تازه‌ای که هیچ پرداخت یا بلِ
+// صادرشده‌ای ندارد. اگر پرداخت/بل دارد، وضعیت را «لغوشده» کنید تا تاریخچه بماند،
+// یا از اسکریپتِ ادغام استفاده کنید. اقلامِ بدهیِ پرداخت‌نشدهٔ همان ثبت‌نام هم
+// پاک می‌شوند تا رکوردِ سرگردان نماند.
+router.delete('/registrations/:id', async (req, res) => {
+  try {
+    const reg = await AcademyRegistration.findById(req.params.id);
+    if (!reg) return res.status(404).json({ success: false, message: 'ثبت‌نام پیدا نشد.' });
+
+    const [payCount, invoiceCount] = await Promise.all([
+      AcademyPayment.countDocuments({ registrationId: reg._id }),
+      AcademyInvoice.countDocuments({ registrationId: reg._id })
+    ]);
+    if (payCount > 0 || invoiceCount > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'این ثبت‌نام پرداخت یا بلِ صادرشده دارد و حذف نمی‌شود. به‌جایش وضعیت را «لغوشده» کنید.'
+      });
+    }
+
+    const removed = await AcademyCharge.deleteMany({ registrationId: reg._id });
+    await AcademyRegistration.deleteOne({ _id: reg._id });
+    res.json({
+      success: true,
+      removedCharges: removed.deletedCount || 0,
+      message: 'ثبت‌نام و بل‌های پرداخت‌نشدهٔ آن حذف شد.'
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'حذفِ ثبت‌نام ناموفق بود.' });
   }
 });
 
