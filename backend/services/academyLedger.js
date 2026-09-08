@@ -5,13 +5,46 @@
 const AcademyCharge = require('../models/AcademyCharge');
 const AcademyRegistration = require('../models/AcademyRegistration');
 const AcademyPayment = require('../models/AcademyPayment');
-const { gregorianToAfghanSolar } = require('../utils/afghanDate');
+const AcademyExpense = require('../models/AcademyExpense');
+const { gregorianToAfghanSolar, afghanSolarToGregorianInput, AFGHAN_SOLAR_MONTHS } = require('../utils/afghanDate');
 
 const num = (value) => Math.max(0, Number(value || 0));
 const round = (value) => Math.round(num(value) * 100) / 100;
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
-const CHARGE_TITLE_FALLBACK = 'قلم';
+// سقفِ محافظ — جلوِ صدورِ بلِ چند-سالِ اشتباه را می‌گیرد.
+const MAX_BILL_MONTHS = 60;
+
+/** شمارهٔ ترتیبیِ یک ماهِ شمسی (jy*12+jm). */
+const monthOrdinal = (key) => {
+  const [jy, jm] = String(key || '').split('-').map(Number);
+  return (jy && jm) ? (jy * 12) + jm : 0;
+};
+
+/** کلیدِ ماهِ شمسیِ جاری، مثلِ «1405-06». */
+const currentShamsiMonthKey = () => shamsiMonthKey(new Date());
+
+/** «1405-06» → «سنبله ۱۴۰۵». */
+function shamsiMonthLabel(periodKey) {
+  const [jy, jm] = String(periodKey || '').split('-').map(Number);
+  if (!jy || !jm || jm < 1 || jm > 12) return String(periodKey || '');
+  const name = AFGHAN_SOLAR_MONTHS[jm - 1] || String(jm);
+  let year = String(jy);
+  try { year = Number(jy).toLocaleString('fa-AF', { useGrouping: false }); } catch { /* keep latin */ }
+  return `${name} ${year}`;
+}
+
+/** بازهٔ میلادیِ [شروع، پایانِ انحصاری) یک ماهِ شمسی، به‌شکلِ 'YYYY-MM-DD'. */
+function monthGregorianRange(periodKey) {
+  const [jy, jm] = String(periodKey || '').split('-').map(Number);
+  if (!jy || !jm) return null;
+  const nextJy = jm >= 12 ? jy + 1 : jy;
+  const nextJm = jm >= 12 ? 1 : jm + 1;
+  const startISO = afghanSolarToGregorianInput(jy, jm, 1);
+  const endISO = afghanSolarToGregorianInput(nextJy, nextJm, 1);
+  if (typeof startISO !== 'string' || typeof endISO !== 'string') return null;
+  return { startISO: startISO.slice(0, 10), endExclusiveISO: endISO.slice(0, 10) };
+}
 
 const chargeNet = (charge) => round(num(charge.amount) - num(charge.discountAmount));
 const chargeOpen = (charge) => round(chargeNet(charge) - num(charge.paidAmount));
@@ -81,9 +114,12 @@ async function recomputeRegistration(registrationId) {
     totalPaid += paid;
   }
 
+  // پرداختِ مازاد بر مجموعِ قلم‌ها (اعتبار) هم در paidAmount شمرده می‌شود.
+  const allPaid = round(payments.reduce((s, p) => s + num(p.amount), 0));
+
   reg.ledgerManaged = true;
   reg.totalPayable = round(totalNet);
-  reg.paidAmount = round(totalPaid);
+  reg.paidAmount = round(Math.max(totalPaid, allPaid));
   reg.balance = round(Math.max(0, totalNet - totalPaid));
   reg.updatedBy = reg.updatedBy || null;
   await reg.save();
@@ -110,6 +146,17 @@ function fifoAllocate(amount, openCharges = []) {
   return { allocations, unallocated: round(left) };
 }
 
+/** مثلِ fifoAllocate ولی `targetChargeId` اول پر می‌شود، بعد FIFO روی بقیه. */
+function allocatePayment(amount, openCharges = [], targetChargeId = '') {
+  const target = String(targetChargeId || '');
+  if (!target) return fifoAllocate(amount, openCharges);
+  const ordered = [
+    ...openCharges.filter((c) => String(c._id) === target),
+    ...openCharges.filter((c) => String(c._id) !== target)
+  ];
+  return fifoAllocate(amount, ordered);
+}
+
 /** ماهِ شمسیِ بعد از «jy-jm». */
 function bumpShamsiMonth(key) {
   const [jy, jm] = String(key).split('-').map(Number);
@@ -117,170 +164,181 @@ function bumpShamsiMonth(key) {
   return jm >= 12 ? `${jy + 1}-01` : `${jy}-${String(jm + 1).padStart(2, '0')}`;
 }
 
-/** تعدادِ ماه‌های شمسی از fromKey تا toKey (می‌تواند منفی باشد). */
-function shamsiMonthsBetween(fromKey, toKey) {
-  const [fy, fm] = String(fromKey).split('-').map(Number);
-  const [ty, tm] = String(toKey).split('-').map(Number);
-  if (!fy || !fm || !ty || !tm) return 0;
-  return (ty * 12 + tm) - (fy * 12 + fm);
-}
-
-// در یک اجرا حداکثر این تعداد ماهِ عقب‌افتاده به‌صورت خودکار شارژ می‌شود. اگر
-// بازهٔ کَچ‌آپ از این بیشتر شد (معمولاً به‌خاطرِ startDateِ کهنه)، فقط همین
-// تعداد ماهِ اخیر ساخته و بقیه با هشدار رد می‌شود تا دستی بررسی شود.
-const MAX_MONTHLY_CATCHUP = 3;
-
-/**
- * شارژِ ماهانهٔ ماه‌های سررسیدشده را برای ثبت‌نام‌های فعالِ ماهانه می‌سازد (idempotent).
- * @param {{ dueDay?: number, registrationId?: string }} [opts]
- * @returns {Promise<{ created: number, registrations: number }>}
- */
-async function generateMonthlyCharges({ dueDay = 20, registrationId = null } = {}) {
-  const filter = {
-    paymentPlan: 'monthly',
-    status: 'active',
-    monthlyFee: { $gt: 0 }
-  };
-  if (registrationId) filter._id = registrationId;
-
-  const regs = await AcademyRegistration.find(filter)
-    .populate('courseId', 'name')
-    .populate('classId', 'name');
-
-  const nowKey = shamsiMonthKey(new Date());
-  let created = 0;
-  const touched = new Set();
-
-  for (const reg of regs) {
-    // مبنای صدورِ فیسِ ماهانه = تاریخِ ثبت‌نام (registrationDate). startDate فقط
-    // وقتی به‌کار می‌رود که *بعد* از تاریخِ ثبت باشد (شاگردی که ثبت شده ولی
-    // دیرتر صنف را شروع می‌کند). startDateِ پیش از تاریخِ ثبت تقریباً همیشه
-    // مقدارِ پیش‌فرضِ غلطِ فرم است («۱ حمل / اولِ سال») و نادیده گرفته می‌شود —
-    // وگرنه شاگرد برای ماه‌هایی که اصلاً نیامده فیس و قرضداری می‌گیرد.
-    const regISO = String(reg.registrationDate || '').slice(0, 10);
-    const rawStartISO = String(reg.startDate || '').slice(0, 10);
-    const startISO = (rawStartISO && regISO && rawStartISO > regISO)
-      ? rawStartISO
-      : (regISO || rawStartISO || todayKey());
-    const endISO = String(reg.endDate || '').slice(0, 10);
-    const startMonthKey = shamsiMonthKey(startISO);
-    // اگر lastMonthlyChargeKey ثبت شده (backfill آن را روی ماهِ جاری می‌گذارد، یا
-    // اجرای قبلی تا آن ماه شارژ ساخته)، از ماهِ *بعدِ* آن شروع کن — نه از ماهِ
-    // شروع — تا ماه‌های گذشته دوباره یا عقب‌افتاده شارژ نشوند.
-    const lastKey = String(reg.lastMonthlyChargeKey || '');
-    let cursorKey = (lastKey && lastKey >= startMonthKey) ? bumpShamsiMonth(lastKey) : startMonthKey;
-
-    // سقفِ امنِ کَچ‌آپ: بیش از MAX_MONTHLY_CATCHUP ماه عقب‌افتادگی را خودکار
-    // نساز — احتمالِ startDateِ اشتباه است. فقط ماه‌های اخیر ساخته می‌شود.
-    if (cursorKey && cursorKey <= nowKey && shamsiMonthsBetween(cursorKey, nowKey) > MAX_MONTHLY_CATCHUP) {
-      let clamped = nowKey;
-      for (let i = 0; i < MAX_MONTHLY_CATCHUP; i += 1) {
-        const [cy, cm] = clamped.split('-').map(Number);
-        clamped = cm <= 1 ? `${cy - 1}-12` : `${cy}-${String(cm - 1).padStart(2, '0')}`;
-      }
-      console.warn(`[academyLedger] ثبت‌نام ${reg._id}: بازهٔ فیسِ ماهانه از ${cursorKey} تا ${nowKey} بیش از ${MAX_MONTHLY_CATCHUP} ماه است — فقط از ${clamped} ساخته شد؛ ماه‌های قدیمی‌تر نیاز به بررسیِ دستی دارند.`);
-      cursorKey = clamped;
-    }
-
-    // نگذار بیش از ۳۶ ماه عقب برود (محافظ)
-    let guard = 0;
-    while (cursorKey <= nowKey && guard < 36) {
-      guard += 1;
-      const dueISO = monthlyDueDateISO(cursorKey, dueDay);
-      if (endISO && dueISO && dueISO > endISO) break;
-
-      const exists = await AcademyCharge.findOne({ registrationId: reg._id, kind: 'monthly', periodKey: cursorKey }).lean();
-      if (!exists) {
-        try {
-          await AcademyCharge.create({
-            registrationId: reg._id,
-            studentId: reg.studentId,
-            kind: 'monthly',
-            title: `فیس ماهانه ${cursorKey}`,
-            amount: num(reg.monthlyFee),
-            dueDate: dueISO,
-            periodKey: cursorKey,
-            currency: reg.currency || 'AFN',
-            createdBy: null
-          });
-          created += 1;
-          touched.add(String(reg._id));
-        } catch (error) {
-          // رقابتِ هم‌زمان روی ایندکسِ یکتا — بی‌خطر
-          if (!(error && error.code === 11000)) throw error;
-        }
-      }
-      cursorKey = bumpShamsiMonth(cursorKey);
-    }
-
-    if (String(reg.lastMonthlyChargeKey || '') !== nowKey) {
-      reg.lastMonthlyChargeKey = nowKey;
-      await reg.save();
-    }
-  }
-
-  for (const id of touched) {
-    await recomputeRegistration(id);
-  }
-
-  return { created, registrations: touched.size };
+/** ماهِ لنگرِ صدورِ بل برای یک ثبت‌نام = ماهِ شمسیِ registrationDate؛ startDate فقط
+ *  اگر *بعد* از registrationDate باشد (شاگردی که دیرتر صنف را شروع کرده). */
+function anchorMonthKey(reg) {
+  const regISO = String(reg.registrationDate || '').slice(0, 10);
+  const rawStartISO = String(reg.startDate || '').slice(0, 10);
+  const startISO = (rawStartISO && regISO && rawStartISO > regISO) ? rawStartISO : (regISO || rawStartISO || todayKey());
+  return shamsiMonthKey(startISO);
 }
 
 /**
- * برای هر قلمِ بازِ معوق که «graceDays» از سررسیدش گذشته و هنوز جریمهٔ دیرکرد نگرفته،
- * یک قلمِ late_fee می‌سازد. idempotent — با کلیدِ `lf:<chargeId>` در periodKey.
- * @param {{ mode:'fixed'|'percent', amount:number, graceDays:number }} policy
- * @returns {Promise<{ created:number }>}
+ * علتِ ناممکن‌بودنِ صدورِ بلِ این ماه — یا '' اگر مجاز است.
+ *  'invalid' | 'before-enrolment' | 'too-old' | 'too-future'
+ * (تاریخِ ختم محدودیت ندارد — از ماهِ عضویت به بعد آزاد است.)
  */
-async function generateLateFees({ mode = 'none', amount = 0, graceDays = 7 } = {}) {
-  if (mode !== 'fixed' && mode !== 'percent') return { created: 0 };
-  const today = todayKey();
-  const cutoff = new Date(today);
-  cutoff.setDate(cutoff.getDate() - Math.max(0, Number(graceDays) || 0));
-  const cutoffKey = cutoff.toISOString().slice(0, 10);
+function billMonthDisallowReason(reg, periodKey) {
+  const ord = monthOrdinal(periodKey);
+  if (!ord) return 'invalid';
+  const curOrd = monthOrdinal(currentShamsiMonthKey());
+  if (ord > curOrd + MAX_BILL_MONTHS) return 'too-future';
+  if (ord < curOrd - MAX_BILL_MONTHS) return 'too-old';
+  const anchorOrd = monthOrdinal(anchorMonthKey(reg));
+  if (anchorOrd && ord < anchorOrd) return 'before-enrolment';
+  return '';
+}
 
-  const overdue = await AcademyCharge.find({
-    status: { $in: ['pending', 'partial'] },
-    kind: { $ne: 'late_fee' },
-    balance: { $gt: 0 },
-    dueDate: { $gt: '', $lte: cutoffKey }
-  });
+function billMonthAllowed(reg, periodKey) {
+  return billMonthDisallowReason(reg, periodKey) === '';
+}
 
-  let created = 0;
-  const touched = new Set();
-  for (const c of overdue) {
-    const marker = `lf:${c._id}`;
-    const exists = await AcademyCharge.findOne({ registrationId: c.registrationId, kind: 'late_fee', periodKey: marker }).lean();
-    if (exists) continue;
-    const fee = mode === 'percent'
-      ? round((round(num(c.amount) - num(c.discountAmount))) * num(amount) / 100)
-      : round(num(amount));
-    if (fee <= 0) continue;
-    await AcademyCharge.create({
-      registrationId: c.registrationId, studentId: c.studentId, kind: 'late_fee',
-      title: `جریمهٔ دیرکرد — ${c.title || CHARGE_TITLE_FALLBACK}`,
-      amount: fee, dueDate: today, periodKey: marker,
-      currency: c.currency || 'AFN', createdBy: null,
-      note: `خودکار — سررسیدِ ${c.dueDate} گذشته`
+/**
+ * صدورِ صریحِ «بلِ یک ماه» برای یک ثبت‌نام. idempotent — بلِ موجود اگر پرداخت
+ * نخورده و مبلغ/تخفیف عوض شده به‌روز می‌شود؛ بلِ ابطالی دوباره زنده می‌شود.
+ * @returns {Promise<{ status:'created'|'updated'|'exists'|'rejected', reason?:string, chargeId?:string }>}
+ */
+async function issueBillForMonth(reg, periodKey, { dueDay = 20, amount = null, discountAmount = null, issuedBy = null } = {}) {
+  if (!reg || !/^\d{3,4}-(0[1-9]|1[0-2])$/.test(String(periodKey || ''))) return { status: 'rejected', reason: 'ماهِ نامعتبر' };
+  const bad = billMonthDisallowReason(reg, periodKey);
+  if (bad) return { status: 'rejected', reason: bad };
+  const net = amount != null ? round(num(amount)) : round(num(reg.monthlyFee));
+  const disc = discountAmount != null ? round(num(discountAmount)) : 0;
+  if (net <= 0) return { status: 'rejected', reason: 'مبلغِ بل صفر است' };
+
+  const existing = await AcademyCharge.findOne({ registrationId: reg._id, kind: 'monthly', periodKey });
+  if (existing) {
+    if (existing.status !== 'void' && num(existing.paidAmount) > 0) return { status: 'exists', chargeId: String(existing._id) };
+    const changed = existing.status === 'void' || num(existing.amount) !== net || num(existing.discountAmount) !== Math.min(net, disc);
+    if (!changed) return { status: 'exists', chargeId: String(existing._id) };
+    existing.status = 'pending';
+    existing.voidedAt = null;
+    existing.voidReason = '';
+    existing.amount = net;
+    existing.discountAmount = Math.min(net, disc);
+    existing.title = `فیسِ ماهِ ${shamsiMonthLabel(periodKey)}`;
+    if (!existing.dueDate) existing.dueDate = monthlyDueDateISO(periodKey, dueDay);
+    existing.issuedBy = issuedBy || existing.issuedBy || null;
+    existing.issuedAt = existing.issuedAt || new Date();
+    await existing.save();
+    return { status: 'updated', chargeId: String(existing._id) };
+  }
+  try {
+    const c = await AcademyCharge.create({
+      registrationId: reg._id,
+      studentId: reg.studentId,
+      kind: 'monthly',
+      title: `فیسِ ماهِ ${shamsiMonthLabel(periodKey)}`,
+      amount: net,
+      discountAmount: Math.min(net, disc),
+      dueDate: monthlyDueDateISO(periodKey, dueDay),
+      periodKey,
+      currency: reg.currency || 'AFN',
+      issuedBy: issuedBy || null,
+      issuedAt: new Date(),
+      createdBy: issuedBy || null
     });
-    created += 1;
-    touched.add(String(c.registrationId));
+    return { status: 'created', chargeId: String(c._id) };
+  } catch (error) {
+    if (error && error.code === 11000) {
+      const again = await AcademyCharge.findOne({ registrationId: reg._id, kind: 'monthly', periodKey }).lean();
+      return { status: 'exists', chargeId: again ? String(again._id) : undefined };
+    }
+    throw error;
+  }
+}
+
+/**
+ * صدورِ گروهیِ بلِ یک ماه برای ثبت‌نام‌های فعالِ ماهانه.
+ * `ids` = فهرستِ registrationId (یا studentId).
+ */
+async function issueBillsForMonth({ month, dueDay = 20, courseId = '', classId = '', ids = null, issuedBy = null } = {}) {
+  const filter = { paymentPlan: 'monthly', status: 'active' };
+  if (courseId) filter.courseId = courseId;
+  if (classId) filter.classId = classId;
+  const regs = await AcademyRegistration.find(filter)
+    .select('_id studentId courseId classId registrationDate startDate monthlyFee currency').lean();
+  const wanted = Array.isArray(ids) && ids.length ? new Set(ids.map(String)) : null;
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  const touched = new Set();
+  for (const reg of regs) {
+    if (wanted && !wanted.has(String(reg._id)) && !wanted.has(String(reg.studentId))) continue;
+    const r = await issueBillForMonth(reg, month, { dueDay, issuedBy });
+    if (r.status === 'created') { created += 1; touched.add(String(reg._id)); }
+    else if (r.status === 'updated') { updated += 1; touched.add(String(reg._id)); }
+    else skipped += 1;
   }
   for (const id of touched) await recomputeRegistration(id);
-  return { created };
+  return { month, label: shamsiMonthLabel(month), created, updated, skipped, registrations: regs.length };
+}
+
+/**
+ * عاید، مصرف و مفادِ یک ماهِ شمسی — تعریفِ واحد.
+ * عاید = پرداخت‌های ابطال‌نشدهٔ دارای بل (invoiceId) با paidAt در آن ماه.
+ * مصرف = مصارفِ همان ماهِ شمسی. مفاد = عاید − مصرف.
+ */
+async function monthlyPnl(periodKey) {
+  const range = monthGregorianRange(periodKey);
+  if (!range) return { periodKey, income: 0, expenses: 0, net: 0, paymentCount: 0, expenseCount: 0, byFeeMonth: [] };
+  const start = new Date(`${range.startISO}T00:00:00.000Z`);
+  const endEx = new Date(`${range.endExclusiveISO}T00:00:00.000Z`);
+
+  const payments = await AcademyPayment.find({
+    status: { $ne: 'void' },
+    invoiceId: { $ne: null },
+    paidAt: { $gte: start, $lt: endEx }
+  }).select('amount allocations').lean();
+  const income = round(payments.reduce((s, p) => s + num(p.amount), 0));
+
+  const expenseAgg = await AcademyExpense.aggregate([
+    { $match: { expenseDate: { $gte: range.startISO, $lt: range.endExclusiveISO } } },
+    { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } }
+  ]);
+  const expenses = round(expenseAgg?.[0]?.total || 0);
+
+  const allocChargeIds = [...new Set(payments.flatMap((p) => (p.allocations || []).map((a) => String(a.chargeId))))];
+  const chargeRows = allocChargeIds.length
+    ? await AcademyCharge.find({ _id: { $in: allocChargeIds } }).select('periodKey kind').lean()
+    : [];
+  const keyByCharge = new Map(chargeRows.map((c) => [String(c._id), c.periodKey || c.kind]));
+  const byMonthMap = new Map();
+  for (const p of payments) {
+    for (const a of p.allocations || []) {
+      const k = keyByCharge.get(String(a.chargeId));
+      if (!k) continue;
+      byMonthMap.set(k, round((byMonthMap.get(k) || 0) + num(a.amount)));
+    }
+  }
+  const byFeeMonth = [...byMonthMap.entries()]
+    .sort((a, b) => monthOrdinal(a[0]) - monthOrdinal(b[0]))
+    .map(([k, amount]) => ({ periodKey: k, label: /^\d{3,4}-\d{2}$/.test(k) ? shamsiMonthLabel(k) : k, amount }));
+
+  return { periodKey, income, expenses, net: round(income - expenses), paymentCount: payments.length, expenseCount: expenseAgg?.[0]?.count || 0, byFeeMonth };
 }
 
 module.exports = {
   num,
   round,
   todayKey,
-  generateLateFees,
   chargeNet,
   chargeOpen,
   isOverdue,
   shamsiMonthKey,
+  currentShamsiMonthKey,
+  shamsiMonthLabel,
+  monthOrdinal,
+  monthGregorianRange,
   monthlyDueDateISO,
+  bumpShamsiMonth,
+  anchorMonthKey,
+  billMonthAllowed,
+  billMonthDisallowReason,
   recomputeRegistration,
   fifoAllocate,
-  generateMonthlyCharges
+  allocatePayment,
+  issueBillForMonth,
+  issueBillsForMonth,
+  monthlyPnl
 };

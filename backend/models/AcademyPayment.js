@@ -23,6 +23,8 @@ const academyPaymentSchema = new mongoose.Schema({
     }, { _id: false })],
     default: []
   },
+  // کلیدِ ماه‌های شمسی که این پرداخت فیس‌شان را پوشش داد، مثلِ ['1405-05','1405-06'].
+  coveredMonths: { type: [String], default: [] },
   status: { type: String, enum: ['active', 'void'], default: 'active', index: true },
   reversalOfId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademyPayment', default: null },
   voidedAt: { type: Date, default: null },
