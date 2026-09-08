@@ -90,15 +90,58 @@ async function recomputeRegistration(registrationId) {
 
   const [charges, payments] = await Promise.all([
     AcademyCharge.find({ registrationId, status: { $ne: 'void' } }).sort({ dueDate: 1, createdAt: 1 }),
-    AcademyPayment.find({ registrationId, status: { $ne: 'void' } })
+    AcademyPayment.find({ registrationId, status: { $ne: 'void' } }).sort({ paidAt: 1, createdAt: 1 })
   ]);
 
+  // ظرفیتِ خالیِ هر قلم (net منهای آنچه تا کنون ادعا شده) و مجموعِ پرداختیِ هر قلم.
+  const netById = new Map(charges.map((c) => [String(c._id), chargeNet(c)]));
   const paidByCharge = new Map();
+  const claimedOn = (id) => paidByCharge.get(id) || 0;
+  const roomOn = (id) => Math.max(0, round((netById.get(id) || 0) - claimedOn(id)));
+  const claim = (id, amt) => paidByCharge.set(id, round(claimedOn(id) + amt));
+
+  // ۱) تخصیص‌های ثبت‌شده را اول — کلَمپ‌شده به ظرفیتِ واقعیِ همان قلم — اعمال کن.
+  const usedByPayment = new Map();
   for (const payment of payments) {
+    let used = 0;
     for (const alloc of payment.allocations || []) {
       const key = String(alloc.chargeId);
-      paidByCharge.set(key, round((paidByCharge.get(key) || 0) + num(alloc.amount)));
+      if (!netById.has(key)) continue; // تخصیص به قلمِ ابطال‌شده/حذف‌شده
+      const take = round(Math.min(num(alloc.amount), roomOn(key)));
+      if (take <= 0) continue;
+      claim(key, take);
+      used = round(used + take);
     }
+    usedByPayment.set(String(payment._id), used);
+  }
+
+  // ۲) خوددرمانی: پرداختِ ابطال‌نشده‌ای که تخصیصش از مبلغش کمتر است و هنوز قلمِ
+  //    بازی هست → باقیمانده را FIFO تخصیص بده و روی خودِ پرداخت ذخیره کن. این
+  //    پرداختِ سرگردانِ مسیرِ قدیمی یا میزِ مهاجرت را به بلش می‌چسباند و
+  //    recompute را idempotent می‌کند — اضافه‌پرداختِ واقعی قلمِ بازی نمی‌یابد و
+  //    مثلِ قبل از راهِ allPaid به‌عنوان اعتبار سرِ جایش می‌ماند.
+  for (const payment of payments) {
+    let shortfall = round(num(payment.amount) - (usedByPayment.get(String(payment._id)) || 0));
+    if (shortfall <= 0) continue;
+    const next = (payment.allocations || []).map((a) => ({ chargeId: a.chargeId, amount: num(a.amount) }));
+    for (const charge of charges) {
+      if (shortfall <= 0) break;
+      const key = String(charge._id);
+      const room = roomOn(key);
+      if (room <= 0) continue;
+      const take = round(Math.min(room, shortfall));
+      claim(key, take);
+      const hit = next.find((a) => String(a.chargeId) === key);
+      if (hit) hit.amount = round(hit.amount + take);
+      else next.push({ chargeId: charge._id, amount: take });
+      shortfall = round(shortfall - take);
+    }
+    payment.allocations = next;
+    payment.coveredMonths = next
+      .map((a) => charges.find((c) => String(c._id) === String(a.chargeId)))
+      .filter((c) => c && c.periodKey)
+      .map((c) => c.periodKey);
+    await payment.save();
   }
 
   let totalNet = 0;
