@@ -104,18 +104,29 @@ function monthKeysFrom(fromKey, count) {
   return out;
 }
 
-/** آیا ماهِ periodKey برای این ثبت‌نام مجاز است؟ (نه پیش از ماهِ عضویت/ثبت،
- *  نه دورتر از سقفِ محافظ). */
-function billMonthAllowed(reg, periodKey) {
+/**
+ * علتِ ناممکن‌بودنِ صدورِ بلِ این ماه برای این ثبت‌نام — یا '' اگر مجاز است.
+ *  - 'invalid'         : کلیدِ ماه معتبر نیست
+ *  - 'before-enrolment': پیش از ماهِ ثبت‌نام/عضویتِ شاگرد
+ *  - 'too-old'         : خیلی عقب (بیش از سقفِ محافظ)
+ *  - 'too-future'      : خیلی جلو (بیش از سقفِ محافظ به بعد)
+ * صدورِ بلِ ماهِ آینده مجاز است (کاربر خودش تصمیم می‌گیرد)، فقط نه چند سال جلوتر.
+ */
+function billMonthDisallowReason(reg, periodKey) {
   const ord = monthOrdinal(periodKey);
-  if (!ord) return false;
+  if (!ord) return 'invalid';
   const curOrd = monthOrdinal(currentShamsiMonthKey());
-  if (ord > curOrd + 1) return false; // خیلی جلوتر از ماهِ جاری بلِ خودکار نده
-  if (ord < curOrd - MAX_LEDGER_MONTHS) return false;
+  if (ord > curOrd + MAX_LEDGER_MONTHS) return 'too-future';
+  if (ord < curOrd - MAX_LEDGER_MONTHS) return 'too-old';
   const startISO = String(reg.startDate || reg.registrationDate || '').slice(0, 10);
   const startOrd = monthOrdinal(shamsiMonthKey(startISO || todayKey()));
-  if (startOrd && ord < startOrd) return false; // پیش از ماهِ عضویت
-  return true;
+  if (startOrd && ord < startOrd) return 'before-enrolment';
+  return '';
+}
+
+/** آیا صدورِ بلِ این ماه برای این ثبت‌نام مجاز است؟ */
+function billMonthAllowed(reg, periodKey) {
+  return billMonthDisallowReason(reg, periodKey) === '';
 }
 
 /**
@@ -357,6 +368,7 @@ module.exports = {
   chargeOpen,
   isOverdue,
   billMonthAllowed,
+  billMonthDisallowReason,
   issueBillForMonth,
   issueBillsForMonth,
   recomputeRegistration,

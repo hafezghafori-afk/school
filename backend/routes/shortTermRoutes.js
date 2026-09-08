@@ -964,7 +964,8 @@ router.post('/bills/preview', async (req, res) => {
           proposedNet: monthlyNet,
           hasBill: Boolean(c),
           billStatus: c ? c.status : '',
-          allowed: L.billMonthAllowed(r, month)
+          allowed: L.billMonthAllowed(r, month),
+          disallowReason: L.billMonthDisallowReason(r, month)
         };
       });
     res.json({

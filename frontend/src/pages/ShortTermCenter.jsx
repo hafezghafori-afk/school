@@ -1155,9 +1155,13 @@ export default function ShortTermCenter() {
                       `${fmt(x.proposedNet)} ${currency}`,
                       x.hasBill
                         ? <span className="stc-chip stc-chip-ok">بل صادرشده</span>
-                        : !x.allowed
-                          ? <span className="stc-chip stc-chip-muted">پیش از عضویت</span>
-                          : <span className="stc-chip stc-chip-bad">بل صادر نشده</span>
+                        : x.disallowReason === 'before-enrolment'
+                          ? <span className="stc-chip stc-chip-muted">پیش از عضویتِ شاگرد</span>
+                          : x.disallowReason === 'too-future'
+                            ? <span className="stc-chip stc-chip-muted">خیلی جلوتر</span>
+                            : x.disallowReason === 'too-old'
+                              ? <span className="stc-chip stc-chip-muted">خیلی قدیمی</span>
+                              : <span className="stc-chip stc-chip-bad">بل صادر نشده</span>
                     ])}
                   />
                 )}
