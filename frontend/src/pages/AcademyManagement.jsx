@@ -95,7 +95,9 @@ const emptyPayment = {
   paymentMethod: 'cash',
   paidAt: new Date().toISOString().slice(0, 10),
   referenceNo: '',
-  note: ''
+  note: '',
+  // ماهِ شمسی‌ای که این پرداخت بابتِ آن است ('1405-06'). خالی = ماهِ جاری.
+  billMonth: ''
 };
 
 const emptyExpense = {
@@ -123,6 +125,8 @@ const tabs = [
   { key: 'courses', label: 'کورس و استاد' },
   { key: 'classes', label: 'پلان صنف' },
   { key: 'registrations', label: 'ثبت‌نام' },
+  { key: 'issue-bills', label: 'صدور بل' },
+  { key: 'ledger', label: 'باقیاتِ ماهانه' },
   { key: 'payments', label: 'پرداخت و بل' },
   { key: 'expenses', label: 'مصارف' },
   { key: 'attendance', label: 'حاضری' },
@@ -190,7 +194,10 @@ async function requestJson(path, options = {}) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data?.success === false) {
-    throw new Error(data?.message || 'عملیات ناموفق بود.');
+    const err = new Error(data?.message || 'عملیات ناموفق بود.');
+    err.status = res.status;
+    err.data = data;
+    throw err;
   }
   return data;
 }
@@ -210,6 +217,30 @@ function StatCard({ label, value, tone = '' }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+// چیپِ ماه: سبز=پرداخت‌شده، سرخ=معوق، کهربایی=صادرشده‌ونرسیده. کلیک روی
+// ماهِ باز → پرداختِ همان ماه.
+const CHIP_STYLE = {
+  base: { display: 'inline-block', padding: '2px 7px', borderRadius: 6, fontSize: 12, border: '1px solid', cursor: 'default' },
+  ok: { color: '#4ade80', borderColor: 'rgba(74,222,128,.4)' },
+  bad: { color: '#f87171', borderColor: 'rgba(248,113,113,.45)' },
+  muted: { color: '#fcd34d', borderColor: 'rgba(251,191,36,.4)' }
+};
+function MonthChips({ months = [], onPick }) {
+  if (!months.length) return <span className="academy-empty" style={{ padding: 0 }}>—</span>;
+  return (
+    <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4 }}>
+      {months.map((m) => {
+        const kind = m.status === 'paid' ? 'ok' : m.overdue ? 'bad' : 'muted';
+        const st = { ...CHIP_STYLE.base, ...CHIP_STYLE[kind], ...(onPick && m.status !== 'paid' ? { cursor: 'pointer' } : {}) };
+        const title = `${m.label} — پرداخت ${fmt(m.paid)} از ${fmt(m.net)}${m.balance ? ` (باقی ${fmt(m.balance)})` : ''}`;
+        return onPick && m.status !== 'paid'
+          ? <button type="button" key={m.periodKey} style={st} title={`${title} — کلیک: پرداختِ این ماه`} onClick={() => onPick(m)}>{m.label}</button>
+          : <span key={m.periodKey} style={st} title={title}>{m.label}</span>;
+      })}
+    </span>
   );
 }
 
@@ -268,6 +299,19 @@ export default function AcademyManagement() {
   const [monthlyReport, setMonthlyReport] = useState(null);
   const [monthlyReportLoading, setMonthlyReportLoading] = useState(false);
   const [monthlyReportDetail, setMonthlyReportDetail] = useState(null);
+  // تبِ «صدور بل» و «باقیاتِ ماهانه»
+  const curSolar = gregorianToAfghanSolar(new Date()) || { jy: 1400, jm: 1 };
+  const curMonthKey = `${curSolar.jy}-${String(curSolar.jm).padStart(2, '0')}`;
+  const [billMonth, setBillMonth] = useState(curMonthKey);
+  const [billPreview, setBillPreview] = useState(null);
+  const [billPreviewLoading, setBillPreviewLoading] = useState(false);
+  const [billSelected, setBillSelected] = useState(() => new Set());
+  const [ledger, setLedger] = useState(null);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [ledgerOnlyDebtors, setLedgerOnlyDebtors] = useState(true);
+  const [ledgerSearch, setLedgerSearch] = useState('');
+  const [ledgerOpenId, setLedgerOpenId] = useState('');
+  const [monthPnl, setMonthPnl] = useState(null);
   const [monthlyReportYear, setMonthlyReportYear] = useState(() => gregorianToAfghanSolar(new Date())?.jy || 1400);
   const [monthlyReportMonth, setMonthlyReportMonth] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -591,10 +635,20 @@ export default function AcademyManagement() {
   const submit = async ({ path, payload, reset, successTab, autoPrintReceipt }) => {
     setBusy(true);
     try {
-      const data = await requestJson(path, {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      });
+      let body = payload;
+      let data;
+      try {
+        data = await requestJson(path, { method: 'POST', body: JSON.stringify(body) });
+      } catch (error) {
+        // پرداخت بدونِ بلِ آن ماه → با تأییدِ کاربر، همان‌جا بل صادر و دوباره تلاش کن.
+        if (error?.data?.code === 'NO_BILL'
+          && window.confirm(`${error.data.message}\n\n(تأیید = صدورِ بلِ ${error.data.billMonthLabel} و ثبتِ پرداخت)`)) {
+          body = { ...body, issueBillIfMissing: true, billMonth: error.data.billMonth };
+          data = await requestJson(path, { method: 'POST', body: JSON.stringify(body) });
+        } else {
+          throw error;
+        }
+      }
       // Shown via the shared floating toast (fixed to the viewport) instead
       // of an inline banner at the top of the page, so the confirmation is
       // visible right where the user is - even deep in a scrolled-down form -
@@ -613,8 +667,10 @@ export default function AcademyManagement() {
       // Payments/expenses are the only writes that change the monthly
       // income/expense numbers - invalidate the cached report so switching
       // to "گزارش‌ها" afterwards refetches instead of showing stale totals.
-      if (monthlyReport && (path === '/api/academy/payments' || path === '/api/academy/expenses')) {
-        setMonthlyReport(null);
+      if (path === '/api/academy/payments' || path === '/api/academy/expenses') {
+        if (monthlyReport) setMonthlyReport(null);
+        setLedger(null);
+        setMonthPnl(null);
       }
     } catch (error) {
       toast.error(error.message);
@@ -622,6 +678,85 @@ export default function AcademyManagement() {
       setBusy(false);
     }
   };
+
+  const loadBillPreview = async () => {
+    setBillPreviewLoading(true);
+    try {
+      const data = await requestJson('/api/academy/bills/preview', {
+        method: 'POST',
+        body: JSON.stringify({ month: billMonth })
+      });
+      setBillPreview(data);
+      setBillSelected(new Set((data.rows || []).filter((x) => !x.hasBill && x.allowed).map((x) => String(x.registrationId))));
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBillPreviewLoading(false);
+    }
+  };
+
+  const issueBills = async (registrationIds) => {
+    setBusy(true);
+    try {
+      const data = await requestJson('/api/academy/bills/issue', {
+        method: 'POST',
+        body: JSON.stringify({ month: billMonth, ids: registrationIds || null })
+      });
+      toast.success(data.message || 'بل صادر شد.');
+      await loadBillPreview();
+      setLedger(null); setMonthPnl(null);
+      await loadData();
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const loadLedger = async () => {
+    setLedgerLoading(true);
+    try {
+      const q = new URLSearchParams();
+      if (ledgerOnlyDebtors) q.set('onlyDebtors', '1');
+      const [grid, pnl] = await Promise.all([
+        requestJson(`/api/academy/reports/monthly-ledger?${q.toString()}`),
+        requestJson('/api/academy/reports/monthly-pnl')
+      ]);
+      setLedger(grid);
+      setMonthPnl(pnl);
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setLedgerLoading(false);
+    }
+  };
+
+  const payLedgerMonth = (row, month) => {
+    setPaymentForm({
+      ...emptyPayment,
+      registrationId: String(row.registrationId),
+      amount: String(month.balance || month.net || ''),
+      billMonth: month.periodKey || ''
+    });
+    setPaymentRegistrationSearch(text(row.studentId?.fullName, ''));
+    setActiveTab('payments');
+  };
+
+  const goIssueBillForCurrentMonth = () => { setBillMonth(curMonthKey); setActiveTab('issue-bills'); };
+
+  useEffect(() => {
+    if (activeTab === 'issue-bills') loadBillPreview();
+    if (activeTab === 'ledger') loadLedger();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, billMonth, ledgerOnlyDebtors]);
+
+  const visibleLedgerRows = useMemo(() => {
+    const rows = ledger?.rows || [];
+    const term = ledgerSearch.trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter((r) => [r.studentId?.fullName, r.studentId?.studentCode, r.courseId?.name, r.classId?.name]
+      .some((v) => String(v || '').toLowerCase().includes(term)));
+  }, [ledger, ledgerSearch]);
 
   const saveSettings = async (event) => {
     event.preventDefault();
@@ -1326,6 +1461,159 @@ export default function AcademyManagement() {
             </div>
           )}
 
+          {activeTab === 'issue-bills' && (
+            <div className="academy-stack">
+              <div className="academy-panel">
+                <div className="academy-panel-head">
+                  <h2>صدور بلِ ماهانه</h2>
+                  <Field label="ماه">
+                    <select value={billMonth} onChange={(e) => setBillMonth(e.target.value)}>
+                      {Array.from({ length: 14 }, (_, i) => {
+                        let jy = curSolar.jy;
+                        let jm = curSolar.jm - 6 + i;
+                        while (jm < 1) { jm += 12; jy -= 1; }
+                        while (jm > 12) { jm -= 12; jy += 1; }
+                        const key = `${jy}-${String(jm).padStart(2, '0')}`;
+                        return <option key={key} value={key}>{formatMonthLabel(key)}</option>;
+                      })}
+                    </select>
+                  </Field>
+                </div>
+                <p className="academy-form-hint">
+                  سیستم خودش بل صادر نمی‌کند. برای ماهِ انتخاب‌شده، شاگردانِ ماهانه‌ای که هنوز بل ندارند را انتخاب و «صدور بل» کنید — شاگرد فقط برای ماهی که بلش صادر شده باقی‌دار نشان داده می‌شود.
+                </p>
+                {billPreview && (
+                  <div className="academy-stats" style={{ marginBottom: 12 }}>
+                    <StatCard label="شاگردانِ ماهانه" value={fmt(billPreview.totals?.active || 0)} />
+                    <StatCard label="بلِ صادرشده" value={fmt(billPreview.totals?.withBill || 0)} tone="green" />
+                    <StatCard label={`بدونِ بلِ ${billPreview.label}`} value={fmt(billPreview.totals?.withoutBill || 0)} tone="amber" />
+                  </div>
+                )}
+                <div style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                  <button type="button" disabled={busy || !billSelected.size} onClick={() => issueBills([...billSelected])}>
+                    صدورِ بلِ {billPreview?.label || ''} برای انتخاب‌شده‌ها ({fmt(billSelected.size)})
+                  </button>
+                  <button type="button" className="academy-inline-button" disabled={busy || !(billPreview?.totals?.withoutBill)} onClick={() => issueBills(null)}>
+                    صدور برای همهٔ شاگردانِ بدونِ بل
+                  </button>
+                </div>
+                {billPreviewLoading ? (
+                  <p className="academy-empty">در حال بارگذاری...</p>
+                ) : (
+                  <Table
+                    columns={['انتخاب', 'شاگرد', 'کورس', 'فیسِ ماهانه', 'وضعیت']}
+                    rows={(billPreview?.rows || []).map((x) => [
+                      x.hasBill || !x.allowed
+                        ? '—'
+                        : <input type="checkbox" checked={billSelected.has(String(x.registrationId))} onChange={(e) => {
+                            const next = new Set(billSelected);
+                            if (e.target.checked) next.add(String(x.registrationId)); else next.delete(String(x.registrationId));
+                            setBillSelected(next);
+                          }} />,
+                      text(x.studentId?.fullName),
+                      text(x.courseId?.name),
+                      `${fmt(x.proposedNet)} ${currency}`,
+                      x.hasBill
+                        ? <span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.ok }}>بل صادرشده</span>
+                        : x.disallowReason === 'before-enrolment'
+                          ? <span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.muted }}>پیش از عضویتِ شاگرد</span>
+                          : x.disallowReason
+                            ? <span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.muted }}>خارج از بازه</span>
+                            : <span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.bad }}>بل صادر نشده</span>
+                    ])}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'ledger' && (
+            <div className="academy-stack">
+              {ledger?.totals?.noBillThisMonth > 0 && (
+                <p className="academy-form-hint" style={{ background: 'rgba(248,113,113,.12)', border: '1px solid rgba(248,113,113,.3)', borderRadius: 8, padding: '8px 10px' }}>
+                  ⚠️ برای <strong>{fmt(ledger.totals.noBillThisMonth)}</strong> شاگرد بلِ ماهِ جاری صادر نشده است.
+                  {' '}<button type="button" className="academy-inline-button" onClick={goIssueBillForCurrentMonth}>رفتن به «صدور بل»</button>
+                </p>
+              )}
+              <div className="academy-stats">
+                <StatCard label={`عایدِ ${monthPnl?.label || 'ماهِ جاری'}`} value={`${fmt(monthPnl?.income || 0)} ${currency}`} tone="green" />
+                <StatCard label={`مصرفِ ${monthPnl?.label || 'ماهِ جاری'}`} value={`${fmt(monthPnl?.expenses || 0)} ${currency}`} tone="red" />
+                <StatCard label={`مفادِ ${monthPnl?.label || 'ماهِ جاری'}`} value={`${fmt(monthPnl?.net || 0)} ${currency}`} />
+                <StatCard label="تعداد باقی‌داران" value={fmt(ledger?.totals?.debtors || 0)} />
+                <StatCard label="مجموع پرداخت‌ها" value={`${fmt(ledger?.totals?.totalPaid || 0)} ${currency}`} tone="green" />
+                <StatCard label="مجموع باقیات" value={`${fmt(ledger?.totals?.totalBalance || 0)} ${currency}`} tone="amber" />
+              </div>
+              <p className="academy-form-hint">
+                عاید فقط از پرداختِ ابطال‌نشده و دارای بلِ صادرشده، منهای مصارفِ همان ماه.
+                {monthPnl?.byFeeMonth?.length ? ` — عاید بابتِ فیسِ ماهِ: ${monthPnl.byFeeMonth.map((b) => `${b.label} (${fmt(b.amount)})`).join('، ')}` : ''}
+              </p>
+              <div className="academy-panel">
+                <div className="academy-panel-head">
+                  <h2>باقیاتِ ماهانه</h2>
+                  <div style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button type="button" className="academy-inline-button" onClick={goIssueBillForCurrentMonth}>صدور بل</button>
+                    <input placeholder="نام، کد، کورس یا صنف" value={ledgerSearch} onChange={(e) => setLedgerSearch(e.target.value)} />
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <input type="checkbox" checked={ledgerOnlyDebtors} onChange={(e) => setLedgerOnlyDebtors(e.target.checked)} />
+                      <span>فقط باقی‌داران</span>
+                    </label>
+                  </div>
+                </div>
+                <p className="academy-form-hint">
+                  فقط ماه‌هایی که برایشان بل صادر شده نمایش داده می‌شود. 🟩 پرداخت‌شده · 🟥 معوق · 🟨 صادرشده و نرسیده — روی چیپِ باقی کلیک کنید تا پرداختِ همان ماه ثبت شود.
+                </p>
+                {ledgerLoading ? (
+                  <p className="academy-empty">در حال بارگذاری...</p>
+                ) : (
+                  <Table
+                    columns={['شاگرد', 'کورس/صنف', 'ماهِ عضویت', 'ماه‌ها', 'باقی از', 'فیسِ ماهانه', 'مجموع پرداخت', 'مجموع باقی', 'جزئیات']}
+                    rows={visibleLedgerRows.map((r) => [
+                      <span>
+                        {text(r.studentId?.fullName)}
+                        {r.studentId?.studentCode ? <><br /><small style={{ opacity: 0.65 }}>{r.studentId.studentCode}</small></> : null}
+                        {r.nonMonthly ? <><br /><span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.muted }}>پلانِ غیرماهانه</span></> : null}
+                        {r.noBillThisMonth ? <><br /><span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.bad }}>بلِ {r.currentMonthLabel} صادر نشده</span></> : null}
+                      </span>,
+                      `${text(r.courseId?.name)}${r.classId?.name ? ` / ${r.classId.name}` : ''}`,
+                      r.startMonthLabel || '—',
+                      r.months?.length ? <MonthChips months={r.months} onPick={(m) => payLedgerMonth(r, m)} /> : <span className="academy-empty" style={{ padding: 0 }}>بدون بل</span>,
+                      r.arrearsFromLabel
+                        ? <span className={r.overdueFromLabel ? 'academy-amount-negative' : ''}>{r.arrearsFromLabel}</span>
+                        : <span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.ok }}>تسویه</span>,
+                      `${fmt(r.monthlyFee)} ${currency}`,
+                      <span className="academy-amount-positive">{`${fmt(r.totalPaid)} ${currency}`}</span>,
+                      <span className={r.totalBalance > 0 ? 'academy-amount-negative' : ''}>{`${fmt(r.totalBalance)} ${currency}`}</span>,
+                      <button type="button" className="academy-inline-button" onClick={() => setLedgerOpenId(ledgerOpenId === String(r.registrationId) ? '' : String(r.registrationId))}>
+                        {ledgerOpenId === String(r.registrationId) ? 'بستن' : 'باز کردن'}
+                      </button>
+                    ])}
+                  />
+                )}
+                {ledgerOpenId ? (() => {
+                  const r = (ledger?.rows || []).find((x) => String(x.registrationId) === ledgerOpenId);
+                  if (!r) return null;
+                  return (
+                    <div className="academy-panel" style={{ marginTop: 12 }}>
+                      <h3>{text(r.studentId?.fullName)} — {text(r.courseId?.name)} · فیسِ ماهانه {fmt(r.monthlyFee)} {currency}{r.credit ? ` · اعتبار ${fmt(r.credit)} ${currency}` : ''}</h3>
+                      <Table
+                        columns={['ماه', 'فیس', 'تخفیف', 'خالص', 'پرداخت‌شده', 'باقی', 'وضعیت', 'اقدام']}
+                        rows={(r.months || []).map((m) => [
+                          m.label, fmt(m.fee), fmt(m.discount), fmt(m.net), fmt(m.paid),
+                          <span className={m.balance > 0 ? 'academy-amount-negative' : ''}>{fmt(m.balance)}</span>,
+                          m.status === 'paid'
+                            ? <span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.ok }}>پرداخت‌شده</span>
+                            : m.overdue ? <span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.bad }}>معوق</span>
+                              : <span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.muted }}>باقی</span>,
+                          m.status === 'paid' ? '—' : <button type="button" className="academy-inline-button" onClick={() => payLedgerMonth(r, m)}>پرداختِ این ماه</button>
+                        ])}
+                      />
+                    </div>
+                  );
+                })() : null}
+              </div>
+            </div>
+          )}
+
           {activeTab === 'payments' && (
             <div className="academy-grid">
               <form className="academy-panel academy-form" onSubmit={(event) => {
@@ -1355,6 +1643,18 @@ export default function AcademyManagement() {
                         {text(item.studentId?.fullName)} - {text(item.courseId?.name)} - باقی {fmt(item.balance)}
                       </option>
                     ))}
+                  </select>
+                </Field>
+                <Field label="بابتِ ماهِ">
+                  <select value={paymentForm.billMonth || curMonthKey} onChange={(e) => setPaymentForm({ ...paymentForm, billMonth: e.target.value })}>
+                    {Array.from({ length: 10 }, (_, i) => {
+                      let jy = curSolar.jy;
+                      let jm = curSolar.jm - 6 + i;
+                      while (jm < 1) { jm += 12; jy -= 1; }
+                      while (jm > 12) { jm -= 12; jy += 1; }
+                      const key = `${jy}-${String(jm).padStart(2, '0')}`;
+                      return <option key={key} value={key}>{formatMonthLabel(key)}</option>;
+                    })}
                   </select>
                 </Field>
                 <Field label="مبلغ پرداخت"><input required type="number" min="1" value={paymentForm.amount} onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })} /></Field>
