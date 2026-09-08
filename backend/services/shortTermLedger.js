@@ -259,20 +259,21 @@ function allocatePayment(amount, openCharges = [], targetChargeId = '') {
 
 /**
  * صدورِ گروهیِ بلِ یک ماهِ مشخص برای ثبت‌نام‌های فعال (idempotent).
- * @param {{ month:string, dueDay?:number, classId?:string, studentIds?:string[], issuedBy?:string }} opts
+ * `ids` = فهرستِ registrationId (یا studentId — هر دو پشتیبانی می‌شود).
+ * @param {{ month:string, dueDay?:number, classId?:string, ids?:string[], issuedBy?:string }} opts
  */
-async function issueBillsForMonth({ month, dueDay = 20, classId = '', studentIds = null, issuedBy = null } = {}) {
+async function issueBillsForMonth({ month, dueDay = 20, classId = '', ids = null, issuedBy = null } = {}) {
   const filter = { status: 'active' };
   if (classId) filter.classId = classId;
   const regs = await ShortTermRegistration.find(filter)
     .select('_id studentId classId startDate registrationDate feeAmount discountAmount').lean();
-  const wanted = Array.isArray(studentIds) && studentIds.length ? new Set(studentIds.map(String)) : null;
+  const wanted = Array.isArray(ids) && ids.length ? new Set(ids.map(String)) : null;
   let created = 0;
   let updated = 0;
   let skipped = 0;
   const touched = new Set();
   for (const reg of regs) {
-    if (wanted && !wanted.has(String(reg.studentId))) continue;
+    if (wanted && !wanted.has(String(reg._id)) && !wanted.has(String(reg.studentId))) continue;
     const r = await issueBillForMonth(reg, month, { dueDay, issuedBy });
     if (r.status === 'created') { created += 1; touched.add(String(reg._id)); }
     else if (r.status === 'updated') { updated += 1; touched.add(String(reg._id)); }

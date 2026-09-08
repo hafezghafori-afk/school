@@ -988,17 +988,23 @@ router.post('/bills/issue', async (req, res) => {
   try {
     if (!validMonth(req.body.month)) return res.status(400).json({ success: false, message: 'ماهِ انتخاب‌شده معتبر نیست.' });
     const settings = await getSettings();
+    const idList = Array.isArray(req.body.ids) ? req.body.ids
+      : Array.isArray(req.body.studentIds) ? req.body.studentIds
+        : null;
     const result = await shortTermLedger.issueBillsForMonth({
       month: String(req.body.month),
       classId: String(req.body.classId || '').trim(),
-      studentIds: Array.isArray(req.body.studentIds) ? req.body.studentIds : null,
+      ids: idList,
       dueDay: settings.monthlyChargeDueDay || 20,
       issuedBy: userId(req)
     });
+    const issued = result.created + result.updated;
     res.json({
       success: true,
       ...result,
-      message: `بلِ ماهِ ${result.label} صادر شد — ${result.created} بلِ تازه${result.updated ? `، ${result.updated} به‌روز` : ''}${result.skipped ? `، ${result.skipped} از قبل داشت` : ''}.`
+      message: issued > 0
+        ? `بلِ ماهِ ${result.label} برای ${issued} شاگرد صادر شد${result.skipped ? ` (${result.skipped} از قبل داشتند)` : ''}.`
+        : `همهٔ شاگردانِ انتخاب‌شده از قبل بلِ ماهِ ${result.label} داشتند — تغییری لازم نبود.`
     });
   } catch {
     res.status(500).json({ success: false, message: 'صدورِ گروهیِ بل ناموفق بود.' });

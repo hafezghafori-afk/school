@@ -529,12 +529,12 @@ export default function ShortTermCenter() {
     }
   };
 
-  const issueBills = async (studentIds) => {
+  const issueBills = async (registrationIds) => {
     setBusy(true);
     try {
       const data = await requestJson('/api/short-term-center/bills/issue', {
         method: 'POST',
-        body: JSON.stringify({ month: billMonth, classId: billClassId, studentIds: studentIds || null })
+        body: JSON.stringify({ month: billMonth, classId: billClassId, ids: registrationIds || null })
       });
       toast.success(data.message || 'بل صادر شد.');
       await loadBillPreview();
