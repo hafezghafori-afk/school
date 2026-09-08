@@ -29,7 +29,10 @@ const shortTermRegistrationSchema = new mongoose.Schema({
   // pre-validate آن‌ها را از feeAmount/discountAmount×durationMonths بازنمی‌نویسد.
   ledgerManaged: { type: Boolean, default: false },
   paymentStatus: { type: String, enum: ['unpaid', 'partial', 'paid'], default: 'unpaid', index: true },
-  status: { type: String, enum: ['active', 'completed', 'cancelled'], default: 'active', index: true },
+  // 'merged' = یکی از چند ثبت‌نامِ ماهانهٔ قدیمیِ یک شاگرد که در مهاجرتِ دفترِ
+  // ماهانه در ثبت‌نامِ کانونیِ همان شاگرد ادغام شد؛ برای تاریخچه می‌ماند ولی
+  // مثلِ 'cancelled' از جریان و رول‌آپ‌ها کنار است.
+  status: { type: String, enum: ['active', 'completed', 'cancelled', 'merged'], default: 'active', index: true },
   note: { type: String, default: '', trim: true },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
@@ -38,6 +41,12 @@ const shortTermRegistrationSchema = new mongoose.Schema({
 shortTermRegistrationSchema.pre('validate', function normalizeShortTermRegistration() {
   this.registrationDate = String(this.registrationDate || '').trim() || new Date().toISOString().slice(0, 10);
   this.startDate = String(this.startDate || '').trim() || this.registrationDate;
+  // «تاریخ شروع» هیچ‌وقت پیش از «تاریخ ثبت» نیست — ماهِ پیش از ثبت‌نام معنی
+  // ندارد و نباید برایش بلِ فیس صادر شود.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(this.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(this.registrationDate)
+      && this.startDate < this.registrationDate) {
+    this.startDate = this.registrationDate;
+  }
   this.durationMonths = Math.max(1, Number(this.durationMonths || 1));
   this.endDate = addMonthsToDateKey(this.startDate, this.durationMonths);
   this.feeAmount = Math.max(0, Number(this.feeAmount || 0));

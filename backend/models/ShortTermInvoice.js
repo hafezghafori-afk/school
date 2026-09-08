@@ -18,6 +18,8 @@ const shortTermInvoiceSchema = new mongoose.Schema({
   issuedAt: { type: Date, default: Date.now, index: true },
   receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   note: { type: String, default: '', trim: true },
+  // کلیدِ ماه‌های شمسی که این بل فیس‌شان را پوشش داد، مثلِ ['1405-05','1405-06'].
+  coveredMonths: { type: [String], default: [] },
   kind: { type: String, enum: ['payment', 'credit_note'], default: 'payment', index: true },
   status: { type: String, enum: ['issued', 'void'], default: 'issued', index: true },
   voidOfId: { type: mongoose.Schema.Types.ObjectId, ref: 'ShortTermInvoice', default: null }

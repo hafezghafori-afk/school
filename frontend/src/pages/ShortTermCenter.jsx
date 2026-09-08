@@ -53,7 +53,13 @@ const emptyPayment = {
   paymentMethod: 'cash',
   paidAt: new Date().toISOString().slice(0, 10),
   referenceNo: '',
-  note: ''
+  note: '',
+  // ماهِ شمسی‌ای که این پرداخت بابتِ آن است (مثلِ '1405-06'). خالی = ماهِ جاری.
+  billMonth: '',
+  // وقتی از «باقیاتِ ماهانه» روی یک ماه «پرداخت» زده شود، این پرداخت مستقیم
+  // روی همان ماه می‌نشیند (وگرنه FIFO روی قدیمی‌ترین ماهِ باز).
+  targetChargeId: '',
+  targetChargeLabel: ''
 };
 
 const emptyExpense = {
@@ -90,6 +96,8 @@ const tabs = [
   { key: 'students', label: 'شاگردان' },
   { key: 'classes', label: 'صنف‌ها' },
   { key: 'registrations', label: 'ثبت‌نام و فیس' },
+  { key: 'issue-bills', label: 'صدور بل' },
+  { key: 'ledger', label: 'باقیاتِ ماهانه' },
   { key: 'payments', label: 'پرداخت، بل و رسید' },
   { key: 'attendance', label: 'حاضری' },
   { key: 'expenses', label: 'مصارف' },
@@ -149,7 +157,10 @@ async function requestJson(path, options = {}) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data?.success === false) {
-    throw new Error(data?.message || 'عملیات ناموفق بود.');
+    const err = new Error(data?.message || 'عملیات ناموفق بود.');
+    err.status = res.status;
+    err.data = data;
+    throw err;
   }
   return data;
 }
@@ -173,13 +184,18 @@ function StatCard({ label, value, tone = '' }) {
 }
 
 // تفکیکِ ماه‌به‌ماه: هر قلمِ ماهانه یک چیپ — سبز=پرداخت‌شده، سرخ=معوق، کهربایی=باقی.
-function MonthChips({ months = [] }) {
+function MonthChips({ months = [], onPick }) {
   if (!months.length) return <span className="stc-empty" style={{ padding: 0 }}>—</span>;
   return (
     <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4 }}>
       {months.map((m) => {
+        const net = m.net ?? m.amount ?? 0;
         const cls = m.status === 'paid' ? 'stc-chip-ok' : m.overdue ? 'stc-chip-bad' : 'stc-chip-muted';
-        return <span key={m.periodKey} className={`stc-chip ${cls}`} title={`${m.periodKey} — پرداخت ${m.paid} از ${m.amount}`}>{formatMonthLabel(m.periodKey)}</span>;
+        const label = m.label || formatMonthLabel(m.periodKey);
+        const title = `${label} — پرداخت ${fmt(m.paid)} از ${fmt(net)}${m.balance ? ` (باقی ${fmt(m.balance)})` : ''}`;
+        return onPick && m.status !== 'paid'
+          ? <button type="button" key={m.periodKey} className={`stc-chip ${cls}`} title={`${title} — کلیک: پرداختِ این ماه`} onClick={() => onPick(m)}>{label}</button>
+          : <span key={m.periodKey} className={`stc-chip ${cls}`} title={title}>{label}</span>;
       })}
     </span>
   );
@@ -375,6 +391,22 @@ export default function ShortTermCenter() {
   const [monthlyReportDetail, setMonthlyReportDetail] = useState(null);
   const [monthlyReportYear, setMonthlyReportYear] = useState(() => gregorianToAfghanSolar(new Date())?.jy || 1400);
   const [monthlyReportMonth, setMonthlyReportMonth] = useState('');
+  // تبِ «باقیاتِ ماهانه»
+  const [ledger, setLedger] = useState(null);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [ledgerOnlyDebtors, setLedgerOnlyDebtors] = useState(true);
+  const [ledgerClassId, setLedgerClassId] = useState('');
+  const [ledgerSearch, setLedgerSearch] = useState('');
+  const [ledgerOpenId, setLedgerOpenId] = useState('');
+  const [monthPnl, setMonthPnl] = useState(null);
+  // تبِ «صدور بل»
+  const curShamsi = gregorianToAfghanSolar(new Date()) || { jy: 1400, jm: 1 };
+  const curMonthKey = `${curShamsi.jy}-${String(curShamsi.jm).padStart(2, '0')}`;
+  const [billMonth, setBillMonth] = useState(curMonthKey);
+  const [billClassId, setBillClassId] = useState('');
+  const [billPreview, setBillPreview] = useState(null);
+  const [billPreviewLoading, setBillPreviewLoading] = useState(false);
+  const [billSelected, setBillSelected] = useState(() => new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [showInactiveStudents, setShowInactiveStudents] = useState(true);
@@ -461,6 +493,92 @@ export default function ShortTermCenter() {
     if (activeTab === 'reports' && !monthlyReport) loadMonthlyReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, reports, monthlyReport]);
+
+  const loadLedger = async () => {
+    setLedgerLoading(true);
+    try {
+      const q = new URLSearchParams();
+      if (ledgerOnlyDebtors) q.set('onlyDebtors', '1');
+      if (ledgerClassId) q.set('classId', ledgerClassId);
+      const [grid, pnl] = await Promise.all([
+        requestJson(`/api/short-term-center/reports/monthly-ledger?${q.toString()}`),
+        requestJson('/api/short-term-center/reports/monthly-pnl')
+      ]);
+      setLedger(grid);
+      setMonthPnl(pnl);
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setLedgerLoading(false);
+    }
+  };
+
+  const loadBillPreview = async () => {
+    setBillPreviewLoading(true);
+    try {
+      const data = await requestJson('/api/short-term-center/bills/preview', {
+        method: 'POST',
+        body: JSON.stringify({ month: billMonth, classId: billClassId })
+      });
+      setBillPreview(data);
+      setBillSelected(new Set((data.rows || []).filter((x) => !x.hasBill && x.allowed).map((x) => String(x.registrationId))));
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBillPreviewLoading(false);
+    }
+  };
+
+  const issueBills = async (registrationIds) => {
+    setBusy(true);
+    try {
+      const data = await requestJson('/api/short-term-center/bills/issue', {
+        method: 'POST',
+        body: JSON.stringify({ month: billMonth, classId: billClassId, ids: registrationIds || null })
+      });
+      toast.success(data.message || 'بل صادر شد.');
+      await loadBillPreview();
+      setLedger(null); setMonthPnl(null);
+      await loadData();
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const payLedgerMonth = (row, month) => {
+    setPaymentForm({
+      ...emptyPayment,
+      registrationId: String(row.registrationId),
+      amount: String(month.balance || month.net || ''),
+      billMonth: month.periodKey || '',
+      targetChargeId: String(month.chargeId || ''),
+      targetChargeLabel: month.label || ''
+    });
+    setPaymentRegistrationSearch(text(row.studentId?.fullName, ''));
+    setActiveTab('payments');
+  };
+
+  const goIssueBillForCurrentMonth = () => {
+    setBillMonth(curMonthKey);
+    setActiveTab('issue-bills');
+  };
+
+  useEffect(() => {
+    if (activeTab === 'ledger') loadLedger();
+    if (activeTab === 'issue-bills') loadBillPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, ledgerOnlyDebtors, ledgerClassId, billMonth, billClassId]);
+
+  const visibleLedgerRows = useMemo(() => {
+    const rows = ledger?.rows || [];
+    const term = ledgerSearch.trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter((r) => includesSearch([
+      r.studentId?.fullName, r.studentId?.studentCode, r.studentId?.phone, r.classId?.name
+    ], term));
+  }, [ledger, ledgerSearch]);
 
   const activeRegistrations = useMemo(
     () => registrations.filter((item) => item.status === 'active' && (item.studentId?.status || 'active') !== 'inactive'),
@@ -554,7 +672,20 @@ export default function ShortTermCenter() {
   const submit = async ({ path, method = 'POST', payload, reset, successTab, autoPrintReceipt, preOpenedPrintWindow }) => {
     setBusy(true);
     try {
-      const data = await requestJson(path, { method, body: JSON.stringify(payload) });
+      let body = payload;
+      let data;
+      try {
+        data = await requestJson(path, { method, body: JSON.stringify(body) });
+      } catch (error) {
+        // پرداخت بدونِ بلِ آن ماه → با تأییدِ کاربر، همان‌جا بل صادر و دوباره تلاش کن.
+        if (error?.data?.code === 'NO_BILL'
+          && window.confirm(`${error.data.message}\n\n(تأیید = صدورِ بلِ ${error.data.billMonthLabel} و ثبتِ پرداخت)`)) {
+          body = { ...body, issueBillIfMissing: true, billMonth: error.data.billMonth };
+          data = await requestJson(path, { method, body: JSON.stringify(body) });
+        } else {
+          throw error;
+        }
+      }
       toast.success(data.message || 'ذخیره شد.');
       if (data.invoice && autoPrintReceipt) {
         printReceipt(data.invoice, data.settings || settings, preOpenedPrintWindow);
@@ -564,8 +695,10 @@ export default function ShortTermCenter() {
       if (reset) reset();
       if (successTab) setActiveTab(successTab);
       await loadData();
-      if (monthlyReport && (path === '/api/short-term-center/payments' || path === '/api/short-term-center/expenses')) {
-        setMonthlyReport(null);
+      if (path === '/api/short-term-center/payments' || path === '/api/short-term-center/expenses') {
+        if (monthlyReport) setMonthlyReport(null);
+        setLedger(null);
+        setMonthPnl(null);
       }
     } catch (error) {
       toast.error(error.message);
@@ -945,6 +1078,229 @@ export default function ShortTermCenter() {
             </div>
           )}
 
+          {activeTab === 'issue-bills' && (
+            <div className="stc-stack">
+              <div className="stc-panel">
+                <div className="stc-panel-head">
+                  <h2>صدور بلِ ماهانه</h2>
+                  <div style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                    <Field label="ماه">
+                      <select value={billMonth} onChange={(e) => setBillMonth(e.target.value)}>
+                        {Array.from({ length: 14 }, (_, i) => {
+                          // ۶ ماهِ گذشته تا ۱ ماهِ آینده حولِ ماهِ جاری
+                          let jy = curShamsi.jy;
+                          let jm = curShamsi.jm - 6 + i;
+                          while (jm < 1) { jm += 12; jy -= 1; }
+                          while (jm > 12) { jm -= 12; jy += 1; }
+                          const key = `${jy}-${String(jm).padStart(2, '0')}`;
+                          return <option key={key} value={key}>{formatMonthLabel(key)}</option>;
+                        })}
+                      </select>
+                    </Field>
+                    <Field label="صنف">
+                      <select value={billClassId} onChange={(e) => setBillClassId(e.target.value)}>
+                        <option value="">همه صنف‌ها</option>
+                        {classes.map((c) => <option key={c._id} value={c._id}>{text(c.name)}</option>)}
+                      </select>
+                    </Field>
+                  </div>
+                </div>
+                <p className="stc-form-hint">
+                  سیستم خودش بل صادر نمی‌کند. برای ماهِ انتخاب‌شده، شاگردانِ فعالی که هنوز بل ندارند را انتخاب و «صدور بل» کنید — شاگرد فقط برای ماهی که بلش صادر شده باقی‌دار نشان داده می‌شود.
+                </p>
+                {billPreview && (
+                  <div className="stc-stats" style={{ marginBottom: 12 }}>
+                    <StatCard label="شاگردانِ فعال" value={fmt(billPreview.totals?.active || 0)} />
+                    <StatCard label="بلِ صادرشده" value={fmt(billPreview.totals?.withBill || 0)} tone="green" />
+                    <StatCard label={`بدونِ بلِ ${billPreview.label}`} value={fmt(billPreview.totals?.withoutBill || 0)} tone="amber" />
+                  </div>
+                )}
+                <div style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                  <button
+                    type="button"
+                    disabled={busy || !billSelected.size}
+                    onClick={() => issueBills([...billSelected])}
+                  >
+                    صدورِ بلِ {billPreview?.label || ''} برای انتخاب‌شده‌ها ({fmt(billSelected.size)})
+                  </button>
+                  <button
+                    type="button"
+                    className="stc-inline-button"
+                    disabled={busy || !(billPreview?.totals?.withoutBill)}
+                    onClick={() => issueBills(null)}
+                  >
+                    صدور برای همهٔ شاگردانِ بدونِ بل
+                  </button>
+                </div>
+                {billPreviewLoading ? (
+                  <p className="stc-empty">در حال بارگذاری...</p>
+                ) : (
+                  <Table
+                    columns={['انتخاب', 'شاگرد', 'صنف', 'فیسِ ماهانه', 'وضعیت']}
+                    rows={(billPreview?.rows || []).map((x) => [
+                      x.hasBill || !x.allowed
+                        ? '—'
+                        : <input
+                            type="checkbox"
+                            checked={billSelected.has(String(x.registrationId))}
+                            onChange={(e) => {
+                              const next = new Set(billSelected);
+                              if (e.target.checked) next.add(String(x.registrationId));
+                              else next.delete(String(x.registrationId));
+                              setBillSelected(next);
+                            }}
+                          />,
+                      text(x.studentId?.fullName),
+                      text(x.classId?.name),
+                      `${fmt(x.proposedNet)} ${currency}`,
+                      x.hasBill
+                        ? <span className="stc-chip stc-chip-ok">بل صادرشده</span>
+                        : x.disallowReason === 'before-enrolment'
+                          ? <span className="stc-chip stc-chip-muted">پیش از عضویتِ شاگرد</span>
+                          : x.disallowReason === 'too-future'
+                            ? <span className="stc-chip stc-chip-muted">خیلی جلوتر</span>
+                            : x.disallowReason === 'too-old'
+                              ? <span className="stc-chip stc-chip-muted">خیلی قدیمی</span>
+                              : <span className="stc-chip stc-chip-bad">بل صادر نشده</span>
+                    ])}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'ledger' && (
+            <div className="stc-stack">
+              {ledger?.totals?.noBillThisMonth > 0 && (
+                <p className="stc-form-hint" style={{ background: 'rgba(248,113,113,.12)', border: '1px solid rgba(248,113,113,.3)', borderRadius: 8, padding: '8px 10px' }}>
+                  ⚠️ برای <strong>{fmt(ledger.totals.noBillThisMonth)}</strong> شاگرد بلِ ماهِ جاری صادر نشده است.
+                  {' '}
+                  <button type="button" className="stc-inline-button" onClick={goIssueBillForCurrentMonth}>رفتن به «صدور بل»</button>
+                </p>
+              )}
+              <div className="stc-stats">
+                <StatCard label={`عایدِ ${monthPnl?.label || 'ماهِ جاری'}`} value={`${fmt(monthPnl?.income || 0)} ${currency}`} tone="green" />
+                <StatCard label={`مصرفِ ${monthPnl?.label || 'ماهِ جاری'}`} value={`${fmt(monthPnl?.expenses || 0)} ${currency}`} tone="amber" />
+                <StatCard label={`مفادِ ${monthPnl?.label || 'ماهِ جاری'}`} value={`${fmt(monthPnl?.net || 0)} ${currency}`} tone={(monthPnl?.net || 0) < 0 ? 'amber' : ''} />
+                <StatCard label="تعداد باقی‌داران" value={fmt(ledger?.totals?.debtors || 0)} />
+                <StatCard label="مجموع پرداخت‌ها" value={`${fmt(ledger?.totals?.totalPaid || 0)} ${currency}`} tone="green" />
+                <StatCard label="مجموع باقیات" value={`${fmt(ledger?.totals?.totalBalance || 0)} ${currency}`} tone="amber" />
+              </div>
+              <p className="stc-form-hint">
+                عاید فقط از پرداختِ ابطال‌نشده و دارای بلِ صادرشده، منهای مصارفِ همان ماه محاسبه می‌شود.
+                {monthPnl?.byFeeMonth?.length
+                  ? ` — عاید بابتِ فیسِ ماهِ: ${monthPnl.byFeeMonth.map((b) => `${b.label} (${fmt(b.amount)})`).join('، ')}`
+                  : ''}
+              </p>
+
+              <div className="stc-panel">
+                <div className="stc-panel-head">
+                  <h2>باقیاتِ ماهانه{ledger?.currentMonth?.label ? ` — تا ${ledger.currentMonth.label}` : ''}</h2>
+                  <div style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button type="button" className="stc-inline-button" onClick={goIssueBillForCurrentMonth}>صدور بل</button>
+                    <button
+                      type="button"
+                      className="stc-inline-button"
+                      disabled={!visibleLedgerRows.length}
+                      onClick={() => exportCsv(
+                        'short-term-monthly-ledger.csv',
+                        ['Student', 'Code', 'Phone', 'Class', 'StartMonth', 'Month', 'Fee', 'Discount', 'Net', 'Paid', 'Balance', 'Status'],
+                        visibleLedgerRows.flatMap((r) => (r.months || []).map((m) => [
+                          r.studentId?.fullName, r.studentId?.studentCode, r.studentId?.phone, r.classId?.name,
+                          r.startMonthLabel, m.label, m.fee, m.discount, m.net, m.paid, m.balance,
+                          m.status === 'paid' ? 'پرداخت‌شده' : m.overdue ? 'معوق' : 'باقی'
+                        ]))
+                      )}
+                    >
+                      Excel/CSV
+                    </button>
+                  </div>
+                </div>
+                <div className="stc-report-filters">
+                  <Field label="صنف">
+                    <select value={ledgerClassId} onChange={(e) => setLedgerClassId(e.target.value)}>
+                      <option value="">همه صنف‌ها</option>
+                      {classes.map((c) => <option key={c._id} value={c._id}>{text(c.name)}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="جستجو">
+                    <input value={ledgerSearch} onChange={(e) => setLedgerSearch(e.target.value)} placeholder="نام، کد، تماس یا صنف" />
+                  </Field>
+                  <label className="stc-field" style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <input type="checkbox" checked={ledgerOnlyDebtors} onChange={(e) => setLedgerOnlyDebtors(e.target.checked)} />
+                    <span>فقط باقی‌داران</span>
+                  </label>
+                </div>
+                <p className="stc-form-hint">
+                  فقط ماه‌هایی که برایشان بل صادر شده نمایش داده می‌شود. 🟩 پرداخت‌شده · 🟥 معوق (سررسید گذشته) · 🟨 صادرشده و نرسیده —
+                  {' '}روی چیپِ باقی کلیک کنید تا پرداختِ همان ماه ثبت شود. شاگردِ «بلِ این ماه صادر نشده» را از تبِ «صدور بل» بل بدهید.
+                </p>
+                {ledgerLoading ? (
+                  <p className="stc-empty">در حال بارگذاری دفترِ ماهانه...</p>
+                ) : (
+                  <Table
+                    columns={['شاگرد', 'صنف', 'ماهِ عضویت', 'ماه‌ها', 'باقی از', 'فیسِ ماهانه', 'مجموع پرداخت', 'مجموع باقی', 'جزئیات']}
+                    rows={visibleLedgerRows.map((r) => [
+                      <span>
+                        {text(r.studentId?.fullName)}
+                        {r.studentId?.studentCode ? <><br /><small style={{ opacity: 0.65 }}>{r.studentId.studentCode}</small></> : null}
+                        {r.noBillThisMonth ? <><br /><span className="stc-chip stc-chip-bad">بلِ {r.currentMonthLabel} صادر نشده</span></> : null}
+                      </span>,
+                      text(r.classId?.name),
+                      r.startMonthLabel || '—',
+                      r.months?.length
+                        ? <MonthChips months={r.months} onPick={(m) => payLedgerMonth(r, m)} />
+                        : <span className="stc-empty" style={{ padding: 0 }}>بدون بل</span>,
+                      r.arrearsFromLabel
+                        ? <span className={r.overdueFromLabel ? 'stc-amount-negative' : ''}>{r.arrearsFromLabel}</span>
+                        : <span className="stc-chip stc-chip-ok">تسویه</span>,
+                      `${fmt(r.monthlyNet)} ${currency}`,
+                      <span className="stc-amount-positive">{`${fmt(r.totalPaid)} ${currency}`}</span>,
+                      <span className={r.totalBalance > 0 ? 'stc-amount-negative' : ''}>{`${fmt(r.totalBalance)} ${currency}`}</span>,
+                      <button
+                        type="button"
+                        className="stc-inline-button"
+                        onClick={() => setLedgerOpenId(ledgerOpenId === String(r.registrationId) ? '' : String(r.registrationId))}
+                      >
+                        {ledgerOpenId === String(r.registrationId) ? 'بستن' : 'باز کردن'}
+                      </button>
+                    ])}
+                  />
+                )}
+                {ledgerOpenId ? (() => {
+                  const r = (ledger?.rows || []).find((x) => String(x.registrationId) === ledgerOpenId);
+                  if (!r) return null;
+                  return (
+                    <div className="stc-panel" style={{ marginTop: 12 }}>
+                      <h3>
+                        {text(r.studentId?.fullName)} — {text(r.classId?.name)} · فیسِ ماهانه {fmt(r.monthlyNet)} {currency}
+                        {r.credit ? ` · اعتبار ${fmt(r.credit)} ${currency}` : ''}
+                      </h3>
+                      <Table
+                        columns={['ماه', 'فیس', 'تخفیف', 'خالص', 'پرداخت‌شده', 'باقی', 'وضعیت', 'اقدام']}
+                        rows={(r.months || []).map((m) => [
+                          m.label,
+                          fmt(m.fee),
+                          fmt(m.discount),
+                          fmt(m.net),
+                          fmt(m.paid),
+                          <span className={m.balance > 0 ? 'stc-amount-negative' : ''}>{fmt(m.balance)}</span>,
+                          m.status === 'paid'
+                            ? <span className="stc-chip stc-chip-ok">پرداخت‌شده</span>
+                            : m.overdue ? <span className="stc-chip stc-chip-bad">معوق</span>
+                              : <span className="stc-chip stc-chip-muted">باقی</span>,
+                          m.status === 'paid'
+                            ? '—'
+                            : <button type="button" className="stc-inline-button" onClick={() => payLedgerMonth(r, m)}>پرداختِ این ماه</button>
+                        ])}
+                      />
+                    </div>
+                  );
+                })() : null}
+              </div>
+            </div>
+          )}
+
           {activeTab === 'payments' && (
             <div className="stc-grid">
               <form className="stc-panel stc-form" onSubmit={(event) => {
@@ -970,6 +1326,26 @@ export default function ShortTermCenter() {
                     ))}
                   </select>
                 </Field>
+                {paymentForm.targetChargeId ? (
+                  <p className="stc-form-hint" style={{ color: '#7dd3fc' }}>
+                    این پرداخت بابتِ فیسِ ماهِ <strong>{paymentForm.targetChargeLabel}</strong> ثبت می‌شود.
+                    {' '}
+                    <button type="button" className="stc-inline-button" onClick={() => setPaymentForm({ ...paymentForm, targetChargeId: '', targetChargeLabel: '' })}>حذفِ هدف</button>
+                  </p>
+                ) : (
+                  <Field label="بابتِ ماهِ">
+                    <select value={paymentForm.billMonth || curMonthKey} onChange={(e) => setPaymentForm({ ...paymentForm, billMonth: e.target.value })}>
+                      {Array.from({ length: 10 }, (_, i) => {
+                        let jy = curShamsi.jy;
+                        let jm = curShamsi.jm - 6 + i;
+                        while (jm < 1) { jm += 12; jy -= 1; }
+                        while (jm > 12) { jm -= 12; jy += 1; }
+                        const key = `${jy}-${String(jm).padStart(2, '0')}`;
+                        return <option key={key} value={key}>{formatMonthLabel(key)}</option>;
+                      })}
+                    </select>
+                  </Field>
+                )}
                 <Field label="مبلغ پرداخت"><input required type="number" min="1" value={paymentForm.amount} onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })} /></Field>
                 <Field label="تاریخ پرداخت"><AfghanDateInput value={paymentForm.paidAt} onChange={(value) => setPaymentForm({ ...paymentForm, paidAt: value })} /></Field>
                 <Field label="روش پرداخت">
@@ -984,14 +1360,16 @@ export default function ShortTermCenter() {
               <div className="stc-panel">
                 <h2>بل‌های صادرشده</h2>
                 <Table
-                  columns={['شماره', 'شاگرد', 'صنف', 'این پرداخت', 'باقی', 'وضعیت', 'اقدام']}
+                  columns={['شماره', 'شاگرد', 'صنف', 'ماهِ فیس', 'این پرداخت', 'باقی', 'وضعیت', 'اقدام']}
                   rows={filteredInvoices.map((item) => {
                     const isCredit = item.kind === 'credit_note';
                     const isVoid = item.status === 'void';
+                    const coveredLabel = (item.coveredMonths || []).map((k) => formatMonthLabel(k)).join('، ');
                     return [
                       <span className={isVoid ? 'stc-void' : ''}>{item.invoiceNumber}</span>,
                       text(item.studentId?.fullName),
                       text(item.className),
+                      coveredLabel || '—',
                       `${isCredit ? '−' : ''}${fmt(item.paidAmount)} ${item.currency || currency}`,
                       fmt(item.remainingBalance),
                       isCredit ? <span className="stc-chip stc-chip-muted">بلِ ابطالی</span>
