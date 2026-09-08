@@ -150,6 +150,7 @@ async function listPayload() {
       .lean(),
     ShortTermInvoice.find().sort({ issuedAt: -1 }).limit(200)
       .populate('studentId', 'fullName studentCode')
+      .populate('paymentId', 'coveredMonths')
       .lean(),
     ShortTermExpense.find().sort({ expenseDate: -1, createdAt: -1 }).limit(200).lean(),
     ShortTermExpenseCategory.find().sort({ name: 1 }).lean(),
@@ -178,7 +179,15 @@ async function listPayload() {
     classes,
     registrations: registrations.map((r) => ({ ...withOverdueFlag(r), charges: chargesByReg.get(String(r._id)) || [] })),
     payments,
-    invoices,
+    // بلِ قدیمی فیلدِ coveredMonths ندارد — از پرداختِ مرتبطش پر می‌شود، بعد
+    // paymentId به شکلِ ساده (فقط id) برگردانده می‌شود.
+    invoices: invoices.map((inv) => ({
+      ...inv,
+      coveredMonths: (inv.coveredMonths && inv.coveredMonths.length)
+        ? inv.coveredMonths
+        : (inv.paymentId?.coveredMonths || []),
+      paymentId: inv.paymentId?._id || inv.paymentId || null
+    })),
     expenses,
     expenseCategories,
     attendance,
