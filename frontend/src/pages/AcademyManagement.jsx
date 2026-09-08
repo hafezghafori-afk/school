@@ -260,9 +260,6 @@ export default function AcademyManagement() {
     invoiceFooter: 'تشکر از پرداخت شما',
     receiptSize: 'half',
     monthlyChargeDueDay: 20,
-    lateFeeMode: 'none',
-    lateFeeAmount: 0,
-    lateFeeGraceDays: 7,
     isActive: true
   });
   const [summary, setSummary] = useState({});
@@ -839,6 +836,7 @@ export default function AcademyManagement() {
       courseName: reg.courseId?.name || '',
       paidAmount: reg.paidAmount ?? 0,
       hasPaidCharge: list.some((c) => Number(c.paidAmount || 0) > 0),
+      hasPayment: payments.some((p) => String(p.registrationId?._id || p.registrationId || '') === String(reg._id)),
       status: reg.status || 'active',
       startDate: reg.startDate ? String(reg.startDate).slice(0, 10) : '',
       endDate: reg.endDate ? String(reg.endDate).slice(0, 10) : '',
@@ -985,25 +983,14 @@ export default function AcademyManagement() {
     }
   };
 
-  const generateMonthly = async () => {
+  const deleteRegistration = async (id) => {
     setBusy(true);
     try {
-      const data = await requestJson('/api/academy/generate-monthly', { method: 'POST', body: '{}' });
-      toast.success(data.message || 'انجام شد.');
+      const data = await requestJson(`/api/academy/registrations/${id}`, { method: 'DELETE' });
+      toast.success(data.message || 'ثبت‌نام حذف شد.');
+      setEditingRegistration(null);
       await loadData();
-    } catch (error) {
-      toast.error(error.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const generateLateFees = async () => {
-    setBusy(true);
-    try {
-      const data = await requestJson('/api/academy/generate-late-fees', { method: 'POST', body: '{}' });
-      toast.success(data.message || 'انجام شد.');
-      await loadData();
+      if (reports) { setReports(null); setDebtors(null); }
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -1394,7 +1381,7 @@ export default function AcademyManagement() {
                   <>
                     <Field label="فیس ثابتِ هر ماه"><input type="number" min="0" value={registrationForm.monthlyFee} onChange={(e) => setRegistrationForm({ ...registrationForm, monthlyFee: e.target.value })} /></Field>
                     <Field label="تاریخ پایان (اختیاری)"><AfghanDateInput value={registrationForm.endDate} onChange={(value) => setRegistrationForm({ ...registrationForm, endDate: value })} /></Field>
-                    <p className="academy-form-hint">هر ماهِ شمسی یک شارژِ تازه به همین مبلغ ساخته می‌شود (سررسید روزِ {settings.monthlyChargeDueDay || 20}). با «تاریخ پایان» یا تغییرِ وضعیت به «متوقف» / «تمام‌شده» متوقف می‌شود؛ «متوقف» برای غیبتِ موقت است و ماه‌های توقف فیس نمی‌گیرد.</p>
+                    <p className="academy-form-hint">این مبلغ، مبلغِ پیش‌فرضِ هر بلِ ماهانه است؛ بل تا در تبِ «صدور بل» صادر نشود ساخته نمی‌شود (سررسید روزِ {settings.monthlyChargeDueDay || 20}). با «تاریخ پایان» یا تغییرِ وضعیت به «متوقف» / «تمام‌شده» صدورِ بل متوقف می‌شود؛ «متوقف» برای غیبتِ موقت است.</p>
                   </>
                 )}
                 {registrationForm.paymentPlan === 'installment' && (
@@ -1417,18 +1404,9 @@ export default function AcademyManagement() {
               <div className="academy-panel">
                 <div className="academy-panel-head">
                   <h2>لیست ثبت‌نام‌ها</h2>
-                  <button
-                    type="button"
-                    className="academy-inline-button"
-                    onClick={generateMonthly}
-                    disabled={busy}
-                    title="برای هر ثبت‌نامِ فعالِ «ماهانه»، شارژِ فیسِ هر ماهِ شمسی را که هنوز ساخته نشده می‌سازد (از ماهِ شروع تا ماهِ جاری). تکراری نمی‌سازد و به‌صورت خودکار هم هنگامِ باز شدنِ صفحه اجرا می‌شود؛ این دکمه فقط «همین حالا اجرا کن» است."
-                  >
-                    ساختِ شارژِ ماهانه
-                  </button>
                 </div>
                 <p className="academy-form-hint">
-                  «ساختِ شارژِ ماهانه»: برای ثبت‌نام‌های ماهانه، قلمِ فیسِ ماه‌های سررسیدشده را که هنوز ساخته نشده می‌سازد (idempotent). خودکار هم اجرا می‌شود؛ دکمه فقط اجرای فوری است.
+                  سیستم خودش بل صادر نمی‌کند. برای ثبت‌نامِ ماهانه، بلِ هر ماه را در تبِ «صدور بل» صادر کنید — شاگرد فقط برای ماهی که بلش صادر شده باقی‌دار نشان داده می‌شود.
                 </p>
                 <Table
                   columns={['شاگرد', 'کورس', 'نوع', 'فیس', 'پرداخت', 'باقی', 'اقلام', 'ویرایش']}
@@ -2168,28 +2146,6 @@ export default function AcademyManagement() {
                 <input type="number" min="0" max="100" value={settings.teacherCommissionPercent ?? 0}
                   onChange={(e) => setSettings({ ...settings, teacherCommissionPercent: e.target.value })} />
               </Field>
-              <Field label="حالتِ جریمهٔ دیرکرد">
-                <select value={settings.lateFeeMode || 'none'} onChange={(e) => setSettings({ ...settings, lateFeeMode: e.target.value })}>
-                  <option value="none">غیرفعال</option>
-                  <option value="fixed">مبلغِ ثابت</option>
-                  <option value="percent">درصدِ قلمِ معوق</option>
-                </select>
-              </Field>
-              <Field label={settings.lateFeeMode === 'percent' ? 'درصدِ جریمهٔ دیرکرد' : 'مبلغِ جریمهٔ دیرکرد'}>
-                <input type="number" min="0" value={settings.lateFeeAmount ?? 0}
-                  onChange={(e) => setSettings({ ...settings, lateFeeAmount: e.target.value })} />
-              </Field>
-              <Field label="مهلتِ ارفاق پس از سررسید (روز)">
-                <input type="number" min="0" value={settings.lateFeeGraceDays ?? 7}
-                  onChange={(e) => setSettings({ ...settings, lateFeeGraceDays: e.target.value })} />
-              </Field>
-              {settings.lateFeeMode && settings.lateFeeMode !== 'none' && (
-                <p className="academy-form-hint">
-                  برای هر قلمِ معوق که بیش از {settings.lateFeeGraceDays ?? 7} روز از سررسیدش گذشته، یک‌بار قلمِ «جریمهٔ دیرکرد» ساخته می‌شود.
-                  {' '}
-                  <button type="button" className="academy-inline-button" onClick={generateLateFees} disabled={busy}>ساختِ جریمهٔ دیرکرد اکنون</button>
-                </p>
-              )}
               <button type="submit" disabled={busy}>ذخیره تنظیمات</button>
             </form>
           )}
@@ -2222,6 +2178,7 @@ export default function AcademyManagement() {
         onSaveCharge={saveChargeEdit}
         onVoidCharge={voidCharge}
         onAddCharge={addChargeToRegistration}
+        onDelete={deleteRegistration}
       />
     </section>
   );
@@ -2257,7 +2214,7 @@ function describeChargeChange(orig, cur) {
   return out;
 }
 
-function RegistrationEditModal({ state, setState, currency, busy, dueDayHint, onSaveBasics, onSaveFinance, onSaveCharge, onVoidCharge, onAddCharge }) {
+function RegistrationEditModal({ state, setState, currency, busy, dueDayHint, onSaveBasics, onSaveFinance, onSaveCharge, onVoidCharge, onAddCharge, onDelete }) {
   if (!state) return null;
   const close = () => setState(null);
   const patch = (fields) => setState((prev) => ({ ...prev, ...fields }));
@@ -2343,6 +2300,31 @@ function RegistrationEditModal({ state, setState, currency, busy, dueDayHint, on
             <Field label="یادداشت"><input value={state.note} onChange={(e) => patch({ note: e.target.value })} /></Field>
           </div>
           <button type="button" onClick={onSaveBasics} disabled={busy || !basicChanges.length}>ذخیرهٔ وضعیت و تاریخ‌ها</button>
+
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(148,163,184,.25)' }}>
+            {state.hasPayment ? (
+              <p className="academy-form-hint" style={{ margin: 0 }}>
+                این ثبت‌نام پرداخت دارد و حذف نمی‌شود. برای کنار گذاشتنِ ثبت‌نامِ تکراری، وضعیت را «لغوشده» کنید — تاریخچه‌اش می‌ماند.
+              </p>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="academy-inline-button"
+                  style={{ borderColor: 'rgba(248,113,113,.5)', color: '#fca5a5' }}
+                  disabled={busy}
+                  onClick={() => {
+                    if (window.confirm('این ثبت‌نام و بل‌های پرداخت‌نشده‌اش کاملاً حذف شوند؟ این کار برگشت‌ناپذیر است.')) onDelete(state._id);
+                  }}
+                >
+                  حذفِ ثبت‌نام
+                </button>
+                <p className="academy-form-hint" style={{ margin: '6px 0 0' }}>
+                  فقط برای ثبت‌نامِ اشتباهِ بدونِ پرداخت. اگر پرداخت داشت، «لغوشده» کنید.
+                </p>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="academy-glass-card">
@@ -2406,7 +2388,7 @@ function RegistrationEditModal({ state, setState, currency, busy, dueDayHint, on
 
           <p className="academy-form-hint">
             {state.paymentPlan === 'monthly'
-              ? `با ذخیره، فیسِ ماهانه تنظیم و شارژِ ماه‌های سررسیدشده ساخته می‌شود (سررسید روزِ ${dueDayHint}).`
+              ? `با ذخیره، فیسِ ماهانه تنظیم و مبلغِ بل‌های ماهانهٔ پرداخت‌نشده به رقمِ تازه به‌روز می‌شود؛ بلِ تازه صادر نمی‌شود (صدور از تبِ «صدور بل»، سررسید روزِ ${dueDayHint}).`
               : 'با ذخیره، اقلامِ بدهیِ پرداخت‌نشدهٔ قبلی ابطال و ساختارِ تازه از نو ساخته می‌شود.'}
           </p>
           <button type="button" onClick={onSaveFinance} disabled={busy || financeLocked || !financeChanges.length}>ذخیرهٔ پرداخت، فیس و تخفیف</button>
