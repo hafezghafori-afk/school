@@ -60,11 +60,13 @@ require('../models/ShortTermClass');
   );
   console.log(`\n[1] ${del.modifiedCount} بلِ ماهِ آینده void شد`);
 
-  const stamp = await ShortTermCharge.updateMany(
-    { status: { $ne: 'void' }, $or: [{ issuedAt: { $exists: false } }, { issuedAt: null }] },
-    [{ $set: { issuedAt: '$createdAt' } }]
-  );
-  console.log(`[2] issuedAt روی ${stamp.modifiedCount} بلِ باقی‌مانده تنظیم شد`);
+  // issuedAt = createdAt برای بل‌هایی که این فیلد را ندارند (پیش از افزودنِ فیلد)
+  let stamped = 0;
+  for (const c of await ShortTermCharge.find({ status: { $ne: 'void' }, issuedAt: { $in: [null, undefined] } }).select('createdAt').lean()) {
+    await ShortTermCharge.updateOne({ _id: c._id }, { $set: { issuedAt: c.createdAt || new Date() } });
+    stamped += 1;
+  }
+  console.log(`[2] issuedAt روی ${stamped} بلِ باقی‌مانده تنظیم شد`);
 
   let n = 0;
   for (const reg of await ShortTermRegistration.find({ status: { $in: ['active', 'completed'] } })) {
