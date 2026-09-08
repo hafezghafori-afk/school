@@ -30,6 +30,9 @@ const academyChargeSchema = new mongoose.Schema({
   balance: { type: Number, default: 0, min: 0 },
   // overdue حالتِ ذخیره‌شده نیست (به «امروز» وابسته است) — در سرویس/پاسخ به‌صورت isOverdue می‌آید
   status: { type: String, enum: ['pending', 'partial', 'paid', 'void'], default: 'pending', index: true },
+  // بل با اقدامِ صریحِ کاربر صادر می‌شود (تبِ «صدور بل» یا هنگامِ ثبتِ پرداخت با تأیید).
+  issuedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  issuedAt: { type: Date, default: Date.now },
   voidedAt: { type: Date, default: null },
   voidedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   voidReason: { type: String, default: '', trim: true },

@@ -86,23 +86,9 @@ async function buildSummary() {
     (sum, item) => sum + Math.max(0, toNumber(item.paidAmount) - toNumber(item.totalPayable)),
     0
   );
-  const { start: shamsiMonthStart, endExclusive: shamsiMonthEnd } = currentShamsiMonthRange();
-  const monthIncome = await AcademyPayment.aggregate([
-    {
-      $match: {
-        status: { $ne: 'void' },
-        paidAt: {
-          $gte: new Date(`${shamsiMonthStart}T00:00:00.000Z`),
-          $lt: new Date(`${shamsiMonthEnd}T00:00:00.000Z`)
-        }
-      }
-    },
-    { $group: { _id: null, total: { $sum: '$amount' } } }
-  ]);
-  const monthExpenses = await AcademyExpense.aggregate([
-    { $match: { expenseDate: { $gte: shamsiMonthStart, $lt: shamsiMonthEnd } } },
-    { $group: { _id: null, total: { $sum: '$amount' } } }
-  ]);
+  // عاید/مصرف/مفادِ ماهِ جاری — تعریفِ واحد در academyLedger.monthlyPnl:
+  // عاید فقط از پرداختِ ابطال‌نشدهٔ دارای بل، منهای مصارفِ همان ماه.
+  const pnl = await academyLedger.monthlyPnl(academyLedger.currentShamsiMonthKey());
 
   return {
     activeStudents,
@@ -113,8 +99,12 @@ async function buildSummary() {
     paidTotal,
     outstandingTotal,
     overpaidTotal,
-    monthIncome: toNumber(monthIncome?.[0]?.total),
-    monthExpenses: toNumber(monthExpenses?.[0]?.total),
+    monthIncome: pnl.income,
+    monthExpenses: pnl.expenses,
+    monthNet: pnl.net,
+    monthKey: pnl.periodKey,
+    monthLabel: academyLedger.shamsiMonthLabel(pnl.periodKey),
+    monthIncomeByFeeMonth: pnl.byFeeMonth,
     recentPayments: payments,
     recentExpenses: expenses,
     recentInvoices: invoices
@@ -122,17 +112,8 @@ async function buildSummary() {
 }
 
 async function listPayload() {
-  // شارژِ ماهانهٔ ماه‌های سررسیدشده را بی‌سروصدا بساز (idempotent)
-  try {
-    const s = await getSettings();
-    await academyLedger.generateMonthlyCharges({ dueDay: s.monthlyChargeDueDay || 20 });
-    if (s.lateFeeMode && s.lateFeeMode !== 'none') {
-      await academyLedger.generateLateFees({ mode: s.lateFeeMode, amount: s.lateFeeAmount, graceDays: s.lateFeeGraceDays });
-    }
-  } catch (error) {
-    console.error('academy lazy charge generation failed:', error?.message || error);
-  }
-
+  // یادداشت: سیستم دیگر خودش بل صادر نمی‌کند. بل فقط از تبِ «صدور بل» یا هنگامِ
+  // ثبتِ پرداخت (با تأیید) ساخته می‌شود — مثلِ FeeOrder در مالیِ مکتب.
   const [settings, students, courses, teachers, classes, registrations, payments, invoices, charges, expenses, expenseCategories, attendance, summary] = await Promise.all([
     getSettings(),
     AcademyStudent.find().sort({ createdAt: -1 }).limit(250).lean(),
@@ -340,9 +321,9 @@ async function buildInitialCharges(reg, body, currency, settings, uid) {
       });
     }
   } else if (reg.paymentPlan === 'monthly') {
+    // بلِ ماهانه خودکار ساخته نمی‌شود — از تبِ «صدور بل» صادر می‌شود.
     if (!toNumber(reg.monthlyFee) && fee > 0) { reg.monthlyFee = fee; }
     await reg.save();
-    try { await academyLedger.generateMonthlyCharges({ dueDay: settings.monthlyChargeDueDay || 20, registrationId: reg._id }); } catch (e) { console.error(e?.message); }
   } else if (fee > 0) {
     await AcademyCharge.create({
       registrationId: reg._id, studentId: reg.studentId, kind: 'enrollment',
@@ -469,13 +450,13 @@ router.put('/registrations/:id', async (req, res) => {
         await buildInitialCharges(reg, req.body, currency, settings, userId(req));
       }
     } else if (req.body.monthlyFee !== undefined && reg.paymentPlan === 'monthly') {
-      // مسیرِ ساده: فقط تغییرِ فیسِ ماهانه (سازگاریِ عقب‌رو)
+      // فقط تغییرِ فیسِ ماهانه → بل‌های ماهانهٔ پرداخت‌نشده با مبلغِ تازه به‌روز
+      // می‌شوند (بلِ تازه صادر نمی‌شود).
       reg.monthlyFee = toNumber(req.body.monthlyFee);
       const monthlyCharges = await AcademyCharge.find({ registrationId: reg._id, kind: 'monthly', status: { $ne: 'void' }, paidAmount: 0 });
       for (const c of monthlyCharges) { c.amount = reg.monthlyFee; c.updatedBy = userId(req); await c.save(); }
       reg.ledgerManaged = true;
       await reg.save();
-      try { await academyLedger.generateMonthlyCharges({ dueDay: settings.monthlyChargeDueDay || 20, registrationId: reg._id }); } catch (e) { console.error(e?.message); }
     }
 
     reg.updatedBy = userId(req);
@@ -506,34 +487,57 @@ router.post('/payments', async (req, res) => {
     if (!registration) return res.status(404).json({ success: false, message: 'ثبت‌نام انتخاب‌شده پیدا نشد.' });
 
     const settings = await getSettings();
+    const dueDay = settings.monthlyChargeDueDay || 20;
 
-    // اطمینان از این‌که ثبت‌نامِ قدیمی حداقل یک قلمِ بدهی دارد (دادهٔ پیش از مهاجرت)
+    // ماهِ هدفِ این پرداخت: از قلمِ هدف، وگرنه billMonth، وگرنه ماهِ جاری.
+    let targetMonth = /^\d{3,4}-(0[1-9]|1[0-2])$/.test(String(req.body.billMonth || '')) ? String(req.body.billMonth) : '';
+    if (req.body.targetChargeId) {
+      const tc = await AcademyCharge.findById(req.body.targetChargeId).select('periodKey registrationId').lean();
+      if (tc && String(tc.registrationId) === String(registration._id) && tc.periodKey) targetMonth = tc.periodKey;
+    }
+    if (!targetMonth) targetMonth = academyLedger.currentShamsiMonthKey();
+
     await academyLedger.recomputeRegistration(registration._id);
-    let openCharges = await AcademyCharge.find({ registrationId: registration._id, status: { $ne: 'void' } })
-      .sort({ dueDate: 1, createdAt: 1 });
-    if (!openCharges.length) {
-      const fee = toNumber(registration.feeAmount);
-      if (fee > 0) {
-        await AcademyCharge.create({
-          registrationId: registration._id, studentId: registration.studentId._id, kind: 'enrollment',
-          title: 'فیس / شمولیت', amount: fee, discountAmount: Math.min(fee, toNumber(registration.discountAmount)),
-          dueDate: String(registration.registrationDate || '').slice(0, 10),
-          currency: settings.currency || 'AFN', createdBy: userId(req)
+    let openCharges = await AcademyCharge.find({ registrationId: registration._id, status: { $ne: 'void' }, balance: { $gt: 0 } })
+      .sort({ dueDate: 1, periodKey: 1, createdAt: 1 });
+    const hasOpenForTarget = openCharges.some((c) => c.periodKey === targetMonth);
+
+    // ثبت‌نامِ ماهانه بدونِ بلِ ماهِ هدف → با تأییدِ کاربر همین‌جا صادر کن.
+    if (registration.paymentPlan === 'monthly' && !hasOpenForTarget && !req.body.targetChargeId) {
+      if (!req.body.issueBillIfMissing) {
+        return res.status(409).json({
+          success: false, code: 'NO_BILL', billMonth: targetMonth,
+          billMonthLabel: academyLedger.shamsiMonthLabel(targetMonth),
+          message: `برای شاگرد بلِ ماهِ ${academyLedger.shamsiMonthLabel(targetMonth)} صادر نشده است. با تأیید، همین‌جا صادر شود؟`
         });
-        await academyLedger.recomputeRegistration(registration._id);
-        openCharges = await AcademyCharge.find({ registrationId: registration._id, status: { $ne: 'void' } }).sort({ dueDate: 1, createdAt: 1 });
       }
+      const issued = await academyLedger.issueBillForMonth(registration, targetMonth, { dueDay, issuedBy: userId(req) });
+      if (issued.status === 'rejected') {
+        return res.status(400).json({ success: false, message: `صدورِ بلِ ماهِ ${academyLedger.shamsiMonthLabel(targetMonth)} ممکن نشد: ${issued.reason}` });
+      }
+      await academyLedger.recomputeRegistration(registration._id);
+      openCharges = await AcademyCharge.find({ registrationId: registration._id, status: { $ne: 'void' }, balance: { $gt: 0 } })
+        .sort({ dueDate: 1, periodKey: 1, createdAt: 1 });
+    }
+
+    if (!openCharges.length) {
+      return res.status(400).json({ success: false, message: 'قلمِ بدهیِ بازی برای تخصیصِ این مبلغ نیست — اول از تبِ «صدور بل» بل صادر کنید.' });
     }
 
     const previousBalance = toNumber(registration.balance);
     if (amount > previousBalance + 0.001) {
-      return res.status(400).json({ success: false, message: `مبلغ از باقیِ این ثبت‌نام (${previousBalance}) بیشتر است.` });
+      return res.status(400).json({ success: false, message: `مبلغ از مجموعِ بل‌های پرداخت‌نشدهٔ این شاگرد (${previousBalance}) بیشتر است.` });
     }
 
-    const { allocations, unallocated } = academyLedger.fifoAllocate(amount, openCharges);
-    if (unallocated > 0.001) {
-      return res.status(400).json({ success: false, message: 'قلمِ بدهیِ بازی برای تخصیصِ این مبلغ نیست.' });
-    }
+    const targetChargeId = req.body.targetChargeId
+      || (openCharges.find((c) => c.periodKey === targetMonth) || {})._id
+      || '';
+    const { allocations } = academyLedger.allocatePayment(amount, openCharges, targetChargeId);
+    const coveredMonthKeys = allocations
+      .map((a) => openCharges.find((c) => String(c._id) === String(a.chargeId)))
+      .filter((c) => c && c.periodKey)
+      .map((c) => c.periodKey);
+    const coveredMonthLabels = coveredMonthKeys.map((k) => academyLedger.shamsiMonthLabel(k));
     const remainingBalance = Math.max(0, previousBalance - amount);
     const paymentNumber = await nextSequence('academy_payment', 'APY');
     const invoiceNumber = await nextSequence('academy_invoice', settings.invoicePrefix || 'ACD');
@@ -544,6 +548,7 @@ router.post('/payments', async (req, res) => {
       paymentNumber,
       amount,
       allocations,
+      coveredMonths: coveredMonthKeys,
       previousBalance,
       remainingBalance,
       currency: settings.currency || 'AFN',
@@ -574,7 +579,9 @@ router.post('/payments', async (req, res) => {
       referenceNo: payment.referenceNo,
       issuedAt: payment.paidAt,
       receivedBy: userId(req),
-      note: req.body.note || ''
+      coveredMonths: coveredMonthKeys,
+      note: [req.body.note || '', coveredMonthLabels.length ? `بابتِ فیسِ ماهِ ${coveredMonthLabels.join('، ')}` : '']
+        .filter(Boolean).join(' — ')
     });
 
     payment.invoiceId = invoice._id;
@@ -764,35 +771,113 @@ router.post('/charges/:id/void', async (req, res) => {
   }
 });
 
-// ساختِ شارژِ ماهانهٔ ماه‌های سررسیدشده (دستی — علاوه بر اجرای lazy)
-router.post('/generate-monthly', async (req, res) => {
+// ===== صدور بل (بل با اقدامِ صریح، نه خودکار) =====
+
+const validMonth = (v) => /^\d{3,4}-(0[1-9]|1[0-2])$/.test(String(v || ''));
+
+// پیش‌نمایشِ صدورِ بلِ یک ماه: کدام شاگردِ ماهانه بل دارد، کدام ندارد.
+router.post('/bills/preview', async (req, res) => {
   try {
-    const settings = await getSettings();
-    const result = await academyLedger.generateMonthlyCharges({
-      dueDay: settings.monthlyChargeDueDay || 20,
-      registrationId: req.body.registrationId || null
+    const L = academyLedger;
+    const month = validMonth(req.body.month) ? String(req.body.month) : L.currentShamsiMonthKey();
+    const filter = { paymentPlan: 'monthly', status: 'active' };
+    if (req.body.courseId) filter.courseId = req.body.courseId;
+    if (req.body.classId) filter.classId = req.body.classId;
+    const regs = await AcademyRegistration.find(filter)
+      .sort({ createdAt: 1 })
+      .populate('studentId', 'fullName studentCode phone status')
+      .populate('courseId', 'name')
+      .populate('classId', 'name')
+      .lean();
+    const regIds = regs.map((r) => r._id);
+    const existing = await AcademyCharge.find({ registrationId: { $in: regIds }, kind: 'monthly', periodKey: month, status: { $ne: 'void' } })
+      .select('registrationId status').lean();
+    const byReg = new Map(existing.map((c) => [String(c.registrationId), c]));
+    const rows = regs
+      .filter((r) => !r.studentId || r.studentId.status !== 'inactive')
+      .map((r) => {
+        const c = byReg.get(String(r._id));
+        return {
+          registrationId: r._id,
+          studentId: r.studentId,
+          courseId: r.courseId,
+          classId: r.classId,
+          monthlyFee: toNumber(r.monthlyFee),
+          proposedNet: toNumber(r.monthlyFee),
+          hasBill: Boolean(c),
+          billStatus: c ? c.status : '',
+          allowed: L.billMonthAllowed(r, month),
+          disallowReason: L.billMonthDisallowReason(r, month)
+        };
+      });
+    res.json({
+      success: true,
+      month,
+      label: L.shamsiMonthLabel(month),
+      rows,
+      totals: {
+        active: rows.length,
+        withBill: rows.filter((x) => x.hasBill).length,
+        withoutBill: rows.filter((x) => !x.hasBill && x.allowed).length
+      }
     });
-    res.json({ success: true, ...result, message: `${result.created} شارژِ ماهانه ساخته شد.` });
   } catch (error) {
-    res.status(400).json({ success: false, message: error?.message || 'ساختِ شارژِ ماهانه ناموفق بود.' });
+    res.status(500).json({ success: false, message: error?.message || 'پیش‌نمایشِ صدورِ بل ناموفق بود.' });
   }
 });
 
-// ساختِ جریمهٔ دیرکردِ خودکار برای اقلامِ معوق (فاز ۳)
-router.post('/generate-late-fees', async (_req, res) => {
+// صدورِ گروهیِ بلِ یک ماه برای شاگردانِ ماهانهٔ فعال (idempotent).
+router.post('/bills/issue', async (req, res) => {
   try {
+    if (!validMonth(req.body.month)) return res.status(400).json({ success: false, message: 'ماهِ انتخاب‌شده معتبر نیست.' });
     const settings = await getSettings();
-    if (!settings.lateFeeMode || settings.lateFeeMode === 'none') {
-      return res.status(400).json({ success: false, message: 'حالتِ جریمهٔ دیرکرد در تنظیمات غیرفعال است.' });
-    }
-    const result = await academyLedger.generateLateFees({
-      mode: settings.lateFeeMode,
-      amount: settings.lateFeeAmount,
-      graceDays: settings.lateFeeGraceDays
+    const idList = Array.isArray(req.body.ids) ? req.body.ids
+      : Array.isArray(req.body.studentIds) ? req.body.studentIds : null;
+    const result = await academyLedger.issueBillsForMonth({
+      month: String(req.body.month),
+      courseId: String(req.body.courseId || '').trim(),
+      classId: String(req.body.classId || '').trim(),
+      ids: idList,
+      dueDay: settings.monthlyChargeDueDay || 20,
+      issuedBy: userId(req)
     });
-    res.json({ success: true, ...result, message: `${result.created} جریمهٔ دیرکرد ساخته شد.` });
+    const issued = result.created + result.updated;
+    res.json({
+      success: true,
+      ...result,
+      message: issued > 0
+        ? `بلِ ماهِ ${result.label} برای ${issued} شاگرد صادر شد${result.skipped ? ` (${result.skipped} از قبل داشتند)` : ''}.`
+        : `همهٔ شاگردانِ انتخاب‌شده از قبل بلِ ماهِ ${result.label} داشتند.`
+    });
   } catch (error) {
-    res.status(400).json({ success: false, message: error?.message || 'ساختِ جریمهٔ دیرکرد ناموفق بود.' });
+    res.status(500).json({ success: false, message: error?.message || 'صدورِ گروهیِ بل ناموفق بود.' });
+  }
+});
+
+// صدورِ تک‌بل برای یک (شاگرد، ماه) با مبلغِ دلخواه.
+router.post('/bills', async (req, res) => {
+  try {
+    if (!validMonth(req.body.month)) return res.status(400).json({ success: false, message: 'ماهِ انتخاب‌شده معتبر نیست.' });
+    const reg = await AcademyRegistration.findById(req.body.registrationId);
+    if (!reg) return res.status(404).json({ success: false, message: 'ثبت‌نام پیدا نشد.' });
+    const settings = await getSettings();
+    const r = await academyLedger.issueBillForMonth(reg, String(req.body.month), {
+      dueDay: settings.monthlyChargeDueDay || 20,
+      amount: req.body.amount != null ? toNumber(req.body.amount) : null,
+      discountAmount: req.body.discountAmount != null ? toNumber(req.body.discountAmount) : null,
+      issuedBy: userId(req)
+    });
+    if (r.status === 'rejected') return res.status(400).json({ success: false, message: `صدورِ بل ممکن نشد: ${r.reason}` });
+    const fresh = await academyLedger.recomputeRegistration(reg._id);
+    res.status(201).json({
+      success: true,
+      chargeId: r.chargeId,
+      status: r.status,
+      registration: fresh?.toObject ? fresh.toObject() : fresh,
+      message: r.status === 'created' ? 'بل صادر شد.' : r.status === 'updated' ? 'بل به‌روز شد.' : 'بلِ این ماه از قبل هست.'
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'صدورِ بل ناموفق بود.' });
   }
 });
 
@@ -1026,6 +1111,8 @@ router.get('/reports/monthly', async (req, res) => {
     const result = await buildShamsiMonthlyReport({
       paymentModel: AcademyPayment,
       expenseModel: AcademyExpense,
+      // عاید فقط از پرداختِ ابطال‌نشده و دارای بلِ صادرشده
+      paymentMatch: { status: { $ne: 'void' }, invoiceId: { $ne: null } },
       year: Number(req.query.year),
       months: req.query.months
     });
@@ -1033,6 +1120,152 @@ router.get('/reports/monthly', async (req, res) => {
     res.json({ success: true, months: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error?.message || 'گزارش ماهانه آموزشگاه ناموفق بود.' });
+  }
+});
+
+// عاید/مصرف/مفادِ یک ماهِ شمسی (پیش‌فرض: ماهِ جاری) — تعریفِ واحد.
+router.get('/reports/monthly-pnl', async (req, res) => {
+  try {
+    const month = validMonth(req.query.month) ? String(req.query.month) : academyLedger.currentShamsiMonthKey();
+    const pnl = await academyLedger.monthlyPnl(month);
+    res.json({ success: true, ...pnl, label: academyLedger.shamsiMonthLabel(month) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'گزارشِ عاید و مصرفِ ماه ناموفق بود.' });
+  }
+});
+
+// شاگردانِ ماهانهٔ فعالی که بلِ ماهِ انتخابی (پیش‌فرض: ماهِ جاری) را ندارند.
+router.get('/reports/no-bill', async (req, res) => {
+  try {
+    const L = academyLedger;
+    const month = validMonth(req.query.month) ? String(req.query.month) : L.currentShamsiMonthKey();
+    const regs = await AcademyRegistration.find({ paymentPlan: 'monthly', status: 'active' })
+      .populate('studentId', 'fullName studentCode phone status')
+      .populate('courseId', 'name')
+      .populate('classId', 'name')
+      .lean();
+    const active = regs.filter((r) => !r.studentId || r.studentId.status !== 'inactive');
+    const withBill = new Set(
+      (await AcademyCharge.find({
+        registrationId: { $in: active.map((r) => r._id) },
+        kind: 'monthly', periodKey: month, status: { $ne: 'void' }
+      }).select('registrationId').lean()).map((c) => String(c.registrationId))
+    );
+    const rows = active
+      .filter((r) => !withBill.has(String(r._id)) && L.billMonthAllowed(r, month))
+      .map((r) => ({
+        registrationId: r._id, studentId: r.studentId, courseId: r.courseId, classId: r.classId,
+        monthlyFee: toNumber(r.monthlyFee)
+      }));
+    res.json({ success: true, month, label: L.shamsiMonthLabel(month), count: rows.length, rows });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'گزارشِ شاگردانِ بدونِ بل ناموفق بود.' });
+  }
+});
+
+// گزارشِ ماهِ مشخص — مثلِ «گزارش مخصوص ماه»ی مالیِ مکتب.
+router.get('/reports/month-specific', async (req, res) => {
+  try {
+    const L = academyLedger;
+    const month = validMonth(req.query.month) ? String(req.query.month) : L.currentShamsiMonthKey();
+    const bills = await AcademyCharge.find({ kind: 'monthly', periodKey: month, status: { $ne: 'void' } })
+      .select('studentId amount discountAmount paidAmount balance status').lean();
+    const students = new Set(bills.map((b) => String(b.studentId)));
+    const billed = L.round(bills.reduce((s, b) => s + Math.max(0, toNumber(b.amount) - toNumber(b.discountAmount)), 0));
+    const collected = L.round(bills.reduce((s, b) => s + toNumber(b.paidAmount), 0));
+    const outstanding = L.round(bills.reduce((s, b) => s + toNumber(b.balance), 0));
+    res.json({
+      success: true, month, label: L.shamsiMonthLabel(month),
+      totalBills: bills.length, totalStudents: students.size,
+      paidBills: bills.filter((b) => b.status === 'paid').length,
+      billedAmount: billed, collectedApproved: collected, outstanding
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'گزارشِ ماهِ مشخص ناموفق بود.' });
+  }
+});
+
+// دفترِ باقیاتِ ماهانه — per شاگرد/ثبت‌نام، فقط ماه‌هایی که بل دارند.
+router.get('/reports/monthly-ledger', async (req, res) => {
+  try {
+    const L = academyLedger;
+    const onlyDebtors = ['1', 'true', 'yes'].includes(String(req.query.onlyDebtors || '').toLowerCase());
+    const courseId = String(req.query.courseId || '').trim();
+    const classId = String(req.query.classId || '').trim();
+    const regFilter = { status: { $in: ['active', 'completed'] } };
+    if (courseId) regFilter.courseId = courseId;
+    if (classId) regFilter.classId = classId;
+    const regs = await AcademyRegistration.find(regFilter)
+      .sort({ createdAt: 1 })
+      .populate('studentId', 'fullName studentCode phone status')
+      .populate('courseId', 'name')
+      .populate('classId', 'name')
+      .lean();
+    const regIds = regs.map((r) => r._id);
+    const charges = await AcademyCharge.find({ registrationId: { $in: regIds }, kind: 'monthly', status: { $ne: 'void' } }).lean();
+    const byReg = new Map();
+    for (const c of charges) {
+      const k = String(c.registrationId);
+      if (!byReg.has(k)) byReg.set(k, []);
+      byReg.get(k).push(c);
+    }
+    const today = todayKey();
+    const curKey = L.currentShamsiMonthKey();
+    const curOrd = L.monthOrdinal(curKey);
+
+    let rows = regs
+      .filter((r) => !r.studentId || r.studentId.status !== 'inactive')
+      .map((r) => {
+        const list = (byReg.get(String(r._id)) || []).slice().sort((a, b) => L.monthOrdinal(a.periodKey) - L.monthOrdinal(b.periodKey));
+        const months = list.map((c) => {
+          const net = Math.max(0, toNumber(c.amount) - toNumber(c.discountAmount));
+          const unpaid = c.status !== 'paid' && toNumber(c.balance) > 0.001;
+          const isFuture = L.monthOrdinal(c.periodKey) > curOrd;
+          return {
+            chargeId: c._id, periodKey: c.periodKey, label: L.shamsiMonthLabel(c.periodKey),
+            fee: toNumber(c.amount), discount: toNumber(c.discountAmount), net,
+            paid: toNumber(c.paidAmount), balance: toNumber(c.balance), status: c.status,
+            overdue: unpaid && !isFuture, dueLater: unpaid && isFuture
+          };
+        });
+        const anchorKey = L.anchorMonthKey(r);
+        const totalNet = L.round(months.reduce((s, m) => s + m.net, 0));
+        const totalPaid = L.round(months.reduce((s, m) => s + m.paid, 0));
+        const totalBalance = L.round(months.reduce((s, m) => s + m.balance, 0));
+        const nonMonthly = r.paymentPlan !== 'monthly';
+        const noBillThisMonth = r.status === 'active' && !nonMonthly
+          && L.billMonthAllowed(r, curKey) && !months.some((m) => m.periodKey === curKey);
+        return {
+          registrationId: r._id, studentId: r.studentId, courseId: r.courseId, classId: r.classId,
+          status: r.status, paymentPlan: r.paymentPlan, nonMonthly,
+          startMonthKey: anchorKey, startMonthLabel: L.shamsiMonthLabel(anchorKey),
+          monthlyFee: toNumber(r.monthlyFee),
+          noBillThisMonth, currentMonthLabel: L.shamsiMonthLabel(curKey),
+          months,
+          totalPayable: totalNet, totalPaid, totalBalance,
+          credit: Math.max(0, L.round(toNumber(r.paidAmount) - totalNet)),
+          arrearsFromLabel: (months.find((m) => m.balance > 0.001) || {}).label || '',
+          overdueFromLabel: (months.find((m) => m.overdue) || {}).label || ''
+        };
+      });
+
+    if (onlyDebtors) rows = rows.filter((r) => r.totalBalance > 0.001 || r.noBillThisMonth);
+    rows.sort((a, b) => b.totalBalance - a.totalBalance);
+
+    res.json({
+      success: true,
+      currentMonth: { periodKey: curKey, label: L.shamsiMonthLabel(curKey) },
+      rows,
+      totals: {
+        rows: rows.length,
+        debtors: rows.filter((r) => r.totalBalance > 0.001).length,
+        noBillThisMonth: rows.filter((r) => r.noBillThisMonth).length,
+        totalPaid: L.round(rows.reduce((s, r) => s + r.totalPaid, 0)),
+        totalBalance: L.round(rows.reduce((s, r) => s + r.totalBalance, 0))
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'گزارشِ باقیاتِ ماهانه ناموفق بود.' });
   }
 });
 
