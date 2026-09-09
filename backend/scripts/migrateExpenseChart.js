@@ -190,9 +190,12 @@ async function run() {
     budgetYearsUpdated: 0,
     budgetBucketsRemapped: 0,
     procurementScanned: 0,
-    procurementRemapped: 0
+    procurementRemapped: 0,
+    deactivatedOrphanCategories: []
   };
 
+  // کلیدهایی که پس از مهاجرت هنوز از سوی یک ExpenseEntry ارجاع می‌شوند.
+  const postMigrationCategoryKeys = new Set();
   const bulk = [];
   for (const row of entries) {
     const rawCat = String(row.category || '');
@@ -208,11 +211,13 @@ async function run() {
       && catPart === res.category;
     if (alreadyClean) {
       report.expense.alreadyOnChart += 1;
+      postMigrationCategoryKeys.add(catPart);
       continue;
     }
 
     if (!res.matched) {
       report.expense.unclassified += 1;
+      postMigrationCategoryKeys.add(UNCLASSIFIED_KEY);
       const g = report.unresolvedGroups[catPart] || { count: 0, amount: 0, samples: new Set() };
       g.count += 1;
       g.amount = round2(g.amount + Number(row.amount || 0));
@@ -246,10 +251,12 @@ async function run() {
       // بازنویسی نکن؛ فقط alias بساز تا گزارش‌ها تا بزنند.
       queueAlias(res.category, catPart, res.subCategory);
       report.expense.closedYearAliasedOnly += 1;
+      postMigrationCategoryKeys.add(catPart);
       continue;
     }
 
     report.expense.remapped += 1;
+    postMigrationCategoryKeys.add(res.category);
     if (APPLY) {
       bulk.push({
         updateOne: {
@@ -344,6 +351,24 @@ async function run() {
     await FinanceProcurementCommitment.bulkWrite(commitmentBulk, { ordered: false });
   }
 
+  // ---- ۶. غیرفعال‌سازیِ دسته‌های دلخواهِ قدیمی که پس از مهاجرت هیچ رکوردی ندارند ----
+  // فقط isSystem:false (دسته‌های ساختهٔ کاربر مثل rent/stationary/modermaktab).
+  // حذف نمی‌شوند تا در پنلِ رجیستری قابلِ مشاهده/بازفعال‌سازی بمانند.
+  const orphanCustomKeys = registryDocs
+    .filter((doc) => doc.isSystem === false
+      && doc.isActive !== false
+      && doc.key !== UNCLASSIFIED_KEY
+      && !EXPENSE_CHART_KEYS.has(doc.key)
+      && !postMigrationCategoryKeys.has(doc.key))
+    .map((doc) => doc.key);
+  report.deactivatedOrphanCategories = orphanCustomKeys;
+  if (APPLY && orphanCustomKeys.length) {
+    await ExpenseCategoryDefinition.updateMany(
+      { key: { $in: orphanCustomKeys }, isSystem: false },
+      { $set: { isActive: false } }
+    );
+  }
+
   // ---- خروجی ----
   const unresolved = Object.entries(report.unresolvedGroups)
     .map(([value, g]) => ({ value, count: g.count, amount: g.amount, samples: [...g.samples] }))
@@ -355,13 +380,14 @@ async function run() {
   console.log(JSON.stringify(report.lowConfidenceGroups, null, 2));
   console.log('\n=== رشته‌های نامشخص → unclassified (در صفِ «دسته‌بندیِ معلق» تعیین تکلیف کنید) ===');
   console.table(unresolved);
-  console.log('\n=== بودجه / تعهدها ===');
+  console.log('\n=== بودجه / تعهدها / پاک‌سازی ===');
   console.log(JSON.stringify({
     budgetYearsUpdated: report.budgetYearsUpdated,
     budgetBucketsRemapped: report.budgetBucketsRemapped,
     procurementScanned: report.procurementScanned,
     procurementRemapped: report.procurementRemapped,
-    aliasesQueued: report.aliasesQueued
+    aliasesQueued: report.aliasesQueued,
+    deactivatedOrphanCategories: report.deactivatedOrphanCategories
   }, null, 2));
 
   if (!APPLY) {

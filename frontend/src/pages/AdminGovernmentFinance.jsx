@@ -5790,7 +5790,7 @@ export default function AdminGovernmentFinance() {
                     <thead>
                       <tr>
                         <th>دسته</th>
-                        <th>فروشنده</th>
+                        <th>شرح</th>
                         <th>مبلغ</th>
                         <th>وضعیت</th>
                         <th>مرحله</th>
@@ -5815,7 +5815,12 @@ export default function AdminGovernmentFinance() {
                               <span>{expenseLabels.subCategory(row.category, row.subCategory)}</span>
                             </div>
                           </td>
-                          <td>{row.vendorName || 'بدون فروشنده'}</td>
+                          <td>
+                            <div className="gov-table-stack">
+                              <strong>{(row.note || '').trim() || (row.vendorName || '').trim() || expenseLabels.subCategory(row.category, row.subCategory)}</strong>
+                              {(row.vendorName || '').trim() && (row.note || '').trim() ? <span>{(row.vendorName || '').trim()}</span> : null}
+                            </div>
+                          </td>
                           <td>{formatMoney(row.amount)}</td>
                           <td><ExpenseStatusBadge status={row.status} /></td>
                           <td><ExpenseStageBadge stage={row.approvalStage} /></td>
@@ -5972,8 +5977,13 @@ export default function AdminGovernmentFinance() {
                   <input name="referenceNo" value={expenseDraft.referenceNo} onChange={handleExpenseDraftChange} />
                 </label>
                 <label className="gov-field gov-field-full">
-                  <span>یادداشت</span>
-                  <input name="note" value={expenseDraft.note} onChange={handleExpenseDraftChange} />
+                  <span>شرح مصرف</span>
+                  <input
+                    name="note"
+                    value={expenseDraft.note}
+                    onChange={handleExpenseDraftChange}
+                    placeholder="مثال: معاش استاد ماه سنبله — یا نامِ فروشنده برای خرید"
+                  />
                 </label>
               </div>
               <div className="gov-card-actions">
@@ -5996,7 +6006,7 @@ export default function AdminGovernmentFinance() {
                     <thead>
                       <tr>
                         <th>دسته</th>
-                        <th>فروشنده</th>
+                        <th>شرح</th>
                         <th>مبلغ</th>
                         <th>تاریخ</th>
                         <th>وضعیت</th>
@@ -6013,7 +6023,12 @@ export default function AdminGovernmentFinance() {
                               <span>{expenseLabels.subCategory(row.category, row.subCategory)}</span>
                             </div>
                           </td>
-                          <td>{row.vendorName || 'بدون فروشنده'}</td>
+                          <td>
+                            <div className="gov-table-stack">
+                              <strong>{(row.note || '').trim() || (row.vendorName || '').trim() || expenseLabels.subCategory(row.category, row.subCategory)}</strong>
+                              {(row.vendorName || '').trim() && (row.note || '').trim() ? <span>{(row.vendorName || '').trim()}</span> : null}
+                            </div>
+                          </td>
                           <td>{formatMoney(row.amount)}</td>
                           <td>{toFaDate(row.expenseDate)}</td>
                           <td><ExpenseStatusBadge status={row.status} /></td>
