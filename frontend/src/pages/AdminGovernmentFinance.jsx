@@ -1672,6 +1672,8 @@ export default function AdminGovernmentFinance() {
   });
   // per-group picker state for the "دسته‌بندیِ معلق" queue, keyed by legacyCategory
   const [categoryReviewDrafts, setCategoryReviewDrafts] = useState({});
+  // the registry panel hides deactivated (migrated-away) categories by default
+  const [showInactiveCategories, setShowInactiveCategories] = useState(false);
   const [treasuryAccountDraft, setTreasuryAccountDraft] = useState({
     id: '',
     title: '',
@@ -1745,6 +1747,22 @@ export default function AdminGovernmentFinance() {
   const activeExpenseCategoryOptions = useMemo(() => (
     (expenseCategoryRegistry || []).filter((item) => item.isActive !== false && item.key !== 'unclassified')
   ), [expenseCategoryRegistry]);
+
+  // Registry panel: deactivated categories (legacy keys the migration retired,
+  // kept for history/audit) are hidden unless the admin opts in.
+  const inactiveExpenseCategoryCount = useMemo(() => (
+    (expenseCategoryRegistry || []).filter((item) => item.isActive === false).length
+  ), [expenseCategoryRegistry]);
+
+  const activeCategoryCount = useMemo(() => (
+    (expenseCategoryRegistry || []).filter((item) => item.isActive !== false).length
+  ), [expenseCategoryRegistry]);
+
+  const visibleCategoryRegistry = useMemo(() => (
+    showInactiveCategories
+      ? expenseCategoryRegistry
+      : (expenseCategoryRegistry || []).filter((item) => item.isActive !== false)
+  ), [expenseCategoryRegistry, showInactiveCategories]);
 
   const selectedExpenseCategory = useMemo(() => (
     expenseCategoryRegistry.find((item) => item.key === expenseDraft.category) || activeExpenseCategoryOptions[0] || null
@@ -5529,14 +5547,24 @@ export default function AdminGovernmentFinance() {
               tabKey="operations"
               panelKey="category-registry"
               title="رجیستری رسمی دسته‌های مصرف"
-              hint={`${formatNumber(expenseCategoryRegistry.length)} دسته`}
+              hint={`${formatNumber(activeCategoryCount)} فعال${inactiveExpenseCategoryCount ? ` · ${formatNumber(inactiveExpenseCategoryCount)} غیرفعال` : ''}`}
               span="7"
             >
-              {!expenseCategoryRegistry.length ? (
+              {inactiveExpenseCategoryCount ? (
+                <label className="gov-toggle" style={{ marginBottom: '10px' }}>
+                  <input
+                    type="checkbox"
+                    checked={showInactiveCategories}
+                    onChange={(event) => setShowInactiveCategories(event.target.checked)}
+                  />
+                  <span>نمایشِ دسته‌های غیرفعال (کلیدهای قدیمیِ کنارگذاشته‌شده در مهاجرت — برای تاریخچه نگه داشته شده‌اند، در هیچ فرمی انتخاب نمی‌شوند)</span>
+                </label>
+              ) : null}
+              {!visibleCategoryRegistry.length ? (
                 <div className="gov-empty-state">هنوز هیچ دسته مصرف رسمی ثبت نشده است.</div>
               ) : (
                 <div className="gov-category-registry">
-                  {expenseCategoryRegistry.map((item) => (
+                  {visibleCategoryRegistry.map((item) => (
                     <article key={item._id || item.key} className="gov-category-card" data-tone={item.colorTone || 'teal'}>
                       <div className="gov-category-card-head">
                         <div>
