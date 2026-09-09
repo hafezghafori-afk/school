@@ -231,6 +231,42 @@ router.put('/students/:id', async (req, res) => {
   }
 });
 
+// حذفِ کاملِ یک شاگرد — فقط ثبتِ اشتباهِ تازه‌ای که نه به صنفی معرفی شده و نه
+// پرداخت/بلی دارد. اگر سابقه دارد، «غیرفعال‌سازی» راهِ درست است تا تاریخچه بماند.
+router.delete('/students/:id', async (req, res) => {
+  try {
+    const student = await AcademyStudent.findById(req.params.id);
+    if (!student) return res.status(404).json({ success: false, message: 'شاگرد پیدا نشد.' });
+
+    const [regCount, payCount, invoiceCount] = await Promise.all([
+      AcademyRegistration.countDocuments({ studentId: student._id }),
+      AcademyPayment.countDocuments({ studentId: student._id }),
+      AcademyInvoice.countDocuments({ studentId: student._id })
+    ]);
+    const blockers = [];
+    if (regCount) blockers.push(`${regCount} ثبت‌نام در صنف`);
+    if (payCount) blockers.push(`${payCount} پرداخت`);
+    if (invoiceCount) blockers.push(`${invoiceCount} بل`);
+    if (blockers.length) {
+      return res.status(400).json({
+        success: false,
+        blockers,
+        message: `این شاگرد ${blockers.join(' و ')} دارد و حذف نمی‌شود. به‌جایش «غیرفعال‌سازی» کنید تا سابقه‌اش بماند.`
+      });
+    }
+
+    // شاگردِ بدونِ ثبت‌نام قلمِ بدهی ندارد؛ ردِ حاضری اگر مانده باشد پاک می‌شود.
+    await AcademyAttendance.updateMany(
+      { 'students.studentId': student._id },
+      { $pull: { students: { studentId: student._id } } }
+    );
+    await AcademyStudent.deleteOne({ _id: student._id });
+    res.json({ success: true, message: `شاگرد «${student.fullName || student.studentCode}» حذف شد.` });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'حذفِ شاگرد ناموفق بود.' });
+  }
+});
+
 router.get('/courses', async (req, res) => {
   try {
     const items = await AcademyCourse.find(mapListQuery(req.query)).sort({ createdAt: -1 }).lean();
