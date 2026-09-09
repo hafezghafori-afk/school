@@ -15,7 +15,13 @@ import {
   toLocaleDateTime
 } from './adminWorkspaceUtils';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
-import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
+import {
+  formatAfghanDate,
+  toGregorianDateInputValue,
+  afghanSolarToGregorianInput,
+  gregorianToAfghanSolar,
+  AFGHAN_SOLAR_MONTHS
+} from '../utils/afghanDate';
 
 const LEGACY_GARBLED_TABS = [
   { key: 'dashboard', label: 'نمای کلی' },
@@ -1577,6 +1583,10 @@ export default function AdminGovernmentFinance() {
   // Expense review/ledger date range (Gregorian YYYY-MM-DD from AfghanDateInput).
   const [expenseDateFrom, setExpenseDateFrom] = useState('');
   const [expenseDateTo, setExpenseDateTo] = useState('');
+  // Expense review queue: status filter + Shamsi month/year quick-pick.
+  const [expenseStatusFilter, setExpenseStatusFilter] = useState('actionable');
+  const [expenseShamsiYear, setExpenseShamsiYear] = useState('');
+  const [expenseShamsiMonth, setExpenseShamsiMonth] = useState('');
   const [message, setMessage] = useState('');
   const [messageTone, setMessageTone] = useState('info');
   const [busyAction, setBusyAction] = useState('');
@@ -1886,15 +1896,61 @@ export default function AdminGovernmentFinance() {
       : (payload.expenseAnalytics?.queue || []);
     return source.filter((item) => inRange(item.expenseDate));
   }, [payload.expenses, payload.expenseAnalytics, expenseDateFrom, expenseDateTo]);
-  const expenseQueueRows = useMemo(() => (
-    filteredExpenseRows
-      .filter((item) => !['approved', 'void'].includes(String(item.status || '').trim()))
-      .slice(0, 500)
-  ), [filteredExpenseRows]);
-  const expenseDateFilterActive = !!expenseDateFrom || !!expenseDateTo;
+  const expenseQueueRows = useMemo(() => {
+    const matchesStatus = (item) => {
+      const status = String(item.status || '').trim();
+      if (expenseStatusFilter === 'all') return true;
+      if (expenseStatusFilter === 'actionable') return !['approved', 'void'].includes(status);
+      return status === expenseStatusFilter;
+    };
+    return filteredExpenseRows.filter(matchesStatus).slice(0, 500);
+  }, [filteredExpenseRows, expenseStatusFilter]);
+  const expenseDateFilterActive = !!expenseDateFrom || !!expenseDateTo || !!expenseShamsiYear;
+
+  // Shamsi year/month quick-pick → fills the Gregorian from/to range the
+  // filter already understands. Month "" with a year set = the whole year.
+  const dayBefore = (isoDay) => (
+    isoDay
+      ? new Date(new Date(`${isoDay}T00:00:00Z`).getTime() - 86400000).toISOString().slice(0, 10)
+      : ''
+  );
+
+  const applyShamsiPeriodFilter = (year, month) => {
+    setExpenseShamsiYear(year);
+    setExpenseShamsiMonth(month);
+    if (!year) {
+      setExpenseDateFrom('');
+      setExpenseDateTo('');
+      return;
+    }
+    const y = Number(year);
+    if (month) {
+      const m = Number(month);
+      const nextFirst = m === 12
+        ? afghanSolarToGregorianInput(y + 1, 1, 1)
+        : afghanSolarToGregorianInput(y, m + 1, 1);
+      setExpenseDateFrom(afghanSolarToGregorianInput(y, m, 1));
+      setExpenseDateTo(dayBefore(nextFirst));
+    } else {
+      setExpenseDateFrom(afghanSolarToGregorianInput(y, 1, 1));
+      setExpenseDateTo(dayBefore(afghanSolarToGregorianInput(y + 1, 1, 1)));
+    }
+  };
+
+  const expenseShamsiYearOptions = useMemo(() => {
+    const now = gregorianToAfghanSolar(new Date());
+    const base = Number(now?.jy) || 1404;
+    const years = [];
+    for (let y = base + 1; y >= base - 4; y -= 1) years.push(String(y));
+    return years;
+  }, []);
+
   const clearExpenseDateFilter = () => {
     setExpenseDateFrom('');
     setExpenseDateTo('');
+    setExpenseShamsiYear('');
+    setExpenseShamsiMonth('');
+    setExpenseStatusFilter('actionable');
   };
   const currentAdminLevel = useMemo(() => {
     try {
@@ -5788,28 +5844,67 @@ export default function AdminGovernmentFinance() {
               <div className="gov-expense-datefilter">
                 <div className="gov-expense-datefilter__row">
                   <label className="gov-field">
+                    <span>وضعیت</span>
+                    <select value={expenseStatusFilter} onChange={(event) => setExpenseStatusFilter(event.target.value)}>
+                      <option value="actionable">در انتظارِ اقدام (پیش‌فرض)</option>
+                      <option value="all">همه</option>
+                      <option value="draft">پیش‌نویس</option>
+                      <option value="pending_review">در صف بررسی</option>
+                      <option value="rejected">رد شده</option>
+                      <option value="approved">تایید شده</option>
+                      <option value="void">باطل شده</option>
+                    </select>
+                  </label>
+                  <label className="gov-field">
+                    <span>سال</span>
+                    <select
+                      value={expenseShamsiYear}
+                      onChange={(event) => applyShamsiPeriodFilter(event.target.value, expenseShamsiMonth)}
+                    >
+                      <option value="">همه سال‌ها</option>
+                      {expenseShamsiYearOptions.map((year) => (
+                        <option key={year} value={year}>{year}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="gov-field">
+                    <span>ماه</span>
+                    <select
+                      value={expenseShamsiMonth}
+                      onChange={(event) => applyShamsiPeriodFilter(expenseShamsiYear, event.target.value)}
+                      disabled={!expenseShamsiYear}
+                    >
+                      <option value="">همه ماه‌ها</option>
+                      {AFGHAN_SOLAR_MONTHS.map((name, index) => (
+                        <option key={name} value={String(index + 1)}>{name}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="gov-expense-datefilter__row">
+                  <label className="gov-field">
                     <span>از تاریخ</span>
-                    <AfghanDateInput name="expenseDateFrom" value={expenseDateFrom} onChange={setExpenseDateFrom} />
+                    <AfghanDateInput name="expenseDateFrom" value={expenseDateFrom} onChange={(value) => { setExpenseShamsiYear(''); setExpenseShamsiMonth(''); setExpenseDateFrom(value); }} />
                   </label>
                   <label className="gov-field">
                     <span>تا تاریخ</span>
-                    <AfghanDateInput name="expenseDateTo" value={expenseDateTo} onChange={setExpenseDateTo} />
+                    <AfghanDateInput name="expenseDateTo" value={expenseDateTo} onChange={(value) => { setExpenseShamsiYear(''); setExpenseShamsiMonth(''); setExpenseDateTo(value); }} />
                   </label>
-                  <button type="button" className="gov-ghost-btn slim" onClick={clearExpenseDateFilter} disabled={!expenseDateFilterActive}>
-                    پاک‌کردنِ تاریخ
+                  <button type="button" className="gov-ghost-btn slim" onClick={clearExpenseDateFilter} disabled={!expenseDateFilterActive && expenseStatusFilter === 'actionable'}>
+                    پاک‌کردنِ فیلترها
                   </button>
                 </div>
                 <span className="gov-expense-datefilter__hint">
                   {expenseDateFilterActive
                     ? `${formatNumber(expenseQueueRows.length)} مورد در بازهٔ انتخابی`
-                    : 'برای دیدن و تاییدِ مصارفِ ماه‌های گذشته، بازهٔ تاریخ را انتخاب کنید.'}
+                    : 'وضعیت و بازهٔ زمانی (سال/ماه یا تاریخِ دقیق) را برای مرورِ مصارفِ گذشته انتخاب کنید.'}
                 </span>
               </div>
 
               {!expenseQueueRows.length ? (
                 <div className="gov-empty-state">
-                  {expenseDateFilterActive
-                    ? 'در این بازهٔ تاریخ هیچ مصرفِ در انتظار اقدامی پیدا نشد.'
+                  {(expenseDateFilterActive || expenseStatusFilter !== 'actionable')
+                    ? 'با این فیلترها هیچ مصرفی پیدا نشد.'
                     : 'در محدوده فعلی هیچ ردیف مصرفی در انتظار اقدام نیست.'}
                 </div>
               ) : (
