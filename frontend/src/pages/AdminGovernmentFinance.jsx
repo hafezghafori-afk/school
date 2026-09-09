@@ -5969,7 +5969,7 @@ export default function AdminGovernmentFinance() {
                   </select>
                 </label>
                 <label className="gov-field">
-                  <span>فروشنده</span>
+                  <span>فروشنده یا شخصِ برداشت‌کنندهٔ پول</span>
                   <input name="vendorName" value={expenseDraft.vendorName} onChange={handleExpenseDraftChange} />
                 </label>
                 <label className="gov-field">
