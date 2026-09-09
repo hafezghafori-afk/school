@@ -41,6 +41,7 @@ function collectOfficialSnapshotGate(readiness = null, reportType = '') {
   const isAnnual = String(reportType || '').trim().toLowerCase() === 'annual';
 
   const openExpenses = Number(expenses.draft || 0) + Number(expenses.pendingReview || 0) + Number(expenses.rejected || 0);
+  const unclassifiedExpenses = Number(expenses.needsCategoryReview || 0);
   const openProcurement = Number(procurements.draft || 0)
     + Number(procurements.pendingReview || 0)
     + Number(procurements.rejected || 0)
@@ -57,6 +58,9 @@ function collectOfficialSnapshotGate(readiness = null, reportType = '') {
   }
   if (openExpenses > 0) {
     blockers.push({ key: 'expenses_open', label: `${openExpenses} مصرف پیش‌نویس/در صف بررسی/ردشده تعیین تکلیف نشده` });
+  }
+  if (unclassifiedExpenses > 0) {
+    blockers.push({ key: 'expenses_unclassified', label: `${unclassifiedExpenses} مصرف بدونِ دستهٔ معتبر (دسته‌بندیِ معلق)` });
   }
   if (openProcurement > 0) {
     blockers.push({ key: 'procurement_open', label: `${openProcurement} تعهد خرید باز یا تسویه‌نشده` });

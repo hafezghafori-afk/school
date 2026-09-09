@@ -1592,7 +1592,7 @@ export default function AdminGovernmentFinance() {
   });
   const [selectedYearBudgetDraft, setSelectedYearBudgetDraft] = useState(() => buildBudgetDraft());
   const [expenseDraft, setExpenseDraft] = useState({
-    category: 'admin',
+    category: 'payroll',
     subCategory: '',
     amount: '',
     expenseDate: '',
@@ -1633,7 +1633,7 @@ export default function AdminGovernmentFinance() {
   const [procurementDraft, setProcurementDraft] = useState({
     title: '',
     vendorName: '',
-    category: 'admin',
+    category: 'payroll',
     subCategory: '',
     procurementType: 'vendor_commitment',
     committedAmount: '',
@@ -1670,6 +1670,8 @@ export default function AdminGovernmentFinance() {
     subCategoriesText: '',
     isActive: true
   });
+  // per-group picker state for the "دسته‌بندیِ معلق" queue, keyed by legacyCategory
+  const [categoryReviewDrafts, setCategoryReviewDrafts] = useState({});
   const [treasuryAccountDraft, setTreasuryAccountDraft] = useState({
     id: '',
     title: '',
@@ -1738,9 +1740,23 @@ export default function AdminGovernmentFinance() {
       : (payload.expenseAnalytics?.registry || reference.expenseCategories || [])
   ), [payload.expenseAnalytics, payload.expenseCategories, reference.expenseCategories]);
 
+  // Categories that may be chosen when recording an expense / budget line:
+  // active, and never the `unclassified` holding bucket (migration-only).
+  const activeExpenseCategoryOptions = useMemo(() => (
+    (expenseCategoryRegistry || []).filter((item) => item.isActive !== false && item.key !== 'unclassified')
+  ), [expenseCategoryRegistry]);
+
   const selectedExpenseCategory = useMemo(() => (
-    expenseCategoryRegistry.find((item) => item.key === expenseDraft.category) || expenseCategoryRegistry[0] || null
-  ), [expenseCategoryRegistry, expenseDraft.category]);
+    expenseCategoryRegistry.find((item) => item.key === expenseDraft.category) || activeExpenseCategoryOptions[0] || null
+  ), [expenseCategoryRegistry, activeExpenseCategoryOptions, expenseDraft.category]);
+
+  const expenseCategoryReviewQueue = useMemo(() => (
+    payload.expenseAnalytics?.categoryReviewQueue || []
+  ), [payload.expenseAnalytics]);
+
+  const expenseNeedsCategoryReviewCount = useMemo(() => (
+    Number(payload.expenseAnalytics?.summary?.needsCategoryReviewCount || 0)
+  ), [payload.expenseAnalytics]);
 
   // ExpenseEntry stores category / subCategory as keys ("salary" / "teachers",
   // "کرایه" / "item_2"); the readable Persian text lives on the category
@@ -2430,8 +2446,8 @@ export default function AdminGovernmentFinance() {
   }, [selectedAcademicYear]);
 
   useEffect(() => {
-    setSelectedYearBudgetDraft(buildBudgetDraft(selectedFinancialYear?.budgetTargets || {}, expenseCategoryRegistry));
-  }, [selectedFinancialYear, expenseCategoryRegistry]);
+    setSelectedYearBudgetDraft(buildBudgetDraft(selectedFinancialYear?.budgetTargets || {}, activeExpenseCategoryOptions));
+  }, [selectedFinancialYear, activeExpenseCategoryOptions]);
 
   useEffect(() => {
     const fallbackCommitmentId = String(settlementReadyProcurementOptions[0]?._id || settlementReadyProcurementOptions[0]?.id || '');
@@ -2444,13 +2460,13 @@ export default function AdminGovernmentFinance() {
   }, [settlementReadyProcurementOptions]);
 
   useEffect(() => {
-    if (!expenseCategoryRegistry.length) return;
-    const fallbackCategory = expenseCategoryRegistry[0]?.key || 'other';
+    if (!activeExpenseCategoryOptions.length) return;
+    const fallbackCategory = activeExpenseCategoryOptions[0]?.key || 'other';
     setExpenseDraft((current) => {
-      const nextCategory = expenseCategoryRegistry.some((item) => item.key === current.category)
+      const nextCategory = activeExpenseCategoryOptions.some((item) => item.key === current.category)
         ? current.category
         : fallbackCategory;
-      const nextSubCategories = (expenseCategoryRegistry.find((item) => item.key === nextCategory)?.subCategories || [])
+      const nextSubCategories = (activeExpenseCategoryOptions.find((item) => item.key === nextCategory)?.subCategories || [])
         .filter((item) => item.isActive !== false);
       const nextSubCategory = nextSubCategories.some((item) => item.key === current.subCategory)
         ? current.subCategory
@@ -2461,7 +2477,7 @@ export default function AdminGovernmentFinance() {
         subCategory: nextSubCategory
       };
     });
-  }, [expenseCategoryRegistry]);
+  }, [activeExpenseCategoryOptions]);
 
   useEffect(() => {
     if (!treasuryAccounts.length) {
@@ -2818,7 +2834,7 @@ export default function AdminGovernmentFinance() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          budgetTargets: serializeBudgetDraft(selectedYearBudgetDraft, expenseCategoryRegistry)
+          budgetTargets: serializeBudgetDraft(selectedYearBudgetDraft, activeExpenseCategoryOptions)
         })
       });
       applyFinancialYearItemToPayload(setPayload, response.item);
@@ -3095,6 +3111,51 @@ export default function AdminGovernmentFinance() {
       await loadWorkspace();
     } catch (error) {
       showMessage(errorMessage(error, 'تایید مصرف ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const handleCategoryReviewDraftChange = (legacyCategory, field, value) => {
+    setCategoryReviewDrafts((current) => {
+      const base = current[legacyCategory] || {
+        category: activeExpenseCategoryOptions[0]?.key || '',
+        subCategory: '',
+        applyToAll: true
+      };
+      const next = { ...base, [field]: value };
+      // switching the parent category clears a now-invalid sub-category
+      if (field === 'category') next.subCategory = '';
+      return { ...current, [legacyCategory]: next };
+    });
+  };
+
+  const resolveCategoryReviewGroup = async (legacyCategory) => {
+    const draft = categoryReviewDrafts[legacyCategory] || {};
+    const category = draft.category || activeExpenseCategoryOptions[0]?.key || '';
+    if (!category) {
+      showMessage('یک سرفصل برای این گروه انتخاب کنید.', 'error');
+      return;
+    }
+    try {
+      setBusyAction(`resolve-review-${legacyCategory}`);
+      const response = await postJson('/api/finance/admin/expenses/category-review/resolve', {
+        legacyCategory,
+        category,
+        subCategory: draft.subCategory || '',
+        applyToAll: draft.applyToAll !== false,
+        addAlias: true,
+        financialYearId: selectedFinancialYearId || undefined
+      });
+      showMessage(response?.message || 'دسته‌بندی اعمال شد.');
+      setCategoryReviewDrafts((current) => {
+        const next = { ...current };
+        delete next[legacyCategory];
+        return next;
+      });
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'اعمالِ دسته‌بندیِ معلق ناموفق بود.'), 'error');
     } finally {
       setBusyAction('');
     }
@@ -4876,7 +4937,7 @@ export default function AdminGovernmentFinance() {
                   <span>بودجه سالانه سقف کل همان دسته است. بودجه ماهانه سقف مصرف همان دسته در هر ماه است. آستانه هشدار معمولاً ۸۵٪ است؛ یعنی قبل از تمام‌شدن بودجه هشدار می‌دهد.</span>
                 </div>
               </div>
-              {!expenseCategoryRegistry.length ? (
+              {!activeExpenseCategoryOptions.length ? (
                 <div className="gov-empty-state">هیچ دسته‌بندی مصرفی برای پیکربندی بودجه در دسترس نیست.</div>
               ) : (
                 <div className="gov-table-wrap">
@@ -4892,7 +4953,7 @@ export default function AdminGovernmentFinance() {
                       </tr>
                     </thead>
                     <tbody>
-                      {expenseCategoryRegistry.map((item) => {
+                      {activeExpenseCategoryOptions.map((item) => {
                         const key = String(item?.key || '').trim().toLowerCase();
                         const draftBucket = selectedYearBudgetDraft.categoryBudgets?.[key] || {};
                         const budgetRow = (budgetVsActual.categories || []).find((entry) => String(entry.categoryKey || '').trim().toLowerCase() === key) || null;
@@ -5379,7 +5440,7 @@ export default function AdminGovernmentFinance() {
                 <label className="gov-field">
                   <span>دسته</span>
                   <select name="category" value={procurementDraft.category} onChange={handleProcurementDraftChange}>
-                    {expenseCategoryRegistry.map((item) => (
+                    {activeExpenseCategoryOptions.map((item) => (
                       <option key={item._id || item.key} value={item.key}>{item.label || item.key}</option>
                     ))}
                   </select>
@@ -5388,7 +5449,7 @@ export default function AdminGovernmentFinance() {
                   <span>زیردسته</span>
                   <select name="subCategory" value={procurementDraft.subCategory} onChange={handleProcurementDraftChange}>
                     <option value="">بدون زیردسته</option>
-                    {((expenseCategoryRegistry.find((item) => item.key === procurementDraft.category)?.subCategories || []).filter((item) => item.isActive !== false)).map((item) => (
+                    {((activeExpenseCategoryOptions.find((item) => item.key === procurementDraft.category)?.subCategories || []).filter((item) => item.isActive !== false)).map((item) => (
                       <option key={item.key} value={item.key}>{item.label || item.key}</option>
                     ))}
                   </select>
@@ -5579,6 +5640,110 @@ export default function AdminGovernmentFinance() {
 
             <CollapsiblePanel
               tabKey="operations"
+              panelKey="category-review-queue"
+              title="دسته‌بندیِ معلق"
+              hint={`${formatNumber(expenseNeedsCategoryReviewCount)} مصرف`}
+              defaultOpen={expenseNeedsCategoryReviewCount > 0}
+              span="12"
+            >
+              <div className="gov-help-note compact">
+                <div className="gov-help-note-copy">
+                  <strong>مصارفِ بدونِ دستهٔ معتبر</strong>
+                  <span>
+                    این‌ها هنگامِ مهاجرت به چارتِ جدید به سرفصلِ رسمی نگاشت نشدند. برای هر گروه یک‌بار
+                    سرفصل و زیرسرفصل را انتخاب کنید؛ همان انتخاب برای همهٔ مصارفِ آن گروه اعمال و به‌عنوان
+                    قانونِ ماندگار ذخیره می‌شود. تا وقتی این صف خالی نشود، گزارشِ رسمی و بستنِ سالِ مالی قفل است.
+                  </span>
+                </div>
+              </div>
+              {!expenseCategoryReviewQueue.length ? (
+                <div className="gov-empty-state">همهٔ مصارف به سرفصل‌های رسمی دسته‌بندی شده‌اند.</div>
+              ) : (
+                <div className="gov-table-wrap">
+                  <table className="gov-table">
+                    <thead>
+                      <tr>
+                        <th>مقدارِ قدیمی</th>
+                        <th>تعداد</th>
+                        <th>مبلغ</th>
+                        <th>نمونه‌ها</th>
+                        <th>سرفصلِ جدید</th>
+                        <th>زیرسرفصل</th>
+                        <th>اقدام</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {expenseCategoryReviewQueue.map((group) => {
+                        const draft = categoryReviewDrafts[group.legacyCategory] || {
+                          category: activeExpenseCategoryOptions[0]?.key || '',
+                          subCategory: '',
+                          applyToAll: true
+                        };
+                        const subOptions = (activeExpenseCategoryOptions.find((item) => item.key === draft.category)?.subCategories || [])
+                          .filter((item) => item.isActive !== false);
+                        return (
+                          <tr key={`review-${group.legacyCategory}`}>
+                            <td><strong>{group.legacyCategory}</strong></td>
+                            <td>{formatNumber(group.count)}</td>
+                            <td>{formatMoney(group.amount)}</td>
+                            <td>
+                              <div className="gov-table-stack">
+                                <span>{(group.samples || []).slice(0, 3).join('، ') || '—'}</span>
+                              </div>
+                            </td>
+                            <td>
+                              <select
+                                value={draft.category}
+                                onChange={(event) => handleCategoryReviewDraftChange(group.legacyCategory, 'category', event.target.value)}
+                              >
+                                {activeExpenseCategoryOptions.map((item) => (
+                                  <option key={item.key} value={item.key}>{item.label || item.key}</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td>
+                              <select
+                                value={draft.subCategory}
+                                onChange={(event) => handleCategoryReviewDraftChange(group.legacyCategory, 'subCategory', event.target.value)}
+                                disabled={!subOptions.length}
+                              >
+                                <option value="">— بدون زیرسرفصل —</option>
+                                {subOptions.map((item) => (
+                                  <option key={item.key} value={item.key}>{item.label || item.key}</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td>
+                              <div className="gov-action-stack">
+                                <label className="gov-toggle">
+                                  <input
+                                    type="checkbox"
+                                    checked={draft.applyToAll !== false}
+                                    onChange={(event) => handleCategoryReviewDraftChange(group.legacyCategory, 'applyToAll', event.target.checked)}
+                                  />
+                                  <span>اعمال به همهٔ «{group.legacyCategory}»</span>
+                                </label>
+                                <button
+                                  type="button"
+                                  className="gov-inline-action"
+                                  disabled={!!busyAction || !draft.category}
+                                  onClick={() => resolveCategoryReviewGroup(group.legacyCategory)}
+                                >
+                                  {busyAction === `resolve-review-${group.legacyCategory}` ? 'در حال اعمال...' : 'اعمال دسته'}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CollapsiblePanel>
+
+            <CollapsiblePanel
+              tabKey="operations"
               panelKey="review-queue"
               title="صف تایید مصارف"
               hint={`${formatNumber(expenseQueueRows.length)} مورد`}
@@ -5732,7 +5897,7 @@ export default function AdminGovernmentFinance() {
                 <label className="gov-field">
                   <span>دسته</span>
                   <select name="category" value={expenseDraft.category} onChange={handleExpenseDraftChange}>
-                    {expenseCategoryRegistry.map((item) => (
+                    {activeExpenseCategoryOptions.map((item) => (
                       <option key={item._id || item.key} value={item.key}>{item.label || item.key}</option>
                     ))}
                   </select>

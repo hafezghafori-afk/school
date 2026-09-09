@@ -3755,6 +3755,137 @@ router.get('/admin/expenses', requireAuth, requireRole(['admin']), requirePermis
   }
 });
 
+// --- «دسته‌بندیِ معلق» — رکوردهای مهاجرت‌شده‌ای که به سرفصلِ رسمی نگاشت نشده‌اند.
+// گروه‌بندی بر اساسِ legacyCategory تا ادمین هر گروه را یک‌بار تعیین تکلیف کند.
+router.get('/admin/expenses/category-review', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+
+    const filter = { schoolId: schoolContext.schoolId, needsCategoryReview: true, status: { $ne: 'void' } };
+    if (String(req.query?.financialYearId || '').trim()) filter.financialYearId = String(req.query.financialYearId).trim();
+
+    const rows = await ExpenseEntry.find(filter)
+      .select('legacyCategory category subCategory amount vendorName note expenseDate status')
+      .lean();
+
+    const groups = new Map();
+    for (const row of rows) {
+      const key = String(row.legacyCategory || row.category || '—').trim().toLowerCase() || '—';
+      const group = groups.get(key) || { legacyCategory: key, count: 0, amount: 0, samples: [] };
+      group.count += 1;
+      group.amount += Number(row.amount || 0);
+      const sample = String(row.subCategory || row.vendorName || row.note || '').trim();
+      if (sample && group.samples.length < 5 && !group.samples.includes(sample)) group.samples.push(sample);
+      groups.set(key, group);
+    }
+
+    const categories = await ensureDefaultExpenseCategories();
+    return res.json({
+      success: true,
+      totalCount: rows.length,
+      groups: [...groups.values()]
+        .map((group) => ({ ...group, amount: Number(group.amount.toFixed(2)) }))
+        .sort((left, right) => right.amount - left.amount),
+      registry: categories
+        .filter((item) => item.isActive !== false && item.isSystem && item.key !== 'unclassified')
+        .map((item) => ({
+          key: item.key,
+          label: item.label,
+          subCategories: (item.subCategories || [])
+            .filter((sub) => sub.isActive !== false)
+            .map((sub) => ({ key: sub.key, label: sub.label }))
+        }))
+    });
+  } catch (error) {
+    console.error('finance expense category review list failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'دریافت صفِ دسته‌بندیِ معلق ناموفق بود.' });
+  }
+});
+
+// اعمالِ دسته بر یک گروهِ legacyCategory (یا مجموعه‌ای از idها) + ثبتِ قانونِ alias.
+router.post('/admin/expenses/category-review/resolve', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const schoolContext = await resolveActiveSchool(req, { payload, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+
+    const legacyCategory = String(payload.legacyCategory || '').trim().toLowerCase();
+    const applyToAll = payload.applyToAll !== false;
+    const addAlias = payload.addAlias !== false;
+    const expenseIds = Array.isArray(payload.expenseIds)
+      ? payload.expenseIds.filter((id) => mongoose.Types.ObjectId.isValid(String(id)))
+      : [];
+
+    if (applyToAll && !legacyCategory) {
+      return res.status(400).json({ success: false, message: 'مقدارِ «legacyCategory» لازم است.' });
+    }
+    if (!applyToAll && !expenseIds.length) {
+      return res.status(400).json({ success: false, message: 'حداقل یک ردیفِ مصرف انتخاب کنید.' });
+    }
+
+    let selection;
+    try {
+      selection = await resolveExpenseCategorySelection({ category: payload.category, subCategory: payload.subCategory });
+    } catch {
+      return res.status(400).json({ success: false, message: 'سرفصل یا زیرسرفصلِ مقصد معتبر نیست.' });
+    }
+
+    const scope = { schoolId: schoolContext.schoolId, needsCategoryReview: true, status: { $ne: 'void' } };
+    if (String(payload.financialYearId || '').trim()) scope.financialYearId = String(payload.financialYearId).trim();
+    const filter = applyToAll
+      ? { ...scope, legacyCategory }
+      : { ...scope, _id: { $in: expenseIds } };
+
+    const result = await ExpenseEntry.updateMany(filter, {
+      $set: {
+        category: selection.category,
+        subCategory: selection.subCategory || '',
+        needsCategoryReview: false
+      }
+    });
+    const updatedCount = Number(result.modifiedCount ?? result.nModified ?? 0);
+
+    let aliasAdded = false;
+    if (addAlias && applyToAll && legacyCategory) {
+      const def = await ExpenseCategoryDefinition.findOne({ key: selection.category });
+      if (def && !(def.aliases || []).some((alias) => alias.value === legacyCategory)) {
+        def.aliases.push({ value: legacyCategory, subCategory: selection.subCategory || '' });
+        def.updatedBy = req.user.id;
+        await def.save();
+        aliasAdded = true;
+      }
+    }
+
+    await logActivity({
+      req,
+      action: 'finance_resolve_expense_category_review',
+      targetType: 'ExpenseCategoryDefinition',
+      targetId: String(selection.category || ''),
+      meta: {
+        legacyCategory: applyToAll ? legacyCategory : `(${expenseIds.length} id)`,
+        category: selection.category,
+        subCategory: selection.subCategory || '',
+        updatedCount,
+        aliasAdded
+      }
+    });
+
+    invalidateFinanceReportCache();
+    return res.json({
+      success: true,
+      updatedCount,
+      aliasAdded,
+      message: updatedCount
+        ? `${updatedCount} مصرف به «${selection.category}» دسته‌بندی شد.`
+        : 'هیچ ردیفی برای به‌روزرسانی پیدا نشد.'
+    });
+  } catch (error) {
+    console.error('finance expense category review resolve failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'اعمالِ دسته‌بندیِ معلق ناموفق بود.' });
+  }
+});
+
 router.post('/admin/expenses', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const payload = req.body || {};

@@ -55,6 +55,12 @@ const expenseEntrySchema = new mongoose.Schema({
     index: true
   },
   subCategory: { type: String, default: '', trim: true },
+  // Set by the expense-chart migration for rows whose original category string
+  // could not be mapped to the unified chart. `legacyCategory` keeps the raw
+  // pre-migration value so the "دسته‌بندیِ معلق" queue can group identical
+  // values and classify them in one action.
+  legacyCategory: { type: String, default: '', trim: true },
+  needsCategoryReview: { type: Boolean, default: false, index: true },
   amount: { type: Number, required: true, min: 0 },
   currency: { type: String, default: 'AFN', trim: true },
   expenseDate: { type: Date, required: true, index: true },
@@ -135,6 +141,7 @@ const expenseEntrySchema = new mongoose.Schema({
 expenseEntrySchema.pre('validate', function syncExpenseEntryState() {
   if (typeof this.category === 'string') this.category = this.category.trim().toLowerCase();
   if (typeof this.subCategory === 'string') this.subCategory = this.subCategory.trim();
+  if (typeof this.legacyCategory === 'string') this.legacyCategory = this.legacyCategory.trim().toLowerCase();
   if (typeof this.currency === 'string') this.currency = this.currency.trim().toUpperCase() || 'AFN';
   if (typeof this.vendorName === 'string') this.vendorName = this.vendorName.trim();
   if (typeof this.referenceNo === 'string') this.referenceNo = this.referenceNo.trim();
@@ -182,6 +189,7 @@ expenseEntrySchema.pre('validate', function syncExpenseEntryState() {
 expenseEntrySchema.index({ financialYearId: 1, status: 1, expenseDate: -1 });
 expenseEntrySchema.index({ academicYearId: 1, classId: 1, status: 1 });
 expenseEntrySchema.index({ category: 1, status: 1, expenseDate: -1 });
+expenseEntrySchema.index({ schoolId: 1, needsCategoryReview: 1, financialYearId: 1 });
 expenseEntrySchema.index({ financialYearId: 1, approvalStage: 1, createdAt: -1 });
 expenseEntrySchema.index({ treasuryAccountId: 1, status: 1, expenseDate: -1 });
 expenseEntrySchema.index({ procurementCommitmentId: 1, status: 1, expenseDate: -1 });

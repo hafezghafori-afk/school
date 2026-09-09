@@ -25,6 +25,16 @@ const expenseSubCategorySchema = new mongoose.Schema({
   order: { type: Number, default: 0 }
 }, { _id: false });
 
+// Legacy raw `category` strings that fold into this definition. Populated by the
+// expense-chart migration and by the "دسته‌بندیِ معلق" review queue: when an admin
+// classifies a legacy value once, it is remembered here so every other row with
+// the same value resolves without re-asking. Also lets closed-year rows (whose
+// `category` is intentionally left untouched) roll up under the new key in reports.
+const expenseCategoryAliasSchema = new mongoose.Schema({
+  value: { type: String, required: true, trim: true, lowercase: true },
+  subCategory: { type: String, default: '', trim: true }
+}, { _id: false });
+
 const expenseCategoryDefinitionSchema = new mongoose.Schema({
   key: { type: String, required: true, trim: true, unique: true, index: true },
   label: { type: String, required: true, trim: true },
@@ -39,6 +49,10 @@ const expenseCategoryDefinitionSchema = new mongoose.Schema({
   order: { type: Number, default: 0 },
   subCategories: {
     type: [expenseSubCategorySchema],
+    default: []
+  },
+  aliases: {
+    type: [expenseCategoryAliasSchema],
     default: []
   },
   createdBy: {
@@ -76,6 +90,18 @@ expenseCategoryDefinitionSchema.pre('validate', function normalizeExpenseCategor
     })
     .filter(Boolean)
     .sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
+
+  const seenAlias = new Set();
+  this.aliases = (Array.isArray(this.aliases) ? this.aliases : [])
+    .map((item) => ({
+      value: String(item?.value || '').trim().toLowerCase(),
+      subCategory: slugifyKey(item?.subCategory || '', '')
+    }))
+    .filter((item) => {
+      if (!item.value || seenAlias.has(item.value)) return false;
+      seenAlias.add(item.value);
+      return true;
+    });
 });
 
 expenseCategoryDefinitionSchema.index({ isActive: 1, order: 1, label: 1 });
