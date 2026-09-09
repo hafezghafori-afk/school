@@ -837,17 +837,21 @@ router.post('/bills/preview', async (req, res) => {
       .filter((r) => !r.studentId || r.studentId.status !== 'inactive')
       .map((r) => {
         const c = byReg.get(String(r._id));
+        // مبلغِ مؤثر: monthlyFee، وگرنه feeAmount. بلِ صفر صادر نمی‌شود، پس
+        // ردیفِ بی‌مبلغ باید همین‌جا دیده شود نه این‌که بی‌صدا رد شود.
+        const net = L.effectiveMonthlyFee(r);
+        const reason = L.billMonthDisallowReason(r, month) || (net > 0 ? '' : 'no-fee');
         return {
           registrationId: r._id,
           studentId: r.studentId,
           courseId: r.courseId,
           classId: r.classId,
-          monthlyFee: toNumber(r.monthlyFee),
-          proposedNet: toNumber(r.monthlyFee),
+          monthlyFee: net,
+          proposedNet: net,
           hasBill: Boolean(c),
           billStatus: c ? c.status : '',
-          allowed: L.billMonthAllowed(r, month),
-          disallowReason: L.billMonthDisallowReason(r, month)
+          allowed: reason === '',
+          disallowReason: reason
         };
       });
     res.json({
@@ -858,7 +862,8 @@ router.post('/bills/preview', async (req, res) => {
       totals: {
         active: rows.length,
         withBill: rows.filter((x) => x.hasBill).length,
-        withoutBill: rows.filter((x) => !x.hasBill && x.allowed).length
+        withoutBill: rows.filter((x) => !x.hasBill && x.allowed).length,
+        noFee: rows.filter((x) => x.disallowReason === 'no-fee').length
       }
     });
   } catch (error) {
@@ -882,12 +887,18 @@ router.post('/bills/issue', async (req, res) => {
       issuedBy: userId(req)
     });
     const issued = result.created + result.updated;
+    const parts = [];
+    if (result.skipped) parts.push(`${result.skipped} از قبل داشتند`);
+    if (result.rejected) parts.push(`${result.rejected} صادر نشد — «فیسِ ماهانه» یا ماهِ عضویتِ آن‌ها را بررسی کنید`);
+    const tail = parts.length ? ` (${parts.join('، ')})` : '';
     res.json({
       success: true,
       ...result,
       message: issued > 0
-        ? `بلِ ماهِ ${result.label} برای ${issued} شاگرد صادر شد${result.skipped ? ` (${result.skipped} از قبل داشتند)` : ''}.`
-        : `همهٔ شاگردانِ انتخاب‌شده از قبل بلِ ماهِ ${result.label} داشتند.`
+        ? `بلِ ماهِ ${result.label} برای ${issued} شاگرد صادر شد${tail}.`
+        : result.rejected
+          ? `هیچ بلی برای ماهِ ${result.label} صادر نشد — ${result.rejected} ثبت‌نام رد شد؛ «فیسِ ماهانه» یا ماهِ عضویتِ آن‌ها را بررسی کنید.`
+          : `همهٔ شاگردانِ انتخاب‌شده از قبل بلِ ماهِ ${result.label} داشتند.`
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error?.message || 'صدورِ گروهیِ بل ناموفق بود.' });

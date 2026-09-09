@@ -1484,6 +1484,9 @@ export default function AcademyManagement() {
                     <StatCard label="شاگردانِ ماهانه" value={fmt(billPreview.totals?.active || 0)} />
                     <StatCard label="بلِ صادرشده" value={fmt(billPreview.totals?.withBill || 0)} tone="green" />
                     <StatCard label={`بدونِ بلِ ${billPreview.label}`} value={fmt(billPreview.totals?.withoutBill || 0)} tone="amber" />
+                    {billPreview.totals?.noFee > 0 && (
+                      <StatCard label="فیسِ ماهانه تعیین نشده" value={fmt(billPreview.totals.noFee)} tone="red" />
+                    )}
                   </div>
                 )}
                 <div style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -1512,10 +1515,12 @@ export default function AcademyManagement() {
                       `${fmt(x.proposedNet)} ${currency}`,
                       x.hasBill
                         ? <span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.ok }}>بل صادرشده</span>
-                        : x.disallowReason === 'before-enrolment'
-                          ? <span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.muted }}>پیش از عضویتِ شاگرد</span>
-                          : x.disallowReason
-                            ? <span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.muted }}>خارج از بازه</span>
+                        : x.disallowReason === 'no-fee'
+                          ? <span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.bad }}>فیسِ ماهانه تعیین نشده</span>
+                          : x.disallowReason === 'before-enrolment'
+                            ? <span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.muted }}>پیش از عضویتِ شاگرد</span>
+                            : x.disallowReason
+                              ? <span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.muted }}>خارج از بازه</span>
                             : <span style={{ ...CHIP_STYLE.base, ...CHIP_STYLE.bad }}>بل صادر نشده</span>
                     ])}
                   />

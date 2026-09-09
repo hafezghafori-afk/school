@@ -237,6 +237,17 @@ function billMonthAllowed(reg, periodKey) {
 }
 
 /**
+ * فیسِ مؤثرِ ماهانهٔ یک ثبت‌نام. برای پلانِ ماهانه، feeAmount همان فیسِ یک ماه
+ * است (هم‌راستا با buildInitialCharges و با مرکزِ موقت) — پس اگر monthlyFee
+ * خالی مانده باشد، feeAmount جای آن را می‌گیرد. بدونِ این fallback، ثبت‌نامی که
+ * monthlyFee‌اش صفر مانده (مثلاً مهاجرت که مبلغ را فقط در حافظه حساب کرد و روی
+ * ثبت‌نام ننوشت) هنگامِ «صدور بل» بی‌صدا رد می‌شود.
+ */
+function effectiveMonthlyFee(reg) {
+  return round(num(reg?.monthlyFee) || num(reg?.feeAmount));
+}
+
+/**
  * صدورِ صریحِ «بلِ یک ماه» برای یک ثبت‌نام. idempotent — بلِ موجود اگر پرداخت
  * نخورده و مبلغ/تخفیف عوض شده به‌روز می‌شود؛ بلِ ابطالی دوباره زنده می‌شود.
  * @returns {Promise<{ status:'created'|'updated'|'exists'|'rejected', reason?:string, chargeId?:string }>}
@@ -245,9 +256,14 @@ async function issueBillForMonth(reg, periodKey, { dueDay = 20, amount = null, d
   if (!reg || !/^\d{3,4}-(0[1-9]|1[0-2])$/.test(String(periodKey || ''))) return { status: 'rejected', reason: 'ماهِ نامعتبر' };
   const bad = billMonthDisallowReason(reg, periodKey);
   if (bad) return { status: 'rejected', reason: bad };
-  const net = amount != null ? round(num(amount)) : round(num(reg.monthlyFee));
+  const net = amount != null ? round(num(amount)) : effectiveMonthlyFee(reg);
   const disc = discountAmount != null ? round(num(discountAmount)) : 0;
   if (net <= 0) return { status: 'rejected', reason: 'مبلغِ بل صفر است' };
+  // خوددرمانی: اگر مبلغ از feeAmount آمد، همان را روی ثبت‌نام هم بنویس تا دفعهٔ
+  // بعد لازم نباشد حدس بزنیم و «فیسِ ماهانه» در UI درست نشان داده شود.
+  if (amount == null && !(num(reg.monthlyFee) > 0)) {
+    await AcademyRegistration.updateOne({ _id: reg._id }, { $set: { monthlyFee: net } });
+  }
 
   const existing = await AcademyCharge.findOne({ registrationId: reg._id, kind: 'monthly', periodKey });
   if (existing) {
@@ -300,21 +316,29 @@ async function issueBillsForMonth({ month, dueDay = 20, courseId = '', classId =
   if (courseId) filter.courseId = courseId;
   if (classId) filter.classId = classId;
   const regs = await AcademyRegistration.find(filter)
-    .select('_id studentId courseId classId registrationDate startDate monthlyFee currency').lean();
+    .select('_id studentId courseId classId registrationDate startDate monthlyFee feeAmount paymentPlan currency').lean();
   const wanted = Array.isArray(ids) && ids.length ? new Set(ids.map(String)) : null;
   let created = 0;
   let updated = 0;
   let skipped = 0;
+  // بلی که *نشد* صادر شود با دلیلش — تا در پیام «از قبل داشتند» جا نزند.
+  const rejected = [];
   const touched = new Set();
   for (const reg of regs) {
     if (wanted && !wanted.has(String(reg._id)) && !wanted.has(String(reg.studentId))) continue;
     const r = await issueBillForMonth(reg, month, { dueDay, issuedBy });
     if (r.status === 'created') { created += 1; touched.add(String(reg._id)); }
     else if (r.status === 'updated') { updated += 1; touched.add(String(reg._id)); }
+    else if (r.status === 'rejected') rejected.push({ registrationId: String(reg._id), reason: r.reason || '' });
     else skipped += 1;
   }
   for (const id of touched) await recomputeRegistration(id);
-  return { month, label: shamsiMonthLabel(month), created, updated, skipped, registrations: regs.length };
+  return {
+    month, label: shamsiMonthLabel(month),
+    created, updated, skipped,
+    rejected: rejected.length, rejectedRows: rejected,
+    registrations: regs.length
+  };
 }
 
 /**
@@ -378,6 +402,7 @@ module.exports = {
   anchorMonthKey,
   billMonthAllowed,
   billMonthDisallowReason,
+  effectiveMonthlyFee,
   recomputeRegistration,
   fifoAllocate,
   allocatePayment,
