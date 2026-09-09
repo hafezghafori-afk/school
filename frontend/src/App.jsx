@@ -1305,6 +1305,7 @@ function AppShell() {
   useEffect(() => {
     if (!authed) return undefined;
     let cancelled = false;
+    let syncedOnce = false;
 
     const syncIdentity = async () => {
       try {
@@ -1314,6 +1315,17 @@ function AppShell() {
 
         const user = data.user;
         const nextPermissions = Array.isArray(user.effectivePermissions) ? user.effectivePermissions : [];
+
+        // If ریاست عمومی changed this account's access while it was open, the
+        // cached login snapshot is stale. Reload once so every permission-gated
+        // menu/route re-evaluates against the new set (no full re-login needed).
+        let stored = [];
+        try { stored = JSON.parse(localStorage.getItem('effectivePermissions') || '[]'); } catch { stored = []; }
+        const changed = syncedOnce
+          && Array.isArray(stored)
+          && (stored.length !== nextPermissions.length
+            || stored.some((item) => !nextPermissions.includes(item))
+            || nextPermissions.some((item) => !stored.includes(item)));
 
         localStorage.setItem('role', String(user.role || localStorage.getItem('role') || ''));
         localStorage.setItem('orgRole', String(user.orgRole || localStorage.getItem('orgRole') || ''));
@@ -1326,14 +1338,24 @@ function AppShell() {
           localStorage.setItem('avatarUrl', String(user.avatarUrl || ''));
           setAvatarUrl(String(user.avatarUrl || ''));
         }
+
+        syncedOnce = true;
+        if (changed && !cancelled) window.location.reload();
       } catch {
         // Silent: guards still fallback to token and stored values.
       }
     };
 
     syncIdentity();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') syncIdentity();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
     };
   }, [authed]);
 

@@ -274,6 +274,10 @@ const ADMIN_LEVEL_ALERT_DOMAINS = {
   finance_lead: new Set(['finance', 'general'])
 };
 
+// پست‌هایی که کارهای فوریِ «سلامت دفترچه» (حساب‌های بدون پروندهٔ رسمی: استاد/کارمند،
+// شاگرد، والد) را در داشبورد می‌بینند — کارِ روزمرهٔ مدیر مکتب است، نه فقط ریاست عمومی.
+const URGENT_DIRECTORY_LEVELS = new Set(['general_president', 'school_manager']);
+
 // آیکون هر بخش مدیریتی (بر اساس key در modernManagementSections) — فقط برای ردیف میانبرهای بزرگ استفاده می‌شود.
 const MANAGEMENT_SECTION_ICONS = {
   schools: 'fa-building',
@@ -3519,6 +3523,7 @@ export default function AdminPanel() {
   // (رکورد AfghanTeacher برای استاد، یا guardian در پروفایل شاگرد برای والد) وصل نیست.
   const orphanInstructorUserCount = Number(directoryHealth.orphanInstructorUsers || 0);
   const orphanParentUserCount = Number(directoryHealth.orphanParentUsers || 0);
+  const orphanStudentUserCount = Number(directoryHealth.orphanStudentUsers || 0);
   const financeStats = stats.finance || {};
   const executiveSummary = {
     totalStudents: Number(financeStats.membershipStudents ?? dashboardSummary.totalStudents ?? stats.users ?? 0),
@@ -3705,18 +3710,28 @@ export default function AdminPanel() {
       badge: 'فوری',
       tone: 'bad'
     }] : []),
-    ...(adminLevel === 'general_president' && orphanInstructorUserCount > 0 ? [{
+    // این سه مورد (استاد/کارمند، شاگرد، والد بدون پروفایل رسمی) کارِ روزمرهٔ مدیر
+    // مکتب هم هست، نه فقط ریاست عمومی.
+    ...(URGENT_DIRECTORY_LEVELS.has(adminLevel) && orphanInstructorUserCount > 0 ? [{
       key: 'orphan-instructor-users',
-      title: 'حساب استاد بدون پروفایل رسمی',
-      meta: `${orphanInstructorUserCount.toLocaleString('fa-AF-u-ca-persian')} حساب استاد — برای رفع، پروندهٔ رسمی بسازید و به حساب موجود وصل کنید`,
+      title: 'حساب استاد/کارمند بدون پروندهٔ رسمی',
+      meta: `${orphanInstructorUserCount.toLocaleString('fa-AF-u-ca-persian')} حساب — پروندهٔ رسمی بسازید و به حساب موجود وصل کنید`,
       to: '/teacher-registration',
       badge: 'فوری',
       tone: 'bad'
     }] : []),
-    ...(adminLevel === 'general_president' && orphanParentUserCount > 0 ? [{
+    ...(URGENT_DIRECTORY_LEVELS.has(adminLevel) && orphanStudentUserCount > 0 ? [{
+      key: 'orphan-student-users',
+      title: 'حساب شاگرد بدون پروندهٔ رسمی',
+      meta: `${orphanStudentUserCount.toLocaleString('fa-AF-u-ca-persian')} حساب — شاگرد را ثبت‌نام کنید و پرونده بسازید`,
+      to: '/student-registration',
+      badge: 'فوری',
+      tone: 'bad'
+    }] : []),
+    ...(URGENT_DIRECTORY_LEVELS.has(adminLevel) && orphanParentUserCount > 0 ? [{
       key: 'orphan-parent-users',
       title: 'حساب والد بدون فرزند وصل‌شده',
-      meta: `${orphanParentUserCount.toLocaleString('fa-AF-u-ca-persian')} حساب والد — برای رفع، او را از تب والدین/سرپرستان به فرزندش وصل کنید`,
+      meta: `${orphanParentUserCount.toLocaleString('fa-AF-u-ca-persian')} حساب والد — او را از تب والدین/سرپرستان به فرزندش وصل کنید`,
       to: '/admin-users#guardians',
       badge: 'فوری',
       tone: 'bad'
@@ -3724,7 +3739,16 @@ export default function AdminPanel() {
     ...(urgentAlerts || [])
       .filter((alert) => {
         const roleDomains = ADMIN_LEVEL_ALERT_DOMAINS[adminLevel];
-        return !roleDomains || roleDomains.has(resolveAlertDomain(alert));
+        if (!roleDomains) return true;
+        const domain = resolveAlertDomain(alert);
+        if (roleDomains.has(domain)) return true;
+        // widen by real capability: a manager granted finance/user/content perms
+        // should see those urgent alerts too, not only the level's default domains
+        if (domain === 'finance' && canManageFinance) return true;
+        if (domain === 'users' && canManageUsers) return true;
+        if (domain === 'support' && canManageContent) return true;
+        if (domain === 'education' && (canManageSchedule || canManageEnrollments)) return true;
+        return false;
       })
       .slice(0, 4)
       .map((alert) => ({
@@ -4057,13 +4081,23 @@ export default function AdminPanel() {
   const managementGroups = Array.from(new Set(visibleManagementSections.map((item) => item.group || 'عمومی')));
 
   const isGeneralPresident = adminLevel === 'general_president';
+  // A section only ends up in `visibleManagementSections` when the user's actual
+  // effective permissions produced a `to`/`onAction` for it. So the real filter
+  // is permission-based: if ریاست عمومی grants a manager an extra permission, the
+  // tools it unlocks now surface here instead of being hidden by a per-level
+  // group whitelist. `ADMIN_LEVEL_GROUP_ACCESS` is kept only as an ordering hint
+  // for the default (no-extra-permission) layout, not as a gate.
   const roleAllowedGroups = ADMIN_LEVEL_GROUP_ACCESS[adminLevel] ?? null;
-  const roleManagementSections = roleAllowedGroups
-    ? visibleManagementSections.filter((item) => roleAllowedGroups.has(item.group || 'عمومی'))
-    : visibleManagementSections;
-  const roleManagementGroups = managementGroups.filter((group) => (
-    roleManagementSections.some((item) => (item.group || 'عمومی') === group)
-  ));
+  const roleManagementSections = visibleManagementSections;
+  const roleManagementGroups = managementGroups
+    .filter((group) => roleManagementSections.some((item) => (item.group || 'عمومی') === group))
+    .sort((left, right) => {
+      // the level's default groups keep their familiar spot; groups newly unlocked
+      // by a granted permission line up after them rather than reshuffling the UI
+      const leftPref = roleAllowedGroups && roleAllowedGroups.has(left) ? 0 : 1;
+      const rightPref = roleAllowedGroups && roleAllowedGroups.has(right) ? 0 : 1;
+      return leftPref - rightPref;
+    });
   const roleHeroCopy = ADMIN_LEVEL_HERO_COPY[adminLevel] || ADMIN_LEVEL_HERO_COPY.general_president;
   const roleHeroActions = ADMIN_LEVEL_HERO_ACTIONS[adminLevel] || ADMIN_LEVEL_HERO_ACTIONS.general_president;
   const generalPresidentKpiItems = [
