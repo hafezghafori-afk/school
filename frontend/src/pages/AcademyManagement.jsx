@@ -1091,6 +1091,33 @@ export default function AcademyManagement() {
     }
   };
 
+  const deleteStudent = async (student) => {
+    if (!window.confirm(`«${student.fullName || student.studentCode}» کاملاً حذف شود؟\nاین شاگرد به هیچ صنفی معرفی نشده و پرداختی ندارد. این کار برگشت‌ناپذیر است.`)) return;
+    setBusy(true);
+    try {
+      const data = await requestJson(`/api/academy/students/${student._id}`, { method: 'DELETE' });
+      toast.success(data.message || 'شاگرد حذف شد.');
+      await loadData();
+      if (reports) { setReports(null); setDebtors(null); }
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // شاگردی که ثبت‌نام یا پرداخت دارد حذف نمی‌شود — دکمه‌اش غیرفعال می‌ماند تا
+  // پیش از کلیک معلوم باشد چرا. بک‌اند هم همین را دوباره بررسی می‌کند.
+  const studentDeleteBlock = (student) => {
+    const id = String(student._id);
+    const regs = registrations.filter((r) => String(r.studentId?._id || r.studentId || '') === id).length;
+    const pays = payments.filter((p) => String(p.studentId?._id || p.studentId || '') === id).length;
+    if (regs && pays) return `${regs} ثبت‌نام و ${pays} پرداخت دارد`;
+    if (regs) return `${regs} ثبت‌نام در صنف دارد`;
+    if (pays) return `${pays} پرداخت دارد`;
+    return '';
+  };
+
   return (
     <section className="academy-page" dir="rtl">
       <div className="academy-topbar">
@@ -1201,28 +1228,46 @@ export default function AcademyManagement() {
                     <span>نمایشِ غیرفعال‌ها</span>
                   </label>
                 </div>
-                <p className="academy-form-hint">غیرفعال‌کردن، شاگرد را از لیستِ صنف، حاضری، یادآوریِ فیس و باقی‌داران کنار می‌گذارد؛ سابقهٔ مالی‌اش می‌ماند و با «فعال‌سازی» برمی‌گردد.</p>
+                <p className="academy-form-hint">
+                  غیرفعال‌کردن، شاگرد را از لیستِ صنف، حاضری، یادآوریِ فیس و باقی‌داران کنار می‌گذارد؛ سابقهٔ مالی‌اش می‌ماند و با «فعال‌سازی» برمی‌گردد.
+                  {' '}«حذف» فقط برای شاگردی فعال است که به هیچ صنفی معرفی نشده و هیچ پرداختی ندارد — یعنی ثبتِ اشتباه؛ در بقیهٔ موارد «غیرفعال‌سازی» درست است.
+                </p>
                 <Table
                   columns={['کد', 'نام', 'تماس', 'وضعیت', 'اقدام']}
-                  rows={filteredStudents.map((item) => [
-                    item.studentCode,
-                    <span className={item.status === 'inactive' ? 'academy-void' : ''}>{text(item.fullName)}</span>,
-                    text(item.phone),
-                    <span className={`academy-chip ${item.status === 'inactive' ? 'academy-chip-bad' : item.status === 'completed' ? 'academy-chip-muted' : 'academy-chip-ok'}`}>
-                      {item.status === 'inactive' ? 'غیرفعال' : item.status === 'completed' ? 'فارغ' : 'فعال'}
-                    </span>,
-                    <div className="academy-cer-actions" style={{ marginInlineStart: 0 }}>
-                      <button type="button" className="academy-inline-button" onClick={() => openStudentProfile(item)}>مشاهده</button>
-                      <button
-                        type="button"
-                        className={`academy-inline-button${item.status === 'inactive' ? '' : ' academy-danger'}`}
-                        onClick={() => toggleStudentStatus(item)}
-                        disabled={busy}
-                      >
-                        {item.status === 'inactive' ? 'فعال‌سازی' : 'غیرفعال‌سازی'}
-                      </button>
-                    </div>
-                  ])}
+                  rows={filteredStudents.map((item) => {
+                    const blocked = studentDeleteBlock(item);
+                    return [
+                      item.studentCode,
+                      <span className={item.status === 'inactive' ? 'academy-void' : ''}>{text(item.fullName)}</span>,
+                      text(item.phone),
+                      <span className={`academy-chip ${item.status === 'inactive' ? 'academy-chip-bad' : item.status === 'completed' ? 'academy-chip-muted' : 'academy-chip-ok'}`}>
+                        {item.status === 'inactive' ? 'غیرفعال' : item.status === 'completed' ? 'فارغ' : 'فعال'}
+                      </span>,
+                      <div className="academy-cer-actions" style={{ marginInlineStart: 0 }}>
+                        <button type="button" className="academy-inline-button" onClick={() => openStudentProfile(item)}>مشاهده</button>
+                        <button
+                          type="button"
+                          className={`academy-inline-button${item.status === 'inactive' ? '' : ' academy-danger'}`}
+                          onClick={() => toggleStudentStatus(item)}
+                          disabled={busy}
+                        >
+                          {item.status === 'inactive' ? 'فعال‌سازی' : 'غیرفعال‌سازی'}
+                        </button>
+                        <button
+                          type="button"
+                          className="academy-inline-button"
+                          style={{ borderColor: 'rgba(248,113,113,.5)', color: '#fca5a5' }}
+                          onClick={() => deleteStudent(item)}
+                          disabled={busy || Boolean(blocked)}
+                          title={blocked
+                            ? `${blocked}؛ به‌جای حذف «غیرفعال‌سازی» کنید.`
+                            : 'حذفِ کاملِ این شاگرد (بدونِ صنف و بدونِ پرداخت)'}
+                        >
+                          حذف
+                        </button>
+                      </div>
+                    ];
+                  })}
                 />
               </div>
             </div>
