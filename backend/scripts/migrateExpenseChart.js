@@ -26,9 +26,11 @@
  *   node backend/scripts/migrateExpenseChart.js --apply --include-closed
  *   node backend/scripts/migrateExpenseChart.js --uri="..." --dns=8.8.8.8   # Atlas
  */
-require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+// Load backend/.env regardless of the cwd the script is launched from
+// (running it from the repo root otherwise silently misses MONGO_URI).
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const dns = require('dns');
 const mongoose = require('mongoose');
 
