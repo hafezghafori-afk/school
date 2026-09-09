@@ -1138,7 +1138,7 @@ export default function AcademyManagement() {
                 <StatCard label="صنف‌های فعال" value={fmt(summary.activeClasses)} />
                 <StatCard label="عواید ماه" value={`${fmt(summary.monthIncome)} ${currency}`} tone="green" />
                 <StatCard label="مصارف ماه" value={`${fmt(summary.monthExpenses)} ${currency}`} tone="red" />
-                <StatCard label="باقی‌داری کل" value={`${fmt(summary.outstandingTotal)} ${currency}`} tone="amber" />
+                <StatCard label="باقیاتِ معوق" value={`${fmt(summary.overdueTotal ?? summary.outstandingTotal)} ${currency}`} tone="red" />
                 <StatCard label="بل‌های صادرشده" value={fmt(summary.invoices)} />
               </div>
               <div className="academy-grid">
@@ -1541,13 +1541,15 @@ export default function AcademyManagement() {
                 <StatCard label={`عایدِ ${monthPnl?.label || 'ماهِ جاری'}`} value={`${fmt(monthPnl?.income || 0)} ${currency}`} tone="green" />
                 <StatCard label={`مصرفِ ${monthPnl?.label || 'ماهِ جاری'}`} value={`${fmt(monthPnl?.expenses || 0)} ${currency}`} tone="red" />
                 <StatCard label={`مفادِ ${monthPnl?.label || 'ماهِ جاری'}`} value={`${fmt(monthPnl?.net || 0)} ${currency}`} />
-                <StatCard label="تعداد باقی‌داران" value={fmt(ledger?.totals?.debtors || 0)} />
+                <StatCard label="تعداد باقی‌داران (معوق)" value={fmt(ledger?.totals?.debtors || 0)} />
                 <StatCard label="مجموع پرداخت‌ها" value={`${fmt(ledger?.totals?.totalPaid || 0)} ${currency}`} tone="green" />
-                <StatCard label="مجموع باقیات" value={`${fmt(ledger?.totals?.totalBalance || 0)} ${currency}`} tone="amber" />
+                <StatCard label="باقیاتِ معوق" value={`${fmt(ledger?.totals?.overdueTotal || 0)} ${currency}`} tone="red" />
+                <StatCard label="بلِ ماه‌های آینده" value={`${fmt(ledger?.totals?.notYetDueTotal || 0)} ${currency}`} tone="amber" />
               </div>
               <p className="academy-form-hint">
                 عاید فقط از پرداختِ ابطال‌نشده و دارای بلِ صادرشده، منهای مصارفِ همان ماه.
                 {monthPnl?.byFeeMonth?.length ? ` — عاید بابتِ فیسِ ماهِ: ${monthPnl.byFeeMonth.map((b) => `${b.label} (${fmt(b.amount)})`).join('، ')}` : ''}
+                {' '}«باقیاتِ معوق» فقط ماه‌هایی است که رسیده‌اند؛ بلِ ماهِ آینده بدهیِ معوق نیست و جدا شمرده می‌شود.
               </p>
               <div className="academy-panel">
                 <div className="academy-panel-head">
@@ -1871,7 +1873,8 @@ export default function AcademyManagement() {
               <div className="academy-stats">
                 <StatCard label="کل فیس قابل دریافت" value={`${fmt(reports?.summary?.dueTotal || summary.dueTotal)} ${currency}`} />
                 <StatCard label="کل دریافت‌شده" value={`${fmt(reports?.summary?.paidTotal || summary.paidTotal)} ${currency}`} tone="green" />
-                <StatCard label="کل باقی‌داری" value={`${fmt(reports?.summary?.outstandingTotal || summary.outstandingTotal)} ${currency}`} tone="amber" />
+                <StatCard label="باقیاتِ معوق (ماه‌های رسیده)" value={`${fmt(reports?.summary?.overdueTotal ?? summary.overdueTotal)} ${currency}`} tone="red" />
+                <StatCard label="بلِ ماه‌های آینده (سررسید نشده)" value={`${fmt(reports?.summary?.notYetDueTotal ?? summary.notYetDueTotal)} ${currency}`} tone="amber" />
                 <StatCard label="اضافه‌پرداخت / اعتبار" value={`${fmt(reports?.summary?.overpaidTotal ?? summary.overpaidTotal)} ${currency}`} tone="blue" />
                 <StatCard label="مفاد ماه جاری" value={`${fmt((reports?.summary?.monthIncome || summary.monthIncome || 0) - (reports?.summary?.monthExpenses || summary.monthExpenses || 0))} ${currency}`} />
               </div>

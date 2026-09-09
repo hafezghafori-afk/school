@@ -86,6 +86,25 @@ async function buildSummary() {
     (sum, item) => sum + Math.max(0, toNumber(item.paidAmount) - toNumber(item.totalPayable)),
     0
   );
+  // «باقی‌داری» یک عدد نیست: بلِ ماهی که هنوز نرسیده بدهیِ معوق نیست. با صدورِ
+  // بلِ ماه‌های پیش‌رو، جمع‌کردنِ هر دو در یک رقم باقیات را چند برابر نشان می‌دهد.
+  // پس به «معوق» (ماهش رسیده) و «سررسید نشده» (ماهِ آینده) تفکیک می‌شود؛
+  // مجموعِ این دو دقیقاً outstandingTotal است.
+  const curOrd = academyLedger.monthOrdinal(academyLedger.currentShamsiMonthKey());
+  const openCharges = await AcademyCharge.find({
+    registrationId: { $in: registrations.map((item) => item._id) },
+    status: { $ne: 'void' },
+    balance: { $gt: 0 }
+  }).select('periodKey balance').lean();
+  let overdueTotal = 0;
+  let notYetDueTotal = 0;
+  for (const charge of openCharges) {
+    const ord = academyLedger.monthOrdinal(charge.periodKey);
+    // قلمِ بدونِ ماه (شمولیت/دستی) همیشه رسیده حساب می‌شود
+    if (ord && ord > curOrd) notYetDueTotal += toNumber(charge.balance);
+    else overdueTotal += toNumber(charge.balance);
+  }
+
   // عاید/مصرف/مفادِ ماهِ جاری — تعریفِ واحد در academyLedger.monthlyPnl:
   // عاید فقط از پرداختِ ابطال‌نشدهٔ دارای بل، منهای مصارفِ همان ماه.
   const pnl = await academyLedger.monthlyPnl(academyLedger.currentShamsiMonthKey());
@@ -98,6 +117,8 @@ async function buildSummary() {
     dueTotal,
     paidTotal,
     outstandingTotal,
+    overdueTotal: academyLedger.round(overdueTotal),
+    notYetDueTotal: academyLedger.round(notYetDueTotal),
     overpaidTotal,
     monthIncome: pnl.income,
     monthExpenses: pnl.expenses,
@@ -1077,15 +1098,8 @@ router.post('/attendance', async (req, res) => {
 
 router.get('/reports/overview', async (_req, res) => {
   try {
-    const [summary, debtors, byCourse, byTeacherAttendance] = await Promise.all([
+    const [summary, byCourse, byTeacherAttendance] = await Promise.all([
       buildSummary(),
-      AcademyRegistration.find({ balance: { $gt: 0 }, status: 'active' })
-        .sort({ balance: -1 })
-        .limit(25)
-        .populate('studentId', 'fullName studentCode phone')
-        .populate('courseId', 'name')
-        .populate('classId', 'name')
-        .lean(),
       AcademyRegistration.aggregate([
         { $group: { _id: '$courseId', registrations: { $sum: 1 }, payable: { $sum: '$totalPayable' }, paid: { $sum: '$paidAmount' }, balance: { $sum: '$balance' } } },
         { $sort: { paid: -1 } },
@@ -1127,7 +1141,26 @@ router.get('/reports/overview', async (_req, res) => {
     ]);
     const paidThisMonthSet = new Set(paidThisMonthAgg.map((item) => String(item._id)));
     const lastPaymentMap = new Map(lastPaymentAgg.map((item) => [String(item._id), item.lastPaymentAt]));
+
+    // بدهیِ *معوق* هر ثبت‌نام: فقط باقیِ بل‌هایی که ماه‌شان رسیده. بلِ ماهِ آینده
+    // شاگرد را باقی‌دار نمی‌کند و نباید در یادآوری یا صدرِ باقی‌داران بیاید.
+    const curOrdOverview = academyLedger.monthOrdinal(academyLedger.currentShamsiMonthKey());
+    const openForOverview = await AcademyCharge.find({
+      registrationId: { $in: outstandingRegs.map((reg) => reg._id) },
+      status: { $ne: 'void' },
+      balance: { $gt: 0 }
+    }).select('registrationId periodKey balance').lean();
+    const overdueByReg = new Map();
+    for (const charge of openForOverview) {
+      const ord = academyLedger.monthOrdinal(charge.periodKey);
+      if (ord && ord > curOrdOverview) continue;
+      const key = String(charge.registrationId);
+      overdueByReg.set(key, academyLedger.round((overdueByReg.get(key) || 0) + toNumber(charge.balance)));
+    }
+    const overdueOf = (reg) => overdueByReg.get(String(reg._id)) || 0;
+
     const feeReminders = outstandingRegs
+      .filter((reg) => overdueOf(reg) > 0.001)
       .filter((reg) => !paidThisMonthSet.has(String(reg._id)))
       .filter((reg) => !reg.studentId || reg.studentId.status !== 'inactive')
       .map((reg) => ({
@@ -1139,13 +1172,23 @@ router.get('/reports/overview', async (_req, res) => {
         totalPayable: reg.totalPayable,
         paidAmount: reg.paidAmount,
         balance: reg.balance,
+        overdueBalance: overdueOf(reg),
         lastPaymentAt: lastPaymentMap.get(String(reg._id)) || null
       }));
+
+    // فهرستِ باقی‌داران از همان مجموعهٔ ۵۰۰تاییِ بالا ساخته می‌شود (نه کوئریِ
+    // جدا با مرتب‌سازیِ balance)، وگرنه کسی که بدهیِ معوقش زیاد ولی balanceِ
+    // خامش پایین است از ۲۵ ردیفِ اول بیرون می‌افتد.
+    const debtorRows = outstandingRegs
+      .map((reg) => ({ ...reg, overdueBalance: overdueOf(reg) }))
+      .filter((reg) => reg.overdueBalance > 0.001)
+      .sort((a, b) => b.overdueBalance - a.overdueBalance)
+      .slice(0, 25);
 
     res.json({
       success: true,
       summary,
-      debtors,
+      debtors: debtorRows,
       byCourse: byCourse.map((item) => ({ ...item, courseName: courseMap.get(String(item._id)) || 'کورس' })),
       attendanceSummary: byTeacherAttendance,
       feeReminderMonth: currentMonthKey,
@@ -1264,8 +1307,9 @@ router.get('/reports/monthly-ledger', async (req, res) => {
     const curKey = L.currentShamsiMonthKey();
     const curOrd = L.monthOrdinal(curKey);
 
+    // شاگردِ غیرفعال از «صدور بل» کنار گذاشته می‌شود ولی بدهی‌اش پابرجاست — پس
+    // این‌جا می‌ماند (با پرچم) تا جمعِ دفتر با کارت‌های گزارش یکی باشد.
     let rows = regs
-      .filter((r) => !r.studentId || r.studentId.status !== 'inactive')
       .map((r) => {
         const list = (byReg.get(String(r._id)) || []).slice().sort((a, b) => L.monthOrdinal(a.periodKey) - L.monthOrdinal(b.periodKey));
         const months = list.map((c) => {
@@ -1283,6 +1327,9 @@ router.get('/reports/monthly-ledger', async (req, res) => {
         const totalNet = L.round(months.reduce((s, m) => s + m.net, 0));
         const totalPaid = L.round(months.reduce((s, m) => s + m.paid, 0));
         const totalBalance = L.round(months.reduce((s, m) => s + m.balance, 0));
+        // باقیِ ماه‌های رسیده = بدهیِ واقعی؛ باقیِ ماه‌های آینده هنوز سررسید نشده.
+        const overdueBalance = L.round(months.filter((m) => m.overdue).reduce((s, m) => s + m.balance, 0));
+        const notYetDueBalance = L.round(months.filter((m) => m.dueLater).reduce((s, m) => s + m.balance, 0));
         const nonMonthly = r.paymentPlan !== 'monthly';
         const noBillThisMonth = r.status === 'active' && !nonMonthly
           && L.billMonthAllowed(r, curKey) && !months.some((m) => m.periodKey === curKey);
@@ -1294,14 +1341,17 @@ router.get('/reports/monthly-ledger', async (req, res) => {
           noBillThisMonth, currentMonthLabel: L.shamsiMonthLabel(curKey),
           months,
           totalPayable: totalNet, totalPaid, totalBalance,
+          overdueBalance, notYetDueBalance,
+          studentInactive: Boolean(r.studentId && r.studentId.status === 'inactive'),
           credit: Math.max(0, L.round(toNumber(r.paidAmount) - totalNet)),
           arrearsFromLabel: (months.find((m) => m.balance > 0.001) || {}).label || '',
           overdueFromLabel: (months.find((m) => m.overdue) || {}).label || ''
         };
       });
 
-    if (onlyDebtors) rows = rows.filter((r) => r.totalBalance > 0.001 || r.noBillThisMonth);
-    rows.sort((a, b) => b.totalBalance - a.totalBalance);
+    // «باقی‌دار» یعنی ماهِ رسیده‌اش پرداخت نشده — نه صرفاً بلِ ماهِ آینده داشتن.
+    if (onlyDebtors) rows = rows.filter((r) => r.overdueBalance > 0.001 || r.noBillThisMonth);
+    rows.sort((a, b) => (b.overdueBalance - a.overdueBalance) || (b.totalBalance - a.totalBalance));
 
     res.json({
       success: true,
@@ -1309,10 +1359,12 @@ router.get('/reports/monthly-ledger', async (req, res) => {
       rows,
       totals: {
         rows: rows.length,
-        debtors: rows.filter((r) => r.totalBalance > 0.001).length,
+        debtors: rows.filter((r) => r.overdueBalance > 0.001).length,
         noBillThisMonth: rows.filter((r) => r.noBillThisMonth).length,
         totalPaid: L.round(rows.reduce((s, r) => s + r.totalPaid, 0)),
-        totalBalance: L.round(rows.reduce((s, r) => s + r.totalBalance, 0))
+        totalBalance: L.round(rows.reduce((s, r) => s + r.totalBalance, 0)),
+        overdueTotal: L.round(rows.reduce((s, r) => s + r.overdueBalance, 0)),
+        notYetDueTotal: L.round(rows.reduce((s, r) => s + r.notYetDueBalance, 0))
       }
     });
   } catch (error) {
