@@ -1409,11 +1409,12 @@ export default function AcademyManagement() {
                   سیستم خودش بل صادر نمی‌کند. برای ثبت‌نامِ ماهانه، بلِ هر ماه را در تبِ «صدور بل» صادر کنید — شاگرد فقط برای ماهی که بلش صادر شده باقی‌دار نشان داده می‌شود.
                 </p>
                 <Table
-                  columns={['شاگرد', 'کورس', 'نوع', 'فیس', 'پرداخت', 'باقی', 'اقلام', 'ویرایش']}
+                  columns={['شاگرد', 'کورس', 'نوع', 'فیس', 'پرداخت', 'باقی', 'اقلام', 'اقدام']}
                   rows={filteredRegistrations.map((item) => {
                     const list = chargesByReg.get(String(item._id)) || [];
                     const overdue = list.filter((c) => c.isOverdue);
                     const nextDue = list.filter((c) => c.balance > 0 && c.dueDate).sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)))[0];
+                    const hasPay = payments.some((p) => String(p.registrationId?._id || p.registrationId || '') === String(item._id));
                     return [
                       <span>
                         {text(item.studentId?.fullName)}
@@ -1431,7 +1432,25 @@ export default function AcademyManagement() {
                       <span className={overdue.length ? 'academy-chip academy-chip-bad' : nextDue ? 'academy-chip' : 'academy-chip academy-chip-ok'}>
                         {list.length ? (overdue.length ? `معوق ${overdue.length}` : nextDue ? `سررسیدِ بعدی ${formatAfghanStoredDateLabel(nextDue.dueDate)}` : 'تسویه') : '—'}
                       </span>,
-                      <button type="button" className="academy-inline-button" onClick={() => openRegEdit(item)}>ویرایش</button>
+                      <span style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}>
+                        <button type="button" className="academy-inline-button" onClick={() => openRegEdit(item)}>ویرایش</button>
+                        <button
+                          type="button"
+                          className="academy-inline-button"
+                          style={{ borderColor: 'rgba(248,113,113,.5)', color: '#fca5a5' }}
+                          disabled={busy || hasPay}
+                          title={hasPay
+                            ? 'این ثبت‌نام پرداخت دارد؛ به‌جای حذف وضعیت را «لغوشده» کنید.'
+                            : 'حذفِ کاملِ این ثبت‌نام و بل‌های پرداخت‌نشده‌اش'}
+                          onClick={() => {
+                            if (window.confirm(`«${text(item.studentId?.fullName)}» در کورسِ «${text(item.courseId?.name)}» — این ثبت‌نام و بل‌های پرداخت‌نشده‌اش کاملاً حذف شوند؟ این کار برگشت‌ناپذیر است.`)) {
+                              deleteRegistration(item._id);
+                            }
+                          }}
+                        >
+                          حذف
+                        </button>
+                      </span>
                     ];
                   })}
                 />
