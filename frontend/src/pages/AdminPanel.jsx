@@ -779,6 +779,7 @@ export default function AdminPanel() {
     }
   });
   const [adminDashboard, setAdminDashboard] = useState(null);
+  const [directoryOrphans, setDirectoryOrphans] = useState(null);
   const [searchQ, setSearchQ] = useState('');
   const [searching, setSearching] = useState(false);
   const [searchToolOpen, setSearchToolOpen] = useState(false);
@@ -955,6 +956,7 @@ export default function AdminPanel() {
   const modernSearchInputRef = useRef(null);
   const schoolSwitcherRef = useRef(null);
   const ownershipPanelRef = useRef(null);
+  const directoryOrphansPanelRef = useRef(null);
 
   useEffect(() => {
     if (!searchToolOpen) return undefined;
@@ -2192,6 +2194,17 @@ export default function AdminPanel() {
     }
   };
 
+  const loadDirectoryOrphans = async () => {
+    if (!canManageUsers) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/users/directory-orphans`, { headers: { ...getAuthHeaders() } });
+      const data = await res.json();
+      setDirectoryOrphans(data?.success ? data : null);
+    } catch {
+      setDirectoryOrphans(null);
+    }
+  };
+
   const loadSettingsQuickLinks = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/settings/public`);
@@ -2499,6 +2512,11 @@ export default function AdminPanel() {
     }
     loadSupportMessages();
   }, [canManageContent]);
+
+  useEffect(() => {
+    if (canManageUsers) loadDirectoryOrphans();
+    else setDirectoryOrphans(null);
+  }, [canManageUsers]);
 
   useEffect(() => {
     loadRecentActivities();
@@ -3521,9 +3539,12 @@ export default function AdminPanel() {
   const directoryHealth = dashboardSummary.directoryHealth || {};
   // حساب کاربری «یتیم» یعنی حساب با نقش استاد/والد وجود دارد ولی به هیچ پروفایل رسمی
   // (رکورد AfghanTeacher برای استاد، یا guardian در پروفایل شاگرد برای والد) وصل نیست.
-  const orphanInstructorUserCount = Number(directoryHealth.orphanInstructorUsers || 0);
-  const orphanParentUserCount = Number(directoryHealth.orphanParentUsers || 0);
-  const orphanStudentUserCount = Number(directoryHealth.orphanStudentUsers || 0);
+  // Prefer the real per-row lists from /admin/users/directory-orphans; fall back
+  // to the coarse count from the dashboard summary only until that loads.
+  const orphanCounts = directoryOrphans?.counts || {};
+  const orphanInstructorUserCount = Number(orphanCounts.instructors ?? directoryHealth.orphanInstructorUsers ?? 0);
+  const orphanParentUserCount = Number(orphanCounts.parents ?? directoryHealth.orphanParentUsers ?? 0);
+  const orphanStudentUserCount = Number(orphanCounts.students ?? directoryHealth.orphanStudentUsers ?? 0);
   const financeStats = stats.finance || {};
   const executiveSummary = {
     totalStudents: Number(financeStats.membershipStudents ?? dashboardSummary.totalStudents ?? stats.users ?? 0),
@@ -3710,29 +3731,30 @@ export default function AdminPanel() {
       badge: 'فوری',
       tone: 'bad'
     }] : []),
-    // این سه مورد (استاد/کارمند، شاگرد، والد بدون پروفایل رسمی) کارِ روزمرهٔ مدیر
-    // مکتب هم هست، نه فقط ریاست عمومی.
+    // این سه مورد (استاد/کارمند، شاگرد، والد بدون پروندهٔ رسمی) کارِ روزمرهٔ مدیر
+    // مکتب هم هست، نه فقط ریاست عمومی. کلیک = رفتن به پنلِ «حساب‌های بدون پرونده»
+    // که نامِ دقیقِ هر حساب را نشان می‌دهد.
     ...(URGENT_DIRECTORY_LEVELS.has(adminLevel) && orphanInstructorUserCount > 0 ? [{
       key: 'orphan-instructor-users',
       title: 'حساب استاد/کارمند بدون پروندهٔ رسمی',
-      meta: `${orphanInstructorUserCount.toLocaleString('fa-AF-u-ca-persian')} حساب — پروندهٔ رسمی بسازید و به حساب موجود وصل کنید`,
-      to: '/teacher-registration',
+      meta: `${orphanInstructorUserCount.toLocaleString('fa-AF-u-ca-persian')} حساب — برای دیدنِ نام‌ها کلیک کنید`,
+      action: () => directoryOrphansPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
       badge: 'فوری',
       tone: 'bad'
     }] : []),
     ...(URGENT_DIRECTORY_LEVELS.has(adminLevel) && orphanStudentUserCount > 0 ? [{
       key: 'orphan-student-users',
       title: 'حساب شاگرد بدون پروندهٔ رسمی',
-      meta: `${orphanStudentUserCount.toLocaleString('fa-AF-u-ca-persian')} حساب — شاگرد را ثبت‌نام کنید و پرونده بسازید`,
-      to: '/student-registration',
+      meta: `${orphanStudentUserCount.toLocaleString('fa-AF-u-ca-persian')} حساب — برای دیدنِ نام‌ها کلیک کنید`,
+      action: () => directoryOrphansPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
       badge: 'فوری',
       tone: 'bad'
     }] : []),
     ...(URGENT_DIRECTORY_LEVELS.has(adminLevel) && orphanParentUserCount > 0 ? [{
       key: 'orphan-parent-users',
       title: 'حساب والد بدون فرزند وصل‌شده',
-      meta: `${orphanParentUserCount.toLocaleString('fa-AF-u-ca-persian')} حساب والد — او را از تب والدین/سرپرستان به فرزندش وصل کنید`,
-      to: '/admin-users#guardians',
+      meta: `${orphanParentUserCount.toLocaleString('fa-AF-u-ca-persian')} حساب والد — برای دیدنِ نام‌ها کلیک کنید`,
+      action: () => directoryOrphansPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
       badge: 'فوری',
       tone: 'bad'
     }] : []),
@@ -4540,6 +4562,37 @@ export default function AdminPanel() {
                         ))}
                       </div>
                     </article>
+
+                    {URGENT_DIRECTORY_LEVELS.has(adminLevel) && (
+                      <article className="admin-modern-panel" ref={directoryOrphansPanelRef}>
+                        <div className="admin-modern-panel-head">
+                          <h2>حساب‌های بدون پرونده</h2>
+                          <button type="button" onClick={loadDirectoryOrphans}>بروزرسانی</button>
+                        </div>
+                        {(orphanInstructorUserCount + orphanStudentUserCount + orphanParentUserCount) === 0 ? (
+                          <span className="admin-modern-empty">هر حسابِ فعالی یک پروندهٔ رسمی دارد.</span>
+                        ) : (
+                          <div className="admin-modern-list">
+                            {[
+                              { key: 'ins', label: 'استاد/کارمند', rows: directoryOrphans?.instructors || [], count: orphanInstructorUserCount, to: '/teacher-registration', fix: 'ثبتِ پرونده' },
+                              { key: 'stu', label: 'شاگرد', rows: directoryOrphans?.students || [], count: orphanStudentUserCount, to: '/student-registration', fix: 'ثبتِ شاگرد' },
+                              { key: 'par', label: 'والد', rows: directoryOrphans?.parents || [], count: orphanParentUserCount, to: '/admin-users#guardians', fix: 'وصل به فرزند' }
+                            ].filter((group) => group.count > 0).map((group) => (
+                              <div key={group.key} className="admin-modern-list-item admin-modern-list-item--tagged">
+                                <div className="admin-modern-list-item__body">
+                                  <strong>{group.label} — {group.count.toLocaleString('fa-AF-u-ca-persian')} حساب</strong>
+                                  <small>
+                                    {(group.rows.slice(0, 6).map((row) => row.name || row.email || 'بدون نام').join('، ')) || '—'}
+                                    {group.rows.length > 6 ? ` و ${(group.rows.length - 6).toLocaleString('fa-AF-u-ca-persian')} مورد دیگر` : ''}
+                                  </small>
+                                </div>
+                                <Link to={group.to} className="admin-modern-tag admin-modern-tag--warn">{group.fix}</Link>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </article>
+                    )}
                   </>
                 )}
               </div>

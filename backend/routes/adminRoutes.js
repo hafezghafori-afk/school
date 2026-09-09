@@ -6,6 +6,7 @@ const AfghanSchool = require('../models/AfghanSchool');
 const AfghanStudent = require('../models/AfghanStudent');
 const StudentCore = require('../models/StudentCore');
 const AfghanTeacher = require('../models/AfghanTeacher');
+const StudentProfile = require('../models/StudentProfile');
 const Course = require('../models/Course');
 const ActivityLog = require('../models/ActivityLog');
 const ContactMessage = require('../models/ContactMessage');
@@ -948,6 +949,43 @@ router.get('/users', requireAuth, requireRole(['admin']), requireAnyPermission([
     });
   } catch (error) {
     res.status(500).json({ success: false, message: 'خطا در دریافت کاربران' });
+  }
+});
+
+// Login accounts that have no official profile behind them — the actual rows,
+// not just a count. Feeds the "حساب‌های بدون پرونده" dashboard panel so a
+// manager can see WHICH student / teacher / parent needs a profile.
+router.get('/users/directory-orphans', requireAuth, requireRole(['admin']), requireAnyPermission(['manage_users', 'users.manage']), async (req, res) => {
+  try {
+    const cap = 100;
+    const [studentLinkIds, teacherLinkIds, guardianUserIds] = await Promise.all([
+      AfghanStudent.distinct('linkedUserId', { linkedUserId: { $ne: null } }),
+      AfghanTeacher.distinct('linkedUserId', { linkedUserId: { $ne: null } }),
+      StudentProfile.distinct('guardians.userId', { 'guardians.userId': { $ne: null } })
+    ]);
+    const toIdSet = (list) => list.map((id) => String(id)).filter(Boolean);
+    const studentSet = toIdSet(studentLinkIds);
+    const teacherSet = toIdSet(teacherLinkIds);
+    const parentSet = toIdSet(guardianUserIds);
+
+    const [students, instructors, parents, studentCount, instructorCount, parentCount] = await Promise.all([
+      User.find({ role: 'student', status: 'active', _id: { $nin: studentSet } }).select('name email grade createdAt').sort({ createdAt: -1 }).limit(cap).lean(),
+      User.find({ role: 'instructor', status: 'active', _id: { $nin: teacherSet } }).select('name email subject createdAt').sort({ createdAt: -1 }).limit(cap).lean(),
+      User.find({ role: 'parent', status: 'active', _id: { $nin: parentSet } }).select('name email createdAt').sort({ createdAt: -1 }).limit(cap).lean(),
+      User.countDocuments({ role: 'student', status: 'active', _id: { $nin: studentSet } }),
+      User.countDocuments({ role: 'instructor', status: 'active', _id: { $nin: teacherSet } }),
+      User.countDocuments({ role: 'parent', status: 'active', _id: { $nin: parentSet } })
+    ]);
+
+    res.json({
+      success: true,
+      counts: { students: studentCount, instructors: instructorCount, parents: parentCount },
+      students,
+      instructors,
+      parents
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'خطا در دریافت حساب‌های بدون پرونده' });
   }
 });
 
