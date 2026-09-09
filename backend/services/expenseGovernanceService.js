@@ -10,98 +10,14 @@ const FinanceTreasuryAccount = require('../models/FinanceTreasuryAccount');
 const StaffAdvance = require('../models/StaffAdvance');
 const StaffSalaryPayment = require('../models/StaffSalaryPayment');
 const AfghanTeacher = require('../models/AfghanTeacher');
+const {
+  EXPENSE_CHART_KEYS,
+  UNCLASSIFIED_KEY,
+  buildExpenseChartSeed
+} = require('../config/expenseChart');
 
-const DEFAULT_EXPENSE_CATEGORIES = [
-  {
-    key: 'salary',
-    label: 'Salary',
-    description: 'Teacher and staff compensation',
-    colorTone: 'teal',
-    isSystem: true,
-    order: 1,
-    subCategories: [
-      { key: 'teachers', label: 'Teachers', order: 1 },
-      { key: 'staff', label: 'Staff', order: 2 },
-      { key: 'bonuses', label: 'Bonuses', order: 3 }
-    ]
-  },
-  {
-    key: 'maintenance',
-    label: 'Maintenance',
-    description: 'Building, repair, and cleaning costs',
-    colorTone: 'copper',
-    isSystem: true,
-    order: 2,
-    subCategories: [
-      { key: 'building', label: 'Building', order: 1 },
-      { key: 'repair', label: 'Repair', order: 2 },
-      { key: 'cleaning', label: 'Cleaning', order: 3 }
-    ]
-  },
-  {
-    key: 'equipment',
-    label: 'Equipment',
-    description: 'Furniture, devices, and learning tools',
-    colorTone: 'slate',
-    isSystem: true,
-    order: 3,
-    subCategories: [
-      { key: 'it', label: 'IT / Devices', order: 1 },
-      { key: 'furniture', label: 'Furniture', order: 2 },
-      { key: 'classroom', label: 'Classroom Tools', order: 3 }
-    ]
-  },
-  {
-    key: 'transport',
-    label: 'Transport',
-    description: 'Transport and logistics costs',
-    colorTone: 'mint',
-    isSystem: true,
-    order: 4,
-    subCategories: [
-      { key: 'fuel', label: 'Fuel', order: 1 },
-      { key: 'student_transport', label: 'Student Transport', order: 2 },
-      { key: 'logistics', label: 'Logistics', order: 3 }
-    ]
-  },
-  {
-    key: 'utilities',
-    label: 'Utilities',
-    description: 'Recurring service costs',
-    colorTone: 'sand',
-    isSystem: true,
-    order: 5,
-    subCategories: [
-      { key: 'electricity', label: 'Electricity', order: 1 },
-      { key: 'water', label: 'Water', order: 2 },
-      { key: 'internet', label: 'Internet', order: 3 }
-    ]
-  },
-  {
-    key: 'admin',
-    label: 'Admin',
-    description: 'Administration and office operations',
-    colorTone: 'rose',
-    isSystem: true,
-    order: 6,
-    subCategories: [
-      { key: 'stationery', label: 'Stationery', order: 1 },
-      { key: 'printing', label: 'Printing', order: 2 },
-      { key: 'audit', label: 'Audit / Compliance', order: 3 }
-    ]
-  },
-  {
-    key: 'other',
-    label: 'Other',
-    description: 'Other approved finance items',
-    colorTone: 'slate',
-    isSystem: true,
-    order: 7,
-    subCategories: [
-      { key: 'misc', label: 'Miscellaneous', order: 1 }
-    ]
-  }
-];
+// سرفصل‌های چارتِ واحد؛ تنها منبعِ حقیقت اکنون config/expenseChart.js است.
+const DEFAULT_EXPENSE_CATEGORIES = buildExpenseChartSeed();
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -161,9 +77,85 @@ async function ensureDefaultExpenseCategories() {
     .sort({ order: 1, label: 1 });
 }
 
+// Idempotent upsert of the unified chart onto an EXISTING registry (where
+// ensureDefaultExpenseCategories's "seed only when empty" guard does nothing).
+// - New system keys are inserted with their sub-categories.
+// - System keys that are NOT in the chart (salary/admin/maintenance/...) are
+//   deactivated, never deleted, so historical rows keep a readable label.
+// - Custom (isSystem:false) categories are left completely untouched.
+// Returns a summary; safe to call repeatedly and on boot.
+async function syncExpenseChartDefinitions({ actorId = null } = {}) {
+  const seed = buildExpenseChartSeed();
+  const summary = { inserted: [], updated: [], deactivatedLegacy: [] };
+
+  const existing = await ExpenseCategoryDefinition.find({}).select('key isSystem isActive');
+  const byKey = new Map(existing.map((item) => [item.key, item]));
+
+  for (const definition of seed) {
+    const current = byKey.get(definition.key);
+    if (!current) {
+      await ExpenseCategoryDefinition.create({ ...definition, createdBy: actorId, updatedBy: actorId });
+      summary.inserted.push(definition.key);
+      continue;
+    }
+    // Refresh label/description/order/subCategories, keep any admin-added aliases.
+    current.label = definition.label;
+    current.description = definition.description;
+    current.colorTone = definition.colorTone;
+    current.order = definition.order;
+    current.isSystem = true;
+    current.isActive = true;
+    current.subCategories = definition.subCategories;
+    current.updatedBy = actorId;
+    await current.save();
+    summary.updated.push(definition.key);
+  }
+
+  const legacySystemKeys = existing
+    .filter((item) => item.isSystem && !EXPENSE_CHART_KEYS.has(item.key) && item.isActive)
+    .map((item) => item.key);
+  if (legacySystemKeys.length) {
+    await ExpenseCategoryDefinition.updateMany(
+      { key: { $in: legacySystemKeys }, isSystem: true },
+      { $set: { isActive: false, updatedBy: actorId } }
+    );
+    summary.deactivatedLegacy = legacySystemKeys;
+  }
+
+  return summary;
+}
+
+// Build a fast raw-string -> { category, subCategory } resolver from the
+// registry's `aliases`. Used by reports to fold closed-year rows (whose
+// `category` is intentionally left on the old key) under the new chart.
+function buildExpenseAliasResolver(categories = []) {
+  const aliasMap = new Map();
+  (categories || []).forEach((cat) => {
+    (cat.aliases || []).forEach((alias) => {
+      const value = String(alias?.value || '').trim().toLowerCase();
+      if (value && !aliasMap.has(value)) {
+        aliasMap.set(value, { category: cat.key, subCategory: String(alias?.subCategory || '') });
+      }
+    });
+  });
+  return (rawCategory = '', rawSubCategory = '') => {
+    const key = normalizeKey(rawCategory, '');
+    const hit = aliasMap.get(key);
+    if (hit) return { category: hit.category, subCategory: hit.subCategory || normalizeKey(rawSubCategory, '') };
+    return { category: key || 'other', subCategory: normalizeKey(rawSubCategory, '') };
+  };
+}
+
 async function resolveExpenseCategorySelection({ category = '', subCategory = '' } = {}) {
   const categories = await ensureDefaultExpenseCategories();
   const categoryKey = normalizeKey(category, 'other');
+  // `unclassified` is a holding bucket for migrated rows only; it can never be
+  // chosen when recording a new expense.
+  if (categoryKey === UNCLASSIFIED_KEY) {
+    const error = new Error('finance_expense_category_invalid');
+    error.statusCode = 400;
+    throw error;
+  }
   const categoryDefinition = categories.find((item) => item.key === categoryKey && item.isActive);
   if (!categoryDefinition) {
     const error = new Error('finance_expense_category_invalid');
@@ -217,7 +209,8 @@ async function buildFinancialYearCloseReadiness({ financialYearId = '', items = 
     pendingReview: 0,
     approved: 0,
     rejected: 0,
-    void: 0
+    void: 0,
+    needsCategoryReview: 0
   };
 
   expenseItems.forEach((item) => {
@@ -227,12 +220,14 @@ async function buildFinancialYearCloseReadiness({ financialYearId = '', items = 
     else if (status === 'approved') counts.approved += 1;
     else if (status === 'rejected') counts.rejected += 1;
     else if (status === 'void') counts.void += 1;
+    if (item?.needsCategoryReview === true && status !== 'void') counts.needsCategoryReview += 1;
   });
 
   const blockers = [];
   if (counts.draft > 0) blockers.push(`${counts.draft} مصرف پیش‌نویس هنوز برای بررسی ارسال نشده است.`);
   if (counts.pendingReview > 0) blockers.push(`${counts.pendingReview} مصرف هنوز در صف بررسی قرار دارد.`);
   if (counts.rejected > 0) blockers.push(`${counts.rejected} مصرف ردشده هنوز نیاز به اصلاح یا باطل‌سازی دارد.`);
+  if (counts.needsCategoryReview > 0) blockers.push(`${counts.needsCategoryReview} مصرف بدونِ دستهٔ معتبر است؛ در «دسته‌بندیِ معلق» تعیین تکلیف شود.`);
 
   let financialYear = null;
   try {
@@ -414,6 +409,8 @@ async function buildExpenseGovernanceAnalytics({ schoolId = '', financialYearId 
   const monthlyMap = new Map();
   const vendorMap = new Map();
   const categoryTotals = new Map();
+  const reviewGroupMap = new Map();
+  let needsCategoryReviewCount = 0;
   let totalAmount = 0;
   let approvedAmount = 0;
   let pendingAmount = 0;
@@ -450,6 +447,24 @@ async function buildExpenseGovernanceAnalytics({ schoolId = '', financialYearId 
     else if (status === 'approved') statusCounts.approved += 1;
     else if (status === 'rejected') statusCounts.rejected += 1;
     else if (status === 'void') statusCounts.void += 1;
+
+    if (item?.needsCategoryReview === true && status !== 'void') {
+      needsCategoryReviewCount += 1;
+      const legacyValue = normalizeText(item?.legacyCategory) || normalizeText(item?.category) || '—';
+      const group = reviewGroupMap.get(legacyValue) || {
+        legacyCategory: legacyValue,
+        count: 0,
+        amount: 0,
+        sampleTitles: []
+      };
+      group.count += 1;
+      group.amount += amount;
+      const sample = normalizeText(item?.subCategory) || normalizeText(item?.vendorName) || normalizeText(item?.note);
+      if (sample && group.sampleTitles.length < 4 && !group.sampleTitles.includes(sample)) {
+        group.sampleTitles.push(sample);
+      }
+      reviewGroupMap.set(legacyValue, group);
+    }
 
     const categoryBucket = categoryTotals.get(categoryKey) || {
       key: categoryKey,
@@ -506,8 +521,12 @@ async function buildExpenseGovernanceAnalytics({ schoolId = '', financialYearId 
       treasuryAssignedCount,
       treasuryUnassignedAmount: Number(treasuryUnassignedAmount.toFixed(2)),
       treasuryUnassignedCount,
+      needsCategoryReviewCount,
       statusCounts
     },
+    categoryReviewQueue: [...reviewGroupMap.values()]
+      .map((group) => ({ ...group, amount: Number(group.amount.toFixed(2)) }))
+      .sort((left, right) => right.amount - left.amount),
     categories: [...categoryTotals.values()]
       .sort((left, right) => right.amount - left.amount)
       .map((item) => ({
@@ -538,15 +557,21 @@ async function buildExpenseGovernanceAnalytics({ schoolId = '', financialYearId 
         description: subItem.description || '',
         isActive: subItem.isActive !== false,
         order: Number(subItem.order || 0)
+      })),
+      aliases: (item.aliases || []).map((alias) => ({
+        value: alias.value,
+        subCategory: alias.subCategory || ''
       }))
     }))
   };
 }
 
 module.exports = {
+  buildExpenseAliasResolver,
   buildExpenseGovernanceAnalytics,
   buildFinancialYearCloseReadiness,
   ensureDefaultExpenseCategories,
   normalizeExpenseCategoryKey: normalizeKey,
-  resolveExpenseCategorySelection
+  resolveExpenseCategorySelection,
+  syncExpenseChartDefinitions
 };

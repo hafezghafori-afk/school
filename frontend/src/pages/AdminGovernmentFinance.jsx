@@ -15,7 +15,13 @@ import {
   toLocaleDateTime
 } from './adminWorkspaceUtils';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
-import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
+import {
+  formatAfghanDate,
+  toGregorianDateInputValue,
+  afghanSolarToGregorianInput,
+  gregorianToAfghanSolar,
+  AFGHAN_SOLAR_MONTHS
+} from '../utils/afghanDate';
 
 const LEGACY_GARBLED_TABS = [
   { key: 'dashboard', label: 'نمای کلی' },
@@ -1577,6 +1583,10 @@ export default function AdminGovernmentFinance() {
   // Expense review/ledger date range (Gregorian YYYY-MM-DD from AfghanDateInput).
   const [expenseDateFrom, setExpenseDateFrom] = useState('');
   const [expenseDateTo, setExpenseDateTo] = useState('');
+  // Expense review queue: status filter + Shamsi month/year quick-pick.
+  const [expenseStatusFilter, setExpenseStatusFilter] = useState('actionable');
+  const [expenseShamsiYear, setExpenseShamsiYear] = useState('');
+  const [expenseShamsiMonth, setExpenseShamsiMonth] = useState('');
   const [message, setMessage] = useState('');
   const [messageTone, setMessageTone] = useState('info');
   const [busyAction, setBusyAction] = useState('');
@@ -1592,7 +1602,7 @@ export default function AdminGovernmentFinance() {
   });
   const [selectedYearBudgetDraft, setSelectedYearBudgetDraft] = useState(() => buildBudgetDraft());
   const [expenseDraft, setExpenseDraft] = useState({
-    category: 'admin',
+    category: 'payroll',
     subCategory: '',
     amount: '',
     expenseDate: '',
@@ -1633,7 +1643,7 @@ export default function AdminGovernmentFinance() {
   const [procurementDraft, setProcurementDraft] = useState({
     title: '',
     vendorName: '',
-    category: 'admin',
+    category: 'payroll',
     subCategory: '',
     procurementType: 'vendor_commitment',
     committedAmount: '',
@@ -1670,6 +1680,10 @@ export default function AdminGovernmentFinance() {
     subCategoriesText: '',
     isActive: true
   });
+  // per-group picker state for the "دسته‌بندیِ معلق" queue, keyed by legacyCategory
+  const [categoryReviewDrafts, setCategoryReviewDrafts] = useState({});
+  // the registry panel hides deactivated (migrated-away) categories by default
+  const [showInactiveCategories, setShowInactiveCategories] = useState(false);
   const [treasuryAccountDraft, setTreasuryAccountDraft] = useState({
     id: '',
     title: '',
@@ -1738,9 +1752,39 @@ export default function AdminGovernmentFinance() {
       : (payload.expenseAnalytics?.registry || reference.expenseCategories || [])
   ), [payload.expenseAnalytics, payload.expenseCategories, reference.expenseCategories]);
 
+  // Categories that may be chosen when recording an expense / budget line:
+  // active, and never the `unclassified` holding bucket (migration-only).
+  const activeExpenseCategoryOptions = useMemo(() => (
+    (expenseCategoryRegistry || []).filter((item) => item.isActive !== false && item.key !== 'unclassified')
+  ), [expenseCategoryRegistry]);
+
+  // Registry panel: deactivated categories (legacy keys the migration retired,
+  // kept for history/audit) are hidden unless the admin opts in.
+  const inactiveExpenseCategoryCount = useMemo(() => (
+    (expenseCategoryRegistry || []).filter((item) => item.isActive === false).length
+  ), [expenseCategoryRegistry]);
+
+  const activeCategoryCount = useMemo(() => (
+    (expenseCategoryRegistry || []).filter((item) => item.isActive !== false).length
+  ), [expenseCategoryRegistry]);
+
+  const visibleCategoryRegistry = useMemo(() => (
+    showInactiveCategories
+      ? expenseCategoryRegistry
+      : (expenseCategoryRegistry || []).filter((item) => item.isActive !== false)
+  ), [expenseCategoryRegistry, showInactiveCategories]);
+
   const selectedExpenseCategory = useMemo(() => (
-    expenseCategoryRegistry.find((item) => item.key === expenseDraft.category) || expenseCategoryRegistry[0] || null
-  ), [expenseCategoryRegistry, expenseDraft.category]);
+    expenseCategoryRegistry.find((item) => item.key === expenseDraft.category) || activeExpenseCategoryOptions[0] || null
+  ), [expenseCategoryRegistry, activeExpenseCategoryOptions, expenseDraft.category]);
+
+  const expenseCategoryReviewQueue = useMemo(() => (
+    payload.expenseAnalytics?.categoryReviewQueue || []
+  ), [payload.expenseAnalytics]);
+
+  const expenseNeedsCategoryReviewCount = useMemo(() => (
+    Number(payload.expenseAnalytics?.summary?.needsCategoryReviewCount || 0)
+  ), [payload.expenseAnalytics]);
 
   // ExpenseEntry stores category / subCategory as keys ("salary" / "teachers",
   // "کرایه" / "item_2"); the readable Persian text lives on the category
@@ -1852,15 +1896,61 @@ export default function AdminGovernmentFinance() {
       : (payload.expenseAnalytics?.queue || []);
     return source.filter((item) => inRange(item.expenseDate));
   }, [payload.expenses, payload.expenseAnalytics, expenseDateFrom, expenseDateTo]);
-  const expenseQueueRows = useMemo(() => (
-    filteredExpenseRows
-      .filter((item) => !['approved', 'void'].includes(String(item.status || '').trim()))
-      .slice(0, 500)
-  ), [filteredExpenseRows]);
-  const expenseDateFilterActive = !!expenseDateFrom || !!expenseDateTo;
+  const expenseQueueRows = useMemo(() => {
+    const matchesStatus = (item) => {
+      const status = String(item.status || '').trim();
+      if (expenseStatusFilter === 'all') return true;
+      if (expenseStatusFilter === 'actionable') return !['approved', 'void'].includes(status);
+      return status === expenseStatusFilter;
+    };
+    return filteredExpenseRows.filter(matchesStatus).slice(0, 500);
+  }, [filteredExpenseRows, expenseStatusFilter]);
+  const expenseDateFilterActive = !!expenseDateFrom || !!expenseDateTo || !!expenseShamsiYear;
+
+  // Shamsi year/month quick-pick → fills the Gregorian from/to range the
+  // filter already understands. Month "" with a year set = the whole year.
+  const dayBefore = (isoDay) => (
+    isoDay
+      ? new Date(new Date(`${isoDay}T00:00:00Z`).getTime() - 86400000).toISOString().slice(0, 10)
+      : ''
+  );
+
+  const applyShamsiPeriodFilter = (year, month) => {
+    setExpenseShamsiYear(year);
+    setExpenseShamsiMonth(month);
+    if (!year) {
+      setExpenseDateFrom('');
+      setExpenseDateTo('');
+      return;
+    }
+    const y = Number(year);
+    if (month) {
+      const m = Number(month);
+      const nextFirst = m === 12
+        ? afghanSolarToGregorianInput(y + 1, 1, 1)
+        : afghanSolarToGregorianInput(y, m + 1, 1);
+      setExpenseDateFrom(afghanSolarToGregorianInput(y, m, 1));
+      setExpenseDateTo(dayBefore(nextFirst));
+    } else {
+      setExpenseDateFrom(afghanSolarToGregorianInput(y, 1, 1));
+      setExpenseDateTo(dayBefore(afghanSolarToGregorianInput(y + 1, 1, 1)));
+    }
+  };
+
+  const expenseShamsiYearOptions = useMemo(() => {
+    const now = gregorianToAfghanSolar(new Date());
+    const base = Number(now?.jy) || 1404;
+    const years = [];
+    for (let y = base + 1; y >= base - 4; y -= 1) years.push(String(y));
+    return years;
+  }, []);
+
   const clearExpenseDateFilter = () => {
     setExpenseDateFrom('');
     setExpenseDateTo('');
+    setExpenseShamsiYear('');
+    setExpenseShamsiMonth('');
+    setExpenseStatusFilter('actionable');
   };
   const currentAdminLevel = useMemo(() => {
     try {
@@ -2430,8 +2520,8 @@ export default function AdminGovernmentFinance() {
   }, [selectedAcademicYear]);
 
   useEffect(() => {
-    setSelectedYearBudgetDraft(buildBudgetDraft(selectedFinancialYear?.budgetTargets || {}, expenseCategoryRegistry));
-  }, [selectedFinancialYear, expenseCategoryRegistry]);
+    setSelectedYearBudgetDraft(buildBudgetDraft(selectedFinancialYear?.budgetTargets || {}, activeExpenseCategoryOptions));
+  }, [selectedFinancialYear, activeExpenseCategoryOptions]);
 
   useEffect(() => {
     const fallbackCommitmentId = String(settlementReadyProcurementOptions[0]?._id || settlementReadyProcurementOptions[0]?.id || '');
@@ -2444,13 +2534,13 @@ export default function AdminGovernmentFinance() {
   }, [settlementReadyProcurementOptions]);
 
   useEffect(() => {
-    if (!expenseCategoryRegistry.length) return;
-    const fallbackCategory = expenseCategoryRegistry[0]?.key || 'other';
+    if (!activeExpenseCategoryOptions.length) return;
+    const fallbackCategory = activeExpenseCategoryOptions[0]?.key || 'other';
     setExpenseDraft((current) => {
-      const nextCategory = expenseCategoryRegistry.some((item) => item.key === current.category)
+      const nextCategory = activeExpenseCategoryOptions.some((item) => item.key === current.category)
         ? current.category
         : fallbackCategory;
-      const nextSubCategories = (expenseCategoryRegistry.find((item) => item.key === nextCategory)?.subCategories || [])
+      const nextSubCategories = (activeExpenseCategoryOptions.find((item) => item.key === nextCategory)?.subCategories || [])
         .filter((item) => item.isActive !== false);
       const nextSubCategory = nextSubCategories.some((item) => item.key === current.subCategory)
         ? current.subCategory
@@ -2461,7 +2551,7 @@ export default function AdminGovernmentFinance() {
         subCategory: nextSubCategory
       };
     });
-  }, [expenseCategoryRegistry]);
+  }, [activeExpenseCategoryOptions]);
 
   useEffect(() => {
     if (!treasuryAccounts.length) {
@@ -2818,7 +2908,7 @@ export default function AdminGovernmentFinance() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          budgetTargets: serializeBudgetDraft(selectedYearBudgetDraft, expenseCategoryRegistry)
+          budgetTargets: serializeBudgetDraft(selectedYearBudgetDraft, activeExpenseCategoryOptions)
         })
       });
       applyFinancialYearItemToPayload(setPayload, response.item);
@@ -3095,6 +3185,51 @@ export default function AdminGovernmentFinance() {
       await loadWorkspace();
     } catch (error) {
       showMessage(errorMessage(error, 'تایید مصرف ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const handleCategoryReviewDraftChange = (legacyCategory, field, value) => {
+    setCategoryReviewDrafts((current) => {
+      const base = current[legacyCategory] || {
+        category: activeExpenseCategoryOptions[0]?.key || '',
+        subCategory: '',
+        applyToAll: true
+      };
+      const next = { ...base, [field]: value };
+      // switching the parent category clears a now-invalid sub-category
+      if (field === 'category') next.subCategory = '';
+      return { ...current, [legacyCategory]: next };
+    });
+  };
+
+  const resolveCategoryReviewGroup = async (legacyCategory) => {
+    const draft = categoryReviewDrafts[legacyCategory] || {};
+    const category = draft.category || activeExpenseCategoryOptions[0]?.key || '';
+    if (!category) {
+      showMessage('یک سرفصل برای این گروه انتخاب کنید.', 'error');
+      return;
+    }
+    try {
+      setBusyAction(`resolve-review-${legacyCategory}`);
+      const response = await postJson('/api/finance/admin/expenses/category-review/resolve', {
+        legacyCategory,
+        category,
+        subCategory: draft.subCategory || '',
+        applyToAll: draft.applyToAll !== false,
+        addAlias: true,
+        financialYearId: selectedFinancialYearId || undefined
+      });
+      showMessage(response?.message || 'دسته‌بندی اعمال شد.');
+      setCategoryReviewDrafts((current) => {
+        const next = { ...current };
+        delete next[legacyCategory];
+        return next;
+      });
+      await loadWorkspace('operations');
+    } catch (error) {
+      showMessage(errorMessage(error, 'اعمالِ دسته‌بندیِ معلق ناموفق بود.'), 'error');
     } finally {
       setBusyAction('');
     }
@@ -4876,7 +5011,7 @@ export default function AdminGovernmentFinance() {
                   <span>بودجه سالانه سقف کل همان دسته است. بودجه ماهانه سقف مصرف همان دسته در هر ماه است. آستانه هشدار معمولاً ۸۵٪ است؛ یعنی قبل از تمام‌شدن بودجه هشدار می‌دهد.</span>
                 </div>
               </div>
-              {!expenseCategoryRegistry.length ? (
+              {!activeExpenseCategoryOptions.length ? (
                 <div className="gov-empty-state">هیچ دسته‌بندی مصرفی برای پیکربندی بودجه در دسترس نیست.</div>
               ) : (
                 <div className="gov-table-wrap">
@@ -4892,7 +5027,7 @@ export default function AdminGovernmentFinance() {
                       </tr>
                     </thead>
                     <tbody>
-                      {expenseCategoryRegistry.map((item) => {
+                      {activeExpenseCategoryOptions.map((item) => {
                         const key = String(item?.key || '').trim().toLowerCase();
                         const draftBucket = selectedYearBudgetDraft.categoryBudgets?.[key] || {};
                         const budgetRow = (budgetVsActual.categories || []).find((entry) => String(entry.categoryKey || '').trim().toLowerCase() === key) || null;
@@ -5379,7 +5514,7 @@ export default function AdminGovernmentFinance() {
                 <label className="gov-field">
                   <span>دسته</span>
                   <select name="category" value={procurementDraft.category} onChange={handleProcurementDraftChange}>
-                    {expenseCategoryRegistry.map((item) => (
+                    {activeExpenseCategoryOptions.map((item) => (
                       <option key={item._id || item.key} value={item.key}>{item.label || item.key}</option>
                     ))}
                   </select>
@@ -5388,7 +5523,7 @@ export default function AdminGovernmentFinance() {
                   <span>زیردسته</span>
                   <select name="subCategory" value={procurementDraft.subCategory} onChange={handleProcurementDraftChange}>
                     <option value="">بدون زیردسته</option>
-                    {((expenseCategoryRegistry.find((item) => item.key === procurementDraft.category)?.subCategories || []).filter((item) => item.isActive !== false)).map((item) => (
+                    {((activeExpenseCategoryOptions.find((item) => item.key === procurementDraft.category)?.subCategories || []).filter((item) => item.isActive !== false)).map((item) => (
                       <option key={item.key} value={item.key}>{item.label || item.key}</option>
                     ))}
                   </select>
@@ -5468,14 +5603,24 @@ export default function AdminGovernmentFinance() {
               tabKey="operations"
               panelKey="category-registry"
               title="رجیستری رسمی دسته‌های مصرف"
-              hint={`${formatNumber(expenseCategoryRegistry.length)} دسته`}
+              hint={`${formatNumber(activeCategoryCount)} فعال${inactiveExpenseCategoryCount ? ` · ${formatNumber(inactiveExpenseCategoryCount)} غیرفعال` : ''}`}
               span="7"
             >
-              {!expenseCategoryRegistry.length ? (
+              {inactiveExpenseCategoryCount ? (
+                <label className="gov-toggle" style={{ marginBottom: '10px' }}>
+                  <input
+                    type="checkbox"
+                    checked={showInactiveCategories}
+                    onChange={(event) => setShowInactiveCategories(event.target.checked)}
+                  />
+                  <span>نمایشِ دسته‌های غیرفعال (کلیدهای قدیمیِ کنارگذاشته‌شده در مهاجرت — برای تاریخچه نگه داشته شده‌اند، در هیچ فرمی انتخاب نمی‌شوند)</span>
+                </label>
+              ) : null}
+              {!visibleCategoryRegistry.length ? (
                 <div className="gov-empty-state">هنوز هیچ دسته مصرف رسمی ثبت نشده است.</div>
               ) : (
                 <div className="gov-category-registry">
-                  {expenseCategoryRegistry.map((item) => (
+                  {visibleCategoryRegistry.map((item) => (
                     <article key={item._id || item.key} className="gov-category-card" data-tone={item.colorTone || 'teal'}>
                       <div className="gov-category-card-head">
                         <div>
@@ -5579,6 +5724,110 @@ export default function AdminGovernmentFinance() {
 
             <CollapsiblePanel
               tabKey="operations"
+              panelKey="category-review-queue"
+              title="دسته‌بندیِ معلق"
+              hint={`${formatNumber(expenseNeedsCategoryReviewCount)} مصرف`}
+              defaultOpen={expenseNeedsCategoryReviewCount > 0}
+              span="12"
+            >
+              <div className="gov-help-note compact">
+                <div className="gov-help-note-copy">
+                  <strong>مصارفِ بدونِ دستهٔ معتبر</strong>
+                  <span>
+                    این‌ها هنگامِ مهاجرت به چارتِ جدید به سرفصلِ رسمی نگاشت نشدند. برای هر گروه یک‌بار
+                    سرفصل و زیرسرفصل را انتخاب کنید؛ همان انتخاب برای همهٔ مصارفِ آن گروه اعمال و به‌عنوان
+                    قانونِ ماندگار ذخیره می‌شود. تا وقتی این صف خالی نشود، گزارشِ رسمی و بستنِ سالِ مالی قفل است.
+                  </span>
+                </div>
+              </div>
+              {!expenseCategoryReviewQueue.length ? (
+                <div className="gov-empty-state">همهٔ مصارف به سرفصل‌های رسمی دسته‌بندی شده‌اند.</div>
+              ) : (
+                <div className="gov-table-wrap">
+                  <table className="gov-table">
+                    <thead>
+                      <tr>
+                        <th>مقدارِ قدیمی</th>
+                        <th>تعداد</th>
+                        <th>مبلغ</th>
+                        <th>نمونه‌ها</th>
+                        <th>سرفصلِ جدید</th>
+                        <th>زیرسرفصل</th>
+                        <th>اقدام</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {expenseCategoryReviewQueue.map((group) => {
+                        const draft = categoryReviewDrafts[group.legacyCategory] || {
+                          category: activeExpenseCategoryOptions[0]?.key || '',
+                          subCategory: '',
+                          applyToAll: true
+                        };
+                        const subOptions = (activeExpenseCategoryOptions.find((item) => item.key === draft.category)?.subCategories || [])
+                          .filter((item) => item.isActive !== false);
+                        return (
+                          <tr key={`review-${group.legacyCategory}`}>
+                            <td><strong>{group.legacyCategory}</strong></td>
+                            <td>{formatNumber(group.count)}</td>
+                            <td>{formatMoney(group.amount)}</td>
+                            <td>
+                              <div className="gov-table-stack">
+                                <span>{(group.samples || []).slice(0, 3).join('، ') || '—'}</span>
+                              </div>
+                            </td>
+                            <td>
+                              <select
+                                value={draft.category}
+                                onChange={(event) => handleCategoryReviewDraftChange(group.legacyCategory, 'category', event.target.value)}
+                              >
+                                {activeExpenseCategoryOptions.map((item) => (
+                                  <option key={item.key} value={item.key}>{item.label || item.key}</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td>
+                              <select
+                                value={draft.subCategory}
+                                onChange={(event) => handleCategoryReviewDraftChange(group.legacyCategory, 'subCategory', event.target.value)}
+                                disabled={!subOptions.length}
+                              >
+                                <option value="">— بدون زیرسرفصل —</option>
+                                {subOptions.map((item) => (
+                                  <option key={item.key} value={item.key}>{item.label || item.key}</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td>
+                              <div className="gov-action-stack">
+                                <label className="gov-toggle">
+                                  <input
+                                    type="checkbox"
+                                    checked={draft.applyToAll !== false}
+                                    onChange={(event) => handleCategoryReviewDraftChange(group.legacyCategory, 'applyToAll', event.target.checked)}
+                                  />
+                                  <span>اعمال به همهٔ «{group.legacyCategory}»</span>
+                                </label>
+                                <button
+                                  type="button"
+                                  className="gov-inline-action"
+                                  disabled={!!busyAction || !draft.category}
+                                  onClick={() => resolveCategoryReviewGroup(group.legacyCategory)}
+                                >
+                                  {busyAction === `resolve-review-${group.legacyCategory}` ? 'در حال اعمال...' : 'اعمال دسته'}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CollapsiblePanel>
+
+            <CollapsiblePanel
+              tabKey="operations"
               panelKey="review-queue"
               title="صف تایید مصارف"
               hint={`${formatNumber(expenseQueueRows.length)} مورد`}
@@ -5595,28 +5844,67 @@ export default function AdminGovernmentFinance() {
               <div className="gov-expense-datefilter">
                 <div className="gov-expense-datefilter__row">
                   <label className="gov-field">
+                    <span>وضعیت</span>
+                    <select value={expenseStatusFilter} onChange={(event) => setExpenseStatusFilter(event.target.value)}>
+                      <option value="actionable">در انتظارِ اقدام (پیش‌فرض)</option>
+                      <option value="all">همه</option>
+                      <option value="draft">پیش‌نویس</option>
+                      <option value="pending_review">در صف بررسی</option>
+                      <option value="rejected">رد شده</option>
+                      <option value="approved">تایید شده</option>
+                      <option value="void">باطل شده</option>
+                    </select>
+                  </label>
+                  <label className="gov-field">
+                    <span>سال</span>
+                    <select
+                      value={expenseShamsiYear}
+                      onChange={(event) => applyShamsiPeriodFilter(event.target.value, expenseShamsiMonth)}
+                    >
+                      <option value="">همه سال‌ها</option>
+                      {expenseShamsiYearOptions.map((year) => (
+                        <option key={year} value={year}>{year}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="gov-field">
+                    <span>ماه</span>
+                    <select
+                      value={expenseShamsiMonth}
+                      onChange={(event) => applyShamsiPeriodFilter(expenseShamsiYear, event.target.value)}
+                      disabled={!expenseShamsiYear}
+                    >
+                      <option value="">همه ماه‌ها</option>
+                      {AFGHAN_SOLAR_MONTHS.map((name, index) => (
+                        <option key={name} value={String(index + 1)}>{name}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="gov-expense-datefilter__row">
+                  <label className="gov-field">
                     <span>از تاریخ</span>
-                    <AfghanDateInput name="expenseDateFrom" value={expenseDateFrom} onChange={setExpenseDateFrom} />
+                    <AfghanDateInput name="expenseDateFrom" value={expenseDateFrom} onChange={(value) => { setExpenseShamsiYear(''); setExpenseShamsiMonth(''); setExpenseDateFrom(value); }} />
                   </label>
                   <label className="gov-field">
                     <span>تا تاریخ</span>
-                    <AfghanDateInput name="expenseDateTo" value={expenseDateTo} onChange={setExpenseDateTo} />
+                    <AfghanDateInput name="expenseDateTo" value={expenseDateTo} onChange={(value) => { setExpenseShamsiYear(''); setExpenseShamsiMonth(''); setExpenseDateTo(value); }} />
                   </label>
-                  <button type="button" className="gov-ghost-btn slim" onClick={clearExpenseDateFilter} disabled={!expenseDateFilterActive}>
-                    پاک‌کردنِ تاریخ
+                  <button type="button" className="gov-ghost-btn slim" onClick={clearExpenseDateFilter} disabled={!expenseDateFilterActive && expenseStatusFilter === 'actionable'}>
+                    پاک‌کردنِ فیلترها
                   </button>
                 </div>
                 <span className="gov-expense-datefilter__hint">
                   {expenseDateFilterActive
                     ? `${formatNumber(expenseQueueRows.length)} مورد در بازهٔ انتخابی`
-                    : 'برای دیدن و تاییدِ مصارفِ ماه‌های گذشته، بازهٔ تاریخ را انتخاب کنید.'}
+                    : 'وضعیت و بازهٔ زمانی (سال/ماه یا تاریخِ دقیق) را برای مرورِ مصارفِ گذشته انتخاب کنید.'}
                 </span>
               </div>
 
               {!expenseQueueRows.length ? (
                 <div className="gov-empty-state">
-                  {expenseDateFilterActive
-                    ? 'در این بازهٔ تاریخ هیچ مصرفِ در انتظار اقدامی پیدا نشد.'
+                  {(expenseDateFilterActive || expenseStatusFilter !== 'actionable')
+                    ? 'با این فیلترها هیچ مصرفی پیدا نشد.'
                     : 'در محدوده فعلی هیچ ردیف مصرفی در انتظار اقدام نیست.'}
                 </div>
               ) : (
@@ -5625,7 +5913,7 @@ export default function AdminGovernmentFinance() {
                     <thead>
                       <tr>
                         <th>دسته</th>
-                        <th>فروشنده</th>
+                        <th>شرح</th>
                         <th>مبلغ</th>
                         <th>وضعیت</th>
                         <th>مرحله</th>
@@ -5650,7 +5938,12 @@ export default function AdminGovernmentFinance() {
                               <span>{expenseLabels.subCategory(row.category, row.subCategory)}</span>
                             </div>
                           </td>
-                          <td>{row.vendorName || 'بدون فروشنده'}</td>
+                          <td>
+                            <div className="gov-table-stack">
+                              <strong>{(row.note || '').trim() || (row.vendorName || '').trim() || expenseLabels.subCategory(row.category, row.subCategory)}</strong>
+                              {(row.vendorName || '').trim() && (row.note || '').trim() ? <span>{(row.vendorName || '').trim()}</span> : null}
+                            </div>
+                          </td>
                           <td>{formatMoney(row.amount)}</td>
                           <td><ExpenseStatusBadge status={row.status} /></td>
                           <td><ExpenseStageBadge stage={row.approvalStage} /></td>
@@ -5732,7 +6025,7 @@ export default function AdminGovernmentFinance() {
                 <label className="gov-field">
                   <span>دسته</span>
                   <select name="category" value={expenseDraft.category} onChange={handleExpenseDraftChange}>
-                    {expenseCategoryRegistry.map((item) => (
+                    {activeExpenseCategoryOptions.map((item) => (
                       <option key={item._id || item.key} value={item.key}>{item.label || item.key}</option>
                     ))}
                   </select>
@@ -5799,7 +6092,7 @@ export default function AdminGovernmentFinance() {
                   </select>
                 </label>
                 <label className="gov-field">
-                  <span>فروشنده</span>
+                  <span>فروشنده یا شخصِ برداشت‌کنندهٔ پول</span>
                   <input name="vendorName" value={expenseDraft.vendorName} onChange={handleExpenseDraftChange} />
                 </label>
                 <label className="gov-field">
@@ -5807,8 +6100,13 @@ export default function AdminGovernmentFinance() {
                   <input name="referenceNo" value={expenseDraft.referenceNo} onChange={handleExpenseDraftChange} />
                 </label>
                 <label className="gov-field gov-field-full">
-                  <span>یادداشت</span>
-                  <input name="note" value={expenseDraft.note} onChange={handleExpenseDraftChange} />
+                  <span>شرح مصرف</span>
+                  <input
+                    name="note"
+                    value={expenseDraft.note}
+                    onChange={handleExpenseDraftChange}
+                    placeholder="مثال: معاش استاد ماه سنبله — یا نامِ فروشنده برای خرید"
+                  />
                 </label>
               </div>
               <div className="gov-card-actions">
@@ -5831,7 +6129,7 @@ export default function AdminGovernmentFinance() {
                     <thead>
                       <tr>
                         <th>دسته</th>
-                        <th>فروشنده</th>
+                        <th>شرح</th>
                         <th>مبلغ</th>
                         <th>تاریخ</th>
                         <th>وضعیت</th>
@@ -5848,7 +6146,12 @@ export default function AdminGovernmentFinance() {
                               <span>{expenseLabels.subCategory(row.category, row.subCategory)}</span>
                             </div>
                           </td>
-                          <td>{row.vendorName || 'بدون فروشنده'}</td>
+                          <td>
+                            <div className="gov-table-stack">
+                              <strong>{(row.note || '').trim() || (row.vendorName || '').trim() || expenseLabels.subCategory(row.category, row.subCategory)}</strong>
+                              {(row.vendorName || '').trim() && (row.note || '').trim() ? <span>{(row.vendorName || '').trim()}</span> : null}
+                            </div>
+                          </td>
                           <td>{formatMoney(row.amount)}</td>
                           <td>{toFaDate(row.expenseDate)}</td>
                           <td><ExpenseStatusBadge status={row.status} /></td>

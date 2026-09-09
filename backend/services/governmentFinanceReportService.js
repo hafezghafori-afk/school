@@ -663,7 +663,7 @@ async function buildGovernmentBudgetVsActualReport(filters = {}) {
         }
       }
     ]),
-    ExpenseCategoryDefinition.find({ isActive: true }).select('key label colorTone order').sort({ order: 1, label: 1 }).lean(),
+    ExpenseCategoryDefinition.find({ isActive: true }).select('key label colorTone order aliases').sort({ order: 1, label: 1 }).lean(),
     buildTreasuryAnalytics({
       financialYearId: financialYear?._id ? String(financialYear._id) : '',
       academicYearId: academicYear?._id ? String(academicYear._id) : ''
@@ -684,12 +684,25 @@ async function buildGovernmentBudgetVsActualReport(filters = {}) {
   const actualExpense = Number(expenseSummaryRows[0]?.total || 0);
   const actualNet = Number((actualIncome - actualExpense).toFixed(2));
   const budgetTargets = normalizeBudgetTargets(financialYear?.budgetTargets || {});
-  const actualByCategory = new Map(
-    (expenseCategoryRows || []).map((item) => [normalizeText(item?._id).toLowerCase(), {
-      actualAmount: Number(item?.total || 0),
-      expenseCount: Number(item?.count || 0)
-    }])
-  );
+  // Fold legacy category keys (kept as-is on closed-year rows) under the unified
+  // chart key they were aliased to, so a closed year's "salary" total rolls into
+  // "payroll" rather than showing as its own deactivated row.
+  const aliasToChartKey = new Map();
+  (categoryRegistry || []).forEach((definition) => {
+    (definition.aliases || []).forEach((alias) => {
+      const value = normalizeText(alias?.value).toLowerCase();
+      if (value && !aliasToChartKey.has(value)) aliasToChartKey.set(value, definition.key);
+    });
+  });
+  const actualByCategory = new Map();
+  (expenseCategoryRows || []).forEach((item) => {
+    const rawKey = normalizeText(item?._id).toLowerCase();
+    const foldedKey = aliasToChartKey.get(rawKey) || rawKey;
+    const bucket = actualByCategory.get(foldedKey) || { actualAmount: 0, expenseCount: 0 };
+    bucket.actualAmount = Number((bucket.actualAmount + Number(item?.total || 0)).toFixed(2));
+    bucket.expenseCount += Number(item?.count || 0);
+    actualByCategory.set(foldedKey, bucket);
+  });
   const budgetByCategory = new Map(
     (budgetTargets.categoryBudgets || []).map((item) => [item.categoryKey, item])
   );
