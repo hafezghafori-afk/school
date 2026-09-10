@@ -72,6 +72,7 @@ const EXPENSE_CHART = [
       { key: 'writing', label: 'قلم، پنسل، مارکر' },
       { key: 'paper', label: 'ورق و کاغذ' },
       { key: 'paper_filing', label: 'دوسیه و پوشِ اسناد' },
+      { key: 'registers', label: 'کتابِ حاضری و دفاترِ راجستر' },
       { key: 'print_consumables', label: 'رنگِ پرینتر / مارکر / پاک‌کن' },
       { key: 'desk_tools', label: 'ستیبلر و لوازمِ میز' },
       { key: 'janitorial', label: 'موادِ پاک‌کاری (جنیتری)' },
