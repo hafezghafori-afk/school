@@ -70,7 +70,9 @@ const EXPENSE_CHART = [
     colorTone: 'slate',
     subCategories: [
       { key: 'writing', label: 'قلم، پنسل، مارکر' },
-      { key: 'paper_filing', label: 'ورق، دوسیه، پوشِ اسناد' },
+      { key: 'paper', label: 'ورق و کاغذ' },
+      { key: 'paper_filing', label: 'دوسیه و پوشِ اسناد' },
+      { key: 'registers', label: 'کتابِ حاضری و دفاترِ راجستر' },
       { key: 'print_consumables', label: 'رنگِ پرینتر / مارکر / پاک‌کن' },
       { key: 'desk_tools', label: 'ستیبلر و لوازمِ میز' },
       { key: 'janitorial', label: 'موادِ پاک‌کاری (جنیتری)' },
@@ -128,6 +130,17 @@ const EXPENSE_CHART = [
       { key: 'govt_fees', label: 'رسمیات و محصولِ دولتی' },
       { key: 'owner_principal_draw', label: 'برداشتِ مدیر / صاحب امتیاز' },
       { key: 'misc', label: 'متفرقه' }
+    ]
+  },
+  {
+    key: 'kitchen_catering',
+    label: 'آشپزخانه و کانتین',
+    description: 'موادِ خوراکه، لوازمِ آشپزخانه و سفره، موادِ پاک‌کاریِ آشپزخانه',
+    colorTone: 'sand',
+    subCategories: [
+      { key: 'food_staples', label: 'موادِ خوراکه (آرد، برنج، روغن، حبوبات، بوره، چای، مصاله)' },
+      { key: 'kitchen_supplies', label: 'لوازمِ آشپزخانه و سفره (دسترخوان، دست‌پاک، ظروفِ یک‌بارمصرف)' },
+      { key: 'cleaning', label: 'موادِ پاک‌کاری و بهداشتی (صابون، پودر، مایع ظرف‌شویی، سفیدکننده)' }
     ]
   },
   {
