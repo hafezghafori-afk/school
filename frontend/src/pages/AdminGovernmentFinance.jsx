@@ -3417,6 +3417,34 @@ export default function AdminGovernmentFinance() {
     }
   };
 
+  // «چاپِ رسید» — سندِ کاغذیِ اضافه برای سه امضای فیزیکی (گیرنده/مدیرِ مالی/مدیرِ
+  // مکتب)، فقط برای رکوردهای تاییدشده. جایگزینِ رکوردِ دیجیتالی نیست.
+  const openVoucherPdf = async (path, busyKey, failMessage) => {
+    try {
+      setBusyAction(busyKey);
+      const { blob, contentType } = await fetchBlob(path, {}, { method: 'GET' });
+      const url = URL.createObjectURL(new Blob([blob], { type: contentType || 'application/pdf' }));
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (error) {
+      showMessage(errorMessage(error, failMessage), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const printStaffAdvanceVoucher = (advanceId) => openVoucherPdf(
+    `/api/finance/admin/staff-advances/${advanceId}/voucher`,
+    `print-staff-advance-voucher-${advanceId}`,
+    'ساختِ رسیدِ پیشکی ناموفق بود.'
+  );
+
+  const printSalaryPaymentVoucher = (paymentId) => openVoucherPdf(
+    `/api/finance/admin/staff-advances/salary-payments/${paymentId}/voucher`,
+    `print-salary-voucher-${paymentId}`,
+    'ساختِ رسیدِ معاش ناموفق بود.'
+  );
+
   const handleSalaryPaymentDraftChange = (event) => {
     const { name, value } = event.target;
     setSalaryPaymentDraft((current) => {
@@ -6508,6 +6536,7 @@ export default function AdminGovernmentFinance() {
                           <th>مانده</th>
                           <th>تاریخ</th>
                           <th>وضعیت</th>
+                          <th>رسید</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -6524,6 +6553,18 @@ export default function AdminGovernmentFinance() {
                             <td>{formatMoney(row.outstandingAmount)}</td>
                             <td>{toFaDate(row.issueDate)}</td>
                             <td><StaffAdvanceStatusBadge status={row.status} /></td>
+                            <td>
+                              {['approved', 'settled', 'written_off', 'refunded'].includes(row.status) ? (
+                                <button
+                                  type="button"
+                                  className="gov-inline-action"
+                                  disabled={!!busyAction}
+                                  onClick={() => printStaffAdvanceVoucher(row._id)}
+                                >
+                                  {busyAction === `print-staff-advance-voucher-${row._id}` ? 'در حال ساخت...' : 'چاپِ رسید'}
+                                </button>
+                              ) : '—'}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -6715,6 +6756,7 @@ export default function AdminGovernmentFinance() {
                           <th>کسرِ پیشکی</th>
                           <th>خالص</th>
                           <th>وضعیت</th>
+                          <th>رسید</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -6726,6 +6768,18 @@ export default function AdminGovernmentFinance() {
                             <td>{formatMoney(row.deductionTotal)}</td>
                             <td>{formatMoney(row.netAmount)}</td>
                             <td><StaffAdvanceStatusBadge status={row.status} /></td>
+                            <td>
+                              {row.status === 'approved' ? (
+                                <button
+                                  type="button"
+                                  className="gov-inline-action"
+                                  disabled={!!busyAction}
+                                  onClick={() => printSalaryPaymentVoucher(row._id)}
+                                >
+                                  {busyAction === `print-salary-voucher-${row._id}` ? 'در حال ساخت...' : 'چاپِ رسید'}
+                                </button>
+                              ) : '—'}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

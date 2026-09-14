@@ -123,6 +123,9 @@ const {
   writeOffAdvance,
   refundAdvance
 } = require('../services/staffAdvanceService');
+const { buildSalaryVoucherHtml, buildAdvanceVoucherHtml } = require('../services/paymentVoucherPrintService');
+const { buildHtmlPdfBuffer, isMissingPlaywrightBrowserError } = require('../services/sheetTemplatePdfService');
+const FinanceTreasuryAccount = require('../models/FinanceTreasuryAccount');
 const {
   PROCUREMENT_APPROVAL_STAGES,
   buildProcurementCommitmentAnalytics,
@@ -190,7 +193,7 @@ const {
   formatNumber: formatReportNumber,
   formatDateLabel: formatReportDateLabel
 } = require('../utils/financeReportPdf');
-const { resolveActiveSchool, writeSchoolContextHeaders } = require('../services/schoolContextService');
+const { resolveActiveSchool, writeSchoolContextHeaders, serializeSchoolBranding } = require('../services/schoolContextService');
 const {
   buildFinanceAnomalyReport,
   buildAnomalySummary
@@ -4754,6 +4757,60 @@ router.post('/admin/staff-advances/:id/void', requireAuth, requireRole(['admin']
   }
 });
 
+// رسیدِ کاغذیِ پیشکی/برداشت — فقط برای رکوردِ تاییدشده (پول واقعاً از خزانه کم شده).
+// این «طرحِ جایگزین» نیست؛ یک سندِ اضافه برای سه امضای فیزیکی (گیرنده/مدیرِ مالی/مدیرِ
+// مکتب) است که کنارِ همین صفحه چاپ و بایگانی می‌شود.
+router.get('/admin/staff-advances/:id/voucher', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await StaffAdvance.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId }).lean();
+    if (!item) return res.status(404).json({ success: false, message: 'رکورد پیشکی پیدا نشد.' });
+    if (!['approved', 'settled', 'written_off', 'refunded'].includes(item.status)) {
+      return res.status(409).json({ success: false, message: 'رسید فقط برای پیشکیِ تاییدشده قابلِ چاپ است.' });
+    }
+
+    const treasuryAccount = item.treasuryAccountId
+      ? await FinanceTreasuryAccount.findById(item.treasuryAccountId).select('title code').lean()
+      : null;
+    const branding = serializeSchoolBranding(schoolContext.school);
+    const { html, filename } = buildAdvanceVoucherHtml({
+      advance: serializeStaffAdvance(item),
+      treasuryAccountLabel: treasuryAccount ? (treasuryAccount.title || treasuryAccount.code || '') : '',
+      branding
+    });
+    const wantHtml = String(req.query.format || '').toLowerCase() === 'html';
+
+    await logActivity({
+      req,
+      action: 'finance_print_staff_advance_voucher',
+      targetType: 'StaffAdvance',
+      targetId: item._id.toString(),
+      meta: { format: wantHtml ? 'html' : 'pdf' }
+    });
+
+    if (wantHtml) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(html);
+    }
+    try {
+      const pdf = await buildHtmlPdfBuffer(html);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${filename.replace(/\.html$/i, '.pdf')}"`);
+      return res.send(pdf);
+    } catch (pdfError) {
+      if (isMissingPlaywrightBrowserError(pdfError)) {
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.send(html);
+      }
+      throw pdfError;
+    }
+  } catch (error) {
+    console.error('staff advance voucher print failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'ساختِ رسیدِ پیشکی ناموفق بود.' });
+  }
+});
+
 router.post('/admin/staff-advances/:id/write-off', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
@@ -5162,6 +5219,59 @@ router.post('/admin/staff-advances/salary-payments/:id/void', requireAuth, requi
       success: false,
       message: error?.userMessage || resolveFinancialYearMessage(error, 'باطل‌سازی پرداختِ معاش ناموفق بود.')
     });
+  }
+});
+
+// رسیدِ کاغذیِ پرداختِ معاش — فقط برای رکوردِ تاییدشده. بنگرید توضیحِ بالای روتِ
+// معادل برای پیشکی/برداشت.
+router.get('/admin/staff-advances/salary-payments/:id/voucher', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await StaffSalaryPayment.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId }).lean();
+    if (!item) return res.status(404).json({ success: false, message: 'رکورد پرداختِ معاش پیدا نشد.' });
+    if (item.status !== 'approved') {
+      return res.status(409).json({ success: false, message: 'رسید فقط برای پرداختِ معاشِ تاییدشده قابلِ چاپ است.' });
+    }
+
+    const treasuryAccount = item.treasuryAccountId
+      ? await FinanceTreasuryAccount.findById(item.treasuryAccountId).select('title code').lean()
+      : null;
+    const branding = serializeSchoolBranding(schoolContext.school);
+    const { html, filename } = buildSalaryVoucherHtml({
+      payment: serializeStaffSalaryPayment(item),
+      treasuryAccountLabel: treasuryAccount ? (treasuryAccount.title || treasuryAccount.code || '') : '',
+      branding
+    });
+    const wantHtml = String(req.query.format || '').toLowerCase() === 'html';
+
+    await logActivity({
+      req,
+      action: 'finance_print_staff_salary_voucher',
+      targetType: 'StaffSalaryPayment',
+      targetId: item._id.toString(),
+      meta: { format: wantHtml ? 'html' : 'pdf' }
+    });
+
+    if (wantHtml) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(html);
+    }
+    try {
+      const pdf = await buildHtmlPdfBuffer(html);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${filename.replace(/\.html$/i, '.pdf')}"`);
+      return res.send(pdf);
+    } catch (pdfError) {
+      if (isMissingPlaywrightBrowserError(pdfError)) {
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.send(html);
+      }
+      throw pdfError;
+    }
+  } catch (error) {
+    console.error('staff salary voucher print failed:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'ساختِ رسیدِ معاش ناموفق بود.' });
   }
 });
 
