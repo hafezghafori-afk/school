@@ -8,7 +8,31 @@
 // گیرندهٔ پول، مدیرِ مالی، مدیرِ مکتب. امضای مدیرِ مکتب یک کنترلِ کاغذیِ مستقل است،
 // نه یک مرحلهٔ تازه در گردشِ کارِ دیجیتالی.
 
+const fs = require('fs');
+const path = require('path');
 const { KIND_LABELS, advanceCapFor } = require('./staffAdvanceService');
+
+// Vazirmatn به‌صورتِ data-URI جاسازی می‌شود، نه فقط با نام در font-family
+// ارجاع داده می‌شود: Playwright این HTML را با page.setContent() (بدونِ
+// baseURL) می‌رندر می‌کند، پس نه لینکِ نسبی به فایل روی دیسک کار می‌کند نه
+// اتصال به اینترنت برای فونتِ گوگل — و امیدوار بودن به اینکه Vazirmatn روی
+// سیستم‌عاملِ سرور نصب باشد شکننده است. دو وزنِ لازم (معمولی/ضخیم) یک‌بار در
+// زمانِ بارگذاریِ ماژول خوانده و کش می‌شوند؛ اگر فایل نبود، سند بدونِ جاسازی و
+// فقط با نامِ فونت (رفتارِ قبلی) رندر می‌شود.
+function loadFontFaceCss() {
+  try {
+    const dir = path.join(__dirname, '..', 'assets', 'fonts');
+    const regular = fs.readFileSync(path.join(dir, 'Vazirmatn-Regular.woff2')).toString('base64');
+    const bold = fs.readFileSync(path.join(dir, 'Vazirmatn-Bold.woff2')).toString('base64');
+    return `
+    @font-face { font-family: 'Vazirmatn'; font-weight: 400; font-style: normal; src: url(data:font/woff2;base64,${regular}) format('woff2'); }
+    @font-face { font-family: 'Vazirmatn'; font-weight: 700; font-style: normal; src: url(data:font/woff2;base64,${bold}) format('woff2'); }
+    `;
+  } catch {
+    return '';
+  }
+}
+const FONT_FACE_CSS = loadFontFaceCss();
 
 function esc(value) {
   return String(value == null ? '' : value)
@@ -111,6 +135,7 @@ function docShell({ title, badgeLabel, docCode, dateValue, brandName, brandSubti
 <meta charset="utf-8" />
 <title>${esc(title)}</title>
 <style>
+  ${FONT_FACE_CSS}
   @page { size: A4; margin: 14mm 12mm; }
   * { box-sizing: border-box; }
   html, body { background: #ffffff; }
