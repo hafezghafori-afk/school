@@ -153,7 +153,7 @@ async function listPayload() {
     AcademyInvoice.find().sort({ issuedAt: -1 }).limit(200)
       .populate('studentId', 'fullName studentCode')
       .lean(),
-    AcademyCharge.find({ status: { $ne: 'void' } }).sort({ dueDate: 1, createdAt: 1 }).limit(2000).lean(),
+    AcademyCharge.find({ status: { $ne: 'void' } }).select('-discountHistory').sort({ dueDate: 1, createdAt: 1 }).limit(2000).lean(),
     AcademyExpense.find().sort({ expenseDate: -1, createdAt: -1 }).limit(200).lean(),
     AcademyExpenseCategory.find().sort({ name: 1 }).lean(),
     AcademyAttendance.find().sort({ attendanceDate: -1, createdAt: -1 }).limit(120)
@@ -362,7 +362,7 @@ async function buildInitialCharges(reg, body, currency, settings, uid) {
   const fee = toNumber(reg.feeAmount);
   const discount = Math.min(fee, toNumber(reg.discountAmount));
   const installments = Array.isArray(body.installments) ? body.installments : [];
-  const discountType = ['sibling', 'scholarship', 'staff', 'hardship', 'other'].includes(body.discountType) ? body.discountType : '';
+  const discountType = academyLedger.normalizeDiscountType(body.discountType);
   const discountReason = String(body.discountReason || '').trim();
 
   if (reg.paymentPlan === 'installment' && installments.length) {
@@ -378,15 +378,18 @@ async function buildInitialCharges(reg, body, currency, settings, uid) {
       });
     }
   } else if (reg.paymentPlan === 'monthly') {
-    // بلِ ماهانه خودکار ساخته نمی‌شود — از تبِ «صدور بل» صادر می‌شود.
+    // بلِ ماهانه خودکار ساخته نمی‌شود — از تبِ «صدور بل» صادر می‌شود. تخفیفِ فرم
+    // «تخفیفِ هر ماه» است: قاعدهٔ خودکاری که هنگامِ صدور روی بلِ هر ماه می‌نشیند.
     if (!toNumber(reg.monthlyFee) && fee > 0) { reg.monthlyFee = fee; }
+    const monthlyDiscount = Math.min(academyLedger.effectiveMonthlyFee(reg), toNumber(reg.discountAmount));
+    if (monthlyDiscount > 0) {
+      academyLedger.setMonthlyDiscountRule(reg, { amount: monthlyDiscount, discountType, discountReason, by: uid });
+    }
     await reg.save();
   } else if (fee > 0) {
-    await AcademyCharge.create({
+    const charge = new AcademyCharge({
       registrationId: reg._id, studentId: reg.studentId, kind: 'enrollment',
-      title: 'فیس / شمولیت', amount: fee, discountAmount: discount,
-      discountReason, discountType,
-      discountApprovedBy: discount > 0 ? uid : null,
+      title: 'فیس / شمولیت', amount: fee,
       // سررسید = تاریخِ ثبت‌نام؛ startDate فقط اگر بعد از آن باشد (هم‌راستا با
       // academyLedger.generateMonthlyCharges — startDateِ «۱ حمل» را نادیده بگیر).
       dueDate: (() => {
@@ -396,6 +399,8 @@ async function buildInitialCharges(reg, body, currency, settings, uid) {
       })(),
       currency, createdBy: uid
     });
+    academyLedger.setChargeDiscount(charge, { amount: discount, discountType, discountReason, by: uid, source: 'registration' });
+    await charge.save();
   }
 }
 
@@ -478,9 +483,36 @@ router.put('/registrations/:id', async (req, res) => {
 
     const financeKeys = ['paymentPlan', 'feeAmount', 'discountAmount', 'monthlyFee', 'discountType', 'discountReason'];
     const wantsFinanceEdit = financeKeys.some((k) => req.body[k] !== undefined) || Array.isArray(req.body.installments);
+    // ثبت‌نامِ ماهانه‌ای که ماهانه می‌ماند ساختاری برای بازسازی ندارد (بل‌ها صریح صادر
+    // می‌شوند): فقط فیسِ ماهانه عوض می‌شود — حتی وقتی ماه‌هایی پرداخت شده‌اند — و
+    // بل‌های پرداخت‌نخورده به مبلغِ تازه می‌روند. تخفیف‌ها از پنجرهٔ «تخفیف» است.
+    const staysMonthly = reg.paymentPlan === 'monthly'
+      && (req.body.paymentPlan === undefined || req.body.paymentPlan === 'monthly');
     let legacyDirectEdit = false;
 
-    if (wantsFinanceEdit) {
+    if (wantsFinanceEdit && staysMonthly) {
+      if (req.body.feeAmount !== undefined) reg.feeAmount = toNumber(req.body.feeAmount);
+      if (req.body.discountAmount !== undefined) reg.discountAmount = toNumber(req.body.discountAmount);
+      const nextFee = req.body.monthlyFee !== undefined ? toNumber(req.body.monthlyFee) : toNumber(reg.monthlyFee);
+      if (nextFee !== toNumber(reg.monthlyFee)) {
+        reg.monthlyFee = nextFee;
+        const openBills = nextFee > 0
+          ? await AcademyCharge.find({ registrationId: reg._id, kind: 'monthly', status: { $ne: 'void' }, paidAmount: 0 })
+          : [];
+        for (const c of openBills) {
+          if (toNumber(c.amount) === nextFee) continue;
+          c.amount = nextFee;
+          if (toNumber(c.discountAmount) > nextFee) {
+            academyLedger.setChargeDiscount(c, {
+              amount: nextFee, discountType: c.discountType, discountReason: c.discountReason, by: userId(req), source: 'fee-change'
+            });
+          }
+          c.updatedBy = userId(req);
+          await c.save();
+        }
+      }
+      reg.ledgerManaged = true;
+    } else if (wantsFinanceEdit) {
       const charges = await AcademyCharge.find({ registrationId: reg._id, status: { $ne: 'void' } });
       const paidCharge = charges.find((c) => toNumber(c.paidAmount) > 0);
       if (paidCharge) {
@@ -514,14 +546,6 @@ router.put('/registrations/:id', async (req, res) => {
         await reg.save();
         await buildInitialCharges(reg, req.body, currency, settings, userId(req));
       }
-    } else if (req.body.monthlyFee !== undefined && reg.paymentPlan === 'monthly') {
-      // فقط تغییرِ فیسِ ماهانه → بل‌های ماهانهٔ پرداخت‌نشده با مبلغِ تازه به‌روز
-      // می‌شوند (بلِ تازه صادر نمی‌شود).
-      reg.monthlyFee = toNumber(req.body.monthlyFee);
-      const monthlyCharges = await AcademyCharge.find({ registrationId: reg._id, kind: 'monthly', status: { $ne: 'void' }, paidAmount: 0 });
-      for (const c of monthlyCharges) { c.amount = reg.monthlyFee; c.updatedBy = userId(req); await c.save(); }
-      reg.ledgerManaged = true;
-      await reg.save();
     }
 
     reg.updatedBy = userId(req);
@@ -569,6 +593,118 @@ router.delete('/registrations/:id', async (req, res) => {
     });
   } catch (error) {
     res.status(400).json({ success: false, message: error?.message || 'حذفِ ثبت‌نام ناموفق بود.' });
+  }
+});
+
+// ===== تخفیف (دکمهٔ «تخفیف» در لیستِ ثبت‌نام‌ها) =====
+
+router.get('/registrations/:id/discounts', async (req, res) => {
+  try {
+    if (!/^[a-f\d]{24}$/i.test(String(req.params.id))) return res.status(404).json({ success: false, message: 'ثبت‌نام پیدا نشد.' });
+    const sheet = await academyLedger.discountSheet(req.params.id);
+    if (!sheet) return res.status(404).json({ success: false, message: 'ثبت‌نام پیدا نشد.' });
+    res.json({ success: true, ...sheet });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'دریافتِ تخفیف‌ها ناموفق بود.' });
+  }
+});
+
+// ذخیرهٔ یکجای تخفیفِ اقلام — پرداخت‌شده یا نشده — و تخفیفِ خودکارِ ماه‌های بعد.
+// تخفیفِ قلمِ پرداخت‌شده پرداخت و رسید را دست نمی‌زند: recompute مازاد را اعتبار
+// می‌کند و روی قدیمی‌ترین قلمِ باز می‌نشاند؛ برداشتنِ تخفیف پول را به همان قلم برمی‌گرداند.
+router.put('/registrations/:id/discounts', async (req, res) => {
+  try {
+    const L = academyLedger;
+    if (!/^[a-f\d]{24}$/i.test(String(req.params.id))) return res.status(404).json({ success: false, message: 'ثبت‌نام پیدا نشد.' });
+    const reg = await AcademyRegistration.findById(req.params.id);
+    if (!reg) return res.status(404).json({ success: false, message: 'ثبت‌نام پیدا نشد.' });
+    const uid = userId(req);
+    const sharedType = L.normalizeDiscountType(req.body.discountType);
+    const sharedReason = String(req.body.discountReason || '').trim();
+    const badAmount = (value) => value === '' || value === null || value === undefined || !Number.isFinite(Number(value)) || Number(value) < 0;
+    const fail = (message) => res.status(400).json({ success: false, message });
+
+    const items = Array.isArray(req.body.items) ? req.body.items : [];
+    const ids = items.map((item) => String(item?.chargeId || '')).filter((id) => /^[a-f\d]{24}$/i.test(id));
+    const charges = ids.length
+      ? await AcademyCharge.find({ _id: { $in: ids }, registrationId: reg._id, status: { $ne: 'void' } })
+      : [];
+    const byId = new Map(charges.map((c) => [String(c._id), c]));
+
+    const changedCharges = [];
+    for (const item of items) {
+      const charge = byId.get(String(item?.chargeId || ''));
+      if (!charge) return fail('یکی از اقلام پیدا نشد یا ابطال شده است — پنجرهٔ تخفیف را دوباره باز کنید.');
+      const label = charge.periodKey ? L.shamsiMonthLabel(charge.periodKey) : (charge.title || 'قلم');
+      if (badAmount(item.discountAmount)) return fail(`مبلغِ تخفیفِ «${label}» نامعتبر است.`);
+      const amount = L.round(Number(item.discountAmount));
+      if (amount > L.num(charge.amount)) return fail(`تخفیفِ «${label}» (${amount}) از فیسِ آن (${L.num(charge.amount)}) بیشتر است.`);
+      const next = {
+        amount,
+        discountType: item.discountType !== undefined ? L.normalizeDiscountType(item.discountType) : sharedType,
+        discountReason: String(item.discountReason ?? sharedReason).trim()
+      };
+      const same = L.round(L.num(charge.discountAmount)) === amount
+        && (amount === 0 || (charge.discountType || '') === next.discountType);
+      if (same) continue;
+      if (!next.discountReason) return fail('دلیلِ تخفیف را بنویسید.');
+      changedCharges.push({ charge, next });
+    }
+
+    let ruleChange = null;
+    if (req.body.rule && typeof req.body.rule === 'object') {
+      if (reg.paymentPlan !== 'monthly') return fail('تخفیفِ خودکارِ ماه‌های بعد فقط برای ثبت‌نامِ ماهانه است.');
+      const ruleIn = req.body.rule;
+      if (badAmount(ruleIn.amount)) return fail('مبلغِ تخفیفِ خودکار نامعتبر است.');
+      const amount = L.round(Number(ruleIn.amount));
+      const fee = L.effectiveMonthlyFee(reg);
+      if (fee > 0 && amount > fee) return fail(`تخفیفِ خودکار (${amount}) از فیسِ ماهانه (${fee}) بیشتر است.`);
+      const untilMonth = amount > 0 ? String(ruleIn.untilMonth || '').trim() : '';
+      if (untilMonth && !validMonth(untilMonth)) return fail('ماهِ پایانِ تخفیفِ خودکار نامعتبر است.');
+      const next = {
+        amount,
+        untilMonth,
+        discountType: ruleIn.discountType !== undefined ? L.normalizeDiscountType(ruleIn.discountType) : sharedType,
+        discountReason: String(ruleIn.discountReason ?? sharedReason).trim()
+      };
+      const prev = reg.monthlyDiscount || {};
+      const same = L.round(L.num(prev.amount)) === amount
+        && String(prev.untilMonth || '') === untilMonth
+        && (amount === 0 || (prev.discountType || '') === next.discountType);
+      if (!same) {
+        if (!next.discountReason) return fail('دلیلِ تخفیف را بنویسید.');
+        ruleChange = next;
+      }
+    }
+
+    if (!changedCharges.length && !ruleChange) return fail('تغییری برای ذخیره نیست.');
+
+    for (const { charge, next } of changedCharges) {
+      L.setChargeDiscount(charge, { ...next, by: uid, source: 'discount-sheet' });
+      charge.updatedBy = uid;
+      await charge.save();
+    }
+    if (ruleChange) {
+      L.setMonthlyDiscountRule(reg, { ...ruleChange, by: uid });
+      reg.updatedBy = uid;
+      await reg.save();
+    }
+    if (changedCharges.length) await L.recomputeRegistration(reg._id);
+
+    const sheet = await L.discountSheet(reg._id);
+    const parts = [];
+    if (changedCharges.length) parts.push(`تخفیفِ ${changedCharges.length.toLocaleString('fa-AF')} قلم ذخیره شد`);
+    if (ruleChange) parts.push(ruleChange.amount > 0 ? 'تخفیفِ خودکارِ ماه‌های بعد تنظیم شد' : 'تخفیفِ خودکارِ ماه‌های بعد برداشته شد');
+    res.json({
+      success: true,
+      ...sheet,
+      item: { _id: reg._id },
+      changedCount: changedCharges.length,
+      ruleChanged: Boolean(ruleChange),
+      message: `${parts.join(' و ')}.`
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error?.message || 'ذخیرهٔ تخفیف ناموفق بود.' });
   }
 });
 
@@ -630,9 +766,11 @@ router.post('/payments', async (req, res) => {
       || (openCharges.find((c) => c.periodKey === targetMonth) || {})._id
       || '';
     const { allocations } = academyLedger.allocatePayment(amount, openCharges, targetChargeId);
-    const coveredMonthKeys = allocations
+    const coveredCharges = allocations
       .map((a) => openCharges.find((c) => String(c._id) === String(a.chargeId)))
-      .filter((c) => c && c.periodKey)
+      .filter(Boolean);
+    const coveredMonthKeys = coveredCharges
+      .filter((c) => c.periodKey)
       .map((c) => c.periodKey);
     const coveredMonthLabels = coveredMonthKeys.map((k) => academyLedger.shamsiMonthLabel(k));
     const remainingBalance = Math.max(0, previousBalance - amount);
@@ -666,8 +804,12 @@ router.post('/payments', async (req, res) => {
       paymentId: payment._id,
       courseName: registration.courseId?.name || '',
       className: registration.classId?.name || '',
-      feeAmount: academyLedger.num(freshReg?.totalPayable ?? registration.feeAmount),
-      discountAmount: registration.discountAmount,
+      // فیس و تخفیفِ رسید = فیس و تخفیفِ همان اقلامی که این پرداخت پوشش داد (مثلاً
+      // ماهِ اسد)، نه جمعِ کلِ ثبت‌نام یا تخفیفِ فرمِ ثبت‌نام.
+      feeAmount: coveredCharges.length
+        ? academyLedger.round(coveredCharges.reduce((s, c) => s + academyLedger.num(c.amount), 0))
+        : academyLedger.num(freshReg?.totalPayable ?? registration.feeAmount),
+      discountAmount: academyLedger.round(coveredCharges.reduce((s, c) => s + academyLedger.num(c.discountAmount), 0)),
       paidAmount: amount,
       previousBalance,
       remainingBalance: academyLedger.num(freshReg?.balance ?? remainingBalance),
@@ -796,17 +938,22 @@ router.post('/registrations/:id/charges', async (req, res) => {
       const amount = toNumber(row.amount);
       if (amount <= 0) continue;
       const kind = ['installment', 'manual', 'late_fee'].includes(row.kind) ? row.kind : 'manual';
-      const c = await AcademyCharge.create({
+      const c = new AcademyCharge({
         registrationId: reg._id, studentId: reg.studentId, kind,
         title: String(row.title || (kind === 'installment' ? `قسط ${idx}` : kind === 'late_fee' ? 'جریمهٔ دیرکرد' : 'قلمِ دستی')).trim(),
         amount,
-        discountAmount: Math.min(amount, toNumber(row.discountAmount)),
-        discountReason: String(row.discountReason || '').trim(),
-        discountType: ['sibling', 'scholarship', 'staff', 'hardship', 'other'].includes(row.discountType) ? row.discountType : '',
-        discountApprovedBy: row.discountApprovedBy || (toNumber(row.discountAmount) > 0 ? userId(req) : null),
         dueDate: String(row.dueDate || '').slice(0, 10),
         currency, note: String(row.note || '').trim(), createdBy: userId(req)
       });
+      academyLedger.setChargeDiscount(c, {
+        amount: row.discountAmount,
+        discountType: row.discountType,
+        discountReason: row.discountReason,
+        by: userId(req),
+        approvedBy: row.discountApprovedBy || userId(req),
+        source: 'charge-add'
+      });
+      await c.save();
       created.push(c._id);
     }
     if (!created.length) return res.status(400).json({ success: false, message: 'قلمی برای افزودن نبود.' });
@@ -828,13 +975,20 @@ router.put('/charges/:id', async (req, res) => {
 
     if (req.body.title !== undefined) charge.title = String(req.body.title || '').trim();
     if (req.body.amount !== undefined) charge.amount = toNumber(req.body.amount);
-    if (req.body.discountAmount !== undefined) charge.discountAmount = Math.min(charge.amount, toNumber(req.body.discountAmount));
-    if (req.body.discountReason !== undefined) charge.discountReason = String(req.body.discountReason || '').trim();
-    if (req.body.discountType !== undefined) {
-      charge.discountType = ['sibling', 'scholarship', 'staff', 'hardship', 'other'].includes(req.body.discountType) ? req.body.discountType : '';
+    const wantsDiscount = ['discountAmount', 'discountType', 'discountReason'].some((k) => req.body[k] !== undefined);
+    // فیسی که زیرِ تخفیفِ فعلی رفت، تخفیف را هم تا سقفِ فیس پایین می‌آورد — با ثبت در تاریخچه.
+    if (wantsDiscount || academyLedger.num(charge.discountAmount) > academyLedger.num(charge.amount)) {
+      const reason = req.body.discountReason !== undefined ? req.body.discountReason : charge.discountReason;
+      const changed = academyLedger.setChargeDiscount(charge, {
+        amount: req.body.discountAmount !== undefined ? req.body.discountAmount : charge.discountAmount,
+        discountType: req.body.discountType !== undefined ? req.body.discountType : charge.discountType,
+        discountReason: reason,
+        by: userId(req),
+        approvedBy: req.body.discountApprovedBy || charge.discountApprovedBy || userId(req),
+        source: 'charge-edit'
+      });
+      if (!changed && academyLedger.num(charge.discountAmount) > 0) charge.discountReason = String(reason || '').trim();
     }
-    if (req.body.discountApprovedBy !== undefined) charge.discountApprovedBy = req.body.discountApprovedBy || null;
-    if (academyLedger.num(charge.discountAmount) > 0 && !charge.discountApprovedBy) charge.discountApprovedBy = userId(req);
     if (req.body.dueDate !== undefined) charge.dueDate = String(req.body.dueDate || '').slice(0, 10);
     if (req.body.note !== undefined) charge.note = String(req.body.note || '').trim();
     charge.updatedBy = userId(req);
@@ -898,13 +1052,16 @@ router.post('/bills/preview', async (req, res) => {
         // ردیفِ بی‌مبلغ باید همین‌جا دیده شود نه این‌که بی‌صدا رد شود.
         const net = L.effectiveMonthlyFee(r);
         const reason = L.billMonthDisallowReason(r, month) || (net > 0 ? '' : 'no-fee');
+        // تخفیفِ خودکاری که بلِ تازهٔ این ماه با آن صادر می‌شود
+        const proposedDiscount = Math.min(net, (L.monthlyDiscountFor(r, month) || {}).amount || 0);
         return {
           registrationId: r._id,
           studentId: r.studentId,
           courseId: r.courseId,
           classId: r.classId,
           monthlyFee: net,
-          proposedNet: net,
+          proposedDiscount,
+          proposedNet: L.round(net - proposedDiscount),
           hasBill: Boolean(c),
           billStatus: c ? c.status : '',
           allowed: reason === '',
@@ -999,7 +1156,7 @@ router.get('/students/:id/statement', async (req, res) => {
     const [registrations, charges, payments, invoices, settings] = await Promise.all([
       AcademyRegistration.find({ studentId }).sort({ createdAt: 1 })
         .populate('courseId', 'name').populate('classId', 'name').lean(),
-      AcademyCharge.find({ studentId }).sort({ dueDate: 1, createdAt: 1 }).lean(),
+      AcademyCharge.find({ studentId }).select('-discountHistory').sort({ dueDate: 1, createdAt: 1 }).lean(),
       AcademyPayment.find({ studentId }).sort({ paidAt: 1, createdAt: 1 }).lean(),
       AcademyInvoice.find({ studentId }).sort({ issuedAt: 1 }).lean(),
       getSettings()
