@@ -5,6 +5,10 @@ const ExpenseEntry = require('../models/ExpenseEntry');
 const FinanceTreasuryTransaction = require('../models/FinanceTreasuryTransaction');
 const { resolveExpenseCategorySelection } = require('./expenseGovernanceService');
 const { resolveQuarterForDate } = require('./financialPeriodService');
+const {
+  PAYROLL_CATEGORY_KEY,
+  PAYROLL_SUBCATEGORY_BY_STAFF_POSITION
+} = require('../config/expenseChart');
 
 // Hard caps by kind (user decision): advances / withdrawals may not exceed one
 // month of the person's salary basis; a staff loan may reach three months.
@@ -430,23 +434,31 @@ function serializeStaffSalaryPayment(doc = {}) {
   };
 }
 
+// A salary expense is filed under «معاشات و مزایا» (payroll) with the
+// sub-category matching the person's «سمت» on the staff registration form.
+// The legacy `salary` / `other` keys were deactivated by the expense-chart
+// migration and must never be a fallback: an expense under an inactive key
+// drops out of payroll totals and budget-vs-actual, and (being locked from
+// editing) cannot be fixed from the UI. If payroll itself is unavailable the
+// approval stops with a clear message instead.
 async function resolveSalaryExpenseCategory(position = '') {
-  const sub = normalizeText(position) === 'teacher' ? 'teachers' : 'staff';
-  const attempts = [
-    { category: 'salary', subCategory: sub },
-    { category: 'salary', subCategory: '' },
-    { category: 'other', subCategory: '' }
-  ];
+  const subCategory = PAYROLL_SUBCATEGORY_BY_STAFF_POSITION[normalizeText(position)] || '';
+  const attempts = subCategory
+    ? [{ category: PAYROLL_CATEGORY_KEY, subCategory }, { category: PAYROLL_CATEGORY_KEY, subCategory: '' }]
+    : [{ category: PAYROLL_CATEGORY_KEY, subCategory: '' }];
   for (const attempt of attempts) {
     try {
       // eslint-disable-next-line no-await-in-loop
       const resolved = await resolveExpenseCategorySelection(attempt);
       return { category: resolved.category, subCategory: resolved.subCategory };
     } catch {
-      // try the next fallback
+      // payroll without the sub-category is the only fallback
     }
   }
-  return { category: 'other', subCategory: '' };
+  const error = new Error('staff_salary_expense_category_unavailable');
+  error.statusCode = 409;
+  error.userMessage = 'سرفصلِ «معاشات و مزایا» در رجیستریِ مصارف فعال نیست؛ پیش از تاییدِ پرداختِ معاش آن را فعال کنید.';
+  throw error;
 }
 
 // Runs when a salary payment reaches its final approval: books the NET salary
@@ -621,6 +633,7 @@ module.exports = {
   listOpenAdvancesForStaff,
   serializeStaffSalaryPayment,
   finalizeSalaryPayment,
+  resolveSalaryExpenseCategory,
   writeOffAdvance,
   refundAdvance
 };

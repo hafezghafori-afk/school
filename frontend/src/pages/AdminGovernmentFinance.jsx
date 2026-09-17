@@ -913,7 +913,8 @@ const EXPENSE_REVISION_KIND_LABELS = {
   text_edit: 'ویرایشِ متنی (بدونِ اثرِ پولی)',
   correction_applied: 'اصلاحِ تاییدشده و اعمال‌شده',
   correction_rejected: 'درخواستِ اصلاحِ ردشده',
-  correction_cancelled: 'درخواستِ اصلاحِ لغوشده'
+  correction_cancelled: 'درخواستِ اصلاحِ لغوشده',
+  system_fix: 'اصلاحِ سیستمی (اسکریپتِ داده)'
 };
 
 function isSalaryLinkedExpenseRow(row) {

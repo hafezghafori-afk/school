@@ -267,6 +267,21 @@ function resolveLegacyExpenseCategory(rawCategory = '', rawSubCategory = '') {
   };
 }
 
+/**
+ * سرفصل و زیرسرفصلِ مصرفی که «پرداختِ معاش» هنگامِ تاییدِ نهایی می‌سازد.
+ * کلیدها همان «سمت»های فرمِ ثبتِ کارمند‌اند (AfghanTeacher.employmentInfo.position).
+ * مدیر و معاونِ مکتب زیرِ «معاش کارمندان اداری» (تصمیمِ کاربر، ۲۰۲۶-۰۹-۱۷).
+ * سمتِ نامعلوم (گیرندهٔ بدونِ رکوردِ کارمند) → «معاشات و مزایا» بدونِ زیرسرفصل.
+ */
+const PAYROLL_CATEGORY_KEY = 'payroll';
+const PAYROLL_SUBCATEGORY_BY_STAFF_POSITION = Object.freeze({
+  teacher: 'teacher_salary',
+  principal: 'admin_staff',
+  vice_principal: 'admin_staff',
+  admin_staff: 'admin_staff',
+  support_staff: 'service_staff'
+});
+
 /** ردیف‌های سیید برای ExpenseCategoryDefinition (order/isSystem/isActive تزریق می‌شوند). */
 function buildExpenseChartSeed() {
   return EXPENSE_CHART.map((item, index) => ({
@@ -292,6 +307,8 @@ module.exports = {
   EXPENSE_CHART,
   EXPENSE_CHART_KEYS,
   LEGACY_CATEGORY_MAP,
+  PAYROLL_CATEGORY_KEY,
+  PAYROLL_SUBCATEGORY_BY_STAFF_POSITION,
   UNCLASSIFIED_KEY,
   UNCLASSIFIED_SUBCATEGORY,
   buildExpenseChartSeed,
