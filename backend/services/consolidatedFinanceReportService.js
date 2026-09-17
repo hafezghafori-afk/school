@@ -266,7 +266,9 @@ async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKe
     // «مصارفِ مکمل» = هر مصرفِ ثبت‌شده که ابطال/ردنشده — شاملِ draft و
     // pending_review، نه فقط approved — تا با آموزشگاه/موقت (که همه را می‌شمارند)
     // هم‌خوان باشد. سهمِ در انتظار تأیید جدا گزارش می‌شود.
-    ExpenseEntry.find({ status: { $nin: ['void', 'rejected'] }, expenseDate: { $gte: gregStart, $lt: gregEnd } })
+    // مصرفِ تاییدشده‌ای که «درخواستِ اصلاحِ» باز دارد تا تاییدِ نهاییِ اصلاح
+    // اصلاً شمرده نمی‌شود (correction: null یعنی بدونِ درخواستِ باز).
+    ExpenseEntry.find({ status: { $nin: ['void', 'rejected'] }, correction: null, expenseDate: { $gte: gregStart, $lt: gregEnd } })
       .select('amount expenseDate category subCategory status vendorName referenceNo')
       .lean(),
     sumPaidRefunds({ startAt: gregStart, endAt: gregEnd }),

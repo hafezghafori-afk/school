@@ -23,6 +23,65 @@ const expenseApprovalTrailSchema = new mongoose.Schema({
   reason: { type: String, default: '', trim: true }
 }, { _id: false });
 
+const expenseFieldChangeSchema = new mongoose.Schema({
+  field: { type: String, default: '', trim: true },
+  from: { type: mongoose.Schema.Types.Mixed, default: null },
+  to: { type: mongoose.Schema.Types.Mixed, default: null }
+}, { _id: false });
+
+// Audit history of changes made to an expense after it was recorded: direct
+// edits of open rows, text-only fixes on approved rows, and the outcome of
+// every correction request (applied / rejected / cancelled).
+const expenseRevisionSchema = new mongoose.Schema({
+  kind: {
+    type: String,
+    enum: ['edit', 'text_edit', 'correction_applied', 'correction_rejected', 'correction_cancelled'],
+    default: 'edit'
+  },
+  at: { type: Date, default: null },
+  by: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  requestedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  reason: { type: String, default: '', trim: true },
+  statusBefore: { type: String, default: '', trim: true },
+  changes: {
+    type: [expenseFieldChangeSchema],
+    default: []
+  }
+}, { _id: false });
+
+// An open correction request on an APPROVED expense. While it exists the row
+// sits in pending_review (so treasury balances, reports and budgets ignore it)
+// but its own fields keep the last approved values; `changes[].to` replaces
+// them only on final approval. Rejecting or cancelling restores
+// `previousApproval`.
+const expenseCorrectionSchema = new mongoose.Schema({
+  reason: { type: String, default: '', trim: true },
+  requestedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  requestedAt: { type: Date, default: null },
+  changes: {
+    type: [expenseFieldChangeSchema],
+    default: []
+  },
+  previousApproval: {
+    submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    submittedAt: { type: Date, default: null },
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    approvedAt: { type: Date, default: null }
+  }
+}, { _id: false });
+
 const expenseEntrySchema = new mongoose.Schema({
   schoolId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -124,6 +183,14 @@ const expenseEntrySchema = new mongoose.Schema({
   rejectReason: { type: String, default: '', trim: true },
   approvalTrail: {
     type: [expenseApprovalTrailSchema],
+    default: []
+  },
+  correction: {
+    type: expenseCorrectionSchema,
+    default: null
+  },
+  revisions: {
+    type: [expenseRevisionSchema],
     default: []
   },
   createdBy: {

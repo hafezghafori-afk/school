@@ -126,6 +126,22 @@ const {
 const { buildSalaryVoucherHtml, buildAdvanceVoucherHtml } = require('../services/paymentVoucherPrintService');
 const { buildHtmlPdfBuffer, isMissingPlaywrightBrowserError } = require('../services/sheetTemplatePdfService');
 const FinanceTreasuryAccount = require('../models/FinanceTreasuryAccount');
+const { invalidateTreasuryCheckpoints } = require('../services/treasuryCheckpointService');
+const {
+  EXPENSE_PAYMENT_METHODS,
+  actorReviewedCurrentExpenseRound,
+  appendExpenseRevision,
+  comparableExpenseValue,
+  diffExpenseFields,
+  hasFinancialExpenseChange,
+  hasOpenExpenseCorrection,
+  isSalaryLinkedExpense,
+  resolveCheckpointInvalidationScope,
+  restoreExpenseApproval,
+  snapshotExpenseApproval,
+  snapshotExpenseCorrection,
+  toPlainExpenseChanges
+} = require('../services/expenseCorrectionService');
 const {
   PROCUREMENT_APPROVAL_STAGES,
   buildProcurementCommitmentAnalytics,
@@ -1269,11 +1285,9 @@ const getNextExpenseStage = (adminLevel = '', currentStage = '') => {
   return '';
 };
 
-const actorAlreadyReviewedExpense = (trail = [], actorId = '') => Array.isArray(trail)
-  && trail.some((entry) => (
-    String(entry?.by || '') === String(actorId || '')
-    && ['approve', 'reject'].includes(String(entry?.action || '').trim().toLowerCase())
-  ));
+// Scoped to the current review round (since the latest submit / correction
+// request) so a corrected resubmission can be reviewed again by the same people.
+const actorAlreadyReviewedExpense = (trail = [], actorId = '') => actorReviewedCurrentExpenseRound(trail, actorId);
 
 const appendExpenseApprovalTrail = (item, { level = '', action = '', by = '', note = '', reason = '' } = {}) => {
   if (!Array.isArray(item.approvalTrail)) item.approvalTrail = [];
@@ -1617,7 +1631,31 @@ const serializeExpenseEntry = (value = null) => {
       : (plain.rejectedBy || null),
     updatedBy: plain.updatedBy?._id
       ? { _id: plain.updatedBy._id, name: plain.updatedBy.name || '' }
-      : (plain.updatedBy || null)
+      : (plain.updatedBy || null),
+    correction: hasOpenExpenseCorrection(plain)
+      ? {
+          reason: plain.correction.reason || '',
+          requestedAt: plain.correction.requestedAt || null,
+          requestedBy: plain.correction.requestedBy?._id
+            ? { _id: plain.correction.requestedBy._id, name: plain.correction.requestedBy.name || '' }
+            : (plain.correction.requestedBy || null),
+          changes: toPlainExpenseChanges(plain.correction.changes)
+        }
+      : null,
+    revisions: Array.isArray(plain.revisions)
+      ? plain.revisions.map((entry) => ({
+          kind: entry?.kind || 'edit',
+          at: entry?.at || null,
+          reason: entry?.reason || '',
+          statusBefore: entry?.statusBefore || '',
+          by: entry?.by?._id ? { _id: entry.by._id, name: entry.by.name || '' } : (entry?.by || null),
+          requestedBy: entry?.requestedBy?._id
+            ? { _id: entry.requestedBy._id, name: entry.requestedBy.name || '' }
+            : (entry?.requestedBy || null),
+          changes: toPlainExpenseChanges(entry?.changes)
+        }))
+      : [],
+    isSalaryLinked: isSalaryLinkedExpense(plain)
   };
 };
 
@@ -1639,6 +1677,9 @@ const populateExpenseEntryQuery = (query) => query
   .populate('treasuryAccountId', 'title code accountType currency isActive')
   .populate('procurementCommitmentId', 'title vendorName committedAmount status approvalStage')
   .populate('approvalTrail.by', 'name')
+  .populate('correction.requestedBy', 'name')
+  .populate('revisions.by', 'name')
+  .populate('revisions.requestedBy', 'name')
   .populate('createdBy', 'name')
   .populate('submittedBy', 'name')
   .populate('approvedBy', 'name')
@@ -3724,6 +3765,232 @@ const reviewExpenseEntryTransition = ({
   };
 };
 
+// --- Editing recorded expenses (see services/expenseCorrectionService.js) ---
+
+const EXPENSE_SALARY_LOCK_MESSAGE = 'این مصرف خودکار از «پرداختِ معاش» ساخته شده و به رکوردِ معاش، قسطِ پیشکی و رسیدِ چاپی وصل است؛ از همان بخش اصلاح شود.';
+const EXPENSE_OPEN_CORRECTION_MESSAGE = 'این مصرف یک درخواستِ اصلاحِ باز دارد؛ اول آن را تایید، رد یا لغو کنید.';
+// Fields whose change moves a treasury balance (procurement-linked expenses are
+// folded differently), so treasury checkpoints must be dropped when they change.
+const EXPENSE_TREASURY_FIELDS = new Set(['amount', 'expenseDate', 'treasuryAccountId', 'procurementCommitmentId']);
+
+const createExpenseEditError = (code, messageDari, statusCode = 400) => {
+  const error = new Error(code);
+  error.statusCode = statusCode;
+  error.messageDari = messageDari;
+  return error;
+};
+
+const assertProcurementCommitmentMatchesCategory = (commitment, category = '', subCategory = '') => {
+  if (!commitment) return;
+  if (String(commitment.category || '') !== String(category || '')
+    || (String(commitment.subCategory || '') && String(commitment.subCategory || '') !== String(subCategory || ''))) {
+    const error = new Error('finance_procurement_commitment_scope_invalid');
+    error.statusCode = 400;
+    throw error;
+  }
+};
+
+const expensePeriodScope = (item, dateValue) => ({
+  schoolId: item.schoolId,
+  financialYearId: item.financialYearId,
+  academicYearId: item.academicYearId,
+  dateValue
+});
+
+// Validates the requested new values for an existing expense. Only fields
+// present in `payload` are considered and only fields that really change are
+// re-validated, so an untouched legacy category or inactive account stays as is.
+const resolveExpenseEditChanges = async ({ item, payload = {}, financialYear }) => {
+  const has = (field) => Object.prototype.hasOwnProperty.call(payload, field);
+  const requested = {};
+
+  const nextCategory = has('category') ? payload.category : item.category;
+  const nextSubCategory = has('subCategory') ? payload.subCategory : item.subCategory;
+  const categoryChanged = (has('category') || has('subCategory')) && (
+    comparableExpenseValue('category', nextCategory) !== comparableExpenseValue('category', item.category)
+    || comparableExpenseValue('subCategory', nextSubCategory) !== comparableExpenseValue('subCategory', item.subCategory)
+  );
+  if (categoryChanged) {
+    const selection = await resolveExpenseCategorySelection({ category: nextCategory, subCategory: nextSubCategory });
+    requested.category = selection.category;
+    requested.subCategory = selection.subCategory;
+  }
+
+  if (has('amount')) {
+    const amount = Number(payload.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw createExpenseEditError('finance_expense_amount_invalid', 'مبلغِ مصرف باید بیشتر از صفر باشد.');
+    }
+    requested.amount = Number(amount.toFixed(2));
+  }
+
+  if (has('expenseDate')
+    && comparableExpenseValue('expenseDate', payload.expenseDate) !== comparableExpenseValue('expenseDate', item.expenseDate)) {
+    const expenseDate = parseDateSafe(payload.expenseDate, null);
+    if (!expenseDate) throw createExpenseEditError('finance_expense_date_invalid', 'تاریخِ مصرف معتبر نیست.');
+    assertDateWithinFinancialYear(financialYear, expenseDate);
+    requested.expenseDate = expenseDate;
+  }
+
+  if (has('paymentMethod')) {
+    const paymentMethod = String(payload.paymentMethod || '').trim() || 'manual';
+    if (!EXPENSE_PAYMENT_METHODS.includes(paymentMethod)) {
+      throw createExpenseEditError('finance_expense_payment_method_invalid', 'روشِ پرداخت معتبر نیست.');
+    }
+    requested.paymentMethod = paymentMethod;
+  }
+
+  if (has('treasuryAccountId')
+    && comparableExpenseValue('treasuryAccountId', payload.treasuryAccountId) !== comparableExpenseValue('treasuryAccountId', item.treasuryAccountId)) {
+    const treasuryAccount = await resolveTreasuryAccountSelection({
+      accountId: payload.treasuryAccountId,
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId
+    });
+    requested.treasuryAccountId = treasuryAccount?._id || null;
+  }
+
+  const procurementChanged = has('procurementCommitmentId')
+    && comparableExpenseValue('procurementCommitmentId', payload.procurementCommitmentId) !== comparableExpenseValue('procurementCommitmentId', item.procurementCommitmentId);
+  const commitmentId = procurementChanged ? payload.procurementCommitmentId : item.procurementCommitmentId;
+  if (procurementChanged || (categoryChanged && commitmentId)) {
+    const procurementCommitment = await resolveProcurementCommitmentSelection({
+      commitmentId,
+      financialYearId: String(financialYear._id || ''),
+      academicYearId: String(financialYear.academicYearId || ''),
+      allowStatuses: ['approved']
+    });
+    assertProcurementCommitmentMatchesCategory(
+      procurementCommitment,
+      requested.category ?? item.category,
+      requested.subCategory ?? item.subCategory
+    );
+    if (procurementChanged) requested.procurementCommitmentId = procurementCommitment?._id || null;
+  }
+
+  ['vendorName', 'referenceNo', 'note'].forEach((field) => {
+    if (has(field)) requested[field] = String(payload[field] ?? '').trim();
+  });
+  if (isSalaryLinkedExpense({ referenceNo: requested.referenceNo })) {
+    throw createExpenseEditError('finance_expense_reference_reserved', 'مرجعِ «staff_salary:» مخصوصِ مصارفِ خودکارِ معاش است.');
+  }
+
+  return { requested, changes: diffExpenseFields(item, requested) };
+};
+
+const applyExpenseFieldChanges = (item, changes = [], financialYear = null) => {
+  const fields = new Set();
+  changes.forEach(({ field, to }) => {
+    item[field] = to;
+    fields.add(field);
+  });
+  if (fields.has('expenseDate') && financialYear) {
+    item.periodQuarter = resolveQuarterForDate(financialYear, item.expenseDate);
+  }
+  if ((fields.has('category') || fields.has('subCategory')) && item.needsCategoryReview) {
+    item.needsCategoryReview = false;
+  }
+};
+
+// Final approval of a correction: re-validate what changed (the registry,
+// treasury accounts, commitments or closed months may have moved on since the
+// request), then write the new values onto the row. Returns the treasury
+// checkpoint scope to drop, or null when no balance-relevant field changed.
+const applyApprovedExpenseCorrection = async ({ item, correction, financialYear }) => {
+  const changes = toPlainExpenseChanges(correction?.changes);
+  const values = Object.fromEntries(changes.map(({ field, to }) => [field, to]));
+  const has = (field) => Object.prototype.hasOwnProperty.call(values, field);
+
+  if (has('category') || has('subCategory')) {
+    await resolveExpenseCategorySelection({
+      category: has('category') ? values.category : item.category,
+      subCategory: has('subCategory') ? values.subCategory : item.subCategory
+    });
+  }
+  if (has('treasuryAccountId') && values.treasuryAccountId) {
+    await resolveTreasuryAccountSelection({
+      accountId: values.treasuryAccountId,
+      schoolId: financialYear.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId
+    });
+  }
+  const commitmentId = has('procurementCommitmentId') ? values.procurementCommitmentId : item.procurementCommitmentId;
+  if (commitmentId && (has('procurementCommitmentId') || has('category') || has('subCategory'))) {
+    const procurementCommitment = await resolveProcurementCommitmentSelection({
+      commitmentId,
+      financialYearId: String(financialYear._id || ''),
+      academicYearId: String(financialYear.academicYearId || ''),
+      allowStatuses: ['approved']
+    });
+    assertProcurementCommitmentMatchesCategory(
+      procurementCommitment,
+      has('category') ? values.category : item.category,
+      has('subCategory') ? values.subCategory : item.subCategory
+    );
+  }
+  if (has('expenseDate')) {
+    const expenseDate = parseDateSafe(values.expenseDate, null);
+    if (!expenseDate) throw createExpenseEditError('finance_expense_date_invalid', 'تاریخِ مصرف معتبر نیست.');
+    assertDateWithinFinancialYear(financialYear, expenseDate);
+    await assertFinancePeriodWritable(expensePeriodScope(item, expenseDate));
+    changes.forEach((change) => {
+      if (change.field === 'expenseDate') change.to = expenseDate;
+    });
+  }
+
+  const before = { treasuryAccountId: item.treasuryAccountId, expenseDate: item.expenseDate };
+  applyExpenseFieldChanges(item, changes, financialYear);
+  if (!changes.some((change) => EXPENSE_TREASURY_FIELDS.has(change.field))) return null;
+  return resolveCheckpointInvalidationScope({
+    before,
+    after: { treasuryAccountId: item.treasuryAccountId, expenseDate: item.expenseDate }
+  });
+};
+
+// Runs right after reviewExpenseEntryTransition on a row with an open
+// correction: final approval applies the requested values; a rejection puts
+// the row back to its previous approved state with its old values.
+const settleExpenseCorrectionReview = async ({
+  item,
+  correction,
+  outcome,
+  action = 'approve',
+  actorId = '',
+  reason = '',
+  financialYear
+}) => {
+  if (!correction) return { checkpointScope: null, settled: '' };
+  if (outcome?.completed) {
+    const checkpointScope = await applyApprovedExpenseCorrection({ item, correction, financialYear });
+    appendExpenseRevision(item, {
+      kind: 'correction_applied',
+      by: actorId,
+      requestedBy: correction.requestedBy,
+      reason: correction.reason,
+      statusBefore: 'approved',
+      changes: correction.changes
+    });
+    item.correction = null;
+    return { checkpointScope, settled: 'applied' };
+  }
+  if (action === 'reject') {
+    appendExpenseRevision(item, {
+      kind: 'correction_rejected',
+      by: actorId,
+      requestedBy: correction.requestedBy,
+      reason,
+      statusBefore: 'approved',
+      changes: correction.changes
+    });
+    restoreExpenseApproval(item, correction.previousApproval);
+    item.correction = null;
+    return { checkpointScope: null, settled: 'rejected' };
+  }
+  return { checkpointScope: null, settled: '' };
+};
+
 router.get('/admin/expenses', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const { classId = '', courseId = '', financialYearId = '', academicYearId = '', status = '', stage = '' } = req.query || {};
@@ -4014,6 +4281,8 @@ router.post('/admin/expenses', requireAuth, requireRole(['admin']), requirePermi
   }
 });
 
+// Direct edit of a draft / rejected / in-review expense. Approved rows go
+// through POST /admin/expenses/:id/correction instead.
 router.patch('/admin/expenses/:id', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const payload = req.body || {};
@@ -4021,83 +4290,66 @@ router.patch('/admin/expenses/:id', requireAuth, requireRole(['admin']), require
     if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
     const item = await ExpenseEntry.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
     if (!item) return res.status(404).json({ success: false, message: 'رکورد مصرف پیدا نشد.' });
-    if (['pending_review', 'approved', 'void'].includes(String(item.status || '').trim())) {
+    if (isSalaryLinkedExpense(item)) {
+      return res.status(409).json({ success: false, message: EXPENSE_SALARY_LOCK_MESSAGE });
+    }
+    if (hasOpenExpenseCorrection(item)) {
+      return res.status(409).json({ success: false, message: EXPENSE_OPEN_CORRECTION_MESSAGE });
+    }
+    const statusBefore = String(item.status || '').trim();
+    if (statusBefore === 'approved') {
       return res.status(409).json({
         success: false,
-        message: 'فقط مصرف‌های پیش‌نویس یا ردشده قابل ویرایش هستند.'
+        message: 'مصرفِ تاییدشده مستقیم ویرایش نمی‌شود؛ برایش «درخواستِ اصلاح» بفرستید.'
       });
     }
+    if (statusBefore === 'void') {
+      return res.status(409).json({ success: false, message: 'مصرفِ باطل‌شده قابلِ ویرایش نیست.' });
+    }
 
-    const scope = await resolveFinanceScope({
-      classId: payload.classId || item.classId,
-      courseId: payload.courseId
-    });
-    if (scope.error) return res.status(400).json({ success: false, message: scope.error });
-
-    const financialYear = payload.financialYearId
-      ? await FinancialYear.findById(String(payload.financialYearId || '').trim())
-      : await FinancialYear.findById(item.financialYearId);
+    const financialYear = await FinancialYear.findById(item.financialYearId);
     assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable(expensePeriodScope(item, item.expenseDate));
 
-    const expenseDate = parseDateSafe(payload.expenseDate || item.expenseDate, null);
-    assertDateWithinFinancialYear(financialYear, expenseDate);
-    await assertFinancePeriodWritable({
-      schoolId: financialYear.schoolId,
-      financialYearId: financialYear._id,
-      academicYearId: financialYear.academicYearId,
-      dateValue: expenseDate
-    });
-    const categorySelection = await resolveExpenseCategorySelection({
-      category: payload.category ?? item.category,
-      subCategory: payload.subCategory ?? item.subCategory
-    });
-    let procurementCommitment = null;
-    if (Object.prototype.hasOwnProperty.call(payload, 'treasuryAccountId')) {
-      const treasuryAccount = await resolveTreasuryAccountSelection({
-        accountId: payload.treasuryAccountId,
-        schoolId: financialYear.schoolId,
-        financialYearId: financialYear._id,
-        academicYearId: financialYear.academicYearId
-      });
-      item.treasuryAccountId = treasuryAccount?._id || null;
+    const { requested, changes } = await resolveExpenseEditChanges({ item, payload, financialYear });
+    if (changes.some((change) => change.field === 'expenseDate')) {
+      await assertFinancePeriodWritable(expensePeriodScope(item, requested.expenseDate));
     }
-    if (Object.prototype.hasOwnProperty.call(payload, 'procurementCommitmentId')) {
-      procurementCommitment = await resolveProcurementCommitmentSelection({
-        commitmentId: payload.procurementCommitmentId,
-        financialYearId: String(financialYear._id || ''),
-        academicYearId: String(financialYear.academicYearId || ''),
-        allowStatuses: ['approved']
+
+    const submitAfterSave = parseBooleanInput(payload.submitAfterSave, false) && ['draft', 'rejected'].includes(statusBefore);
+    if (!changes.length && !submitAfterSave) {
+      const current = await populateExpenseEntryQuery(ExpenseEntry.findById(item._id));
+      return res.json({
+        success: true,
+        unchanged: true,
+        item: serializeExpenseEntry(current),
+        message: 'تغییری برای ذخیره وجود نداشت.'
       });
-      if (procurementCommitment) {
-        if (String(procurementCommitment.category || '') !== String(categorySelection.category || '')) {
-          const error = new Error('finance_procurement_commitment_scope_invalid');
-          error.statusCode = 400;
-          throw error;
-        }
-        if (String(procurementCommitment.subCategory || '') && String(procurementCommitment.subCategory || '') !== String(categorySelection.subCategory || '')) {
-          const error = new Error('finance_procurement_commitment_scope_invalid');
-          error.statusCode = 400;
-          throw error;
-        }
+    }
+
+    const reason = String(payload.reason || '').trim();
+    let restartedReview = false;
+    if (changes.length) {
+      applyExpenseFieldChanges(item, changes, financialYear);
+      appendExpenseRevision(item, { kind: 'edit', by: req.user.id, reason, statusBefore, changes });
+      item.updatedBy = req.user.id;
+      // Reviewers may already have approved the old figures, so an in-review
+      // edit starts a fresh round from the first stage.
+      if (statusBefore === 'pending_review') {
+        appendExpenseApprovalTrail(item, {
+          level: normalizeAdminLevel(await resolveAdminActorLevel(req.user.id)) || 'finance_manager',
+          action: 'edit',
+          by: req.user.id,
+          note: 'ویرایش در صفِ بررسی',
+          reason
+        });
+        submitExpenseEntryForReview(item, req.user.id, 'پس از ویرایش، بررسی از مرحلهٔ «مدیر مالی» دوباره شروع شد.');
+        restartedReview = true;
       }
-      item.procurementCommitmentId = procurementCommitment?._id || null;
     }
-
-    item.schoolId = financialYear.schoolId;
-    item.financialYearId = financialYear._id;
-    item.academicYearId = financialYear.academicYearId;
-    item.classId = scope.classId || null;
-    item.category = categorySelection.category;
-    item.subCategory = categorySelection.subCategory;
-    item.amount = normalizeMoneyInput(payload.amount, item.amount);
-    item.currency = String(payload.currency ?? item.currency ?? 'AFN').trim().toUpperCase() || 'AFN';
-    item.expenseDate = expenseDate;
-    item.periodQuarter = resolveQuarterForDate(financialYear, expenseDate);
-    item.paymentMethod = String(payload.paymentMethod ?? item.paymentMethod ?? 'manual').trim() || 'manual';
-    item.vendorName = String(payload.vendorName ?? procurementCommitment?.vendorName ?? item.vendorName ?? '').trim();
-    item.referenceNo = String(payload.referenceNo ?? item.referenceNo ?? '').trim();
-    item.note = String(payload.note ?? item.note ?? '').trim();
-    item.updatedBy = req.user.id;
+    if (submitAfterSave) {
+      submitExpenseEntryForReview(item, req.user.id, 'پس از ویرایش برای بررسی ارسال شد.');
+    }
     await item.save();
 
     const saved = await populateExpenseEntryQuery(ExpenseEntry.findById(item._id));
@@ -4108,22 +4360,218 @@ router.patch('/admin/expenses/:id', requireAuth, requireRole(['admin']), require
       targetType: 'ExpenseEntry',
       targetId: item._id.toString(),
       meta: {
-        financialYearId: String(financialYear._id),
-        classId: scope.classId || '',
+        financialYearId: String(item.financialYearId || ''),
         amount: Number(item.amount || 0),
-        status: item.status || ''
+        statusBefore,
+        status: item.status || '',
+        changedFields: changes.map((change) => change.field),
+        restartedReview,
+        submitted: submitAfterSave
       }
     });
 
+    invalidateFinanceReportCache();
+    let message = 'مصرف ویرایش شد.';
+    if (restartedReview) message = 'مصرف ویرایش شد و بررسی از مرحلهٔ «مدیر مالی» دوباره شروع شد.';
+    else if (submitAfterSave) message = changes.length ? 'مصرف ویرایش و برای بررسی ارسال شد.' : 'مصرف برای بررسی ارسال شد.';
     return res.json({
       success: true,
       item: serializeExpenseEntry(saved),
-      message: 'مصرف ویرایش شد.'
+      changes,
+      restartedReview,
+      submitted: submitAfterSave,
+      message
     });
   } catch (error) {
     return res.status(resolveFinancialYearErrorStatus(error)).json({
       success: false,
       message: resolveFinancialYearMessage(error, 'ویرایش مصرف ناموفق بود.')
+    });
+  }
+});
+
+// Correction of an APPROVED expense. A text-only change (شرح / فروشنده / مرجع)
+// is saved directly and logged; anything else opens a correction request that
+// takes the row out of treasury balances and reports until the general
+// president's final approval applies the new values.
+router.post('/admin/expenses/:id/correction', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const schoolContext = await resolveActiveSchool(req, { payload, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await ExpenseEntry.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
+    if (!item) return res.status(404).json({ success: false, message: 'رکورد مصرف پیدا نشد.' });
+    if (isSalaryLinkedExpense(item)) {
+      return res.status(409).json({ success: false, message: EXPENSE_SALARY_LOCK_MESSAGE });
+    }
+    if (hasOpenExpenseCorrection(item)) {
+      return res.status(409).json({ success: false, message: EXPENSE_OPEN_CORRECTION_MESSAGE });
+    }
+    if (String(item.status || '').trim() !== 'approved') {
+      return res.status(409).json({
+        success: false,
+        message: 'درخواستِ اصلاح فقط برای مصرفِ تاییدشده است؛ مصارفِ دیگر مستقیم ویرایش می‌شوند.'
+      });
+    }
+
+    const financialYear = await FinancialYear.findById(item.financialYearId);
+    assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable(expensePeriodScope(item, item.expenseDate));
+
+    const { requested, changes } = await resolveExpenseEditChanges({ item, payload, financialYear });
+    if (!changes.length) {
+      return res.status(400).json({ success: false, message: 'هیچ تغییری نسبت به مقادیرِ فعلیِ مصرف وارد نشده است.' });
+    }
+    if (changes.some((change) => change.field === 'expenseDate')) {
+      await assertFinancePeriodWritable(expensePeriodScope(item, requested.expenseDate));
+    }
+
+    const reason = String(payload.reason || '').trim();
+    const actorLevel = normalizeAdminLevel(await resolveAdminActorLevel(req.user.id));
+
+    if (!hasFinancialExpenseChange(changes)) {
+      applyExpenseFieldChanges(item, changes, financialYear);
+      appendExpenseRevision(item, { kind: 'text_edit', by: req.user.id, reason, statusBefore: 'approved', changes });
+      item.updatedBy = req.user.id;
+      await item.save();
+
+      const saved = await populateExpenseEntryQuery(ExpenseEntry.findById(item._id));
+      await logActivity({
+        req,
+        action: 'finance_edit_approved_expense_text',
+        targetType: 'ExpenseEntry',
+        targetId: item._id.toString(),
+        meta: {
+          financialYearId: String(item.financialYearId || ''),
+          changedFields: changes.map((change) => change.field)
+        }
+      });
+
+      invalidateFinanceReportCache();
+      return res.json({
+        success: true,
+        mode: 'text_edit',
+        item: serializeExpenseEntry(saved),
+        changes,
+        message: 'تغییراتِ متنیِ مصرف ذخیره شد؛ مبلغ و موجودیِ خزانه تغییری نکرد.'
+      });
+    }
+
+    if (!reason) {
+      return res.status(400).json({ success: false, message: 'دلیلِ اصلاحِ مصرفِ تاییدشده را بنویسید.' });
+    }
+
+    item.correction = {
+      reason,
+      requestedBy: req.user.id,
+      requestedAt: new Date(),
+      changes,
+      previousApproval: snapshotExpenseApproval(item)
+    };
+    item.status = 'pending_review';
+    item.approvalStage = EXPENSE_APPROVAL_STAGES.financeManager;
+    item.approvedBy = null;
+    item.approvedAt = null;
+    item.updatedBy = req.user.id;
+    appendExpenseApprovalTrail(item, {
+      level: actorLevel || 'finance_manager',
+      action: 'correction_request',
+      by: req.user.id,
+      note: 'درخواستِ اصلاحِ مصرفِ تاییدشده',
+      reason
+    });
+    await item.save();
+
+    const saved = await populateExpenseEntryQuery(ExpenseEntry.findById(item._id));
+    await logActivity({
+      req,
+      action: 'finance_request_expense_correction',
+      targetType: 'ExpenseEntry',
+      targetId: item._id.toString(),
+      meta: {
+        financialYearId: String(item.financialYearId || ''),
+        amount: Number(item.amount || 0),
+        changedFields: changes.map((change) => change.field),
+        reason
+      }
+    });
+
+    invalidateFinanceReportCache();
+    return res.json({
+      success: true,
+      mode: 'correction',
+      item: serializeExpenseEntry(saved),
+      changes,
+      message: 'درخواستِ اصلاح ثبت شد. تا تاییدِ نهاییِ ریاست عمومی، این مصرف در موجودیِ خزانه و گزارش‌ها حساب نمی‌شود.'
+    });
+  } catch (error) {
+    return res.status(resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: resolveFinancialYearMessage(error, 'ثبتِ درخواستِ اصلاحِ مصرف ناموفق بود.')
+    });
+  }
+});
+
+// Withdraws an open correction: the row returns to its previous approved state
+// with its old values and counts in treasury balances and reports again.
+router.post('/admin/expenses/:id/correction/cancel', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const schoolContext = await resolveActiveSchool(req, { payload, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    const item = await ExpenseEntry.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
+    if (!item) return res.status(404).json({ success: false, message: 'رکورد مصرف پیدا نشد.' });
+    const correction = snapshotExpenseCorrection(item);
+    if (!correction) {
+      return res.status(409).json({ success: false, message: 'این مصرف درخواستِ اصلاحِ بازی ندارد.' });
+    }
+
+    const financialYear = await FinancialYear.findById(item.financialYearId);
+    assertFinancialYearWritable(financialYear);
+    await assertFinancePeriodWritable(expensePeriodScope(item, item.expenseDate));
+
+    const note = String(payload.note || '').trim();
+    appendExpenseRevision(item, {
+      kind: 'correction_cancelled',
+      by: req.user.id,
+      requestedBy: correction.requestedBy,
+      reason: note,
+      statusBefore: 'approved',
+      changes: correction.changes
+    });
+    restoreExpenseApproval(item, correction.previousApproval);
+    appendExpenseApprovalTrail(item, {
+      level: normalizeAdminLevel(await resolveAdminActorLevel(req.user.id)) || 'finance_manager',
+      action: 'correction_cancel',
+      by: req.user.id,
+      note: note || 'درخواستِ اصلاح لغو شد.'
+    });
+    item.correction = null;
+    item.updatedBy = req.user.id;
+    await item.save();
+
+    const saved = await populateExpenseEntryQuery(ExpenseEntry.findById(item._id));
+    await logActivity({
+      req,
+      action: 'finance_cancel_expense_correction',
+      targetType: 'ExpenseEntry',
+      targetId: item._id.toString(),
+      meta: {
+        financialYearId: String(item.financialYearId || ''),
+        changedFields: correction.changes.map((change) => change.field)
+      }
+    });
+
+    invalidateFinanceReportCache();
+    return res.json({
+      success: true,
+      item: serializeExpenseEntry(saved),
+      message: 'درخواستِ اصلاح لغو شد؛ مصرف با مقادیرِ قبلیِ تاییدشده دوباره حساب می‌شود.'
+    });
+  } catch (error) {
+    return res.status(resolveFinancialYearErrorStatus(error)).json({
+      success: false,
+      message: resolveFinancialYearMessage(error, 'لغوِ درخواستِ اصلاح ناموفق بود.')
     });
   }
 });
@@ -4146,6 +4594,9 @@ router.post('/admin/expenses/:id/submit', requireAuth, requireRole(['admin']), r
 
     if (item.status === 'approved' || item.status === 'void') {
       return res.status(409).json({ success: false, message: 'مصرف تاییدشده یا باطل دوباره برای بررسی فرستاده نمی‌شود.' });
+    }
+    if (hasOpenExpenseCorrection(item)) {
+      return res.status(409).json({ success: false, message: EXPENSE_OPEN_CORRECTION_MESSAGE });
     }
 
     submitExpenseEntryForReview(item, req.user.id, String(req.body?.note || '').trim());
@@ -4196,6 +4647,8 @@ router.post('/admin/expenses/:id/review', requireAuth, requireRole(['admin']), r
     });
 
     const actorLevel = await resolveAdminActorLevel(req.user.id);
+    const correction = snapshotExpenseCorrection(item);
+    const reviewAction = String(req.body?.action || '').trim().toLowerCase() === 'reject' ? 'reject' : 'approve';
     const outcome = reviewExpenseEntryTransition({
       item,
       actorId: req.user.id,
@@ -4204,6 +4657,18 @@ router.post('/admin/expenses/:id/review', requireAuth, requireRole(['admin']), r
       note: String(req.body?.note || '').trim(),
       reason: String(req.body?.reason || '').trim()
     });
+    const { checkpointScope, settled } = await settleExpenseCorrectionReview({
+      item,
+      correction,
+      outcome,
+      action: reviewAction,
+      actorId: req.user.id,
+      reason: String(req.body?.reason || '').trim(),
+      financialYear
+    });
+    // Dropped before the save: if the save then fails, a missing checkpoint
+    // only costs a full recompute, never a wrong balance.
+    if (checkpointScope) await invalidateTreasuryCheckpoints(checkpointScope);
     await item.save();
 
     const saved = await populateExpenseEntryQuery(ExpenseEntry.findById(item._id));
@@ -4217,18 +4682,28 @@ router.post('/admin/expenses/:id/review', requireAuth, requireRole(['admin']), r
         financialYearId: String(item.financialYearId || ''),
         amount: Number(item.amount || 0),
         nextStage: outcome.nextStage || '',
-        actorLevel
+        actorLevel,
+        ...(correction ? {
+          correction: settled || 'advanced',
+          changedFields: correction.changes.map((change) => change.field)
+        } : {})
       }
     });
+
+    let message = reviewAction === 'reject'
+      ? 'مصرف رد شد.'
+      : (outcome.completed ? 'مصرف به‌صورت کامل تایید شد.' : 'مصرف به مرحله بعدی بررسی منتقل شد.');
+    if (settled === 'applied') message = 'اصلاحِ مصرف تایید و اعمال شد؛ مصرف با مقادیرِ جدید در خزانه و گزارش‌ها حساب می‌شود.';
+    else if (settled === 'rejected') message = 'درخواستِ اصلاح رد شد؛ مصرف با مقادیرِ قبلیِ تاییدشده دوباره حساب می‌شود.';
+    else if (correction) message = 'درخواستِ اصلاح به مرحلهٔ بعدیِ بررسی منتقل شد.';
 
     invalidateFinanceReportCache();
     return res.json({
       success: true,
       item: serializeExpenseEntry(saved),
-      nextStage: outcome.nextStage,
-      message: req.body?.action === 'reject'
-        ? 'مصرف رد شد.'
-        : (outcome.completed ? 'مصرف به‌صورت کامل تایید شد.' : 'مصرف به مرحله بعدی بررسی منتقل شد.')
+      nextStage: settled === 'rejected' ? item.approvalStage : outcome.nextStage,
+      correction: settled || (correction ? 'advanced' : ''),
+      message
     });
   } catch (error) {
     return res.status(resolveFinancialYearErrorStatus(error)).json({
@@ -4260,6 +4735,7 @@ router.post('/admin/expenses/:id/approve', requireAuth, requireRole(['admin']), 
     }
 
     const actorLevel = await resolveAdminActorLevel(req.user.id);
+    const correction = snapshotExpenseCorrection(item);
     const outcome = reviewExpenseEntryTransition({
       item,
       actorId: req.user.id,
@@ -4267,6 +4743,15 @@ router.post('/admin/expenses/:id/approve', requireAuth, requireRole(['admin']), 
       action: 'approve',
       note: String(req.body?.note || '').trim()
     });
+    const { checkpointScope, settled } = await settleExpenseCorrectionReview({
+      item,
+      correction,
+      outcome,
+      action: 'approve',
+      actorId: req.user.id,
+      financialYear
+    });
+    if (checkpointScope) await invalidateTreasuryCheckpoints(checkpointScope);
     await item.save();
 
     const saved = await populateExpenseEntryQuery(ExpenseEntry.findById(item._id));
@@ -4280,17 +4765,19 @@ router.post('/admin/expenses/:id/approve', requireAuth, requireRole(['admin']), 
         financialYearId: String(item.financialYearId || ''),
         amount: Number(item.amount || 0),
         nextStage: outcome.nextStage || '',
-        actorLevel
+        actorLevel,
+        ...(correction ? { correction: settled || 'advanced' } : {})
       }
     });
 
+    invalidateFinanceReportCache();
     return res.json({
       success: true,
       item: serializeExpenseEntry(saved),
       nextStage: outcome.nextStage,
-      message: outcome.completed
-        ? 'مصرف به‌صورت کامل تایید شد.'
-        : 'مصرف به مرحله بعدی بررسی منتقل شد.'
+      message: settled === 'applied'
+        ? 'اصلاحِ مصرف تایید و اعمال شد.'
+        : (outcome.completed ? 'مصرف به‌صورت کامل تایید شد.' : 'مصرف به مرحله بعدی بررسی منتقل شد.')
     });
   } catch (error) {
     return res.status(resolveFinancialYearErrorStatus(error)).json({
@@ -4306,6 +4793,10 @@ router.post('/admin/expenses/:id/void', requireAuth, requireRole(['admin']), req
     if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
     const item = await ExpenseEntry.findOne({ _id: req.params.id, schoolId: schoolContext.schoolId });
     if (!item) return res.status(404).json({ success: false, message: 'رکورد مصرف پیدا نشد.' });
+
+    if (hasOpenExpenseCorrection(item)) {
+      return res.status(409).json({ success: false, message: EXPENSE_OPEN_CORRECTION_MESSAGE });
+    }
 
     const financialYear = await FinancialYear.findById(item.financialYearId);
     assertFinancialYearWritable(financialYear);
