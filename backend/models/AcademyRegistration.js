@@ -19,6 +19,28 @@ const academyRegistrationSchema = new mongoose.Schema({
   monthlyFee: { type: Number, default: 0, min: 0 },
   // آخرین ماهِ شمسیِ شارژشده «1405-07» — ضدِ شارژِ عقب‌افتاده
   lastMonthlyChargeKey: { type: String, default: '', trim: true },
+  // فقط برای paymentPlan=monthly: تخفیفِ خودکاری که هنگامِ «صدور بل» روی بلِ ماه‌های
+  // تازه می‌نشیند. untilMonth خالی = ادامه‌دار. تخفیفِ بل‌های موجود روی خودِ بل است.
+  monthlyDiscount: {
+    amount: { type: Number, default: 0, min: 0 },
+    untilMonth: { type: String, default: '', trim: true },
+    discountType: { type: String, enum: ['', 'sibling', 'scholarship', 'staff', 'hardship', 'other'], default: '' },
+    discountReason: { type: String, default: '', trim: true },
+    setBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    setAt: { type: Date, default: null }
+  },
+  monthlyDiscountHistory: {
+    type: [new mongoose.Schema({
+      at: { type: Date, default: Date.now },
+      by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      from: { type: Number, default: 0, min: 0 },
+      to: { type: Number, default: 0, min: 0 },
+      untilMonth: { type: String, default: '', trim: true },
+      discountType: { type: String, default: '' },
+      discountReason: { type: String, default: '', trim: true }
+    }, { _id: false })],
+    default: []
+  },
   // وقتی true، totalPayable/paidAmount/balance از AcademyCharge رول‌آپ می‌شوند و
   // pre-validate آن‌ها را از feeAmount/discountAmount بازنمی‌نویسد.
   ledgerManaged: { type: Boolean, default: false },
@@ -38,6 +60,11 @@ academyRegistrationSchema.pre('validate', function normalizeAcademyRegistration(
   this.feeAmount = Math.max(0, Number(this.feeAmount || 0));
   this.discountAmount = Math.max(0, Number(this.discountAmount || 0));
   this.monthlyFee = Math.max(0, Number(this.monthlyFee || 0));
+  if (this.monthlyDiscount) {
+    this.monthlyDiscount.amount = Math.max(0, Number(this.monthlyDiscount.amount || 0));
+    const until = String(this.monthlyDiscount.untilMonth || '').trim();
+    this.monthlyDiscount.untilMonth = /^\d{3,4}-(0[1-9]|1[0-2])$/.test(until) ? until : '';
+  }
   this.paidAmount = Math.max(0, Number(this.paidAmount || 0));
   this.currency = String(this.currency || 'AFN').trim().toUpperCase() || 'AFN';
 

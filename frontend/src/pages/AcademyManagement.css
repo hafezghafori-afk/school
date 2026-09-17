@@ -951,3 +951,47 @@
 }
 .academy-bucket-chip b { display: block; font-size: 14px; }
 .academy-bucket-chip.is-hot { border-color: rgba(248, 113, 113, 0.4); background: rgba(248, 113, 113, 0.1); }
+
+/* ---------- پنجرهٔ «تخفیف» (دکمهٔ تخفیف در لیستِ ثبت‌نام‌ها) ---------- */
+.academy-inline-button.academy-discount-button {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(56, 189, 248, 0.14);
+  color: #7dd3fc;
+}
+.academy-chip-discount { background: rgba(56, 189, 248, 0.16); color: #7dd3fc; margin-top: 4px; }
+.academy-chip-warn { background: rgba(251, 191, 36, 0.16); color: #fcd34d; }
+
+.academy-discount-modal { width: min(100%, 980px); }
+.academy-discount-bulk { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.academy-discount-bulk .academy-cer-field { display: flex; flex-direction: column; gap: 3px; flex: 0 1 160px; min-width: 120px; }
+.academy-discount-bulk .academy-cer-field > span { font-size: 10px; font-weight: 800; color: #a5f3fc; }
+.academy-discount-bulk .academy-discount-reason { flex: 1 1 260px; }
+.academy-discount-bulk .academy-checkbox { align-self: center; }
+.academy-discount-modal .academy-discount-bulk input,
+.academy-discount-modal .academy-discount-bulk select,
+.academy-discount-table input {
+  height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+.academy-discount-modal .academy-discount-bulk input[type='checkbox'] { width: 16px; height: 16px; }
+.academy-discount-modal .academy-discount-bulk select:disabled { opacity: 0.55; }
+.academy-discount-table { min-width: 720px; font-size: 12px; }
+.academy-discount-table th,
+.academy-discount-table td { padding: 6px 8px; }
+.academy-discount-table td input { max-width: 110px; }
+.academy-discount-table small { opacity: 0.72; font-size: 10.5px; }
+.academy-discount-table tr.is-dirty td { background: rgba(56, 189, 248, 0.08); }
+.academy-discount-table tr.is-invalid td { background: rgba(248, 113, 113, 0.12); }
+.academy-discount-table tr.is-invalid input { border-color: rgba(248, 113, 113, 0.7); }
+.academy-discount-paid-note { color: #fcd34d; }
+.academy-discount-totals { margin: 8px 0 10px; font-size: 12px; }
+.academy-discount-history { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; }
+.academy-discount-history li { padding: 5px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.04); }
+.academy-discount-history small { opacity: 0.65; }

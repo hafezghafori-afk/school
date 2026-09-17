@@ -21,6 +21,19 @@ const academyChargeSchema = new mongoose.Schema({
   discountReason: { type: String, default: '', trim: true },
   discountType: { type: String, enum: ['', 'sibling', 'scholarship', 'staff', 'hardship', 'other'], default: '' },
   discountApprovedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  // هر تغییرِ تخفیف (پنجرهٔ «تخفیف»، صدورِ بل، ویرایش/افزودنِ قلم) — قبل ← بعد، کاربر، دلیل
+  discountHistory: {
+    type: [new mongoose.Schema({
+      at: { type: Date, default: Date.now },
+      by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      from: { type: Number, default: 0, min: 0 },
+      to: { type: Number, default: 0, min: 0 },
+      discountType: { type: String, default: '' },
+      discountReason: { type: String, default: '', trim: true },
+      source: { type: String, default: '', trim: true }
+    }, { _id: false })],
+    default: []
+  },
   // تاریخِ سررسید — رشتهٔ ISO میلادی مثل بقیهٔ تاریخ‌های آموزشگاه (YYYY-MM-DD)
   dueDate: { type: String, default: '', trim: true },
   // فقط برای kind=monthly: کلیدِ ماهِ شمسی «1405-07» — یکتا per ثبت‌نام، ضدِ دوبار شارژ
@@ -54,7 +67,8 @@ academyChargeSchema.pre('validate', function normalizeAcademyCharge() {
   const net = Math.max(0, this.amount - this.discountAmount);
   this.balance = Math.max(0, Math.round((net - this.paidAmount) * 100) / 100);
   if (this.status !== 'void') {
-    this.status = this.balance <= 0 && net > 0 ? 'paid' : this.paidAmount > 0 ? 'partial' : 'pending';
+    // قلمی که با تخفیفِ کامل خالصش صفر شده تسویه است، نه «در انتظار».
+    this.status = this.balance <= 0 && (net > 0 || this.discountAmount > 0) ? 'paid' : this.paidAmount > 0 ? 'partial' : 'pending';
   }
 });
 
