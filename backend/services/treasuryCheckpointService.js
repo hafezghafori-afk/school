@@ -131,6 +131,21 @@ async function findValidCheckpointSeedMap({ accounts = [], asOf = new Date() } =
   return { seedByAccountId, sinceByAccountId };
 }
 
+// The read path only re-verifies row COUNTS through the cut-off, so an approved
+// expense whose amount, date or account is corrected in place would leave the
+// checkpoint looking valid but wrong. Whoever rewrites approved history drops
+// every checkpoint that folded it, and the next read recomputes in full.
+async function invalidateTreasuryCheckpoints({ accountIds = [], fromDate = null } = {}) {
+  const ids = [...new Set((accountIds || []).map((id) => String(id?._id || id || '').trim()).filter(Boolean))];
+  const cutOff = toDate(fromDate);
+  if (!ids.length || !cutOff) return 0;
+  const result = await FinanceTreasuryCheckpoint.deleteMany({
+    accountId: { $in: ids },
+    asOf: { $gte: cutOff }
+  });
+  return Number(result?.deletedCount || 0);
+}
+
 async function listActiveTreasuryAccounts({ financialYearId = '', academicYearId = '' } = {}) {
   const filter = { isActive: true };
   if (financialYearId) filter.financialYearId = financialYearId;
@@ -143,5 +158,6 @@ module.exports = {
   computeAccountMetricsThrough,
   createTreasuryCheckpoint,
   findValidCheckpointSeedMap,
+  invalidateTreasuryCheckpoints,
   listActiveTreasuryAccounts
 };

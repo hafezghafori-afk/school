@@ -4478,6 +4478,17 @@ const buildMockProcurementAnalytics = ({ financialYearId = '', academicYearId = 
   };
 };
 
+const treasuryCheckpointInvalidations = [];
+const treasuryCheckpointServiceMock = {
+  async invalidateTreasuryCheckpoints({ accountIds = [], fromDate = null } = {}) {
+    treasuryCheckpointInvalidations.push({
+      accountIds: (accountIds || []).map((id) => String(id)),
+      fromDate: fromDate ? new Date(fromDate).toISOString().slice(0, 10) : ''
+    });
+    return 0;
+  }
+};
+
 const treasuryGovernanceServiceMock = {
   async buildTreasuryAnalytics(filters = {}) {
     return clone(buildMockTreasuryAnalytics(filters));
@@ -5071,6 +5082,7 @@ function loadFinanceRouter() {
       };
     }
     if (isFinanceRoute && request === '../services/reportEngineService') return reportEngineServiceMock;
+    if (isFinanceRoute && request === '../services/treasuryCheckpointService') return treasuryCheckpointServiceMock;
     if (isFinanceRoute && request === '../models/Order') return OrderMock;
     if (isFinanceRoute && request === '../models/StudentMembership') return StudentMembershipMock;
     if (isFinanceRoute && request === '../models/UserNotification') return UserNotificationMock;
@@ -6239,6 +6251,282 @@ async function run() {
       assertCase(String(csvResponse.headers['content-type'] || '').includes('text/csv'), 'expected text/csv content type');
       assertCase(/# reportType,quarterly/.test(csvResponse.text || ''), 'expected the snapshot meta block in the CSV');
       assertCase(/# version,\d/.test(csvResponse.text || ''), 'expected the version line in the CSV meta block');
+    });
+
+    await check('route smoke: expense edit covers drafts, in-review restarts, rejected resubmissions and locks', async () => {
+      const expensePath = (id, suffix = '') => `/api/finance/admin/expenses/${id}${suffix}`;
+      const createResponse = await request(server, '/api/finance/admin/expenses', {
+        method: 'POST',
+        user: financeManagerUser,
+        body: {
+          financialYearId: 'fy-1',
+          classId: IDS.class1,
+          category: 'admin',
+          subCategory: 'stationery',
+          amount: 400,
+          expenseDate: '2026-05-10',
+          vendorName: 'Kabul Paper',
+          note: 'Paper for exams',
+          status: 'draft'
+        }
+      });
+      assertCase(createResponse.status === 201, `expected 201, received ${createResponse.status}: ${createResponse.text}`);
+      const expenseId = createResponse.data?.item?._id;
+
+      const draftEdit = await request(server, expensePath(expenseId), {
+        method: 'PATCH',
+        user: financeManagerUser,
+        body: { amount: 450, note: 'Paper for final exams', reason: 'Typo in amount' }
+      });
+      assertCase(draftEdit.status === 200, `expected draft edit 200, received ${draftEdit.status}: ${draftEdit.text}`);
+      assertCase(Number(draftEdit.data?.item?.amount) === 450, 'expected the edited amount');
+      assertCase(draftEdit.data?.item?.status === 'draft', 'expected a draft to stay a draft');
+      const draftRevision = (draftEdit.data?.item?.revisions || []).slice(-1)[0];
+      assertCase(draftRevision?.kind === 'edit', 'expected an edit revision');
+      assertCase(
+        (draftRevision?.changes || []).map((change) => change.field).sort().join(',') === 'amount,note',
+        `expected amount + note changes, got ${JSON.stringify(draftRevision?.changes)}`
+      );
+      assertCase(Number(draftRevision.changes.find((change) => change.field === 'amount')?.from) === 400, 'expected the old amount in the revision');
+      assertCase(draftRevision?.reason === 'Typo in amount', 'expected the edit reason in the revision');
+
+      const unchanged = await request(server, expensePath(expenseId), {
+        method: 'PATCH',
+        user: financeManagerUser,
+        body: { amount: 450 }
+      });
+      assertCase(unchanged.status === 200 && unchanged.data?.unchanged === true, `expected an unchanged response: ${unchanged.text}`);
+      assertCase((unchanged.data?.item?.revisions || []).length === 1, 'expected no revision for a no-op edit');
+
+      const zeroAmount = await request(server, expensePath(expenseId), {
+        method: 'PATCH',
+        user: financeManagerUser,
+        body: { amount: 0 }
+      });
+      assertCase(zeroAmount.status === 400, `expected 400 for a zero amount, received ${zeroAmount.status}`);
+
+      const saveAndSubmit = await request(server, expensePath(expenseId), {
+        method: 'PATCH',
+        user: financeManagerUser,
+        body: { vendorName: 'Kabul Paper Co', submitAfterSave: true }
+      });
+      assertCase(saveAndSubmit.status === 200, `expected save-and-submit 200, received ${saveAndSubmit.status}: ${saveAndSubmit.text}`);
+      assertCase(saveAndSubmit.data?.item?.status === 'pending_review', 'expected pending_review after save-and-submit');
+      assertCase(saveAndSubmit.data?.item?.approvalStage === 'finance_manager_review', 'expected the first review stage');
+
+      const managerFirstApprove = await request(server, expensePath(expenseId, '/review'), {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { action: 'approve' }
+      });
+      assertCase(managerFirstApprove.data?.nextStage === 'finance_lead_review', `expected finance_lead_review, got ${managerFirstApprove.text}`);
+
+      const inReviewEdit = await request(server, expensePath(expenseId), {
+        method: 'PATCH',
+        user: financeManagerUser,
+        body: { amount: 500 }
+      });
+      assertCase(inReviewEdit.status === 200, `expected in-review edit 200, received ${inReviewEdit.status}: ${inReviewEdit.text}`);
+      assertCase(inReviewEdit.data?.restartedReview === true, 'expected the review chain to restart');
+      assertCase(inReviewEdit.data?.item?.approvalStage === 'finance_manager_review', 'expected the chain back at the first stage');
+
+      // Round-scoped four-eyes: the manager approved the old figures in the
+      // previous round and may review the edited expense again.
+      const managerSecondApprove = await request(server, expensePath(expenseId, '/review'), {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { action: 'approve' }
+      });
+      assertCase(managerSecondApprove.status === 200, `expected a new-round approval, received ${managerSecondApprove.status}: ${managerSecondApprove.text}`);
+      const managerSameRound = await request(server, expensePath(expenseId, '/review'), {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { action: 'approve' }
+      });
+      assertCase(managerSameRound.status === 409, `expected the same reviewer blocked within a round, received ${managerSameRound.status}`);
+
+      const leadReject = await request(server, expensePath(expenseId, '/review'), {
+        method: 'POST',
+        user: financeLeadUser,
+        body: { action: 'reject', reason: 'Wrong vendor' }
+      });
+      assertCase(leadReject.data?.item?.status === 'rejected', `expected rejected, got ${leadReject.text}`);
+
+      const rejectedFix = await request(server, expensePath(expenseId), {
+        method: 'PATCH',
+        user: financeManagerUser,
+        body: { vendorName: 'Herat Paper', submitAfterSave: true }
+      });
+      assertCase(rejectedFix.data?.item?.status === 'pending_review', `expected a resubmitted rejected expense, got ${rejectedFix.text}`);
+
+      for (const [user, expectedStage] of [
+        [financeManagerUser, 'finance_lead_review'],
+        [financeLeadUser, 'general_president_review'],
+        [presidentUser, 'completed']
+      ]) {
+        const step = await request(server, expensePath(expenseId, '/review'), {
+          method: 'POST',
+          user,
+          body: { action: 'approve' }
+        });
+        assertCase(step.data?.nextStage === expectedStage, `expected ${expectedStage}, got ${step.status}: ${step.text}`);
+      }
+
+      const approvedPatch = await request(server, expensePath(expenseId), {
+        method: 'PATCH',
+        user: financeManagerUser,
+        body: { amount: 600 }
+      });
+      assertCase(approvedPatch.status === 409, `expected approved rows to need a correction request, received ${approvedPatch.status}`);
+
+      expenseEntries.unshift({
+        ...clone(expenseEntries.find((item) => item._id === 'expense-1')),
+        _id: 'expense-salary-lock',
+        category: 'salary',
+        subCategory: 'teachers',
+        referenceNo: 'staff_salary:payment-1',
+        note: 'Salary 1405-03'
+      });
+      const salaryPatch = await request(server, expensePath('expense-salary-lock'), {
+        method: 'PATCH',
+        user: financeManagerUser,
+        body: { note: 'changed' }
+      });
+      assertCase(salaryPatch.status === 409, `expected salary expenses locked for edit, received ${salaryPatch.status}`);
+      const salaryCorrection = await request(server, expensePath('expense-salary-lock', '/correction'), {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { amount: 1, reason: 'test' }
+      });
+      assertCase(salaryCorrection.status === 409, `expected salary expenses locked for correction, received ${salaryCorrection.status}`);
+      assertCase(String(salaryCorrection.data?.message || '').includes('پرداختِ معاش'), 'expected the salary lock message');
+    });
+
+    await check('route smoke: approved expense correction leaves treasury and reports until final approval', async () => {
+      const expensePath = (id, suffix = '') => `/api/finance/admin/expenses/${id}${suffix}`;
+      const approvedAmount = async () => {
+        const analytics = await request(server, '/api/finance/admin/expenses/analytics?financialYearId=fy-1', { user: financeManagerUser });
+        return Number(analytics.data?.analytics?.summary?.approvedAmount || 0);
+      };
+      const review = (id, user, body) => request(server, expensePath(id, '/review'), { method: 'POST', user, body });
+
+      const createResponse = await request(server, '/api/finance/admin/expenses', {
+        method: 'POST',
+        user: financeManagerUser,
+        body: {
+          financialYearId: 'fy-1',
+          classId: IDS.class1,
+          category: 'admin',
+          subCategory: 'printing',
+          amount: 600,
+          expenseDate: '2026-06-15',
+          treasuryAccountId: 'treasury-account-1',
+          vendorName: 'Print House',
+          note: 'Report cards',
+          status: 'pending_review'
+        }
+      });
+      assertCase(createResponse.status === 201, `expected 201, received ${createResponse.status}: ${createResponse.text}`);
+      const expenseId = createResponse.data?.item?._id;
+      await review(expenseId, financeManagerUser, { action: 'approve' });
+      await review(expenseId, financeLeadUser, { action: 'approve' });
+      const finalApproval = await review(expenseId, presidentUser, { action: 'approve' });
+      assertCase(finalApproval.data?.item?.status === 'approved', `expected an approved expense, got ${finalApproval.text}`);
+      const approvedBaseline = await approvedAmount();
+
+      const textEdit = await request(server, expensePath(expenseId, '/correction'), {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { note: 'Report cards for grade 10' }
+      });
+      assertCase(textEdit.status === 200 && textEdit.data?.mode === 'text_edit', `expected a direct text edit, got ${textEdit.status}: ${textEdit.text}`);
+      assertCase(textEdit.data?.item?.status === 'approved', 'expected a text edit to keep the expense approved');
+      assertCase((textEdit.data?.item?.revisions || []).slice(-1)[0]?.kind === 'text_edit', 'expected a text_edit revision');
+
+      const withoutReason = await request(server, expensePath(expenseId, '/correction'), {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { amount: 650 }
+      });
+      assertCase(withoutReason.status === 400, `expected a reason to be required, received ${withoutReason.status}`);
+
+      const noChange = await request(server, expensePath(expenseId, '/correction'), {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { amount: 600, reason: 'nothing' }
+      });
+      assertCase(noChange.status === 400, `expected 400 when nothing changes, received ${noChange.status}`);
+
+      const requestCorrection = () => request(server, expensePath(expenseId, '/correction'), {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { amount: 650, expenseDate: '2026-06-10', reason: 'Receipt shows 650 on the 10th' }
+      });
+      const opened = await requestCorrection();
+      assertCase(opened.status === 200 && opened.data?.mode === 'correction', `expected a correction request, got ${opened.status}: ${opened.text}`);
+      assertCase(opened.data?.item?.status === 'pending_review', 'expected the corrected expense back in review');
+      assertCase(opened.data?.item?.approvalStage === 'finance_manager_review', 'expected the correction at the first stage');
+      assertCase(Number(opened.data?.item?.amount) === 600, 'expected the approved amount untouched while the correction is open');
+      assertCase(
+        (opened.data?.item?.correction?.changes || []).map((change) => change.field).sort().join(',') === 'amount,expenseDate',
+        `expected amount + date in the correction, got ${JSON.stringify(opened.data?.item?.correction)}`
+      );
+      assertCase(await approvedAmount() === approvedBaseline - 600, 'expected the expense to leave approved totals while its correction is open');
+
+      for (const [label, method, suffix, body] of [
+        ['edit', 'PATCH', '', { amount: 700 }],
+        ['void', 'POST', '/void', {}],
+        ['submit', 'POST', '/submit', {}],
+        ['second correction', 'POST', '/correction', { amount: 700, reason: 'again' }]
+      ]) {
+        const blocked = await request(server, expensePath(expenseId, suffix), { method, user: financeManagerUser, body });
+        assertCase(blocked.status === 409, `expected ${label} blocked while a correction is open, received ${blocked.status}`);
+      }
+
+      const cancelled = await request(server, expensePath(expenseId, '/correction/cancel'), {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { note: 'Entered by mistake' }
+      });
+      assertCase(cancelled.status === 200, `expected cancel 200, received ${cancelled.status}: ${cancelled.text}`);
+      assertCase(cancelled.data?.item?.status === 'approved' && cancelled.data?.item?.approvalStage === 'completed', 'expected the approved state restored');
+      assertCase(cancelled.data?.item?.correction === null, 'expected the correction cleared');
+      assertCase(String(cancelled.data?.item?.approvedBy?._id || cancelled.data?.item?.approvedBy || '') === IDS.adminPresident, 'expected the original approver restored');
+      assertCase((cancelled.data?.item?.revisions || []).slice(-1)[0]?.kind === 'correction_cancelled', 'expected a correction_cancelled revision');
+      assertCase(await approvedAmount() === approvedBaseline, 'expected the expense back in approved totals after cancelling');
+
+      const reopened = await requestCorrection();
+      assertCase(reopened.status === 200, `expected a new correction request, received ${reopened.status}: ${reopened.text}`);
+      const invalidationsBefore = treasuryCheckpointInvalidations.length;
+      await review(expenseId, financeManagerUser, { action: 'approve' });
+      await review(expenseId, financeLeadUser, { action: 'approve' });
+      const applied = await review(expenseId, presidentUser, { action: 'approve' });
+      assertCase(applied.status === 200 && applied.data?.correction === 'applied', `expected the correction applied, got ${applied.status}: ${applied.text}`);
+      assertCase(applied.data?.item?.status === 'approved', 'expected approved after the final correction approval');
+      assertCase(Number(applied.data?.item?.amount) === 650, 'expected the corrected amount');
+      assertCase(String(applied.data?.item?.expenseDate || '').slice(0, 10) === '2026-06-10', 'expected the corrected date');
+      assertCase(applied.data?.item?.correction === null, 'expected the correction cleared after applying');
+      assertCase((applied.data?.item?.revisions || []).slice(-1)[0]?.kind === 'correction_applied', 'expected a correction_applied revision');
+      const invalidation = treasuryCheckpointInvalidations[invalidationsBefore];
+      assertCase(
+        invalidation && invalidation.accountIds.join(',') === 'treasury-account-1' && invalidation.fromDate === '2026-06-10',
+        `expected treasury checkpoints dropped from the earlier date, got ${JSON.stringify(invalidation)}`
+      );
+      assertCase(await approvedAmount() === approvedBaseline + 50, 'expected approved totals to use the corrected amount');
+
+      const rejectedRequest = await request(server, expensePath(expenseId, '/correction'), {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { amount: 900, reason: 'Second receipt' }
+      });
+      assertCase(rejectedRequest.status === 200, `expected another correction request, received ${rejectedRequest.status}: ${rejectedRequest.text}`);
+      const rejected = await review(expenseId, financeManagerUser, { action: 'reject', reason: 'No receipt attached' });
+      assertCase(rejected.status === 200 && rejected.data?.correction === 'rejected', `expected the correction rejected, got ${rejected.status}: ${rejected.text}`);
+      assertCase(rejected.data?.item?.status === 'approved', 'expected a rejected correction to leave the expense approved');
+      assertCase(Number(rejected.data?.item?.amount) === 650, 'expected the previously approved amount kept');
+      const rejectedRevision = (rejected.data?.item?.revisions || []).slice(-1)[0];
+      assertCase(rejectedRevision?.kind === 'correction_rejected' && rejectedRevision?.reason === 'No receipt attached', 'expected a correction_rejected revision with the reason');
+      assertCase(await approvedAmount() === approvedBaseline + 50, 'expected approved totals unchanged by a rejected correction');
     });
 
     await check('route smoke: expense governance review chain blocks year close until approval is complete', async () => {

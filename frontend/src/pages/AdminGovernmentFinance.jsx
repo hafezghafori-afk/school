@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 import './GovernmentFinanceWorkspace.css';
 
@@ -871,11 +872,162 @@ function canRejectExpenseStage(adminLevel = '', stage = '') {
   return false;
 }
 
+// Mirrors the backend: only approve/reject events after the latest submit (or
+// correction request) count, so an edited resubmission can be reviewed again.
 function actorAlreadyReviewedExpense(trail, actorId = '') {
-  return Array.isArray(trail) && trail.some((entry) => (
+  if (!Array.isArray(trail)) return false;
+  let roundStart = 0;
+  trail.forEach((entry, index) => {
+    if (['submit', 'correction_request'].includes(String(entry?.action || '').trim().toLowerCase())) roundStart = index;
+  });
+  return trail.slice(roundStart).some((entry) => (
     String(entry?.by?._id || entry?.by || '') === String(actorId || '')
     && ['approve', 'reject'].includes(String(entry?.action || '').trim().toLowerCase())
   ));
+}
+
+const EXPENSE_FIELD_LABELS = {
+  category: 'دسته',
+  subCategory: 'زیردسته',
+  amount: 'مبلغ',
+  expenseDate: 'تاریخ مصرف',
+  paymentMethod: 'روش پرداخت',
+  treasuryAccountId: 'حساب خزانه',
+  procurementCommitmentId: 'تعهد فروشنده',
+  vendorName: 'فروشنده / برداشت‌کننده',
+  referenceNo: 'مرجع',
+  note: 'شرح مصرف'
+};
+const EXPENSE_EDIT_FIELDS = Object.keys(EXPENSE_FIELD_LABELS);
+// Changing only these on an approved expense is saved directly (no money moves).
+const EXPENSE_TEXT_ONLY_FIELDS = new Set(['vendorName', 'referenceNo', 'note']);
+const EXPENSE_PAYMENT_METHOD_LABELS = {
+  manual: 'دستی',
+  cash: 'نقدی',
+  bank_transfer: 'انتقال بانکی',
+  hawala: 'حواله',
+  other: 'سایر'
+};
+const EXPENSE_REVISION_KIND_LABELS = {
+  edit: 'ویرایش',
+  text_edit: 'ویرایشِ متنی (بدونِ اثرِ پولی)',
+  correction_applied: 'اصلاحِ تاییدشده و اعمال‌شده',
+  correction_rejected: 'درخواستِ اصلاحِ ردشده',
+  correction_cancelled: 'درخواستِ اصلاحِ لغوشده'
+};
+
+function isSalaryLinkedExpenseRow(row) {
+  return Boolean(row?.isSalaryLinked) || String(row?.referenceNo || '').trim().startsWith('staff_salary:');
+}
+
+function hasOpenExpenseCorrectionRow(row) {
+  return Boolean(row?.correction?.requestedAt);
+}
+
+// What the edit button does for a row: 'edit' (draft / rejected / in review),
+// 'correction' (approved), or nothing with the reason it is locked.
+function resolveExpenseEditAccess(row) {
+  const status = String(row?.status || '').trim();
+  if (!row?._id || status === 'void') return { mode: '', lockedReason: '' };
+  if (isSalaryLinkedExpenseRow(row)) {
+    return { mode: '', lockedReason: 'این مصرف خودکار از «پرداختِ معاش» ساخته شده؛ از بخشِ معاش اصلاح شود.' };
+  }
+  if (hasOpenExpenseCorrectionRow(row)) return { mode: '', lockedReason: 'درخواستِ اصلاحِ این مصرف در صفِ تایید است.' };
+  if (row?.financialYear?.isClosed) return { mode: '', lockedReason: 'سالِ مالیِ این مصرف بسته شده است.' };
+  return { mode: status === 'approved' ? 'correction' : 'edit', lockedReason: '' };
+}
+
+function buildExpenseEditDraft(row = {}) {
+  return {
+    category: String(row.category || ''),
+    subCategory: String(row.subCategory || ''),
+    amount: row.amount != null ? String(row.amount) : '',
+    expenseDate: toInputDate(row.expenseDate),
+    paymentMethod: String(row.paymentMethod || 'manual'),
+    treasuryAccountId: String(row.treasuryAccountId?._id || row.treasuryAccountId || ''),
+    procurementCommitmentId: String(row.procurementCommitmentId?._id || row.procurementCommitmentId || ''),
+    vendorName: String(row.vendorName || ''),
+    referenceNo: String(row.referenceNo || ''),
+    note: String(row.note || '')
+  };
+}
+
+function normalizeExpenseDraftValue(field, value) {
+  if (field === 'amount') {
+    const amount = Number(value);
+    return Number.isFinite(amount) && String(value ?? '').trim() !== '' ? String(Number(amount.toFixed(2))) : String(value ?? '').trim();
+  }
+  return String(value ?? '').trim();
+}
+
+function diffExpenseEditDraft(initial = {}, draft = {}) {
+  return EXPENSE_EDIT_FIELDS
+    .filter((field) => normalizeExpenseDraftValue(field, initial[field]) !== normalizeExpenseDraftValue(field, draft[field]))
+    .map((field) => ({ field, from: initial[field], to: draft[field] }));
+}
+
+// Gregorian yyyy-mm-dd range covering a Shamsi year, or one month of it.
+function buildShamsiPeriodRange(year, month = '') {
+  const y = Number(year);
+  if (!y) return { from: '', to: '' };
+  const dayBefore = (isoDay) => (
+    isoDay ? new Date(new Date(`${isoDay}T00:00:00Z`).getTime() - 86400000).toISOString().slice(0, 10) : ''
+  );
+  if (month) {
+    const m = Number(month);
+    const nextFirst = m === 12 ? afghanSolarToGregorianInput(y + 1, 1, 1) : afghanSolarToGregorianInput(y, m + 1, 1);
+    return { from: afghanSolarToGregorianInput(y, m, 1), to: dayBefore(nextFirst) };
+  }
+  return { from: afghanSolarToGregorianInput(y, 1, 1), to: dayBefore(afghanSolarToGregorianInput(y + 1, 1, 1)) };
+}
+
+// «دفتر ثبت مصارف» lists nothing until at least one of these is chosen.
+const EMPTY_EXPENSE_LEDGER_FILTERS = {
+  status: '',
+  shamsiYear: '',
+  shamsiMonth: '',
+  dateFrom: '',
+  dateTo: '',
+  category: '',
+  search: ''
+};
+const EXPENSE_LEDGER_STATUS_OPTIONS = [
+  { key: 'all', label: 'همه' },
+  { key: 'draft', label: 'پیش‌نویس' },
+  { key: 'pending_review', label: 'در صفِ بررسی' },
+  { key: 'correction', label: 'درخواستِ اصلاحِ باز' },
+  { key: 'rejected', label: 'رد شده' },
+  { key: 'approved', label: 'تایید شده' },
+  { key: 'void', label: 'باطل شده' }
+];
+const EXPENSE_LEDGER_ROW_LIMIT = 500;
+
+// Arabic/Persian letter variants and case must not decide whether a search hits.
+function normalizeExpenseSearchText(value) {
+  return String(value ?? '').replace(/ي/g, 'ی').replace(/ك/g, 'ک').trim().toLowerCase();
+}
+
+function isExpenseLedgerFilterActive(filters = EMPTY_EXPENSE_LEDGER_FILTERS) {
+  return Boolean(filters.status || filters.dateFrom || filters.dateTo || filters.category || String(filters.search || '').trim());
+}
+
+function matchesExpenseLedgerFilters(row, filters = EMPTY_EXPENSE_LEDGER_FILTERS) {
+  const status = String(row?.status || '').trim();
+  if (filters.status === 'correction') {
+    if (!hasOpenExpenseCorrectionRow(row)) return false;
+  } else if (filters.status && filters.status !== 'all' && status !== filters.status) {
+    return false;
+  }
+  const day = String(row?.expenseDate || '').slice(0, 10);
+  if (filters.dateFrom && (!day || day < filters.dateFrom)) return false;
+  if (filters.dateTo && (!day || day > filters.dateTo)) return false;
+  if (filters.category && String(row?.category || '').trim() !== filters.category) return false;
+  const search = normalizeExpenseSearchText(filters.search);
+  if (search) {
+    const haystack = normalizeExpenseSearchText([row?.note, row?.vendorName, row?.referenceNo].join(' '));
+    if (!haystack.includes(search)) return false;
+  }
+  return true;
 }
 
 function resolveTreasuryAccountTypeLabel(accountType = '') {
@@ -1601,6 +1753,12 @@ export default function AdminGovernmentFinance() {
     isActive: true
   });
   const [selectedYearBudgetDraft, setSelectedYearBudgetDraft] = useState(() => buildBudgetDraft());
+  // Edit / correction dialog for an already recorded expense:
+  // { row, mode: 'edit' | 'correction', initial, draft, reason, error }.
+  const [expenseEditor, setExpenseEditor] = useState(null);
+  const expenseEditorRef = useRef(null);
+  const [expandedExpenseHistoryId, setExpandedExpenseHistoryId] = useState('');
+  const [expenseLedgerFilters, setExpenseLedgerFilters] = useState(EMPTY_EXPENSE_LEDGER_FILTERS);
   const [expenseDraft, setExpenseDraft] = useState({
     category: 'payroll',
     subCategory: '',
@@ -1909,32 +2067,42 @@ export default function AdminGovernmentFinance() {
 
   // Shamsi year/month quick-pick → fills the Gregorian from/to range the
   // filter already understands. Month "" with a year set = the whole year.
-  const dayBefore = (isoDay) => (
-    isoDay
-      ? new Date(new Date(`${isoDay}T00:00:00Z`).getTime() - 86400000).toISOString().slice(0, 10)
-      : ''
-  );
-
   const applyShamsiPeriodFilter = (year, month) => {
+    const range = buildShamsiPeriodRange(year, month);
     setExpenseShamsiYear(year);
     setExpenseShamsiMonth(month);
-    if (!year) {
-      setExpenseDateFrom('');
-      setExpenseDateTo('');
-      return;
-    }
-    const y = Number(year);
-    if (month) {
-      const m = Number(month);
-      const nextFirst = m === 12
-        ? afghanSolarToGregorianInput(y + 1, 1, 1)
-        : afghanSolarToGregorianInput(y, m + 1, 1);
-      setExpenseDateFrom(afghanSolarToGregorianInput(y, m, 1));
-      setExpenseDateTo(dayBefore(nextFirst));
-    } else {
-      setExpenseDateFrom(afghanSolarToGregorianInput(y, 1, 1));
-      setExpenseDateTo(dayBefore(afghanSolarToGregorianInput(y + 1, 1, 1)));
-    }
+    setExpenseDateFrom(range.from);
+    setExpenseDateTo(range.to);
+  };
+
+  // «دفتر ثبت مصارف» has its own filters and shows no rows until one is set.
+  const expenseLedgerFilterActive = isExpenseLedgerFilterActive(expenseLedgerFilters);
+  const expenseLedgerMatches = useMemo(() => {
+    if (!expenseLedgerFilterActive) return [];
+    const source = (payload.expenses || []).length
+      ? (payload.expenses || [])
+      : (payload.expenseAnalytics?.queue || []);
+    return source.filter((row) => matchesExpenseLedgerFilters(row, expenseLedgerFilters));
+  }, [payload.expenses, payload.expenseAnalytics, expenseLedgerFilterActive, expenseLedgerFilters]);
+  const expenseLedgerRows = useMemo(() => expenseLedgerMatches.slice(0, EXPENSE_LEDGER_ROW_LIMIT), [expenseLedgerMatches]);
+  const expenseLedgerTotalAmount = useMemo(() => (
+    expenseLedgerMatches
+      .filter((row) => String(row.status || '').trim() !== 'void')
+      .reduce((sum, row) => sum + toNumber(row.amount), 0)
+  ), [expenseLedgerMatches]);
+
+  const updateExpenseLedgerFilters = (patch) => {
+    setExpenseLedgerFilters((current) => ({ ...current, ...patch }));
+  };
+
+  const applyExpenseLedgerShamsiPeriod = (year, month) => {
+    const range = buildShamsiPeriodRange(year, month);
+    updateExpenseLedgerFilters({ shamsiYear: year, shamsiMonth: year ? month : '', dateFrom: range.from, dateTo: range.to });
+  };
+
+  const clearExpenseLedgerFilters = () => {
+    setExpenseLedgerFilters(EMPTY_EXPENSE_LEDGER_FILTERS);
+    setExpandedExpenseHistoryId('');
   };
 
   const expenseShamsiYearOptions = useMemo(() => {
@@ -1975,7 +2143,6 @@ export default function AdminGovernmentFinance() {
     expenseCategoryRegistry.find((item) => String(item._id || item.id) === String(categoryDraft.id || '')) || null
   ), [categoryDraft.id, expenseCategoryRegistry]);
 
-  const archivePreview = useMemo(() => buildTablePreview(filteredExpenseRows, expenseDateFilterActive ? 200 : 12), [filteredExpenseRows, expenseDateFilterActive]);
   const treasurySummary = useMemo(() => payload.treasuryAnalytics?.summary || {}, [payload.treasuryAnalytics]);
   const staffAdvanceSummary = useMemo(() => payload.staffAdvanceAnalytics?.summary || {}, [payload.staffAdvanceAnalytics]);
   const staffAdvanceQueue = useMemo(() => payload.staffAdvanceAnalytics?.queue || [], [payload.staffAdvanceAnalytics]);
@@ -3255,12 +3422,15 @@ export default function AdminGovernmentFinance() {
         : '';
       if (action === 'reject' && reason === null) return;
       setBusyAction(`${action}-expense-${expenseId}`);
-      await postJson(`/api/finance/admin/expenses/${expenseId}/review`, {
+      const response = await postJson(`/api/finance/admin/expenses/${expenseId}/review`, {
         action,
         reason: reason || '',
         note: action === 'reject' ? 'از مرکز مالی رد شد.' : 'از مرکز مالی تایید شد.'
       });
-      showMessage(action === 'reject' ? 'مصرف رد شد.' : 'مصرف بررسی و ثبت شد.');
+      // Correction outcomes (applied / rejected) come with their own wording.
+      showMessage(response?.correction
+        ? response.message
+        : (action === 'reject' ? 'مصرف رد شد.' : 'مصرف بررسی و ثبت شد.'));
       await loadWorkspace();
     } catch (error) {
       showMessage(errorMessage(error, 'بررسی مصرف ناموفق بود.'), 'error');
@@ -3281,6 +3451,443 @@ export default function AdminGovernmentFinance() {
       setBusyAction('');
     }
   };
+
+  const openExpenseEditor = (row) => {
+    const { mode } = resolveExpenseEditAccess(row);
+    if (!mode) return;
+    const initial = buildExpenseEditDraft(row);
+    setExpenseEditor({ row, mode, initial, draft: { ...initial }, reason: '', error: '' });
+  };
+
+  const closeExpenseEditor = () => {
+    if (String(busyAction || '').startsWith('edit-expense-')) return;
+    setExpenseEditor(null);
+  };
+
+  const handleExpenseEditorChange = (event) => {
+    const { name, value } = event.target;
+    setExpenseEditor((current) => {
+      if (!current) return current;
+      const draft = { ...current.draft, [name]: value };
+      if (name === 'category') {
+        // Back to the original category restores its original sub-category.
+        draft.subCategory = value === current.initial.category
+          ? current.initial.subCategory
+          : ((expenseCategoryRegistry.find((item) => item.key === value)?.subCategories || [])
+            .filter((item) => item.isActive !== false)[0]?.key || '');
+      }
+      if (name === 'procurementCommitmentId' && value) {
+        const commitment = procurementItems.find((item) => String(item._id || item.id || '') === String(value));
+        if (commitment) {
+          draft.category = commitment.category || draft.category;
+          draft.subCategory = commitment.subCategory || draft.subCategory;
+          if (!draft.treasuryAccountId && commitment.treasuryAccountId) {
+            draft.treasuryAccountId = String(commitment.treasuryAccountId?._id || commitment.treasuryAccountId);
+          }
+        }
+      }
+      return { ...current, draft, error: '' };
+    });
+  };
+
+  const saveExpenseEditor = async ({ submitAfterSave = false } = {}) => {
+    if (!expenseEditor) return;
+    const { row, mode, initial, draft } = expenseEditor;
+    const changes = diffExpenseEditDraft(initial, draft);
+    const body = Object.fromEntries(changes.map(({ field }) => [field, draft[field]]));
+    // The backend validates category + sub-category as a pair.
+    if ('category' in body || 'subCategory' in body) {
+      body.category = draft.category;
+      body.subCategory = draft.subCategory;
+    }
+    const reason = String(expenseEditor.reason || '').trim();
+    if (reason) body.reason = reason;
+    try {
+      setBusyAction(`edit-expense-${row._id}`);
+      const response = mode === 'correction'
+        ? await postJson(`/api/finance/admin/expenses/${row._id}/correction`, body)
+        : await fetchJson(`/api/finance/admin/expenses/${row._id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...body, submitAfterSave })
+          });
+      setExpenseEditor(null);
+      showMessage(response?.message || 'مصرف ویرایش شد.');
+      await loadWorkspace();
+    } catch (error) {
+      const text = errorMessage(error, mode === 'correction' ? 'ثبتِ درخواستِ اصلاح ناموفق بود.' : 'ویرایش مصرف ناموفق بود.');
+      setExpenseEditor((current) => (current ? { ...current, error: text } : current));
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const cancelExpenseCorrection = async (row) => {
+    if (!window.confirm('درخواستِ اصلاحِ این مصرف لغو شود؟ مصرف با مقادیرِ قبلیِ تاییدشده دوباره در خزانه و گزارش‌ها حساب می‌شود.')) return;
+    try {
+      setBusyAction(`cancel-correction-${row._id}`);
+      const response = await postJson(`/api/finance/admin/expenses/${row._id}/correction/cancel`, {});
+      showMessage(response?.message || 'درخواستِ اصلاح لغو شد.');
+      await loadWorkspace();
+    } catch (error) {
+      showMessage(errorMessage(error, 'لغوِ درخواستِ اصلاح ناموفق بود.'), 'error');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const describeExpenseFieldValue = (field, value, categoryKey = '') => {
+    if (value === null || value === undefined || String(value).trim() === '') return '—';
+    if (field === 'amount') return formatMoney(value);
+    if (field === 'expenseDate') return toFaDate(value);
+    if (field === 'category') return expenseLabels.category(value);
+    if (field === 'subCategory') return expenseLabels.subCategory(categoryKey, value);
+    if (field === 'paymentMethod') return EXPENSE_PAYMENT_METHOD_LABELS[value] || String(value);
+    if (field === 'treasuryAccountId') {
+      const account = treasuryAccounts.find((item) => String(item._id || item.id || '') === String(value));
+      return account?.title || account?.code || 'حسابِ دیگر';
+    }
+    if (field === 'procurementCommitmentId') {
+      const commitment = procurementItems.find((item) => String(item._id || item.id || '') === String(value));
+      return commitment?.title || commitment?.vendorName || 'تعهدِ دیگر';
+    }
+    return String(value);
+  };
+
+  // Readable before → after lines for a changes list (sub-categories resolve
+  // against the category on the same side of the change).
+  const describeExpenseChanges = (changes = [], row = {}) => {
+    const list = Array.isArray(changes) ? changes : [];
+    const categoryChange = list.find((change) => change.field === 'category');
+    return list.map((change) => ({
+      key: change.field,
+      label: EXPENSE_FIELD_LABELS[change.field] || change.field,
+      from: describeExpenseFieldValue(change.field, change.from, categoryChange ? categoryChange.from : row.category),
+      to: describeExpenseFieldValue(change.field, change.to, categoryChange ? categoryChange.to : row.category)
+    }));
+  };
+
+  // «تاریخ ثبت‌شده»: the day the expense was made. When it was entered into the
+  // system on a different day, that day is shown underneath.
+  const renderExpenseDateCell = (row) => {
+    const expenseDay = toInputDate(row.expenseDate);
+    const recordedDay = toInputDate(row.createdAt);
+    return (
+      <td data-expense-date-cell="true">
+        <div className="gov-table-stack">
+          <strong>{toFaDate(row.expenseDate)}</strong>
+          {recordedDay && recordedDay !== expenseDay ? (
+            <span title="روزی که این مصرف در سیستم وارد شد">ثبت در سیستم: {toFaDate(row.createdAt)}</span>
+          ) : null}
+        </div>
+      </td>
+    );
+  };
+
+  const renderExpenseChangeList = (changes = [], row = {}) => (
+    <ul className="gov-change-list">
+      {describeExpenseChanges(changes, row).map((item) => (
+        <li key={item.key}>
+          <span>{item.label}:</span>
+          <s>{item.from}</s>
+          <span aria-hidden="true">←</span>
+          <b>{item.to}</b>
+        </li>
+      ))}
+    </ul>
+  );
+
+  // Edit / correction / history controls shared by the ledger and the queue.
+  const renderExpenseEditControls = (row, { withHistory = false } = {}) => {
+    const access = resolveExpenseEditAccess(row);
+    const correctionOpen = hasOpenExpenseCorrectionRow(row);
+    const revisionCount = (row.revisions || []).length;
+    const historyOpen = expandedExpenseHistoryId === row._id;
+    return (
+      <>
+        {access.mode ? (
+          <button
+            type="button"
+            className="gov-inline-action"
+            data-expense-edit={row._id}
+            disabled={!!busyAction}
+            onClick={() => openExpenseEditor(row)}
+          >
+            {access.mode === 'correction' ? 'درخواستِ اصلاح' : 'ویرایش'}
+          </button>
+        ) : null}
+        {correctionOpen ? (
+          <button
+            type="button"
+            className="gov-inline-action"
+            data-expense-correction-cancel={row._id}
+            disabled={!!busyAction}
+            onClick={() => cancelExpenseCorrection(row)}
+          >
+            لغوِ درخواستِ اصلاح
+          </button>
+        ) : null}
+        {!access.mode && !correctionOpen && isSalaryLinkedExpenseRow(row) ? (
+          <span className="gov-inline-muted" title={access.lockedReason}>اصلاح از بخشِ معاش</span>
+        ) : null}
+        {withHistory && revisionCount ? (
+          <button
+            type="button"
+            className="gov-inline-action"
+            aria-expanded={historyOpen}
+            onClick={() => setExpandedExpenseHistoryId(historyOpen ? '' : row._id)}
+          >
+            {historyOpen ? 'بستنِ تاریخچه' : `تاریخچه (${formatNumber(revisionCount)})`}
+          </button>
+        ) : null}
+      </>
+    );
+  };
+
+  const renderExpenseEditorDialog = () => {
+    if (!expenseEditor || typeof document === 'undefined') return null;
+    const { row, mode, initial, draft, reason, error } = expenseEditor;
+    const status = String(row.status || '').trim();
+    const changes = diffExpenseEditDraft(initial, draft);
+    const moneyChange = changes.some((change) => !EXPENSE_TEXT_ONLY_FIELDS.has(change.field));
+    const isSaving = busyAction === `edit-expense-${row._id}`;
+    const reasonRequired = mode === 'correction' && moneyChange;
+    const updateEditor = (patch) => setExpenseEditor((current) => (current ? { ...current, ...patch, error: '' } : current));
+
+    // Keep the row's current values selectable even when they are no longer
+    // offered for new expenses (inactive category, other account/commitment).
+    const categoryOptions = activeExpenseCategoryOptions.some((item) => item.key === initial.category)
+      ? activeExpenseCategoryOptions
+      : [...activeExpenseCategoryOptions, ...expenseCategoryRegistry.filter((item) => item.key === initial.category)];
+    const subCategoryOptions = ((expenseCategoryRegistry.find((item) => item.key === draft.category)?.subCategories) || [])
+      .filter((item) => item.isActive !== false || (draft.category === initial.category && item.key === initial.subCategory));
+    const accountOptions = !initial.treasuryAccountId
+      || treasuryAccounts.some((item) => String(item._id || item.id || '') === initial.treasuryAccountId)
+      ? treasuryAccounts
+      : [...treasuryAccounts, { _id: initial.treasuryAccountId, title: row.treasuryAccount?.title || 'حسابِ فعلی' }];
+    const commitmentOptions = !initial.procurementCommitmentId
+      || approvedProcurementOptions.some((item) => String(item._id || item.id || '') === initial.procurementCommitmentId)
+      ? approvedProcurementOptions
+      : [
+          ...approvedProcurementOptions,
+          procurementItems.find((item) => String(item._id || item.id || '') === initial.procurementCommitmentId)
+            || { _id: initial.procurementCommitmentId, title: row.procurementCommitment?.title || 'تعهدِ فعلی' }
+        ];
+
+    let note = 'این مصرف پیش‌نویس است و هنوز اثرِ مالی ندارد.';
+    if (mode === 'correction') {
+      note = 'مصرفِ تاییدشده: تغییرِ فقط شرح، فروشنده یا مرجع مستقیم ذخیره می‌شود. تغییرِ مبلغ، تاریخ، دسته یا حساب یک «درخواستِ اصلاح» می‌سازد که سه مرحله تایید می‌شود؛ تا تاییدِ نهایی، این مصرف در خزانه و گزارش‌ها حساب نمی‌شود. اگر رد یا لغو شود، با مقادیرِ فعلی دوباره حساب می‌شود.';
+    } else if (status === 'pending_review') {
+      note = `این مصرف در صفِ بررسی است (منتظرِ ${expenseStageWaitLabel(row.approvalStage)}). با ذخیرهٔ تغییرات، تاییدهای قبلی لغو و بررسی از «مدیر مالی» دوباره شروع می‌شود.`;
+    } else if (status === 'rejected') {
+      note = `این مصرف رد شده${row.rejectReason ? ` — دلیل: «${row.rejectReason}»` : ''}. پس از اصلاح، «ذخیره و ارسال برای بررسی» را بزنید.`;
+    }
+
+    const fieldProps = (name) => ({ name, value: draft[name], onChange: handleExpenseEditorChange, disabled: isSaving });
+
+    return createPortal(
+      // No close-on-backdrop-click: a stray click must not throw away a
+      // half-written correction. × / انصراف / Escape close it.
+      <div className="gov-dialog-backdrop" role="presentation">
+        <section
+          ref={expenseEditorRef}
+          className="gov-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="gov-expense-editor-title"
+          dir="rtl"
+          tabIndex={-1}
+          data-expense-editor={mode}
+        >
+          <header className="gov-dialog__head">
+            <div>
+              <h2 id="gov-expense-editor-title">{mode === 'correction' ? 'درخواستِ اصلاحِ مصرفِ تاییدشده' : 'ویرایشِ مصرف'}</h2>
+              <p>
+                <span>{expenseLabels.category(row.category)}</span>
+                <span>{formatMoney(row.amount)}</span>
+                <span>{toFaDate(row.expenseDate)}</span>
+                <ExpenseStatusBadge status={row.status} />
+              </p>
+            </div>
+            <button type="button" className="gov-dialog__close" onClick={closeExpenseEditor} disabled={isSaving} aria-label="بستن">×</button>
+          </header>
+
+          <div className="gov-dialog__note" data-tone={mode === 'correction' ? 'copper' : 'teal'}>{note}</div>
+
+          <div className={`gov-change-summary${changes.length ? '' : ' is-empty'}`} aria-live="polite">
+            {changes.length ? (
+              <>
+                <div className="gov-change-summary__head">
+                  <strong>تغییرات</strong>
+                  {mode === 'correction' ? (
+                    <span className="gov-status-badge" data-tone={moneyChange ? 'copper' : 'mint'}>
+                      {moneyChange ? 'نیازمندِ تاییدِ سه‌مرحله‌ای' : 'بدونِ نیاز به تایید'}
+                    </span>
+                  ) : null}
+                </div>
+                {renderExpenseChangeList(changes, row)}
+              </>
+            ) : (
+              <span>هنوز چیزی تغییر نکرده — مقدارِ اشتباه را در فرمِ زیر اصلاح کنید.</span>
+            )}
+          </div>
+
+          <div className="gov-form-grid">
+            <label className="gov-field">
+              <span>دسته</span>
+              <select {...fieldProps('category')}>
+                {categoryOptions.map((item) => (
+                  <option key={item._id || item.key} value={item.key}>
+                    {item.label || item.key}{item.isActive === false ? ' (غیرفعال)' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="gov-field">
+              <span>زیردسته</span>
+              <select {...fieldProps('subCategory')}>
+                <option value="">بدون زیردسته</option>
+                {subCategoryOptions.map((item) => (
+                  <option key={item.key} value={item.key}>{item.label || item.key}</option>
+                ))}
+              </select>
+            </label>
+            <label className="gov-field">
+              <span>مبلغ</span>
+              <input {...fieldProps('amount')} inputMode="decimal" />
+            </label>
+            <label className="gov-field">
+              <span>تاریخ مصرف</span>
+              <AfghanDateInput
+                name="expenseDate"
+                value={draft.expenseDate}
+                onChange={(value) => updateEditor({ draft: { ...draft, expenseDate: value } })}
+                showGregorianEquivalent
+                disabled={isSaving}
+              />
+            </label>
+            <label className="gov-field">
+              <span>حساب خزانه</span>
+              <select {...fieldProps('treasuryAccountId')}>
+                <option value="">بدون اتصال خزانه</option>
+                {accountOptions.map((item) => (
+                  <option key={item._id || item.id} value={item._id || item.id}>{item.title || item.code || item._id}</option>
+                ))}
+              </select>
+            </label>
+            <label className="gov-field">
+              <span>روش پرداخت</span>
+              <select {...fieldProps('paymentMethod')}>
+                {Object.entries(EXPENSE_PAYMENT_METHOD_LABELS).map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="gov-field">
+              <span>تعهد فروشنده</span>
+              <select {...fieldProps('procurementCommitmentId')}>
+                <option value="">بدون تعهد مرتبط</option>
+                {commitmentOptions.map((item) => (
+                  <option key={item._id || item.id} value={item._id || item.id}>{item.title || item.vendorName || item._id}</option>
+                ))}
+              </select>
+            </label>
+            <label className="gov-field">
+              <span>فروشنده یا شخصِ برداشت‌کنندهٔ پول</span>
+              <input {...fieldProps('vendorName')} />
+            </label>
+            <label className="gov-field">
+              <span>مرجع</span>
+              <input {...fieldProps('referenceNo')} />
+            </label>
+            <label className="gov-field gov-field-full">
+              <span>شرح مصرف</span>
+              <input {...fieldProps('note')} />
+            </label>
+            <label className="gov-field gov-field-full">
+              <span>{reasonRequired ? 'دلیلِ اصلاح (الزامی)' : 'دلیلِ ویرایش (اختیاری)'}</span>
+              <textarea
+                className="gov-dialog__reason"
+                name="reason"
+                rows={2}
+                value={reason}
+                onChange={(event) => updateEditor({ reason: event.target.value })}
+                placeholder="مثال: مبلغ در رسید ۶۵۰ افغانی است، نه ۶۰۰."
+                disabled={isSaving}
+              />
+            </label>
+          </div>
+
+          {error ? <div className="gov-finance-message error" role="alert">{error}</div> : null}
+
+          <footer className="gov-dialog__actions">
+            {mode === 'correction' ? (
+              <button
+                type="button"
+                className="gov-primary-btn"
+                data-expense-editor-save="correction"
+                onClick={() => saveExpenseEditor()}
+                disabled={isSaving || !changes.length || (reasonRequired && !String(reason || '').trim())}
+              >
+                {isSaving ? 'در حال ذخیره...' : (moneyChange ? 'ارسالِ درخواستِ اصلاح' : 'ذخیرهٔ تغییراتِ متنی')}
+              </button>
+            ) : null}
+            {mode === 'edit' && status === 'pending_review' ? (
+              <button
+                type="button"
+                className="gov-primary-btn"
+                data-expense-editor-save="restart"
+                onClick={() => saveExpenseEditor()}
+                disabled={isSaving || !changes.length}
+              >
+                {isSaving ? 'در حال ذخیره...' : 'ذخیره و شروعِ دوبارهٔ بررسی'}
+              </button>
+            ) : null}
+            {mode === 'edit' && status !== 'pending_review' ? (
+              <>
+                <button
+                  type="button"
+                  className="gov-primary-btn"
+                  data-expense-editor-save="submit"
+                  onClick={() => saveExpenseEditor({ submitAfterSave: true })}
+                  disabled={isSaving}
+                >
+                  {isSaving ? 'در حال ذخیره...' : 'ذخیره و ارسال برای بررسی'}
+                </button>
+                <button
+                  type="button"
+                  className="gov-ghost-btn"
+                  data-expense-editor-save="edit"
+                  onClick={() => saveExpenseEditor()}
+                  disabled={isSaving || !changes.length}
+                >
+                  فقط ذخیرهٔ تغییرات
+                </button>
+              </>
+            ) : null}
+            <button type="button" className="gov-ghost-btn" onClick={closeExpenseEditor} disabled={isSaving}>
+              انصراف
+            </button>
+          </footer>
+        </section>
+      </div>,
+      document.body
+    );
+  };
+
+  const isExpenseEditorOpen = Boolean(expenseEditor);
+  useEffect(() => {
+    if (isExpenseEditorOpen) expenseEditorRef.current?.focus();
+  }, [isExpenseEditorOpen]);
+  useEffect(() => {
+    if (!isExpenseEditorOpen) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') closeExpenseEditor();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isExpenseEditorOpen, busyAction]);
 
   const handleStaffAdvanceDraftChange = (event) => {
     const { name, value } = event.target;
@@ -5942,6 +6549,7 @@ export default function AdminGovernmentFinance() {
                       <tr>
                         <th>دسته</th>
                         <th>شرح</th>
+                        <th>تاریخ ثبت‌شده</th>
                         <th>مبلغ</th>
                         <th>وضعیت</th>
                         <th>مرحله</th>
@@ -5952,6 +6560,7 @@ export default function AdminGovernmentFinance() {
                     <tbody>
                       {expenseQueueRows.map((row) => {
                         const isPending = row.status === 'pending_review';
+                        const correctionOpen = hasOpenExpenseCorrectionRow(row);
                         const alreadyReviewed = actorAlreadyReviewedExpense(row.approvalTrail, currentUserId);
                         const canApprove = isPending && !alreadyReviewed && canApproveExpenseStage(currentAdminLevel, row.approvalStage);
                         const canReject = isPending && !alreadyReviewed && canRejectExpenseStage(currentAdminLevel, row.approvalStage);
@@ -5959,7 +6568,7 @@ export default function AdminGovernmentFinance() {
                           ? 'شما قبلاً روی این مصرف اقدام کرده‌اید.'
                           : `این مرحله منتظرِ ${expenseStageWaitLabel(row.approvalStage)} است؛ سطحِ حسابِ شما مجاز نیست.`;
                         return (
-                        <tr key={`queue-${row._id}`}>
+                        <tr key={`queue-${row._id}`} data-expense-correction-row={correctionOpen ? 'true' : undefined}>
                           <td>
                             <div className="gov-table-stack">
                               <strong>{expenseLabels.category(row.category)}</strong>
@@ -5971,9 +6580,26 @@ export default function AdminGovernmentFinance() {
                               <strong>{(row.note || '').trim() || (row.vendorName || '').trim() || expenseLabels.subCategory(row.category, row.subCategory)}</strong>
                               {(row.vendorName || '').trim() && (row.note || '').trim() ? <span>{(row.vendorName || '').trim()}</span> : null}
                             </div>
+                            {correctionOpen ? (
+                              <div className="gov-correction-inline">
+                                <strong>درخواستِ اصلاحِ مصرفِ تاییدشده</strong>
+                                {renderExpenseChangeList(row.correction.changes, row)}
+                                <small>
+                                  {row.correction.reason ? `دلیل: ${row.correction.reason}` : 'بدونِ دلیل'}
+                                  {row.correction.requestedBy?.name ? ` — ${row.correction.requestedBy.name}` : ''}
+                                </small>
+                                <small>تا تاییدِ نهایی، این مصرف در خزانه و گزارش‌ها حساب نمی‌شود.</small>
+                              </div>
+                            ) : null}
                           </td>
-                          <td>{formatMoney(row.amount)}</td>
-                          <td><ExpenseStatusBadge status={row.status} /></td>
+                          {renderExpenseDateCell(row)}
+                          <td className="gov-expense-amount-cell">{formatMoney(row.amount)}</td>
+                          <td>
+                            <div className="gov-pill-row">
+                              <ExpenseStatusBadge status={row.status} />
+                              {correctionOpen ? <span className="gov-status-badge" data-tone="copper">اصلاح</span> : null}
+                            </div>
+                          </td>
                           <td><ExpenseStageBadge stage={row.approvalStage} /></td>
                           <td>
                             {isPending
@@ -6005,7 +6631,9 @@ export default function AdminGovernmentFinance() {
                                     title={canApprove ? undefined : blockedReason}
                                     onClick={() => reviewExpense(row._id, 'approve')}
                                   >
-                                    {row.approvalStage === 'general_president_review' ? 'تاییدِ نهایی' : 'تایید مرحله'}
+                                    {row.approvalStage === 'general_president_review'
+                                      ? (correctionOpen ? 'تاییدِ نهاییِ اصلاح' : 'تاییدِ نهایی')
+                                      : 'تایید مرحله'}
                                   </button>
                                   <button
                                     type="button"
@@ -6019,7 +6647,8 @@ export default function AdminGovernmentFinance() {
                                   </button>
                                 </>
                               ) : null}
-                              {row.status !== 'void' && row.status !== 'approved' ? (
+                              {renderExpenseEditControls(row)}
+                              {row.status !== 'void' && row.status !== 'approved' && !correctionOpen ? (
                                 <button
                                   type="button"
                                   className="gov-inline-action"
@@ -6045,7 +6674,7 @@ export default function AdminGovernmentFinance() {
               tabKey="operations"
               panelKey="expense-ledger"
               title="دفتر ثبت مصارف"
-              hint="ثبت ردیف تازه + مرور اخیر"
+              hint="ثبت ردیف تازه + جستجوی مصارف با فیلتر"
               defaultOpen
               span="12"
             >
@@ -6143,14 +6772,121 @@ export default function AdminGovernmentFinance() {
                 </button>
               </div>
 
-              {expenseDateFilterActive ? (
-                <p className="gov-expense-datefilter__hint" style={{ margin: '4px 0 10px' }}>
-                  فهرست بر اساسِ بازهٔ تاریخِ «صف تایید مصارف» فیلتر شده است.
-                </p>
-              ) : null}
+              <div className="gov-expense-datefilter gov-expense-ledger-filter" data-expense-ledger-filters="true">
+                <strong className="gov-expense-ledger-filter__title">جستجوی مصارفِ ثبت‌شده</strong>
+                <div className="gov-expense-datefilter__row">
+                  <label className="gov-field">
+                    <span>وضعیت</span>
+                    <select
+                      name="ledgerStatus"
+                      value={expenseLedgerFilters.status}
+                      onChange={(event) => updateExpenseLedgerFilters({ status: event.target.value })}
+                    >
+                      <option value="">— انتخاب نشده —</option>
+                      {EXPENSE_LEDGER_STATUS_OPTIONS.map((item) => (
+                        <option key={item.key} value={item.key}>{item.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="gov-field">
+                    <span>سال</span>
+                    <select
+                      name="ledgerShamsiYear"
+                      value={expenseLedgerFilters.shamsiYear}
+                      onChange={(event) => applyExpenseLedgerShamsiPeriod(event.target.value, expenseLedgerFilters.shamsiMonth)}
+                    >
+                      <option value="">— انتخاب نشده —</option>
+                      {expenseShamsiYearOptions.map((year) => (
+                        <option key={year} value={year}>{year}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="gov-field">
+                    <span>ماه</span>
+                    <select
+                      name="ledgerShamsiMonth"
+                      value={expenseLedgerFilters.shamsiMonth}
+                      onChange={(event) => applyExpenseLedgerShamsiPeriod(expenseLedgerFilters.shamsiYear, event.target.value)}
+                      disabled={!expenseLedgerFilters.shamsiYear}
+                    >
+                      <option value="">همهٔ ماه‌های سال</option>
+                      {AFGHAN_SOLAR_MONTHS.map((name, index) => (
+                        <option key={name} value={String(index + 1)}>{name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="gov-field">
+                    <span>دسته</span>
+                    <select
+                      name="ledgerCategory"
+                      value={expenseLedgerFilters.category}
+                      onChange={(event) => updateExpenseLedgerFilters({ category: event.target.value })}
+                    >
+                      <option value="">— انتخاب نشده —</option>
+                      {expenseCategoryRegistry
+                        .filter((item) => item.key !== 'unclassified')
+                        .map((item) => (
+                          <option key={item._id || item.key} value={item.key}>
+                            {item.label || item.key}{item.isActive === false ? ' (غیرفعال)' : ''}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="gov-expense-datefilter__row">
+                  <label className="gov-field">
+                    <span>از تاریخ</span>
+                    <AfghanDateInput
+                      name="ledgerDateFrom"
+                      value={expenseLedgerFilters.dateFrom}
+                      onChange={(value) => updateExpenseLedgerFilters({ dateFrom: value, shamsiYear: '', shamsiMonth: '' })}
+                    />
+                  </label>
+                  <label className="gov-field">
+                    <span>تا تاریخ</span>
+                    <AfghanDateInput
+                      name="ledgerDateTo"
+                      value={expenseLedgerFilters.dateTo}
+                      onChange={(value) => updateExpenseLedgerFilters({ dateTo: value, shamsiYear: '', shamsiMonth: '' })}
+                    />
+                  </label>
+                  <label className="gov-field">
+                    <span>جستجو در شرح، فروشنده یا مرجع</span>
+                    <input
+                      name="ledgerSearch"
+                      type="search"
+                      value={expenseLedgerFilters.search}
+                      onChange={(event) => updateExpenseLedgerFilters({ search: event.target.value })}
+                      placeholder="مثال: کرایه، چاپخانه"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="gov-ghost-btn slim"
+                    data-expense-ledger-clear="true"
+                    onClick={clearExpenseLedgerFilters}
+                    disabled={!expenseLedgerFilterActive}
+                  >
+                    پاک‌کردنِ فیلترها
+                  </button>
+                </div>
+                {expenseLedgerFilterActive ? (
+                  <span className="gov-expense-datefilter__hint" data-expense-ledger-summary="true">
+                    {formatNumber(expenseLedgerMatches.length)} مورد · جمعِ مبلغ (بدونِ باطل‌شده‌ها): {formatMoney(expenseLedgerTotalAmount)}
+                    {expenseLedgerMatches.length > EXPENSE_LEDGER_ROW_LIMIT
+                      ? ` · فقط ${formatNumber(EXPENSE_LEDGER_ROW_LIMIT)} ردیفِ اول نمایش داده می‌شود؛ فیلتر را دقیق‌تر کنید.`
+                      : ''}
+                  </span>
+                ) : null}
+              </div>
 
-              {!archivePreview.length ? (
-                <div className="gov-empty-state">هنوز هیچ ردیف مصرفی برای این فیلترها ثبت نشده است.</div>
+              {!expenseLedgerFilterActive ? (
+                <div className="gov-empty-state compact" data-expense-ledger-idle="true">
+                  فهرستِ مصارف خودکار نمایش داده نمی‌شود. برای دیدن، حداقل یک فیلتر انتخاب کنید: وضعیت، سال/ماه یا تاریخ، دسته، یا جستجو.
+                  برای دیدنِ همهٔ مصارف، وضعیت را «همه» بگذارید.
+                </div>
+              ) : !expenseLedgerRows.length ? (
+                <div className="gov-empty-state compact">با این فیلترها هیچ مصرفی پیدا نشد.</div>
               ) : (
                 <div className="gov-table-wrap">
                   <table className="gov-table">
@@ -6158,16 +6894,20 @@ export default function AdminGovernmentFinance() {
                       <tr>
                         <th>دسته</th>
                         <th>شرح</th>
+                        <th>تاریخ ثبت‌شده</th>
                         <th>مبلغ</th>
-                        <th>تاریخ</th>
                         <th>وضعیت</th>
                         <th>مرحله</th>
                         <th>ردپای بررسی</th>
+                        <th>اقدام</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {archivePreview.map((row) => (
-                        <tr key={row._id}>
+                      {expenseLedgerRows.map((row) => {
+                        const correctionOpen = hasOpenExpenseCorrectionRow(row);
+                        return (
+                        <React.Fragment key={row._id}>
+                        <tr data-expense-ledger-row={row._id}>
                           <td>
                             <div className="gov-table-stack">
                               <strong>{expenseLabels.category(row.category)}</strong>
@@ -6180,13 +6920,52 @@ export default function AdminGovernmentFinance() {
                               {(row.vendorName || '').trim() && (row.note || '').trim() ? <span>{(row.vendorName || '').trim()}</span> : null}
                             </div>
                           </td>
-                          <td>{formatMoney(row.amount)}</td>
-                          <td>{toFaDate(row.expenseDate)}</td>
-                          <td><ExpenseStatusBadge status={row.status} /></td>
+                          {renderExpenseDateCell(row)}
+                          <td className="gov-expense-amount-cell">{formatMoney(row.amount)}</td>
+                          <td>
+                            <div className="gov-pill-row">
+                              <ExpenseStatusBadge status={row.status} />
+                              {correctionOpen ? (
+                                <span className="gov-status-badge" data-tone="copper" title="تا تاییدِ نهایی در خزانه و گزارش‌ها حساب نمی‌شود.">
+                                  اصلاح در انتظارِ تایید
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
                           <td><ExpenseStageBadge stage={row.approvalStage} /></td>
                           <td>{formatNumber((row.approvalTrail || []).length)} رویداد</td>
+                          <td>
+                            <div className="gov-action-stack">
+                              {renderExpenseEditControls(row, { withHistory: true })}
+                            </div>
+                          </td>
                         </tr>
-                      ))}
+                        {expandedExpenseHistoryId === row._id ? (
+                          <tr className="gov-expense-history-row">
+                            <td colSpan={8}>
+                              <ol className="gov-expense-history">
+                                {(row.revisions || []).slice().reverse().map((entry, index) => (
+                                  <li key={`${row._id}-revision-${index}`}>
+                                    <div className="gov-expense-history__head">
+                                      <strong>{EXPENSE_REVISION_KIND_LABELS[entry.kind] || entry.kind}</strong>
+                                      <span>
+                                        {entry.by?.name || '—'} · {toLocaleDateTime(entry.at)}
+                                        {entry.requestedBy?.name && entry.requestedBy?.name !== entry.by?.name
+                                          ? ` · درخواست‌کننده: ${entry.requestedBy.name}`
+                                          : ''}
+                                      </span>
+                                    </div>
+                                    {entry.reason ? <p>دلیل: {entry.reason}</p> : null}
+                                    {renderExpenseChangeList(entry.changes, row)}
+                                  </li>
+                                ))}
+                              </ol>
+                            </td>
+                          </tr>
+                        ) : null}
+                        </React.Fragment>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -7825,6 +8604,7 @@ export default function AdminGovernmentFinance() {
           </>
         )}
       </div>
+      {renderExpenseEditorDialog()}
     </div>
   );
 }

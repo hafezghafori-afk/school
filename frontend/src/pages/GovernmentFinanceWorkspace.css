@@ -1746,6 +1746,34 @@
   }
 }
 
+/* Expense tables: keep the amount and the main «تاریخ ثبت‌شده» line on one line. */
+.gov-table td.gov-expense-amount-cell,
+.gov-table td[data-expense-date-cell] strong {
+  white-space: nowrap;
+}
+
+.gov-table td[data-expense-date-cell] span {
+  font-size: 0.8rem;
+}
+
+/* «دفتر ثبت مصارف»: the filter bar under «ثبت مصرف» that gates the list. */
+.gov-expense-ledger-filter {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.gov-expense-ledger-filter .gov-expense-datefilter__hint {
+  margin-top: 0;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.gov-expense-ledger-filter__title {
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
 .gov-reports-switch {
   display: flex;
   justify-content: center;
@@ -1777,4 +1805,241 @@
   color: #fff;
   background: linear-gradient(135deg, var(--teal), #115e59);
   box-shadow: 0 8px 18px rgba(15, 118, 110, 0.18);
+}
+
+/* Expense edit / correction dialog. It is portalled to <body>, outside
+   .gov-finance-page, so it re-declares the tokens its children use. */
+.gov-dialog-backdrop {
+  --ink: #16302b;
+  --ink-muted: #42605b;
+  --teal: #0f766e;
+  --copper: #b45309;
+  --rose: #9f1239;
+  --glass-hairline: 1px solid rgba(21, 48, 43, 0.09);
+  --font-persian-ui: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px 16px;
+  overflow-y: auto;
+  background: rgba(10, 32, 29, 0.5);
+}
+
+.gov-dialog {
+  width: min(780px, 100%);
+  margin: auto 0;
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+  border-radius: 24px;
+  background: #fbfdfc;
+  color: var(--ink);
+  font-family: var(--font-persian-ui);
+  font-size: 1rem;
+  text-align: right;
+  box-shadow: 0 30px 70px -20px rgba(8, 30, 27, 0.55);
+}
+
+.gov-dialog__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.gov-dialog__head h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: var(--ink);
+}
+
+.gov-dialog__head p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 6px 0 0;
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+}
+
+.gov-dialog__close {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #d5e6e2;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.gov-dialog__note {
+  padding: 11px 13px;
+  border-radius: 14px;
+  border: var(--glass-hairline);
+  border-inline-start: 3px solid var(--teal);
+  background: rgba(15, 118, 110, 0.06);
+  font-size: 0.9rem;
+  line-height: 1.8;
+}
+
+.gov-dialog__note[data-tone='copper'] {
+  border-inline-start-color: var(--copper);
+  background: rgba(180, 83, 9, 0.07);
+}
+
+.gov-dialog .gov-form-grid {
+  gap: 10px 12px;
+}
+
+/* Don't stretch an input to the height of a taller neighbour (the date field). */
+.gov-dialog .gov-field {
+  align-content: start;
+}
+
+.gov-dialog .gov-field textarea.gov-dialog__reason {
+  min-height: 64px;
+}
+
+.gov-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.gov-dialog .gov-ghost-btn {
+  color: var(--teal);
+  background: linear-gradient(180deg, #effaf8, #f8fcfb);
+  border: 1px solid #c8e3dd;
+}
+
+.gov-dialog .gov-primary-btn:disabled,
+.gov-dialog .gov-ghost-btn:disabled {
+  cursor: not-allowed;
+}
+
+.gov-change-summary {
+  display: grid;
+  gap: 8px;
+  padding: 10px 13px;
+  border-radius: 14px;
+  border: 1px dashed #b9d8d1;
+  background: #f4faf8;
+  font-size: 0.9rem;
+}
+
+.gov-change-summary.is-empty {
+  color: var(--ink-muted);
+}
+
+.gov-change-summary__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.gov-change-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.86rem;
+}
+
+.gov-change-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+}
+
+.gov-change-list s {
+  color: #8a5a5a;
+}
+
+.gov-change-list b {
+  color: #0b524c;
+}
+
+.gov-correction-inline {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border-inline-start: 3px solid var(--copper);
+  background: rgba(180, 83, 9, 0.07);
+}
+
+.gov-correction-inline strong {
+  font-size: 0.84rem;
+  color: #9a3412;
+}
+
+.gov-correction-inline small {
+  color: var(--ink-muted);
+}
+
+.gov-inline-muted {
+  color: #8aa39f;
+  font-size: 0.85rem;
+  cursor: help;
+}
+
+.gov-expense-history-row > td {
+  background: rgba(237, 245, 243, 0.6);
+}
+
+.gov-expense-history {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gov-expense-history > li {
+  display: grid;
+  gap: 5px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: var(--glass-hairline);
+  background: #fff;
+}
+
+.gov-expense-history p {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.gov-expense-history__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  font-size: 0.88rem;
+}
+
+.gov-expense-history__head span {
+  color: var(--ink-muted);
+}
+
+@media (max-width: 720px) {
+  .gov-dialog {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .gov-dialog .gov-form-grid {
+    grid-template-columns: 1fr;
+  }
 }
