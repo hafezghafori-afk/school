@@ -78,6 +78,9 @@ const afghanTeachers = [
     },
     employmentInfo: {
       employeeId: 'T-BETA-001',
+      // Required on the model; only a teacher gets an account created for her
+      // automatically (see staffDirectoryLinkService).
+      position: 'teacher',
       subjects: [{ subjectName: 'Science' }],
       classes: []
     },
