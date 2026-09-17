@@ -30,12 +30,13 @@ const expenseFieldChangeSchema = new mongoose.Schema({
 }, { _id: false });
 
 // Audit history of changes made to an expense after it was recorded: direct
-// edits of open rows, text-only fixes on approved rows, and the outcome of
-// every correction request (applied / rejected / cancelled).
+// edits of open rows, text-only fixes on approved rows, the outcome of every
+// correction request (applied / rejected / cancelled), and data-repair scripts
+// (system_fix, `by` is null).
 const expenseRevisionSchema = new mongoose.Schema({
   kind: {
     type: String,
-    enum: ['edit', 'text_edit', 'correction_applied', 'correction_rejected', 'correction_cancelled'],
+    enum: ['edit', 'text_edit', 'correction_applied', 'correction_rejected', 'correction_cancelled', 'system_fix'],
     default: 'edit'
   },
   at: { type: Date, default: null },
