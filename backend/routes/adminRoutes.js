@@ -42,6 +42,10 @@ const {
 } = require('../utils/userRole');
 const { requireAuth, requireRole, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const { runSlaEscalationSweep, LEVEL_TIMEOUT_MINUTES } = require('../services/slaAutomation');
+const {
+  canAutoCreateAccountForPosition,
+  pickAccountForTeacherFile
+} = require('../services/staffDirectoryLinkService');
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
 const { normalizeStudentSearchText } = require('../utils/studentSearch');
 
@@ -823,10 +827,22 @@ const ensureRegisteredTeachersInUserDirectory = async () => {
       { linkedUserId: { $exists: false } }
     ]
   })
-    .select('_id personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari contactInfo.email employmentInfo.employeeId employmentInfo.subjects employmentInfo.classes linkedUserId')
+    .select('_id personalInfo.firstName personalInfo.lastName personalInfo.firstNameDari personalInfo.lastNameDari contactInfo.email employmentInfo.employeeId employmentInfo.position employmentInfo.subjects employmentInfo.classes linkedUserId')
     .lean();
 
   if (!teachers.length) return;
+
+  // The person's real account is matched by email first and by name second (see
+  // staffDirectoryLinkService). Without the name bridge, a file whose email
+  // differs from the account's got a brand-new synthetic account and the real
+  // account stayed «بدون پروندهٔ رسمی» in the dashboard forever. Managerial and
+  // support posts hold `role: 'admin'` accounts, so those count as candidates
+  // too — a principal's file must not invent a teacher account for her.
+  const [staffAccounts, claimedUserIds] = await Promise.all([
+    User.find({ role: { $in: ['instructor', 'admin'] }, status: 'active' }).select('_id name email role orgRole status').lean(),
+    AfghanTeacher.distinct('linkedUserId', { linkedUserId: { $ne: null } })
+  ]);
+  const linkedUserIds = new Set(claimedUserIds.map((id) => String(id)));
 
   for (const teacher of teachers) {
     const desiredName = getTeacherDisplayName(teacher);
@@ -835,13 +851,24 @@ const ensureRegisteredTeachersInUserDirectory = async () => {
     let nextEmail = EMAIL_RX.test(rawEmail) ? rawEmail : buildStudentFallbackEmail(teacher, 'teacher', schoolLabel);
     let targetUserId = null;
 
-    const existingByEmail = await User.findOne({ email: nextEmail }).select('_id orgRole').lean();
-    if (existingByEmail?._id) {
-      if (String(existingByEmail.orgRole || '') === 'instructor') {
-        targetUserId = existingByEmail._id;
-      } else {
-        nextEmail = buildStudentFallbackEmail(teacher, 'teacher', schoolLabel);
-      }
+    const match = pickAccountForTeacherFile({ file: teacher, accounts: staffAccounts, linkedUserIds });
+    if (match.userId) {
+      targetUserId = match.userId;
+    } else if (match.via === 'ambiguous_name') {
+      // Two unlinked accounts share this name — linking the wrong one would move
+      // someone else's classes, and inventing a third account would add to the
+      // pile. Leave it for a human.
+      console.warn(`staff directory link skipped (ambiguous name): teacher=${teacher._id} candidates=${match.candidates.join(',')}`);
+      continue;
+    } else if (!canAutoCreateAccountForPosition(teacher?.employmentInfo?.position)) {
+      // A principal / vice-principal / admin / support post gets its account —
+      // and its access level — from a human, not from this sweep.
+      console.warn(`staff directory link skipped (position needs a manual account): teacher=${teacher._id} position=${teacher?.employmentInfo?.position || ''}`);
+      continue;
+    } else {
+      const existingByEmail = await User.findOne({ email: nextEmail }).select('_id orgRole').lean();
+      // An address that belongs to a non-instructor account must not be hijacked.
+      if (existingByEmail?._id) nextEmail = buildStudentFallbackEmail(teacher, 'teacher', schoolLabel);
     }
 
     if (!targetUserId) {
@@ -857,14 +884,27 @@ const ensureRegisteredTeachersInUserDirectory = async () => {
         subject: desiredSubject
       });
       targetUserId = createdUser._id;
+      staffAccounts.push({
+        _id: createdUser._id,
+        name: desiredName,
+        email: nextEmail,
+        role: 'instructor',
+        orgRole: 'instructor',
+        status: 'active'
+      });
     } else {
+      // Never touch role / orgRole here: the matched account may be a principal
+      // or a finance post, and `subject` is a teaching field only.
+      const matched = staffAccounts.find((account) => String(account._id) === String(targetUserId));
       await User.findByIdAndUpdate(targetUserId, {
         name: desiredName,
-        subject: desiredSubject,
-        status: 'active'
+        status: 'active',
+        ...(String(matched?.role || '') === 'instructor' ? { subject: desiredSubject } : {})
       });
     }
 
+    // Within one sweep, two files must not claim the same account.
+    linkedUserIds.add(String(targetUserId));
     await AfghanTeacher.updateOne(
       { _id: teacher._id },
       {
