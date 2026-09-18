@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './AttendanceManager.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch } from '../utils/apiClient';
+import DataState, { DataErrorCard } from '../components/ui/DataState';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, formatAfghanDateTime, toGregorianDateInputValue } from '../utils/afghanDate';
 import { studentMatchesSearch } from '../utils/studentSearch';
@@ -279,6 +281,8 @@ export default function AttendanceManager() {
   const [studentReport, setStudentReport] = useState(null);
   const [message, setMessage] = useState('');
   const [loadingEntry, setLoadingEntry] = useState(false);
+  const [entryError, setEntryError] = useState(null);
+  const [coursesError, setCoursesError] = useState(null);
   const [loadingClassReport, setLoadingClassReport] = useState(false);
   const [loadingStudentReport, setLoadingStudentReport] = useState(false);
   const [saving, setSaving] = useState({});
@@ -342,27 +346,22 @@ export default function AttendanceManager() {
   };
 
   const loadCourses = async () => {
+    setCoursesError(null);
     try {
       const role = String(localStorage.getItem('role') || '').trim().toLowerCase();
       const isInstructor = role === 'instructor';
-      const res = await fetch(`${API_BASE}${isInstructor ? '/api/education/instructor/courses' : '/api/education/school-classes?status=active'}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${isInstructor ? '/api/education/instructor/courses' : '/api/education/school-classes?status=active'}`);
       if (!data?.success) {
         setCourses([]);
         setCourseId('');
-        return;
+        throw new Error(String(data?.message || '').trim() || 'دریافت فهرست صنف‌ها ممکن نشد.');
       }
 
       let sourceItems = Array.isArray(data?.items) ? data.items : [];
       if (isInstructor && !sourceItems.length) {
         const teacherId = String(localStorage.getItem('userId') || '').trim();
         if (teacherId) {
-          const fallbackRes = await fetch(`${API_BASE}/api/teacher-assignments/teacher/${encodeURIComponent(teacherId)}`, {
-            headers: { ...getAuthHeaders() }
-          });
-          const fallbackData = await fallbackRes.json().catch(() => ({}));
+          const fallbackData = await apiFetch(`/api/teacher-assignments/teacher/${encodeURIComponent(teacherId)}`).catch(() => ({}));
           sourceItems = buildCourseItemsFromAssignments(fallbackData?.data?.assignments || fallbackData?.items || []);
         }
       }
@@ -375,9 +374,12 @@ export default function AttendanceManager() {
         }
         return getCourseSelectionId(items[0]) || items[0]?._id || '';
       });
-    } catch {
+    } catch (error) {
+      // An empty <select> used to be the only sign that this failed, which read
+      // as "this school has no classes" rather than "the list never arrived".
       setCourses([]);
       setCourseId('');
+      setCoursesError(error);
     }
   };
 
@@ -394,30 +396,29 @@ export default function AttendanceManager() {
     }
 
     setLoadingEntry(true);
+    setEntryError(null);
     if (!silent) setMessage('');
 
     try {
       const scopePath = targetClassId
         ? `class/${encodeURIComponent(targetClassId)}`
         : `course/${encodeURIComponent(targetCompatCourseId)}`;
-      const res = await fetch(`${API_BASE}/api/attendance/${scopePath}?date=${encodeURIComponent(targetDate)}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`/api/attendance/${scopePath}?date=${encodeURIComponent(targetDate)}`);
       if (!data?.success) {
         setRows([]);
         setStudentOptions([]);
-        if (!silent) setMessage(data?.message || 'دریافت جدول حاضری ممکن نشد.');
-        return;
+        throw new Error(String(data?.message || '').trim() || 'دریافت جدول حاضری ممکن نشد.');
       }
 
       const items = Array.isArray(data.items) ? data.items : [];
       setRows(items.map((item) => buildEditableRow(item, targetDate)));
       syncStudentOptions(items.map((item) => item.student).filter(Boolean));
-    } catch {
+    } catch (error) {
       setRows([]);
       setStudentOptions([]);
-      if (!silent) setMessage('خطا در ارتباط با سرور');
+      // The shared message bar is also used for save confirmations and is wiped
+      // by the next action, so a failed load keeps its own state with a retry.
+      setEntryError(error);
     } finally {
       setLoadingEntry(false);
     }
@@ -1074,6 +1075,10 @@ export default function AttendanceManager() {
                   </select>
                 </label>
 
+                {!!coursesError && (
+                  <DataErrorCard error={coursesError} onRetry={loadCourses} compact />
+                )}
+
                 <label>
                   <span>جستجوی شاگرد</span>
                   <input
@@ -1293,8 +1298,13 @@ export default function AttendanceManager() {
               </div>
             </div>
 
-            {loadingEntry && <div className="attendance-empty">در حال دریافت جدول حاضری...</div>}
-            {!loadingEntry && !rows.length && (
+            {loadingEntry && (
+              <DataState loading skeleton="table" skeletonProps={{ rows: 8, columns: 6 }} loadingLabel="در حال دریافت جدول حاضری..." />
+            )}
+            {!loadingEntry && !!entryError && (
+              <DataErrorCard error={entryError} onRetry={() => loadAttendance()} />
+            )}
+            {!loadingEntry && !entryError && !rows.length && (
               <div className="attendance-empty">برای این صنف شاگرد فعالی ثبت نشده است.</div>
             )}
 

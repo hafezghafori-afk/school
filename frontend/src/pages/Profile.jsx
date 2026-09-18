@@ -5,6 +5,8 @@ import './Profile.css';
 import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
 import useExpandableList from '../hooks/useExpandableList';
+import { apiFetch } from '../utils/apiClient';
+import DataState from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -139,6 +141,8 @@ function PasswordField({
 export default function Profile() {
   const location = useLocation();
   const [user, setUser] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState(null);
   const [activity, setActivity] = useState([]);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -227,8 +231,7 @@ export default function Profile() {
     try {
       setExecutiveLoading(true);
       setExecutiveError('');
-      const res = await fetch(`${API_BASE}/api/admin/alerts`, { headers: { ...getAuthHeaders() } });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/admin/alerts`);
       if (!data?.success) {
         setExecutiveSummary(null);
         setExecutiveError(data?.message || 'خطا در دریافت وضعیت مدیریتی');
@@ -248,12 +251,12 @@ export default function Profile() {
   }, []);
 
   const loadProfile = async () => {
+    setProfileLoading(true);
+    setProfileError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/users/me`, { headers: { ...getAuthHeaders() } });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/users/me`);
       if (!data?.success) {
-        setMessage(data?.message || 'خطا در دریافت پروفایل');
-        return;
+        throw new Error(String(data?.message || '').trim() || 'خطا در دریافت پروفایل');
       }
       setUser(data.user);
       try {
@@ -271,15 +274,18 @@ export default function Profile() {
       setGrade(data.user?.grade || '');
       setSubject(data.user?.subject || '');
       setBio(data.user?.bio || '');
-    } catch {
-      setMessage('خطا در اتصال به سرور');
+    } catch (error) {
+      // Rendering the form with `user` still null showed every field blank,
+      // which reads as "my profile was wiped" rather than "it didn't load".
+      setProfileError(error);
+    } finally {
+      setProfileLoading(false);
     }
   };
 
   const loadActivity = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/users/me/activity`, { headers: { ...getAuthHeaders() } });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/users/me/activity`);
       setActivity(data?.items || []);
     } catch {
       setActivity([]);
@@ -288,10 +294,7 @@ export default function Profile() {
 
   const loadProfileUpdateRequest = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/users/me/profile-update-request`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/users/me/profile-update-request`);
       if (data?.success) setProfileUpdateRequest(data.item || null);
     } catch {
       setProfileUpdateRequest(null);
@@ -310,10 +313,7 @@ export default function Profile() {
     try {
       setTeacherAssignmentsLoading(true);
       setTeacherAssignmentsError('');
-      const res = await fetch(`${API_BASE}/api/teacher-assignments/teacher/${encodeURIComponent(normalizedTeacherId)}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/teacher-assignments/teacher/${encodeURIComponent(normalizedTeacherId)}`);
       if (!data?.success) {
         setTeacherAssignments([]);
         setTeacherAssignmentSummary(null);
@@ -873,6 +873,28 @@ export default function Profile() {
   }, [bio, editBaseline, email, grade, name, subject]);
 
   const hasProfileChanges = profileChanges.length > 0;
+
+  if (!user && (profileLoading || profileError)) {
+    return (
+      <div className="profile-page">
+        <div className="profile-card">
+          <div className="card-back">
+            <button type="button" onClick={() => window.history.back()}>بازگشت</button>
+          </div>
+          <DataState
+            loading={profileLoading}
+            error={profileError}
+            data={user}
+            onRetry={loadProfile}
+            skeleton="form"
+            skeletonProps={{ fields: 5 }}
+            showEmpty={false}
+            loadingLabel="در حال دریافت پروفایل..."
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="profile-page">

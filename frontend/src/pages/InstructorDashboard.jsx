@@ -8,13 +8,10 @@ import KpiRingCard from '../components/dashboard/KpiRingCard';
 
 import { API_BASE } from '../config/api';
 import { formatAfghanDate, formatAfghanDateTime } from '../utils/afghanDate';
+import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const ACTIVE_TEACHER_ASSIGNMENT_STATUSES = new Set(['active', 'planned', 'pending']);
-
-const getAuthHeaders = () => {
-  const token = localStorage.getItem('token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
-};
 
 const getName = () => localStorage.getItem('userName') || 'استاد عزیز';
 const normalizeText = (value) => String(value || '').trim();
@@ -46,12 +43,14 @@ const toFaDateTime = (value) => (
 
 const formatRate = (value) => `${Number(value || 0).toLocaleString('fa-AF-u-ca-persian')}%`;
 
+// Keeps its "never throws" contract — one failed widget should not blank the
+// whole dashboard — but goes through apiFetch so each call still gets a
+// timeout, retries, the top progress bar and the connection banner.
 const safeFetchJson = async (url) => {
   try {
-    const response = await fetch(url, { headers: { ...getAuthHeaders() } });
-    return await response.json().catch(() => ({}));
-  } catch {
-    return { success: false };
+    return await apiFetch(url);
+  } catch (error) {
+    return { success: false, error };
   }
 };
 
@@ -216,6 +215,7 @@ export default function InstructorDashboard() {
   const [teacherDashboard, setTeacherDashboard] = useState(null);
   const [myCourses, setMyCourses] = useState([]);
   const [myCoursesLoading, setMyCoursesLoading] = useState(false);
+  const [myCoursesError, setMyCoursesError] = useState(null);
   const [selectedCourseId, setSelectedCourseId] = useState('');
   const [weeklyAttendance, setWeeklyAttendance] = useState(null);
   const [weeklyAttendanceLoading, setWeeklyAttendanceLoading] = useState(false);
@@ -238,8 +238,7 @@ export default function InstructorDashboard() {
 
   const loadProfile = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/users/me`, { headers: { ...getAuthHeaders() } });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/users/me`);
       if (data?.success) setUser(data.user);
     } catch {
       setUser(null);
@@ -248,8 +247,7 @@ export default function InstructorDashboard() {
 
   const loadSchedule = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/schedules/today`, { headers: { ...getAuthHeaders() } });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/schedules/today`);
       setTodaySchedule(data?.success ? (data.items || []) : []);
     } catch {
       setTodaySchedule([]);
@@ -266,18 +264,22 @@ export default function InstructorDashboard() {
     }
 
     setMyCoursesLoading(true);
+    setMyCoursesError(null);
     try {
-      const [assignmentRes, legacyCourseRes] = await Promise.all([
-        fetch(`${API_BASE}/api/teacher-assignments/teacher/${encodeURIComponent(normalizedTeacherId)}`, {
-          headers: { ...getAuthHeaders() }
-        }),
-        fetch(`${API_BASE}/api/education/instructor/courses`, {
-          headers: { ...getAuthHeaders() }
-        })
+      // allSettled, not all: a teacher may legitimately have assignments but no
+      // legacy course records (or the reverse), and one empty source must not
+      // wipe out the other.
+      const [assignmentResult, legacyCourseResult] = await Promise.allSettled([
+        apiFetch(`/api/teacher-assignments/teacher/${encodeURIComponent(normalizedTeacherId)}`),
+        apiFetch('/api/education/instructor/courses')
       ]);
 
-      const assignmentData = await assignmentRes.json().catch(() => ({}));
-      const legacyCourseData = await legacyCourseRes.json().catch(() => ({}));
+      if (assignmentResult.status === 'rejected' && legacyCourseResult.status === 'rejected') {
+        throw assignmentResult.reason;
+      }
+
+      const assignmentData = assignmentResult.status === 'fulfilled' ? assignmentResult.value : {};
+      const legacyCourseData = legacyCourseResult.status === 'fulfilled' ? legacyCourseResult.value : {};
       const assignmentItems = buildAssignmentCourseItems(assignmentData?.data?.assignments || []);
       const legacyItems = legacyCourseData?.success ? (legacyCourseData.items || []) : [];
       const items = mergeCourseSources(assignmentItems, legacyItems);
@@ -289,9 +291,10 @@ export default function InstructorDashboard() {
         }
         return getCourseSelectionId(items[0]) || '';
       });
-    } catch {
+    } catch (error) {
       setMyCourses([]);
       setSelectedCourseId('');
+      setMyCoursesError(error);
     } finally {
       setMyCoursesLoading(false);
     }
@@ -300,10 +303,7 @@ export default function InstructorDashboard() {
   const loadOfficialTasks = async () => {
     setOfficialTasksLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/users/me/notifications?status=unread&limit=20`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/users/me/notifications?status=unread&limit=20`);
       if (!data?.success) {
         setOfficialTasks([]);
         return;
@@ -360,10 +360,7 @@ export default function InstructorDashboard() {
         const targetPath = selectedClassId
           ? `${API_BASE}/api/attendance/class/${encodeURIComponent(selectedClassId)}/weekly`
           : `${API_BASE}/api/attendance/course/${encodeURIComponent(selectedCompatCourseId)}/weekly`;
-        const res = await fetch(targetPath, {
-          headers: { ...getAuthHeaders() }
-        });
-        const data = await res.json();
+        const data = await apiFetch(targetPath);
         setWeeklyAttendance(data?.success ? data : null);
       } catch {
         setWeeklyAttendance(null);
@@ -584,7 +581,10 @@ export default function InstructorDashboard() {
           <div className="dash-panel">
             <h3>صنف‌های من</h3>
             {myCoursesLoading && <div className="dash-note">در حال دریافت صنف‌های واگذارشده...</div>}
-            {!myCoursesLoading && !myCourses.length && <div className="dash-note">هنوز صنفی به این حساب نسبت داده نشده است.</div>}
+            {!myCoursesLoading && !!myCoursesError && (
+              <DataErrorCard error={myCoursesError} onRetry={() => loadMyCourses(user?._id || user?.id || '')} compact />
+            )}
+            {!myCoursesLoading && !myCoursesError && !myCourses.length && <div className="dash-note">هنوز صنفی به این حساب نسبت داده نشده است.</div>}
             {myCourses.map((item) => {
               const isActive = String(getCourseSelectionId(item)) === String(selectedCourseId);
               return (

@@ -8,6 +8,8 @@ import { Checkbox } from '../components/ui/checkbox';
 import { Badge } from '../components/ui/badge';
 import { Trash2, Edit, Plus, BookOpen, Clock, AlertCircle, Users } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { apiFetch } from '../utils/apiClient';
+import DataState from '../components/ui/DataState';
 
 const CurriculumManagement = () => {
   const [curriculumRules, setCurriculumRules] = useState([]);
@@ -15,6 +17,7 @@ const CurriculumManagement = () => {
   const [subjects, setSubjects] = useState([]);
   const [academicYears, setAcademicYears] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [editingRule, setEditingRule] = useState(null);
   const [selectedClass, setSelectedClass] = useState(null);
@@ -59,18 +62,19 @@ const CurriculumManagement = () => {
   }, []);
 
   const fetchCurriculumRules = async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
-      const response = await fetch(`/api/curriculum-rules/school/${schoolId}`);
-      const data = await response.json();
-      
+      const data = await apiFetch(`/api/curriculum-rules/school/${schoolId}`);
+
       if (data.success) {
         setCurriculumRules(data.data);
       } else {
-          toast.error('خطا در دریافت قوانین مضمون.');
+        throw new Error(String(data?.message || '').trim() || 'خطا در دریافت قوانین مضمون.');
       }
     } catch (error) {
       console.error('Error fetching curriculum rules:', error);
-      toast.error('خطا در دریافت قوانین مضمون.');
+      setLoadError(error);
     } finally {
       setLoading(false);
     }
@@ -78,8 +82,7 @@ const CurriculumManagement = () => {
 
   const fetchClasses = async () => {
     try {
-      const response = await fetch(`/api/school-classes/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/school-classes/school/${schoolId}`);
       
       if (data.success) {
         setClasses(data.data);
@@ -91,8 +94,7 @@ const CurriculumManagement = () => {
 
   const fetchSubjects = async () => {
     try {
-      const response = await fetch(`/api/subjects/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/subjects/school/${schoolId}`);
       
       if (data.success) {
         setSubjects(data.data);
@@ -104,8 +106,7 @@ const CurriculumManagement = () => {
 
   const fetchAcademicYears = async () => {
     try {
-      const response = await fetch(`/api/academic-years/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/academic-years/school/${schoolId}`);
       
       if (data.success) {
         setAcademicYears(data.data.filter(year => year.status === 'active'));
@@ -198,8 +199,7 @@ const CurriculumManagement = () => {
     setSelectedClass(classId);
     if (classId) {
       try {
-        const response = await fetch(`/api/curriculum-rules/class/${classId}/summary`);
-        const data = await response.json();
+        const data = await apiFetch(`/api/curriculum-rules/class/${classId}/summary`);
         
         if (data.success) {
           // Show existing curriculum for this class
@@ -291,8 +291,21 @@ const CurriculumManagement = () => {
     resetForm();
   };
 
-  if (loading) {
-    return <div className="flex justify-center items-center h-64">در حال بارگذاری...</div>;
+  if (loading || loadError) {
+    return (
+      <div className="container mx-auto p-6 tt-shared-page">
+        <DataState
+          loading={loading}
+          error={loadError}
+          data={curriculumRules}
+          onRetry={fetchCurriculumRules}
+          skeleton="cards"
+          skeletonProps={{ count: 4 }}
+          showEmpty={false}
+          loadingLabel="در حال دریافت قوانین مضمون..."
+        />
+      </div>
+    );
   }
 
   return (

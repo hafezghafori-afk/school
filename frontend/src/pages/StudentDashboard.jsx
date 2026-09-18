@@ -11,14 +11,11 @@ import TrendBars from '../components/dashboard/TrendBars';
 
 import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
+import { apiFetch } from '../utils/apiClient';
+import DataState from '../components/ui/DataState';
 
 const getName = () => localStorage.getItem('userName') || 'شاگرد عزیز';
 const getLastLogin = () => localStorage.getItem('lastLoginAt') || '';
-
-const getAuthHeaders = () => {
-  const token = localStorage.getItem('token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
-};
 
 const toFaDate = (value) => {
   return formatAfghanDate(value, {
@@ -90,17 +87,22 @@ const deadlineText = (date) => {
   return `${days} روز مانده`;
 };
 
+// Keeps its "never throws" contract — a dashboard of independent widgets should
+// not go blank because one of them failed — but goes through apiFetch so each
+// call still gets a timeout, retries, the top progress bar and the connection
+// banner. The reason is handed back so the caller can show it if it matters.
 const safeFetchJson = async (url) => {
   try {
-    const response = await fetch(url, { headers: { ...getAuthHeaders() } });
-    return await response.json().catch(() => ({}));
-  } catch {
-    return { success: false };
+    return await apiFetch(url);
+  } catch (error) {
+    return { success: false, error };
   }
 };
 
 export default function StudentDashboard() {
   const [user, setUser] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState(null);
   const [todaySchedule, setTodaySchedule] = useState([]);
   const [profileUpdateRequest, setProfileUpdateRequest] = useState(null);
   const [latestHomeworks, setLatestHomeworks] = useState([]);
@@ -134,13 +136,22 @@ export default function StudentDashboard() {
         ? 'pending'
         : '';
 
+  const loadProfile = async () => {
+    setProfileLoading(true);
+    setProfileError(null);
+    const data = await safeFetchJson(`${API_BASE}/api/users/me`);
+    if (data?.success) {
+      setUser(data.user);
+    } else {
+      setUser(null);
+      setProfileError(data?.error || new Error('دریافت معلومات حساب ناموفق بود.'));
+    }
+    setProfileLoading(false);
+  };
+
   useEffect(() => {
-    const loadProfile = async () => {
-      const data = await safeFetchJson(`${API_BASE}/api/users/me`);
-      if (data?.success) setUser(data.user);
-      else setUser(null);
-    };
     loadProfile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -576,6 +587,26 @@ export default function StudentDashboard() {
       </div>
     </>
   );
+
+  // The whole dashboard is built around the signed-in student, so if that one
+  // call failed every widget below would be an empty shell claiming zero
+  // courses, zero homework and zero attendance.
+  if (!user && (profileLoading || profileError)) {
+    return (
+      <div className="student-dashboard-page" style={{ padding: '24px 16px' }}>
+        <DataState
+          loading={profileLoading}
+          error={profileError}
+          data={user}
+          onRetry={loadProfile}
+          skeleton="cards"
+          skeletonProps={{ count: 4 }}
+          showEmpty={false}
+          loadingLabel="در حال دریافت معلومات حساب..."
+        />
+      </div>
+    );
+  }
 
   return (
     <DashboardShell

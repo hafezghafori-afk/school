@@ -1,0 +1,126 @@
+.global-progress {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 9999;
+  overflow: hidden;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+
+.global-progress-bar {
+  display: block;
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--accent, #f2b90c), var(--btn-secondary, #0ea5e9), transparent);
+  animation: global-progress-slide 1.1s ease-in-out infinite;
+}
+
+@keyframes global-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .global-progress-bar {
+    width: 100%;
+    animation: global-progress-fade 1.6s ease-in-out infinite;
+    transform: none;
+  }
+
+  @keyframes global-progress-fade {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 1; }
+  }
+}
+
+/* ---------------------------------------------------------------- *
+ * Connection banner
+ * ---------------------------------------------------------------- */
+
+.connection-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  width: min(100%, 1180px);
+  margin: 12px auto 0;
+  padding: 11px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md, 12px);
+  color: var(--paper, #f6f7fb);
+  font-size: 0.87rem;
+}
+
+.connection-banner.is-bad {
+  border-color: rgba(248, 113, 113, 0.34);
+  background: rgba(60, 20, 26, 0.5);
+}
+
+.connection-banner.is-warn {
+  border-color: rgba(242, 185, 12, 0.34);
+  background: rgba(63, 48, 10, 0.5);
+}
+
+.connection-banner-icon {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.connection-banner-body {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.connection-banner-body strong {
+  font-weight: 800;
+}
+
+.connection-banner-text {
+  color: var(--text-muted, rgba(246, 247, 251, 0.75));
+  line-height: 1.7;
+}
+
+.connection-banner-retry {
+  padding: 6px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-sm, 10px);
+  background: var(--btn-ghost, rgba(255, 255, 255, 0.1));
+  color: var(--paper, #f6f7fb);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.connection-banner-retry:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.connection-banner-retry:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.connection-banner-retry:focus-visible {
+  outline: 2px solid var(--accent, #f2b90c);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .connection-banner {
+    margin-top: 8px;
+    padding: 10px 12px;
+    font-size: 0.82rem;
+  }
+
+  .connection-banner-retry {
+    width: 100%;
+  }
+}

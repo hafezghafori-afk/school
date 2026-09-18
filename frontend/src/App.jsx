@@ -5,7 +5,11 @@ import './App.css';
 import './pages/TimetableSharedRedesign.css';
 import Footer from './components/Footer';
 import AccessDenied from './components/AccessDenied';
+import AppErrorBoundary from './components/AppErrorBoundary';
+import ConnectionBanner, { GlobalProgressBar } from './components/ConnectionBanner';
 import { ToastProvider } from './components/ui/toast';
+import { SkeletonCards } from './components/ui/Skeleton';
+import { CONNECTION, checkApiHealth, subscribeToConnection } from './utils/apiClient';
 import useSiteSettings, { PUBLIC_WEBSITE_LANGUAGE_KEY } from './hooks/useSiteSettings';
 import { getPublicWebsiteLocale, publicLanguageOptions } from './i18n/publicWebsite';
 import { API_BASE, API_ORIGIN } from './config/api';
@@ -272,6 +276,21 @@ const REMOTE_SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const RECENT_SEARCHES_STORAGE_KEY = 'school_quick_search_recent_v1';
 const MAX_RECENT_SEARCHES = 6;
 const API_HEALTH_POLL_MS = 30 * 1000;
+
+// The connection store carries more states than the health strip has styles
+// for, so each one gets its own honest label and falls back to one of the three
+// existing tone classes (online / offline / checking).
+const API_HEALTH_LABELS = {
+  [CONNECTION.ONLINE]: { label: 'آنلاین', tone: 'online' },
+  [CONNECTION.OFFLINE]: { label: 'انترنت قطع است', tone: 'offline' },
+  [CONNECTION.SERVER_DOWN]: { label: 'سرور در دسترس نیست', tone: 'offline' },
+  [CONNECTION.DB_DOWN]: { label: 'دیتابیس در دسترس نیست', tone: 'offline' },
+  [CONNECTION.STARTING]: { label: 'در حال آماده‌سازی سرور', tone: 'checking' },
+  [CONNECTION.SLOW]: { label: 'پاسخ کند', tone: 'checking' },
+  [CONNECTION.CHECKING]: { label: 'در حال بررسی', tone: 'checking' }
+};
+
+const describeApiHealth = (status) => API_HEALTH_LABELS[status] || API_HEALTH_LABELS[CONNECTION.CHECKING];
 const MENU_NEWS_SEEN_AT_STORAGE_KEY = 'school_menu_seen_news_at_v1';
 const MENU_CHAT_SEEN_AT_STORAGE_KEY = 'school_menu_seen_chat_at_v1';
 const MENU_ACTIVITY_POLL_MS = 60 * 1000;
@@ -864,9 +883,16 @@ const getMegaChildUiMeta = (child, parentTitle = '', menuKind = 'generic') => {
 };
 
 function RouteLoading() {
+  // Shown while a lazy route chunk downloads. On a weak link that wait is long
+  // enough that a single line of text reads as a frozen page, so the page's
+  // shape is drawn under it and keeps moving.
   return (
-    <div className="route-loading" role="status" aria-live="polite">
-      <span>در حال بارگذاری...</span>
+    <div className="route-loading" role="status" aria-live="polite" aria-busy="true">
+      <span className="route-loading-label">
+        <span className="route-loading-spinner" aria-hidden="true" />
+        در حال بارگذاری صفحه...
+      </span>
+      <SkeletonCards count={3} />
     </div>
   );
 }
@@ -1473,49 +1499,31 @@ function AppShell() {
   }, [API_ORIGIN]);
 
   const runApiHealthCheck = useCallback(async ({ markChecking = true } = {}) => {
-    if (markChecking) {
-      setApiHealth((prev) => ({ ...prev, status: 'checking' }));
-    }
     setApiHealthLoading(true);
-
-    const startedAt = typeof performance !== 'undefined' && performance.now
-      ? performance.now()
-      : Date.now();
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 5000);
-
     try {
-      const res = await fetch(`${API_BASE}/api/health`, {
-        method: 'GET',
-        cache: 'no-store',
-        signal: controller.signal,
-        headers: { Accept: 'application/json' }
-      });
-
-      if (!res.ok) throw new Error(`HTTP_${res.status}`);
-      await res.json().catch(() => ({}));
-
-      const endedAt = typeof performance !== 'undefined' && performance.now
-        ? performance.now()
-        : Date.now();
-      const latencyMs = Math.max(0, Math.round(endedAt - startedAt));
-
-      setApiHealth({
-        status: 'online',
-        latencyMs,
-        checkedAt: new Date().toISOString()
-      });
-    } catch {
-      setApiHealth({
-        status: 'offline',
-        latencyMs: null,
-        checkedAt: new Date().toISOString()
-      });
+      await checkApiHealth({ markChecking });
     } finally {
-      window.clearTimeout(timeoutId);
       setApiHealthLoading(false);
     }
   }, []);
+
+  // The strip mirrors the shared connection store rather than probing on its
+  // own, so it agrees with the global banner and with whatever the page's last
+  // real request just found out — and it can finally tell "server down" apart
+  // from "server up, database unreachable", which the backend has always said
+  // and the old check flattened into a single "قطع ارتباط".
+  useEffect(() => subscribeToConnection((connection) => {
+    setApiHealth({
+      status: connection.status,
+      latencyMs: connection.latencyMs,
+      checkedAt: connection.checkedAt || ''
+    });
+  }), []);
+
+  // One probe on mount for everyone, logged in or not. A visitor on the public
+  // site or the login form hits the same dead backend an admin does, and used
+  // to get the same silence; the dashboard keeps its own polling below.
+  useEffect(() => { checkApiHealth({ markChecking: false }); }, []);
 
   useEffect(() => {
     if (!authed || !isDashboardArea) return undefined;
@@ -3319,12 +3327,18 @@ function AppShell() {
       )}
 
       <div className={`content ${isDashboardArea ? 'dashboard-content' : 'public-content'} ${isHome ? 'home-content' : ''}`}>
+        {/* Unlike the dashboard-only health strip below, these two are mounted on
+            every page — public, login and dashboard alike — because a visitor on
+            the registration form deserves to know the server is down just as
+            much as an admin does. */}
+        <GlobalProgressBar />
+        <ConnectionBanner />
         {authed && isDashboardArea && !useCompactAdminApiHealth && (
-          <div className={`api-health-banner ${apiHealth.status}`}>
+          <div className={`api-health-banner ${describeApiHealth(apiHealth.status).tone}`}>
             <span className="api-health-dot" aria-hidden="true" />
             <strong>{'وضعیت سرور'}</strong>
             <span className="api-health-text">
-              {apiHealth.status === 'online' ? 'آنلاین' : apiHealth.status === 'offline' ? 'قطع ارتباط' : 'در حال بررسی'}
+              {describeApiHealth(apiHealth.status).label}
             </span>
             {apiHealth.latencyMs != null && <span className="api-health-meta">{`تاخیر: ${apiHealth.latencyMs} ms`}</span>}
             {!!apiHealthCheckedLabel && <span className="api-health-meta">{`آخرین بررسی: ${apiHealthCheckedLabel}`}</span>}
@@ -3338,6 +3352,7 @@ function AppShell() {
             </button>
           </div>
         )}
+        <AppErrorBoundary resetKey={location.pathname}>
         <Suspense fallback={<RouteLoading />}>
           <Routes>
             <Route path="/" element={<Home />} />
@@ -3597,6 +3612,7 @@ function AppShell() {
             <Route path="*" element={<MenuContent settings={settings} />} />
           </Routes>
         </Suspense>
+        </AppErrorBoundary>
       </div>
       {/* Reuse the exact same condition as the header above (not a separately re-derived one) so the old
           Footer.jsx can never end up shown on a page where the old header is already hidden, or vice versa. */}

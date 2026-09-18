@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import './AdminUsers.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch } from '../utils/apiClient';
+import DataState from '../components/ui/DataState';
 import {
   PERMISSION_GROUPS,
   PERMISSION_OPTIONS as CATALOG_PERMISSION_OPTIONS,
@@ -910,6 +912,8 @@ export default function AdminUsers() {
     []
   );
   const [items, setItems] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [usersError, setUsersError] = useState(null);
   const [message, setMessage] = useState('');
   const [messageTone, setMessageTone] = useState('info');
   const showMessage = (text = '', tone = 'info') => {
@@ -966,20 +970,24 @@ export default function AdminUsers() {
   const [editDrawerTab, setEditDrawerTab] = useState('details');
 
   const loadUsers = async () => {
+    setUsersLoading(true);
+    setUsersError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users`, {
-        headers: { ...getAuthHeaders() }
-      });
+      const res = await apiFetch('/api/admin/users', { parse: 'response' });
       const result = await readApiResponse(res, 'خطا در دریافت کاربران');
       if (!result.success || !result.data?.success) {
-        showMessage(result.message || result.data?.message || 'خطا در دریافت کاربران', 'error');
         setItems([]);
-        return;
+        throw new Error(result.message || result.data?.message || 'خطا در دریافت کاربران');
       }
       setItems((Array.isArray(result.data.items) ? result.data.items : []).map(normalizeManagedUser));
-    } catch {
-      showMessage('خطا در اتصال به سرور', 'error');
+    } catch (error) {
+      // The toast-style message here disappears after a few seconds and leaves
+      // an empty directory behind, so the failure is also held in state where
+      // the list would have been, with a way to try again.
       setItems([]);
+      setUsersError(error);
+    } finally {
+      setUsersLoading(false);
     }
   };
 
@@ -2770,7 +2778,20 @@ export default function AdminUsers() {
           </>
         )}
 
-        {workspaceTab === 'directory' && (
+        {workspaceTab === 'directory' && (usersLoading || usersError) && (
+          <DataState
+            loading={usersLoading}
+            error={usersError}
+            data={items}
+            onRetry={loadUsers}
+            skeleton="list"
+            skeletonProps={{ count: 6 }}
+            showEmpty={false}
+            loadingLabel="در حال دریافت فهرست کاربران..."
+          />
+        )}
+
+        {workspaceTab === 'directory' && !usersLoading && !usersError && (
           <div className="adminusers-list adminusers-list--compact">
           {displayedUsers.map((user) => {
             const rowEffectivePermissions = resolveEffectivePermissions(user);

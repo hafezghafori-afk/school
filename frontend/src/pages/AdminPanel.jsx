@@ -6,9 +6,11 @@ import NotificationBell from '../components/NotificationBell';
 import DashboardProfileCard from '../components/DashboardProfileCard';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import KpiRingCard from '../components/dashboard/KpiRingCard';
+import DataState from '../components/ui/DataState';
 import TrendBars from '../components/dashboard/TrendBars';
 
 import { API_BASE } from '../config/api';
+import { CONNECTION, apiFetch, checkApiHealth, subscribeToConnection } from '../utils/apiClient';
 import { expandLegacyPermissions, permissionAllows } from '../config/permissionCatalog';
 import { formatAfghanDate, formatAfghanDateTime, formatAfghanTime } from '../utils/afghanDate';
 import { formatFinanceCode } from '../utils/latinFinanceCode';
@@ -779,6 +781,8 @@ export default function AdminPanel() {
     }
   });
   const [adminDashboard, setAdminDashboard] = useState(null);
+  const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [dashboardError, setDashboardError] = useState(null);
   const [directoryOrphans, setDirectoryOrphans] = useState(null);
   const [searchQ, setSearchQ] = useState('');
   const [searching, setSearching] = useState(false);
@@ -1011,9 +1015,15 @@ export default function AdminPanel() {
     return formatAfghanTime(apiHealth.checkedAt, { hour: '2-digit', minute: '2-digit' });
   }, [apiHealth.checkedAt]);
   const apiHealthStatusLabel = useMemo(() => {
-    if (apiHealth.status === 'online') return 'سالم';
-    if (apiHealth.status === 'offline') return 'قطع ارتباط';
-    return 'در حال بررسی';
+    const labels = {
+      [CONNECTION.ONLINE]: 'سالم',
+      [CONNECTION.OFFLINE]: 'انترنت قطع است',
+      [CONNECTION.SERVER_DOWN]: 'سرور در دسترس نیست',
+      [CONNECTION.DB_DOWN]: 'دیتابیس در دسترس نیست',
+      [CONNECTION.STARTING]: 'در حال آماده‌سازی',
+      [CONNECTION.SLOW]: 'پاسخ کند'
+    };
+    return labels[apiHealth.status] || 'در حال بررسی';
   }, [apiHealth.status]);
   const localizedLastLogin = useMemo(() => {
     if (!lastLogin) return '';
@@ -1413,10 +1423,7 @@ export default function AdminPanel() {
     setWizardBusy(true);
     setWizardMsg({ text: '', error: false });
     try {
-      const existingRes = await fetch(`${API_BASE}/api/school-classes/school/${wizardSchoolId}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const existingData = await existingRes.json();
+      const existingData = await apiFetch(`${API_BASE}/api/school-classes/school/${wizardSchoolId}`);
       const existingRows = Array.isArray(existingData?.data) ? existingData.data : [];
       const existingKeys = new Set(
         existingRows
@@ -2032,8 +2039,7 @@ export default function AdminPanel() {
   const loadPendingOrders = async () => {
     if (!canManageFinance) return;
     try {
-      const res = await fetch(`${API_BASE}/api/student-finance/payments?status=pending`, { headers: { ...getAuthHeaders() } });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/student-finance/payments?status=pending`);
       if (!data?.success) {
         setOrders([]);
         setOrderMessage(data?.message || 'خطا در دریافت رسیدها');
@@ -2101,10 +2107,7 @@ export default function AdminPanel() {
   const loadProfileRequests = async () => {
     if (!canManageUsers) return;
     try {
-      const res = await fetch(`${API_BASE}/api/admin/profile-update-requests?status=pending`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/admin/profile-update-requests?status=pending`);
       if (!data?.success) {
         setProfileRequests([]);
         setRequestMessage(data?.message || 'خطا در دریافت درخواست‌ها');
@@ -2121,10 +2124,7 @@ export default function AdminPanel() {
   const loadSupportMessages = async () => {
     if (!canManageContent) return;
     try {
-      const res = await fetch(`${API_BASE}/api/contact/admin`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/contact/admin`);
       if (!data?.success) {
         setSupportMessages([]);
         setSupportMessage(data?.message || 'خطا در دریافت پیام‌های پشتیبانی');
@@ -2146,8 +2146,7 @@ export default function AdminPanel() {
   const loadAlerts = async () => {
     if (!canViewReports) return;
     try {
-      const res = await fetch(`${API_BASE}/api/admin/alerts`, { headers: { ...getAuthHeaders() } });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/admin/alerts`);
       if (!data?.success) {
         setAlerts([]);
         return;
@@ -2165,8 +2164,7 @@ export default function AdminPanel() {
   const loadStats = async () => {
     if (!canViewDashboardStats) return;
     try {
-      const res = await fetch(`${API_BASE}/api/admin/stats`, { headers: { ...getAuthHeaders() } });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/admin/stats`);
       if (!data?.success) return;
       setStats({
         users: data.users || 0,
@@ -2184,21 +2182,32 @@ export default function AdminPanel() {
   };
 
   const loadAdminDashboard = async () => {
-    if (!canViewReports) return;
+    // An admin without view_reports never calls this endpoint, so the section
+    // must drop straight out of its loading state rather than waiting forever.
+    if (!canViewReports) {
+      setDashboardLoading(false);
+      return;
+    }
+    setDashboardLoading(true);
+    setDashboardError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/dashboard/admin`, { headers: { ...getAuthHeaders() } });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/dashboard/admin`);
       setAdminDashboard(data?.success ? data : null);
-    } catch {
+    } catch (error) {
+      // Every KPI on this page falls back to 0, so a failed load rendered a
+      // school with no students, no income and no attendance — the most
+      // alarming possible way to say "the request didn't arrive".
       setAdminDashboard(null);
+      setDashboardError(error);
+    } finally {
+      setDashboardLoading(false);
     }
   };
 
   const loadDirectoryOrphans = async () => {
     if (!canManageUsers) return;
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/directory-orphans`, { headers: { ...getAuthHeaders() } });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/admin/users/directory-orphans`);
       setDirectoryOrphans(data?.success ? data : null);
     } catch {
       setDirectoryOrphans(null);
@@ -2207,8 +2216,7 @@ export default function AdminPanel() {
 
   const loadSettingsQuickLinks = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/settings/public`);
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/settings/public`);
       if (!data?.success) return;
       const links = normalizeQuickLinkItems(data?.settings?.adminQuickLinks || []);
       if (links.length) setSettingsQuickLinks(links);
@@ -2221,10 +2229,7 @@ export default function AdminPanel() {
     if (!canViewReports) return;
     try {
       const actionIn = encodeURIComponent(REPORT_ACTIVITY_ACTIONS.join(','));
-      const res = await fetch(`${API_BASE}/api/admin-logs?action_in=${actionIn}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/admin-logs?action_in=${actionIn}`);
       if (!data?.success) {
         setReportActivityItems([]);
         return;
@@ -2238,10 +2243,7 @@ export default function AdminPanel() {
 
   const loadRecentActivities = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/recent-activity?limit=10`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/admin/recent-activity?limit=10`);
       if (!data?.success) {
         setRecentActivityItems([]);
         return;
@@ -2263,10 +2265,7 @@ export default function AdminPanel() {
       const endpoint = query
         ? `${API_BASE}/api/admin/workflow-report?${query}`
         : `${API_BASE}/api/admin/workflow-report`;
-      const res = await fetch(endpoint, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(endpoint);
       if (!data?.success) {
         setWorkflowReport(null);
         setWorkflowMessage(data?.message || 'خطا در دریافت گزارش جریان کار');
@@ -2364,8 +2363,7 @@ export default function AdminPanel() {
 
   const loadProfile = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/users/me`, { headers: { ...getAuthHeaders() } });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/users/me`);
       if (data?.success) {
         setUser(data.user);
         try {
@@ -2389,11 +2387,12 @@ export default function AdminPanel() {
     try {
       const schoolId = resolveTimetableSchoolId();
       if (schoolId && schoolId !== 'default-school-id') {
-        const draftRes = await fetch(`${API_BASE}/api/timetables/daily-draft?schoolId=${encodeURIComponent(schoolId)}`, {
-          headers: { ...getAuthHeaders() }
-        });
-        const draftData = await draftRes.json();
-        const serverDraft = draftRes.ok && draftData?.success && draftData?.item
+        // A missing server draft is normal, not an error: the local draft and
+        // then today's published schedule are tried next, so this one failure
+        // must not abort the chain.
+        const draftData = await apiFetch(`${API_BASE}/api/timetables/daily-draft?schoolId=${encodeURIComponent(schoolId)}`)
+          .catch(() => null);
+        const serverDraft = draftData?.success && draftData?.item
           ? writeDailyTimetableDraft(draftData.item)
           : null;
         const serverDraftSchedule = buildAdminScheduleFromDraft(serverDraft);
@@ -2416,8 +2415,7 @@ export default function AdminPanel() {
         return;
       }
 
-      const res = await fetch(`${API_BASE}/api/schedules/today`, { headers: { ...getAuthHeaders() } });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/schedules/today`);
       setTodaySchedule(data?.success ? (data.items || []) : []);
       setTodayScheduleSource('api');
       setTodayScheduleScopeLabel('امروز');
@@ -2434,30 +2432,23 @@ export default function AdminPanel() {
 
   const runApiHealthCheck = async () => {
     setApiHealthLoading(true);
-    const startedAt = typeof performance !== 'undefined' && typeof performance.now === 'function'
-      ? performance.now()
-      : Date.now();
-
     try {
-      const res = await fetch(`${API_BASE}/api/health`, { headers: { ...getAuthHeaders() } });
-      const finishedAt = typeof performance !== 'undefined' && typeof performance.now === 'function'
-        ? performance.now()
-        : Date.now();
-      setApiHealth({
-        status: res.ok ? 'online' : 'offline',
-        latencyMs: Math.max(0, Math.round(finishedAt - startedAt)),
-        checkedAt: new Date().toISOString()
-      });
-    } catch {
-      setApiHealth({
-        status: 'offline',
-        latencyMs: null,
-        checkedAt: new Date().toISOString()
-      });
+      await checkApiHealth();
     } finally {
       setApiHealthLoading(false);
     }
   };
+
+  // Mirror the shared connection store instead of probing separately, so this
+  // strip, the header strip and the global banner can never disagree about
+  // whether the backend is reachable.
+  useEffect(() => subscribeToConnection((connection) => {
+    setApiHealth({
+      status: connection.status,
+      latencyMs: connection.latencyMs,
+      checkedAt: connection.checkedAt || ''
+    });
+  }), []);
 
   useEffect(() => {
     loadProfile();
@@ -3281,10 +3272,7 @@ export default function AdminPanel() {
     setSearching(true);
     setSearchMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/admin/search?q=${encodeURIComponent(q)}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/admin/search?q=${encodeURIComponent(q)}`);
       if (!data?.success) {
         setSearchMessage(data?.message || 'جستجو ناموفق بود');
         return;
@@ -4346,6 +4334,21 @@ export default function AdminPanel() {
         </header>
 
         <div className="admin-modern-overview">
+            {canViewReports && (dashboardLoading || dashboardError) && (
+              <DataState
+                loading={dashboardLoading}
+                error={dashboardError}
+                data={adminDashboard}
+                onRetry={loadAdminDashboard}
+                skeleton="cards"
+                skeletonProps={{ count: 4 }}
+                showEmpty={false}
+                loadingLabel="در حال دریافت خلاصهٔ امروز..."
+              />
+            )}
+            {/* An admin without view_reports never fetches this summary, so the
+                cards show right away from whatever else is loaded. */}
+            {(!canViewReports || (!dashboardLoading && !dashboardError)) && (
             <section className="admin-modern-kpis" aria-label="خلاصه امروز">
               {roleKpiItems.map((item) => (
                 <KpiRingCard
@@ -4358,6 +4361,7 @@ export default function AdminPanel() {
                 />
               ))}
             </section>
+            )}
 
             <section className="admin-modern-layout">
               <div className="admin-modern-layout__col">

@@ -17,6 +17,7 @@ import { getOfficialPrintLogoImageClass, getPrintLogoUrls } from '../utils/print
 import { localizeSystemMessage } from '../utils/systemMessage';
 import { buildStudentSearchBlob as buildSharedStudentSearchBlob } from '../utils/studentSearch';
 import { readStoredSchoolId, resolveActiveSchoolContext } from './adminWorkspaceUtils';
+import { apiFetch } from '../utils/apiClient';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -3985,9 +3986,14 @@ export default function AdminFinance() {
   ];
 
   const fetchJson = async (url, options = {}) => {
-    const res = await fetch(url, {
+    // rejectOnHttpError is off because the checks below read the body on any
+    // status to tell "this API route isn't deployed" (an HTML error page) apart
+    // from "the server answered with an error" — apiFetch still supplies the
+    // timeout, the retries and the connection banner.
+    const res = await apiFetch(url, {
       ...options,
-      headers: { ...(options.headers || {}), ...getAuthHeaders() }
+      parse: 'response',
+      rejectOnHttpError: false
     });
     const contentType = String(res.headers.get('content-type') || '').toLowerCase();
     const text = await res.text();
@@ -4026,8 +4032,7 @@ export default function AdminFinance() {
       setMonthlySummaryError('');
       const url = new URL(buildScopedReportUrl('/api/finance/admin/reports/monthly-summary'));
       url.searchParams.set('month', targetMonthKey);
-      const res = await fetch(url.toString(), { headers: { ...getAuthHeaders() } });
-      const data = await res.json();
+      const data = await apiFetch(url.toString());
       if (!data?.success) {
         setMonthlySummaryData(null);
         setMonthlySummaryError(data?.message || 'خطا در دریافت گزارش ماهانه.');

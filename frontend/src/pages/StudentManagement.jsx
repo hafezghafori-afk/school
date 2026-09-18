@@ -7,6 +7,8 @@ import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Badge } from '../components/ui/badge';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import DataState from '../components/ui/DataState';
+import { apiFetch } from '../utils/apiClient';
 import { 
   Users, 
   Search, 
@@ -643,6 +645,7 @@ const StudentManagement = () => {
   const [students, setStudents] = useState([]);
   const [filteredStudents, setFilteredStudents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -763,17 +766,22 @@ const StudentManagement = () => {
 
   const fetchStudents = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const query = schoolId ? `?schoolId=${encodeURIComponent(schoolId)}` : '';
-      const headers = { ...getAuthHeaders(), 'Cache-Control': 'no-cache' };
+      const headers = { 'Cache-Control': 'no-cache' };
       const [studentResult, financeResult, educationResult, onlineEnrollmentResult] = await Promise.allSettled([
-        fetch(`/api/afghan-students${query}`, { headers, cache: 'no-store' }).then((res) => res.json()),
-        fetch('/api/finance/admin/student-memberships', { headers, credentials: 'include', cache: 'no-store' }).then((res) => res.ok ? res.json() : { success: false, items: [] }),
-        fetch('/api/education/student-enrollments', { headers, credentials: 'include', cache: 'no-store' }).then((res) => res.ok ? res.json() : { success: false, items: [] }),
-        fetch('/api/enrollments/admin', { headers, credentials: 'include', cache: 'no-store' }).then((res) => res.ok ? res.json() : { success: false, items: [] })
+        apiFetch(`/api/afghan-students${query}`, { headers, cache: 'no-store' }),
+        apiFetch('/api/finance/admin/student-memberships', { headers, credentials: 'include', cache: 'no-store' }),
+        apiFetch('/api/education/student-enrollments', { headers, credentials: 'include', cache: 'no-store' }),
+        apiFetch('/api/enrollments/admin', { headers, credentials: 'include', cache: 'no-store' })
       ]);
 
-      const data = studentResult.status === 'fulfilled' ? studentResult.value : { success: false };
+      // The three side lists are enrichment — the page is still worth showing
+      // without them. The student list is not, so its failure is re-thrown with
+      // the reason intact (offline vs. server down vs. database down).
+      if (studentResult.status === 'rejected') throw studentResult.reason;
+      const data = studentResult.value;
       const financeData = financeResult.status === 'fulfilled' ? financeResult.value : { items: [] };
       const educationData = educationResult.status === 'fulfilled' ? educationResult.value : { items: [] };
       const onlineEnrollmentData = onlineEnrollmentResult.status === 'fulfilled' ? onlineEnrollmentResult.value : { items: [] };
@@ -790,71 +798,16 @@ const StudentManagement = () => {
         const withOnlineEnrollments = mergeOnlineEnrollmentRecords(withEducation, onlineEnrollmentData.items || []);
         setStudents(applyCanonicalEducationStatus(withOnlineEnrollments));
       } else {
-        // اگر API ناموفق بود، از داده‌های نمونه استفاده کن
-        const mockData = [
-          {
-            _id: '1',
-            firstName: 'علی',
-            lastName: 'احمدی',
-            fatherName: 'رحیم',
-            nationalId: '123456789',
-            phone: '0771234567',
-            email: 'ali@example.com',
-            gender: 'male',
-            status: 'active',
-            province: 'kabul',
-            classId: { _id: 'class1', title: 'صنف ۱۰ الف' },
-            academicYearId: { _id: 'year1', title: '1403-1404' },
-            shiftId: { _id: 'shift1', name: 'صبح' },
-            previousSchool: '',
-            previousGrade: '',
-            createdAt: new Date().toISOString()
-          },
-          {
-            _id: '2',
-            firstName: 'فاطمه',
-            lastName: 'محمدی',
-            fatherName: 'حسین',
-            nationalId: '987654321',
-            phone: '0779876543',
-            email: 'fatima@example.com',
-            gender: 'female',
-            status: 'active',
-            province: 'kabul',
-            classId: { _id: 'class2', title: 'صنف ۱۰ ب' },
-            academicYearId: { _id: 'year1', title: '1403-1404' },
-            shiftId: { _id: 'shift2', name: 'عصر' },
-            previousSchool: '',
-            previousGrade: '',
-            createdAt: new Date().toISOString()
-          }
-        ];
-        setStudents(mockData);
+        throw new Error(String(data.message || '').trim() || 'دریافت فهرست شاگردان از سرور ناموفق بود.');
       }
     } catch (error) {
+      // This used to fall back to two hard-coded sample students (علی احمدی and
+      // فاطمه محمدی) whenever the load failed, so a dead backend rendered as a
+      // school with two pupils in it — worse than an empty page, because it
+      // looked like real data. Show the actual reason instead.
       console.error('Error fetching students:', error);
-      // در صورت خطا نیز، از داده‌های نمونه استفاده کن
-      const mockData = [
-        {
-          _id: '1',
-          firstName: 'علی',
-          lastName: 'احمدی',
-          fatherName: 'رحیم',
-          nationalId: '123456789',
-          phone: '0771234567',
-          email: 'ali@example.com',
-          gender: 'male',
-          status: 'active',
-          province: 'kabul',
-          classId: { _id: 'class1', title: 'صنف ۱۰ الف' },
-          academicYearId: { _id: 'year1', title: '1403-1404' },
-          shiftId: { _id: 'shift1', name: 'صبح' },
-          previousSchool: '',
-          previousGrade: '',
-          createdAt: new Date().toISOString()
-        }
-      ];
-      setStudents(mockData);
+      setStudents([]);
+      setLoadError(error);
     } finally {
       setLoading(false);
     }
@@ -1689,6 +1642,20 @@ const StudentManagement = () => {
           <span className="student-count-pill">{filteredStudents.length} مورد</span>
         </div>
 
+        {/* showEmpty is off because the page's own empty state below is the
+            better one — but it may only be shown once we know the list really
+            arrived, otherwise "شاگردی پیدا نشد" is a claim about the school
+            rather than about the request. */}
+        <DataState
+          loading={loading}
+          error={loadError}
+          data={students}
+          onRetry={fetchStudents}
+          skeleton="list"
+          skeletonProps={{ count: 6 }}
+          showEmpty={false}
+          loadingLabel="در حال دریافت فهرست شاگردان..."
+        >
         {filteredStudents.length === 0 ? (
           <div className="student-empty-state">
             <Users size={34} />
@@ -1801,6 +1768,7 @@ const StudentManagement = () => {
           ) : null}
           </>
         )}
+        </DataState>
       </section>
 
       {showEdit && selectedStudent && (

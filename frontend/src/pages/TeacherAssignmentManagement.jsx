@@ -6,6 +6,8 @@ import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Checkbox } from '../components/ui/checkbox';
 import { Badge } from '../components/ui/badge';
+import DataState from '../components/ui/DataState';
+import { apiFetch } from '../utils/apiClient';
 import { Trash2, Edit, Plus, Users, Clock, AlertCircle, UserCheck, Calendar } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import './TeacherAssignmentManagement.css';
@@ -51,6 +53,7 @@ const TeacherAssignmentManagement = () => {
   const [subjects, setSubjects] = useState([]);
   const [academicYears, setAcademicYears] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [assignmentsError, setAssignmentsError] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [editingAssignment, setEditingAssignment] = useState(null);
   const [bulkMode, setBulkMode] = useState(false);
@@ -117,18 +120,22 @@ const TeacherAssignmentManagement = () => {
   }, []);
 
   const fetchAssignments = async () => {
+    setLoading(true);
+    setAssignmentsError(null);
     try {
-      const response = await fetch(`/api/teacher-assignments/school/${schoolId}`, { headers: { ...getAuthHeaders() } });
-      const data = await response.json();
-      
+      const data = await apiFetch(`/api/teacher-assignments/school/${schoolId}`);
+
       if (data.success) {
         setAssignments(data.data);
       } else {
-        toast.error('دریافت تخصیص‌های استاد ناموفق بود.');
+        throw new Error(String(data?.message || '').trim() || 'دریافت تخصیص‌های استاد ناموفق بود.');
       }
     } catch (error) {
+      // A toast alone left the page showing "هیچ تخصیصی پیدا نشد" a few seconds
+      // later, which claims the school has no assignments rather than admitting
+      // the list never loaded.
       console.error('Error fetching teacher assignments:', error);
-      toast.error('دریافت تخصیص‌های استاد ناموفق بود.');
+      setAssignmentsError(error);
     } finally {
       setLoading(false);
     }
@@ -1396,6 +1403,19 @@ const TeacherAssignmentManagement = () => {
         </div>
       </div>
 
+      {(loading || assignmentsError) && (
+        <DataState
+          loading={loading}
+          error={assignmentsError}
+          data={assignments}
+          onRetry={fetchAssignments}
+          skeleton="cards"
+          skeletonProps={{ count: 4 }}
+          showEmpty={false}
+          loadingLabel="در حال دریافت تخصیص‌های استاد..."
+        />
+      )}
+
       {/* Assignments List */}
       <div className="tt-assignment-list-grid tt-assignment-wizard-list-grid">
         {filteredAssignments.map((assignment, index) => (
@@ -1494,7 +1514,7 @@ const TeacherAssignmentManagement = () => {
         </div>
       )}
 
-      {assignments.length === 0 && !loading && (
+      {assignments.length === 0 && !loading && !assignmentsError && (
         <div className="text-center py-12 tt-assignment-empty-state">
           <UserCheck className="w-12 h-12 text-gray-400 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">هیچ تخصیصی پیدا نشد</h3>

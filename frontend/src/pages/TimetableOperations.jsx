@@ -8,6 +8,8 @@ import { CalendarDays, Users, GraduationCap, Trash2, Save, X, Printer } from 'lu
 import { toast } from 'react-hot-toast';
 import '../styles/timetable-print.css';
 import './TimetableOperations.css';
+import { apiFetch } from '../utils/apiClient';
+import DataState from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -92,6 +94,8 @@ export default function TimetableOperations() {
   const [entries, setEntries] = useState([]);
   const [timetable, setTimetable] = useState({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [saving, setSaving] = useState(false);
   const [editingCell, setEditingCell] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -171,20 +175,12 @@ export default function TimetableOperations() {
     const bootstrap = async () => {
       setLoading(true);
       try {
-        const [classRes, teacherRes, subjectRes, yearRes, shiftRes] = await Promise.all([
-          fetch(`/api/school-classes/school/${schoolId}`, { headers: { ...getAuthHeaders() } }),
-          fetch(`/api/users/school/${schoolId}?role=teacher`, { headers: { ...getAuthHeaders() } }),
-          fetch(`/api/subjects/school/${schoolId}`, { headers: { ...getAuthHeaders() } }),
-          fetch(`/api/academic-years/school/${schoolId}`, { headers: { ...getAuthHeaders() } }),
-          fetch(`/api/shifts/school/${schoolId}`, { headers: { ...getAuthHeaders() } })
-        ]);
-
         const [classData, teacherData, subjectData, yearData, shiftData] = await Promise.all([
-          classRes.json(),
-          teacherRes.json(),
-          subjectRes.json(),
-          yearRes.json(),
-          shiftRes.json()
+          apiFetch(`/api/school-classes/school/${schoolId}`),
+          apiFetch(`/api/users/school/${schoolId}?role=teacher`),
+          apiFetch(`/api/subjects/school/${schoolId}`),
+          apiFetch(`/api/academic-years/school/${schoolId}`),
+          apiFetch(`/api/shifts/school/${schoolId}`)
         ]);
 
         const nextClasses = classData?.success ? classData.data || [] : [];
@@ -205,14 +201,16 @@ export default function TimetableOperations() {
         if (nextShifts.length > 0) setSelectedShift(nextShifts[0]._id);
       } catch (error) {
         console.error('Error loading timetable operations data:', error);
-        toast.error('بارگذاری اطلاعات اولیه ناموفق بود.');
+        setLoadError(error);
       } finally {
         setLoading(false);
       }
     };
 
     bootstrap();
-  }, [schoolId, hasValidSchoolId]);
+    // reloadToken lets the error card re-run this bootstrap without a full page
+    // reload, which would also throw away the user's filter selections.
+  }, [schoolId, hasValidSchoolId, reloadToken]);
 
   useEffect(() => {
     const fetchTimetable = async () => {
@@ -225,8 +223,7 @@ export default function TimetableOperations() {
         const targetId = viewType === 'class' ? selectedClass : selectedTeacher;
         const endpoint = viewType === 'class' ? 'class' : 'teacher';
         const url = `/api/timetable/${endpoint}/${targetId}?academicYearId=${selectedAcademicYear}&shiftId=${selectedShift}`;
-        const response = await fetch(url, { headers: { ...getAuthHeaders() } });
-        const data = await response.json();
+        const data = await apiFetch(url);
 
         if (!data?.success) {
           toast.error('دریافت تقسیم اوقات ناموفق بود.');
@@ -305,8 +302,7 @@ export default function TimetableOperations() {
       setEditingCell(null);
 
       const refreshUrl = `/api/timetable/class/${selectedClass}?academicYearId=${selectedAcademicYear}&shiftId=${selectedShift}`;
-      const refreshResponse = await fetch(refreshUrl, { headers: { ...getAuthHeaders() } });
-      const refreshData = await refreshResponse.json();
+      const refreshData = await apiFetch(refreshUrl);
       if (refreshData?.success) {
         setEntries(refreshData.data?.entries || []);
         setTimetable(refreshData.data?.timetable || {});
@@ -335,8 +331,7 @@ export default function TimetableOperations() {
       setEditingCell(null);
 
       const refreshUrl = `/api/timetable/class/${selectedClass}?academicYearId=${selectedAcademicYear}&shiftId=${selectedShift}`;
-      const refreshResponse = await fetch(refreshUrl, { headers: { ...getAuthHeaders() } });
-      const refreshData = await refreshResponse.json();
+      const refreshData = await apiFetch(refreshUrl);
       if (refreshData?.success) {
         setEntries(refreshData.data?.entries || []);
         setTimetable(refreshData.data?.timetable || {});
@@ -349,8 +344,21 @@ export default function TimetableOperations() {
     }
   };
 
-  if (loading) {
-    return <div className="flex justify-center items-center h-64">در حال بارگذاری...</div>;
+  if (loading || loadError) {
+    return (
+      <div className="container mx-auto p-6 tt-shared-page">
+        <DataState
+          loading={loading}
+          error={loadError}
+          data={entries}
+          onRetry={() => setReloadToken((token) => token + 1)}
+          skeleton="table"
+          skeletonProps={{ rows: 7, columns: 6 }}
+          showEmpty={false}
+          loadingLabel="در حال دریافت تقسیم اوقات..."
+        />
+      </div>
+    );
   }
 
   return (

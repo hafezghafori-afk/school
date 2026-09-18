@@ -10,6 +10,8 @@ import { Badge } from '../components/ui/badge';
 import { Trash2, Edit, Plus, Clock, Calendar, Settings, AlertCircle } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import './TimetableConfiguration.css';
+import { apiFetch } from '../utils/apiClient';
+import DataState from '../components/ui/DataState';
 
 const normalizeShiftToken = (value) => String(value || '')
   .trim()
@@ -103,6 +105,7 @@ const TimetableConfiguration = () => {
   const [academicYears, setAcademicYears] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [editingConfig, setEditingConfig] = useState(null);
   const [showPeriodSetup, setShowPeriodSetup] = useState(false);
@@ -146,18 +149,19 @@ const TimetableConfiguration = () => {
 
   const fetchConfigurations = async () => {
     if (!hasValidSchoolId) return;
+    setLoading(true);
+    setLoadError(null);
     try {
-      const response = await fetch(`/api/timetable-configuration/school/${schoolId}`, { headers: { ...getAuthHeaders() } });
-      const data = await response.json();
+      const data = await apiFetch(`/api/timetable-configuration/school/${schoolId}`);
 
       if (data.success) {
         setConfigurations(data.data);
       } else {
-        toast.error('دریافت تنظیمات تقسیم اوقات ناموفق بود.');
+        throw new Error(String(data?.message || '').trim() || 'دریافت تنظیمات تقسیم اوقات ناموفق بود.');
       }
     } catch (error) {
       console.error('Error fetching configurations:', error);
-      toast.error('دریافت تنظیمات تقسیم اوقات ناموفق بود.');
+      setLoadError(error);
     } finally {
       setLoading(false);
     }
@@ -166,8 +170,7 @@ const TimetableConfiguration = () => {
   const fetchAcademicYears = async () => {
     if (!hasValidSchoolId) return;
     try {
-      const response = await fetch(`/api/academic-years/school/${schoolId}`, { headers: { ...getAuthHeaders() } });
-      const data = await response.json();
+      const data = await apiFetch(`/api/academic-years/school/${schoolId}`);
 
       if (data.success) {
         setAcademicYears(data.data.filter((year) => year.status === 'active'));
@@ -180,8 +183,7 @@ const TimetableConfiguration = () => {
   const fetchShifts = async () => {
     if (!hasValidSchoolId) return;
     try {
-      const response = await fetch(`/api/shifts/school/${schoolId}`, { headers: { ...getAuthHeaders() } });
-      const data = await response.json();
+      const data = await apiFetch(`/api/shifts/school/${schoolId}`);
 
       if (data.success) {
         const currentShifts = Array.isArray(data.data) ? data.data : [];
@@ -211,8 +213,7 @@ const TimetableConfiguration = () => {
             })
           );
 
-          const refreshedResponse = await fetch(`/api/shifts/school/${schoolId}`, { headers: { ...getAuthHeaders() } });
-          const refreshedData = await refreshedResponse.json();
+          const refreshedData = await apiFetch(`/api/shifts/school/${schoolId}`);
           if (refreshedData.success) {
             setShifts(refreshedData.data || []);
             return;
@@ -318,8 +319,7 @@ const TimetableConfiguration = () => {
 
   const handleSetupPeriods = async (config) => {
     try {
-      const response = await fetch(`/api/timetable-configuration/${config._id}/details`, { headers: { ...getAuthHeaders() } });
-      const data = await response.json();
+      const data = await apiFetch(`/api/timetable-configuration/${config._id}/details`);
 
       if (data.success) {
         setSelectedConfig(data.data.configuration);
@@ -377,8 +377,21 @@ const TimetableConfiguration = () => {
     resetForm();
   };
 
-  if (loading) {
-    return <div className="flex justify-center items-center h-64">در حال بارگذاری...</div>;
+  if (loading || loadError) {
+    return (
+      <div className="container mx-auto p-6 tt-shared-page">
+        <DataState
+          loading={loading}
+          error={loadError}
+          data={configurations}
+          onRetry={fetchConfigurations}
+          skeleton="cards"
+          skeletonProps={{ count: 3 }}
+          showEmpty={false}
+          loadingLabel="در حال دریافت تنظیمات تقسیم اوقات..."
+        />
+      </div>
+    );
   }
 
   const totalConfigs = configurations.length;
