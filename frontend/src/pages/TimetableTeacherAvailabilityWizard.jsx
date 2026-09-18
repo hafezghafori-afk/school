@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Checkbox } from '../components/ui/checkbox';
 import { Textarea } from '../components/ui/textarea';
 import { toast } from 'react-hot-toast';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const STEPS = [
   'انتخاب استاد و سال',
@@ -70,9 +71,9 @@ export default function TimetableTeacherAvailabilityWizard() {
       try {
         const schoolId = localStorage.getItem('schoolId') || '';
         const [tRes, yRes, sRes] = await Promise.all([
-          fetch(`/api/users/school/${schoolId}?role=teacher`, { headers: { ...getAuthHeaders() } }),
-          fetch(`/api/academic-years/school/${schoolId}`, { headers: { ...getAuthHeaders() } }),
-          fetch(`/api/shifts/school/${schoolId}`, { headers: { ...getAuthHeaders() } })
+          apiFetch(`/api/users/school/${schoolId}?role=teacher`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }),
+          apiFetch(`/api/academic-years/school/${schoolId}`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }),
+          apiFetch(`/api/shifts/school/${schoolId}`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } })
         ]);
         const tData = await tRes.json();
         const yData = await yRes.json();
@@ -81,7 +82,7 @@ export default function TimetableTeacherAvailabilityWizard() {
         if (yData.success) setAcademicYears(yData.data.filter(y => y.status === 'active'));
         if (sData.success) setShifts(sData.data);
       } catch (e) {
-        toast.error('دریافت داده‌ها ناموفق بود');
+        toast.error(failureMessage(e, 'دریافت داده‌ها ناموفق بود'));
       } finally {
         setLoading(false);
       }
@@ -140,7 +141,8 @@ export default function TimetableTeacherAvailabilityWizard() {
     setSubmitting(true);
     try {
       const schoolId = localStorage.getItem('schoolId') || 'default-school-id';
-      const response = await fetch(`/api/teacher-availability/school/${schoolId}`, {
+      const response = await apiFetch(`/api/teacher-availability/school/${schoolId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -157,7 +159,7 @@ export default function TimetableTeacherAvailabilityWizard() {
         toast.error(data.message || 'ثبت حضور استاد ناموفق بود.');
       }
     } catch (e) {
-      toast.error('ثبت حضور استاد ناموفق بود.');
+      toast.error(failureMessage(e, 'ثبت حضور استاد ناموفق بود.'));
     } finally {
       setSubmitting(false);
     }

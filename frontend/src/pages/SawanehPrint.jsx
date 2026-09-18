@@ -7,6 +7,7 @@ import { getOfficialPrintLogoImageClass, getPrintLogoUrls, toAssetUrl } from '..
 import { formatAfghanStoredDateLabel } from '../utils/afghanDate';
 import { API_BASE } from '../config/api';
 import './SawanehPrint.css';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const authHeaders = () => {
   const token = localStorage.getItem('token');
@@ -425,7 +426,7 @@ const SawanehPrint = () => {
     let alive = true;
     (async () => {
       try {
-        const cardRes = await fetch(`${API_BASE}/api/sawaneh/cards/${studentId}`, { headers: authHeaders() });
+        const cardRes = await apiFetch(`${API_BASE}/api/sawaneh/cards/${studentId}`, { parse: 'response', rejectOnHttpError: false, headers: authHeaders() });
         const cardData = await cardRes.json();
         if (!cardRes.ok || !cardData.success) throw new Error(cardData.message || 'خطا در دریافت کارت سوانح');
         if (!alive) return;
@@ -433,12 +434,12 @@ const SawanehPrint = () => {
         setStudent(cardData.data.studentId && typeof cardData.data.studentId === 'object' ? cardData.data.studentId : null);
 
         if (form !== 'card') {
-          const tRes = await fetch(`${API_BASE}/api/sawaneh/transcripts/${studentId}`, { headers: authHeaders() });
+          const tRes = await apiFetch(`${API_BASE}/api/sawaneh/transcripts/${studentId}`, { parse: 'response', rejectOnHttpError: false, headers: authHeaders() });
           const tData = await tRes.json();
           if (alive && tRes.ok && tData.success) setTranscripts(Array.isArray(tData.data) ? tData.data : []);
         }
       } catch (err) {
-        if (alive) setError(err.message || 'خطا در بارگذاری');
+        if (alive) setError(failureMessage(error, 'خطا در بارگذاری'));
       } finally {
         if (alive) setReady(true);
       }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE } from '../config/api';
 import './LoginSettingsManager.css';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const LoginSettingsManager = () => {
   const [settings, setSettings] = useState({
@@ -28,14 +29,13 @@ const LoginSettingsManager = () => {
   const fetchSettings = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/api/login-settings`);
-      const data = await response.json();
+      const data = await apiFetch(`${API_BASE}/api/login-settings`);
       if (data.success) {
         setSettings(data.settings);
         setLogoPreview(data.settings.logo);
       }
     } catch (error) {
-      setMessage('خطا در دریافت تنظیمات');
+      setMessage(failureMessage(error, 'خطا در دریافت تنظیمات'));
     } finally {
       setLoading(false);
     }
@@ -80,7 +80,8 @@ const LoginSettingsManager = () => {
         }
       });
 
-      const response = await fetch(`${API_BASE}/api/login-settings`, {
+      const response = await apiFetch(`${API_BASE}/api/login-settings`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -106,7 +107,7 @@ const LoginSettingsManager = () => {
       }
     } catch (error) {
       console.error('Submit error:', error);
-      setMessage('خطا در اتصال به سرور');
+      setMessage(failureMessage(error, 'خطا در اتصال به سرور'));
     } finally {
       setSaving(false);
     }
@@ -116,7 +117,8 @@ const LoginSettingsManager = () => {
     if (!confirm('آیا از حذف لوگو مطمئن هستید؟')) return;
     
     try {
-      const response = await fetch(`${API_BASE}/api/login-settings/logo`, {
+      const response = await apiFetch(`${API_BASE}/api/login-settings/logo`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -134,7 +136,7 @@ const LoginSettingsManager = () => {
         setMessage(data.message || 'خطا در حذف لوگو');
       }
     } catch (error) {
-      setMessage('خطا در اتصال به سرور');
+      setMessage(failureMessage(error, 'خطا در اتصال به سرور'));
     }
   };
 

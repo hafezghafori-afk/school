@@ -6,6 +6,7 @@ import { getStudentAsasNumber, studentMatchesSearch } from '../utils/studentSear
 import { useToast } from '../components/ui/toast';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { AFGHAN_SOLAR_MONTHS, formatAfghanStoredDateLabel, gregorianToAfghanSolar } from '../utils/afghanDate';
+import { apiFetch } from '../utils/apiClient';
 
 const emptyStudent = {
   firstName: '',
@@ -184,7 +185,8 @@ const getAuthHeaders = () => {
 };
 
 async function requestJson(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await apiFetch(`${API_BASE}${path}`, {
+    parse: 'response', rejectOnHttpError: false,
     ...options,
     headers: {
       ...getAuthHeaders(),

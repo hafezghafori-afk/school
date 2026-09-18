@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './QuizBuilder.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -61,10 +62,7 @@ export default function QuizBuilder() {
     try {
       const role = String(localStorage.getItem('role') || '').trim().toLowerCase();
       const isInstructor = role === 'instructor';
-      const res = await fetch(`${API_BASE}${isInstructor ? '/api/education/instructor/courses' : '/api/education/school-classes?status=active'}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}${isInstructor ? '/api/education/instructor/courses' : '/api/education/school-classes?status=active'}`);
       if (!data?.success) {
         setCourses([]);
         setCourseId('');
@@ -116,7 +114,8 @@ export default function QuizBuilder() {
     const classId = getCourseClassId(selectedCourse);
 
     try {
-      const res = await fetch(`${API_BASE}/api/quizzes/create`, {
+      const res = await apiFetch(`${API_BASE}/api/quizzes/create`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
@@ -134,8 +133,8 @@ export default function QuizBuilder() {
       setMessage('آزمون ذخیره شد.');
       setQuestions([]);
       setSubject('');
-    } catch {
-      setMessage('خطا در ذخیره آزمون');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ذخیره آزمون'));
     }
   };
 

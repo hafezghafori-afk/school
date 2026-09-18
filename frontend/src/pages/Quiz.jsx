@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import './Quiz.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const normalizeQuizQuestion = (item = {}) => {
   const text = String(item?.text || item?.questionText || '').trim();
@@ -32,8 +33,7 @@ export default function Quiz() {
       setResult(null);
       setAnswers({});
 
-      const courseRes = await fetch(`${API_BASE}/api/education/public-school-classes/${identifier}`);
-      const courseData = await courseRes.json();
+      const courseData = await apiFetch(`${API_BASE}/api/education/public-school-classes/${identifier}`);
       if (!courseData?.success) {
         setCourse(null);
         setQuiz(null);
@@ -63,8 +63,7 @@ export default function Quiz() {
       if (classId) params.set('classId', classId);
       if (compatibilityCourseId) params.set('courseId', compatibilityCourseId);
 
-      const quizRes = await fetch(`${API_BASE}/api/quizzes/subject/${encodeURIComponent(subject)}${params.toString() ? `?${params.toString()}` : ''}`);
-      const quizData = await quizRes.json();
+      const quizData = await apiFetch(`${API_BASE}/api/quizzes/subject/${encodeURIComponent(subject)}${params.toString() ? `?${params.toString()}` : ''}`);
       if (!quizData?.success) {
         setQuiz(null);
         setMessage(quizData?.message || 'آزمون پیدا نشد.');
@@ -76,10 +75,10 @@ export default function Quiz() {
         questions: Array.isArray(nextQuiz.questions) ? nextQuiz.questions.map(normalizeQuizQuestion) : []
       } : null);
       setMessage('');
-    } catch {
+    } catch (error) {
       setCourse(null);
       setQuiz(null);
-      setMessage('خطا در دریافت آزمون');
+      setMessage(failureMessage(error, 'خطا در دریافت آزمون'));
     }
   };
 

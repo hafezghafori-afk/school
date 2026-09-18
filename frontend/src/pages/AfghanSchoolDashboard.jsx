@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './AfghanSchoolDashboard.css';
+import { apiFetch } from '../utils/apiClient';
 
 const AfghanSchoolDashboard = () => {
   const navigate = useNavigate();
@@ -58,7 +59,7 @@ const AfghanSchoolDashboard = () => {
         ? '/api/afghan-schools/dashboard'
         : `/api/afghan-schools/dashboard?province=${selectedProvince}`;
       
-      const response = await fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } });
+      const response = await apiFetch(url, { parse: 'response', rejectOnHttpError: false, headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } });
       const data = await response.json();
 
       if (data.success) {

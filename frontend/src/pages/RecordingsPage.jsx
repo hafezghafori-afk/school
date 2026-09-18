@@ -4,6 +4,7 @@ import './RecordingsPage.css';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDateTime } from '../utils/afghanDate';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -96,10 +97,7 @@ export default function RecordingsPage() {
           ? '/api/education/instructor/courses'
           : '/api/education/my-courses';
       const source = role === 'admin' ? 'schoolClass' : 'courseAccess';
-      const res = await fetch(`${API_BASE}${endpoint}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}${endpoint}`);
       if (!data?.success) {
         setCourses([]);
         setCourseFilter('');
@@ -143,19 +141,16 @@ export default function RecordingsPage() {
       if (classId) params.set('classId', classId);
       if (compatCourseId) params.set('courseId', compatCourseId);
 
-      const res = await fetch(`${API_BASE}/api/recordings${params.toString() ? `?${params.toString()}` : ''}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/recordings${params.toString() ? `?${params.toString()}` : ''}`);
       if (!data?.success) {
         setItems([]);
         setMessage(data?.message || 'خطا در دریافت ضبط جلسات');
         return;
       }
       setItems(Array.isArray(data.items) ? data.items : []);
-    } catch {
+    } catch (error) {
       setItems([]);
-      setMessage('خطا در ارتباط با سرور');
+      setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
     } finally {
       setLoading(false);
     }
@@ -206,7 +201,8 @@ export default function RecordingsPage() {
       payload.append('description', form.description || '');
       payload.append('file', form.file);
 
-      const res = await fetch(`${API_BASE}/api/recordings`, {
+      const res = await apiFetch(`${API_BASE}/api/recordings`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { ...getAuthHeaders() },
         body: payload
@@ -219,8 +215,8 @@ export default function RecordingsPage() {
       setMessage('ضبط جلسه با موفقیت ثبت شد');
       resetForm();
       await loadItems(courseFilter);
-    } catch {
-      setMessage('خطا در ثبت ضبط جلسه');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ثبت ضبط جلسه'));
     } finally {
       setSaving(false);
     }
@@ -232,7 +228,8 @@ export default function RecordingsPage() {
     if (!ok) return;
     setMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/recordings/${id}`, {
+      const res = await apiFetch(`${API_BASE}/api/recordings/${id}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: { ...getAuthHeaders() }
       });
@@ -243,8 +240,8 @@ export default function RecordingsPage() {
       }
       setMessage('ضبط جلسه حذف شد');
       await loadItems(courseFilter);
-    } catch {
-      setMessage('خطا در حذف ضبط جلسه');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در حذف ضبط جلسه'));
     }
   };
 

@@ -13,6 +13,7 @@ import {
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
 import { formatFinanceCode } from '../utils/latinFinanceCode';
+import { apiFetch } from '../utils/apiClient';
 
 const ORDER_STATUS_LABELS = {
   new: 'پرداخت نشده',
@@ -478,7 +479,8 @@ export default function StudentFinance() {
         formData.append('feeOrderId', selectedPayableOrder.id || '');
       }
 
-      const response = await fetch(buildApiUrl(endpoint), {
+      const response = await apiFetch(buildApiUrl(endpoint), {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           ...getAuthHeaders()

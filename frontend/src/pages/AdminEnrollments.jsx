@@ -5,6 +5,7 @@ import './AdminContent.css';
 import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
 import { studentMatchesSearch } from '../utils/studentSearch';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -32,7 +33,8 @@ export default function AdminEnrollments() {
 
   const downloadExcel = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/enrollments/export.xlsx`, {
+      const res = await apiFetch(`${API_BASE}/api/enrollments/export.xlsx`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: { ...getAuthHeaders() }
       });
       if (!res.ok) throw new Error('failed');
@@ -45,25 +47,22 @@ export default function AdminEnrollments() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-    } catch {
-      setMessage('خطا در دریافت فایل اکسل');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در دریافت فایل اکسل'));
     }
   };
 
   const loadItems = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/enrollments/admin`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/enrollments/admin`);
       if (data?.success) {
         setItems(data.items || []);
         setMessage('');
       } else {
         setMessage(data?.message || 'خطا در دریافت ثبت‌نام‌ها');
       }
-    } catch {
-      setMessage('خطا در اتصال به سرور');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در اتصال به سرور'));
     }
   };
 
@@ -98,13 +97,14 @@ export default function AdminEnrollments() {
 
   const approve = async (id) => {
     try {
-      await fetch(`${API_BASE}/api/enrollments/${id}/approve`, {
+      await apiFetch(`${API_BASE}/api/enrollments/${id}/approve`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { ...getAuthHeaders() }
       });
       loadItems();
-    } catch {
-      setMessage('خطا در تایید درخواست');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در تایید درخواست'));
     }
   };
 
@@ -112,20 +112,22 @@ export default function AdminEnrollments() {
     const reason = window.prompt('دلیل رد درخواست را وارد کنید:', templates.rejected);
     if (reason === null) return;
     try {
-      await fetch(`${API_BASE}/api/enrollments/${id}/reject`, {
+      await apiFetch(`${API_BASE}/api/enrollments/${id}/reject`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ reason })
       });
       loadItems();
-    } catch {
-      setMessage('خطا در رد درخواست');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در رد درخواست'));
     }
   };
 
   const downloadZip = async (id) => {
     try {
-      const res = await fetch(`${API_BASE}/api/enrollments/${id}/zip`, {
+      const res = await apiFetch(`${API_BASE}/api/enrollments/${id}/zip`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: { ...getAuthHeaders() }
       });
       if (!res.ok) throw new Error('failed');
@@ -138,14 +140,15 @@ export default function AdminEnrollments() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-    } catch {
-      setMessage('خطا در دریافت فایل ZIP');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در دریافت فایل ZIP'));
     }
   };
 
   const downloadPdf = async (id) => {
     try {
-      const res = await fetch(`${API_BASE}/api/enrollments/${id}/report`, {
+      const res = await apiFetch(`${API_BASE}/api/enrollments/${id}/report`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: { ...getAuthHeaders() }
       });
       if (!res.ok) throw new Error('failed');
@@ -158,8 +161,8 @@ export default function AdminEnrollments() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-    } catch {
-      setMessage('خطا در دریافت PDF');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در دریافت PDF'));
     }
   };
 

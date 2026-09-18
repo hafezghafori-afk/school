@@ -7,6 +7,7 @@ import { getOfficialPrintLogoImageClass, getPrintLogoUrls } from '../utils/print
 import './AdminEnrollmentPrint.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -23,18 +24,15 @@ export default function AdminEnrollmentPrint() {
 
   const loadItem = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/enrollments/${id}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/enrollments/${id}`);
       if (data?.success) {
         setItem(data.item || null);
         setMessage('');
       } else {
         setMessage(data?.message || 'درخواست یافت نشد');
       }
-    } catch {
-      setMessage('خطا در دریافت درخواست');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در دریافت درخواست'));
     }
   };
 

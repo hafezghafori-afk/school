@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 
 import { API_BASE } from '../config/api';
 import LoginModernBase from './LoginModernBase';
+import { apiFetch } from '../utils/apiClient';
 
 const DEFAULT_LOGIN_SETTINGS = {
   logo: null,
@@ -24,7 +25,7 @@ export default function LoginPageEnhanced() {
 
     const fetchLoginSettings = async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/settings/login-page`);
+        const response = await apiFetch(`${API_BASE}/api/settings/login-page`, { parse: 'response', rejectOnHttpError: false });
         if (!response.ok) return;
 
         const data = await response.json();

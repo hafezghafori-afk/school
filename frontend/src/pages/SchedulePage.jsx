@@ -5,6 +5,7 @@ import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import StudentTimetableView from './StudentTimetableView';
 import TeacherTimetableView from './TeacherTimetableView';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -42,18 +43,15 @@ export default function SchedulePage() {
       const url = view === 'week'
         ? `${API_BASE}/api/schedules/week?date=${targetDate}`
         : `${API_BASE}/api/schedules/by-date?date=${targetDate}`;
-      const res = await fetch(url, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(url);
       if (!data?.success) {
         setMessage(data?.message || 'خطا در دریافت تقسیم اوقات');
         setItems([]);
         return;
       }
       setItems(data.items || []);
-    } catch {
-      setMessage('خطا در ارتباط با سرور');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
       setItems([]);
     }
   };

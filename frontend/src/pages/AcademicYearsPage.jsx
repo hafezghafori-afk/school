@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import './AcademicYearsPage.css';
+import { apiFetch } from '../utils/apiClient';
 
 const AcademicYearsPage = () => {
   const [academicYears, setAcademicYears] = useState([]);
@@ -32,8 +33,7 @@ const AcademicYearsPage = () => {
   const fetchAcademicYears = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/academic-years/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/academic-years/school/${schoolId}`);
       
       if (data.success) {
         setAcademicYears(data.data);
@@ -59,7 +59,8 @@ const AcademicYearsPage = () => {
       
       const method = editingYear ? 'PATCH' : 'POST';
       
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -89,7 +90,8 @@ const AcademicYearsPage = () => {
 
   const handleActivate = async (yearId) => {
     try {
-      const response = await fetch(`/api/academic-years/${yearId}/activate`, {
+      const response = await apiFetch(`/api/academic-years/${yearId}/activate`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -111,7 +113,8 @@ const AcademicYearsPage = () => {
 
   const handleClose = async (yearId) => {
     try {
-      const response = await fetch(`/api/academic-years/${yearId}/close`, {
+      const response = await apiFetch(`/api/academic-years/${yearId}/close`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -137,7 +140,8 @@ const AcademicYearsPage = () => {
     }
 
     try {
-      const response = await fetch(`/api/academic-years/${yearId}`, {
+      const response = await apiFetch(`/api/academic-years/${yearId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`

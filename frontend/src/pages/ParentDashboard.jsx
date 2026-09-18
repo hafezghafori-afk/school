@@ -13,6 +13,7 @@ import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { downloadBlob, errorMessage, fetchBlob } from './adminWorkspaceUtils';
 import { formatFinanceCode } from '../utils/latinFinanceCode';
 import { formatAfghanDate } from '../utils/afghanDate';
+import { apiFetch } from '../utils/apiClient';
 
 const ORDER_STATUS_LABELS = {
   new: 'پرداخت نشده',
@@ -123,7 +124,7 @@ const toDateTimeInputValue = (value = new Date()) => {
 
 const safeFetchJson = async (url) => {
   try {
-    const response = await fetch(url, { headers: { ...getAuthHeaders() } });
+    const response = await apiFetch(url, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } });
     return await response.json().catch(() => ({}));
   } catch {
     return { success: false };
@@ -508,7 +509,8 @@ export default function ParentDashboard() {
         formData.append('billId', selectedReceiptOrder?.sourceBillId || '');
       }
 
-      const response = await fetch(endpoint, {
+      const response = await apiFetch(endpoint, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           ...getAuthHeaders()

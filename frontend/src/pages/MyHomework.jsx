@@ -3,6 +3,7 @@ import './MyHomework.css';
 
 import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
+import { apiFetch } from '../utils/apiClient';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -59,10 +60,7 @@ export default function MyHomework() {
   const loadCourses = async () => {
     if (!userId) return;
     try {
-      const res = await fetch(`${API_BASE}/api/education/my-courses`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/education/my-courses`);
       const items = normalizeCourseOptions(data?.items || []);
       setCourses(items);
       if (!selectedCourse && items.length) {
@@ -91,10 +89,12 @@ export default function MyHomework() {
       }
 
       const [hwRes, subRes] = await Promise.all([
-        fetch(`${API_BASE}${homeworkRoute}`, {
+        apiFetch(`${API_BASE}${homeworkRoute}`, {
+          parse: 'response', rejectOnHttpError: false,
           headers: { ...getAuthHeaders() }
         }),
-        fetch(`${API_BASE}/api/homeworks/my/submissions?${submissionQuery}`, {
+        apiFetch(`${API_BASE}/api/homeworks/my/submissions?${submissionQuery}`, {
+          parse: 'response', rejectOnHttpError: false,
           headers: { ...getAuthHeaders() }
         })
       ]);
@@ -136,7 +136,8 @@ export default function MyHomework() {
       const form = new FormData();
       form.append('text', text);
       form.append('file', file);
-      const res = await fetch(`${API_BASE}/api/homeworks/${homeworkId}/submit`, {
+      const res = await apiFetch(`${API_BASE}/api/homeworks/${homeworkId}/submit`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { ...getAuthHeaders() },
         body: form

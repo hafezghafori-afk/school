@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import './CourseList.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const getCourseTargetId = (item = {}) => (
   String(item?.classId || item?.id || item?.courseId || item?.legacyCourseId || item?._id || '').trim()
@@ -23,16 +24,15 @@ export default function CourseList() {
       const params = new URLSearchParams();
       if (query) params.set('q', query);
       if (category) params.set('category', category);
-      const res = await fetch(`${API_BASE}/api/education/public-school-classes?${params.toString()}`);
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/education/public-school-classes?${params.toString()}`);
       if (!data?.success) {
         setMessage(data?.message || 'خطا در دریافت صنف‌ها');
         setItems([]);
         return;
       }
       setItems(Array.isArray(data.items) ? data.items : []);
-    } catch {
-      setMessage('خطا در دریافت صنف‌ها');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در دریافت صنف‌ها'));
       setItems([]);
     } finally {
       setLoading(false);

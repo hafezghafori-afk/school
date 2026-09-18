@@ -3,6 +3,7 @@ import { API_BASE } from '../config/api';
 import { formatAfghanDateTime, formatAfghanStoredDateLabel } from '../utils/afghanDate';
 import { studentMatchesSearch } from '../utils/studentSearch';
 import './OnlineRegistrations.css';
+import { apiFetch } from '../utils/apiClient';
 
 const STATUS_META = {
   pending: { label: 'در انتظار', tone: 'warn' },
@@ -85,7 +86,8 @@ export default function OnlineRegistrations() {
   const loadRegistrations = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/api/enrollments/admin`, {
+      const response = await apiFetch(`${API_BASE}/api/enrollments/admin`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: {
           Accept: 'application/json',
           ...getAuthHeaders()
@@ -113,7 +115,8 @@ export default function OnlineRegistrations() {
     if (!item?._id) return;
     setActionLoading(`approve:${item._id}`);
     try {
-      const response = await fetch(`${API_BASE}/api/enrollments/${item._id}/approve`, {
+      const response = await apiFetch(`${API_BASE}/api/enrollments/${item._id}/approve`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: {
           Accept: 'application/json',
@@ -144,7 +147,8 @@ export default function OnlineRegistrations() {
     }
     setActionLoading(`reject:${item._id}`);
     try {
-      const response = await fetch(`${API_BASE}/api/enrollments/${item._id}/reject`, {
+      const response = await apiFetch(`${API_BASE}/api/enrollments/${item._id}/reject`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -170,7 +174,8 @@ export default function OnlineRegistrations() {
 
   const downloadExcel = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/enrollments/export.xlsx`, {
+      const response = await apiFetch(`${API_BASE}/api/enrollments/export.xlsx`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: {
           ...getAuthHeaders()
         }
@@ -193,7 +198,8 @@ export default function OnlineRegistrations() {
   const downloadZip = async (item) => {
     if (!item?._id) return;
     try {
-      const response = await fetch(`${API_BASE}/api/enrollments/${item._id}/zip`, {
+      const response = await apiFetch(`${API_BASE}/api/enrollments/${item._id}/zip`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: {
           ...getAuthHeaders()
         }
@@ -216,7 +222,8 @@ export default function OnlineRegistrations() {
   const downloadPdf = async (item) => {
     if (!item?._id) return;
     try {
-      const response = await fetch(`${API_BASE}/api/enrollments/${item._id}/report`, {
+      const response = await apiFetch(`${API_BASE}/api/enrollments/${item._id}/report`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: {
           ...getAuthHeaders()
         }

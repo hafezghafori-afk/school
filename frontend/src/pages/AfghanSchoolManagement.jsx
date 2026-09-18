@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import './AfghanSchoolManagement.css';
+import { apiFetch } from '../utils/apiClient';
 
 const AfghanSchoolManagement = () => {
   const navigate = useNavigate();
@@ -93,8 +94,7 @@ const AfghanSchoolManagement = () => {
       if (filters.ownership !== 'all') params.append('ownership', filters.ownership);
       if (filters.search) params.append('search', filters.search);
       
-      const response = await fetch(`/api/afghan-schools?${params}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/afghan-schools?${params}`);
       
       if (data.success) {
         setSchools(data.data.schools);
@@ -129,7 +129,8 @@ const AfghanSchoolManagement = () => {
     }
 
     try {
-      const response = await fetch(`/api/afghan-schools/${schoolId}`, {
+      const response = await apiFetch(`/api/afghan-schools/${schoolId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE'
       });
       const data = await response.json();

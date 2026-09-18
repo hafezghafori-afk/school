@@ -9,7 +9,7 @@ import AppErrorBoundary from './components/AppErrorBoundary';
 import ConnectionBanner, { GlobalProgressBar } from './components/ConnectionBanner';
 import { ToastProvider } from './components/ui/toast';
 import { SkeletonCards } from './components/ui/Skeleton';
-import { CONNECTION, checkApiHealth, subscribeToConnection } from './utils/apiClient';
+import { CONNECTION, apiFetch, checkApiHealth, subscribeToConnection } from './utils/apiClient';
 import useSiteSettings, { PUBLIC_WEBSITE_LANGUAGE_KEY } from './hooks/useSiteSettings';
 import { getPublicWebsiteLocale, publicLanguageOptions } from './i18n/publicWebsite';
 import { API_BASE, API_ORIGIN } from './config/api';
@@ -955,7 +955,8 @@ function PermissionAccessGuard({
 
     try {
       const routePath = window.location.pathname || '';
-      const res = await fetch(`${API_BASE}/api/users/me/access-request`, {
+      const res = await apiFetch(`${API_BASE}/api/users/me/access-request`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           ...getAuthHeaders(),
@@ -1017,8 +1018,7 @@ function PermissionAccessGuard({
 
     const checkAccess = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/users/me`, { headers: { ...getAuthHeaders() } });
-        const data = await res.json();
+        const data = await apiFetch(`${API_BASE}/api/users/me`);
         if (!data?.success) {
           finish(false);
           return;
@@ -1335,8 +1335,7 @@ function AppShell() {
 
     const syncIdentity = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/users/me`, { headers: { ...getAuthHeaders() } });
-        const data = await res.json();
+        const data = await apiFetch(`${API_BASE}/api/users/me`);
         if (!data?.success || !data?.user || cancelled) return;
 
         const user = data.user;
@@ -1915,9 +1914,9 @@ function AppShell() {
       setRemoteSearch((prev) => ({ ...prev, loading: true, error: '' }));
 
       try {
-        const coursesPromise = fetch(
+        const coursesPromise = apiFetch(
           `${API_BASE}/api/education/public-school-classes?q=${encodeURIComponent(normalizedSearch)}&limit=5`,
-          { signal: controller.signal }
+          { parse: 'response', rejectOnHttpError: false, signal: controller.signal }
         ).then(async (res) => {
           const data = await res.json().catch(() => ({}));
           return Array.isArray(data?.items) ? data.items : [];
@@ -1925,7 +1924,7 @@ function AppShell() {
 
         const newsPromise = newsPoolLoadedRef.current
           ? Promise.resolve(newsSearchPoolRef.current)
-          : fetch(`${API_BASE}/api/news`, { signal: controller.signal }).then(async (res) => {
+          : apiFetch(`${API_BASE}/api/news`, { parse: 'response', rejectOnHttpError: false, signal: controller.signal }).then(async (res) => {
               const data = await res.json().catch(() => ({}));
               const items = Array.isArray(data?.items) ? data.items : [];
               newsSearchPoolRef.current = items;
@@ -1935,7 +1934,7 @@ function AppShell() {
 
         const galleryPromise = galleryPoolLoadedRef.current
           ? Promise.resolve(gallerySearchPoolRef.current)
-          : fetch(`${API_BASE}/api/gallery`, { signal: controller.signal }).then(async (res) => {
+          : apiFetch(`${API_BASE}/api/gallery`, { parse: 'response', rejectOnHttpError: false, signal: controller.signal }).then(async (res) => {
               const data = await res.json().catch(() => ({}));
               const items = Array.isArray(data?.items) ? data.items : [];
               gallerySearchPoolRef.current = items;
@@ -2283,7 +2282,7 @@ function AppShell() {
       let chatCount = 0;
 
       try {
-        const newsRes = await fetch(`${API_BASE}/api/news`);
+        const newsRes = await apiFetch(`${API_BASE}/api/news`, { parse: 'response', rejectOnHttpError: false });
         const newsData = await newsRes.json().catch(() => ({}));
         const newsItems = Array.isArray(newsData?.items) ? newsData.items : [];
         const newsTimes = newsItems
@@ -2306,8 +2305,8 @@ function AppShell() {
         try {
           const headers = { ...getAuthHeaders() };
           const [directRes, groupRes] = await Promise.all([
-            fetch(`${API_BASE}/api/chats/threads/direct`, { headers }),
-            fetch(`${API_BASE}/api/chats/threads/group`, { headers })
+            apiFetch(`${API_BASE}/api/chats/threads/direct`, { parse: 'response', rejectOnHttpError: false, headers }),
+            apiFetch(`${API_BASE}/api/chats/threads/group`, { parse: 'response', rejectOnHttpError: false, headers })
           ]);
           const [directData, groupData] = await Promise.all([
             directRes.json().catch(() => ({})),

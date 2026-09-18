@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { API_BASE } from '../config/api';
 import './SawanehDashboard.css';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const authHeaders = () => {
   const token = localStorage.getItem('token');
@@ -37,12 +38,12 @@ const SawanehDashboard = () => {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API_BASE}/api/sawaneh/reports/overview`, { headers: authHeaders() });
+      const res = await apiFetch(`${API_BASE}/api/sawaneh/reports/overview`, { parse: 'response', rejectOnHttpError: false, headers: authHeaders() });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.message || 'خطا در دریافت داشبورد');
       setData(json.data);
     } catch (err) {
-      setError(err.message || 'خطا در اتصال به سرور');
+      setError(failureMessage(error, 'خطا در اتصال به سرور'));
       setData(null);
     } finally {
       setLoading(false);

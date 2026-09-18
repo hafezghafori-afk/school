@@ -4,6 +4,7 @@ import { API_BASE as DEFAULT_API_BASE } from '../config/api';
 import { formatAfghanDateTime } from '../utils/afghanDate';
 import { localizeSystemMessage } from '../utils/systemMessage';
 import './NotificationBell.css';
+import { apiFetch } from '../utils/apiClient';
 
 const SOUND_PREF_KEY = 'school_notify_sound_enabled_v1';
 const SOUND_MASTER_GAIN = 0.82;
@@ -205,8 +206,7 @@ export default function NotificationBell({
 
   const loadNotifications = useCallback(async () => {
     try {
-      const res = await fetch(`${apiBase}/api/users/me/notifications`, { headers: { ...getAuthHeaders() } });
-      const data = await res.json();
+      const data = await apiFetch(`${apiBase}/api/users/me/notifications`);
       if (!data?.success) return;
 
       const nextItems = (data.items || [])
@@ -344,7 +344,8 @@ export default function NotificationBell({
   const markOneRead = async (id) => {
     if (!id) return;
     try {
-      await fetch(`${apiBase}/api/users/me/notifications/${id}/read`, {
+      await apiFetch(`${apiBase}/api/users/me/notifications/${id}/read`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { ...getAuthHeaders() }
       });
@@ -358,7 +359,8 @@ export default function NotificationBell({
     if (!unread || busy) return;
     setBusy(true);
     try {
-      const res = await fetch(`${apiBase}/api/users/me/notifications/read-all`, {
+      const res = await apiFetch(`${apiBase}/api/users/me/notifications/read-all`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { ...getAuthHeaders() }
       });

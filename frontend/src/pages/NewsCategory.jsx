@@ -6,6 +6,7 @@ import './News.css';
 
 import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
+import { apiFetch } from '../utils/apiClient';
 
 const toDate = (value) => {
   return formatAfghanDate(value, {
@@ -37,8 +38,7 @@ export default function NewsCategory() {
     const loadNews = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/api/news?category=${category}`);
-        const data = await res.json();
+        const data = await apiFetch(`${API_BASE}/api/news?category=${category}`);
         if (data?.success) {
           setItems(data.items || []);
         } else {

@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Badge } from '../components/ui/badge';
 import { Trash2, Edit, Plus, Users, GraduationCap, Eye } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const SchoolClassManagement = () => {
   const [classes, setClasses] = useState([]);
@@ -49,8 +50,7 @@ const SchoolClassManagement = () => {
 
   const fetchClasses = async () => {
     try {
-      const response = await fetch(`/api/school-classes/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/school-classes/school/${schoolId}`);
       
       if (data.success) {
         setClasses(data.data);
@@ -59,7 +59,7 @@ const SchoolClassManagement = () => {
       }
     } catch (error) {
       console.error('Error fetching classes:', error);
-      toast.error('Error fetching classes');
+      toast.error(failureMessage(error, 'Error fetching classes'));
     } finally {
       setLoading(false);
     }
@@ -67,8 +67,7 @@ const SchoolClassManagement = () => {
 
   const fetchAcademicYears = async () => {
     try {
-      const response = await fetch(`/api/academic-years/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/academic-years/school/${schoolId}`);
       
       if (data.success) {
         setAcademicYears(data.data.filter(year => year.status === 'active'));
@@ -80,8 +79,7 @@ const SchoolClassManagement = () => {
 
   const fetchShifts = async () => {
     try {
-      const response = await fetch(`/api/shifts/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/shifts/school/${schoolId}`);
       
       if (data.success) {
         setShifts(data.data);
@@ -101,7 +99,8 @@ const SchoolClassManagement = () => {
       
       const method = editingClass ? 'PUT' : 'POST';
       
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -122,7 +121,7 @@ const SchoolClassManagement = () => {
       }
     } catch (error) {
       console.error('Error saving class:', error);
-      toast.error('Error saving class');
+      toast.error(failureMessage(error, 'Error saving class'));
     }
   };
 
@@ -148,7 +147,8 @@ const SchoolClassManagement = () => {
     if (!confirm('Are you sure you want to delete this class?')) return;
     
     try {
-      const response = await fetch(`/api/school-classes/${classId}`, {
+      const response = await apiFetch(`/api/school-classes/${classId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
       });
 
@@ -162,7 +162,7 @@ const SchoolClassManagement = () => {
       }
     } catch (error) {
       console.error('Error deleting class:', error);
-      toast.error('Error deleting class');
+      toast.error(failureMessage(error, 'Error deleting class'));
     }
   };
 

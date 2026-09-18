@@ -4,6 +4,7 @@ import './MyAttendance.css';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const STATUS_OPTIONS = [
   { value: 'all', label: 'همه وضعیت‌ها' },
@@ -103,10 +104,7 @@ export default function MyAttendance() {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/api/education/my-courses`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/education/my-courses`);
       if (!data?.success) {
         setCourses([]);
         return;
@@ -133,10 +131,7 @@ export default function MyAttendance() {
         query.set('to', range.to);
       }
 
-      const res = await fetch(`${API_BASE}/api/attendance/my${query.toString() ? `?${query.toString()}` : ''}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/attendance/my${query.toString() ? `?${query.toString()}` : ''}`);
       if (!data?.success) {
         setMessage(data?.message || 'خطا در دریافت حضور و غیاب');
         setItems([]);
@@ -144,8 +139,8 @@ export default function MyAttendance() {
       }
 
       setItems(data.items || []);
-    } catch {
-      setMessage('خطا در ارتباط با سرور');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
       setItems([]);
     } finally {
       setLoading(false);

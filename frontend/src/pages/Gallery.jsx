@@ -5,6 +5,7 @@ import { PublicLayout } from '../components/public';
 import './Gallery.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch } from '../utils/apiClient';
 
 const resolveImage = (url) => {
   if (!url) return '';
@@ -23,8 +24,7 @@ export default function Gallery() {
     const loadGallery = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/api/gallery`);
-        const data = await res.json();
+        const data = await apiFetch(`${API_BASE}/api/gallery`);
         if (data?.success) {
           setItems(data.items || []);
         } else {

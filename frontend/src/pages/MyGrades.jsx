@@ -3,6 +3,7 @@ import './MyGrades.css';
 
 import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const BREAKDOWN_FIELDS = [
   { key: 'writtenScore', label: 'تحریری' },
@@ -53,8 +54,8 @@ export default function MyGrades() {
     setMessage('');
     try {
       const [response, generalResponse] = await Promise.all([
-        fetch(`${API_BASE}/api/exams/my/results`, { headers: { ...getAuthHeaders() } }),
-        fetch(`${API_BASE}/api/result-tables/my/published`, { headers: { ...getAuthHeaders() } }).catch(() => null)
+        apiFetch(`${API_BASE}/api/exams/my/results`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }),
+        apiFetch(`${API_BASE}/api/result-tables/my/published`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }).catch(() => null)
       ]);
       const data = await response.json().catch(() => ({}));
       const generalData = generalResponse ? await generalResponse.json().catch(() => ({})) : {};
@@ -68,8 +69,8 @@ export default function MyGrades() {
       setStudent(data.student || null);
       setItems(data.items || []);
       setGeneralResults(generalResponse?.ok && generalData?.success !== false ? (generalData.items || []) : []);
-    } catch {
-      setMessage('خطا در ارتباط با سرور');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
       setItems([]);
       setGeneralResults([]);
       setStudent(null);

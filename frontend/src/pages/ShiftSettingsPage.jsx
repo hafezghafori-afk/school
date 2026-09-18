@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './ShiftSettingsPage.css';
+import { apiFetch } from '../utils/apiClient';
 
 const ShiftSettingsPage = () => {
   const [shifts, setShifts] = useState([]);
@@ -26,8 +27,7 @@ const ShiftSettingsPage = () => {
   const fetchShifts = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/school-shifts/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/school-shifts/school/${schoolId}`);
       
       if (data.success) {
         setShifts(data.data);
@@ -44,8 +44,7 @@ const ShiftSettingsPage = () => {
   const fetchWeekConfig = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/school-week-config/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/school-week-config/school/${schoolId}`);
       
       if (data.success) {
         setWeekConfig(data.data);
@@ -71,7 +70,8 @@ const ShiftSettingsPage = () => {
       
       const method = editingShift ? 'PATCH' : 'POST';
       
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -111,7 +111,8 @@ const ShiftSettingsPage = () => {
       
       const method = weekConfig ? 'PATCH' : 'POST';
       
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -139,7 +140,8 @@ const ShiftSettingsPage = () => {
 
   const handleToggleShift = async (shiftId) => {
     try {
-      const response = await fetch(`/api/school-shifts/${shiftId}/toggle-status`, {
+      const response = await apiFetch(`/api/school-shifts/${shiftId}/toggle-status`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -165,7 +167,8 @@ const ShiftSettingsPage = () => {
     }
 
     try {
-      const response = await fetch(`/api/school-shifts/${shiftId}`, {
+      const response = await apiFetch(`/api/school-shifts/${shiftId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -191,7 +194,8 @@ const ShiftSettingsPage = () => {
     }
 
     try {
-      const response = await fetch(`/api/school-week-config/${weekConfig._id}/reset-default`, {
+      const response = await apiFetch(`/api/school-week-config/${weekConfig._id}/reset-default`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`

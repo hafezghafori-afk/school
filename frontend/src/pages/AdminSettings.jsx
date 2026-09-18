@@ -3,6 +3,7 @@ import './AdminSettings.css';
 import { API_BASE } from '../config/api';
 import LoginSettingsManager from '../components/LoginSettingsManager';
 import { getPrintLogoUrls, storePrintLogos } from '../utils/printLogos';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -293,8 +294,8 @@ export default function AdminSettings() {
     setLoading(true);
     try {
       const [res, websiteRes] = await Promise.all([
-        fetch(`${API_BASE}/api/settings`, { headers: { ...getAuthHeaders() } }),
-        fetch(`${API_BASE}/api/school-websites/admin/primary`, { headers: { ...getAuthHeaders() } }).catch(() => null)
+        apiFetch(`${API_BASE}/api/settings`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }),
+        apiFetch(`${API_BASE}/api/school-websites/admin/primary`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }).catch(() => null)
       ]);
       const data = await res.json();
       const websiteData = websiteRes ? await websiteRes.json().catch(() => ({})) : {};
@@ -323,8 +324,8 @@ export default function AdminSettings() {
       storePrintLogos(nextSettings);
       setAccessDenied(false);
       setMessage('');
-    } catch {
-      setMessage('خطا در اتصال به سرور');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در اتصال به سرور'));
       setSettings(null);
     } finally {
       setLoading(false);
@@ -386,7 +387,8 @@ export default function AdminSettings() {
       ministryLogoUrl: nextSettings.ministryLogoUrl || websiteProfile.ministryLogoUrl || '',
       departmentLogoUrl: nextSettings.departmentLogoUrl || websiteProfile.departmentLogoUrl || ''
     });
-    const websiteRes = await fetch(`${API_BASE}/api/school-websites/admin/${websiteProfile.schoolId}`, {
+    const websiteRes = await apiFetch(`${API_BASE}/api/school-websites/admin/${websiteProfile.schoolId}`, {
+      parse: 'response', rejectOnHttpError: false,
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -413,7 +415,8 @@ export default function AdminSettings() {
         if (!uploadedSettings) return;
         settingsToSave = uploadedSettings;
       }
-      const res = await fetch(`${API_BASE}/api/settings`, {
+      const res = await apiFetch(`${API_BASE}/api/settings`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -437,8 +440,8 @@ export default function AdminSettings() {
       setRootDraft({});
       storePrintLogos(normalized);
       setMessage(successText);
-    } catch {
-      setMessage('خطا در ذخیره تنظیمات');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ذخیره تنظیمات'));
     } finally {
       setSaving(false);
     }
@@ -456,7 +459,8 @@ export default function AdminSettings() {
       if (officialLogoFiles.schoolLogo) formData.append('schoolLogo', officialLogoFiles.schoolLogo);
       if (officialLogoFiles.ministryLogo) formData.append('ministryLogo', officialLogoFiles.ministryLogo);
       if (officialLogoFiles.departmentLogo) formData.append('departmentLogo', officialLogoFiles.departmentLogo);
-      const res = await fetch(`${API_BASE}/api/settings/assets`, {
+      const res = await apiFetch(`${API_BASE}/api/settings/assets`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { ...getAuthHeaders() },
         body: formData
@@ -478,8 +482,8 @@ export default function AdminSettings() {
       await syncWebsiteLogosFromSettings(normalized);
       if (!quiet) setMessage('لوگوهای رسمی فرم‌ها و گزارش‌ها ذخیره شد.');
       return normalized;
-    } catch {
-      setMessage('خطا در بارگذاری لوگوها');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در بارگذاری لوگوها'));
       return null;
     } finally {
       if (!keepSaving) setSaving(false);
@@ -643,7 +647,8 @@ export default function AdminSettings() {
     setWebsiteBusy(true);
     setMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/school-websites/admin/${websiteProfile.schoolId}`, {
+      const res = await apiFetch(`${API_BASE}/api/school-websites/admin/${websiteProfile.schoolId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -659,8 +664,8 @@ export default function AdminSettings() {
       setWebsiteProfile(normalizeWebsiteProfile(data.profile));
       setRowsDraft({});
       setMessage('محتوای وب‌سایت مکتب ذخیره شد.');
-    } catch {
-      setMessage('خطا در ذخیره محتوای وب‌سایت مکتب.');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ذخیره محتوای وب‌سایت مکتب.'));
     } finally {
       setWebsiteBusy(false);
     }
@@ -672,7 +677,8 @@ export default function AdminSettings() {
     setMessage('');
     try {
       const targetLanguages = WEBSITE_LANGUAGES.map((item) => item.key).filter((key) => key !== websiteLanguage);
-      const res = await fetch(`${API_BASE}/api/school-websites/admin/${websiteProfile.schoolId}/translate`, {
+      const res = await apiFetch(`${API_BASE}/api/school-websites/admin/${websiteProfile.schoolId}/translate`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -688,8 +694,8 @@ export default function AdminSettings() {
       setWebsiteProfile(normalizeWebsiteProfile(data.profile));
       setRowsDraft({});
       setMessage(overwrite ? 'ترجمه خودکار انجام شد و زبان‌های مقصد بازنویسی شدند.' : 'ترجمه خودکار فیلدهای خالی انجام شد.');
-    } catch {
-      setMessage('خطا در ترجمه خودکار محتوای وب‌سایت.');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ترجمه خودکار محتوای وب‌سایت.'));
     } finally {
       setWebsiteBusy(false);
     }

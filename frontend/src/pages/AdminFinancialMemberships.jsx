@@ -15,6 +15,7 @@ import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { getStudentAsasNumber, studentMatchesSearch } from '../utils/studentSearch';
 import { readStoredSchoolId } from './adminWorkspaceUtils';
 import './AdminFinancialMemberships.css';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const getDefaultForm = () => ({
   studentId: '',
@@ -90,14 +91,15 @@ export default function AdminFinancialMemberships() {
     const fetchMemberships = useCallback(async () => {
       setLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/api/finance/admin/student-memberships`, {
+        const res = await apiFetch(`${API_BASE}/api/finance/admin/student-memberships`, {
+          parse: 'response', rejectOnHttpError: false,
           credentials: 'include',
           headers: { ...getAuthHeaders() }
         });
         const data = await res.json();
         setMemberships(data.items || []);
-      } catch {
-        setMessage('خطا در دریافت لیست عضویت‌ها');
+      } catch (error) {
+        setMessage(failureMessage(error, 'خطا در دریافت لیست عضویت‌ها'));
       } finally {
         setLoading(false);
       }
@@ -160,7 +162,8 @@ export default function AdminFinancialMemberships() {
 
       setMessage('');
       try {
-        const res = await fetch(`${API_BASE}/api/finance/admin/student-memberships/${membershipId}`, {
+        const res = await apiFetch(`${API_BASE}/api/finance/admin/student-memberships/${membershipId}`, {
+          parse: 'response', rejectOnHttpError: false,
           method: 'DELETE',
           headers: { ...getAuthHeaders() },
           credentials: 'include'
@@ -170,7 +173,7 @@ export default function AdminFinancialMemberships() {
         setMessage('عضویت با موفقیت حذف شد');
         await fetchMemberships();
       } catch (err) {
-        setMessage(err.message || 'خطا در حذف عضویت');
+        setMessage(failureMessage(error, 'خطا در حذف عضویت'));
       }
     };
 
@@ -203,7 +206,8 @@ export default function AdminFinancialMemberships() {
         const endpoint = isEditing
           ? `${API_BASE}/api/finance/admin/student-memberships/${editingMembershipId}`
           : `${API_BASE}/api/finance/admin/student-memberships`;
-        const res = await fetch(endpoint, {
+        const res = await apiFetch(endpoint, {
+          parse: 'response', rejectOnHttpError: false,
           method: isEditing ? 'PUT' : 'POST',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           credentials: 'include',
@@ -221,7 +225,7 @@ export default function AdminFinancialMemberships() {
         setMessage(successMessage);
         await fetchMemberships();
       } catch (err) {
-        setMessage(err.message || 'خطا در ذخیره عضویت');
+        setMessage(failureMessage(error, 'خطا در ذخیره عضویت'));
       }
       setFormLoading(false);
     };
@@ -230,7 +234,8 @@ export default function AdminFinancialMemberships() {
     // Fetch reference data (students, years, classes)
     useEffect(() => {
       setLoading(true);
-      fetch(`${API_BASE}/api/finance/admin/reference-data`, {
+      apiFetch(`${API_BASE}/api/finance/admin/reference-data`, {
+        parse: 'response', rejectOnHttpError: false,
         credentials: 'include',
         headers: { ...getAuthHeaders() }
       })
@@ -248,7 +253,7 @@ export default function AdminFinancialMemberships() {
           setAcademicYears(data.academicYears || []);
           setClasses(data.classes || []);
         })
-        .catch((err) => setMessage(err.message || 'خطا در دریافت اطلاعات مرجع'))
+        .catch((err) => setMessage(failureMessage(error, 'خطا در دریافت اطلاعات مرجع')))
         .finally(() => setLoading(false));
     }, []);
 

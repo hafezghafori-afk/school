@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import './AcademicTermsPage.css';
+import { apiFetch } from '../utils/apiClient';
 
 const AcademicTermsPage = () => {
   const [academicYears, setAcademicYears] = useState([]);
@@ -45,8 +46,7 @@ const AcademicTermsPage = () => {
     try {
       // Mock school ID - in real app, get from context/auth
       const schoolId = '507f1f77bcf86cd799439011';
-      const response = await fetch(`/api/academic-years/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/academic-years/school/${schoolId}`);
       
       if (data.success) {
         setAcademicYears(data.data);
@@ -67,8 +67,7 @@ const AcademicTermsPage = () => {
     
     try {
       setLoading(true);
-      const response = await fetch(`/api/academic-terms/academic-year/${selectedYear}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/academic-terms/academic-year/${selectedYear}`);
       
       if (data.success) {
         setTerms(data.data);
@@ -94,7 +93,8 @@ const AcademicTermsPage = () => {
       
       const method = editingTerm ? 'PATCH' : 'POST';
       
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -128,7 +128,8 @@ const AcademicTermsPage = () => {
     setSuccess('');
 
     try {
-      const response = await fetch(`/api/academic-terms/academic-year/${selectedYear}/generate-terms`, {
+      const response = await apiFetch(`/api/academic-terms/academic-year/${selectedYear}/generate-terms`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -154,7 +155,8 @@ const AcademicTermsPage = () => {
 
   const handleActivate = async (termId) => {
     try {
-      const response = await fetch(`/api/academic-terms/${termId}/activate`, {
+      const response = await apiFetch(`/api/academic-terms/${termId}/activate`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -176,7 +178,8 @@ const AcademicTermsPage = () => {
 
   const handleClose = async (termId) => {
     try {
-      const response = await fetch(`/api/academic-terms/${termId}/close`, {
+      const response = await apiFetch(`/api/academic-terms/${termId}/close`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -202,7 +205,8 @@ const AcademicTermsPage = () => {
     }
 
     try {
-      const response = await fetch(`/api/academic-terms/${termId}`, {
+      const response = await apiFetch(`/api/academic-terms/${termId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`

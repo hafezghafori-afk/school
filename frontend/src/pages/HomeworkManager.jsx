@@ -4,6 +4,7 @@ import './HomeworkManager.css';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -104,10 +105,7 @@ export default function HomeworkManager() {
     try {
       const role = String(localStorage.getItem('role') || '').trim().toLowerCase();
       const isInstructor = role === 'instructor';
-      const res = await fetch(`${API_BASE}${isInstructor ? '/api/education/instructor/courses' : '/api/education/school-classes?status=active'}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}${isInstructor ? '/api/education/instructor/courses' : '/api/education/school-classes?status=active'}`);
       if (!data?.success) {
         setCourses([]);
         setCourseId('');
@@ -147,10 +145,7 @@ export default function HomeworkManager() {
         return;
       }
 
-      const res = await fetch(`${API_BASE}${routePath}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}${routePath}`);
       const nextItems = data?.items || [];
       setItems(nextItems);
       setSelectedReviewHomeworkId((prev) => (
@@ -163,8 +158,8 @@ export default function HomeworkManager() {
         setForm(emptyForm);
         setFormFileKey((prev) => prev + 1);
       }
-    } catch {
-      setMessage('خطا در دریافت کارخانگی');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در دریافت کارخانگی'));
       setItems([]);
       setSelectedReviewHomeworkId('');
     } finally {
@@ -179,14 +174,11 @@ export default function HomeworkManager() {
     setLoadingSubmissionsId(homeworkId);
     setMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/homeworks/${homeworkId}/submissions`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/homeworks/${homeworkId}/submissions`);
       setSubmissions((prev) => ({ ...prev, [homeworkId]: data?.items || [] }));
-    } catch {
+    } catch (error) {
       setSubmissions((prev) => ({ ...prev, [homeworkId]: [] }));
-      setMessage('خطا در دریافت تحویل‌ها');
+      setMessage(failureMessage(error, 'خطا در دریافت تحویل‌ها'));
     } finally {
       setLoadingSubmissionsId('');
     }
@@ -243,9 +235,10 @@ export default function HomeworkManager() {
       if (form.attachment) body.append('attachment', form.attachment);
 
       const isEditing = Boolean(editingHomeworkId);
-      const res = await fetch(
+      const res = await apiFetch(
         `${API_BASE}/api/homeworks/${isEditing ? editingHomeworkId : 'create'}`,
         {
+          parse: 'response', rejectOnHttpError: false,
           method: isEditing ? 'PUT' : 'POST',
           headers: { ...getAuthHeaders() },
           body
@@ -279,7 +272,8 @@ export default function HomeworkManager() {
     setDeletingHomeworkId(id);
     setMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/homeworks/${id}`, {
+      const res = await apiFetch(`${API_BASE}/api/homeworks/${id}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: { ...getAuthHeaders() }
       });
@@ -299,8 +293,8 @@ export default function HomeworkManager() {
         resetForm();
       }
       await loadHomeworks(courseId);
-    } catch {
-      setMessage('خطا در حذف کارخانگی');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در حذف کارخانگی'));
     } finally {
       setDeletingHomeworkId('');
     }
@@ -343,7 +337,8 @@ export default function HomeworkManager() {
     setGradingBusyId(submissionId);
     setMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/homeworks/${homeworkId}/grade`, {
+      const res = await apiFetch(`${API_BASE}/api/homeworks/${homeworkId}/grade`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
@@ -360,8 +355,8 @@ export default function HomeworkManager() {
 
       setMessage('نتیجه بررسی ثبت شد.');
       await loadSubmissions(homeworkId, { force: true });
-    } catch {
-      setMessage('خطا در ثبت نتیجه بررسی');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ثبت نتیجه بررسی'));
     } finally {
       setGradingBusyId('');
     }

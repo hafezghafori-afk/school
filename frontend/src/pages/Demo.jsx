@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { API_BASE } from '../config/api';
 import { persistAuthSession } from '../utils/authSession';
 import './Demo.css';
+import { apiFetch } from '../utils/apiClient';
 
 const DEMO_API_BASE = (import.meta.env.VITE_DEMO_API_BASE || API_BASE || '').replace(/\/+$/, '');
 
@@ -69,7 +70,8 @@ export default function Demo() {
     setStatus({ tone: '', text: '' });
 
     try {
-      const response = await fetch(`${DEMO_API_BASE}/api/auth/demo-login`, {
+      const response = await apiFetch(`${DEMO_API_BASE}/api/auth/demo-login`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: role.key })

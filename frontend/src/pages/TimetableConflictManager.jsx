@@ -13,6 +13,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const TimetableConflictManager = () => {
   const [conflicts, setConflicts] = useState([]);
@@ -72,8 +73,7 @@ const TimetableConflictManager = () => {
 
   const fetchAcademicYears = async () => {
     try {
-      const response = await fetch(`/api/academic-years/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/academic-years/school/${schoolId}`);
       
       if (data.success) {
         setAcademicYears(data.data.filter(year => year.status === 'active'));
@@ -88,8 +88,7 @@ const TimetableConflictManager = () => {
 
   const fetchShifts = async () => {
     try {
-      const response = await fetch(`/api/shifts/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/shifts/school/${schoolId}`);
       
       if (data.success) {
         setShifts(data.data);
@@ -107,8 +106,7 @@ const TimetableConflictManager = () => {
 
     setLoading(true);
     try {
-      const response = await fetch(`/api/timetable/conflicts/${schoolId}?academicYearId=${selectedAcademicYear}&shiftId=${selectedShift}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/timetable/conflicts/${schoolId}?academicYearId=${selectedAcademicYear}&shiftId=${selectedShift}`);
       
       if (data.success) {
         setConflicts(data.data.conflicts);
@@ -117,7 +115,7 @@ const TimetableConflictManager = () => {
       }
     } catch (error) {
       console.error('Error fetching conflicts:', error);
-      toast.error('دریافت تداخل‌ها ناموفق بود.');
+      toast.error(failureMessage(error, 'دریافت تداخل‌ها ناموفق بود.'));
     } finally {
       setLoading(false);
     }
@@ -133,7 +131,7 @@ const TimetableConflictManager = () => {
       fetchConflicts();
     } catch (error) {
       console.error('Error resolving conflict:', error);
-      toast.error('حل تداخل ناموفق بود.');
+      toast.error(failureMessage(error, 'حل تداخل ناموفق بود.'));
     } finally {
       setResolvingConflict(null);
     }

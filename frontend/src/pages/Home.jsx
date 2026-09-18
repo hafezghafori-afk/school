@@ -5,6 +5,7 @@ import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
 import { normalizeCardList, normalizeStats, normalizeHighlights } from '../utils/publicContent';
 import './Home.css';
+import { apiFetch } from '../utils/apiClient';
 
 const features = [
   {
@@ -99,7 +100,7 @@ export default function Home() {
   const [newsItems, setNewsItems] = useState(null);
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/api/news`)
+    apiFetch(`${API_BASE}/api/news`, { parse: 'response', rejectOnHttpError: false })
       .then((res) => res.json())
       .then((data) => {
         if (cancelled) return;

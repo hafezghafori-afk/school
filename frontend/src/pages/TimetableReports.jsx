@@ -17,6 +17,7 @@ import {
   Settings
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const isValidObjectId = (value = '') => /^[a-f\d]{24}$/i.test(String(value || '').trim());
 
@@ -110,8 +111,7 @@ const TimetableReports = () => {
 
   const fetchClasses = async () => {
     try {
-      const response = await fetch(`/api/school-classes/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/school-classes/school/${schoolId}`);
       
       if (data.success) {
         setClasses(data.data);
@@ -123,8 +123,7 @@ const TimetableReports = () => {
 
   const fetchTeachers = async () => {
     try {
-      const response = await fetch(`/api/users/school/${schoolId}?role=teacher`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/users/school/${schoolId}?role=teacher`);
       
       if (data.success) {
         setTeachers(data.data);
@@ -136,8 +135,7 @@ const TimetableReports = () => {
 
   const fetchAcademicYears = async () => {
     try {
-      const response = await fetch(`/api/academic-years/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/academic-years/school/${schoolId}`);
       
       if (data.success) {
         setAcademicYears(data.data.filter(year => year.status === 'active'));
@@ -152,8 +150,7 @@ const TimetableReports = () => {
 
   const fetchShifts = async () => {
     try {
-      const response = await fetch(`/api/shifts/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/shifts/school/${schoolId}`);
       
       if (data.success) {
         setShifts(data.data);
@@ -198,8 +195,7 @@ const TimetableReports = () => {
           url = `/api/reports/${selectedReportType}?schoolId=${schoolId}&academicYearId=${selectedAcademicYear}&shiftId=${selectedShift}&target=${selectedTarget}`;
       }
 
-      const response = await fetch(url);
-      const data = await response.json();
+      const data = await apiFetch(url);
       
       if (data.success) {
         setPreviewData(data.data);
@@ -210,7 +206,7 @@ const TimetableReports = () => {
       }
     } catch (error) {
       console.error('Error generating report:', error);
-      toast.error('ساخت گزارش ناموفق بود.');
+      toast.error(failureMessage(error, 'ساخت گزارش ناموفق بود.'));
     } finally {
       setLoading(false);
     }

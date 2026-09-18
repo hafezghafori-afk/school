@@ -5,6 +5,7 @@ import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
 import { studentMatchesSearch } from '../utils/studentSearch';
+import { apiFetch } from '../utils/apiClient';
 
 const COMPONENT_FIELDS = [
   { key: 'writtenScore', maxKey: 'writtenMax', label: 'تحریری' },
@@ -250,7 +251,8 @@ async function fetchJson(url, options = {}) {
   if (options.body) {
     headers['Content-Type'] = headers['Content-Type'] || 'application/json';
   }
-  const response = await fetch(url, {
+  const response = await apiFetch(url, {
+    parse: 'response', rejectOnHttpError: false,
     ...options,
     headers
   });
@@ -262,7 +264,7 @@ async function fetchJson(url, options = {}) {
 }
 
 async function fetchBinary(url, responseType = 'blob') {
-  const response = await fetch(url, { headers: { ...getAuthHeaders() } });
+  const response = await apiFetch(url, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data?.message || 'request_failed');

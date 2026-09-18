@@ -8,6 +8,7 @@ import { Checkbox } from '../components/ui/checkbox';
 import { Badge } from '../components/ui/badge';
 import { Trash2, Edit, Plus, BookOpen, Beaker, Monitor, Dumbbell } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const SubjectManagement = () => {
   const [subjects, setSubjects] = useState([]);
@@ -57,8 +58,7 @@ const SubjectManagement = () => {
 
   const fetchSubjects = async () => {
     try {
-      const response = await fetch(`/api/subjects/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/subjects/school/${schoolId}`);
       
       if (data.success) {
         setSubjects(data.data);
@@ -67,7 +67,7 @@ const SubjectManagement = () => {
       }
     } catch (error) {
       console.error('Error fetching subjects:', error);
-      toast.error('Error fetching subjects');
+      toast.error(failureMessage(error, 'Error fetching subjects'));
     } finally {
       setLoading(false);
     }
@@ -83,7 +83,8 @@ const SubjectManagement = () => {
       
       const method = editingSubject ? 'PUT' : 'POST';
       
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -104,7 +105,7 @@ const SubjectManagement = () => {
       }
     } catch (error) {
       console.error('Error saving subject:', error);
-      toast.error('Error saving subject');
+      toast.error(failureMessage(error, 'Error saving subject'));
     }
   };
 
@@ -133,7 +134,8 @@ const SubjectManagement = () => {
     if (!confirm('Are you sure you want to delete this subject?')) return;
     
     try {
-      const response = await fetch(`/api/subjects/${subjectId}`, {
+      const response = await apiFetch(`/api/subjects/${subjectId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
       });
 
@@ -147,7 +149,7 @@ const SubjectManagement = () => {
       }
     } catch (error) {
       console.error('Error deleting subject:', error);
-      toast.error('Error deleting subject');
+      toast.error(failureMessage(error, 'Error deleting subject'));
     }
   };
 

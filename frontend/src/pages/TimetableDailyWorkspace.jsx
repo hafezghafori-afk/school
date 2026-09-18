@@ -10,6 +10,7 @@ import {
   writeDailyTimetableDraft
 } from '../utils/dailyTimetableDraft';
 import './TimetableDailyWorkspace.css';
+import { apiFetch } from '../utils/apiClient';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -45,7 +46,8 @@ export default function TimetableDailyWorkspace({
     }
 
     try {
-      const response = await fetch('/api/timetables/daily-draft', {
+      const response = await apiFetch('/api/timetables/daily-draft', {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -86,7 +88,8 @@ export default function TimetableDailyWorkspace({
     }
 
     try {
-      const response = await fetch('/api/timetables/daily-draft/publish', {
+      const response = await apiFetch('/api/timetables/daily-draft/publish', {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -122,7 +125,8 @@ export default function TimetableDailyWorkspace({
     if (!canPersistDraft) return;
 
     try {
-      const response = await fetch(`/api/timetables/daily-draft?schoolId=${encodeURIComponent(schoolId)}`, {
+      const response = await apiFetch(`/api/timetables/daily-draft?schoolId=${encodeURIComponent(schoolId)}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: { ...getAuthHeaders() }
       });
@@ -151,13 +155,11 @@ export default function TimetableDailyWorkspace({
 
     const loadCollection = async (primaryPath, fallbackPath = '') => {
       try {
-        const response = await fetch(primaryPath, { headers: { ...getAuthHeaders() } });
-        const data = await response.json();
+        const data = await apiFetch(primaryPath);
         let items = extractCollectionItems(data);
 
         if (!items.length && fallbackPath && schoolId !== 'default-school-id') {
-          const fallbackResponse = await fetch(fallbackPath, { headers: { ...getAuthHeaders() } });
-          const fallbackData = await fallbackResponse.json();
+          const fallbackData = await apiFetch(fallbackPath);
           items = extractCollectionItems(fallbackData);
         }
 
@@ -202,10 +204,7 @@ export default function TimetableDailyWorkspace({
       if (!canPersistDraft) return localDraft;
 
       try {
-        const response = await fetch(`/api/timetables/daily-draft?schoolId=${encodeURIComponent(schoolId)}`, {
-          headers: { ...getAuthHeaders() }
-        });
-        const data = await response.json();
+        const data = await apiFetch(`/api/timetables/daily-draft?schoolId=${encodeURIComponent(schoolId)}`);
 
         if (response.ok && data?.success && data?.item) {
           return writeDailyTimetableDraft(data.item);

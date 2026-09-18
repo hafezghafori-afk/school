@@ -9,6 +9,7 @@ import TaskAlertPanel from '../components/dashboard/TaskAlertPanel';
 import TrendBars from '../components/dashboard/TrendBars';
 import { API_BASE } from '../config/api';
 import { formatAfghanDateTime } from '../utils/afghanDate';
+import { apiFetch } from '../utils/apiClient';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -19,7 +20,7 @@ const getName = () => localStorage.getItem('userName') || 'مدیر محترم';
 
 const safeFetchJson = async (url) => {
   try {
-    const response = await fetch(url, { headers: { ...getAuthHeaders() } });
+    const response = await apiFetch(url, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } });
     return await response.json().catch(() => ({}));
   } catch {
     return { success: false };

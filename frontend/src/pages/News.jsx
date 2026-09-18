@@ -6,6 +6,7 @@ import './News.css';
 
 import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
+import { apiFetch } from '../utils/apiClient';
 
 const tabs = [
   { key: 'all', label: 'همه' },
@@ -54,8 +55,7 @@ export default function News() {
         const url = active === 'all'
           ? `${API_BASE}/api/news`
           : `${API_BASE}/api/news?category=${active}`;
-        const res = await fetch(url);
-        const data = await res.json();
+        const data = await apiFetch(url);
         if (data?.success) {
           setItems(data.items || []);
         } else {

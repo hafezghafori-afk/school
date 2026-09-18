@@ -6,6 +6,7 @@ import useExpandableList from '../hooks/useExpandableList';
 import { formatFinanceCode } from '../utils/latinFinanceCode';
 import { getStudentAsasNumber, studentMatchesSearch } from '../utils/studentSearch';
 import { errorMessage as describeError, fetchText, openHtmlDocument } from './adminWorkspaceUtils';
+import { apiFetch } from '../utils/apiClient';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -31,7 +32,8 @@ function formatMoney(value, currency = 'AFN') {
 }
 
 async function fetchJson(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await apiFetch(`${API_BASE}${path}`, {
+    parse: 'response', rejectOnHttpError: false,
     headers: {
       ...getAuthHeaders(),
       ...(options.body ? { 'content-type': 'application/json' } : {})

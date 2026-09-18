@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import './CourseDetails.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 export default function CourseDetails() {
   const { id } = useParams();
@@ -30,8 +31,7 @@ export default function CourseDetails() {
 
   const loadCourse = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/education/public-school-classes/${id}`);
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/education/public-school-classes/${id}`);
       if (!data?.success) {
         setMessage(data?.message || 'صنف پیدا نشد.');
         setCourse(null);
@@ -39,8 +39,8 @@ export default function CourseDetails() {
       }
       setCourse(data.item);
       setMessage('');
-    } catch {
-      setMessage('خطا در دریافت صنف');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در دریافت صنف'));
       setCourse(null);
     }
   };
@@ -53,7 +53,8 @@ export default function CourseDetails() {
     const loadJoinStatus = async () => {
       if (!canRequestJoin || !course || !membershipTargetId) return;
       try {
-        const res = await fetch(`${API_BASE}/api/education/course-access-status/${membershipTargetId}`, {
+        const res = await apiFetch(`${API_BASE}/api/education/course-access-status/${membershipTargetId}`, {
+          parse: 'response', rejectOnHttpError: false,
           headers: { Authorization: `Bearer ${token}` }
         });
         const data = await res.json();
@@ -74,7 +75,8 @@ export default function CourseDetails() {
     setJoinBusy(true);
     setJoinMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/education/join-requests`, {
+      const res = await apiFetch(`${API_BASE}/api/education/join-requests`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

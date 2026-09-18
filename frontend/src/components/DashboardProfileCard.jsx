@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './DashboardProfileCard.css';
+import { apiFetch } from '../utils/apiClient';
 
 const roleLabel = (user = {}) => {
   const orgRole = String(user?.orgRole || '').trim().toLowerCase();
@@ -117,7 +118,8 @@ export default function DashboardProfileCard({
       try {
         setTeacherAssignmentsLoading(true);
         setTeacherAssignmentsError('');
-        const response = await fetch(`${normalizedApiBase}/api/teacher-assignments/teacher/${encodeURIComponent(teacherId)}`, {
+        const response = await apiFetch(`${normalizedApiBase}/api/teacher-assignments/teacher/${encodeURIComponent(teacherId)}`, {
+          parse: 'response', rejectOnHttpError: false,
           headers: { ...getAuthHeaders() }
         });
         const data = await response.json().catch(() => ({}));

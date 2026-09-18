@@ -5,6 +5,7 @@ import './AdminContent.css';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDateTime } from '../utils/afghanDate';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -143,18 +144,15 @@ export default function AdminLogs() {
   const loadItems = async () => {
     try {
       const query = toQuery();
-      const res = await fetch(`${API_BASE}/api/admin-logs${query ? `?${query}` : ''}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/admin-logs${query ? `?${query}` : ''}`);
       if (!data?.success) {
         setMessage('خطا در دریافت لاگ‌ها');
         return;
       }
       setItems(data.items || []);
       setMessage('');
-    } catch {
-      setMessage('خطا در ارتباط با سرور');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
     }
   };
 
@@ -167,7 +165,7 @@ export default function AdminLogs() {
     const token = localStorage.getItem('token') || '';
     const query = toQuery();
     const url = `${API_BASE}/api/admin-logs/export.csv${query ? `?${query}` : ''}`;
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    apiFetch(url, { parse: 'response', rejectOnHttpError: false, headers: { Authorization: `Bearer ${token}` } })
       .then((res) => res.blob())
       .then((blob) => {
         const link = document.createElement('a');

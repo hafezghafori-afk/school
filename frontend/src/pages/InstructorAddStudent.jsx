@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import './InstructorAddStudent.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -27,7 +28,8 @@ export default function InstructorAddStudent() {
     setMessage('');
 
     try {
-      const res = await fetch(`${API_BASE}/api/users/create-student`, {
+      const res = await apiFetch(`${API_BASE}/api/users/create-student`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(form)
@@ -40,8 +42,8 @@ export default function InstructorAddStudent() {
 
       setMessage('شاگرد جدید با موفقیت ایجاد شد.');
       setForm({ name: '', email: '', password: '', grade: '', subject: '' });
-    } catch {
-      setMessage('در زمان ایجاد شاگرد خطا رخ داد.');
+    } catch (error) {
+      setMessage(failureMessage(error, 'در زمان ایجاد شاگرد خطا رخ داد.'));
     }
   };
 

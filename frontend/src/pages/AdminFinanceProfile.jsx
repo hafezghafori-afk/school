@@ -5,6 +5,7 @@ import { formatAfghanDate } from '../utils/afghanDate';
 import { formatFinanceCode } from '../utils/latinFinanceCode';
 import { readStoredSchoolId } from './adminWorkspaceUtils';
 import './AdminFinanceProfile.css';
+import { apiFetch } from '../utils/apiClient';
 
 const OPEN_ORDER_STATUSES = new Set(['new', 'partial', 'overdue']);
 const STATUS_LABELS = {
@@ -152,7 +153,7 @@ const getHeaders = () => {
 };
 
 const loadJson = async (url, signal) => {
-  const response = await fetch(url, { headers: getHeaders(), signal });
+  const response = await apiFetch(url, { parse: 'response', rejectOnHttpError: false, headers: getHeaders(), signal });
   const contentType = String(response.headers.get('content-type') || '').toLowerCase();
   if (!contentType.includes('application/json')) {
     throw new Error('مسیر معلومات مالی روی Backend فعال نیست.');

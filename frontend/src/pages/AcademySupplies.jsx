@@ -5,6 +5,7 @@ import { studentMatchesSearch } from '../utils/studentSearch';
 import './AcademySupplies.css';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanStoredDateLabel } from '../utils/afghanDate';
+import { apiFetch } from '../utils/apiClient';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -45,7 +46,8 @@ const getAuthHeaders = () => {
 };
 
 async function requestJson(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await apiFetch(`${API_BASE}${path}`, {
+    parse: 'response', rejectOnHttpError: false,
     ...options,
     headers: {
       ...getAuthHeaders(),

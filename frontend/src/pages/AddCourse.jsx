@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import './AddCourse.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -33,7 +34,8 @@ export default function AddCourse() {
       if (form.video) body.append('video', form.video);
       if (form.pdf) body.append('pdf', form.pdf);
 
-      const res = await fetch(`${API_BASE}/api/courses/add`, {
+      const res = await apiFetch(`${API_BASE}/api/courses/add`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { ...getAuthHeaders() },
         body
@@ -45,8 +47,8 @@ export default function AddCourse() {
       }
       setMessage('صنف با موفقیت ثبت شد.');
       setForm({ title: '', description: '', price: '', grade: '', subject: '', video: null, pdf: null });
-    } catch {
-      setMessage('خطا در ثبت صنف');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ثبت صنف'));
     }
   };
 

@@ -11,6 +11,7 @@ import {
 } from '../utils/dailyTimetableDraft';
 import '../styles/timetable-print.css';
 import './TimetableAudienceView.css';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const WEEK_DAYS = [
   { value: 'saturday', label: 'شنبه' },
@@ -77,9 +78,9 @@ export default function TeacherTimetableView() {
       setLoading(true);
       try {
         const [meRes, yearsRes, shiftsRes] = await Promise.all([
-          fetch('/api/users/me', { headers: { ...getAuthHeaders() } }),
-          fetch(`/api/academic-years/school/${schoolId}`, { headers: { ...getAuthHeaders() } }),
-          fetch(`/api/shifts/school/${schoolId}`, { headers: { ...getAuthHeaders() } })
+          apiFetch('/api/users/me', { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }),
+          apiFetch(`/api/academic-years/school/${schoolId}`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }),
+          apiFetch(`/api/shifts/school/${schoolId}`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } })
         ]);
 
         const [meData, yearsData, shiftsData] = await Promise.all([
@@ -104,7 +105,7 @@ export default function TeacherTimetableView() {
         if (nextShifts.length > 0) setSelectedShift(nextShifts[0]._id);
       } catch (error) {
         console.error('Error loading teacher timetable bootstrap:', error);
-        toast.error('بارگذاری اولیه ناموفق بود.');
+        toast.error(failureMessage(error, 'بارگذاری اولیه ناموفق بود.'));
       } finally {
         setLoading(false);
       }
@@ -126,8 +127,8 @@ export default function TeacherTimetableView() {
           : '';
 
         const [response, publishedResponse] = await Promise.all([
-          fetch(url, { headers: { ...getAuthHeaders() } }),
-          publishedUrl ? fetch(publishedUrl, { headers: { ...getAuthHeaders() } }) : Promise.resolve(null)
+          apiFetch(url, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }),
+          publishedUrl ? apiFetch(publishedUrl, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }) : Promise.resolve(null)
         ]);
 
         const data = await response.json();
@@ -167,7 +168,7 @@ export default function TeacherTimetableView() {
         setSlotRows(buildWeeklySlotRowsFromDailyDraft(publishedItem));
       } catch (error) {
         console.error('Error loading teacher timetable:', error);
-        toast.error('دریافت تقسیم اوقات استاد ناموفق بود.');
+        toast.error(failureMessage(error, 'دریافت تقسیم اوقات استاد ناموفق بود.'));
         setSlotRows(SLOT_ROWS);
       } finally {
         setLoading(false);

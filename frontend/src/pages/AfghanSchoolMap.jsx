@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './AfghanSchoolMap.css';
+import { apiFetch } from '../utils/apiClient';
 
 const AfghanSchoolMap = () => {
   const navigate = useNavigate();
@@ -123,8 +124,7 @@ const AfghanSchoolMap = () => {
       if (selectedSchoolType !== 'all') params.append('schoolType', selectedSchoolType);
       if (selectedOwnership !== 'all') params.append('ownership', selectedOwnership);
       
-      const response = await fetch(`/api/afghan-schools/map-data?${params}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/afghan-schools/map-data?${params}`);
       
       if (data.success) {
         setSchools(data.data);
