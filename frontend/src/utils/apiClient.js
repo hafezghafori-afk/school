@@ -308,12 +308,11 @@ export const apiFetch = async (path, options = {}) => {
     // connection reporting.
     //
     // This opt-out covers 4xx only. A 4xx is the backend understanding the
-    // request and rejecting it, so its body is the page's own business to read.
-    // A 5xx is not: it carries no verdict about the request, and handing one to
-    // a page's `if (!data.success)` branch is how the login form came to answer
-    // a dead server with «ایمیل/نام کاربری یا رمز عبور درست نیست» — telling
-    // people their password is wrong when nothing had checked it. Server errors
-    // therefore always throw, and land in the catch as what they are.
+    // request and rejecting it, so its body is the page's own verdict to read.
+    // A 5xx carries no verdict at all, and a page's `if (!data.success)` branch
+    // cannot tell the two apart — it would dress a crashed request up in
+    // whatever wording that branch uses for a rejected one. Server errors
+    // therefore always throw and land in the catch as what they are.
     rejectOnHttpError = true,
     ...rest
   } = options;
