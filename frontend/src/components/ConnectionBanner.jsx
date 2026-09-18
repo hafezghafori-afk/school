@@ -13,41 +13,103 @@ import './ConnectionBanner.css';
 
 const PROGRESS_DELAY_MS = 220;
 const RECHECK_MS = 6000;
+const CREEP_TICK_MS = 300;
+const PATIENCE_MS = 6000;
+// Never let the bar sit at 100% while work is still outstanding — a full bar
+// that keeps waiting is what makes people think the page has hung.
+const CEILING = 92;
 
 /**
- * Indeterminate bar pinned to the top of the window whenever any request is in
- * flight. Held back briefly so quick calls don't make the UI flicker.
+ * Progress for a burst of requests, plus a labelled pill.
+ *
+ * A bare sweeping line was not read as "data is loading": it carries no words
+ * and shows no progress, so a page opening 28 requests looked exactly like one
+ * opening a single slow one. This tracks the busiest moment of a burst and
+ * reports how much of it has come back, which turns the same signal into
+ * something that visibly advances — and says so in words.
  */
 export function GlobalProgressBar() {
   const [visible, setVisible] = useState(false);
-  const timerRef = useRef(null);
+  const [progress, setProgress] = useState(0);
+  const [waitedLong, setWaitedLong] = useState(false);
+
+  const showTimerRef = useRef(null);
+  const peakRef = useRef(0);
+  const inFlightRef = useRef(0);
+  const startedAtRef = useRef(0);
 
   useEffect(() => subscribeToRequestActivity((inFlight) => {
+    inFlightRef.current = inFlight;
+
     if (inFlight > 0) {
-      if (timerRef.current || visible) return;
-      timerRef.current = window.setTimeout(() => {
-        timerRef.current = null;
+      peakRef.current = Math.max(peakRef.current, inFlight);
+      if (showTimerRef.current || visible) return;
+      startedAtRef.current = Date.now();
+      showTimerRef.current = window.setTimeout(() => {
+        showTimerRef.current = null;
         setVisible(true);
       }, PROGRESS_DELAY_MS);
       return;
     }
-    if (timerRef.current) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
+
+    if (showTimerRef.current) {
+      window.clearTimeout(showTimerRef.current);
+      showTimerRef.current = null;
     }
-    setVisible(false);
+    // Let the bar finish to the end before it goes, so the eye sees it complete
+    // rather than vanish part-way.
+    peakRef.current = 0;
+    setProgress(100);
+    setWaitedLong(false);
+    window.setTimeout(() => {
+      if (inFlightRef.current === 0) {
+        setVisible(false);
+        setProgress(0);
+      }
+    }, 280);
   }), [visible]);
 
+  useEffect(() => {
+    if (!visible) return undefined;
+
+    const id = window.setInterval(() => {
+      const peak = peakRef.current;
+      const inFlight = inFlightRef.current;
+      if (!peak || !inFlight) return;
+
+      const elapsed = Date.now() - startedAtRef.current;
+      setWaitedLong(elapsed > PATIENCE_MS);
+
+      // How much of the burst has come back.
+      const settled = ((peak - inFlight) / peak) * 100;
+      // A lone request would otherwise sit at zero for its whole life, so time
+      // alone also advances the bar, asymptotically and never past the ceiling.
+      const byTime = CEILING * (1 - Math.exp(-elapsed / 4000));
+
+      setProgress((previous) => Math.min(CEILING, Math.max(previous, settled, byTime)));
+    }, CREEP_TICK_MS);
+
+    return () => window.clearInterval(id);
+  }, [visible]);
+
   useEffect(() => () => {
-    if (timerRef.current) window.clearTimeout(timerRef.current);
+    if (showTimerRef.current) window.clearTimeout(showTimerRef.current);
   }, []);
 
   if (!visible) return null;
 
   return (
-    <div className="global-progress" role="status" aria-live="polite" aria-label="در حال دریافت اطلاعات">
-      <span className="global-progress-bar" />
-    </div>
+    <>
+      <div className="global-progress" aria-hidden="true">
+        <span className="global-progress-bar" style={{ width: `${progress}%` }} />
+      </div>
+      <div className="global-activity" role="status" aria-live="polite">
+        <span className="global-activity-spinner" aria-hidden="true" />
+        <span className="global-activity-text">
+          {waitedLong ? 'هنوز در حال دریافت اطلاعات است...' : 'در حال دریافت اطلاعات...'}
+        </span>
+      </div>
+    </>
   );
 }
 
