@@ -2358,12 +2358,25 @@ export default function AdminFinance() {
   });
   const [classPaymentApprovalRefreshKey, setClassPaymentApprovalRefreshKey] = useState(0);
   const [message, setMessageState] = useState('');
-  const setMessage = (value = '') => setMessageState(localizeSystemMessage(value));
+  const [messageTone, setMessageTone] = useState('info');
+  // The tone is opt-in: every existing call keeps the neutral bar it has today,
+  // and only the places where the wording could be misread announce themselves.
+  // The one that matters is a duplicate submission — the backend answers 200
+  // with «این پرداخت قبلاً ثبت شده بود و دوباره ایجاد نشد», which in a bar
+  // styled like every success reads as if the payment went through.
+  const setMessage = (value = '', tone = 'info') => {
+    setMessageTone(tone);
+    setMessageState(localizeSystemMessage(value));
+  };
   useEffect(() => {
     if (!message) return undefined;
+    // A warning or a failure has to survive until it is read: these are the
+    // cases where nothing was recorded, so dismissing them on a timer is how a
+    // user walks away believing the opposite.
+    if (messageTone === 'warning' || messageTone === 'error') return undefined;
     const timer = setTimeout(() => setMessageState(''), 6000);
     return () => clearTimeout(timer);
-  }, [message]);
+  }, [message, messageTone]);
   const [financeDataErrors, setFinanceDataErrors] = useState({ orders: '', payments: '' });
   const [busy, setBusy] = useState(false);
   const [activeSchoolContext, setActiveSchoolContext] = useState(null);
@@ -6122,7 +6135,13 @@ export default function AdminFinance() {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/student-finance/payments`, buildDeskPaymentPayload());
       const createdReceipt = data?.item ? toLegacyLikeReceiptRow(data.item) : null;
-      setMessage(data.message || 'پرداخت ثبت شد');
+      // The backend recognises an identical resubmission and returns the
+      // existing receipt instead of creating a second one. That answer is a 200
+      // like any success, so the flag is what tells them apart — not the wording.
+      setMessage(
+        data.message || 'پرداخت ثبت شد',
+        data?.item?.isDuplicate ? 'warning' : 'info'
+      );
       if (createdReceipt?._id) {
         setPendingReceipts((prev) => {
           const existing = Array.isArray(prev) ? prev : [];
@@ -6179,7 +6198,9 @@ export default function AdminFinance() {
       setDeskPaymentSubmitMode('save');
       await refreshPaymentWorkspace();
     } catch (err) {
-      setMessage(err.message);
+      // Nothing was recorded — including the approval-time refusals such as
+      // «یکی از بل‌های تخصیص‌یافته قبلاً به‌طور کامل پرداخت شده است».
+      setMessage(err.message, 'error');
       setDeskPaymentSubmitMode('save');
       setBusy(false);
       if (printWindow) printWindow.close();
@@ -8267,7 +8288,19 @@ export default function AdminFinance() {
       <h2>مرکز مالی مکتب</h2>
       <p className="muted">سطح فعال مالی: {ADMIN_LEVEL_UI_LABELS[financeRole] || financeRole}</p>
       {message && (
-        <div className="finance-msg" role="status" data-testid="finance-toast">
+        <div
+          className={`finance-msg is-${messageTone}`}
+          // A warning or failure is announced immediately rather than waiting
+          // its turn, because it is saying an action did not happen.
+          role={messageTone === 'info' ? 'status' : 'alert'}
+          data-testid="finance-toast"
+          data-tone={messageTone}
+        >
+          {messageTone !== 'info' && (
+            <span className="finance-msg-icon" aria-hidden="true">
+              {messageTone === 'warning' ? '⚠️' : '⛔'}
+            </span>
+          )}
           <span>{message}</span>
           <button type="button" className="finance-msg-close" onClick={() => setMessageState('')} aria-label="بستن پیام">×</button>
         </div>
