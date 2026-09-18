@@ -8,7 +8,7 @@ import { CalendarDays, Users, GraduationCap, Trash2, Save, X, Printer } from 'lu
 import { toast } from 'react-hot-toast';
 import '../styles/timetable-print.css';
 import './TimetableOperations.css';
-import { apiFetch } from '../utils/apiClient';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 import DataState from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
@@ -236,7 +236,7 @@ export default function TimetableOperations() {
         setTimetable(data.data?.timetable || {});
       } catch (error) {
         console.error('Error loading timetable:', error);
-        toast.error('دریافت تقسیم اوقات ناموفق بود.');
+        toast.error(failureMessage(error, 'دریافت تقسیم اوقات ناموفق بود.'));
       } finally {
         setLoading(false);
       }
@@ -286,7 +286,8 @@ export default function TimetableOperations() {
       const url = isEdit ? `/api/timetable/${editingCell.entry._id}` : '/api/timetable';
       const method = isEdit ? 'PUT' : 'POST';
 
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(payload)
@@ -309,7 +310,7 @@ export default function TimetableOperations() {
       }
     } catch (error) {
       console.error('Error saving timetable cell:', error);
-      toast.error('ذخیره خانه ناموفق بود.');
+      toast.error(failureMessage(error, 'ذخیره خانه ناموفق بود.'));
     } finally {
       setSaving(false);
     }
@@ -320,7 +321,7 @@ export default function TimetableOperations() {
     setSaving(true);
 
     try {
-      const response = await fetch(`/api/timetable/${editingCell.entry._id}`, { method: 'DELETE', headers: { ...getAuthHeaders() } });
+      const response = await apiFetch(`/api/timetable/${editingCell.entry._id}`, { parse: 'response', rejectOnHttpError: false, method: 'DELETE', headers: { ...getAuthHeaders() } });
       const data = await response.json();
       if (!data?.success) {
         toast.error(data?.message || 'حذف خانه ناموفق بود.');
@@ -338,7 +339,7 @@ export default function TimetableOperations() {
       }
     } catch (error) {
       console.error('Error deleting timetable cell:', error);
-      toast.error('حذف خانه ناموفق بود.');
+      toast.error(failureMessage(error, 'حذف خانه ناموفق بود.'));
     } finally {
       setSaving(false);
     }

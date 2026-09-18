@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import './LoginModernBase.css';
 import PasswordField from './PasswordField';
 import { persistAuthSession } from '../utils/authSession';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 import { PublicFooter, PublicHeader, SchoolLogo } from './public';
 import useSiteSettings from '../hooks/useSiteSettings';
 
@@ -164,7 +165,8 @@ export default function LoginModernBase({
   };
 
   const submitCredentials = async () => {
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
+    const res = await apiFetch(`${API_BASE}/api/auth/login`, {
+      parse: 'response', rejectOnHttpError: false,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
@@ -195,7 +197,8 @@ export default function LoginModernBase({
       return;
     }
 
-    const res = await fetch(`${API_BASE}/api/auth/login/2fa/verify`, {
+    const res = await apiFetch(`${API_BASE}/api/auth/login/2fa/verify`, {
+      parse: 'response', rejectOnHttpError: false,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ challengeToken, code: verifyCode })
@@ -216,7 +219,8 @@ export default function LoginModernBase({
       return;
     }
 
-    const res = await fetch(`${API_BASE}/api/auth/forgot-password`, {
+    const res = await apiFetch(`${API_BASE}/api/auth/forgot-password`, {
+      parse: 'response', rejectOnHttpError: false,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email })
@@ -237,7 +241,8 @@ export default function LoginModernBase({
     clearMessage();
 
     try {
-      const res = await fetch(`${API_BASE}/api/auth/login/2fa/resend`, {
+      const res = await apiFetch(`${API_BASE}/api/auth/login/2fa/resend`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ challengeToken })
@@ -249,8 +254,8 @@ export default function LoginModernBase({
         return;
       }
       showMessage(data?.message || 'کد جدید ارسال شد.', 'success');
-    } catch {
-      showMessage('در ارتباط با سرور مشکلی پیش آمد.', 'error');
+    } catch (error) {
+      showMessage(failureMessage(error, 'در ارتباط با سرور مشکلی پیش آمد.'), 'error');
     } finally {
       setResendBusy(false);
     }
@@ -271,7 +276,7 @@ export default function LoginModernBase({
       }
     } catch (error) {
       console.error('Action error:', error);
-      showMessage('اتصال به سرور برقرار نشد. اینترنت را بررسی کنید.', 'error');
+      showMessage(failureMessage(error, 'اتصال به سرور برقرار نشد. اینترنت را بررسی کنید.'), 'error');
     } finally {
       setLoading(false);
     }

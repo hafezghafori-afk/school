@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Badge } from '../components/ui/badge';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import DataState from '../components/ui/DataState';
-import { apiFetch } from '../utils/apiClient';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 import { 
   Users, 
   Search, 
@@ -642,6 +642,7 @@ const updateStudentRowFromProfile = (rows, updatedProfile) => {
 const StudentManagement = () => {
   const navigate = useNavigate();
   const toast = useToast();
+  const [busyAction, setBusyAction] = useState('');
   const [students, setStudents] = useState([]);
   const [filteredStudents, setFilteredStudents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -819,7 +820,7 @@ const StudentManagement = () => {
       return;
     }
     try {
-      const response = await fetch(`/api/academic-years/school/${schoolId}`, { headers: getAuthHeaders() });
+      const response = await apiFetch(`/api/academic-years/school/${schoolId}`, { parse: 'response', rejectOnHttpError: false, headers: getAuthHeaders() });
       const data = await response.json();
       
       if (data.success) {
@@ -846,7 +847,7 @@ const StudentManagement = () => {
       return;
     }
     try {
-      const response = await fetch(`/api/school-classes/school/${schoolId}`, { headers: getAuthHeaders() });
+      const response = await apiFetch(`/api/school-classes/school/${schoolId}`, { parse: 'response', rejectOnHttpError: false, headers: getAuthHeaders() });
       const data = await response.json();
       
       if (data.success) {
@@ -875,7 +876,7 @@ const StudentManagement = () => {
       return;
     }
     try {
-      const response = await fetch(`/api/shifts/school/${schoolId}`, { headers: getAuthHeaders() });
+      const response = await apiFetch(`/api/shifts/school/${schoolId}`, { parse: 'response', rejectOnHttpError: false, headers: getAuthHeaders() });
       const data = await response.json();
       
       if (data.success) {
@@ -957,6 +958,7 @@ const StudentManagement = () => {
   };
 
   const handleDelete = async (studentId) => {
+    if (busyAction) return;
     if (!studentId) {
       toast.error('شناسهٔ شاگرد پیدا نشد.');
       return;
@@ -964,8 +966,10 @@ const StudentManagement = () => {
     if (!confirm('آیا مطمئن هستید که این شاگرد حذف شود؟ این عملیات قابل بازگشت نیست.')) return;
 
     setActionLoading(studentId);
+    setBusyAction('handleDelete');
     try {
-      const response = await fetch(`/api/afghan-students/${studentId}`, {
+      const response = await apiFetch(`/api/afghan-students/${studentId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: { ...getAuthHeaders() }
       });
@@ -977,8 +981,9 @@ const StudentManagement = () => {
       setStudents((currentRows) => currentRows.filter((row) => row._id !== studentId));
       await fetchStudents();
     } catch (error) {
-      toast.error(error.message || 'حذف شاگرد ناموفق بود.');
+      toast.error(failureMessage(error, 'حذف شاگرد ناموفق بود.'));
     } finally {
+      setBusyAction('');
       setActionLoading(null);
     }
   };
@@ -1005,6 +1010,7 @@ const StudentManagement = () => {
   };
 
   const saveStudentProfile = async () => {
+    if (busyAction) return;
     const profileId = makeKey(selectedStudent?.profileId);
     if (!profileId) {
       toast.info('این ردیف هنوز پروفایل اصلی شاگرد ندارد؛ صنف را از مدیریت آموزش و معلومات مالی را از ممبرشیپ مالی تنظیم کنید.');
@@ -1032,6 +1038,7 @@ const StudentManagement = () => {
       return;
     }
     setActionLoading(profileId);
+    setBusyAction('saveStudentProfile');
     try {
       const payload = {
         'personalInfo.firstName': editForm.firstNameEnglish.trim() || editForm.firstName.trim(),
@@ -1052,7 +1059,8 @@ const StudentManagement = () => {
         status: editForm.status
       };
 
-      const response = await fetch(`/api/afghan-students/${profileId}`, {
+      const response = await apiFetch(`/api/afghan-students/${profileId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(payload)
@@ -1069,8 +1077,9 @@ const StudentManagement = () => {
       });
       await fetchStudents();
     } catch (error) {
-      toast.error(error.message || 'ذخیره مشخصات ناموفق بود.');
+      toast.error(failureMessage(error, 'ذخیره مشخصات ناموفق بود.'));
     } finally {
+      setBusyAction('');
       setActionLoading(null);
     }
   };
@@ -1198,7 +1207,8 @@ const StudentManagement = () => {
       setOptionalPayloadRawValue(payload, 'familyInfo.guardianRelation', editForm.guardianRelation);
       setOptionalPayloadRawValue(payload, 'medicalInfo.bloodGroup', editForm.bloodType);
 
-      const response = await fetch(`/api/afghan-students/${profileId}`, {
+      const response = await apiFetch(`/api/afghan-students/${profileId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(payload)
@@ -1433,7 +1443,7 @@ const StudentManagement = () => {
     } catch (error) {
       printWindow.close();
       console.error('Student PDF export failed:', error);
-      toast.error('خروجی PDF ساخته نشد. لطفاً دوباره تلاش کنید.');
+      toast.error(failureMessage(error, 'خروجی PDF ساخته نشد. لطفاً دوباره تلاش کنید.'));
     }
   };
 

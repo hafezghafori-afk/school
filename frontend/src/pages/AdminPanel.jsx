@@ -1231,7 +1231,8 @@ export default function AdminPanel() {
       const timestamp = Date.now();
       const provinceCode = `${createSchoolForm.province.substring(0, 3).toUpperCase()}-${timestamp}`;
       const ministryCode = `MS-${createSchoolForm.province.substring(0, 2).toUpperCase()}-${timestamp}`;
-      const res = await fetch(`${API_BASE}/api/afghan-schools`, {
+      const res = await apiFetch(`${API_BASE}/api/afghan-schools`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ ...createSchoolForm, namePashto: createSchoolForm.name, provinceCode, ministryCode })
@@ -1289,7 +1290,8 @@ export default function AdminPanel() {
       if (wizardYearForm.code.trim()) body.code = wizardYearForm.code.trim();
       if (wizardYearForm.startDate) body.startDate = wizardYearForm.startDate;
       if (wizardYearForm.endDate) body.endDate = wizardYearForm.endDate;
-      const res = await fetch(`${API_BASE}/api/academic-years`, {
+      const res = await apiFetch(`${API_BASE}/api/academic-years`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(body)
@@ -1328,7 +1330,8 @@ export default function AdminPanel() {
     try {
       for (let i = 0; i < selectedShiftRows.length; i++) {
         const row = selectedShiftRows[i];
-        const res = await fetch(`${API_BASE}/api/shifts/school/${wizardSchoolId}`, {
+        const res = await apiFetch(`${API_BASE}/api/shifts/school/${wizardSchoolId}`, {
+          parse: 'response', rejectOnHttpError: false,
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({
@@ -1356,7 +1359,7 @@ export default function AdminPanel() {
       } else {
         // Fallback: اگر پاسخ سرور ساختار غیرمنتظره داشت، مستقیم از API فچ کن
         try {
-          const fallbackRes = await fetch(`${API_BASE}/api/shifts/school/${wizardSchoolId}`, { headers: getAuthHeaders() });
+          const fallbackRes = await apiFetch(`${API_BASE}/api/shifts/school/${wizardSchoolId}`, { parse: 'response', rejectOnHttpError: false, headers: getAuthHeaders() });
           const fallbackData = await fallbackRes.json();
           const fallbackShifts = (fallbackData?.data || []).filter(s => s?._id);
           setWizardCreatedShifts(fallbackShifts);
@@ -1440,7 +1443,8 @@ export default function AdminPanel() {
         }
 
         const { _shiftName, ...classData } = cls;
-        const res = await fetch(`${API_BASE}/api/school-classes/school/${wizardSchoolId}`, {
+        const res = await apiFetch(`${API_BASE}/api/school-classes/school/${wizardSchoolId}`, {
+          parse: 'response', rejectOnHttpError: false,
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify(classData)
@@ -1489,7 +1493,8 @@ export default function AdminPanel() {
   }, []);
 
   const loadSchoolOptions = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/api/afghan-schools?limit=100`, {
+    const res = await apiFetch(`${API_BASE}/api/afghan-schools?limit=100`, {
+      parse: 'response', rejectOnHttpError: false,
       headers: getAuthHeaders()
     });
     const data = await res.json();
@@ -1500,7 +1505,8 @@ export default function AdminPanel() {
   }, []);
 
   const loadOwnershipAudit = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/api/afghan-schools/ownership-audit`, {
+    const res = await apiFetch(`${API_BASE}/api/afghan-schools/ownership-audit`, {
+      parse: 'response', rejectOnHttpError: false,
       headers: getAuthHeaders()
     });
     const data = await res.json();
@@ -1518,7 +1524,8 @@ export default function AdminPanel() {
     setSchoolScopeBusy(true);
     setSchoolScopeMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/afghan-schools/ownership-backfill`, {
+      const res = await apiFetch(`${API_BASE}/api/afghan-schools/ownership-backfill`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ targetSchoolId: activeSchoolId, limit: 20000 })
@@ -1620,7 +1627,8 @@ export default function AdminPanel() {
           name: schoolEditForm.principal?.name?.trim() || `${schoolEditForm.nameDari} - مدیر`
         }
       };
-      const res = await fetch(`${API_BASE}/api/afghan-schools/${schoolId}`, {
+      const res = await apiFetch(`${API_BASE}/api/afghan-schools/${schoolId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(payload)
@@ -1663,7 +1671,8 @@ export default function AdminPanel() {
     setSchoolScopeBusy(true);
     setSchoolScopeMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/afghan-schools/${schoolId}`, {
+      const res = await apiFetch(`${API_BASE}/api/afghan-schools/${schoolId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: getAuthHeaders()
       });
@@ -1686,8 +1695,8 @@ export default function AdminPanel() {
     let mounted = true;
     Promise.allSettled([
       resolveActiveSchoolContext(),
-      fetch(`${API_BASE}/api/afghan-schools?limit=100`, { headers: getAuthHeaders() }).then((res) => res.json()),
-      fetch(`${API_BASE}/api/afghan-schools/ownership-audit`, { headers: getAuthHeaders() }).then((res) => res.json())
+      apiFetch(`${API_BASE}/api/afghan-schools?limit=100`, { parse: 'response', rejectOnHttpError: false, headers: getAuthHeaders() }).then((res) => res.json()),
+      apiFetch(`${API_BASE}/api/afghan-schools/ownership-audit`, { parse: 'response', rejectOnHttpError: false, headers: getAuthHeaders() }).then((res) => res.json())
     ])
       .then((results) => {
         if (!mounted) return;
@@ -2282,7 +2291,8 @@ export default function AdminPanel() {
   const loadSlaConfig = async () => {
     if (!canViewReports) return;
     try {
-      const res = await fetch(`${API_BASE}/api/admin/sla/config`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/sla/config`, {
+        parse: 'response', rejectOnHttpError: false,
         cache: 'no-store',
         headers: {
           ...getAuthHeaders(),
@@ -2332,7 +2342,8 @@ export default function AdminPanel() {
     setSlaBusy(true);
     setSlaMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/admin/sla/run`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/sla/run`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { ...getAuthHeaders() }
       });
@@ -2559,7 +2570,8 @@ export default function AdminPanel() {
     setBusy((prev) => ({ ...prev, [order._id]: true }));
     setOrderMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/student-finance/payments/${order._id}/approve`, {
+      const res = await apiFetch(`${API_BASE}/api/student-finance/payments/${order._id}/approve`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { ...getAuthHeaders() }
       });
@@ -2584,7 +2596,8 @@ export default function AdminPanel() {
     setBusy((prev) => ({ ...prev, [order._id]: true }));
     setOrderMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/student-finance/payments/${order._id}/reject`, {
+      const res = await apiFetch(`${API_BASE}/api/student-finance/payments/${order._id}/reject`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ reason: reason || 'رد شد' })
@@ -2609,7 +2622,8 @@ export default function AdminPanel() {
     setBusy((prev) => ({ ...prev, [item._id]: true }));
     setRequestMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/admin/profile-update-requests/${item._id}/approve`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/profile-update-requests/${item._id}/approve`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { ...getAuthHeaders() }
       });
@@ -2633,7 +2647,8 @@ export default function AdminPanel() {
     setBusy((prev) => ({ ...prev, [item._id]: true }));
     setRequestMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/admin/profile-update-requests/${item._id}/reject`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/profile-update-requests/${item._id}/reject`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ reason })
@@ -2692,7 +2707,8 @@ export default function AdminPanel() {
     let failed = 0;
     for (const id of selectedProfileIds) {
       try {
-        const res = await fetch(`${API_BASE}/api/admin/profile-update-requests/${id}/approve`, {
+        const res = await apiFetch(`${API_BASE}/api/admin/profile-update-requests/${id}/approve`, {
+          parse: 'response', rejectOnHttpError: false,
           method: 'POST',
           headers: { ...getAuthHeaders() }
         });
@@ -2719,7 +2735,8 @@ export default function AdminPanel() {
     let failed = 0;
     for (const id of selectedProfileIds) {
       try {
-        const res = await fetch(`${API_BASE}/api/admin/profile-update-requests/${id}/reject`, {
+        const res = await apiFetch(`${API_BASE}/api/admin/profile-update-requests/${id}/reject`, {
+          parse: 'response', rejectOnHttpError: false,
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({ reason })
@@ -2746,7 +2763,8 @@ export default function AdminPanel() {
     let failed = 0;
     for (const id of selectedOrderIds) {
       try {
-        const res = await fetch(`${API_BASE}/api/student-finance/payments/${id}/approve`, {
+        const res = await apiFetch(`${API_BASE}/api/student-finance/payments/${id}/approve`, {
+          parse: 'response', rejectOnHttpError: false,
           method: 'POST',
           headers: { ...getAuthHeaders() }
         });
@@ -2773,7 +2791,8 @@ export default function AdminPanel() {
     let failed = 0;
     for (const id of selectedOrderIds) {
       try {
-        const res = await fetch(`${API_BASE}/api/student-finance/payments/${id}/reject`, {
+        const res = await apiFetch(`${API_BASE}/api/student-finance/payments/${id}/reject`, {
+          parse: 'response', rejectOnHttpError: false,
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({ reason: reason || 'رد شد' })
@@ -2798,7 +2817,8 @@ export default function AdminPanel() {
     setBusy((prev) => ({ ...prev, [busyKey]: true }));
     setSupportMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/contact/${messageItem._id}/read`, {
+      const res = await apiFetch(`${API_BASE}/api/contact/${messageItem._id}/read`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { ...getAuthHeaders() }
       });
@@ -3009,7 +3029,8 @@ export default function AdminPanel() {
         method = 'PUT';
       }
 
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
@@ -3327,7 +3348,8 @@ export default function AdminPanel() {
 
   const logClientActivity = async (action, context = '') => {
     try {
-      await fetch(`${API_BASE}/api/admin/client-activity`, {
+      await apiFetch(`${API_BASE}/api/admin/client-activity`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ action, context })

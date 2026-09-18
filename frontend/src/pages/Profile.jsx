@@ -5,7 +5,7 @@ import './Profile.css';
 import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
 import useExpandableList from '../hooks/useExpandableList';
-import { apiFetch } from '../utils/apiClient';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 import DataState from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
@@ -446,7 +446,8 @@ export default function Profile() {
     }
     try {
       setSaving(true);
-      const res = await fetch(`${API_BASE}/api/users/me`, {
+      const res = await apiFetch(`${API_BASE}/api/users/me`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
@@ -476,8 +477,8 @@ export default function Profile() {
         setMessage('پروفایل به‌روزرسانی شد.');
       }
       setEditProfileModal(false);
-    } catch {
-      setMessage('خطا در ذخیره پروفایل');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ذخیره پروفایل'));
     } finally {
       setSaving(false);
     }
@@ -536,9 +537,9 @@ export default function Profile() {
       setCropY(0);
       setCropModal(true);
       setMessage('تصویر انتخاب شد. در صورت نیاز برش دهید و روی "اعمال برش" بزنید.');
-    } catch {
+    } catch (error) {
       setFormErrors((prev) => ({ ...prev, avatar: 'خواندن فایل امکان‌پذیر نیست. فایل دیگری انتخاب کنید.' }));
-      setMessage('خواندن فایل امکان‌پذیر نیست.');
+      setMessage(failureMessage(error, 'خواندن فایل امکان‌پذیر نیست.'));
     }
   };
 
@@ -591,9 +592,9 @@ export default function Profile() {
       setAvatarPreview(URL.createObjectURL(croppedFile));
       setCropModal(false);
       setMessage('برش انجام شد. اکنون روی "بارگذاری عکس" بزنید.');
-    } catch {
+    } catch (error) {
       setFormErrors((prev) => ({ ...prev, avatar: 'برش تصویر انجام نشد. دوباره تلاش کنید.' }));
-      setMessage('برش تصویر انجام نشد.');
+      setMessage(failureMessage(error, 'برش تصویر انجام نشد.'));
     } finally {
       setCropProcessing(false);
     }
@@ -609,7 +610,8 @@ export default function Profile() {
       setAvatarUploading(true);
       const form = new FormData();
       form.append('avatar', avatarFile);
-      const res = await fetch(`${API_BASE}/api/users/me/avatar`, {
+      const res = await apiFetch(`${API_BASE}/api/users/me/avatar`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { ...getAuthHeaders() },
         body: form
@@ -625,8 +627,8 @@ export default function Profile() {
       setAvatarFile(null);
       setAvatarPreview('');
       setMessage('عکس پروفایل به‌روزرسانی شد.');
-    } catch {
-      setMessage('خطا در بارگذاری عکس');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در بارگذاری عکس'));
     } finally {
       setAvatarUploading(false);
     }
@@ -640,7 +642,8 @@ export default function Profile() {
     setMessage('');
     try {
       setAvatarRemoving(true);
-      const res = await fetch(`${API_BASE}/api/users/me/avatar`, {
+      const res = await apiFetch(`${API_BASE}/api/users/me/avatar`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: { ...getAuthHeaders() }
       });
@@ -655,8 +658,8 @@ export default function Profile() {
       localStorage.setItem('avatarUrl', '');
       window.dispatchEvent(new Event('avatar-updated'));
       setMessage('عکس پروفایل حذف شد.');
-    } catch {
-      setMessage('خطا در حذف عکس پروفایل');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در حذف عکس پروفایل'));
     } finally {
       setAvatarRemoving(false);
     }
@@ -681,7 +684,8 @@ export default function Profile() {
 
     try {
       setPasswordSaving(true);
-      const res = await fetch(`${API_BASE}/api/users/me/password`, {
+      const res = await apiFetch(`${API_BASE}/api/users/me/password`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ currentPassword, newPassword })
@@ -696,8 +700,8 @@ export default function Profile() {
       }
       closePasswordModal();
       setMessage('رمز عبور با موفقیت تغییر کرد.');
-    } catch {
-      setMessage('خطا در تغییر رمز عبور');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در تغییر رمز عبور'));
     } finally {
       setPasswordSaving(false);
     }

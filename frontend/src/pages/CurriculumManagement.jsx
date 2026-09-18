@@ -8,7 +8,7 @@ import { Checkbox } from '../components/ui/checkbox';
 import { Badge } from '../components/ui/badge';
 import { Trash2, Edit, Plus, BookOpen, Clock, AlertCircle, Users } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-import { apiFetch } from '../utils/apiClient';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 import DataState from '../components/ui/DataState';
 
 const CurriculumManagement = () => {
@@ -18,6 +18,8 @@ const CurriculumManagement = () => {
   const [academicYears, setAcademicYears] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingRule, setEditingRule] = useState(null);
   const [selectedClass, setSelectedClass] = useState(null);
@@ -118,15 +120,18 @@ const CurriculumManagement = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+    if (saving) return;
+    setSaving(true);
+
     try {
-      const url = editingRule 
+      const url = editingRule
         ? `/api/curriculum-rules/${editingRule._id}`
         : `/api/curriculum-rules/school/${schoolId}`;
       
       const method = editingRule ? 'PUT' : 'POST';
       
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -147,7 +152,9 @@ const CurriculumManagement = () => {
       }
     } catch (error) {
       console.error('Error saving curriculum rule:', error);
-      toast.error('خطا در ذخیره قانون مضمون.');
+      toast.error(failureMessage(error, 'خطا در ذخیره قانون مضمون.'));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -175,9 +182,12 @@ const CurriculumManagement = () => {
 
   const handleDelete = async (ruleId) => {
     if (!confirm('آیا مطمئن هستید که می‌خواهید این قانون مضمون را حذف کنید؟')) return;
-    
+    if (deletingId) return;
+    setDeletingId(ruleId);
+
     try {
-      const response = await fetch(`/api/curriculum-rules/${ruleId}`, {
+      const response = await apiFetch(`/api/curriculum-rules/${ruleId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
       });
 
@@ -191,7 +201,9 @@ const CurriculumManagement = () => {
       }
     } catch (error) {
       console.error('Error deleting curriculum rule:', error);
-      toast.error('خطا در حذف قانون مضمون.');
+      toast.error(failureMessage(error, 'خطا در حذف قانون مضمون.'));
+    } finally {
+      setDeletingId('');
     }
   };
 
@@ -216,9 +228,12 @@ const CurriculumManagement = () => {
       toast.error('لطفاً، صنف، سال تعلیمی و حداقل یک مضمون را انتخاب نمایید.');
       return;
     }
+    if (saving) return;
+    setSaving(true);
 
     try {
-      const response = await fetch(`/api/curriculum-rules/class/${selectedClass}/bulk`, {
+      const response = await apiFetch(`/api/curriculum-rules/class/${selectedClass}/bulk`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -241,7 +256,9 @@ const CurriculumManagement = () => {
       }
     } catch (error) {
       console.error('Error creating curriculum rules:', error);
-      toast.error('خطا در ایجاد قوانین مضمون.');
+      toast.error(failureMessage(error, 'خطا در ایجاد قوانین مضمون.'));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -443,8 +460,8 @@ const CurriculumManagement = () => {
             )}
 
             <div className="flex gap-2">
-              <Button onClick={handleBulkSubmit} disabled={bulkSubjects.length === 0}>
-                ایجاد {bulkSubjects.length} قانون مضمون
+              <Button onClick={handleBulkSubmit} disabled={saving || bulkSubjects.length === 0}>
+                {saving ? 'در حال ثبت...' : `ایجاد ${bulkSubjects.length} قانون مضمون`}
               </Button>
               <Button variant="outline" onClick={handleCancel}>
                 انصراف
@@ -623,8 +640,8 @@ const CurriculumManagement = () => {
               </div>
 
               <div className="flex gap-2">
-                <Button type="submit">
-                  {editingRule ? 'به‌روزرسانی قانون' : 'ایجاد قانون'}
+                <Button type="submit" disabled={saving}>
+                  {saving ? 'در حال ذخیره...' : (editingRule ? 'به‌روزرسانی قانون' : 'ایجاد قانون')}
                 </Button>
                 <Button type="button" variant="outline" onClick={handleCancel}>
                   انصراف
@@ -706,10 +723,11 @@ const CurriculumManagement = () => {
                     size="sm"
                     variant="outline"
                     onClick={() => handleDelete(rule._id)}
+                    disabled={deletingId === rule._id}
                     className="flex items-center gap-1 text-red-600 hover:text-red-700"
                   >
                     <Trash2 className="w-3 h-3" />
-                    حذف
+                    {deletingId === rule._id ? 'در حال حذف...' : 'حذف'}
                   </Button>
                 </div>
               </div>

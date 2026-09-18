@@ -8,6 +8,10 @@ import { API_BASE } from '../config/api';
 // make that state visible and recoverable.
 
 export const DEFAULT_TIMEOUT_MS = 15000;
+// Writes get longer than reads: saving a term's grades or closing a finance
+// month legitimately takes more than fifteen seconds, and cutting one off early
+// is far worse than waiting — see TIMEOUT_UNSAFE below.
+export const DEFAULT_MUTATION_TIMEOUT_MS = 30000;
 const MAX_RETRIES = 2;
 const RETRY_BACKOFF_MS = [600, 1800];
 // Ceiling on one apiFetch call including its retries. Without it, three
@@ -23,6 +27,11 @@ export const ERROR_KINDS = {
   OFFLINE: 'offline',
   NETWORK: 'network',
   TIMEOUT: 'timeout',
+  // A write whose answer never arrived. Deliberately separate from TIMEOUT:
+  // the request may well have been carried out on the server, so telling the
+  // user to "just try again" is how a school ends up with the same payment
+  // recorded twice.
+  TIMEOUT_UNSAFE: 'timeout_unsafe',
   DB_DOWN: 'db_down',
   STARTING: 'starting',
   SERVER: 'server',
@@ -36,6 +45,7 @@ const MESSAGES = {
   [ERROR_KINDS.OFFLINE]: 'ارتباط انترنتی شما قطع است. پس از وصل‌شدن، دوباره تلاش کنید.',
   [ERROR_KINDS.NETWORK]: 'سرور در دسترس نیست. ممکن است خاموش باشد یا انترنت شما ضعیف باشد.',
   [ERROR_KINDS.TIMEOUT]: 'پاسخ سرور بیش از حد طول کشید. انترنت کند است یا سرور مصروف است.',
+  [ERROR_KINDS.TIMEOUT_UNSAFE]: 'پاسخ سرور نرسید و معلوم نیست این عملیات ثبت شده یا نه. پیش از تلاشِ دوباره، فهرست را تازه کنید و ببینید ثبت شده است یا خیر.',
   [ERROR_KINDS.DB_DOWN]: 'سرور فعال است اما دیتابیس در دسترس نیست. لطفاً چند لحظه بعد دوباره تلاش کنید.',
   [ERROR_KINDS.STARTING]: 'سرور در حال آماده‌سازی است. به‌صورت خودکار دوباره تلاش می‌کنیم.',
   [ERROR_KINDS.SERVER]: 'در سرور خطایی رخ داد. لطفاً دوباره تلاش کنید.',
@@ -56,13 +66,16 @@ const RETRYABLE_KINDS = new Set([
 ]);
 
 export class ApiError extends Error {
-  constructor({ kind, status = 0, serverMessage = '', url = '' }) {
+  constructor({ kind, status = 0, serverMessage = '', url = '', body = null }) {
     const message = serverMessage || MESSAGES[kind] || MESSAGES[ERROR_KINDS.SERVER];
     super(message);
     this.name = 'ApiError';
     this.kind = kind;
     this.status = status;
     this.url = url;
+    // The parsed error body, for the call sites that need more than the message
+    // — a timetable clash reads `conflictType` to say which side collided.
+    this.body = body;
     // The generic sentence for this kind, kept separate from `message` so a
     // caller can show the backend's own wording and still know the category.
     this.kindMessage = MESSAGES[kind] || MESSAGES[ERROR_KINDS.SERVER];
@@ -76,6 +89,30 @@ export const describeError = (error) => {
   if (isApiError(error)) return error.message;
   if (error?.name === 'AbortError') return MESSAGES[ERROR_KINDS.TIMEOUT];
   return error?.message || MESSAGES[ERROR_KINDS.SERVER];
+};
+
+// Kinds where the user needs the cause, not just "it failed" — the difference
+// between "your internet dropped" and "the database is unreachable" decides
+// whether they retry now, wait, or call someone.
+const CONNECTION_KINDS = new Set([
+  ERROR_KINDS.OFFLINE,
+  ERROR_KINDS.NETWORK,
+  ERROR_KINDS.TIMEOUT,
+  ERROR_KINDS.TIMEOUT_UNSAFE,
+  ERROR_KINDS.DB_DOWN,
+  ERROR_KINDS.STARTING
+]);
+
+/**
+ * Message for a failed action: keeps the caller's "what you were doing" wording
+ * and appends why it failed, so a save that dies on a dead server no longer
+ * reads the same as one the backend rejected on its merits.
+ */
+export const failureMessage = (error, fallback = 'عملیات ناموفق بود.') => {
+  if (isApiError(error) && CONNECTION_KINDS.has(error.kind)) {
+    return `${fallback} ${error.message}`;
+  }
+  return describeError(error) || fallback;
 };
 
 /* ------------------------------------------------------------------ *
@@ -158,6 +195,7 @@ const reportOutcome = (error, latencyMs) => {
     [ERROR_KINDS.OFFLINE]: CONNECTION.OFFLINE,
     [ERROR_KINDS.NETWORK]: CONNECTION.SERVER_DOWN,
     [ERROR_KINDS.TIMEOUT]: CONNECTION.SLOW,
+    [ERROR_KINDS.TIMEOUT_UNSAFE]: CONNECTION.SLOW,
     [ERROR_KINDS.DB_DOWN]: CONNECTION.DB_DOWN,
     [ERROR_KINDS.STARTING]: CONNECTION.STARTING
   };
@@ -193,8 +231,12 @@ const buildUrl = (path = '') => {
   return `${API_BASE}${text.startsWith('/') ? '' : '/'}${text}`;
 };
 
-const classifyResponse = async (res, url) => {
-  const body = await res.json().catch(() => ({}));
+// `keepBody` reads a clone, so a caller that opted out of the throw still gets
+// an untouched response to parse itself while the banner keeps learning that
+// e.g. this 503 was the database rather than the server.
+const classifyResponse = async (res, url, { keepBody = false } = {}) => {
+  const source = keepBody ? res.clone() : res;
+  const body = await source.json().catch(() => ({}));
   const serverMessage = String(body?.message || '').trim();
 
   let kind = ERROR_KINDS.SERVER;
@@ -209,11 +251,16 @@ const classifyResponse = async (res, url) => {
   else if (res.status >= 500) kind = ERROR_KINDS.SERVER;
   else if (res.status >= 400) kind = ERROR_KINDS.CLIENT;
 
-  return new ApiError({ kind, status: res.status, serverMessage, url });
+  return new ApiError({ kind, status: res.status, serverMessage, url, body });
 };
 
-const classifyThrow = (url, timedOut) => {
-  if (timedOut) return new ApiError({ kind: ERROR_KINDS.TIMEOUT, url });
+const classifyThrow = (url, timedOut, isSafeMethod) => {
+  if (timedOut) {
+    return new ApiError({
+      kind: isSafeMethod ? ERROR_KINDS.TIMEOUT : ERROR_KINDS.TIMEOUT_UNSAFE,
+      url
+    });
+  }
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     return new ApiError({ kind: ERROR_KINDS.OFFLINE, url });
   }
@@ -243,21 +290,30 @@ const combineSignals = (external, own) => {
  *
  * Retries are limited to GET/HEAD by default: repeating a POST in a system that
  * records payments could book the same amount twice, so an unsafe method is
- * only retried when the caller opts in with `retry: true`.
+ * only retried when the caller opts in with `retry: true`. Writes also get the
+ * longer timeout and, if they do time out, an error that says the operation may
+ * have gone through rather than inviting a blind second attempt.
  */
 export const apiFetch = async (path, options = {}) => {
   const {
     method = 'GET',
-    timeoutMs = DEFAULT_TIMEOUT_MS,
+    timeoutMs,
     retry,
     signal: externalSignal,
     auth = true,
     parse = 'json',
     headers = {},
-    // Callers that already do their own status handling (AdminFinance reads the
-    // body itself to tell "API route missing" from "bad JSON") opt out of the
-    // throw and get the Response back, while still keeping the timeout, the
-    // retries and the connection reporting.
+    // Callers that do their own status handling opt out of the throw and get
+    // the Response back, while still keeping the timeout, the retries and the
+    // connection reporting.
+    //
+    // This opt-out covers 4xx only. A 4xx is the backend understanding the
+    // request and rejecting it, so its body is the page's own business to read.
+    // A 5xx is not: it carries no verdict about the request, and handing one to
+    // a page's `if (!data.success)` branch is how the login form came to answer
+    // a dead server with «ایمیل/نام کاربری یا رمز عبور درست نیست» — telling
+    // people their password is wrong when nothing had checked it. Server errors
+    // therefore always throw, and land in the catch as what they are.
     rejectOnHttpError = true,
     ...rest
   } = options;
@@ -265,6 +321,7 @@ export const apiFetch = async (path, options = {}) => {
   const url = buildUrl(path);
   const isSafeMethod = ['GET', 'HEAD'].includes(String(method).toUpperCase());
   const retriesAllowed = retry === false ? 0 : ((retry === true || isSafeMethod) ? MAX_RETRIES : 0);
+  const effectiveTimeout = timeoutMs ?? (isSafeMethod ? DEFAULT_TIMEOUT_MS : DEFAULT_MUTATION_TIMEOUT_MS);
 
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     const offline = new ApiError({ kind: ERROR_KINDS.OFFLINE, url });
@@ -286,7 +343,7 @@ export const apiFetch = async (path, options = {}) => {
       const timeoutId = setTimeout(() => {
         timedOut = true;
         controller.abort();
-      }, timeoutMs);
+      }, effectiveTimeout);
 
       try {
         const res = await fetch(url, {
@@ -309,19 +366,17 @@ export const apiFetch = async (path, options = {}) => {
           return res.json().catch(() => ({}));
         }
 
-        // classifyResponse consumes the body, so a caller that wants to read it
-        // itself gets the untouched response and we skip that classification.
-        if (!rejectOnHttpError) {
-          lastResponse = res;
-          lastError = new ApiError({ kind: res.status >= 500 ? ERROR_KINDS.SERVER : ERROR_KINDS.CLIENT, status: res.status, url });
-        } else {
-          lastError = await classifyResponse(res, url);
-        }
+        // Classify either way — that is what tells the banner a 503 was the
+        // database rather than the server — but read a clone when the caller
+        // wants to parse the body itself.
+        const handsBack = !rejectOnHttpError && res.status < 500;
+        lastError = await classifyResponse(res, url, { keepBody: handsBack });
+        if (handsBack) lastResponse = res;
       } catch (error) {
         // An abort from the caller's own signal (unmount, superseded request)
         // is not a failure — let it through untouched.
         if (externalSignal?.aborted) throw error;
-        lastError = classifyThrow(url, timedOut);
+        lastError = classifyThrow(url, timedOut, isSafeMethod);
       } finally {
         clearTimeout(timeoutId);
       }

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import './AdminUsers.css';
 
 import { API_BASE } from '../config/api';
-import { apiFetch } from '../utils/apiClient';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 import DataState from '../components/ui/DataState';
 import {
   PERMISSION_GROUPS,
@@ -911,6 +911,7 @@ export default function AdminUsers() {
     () => String(localStorage.getItem('orgRole') || '').trim().toLowerCase(),
     []
   );
+  const [busyAction, setBusyAction] = useState('');
   const [items, setItems] = useState([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [usersError, setUsersError] = useState(null);
@@ -994,7 +995,8 @@ export default function AdminUsers() {
   const loadAccessRequests = async (status = accessStatusFilter) => {
     try {
       const query = encodeURIComponent(status || 'pending');
-      const res = await fetch(`${API_BASE}/api/admin/access-requests?status=${query}`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/access-requests?status=${query}`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: { ...getAuthHeaders() }
       });
       const data = await res.json();
@@ -1010,10 +1012,10 @@ export default function AdminUsers() {
         (item) => String(item?._id) === String(id) && String(item?.status || '') === 'pending'
       )));
       setAccessMessage('');
-    } catch {
+    } catch (error) {
       setAccessRequests([]);
       setSelectedAccessIds([]);
-      setAccessMessage('خطا در اتصال به سرور (درخواست دسترسی)');
+      setAccessMessage(failureMessage(error, 'خطا در اتصال به سرور (درخواست دسترسی)'));
     }
   };
 
@@ -1116,7 +1118,8 @@ export default function AdminUsers() {
       setGuardianUserMessage('');
       try {
         const encodedQuery = encodeURIComponent(query);
-        const res = await fetch(`${API_BASE}/api/student-profiles/guardian-users/search?q=${encodedQuery}`, {
+        const res = await apiFetch(`${API_BASE}/api/student-profiles/guardian-users/search?q=${encodedQuery}`, {
+          parse: 'response', rejectOnHttpError: false,
           headers: { ...getAuthHeaders() },
           signal: controller.signal
         });
@@ -1187,7 +1190,8 @@ export default function AdminUsers() {
       setGuardianStudentMessage('');
       try {
         const encodedQuery = encodeURIComponent(query);
-        const res = await fetch(`${API_BASE}/api/student-profiles/linkable-students/search?q=${encodedQuery}`, {
+        const res = await apiFetch(`${API_BASE}/api/student-profiles/linkable-students/search?q=${encodedQuery}`, {
+          parse: 'response', rejectOnHttpError: false,
           headers: { ...getAuthHeaders() },
           signal: controller.signal
         });
@@ -1275,14 +1279,17 @@ export default function AdminUsers() {
   };
 
   const handleCreate = async () => {
+    if (busyAction) return;
     showMessage('');
     const rolePayload = buildRoleRequestPayload(form.orgRole);
     if (!form.name.trim() || !form.email.trim() || !form.password.trim()) {
       showMessage('نام، ایمیل و رمز عبور الزامی است.', 'error');
       return;
     }
+    setBusyAction('handleCreate');
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/users`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
@@ -1302,12 +1309,15 @@ export default function AdminUsers() {
       setForm(createEditUserForm());
       showMessage('کاربر جدید ایجاد شد.', 'success');
       loadUsers();
-    } catch {
-      showMessage('خطا در ایجاد کاربر', 'error');
+    } catch (error) {
+      showMessage(failureMessage(error, 'خطا در ایجاد کاربر'), 'error');
+    } finally {
+      setBusyAction('');
     }
   };
 
   const handleSectionCreate = async () => {
+    if (busyAction) return;
     showMessage('');
     const createSection = DIRECTORY_CREATE_SECTIONS.has(activeDirectorySection) ? activeDirectorySection : '';
     const config = DIRECTORY_CREATE_CONFIG[createSection] || null;
@@ -1328,8 +1338,10 @@ export default function AdminUsers() {
       return;
     }
 
+    setBusyAction('handleSectionCreate');
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/users`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
@@ -1365,8 +1377,10 @@ export default function AdminUsers() {
       }
       setCreateFormOpen(false);
       await loadUsers();
-    } catch {
-      showMessage('خطا در ایجاد کاربر', 'error');
+    } catch (error) {
+      showMessage(failureMessage(error, 'خطا در ایجاد کاربر'), 'error');
+    } finally {
+      setBusyAction('');
     }
   };
 
@@ -1452,7 +1466,8 @@ export default function AdminUsers() {
 
     setGuardianLinkBusy(true);
     try {
-      const res = await fetch(`${API_BASE}/api/student-profiles/${encodeURIComponent(studentRef)}/guardians/link`, {
+      const res = await apiFetch(`${API_BASE}/api/student-profiles/${encodeURIComponent(studentRef)}/guardians/link`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
@@ -1500,19 +1515,22 @@ export default function AdminUsers() {
       }));
       showMessage(result.data?.message || 'والد/سرپرست با موفقیت به شاگرد وصل شد.', 'success');
       await loadUsers();
-    } catch {
-      showMessage('خطا در وصل‌کردن والد/سرپرست به شاگرد', 'error');
+    } catch (error) {
+      showMessage(failureMessage(error, 'خطا در وصل‌کردن والد/سرپرست به شاگرد'), 'error');
     } finally {
       setGuardianLinkBusy(false);
     }
   };
 
   const updateRole = async (id, orgRole) => {
+    if (busyAction) return;
     const nextOrgRole = normalizeOrgRole(orgRole, 'student');
     const rolePayload = buildRoleRequestPayload(nextOrgRole);
     setBusyId(id);
+    setBusyAction('updateRole');
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/${id}/role`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/users/${id}/role`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(rolePayload)
@@ -1524,7 +1542,8 @@ export default function AdminUsers() {
       }
 
       if (isPermissionsLocked(nextOrgRole)) {
-        const permissionsRes = await fetch(`${API_BASE}/api/admin/users/${id}/permissions`, {
+        const permissionsRes = await apiFetch(`${API_BASE}/api/admin/users/${id}/permissions`, {
+          parse: 'response', rejectOnHttpError: false,
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({ permissions: [] })
@@ -1538,17 +1557,21 @@ export default function AdminUsers() {
 
       showMessage('نقش کاربر به‌روزرسانی شد.', 'success');
       loadUsers();
-    } catch {
-      showMessage('خطا در تغییر نقش', 'error');
+    } catch (error) {
+      showMessage(failureMessage(error, 'خطا در تغییر نقش'), 'error');
     } finally {
+      setBusyAction('');
       setBusyId('');
     }
   };
 
   const updatePermissions = async (id, permissions, orgRole = 'student') => {
+    if (busyAction) return;
     setBusyId(id);
+    setBusyAction('updatePermissions');
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/${id}/permissions`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/users/${id}/permissions`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ permissions: sanitizePermissionsForOrgRole(orgRole, permissions) })
@@ -1560,9 +1583,10 @@ export default function AdminUsers() {
       }
       showMessage('دسترسی‌های کاربر به‌روزرسانی شد.', 'success');
       loadUsers();
-    } catch {
-      showMessage('خطا در به‌روزرسانی دسترسی‌ها', 'error');
+    } catch (error) {
+      showMessage(failureMessage(error, 'خطا در به‌روزرسانی دسترسی‌ها'), 'error');
     } finally {
+      setBusyAction('');
       setBusyId('');
     }
   };
@@ -1570,7 +1594,8 @@ export default function AdminUsers() {
   const updateStatus = async (id, status) => {
     setBusyId(id);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/${id}/status`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/users/${id}/status`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ status: normalizeUserStatus(status, 'active') })
@@ -1582,8 +1607,8 @@ export default function AdminUsers() {
       }
       showMessage('وضعیت کاربر به‌روزرسانی شد.', 'success');
       loadUsers();
-    } catch {
-      showMessage('خطا در به‌روزرسانی وضعیت کاربر', 'error');
+    } catch (error) {
+      showMessage(failureMessage(error, 'خطا در به‌روزرسانی وضعیت کاربر'), 'error');
     } finally {
       setBusyId('');
     }
@@ -1605,6 +1630,7 @@ export default function AdminUsers() {
   };
 
   const submitUserEdit = async () => {
+    if (busyAction) return;
     const userId = String(editModal.userId || '').trim();
     const draft = editModal.form || {};
     if (!userId) return;
@@ -1624,8 +1650,10 @@ export default function AdminUsers() {
 
     setEditModal((prev) => ({ ...prev, busy: true }));
     const rolePayload = buildRoleRequestPayload(draft.orgRole);
+    setBusyAction('submitUserEdit');
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/${userId}`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/users/${userId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
@@ -1649,13 +1677,16 @@ export default function AdminUsers() {
       showMessage(result.data?.message || 'مشخصات کاربر به‌روزرسانی شد.', 'success');
       closeEditModal();
       loadUsers();
-    } catch {
-      showMessage('خطا در به‌روزرسانی مشخصات کاربر', 'error');
+    } catch (error) {
+      showMessage(failureMessage(error, 'خطا در به‌روزرسانی مشخصات کاربر'), 'error');
       setEditModal((prev) => ({ ...prev, busy: false }));
+    } finally {
+      setBusyAction('');
     }
   };
 
   const deactivateManagedUser = async (user) => {
+    if (busyAction) return;
     const userId = String(user?._id || '').trim();
     if (!userId) return;
 
@@ -1669,8 +1700,10 @@ export default function AdminUsers() {
     if (!confirmed) return;
 
     setBusyId(userId);
+    setBusyAction('deactivateManagedUser');
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/${userId}/deactivate`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/users/${userId}/deactivate`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ note: `غیرفعال‌سازی ${roleLabel} از پنل کاربران` })
@@ -1683,9 +1716,10 @@ export default function AdminUsers() {
 
       showMessage(result.data?.message || 'کاربر غیرفعال شد.', 'success');
       await loadUsers();
-    } catch {
-      showMessage('خطا در غیرفعال‌سازی کاربر', 'error');
+    } catch (error) {
+      showMessage(failureMessage(error, 'خطا در غیرفعال‌سازی کاربر'), 'error');
     } finally {
+      setBusyAction('');
       setBusyId('');
     }
   };
@@ -1738,6 +1772,7 @@ export default function AdminUsers() {
   };
 
   const submitAccessDecision = async () => {
+    if (busyAction) return;
     const item = accessDecisionModal.item;
     if (!item?._id) return;
     const mode = accessDecisionModal.mode === 'reject' ? 'reject' : 'approve';
@@ -1749,8 +1784,10 @@ export default function AdminUsers() {
     }
 
     setAccessBusyId(item._id);
+    setBusyAction('submitAccessDecision');
     try {
-      const res = await fetch(`${API_BASE}/api/admin/access-requests/${item._id}/${mode}`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/access-requests/${item._id}/${mode}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ note })
@@ -1768,6 +1805,7 @@ export default function AdminUsers() {
     } catch {
       setAccessMessage(mode === 'approve' ? 'خطا در تایید درخواست' : 'خطا در رد درخواست');
     } finally {
+      setBusyAction('');
       setAccessBusyId('');
     }
   };
@@ -1788,7 +1826,8 @@ export default function AdminUsers() {
 
     setAccessBulkBusy(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/access-requests/bulk`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/access-requests/bulk`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ action: mode, ids, note })

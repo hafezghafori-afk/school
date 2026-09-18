@@ -10,7 +10,7 @@ import { Badge } from '../components/ui/badge';
 import { Trash2, Edit, Plus, Clock, Calendar, Settings, AlertCircle } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import './TimetableConfiguration.css';
-import { apiFetch } from '../utils/apiClient';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 import DataState from '../components/ui/DataState';
 
 const normalizeShiftToken = (value) => String(value || '')
@@ -101,6 +101,7 @@ const resolveSchoolId = () => {
 };
 
 const TimetableConfiguration = () => {
+  const [busyAction, setBusyAction] = useState('');
   const [configurations, setConfigurations] = useState([]);
   const [academicYears, setAcademicYears] = useState([]);
   const [shifts, setShifts] = useState([]);
@@ -201,7 +202,8 @@ const TimetableConfiguration = () => {
               const template = DEFAULT_SHIFT_DETAILS[shiftName];
               if (!template) return;
 
-              await fetch(`/api/shifts/school/${schoolId}`, {
+              await apiFetch(`/api/shifts/school/${schoolId}`, {
+                parse: 'response', rejectOnHttpError: false,
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                 body: JSON.stringify({
@@ -228,18 +230,20 @@ const TimetableConfiguration = () => {
       }
     } catch (error) {
       console.error('Error fetching shifts:', error);
-      toast.error('دریافت نوبت‌ها ناموفق بود.');
+      toast.error(failureMessage(error, 'دریافت نوبت‌ها ناموفق بود.'));
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (busyAction) return;
 
     if (!hasValidSchoolId) {
       toast.error('ابتدا یک مکتب معتبر انتخاب یا ایجاد کنید.');
       return;
     }
 
+    setBusyAction('handleSubmit');
     try {
       const url = editingConfig
         ? `/api/timetable-configuration/${editingConfig._id}`
@@ -247,7 +251,8 @@ const TimetableConfiguration = () => {
 
       const method = editingConfig ? 'PUT' : 'POST';
 
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -269,7 +274,9 @@ const TimetableConfiguration = () => {
       }
     } catch (error) {
       console.error('Error saving configuration:', error);
-      toast.error('ذخیره تنظیم تقسیم اوقات ناموفق بود.');
+      toast.error(failureMessage(error, 'ذخیره تنظیم تقسیم اوقات ناموفق بود.'));
+    } finally {
+      setBusyAction('');
     }
   };
 
@@ -295,10 +302,13 @@ const TimetableConfiguration = () => {
   };
 
   const handleDelete = async (configId) => {
+    if (busyAction) return;
     if (!confirm('آیا مطمئن هستید که این تنظیم حذف شود؟ با حذف آن، همه تعریف‌های ساعت نیز حذف می‌شوند.')) return;
 
+    setBusyAction('handleDelete');
     try {
-      const response = await fetch(`/api/timetable-configuration/${configId}`, {
+      const response = await apiFetch(`/api/timetable-configuration/${configId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: { ...getAuthHeaders() }
       });
@@ -313,7 +323,9 @@ const TimetableConfiguration = () => {
       }
     } catch (error) {
       console.error('Error deleting configuration:', error);
-      toast.error('حذف تنظیم تقسیم اوقات ناموفق بود.');
+      toast.error(failureMessage(error, 'حذف تنظیم تقسیم اوقات ناموفق بود.'));
+    } finally {
+      setBusyAction('');
     }
   };
 
@@ -330,13 +342,16 @@ const TimetableConfiguration = () => {
       }
     } catch (error) {
       console.error('Error fetching period definitions:', error);
-      toast.error('دریافت تعریف ساعت‌ها ناموفق بود.');
+      toast.error(failureMessage(error, 'دریافت تعریف ساعت‌ها ناموفق بود.'));
     }
   };
 
   const handleSavePeriods = async () => {
+    if (busyAction) return;
+    setBusyAction('handleSavePeriods');
     try {
-      const response = await fetch(`/api/timetable-configuration/${selectedConfig._id}/periods`, {
+      const response = await apiFetch(`/api/timetable-configuration/${selectedConfig._id}/periods`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -357,7 +372,9 @@ const TimetableConfiguration = () => {
       }
     } catch (error) {
       console.error('Error updating periods:', error);
-      toast.error('به‌روزرسانی تعریف ساعت‌ها ناموفق بود.');
+      toast.error(failureMessage(error, 'به‌روزرسانی تعریف ساعت‌ها ناموفق بود.'));
+    } finally {
+      setBusyAction('');
     }
   };
 
@@ -620,8 +637,8 @@ const TimetableConfiguration = () => {
               </div>
 
               <div className="flex gap-2 tt-config-form-actions">
-                <Button type="submit" className="tt-config-primary-btn">
-                  {editingConfig ? 'ذخیره تغییرات' : 'ایجاد تنظیم'}
+                <Button type="submit" className="tt-config-primary-btn" disabled={busyAction === 'handleSubmit'}>
+                  {busyAction === 'handleSubmit' ? 'در حال ذخیره...' : (editingConfig ? 'ذخیره تغییرات' : 'ایجاد تنظیم')}
                 </Button>
                 <Button type="button" variant="outline" onClick={handleCancel}>
                   انصراف
@@ -703,7 +720,7 @@ const TimetableConfiguration = () => {
                 ))}
 
               <div className="flex gap-2 pt-4 tt-config-form-actions">
-                <Button onClick={handleSavePeriods} className="tt-config-primary-btn">ذخیره تعریف ساعت‌ها</Button>
+                <Button onClick={handleSavePeriods} className="tt-config-primary-btn" disabled={busyAction === 'handleSavePeriods'}>{busyAction === 'handleSavePeriods' ? 'در حال ذخیره...' : 'ذخیره تعریف ساعت‌ها'}</Button>
                 <Button variant="outline" onClick={() => setShowPeriodSetup(false)}>
                   انصراف
                 </Button>

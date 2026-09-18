@@ -17,7 +17,7 @@ import { getOfficialPrintLogoImageClass, getPrintLogoUrls } from '../utils/print
 import { localizeSystemMessage } from '../utils/systemMessage';
 import { buildStudentSearchBlob as buildSharedStudentSearchBlob } from '../utils/studentSearch';
 import { readStoredSchoolId, resolveActiveSchoolContext } from './adminWorkspaceUtils';
-import { apiFetch } from '../utils/apiClient';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -1813,7 +1813,7 @@ const waitForPrintableFonts = async (timeoutMs = 4000) => {
       document.fonts.ready,
       new Promise((resolve) => { if (typeof window !== 'undefined') window.setTimeout(resolve, timeoutMs); })
     ]);
-  } catch {
+  } catch (error) {
     // A rejected font load shouldn't block printing — proceed with whatever is ready.
   }
 };
@@ -3450,7 +3450,7 @@ export default function AdminFinance() {
       || String(item?.studentCoreId || '') === String(row?.studentCoreId || row?.studentId || '')
     ));
     if (!match?._id) {
-      setMessage('عضویت مالی فعال این شاگرد برای باز کردن میز پرداخت پیدا نشد.');
+      setMessage(failureMessage(error, 'عضویت مالی فعال این شاگرد برای باز کردن میز پرداخت پیدا نشد.'));
       return;
     }
     handlePaymentDeskStudentChange(match._id);
@@ -3468,7 +3468,7 @@ export default function AdminFinance() {
   const markDebtorDormant = async (row = {}) => {
     const orderIds = Array.isArray(row?.unpaidOrderIds) ? row.unpaidOrderIds : [];
     if (!orderIds.length) {
-      setMessage('این شاگرد بدهی بدون‌پرداخت ندارد؛ برای بدهی‌هایی که رویشان پول نشسته از «بررسی بازپرداخت» استفاده کنید.');
+      setMessage(failureMessage(error, 'این شاگرد بدهی بدون‌پرداخت ندارد؛ برای بدهی‌هایی که رویشان پول نشسته از «بررسی بازپرداخت» استفاده کنید.'));
       return;
     }
     const reason = window.prompt(
@@ -3506,7 +3506,7 @@ export default function AdminFinance() {
   const openDepartedDebtorRefund = (row = {}) => {
     const refundableIds = new Set(Array.isArray(row?.refundableOrderIds) ? row.refundableOrderIds : []);
     if (!refundableIds.size) {
-      setMessage('بدهی این شاگرد پرداختی ندارد که قابل بازپرداخت باشد؛ برای این نوع بدهی از «راکد اعلام کردن» استفاده کنید.');
+      setMessage(failureMessage(error, 'بدهی این شاگرد پرداختی ندارد که قابل بازپرداخت باشد؛ برای این نوع بدهی از «راکد اعلام کردن» استفاده کنید.'));
       setActiveSection('payments');
       return;
     }
@@ -4369,9 +4369,9 @@ export default function AdminFinance() {
       if (!selectedMonthCloseId && monthsData?.success && monthsData.items?.[0]?._id) {
         setSelectedMonthCloseId(monthsData.items[0]._id);
       }
-      setMessage('');
+      setMessage(failureMessage(error, ''));
     } catch {
-      setMessage('خطا در ارتباط با سرور');
+      setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
     } finally {
       if (paymentWorkspaceRefreshId === paymentWorkspaceRefreshIdRef.current) {
         setBusy(false);
@@ -5601,7 +5601,7 @@ export default function AdminFinance() {
       // The requested print data never rendered (e.g. the report/receipt was still loading or
       // failed to load) — printing now would produce a blank/white page, so bail out instead.
       setPrintMode('');
-      setMessage('داده‌ای برای چاپ آماده نشد؛ لطفاً دوباره تلاش کنید.');
+      setMessage(failureMessage(error, 'داده‌ای برای چاپ آماده نشد؛ لطفاً دوباره تلاش کنید.'));
       return;
     }
     await Promise.all([waitForPrintableImages(root), waitForPrintableFonts()]);
@@ -5788,7 +5788,7 @@ export default function AdminFinance() {
   const previewAdvanceStudentBilling = async (monthCount) => {
     const membershipId = String(paymentDeskMembershipStudent?.membershipId || '').trim();
     if (!membershipId || !paymentDeskForm.classId || !paymentDeskForm.academicYearId) {
-      setMessage('ابتدا شاگرد، صنف و سال تعلیمی را در میز پرداخت انتخاب کنید.');
+      setMessage(failureMessage(error, 'ابتدا شاگرد، صنف و سال تعلیمی را در میز پرداخت انتخاب کنید.'));
       return;
     }
     const payload = {
@@ -5914,7 +5914,7 @@ export default function AdminFinance() {
       } catch (error) {
         if (!active) return;
         setDeliveryTemplatePreview(null);
-        setDeliveryTemplatePreviewError(error.message || 'پیش‌نمایش template ناموفق بود');
+        setDeliveryTemplatePreviewError(failureMessage(error, 'پیش‌نمایش template ناموفق بود'));
       } finally {
         if (active) setDeliveryTemplatePreviewBusy(false);
       }
@@ -7141,7 +7141,7 @@ export default function AdminFinance() {
       printWindow.document.write(html);
       printWindow.document.close();
     } catch (err) {
-      setMessage(err.message || 'جزئیات رسید برای چاپ دریافت نشد.');
+      setMessage(failureMessage(error, 'جزئیات رسید برای چاپ دریافت نشد.'));
     } finally {
       setBusy(false);
     }
@@ -7373,7 +7373,8 @@ export default function AdminFinance() {
     const targetId = String(item?._id || item?.id || selectedMonthClose?._id || selectedMonthClose?.id || '').trim();
     if (!targetId) return;
     try {
-      const res = await fetch(`${API_BASE}/api/finance/admin/month-close/${targetId}/export.csv`, {
+      const res = await apiFetch(`${API_BASE}/api/finance/admin/month-close/${targetId}/export.csv`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: { ...getAuthHeaders() }
       });
       if (!res.ok) throw new Error('دانلود snapshot ماه مالی ناموفق بود');
@@ -7393,7 +7394,8 @@ export default function AdminFinance() {
     const targetId = String(item?._id || item?.id || selectedMonthClose?._id || selectedMonthClose?.id || '').trim();
     if (!targetId) return;
     try {
-      const res = await fetch(`${API_BASE}/api/finance/admin/month-close/${targetId}/export.pdf`, {
+      const res = await apiFetch(`${API_BASE}/api/finance/admin/month-close/${targetId}/export.pdf`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: { ...getAuthHeaders() }
       });
       if (!res.ok) throw new Error('دانلود بسته PDF ماه مالی ناموفق بود');
@@ -7428,7 +7430,7 @@ export default function AdminFinance() {
       await loadAll();
     } catch (err) {
       setVerifiedDocument(null);
-      setMessage(err.message || 'اعتبارسنجی سند مالی ناموفق بود');
+      setMessage(failureMessage(error, 'اعتبارسنجی سند مالی ناموفق بود'));
       setBusy(false);
     }
   };
@@ -7467,7 +7469,7 @@ export default function AdminFinance() {
       setMessage(nextVerifiedDocument?.documentNo ? `سند ${nextVerifiedDocument.documentNo} اعتبارسنجی شد` : 'سند مالی اعتبارسنجی شد');
     } catch (err) {
       setVerifiedDocument(null);
-      setMessage(err.message || 'اعتبارسنجی سند مالی ناموفق بود');
+      setMessage(failureMessage(error, 'اعتبارسنجی سند مالی ناموفق بود'));
     } finally {
       setBusy(false);
     }
@@ -7485,7 +7487,8 @@ export default function AdminFinance() {
     }
     try {
       setBusy(true);
-      const res = await fetch(`${API_BASE}/api/finance/admin/documents/batch-statements.zip`, {
+      const res = await apiFetch(`${API_BASE}/api/finance/admin/documents/batch-statements.zip`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -7531,7 +7534,8 @@ export default function AdminFinance() {
     }
     try {
       setBusy(true);
-      const res = await fetch(`${API_BASE}/api/finance/admin/document-archive/${archiveId}/deliver`, {
+      const res = await apiFetch(`${API_BASE}/api/finance/admin/document-archive/${archiveId}/deliver`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -7588,7 +7592,7 @@ export default function AdminFinance() {
         setSelectedDeliveryProviderChannel(String(data.item.channel));
       }
     } catch (err) {
-      setMessage(err.message || 'ذخیره تنظیمات ارایه‌کننده ناموفق بود');
+      setMessage(failureMessage(error, 'ذخیره تنظیمات ارایه‌کننده ناموفق بود'));
       setBusy(false);
     }
   };
@@ -7631,7 +7635,7 @@ export default function AdminFinance() {
         setSelectedDeliveryProviderChannel(String(data.item.channel));
       }
     } catch (err) {
-      setMessage(err.message || 'چرخش اعتبارنامه‌ها ناموفق بود');
+      setMessage(failureMessage(error, 'چرخش اعتبارنامه‌ها ناموفق بود'));
       setBusy(false);
     }
   };
@@ -8150,7 +8154,8 @@ export default function AdminFinance() {
 
   const exportCsv = async () => {
     try {
-      const res = await fetch(buildScopedReportUrl('/api/finance/admin/reports/export.csv'), {
+      const res = await apiFetch(buildScopedReportUrl('/api/finance/admin/reports/export.csv'), {
+        parse: 'response', rejectOnHttpError: false,
         headers: { ...getAuthHeaders() }
       });
       if (!res.ok) throw new Error('دانلود گزارش ناموفق بود');
@@ -8179,7 +8184,8 @@ export default function AdminFinance() {
         url.searchParams.set('q', auditTimelineSearch.trim());
       }
 
-      const res = await fetch(url.toString(), {
+      const res = await apiFetch(url.toString(), {
+        parse: 'response', rejectOnHttpError: false,
         headers: { ...getAuthHeaders() }
       });
       if (!res.ok) throw new Error('دانلود پکیج حسابرسی ناموفق بود');
@@ -8207,7 +8213,7 @@ export default function AdminFinance() {
   const downloadFinancePdfFile = async (url, filename, busyKey) => {
     setReportPdfBusyKey(busyKey);
     try {
-      const res = await fetch(url, { headers: { ...getAuthHeaders() } });
+      const res = await apiFetch(url, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } });
       if (!res.ok) {
         const serverMessage = await res.clone().json().then((body) => body?.message).catch(() => null);
         throw new Error(serverMessage ? `دانلود PDF ناموفق بود: ${serverMessage} (${res.status})` : `دانلود PDF ناموفق بود (${res.status})`);
