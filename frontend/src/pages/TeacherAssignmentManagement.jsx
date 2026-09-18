@@ -6,6 +6,8 @@ import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Checkbox } from '../components/ui/checkbox';
 import { Badge } from '../components/ui/badge';
+import DataState from '../components/ui/DataState';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 import { Trash2, Edit, Plus, Users, Clock, AlertCircle, UserCheck, Calendar } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import './TeacherAssignmentManagement.css';
@@ -45,12 +47,14 @@ const resolveSchoolId = () => {
 };
 
 const TeacherAssignmentManagement = () => {
+  const [busyAction, setBusyAction] = useState('');
   const [assignments, setAssignments] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [classes, setClasses] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [academicYears, setAcademicYears] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [assignmentsError, setAssignmentsError] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [editingAssignment, setEditingAssignment] = useState(null);
   const [bulkMode, setBulkMode] = useState(false);
@@ -117,18 +121,22 @@ const TeacherAssignmentManagement = () => {
   }, []);
 
   const fetchAssignments = async () => {
+    setLoading(true);
+    setAssignmentsError(null);
     try {
-      const response = await fetch(`/api/teacher-assignments/school/${schoolId}`, { headers: { ...getAuthHeaders() } });
-      const data = await response.json();
-      
+      const data = await apiFetch(`/api/teacher-assignments/school/${schoolId}`);
+
       if (data.success) {
         setAssignments(data.data);
       } else {
-        toast.error('دریافت تخصیص‌های استاد ناموفق بود.');
+        throw new Error(String(data?.message || '').trim() || 'دریافت تخصیص‌های استاد ناموفق بود.');
       }
     } catch (error) {
+      // A toast alone left the page showing "هیچ تخصیصی پیدا نشد" a few seconds
+      // later, which claims the school has no assignments rather than admitting
+      // the list never loaded.
       console.error('Error fetching teacher assignments:', error);
-      toast.error('دریافت تخصیص‌های استاد ناموفق بود.');
+      setAssignmentsError(error);
     } finally {
       setLoading(false);
     }
@@ -136,7 +144,7 @@ const TeacherAssignmentManagement = () => {
 
   const fetchTeachers = async () => {
     try {
-      const response = await fetch(`/api/users/school/${schoolId}?role=teacher`, { headers: { ...getAuthHeaders() } });
+      const response = await apiFetch(`/api/users/school/${schoolId}?role=teacher`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } });
       const data = await response.json();
       
       if (data.success) {
@@ -149,13 +157,13 @@ const TeacherAssignmentManagement = () => {
 
   const fetchClasses = async () => {
     try {
-      const response = await fetch(`/api/school-classes/school/${schoolId}`, { headers: { ...getAuthHeaders() } });
+      const response = await apiFetch(`/api/school-classes/school/${schoolId}`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } });
       const data = await response.json();
       
       if (data.success) {
         let classItems = Array.isArray(data.data) ? data.data : [];
         if (!classItems.length && schoolId !== 'default-school-id') {
-          const fallbackResponse = await fetch('/api/school-classes/school/default-school-id', { headers: { ...getAuthHeaders() } });
+          const fallbackResponse = await apiFetch('/api/school-classes/school/default-school-id', { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } });
           const fallbackData = await fallbackResponse.json();
           if (fallbackData.success && Array.isArray(fallbackData.data) && fallbackData.data.length) {
             classItems = fallbackData.data;
@@ -170,13 +178,13 @@ const TeacherAssignmentManagement = () => {
 
   const fetchSubjects = async () => {
     try {
-      const response = await fetch(`/api/subjects/school/${schoolId}`, { headers: { ...getAuthHeaders() } });
+      const response = await apiFetch(`/api/subjects/school/${schoolId}`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } });
       const data = await response.json();
       
       if (data.success) {
         let subjectItems = Array.isArray(data.data) ? data.data : [];
         if (!subjectItems.length && schoolId !== 'default-school-id') {
-          const fallbackResponse = await fetch('/api/subjects/school/default-school-id', { headers: { ...getAuthHeaders() } });
+          const fallbackResponse = await apiFetch('/api/subjects/school/default-school-id', { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } });
           const fallbackData = await fallbackResponse.json();
           if (fallbackData.success && Array.isArray(fallbackData.data) && fallbackData.data.length) {
             subjectItems = fallbackData.data;
@@ -191,7 +199,7 @@ const TeacherAssignmentManagement = () => {
 
   const fetchAcademicYears = async () => {
     try {
-      const response = await fetch(`/api/academic-years/school/${schoolId}`, { headers: { ...getAuthHeaders() } });
+      const response = await apiFetch(`/api/academic-years/school/${schoolId}`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } });
       const data = await response.json();
       
       if (data.success) {
@@ -212,7 +220,7 @@ const TeacherAssignmentManagement = () => {
         return;
       }
 
-      const response = await fetch(`/api/teacher-assignments/workload/${schoolId}?academicYearId=${fallbackYearId}`, { headers: { ...getAuthHeaders() } });
+      const response = await apiFetch(`/api/teacher-assignments/workload/${schoolId}?academicYearId=${fallbackYearId}`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } });
       const data = await response.json();
       
       if (data.success) {
@@ -226,7 +234,7 @@ const TeacherAssignmentManagement = () => {
       }
     } catch (error) {
       console.error('Error fetching workload data:', error);
-      toast.error('دریافت بار درسی ناموفق بود.');
+      toast.error(failureMessage(error, 'دریافت بار درسی ناموفق بود.'));
     }
   };
 
@@ -327,9 +335,11 @@ const TeacherAssignmentManagement = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (busyAction) return;
 
     if (!validateSingleStep(1) || !validateSingleStep(2)) return;
     
+    setBusyAction('handleSubmit');
     try {
       const url = editingAssignment 
         ? `/api/teacher-assignments/${editingAssignment._id}`
@@ -337,7 +347,8 @@ const TeacherAssignmentManagement = () => {
       
       const method = editingAssignment ? 'PUT' : 'POST';
       
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -359,7 +370,9 @@ const TeacherAssignmentManagement = () => {
       }
     } catch (error) {
       console.error('Error saving assignment:', error);
-      toast.error('ذخیره تخصیص استاد ناموفق بود.');
+      toast.error(failureMessage(error, 'ذخیره تخصیص استاد ناموفق بود.'));
+    } finally {
+      setBusyAction('');
     }
   };
 
@@ -418,10 +431,13 @@ const TeacherAssignmentManagement = () => {
   };
 
   const handleDelete = async (assignmentId) => {
+    if (busyAction) return;
     if (!confirm('آیا مطمئن هستید که این تخصیص ختم شود؟ سابقه آن در سیستم نگهداری می‌شود.')) return;
     
+    setBusyAction('handleDelete');
     try {
-      const response = await fetch(`/api/teacher-assignments/${assignmentId}`, {
+      const response = await apiFetch(`/api/teacher-assignments/${assignmentId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: { ...getAuthHeaders() }
       });
@@ -436,7 +452,9 @@ const TeacherAssignmentManagement = () => {
       }
     } catch (error) {
       console.error('Error deleting assignment:', error);
-      toast.error('ختم تخصیص استاد ناموفق بود.');
+      toast.error(failureMessage(error, 'ختم تخصیص استاد ناموفق بود.'));
+    } finally {
+      setBusyAction('');
     }
   };
 
@@ -446,7 +464,7 @@ const TeacherAssignmentManagement = () => {
     setSubjectVisibleCounts({});
     if (classId) {
       try {
-        const response = await fetch(`/api/teacher-assignments/class/${classId}`, { headers: { ...getAuthHeaders() } });
+        const response = await apiFetch(`/api/teacher-assignments/class/${classId}`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } });
         const data = await response.json();
         
         if (data.success) {
@@ -468,7 +486,7 @@ const TeacherAssignmentManagement = () => {
     try {
       setBulkSubjectsLoading(true);
       const query = academicYearId ? `?academicYearId=${encodeURIComponent(academicYearId)}` : '';
-      const response = await fetch(`/api/curriculum-rules/class/${classId}${query}`, { headers: { ...getAuthHeaders() } });
+      const response = await apiFetch(`/api/curriculum-rules/class/${classId}${query}`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } });
       const data = await response.json();
 
       if (!data.success) {
@@ -563,7 +581,7 @@ const TeacherAssignmentManagement = () => {
 
       try {
         const query = `?academicYearId=${encodeURIComponent(academicYearId)}`;
-        const response = await fetch(`/api/curriculum-rules/class/${classId}${query}`, { headers: { ...getAuthHeaders() } });
+        const response = await apiFetch(`/api/curriculum-rules/class/${classId}${query}`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } });
         const data = await response.json();
         if (cancelled) return;
 
@@ -649,13 +667,16 @@ const TeacherAssignmentManagement = () => {
   }, [showForm, bulkMode, formData.classId, formData.academicYearId, subjects, classes, editingAssignment]);
 
   const handleBulkSubmit = async () => {
+    if (busyAction) return;
     if (!selectedClass || !formData.academicYearId || bulkAssignments.length === 0) {
       toast.error('لطفاً صنف، سال تعلیمی و حداقل یک تخصیص را انتخاب کنید.');
       return;
     }
 
+    setBusyAction('handleBulkSubmit');
     try {
-      const response = await fetch(`/api/teacher-assignments/bulk`, {
+      const response = await apiFetch(`/api/teacher-assignments/bulk`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -692,7 +713,9 @@ const TeacherAssignmentManagement = () => {
       }
     } catch (error) {
       console.error('Error creating assignments:', error);
-      toast.error('ایجاد تخصیص‌های گروهی ناموفق بود.');
+      toast.error(failureMessage(error, 'ایجاد تخصیص‌های گروهی ناموفق بود.'));
+    } finally {
+      setBusyAction('');
     }
   };
 
@@ -1188,8 +1211,8 @@ const TeacherAssignmentManagement = () => {
             )}
 
             <div className="flex gap-2 tt-assignment-bulk-actions">
-              <Button onClick={handleBulkSubmit} disabled={bulkAssignments.length === 0} className="tt-assignment-primary-btn">
-                ایجاد {bulkAssignments.length} تخصیص
+              <Button onClick={handleBulkSubmit} disabled={busyAction === 'handleBulkSubmit' || bulkAssignments.length === 0} className="tt-assignment-primary-btn">
+                {busyAction === 'handleBulkSubmit' ? 'در حال ثبت...' : `ایجاد ${bulkAssignments.length} تخصیص`}
               </Button>
               <Button variant="outline" onClick={handleCancel} className="tt-assignment-ghost-btn">
                 انصراف
@@ -1376,8 +1399,8 @@ const TeacherAssignmentManagement = () => {
                     بعدی
                   </Button>
                 ) : (
-                  <Button type="submit" className="tt-assignment-primary-btn">
-                    {editingAssignment ? 'ذخیره تغییرات' : 'ایجاد تخصیص'}
+                  <Button type="submit" className="tt-assignment-primary-btn" disabled={busyAction === 'handleSubmit'}>
+                    {busyAction === 'handleSubmit' ? 'در حال ذخیره...' : (editingAssignment ? 'ذخیره تغییرات' : 'ایجاد تخصیص')}
                   </Button>
                 )}
                 <Button type="button" variant="outline" onClick={handleCancel} className="tt-assignment-ghost-btn">
@@ -1395,6 +1418,19 @@ const TeacherAssignmentManagement = () => {
           <p>{hasActiveFilters ? `${filteredAssignments.length} مورد از ${assignments.length} تخصیص نمایش داده می‌شود.` : `${assignments.length} تخصیص فعال`}</p>
         </div>
       </div>
+
+      {(loading || assignmentsError) && (
+        <DataState
+          loading={loading}
+          error={assignmentsError}
+          data={assignments}
+          onRetry={fetchAssignments}
+          skeleton="cards"
+          skeletonProps={{ count: 4 }}
+          showEmpty={false}
+          loadingLabel="در حال دریافت تخصیص‌های استاد..."
+        />
+      )}
 
       {/* Assignments List */}
       <div className="tt-assignment-list-grid tt-assignment-wizard-list-grid">
@@ -1467,10 +1503,11 @@ const TeacherAssignmentManagement = () => {
                     size="sm"
                     variant="outline"
                     onClick={() => handleDelete(assignment._id)}
+                    disabled={busyAction === 'handleDelete'}
                     className="flex items-center gap-1 text-red-600 hover:text-red-700 tt-assignment-delete-btn"
                   >
                     <Trash2 className="w-3 h-3" />
-                    ختم تخصیص
+                    {busyAction === 'handleDelete' ? 'در حال حذف...' : 'ختم تخصیص'}
                   </Button>
                 </div>
               </div>
@@ -1494,7 +1531,7 @@ const TeacherAssignmentManagement = () => {
         </div>
       )}
 
-      {assignments.length === 0 && !loading && (
+      {assignments.length === 0 && !loading && !assignmentsError && (
         <div className="text-center py-12 tt-assignment-empty-state">
           <UserCheck className="w-12 h-12 text-gray-400 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">هیچ تخصیصی پیدا نشد</h3>

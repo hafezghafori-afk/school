@@ -3,6 +3,8 @@ import './AdminNotifications.css';
 
 import { API_BASE } from '../config/api';
 import { formatAfghanDateTime } from '../utils/afghanDate';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -103,6 +105,7 @@ const buildSummaryFallback = (items = []) => ({
 });
 
 export default function AdminNotifications() {
+  const [loadError, setLoadError] = useState(null);
   const [items, setItems] = useState([]);
   const [summary, setSummary] = useState(buildSummaryFallback([]));
   const [selectedId, setSelectedId] = useState('');
@@ -117,6 +120,7 @@ export default function AdminNotifications() {
   });
 
   const loadNotifications = async ({ silent = false } = {}) => {
+    setLoadError(null);
     if (!silent) setLoading(true);
     setMessage('');
     try {
@@ -124,10 +128,7 @@ export default function AdminNotifications() {
         category: 'finance',
         limit: '150'
       });
-      const res = await fetch(`${API_BASE}/api/users/me/notifications?${params.toString()}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/users/me/notifications?${params.toString()}`);
       if (!data?.success) {
         setItems([]);
         setSummary(buildSummaryFallback([]));
@@ -141,10 +142,11 @@ export default function AdminNotifications() {
         if (prev && nextItems.some((item) => item._id === prev)) return prev;
         return nextItems[0]?._id || '';
       });
-    } catch {
+    } catch (error) {
+      setLoadError(error);
       setItems([]);
       setSummary(buildSummaryFallback([]));
-      setMessage('خطا در دریافت اعلان‌های مالی');
+      setMessage('');
     } finally {
       if (!silent) setLoading(false);
     }
@@ -189,7 +191,8 @@ export default function AdminNotifications() {
     setMessage('');
     try {
       const endpoint = nextRead ? 'read' : 'unread';
-      const res = await fetch(`${API_BASE}/api/users/me/notifications/${item._id}/${endpoint}`, {
+      const res = await apiFetch(`${API_BASE}/api/users/me/notifications/${item._id}/${endpoint}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { ...getAuthHeaders() }
       });
@@ -200,8 +203,8 @@ export default function AdminNotifications() {
       }
       await loadNotifications({ silent: true });
       setMessage(nextRead ? 'اعلان به‌عنوان خوانده‌شده ثبت شد.' : 'اعلان دوباره به حالت نخوانده برگشت.');
-    } catch {
-      setMessage('خطا در بروزرسانی اعلان');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در بروزرسانی اعلان'));
     } finally {
       setBusy(false);
     }
@@ -211,7 +214,8 @@ export default function AdminNotifications() {
     setBusy(true);
     setMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/users/me/notifications/read-all`, {
+      const res = await apiFetch(`${API_BASE}/api/users/me/notifications/read-all`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -226,8 +230,8 @@ export default function AdminNotifications() {
       }
       await loadNotifications({ silent: true });
       setMessage(`اعلان‌های مالی خوانده شد${Number(data.count || 0) ? ` (${data.count})` : ''}.`);
-    } catch {
-      setMessage('خطا در خواندن اعلان‌های مالی');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در خواندن اعلان‌های مالی'));
     } finally {
       setBusy(false);
     }
@@ -235,6 +239,7 @@ export default function AdminNotifications() {
 
   return (
     <div className="notify-page notify-page-v2">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadNotifications} compact />}
       <div className="notify-shell">
         <div className="card-back">
           <button type="button" onClick={() => window.history.back()}>بازگشت</button>

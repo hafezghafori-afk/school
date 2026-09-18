@@ -16,6 +16,8 @@ import {
 import { toast } from 'react-hot-toast';
 import { permissionAllows } from '../config/permissionCatalog';
 import './TimableViewer.css';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -115,6 +117,8 @@ const CORE_SUBJECT_KEYWORDS = [
 const TimableViewer = () => {
   const effectivePermissions = getStoredEffectivePermissions();
   const canManageSchedule = permissionAllows('manage_schedule', effectivePermissions);
+  const [loadError, setLoadError] = useState(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [timetableData, setTimetableData] = useState(null);
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -181,6 +185,7 @@ const TimableViewer = () => {
     let isMounted = true;
 
     const loadReferenceData = async () => {
+      setLoadError(null);
       setReferenceLoading(true);
       await Promise.all([
         fetchClasses(),
@@ -196,7 +201,7 @@ const TimableViewer = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [reloadToken]);
 
   useEffect(() => {
     const hasTarget = viewMode === 'admin'
@@ -215,7 +220,7 @@ const TimableViewer = () => {
 
   const fetchClasses = async () => {
     try {
-      const response = await fetch(`/api/school-classes/school/${effectiveSchoolId}`, { headers: getAuthHeaders() });
+      const response = await apiFetch(`/api/school-classes/school/${effectiveSchoolId}`, { parse: 'response', rejectOnHttpError: false, headers: getAuthHeaders() });
       const data = await response.json();
       
       if (data.success) {
@@ -232,7 +237,7 @@ const TimableViewer = () => {
 
   const fetchTeachers = async () => {
     try {
-      const response = await fetch(`/api/users/school/${effectiveSchoolId}?role=teacher`, { headers: getAuthHeaders() });
+      const response = await apiFetch(`/api/users/school/${effectiveSchoolId}?role=teacher`, { parse: 'response', rejectOnHttpError: false, headers: getAuthHeaders() });
       const data = await response.json();
       
       if (data.success) {
@@ -249,7 +254,7 @@ const TimableViewer = () => {
 
   const fetchAcademicYears = async () => {
     try {
-      const response = await fetch(`/api/academic-years/school/${effectiveSchoolId}`, { headers: getAuthHeaders() });
+      const response = await apiFetch(`/api/academic-years/school/${effectiveSchoolId}`, { parse: 'response', rejectOnHttpError: false, headers: getAuthHeaders() });
       const data = await response.json();
       
       if (data.success) {
@@ -268,7 +273,7 @@ const TimableViewer = () => {
 
   const fetchShifts = async () => {
     try {
-      const response = await fetch(`/api/shifts/school/${effectiveSchoolId}`, { headers: getAuthHeaders() });
+      const response = await apiFetch(`/api/shifts/school/${effectiveSchoolId}`, { parse: 'response', rejectOnHttpError: false, headers: getAuthHeaders() });
       const data = await response.json();
       
       if (data.success) {
@@ -318,7 +323,7 @@ const TimableViewer = () => {
         url = `/api/timetable/entries/${effectiveSchoolId}?${queryString}`;
       }
 
-      const response = await fetch(url, { headers: getAuthHeaders() });
+      const response = await apiFetch(url, { parse: 'response', rejectOnHttpError: false, headers: getAuthHeaders() });
       const data = await response.json();
       
       if (data.success) {
@@ -328,7 +333,7 @@ const TimableViewer = () => {
       }
     } catch (error) {
       console.error('Error fetching timetable:', error);
-      toast.error('دریافت تقسیم اوقات ناموفق بود.');
+      toast.error(failureMessage(error, 'دریافت تقسیم اوقات ناموفق بود.'));
     } finally {
       setLoading(false);
     }
@@ -342,7 +347,7 @@ const TimableViewer = () => {
         academicYearId: selectedAcademicYear,
         shiftId: selectedShift
       });
-      const response = await fetch(`/api/timetable/conflicts/${effectiveSchoolId}?${queryString}`, { headers: getAuthHeaders() });
+      const response = await apiFetch(`/api/timetable/conflicts/${effectiveSchoolId}?${queryString}`, { parse: 'response', rejectOnHttpError: false, headers: getAuthHeaders() });
       const data = await response.json();
       
       if (data.success) {
@@ -411,7 +416,8 @@ const TimableViewer = () => {
 
     setIsGenerating(true);
     try {
-      const response = await fetch('/api/timetable/generate', {
+      const response = await apiFetch('/api/timetable/generate', {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -453,7 +459,7 @@ const TimableViewer = () => {
       }
     } catch (error) {
       console.error('Error generating timetable:', error);
-      toast.error('ساخت تقسیم اوقات ناموفق بود.');
+      toast.error(failureMessage(error, 'ساخت تقسیم اوقات ناموفق بود.'));
     } finally {
       setIsGenerating(false);
     }
@@ -514,7 +520,8 @@ const TimableViewer = () => {
     setIsPublishing(true);
 
     try {
-      const response = await fetch(`/api/timetable/publish/${schoolId}`, {
+      const response = await apiFetch(`/api/timetable/publish/${schoolId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -550,7 +557,7 @@ const TimableViewer = () => {
       }
     } catch (error) {
       console.error('Error publishing timetable:', error);
-      toast.error('نشر تقسیم اوقات ناموفق بود.');
+      toast.error(failureMessage(error, 'نشر تقسیم اوقات ناموفق بود.'));
     } finally {
       setIsPublishing(false);
     }
@@ -792,6 +799,7 @@ const TimableViewer = () => {
 
   return (
     <div className="container mx-auto p-6 space-y-6 tt-shared-page tv-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={() => setReloadToken((token) => token + 1)} compact />}
       <div className="tv-hero tt-shared-header">
         <div className="tv-hero-main">
           <h1 className="text-3xl font-bold text-gray-900 tt-shared-title">نمایش تقسیم اوقات</h1>

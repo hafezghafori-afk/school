@@ -5,6 +5,8 @@ import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import StudentTimetableView from './StudentTimetableView';
 import TeacherTimetableView from './TeacherTimetableView';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -23,6 +25,7 @@ const getScheduleClassLabel = (item) => item?.schoolClass?.title || item?.course
 
 export default function SchedulePage() {
   const role = String(localStorage.getItem('role') || '').trim().toLowerCase();
+  const [loadError, setLoadError] = useState(null);
   const [date, setDate] = useState(todayStr());
   const [view, setView] = useState('day');
   const [items, setItems] = useState([]);
@@ -37,23 +40,22 @@ export default function SchedulePage() {
   }
 
   const loadSchedule = async (targetDate) => {
+    setLoadError(null);
     setMessage('');
     try {
       const url = view === 'week'
         ? `${API_BASE}/api/schedules/week?date=${targetDate}`
         : `${API_BASE}/api/schedules/by-date?date=${targetDate}`;
-      const res = await fetch(url, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(url);
       if (!data?.success) {
         setMessage(data?.message || 'خطا در دریافت تقسیم اوقات');
         setItems([]);
         return;
       }
       setItems(data.items || []);
-    } catch {
-      setMessage('خطا در ارتباط با سرور');
+    } catch (error) {
+      setLoadError(error);
+      setMessage('');
       setItems([]);
     }
   };
@@ -64,6 +66,7 @@ export default function SchedulePage() {
 
   return (
     <div className="schedule-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadSchedule} compact />}
       <div className="schedule-card">
         <div className="card-back">
           <button type="button" onClick={() => window.history.back()}>بازگشت</button>

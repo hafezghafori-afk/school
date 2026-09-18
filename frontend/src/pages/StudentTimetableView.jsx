@@ -11,6 +11,8 @@ import {
 } from '../utils/dailyTimetableDraft';
 import '../styles/timetable-print.css';
 import './TimetableAudienceView.css';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const WEEK_DAYS = [
   { value: 'saturday', label: 'شنبه' },
@@ -72,6 +74,8 @@ function countUniqueSubjects(entries = []) {
 }
 
 export default function StudentTimetableView() {
+  const [loadError, setLoadError] = useState(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [user, setUser] = useState(null);
   const [classes, setClasses] = useState([]);
   const [academicYears, setAcademicYears] = useState([]);
@@ -92,10 +96,10 @@ export default function StudentTimetableView() {
       setLoading(true);
       try {
         const [meRes, classesRes, yearsRes, shiftsRes] = await Promise.all([
-          fetch('/api/users/me', { headers: { ...getAuthHeaders() } }),
-          fetch(`/api/school-classes/school/${schoolId}`, { headers: { ...getAuthHeaders() } }),
-          fetch(`/api/academic-years/school/${schoolId}`, { headers: { ...getAuthHeaders() } }),
-          fetch(`/api/shifts/school/${schoolId}`, { headers: { ...getAuthHeaders() } })
+          apiFetch('/api/users/me', { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }),
+          apiFetch(`/api/school-classes/school/${schoolId}`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }),
+          apiFetch(`/api/academic-years/school/${schoolId}`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }),
+          apiFetch(`/api/shifts/school/${schoolId}`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } })
         ]);
 
         const [meData, classesData, yearsData, shiftsData] = await Promise.all([
@@ -125,8 +129,7 @@ export default function StudentTimetableView() {
 
         if (!resolvedClassId && meData.user?.role === 'student') {
           try {
-            const overviewRes = await fetch('/api/student-finance/me/overviews', { headers: { ...getAuthHeaders() } });
-            const overviewData = await overviewRes.json();
+            const overviewData = await apiFetch('/api/student-finance/me/overviews');
             if (overviewData?.success && Array.isArray(overviewData.items) && overviewData.items.length > 0) {
               resolvedClassId = extractSchoolClassIdFromOverviewItem(overviewData.items[0]);
             }
@@ -151,7 +154,7 @@ export default function StudentTimetableView() {
         setSelectedClass(resolvedClassId);
       } catch (error) {
         console.error('Error loading student timetable bootstrap:', error);
-        toast.error('بارگذاری اولیه ناموفق بود.');
+        toast.error(failureMessage(error, 'بارگذاری اولیه ناموفق بود.'));
       } finally {
         setLoading(false);
       }
@@ -162,6 +165,7 @@ export default function StudentTimetableView() {
 
   useEffect(() => {
     const fetchTimetable = async () => {
+      setLoadError(null);
       if (!selectedClass || !selectedAcademicYear || !selectedShift) return;
 
       setLoading(true);
@@ -172,8 +176,8 @@ export default function StudentTimetableView() {
           : '';
 
         const [response, publishedResponse] = await Promise.all([
-          fetch(url, { headers: { ...getAuthHeaders() } }),
-          publishedUrl ? fetch(publishedUrl, { headers: { ...getAuthHeaders() } }) : Promise.resolve(null)
+          apiFetch(url, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }),
+          publishedUrl ? apiFetch(publishedUrl, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }) : Promise.resolve(null)
         ]);
 
         const data = await response.json();
@@ -216,8 +220,9 @@ export default function StudentTimetableView() {
         setPublishedEntryCount(usePublishedFallback ? publishedEntries.length : 0);
         setSlotRows(buildWeeklySlotRowsFromDailyDraft(publishedItem));
       } catch (error) {
+        setLoadError(error);
         console.error('Error loading student timetable:', error);
-        toast.error('دریافت برنامه شاگرد ناموفق بود.');
+        toast.error(failureMessage(error, 'دریافت برنامه شاگرد ناموفق بود.'));
         setSlotRows(SLOT_ROWS);
       } finally {
         setLoading(false);
@@ -225,7 +230,7 @@ export default function StudentTimetableView() {
     };
 
     fetchTimetable();
-  }, [classes, schoolId, selectedClass, selectedAcademicYear, selectedShift]);
+  }, [classes, schoolId, selectedClass, selectedAcademicYear, selectedShift, reloadToken]);
 
   const selectedClassLabel = classes.find((item) => item._id === selectedClass)?.title || 'صنف';
   const selectedAcademicYearLabel = academicYears.find((item) => item._id === selectedAcademicYear)?.title || 'سال تعلیمی';
@@ -251,6 +256,7 @@ export default function StudentTimetableView() {
 
   return (
     <div className="container mx-auto p-4 md:p-6 space-y-6 tt-shared-page tt-audience-page print-timetable print-class-timetable">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={() => setReloadToken((token) => token + 1)} compact />}
       <div className="print-header">
         <h1>تقسیم اوقات رسمی مکتب</h1>
         <h2>برنامه هفتگی شاگرد</h2>

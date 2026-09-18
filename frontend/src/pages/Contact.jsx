@@ -5,6 +5,7 @@ import { PublicLayout } from '../components/public';
 import './Contact.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch } from '../utils/apiClient';
 
 const text = {
   fa: {
@@ -89,7 +90,8 @@ export default function Contact() {
       const endpoint = settings?.isSchoolWebsite
         ? `${API_BASE}/api/school-websites/contact`
         : `${API_BASE}/api/contact`;
-      const res = await fetch(endpoint, {
+      const res = await apiFetch(endpoint, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, slug: settings?.slug || '' })

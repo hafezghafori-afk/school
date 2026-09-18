@@ -1,0 +1,180 @@
+.global-progress {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 9999;
+  overflow: hidden;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+
+/* Grows from the right edge, the direction this interface reads in. */
+.global-progress-bar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 0;
+  border-radius: 0 0 0 4px;
+  background: linear-gradient(270deg, var(--accent, #f2b90c), var(--btn-secondary, #0ea5e9));
+  box-shadow: 0 0 12px rgba(14, 165, 233, 0.55);
+  transition: width 0.3s ease-out;
+}
+
+/* ---------------------------------------------------------------- *
+ * Labelled pill — the part that actually says what is happening
+ * ---------------------------------------------------------------- */
+
+.global-activity {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  z-index: 9999;
+  display: inline-flex;
+  gap: 9px;
+  align-items: center;
+  padding: 7px 15px;
+  border: 1px solid var(--card-border, rgba(255, 255, 255, 0.16));
+  border-radius: 999px;
+  background: rgba(12, 18, 30, 0.92);
+  box-shadow: 0 10px 26px rgba(2, 6, 23, 0.45);
+  color: var(--paper, #f6f7fb);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: global-activity-in 0.22s ease-out;
+}
+
+@keyframes global-activity-in {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.global-activity-spinner {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  border-top-color: var(--accent, #f2b90c);
+  border-radius: 50%;
+  animation: global-activity-spin 0.8s linear infinite;
+}
+
+@keyframes global-activity-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .global-progress-bar {
+    transition: none;
+  }
+
+  .global-activity {
+    animation: none;
+  }
+
+  .global-activity-spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+@media (max-width: 640px) {
+  .global-activity {
+    max-width: calc(100vw - 32px);
+    font-size: 0.78rem;
+  }
+}
+
+/* ---------------------------------------------------------------- *
+ * Connection banner
+ * ---------------------------------------------------------------- */
+
+.connection-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  width: min(100%, 1180px);
+  margin: 12px auto 0;
+  padding: 11px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md, 12px);
+  color: var(--paper, #f6f7fb);
+  font-size: 0.87rem;
+}
+
+.connection-banner.is-bad {
+  border-color: rgba(248, 113, 113, 0.34);
+  background: rgba(60, 20, 26, 0.5);
+}
+
+.connection-banner.is-warn {
+  border-color: rgba(242, 185, 12, 0.34);
+  background: rgba(63, 48, 10, 0.5);
+}
+
+.connection-banner-icon {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.connection-banner-body {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.connection-banner-body strong {
+  font-weight: 800;
+}
+
+.connection-banner-text {
+  color: var(--text-muted, rgba(246, 247, 251, 0.75));
+  line-height: 1.7;
+}
+
+.connection-banner-retry {
+  padding: 6px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-sm, 10px);
+  background: var(--btn-ghost, rgba(255, 255, 255, 0.1));
+  color: var(--paper, #f6f7fb);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.connection-banner-retry:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.connection-banner-retry:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.connection-banner-retry:focus-visible {
+  outline: 2px solid var(--accent, #f2b90c);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .connection-banner {
+    margin-top: 8px;
+    padding: 10px 12px;
+    font-size: 0.82rem;
+  }
+
+  .connection-banner-retry {
+    width: 100%;
+  }
+}

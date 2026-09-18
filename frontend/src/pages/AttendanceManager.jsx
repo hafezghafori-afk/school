@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './AttendanceManager.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import DataState, { DataErrorCard } from '../components/ui/DataState';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, formatAfghanDateTime, toGregorianDateInputValue } from '../utils/afghanDate';
 import { studentMatchesSearch } from '../utils/studentSearch';
@@ -279,6 +281,8 @@ export default function AttendanceManager() {
   const [studentReport, setStudentReport] = useState(null);
   const [message, setMessage] = useState('');
   const [loadingEntry, setLoadingEntry] = useState(false);
+  const [entryError, setEntryError] = useState(null);
+  const [coursesError, setCoursesError] = useState(null);
   const [loadingClassReport, setLoadingClassReport] = useState(false);
   const [loadingStudentReport, setLoadingStudentReport] = useState(false);
   const [saving, setSaving] = useState({});
@@ -342,27 +346,22 @@ export default function AttendanceManager() {
   };
 
   const loadCourses = async () => {
+    setCoursesError(null);
     try {
       const role = String(localStorage.getItem('role') || '').trim().toLowerCase();
       const isInstructor = role === 'instructor';
-      const res = await fetch(`${API_BASE}${isInstructor ? '/api/education/instructor/courses' : '/api/education/school-classes?status=active'}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${isInstructor ? '/api/education/instructor/courses' : '/api/education/school-classes?status=active'}`);
       if (!data?.success) {
         setCourses([]);
         setCourseId('');
-        return;
+        throw new Error(String(data?.message || '').trim() || 'دریافت فهرست صنف‌ها ممکن نشد.');
       }
 
       let sourceItems = Array.isArray(data?.items) ? data.items : [];
       if (isInstructor && !sourceItems.length) {
         const teacherId = String(localStorage.getItem('userId') || '').trim();
         if (teacherId) {
-          const fallbackRes = await fetch(`${API_BASE}/api/teacher-assignments/teacher/${encodeURIComponent(teacherId)}`, {
-            headers: { ...getAuthHeaders() }
-          });
-          const fallbackData = await fallbackRes.json().catch(() => ({}));
+          const fallbackData = await apiFetch(`/api/teacher-assignments/teacher/${encodeURIComponent(teacherId)}`).catch(() => ({}));
           sourceItems = buildCourseItemsFromAssignments(fallbackData?.data?.assignments || fallbackData?.items || []);
         }
       }
@@ -375,9 +374,12 @@ export default function AttendanceManager() {
         }
         return getCourseSelectionId(items[0]) || items[0]?._id || '';
       });
-    } catch {
+    } catch (error) {
+      // An empty <select> used to be the only sign that this failed, which read
+      // as "this school has no classes" rather than "the list never arrived".
       setCourses([]);
       setCourseId('');
+      setCoursesError(error);
     }
   };
 
@@ -394,30 +396,29 @@ export default function AttendanceManager() {
     }
 
     setLoadingEntry(true);
+    setEntryError(null);
     if (!silent) setMessage('');
 
     try {
       const scopePath = targetClassId
         ? `class/${encodeURIComponent(targetClassId)}`
         : `course/${encodeURIComponent(targetCompatCourseId)}`;
-      const res = await fetch(`${API_BASE}/api/attendance/${scopePath}?date=${encodeURIComponent(targetDate)}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`/api/attendance/${scopePath}?date=${encodeURIComponent(targetDate)}`);
       if (!data?.success) {
         setRows([]);
         setStudentOptions([]);
-        if (!silent) setMessage(data?.message || 'دریافت جدول حاضری ممکن نشد.');
-        return;
+        throw new Error(String(data?.message || '').trim() || 'دریافت جدول حاضری ممکن نشد.');
       }
 
       const items = Array.isArray(data.items) ? data.items : [];
       setRows(items.map((item) => buildEditableRow(item, targetDate)));
       syncStudentOptions(items.map((item) => item.student).filter(Boolean));
-    } catch {
+    } catch (error) {
       setRows([]);
       setStudentOptions([]);
-      if (!silent) setMessage('خطا در ارتباط با سرور');
+      // The shared message bar is also used for save confirmations and is wiped
+      // by the next action, so a failed load keeps its own state with a retry.
+      setEntryError(error);
     } finally {
       setLoadingEntry(false);
     }
@@ -435,7 +436,8 @@ export default function AttendanceManager() {
     if (!silent) setMessage('');
 
     try {
-      const res = await fetch(`${API_BASE}/api/attendance/employees?date=${encodeURIComponent(targetDate)}`, {
+      const res = await apiFetch(`${API_BASE}/api/attendance/employees?date=${encodeURIComponent(targetDate)}`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: { ...getAuthHeaders() }
       });
       const data = await res.json();
@@ -449,10 +451,10 @@ export default function AttendanceManager() {
       const items = Array.isArray(data.items) ? data.items : [];
       setEmployeeRows(items.map((item) => buildEditableEmployeeRow(item, targetDate)));
       syncEmployeeOptions(items.map((item) => item.employee).filter(Boolean));
-    } catch {
+    } catch (error) {
       setEmployeeRows([]);
       setEmployeeOptions([]);
-      if (!silent) setMessage('خطا در ارتباط با سرور');
+      if (!silent) setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
     } finally {
       setLoadingEmployeeEntry(false);
     }
@@ -476,7 +478,8 @@ export default function AttendanceManager() {
       const scopePath = selectedClassId
         ? `class/${encodeURIComponent(selectedClassId)}`
         : `course/${encodeURIComponent(selectedCompatCourseId)}`;
-      const res = await fetch(`${API_BASE}/api/attendance/${scopePath}/summary?${query.toString()}`, {
+      const res = await apiFetch(`${API_BASE}/api/attendance/${scopePath}/summary?${query.toString()}`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: { ...getAuthHeaders() }
       });
       const data = await res.json();
@@ -487,8 +490,8 @@ export default function AttendanceManager() {
 
       setClassReport(data);
       syncStudentOptions((data.students || []).map((item) => item.student).filter(Boolean));
-    } catch {
-      setMessage('خطا در ارتباط با سرور');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
     } finally {
       setLoadingClassReport(false);
     }
@@ -512,9 +515,9 @@ export default function AttendanceManager() {
       if (selectedClassId) query.set('classId', selectedClassId);
       else if (selectedCompatCourseId) query.set('courseId', selectedCompatCourseId);
 
-      const res = await fetch(
+      const res = await apiFetch(
         `${API_BASE}/api/attendance/student/${encodeURIComponent(targetStudentId)}/summary?${query.toString()}`,
-        { headers: { ...getAuthHeaders() } }
+        { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }
       );
       const data = await res.json();
       if (!data?.success) {
@@ -523,8 +526,8 @@ export default function AttendanceManager() {
       }
 
       setStudentReport(data);
-    } catch {
-      setMessage('خطا در ارتباط با سرور');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
     } finally {
       setLoadingStudentReport(false);
     }
@@ -545,7 +548,8 @@ export default function AttendanceManager() {
         from: range.from,
         to: range.to
       });
-      const res = await fetch(`${API_BASE}/api/attendance/employees/summary?${query.toString()}`, {
+      const res = await apiFetch(`${API_BASE}/api/attendance/employees/summary?${query.toString()}`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: { ...getAuthHeaders() }
       });
       const data = await res.json();
@@ -556,8 +560,8 @@ export default function AttendanceManager() {
 
       setEmployeeReport(data);
       syncEmployeeOptions((data.employees || []).map((item) => item.employee).filter(Boolean));
-    } catch {
-      setMessage('خطا در ارتباط با سرور');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
     } finally {
       setLoadingEmployeeReport(false);
     }
@@ -578,9 +582,9 @@ export default function AttendanceManager() {
         from: range.from,
         to: range.to
       });
-      const res = await fetch(
+      const res = await apiFetch(
         `${API_BASE}/api/attendance/employees/${encodeURIComponent(targetEmployeeId)}/summary?${query.toString()}`,
-        { headers: { ...getAuthHeaders() } }
+        { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }
       );
       const data = await res.json();
       if (!data?.success) {
@@ -589,15 +593,16 @@ export default function AttendanceManager() {
       }
 
       setEmployeeDetailReport(data);
-    } catch {
-      setMessage('خطا در ارتباط با سرور');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
     } finally {
       setLoadingEmployeeDetailReport(false);
     }
   };
 
   const downloadReportFile = async (url, fallbackFilename) => {
-    const res = await fetch(url, {
+    const res = await apiFetch(url, {
+      parse: 'response', rejectOnHttpError: false,
       headers: { ...getAuthHeaders() }
     });
 
@@ -644,7 +649,7 @@ export default function AttendanceManager() {
         `attendance-course-${range.from}-${range.to}.csv`
       );
     } catch (error) {
-      setMessage(error.message || 'خطا در دانلود گزارش صنف');
+      setMessage(failureMessage(error, 'خطا در دانلود گزارش صنف'));
     } finally {
       setExportingClassReport(false);
     }
@@ -670,7 +675,7 @@ export default function AttendanceManager() {
         `attendance-student-${range.from}-${range.to}.csv`
       );
     } catch (error) {
-      setMessage(error.message || 'خطا در دانلود گزارش شاگرد');
+      setMessage(failureMessage(error, 'خطا در دانلود گزارش شاگرد'));
     } finally {
       setExportingStudentReport(false);
     }
@@ -694,7 +699,7 @@ export default function AttendanceManager() {
         `attendance-employees-${range.from}-${range.to}.csv`
       );
     } catch (error) {
-      setMessage(error.message || 'خطا در دانلود گزارش کارمندان');
+      setMessage(failureMessage(error, 'خطا در دانلود گزارش کارمندان'));
     } finally {
       setExportingEmployeeReport(false);
     }
@@ -718,14 +723,15 @@ export default function AttendanceManager() {
         `attendance-employee-${range.from}-${range.to}.csv`
       );
     } catch (error) {
-      setMessage(error.message || 'خطا در دانلود گزارش کارمند');
+      setMessage(failureMessage(error, 'خطا در دانلود گزارش کارمند'));
     } finally {
       setExportingEmployeeDetailReport(false);
     }
   };
 
   const saveAttendanceRecord = async (row) => {
-    const res = await fetch(`${API_BASE}/api/attendance/upsert`, {
+    const res = await apiFetch(`${API_BASE}/api/attendance/upsert`, {
+      parse: 'response', rejectOnHttpError: false,
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify({
@@ -746,7 +752,8 @@ export default function AttendanceManager() {
   };
 
   const saveEmployeeAttendanceRecord = async (row) => {
-    const res = await fetch(`${API_BASE}/api/attendance/employees/upsert`, {
+    const res = await apiFetch(`${API_BASE}/api/attendance/employees/upsert`, {
+      parse: 'response', rejectOnHttpError: false,
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify({
@@ -830,7 +837,7 @@ export default function AttendanceManager() {
       )));
       setMessage('حاضری شاگرد ذخیره شد.');
     } catch (error) {
-      setMessage(error.message || 'خطا در ذخیره حاضری');
+      setMessage(failureMessage(error, 'خطا در ذخیره حاضری'));
     } finally {
       setSaving((prev) => ({ ...prev, [idx]: false }));
     }
@@ -857,7 +864,7 @@ export default function AttendanceManager() {
       )));
       setMessage('حاضری کارمند ذخیره شد.');
     } catch (error) {
-      setMessage(error.message || 'خطا در ذخیره حاضری کارمند');
+      setMessage(failureMessage(error, 'خطا در ذخیره حاضری کارمند'));
     } finally {
       setEmployeeSaving((prev) => ({ ...prev, [idx]: false }));
     }
@@ -1073,6 +1080,10 @@ export default function AttendanceManager() {
                     ))}
                   </select>
                 </label>
+
+                {!!coursesError && (
+                  <DataErrorCard error={coursesError} onRetry={loadCourses} compact />
+                )}
 
                 <label>
                   <span>جستجوی شاگرد</span>
@@ -1293,8 +1304,13 @@ export default function AttendanceManager() {
               </div>
             </div>
 
-            {loadingEntry && <div className="attendance-empty">در حال دریافت جدول حاضری...</div>}
-            {!loadingEntry && !rows.length && (
+            {loadingEntry && (
+              <DataState loading skeleton="table" skeletonProps={{ rows: 8, columns: 6 }} loadingLabel="در حال دریافت جدول حاضری..." />
+            )}
+            {!loadingEntry && !!entryError && (
+              <DataErrorCard error={entryError} onRetry={() => loadAttendance()} />
+            )}
+            {!loadingEntry && !entryError && !rows.length && (
               <div className="attendance-empty">برای این صنف شاگرد فعالی ثبت نشده است.</div>
             )}
 

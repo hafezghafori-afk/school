@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from './ui/AfghanDateInput';
 import { formatAfghanDateTime, toGregorianDateTimeInputValue } from '../utils/afghanDate';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const providerLabels = {
   manual: 'لینک دستی',
@@ -176,8 +177,7 @@ export default function VirtualClassPanel({ role = 'student' }) {
     try {
       const isInstructor = role === 'instructor';
       const target = `${API_BASE}${isInstructor ? '/api/education/instructor/courses' : '/api/education/school-classes?status=active'}`;
-      const res = await fetch(target, { headers: { ...getAuthHeaders() } });
-      const data = await res.json();
+      const data = await apiFetch(target);
       const nextCourses = normalizeCourseOptions(data?.items || [], isInstructor ? 'courseAccess' : 'schoolClass');
       setCourses(nextCourses);
       setForm((prev) => ({
@@ -202,10 +202,7 @@ export default function VirtualClassPanel({ role = 'student' }) {
         else if (selectedCompatCourseId) params.set('courseId', selectedCompatCourseId);
       }
 
-      const res = await fetch(`${API_BASE}/api/virtual-classes${params.toString() ? `?${params.toString()}` : ''}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/virtual-classes${params.toString() ? `?${params.toString()}` : ''}`);
       if (!data?.success) {
         setSessions([]);
         setSummary(buildSessionSummary([]));
@@ -216,10 +213,10 @@ export default function VirtualClassPanel({ role = 'student' }) {
       const items = sortSessionItems(Array.isArray(data?.items) ? data.items : []);
       setSessions(items);
       setSummary(data?.summary || buildSessionSummary(items));
-    } catch {
+    } catch (error) {
       setSessions([]);
       setSummary(buildSessionSummary([]));
-      setMessage('خطا در ارتباط با سرور');
+      setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
     } finally {
       setLoading(false);
     }
@@ -292,7 +289,8 @@ export default function VirtualClassPanel({ role = 'student' }) {
         : `${API_BASE}/api/virtual-classes`;
       const method = editingSessionId ? 'PUT' : 'POST';
 
-      const res = await fetch(target, {
+      const res = await apiFetch(target, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
@@ -315,8 +313,8 @@ export default function VirtualClassPanel({ role = 'student' }) {
       setMessage(editingSessionId ? 'جلسه آنلاین ویرایش شد.' : 'جلسه آنلاین ثبت شد.');
       resetForm();
       await loadSessions(courseFilter);
-    } catch {
-      setMessage('خطا در ذخیره جلسه آنلاین');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ذخیره جلسه آنلاین'));
     } finally {
       setSaving(false);
     }
@@ -334,7 +332,8 @@ export default function VirtualClassPanel({ role = 'student' }) {
         : action === 'end'
           ? `${API_BASE}/api/virtual-classes/${item._id}/end`
           : `${API_BASE}/api/virtual-classes/${item._id}`;
-      const res = await fetch(target, {
+      const res = await apiFetch(target, {
+        parse: 'response', rejectOnHttpError: false,
         method: action === 'delete' ? 'DELETE' : 'POST',
         headers: { ...getAuthHeaders() }
       });
@@ -352,8 +351,8 @@ export default function VirtualClassPanel({ role = 'student' }) {
 
       setMessage(action === 'start' ? 'جلسه آغاز شد.' : action === 'end' ? 'جلسه ختم شد.' : 'جلسه حذف شد.');
       await loadSessions(courseFilter);
-    } catch {
-      setMessage('خطا در انجام عملیات جلسه آنلاین');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در انجام عملیات جلسه آنلاین'));
     } finally {
       setActionId('');
     }

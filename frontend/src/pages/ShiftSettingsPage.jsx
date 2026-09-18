@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import './ShiftSettingsPage.css';
+import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const ShiftSettingsPage = () => {
+  const [loadError, setLoadError] = useState(null);
   const [shifts, setShifts] = useState([]);
   const [weekConfig, setWeekConfig] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -24,10 +27,10 @@ const ShiftSettingsPage = () => {
   }, [activeTab]);
 
   const fetchShifts = async () => {
+    setLoadError(null);
     try {
       setLoading(true);
-      const response = await fetch(`/api/school-shifts/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/school-shifts/school/${schoolId}`);
       
       if (data.success) {
         setShifts(data.data);
@@ -35,6 +38,7 @@ const ShiftSettingsPage = () => {
         setError('خطا در دریافت شیفت‌ها');
       }
     } catch (err) {
+      setLoadError(err);
       setError('خطا در ارتباط با سرور');
     } finally {
       setLoading(false);
@@ -44,8 +48,7 @@ const ShiftSettingsPage = () => {
   const fetchWeekConfig = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/school-week-config/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/school-week-config/school/${schoolId}`);
       
       if (data.success) {
         setWeekConfig(data.data);
@@ -71,7 +74,8 @@ const ShiftSettingsPage = () => {
       
       const method = editingShift ? 'PATCH' : 'POST';
       
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -111,7 +115,8 @@ const ShiftSettingsPage = () => {
       
       const method = weekConfig ? 'PATCH' : 'POST';
       
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -139,7 +144,8 @@ const ShiftSettingsPage = () => {
 
   const handleToggleShift = async (shiftId) => {
     try {
-      const response = await fetch(`/api/school-shifts/${shiftId}/toggle-status`, {
+      const response = await apiFetch(`/api/school-shifts/${shiftId}/toggle-status`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -165,7 +171,8 @@ const ShiftSettingsPage = () => {
     }
 
     try {
-      const response = await fetch(`/api/school-shifts/${shiftId}`, {
+      const response = await apiFetch(`/api/school-shifts/${shiftId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -191,7 +198,8 @@ const ShiftSettingsPage = () => {
     }
 
     try {
-      const response = await fetch(`/api/school-week-config/${weekConfig._id}/reset-default`, {
+      const response = await apiFetch(`/api/school-week-config/${weekConfig._id}/reset-default`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -311,6 +319,7 @@ const ShiftSettingsPage = () => {
 
   return (
     <div className="shift-settings-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={fetchShifts} compact />}
       <div className="page-header">
         <h1>تنظیمات زمانی مکتب</h1>
       </div>

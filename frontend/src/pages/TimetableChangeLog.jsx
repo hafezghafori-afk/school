@@ -21,8 +21,11 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { formatAfghanDateTime } from '../utils/afghanDate';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const TimetableChangeLog = () => {
+  const [loadError, setLoadError] = useState(null);
   const [changes, setChanges] = useState([]);
   const [filteredChanges, setFilteredChanges] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -84,22 +87,22 @@ const TimetableChangeLog = () => {
   }, [changes, filters, searchTerm]);
 
   const fetchClasses = async () => {
+    setLoadError(null);
     try {
-      const response = await fetch(`/api/school-classes/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/school-classes/school/${schoolId}`);
       
       if (data.success) {
         setClasses(data.data);
       }
     } catch (error) {
+      setLoadError(error);
       console.error('Error fetching classes:', error);
     }
   };
 
   const fetchTeachers = async () => {
     try {
-      const response = await fetch(`/api/users/school/${schoolId}?role=teacher`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/users/school/${schoolId}?role=teacher`);
       
       if (data.success) {
         setTeachers(data.data);
@@ -111,8 +114,7 @@ const TimetableChangeLog = () => {
 
   const fetchAcademicYears = async () => {
     try {
-      const response = await fetch(`/api/academic-years/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/academic-years/school/${schoolId}`);
       
       if (data.success) {
         setAcademicYears(data.data.filter(year => year.status === 'active'));
@@ -124,8 +126,7 @@ const TimetableChangeLog = () => {
 
   const fetchShifts = async () => {
     try {
-      const response = await fetch(`/api/shifts/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/shifts/school/${schoolId}`);
       
       if (data.success) {
         setShifts(data.data);
@@ -144,8 +145,7 @@ const TimetableChangeLog = () => {
       if (filters.classId) params.append('classId', filters.classId);
       if (filters.teacherId) params.append('teacherId', filters.teacherId);
 
-      const response = await fetch(`/api/timetable/history/${schoolId}?${params}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/timetable/history/${schoolId}?${params}`);
       
       if (data.success) {
         setChanges(data.data);
@@ -154,7 +154,7 @@ const TimetableChangeLog = () => {
       }
     } catch (error) {
       console.error('Error fetching change history:', error);
-      toast.error('خطا در دریافت تاریخچه تغییرات.');
+      toast.error(failureMessage(error, 'خطا در دریافت تاریخچه تغییرات.'));
     } finally {
       setLoading(false);
     }
@@ -220,7 +220,7 @@ const TimetableChangeLog = () => {
       toast.info('قابلیت برگشت تغییر در حال توسعه است، به زودی در دسترس خواهد بود.');
     } catch (error) {
       console.error('Error undoing change:', error);
-      toast.error('برگشت تغییر ناموفق بود.');
+      toast.error(failureMessage(error, 'برگشت تغییر ناموفق بود.'));
     }
   };
 
@@ -230,7 +230,7 @@ const TimetableChangeLog = () => {
       toast.info('قابلیت بازگردانی کامل در حال توسعه است، به زودی در دسترس خواهد بود.');
     } catch (error) {
       console.error('Error reverting change:', error);
-      toast.error('بازگردانی تغییر ناموفق بود.');
+      toast.error(failureMessage(error, 'بازگردانی تغییر ناموفق بود.'));
     }
   };
 
@@ -367,6 +367,7 @@ const TimetableChangeLog = () => {
 
   return (
     <div className="container mx-auto p-6 space-y-6 tt-shared-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={fetchClasses} compact />}
       <div className="flex justify-between items-center tt-shared-header">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 tt-shared-title">تاریخچه تغییرات</h1>

@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './AdminContent.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -16,6 +18,7 @@ const TYPE_LABELS = {
 };
 
 export default function AdminContact() {
+  const [loadError, setLoadError] = useState(null);
   const [items, setItems] = useState([]);
   const [message, setMessage] = useState('');
   const [query, setQuery] = useState('');
@@ -23,19 +26,18 @@ export default function AdminContact() {
   const [type, setType] = useState('all');
 
   const loadItems = async () => {
+    setLoadError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/contact/admin`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/contact/admin`);
       if (data?.success) {
         setItems(data.items || []);
         setMessage('');
       } else {
         setMessage(data?.message || 'خطا در دریافت پیام‌ها');
       }
-    } catch {
-      setMessage('خطا در اتصال به سرور');
+    } catch (error) {
+      setLoadError(error);
+      setMessage('');
     }
   };
 
@@ -57,31 +59,34 @@ export default function AdminContact() {
 
   const markRead = async (id) => {
     try {
-      await fetch(`${API_BASE}/api/contact/${id}/read`, {
+      await apiFetch(`${API_BASE}/api/contact/${id}/read`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { ...getAuthHeaders() }
       });
       loadItems();
-    } catch {
-      setMessage('خطا در به‌روزرسانی پیام');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در به‌روزرسانی پیام'));
     }
   };
 
   const removeItem = async (id) => {
     if (!window.confirm('حذف این پیام؟')) return;
     try {
-      await fetch(`${API_BASE}/api/contact/${id}`, {
+      await apiFetch(`${API_BASE}/api/contact/${id}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: { ...getAuthHeaders() }
       });
       loadItems();
-    } catch {
-      setMessage('خطا در حذف پیام');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در حذف پیام'));
     }
   };
 
   return (
     <section className="admin-content-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadItems} compact />}
       <div className="card-back">
         <button type="button" onClick={() => window.history.back()}>بازگشت</button>
       </div>

@@ -5,6 +5,8 @@ import { studentMatchesSearch } from '../utils/studentSearch';
 import { useToast } from '../components/ui/toast';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { AFGHAN_SOLAR_MONTHS, formatAfghanStoredDateLabel, gregorianToAfghanSolar } from '../utils/afghanDate';
+import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const emptyStudent = {
   firstName: '',
@@ -147,7 +149,8 @@ const getAuthHeaders = () => {
 };
 
 async function requestJson(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await apiFetch(`${API_BASE}${path}`, {
+    parse: 'response', rejectOnHttpError: false,
     ...options,
     headers: {
       ...getAuthHeaders(),
@@ -371,6 +374,7 @@ function buildReceiptPrintHtml(invoice, settings) {
 
 export default function ShortTermCenter() {
   const toast = useToast();
+  const [loadError, setLoadError] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -425,6 +429,7 @@ export default function ShortTermCenter() {
 
   const loadData = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await requestJson('/api/short-term-center/bootstrap');
       setSettings(data.settings || settings);
@@ -438,7 +443,7 @@ export default function ShortTermCenter() {
       setExpenseCategories(data.expenseCategories || []);
       setAttendance(data.attendance || []);
     } catch (error) {
-      toast.error(error.message);
+      setLoadError(error);
     } finally {
       setLoading(false);
     }
@@ -862,6 +867,7 @@ export default function ShortTermCenter() {
 
   return (
     <section className="stc-page" dir="rtl">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadData} compact />}
       <div className="stc-topbar">
         <div>
           <span className="stc-eyebrow">سیستم مستقل — جدا از مکتب و آموزشگاه</span>

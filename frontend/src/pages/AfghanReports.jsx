@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './AfghanReports.css';
+import { apiFetch } from '../utils/apiClient';
 
 const AfghanReports = () => {
   const navigate = useNavigate();
@@ -86,8 +87,7 @@ const AfghanReports = () => {
           }
       }
       
-      const response = await fetch(`${url}?${params}`);
-      const data = await response.json();
+      const data = await apiFetch(`${url}?${params}`);
       
       if (data.success) {
         setReportData(data.data);

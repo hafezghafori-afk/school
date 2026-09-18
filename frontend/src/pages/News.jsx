@@ -6,6 +6,8 @@ import './News.css';
 
 import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
+import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const tabs = [
   { key: 'all', label: 'همه' },
@@ -31,6 +33,8 @@ const resolveImage = (url) => {
 export default function News() {
   const location = useLocation();
   const { settings } = useSiteSettings();
+  const [loadError, setLoadError] = useState(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [items, setItems] = useState([]);
   const [active, setActive] = useState('all');
   const [loading, setLoading] = useState(false);
@@ -49,29 +53,31 @@ export default function News() {
 
   useEffect(() => {
     const loadNews = async () => {
+      setLoadError(null);
       setLoading(true);
       try {
         const url = active === 'all'
           ? `${API_BASE}/api/news`
           : `${API_BASE}/api/news?category=${active}`;
-        const res = await fetch(url);
-        const data = await res.json();
+        const data = await apiFetch(url);
         if (data?.success) {
           setItems(data.items || []);
         } else {
           setItems([]);
         }
-      } catch {
+      } catch (error) {
+        setLoadError(error);
         setItems([]);
       } finally {
         setLoading(false);
       }
     };
     loadNews();
-  }, [active]);
+  }, [active, reloadToken]);
 
   return (
     <PublicLayout active="اخبار" settings={settings}>
+      {!!loadError && <DataErrorCard error={loadError} onRetry={() => setReloadToken((token) => token + 1)} compact />}
       <section className="news-page public-container">
       <div className="news-hero">
         <div>

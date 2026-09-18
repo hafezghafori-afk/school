@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import './AcademicYearsPage.css';
+import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const AcademicYearsPage = () => {
+  const [loadError, setLoadError] = useState(null);
   const [academicYears, setAcademicYears] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -30,10 +33,10 @@ const AcademicYearsPage = () => {
   }, []);
 
   const fetchAcademicYears = async () => {
+    setLoadError(null);
     try {
       setLoading(true);
-      const response = await fetch(`/api/academic-years/school/${schoolId}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/academic-years/school/${schoolId}`);
       
       if (data.success) {
         setAcademicYears(data.data);
@@ -41,6 +44,7 @@ const AcademicYearsPage = () => {
         setError('خطا در دریافت سال‌های تحصیلی');
       }
     } catch (err) {
+      setLoadError(err);
       setError('خطا در ارتباط با سرور');
     } finally {
       setLoading(false);
@@ -59,7 +63,8 @@ const AcademicYearsPage = () => {
       
       const method = editingYear ? 'PATCH' : 'POST';
       
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -89,7 +94,8 @@ const AcademicYearsPage = () => {
 
   const handleActivate = async (yearId) => {
     try {
-      const response = await fetch(`/api/academic-years/${yearId}/activate`, {
+      const response = await apiFetch(`/api/academic-years/${yearId}/activate`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -111,7 +117,8 @@ const AcademicYearsPage = () => {
 
   const handleClose = async (yearId) => {
     try {
-      const response = await fetch(`/api/academic-years/${yearId}/close`, {
+      const response = await apiFetch(`/api/academic-years/${yearId}/close`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -137,7 +144,8 @@ const AcademicYearsPage = () => {
     }
 
     try {
-      const response = await fetch(`/api/academic-years/${yearId}`, {
+      const response = await apiFetch(`/api/academic-years/${yearId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -207,6 +215,7 @@ const AcademicYearsPage = () => {
 
   return (
     <div className="academic-years-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={fetchAcademicYears} compact />}
       <div className="page-header">
         <h1>سال‌های تحصیلی</h1>
         <button 

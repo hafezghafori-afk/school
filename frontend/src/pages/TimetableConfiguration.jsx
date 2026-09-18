@@ -10,6 +10,8 @@ import { Badge } from '../components/ui/badge';
 import { Trash2, Edit, Plus, Clock, Calendar, Settings, AlertCircle } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import './TimetableConfiguration.css';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import DataState from '../components/ui/DataState';
 
 const normalizeShiftToken = (value) => String(value || '')
   .trim()
@@ -99,10 +101,12 @@ const resolveSchoolId = () => {
 };
 
 const TimetableConfiguration = () => {
+  const [busyAction, setBusyAction] = useState('');
   const [configurations, setConfigurations] = useState([]);
   const [academicYears, setAcademicYears] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [editingConfig, setEditingConfig] = useState(null);
   const [showPeriodSetup, setShowPeriodSetup] = useState(false);
@@ -146,18 +150,19 @@ const TimetableConfiguration = () => {
 
   const fetchConfigurations = async () => {
     if (!hasValidSchoolId) return;
+    setLoading(true);
+    setLoadError(null);
     try {
-      const response = await fetch(`/api/timetable-configuration/school/${schoolId}`, { headers: { ...getAuthHeaders() } });
-      const data = await response.json();
+      const data = await apiFetch(`/api/timetable-configuration/school/${schoolId}`);
 
       if (data.success) {
         setConfigurations(data.data);
       } else {
-        toast.error('دریافت تنظیمات تقسیم اوقات ناموفق بود.');
+        throw new Error(String(data?.message || '').trim() || 'دریافت تنظیمات تقسیم اوقات ناموفق بود.');
       }
     } catch (error) {
       console.error('Error fetching configurations:', error);
-      toast.error('دریافت تنظیمات تقسیم اوقات ناموفق بود.');
+      setLoadError(error);
     } finally {
       setLoading(false);
     }
@@ -166,8 +171,7 @@ const TimetableConfiguration = () => {
   const fetchAcademicYears = async () => {
     if (!hasValidSchoolId) return;
     try {
-      const response = await fetch(`/api/academic-years/school/${schoolId}`, { headers: { ...getAuthHeaders() } });
-      const data = await response.json();
+      const data = await apiFetch(`/api/academic-years/school/${schoolId}`);
 
       if (data.success) {
         setAcademicYears(data.data.filter((year) => year.status === 'active'));
@@ -180,8 +184,7 @@ const TimetableConfiguration = () => {
   const fetchShifts = async () => {
     if (!hasValidSchoolId) return;
     try {
-      const response = await fetch(`/api/shifts/school/${schoolId}`, { headers: { ...getAuthHeaders() } });
-      const data = await response.json();
+      const data = await apiFetch(`/api/shifts/school/${schoolId}`);
 
       if (data.success) {
         const currentShifts = Array.isArray(data.data) ? data.data : [];
@@ -199,7 +202,8 @@ const TimetableConfiguration = () => {
               const template = DEFAULT_SHIFT_DETAILS[shiftName];
               if (!template) return;
 
-              await fetch(`/api/shifts/school/${schoolId}`, {
+              await apiFetch(`/api/shifts/school/${schoolId}`, {
+                parse: 'response', rejectOnHttpError: false,
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                 body: JSON.stringify({
@@ -211,8 +215,7 @@ const TimetableConfiguration = () => {
             })
           );
 
-          const refreshedResponse = await fetch(`/api/shifts/school/${schoolId}`, { headers: { ...getAuthHeaders() } });
-          const refreshedData = await refreshedResponse.json();
+          const refreshedData = await apiFetch(`/api/shifts/school/${schoolId}`);
           if (refreshedData.success) {
             setShifts(refreshedData.data || []);
             return;
@@ -227,18 +230,20 @@ const TimetableConfiguration = () => {
       }
     } catch (error) {
       console.error('Error fetching shifts:', error);
-      toast.error('دریافت نوبت‌ها ناموفق بود.');
+      toast.error(failureMessage(error, 'دریافت نوبت‌ها ناموفق بود.'));
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (busyAction) return;
 
     if (!hasValidSchoolId) {
       toast.error('ابتدا یک مکتب معتبر انتخاب یا ایجاد کنید.');
       return;
     }
 
+    setBusyAction('handleSubmit');
     try {
       const url = editingConfig
         ? `/api/timetable-configuration/${editingConfig._id}`
@@ -246,7 +251,8 @@ const TimetableConfiguration = () => {
 
       const method = editingConfig ? 'PUT' : 'POST';
 
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -268,7 +274,9 @@ const TimetableConfiguration = () => {
       }
     } catch (error) {
       console.error('Error saving configuration:', error);
-      toast.error('ذخیره تنظیم تقسیم اوقات ناموفق بود.');
+      toast.error(failureMessage(error, 'ذخیره تنظیم تقسیم اوقات ناموفق بود.'));
+    } finally {
+      setBusyAction('');
     }
   };
 
@@ -294,10 +302,13 @@ const TimetableConfiguration = () => {
   };
 
   const handleDelete = async (configId) => {
+    if (busyAction) return;
     if (!confirm('آیا مطمئن هستید که این تنظیم حذف شود؟ با حذف آن، همه تعریف‌های ساعت نیز حذف می‌شوند.')) return;
 
+    setBusyAction('handleDelete');
     try {
-      const response = await fetch(`/api/timetable-configuration/${configId}`, {
+      const response = await apiFetch(`/api/timetable-configuration/${configId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: { ...getAuthHeaders() }
       });
@@ -312,14 +323,15 @@ const TimetableConfiguration = () => {
       }
     } catch (error) {
       console.error('Error deleting configuration:', error);
-      toast.error('حذف تنظیم تقسیم اوقات ناموفق بود.');
+      toast.error(failureMessage(error, 'حذف تنظیم تقسیم اوقات ناموفق بود.'));
+    } finally {
+      setBusyAction('');
     }
   };
 
   const handleSetupPeriods = async (config) => {
     try {
-      const response = await fetch(`/api/timetable-configuration/${config._id}/details`, { headers: { ...getAuthHeaders() } });
-      const data = await response.json();
+      const data = await apiFetch(`/api/timetable-configuration/${config._id}/details`);
 
       if (data.success) {
         setSelectedConfig(data.data.configuration);
@@ -330,13 +342,16 @@ const TimetableConfiguration = () => {
       }
     } catch (error) {
       console.error('Error fetching period definitions:', error);
-      toast.error('دریافت تعریف ساعت‌ها ناموفق بود.');
+      toast.error(failureMessage(error, 'دریافت تعریف ساعت‌ها ناموفق بود.'));
     }
   };
 
   const handleSavePeriods = async () => {
+    if (busyAction) return;
+    setBusyAction('handleSavePeriods');
     try {
-      const response = await fetch(`/api/timetable-configuration/${selectedConfig._id}/periods`, {
+      const response = await apiFetch(`/api/timetable-configuration/${selectedConfig._id}/periods`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -357,7 +372,9 @@ const TimetableConfiguration = () => {
       }
     } catch (error) {
       console.error('Error updating periods:', error);
-      toast.error('به‌روزرسانی تعریف ساعت‌ها ناموفق بود.');
+      toast.error(failureMessage(error, 'به‌روزرسانی تعریف ساعت‌ها ناموفق بود.'));
+    } finally {
+      setBusyAction('');
     }
   };
 
@@ -377,8 +394,21 @@ const TimetableConfiguration = () => {
     resetForm();
   };
 
-  if (loading) {
-    return <div className="flex justify-center items-center h-64">در حال بارگذاری...</div>;
+  if (loading || loadError) {
+    return (
+      <div className="container mx-auto p-6 tt-shared-page">
+        <DataState
+          loading={loading}
+          error={loadError}
+          data={configurations}
+          onRetry={fetchConfigurations}
+          skeleton="cards"
+          skeletonProps={{ count: 3 }}
+          showEmpty={false}
+          loadingLabel="در حال دریافت تنظیمات تقسیم اوقات..."
+        />
+      </div>
+    );
   }
 
   const totalConfigs = configurations.length;
@@ -607,8 +637,8 @@ const TimetableConfiguration = () => {
               </div>
 
               <div className="flex gap-2 tt-config-form-actions">
-                <Button type="submit" className="tt-config-primary-btn">
-                  {editingConfig ? 'ذخیره تغییرات' : 'ایجاد تنظیم'}
+                <Button type="submit" className="tt-config-primary-btn" disabled={busyAction === 'handleSubmit'}>
+                  {busyAction === 'handleSubmit' ? 'در حال ذخیره...' : (editingConfig ? 'ذخیره تغییرات' : 'ایجاد تنظیم')}
                 </Button>
                 <Button type="button" variant="outline" onClick={handleCancel}>
                   انصراف
@@ -690,7 +720,7 @@ const TimetableConfiguration = () => {
                 ))}
 
               <div className="flex gap-2 pt-4 tt-config-form-actions">
-                <Button onClick={handleSavePeriods} className="tt-config-primary-btn">ذخیره تعریف ساعت‌ها</Button>
+                <Button onClick={handleSavePeriods} className="tt-config-primary-btn" disabled={busyAction === 'handleSavePeriods'}>{busyAction === 'handleSavePeriods' ? 'در حال ذخیره...' : 'ذخیره تعریف ساعت‌ها'}</Button>
                 <Button variant="outline" onClick={() => setShowPeriodSetup(false)}>
                   انصراف
                 </Button>

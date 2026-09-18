@@ -1,6 +1,7 @@
 import { API_BASE } from '../config/api';
 import { formatAfghanDateTime } from '../utils/afghanDate';
 import { localizeSystemMessage } from '../utils/systemMessage';
+import { apiFetch } from '../utils/apiClient';
 
 export const DEFAULT_SCHOOL_ID = 'default-school-id';
 export const LEGACY_SINGLE_SCHOOL_ID = '000000000000000000000001';
@@ -156,7 +157,8 @@ function extractErrorMessage(response, data) {
 }
 
 export async function fetchJson(path, options = {}) {
-  const response = await fetch(buildApiUrl(path), {
+  const response = await apiFetch(buildApiUrl(path), {
+    parse: 'response', rejectOnHttpError: false,
     ...options,
     headers: {
       ...(options.headers || {}),
@@ -228,7 +230,8 @@ export async function fetchBlob(path, body = {}, options = {}) {
     ...(options.headers || {}),
     ...getAuthHeaders()
   };
-  const response = await fetch(buildApiUrl(path), {
+  const response = await apiFetch(buildApiUrl(path), {
+    parse: 'response', rejectOnHttpError: false,
     method,
     ...options,
     headers,
@@ -258,7 +261,8 @@ export async function fetchText(path, body = {}, options = {}) {
     ...(options.headers || {}),
     ...getAuthHeaders()
   };
-  const response = await fetch(buildApiUrl(path), {
+  const response = await apiFetch(buildApiUrl(path), {
+    parse: 'response', rejectOnHttpError: false,
     method,
     ...options,
     headers,

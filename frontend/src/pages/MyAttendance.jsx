@@ -4,6 +4,8 @@ import './MyAttendance.css';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const STATUS_OPTIONS = [
   { value: 'all', label: 'همه وضعیت‌ها' },
@@ -84,6 +86,7 @@ const findCourseBySelection = (items = [], selectionId = '') => (
 const formatRate = (value) => `${Number(value || 0).toLocaleString('fa-AF-u-ca-persian')}%`;
 
 export default function MyAttendance() {
+  const [loadError, setLoadError] = useState(null);
   const [courses, setCourses] = useState([]);
   const [courseId, setCourseId] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -103,10 +106,7 @@ export default function MyAttendance() {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/api/education/my-courses`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/education/my-courses`);
       if (!data?.success) {
         setCourses([]);
         return;
@@ -121,6 +121,7 @@ export default function MyAttendance() {
   };
 
   const loadAttendance = async () => {
+    setLoadError(null);
     setLoading(true);
     setMessage('');
 
@@ -133,10 +134,7 @@ export default function MyAttendance() {
         query.set('to', range.to);
       }
 
-      const res = await fetch(`${API_BASE}/api/attendance/my${query.toString() ? `?${query.toString()}` : ''}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/attendance/my${query.toString() ? `?${query.toString()}` : ''}`);
       if (!data?.success) {
         setMessage(data?.message || 'خطا در دریافت حضور و غیاب');
         setItems([]);
@@ -144,8 +142,9 @@ export default function MyAttendance() {
       }
 
       setItems(data.items || []);
-    } catch {
-      setMessage('خطا در ارتباط با سرور');
+    } catch (error) {
+      setLoadError(error);
+      setMessage('');
       setItems([]);
     } finally {
       setLoading(false);
@@ -189,6 +188,7 @@ export default function MyAttendance() {
 
   return (
     <div className="myattendance-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadAttendance} compact />}
       <div className="myattendance-card">
         <div className="card-back">
           <button type="button" onClick={() => window.history.back()}>بازگشت</button>

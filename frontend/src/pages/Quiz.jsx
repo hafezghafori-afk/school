@@ -3,6 +3,8 @@ import { useParams } from 'react-router-dom';
 import './Quiz.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const normalizeQuizQuestion = (item = {}) => {
   const text = String(item?.text || item?.questionText || '').trim();
@@ -20,6 +22,7 @@ const normalizeQuizQuestion = (item = {}) => {
 
 export default function Quiz() {
   const { courseId: identifier } = useParams();
+  const [loadError, setLoadError] = useState(null);
   const [quiz, setQuiz] = useState(null);
   const [course, setCourse] = useState(null);
   const [answers, setAnswers] = useState({});
@@ -27,13 +30,13 @@ export default function Quiz() {
   const [message, setMessage] = useState('');
 
   const loadQuiz = async () => {
+    setLoadError(null);
     try {
       setMessage('');
       setResult(null);
       setAnswers({});
 
-      const courseRes = await fetch(`${API_BASE}/api/education/public-school-classes/${identifier}`);
-      const courseData = await courseRes.json();
+      const courseData = await apiFetch(`${API_BASE}/api/education/public-school-classes/${identifier}`);
       if (!courseData?.success) {
         setCourse(null);
         setQuiz(null);
@@ -63,8 +66,7 @@ export default function Quiz() {
       if (classId) params.set('classId', classId);
       if (compatibilityCourseId) params.set('courseId', compatibilityCourseId);
 
-      const quizRes = await fetch(`${API_BASE}/api/quizzes/subject/${encodeURIComponent(subject)}${params.toString() ? `?${params.toString()}` : ''}`);
-      const quizData = await quizRes.json();
+      const quizData = await apiFetch(`${API_BASE}/api/quizzes/subject/${encodeURIComponent(subject)}${params.toString() ? `?${params.toString()}` : ''}`);
       if (!quizData?.success) {
         setQuiz(null);
         setMessage(quizData?.message || 'آزمون پیدا نشد.');
@@ -76,10 +78,11 @@ export default function Quiz() {
         questions: Array.isArray(nextQuiz.questions) ? nextQuiz.questions.map(normalizeQuizQuestion) : []
       } : null);
       setMessage('');
-    } catch {
+    } catch (error) {
+      setLoadError(error);
       setCourse(null);
       setQuiz(null);
-      setMessage('خطا در دریافت آزمون');
+      setMessage('');
     }
   };
 
@@ -127,6 +130,7 @@ export default function Quiz() {
 
   return (
     <div className="quiz-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadQuiz} compact />}
       <div className="quiz-card">
         <div className="card-back">
           <button type="button" onClick={() => window.history.back()}>بازگشت</button>

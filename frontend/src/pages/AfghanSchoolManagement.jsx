@@ -2,9 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import './AfghanSchoolManagement.css';
+import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const AfghanSchoolManagement = () => {
   const navigate = useNavigate();
+  const [loadError, setLoadError] = useState(null);
   const [schools, setSchools] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -80,6 +83,7 @@ const AfghanSchoolManagement = () => {
   }, [currentPage, filters]);
 
   const fetchSchools = async () => {
+    setLoadError(null);
     try {
       setLoading(true);
       setError('');
@@ -93,8 +97,7 @@ const AfghanSchoolManagement = () => {
       if (filters.ownership !== 'all') params.append('ownership', filters.ownership);
       if (filters.search) params.append('search', filters.search);
       
-      const response = await fetch(`/api/afghan-schools?${params}`);
-      const data = await response.json();
+      const data = await apiFetch(`/api/afghan-schools?${params}`);
       
       if (data.success) {
         setSchools(data.data.schools);
@@ -103,6 +106,7 @@ const AfghanSchoolManagement = () => {
         setError(data.message || 'خطا در دریافت اطلاعات مکاتب');
       }
     } catch (err) {
+      setLoadError(err);
       setError('خطا در اتصال به سرور');
     } finally {
       setLoading(false);
@@ -129,7 +133,8 @@ const AfghanSchoolManagement = () => {
     }
 
     try {
-      const response = await fetch(`/api/afghan-schools/${schoolId}`, {
+      const response = await apiFetch(`/api/afghan-schools/${schoolId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE'
       });
       const data = await response.json();
@@ -174,6 +179,7 @@ const AfghanSchoolManagement = () => {
 
   return (
     <div className="school-management">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={fetchSchools} compact />}
       <header className="management-header">
         <h1>مدیریت مکاتب افغانستان</h1>
         <div className="header-actions">

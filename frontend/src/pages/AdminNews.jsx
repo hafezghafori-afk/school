@@ -3,6 +3,8 @@ import './AdminContent.css';
 
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -26,6 +28,7 @@ const resolveImage = (url) => {
 };
 
 export default function AdminNews() {
+  const [loadError, setLoadError] = useState(null);
   const [items, setItems] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState('');
@@ -33,19 +36,18 @@ export default function AdminNews() {
   const [uploading, setUploading] = useState(false);
 
   const loadItems = async () => {
+    setLoadError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/news/admin`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/news/admin`);
       if (data?.success) {
         setItems(data.items || []);
         setMessage('');
       } else {
         setMessage(data?.message || 'خطا در دریافت خبرها');
       }
-    } catch {
-      setMessage('خطا در اتصال به سرور');
+    } catch (error) {
+      setLoadError(error);
+      setMessage('');
     }
   };
 
@@ -64,7 +66,8 @@ export default function AdminNews() {
     try {
       const formData = new FormData();
       formData.append('image', file);
-      const res = await fetch(`${API_BASE}/api/news/upload`, {
+      const res = await apiFetch(`${API_BASE}/api/news/upload`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { ...getAuthHeaders() },
         body: formData
@@ -76,8 +79,8 @@ export default function AdminNews() {
       }
       handleChange('imageUrl', data.url || '');
       setMessage('تصویر آپلود شد.');
-    } catch {
-      setMessage('خطا در آپلود تصویر');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در آپلود تصویر'));
     } finally {
       setUploading(false);
     }
@@ -89,7 +92,8 @@ export default function AdminNews() {
     try {
       const method = editingId ? 'PUT' : 'POST';
       const url = editingId ? `${API_BASE}/api/news/${editingId}` : `${API_BASE}/api/news`;
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(form)
@@ -103,8 +107,8 @@ export default function AdminNews() {
       setForm(emptyForm);
       setEditingId('');
       loadItems();
-    } catch {
-      setMessage('خطا در ذخیره خبر');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ذخیره خبر'));
     }
   };
 
@@ -125,7 +129,8 @@ export default function AdminNews() {
   const removeItem = async (id) => {
     if (!window.confirm('حذف این خبر؟')) return;
     try {
-      const res = await fetch(`${API_BASE}/api/news/${id}`, {
+      const res = await apiFetch(`${API_BASE}/api/news/${id}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: { ...getAuthHeaders() }
       });
@@ -135,13 +140,14 @@ export default function AdminNews() {
         return;
       }
       loadItems();
-    } catch {
-      setMessage('خطا در حذف خبر');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در حذف خبر'));
     }
   };
 
   return (
     <section className="admin-content-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadItems} compact />}
       <div className="card-back">
         <button type="button" onClick={() => window.history.back()}>بازگشت</button>
       </div>

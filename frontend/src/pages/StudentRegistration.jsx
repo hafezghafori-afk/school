@@ -13,6 +13,7 @@ import {
 } from './adminWorkspaceUtils';
 import './AfghanSchoolManagement.css';
 import './StudentRegistration.css';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const trimValue = (value) => String(value || '').trim();
 const displayText = (value) => repairDisplayText(value);
@@ -56,7 +57,8 @@ const STEP_REQUIRED_MESSAGES = [
 ];
 
 async function fetchStudentRegistrationJson(path, headers = {}) {
-  const response = await fetch(path, {
+  const response = await apiFetch(path, {
+    parse: 'response', rejectOnHttpError: false,
     headers: {
       ...headers,
       'Cache-Control': 'no-cache'
@@ -81,7 +83,8 @@ async function uploadStudentRegistrationFiles(studentId, files = {}) {
     if (file) formData.append(key, file);
   });
 
-  const response = await fetch(`/api/afghan-students/${studentId}/documents`, {
+  const response = await apiFetch(`/api/afghan-students/${studentId}/documents`, {
+    parse: 'response', rejectOnHttpError: false,
     method: 'POST',
     headers: getAuthHeaders(),
     body: formData
@@ -446,7 +449,7 @@ const StudentRegistration = () => {
         }));
       } catch (error) {
         console.error('Failed to load student registration references:', error);
-        toastRef.current.error(displayText(error.message || 'خطا در دریافت اطلاعات اولیه ثبت شاگرد.'));
+        toastRef.current.error(displayText(failureMessage(error, 'خطا در دریافت اطلاعات اولیه ثبت شاگرد.')));
       } finally {
         setReferenceLoading(false);
       }
@@ -619,7 +622,8 @@ const StudentRegistration = () => {
       }
 
       setSubmitStatus({ type: 'info', text: 'در حال ارسال معلومات به سرور...' });
-      const response = await fetch('/api/afghan-students', {
+      const response = await apiFetch('/api/afghan-students', {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { API_BASE } from '../config/api';
 import useSiteSettings from '../hooks/useSiteSettings';
 import './DemoRequest.css';
+import { apiFetch } from '../utils/apiClient';
 
 const moduleOptions = [
   'مدیریت شاگردان',
@@ -60,7 +61,8 @@ export default function DemoRequest() {
     try {
       const message = form.message.trim()
         || `درخواست دمو برای ${form.schoolName} با حدود ${form.studentCount || 'نامشخص'} شاگرد.`;
-      const res = await fetch(`${API_BASE}/api/contact`, {
+      const res = await apiFetch(`${API_BASE}/api/contact`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

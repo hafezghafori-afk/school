@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import './AdminContent.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -23,6 +25,7 @@ const resolveImage = (url) => {
 };
 
 export default function AdminGallery() {
+  const [loadError, setLoadError] = useState(null);
   const [items, setItems] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState('');
@@ -30,19 +33,18 @@ export default function AdminGallery() {
   const [uploading, setUploading] = useState(false);
 
   const loadItems = async () => {
+    setLoadError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/gallery/admin`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/gallery/admin`);
       if (data?.success) {
         setItems(data.items || []);
         setMessage('');
       } else {
         setMessage(data?.message || 'خطا در دریافت گالری');
       }
-    } catch {
-      setMessage('خطا در اتصال به سرور');
+    } catch (error) {
+      setLoadError(error);
+      setMessage('');
     }
   };
 
@@ -61,7 +63,8 @@ export default function AdminGallery() {
     try {
       const formData = new FormData();
       formData.append('image', file);
-      const res = await fetch(`${API_BASE}/api/gallery/upload`, {
+      const res = await apiFetch(`${API_BASE}/api/gallery/upload`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { ...getAuthHeaders() },
         body: formData
@@ -73,8 +76,8 @@ export default function AdminGallery() {
       }
       handleChange('imageUrl', data.url || '');
       setMessage('تصویر آپلود شد.');
-    } catch {
-      setMessage('خطا در آپلود تصویر');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در آپلود تصویر'));
     } finally {
       setUploading(false);
     }
@@ -94,7 +97,8 @@ export default function AdminGallery() {
     try {
       const method = editingId ? 'PUT' : 'POST';
       const url = editingId ? `${API_BASE}/api/gallery/${editingId}` : `${API_BASE}/api/gallery`;
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(form)
@@ -108,8 +112,8 @@ export default function AdminGallery() {
       setForm(emptyForm);
       setEditingId('');
       loadItems();
-    } catch {
-      setMessage('خطا در ذخیره گالری');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ذخیره گالری'));
     }
   };
 
@@ -128,7 +132,8 @@ export default function AdminGallery() {
   const removeItem = async (id) => {
     if (!window.confirm('حذف این تصویر؟')) return;
     try {
-      const res = await fetch(`${API_BASE}/api/gallery/${id}`, {
+      const res = await apiFetch(`${API_BASE}/api/gallery/${id}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'DELETE',
         headers: { ...getAuthHeaders() }
       });
@@ -138,13 +143,14 @@ export default function AdminGallery() {
         return;
       }
       loadItems();
-    } catch {
-      setMessage('خطا در حذف تصویر');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در حذف تصویر'));
     }
   };
 
   return (
     <section className="admin-content-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadItems} compact />}
       <div className="card-back">
         <button type="button" onClick={() => window.history.back()}>بازگشت</button>
       </div>

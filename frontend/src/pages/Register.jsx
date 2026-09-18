@@ -4,6 +4,7 @@ import AfghanDateInput from '../components/ui/AfghanDateInput';
 import './AfghanSchoolManagement.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const safeItems = (data) => data?.data || data?.items || data?.schools || [];
 
@@ -44,7 +45,7 @@ export default function Register() {
     const loadSchools = async () => {
       setReferenceLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/api/afghan-schools`);
+        const res = await apiFetch(`${API_BASE}/api/afghan-schools`, { parse: 'response', rejectOnHttpError: false });
         const data = await res.json().catch(() => ({}));
         const items = safeItems(data).filter(Boolean);
         setSchools(items);
@@ -67,9 +68,9 @@ export default function Register() {
       setReferenceLoading(true);
       try {
         const [classesRes, shiftsRes, yearsRes] = await Promise.all([
-          fetch(`${API_BASE}/api/school-classes/school/${form.schoolId}`),
-          fetch(`${API_BASE}/api/shifts/school/${form.schoolId}`),
-          fetch(`${API_BASE}/api/academic-years/school/${form.schoolId}`)
+          apiFetch(`${API_BASE}/api/school-classes/school/${form.schoolId}`, { parse: 'response', rejectOnHttpError: false }),
+          apiFetch(`${API_BASE}/api/shifts/school/${form.schoolId}`, { parse: 'response', rejectOnHttpError: false }),
+          apiFetch(`${API_BASE}/api/academic-years/school/${form.schoolId}`, { parse: 'response', rejectOnHttpError: false })
         ]);
         const [classesData, shiftsData, yearsData] = await Promise.all([
           classesRes.json().catch(() => ({})),
@@ -134,7 +135,7 @@ export default function Register() {
       Object.entries(form).forEach(([key, value]) => formData.append(key, value || ''));
       Object.entries(files).forEach(([key, file]) => { if (file) formData.append(key, file); });
 
-      const res = await fetch(`${API_BASE}/api/enrollments`, { method: 'POST', body: formData });
+      const res = await apiFetch(`${API_BASE}/api/enrollments`, { parse: 'response', rejectOnHttpError: false, method: 'POST', body: formData });
       const data = await res.json();
       if (!data?.success) {
         setMessage(data?.message || 'ثبت درخواست ناموفق بود.');
@@ -142,8 +143,8 @@ export default function Register() {
       }
       setMessage(`درخواست شما با موفقیت ثبت شد. شماره پیگیری شما: ${data?.enrollment?.registrationId || '---'}`);
       resetForm();
-    } catch {
-      setMessage('خطا در اتصال به سرور');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در اتصال به سرور'));
     } finally {
       setLoading(false);
     }

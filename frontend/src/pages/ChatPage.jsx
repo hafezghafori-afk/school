@@ -5,6 +5,8 @@ import './ChatPage.css';
 import VirtualClassPanel from '../components/VirtualClassPanel';
 import { API_BASE } from '../config/api';
 import { formatAfghanTime } from '../utils/afghanDate';
+import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -95,6 +97,7 @@ export default function ChatPage() {
   const role = localStorage.getItem('role') || 'student';
   const myId = localStorage.getItem('userId') || '';
 
+  const [loadError, setLoadError] = useState(null);
   const [tab, setTab] = useState(getInitialChatTab);
   const [directThreads, setDirectThreads] = useState([]);
   const [groupThreads, setGroupThreads] = useState([]);
@@ -193,10 +196,11 @@ export default function ChatPage() {
   };
 
   const loadThreads = async () => {
+    setLoadError(null);
     try {
       const [directRes, groupRes] = await Promise.all([
-        fetch(`${API_BASE}/api/chats/threads/direct`, { headers: { ...getAuthHeaders() } }),
-        fetch(`${API_BASE}/api/chats/threads/group`, { headers: { ...getAuthHeaders() } })
+        apiFetch(`${API_BASE}/api/chats/threads/direct`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }),
+        apiFetch(`${API_BASE}/api/chats/threads/group`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } })
       ]);
       const directData = await directRes.json();
       const groupData = await groupRes.json();
@@ -212,15 +216,15 @@ export default function ChatPage() {
         }
         return nextDirect[0] || nextGroup[0] || null;
       });
-    } catch {
+    } catch (error) {
+      setLoadError(error);
       setError('خطا در دریافت فهرست گفتگوها');
     }
   };
 
   const loadUsers = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/users`, { headers: { ...getAuthHeaders() } });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/users`);
       setUsers(data?.items || data?.users || []);
     } catch {
       setUsers([]);
@@ -230,10 +234,7 @@ export default function ChatPage() {
   const loadMessages = async (threadId) => {
     if (!threadId) return;
     try {
-      const res = await fetch(`${API_BASE}/api/chats/messages/${threadId}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/chats/messages/${threadId}`);
       setMessages(data?.items || []);
       scrollToBottom();
       socketRef.current?.emit('chat:seen', { threadId });
@@ -254,7 +255,8 @@ export default function ChatPage() {
       return;
     }
     try {
-      const res = await fetch(`${API_BASE}/api/chats/direct`, {
+      const res = await apiFetch(`${API_BASE}/api/chats/direct`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ userId })
@@ -301,7 +303,8 @@ export default function ChatPage() {
       const form = new FormData();
       if (text.trim()) form.append('text', text.trim());
       if (file) form.append('file', file);
-      const res = await fetch(`${API_BASE}/api/chats/messages/${selectedThread._id}`, {
+      const res = await apiFetch(`${API_BASE}/api/chats/messages/${selectedThread._id}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { ...getAuthHeaders() },
         body: form
@@ -421,6 +424,7 @@ export default function ChatPage() {
 
   return (
     <div className="chat-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadThreads} compact />}
       <div className="chat-card">
         {toast && <div className="chat-toast">{toast}</div>}
         <div className="card-back">

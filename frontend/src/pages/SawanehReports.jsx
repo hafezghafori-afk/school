@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { API_BASE } from '../config/api';
 import './SawanehReports.css';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const authHeaders = () => {
   const token = localStorage.getItem('token');
@@ -35,12 +36,12 @@ const SawanehReports = () => {
     try {
       const params = new URLSearchParams();
       if (grade) params.set('grade', grade);
-      const res = await fetch(`${API_BASE}/api/sawaneh/reports/overview?${params.toString()}`, { headers: authHeaders() });
+      const res = await apiFetch(`${API_BASE}/api/sawaneh/reports/overview?${params.toString()}`, { parse: 'response', rejectOnHttpError: false, headers: authHeaders() });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.message || 'خطا در دریافت گزارش');
       setData(json.data);
     } catch (err) {
-      setError(err.message || 'خطا در اتصال به سرور');
+      setError(failureMessage(error, 'خطا در اتصال به سرور'));
       setData(null);
     } finally {
       setLoading(false);
@@ -55,7 +56,7 @@ const SawanehReports = () => {
     try {
       const params = new URLSearchParams();
       if (grade) params.set('grade', grade);
-      const res = await fetch(`${API_BASE}/api/sawaneh/reports/asas-list.xlsx?${params.toString()}`, { headers: authHeaders() });
+      const res = await apiFetch(`${API_BASE}/api/sawaneh/reports/asas-list.xlsx?${params.toString()}`, { parse: 'response', rejectOnHttpError: false, headers: authHeaders() });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
         throw new Error(json.message || 'دانلود ناموفق بود');
@@ -70,7 +71,7 @@ const SawanehReports = () => {
       link.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setError(err.message || 'دانلود لست اساس ناموفق بود');
+      setError(failureMessage(error, 'دانلود لست اساس ناموفق بود'));
     } finally {
       setDownloading(false);
     }

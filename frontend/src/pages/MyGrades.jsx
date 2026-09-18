@@ -3,6 +3,8 @@ import './MyGrades.css';
 
 import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const BREAKDOWN_FIELDS = [
   { key: 'writtenScore', label: 'تحریری' },
@@ -42,6 +44,7 @@ const statusLabel = (value = '') => {
 };
 
 export default function MyGrades() {
+  const [loadError, setLoadError] = useState(null);
   const [student, setStudent] = useState(null);
   const [items, setItems] = useState([]);
   const [generalResults, setGeneralResults] = useState([]);
@@ -49,12 +52,13 @@ export default function MyGrades() {
   const [loading, setLoading] = useState(false);
 
   const loadGrades = async () => {
+    setLoadError(null);
     setLoading(true);
     setMessage('');
     try {
       const [response, generalResponse] = await Promise.all([
-        fetch(`${API_BASE}/api/exams/my/results`, { headers: { ...getAuthHeaders() } }),
-        fetch(`${API_BASE}/api/result-tables/my/published`, { headers: { ...getAuthHeaders() } }).catch(() => null)
+        apiFetch(`${API_BASE}/api/exams/my/results`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }),
+        apiFetch(`${API_BASE}/api/result-tables/my/published`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }).catch(() => null)
       ]);
       const data = await response.json().catch(() => ({}));
       const generalData = generalResponse ? await generalResponse.json().catch(() => ({})) : {};
@@ -68,8 +72,9 @@ export default function MyGrades() {
       setStudent(data.student || null);
       setItems(data.items || []);
       setGeneralResults(generalResponse?.ok && generalData?.success !== false ? (generalData.items || []) : []);
-    } catch {
-      setMessage('خطا در ارتباط با سرور');
+    } catch (error) {
+      setLoadError(error);
+      setMessage('');
       setItems([]);
       setGeneralResults([]);
       setStudent(null);
@@ -84,6 +89,7 @@ export default function MyGrades() {
 
   return (
     <div className="mygrades-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadGrades} compact />}
       <div className="mygrades-card">
         <div className="card-back">
           <button type="button" onClick={() => window.history.back()}>بازگشت</button>

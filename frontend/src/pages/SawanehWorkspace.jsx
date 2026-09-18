@@ -9,6 +9,7 @@ import {
   genderLabel
 } from '../config/afghanStudentFields';
 import './SawanehWorkspace.css';
+import { apiFetch, failureMessage } from '../utils/apiClient';
 
 const authHeaders = () => {
   const token = localStorage.getItem('token');
@@ -165,7 +166,8 @@ const SawanehWorkspace = () => {
       const params = new URLSearchParams({ limit: '200' });
       if (search.trim()) params.set('q', search.trim());
       if (statusFilter !== 'all') params.set('status', statusFilter);
-      const res = await fetch(`${API_BASE}/api/sawaneh/cards?${params.toString()}`, {
+      const res = await apiFetch(`${API_BASE}/api/sawaneh/cards?${params.toString()}`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: authHeaders()
       });
       const data = await res.json();
@@ -174,7 +176,7 @@ const SawanehWorkspace = () => {
       }
       setRows(Array.isArray(data.data) ? data.data : []);
     } catch (err) {
-      setListError(err.message || 'خطا در اتصال به سرور');
+      setListError(failureMessage(err, 'خطا در اتصال به سرور'));
       setRows([]);
     } finally {
       setListLoading(false);
@@ -193,7 +195,8 @@ const SawanehWorkspace = () => {
     setCard(null);
     setForm(null);
     try {
-      const res = await fetch(`${API_BASE}/api/sawaneh/cards/${studentId}`, {
+      const res = await apiFetch(`${API_BASE}/api/sawaneh/cards/${studentId}`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: authHeaders()
       });
       const data = await res.json();
@@ -239,7 +242,7 @@ const SawanehWorkspace = () => {
         penaltyPaid: Boolean(nextCard.separation?.penaltyPaid)
       });
     } catch (err) {
-      setCardError(err.message || 'خطا در اتصال به سرور');
+      setCardError(failureMessage(err, 'خطا در اتصال به سرور'));
     } finally {
       setCardLoading(false);
     }
@@ -288,7 +291,8 @@ const SawanehWorkspace = () => {
         relatives: form.relatives.filter((item) => item.name.trim() || item.phone.trim()),
         status: form.status
       };
-      const res = await fetch(`${API_BASE}/api/sawaneh/cards/${selectedId}`, {
+      const res = await apiFetch(`${API_BASE}/api/sawaneh/cards/${selectedId}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: authHeaders(),
         body: JSON.stringify(payload)
@@ -301,7 +305,7 @@ const SawanehWorkspace = () => {
       flash('کارت سوانح ذخیره شد.');
       fetchList();
     } catch (err) {
-      setCardError(err.message || 'خطا در ذخیره');
+      setCardError(failureMessage(err, 'خطا در ذخیره'));
     } finally {
       setSaving(false);
     }
@@ -312,7 +316,8 @@ const SawanehWorkspace = () => {
     setRemarkSaving(true);
     setCardError('');
     try {
-      const res = await fetch(`${API_BASE}/api/sawaneh/cards/${selectedId}/supervisor-remark`, {
+      const res = await apiFetch(`${API_BASE}/api/sawaneh/cards/${selectedId}/supervisor-remark`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({
@@ -330,7 +335,7 @@ const SawanehWorkspace = () => {
       flash('نظر نگرانِ صنف ثبت شد.');
       fetchList();
     } catch (err) {
-      setCardError(err.message || 'خطا در ثبت نظر');
+      setCardError(failureMessage(err, 'خطا در ثبت نظر'));
     } finally {
       setRemarkSaving(false);
     }
@@ -341,7 +346,8 @@ const SawanehWorkspace = () => {
     setSepSaving(true);
     setCardError('');
     try {
-      const res = await fetch(`${API_BASE}/api/sawaneh/cards/${selectedId}/separation`, {
+      const res = await apiFetch(`${API_BASE}/api/sawaneh/cards/${selectedId}/separation`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({
@@ -355,7 +361,7 @@ const SawanehWorkspace = () => {
       setCard(data.data);
       flash('جزئیاتِ منفکی ذخیره شد.');
     } catch (err) {
-      setCardError(err.message || 'خطا در ذخیرهٔ منفکی');
+      setCardError(failureMessage(err, 'خطا در ذخیرهٔ منفکی'));
     } finally {
       setSepSaving(false);
     }
@@ -393,7 +399,8 @@ const SawanehWorkspace = () => {
     try {
       if (nameChanged) payload.nameCorrectionLetterNo = nameLetterNo.trim();
 
-      const res = await fetch(`${API_BASE}/api/afghan-students/${cardStudent._id}`, {
+      const res = await apiFetch(`${API_BASE}/api/afghan-students/${cardStudent._id}`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: authHeaders(),
         body: JSON.stringify(payload)
@@ -407,7 +414,7 @@ const SawanehWorkspace = () => {
       await loadCard(selectedId);
       fetchList();
     } catch (err) {
-      setCardError(err.message || 'خطا در ذخیرهٔ مشخصات شاگرد');
+      setCardError(failureMessage(err, 'خطا در ذخیرهٔ مشخصات شاگرد'));
     } finally {
       setStudentSaving(false);
     }
@@ -423,7 +430,7 @@ const SawanehWorkspace = () => {
   const loadTranscripts = useCallback(async (studentId) => {
     if (!studentId) return;
     try {
-      const res = await fetch(`${API_BASE}/api/sawaneh/transcripts/${studentId}`, { headers: authHeaders() });
+      const res = await apiFetch(`${API_BASE}/api/sawaneh/transcripts/${studentId}`, { parse: 'response', rejectOnHttpError: false, headers: authHeaders() });
       const data = await res.json();
       if (res.ok && data.success) {
         const list = Array.isArray(data.data) ? data.data : [];
@@ -461,7 +468,8 @@ const SawanehWorkspace = () => {
     setTranscriptBusy(true);
     setCardError('');
     try {
-      const res = await fetch(`${API_BASE}/api/sawaneh/transcripts/${selectedId}${path}`, {
+      const res = await apiFetch(`${API_BASE}/api/sawaneh/transcripts/${selectedId}${path}`, {
+        parse: 'response', rejectOnHttpError: false,
         method,
         headers: authHeaders(),
         ...(body ? { body: JSON.stringify(body) } : {})
@@ -474,7 +482,7 @@ const SawanehWorkspace = () => {
       }
       flash(data.message || 'انجام شد.');
     } catch (err) {
-      setCardError(err.message || 'خطا در عملیات سوانح تعلیمی');
+      setCardError(failureMessage(err, 'خطا در عملیات سوانح تعلیمی'));
     } finally {
       setTranscriptBusy(false);
     }

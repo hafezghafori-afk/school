@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import './CourseList.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getCourseTargetId = (item = {}) => (
   String(item?.classId || item?.id || item?.courseId || item?.legacyCourseId || item?._id || '').trim()
@@ -10,6 +12,7 @@ const getCourseTargetId = (item = {}) => (
 
 export default function CourseList() {
   const navigate = useNavigate();
+  const [loadError, setLoadError] = useState(null);
   const [items, setItems] = useState([]);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('');
@@ -17,22 +20,23 @@ export default function CourseList() {
   const [message, setMessage] = useState('');
 
   const loadCourses = async () => {
+    setLoadError(null);
     setLoading(true);
     setMessage('');
     try {
       const params = new URLSearchParams();
       if (query) params.set('q', query);
       if (category) params.set('category', category);
-      const res = await fetch(`${API_BASE}/api/education/public-school-classes?${params.toString()}`);
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/education/public-school-classes?${params.toString()}`);
       if (!data?.success) {
         setMessage(data?.message || 'خطا در دریافت صنف‌ها');
         setItems([]);
         return;
       }
       setItems(Array.isArray(data.items) ? data.items : []);
-    } catch {
-      setMessage('خطا در دریافت صنف‌ها');
+    } catch (error) {
+      setLoadError(error);
+      setMessage('');
       setItems([]);
     } finally {
       setLoading(false);
@@ -58,6 +62,7 @@ export default function CourseList() {
 
   return (
     <section className="courses-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadCourses} compact />}
       <div className="card-back">
         <button type="button" onClick={() => window.history.back()}>بازگشت</button>
       </div>

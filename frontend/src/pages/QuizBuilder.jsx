@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import './QuizBuilder.css';
 
 import { API_BASE } from '../config/api';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -48,6 +50,7 @@ const normalizeCourseOptions = (items = [], source = 'courseAccess') => items
   .filter((item) => item.courseId || item.classId);
 
 export default function QuizBuilder() {
+  const [loadError, setLoadError] = useState(null);
   const [courses, setCourses] = useState([]);
   const [courseId, setCourseId] = useState('');
   const [subject, setSubject] = useState('');
@@ -58,13 +61,11 @@ export default function QuizBuilder() {
   const [message, setMessage] = useState('');
 
   const loadCourses = async () => {
+    setLoadError(null);
     try {
       const role = String(localStorage.getItem('role') || '').trim().toLowerCase();
       const isInstructor = role === 'instructor';
-      const res = await fetch(`${API_BASE}${isInstructor ? '/api/education/instructor/courses' : '/api/education/school-classes?status=active'}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}${isInstructor ? '/api/education/instructor/courses' : '/api/education/school-classes?status=active'}`);
       if (!data?.success) {
         setCourses([]);
         setCourseId('');
@@ -79,7 +80,8 @@ export default function QuizBuilder() {
         }
         return getCompatCourseId(nextCourses[0]) || '';
       });
-    } catch {
+    } catch (error) {
+      setLoadError(error);
       setCourses([]);
       setCourseId('');
     }
@@ -116,7 +118,8 @@ export default function QuizBuilder() {
     const classId = getCourseClassId(selectedCourse);
 
     try {
-      const res = await fetch(`${API_BASE}/api/quizzes/create`, {
+      const res = await apiFetch(`${API_BASE}/api/quizzes/create`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
@@ -134,13 +137,14 @@ export default function QuizBuilder() {
       setMessage('آزمون ذخیره شد.');
       setQuestions([]);
       setSubject('');
-    } catch {
-      setMessage('خطا در ذخیره آزمون');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در ذخیره آزمون'));
     }
   };
 
   return (
     <div className="quizbuilder-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadCourses} compact />}
       <div className="quizbuilder-card">
         <div className="card-back">
           <button type="button" onClick={() => window.history.back()}>بازگشت</button>

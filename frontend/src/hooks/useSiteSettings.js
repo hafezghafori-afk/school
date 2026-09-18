@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { API_BASE } from '../config/api';
 import { getPublicWebsiteLocale } from '../i18n/publicWebsite';
+import { apiFetch } from '../utils/apiClient';
 
 export const PUBLIC_WEBSITE_LANGUAGE_KEY = 'publicWebsiteLanguage';
 
@@ -115,11 +116,12 @@ export default function useSiteSettings() {
       // back, instead of just the slower of the two. Every page load hits
       // this, not just the public site.
       const [settingsResponse, profileResponse, activeSchoolResponse] = await Promise.all([
-        fetch(`${API_BASE}/api/settings/public`),
+        apiFetch(`${API_BASE}/api/settings/public`, { parse: 'response', rejectOnHttpError: false }),
         shouldLoadSchoolProfile
-          ? fetch(`${API_BASE}/api/school-websites/public?slug=${encodeURIComponent(schoolSlug)}&lang=${encodeURIComponent(language)}`)
+          ? apiFetch(`${API_BASE}/api/school-websites/public?slug=${encodeURIComponent(schoolSlug)}&lang=${encodeURIComponent(language)}`, { parse: 'response', rejectOnHttpError: false })
           : Promise.resolve(null),
-        fetch(`${API_BASE}/api/afghan-schools/active`, {
+        apiFetch(`${API_BASE}/api/afghan-schools/active`, {
+          parse: 'response', rejectOnHttpError: false,
           headers: { ...getAuthHeaders() }
         }).catch(() => null)
       ]);

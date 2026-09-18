@@ -5,6 +5,8 @@ import './AdminContent.css';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDateTime } from '../utils/afghanDate';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -102,6 +104,7 @@ const contextLabel = (value = '') => CONTEXT_LABELS[String(value || '').trim()] 
 
 export default function AdminLogs() {
   const location = useLocation();
+  const [loadError, setLoadError] = useState(null);
   const [items, setItems] = useState([]);
   const [message, setMessage] = useState('');
   const [filters, setFilters] = useState({
@@ -141,20 +144,19 @@ export default function AdminLogs() {
   };
 
   const loadItems = async () => {
+    setLoadError(null);
     try {
       const query = toQuery();
-      const res = await fetch(`${API_BASE}/api/admin-logs${query ? `?${query}` : ''}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/admin-logs${query ? `?${query}` : ''}`);
       if (!data?.success) {
         setMessage('خطا در دریافت لاگ‌ها');
         return;
       }
       setItems(data.items || []);
       setMessage('');
-    } catch {
-      setMessage('خطا در ارتباط با سرور');
+    } catch (error) {
+      setLoadError(error);
+      setMessage('');
     }
   };
 
@@ -167,7 +169,7 @@ export default function AdminLogs() {
     const token = localStorage.getItem('token') || '';
     const query = toQuery();
     const url = `${API_BASE}/api/admin-logs/export.csv${query ? `?${query}` : ''}`;
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    apiFetch(url, { parse: 'response', rejectOnHttpError: false, headers: { Authorization: `Bearer ${token}` } })
       .then((res) => res.blob())
       .then((blob) => {
         const link = document.createElement('a');
@@ -221,6 +223,7 @@ export default function AdminLogs() {
 
   return (
     <section className="admin-content-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadItems} compact />}
       <div className="card-back">
         <button type="button" onClick={() => window.history.back()}>بازگشت</button>
       </div>

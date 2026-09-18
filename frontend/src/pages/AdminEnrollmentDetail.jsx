@@ -4,6 +4,8 @@ import './AdminContent.css';
 
 import { API_BASE } from '../config/api';
 import { formatAfghanStoredDateLabel } from '../utils/afghanDate';
+import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -25,24 +27,24 @@ const templates = {
 
 export default function AdminEnrollmentDetail() {
   const { id } = useParams();
+  const [loadError, setLoadError] = useState(null);
   const [item, setItem] = useState(null);
   const [message, setMessage] = useState('');
   const [reason, setReason] = useState(templates.rejected);
 
   const loadItem = async () => {
+    setLoadError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/enrollments/${id}`, {
-        headers: { ...getAuthHeaders() }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`${API_BASE}/api/enrollments/${id}`);
       if (data?.success) {
         setItem(data.item || null);
         setMessage('');
       } else {
         setMessage(data?.message || 'درخواست پیدا نشد');
       }
-    } catch {
-      setMessage('خطا در دریافت اطلاعات');
+    } catch (error) {
+      setLoadError(error);
+      setMessage('');
     }
   };
 
@@ -52,19 +54,21 @@ export default function AdminEnrollmentDetail() {
 
   const approve = async () => {
     try {
-      await fetch(`${API_BASE}/api/enrollments/${id}/approve`, {
+      await apiFetch(`${API_BASE}/api/enrollments/${id}/approve`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { ...getAuthHeaders() }
       });
       loadItem();
-    } catch {
-      setMessage('خطا در تایید درخواست');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در تایید درخواست'));
     }
   };
 
   const downloadZip = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/enrollments/${id}/zip`, {
+      const res = await apiFetch(`${API_BASE}/api/enrollments/${id}/zip`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: { ...getAuthHeaders() }
       });
       if (!res.ok) throw new Error('failed');
@@ -77,14 +81,15 @@ export default function AdminEnrollmentDetail() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-    } catch {
-      setMessage('خطا در دریافت فایل ZIP');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در دریافت فایل ZIP'));
     }
   };
 
   const downloadPdf = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/enrollments/${id}/report`, {
+      const res = await apiFetch(`${API_BASE}/api/enrollments/${id}/report`, {
+        parse: 'response', rejectOnHttpError: false,
         headers: { ...getAuthHeaders() }
       });
       if (!res.ok) throw new Error('failed');
@@ -97,22 +102,23 @@ export default function AdminEnrollmentDetail() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-    } catch {
-      setMessage('خطا در دریافت PDF');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در دریافت PDF'));
     }
   };
 
   const reject = async () => {
     if (!reason.trim()) return setMessage('دلیل رد را وارد کنید');
     try {
-      await fetch(`${API_BASE}/api/enrollments/${id}/reject`, {
+      await apiFetch(`${API_BASE}/api/enrollments/${id}/reject`, {
+        parse: 'response', rejectOnHttpError: false,
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ reason })
       });
       loadItem();
-    } catch {
-      setMessage('خطا در رد درخواست');
+    } catch (error) {
+      setMessage(failureMessage(error, 'خطا در رد درخواست'));
     }
   };
 
@@ -129,6 +135,7 @@ export default function AdminEnrollmentDetail() {
 
   return (
     <section className="admin-content-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadItem} compact />}
       <div className="card-back">
         <button type="button" onClick={() => window.history.back()}>بازگشت</button>
       </div>
