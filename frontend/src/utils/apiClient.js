@@ -216,10 +216,33 @@ if (typeof window !== 'undefined') {
  * apiFetch
  * ------------------------------------------------------------------ */
 
+// The id the legacy single-school deployments used; it identifies no real
+// school, so sending it would scope a request to nothing.
+const LEGACY_SINGLE_SCHOOL_ID = '000000000000000000000001';
+
+const readStoredSchoolId = () => {
+  try {
+    return ['schoolId', 'school_id', 'selectedSchoolId']
+      .map((key) => String(window.localStorage.getItem(key) || '').trim())
+      .find((value) => /^[a-f\d]{24}$/i.test(value) && value !== LEGACY_SINGLE_SCHOOL_ID) || '';
+  } catch {
+    return '';
+  }
+};
+
+// Which school the admin is working in is ambient session context, exactly like
+// the token: the finance dashboard answers 400 «مکتب فعال را انتخاب کنید»
+// without it. It used to be attached by hand in the few pages that needed it,
+// which meant any call site that forgot — or that had its headers folded away —
+// silently lost its scope. Sending it from here makes that impossible.
 const getAuthHeaders = () => {
   try {
     const token = window.localStorage.getItem('token');
-    return token ? { Authorization: `Bearer ${token}` } : {};
+    const schoolId = readStoredSchoolId();
+    return {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(schoolId ? { 'X-School-Id': schoolId } : {})
+    };
   } catch {
     return {};
   }

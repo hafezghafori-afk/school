@@ -3995,6 +3995,19 @@ export default function AdminFinance() {
       parse: 'response',
       rejectOnHttpError: false
     });
+    // 401/403 are never business data on these routes — they mean the session
+    // expired or the account lost the permission. Parsing them like a normal
+    // body is why an expired session rendered a finance centre full of empty
+    // tables and said nothing at all.
+    if (res.status === 401 || res.status === 403) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(
+        String(body?.message || '').trim()
+        || (res.status === 401
+          ? 'نشست شما منقضی شده است. لطفاً دوباره وارد شوید.'
+          : 'شما اجازهٔ دیدن اطلاعات مالی را ندارید.')
+      );
+    }
     const contentType = String(res.headers.get('content-type') || '').toLowerCase();
     const text = await res.text();
     if (!contentType.includes('application/json')) {
