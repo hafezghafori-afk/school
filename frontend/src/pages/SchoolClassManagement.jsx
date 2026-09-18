@@ -8,8 +8,10 @@ import { Badge } from '../components/ui/badge';
 import { Trash2, Edit, Plus, Users, GraduationCap, Eye } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const SchoolClassManagement = () => {
+  const [loadError, setLoadError] = useState(null);
   const [classes, setClasses] = useState([]);
   const [academicYears, setAcademicYears] = useState([]);
   const [shifts, setShifts] = useState([]);
@@ -49,6 +51,7 @@ const SchoolClassManagement = () => {
   }, []);
 
   const fetchClasses = async () => {
+    setLoadError(null);
     try {
       const data = await apiFetch(`/api/school-classes/school/${schoolId}`);
       
@@ -58,6 +61,7 @@ const SchoolClassManagement = () => {
         toast.error('Error fetching classes');
       }
     } catch (error) {
+      setLoadError(error);
       console.error('Error fetching classes:', error);
       toast.error(failureMessage(error, 'Error fetching classes'));
     } finally {
@@ -207,6 +211,7 @@ const SchoolClassManagement = () => {
 
   return (
     <div className="container mx-auto p-6 space-y-6">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={fetchClasses} compact />}
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Class Management</h1>

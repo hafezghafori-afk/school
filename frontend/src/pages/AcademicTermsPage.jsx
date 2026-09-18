@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import './AcademicTermsPage.css';
 import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const AcademicTermsPage = () => {
+  const [loadError, setLoadError] = useState(null);
   const [academicYears, setAcademicYears] = useState([]);
   const [selectedYear, setSelectedYear] = useState('');
   const [terms, setTerms] = useState([]);
@@ -63,6 +65,7 @@ const AcademicTermsPage = () => {
   };
 
   const fetchTerms = async () => {
+    setLoadError(null);
     if (!selectedYear) return;
     
     try {
@@ -75,6 +78,7 @@ const AcademicTermsPage = () => {
         setError('خطا در دریافت ترم‌ها');
       }
     } catch (err) {
+      setLoadError(err);
       setError('خطا در ارتباط با سرور');
     } finally {
       setLoading(false);
@@ -291,6 +295,7 @@ const AcademicTermsPage = () => {
 
   return (
     <div className="academic-terms-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={fetchTerms} compact />}
       <div className="page-header">
         <div className="header-content">
           <h1>ترم‌های تحصیلی</h1>

@@ -4,6 +4,7 @@ import { API_BASE } from '../config/api';
 import LoginSettingsManager from '../components/LoginSettingsManager';
 import { getPrintLogoUrls, storePrintLogos } from '../utils/printLogos';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -276,6 +277,7 @@ const normalizeAdminQuickLinks = (items = []) => {
 };
 
 export default function AdminSettings() {
+  const [loadError, setLoadError] = useState(null);
   const [settings, setSettings] = useState(null);
   const [activeTab, setActiveTab] = useState(getInitialSettingsTab);
   const [message, setMessage] = useState('');
@@ -291,6 +293,7 @@ export default function AdminSettings() {
   const [rootDraft, setRootDraft] = useState({});
 
   const loadSettings = async () => {
+    setLoadError(null);
     setLoading(true);
     try {
       const [res, websiteRes] = await Promise.all([
@@ -325,7 +328,8 @@ export default function AdminSettings() {
       setAccessDenied(false);
       setMessage('');
     } catch (error) {
-      setMessage(failureMessage(error, 'خطا در اتصال به سرور'));
+      setLoadError(error);
+      setMessage('');
       setSettings(null);
     } finally {
       setLoading(false);
@@ -1551,6 +1555,7 @@ export default function AdminSettings() {
 
   return (
     <div className="admin-settings" dir="rtl">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadSettings} compact />}
       <div className="card-back">
         <button type="button" onClick={() => window.history.back()}>بازگشت</button>
       </div>

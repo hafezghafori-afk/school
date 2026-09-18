@@ -14,8 +14,10 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const TimetableConflictManager = () => {
+  const [loadError, setLoadError] = useState(null);
   const [conflicts, setConflicts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedAcademicYear, setSelectedAcademicYear] = useState('');
@@ -72,6 +74,7 @@ const TimetableConflictManager = () => {
   }, [selectedAcademicYear, selectedShift]);
 
   const fetchAcademicYears = async () => {
+    setLoadError(null);
     try {
       const data = await apiFetch(`/api/academic-years/school/${schoolId}`);
       
@@ -82,6 +85,7 @@ const TimetableConflictManager = () => {
         }
       }
     } catch (error) {
+      setLoadError(error);
       console.error('Error fetching academic years:', error);
     }
   };
@@ -151,6 +155,7 @@ const TimetableConflictManager = () => {
 
   return (
     <div className="container mx-auto p-6 space-y-6 tt-shared-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={fetchAcademicYears} compact />}
       <div className="flex justify-between items-center tt-shared-header">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 tt-shared-title">تداخل‌های تقسیم اوقات</h1>

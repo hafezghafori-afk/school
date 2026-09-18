@@ -5,6 +5,7 @@ import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDateTime } from '../utils/afghanDate';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -75,6 +76,7 @@ export default function RecordingsPage() {
   const role = String(localStorage.getItem('role') || '').trim().toLowerCase();
   const canManage = useMemo(() => ['admin', 'instructor'].includes(role), [role]);
 
+  const [loadError, setLoadError] = useState(null);
   const [items, setItems] = useState([]);
   const [courses, setCourses] = useState([]);
   const [courseFilter, setCourseFilter] = useState('');
@@ -130,6 +132,7 @@ export default function RecordingsPage() {
   };
 
   const loadItems = async (selectedCourse = courseFilter) => {
+    setLoadError(null);
     setLoading(true);
     setMessage('');
     try {
@@ -149,8 +152,9 @@ export default function RecordingsPage() {
       }
       setItems(Array.isArray(data.items) ? data.items : []);
     } catch (error) {
+      setLoadError(error);
       setItems([]);
-      setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
+      setMessage('');
     } finally {
       setLoading(false);
     }
@@ -247,6 +251,7 @@ export default function RecordingsPage() {
 
   return (
     <div className="recordings-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadItems} compact />}
       <div className="recordings-card">
         <div className="card-back">
           <button type="button" onClick={() => window.history.back()}>بازگشت</button>

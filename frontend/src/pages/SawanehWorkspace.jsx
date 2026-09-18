@@ -176,7 +176,7 @@ const SawanehWorkspace = () => {
       }
       setRows(Array.isArray(data.data) ? data.data : []);
     } catch (err) {
-      setListError(failureMessage(error, 'خطا در اتصال به سرور'));
+      setListError(failureMessage(err, 'خطا در اتصال به سرور'));
       setRows([]);
     } finally {
       setListLoading(false);
@@ -242,7 +242,7 @@ const SawanehWorkspace = () => {
         penaltyPaid: Boolean(nextCard.separation?.penaltyPaid)
       });
     } catch (err) {
-      setCardError(failureMessage(error, 'خطا در اتصال به سرور'));
+      setCardError(failureMessage(err, 'خطا در اتصال به سرور'));
     } finally {
       setCardLoading(false);
     }
@@ -305,7 +305,7 @@ const SawanehWorkspace = () => {
       flash('کارت سوانح ذخیره شد.');
       fetchList();
     } catch (err) {
-      setCardError(failureMessage(error, 'خطا در ذخیره'));
+      setCardError(failureMessage(err, 'خطا در ذخیره'));
     } finally {
       setSaving(false);
     }
@@ -335,7 +335,7 @@ const SawanehWorkspace = () => {
       flash('نظر نگرانِ صنف ثبت شد.');
       fetchList();
     } catch (err) {
-      setCardError(failureMessage(error, 'خطا در ثبت نظر'));
+      setCardError(failureMessage(err, 'خطا در ثبت نظر'));
     } finally {
       setRemarkSaving(false);
     }
@@ -361,7 +361,7 @@ const SawanehWorkspace = () => {
       setCard(data.data);
       flash('جزئیاتِ منفکی ذخیره شد.');
     } catch (err) {
-      setCardError(failureMessage(error, 'خطا در ذخیرهٔ منفکی'));
+      setCardError(failureMessage(err, 'خطا در ذخیرهٔ منفکی'));
     } finally {
       setSepSaving(false);
     }
@@ -414,7 +414,7 @@ const SawanehWorkspace = () => {
       await loadCard(selectedId);
       fetchList();
     } catch (err) {
-      setCardError(failureMessage(error, 'خطا در ذخیرهٔ مشخصات شاگرد'));
+      setCardError(failureMessage(err, 'خطا در ذخیرهٔ مشخصات شاگرد'));
     } finally {
       setStudentSaving(false);
     }
@@ -482,7 +482,7 @@ const SawanehWorkspace = () => {
       }
       flash(data.message || 'انجام شد.');
     } catch (err) {
-      setCardError(failureMessage(error, 'خطا در عملیات سوانح تعلیمی'));
+      setCardError(failureMessage(err, 'خطا در عملیات سوانح تعلیمی'));
     } finally {
       setTranscriptBusy(false);
     }

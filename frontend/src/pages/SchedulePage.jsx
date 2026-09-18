@@ -6,6 +6,7 @@ import AfghanDateInput from '../components/ui/AfghanDateInput';
 import StudentTimetableView from './StudentTimetableView';
 import TeacherTimetableView from './TeacherTimetableView';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -24,6 +25,7 @@ const getScheduleClassLabel = (item) => item?.schoolClass?.title || item?.course
 
 export default function SchedulePage() {
   const role = String(localStorage.getItem('role') || '').trim().toLowerCase();
+  const [loadError, setLoadError] = useState(null);
   const [date, setDate] = useState(todayStr());
   const [view, setView] = useState('day');
   const [items, setItems] = useState([]);
@@ -38,6 +40,7 @@ export default function SchedulePage() {
   }
 
   const loadSchedule = async (targetDate) => {
+    setLoadError(null);
     setMessage('');
     try {
       const url = view === 'week'
@@ -51,7 +54,8 @@ export default function SchedulePage() {
       }
       setItems(data.items || []);
     } catch (error) {
-      setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
+      setLoadError(error);
+      setMessage('');
       setItems([]);
     }
   };
@@ -62,6 +66,7 @@ export default function SchedulePage() {
 
   return (
     <div className="schedule-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadSchedule} compact />}
       <div className="schedule-card">
         <div className="card-back">
           <button type="button" onClick={() => window.history.back()}>بازگشت</button>

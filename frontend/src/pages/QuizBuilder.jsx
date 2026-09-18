@@ -3,6 +3,7 @@ import './QuizBuilder.css';
 
 import { API_BASE } from '../config/api';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -49,6 +50,7 @@ const normalizeCourseOptions = (items = [], source = 'courseAccess') => items
   .filter((item) => item.courseId || item.classId);
 
 export default function QuizBuilder() {
+  const [loadError, setLoadError] = useState(null);
   const [courses, setCourses] = useState([]);
   const [courseId, setCourseId] = useState('');
   const [subject, setSubject] = useState('');
@@ -59,6 +61,7 @@ export default function QuizBuilder() {
   const [message, setMessage] = useState('');
 
   const loadCourses = async () => {
+    setLoadError(null);
     try {
       const role = String(localStorage.getItem('role') || '').trim().toLowerCase();
       const isInstructor = role === 'instructor';
@@ -77,7 +80,8 @@ export default function QuizBuilder() {
         }
         return getCompatCourseId(nextCourses[0]) || '';
       });
-    } catch {
+    } catch (error) {
+      setLoadError(error);
       setCourses([]);
       setCourseId('');
     }
@@ -140,6 +144,7 @@ export default function QuizBuilder() {
 
   return (
     <div className="quizbuilder-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadCourses} compact />}
       <div className="quizbuilder-card">
         <div className="card-back">
           <button type="button" onClick={() => window.history.back()}>بازگشت</button>

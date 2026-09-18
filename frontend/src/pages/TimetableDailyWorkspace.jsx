@@ -11,6 +11,7 @@ import {
 } from '../utils/dailyTimetableDraft';
 import './TimetableDailyWorkspace.css';
 import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -26,6 +27,8 @@ export default function TimetableDailyWorkspace({
     description: metaDescription
   });
 
+  const [loadError, setLoadError] = useState(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [subjects, setSubjects] = useState([]);
@@ -154,6 +157,7 @@ export default function TimetableDailyWorkspace({
     };
 
     const loadCollection = async (primaryPath, fallbackPath = '') => {
+      setLoadError(null);
       try {
         const data = await apiFetch(primaryPath);
         let items = extractCollectionItems(data);
@@ -165,6 +169,7 @@ export default function TimetableDailyWorkspace({
 
         return items;
       } catch (error) {
+        setLoadError(error);
         console.error(`Error loading collection from ${primaryPath}:`, error);
         return [];
       }
@@ -206,7 +211,10 @@ export default function TimetableDailyWorkspace({
       try {
         const data = await apiFetch(`/api/timetables/daily-draft?schoolId=${encodeURIComponent(schoolId)}`);
 
-        if (response.ok && data?.success && data?.item) {
+        // apiFetch throws on a non-OK response, so reaching this line already
+        // means the request succeeded — the old `response.ok` check came from
+        // the raw-fetch version and its variable no longer exists.
+        if (data?.success && data?.item) {
           return writeDailyTimetableDraft(data.item);
         }
 
@@ -260,7 +268,7 @@ export default function TimetableDailyWorkspace({
     return () => {
       isMounted = false;
     };
-  }, [canLoadSchoolData, canPersistDraft, persistDraftToServer, schoolId]);
+  }, [canLoadSchoolData, canPersistDraft, persistDraftToServer, schoolId, reloadToken]);
 
   if (loading) {
     return (
@@ -278,6 +286,7 @@ export default function TimetableDailyWorkspace({
 
   return (
     <section className="tt-daily-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={() => setReloadToken((token) => token + 1)} compact />}
       <div className="tt-daily-page-glow tt-daily-page-glow--one" />
       <div className="tt-daily-page-glow tt-daily-page-glow--two" />
       <div className="tt-daily-wrap">

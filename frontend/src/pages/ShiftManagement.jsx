@@ -9,6 +9,7 @@ import { Trash2, Edit, Plus, Clock, Users } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import './ShiftManagement.css';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -119,6 +120,7 @@ const isShiftMatch = (shift = {}, expected = '') => {
 };
 
 const ShiftManagement = () => {
+  const [loadError, setLoadError] = useState(null);
   const [shifts, setShifts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -162,6 +164,7 @@ const ShiftManagement = () => {
   }, [schoolId]);
 
   const fetchShifts = async () => {
+    setLoadError(null);
     try {
       const data = await apiFetch(`/api/school-shifts?schoolId=${schoolId}`);
       
@@ -171,6 +174,7 @@ const ShiftManagement = () => {
         toast.error('خطا در دریافت نوبت‌ها');
       }
     } catch (error) {
+      setLoadError(error);
       console.error('Error fetching shifts:', error);
       toast.error(failureMessage(error, 'خطا در دریافت نوبت‌ها'));
     } finally {
@@ -303,6 +307,7 @@ const ShiftManagement = () => {
 
   return (
     <div className="container mx-auto p-4 md:p-6 space-y-6 tt-shift-page tt-shared-page" dir="rtl">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={fetchShifts} compact />}
       <div className="tt-shift-hero tt-shared-header">
         <div className="tt-shift-hero-main">
           <h1 className="text-3xl font-bold text-gray-900 tt-shared-title">مدیریت نوبت‌ها</h1>

@@ -3,6 +3,7 @@ import './AdminContent.css';
 
 import { API_BASE } from '../config/api';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -24,6 +25,7 @@ const resolveImage = (url) => {
 };
 
 export default function AdminGallery() {
+  const [loadError, setLoadError] = useState(null);
   const [items, setItems] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState('');
@@ -31,6 +33,7 @@ export default function AdminGallery() {
   const [uploading, setUploading] = useState(false);
 
   const loadItems = async () => {
+    setLoadError(null);
     try {
       const data = await apiFetch(`${API_BASE}/api/gallery/admin`);
       if (data?.success) {
@@ -40,7 +43,8 @@ export default function AdminGallery() {
         setMessage(data?.message || 'خطا در دریافت گالری');
       }
     } catch (error) {
-      setMessage(failureMessage(error, 'خطا در اتصال به سرور'));
+      setLoadError(error);
+      setMessage('');
     }
   };
 
@@ -146,6 +150,7 @@ export default function AdminGallery() {
 
   return (
     <section className="admin-content-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadItems} compact />}
       <div className="card-back">
         <button type="button" onClick={() => window.history.back()}>بازگشت</button>
       </div>

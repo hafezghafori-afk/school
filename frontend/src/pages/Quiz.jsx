@@ -4,6 +4,7 @@ import './Quiz.css';
 
 import { API_BASE } from '../config/api';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const normalizeQuizQuestion = (item = {}) => {
   const text = String(item?.text || item?.questionText || '').trim();
@@ -21,6 +22,7 @@ const normalizeQuizQuestion = (item = {}) => {
 
 export default function Quiz() {
   const { courseId: identifier } = useParams();
+  const [loadError, setLoadError] = useState(null);
   const [quiz, setQuiz] = useState(null);
   const [course, setCourse] = useState(null);
   const [answers, setAnswers] = useState({});
@@ -28,6 +30,7 @@ export default function Quiz() {
   const [message, setMessage] = useState('');
 
   const loadQuiz = async () => {
+    setLoadError(null);
     try {
       setMessage('');
       setResult(null);
@@ -76,9 +79,10 @@ export default function Quiz() {
       } : null);
       setMessage('');
     } catch (error) {
+      setLoadError(error);
       setCourse(null);
       setQuiz(null);
-      setMessage(failureMessage(error, 'خطا در دریافت آزمون'));
+      setMessage('');
     }
   };
 
@@ -126,6 +130,7 @@ export default function Quiz() {
 
   return (
     <div className="quiz-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadQuiz} compact />}
       <div className="quiz-card">
         <div className="card-back">
           <button type="button" onClick={() => window.history.back()}>بازگشت</button>

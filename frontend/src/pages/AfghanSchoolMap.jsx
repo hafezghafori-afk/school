@@ -2,10 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './AfghanSchoolMap.css';
 import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const AfghanSchoolMap = () => {
   const navigate = useNavigate();
   const mapRef = useRef(null);
+  const [loadError, setLoadError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [schools, setSchools] = useState([]);
   const [selectedProvince, setSelectedProvince] = useState('all');
@@ -115,6 +117,7 @@ const AfghanSchoolMap = () => {
   };
 
   const fetchSchools = async () => {
+    setLoadError(null);
     try {
       setLoading(true);
       setError('');
@@ -133,6 +136,7 @@ const AfghanSchoolMap = () => {
         setError(data.message || 'خطا در دریافت اطلاعات مکاتب');
       }
     } catch (err) {
+      setLoadError(err);
       setError('خطا در اتصال به سرور');
     } finally {
       setLoading(false);
@@ -227,6 +231,7 @@ const AfghanSchoolMap = () => {
 
   return (
     <div className="afghan-map">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={fetchSchools} compact />}
       <header className="map-header">
         <h1>نقشه مکاتب افغانستان</h1>
         <div className="header-controls">

@@ -22,8 +22,10 @@ import {
 import { toast } from 'react-hot-toast';
 import { formatAfghanDateTime } from '../utils/afghanDate';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const TimetableChangeLog = () => {
+  const [loadError, setLoadError] = useState(null);
   const [changes, setChanges] = useState([]);
   const [filteredChanges, setFilteredChanges] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -85,6 +87,7 @@ const TimetableChangeLog = () => {
   }, [changes, filters, searchTerm]);
 
   const fetchClasses = async () => {
+    setLoadError(null);
     try {
       const data = await apiFetch(`/api/school-classes/school/${schoolId}`);
       
@@ -92,6 +95,7 @@ const TimetableChangeLog = () => {
         setClasses(data.data);
       }
     } catch (error) {
+      setLoadError(error);
       console.error('Error fetching classes:', error);
     }
   };
@@ -363,6 +367,7 @@ const TimetableChangeLog = () => {
 
   return (
     <div className="container mx-auto p-6 space-y-6 tt-shared-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={fetchClasses} compact />}
       <div className="flex justify-between items-center tt-shared-header">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 tt-shared-title">تاریخچه تغییرات</h1>

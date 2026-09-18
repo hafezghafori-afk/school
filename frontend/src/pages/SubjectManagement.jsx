@@ -9,8 +9,10 @@ import { Badge } from '../components/ui/badge';
 import { Trash2, Edit, Plus, BookOpen, Beaker, Monitor, Dumbbell } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const SubjectManagement = () => {
+  const [loadError, setLoadError] = useState(null);
   const [subjects, setSubjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -57,6 +59,7 @@ const SubjectManagement = () => {
   }, []);
 
   const fetchSubjects = async () => {
+    setLoadError(null);
     try {
       const data = await apiFetch(`/api/subjects/school/${schoolId}`);
       
@@ -66,6 +69,7 @@ const SubjectManagement = () => {
         toast.error('Error fetching subjects');
       }
     } catch (error) {
+      setLoadError(error);
       console.error('Error fetching subjects:', error);
       toast.error(failureMessage(error, 'Error fetching subjects'));
     } finally {
@@ -223,6 +227,7 @@ const SubjectManagement = () => {
 
   return (
     <div className="container mx-auto p-6 space-y-6">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={fetchSubjects} compact />}
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Subject Management</h1>

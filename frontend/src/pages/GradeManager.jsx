@@ -6,6 +6,7 @@ import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
 import { studentMatchesSearch } from '../utils/studentSearch';
 import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const COMPONENT_FIELDS = [
   { key: 'writtenScore', maxKey: 'writtenMax', label: 'تحریری' },
@@ -276,6 +277,7 @@ async function fetchBinary(url, responseType = 'blob') {
 }
 
 export default function GradeManager() {
+  const [loadError, setLoadError] = useState(null);
   const [referenceData, setReferenceData] = useState({
     academicYears: [],
     assessmentPeriods: [],
@@ -584,6 +586,7 @@ export default function GradeManager() {
     pageOverride = sessionPagination.page,
     nextQueueFilters = appliedQueueFilters
   ) => {
+    setLoadError(null);
     setLoadingSessions(true);
     try {
       const scope = !isInstructor
@@ -635,7 +638,8 @@ export default function GradeManager() {
           : nextItems[0]?.id || '';
       setSelectedSessionId(targetId);
       syncQueueUrl({ status: statusOverride, page: resolvedPage, nextQueueFilters, sessionId: targetId });
-    } catch {
+    } catch (error) {
+      setLoadError(error);
       applyMessage('بارگیری فهرست شقه‌ها موفق نشد.', 'error');
       setSessions([]);
       setSelectedSessionId('');
@@ -999,6 +1003,7 @@ export default function GradeManager() {
 
   return (
     <div className="grade-manager-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadSessions} compact />}
       <div className="grade-manager-card">
         <div className="card-back">
           <button type="button" onClick={() => window.history.back()}>بازگشت</button>

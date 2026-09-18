@@ -14,6 +14,7 @@ import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
 import { formatFinanceCode } from '../utils/latinFinanceCode';
 import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const ORDER_STATUS_LABELS = {
   new: 'پرداخت نشده',
@@ -282,6 +283,7 @@ function buildAggregateSummary(items = []) {
 }
 
 export default function StudentFinance() {
+  const [loadError, setLoadError] = useState(null);
   const [items, setItems] = useState([]);
   const [selectedMembershipId, setSelectedMembershipId] = useState('');
   const [loading, setLoading] = useState(true);
@@ -301,6 +303,7 @@ export default function StudentFinance() {
   });
 
   const loadData = async ({ silent = false } = {}) => {
+    setLoadError(null);
     if (!silent) setLoading(true);
     try {
       const data = await fetchJson('/api/student-finance/me/overviews');
@@ -315,6 +318,7 @@ export default function StudentFinance() {
       setMessage(nextItems.length ? '' : 'هنوز برای شما عضویت مالی فعال ثبت نشده است.');
       setMessageType(nextItems.length ? 'info' : 'error');
     } catch (error) {
+      setLoadError(error);
       setItems([]);
       setSelectedMembershipId('');
       setMessage(errorMessage(error, 'دریافت وضعیت مالی متعلم ناموفق بود.'));
@@ -513,6 +517,7 @@ export default function StudentFinance() {
 
   return (
     <section className="student-finance-shell">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadData} compact />}
       <div className="student-finance-page">
         <div className="student-finance-hero">
           <div>

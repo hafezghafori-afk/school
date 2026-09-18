@@ -173,7 +173,7 @@ export default function AdminFinancialMemberships() {
         setMessage('عضویت با موفقیت حذف شد');
         await fetchMemberships();
       } catch (err) {
-        setMessage(failureMessage(error, 'خطا در حذف عضویت'));
+        setMessage(failureMessage(err, 'خطا در حذف عضویت'));
       }
     };
 
@@ -225,7 +225,7 @@ export default function AdminFinancialMemberships() {
         setMessage(successMessage);
         await fetchMemberships();
       } catch (err) {
-        setMessage(failureMessage(error, 'خطا در ذخیره عضویت'));
+        setMessage(failureMessage(err, 'خطا در ذخیره عضویت'));
       }
       setFormLoading(false);
     };
@@ -253,7 +253,7 @@ export default function AdminFinancialMemberships() {
           setAcademicYears(data.academicYears || []);
           setClasses(data.classes || []);
         })
-        .catch((err) => setMessage(failureMessage(error, 'خطا در دریافت اطلاعات مرجع')))
+        .catch((err) => setMessage(failureMessage(err, 'خطا در دریافت اطلاعات مرجع')))
         .finally(() => setLoading(false));
     }, []);
 

@@ -6,6 +6,7 @@ import './Gallery.css';
 
 import { API_BASE } from '../config/api';
 import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const resolveImage = (url) => {
   if (!url) return '';
@@ -15,6 +16,8 @@ const resolveImage = (url) => {
 
 export default function Gallery() {
   const { settings } = useSiteSettings();
+  const [loadError, setLoadError] = useState(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [activeItem, setActiveItem] = useState(null);
@@ -22,6 +25,7 @@ export default function Gallery() {
 
   useEffect(() => {
     const loadGallery = async () => {
+      setLoadError(null);
       setLoading(true);
       try {
         const data = await apiFetch(`${API_BASE}/api/gallery`);
@@ -30,14 +34,15 @@ export default function Gallery() {
         } else {
           setItems([]);
         }
-      } catch {
+      } catch (error) {
+        setLoadError(error);
         setItems([]);
       } finally {
         setLoading(false);
       }
     };
     loadGallery();
-  }, []);
+  }, [reloadToken]);
 
   useEffect(() => {
     if (loading || !items.length) return undefined;
@@ -88,6 +93,7 @@ export default function Gallery() {
 
   return (
     <PublicLayout active="گالری" settings={settings}>
+      {!!loadError && <DataErrorCard error={loadError} onRetry={() => setReloadToken((token) => token + 1)} compact />}
       <section className="gallery-page public-container">
       <div className="gallery-hero">
         <div>

@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import './ShiftSettingsPage.css';
 import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const ShiftSettingsPage = () => {
+  const [loadError, setLoadError] = useState(null);
   const [shifts, setShifts] = useState([]);
   const [weekConfig, setWeekConfig] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -25,6 +27,7 @@ const ShiftSettingsPage = () => {
   }, [activeTab]);
 
   const fetchShifts = async () => {
+    setLoadError(null);
     try {
       setLoading(true);
       const data = await apiFetch(`/api/school-shifts/school/${schoolId}`);
@@ -35,6 +38,7 @@ const ShiftSettingsPage = () => {
         setError('خطا در دریافت شیفت‌ها');
       }
     } catch (err) {
+      setLoadError(err);
       setError('خطا در ارتباط با سرور');
     } finally {
       setLoading(false);
@@ -315,6 +319,7 @@ const ShiftSettingsPage = () => {
 
   return (
     <div className="shift-settings-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={fetchShifts} compact />}
       <div className="page-header">
         <h1>تنظیمات زمانی مکتب</h1>
       </div>

@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './AfghanSchoolDashboard.css';
 import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const AfghanSchoolDashboard = () => {
   const navigate = useNavigate();
+  const [loadError, setLoadError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState(null);
   const [selectedProvince, setSelectedProvince] = useState('all');
@@ -53,6 +55,7 @@ const AfghanSchoolDashboard = () => {
   }, [selectedProvince]);
 
   const fetchDashboardData = async () => {
+    setLoadError(null);
     try {
       setLoading(true);
       const url = selectedProvince === 'all' 
@@ -70,6 +73,7 @@ const AfghanSchoolDashboard = () => {
         setError(data.message || 'خطا در دریافت اطلاعات');
       }
     } catch (err) {
+      setLoadError(err);
       setError('خطا در اتصال به سرور');
     } finally {
       setLoading(false);
@@ -114,6 +118,7 @@ const AfghanSchoolDashboard = () => {
 
   return (
     <div className="afghan-dashboard">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={fetchDashboardData} compact />}
       <header className="dashboard-header">
         <h1>داشبورد مدیریتی مکاتب افغانستان</h1>
         <div className="header-controls">

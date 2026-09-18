@@ -12,6 +12,7 @@ import {
 import '../styles/timetable-print.css';
 import './TimetableAudienceView.css';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const WEEK_DAYS = [
   { value: 'saturday', label: 'شنبه' },
@@ -73,6 +74,8 @@ function countUniqueSubjects(entries = []) {
 }
 
 export default function StudentTimetableView() {
+  const [loadError, setLoadError] = useState(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [user, setUser] = useState(null);
   const [classes, setClasses] = useState([]);
   const [academicYears, setAcademicYears] = useState([]);
@@ -162,6 +165,7 @@ export default function StudentTimetableView() {
 
   useEffect(() => {
     const fetchTimetable = async () => {
+      setLoadError(null);
       if (!selectedClass || !selectedAcademicYear || !selectedShift) return;
 
       setLoading(true);
@@ -216,6 +220,7 @@ export default function StudentTimetableView() {
         setPublishedEntryCount(usePublishedFallback ? publishedEntries.length : 0);
         setSlotRows(buildWeeklySlotRowsFromDailyDraft(publishedItem));
       } catch (error) {
+        setLoadError(error);
         console.error('Error loading student timetable:', error);
         toast.error(failureMessage(error, 'دریافت برنامه شاگرد ناموفق بود.'));
         setSlotRows(SLOT_ROWS);
@@ -225,7 +230,7 @@ export default function StudentTimetableView() {
     };
 
     fetchTimetable();
-  }, [classes, schoolId, selectedClass, selectedAcademicYear, selectedShift]);
+  }, [classes, schoolId, selectedClass, selectedAcademicYear, selectedShift, reloadToken]);
 
   const selectedClassLabel = classes.find((item) => item._id === selectedClass)?.title || 'صنف';
   const selectedAcademicYearLabel = academicYears.find((item) => item._id === selectedAcademicYear)?.title || 'سال تعلیمی';
@@ -251,6 +256,7 @@ export default function StudentTimetableView() {
 
   return (
     <div className="container mx-auto p-4 md:p-6 space-y-6 tt-shared-page tt-audience-page print-timetable print-class-timetable">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={() => setReloadToken((token) => token + 1)} compact />}
       <div className="print-header">
         <h1>تقسیم اوقات رسمی مکتب</h1>
         <h2>برنامه هفتگی شاگرد</h2>

@@ -18,10 +18,12 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const isValidObjectId = (value = '') => /^[a-f\d]{24}$/i.test(String(value || '').trim());
 
 const TimetableReports = () => {
+  const [loadError, setLoadError] = useState(null);
   const [reports, setReports] = useState([]);
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -110,6 +112,7 @@ const TimetableReports = () => {
   }, [hasValidSchoolId]);
 
   const fetchClasses = async () => {
+    setLoadError(null);
     try {
       const data = await apiFetch(`/api/school-classes/school/${schoolId}`);
       
@@ -117,6 +120,7 @@ const TimetableReports = () => {
         setClasses(data.data);
       }
     } catch (error) {
+      setLoadError(error);
       console.error('Error fetching classes:', error);
     }
   };
@@ -444,6 +448,7 @@ const TimetableReports = () => {
 
   return (
     <div className="container mx-auto p-6 space-y-6 tt-shared-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={fetchClasses} compact />}
       <div className="flex justify-between items-center tt-shared-header">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 tt-shared-title">گزارش‌های تقسیم اوقات</h1>

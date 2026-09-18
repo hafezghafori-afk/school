@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import './AcademicYearsPage.css';
 import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const AcademicYearsPage = () => {
+  const [loadError, setLoadError] = useState(null);
   const [academicYears, setAcademicYears] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -31,6 +33,7 @@ const AcademicYearsPage = () => {
   }, []);
 
   const fetchAcademicYears = async () => {
+    setLoadError(null);
     try {
       setLoading(true);
       const data = await apiFetch(`/api/academic-years/school/${schoolId}`);
@@ -41,6 +44,7 @@ const AcademicYearsPage = () => {
         setError('خطا در دریافت سال‌های تحصیلی');
       }
     } catch (err) {
+      setLoadError(err);
       setError('خطا در ارتباط با سرور');
     } finally {
       setLoading(false);
@@ -211,6 +215,7 @@ const AcademicYearsPage = () => {
 
   return (
     <div className="academic-years-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={fetchAcademicYears} compact />}
       <div className="page-header">
         <h1>سال‌های تحصیلی</h1>
         <button 

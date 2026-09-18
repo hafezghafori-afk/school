@@ -4,6 +4,7 @@ import './AdminNotifications.css';
 import { API_BASE } from '../config/api';
 import { formatAfghanDateTime } from '../utils/afghanDate';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -104,6 +105,7 @@ const buildSummaryFallback = (items = []) => ({
 });
 
 export default function AdminNotifications() {
+  const [loadError, setLoadError] = useState(null);
   const [items, setItems] = useState([]);
   const [summary, setSummary] = useState(buildSummaryFallback([]));
   const [selectedId, setSelectedId] = useState('');
@@ -118,6 +120,7 @@ export default function AdminNotifications() {
   });
 
   const loadNotifications = async ({ silent = false } = {}) => {
+    setLoadError(null);
     if (!silent) setLoading(true);
     setMessage('');
     try {
@@ -140,9 +143,10 @@ export default function AdminNotifications() {
         return nextItems[0]?._id || '';
       });
     } catch (error) {
+      setLoadError(error);
       setItems([]);
       setSummary(buildSummaryFallback([]));
-      setMessage(failureMessage(error, 'خطا در دریافت اعلان‌های مالی'));
+      setMessage('');
     } finally {
       if (!silent) setLoading(false);
     }
@@ -235,6 +239,7 @@ export default function AdminNotifications() {
 
   return (
     <div className="notify-page notify-page-v2">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadNotifications} compact />}
       <div className="notify-shell">
         <div className="card-back">
           <button type="button" onClick={() => window.history.back()}>بازگشت</button>

@@ -12,6 +12,7 @@ import {
 import '../styles/timetable-print.css';
 import './TimetableAudienceView.css';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const WEEK_DAYS = [
   { value: 'saturday', label: 'شنبه' },
@@ -60,6 +61,8 @@ function countActiveClasses(entries = []) {
 }
 
 export default function TeacherTimetableView() {
+  const [loadError, setLoadError] = useState(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [user, setUser] = useState(null);
   const [academicYears, setAcademicYears] = useState([]);
   const [shifts, setShifts] = useState([]);
@@ -116,6 +119,7 @@ export default function TeacherTimetableView() {
 
   useEffect(() => {
     const fetchTimetable = async () => {
+      setLoadError(null);
       const teacherId = String(user?._id || user?.id || '').trim();
       if (!teacherId || !selectedAcademicYear || !selectedShift) return;
 
@@ -167,6 +171,7 @@ export default function TeacherTimetableView() {
         setPublishedEntryCount(usePublishedFallback ? publishedEntries.length : 0);
         setSlotRows(buildWeeklySlotRowsFromDailyDraft(publishedItem));
       } catch (error) {
+        setLoadError(error);
         console.error('Error loading teacher timetable:', error);
         toast.error(failureMessage(error, 'دریافت تقسیم اوقات استاد ناموفق بود.'));
         setSlotRows(SLOT_ROWS);
@@ -176,7 +181,7 @@ export default function TeacherTimetableView() {
     };
 
     fetchTimetable();
-  }, [schoolId, user, selectedAcademicYear, selectedShift]);
+  }, [schoolId, user, selectedAcademicYear, selectedShift, reloadToken]);
 
   const teacherLabel = getTeacherLabel(user);
   const selectedAcademicYearLabel = academicYears.find((item) => item._id === selectedAcademicYear)?.title || 'سال تعلیمی';
@@ -202,6 +207,7 @@ export default function TeacherTimetableView() {
 
   return (
     <div className="container mx-auto p-4 md:p-6 space-y-6 tt-shared-page tt-audience-page print-timetable print-teacher-schedule">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={() => setReloadToken((token) => token + 1)} compact />}
       <div className="print-header">
         <h1>تقسیم اوقات رسمی مکتب</h1>
         <h2>برنامه هفتگی استاد</h2>

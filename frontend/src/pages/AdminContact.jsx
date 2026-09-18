@@ -3,6 +3,7 @@ import './AdminContent.css';
 
 import { API_BASE } from '../config/api';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -17,6 +18,7 @@ const TYPE_LABELS = {
 };
 
 export default function AdminContact() {
+  const [loadError, setLoadError] = useState(null);
   const [items, setItems] = useState([]);
   const [message, setMessage] = useState('');
   const [query, setQuery] = useState('');
@@ -24,6 +26,7 @@ export default function AdminContact() {
   const [type, setType] = useState('all');
 
   const loadItems = async () => {
+    setLoadError(null);
     try {
       const data = await apiFetch(`${API_BASE}/api/contact/admin`);
       if (data?.success) {
@@ -33,7 +36,8 @@ export default function AdminContact() {
         setMessage(data?.message || 'خطا در دریافت پیام‌ها');
       }
     } catch (error) {
-      setMessage(failureMessage(error, 'خطا در اتصال به سرور'));
+      setLoadError(error);
+      setMessage('');
     }
   };
 
@@ -82,6 +86,7 @@ export default function AdminContact() {
 
   return (
     <section className="admin-content-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadItems} compact />}
       <div className="card-back">
         <button type="button" onClick={() => window.history.back()}>بازگشت</button>
       </div>

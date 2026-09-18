@@ -7,6 +7,7 @@ import './News.css';
 import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
 import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const toDate = (value) => {
   return formatAfghanDate(value, {
@@ -31,11 +32,14 @@ const label = (cat) => {
 export default function NewsCategory() {
   const { category } = useParams();
   const { settings } = useSiteSettings();
+  const [loadError, setLoadError] = useState(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const loadNews = async () => {
+      setLoadError(null);
       setLoading(true);
       try {
         const data = await apiFetch(`${API_BASE}/api/news?category=${category}`);
@@ -44,17 +48,19 @@ export default function NewsCategory() {
         } else {
           setItems([]);
         }
-      } catch {
+      } catch (error) {
+        setLoadError(error);
         setItems([]);
       } finally {
         setLoading(false);
       }
     };
     loadNews();
-  }, [category]);
+  }, [category, reloadToken]);
 
   return (
     <PublicLayout active="اخبار" settings={settings}>
+      {!!loadError && <DataErrorCard error={loadError} onRetry={() => setReloadToken((token) => token + 1)} compact />}
       <section className="news-page public-container">
       <div className="news-hero">
         <div>

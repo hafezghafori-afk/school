@@ -5,6 +5,7 @@ import './AdminContent.css';
 import { API_BASE } from '../config/api';
 import { formatAfghanStoredDateLabel } from '../utils/afghanDate';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -26,11 +27,13 @@ const templates = {
 
 export default function AdminEnrollmentDetail() {
   const { id } = useParams();
+  const [loadError, setLoadError] = useState(null);
   const [item, setItem] = useState(null);
   const [message, setMessage] = useState('');
   const [reason, setReason] = useState(templates.rejected);
 
   const loadItem = async () => {
+    setLoadError(null);
     try {
       const data = await apiFetch(`${API_BASE}/api/enrollments/${id}`);
       if (data?.success) {
@@ -40,7 +43,8 @@ export default function AdminEnrollmentDetail() {
         setMessage(data?.message || 'درخواست پیدا نشد');
       }
     } catch (error) {
-      setMessage(failureMessage(error, 'خطا در دریافت اطلاعات'));
+      setLoadError(error);
+      setMessage('');
     }
   };
 
@@ -131,6 +135,7 @@ export default function AdminEnrollmentDetail() {
 
   return (
     <section className="admin-content-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadItem} compact />}
       <div className="card-back">
         <button type="button" onClick={() => window.history.back()}>بازگشت</button>
       </div>

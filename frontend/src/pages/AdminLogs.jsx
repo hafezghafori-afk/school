@@ -6,6 +6,7 @@ import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDateTime } from '../utils/afghanDate';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -103,6 +104,7 @@ const contextLabel = (value = '') => CONTEXT_LABELS[String(value || '').trim()] 
 
 export default function AdminLogs() {
   const location = useLocation();
+  const [loadError, setLoadError] = useState(null);
   const [items, setItems] = useState([]);
   const [message, setMessage] = useState('');
   const [filters, setFilters] = useState({
@@ -142,6 +144,7 @@ export default function AdminLogs() {
   };
 
   const loadItems = async () => {
+    setLoadError(null);
     try {
       const query = toQuery();
       const data = await apiFetch(`${API_BASE}/api/admin-logs${query ? `?${query}` : ''}`);
@@ -152,7 +155,8 @@ export default function AdminLogs() {
       setItems(data.items || []);
       setMessage('');
     } catch (error) {
-      setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
+      setLoadError(error);
+      setMessage('');
     }
   };
 
@@ -219,6 +223,7 @@ export default function AdminLogs() {
 
   return (
     <section className="admin-content-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadItems} compact />}
       <div className="card-back">
         <button type="button" onClick={() => window.history.back()}>بازگشت</button>
       </div>

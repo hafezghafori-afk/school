@@ -5,6 +5,7 @@ import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -74,6 +75,7 @@ const normalizeCourseOptions = (items = [], source = 'courseAccess') => items
   .filter((item) => item.classId);
 
 export default function HomeworkManager() {
+  const [loadError, setLoadError] = useState(null);
   const [view, setView] = useState('create');
   const [courses, setCourses] = useState([]);
   const [courseId, setCourseId] = useState('');
@@ -125,6 +127,7 @@ export default function HomeworkManager() {
   };
 
   const loadHomeworks = async (targetCourseId) => {
+    setLoadError(null);
     if (!targetCourseId) {
       setItems([]);
       setSelectedReviewHomeworkId('');
@@ -159,7 +162,8 @@ export default function HomeworkManager() {
         setFormFileKey((prev) => prev + 1);
       }
     } catch (error) {
-      setMessage(failureMessage(error, 'خطا در دریافت کارخانگی'));
+      setLoadError(error);
+      setMessage('');
       setItems([]);
       setSelectedReviewHomeworkId('');
     } finally {
@@ -376,6 +380,7 @@ export default function HomeworkManager() {
 
   return (
     <div className="homework-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadHomeworks} compact />}
       <div className="homework-card">
         <div className="card-back">
           <button type="button" onClick={() => window.history.back()}>بازگشت</button>

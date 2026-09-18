@@ -4,6 +4,7 @@ import { formatAfghanDateTime, formatAfghanStoredDateLabel } from '../utils/afgh
 import { studentMatchesSearch } from '../utils/studentSearch';
 import './OnlineRegistrations.css';
 import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const STATUS_META = {
   pending: { label: 'در انتظار', tone: 'warn' },
@@ -42,6 +43,7 @@ const getStatusMeta = (status = '') => STATUS_META[String(status || '').trim().t
 };
 
 export default function OnlineRegistrations() {
+  const [loadError, setLoadError] = useState(null);
   const [registrations, setRegistrations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -84,6 +86,7 @@ export default function OnlineRegistrations() {
   }), [registrations]);
 
   const loadRegistrations = async () => {
+    setLoadError(null);
     setLoading(true);
     try {
       const response = await apiFetch(`${API_BASE}/api/enrollments/admin`, {
@@ -100,6 +103,7 @@ export default function OnlineRegistrations() {
       setRegistrations(Array.isArray(data.items) ? data.items : []);
       setMessage('');
     } catch (error) {
+      setLoadError(error);
       setMessage(error?.message || 'دریافت درخواست‌های ثبت‌نام آنلاین ناموفق بود.');
     } finally {
       setLoading(false);
@@ -255,6 +259,7 @@ export default function OnlineRegistrations() {
 
   return (
     <section className="online-registrations-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadRegistrations} compact />}
       <div className="online-registrations-hero">
         <div className="online-registrations-copy">
           <span className="online-registrations-kicker">ثبت‌نام آنلاین</span>

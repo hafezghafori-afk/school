@@ -3450,7 +3450,7 @@ export default function AdminFinance() {
       || String(item?.studentCoreId || '') === String(row?.studentCoreId || row?.studentId || '')
     ));
     if (!match?._id) {
-      setMessage(failureMessage(error, 'عضویت مالی فعال این شاگرد برای باز کردن میز پرداخت پیدا نشد.'));
+      setMessage('عضویت مالی فعال این شاگرد برای باز کردن میز پرداخت پیدا نشد.');
       return;
     }
     handlePaymentDeskStudentChange(match._id);
@@ -3468,7 +3468,7 @@ export default function AdminFinance() {
   const markDebtorDormant = async (row = {}) => {
     const orderIds = Array.isArray(row?.unpaidOrderIds) ? row.unpaidOrderIds : [];
     if (!orderIds.length) {
-      setMessage(failureMessage(error, 'این شاگرد بدهی بدون‌پرداخت ندارد؛ برای بدهی‌هایی که رویشان پول نشسته از «بررسی بازپرداخت» استفاده کنید.'));
+      setMessage('این شاگرد بدهی بدون‌پرداخت ندارد؛ برای بدهی‌هایی که رویشان پول نشسته از «بررسی بازپرداخت» استفاده کنید.');
       return;
     }
     const reason = window.prompt(
@@ -3506,7 +3506,7 @@ export default function AdminFinance() {
   const openDepartedDebtorRefund = (row = {}) => {
     const refundableIds = new Set(Array.isArray(row?.refundableOrderIds) ? row.refundableOrderIds : []);
     if (!refundableIds.size) {
-      setMessage(failureMessage(error, 'بدهی این شاگرد پرداختی ندارد که قابل بازپرداخت باشد؛ برای این نوع بدهی از «راکد اعلام کردن» استفاده کنید.'));
+      setMessage('بدهی این شاگرد پرداختی ندارد که قابل بازپرداخت باشد؛ برای این نوع بدهی از «راکد اعلام کردن» استفاده کنید.');
       setActiveSection('payments');
       return;
     }
@@ -4369,8 +4369,8 @@ export default function AdminFinance() {
       if (!selectedMonthCloseId && monthsData?.success && monthsData.items?.[0]?._id) {
         setSelectedMonthCloseId(monthsData.items[0]._id);
       }
-      setMessage(failureMessage(error, ''));
-    } catch {
+      setMessage('');
+    } catch (error) {
       setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
     } finally {
       if (paymentWorkspaceRefreshId === paymentWorkspaceRefreshIdRef.current) {
@@ -5601,7 +5601,7 @@ export default function AdminFinance() {
       // The requested print data never rendered (e.g. the report/receipt was still loading or
       // failed to load) — printing now would produce a blank/white page, so bail out instead.
       setPrintMode('');
-      setMessage(failureMessage(error, 'داده‌ای برای چاپ آماده نشد؛ لطفاً دوباره تلاش کنید.'));
+      setMessage('داده‌ای برای چاپ آماده نشد؛ لطفاً دوباره تلاش کنید.');
       return;
     }
     await Promise.all([waitForPrintableImages(root), waitForPrintableFonts()]);
@@ -5788,7 +5788,7 @@ export default function AdminFinance() {
   const previewAdvanceStudentBilling = async (monthCount) => {
     const membershipId = String(paymentDeskMembershipStudent?.membershipId || '').trim();
     if (!membershipId || !paymentDeskForm.classId || !paymentDeskForm.academicYearId) {
-      setMessage(failureMessage(error, 'ابتدا شاگرد، صنف و سال تعلیمی را در میز پرداخت انتخاب کنید.'));
+      setMessage('ابتدا شاگرد، صنف و سال تعلیمی را در میز پرداخت انتخاب کنید.');
       return;
     }
     const payload = {
@@ -7141,7 +7141,7 @@ export default function AdminFinance() {
       printWindow.document.write(html);
       printWindow.document.close();
     } catch (err) {
-      setMessage(failureMessage(error, 'جزئیات رسید برای چاپ دریافت نشد.'));
+      setMessage(failureMessage(err, 'جزئیات رسید برای چاپ دریافت نشد.'));
     } finally {
       setBusy(false);
     }
@@ -7430,7 +7430,7 @@ export default function AdminFinance() {
       await loadAll();
     } catch (err) {
       setVerifiedDocument(null);
-      setMessage(failureMessage(error, 'اعتبارسنجی سند مالی ناموفق بود'));
+      setMessage(failureMessage(err, 'اعتبارسنجی سند مالی ناموفق بود'));
       setBusy(false);
     }
   };
@@ -7469,7 +7469,7 @@ export default function AdminFinance() {
       setMessage(nextVerifiedDocument?.documentNo ? `سند ${nextVerifiedDocument.documentNo} اعتبارسنجی شد` : 'سند مالی اعتبارسنجی شد');
     } catch (err) {
       setVerifiedDocument(null);
-      setMessage(failureMessage(error, 'اعتبارسنجی سند مالی ناموفق بود'));
+      setMessage(failureMessage(err, 'اعتبارسنجی سند مالی ناموفق بود'));
     } finally {
       setBusy(false);
     }
@@ -7592,7 +7592,7 @@ export default function AdminFinance() {
         setSelectedDeliveryProviderChannel(String(data.item.channel));
       }
     } catch (err) {
-      setMessage(failureMessage(error, 'ذخیره تنظیمات ارایه‌کننده ناموفق بود'));
+      setMessage(failureMessage(err, 'ذخیره تنظیمات ارایه‌کننده ناموفق بود'));
       setBusy(false);
     }
   };
@@ -7635,7 +7635,7 @@ export default function AdminFinance() {
         setSelectedDeliveryProviderChannel(String(data.item.channel));
       }
     } catch (err) {
-      setMessage(failureMessage(error, 'چرخش اعتبارنامه‌ها ناموفق بود'));
+      setMessage(failureMessage(err, 'چرخش اعتبارنامه‌ها ناموفق بود'));
       setBusy(false);
     }
   };

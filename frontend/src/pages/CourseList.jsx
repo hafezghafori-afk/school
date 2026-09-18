@@ -4,6 +4,7 @@ import './CourseList.css';
 
 import { API_BASE } from '../config/api';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getCourseTargetId = (item = {}) => (
   String(item?.classId || item?.id || item?.courseId || item?.legacyCourseId || item?._id || '').trim()
@@ -11,6 +12,7 @@ const getCourseTargetId = (item = {}) => (
 
 export default function CourseList() {
   const navigate = useNavigate();
+  const [loadError, setLoadError] = useState(null);
   const [items, setItems] = useState([]);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('');
@@ -18,6 +20,7 @@ export default function CourseList() {
   const [message, setMessage] = useState('');
 
   const loadCourses = async () => {
+    setLoadError(null);
     setLoading(true);
     setMessage('');
     try {
@@ -32,7 +35,8 @@ export default function CourseList() {
       }
       setItems(Array.isArray(data.items) ? data.items : []);
     } catch (error) {
-      setMessage(failureMessage(error, 'خطا در دریافت صنف‌ها'));
+      setLoadError(error);
+      setMessage('');
       setItems([]);
     } finally {
       setLoading(false);
@@ -58,6 +62,7 @@ export default function CourseList() {
 
   return (
     <section className="courses-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadCourses} compact />}
       <div className="card-back">
         <button type="button" onClick={() => window.history.back()}>بازگشت</button>
       </div>

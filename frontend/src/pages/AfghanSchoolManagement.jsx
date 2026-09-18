@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import './AfghanSchoolManagement.css';
 import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const AfghanSchoolManagement = () => {
   const navigate = useNavigate();
+  const [loadError, setLoadError] = useState(null);
   const [schools, setSchools] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -81,6 +83,7 @@ const AfghanSchoolManagement = () => {
   }, [currentPage, filters]);
 
   const fetchSchools = async () => {
+    setLoadError(null);
     try {
       setLoading(true);
       setError('');
@@ -103,6 +106,7 @@ const AfghanSchoolManagement = () => {
         setError(data.message || 'خطا در دریافت اطلاعات مکاتب');
       }
     } catch (err) {
+      setLoadError(err);
       setError('خطا در اتصال به سرور');
     } finally {
       setLoading(false);
@@ -175,6 +179,7 @@ const AfghanSchoolManagement = () => {
 
   return (
     <div className="school-management">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={fetchSchools} compact />}
       <header className="management-header">
         <h1>مدیریت مکاتب افغانستان</h1>
         <div className="header-actions">

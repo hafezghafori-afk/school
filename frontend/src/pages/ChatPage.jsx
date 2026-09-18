@@ -6,6 +6,7 @@ import VirtualClassPanel from '../components/VirtualClassPanel';
 import { API_BASE } from '../config/api';
 import { formatAfghanTime } from '../utils/afghanDate';
 import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -96,6 +97,7 @@ export default function ChatPage() {
   const role = localStorage.getItem('role') || 'student';
   const myId = localStorage.getItem('userId') || '';
 
+  const [loadError, setLoadError] = useState(null);
   const [tab, setTab] = useState(getInitialChatTab);
   const [directThreads, setDirectThreads] = useState([]);
   const [groupThreads, setGroupThreads] = useState([]);
@@ -194,6 +196,7 @@ export default function ChatPage() {
   };
 
   const loadThreads = async () => {
+    setLoadError(null);
     try {
       const [directRes, groupRes] = await Promise.all([
         apiFetch(`${API_BASE}/api/chats/threads/direct`, { parse: 'response', rejectOnHttpError: false, headers: { ...getAuthHeaders() } }),
@@ -213,7 +216,8 @@ export default function ChatPage() {
         }
         return nextDirect[0] || nextGroup[0] || null;
       });
-    } catch {
+    } catch (error) {
+      setLoadError(error);
       setError('خطا در دریافت فهرست گفتگوها');
     }
   };
@@ -420,6 +424,7 @@ export default function ChatPage() {
 
   return (
     <div className="chat-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadThreads} compact />}
       <div className="chat-card">
         {toast && <div className="chat-toast">{toast}</div>}
         <div className="card-back">

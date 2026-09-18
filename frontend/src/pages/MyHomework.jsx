@@ -4,6 +4,7 @@ import './MyHomework.css';
 import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
 import { apiFetch } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -46,6 +47,7 @@ const normalizeCourseOptions = (items = []) => items
   .filter((item) => item.classId);
 
 export default function MyHomework() {
+  const [loadError, setLoadError] = useState(null);
   const [courses, setCourses] = useState([]);
   const [selectedCourse, setSelectedCourse] = useState('');
   const [homeworks, setHomeworks] = useState([]);
@@ -72,6 +74,7 @@ export default function MyHomework() {
   };
 
   const loadHomeworks = async (courseId) => {
+    setLoadError(null);
     if (!courseId) return;
     setLoading(true);
     setError('');
@@ -108,6 +111,7 @@ export default function MyHomework() {
       setHomeworks(hwData?.items || []);
       setSubmissions(submissionMap);
     } catch (err) {
+      setLoadError(err);
       setError('خطا در دریافت کارخانگی');
       setHomeworks([]);
       setSubmissions({});
@@ -161,6 +165,7 @@ export default function MyHomework() {
 
   return (
     <div className="myhomework-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadHomeworks} compact />}
       <div className="myhomework-card">
         <div className="card-back">
           <button type="button" onClick={() => window.history.back()}>بازگشت</button>

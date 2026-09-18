@@ -17,6 +17,7 @@ import { toast } from 'react-hot-toast';
 import { permissionAllows } from '../config/permissionCatalog';
 import './TimableViewer.css';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -116,6 +117,8 @@ const CORE_SUBJECT_KEYWORDS = [
 const TimableViewer = () => {
   const effectivePermissions = getStoredEffectivePermissions();
   const canManageSchedule = permissionAllows('manage_schedule', effectivePermissions);
+  const [loadError, setLoadError] = useState(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [timetableData, setTimetableData] = useState(null);
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -182,6 +185,7 @@ const TimableViewer = () => {
     let isMounted = true;
 
     const loadReferenceData = async () => {
+      setLoadError(null);
       setReferenceLoading(true);
       await Promise.all([
         fetchClasses(),
@@ -197,7 +201,7 @@ const TimableViewer = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [reloadToken]);
 
   useEffect(() => {
     const hasTarget = viewMode === 'admin'
@@ -795,6 +799,7 @@ const TimableViewer = () => {
 
   return (
     <div className="container mx-auto p-6 space-y-6 tt-shared-page tv-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={() => setReloadToken((token) => token + 1)} compact />}
       <div className="tv-hero tt-shared-header">
         <div className="tv-hero-main">
           <h1 className="text-3xl font-bold text-gray-900 tt-shared-title">نمایش تقسیم اوقات</h1>

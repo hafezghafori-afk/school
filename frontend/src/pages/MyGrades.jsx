@@ -4,6 +4,7 @@ import './MyGrades.css';
 import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+import { DataErrorCard } from '../components/ui/DataState';
 
 const BREAKDOWN_FIELDS = [
   { key: 'writtenScore', label: 'تحریری' },
@@ -43,6 +44,7 @@ const statusLabel = (value = '') => {
 };
 
 export default function MyGrades() {
+  const [loadError, setLoadError] = useState(null);
   const [student, setStudent] = useState(null);
   const [items, setItems] = useState([]);
   const [generalResults, setGeneralResults] = useState([]);
@@ -50,6 +52,7 @@ export default function MyGrades() {
   const [loading, setLoading] = useState(false);
 
   const loadGrades = async () => {
+    setLoadError(null);
     setLoading(true);
     setMessage('');
     try {
@@ -70,7 +73,8 @@ export default function MyGrades() {
       setItems(data.items || []);
       setGeneralResults(generalResponse?.ok && generalData?.success !== false ? (generalData.items || []) : []);
     } catch (error) {
-      setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
+      setLoadError(error);
+      setMessage('');
       setItems([]);
       setGeneralResults([]);
       setStudent(null);
@@ -85,6 +89,7 @@ export default function MyGrades() {
 
   return (
     <div className="mygrades-page">
+      {!!loadError && <DataErrorCard error={loadError} onRetry={loadGrades} compact />}
       <div className="mygrades-card">
         <div className="card-back">
           <button type="button" onClick={() => window.history.back()}>بازگشت</button>
