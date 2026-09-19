@@ -93,7 +93,6 @@ export default function AdminFinancialMemberships() {
       try {
         const res = await apiFetch(`${API_BASE}/api/finance/admin/student-memberships`, {
           parse: 'response', rejectOnHttpError: false,
-          credentials: 'include',
           headers: { ...getAuthHeaders() }
         });
         const data = await res.json();
@@ -165,8 +164,7 @@ export default function AdminFinancialMemberships() {
         const res = await apiFetch(`${API_BASE}/api/finance/admin/student-memberships/${membershipId}`, {
           parse: 'response', rejectOnHttpError: false,
           method: 'DELETE',
-          headers: { ...getAuthHeaders() },
-          credentials: 'include'
+          headers: { ...getAuthHeaders() }
         });
         const data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.message || 'خطا در حذف عضویت');
@@ -210,7 +208,6 @@ export default function AdminFinancialMemberships() {
           parse: 'response', rejectOnHttpError: false,
           method: isEditing ? 'PUT' : 'POST',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          credentials: 'include',
           body: JSON.stringify(payload)
         });
         const data = await res.json();
@@ -236,7 +233,6 @@ export default function AdminFinancialMemberships() {
       setLoading(true);
       apiFetch(`${API_BASE}/api/finance/admin/reference-data`, {
         parse: 'response', rejectOnHttpError: false,
-        credentials: 'include',
         headers: { ...getAuthHeaders() }
       })
         .then((res) => res.json())

@@ -39,29 +39,28 @@ test.describe('student management filters workflow', () => {
         contentType: 'application/json',
         body: JSON.stringify({
           success: true,
-          data: {
-            students: [
-              {
-                _id: 'profile-1',
-                linkedUserId: 'student-1',
-                registrationId: 'REG-1001',
-                asasNumber: '1405-0001',
-                status: 'active',
-                personalInfo: { firstName: 'علی', lastName: 'احمدی', fatherName: 'کریم', gender: 'male' },
-                contactInfo: { phone: '0700123456', email: 'ali@example.test' },
-                academicInfo: { currentGrade: 'grade7', currentShift: 'morning' }
-              },
-              {
-                _id: 'profile-2',
-                linkedUserId: 'student-2',
-                registrationId: 'REG-2002',
-                status: 'inactive',
-                personalInfo: { firstName: 'مریم', lastName: 'کریمی', fatherName: 'حسن', gender: 'female' },
-                contactInfo: { phone: '0799999999', email: 'maryam@example.test' },
-                academicInfo: { currentGrade: 'grade8', currentShift: 'afternoon' }
-              }
-            ]
-          }
+          students: [
+            {
+              _id: 'profile-1',
+              linkedUserId: 'student-1',
+              registrationId: 'REG-1001',
+              asasNumber: '1405-0001',
+              status: 'active',
+              personalInfo: { firstName: 'علی', lastName: 'احمدی', fatherName: 'کریم', gender: 'male' },
+              contactInfo: { phone: '0700123456', email: 'ali@example.test' },
+              academicInfo: { currentGrade: 'grade7', currentShift: 'morning' }
+            },
+            {
+              _id: 'profile-2',
+              linkedUserId: 'student-2',
+              registrationId: 'REG-2002',
+              status: 'inactive',
+              personalInfo: { firstName: 'مریم', lastName: 'کریمی', fatherName: 'حسن', gender: 'female' },
+              contactInfo: { phone: '0799999999', email: 'maryam@example.test' },
+              academicInfo: { currentGrade: 'grade8', currentShift: 'afternoon' }
+            }
+          ],
+          pagination: { page: 1, limit: 1000, total: 2, pages: 1 }
         })
       });
     });
