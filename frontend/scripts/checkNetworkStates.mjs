@@ -142,7 +142,32 @@ for (const file of files) {
 if (!strayMessages) logPass('every failureMessage() call is inside a catch');
 
 /* ------------------------------------------------------------------ *
- * 3. each error card lives with the state that feeds it
+ * 3. no credentials: 'include'
+ * ------------------------------------------------------------------ */
+
+// This API authenticates with a Bearer token and sets no cookies at all, so
+// credentials: 'include' buys nothing — but it is not merely redundant. The
+// deployed frontend talks to the backend cross-origin, and in credentials mode
+// a preflight is rejected unless the server answers
+// Access-Control-Allow-Credentials: true, which a token API has no reason to
+// send. Every request carrying it is therefore blocked by the browser before
+// it is sent, and surfaces as "سرور در دسترس نیست" — a dead-server message for
+// a server that is perfectly alive. Three of these silently emptied the
+// student list on 2026-09-19.
+
+let credentialed = 0;
+for (const file of files) {
+  const lines = fs.readFileSync(file, 'utf8').split('\n');
+  lines.forEach((line, index) => {
+    if (!/credentials:\s*['"]include['"]/.test(line)) return;
+    credentialed += 1;
+    logFail(`credentials: 'include' at ${rel(file)}:${index + 1} — this API is Bearer-only, and cross-origin it makes the browser block the request outright`);
+  });
+}
+if (!credentialed) logPass("no request asks for credentials: 'include'");
+
+/* ------------------------------------------------------------------ *
+ * 4. each error card lives with the state that feeds it
  * ------------------------------------------------------------------ */
 
 const TOP_LEVEL_DECL = /^(export default function|export function|function|const)\s+([A-Za-z_$][\w$]*)/;
@@ -177,7 +202,7 @@ for (const file of files) {
 if (!misplacedCards) logPass(`all ${cardsChecked} error cards render in the component holding their state`);
 
 /* ------------------------------------------------------------------ *
- * 4. coverage report (informational)
+ * 5. coverage report (informational)
  * ------------------------------------------------------------------ */
 
 const jsxFiles = files.filter((file) => file.endsWith('.jsx'));

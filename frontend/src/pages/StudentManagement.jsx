@@ -773,9 +773,9 @@ const StudentManagement = () => {
       const headers = { 'Cache-Control': 'no-cache' };
       const [studentResult, financeResult, educationResult, onlineEnrollmentResult] = await Promise.allSettled([
         apiFetch(`/api/afghan-students${query}`, { headers, cache: 'no-store' }),
-        apiFetch('/api/finance/admin/student-memberships', { headers, credentials: 'include', cache: 'no-store' }),
-        apiFetch('/api/education/student-enrollments', { headers, credentials: 'include', cache: 'no-store' }),
-        apiFetch('/api/enrollments/admin', { headers, credentials: 'include', cache: 'no-store' })
+        apiFetch('/api/finance/admin/student-memberships', { headers, cache: 'no-store' }),
+        apiFetch('/api/education/student-enrollments', { headers, cache: 'no-store' }),
+        apiFetch('/api/enrollments/admin', { headers, cache: 'no-store' })
       ]);
 
       // The three side lists are enrichment — the page is still worth showing
@@ -788,7 +788,16 @@ const StudentManagement = () => {
       const onlineEnrollmentData = onlineEnrollmentResult.status === 'fulfilled' ? onlineEnrollmentResult.value : { items: [] };
       
       if (data.success) {
-        const items = Array.isArray(data.data?.students) ? data.data.students : (Array.isArray(data.data) ? data.data : []);
+        // The backend's ok() spreads its payload at the top level — the answer
+        // is { success, message, students, pagination }, with no `data` around
+        // it. Reading data.data.students therefore found nothing, every time,
+        // and the empty array it fell back to looked exactly like a school with
+        // no pupils. What hid it is that the three lists below add rows of
+        // their own, so the page still filled up from finance and enrolment
+        // records and only the students who had neither went missing.
+        const items = Array.isArray(data.students) ? data.students
+          : Array.isArray(data.data?.students) ? data.data.students
+            : Array.isArray(data.data) ? data.data : [];
         const normalized = items.map((item) => {
           const row = normalizeAfghanStudent(item);
           addSourceTag(row, 'profile');
