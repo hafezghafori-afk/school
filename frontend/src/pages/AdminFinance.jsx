@@ -7323,7 +7323,14 @@ export default function AdminFinance() {
     try {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/finance/admin/month-close`, { monthKey, note });
-      if (data?.item?._id) setSelectedMonthCloseId(data.item._id);
+      // Take the fresh record straight from the response. The detail is
+      // otherwise only refetched when selectedMonthCloseId changes, and these
+      // actions re-select the same month — so the panel, which reads the detail
+      // in preference to the list, would keep showing the pre-action stage.
+      if (data?.item?._id) {
+        setSelectedMonthCloseId(data.item._id);
+        setSelectedMonthCloseDetail(data.item);
+      }
       setMessage(data.message || 'ماه مالی بسته شد');
       await loadAll();
     } catch (err) {
@@ -7339,7 +7346,14 @@ export default function AdminFinance() {
     try {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/finance/admin/month-close/${targetId}/approve`, { note });
-      if (data?.item?._id) setSelectedMonthCloseId(data.item._id);
+      // Take the fresh record straight from the response. The detail is
+      // otherwise only refetched when selectedMonthCloseId changes, and these
+      // actions re-select the same month — so the panel, which reads the detail
+      // in preference to the list, would keep showing the pre-action stage.
+      if (data?.item?._id) {
+        setSelectedMonthCloseId(data.item._id);
+        setSelectedMonthCloseDetail(data.item);
+      }
       setMessage(data.message || 'مرحله بستن ماه مالی تایید شد');
       await loadAll();
     } catch (err) {
@@ -7356,7 +7370,14 @@ export default function AdminFinance() {
     try {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/finance/admin/month-close/${targetId}/reject`, { reason });
-      if (data?.item?._id) setSelectedMonthCloseId(data.item._id);
+      // Take the fresh record straight from the response. The detail is
+      // otherwise only refetched when selectedMonthCloseId changes, and these
+      // actions re-select the same month — so the panel, which reads the detail
+      // in preference to the list, would keep showing the pre-action stage.
+      if (data?.item?._id) {
+        setSelectedMonthCloseId(data.item._id);
+        setSelectedMonthCloseDetail(data.item);
+      }
       setMessage(data.message || 'درخواست بستن ماه مالی رد شد');
       await loadAll();
     } catch (err) {
@@ -7373,7 +7394,14 @@ export default function AdminFinance() {
     try {
       setBusy(true);
       const data = await postJson(`${API_BASE}/api/finance/admin/month-close/${targetId}/reopen`, { note });
-      if (data?.item?._id) setSelectedMonthCloseId(data.item._id);
+      // Take the fresh record straight from the response. The detail is
+      // otherwise only refetched when selectedMonthCloseId changes, and these
+      // actions re-select the same month — so the panel, which reads the detail
+      // in preference to the list, would keep showing the pre-action stage.
+      if (data?.item?._id) {
+        setSelectedMonthCloseId(data.item._id);
+        setSelectedMonthCloseDetail(data.item);
+      }
       setMessage(data.message || 'ماه مالی بازگشایی شد');
       await loadAll();
     } catch (err) {
@@ -12807,7 +12835,16 @@ export default function AdminFinance() {
           )}
           {!visibleAnomalies.length && <p className="muted">در این محدوده فعلاً ناهنجاری مالی فعالی دیده نشد.</p>}
         </div>
-        {selectedMonthClose ? (
+      </div>
+
+      {/* Its own grid. This card declares overview/settings/reports but sat
+          inside the anomalies grid, and the section CSS hides any
+          [data-finance-section] that does not match the active tab — so the
+          card was hidden on the anomalies tab and its parent grid was hidden
+          on every other one. The approve/reject buttons could not be reached
+          from anywhere. */}
+      {selectedMonthClose ? (
+        <div className="finance-grid" data-finance-section="overview settings reports">
           <div className="finance-card" data-finance-section="overview settings reports" data-testid="month-close-snapshot-card">
             <div className="finance-card-head">
               <div>
@@ -12945,8 +12982,8 @@ export default function AdminFinance() {
               </div>
             )}
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       {false && <div className="finance-card" data-finance-section="reports settings" data-testid="finance-delivery-provider-config-card">
         <div className="finance-card-head">

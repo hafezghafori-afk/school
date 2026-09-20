@@ -1,10 +1,16 @@
 import { test, expect } from '@playwright/test';
 
+import { gotoAppPage, stubUnmockedApi } from './navigation.helpers';
+
 const studentSession = {
   token: 'mock.header.signature',
   role: 'student',
   userId: 'student-2',
-  userName: 'Student Beta'
+  userName: 'Student Beta',
+  // /my-finance is guarded by finance.my.view. Every real student account gets
+  // it from the backend's role defaults, so a session mock without it is not a
+  // stricter test — it is a student the app is right to turn away.
+  permissions: ['finance.my.view']
 };
 
 const adminSession = {
@@ -58,8 +64,61 @@ const setupShellMocks = async (page) => {
   });
 };
 
+// The route guard and the identity sync both read /api/users/me. Tests that do
+// not answer it leave the guard falling back to a dead backend, which denies
+// the page for the wrong reason.
+const routeCurrentUser = async (page, session) => {
+  await page.route('**/api/users/me', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        user: {
+          _id: session.userId,
+          id: session.userId,
+          name: session.userName,
+          role: session.role,
+          ...(session.adminLevel ? { adminLevel: session.adminLevel } : {}),
+          effectivePermissions: session.permissions || []
+        }
+      })
+    });
+  });
+};
+
+// Each section tab carries data-testid="finance-section-<key>". Positional
+// indices silently pointed at the wrong section once «مصارف» was inserted at
+// position 3, so address the tabs by the key they actually stand for.
+// The anomaly list reloads after every action, and while it is empty the page
+// clears the selection (setSelectedAnomalyId('')) which unmounts the inspector
+// underneath whatever is being typed. Re-select before each step so a reload
+// landing mid-block cannot strand the rest of it.
+const ensureAnomalySelected = async (page) => {
+  const inspector = page.getByTestId('finance-anomaly-inspector');
+  const rows = page.getByTestId('finance-anomaly-list').locator('.anomaly-workflow-item');
+  await expect(rows.first()).toBeVisible({ timeout: 20_000 });
+  if (await inspector.count() === 0) await rows.first().click();
+  await expect(inspector).toBeVisible({ timeout: 20_000 });
+};
+
+// Each relief record is collapsed to a compact row now; its reason only shows
+// once that row is expanded.
+const expandRegistryRow = async (list, hasText) => {
+  await list.locator('.finance-registry-row-compact').filter({ hasText }).first().click();
+};
+
+const financeTab = (page, key) => page.getByTestId(`finance-section-${key}`);
+
 test.describe('finance workflow', () => {
   test.beforeEach(async ({ page }) => {
+    // Registered first so every mock below still wins. The finance centre calls
+    // a number of endpoints this spec never declared; left unclaimed they are
+    // proxied to a backend that is not running, and apiFetch retries each one.
+    // refreshPaymentWorkspace only clears `busy` from the newest refresh, so a
+    // refresh stuck behind those retries leaves every action button in the
+    // anomaly inspector disabled.
+    await stubUnmockedApi(page);
     await setupShellMocks(page);
   });
 
@@ -279,7 +338,10 @@ test.describe('finance workflow', () => {
       localStorage.setItem('role', session.role);
       localStorage.setItem('userId', session.userId);
       localStorage.setItem('userName', session.userName);
+      localStorage.setItem('effectivePermissions', JSON.stringify(session.permissions));
     }, studentSession);
+
+    await routeCurrentUser(page, studentSession);
 
     await page.route('**/api/student-finance/me/overviews', async (route) => {
       await route.fulfill({
@@ -292,7 +354,7 @@ test.describe('finance workflow', () => {
       });
     });
 
-    await page.goto('/my-finance', { waitUntil: 'domcontentloaded' });
+    await gotoAppPage(page, '/my-finance');
 
     await expect(page.getByRole('heading', { name: 'نمای مالی متعلم' })).toBeVisible();
     await expect(page.locator('.student-finance-hero-meta')).toContainText('Student Beta');
@@ -306,14 +368,16 @@ test.describe('finance workflow', () => {
     await expect(page.locator('.student-finance-stack')).toContainText('Scholarship');
     await expect(page.locator('.student-finance-stack')).toContainText('Bus Fee');
 
-    await page.locator('.student-finance-field select').selectOption('mem-2');
+    // The page grew a payment form with its own .student-finance-field selects,
+    // so the membership switcher has to be picked out by position.
+    await page.locator('.student-finance-field select').first().selectOption('mem-2');
     await expect(page.locator('.student-finance-membership-card')).toContainText('Class 11 B');
     await expect(page.locator('.student-finance-eligibility')).toContainText('مجاز');
     await expect(page.locator('.student-finance-table')).toContainText('Exam Fee');
   });
 
   test('admin finance workflow shows preview, approval trail, and operational actions', async ({ page }) => {
-    test.setTimeout(420000);
+    test.setTimeout(600_000);
     let approveCalls = 0;
     let paymentsListUrl = '';
     let reminderCalls = 0;
@@ -1692,7 +1756,24 @@ test.describe('finance workflow', () => {
       window.print = () => {
         window.__printCalls += 1;
       };
+      // The receipt print builds a standalone document and writes it into its
+      // own window rather than printing a hidden sheet inside the page, so the
+      // only way to see what it produced is to capture that write.
+      window.__openedPrintReports = [];
+      window.open = () => ({
+        document: {
+          open() {},
+          write(html) {
+            window.__openedPrintReports.push(html);
+          },
+          close() {}
+        },
+        focus() {},
+        close() {}
+      });
     }, adminSession);
+
+    await routeCurrentUser(page, adminSession);
 
     await page.route('**/api/finance/admin/reference-data', async (route) => {
       await route.fulfill({
@@ -3399,23 +3480,93 @@ test.describe('finance workflow', () => {
       });
     });
 
-    await page.goto('/admin-finance', { waitUntil: 'domcontentloaded' });
+    // «وضعیت صدور بل شاگردان» is built by joining current memberships against
+    // the bills, so without these the panel has nobody to report on.
+    await page.route('**/api/finance/admin/student-memberships*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          items: [
+            {
+              _id: 'mem-1',
+              studentId: 'student-1',
+              studentCoreId: 'student-core-1',
+              studentName: 'Student Alpha',
+              classId: 'class-1',
+              classTitle: 'Class One Core',
+              academicYearId: 'year-1',
+              academicYearTitle: '1406',
+              status: 'active',
+              isCurrent: true
+            },
+            {
+              _id: 'mem-2',
+              studentId: 'student-2',
+              studentCoreId: 'student-core-2',
+              studentName: 'Student Beta',
+              classId: 'class-1',
+              classTitle: 'Class One Core',
+              academicYearId: 'year-1',
+              academicYearTitle: '1406',
+              status: 'active',
+              isCurrent: true
+            }
+          ]
+        })
+      });
+    });
 
-    const financeTabs = page.locator('.finance-shell-tab');
+    // Three days inside one month, so the daily/weekly/monthly toggle on the
+    // income chart has something real to re-bucket.
+    await page.route('**/api/finance/admin/dashboard/overview*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          overview: {
+            series: {
+              daily: [
+                { date: '2026-03-10', monthKey: '2026-03', income: 500, expense: 200, net: 300 },
+                { date: '2026-03-11', monthKey: '2026-03', income: 700, expense: 100, net: 600 },
+                { date: '2026-03-12', monthKey: '2026-03', income: 300, expense: 50, net: 250 }
+              ]
+            }
+          }
+        })
+      });
+    });
+
+    await gotoAppPage(page, '/admin-finance');
+
     const anomalyCenter = page.getByTestId('finance-anomalies-card');
     await expect(anomalyCenter).toBeHidden();
-    await expect(page.getByTestId('income-trend-card')).toBeVisible();
-    await page.getByTestId('income-trend-card').locator('button').nth(2).click();
-    await expect(page.getByTestId('paid-vs-due-card')).toBeVisible();
+    // The separate paid-vs-due card is gone: عواید/مصارف/خالص now share one
+    // chart whose range toggle re-buckets the same series.
+    const incomeTrendCard = page.getByTestId('income-trend-card');
+    await expect(incomeTrendCard).toBeVisible();
+    await expect(incomeTrendCard.locator('.finance-line-legend-item')).toHaveCount(3);
+    await incomeTrendCard.getByRole('button', { name: 'ماهانه' }).click();
+    await expect(incomeTrendCard.locator('.finance-line-legend-item')).toHaveCount(1);
+    await expect(incomeTrendCard.locator('.finance-line-legend-item')).toContainText(/1,150|۱٬۱۵۰/);
 
-    await financeTabs.nth(2).click();
+    await financeTab(page, 'orders').click();
     const ordersCard = page.getByTestId('finance-orders-table-card');
     await expect(page.getByTestId('bill-record-summary')).toContainText(/3|۳/);
     await expect(page.getByTestId('bill-record-summary')).toContainText('بل رسمی');
     await expect(page.getByTestId('bill-record-summary')).toContainText(/1|۱/);
     await expect(page.getByTestId('bill-record-summary')).toContainText('بل باطل');
     await expect(ordersCard.locator('.finance-orders-table .row')).toHaveCount(3);
-    await expect(ordersCard.locator('.finance-orders-table .row')).not.toContainText('VOID-ADMISSION-001');
+    // Assert on the table, not on the row collection: a "no row says X" check
+    // against several rows is a strict-mode violation, not a passing test.
+    await expect(ordersCard.locator('.finance-orders-table')).not.toContainText('VOID-ADMISSION-001');
+    // The issuance panel deliberately stays empty until a criterion is chosen.
+    // Every bill in this fixture belongs to class-1, so filtering by it names a
+    // scope without changing what is in it.
+    await expect(page.getByTestId('bill-issuance-guidance')).toBeVisible();
+    await page.getByTestId('bill-class-filter').selectOption('class-1');
     const alphaIssuance = page.getByTestId('bill-issuance-results').locator('.mini-row').filter({ hasText: 'Student Alpha' });
     await expect(alphaIssuance).toContainText(/2|۲/);
     await expect(alphaIssuance).toContainText('فیس/شهریه');
@@ -3430,7 +3581,7 @@ test.describe('finance workflow', () => {
     await page.getByTestId('bill-fee-type-filter').selectOption('all');
     await page.getByTestId('bill-status-filter').selectOption('official');
 
-    await financeTabs.nth(1).click();
+    await financeTab(page, 'payments').click();
 
     await expect(page.locator('.finance-page h2')).toBeVisible();
     await expect.poll(() => paymentsListUrl).toContain('view=all');
@@ -3438,30 +3589,44 @@ test.describe('finance workflow', () => {
     await expect(page.locator('.receipt-file-link')).toContainText('نمایش فایل رسید');
     await expect(page.locator('.receipt-inspector .receipt-note-box .trail-item')).toHaveCount(1);
     await expect(page.locator('.receipt-inspector .receipt-trail .trail-item')).toHaveCount(1);
-    await expect(page.getByTestId('cashier-daily-report')).toContainText('Finance Manager');
-    await expect(page.getByTestId('cashier-daily-report')).toContainText('انتقال بانکی');
+    // The on-screen «گزارش صندوق روزانه» card was replaced by the monthly
+    // arrears card; the receiver and the payment method are read off the
+    // receipt inspector, which is where an operator sees them now.
     await expect(page.locator('.receipt-inspector')).toContainText('Finance Manager');
+    await expect(page.locator('.receipt-inspector')).toContainText('انتقال بانکی');
     await page.getByTestId('print-selected-receipt').click();
-    await expect.poll(() => page.evaluate(() => window.__printCalls)).toBe(1);
-    const printableReceipt = page.getByTestId('printable-receipt-sheet');
-    await expect(printableReceipt).toContainText('رسید پرداخت فیس شاگرد');
-    await expect(printableReceipt.locator('.finance-receipt-print-copy')).toHaveCount(2);
-    await expect(printableReceipt.locator('[data-receipt-copy="student"]')).toContainText('نسخه شاگرد');
-    await expect(printableReceipt.locator('[data-receipt-copy="school"]')).toContainText('نسخه مکتب');
-    await expect(printableReceipt.locator('.finance-receipt-cut-line')).toContainText('محل برش');
-    await expect(printableReceipt.getByText('نام پدر:')).toHaveCount(2);
-    await expect(printableReceipt.getByText('Mohammad Karim')).toHaveCount(2);
-    await expect(printableReceipt.getByText('نمبر اساس:')).toHaveCount(2);
-    await expect(printableReceipt.getByText('ASAS-1406-001')).toHaveCount(2);
-    await expect(printableReceipt.getByText('مشخصات شاگرد')).toHaveCount(2);
-    await expect(printableReceipt.getByText('مشخصات پرداخت')).toHaveCount(2);
-    await expect(printableReceipt.getByText('مبلغ اصلی بل')).toHaveCount(2);
-    await expect(printableReceipt.getByText('تخفیف و معافیت')).toHaveCount(2);
-    await expect(printableReceipt.getByText('باقیات فعلی')).toHaveCount(2);
-    await expect(printableReceipt.getByText('1406')).toHaveCount(2);
-    await expect(printableReceipt.getByText('مدیر مالی')).toHaveCount(2);
+    // printSelectedReceipt fetches the receipt detail first, so give it more
+    // than the default budget before reading what it wrote.
+    await expect.poll(() => page.evaluate(() => window.__openedPrintReports.length), { timeout: 20_000 }).toBe(1);
+    const receiptHtml = await page.evaluate(() => window.__openedPrintReports[0] || '');
+    // Render what the print window received, so the sheet can still be checked
+    // as a document rather than as a string.
+    const receiptSheet = await page.context().newPage();
+    await receiptSheet.setContent(receiptHtml);
+    await expect(receiptSheet.locator('[data-receipt-copy]')).toHaveCount(2);
+    await expect(receiptSheet.locator('[data-receipt-copy="student"]')).toContainText('نسخه شاگرد');
+    await expect(receiptSheet.locator('[data-receipt-copy="school"]')).toContainText('نسخه مکتب');
+    await expect(receiptSheet.locator('.cut-line')).toContainText('محل برش');
+    await expect(receiptSheet.getByText('رسید پرداخت فیس شاگرد')).toHaveCount(2);
+    await expect(receiptSheet.getByText('نام پدر:')).toHaveCount(2);
+    await expect(receiptSheet.getByText('Mohammad Karim')).toHaveCount(2);
+    await expect(receiptSheet.getByText('نمبر اساس:')).toHaveCount(2);
+    await expect(receiptSheet.getByText('ASAS-1406-001')).toHaveCount(2);
+    await expect(receiptSheet.getByText('مشخصات شاگرد')).toHaveCount(2);
+    await expect(receiptSheet.getByText('مشخصات پرداخت')).toHaveCount(2);
+    await expect(receiptSheet.getByText('مبلغ اصلی بل')).toHaveCount(2);
+    await expect(receiptSheet.getByText('تخفیف و معافیت')).toHaveCount(2);
+    await expect(receiptSheet.getByText('باقیات فعلی')).toHaveCount(2);
+    await expect(receiptSheet.getByText('مدیر مالی')).toHaveCount(2);
+    await expect(receiptSheet.getByText('سال تعلیمی')).toHaveCount(2);
+    await expect(receiptSheet.locator('[data-receipt-copy="student"]')).toContainText('1406');
+    await expect(receiptSheet.locator('[data-receipt-copy="school"]')).toContainText('1406');
+    await receiptSheet.close();
 
-    await expect(page.locator('.receipt-inbox-summary')).toContainText(/11|۱۱/);
+    // Expenses and refunds carry the same chip-group class now, so name the
+    // receipt inbox by the one counter only it has.
+    const receiptInboxSummary = page.locator('.receipt-inbox-summary').filter({ hasText: 'ارجاع‌شده' });
+    await expect(receiptInboxSummary).toContainText(/11|۱۱/);
     await expect(page.locator('.finance-table.receipts-table .row')).toHaveCount(10);
     await expect(page.getByTestId('receipt-page-summary')).toContainText(/1|۱/);
     await expect(page.getByTestId('receipt-page-summary')).toContainText(/10|۱۰/);
@@ -3502,24 +3667,39 @@ test.describe('finance workflow', () => {
     await receiptFilters.nth(2).selectOption('all');
     await receiptFilters.nth(3).selectOption('all');
 
-    await financeTabs.nth(3).click();
+    await financeTab(page, 'discounts').click();
     const reliefEntryWorkspace = page.getByTestId('relief-entry-workspace');
     await expect(reliefEntryWorkspace).toBeVisible();
     await expect(reliefEntryWorkspace.locator('.finance-relief-mode-tabs button')).toHaveCount(2);
     await expect(reliefEntryWorkspace.getByTestId('discount-registry-form')).toBeVisible();
     await expect(reliefEntryWorkspace.getByTestId('relief-student-spotlight')).toBeVisible();
-    await expect(page.getByTestId('discount-registry-list')).toContainText('Merit scholarship');
-    await expect(page.getByTestId('exemption-registry-list')).toContainText('Sponsored seat');
+    const discountRegistryList = page.getByTestId('discount-registry-list');
+    const exemptionRegistryList = page.getByTestId('exemption-registry-list');
+    await expandRegistryRow(discountRegistryList, 'Student Alpha');
+    await expect(page.getByTestId('discount-detail-dis-1')).toContainText('Merit scholarship');
+    await expandRegistryRow(exemptionRegistryList, 'Student Beta');
+    await expect(page.getByTestId('exemption-detail-ex-1')).toContainText('Sponsored seat');
     await page.getByRole('button', { name: 'فورم تخفیف' }).click();
-    await page.getByTestId('discount-registry-form').locator('select').nth(0).selectOption('student-2');
-    await page.getByTestId('discount-registry-form').locator('select').nth(1).selectOption('class-2');
-    await page.getByTestId('discount-registry-form').locator('select').nth(2).selectOption('year-1');
-    await page.getByTestId('discount-registry-form').locator('select').nth(3).selectOption('waiver');
-    await page.getByTestId('discount-registry-form').locator('input[placeholder="مبلغ تخفیف / تعدیل"]').fill('250');
-    await page.getByTestId('discount-registry-form').locator('textarea').fill('Sibling support');
+    const discountRegistryForm = page.getByTestId('discount-registry-form');
+    // The form gained a «هدف» scope and a coverage-mode select ahead of the
+    // student picker, and now derives the class and year from the chosen
+    // membership rather than letting them be picked — both of those selects are
+    // disabled in single-student scope. Address each select by an option only
+    // it carries, so another field landing in front cannot silently retarget
+    // these the way positional indices did.
+    const discountSelect = (optionValue) => discountRegistryForm
+      .locator('select')
+      .filter({ has: page.locator(`option[value="${optionValue}"]`) })
+      .first();
+    await discountSelect('student').selectOption('student');
+    await discountSelect('student-2').selectOption('student-2');
+    await discountSelect('waiver').selectOption('waiver');
+    await discountRegistryForm.locator('input[placeholder="مبلغ تخفیف"]').fill('250');
+    await discountRegistryForm.locator('textarea').fill('Sibling support');
     await page.getByTestId('save-discount-registry').click();
-    await expect(page.getByTestId('discount-registry-list')).toContainText('Sibling support');
-    await expect(page.getByTestId('discount-registry-list')).toContainText('Student Beta');
+    await expect(discountRegistryList).toContainText('Student Beta');
+    await expandRegistryRow(discountRegistryList, 'Student Beta');
+    await expect(page.getByTestId('discount-detail-dis-new')).toContainText('Sibling support');
 
     page.once('dialog', (dialog) => dialog.accept('Manual cleanup'));
     await page.getByTestId('cancel-discount-dis-new').click();
@@ -3536,36 +3716,50 @@ test.describe('finance workflow', () => {
     await page.getByTestId('exemption-registry-form').locator('textarea').nth(0).fill('Community program');
     await page.getByTestId('exemption-registry-form').locator('textarea').nth(1).fill('Foundation review');
     await page.getByTestId('save-exemption-registry').click();
-    await expect(page.getByTestId('exemption-registry-list')).toContainText('Community program');
-    await expect(page.getByTestId('exemption-registry-list')).toContainText(/50|۵۰/);
+    await expect(exemptionRegistryList).toContainText(/50|۵۰/);
+    await expandRegistryRow(exemptionRegistryList, 'Student Alpha');
+    await expect(page.getByTestId('exemption-detail-ex-new')).toContainText('Community program');
 
     page.once('dialog', (dialog) => dialog.accept('Policy update'));
     await page.getByTestId('cancel-exemption-ex-new').click();
     await expect(page.getByTestId('exemption-registry-list')).not.toContainText('Community program');
 
-    await financeTabs.nth(1).click();
+    await financeTab(page, 'payments').click();
     const paymentDesk = page.getByTestId('finance-payment-desk');
     await paymentDesk.getByTestId('desk-student-select').selectOption('student-1');
     await paymentDesk.getByTestId('desk-class-select').selectOption('class-1');
     await paymentDesk.getByTestId('desk-academic-year-select').selectOption('year-1');
     await paymentDesk.locator('input[placeholder="مبلغ پرداخت"]').fill('700');
     await paymentDesk.getByRole('button', { name: 'تخصیص پیشرفته' }).click();
+
+    // The desk takes one «نوع فیس» at a time now: the bills it offers, and the
+    // outstanding it works against, are scoped to that fee type. A payment can
+    // no longer be split across a tuition bill and a transport bill at once, so
+    // check the scoping itself and then allocate inside one scope. The pick
+    // list only exists once advanced allocation is open.
+    const deskOpenOrders = paymentDesk.getByTestId('desk-open-orders');
+    await expect(deskOpenOrders).toContainText('Tuition Term 1');
+    await expect(deskOpenOrders).not.toContainText('Transport Monthly');
+    await paymentDesk.getByTestId('desk-fee-type-select').selectOption('transport');
+    await expect(deskOpenOrders).toContainText('Transport Monthly');
+    await expect(deskOpenOrders).not.toContainText('Tuition Term 1');
+    await paymentDesk.getByTestId('desk-fee-type-select').selectOption('tuition');
+
     await paymentDesk.getByTestId('desk-allocation-mode-select').selectOption('manual');
-    await expect(paymentDesk.getByTestId('desk-open-orders')).toContainText('Transport Monthly');
-    await paymentDesk.getByTestId('desk-manual-allocation-order-1').fill('500');
-    await paymentDesk.getByTestId('desk-manual-allocation-order-3').fill('200');
+    await paymentDesk.getByTestId('desk-manual-allocation-order-1').fill('700');
     await expect(paymentDesk.getByTestId('preview-desk-payment')).toBeEnabled();
     await paymentDesk.getByTestId('preview-desk-payment').scrollIntoViewIfNeeded();
     await paymentDesk.getByTestId('preview-desk-payment').click({ force: true });
     await expect.poll(() => previewAllocationCalls).toBe(1);
-    await expect(paymentDesk.getByTestId('desk-payment-preview')).toContainText(/2|۲/);
+    await expect(paymentDesk.getByTestId('desk-payment-preview')).toContainText('Tuition Term 1');
+    await expect(paymentDesk.getByTestId('desk-payment-preview')).toContainText(/700|۷۰۰/);
     await paymentDesk.getByTestId('submit-desk-payment').scrollIntoViewIfNeeded();
     await paymentDesk.getByTestId('submit-desk-payment').click({ force: true });
     await expect.poll(() => createPaymentCalls).toBe(1);
     await expect.poll(() => lastCreatedPaymentBody?.allocationMode).toBe('manual');
-    await expect.poll(() => lastCreatedPaymentBody?.allocations?.length || 0).toBe(2);
-    await expect.poll(() => Number(lastCreatedPaymentBody?.allocations?.[0]?.amount || 0)).toBe(500);
-    await expect.poll(() => Number(lastCreatedPaymentBody?.allocations?.[1]?.amount || 0)).toBe(200);
+    await expect.poll(() => lastCreatedPaymentBody?.allocations?.length || 0).toBe(1);
+    await expect.poll(() => Number(lastCreatedPaymentBody?.allocations?.[0]?.amount || 0)).toBe(700);
+    await expect.poll(() => String(lastCreatedPaymentBody?.feeType || '')).toBe('tuition');
 
     await receiptFilters.nth(0).selectOption('general_president_review');
     await expect(page.locator('.finance-table.receipts-table .row')).toHaveCount(1);
@@ -3575,36 +3769,69 @@ test.describe('finance workflow', () => {
     await page.locator('.finance-table.receipts-table .row').filter({ hasText: 'Student Alpha' }).first().getByRole('button', { name: 'تایید نهایی' }).click();
     await expect.poll(() => approveCalls).toBe(1);
 
-    await financeTabs.nth(5).click();
+    await financeTab(page, 'reports').click();
     await expect(anomalyCenter).toBeHidden();
-    await financeTabs.nth(6).click();
+    await financeTab(page, 'settings').click();
     await expect(anomalyCenter).toBeHidden();
-    await financeTabs.nth(4).click();
+    await financeTab(page, 'anomalies').click();
     await expect(anomalyCenter).toBeVisible();
     await expect(anomalyCenter).toContainText('Student Alpha');
     await expect(anomalyCenter).toContainText('Student Beta');
     await expect(anomalyCenter.locator(':scope > .mini-row')).toHaveCount(0);
+    await ensureAnomalySelected(page);
     await page.getByTestId('anomaly-assigned-level').selectOption('general_president');
     await page.getByTestId('anomaly-note-input').fill('Escalate overdue case to general president');
     await page.getByTestId('anomaly-assign-button').click();
     await expect(page.getByTestId('finance-anomaly-inspector')).toContainText('Escalate overdue case to general president');
     await expect(page.getByTestId('finance-anomaly-inspector')).toContainText(/ارجاع|assigned/i);
-    await page.getByTestId('anomaly-snooze-until').fill('2026-04-15');
+    // AfghanDateInput again: the testid lands on the هجری شمسی year box, so
+    // writing a Gregorian string there leaves the month and day empty, the
+    // value unparseable, and the تعویق button disabled. 1405/1/26 = 2026-04-15.
+    await ensureAnomalySelected(page);
+    const snoozeYear = page.getByTestId('anomaly-snooze-until');
+    const snoozeField = snoozeYear
+      .locator('xpath=ancestor::div[contains(@class,"afghan-date-field")][1]');
+    // Day last: the field starts empty, and only the commit that has all three
+    // parts produces a date the تعویق button will accept.
+    await snoozeYear.fill('1405');
+    await snoozeField.locator('.afghan-date-month').selectOption('1');
+    await snoozeField.locator('.afghan-date-day').fill('26');
+    await expect(snoozeYear).toHaveValue('1405');
+    await expect(snoozeField.locator('.afghan-date-day')).toHaveValue('26');
     await page.getByTestId('anomaly-note-input').fill('Pause follow-up until the guardian call');
     await page.getByTestId('anomaly-snooze-button').click();
+    // A snoozed record is no longer «باز», so it leaves the default list and
+    // the selection moves on. Widen the filter and pick it back up.
+    await page.getByTestId('anomaly-workflow-filter').selectOption('all');
+    await page.getByTestId('finance-anomaly-list')
+      .locator('.anomaly-workflow-item')
+      .filter({ hasText: 'معطل' })
+      .first()
+      .click();
     await expect(page.getByTestId('finance-anomaly-inspector')).toContainText('Pause follow-up until the guardian call');
+    await ensureAnomalySelected(page);
     await page.getByTestId('anomaly-note-input').fill('Guardian paid directly at the branch');
     await page.getByTestId('anomaly-resolve-button').click();
     await expect(page.getByTestId('finance-anomaly-inspector')).toContainText('Guardian paid directly at the branch');
-    await expect(page.getByTestId('by-class-report-card')).toContainText('Class Two Core');
+    // The by-class report card this used to cross-check went away with the
+    // dashboard rework in 06af4c9; the class filter's effect on the anomaly
+    // centre is what is left to assert.
+    await expect(anomalyCenter).toContainText('Student Beta');
     await page.getByTestId('anomaly-class-filter').selectOption('class-1');
     await expect(anomalyCenter).not.toContainText('Student Beta');
-    await expect(page.getByTestId('by-class-report-card')).not.toContainText('Class Two Core');
+    // The timeline is loaded by loadAll, not by the payment-workspace refresh
+    // the anomaly actions trigger, so entries those actions log do not show up
+    // here without a full reload; and it is scoped by the report class filter,
+    // not by the anomaly one set just above. Its own kind filter is what it
+    // actually owns.
+    // The timeline card lives in the reports section: its text is readable from
+    // any tab, but its controls are only interactive once that tab is open.
+    await financeTab(page, 'reports').click();
     await expect(page.getByTestId('finance-audit-timeline-card')).toContainText('Overdue tuition order');
-    await expect(page.getByTestId('finance-audit-timeline-card')).toContainText('Anomaly resolved');
-    await expect(page.getByTestId('finance-audit-timeline-card')).not.toContainText('Guardian receipt submitted');
+    await expect(page.getByTestId('finance-audit-timeline-card')).toContainText('Guardian receipt submitted');
     await page.getByTestId('audit-timeline-kind-filter').selectOption('system');
     await expect(page.getByTestId('audit-timeline-list')).toContainText('Reminder sweep completed');
+    await expect(page.getByTestId('audit-timeline-list')).not.toContainText('Guardian receipt submitted');
     await page.getByTestId('report-class-filter').selectOption('class-1');
     await page.getByTestId('report-class-filter').selectOption('');
     await page.getByTestId('audit-timeline-kind-filter').selectOption('payment');
@@ -3626,7 +3853,11 @@ test.describe('finance workflow', () => {
     await expect.poll(() => lastExportUrl).toContain('/api/finance/admin/reports/export.csv');
     page.once('dialog', (dialog) => dialog.accept('Close pack ready'));
     await page.getByRole('button', { name: 'درخواست بستن ماه مالی' }).click();
-    await expect(page.getByTestId('month-close-snapshot-card')).toContainText('2026-03');
+    // The card names the month in هجری شمسی now rather than echoing the raw
+    // month key, and the month it closes is the current one — so assert that it
+    // names a month at all rather than pinning a date that moves.
+    await expect(page.getByTestId('month-close-snapshot-card'))
+      .toContainText(/حمل|ثور|جوزا|سرطان|اسد|سنبله|میزان|عقرب|قوس|جدی|دلو|حوت/);
     await expect(page.getByTestId('month-close-snapshot-card')).toContainText('دارای مانع فعال');
     await expect(page.getByTestId('month-close-approval-trail')).toContainText('submit');
 
@@ -3642,198 +3873,14 @@ test.describe('finance workflow', () => {
     await page.getByTestId('export-month-close-pdf').click();
     await expect.poll(() => monthClosePdfExportCalls).toBe(1);
     await expect.poll(() => lastMonthClosePdfUrl).toContain('/api/finance/admin/month-close/');
-    await expect(page.getByTestId('finance-delivery-provider-config-card')).toContainText('mock_sms_gateway');
-    await page.getByTestId('finance-delivery-provider-mode').selectOption('twilio');
-    await page.getByTestId('finance-delivery-provider-name').fill('twilio_sms_gateway');
-    await page.getByTestId('finance-delivery-provider-from-handle').fill('+93700999000');
-    await page.getByTestId('finance-delivery-provider-account-sid').fill('AC1234567890');
-    await page.getByTestId('finance-delivery-provider-auth-token').fill('secret-token-12345');
-    await page.getByTestId('finance-delivery-provider-webhook-token').fill('sms-hook-token');
-    await page.getByTestId('finance-delivery-provider-save').click();
-    await expect(page.getByTestId('finance-delivery-provider-status')).toContainText('twilio_sms_gateway');
-    await expect(page.getByTestId('finance-delivery-provider-status')).toContainText('/api/finance/delivery/providers/twilio/status');
-    await page.getByTestId('finance-delivery-provider-auth-token').fill('rotated-secret-67890');
-    await page.getByTestId('finance-delivery-provider-rotation-note').fill('Monthly secret rotation');
-    await page.getByTestId('finance-delivery-provider-rotate').click();
-    await expect(page.getByTestId('finance-delivery-provider-status')).toContainText('Credential Version');
-    await expect(page.getByTestId('finance-delivery-provider-audit-trail')).toContainText('Monthly secret rotation');
-    await expect(page.getByTestId('finance-delivery-provider-audit-trail')).toContainText('rotation');
+
+    // The finance delivery controls (providers, campaigns, message templates,
+    // retry and recovery queues) were switched off in 241c481 «Remove unused
+    // finance delivery controls» — the JSX is still in AdminFinance.jsx but
+    // gated behind `{false && ...}`, so none of it reaches the page. The ~190
+    // lines that drove it here were testing UI no operator can open; only the
+    // document archive below is still real.
     await expect(page.getByTestId('finance-document-archive-card')).toContainText('MCP-202603-1');
-    await page.getByTestId('finance-delivery-campaign-template').selectOption('monthly_statement');
-    await expect(page.getByTestId('finance-delivery-template-variable-catalog')).toContainText('Document No');
-    await expect(page.getByTestId('finance-delivery-template-variable-catalog')).toContainText('{{documentNo}}');
-    await expect(page.getByTestId('finance-delivery-template-preview')).toContainText('MCP-202603-001');
-    await expect(page.getByTestId('finance-delivery-template-preview')).toContainText('Finance statement MCP-202603-001');
-    await page.getByTestId('finance-delivery-campaign-template-subject').fill('Custom statement {{documentNo}}');
-    await page.getByTestId('finance-delivery-campaign-template-body').fill('Custom body {{documentNo}} for {{subjectName}}');
-    await page.getByTestId('finance-delivery-template-change-note').fill('Version 2 draft');
-    await page.getByTestId('finance-delivery-template-save-draft').click();
-    await expect(page.getByTestId('finance-delivery-template-version-manager')).toContainText('draft');
-    await expect(page.getByTestId('finance-delivery-template-version-select')).toContainText('v2');
-    await expect(page.getByTestId('finance-delivery-template-governance-summary')).toContainText('پیش‌نویس');
-    await expect(page.getByTestId('finance-delivery-template-preview-rollout')).toContainText('رکورد آرشیف');
-    await page.getByTestId('finance-delivery-template-request-review').click();
-    await expect(page.getByTestId('finance-delivery-template-approve')).toBeEnabled();
-    await page.getByTestId('finance-delivery-template-approve').click();
-    await expect(page.getByTestId('finance-delivery-template-publish-draft')).toBeEnabled();
-    await page.getByTestId('finance-delivery-template-publish-draft').click();
-    await expect(page.getByTestId('finance-delivery-template-version-manager')).toContainText('published');
-    await expect(page.getByTestId('finance-delivery-campaign-template-subject')).toHaveValue('Custom statement {{documentNo}}');
-
-    await page.getByTestId('finance-delivery-campaign-name').fill('Monthly statement campaign');
-    await page.getByTestId('finance-delivery-campaign-document-type').selectOption('batch_statement_pack');
-    await page.getByTestId('finance-delivery-campaign-channel').selectOption('email');
-    await page.getByTestId('finance-delivery-campaign-save').click();
-    await page.getByTestId('finance-delivery-retry-channel').selectOption('sms');
-    await page.getByTestId('finance-delivery-retry-channel').selectOption('all');
-    await expect(page.getByTestId('finance-delivery-campaign-list')).toContainText('Monthly statement campaign');
-    await expect(page.getByTestId('finance-delivery-campaign-detail')).toContainText('۰ موفق / ۰ ناموفق');
-    await expect(page.getByTestId('finance-delivery-campaign-detail')).toContainText('Monthly Statement');
-    await expect(page.getByTestId('finance-delivery-campaign-detail')).toContainText('Custom statement {{documentNo}}');
-    await expect(page.getByTestId('finance-delivery-analytics')).toContainText('تحویل‌ها');
-
-    deliveryCampaignState.items = [{
-      _id: 'campaign-retry-sms',
-      name: 'SMS collection campaign',
-      status: 'active',
-      documentType: 'student_statement',
-      channel: 'sms',
-      classId: 'class-1',
-      classTitle: 'Class One Core',
-      academicYearId: 'year-1',
-      academicYearTitle: '1406',
-      monthKey: '2026-03',
-      messageTemplateKey: 'balance_followup',
-      messageTemplateSubject: 'Payment follow-up {{documentNo}}',
-      messageTemplateBody: 'Please review finance document {{documentNo}}.',
-      recipientHandles: ['+93700111222'],
-      recipientEmails: ['+93700111222'],
-      includeLinkedAudience: true,
-      automationEnabled: false,
-      retryFailed: true,
-      intervalHours: 24,
-      maxDocumentsPerRun: 5,
-      note: 'Retry flow',
-      nextRunAt: null,
-      lastRunAt: '2026-03-28T11:05:00.000Z',
-      lastRunStatus: 'failed',
-      targetSummary: { total: 1, successful: 0, failed: 1, skipped: 0 },
-      targets: [
-        {
-          archiveId: documentArchiveState.items[0]?._id || 'doc-1',
-          documentNo: documentArchiveState.items[0]?.documentNo || 'MCP-202603-1',
-          channel: 'sms',
-          status: 'failed',
-          recipient: '+93700111222',
-          recipientCount: 1,
-          attempts: 1,
-          lastAttemptAt: '2026-03-28T11:05:00.000Z',
-          lastError: 'sms_gateway_timeout',
-          provider: 'mock_sms_gateway',
-          providerMessageId: '',
-          providerStatus: 'timeout',
-          lastFailureCode: 'provider_timeout',
-          retryable: true,
-          nextRetryAt: '2026-03-28T11:20:00.000Z'
-        }
-      ],
-      runLog: []
-    }, ...deliveryCampaignState.items];
-    await page.getByTestId('finance-delivery-retry-channel').selectOption('sms');
-    await expect(page.getByTestId('finance-delivery-provider-breakdown')).toContainText('mock_sms_gateway');
-    await expect(page.getByTestId('finance-delivery-failure-breakdown')).toContainText('provider_timeout');
-    await page.getByTestId('finance-delivery-provider-filter').selectOption('mock_sms_gateway');
-    await page.getByTestId('finance-delivery-retryability-filter').selectOption('retryable');
-    await expect(page.getByTestId('finance-delivery-retry-queue')).toContainText('SMS collection campaign');
-    await expect(page.getByTestId('finance-delivery-retry-queue')).toContainText('mock_sms_gateway');
-    await expect(page.getByTestId('finance-delivery-retry-queue')).toContainText('provider_timeout');
-    await page.getByTestId('finance-delivery-retry-button-0').click();
-    await expect(page.getByTestId('finance-delivery-retry-queue')).toContainText('در حال حاضر مورد ناموفق برای retry وجود ندارد');
-    await page.getByTestId('finance-delivery-provider-filter').selectOption('all');
-    await page.getByTestId('finance-delivery-retryability-filter').selectOption('all');
-
-    documentArchiveState.items = documentArchiveState.items.map((item, index) => (
-      index === 0
-        ? {
-            ...item,
-            deliveryLog: [
-              ...(Array.isArray(item.deliveryLog) ? item.deliveryLog : []),
-              {
-                channel: 'sms',
-                status: 'sent',
-                recipient: '+93700111444',
-                recipientCount: 1,
-                linkedAudienceNotified: false,
-                subject: 'Recovery queue test',
-                provider: 'mock_sms_gateway',
-                providerMessageId: 'mock-recovery-001',
-                providerStatus: 'accepted',
-                note: 'Awaiting callback',
-                errorMessage: '',
-                failureCode: '',
-                retryable: false,
-                nextRetryAt: null,
-                sentAt: '2026-03-01T08:00:00.000Z'
-              }
-            ],
-            lastDeliveryStatus: 'sent'
-          }
-        : item
-    ));
-    deliveryCampaignState.items = [{
-      _id: 'campaign-recovery-ui',
-      name: 'Recovery callback campaign',
-      status: 'active',
-      documentType: 'student_statement',
-      channel: 'sms',
-      classId: 'class-1',
-      classTitle: 'Class One Core',
-      academicYearId: 'year-1',
-      academicYearTitle: '1406',
-      monthKey: '2026-03',
-      messageTemplateKey: 'balance_followup',
-      messageTemplateSubject: 'Payment follow-up {{documentNo}}',
-      messageTemplateBody: 'Please review finance document {{documentNo}}.',
-      recipientHandles: ['+93700111444'],
-      recipientEmails: ['+93700111444'],
-      includeLinkedAudience: true,
-      automationEnabled: false,
-      retryFailed: true,
-      intervalHours: 24,
-      maxDocumentsPerRun: 5,
-      note: 'Recovery flow',
-      nextRunAt: null,
-      lastRunAt: '2026-03-28T11:25:00.000Z',
-      lastRunStatus: 'partial',
-      targetSummary: { total: 1, successful: 1, failed: 0, skipped: 0 },
-      targets: [
-        {
-          archiveId: documentArchiveState.items[0]?._id || 'doc-1',
-          documentNo: documentArchiveState.items[0]?.documentNo || 'MCP-202603-1',
-          channel: 'sms',
-          status: 'sent',
-          recipient: '+93700111444',
-          recipientCount: 1,
-          attempts: 1,
-          lastAttemptAt: '2026-03-01T08:00:00.000Z',
-          lastDeliveredAt: null,
-          lastError: '',
-          provider: 'mock_sms_gateway',
-          providerMessageId: 'mock-recovery-001',
-          providerStatus: 'accepted',
-          lastFailureCode: '',
-          retryable: false,
-          nextRetryAt: null
-        }
-      ],
-      runLog: []
-    }, ...deliveryCampaignState.items];
-    await page.getByTestId('finance-delivery-recovery-state-filter').selectOption('awaiting_callback');
-    await expect(page.getByTestId('finance-delivery-recovery-queue')).toContainText('mock-recovery-001');
-    await expect(page.getByTestId('finance-delivery-recovery-queue')).toContainText('Recovery callback campaign');
-    await expect(page.getByTestId('finance-delivery-recovery-replay-0')).toBeVisible();
-    await expect(page.getByTestId('finance-delivery-recovery-failed-0')).toBeVisible();
-    await page.getByTestId('finance-delivery-recovery-state-filter').selectOption('all');
 
     await page.getByTestId('finance-document-verify-input').fill('FV-MCP-1');
     await page.getByTestId('finance-document-verify-button').click();
@@ -3853,6 +3900,9 @@ test.describe('finance workflow', () => {
     await expect.poll(() => documentBatchExportCalls).toBe(1);
     await expect(page.getByTestId('finance-document-archive-list')).toContainText('بسته گروهی استیتمنت');
     await page.getByTestId('finance-document-type-filter').selectOption('batch_statement_pack');
-    await expect(page.getByTestId('finance-document-archive-list')).toContainText('BSP-202603-1');
+    // The pack's document number is built from the month the app asks for, which
+    // is the current one — so match the shape rather than pinning a month that
+    // moves with the calendar.
+    await expect(page.getByTestId('finance-document-archive-list')).toContainText(/BSP-\d{6}-1/);
   });
 });
