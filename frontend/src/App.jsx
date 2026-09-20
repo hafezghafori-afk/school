@@ -10,7 +10,7 @@ import ConnectionBanner, { GlobalProgressBar } from './components/ConnectionBann
 import { ToastProvider } from './components/ui/toast';
 import { SkeletonCards } from './components/ui/Skeleton';
 import { CONNECTION, apiFetch, checkApiHealth, subscribeToConnection } from './utils/apiClient';
-import useSiteSettings, { PUBLIC_WEBSITE_LANGUAGE_KEY } from './hooks/useSiteSettings';
+import useSiteSettings, { PUBLIC_WEBSITE_LANGUAGE_KEY, SiteSettingsProvider } from './hooks/useSiteSettings';
 import { getPublicWebsiteLocale, publicLanguageOptions } from './i18n/publicWebsite';
 import { API_BASE, API_ORIGIN } from './config/api';
 import { expandLegacyPermissions, permissionAllows, PERMISSION_OPTIONS } from './config/permissionCatalog';
@@ -3623,9 +3623,14 @@ function AppShell() {
 function App() {
   return (
     <Router>
-      <ToastProvider>
-        <AppShell />
-      </ToastProvider>
+      {/* Above AppShell and every route inside it, so the shell's header and the
+          page it frames read one shared copy of the school's name, logo and
+          language instead of each fetching its own. */}
+      <SiteSettingsProvider>
+        <ToastProvider>
+          <AppShell />
+        </ToastProvider>
+      </SiteSettingsProvider>
     </Router>
   );
 }

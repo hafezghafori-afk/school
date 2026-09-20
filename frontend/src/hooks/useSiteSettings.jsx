@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { API_BASE } from '../config/api';
 import { getPublicWebsiteLocale } from '../i18n/publicWebsite';
@@ -97,7 +97,11 @@ const mergeSchoolWebsiteSettings = (settings, profile, activeSchool, language = 
   };
 };
 
-export default function useSiteSettings() {
+const SiteSettingsContext = createContext(null);
+
+// The state machine itself. Exactly one of these runs per app — see the
+// provider below for why that matters.
+const useSiteSettingsState = () => {
   const location = useLocation();
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -107,7 +111,7 @@ export default function useSiteSettings() {
   const schoolSlug = useMemo(() => extractSchoolSlug(location.pathname), [location.pathname]);
   const shouldLoadSchoolProfile = useMemo(() => isPublicWebsitePath(location.pathname), [location.pathname]);
 
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
     setLoading(true);
     try {
       // The active-school lookup used to run AFTER the other two requests
@@ -139,11 +143,11 @@ export default function useSiteSettings() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [schoolSlug, language, shouldLoadSchoolProfile]);
 
   useEffect(() => {
     fetchSettings();
-  }, [schoolSlug, language, shouldLoadSchoolProfile]);
+  }, [fetchSettings]);
 
   useEffect(() => {
     const urlLanguage = getUrlLanguage(location.search);
@@ -166,5 +170,40 @@ export default function useSiteSettings() {
     return () => window.removeEventListener('publicWebsiteLanguageChange', handleLanguageChange);
   }, []);
 
-  return { settings, loading, language, locale: getPublicWebsiteLocale(language), refresh: fetchSettings };
+  return useMemo(
+    () => ({ settings, loading, language, locale: getPublicWebsiteLocale(language), refresh: fetchSettings }),
+    [settings, loading, language, fetchSettings]
+  );
+};
+
+/**
+ * Holds the one copy of the public site settings for the whole app.
+ *
+ * The three routes above — /api/settings/public, /api/school-websites/public
+ * and /api/afghan-schools/active — answer questions every part of the app asks:
+ * what is this school called, what is its logo, which language is the visitor
+ * reading. So the hook below was called by the app shell AND by the page inside
+ * it, and the two instances knew nothing about each other: every page loaded all
+ * three routes twice, on a wire that only carries six requests at a time. Half
+ * of the home page's opening round trips were a second copy of an answer already
+ * arriving, and the language each instance settled on could differ.
+ *
+ * One instance, mounted once, removes both problems: the requests happen once
+ * and every consumer reads the same answer.
+ */
+export const SiteSettingsProvider = ({ children }) => {
+  const value = useSiteSettingsState();
+  return <SiteSettingsContext.Provider value={value}>{children}</SiteSettingsContext.Provider>;
+};
+
+export default function useSiteSettings() {
+  const value = useContext(SiteSettingsContext);
+  // The provider sits directly inside the Router in App.jsx, and this hook has
+  // always needed that Router itself (useLocation), so every existing caller is
+  // below it. A new one that is not should say so loudly rather than quietly
+  // render the built-in fallback name and logo forever.
+  if (!value) {
+    throw new Error('useSiteSettings() must be used inside <SiteSettingsProvider> — it is mounted in App.jsx.');
+  }
+  return value;
 }
