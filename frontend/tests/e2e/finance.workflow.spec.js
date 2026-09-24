@@ -2034,7 +2034,7 @@ test.describe('finance workflow', () => {
     const receiptFilters = page.locator('#pending-receipts .finance-inline-filter select');
     await receiptFilters.nth(1).selectOption('approved');
     await expect(page.locator('.finance-table.receipts-table .row')).toHaveCount(5);
-    await expect(page.locator('.finance-table.receipts-table .row').first()).toContainText('تاییدشده');
+    await expect(page.locator('.finance-table.receipts-table .row').first()).toContainText('تاییدِ نهایی – ثبت در حساب');
     await receiptFilters.nth(1).selectOption('all');
 
     await page.getByTestId('receipt-academic-year-filter').selectOption('year-2');
@@ -2191,7 +2191,7 @@ test.describe('finance workflow', () => {
 
     page.once('dialog', (dialog) => dialog.accept('Manager approved the package'));
     await page.getByTestId('approve-month-close').click();
-    await expect(page.getByTestId('month-close-snapshot-card')).toContainText('در انتظار آمریت مالی');
+    await expect(page.getByTestId('month-close-snapshot-card')).toContainText('در انتظارِ آمریتِ مالی');
     await expect(page.getByTestId('month-close-approval-trail')).toContainText('Manager approved the package');
 
     await page.getByTestId('export-month-close-snapshot').click();

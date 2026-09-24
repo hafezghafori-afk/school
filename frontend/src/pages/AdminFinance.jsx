@@ -1,4 +1,5 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import WorkflowStatus, { resolveWorkflowState } from '../components/finance/WorkflowStatus';
 import { Link } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import './AdminFinance.css';
@@ -675,35 +676,10 @@ const getStudentDisplayName = (student = {}) => (
   String(student?.fullName || student?.name || student?.email || '').trim() || 'متعلم'
 );
 
-const RECEIPT_STAGE_UI_LABELS = {
-  finance_manager_review: 'در انتظار مدیر مالی',
-  finance_lead_review: 'مرحله قدیمی آمریت مالی',
-  general_president_review: 'در انتظار ریاست عمومی',
-  completed: 'تایید نهایی',
-  rejected: 'رد شده'
-};
-
 const ADMIN_LEVEL_UI_LABELS = {
   finance_manager: 'مدیر مالی',
   finance_lead: 'آمریت مالی',
   general_president: 'ریاست عمومی'
-};
-
-const MONTH_CLOSE_STAGE_UI_LABELS = {
-  draft: 'پیش‌نویس',
-  finance_manager_review: 'در انتظار مدیر مالی',
-  finance_lead_review: 'در انتظار آمریت مالی',
-  general_president_review: 'در انتظار ریاست عمومی',
-  completed: 'تایید نهایی',
-  rejected: 'رد شده'
-};
-
-const MONTH_CLOSE_STATUS_UI_LABELS = {
-  draft: 'پیش‌نویس',
-  pending_review: 'در جریان تایید',
-  closed: 'بسته',
-  reopened: 'بازگشایی شده',
-  rejected: 'برگشت شده'
 };
 
 const PAYMENT_STATUS_UI_LABELS = {
@@ -10832,7 +10808,7 @@ export default function AdminFinance() {
         {!!filteredReceipts.length && (
           <div className="receipt-review-layout">
             <div className="finance-table receipts-table">
-              <div className="head"><span>متعلم</span><span>سند / منبع</span><span>مبلغ</span><span>وضعیت</span><span>مرحله / پیگیری</span><span>عملیات</span></div>
+              <div className="head"><span>متعلم</span><span>سند / منبع</span><span>مبلغ</span><span>وضعیتِ کار</span><span>پیگیری</span><span>عملیات</span></div>
               {paginatedReceipts.map((item) => {
                 const stage = normalizeReceiptStage(item.approvalStage || '');
                 const canReview = canReviewReceipt(item);
@@ -10860,19 +10836,20 @@ export default function AdminFinance() {
                     </div>
                     <span>{fmt(item.amount)}</span>
                     <div className="receipt-cell-stack">
-                      <span className={`receipt-status-badge ${String(item.status || '').trim() || 'pending'}`}>
-                        {PAYMENT_STATUS_UI_LABELS[item.status] || item.status || '---'}
-                      </span>
+                      <WorkflowStatus kind="receipt" className="workflow-badge" status={item.status} stage={stage} approvalTrail={item.approvalTrail} rejectReason={item.rejectReason} />
                       <small>{toFaDate(item.paidAt)}</small>
                     </div>
                     <div className="receipt-cell-stack">
-                      <span className={`workflow-badge ${stage}`}>{RECEIPT_STAGE_UI_LABELS[stage] || stage}</span>
                       <small>{FOLLOW_UP_STATUS_LABELS[getReceiptFollowUpStatus(item)] || getReceiptFollowUpStatus(item)}</small>
                     </div>
-                    <div className="row-actions">
-                      <button type="button" onClick={(e) => { e.stopPropagation(); approveReceipt(item._id); }} disabled={busy || !canReview}>{getApproveLabel(item)}</button>
-                      <button type="button" className="danger" onClick={(e) => { e.stopPropagation(); rejectReceipt(item._id); }} disabled={busy || !canReview}>رد</button>
-                    </div>
+                    {item.status === 'pending' ? (
+                      <div className="row-actions">
+                        <button type="button" onClick={(e) => { e.stopPropagation(); approveReceipt(item._id); }} disabled={busy || !canReview}>{getApproveLabel(item)}</button>
+                        <button type="button" className="danger" onClick={(e) => { e.stopPropagation(); rejectReceipt(item._id); }} disabled={busy || !canReview}>رد</button>
+                      </div>
+                    ) : (
+                      <span className="muted">{item.status === 'approved' ? 'انجام شد' : 'منتظرِ اصلاح'}</span>
+                    )}
                   </div>
                 );
               })}
@@ -10885,9 +10862,14 @@ export default function AdminFinance() {
                     <strong>{selectedReceipt.student?.name || '---'}</strong>
                     <span className="finance-latin-code">{formatFinanceCode(selectedReceipt.bill?.billNumber, '---')}</span>
                   </div>
-                  <span className={`workflow-badge ${normalizeReceiptStage(selectedReceipt.approvalStage || '')}`}>
-                    {RECEIPT_STAGE_UI_LABELS[normalizeReceiptStage(selectedReceipt.approvalStage || '')] || selectedReceipt.approvalStage}
-                  </span>
+                  <WorkflowStatus
+                    kind="receipt"
+                    className="workflow-badge"
+                    status={selectedReceipt.status}
+                    stage={normalizeReceiptStage(selectedReceipt.approvalStage || '')}
+                    approvalTrail={selectedReceipt.approvalTrail}
+                    rejectReason={selectedReceipt.rejectReason}
+                  />
                 </div>
 
                 <div className="receipt-meta-grid">
@@ -10913,14 +10895,16 @@ export default function AdminFinance() {
                   <button type="button" className="secondary" onClick={printSelectedReceipt} disabled={busy} data-testid="print-selected-receipt">
                     {busy ? 'در حال آماده‌سازی چاپ…' : 'چاپ رسید'}
                   </button>
-                  <div className="row-actions">
-                    <button type="button" onClick={() => approveReceipt(selectedReceipt._id)} disabled={busy || !canReviewReceipt(selectedReceipt)}>
-                      {getApproveLabel(selectedReceipt)}
-                    </button>
-                    <button type="button" className="danger" onClick={() => rejectReceipt(selectedReceipt._id)} disabled={busy || !canReviewReceipt(selectedReceipt)}>
-                      رد
-                    </button>
-                  </div>
+                  {selectedReceipt.status === 'pending' ? (
+                    <div className="row-actions">
+                      <button type="button" onClick={() => approveReceipt(selectedReceipt._id)} disabled={busy || !canReviewReceipt(selectedReceipt)}>
+                        {getApproveLabel(selectedReceipt)}
+                      </button>
+                      <button type="button" className="danger" onClick={() => rejectReceipt(selectedReceipt._id)} disabled={busy || !canReviewReceipt(selectedReceipt)}>
+                        رد
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
 
                 {selectedReceipt.note ? (
@@ -11954,12 +11938,14 @@ export default function AdminFinance() {
                     ))}
                   </select>
                 </label>
-                <span className={`finance-chip ${selectedMonthCloseStatus === 'closed' ? 'finance-chip-emerald' : selectedMonthCloseStatus === 'rejected' || selectedMonthCloseStatus === 'reopened' ? 'finance-chip-rose' : 'finance-chip-amber'}`}>
-                  {MONTH_CLOSE_STATUS_UI_LABELS[selectedMonthCloseStatus] || selectedMonthCloseStatus}
-                </span>
-                <span className="finance-chip finance-chip-muted">
-                  {MONTH_CLOSE_STAGE_UI_LABELS[selectedMonthCloseStage] || selectedMonthCloseStage}
-                </span>
+                <WorkflowStatus
+                  kind="monthClose"
+                  className="workflow-badge"
+                  status={selectedMonthCloseStatus}
+                  stage={selectedMonthCloseStage}
+                  approvalTrail={selectedMonthCloseDetail?.approvalTrail || selectedMonthClose?.approvalTrail}
+                  rejectReason={selectedMonthCloseDetail?.rejectReason || selectedMonthClose?.rejectReason}
+                />
                 <button type="button" className="secondary" onClick={() => exportMonthCloseSnapshot(selectedMonthClose)} disabled={busy} data-testid="export-month-close-snapshot">خروجی CSV</button>
                 <button type="button" className="secondary" onClick={() => exportMonthClosePdfPack(selectedMonthClose)} disabled={busy} data-testid="export-month-close-pdf">بسته پی‌دی‌اف</button>
                 {canApproveSelectedMonthClose ? (
@@ -12029,8 +12015,8 @@ export default function AdminFinance() {
                 <span>{selectedMonthCloseDetail?.requestedBy?.name || selectedMonthClose?.requestedBy?.name || selectedMonthCloseDetail?.closedBy?.name || selectedMonthClose?.closedBy?.name || 'ثبت نشده'}</span>
               </div>
               <div className="mini-row">
-                <span>مرحله جاری</span>
-                <span>{MONTH_CLOSE_STAGE_UI_LABELS[selectedMonthCloseStage] || selectedMonthCloseStage}</span>
+                <span>وضعیتِ کار</span>
+                <span>{resolveWorkflowState({ kind: 'monthClose', status: selectedMonthCloseStatus, stage: selectedMonthCloseStage }).label}</span>
               </div>
               {(monthCloseSnapshot?.classes || []).slice(0, 4).map((row) => (
                 <div key={`month-close-class-${row.classId || row.title}`} className="mini-row">

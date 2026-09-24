@@ -177,6 +177,7 @@ function serializeStaffAdvance(doc = {}) {
     status: d.status || 'draft',
     approvalStage: d.approvalStage || 'draft',
     approvalTrail: Array.isArray(d.approvalTrail) ? d.approvalTrail : [],
+    rejectReason: normalizeText(d.rejectReason),
     settledAt: d.settledAt || null,
     createdAt: d.createdAt || null
   };
@@ -333,6 +334,10 @@ async function buildStaffAdvanceAnalytics({ schoolId = '', financialYearId = '',
   const salaryPaidTotal = salaryRows
     .filter((row) => normalizeText(row.status).toLowerCase() === 'approved')
     .reduce((sum, row) => sum + roundMoney(row.deductionTotal), 0);
+  // مالیهٔ نگه‌داشته‌شده از معاش‌های تاییدشده — بدهیِ مکتب به ریاستِ عواید.
+  const salaryTaxTotal = salaryRows
+    .filter((row) => normalizeText(row.status).toLowerCase() === 'approved')
+    .reduce((sum, row) => sum + roundMoney(row.taxAmount), 0);
 
   return {
     summary: {
@@ -343,6 +348,7 @@ async function buildStaffAdvanceAnalytics({ schoolId = '', financialYearId = '',
       staffCount: ledger.filter((item) => item.outstanding > 0).length,
       departedOutstanding: departed,
       salaryDeductedTotal: roundMoney(salaryPaidTotal),
+      salaryTaxTotal: roundMoney(salaryTaxTotal),
       statusCounts
     },
     ledger: ledger.slice(0, 60),
@@ -370,12 +376,15 @@ async function buildStaffAdvanceAnalytics({ schoolId = '', financialYearId = '',
 // takes its planned installment (or the whole outstanding for a `next_salary`
 // plan), never more than what is left in the gross salary — so a short month
 // simply carries the rest to the next payment.
-function computeSalaryDeduction({ openAdvances = [], grossSalary = 0 } = {}) {
+// مالیه اول از ناخالص کسر می‌شود؛ اقساطِ پیشکی فقط از باقیمانده برداشته می‌شوند.
+function computeSalaryDeduction({ openAdvances = [], grossSalary = 0, taxAmount = 0 } = {}) {
   const gross = Math.max(0, Number(grossSalary) || 0);
+  const tax = roundMoney(Math.min(gross, Math.max(0, Number(taxAmount) || 0)));
   const sorted = (Array.isArray(openAdvances) ? openAdvances : [])
     .filter((advance) => roundMoney(advance?.outstandingAmount) > 0)
     .sort((left, right) => new Date(left.issueDate || 0).getTime() - new Date(right.issueDate || 0).getTime());
-  let remaining = gross;
+  const afterTax = roundMoney(gross - tax);
+  let remaining = afterTax;
   const deductions = [];
   for (const advance of sorted) {
     if (remaining <= 0.001) break;
@@ -389,8 +398,8 @@ function computeSalaryDeduction({ openAdvances = [], grossSalary = 0 } = {}) {
       remaining = roundMoney(remaining - take);
     }
   }
-  const deductionTotal = roundMoney(gross - remaining);
-  return { deductions, deductionTotal, netAmount: roundMoney(gross - deductionTotal) };
+  const deductionTotal = roundMoney(afterTax - remaining);
+  return { deductions, taxAmount: tax, deductionTotal, netAmount: roundMoney(afterTax - deductionTotal) };
 }
 
 async function listOpenAdvancesForStaff({ schoolId, financialYearId = '', staffId = '', staffName = '' } = {}) {
@@ -415,6 +424,7 @@ function serializeStaffSalaryPayment(doc = {}) {
     period: d.period || '',
     paymentDate: d.paymentDate || null,
     grossSalary: roundMoney(d.grossSalary),
+    taxAmount: roundMoney(d.taxAmount),
     deductionTotal: roundMoney(d.deductionTotal),
     netAmount: roundMoney(d.netAmount),
     deductions: (Array.isArray(d.deductions) ? d.deductions : []).map((item) => ({
@@ -430,6 +440,7 @@ function serializeStaffSalaryPayment(doc = {}) {
     status: d.status || 'draft',
     approvalStage: d.approvalStage || 'draft',
     approvalTrail: Array.isArray(d.approvalTrail) ? d.approvalTrail : [],
+    rejectReason: normalizeText(d.rejectReason),
     createdAt: d.createdAt || null
   };
 }
@@ -510,7 +521,7 @@ async function finalizeSalaryPayment({ payment, financialYear, actorId = null } 
     procurementCommitmentId: null,
     vendorName: staffName,
     referenceNo: `staff_salary:${payment._id}`,
-    note: `معاشِ ${payment.period}${staffName ? ` — ${staffName}` : ''}: ناخالص ${roundMoney(payment.grossSalary)} − پیشکی ${roundMoney(payment.deductionTotal)} = خالص ${roundMoney(payment.netAmount)}`,
+    note: `معاشِ ${payment.period}${staffName ? ` — ${staffName}` : ''}: ناخالص ${roundMoney(payment.grossSalary)}${roundMoney(payment.taxAmount) > 0 ? ` − مالیه ${roundMoney(payment.taxAmount)}` : ''} − پیشکی ${roundMoney(payment.deductionTotal)} = خالص ${roundMoney(payment.netAmount)}`,
     status: 'approved',
     approvalStage: 'completed',
     submittedBy: actorId || null,
