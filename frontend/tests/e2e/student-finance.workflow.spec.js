@@ -1,10 +1,16 @@
 import { test, expect } from '@playwright/test';
 
+import { gotoAppPage } from './navigation.helpers';
+
 const studentSession = {
   token: 'mock.header.signature',
   role: 'student',
   userId: 'student-1',
-  userName: 'متعلم الف'
+  userName: 'متعلم الف',
+  // /my-finance is guarded by finance.my.view. Every real student account gets
+  // it from the backend's role defaults, so a session mock without it is not a
+  // stricter test — it is a student the app is right to turn away.
+  permissions: ['finance.my.view']
 };
 
 function json(body, status = 200, headers = {}) {
@@ -24,6 +30,7 @@ async function setupStudentWorkspace(page) {
     localStorage.setItem('role', session.role);
     localStorage.setItem('userId', session.userId);
     localStorage.setItem('userName', session.userName);
+    localStorage.setItem('effectivePermissions', JSON.stringify(session.permissions));
   }, studentSession);
 
   await page.route('**/api/settings/public', async (route) => {
@@ -52,7 +59,8 @@ async function setupStudentWorkspace(page) {
       user: {
         _id: studentSession.userId,
         name: studentSession.userName,
-        role: studentSession.role
+        role: studentSession.role,
+        effectivePermissions: studentSession.permissions
       }
     }));
   });
@@ -215,7 +223,7 @@ test.describe('student finance canonical workflow', () => {
       });
     });
 
-    await page.goto('/my-finance', { waitUntil: 'domcontentloaded' });
+    await gotoAppPage(page, '/my-finance');
 
     await expect(page.getByRole('heading', { name: 'نمای مالی متعلم' })).toBeVisible();
     await expect(page.locator('.student-finance-summary-card').first()).toContainText(/2|۲/);
@@ -228,7 +236,10 @@ test.describe('student finance canonical workflow', () => {
 
     await expect(page.locator('.student-finance-membership-card')).toContainText('صنف یازدهم ب');
     await expect(page.locator('.student-finance-eligibility')).toContainText('متوقف');
-    await expect(page.locator('.student-finance-eligibility')).toContainText('معوق');
+    // The fee status that used to read «معوق» is spelled out as «سررسید گذشته»
+    // now; read the status line itself rather than the whole panel, whose meta
+    // list repeats the same words.
+    await expect(page.locator('.student-finance-eligibility strong')).toHaveText('سررسید گذشته');
     await expect(page.locator('.student-finance-table-wrap').first()).toContainText('فیس امتحان');
     await expect(page.locator('.student-finance-stack')).toContainText('ترانسپورت مسیر جنوب');
     await expect(page.locator('.student-finance-timeline')).toContainText('رسید در انتظار تایید');

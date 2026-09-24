@@ -5538,16 +5538,19 @@ router.get('/admin/staff-advances/salary-preview', requireAuth, requireRole(['ad
     const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
     if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
     const grossSalary = normalizeMoneyInput(req.query?.grossSalary, 0);
+    const taxAmount = normalizeMoneyInput(req.query?.taxAmount, 0);
+    if (taxAmount > grossSalary) return res.status(400).json({ success: false, message: 'مالیه نمی‌تواند از معاشِ ناخالص بیشتر باشد.' });
     const openAdvances = await listOpenAdvancesForStaff({
       schoolId: schoolContext.schoolId,
       financialYearId: String(req.query?.financialYearId || '').trim(),
       staffId: String(req.query?.staffId || '').trim(),
       staffName: String(req.query?.staffName || '').trim()
     });
-    const plan = computeSalaryDeduction({ openAdvances, grossSalary });
+    const plan = computeSalaryDeduction({ openAdvances, grossSalary, taxAmount });
     return res.json({
       success: true,
       grossSalary,
+      taxAmount: plan.taxAmount,
       openAdvances: openAdvances.map((item) => serializeStaffAdvance(item)),
       deductions: plan.deductions,
       deductionTotal: plan.deductionTotal,
@@ -5556,7 +5559,7 @@ router.get('/admin/staff-advances/salary-preview', requireAuth, requireRole(['ad
   } catch (error) {
     return res.status(error?.statusCode || 500).json({
       success: false,
-      message: error?.userMessage || 'محاسبهٔ کسرِ پیشکی ناموفق بود.'
+      message: error?.userMessage || 'محاسبهٔ پیشکی و مالیات ناموفق بود.'
     });
   }
 });
@@ -5603,6 +5606,8 @@ router.post('/admin/staff-advances/salary-payments', requireAuth, requireRole(['
 
     const grossSalary = normalizeMoneyInput(payload.grossSalary, 0);
     if (grossSalary <= 0) return res.status(400).json({ success: false, message: 'معاشِ ناخالص را وارد کنید.' });
+    const taxAmount = normalizeMoneyInput(payload.taxAmount, 0);
+    if (taxAmount > grossSalary) return res.status(400).json({ success: false, message: 'مالیه نمی‌تواند از معاشِ ناخالص بیشتر باشد.' });
 
     const treasuryAccount = await resolveTreasuryAccountSelection({
       accountId: payload.treasuryAccountId,
@@ -5623,7 +5628,7 @@ router.post('/admin/staff-advances/salary-payments', requireAuth, requireRole(['
       staffId: staffId || '',
       staffName: staffId ? '' : snapshot.name
     });
-    const plan = computeSalaryDeduction({ openAdvances, grossSalary });
+    const plan = computeSalaryDeduction({ openAdvances, grossSalary, taxAmount });
 
     const requestedStatus = String(payload.status || '').trim().toLowerCase() === 'pending_review'
       ? 'pending_review'
@@ -5638,6 +5643,7 @@ router.post('/admin/staff-advances/salary-payments', requireAuth, requireRole(['
       period: monthKeyOf(paymentDate),
       paymentDate,
       grossSalary,
+      taxAmount: plan.taxAmount,
       deductions: plan.deductions,
       treasuryAccountId: treasuryAccount._id,
       paymentMethod: ['cash', 'bank_transfer', 'hawala', 'manual'].includes(String(payload.paymentMethod || '').trim())
@@ -5660,7 +5666,7 @@ router.post('/admin/staff-advances/salary-payments', requireAuth, requireRole(['
       action: 'finance_create_staff_salary_payment',
       targetType: 'StaffSalaryPayment',
       targetId: item._id.toString(),
-      meta: { financialYearId: String(financialYear._id), gross: grossSalary, deduction: plan.deductionTotal, net: plan.netAmount, status: requestedStatus }
+      meta: { financialYearId: String(financialYear._id), gross: grossSalary, tax: plan.taxAmount, deduction: plan.deductionTotal, net: plan.netAmount, status: requestedStatus }
     });
 
     return res.status(201).json({ success: true, item: serializeStaffSalaryPayment(item), message: 'پرداختِ معاش ثبت شد.' });

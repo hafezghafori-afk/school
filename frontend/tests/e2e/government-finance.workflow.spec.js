@@ -1,6 +1,35 @@
 import { test, expect } from '@playwright/test';
 
 import { setupAdminWorkspace } from './adminWorkspace.helpers';
+import { gotoAppPage, stubUnmockedApi } from './navigation.helpers';
+
+// Every date on this page is an AfghanDateInput: the `name` attribute belongs
+// to a hidden input that mirrors the Gregorian value for the API, while the
+// person types a هجری شمسی year/month/day. Filling the hidden mirror is what a
+// test cannot do and a user never does, so drive the visible fields instead.
+// Day goes first: it is always <= 29 here, so no intermediate combination can
+// be an invalid date and reset the field while the rest is still being typed.
+const AFGHAN_DATES = {
+  // Gregorian equivalents, for the mocked API payloads these end up in.
+  '2026-03-20': { year: '1404', month: '12', day: '29' },
+  '2026-03-21': { year: '1405', month: '1', day: '1' },
+  '2026-03-22': { year: '1405', month: '1', day: '2' },
+  '2026-03-23': { year: '1405', month: '1', day: '3' },
+  '2026-03-24': { year: '1405', month: '1', day: '4' },
+  '2026-03-25': { year: '1405', month: '1', day: '5' }
+};
+
+const fillAfghanDate = async (scope, name, gregorianDate) => {
+  const solar = AFGHAN_DATES[gregorianDate];
+  if (!solar) throw new Error(`No Afghan solar equivalent registered for ${gregorianDate}`);
+  const field = scope
+    .locator(`input[name="${name}"]`)
+    .locator('xpath=ancestor::div[contains(@class,"afghan-date-field")][1]');
+  await field.locator('.afghan-date-day').fill(solar.day);
+  await field.locator('.afghan-date-year').fill(solar.year);
+  await field.locator('.afghan-date-month').selectOption(solar.month);
+  await expect(field.locator(`input[name="${name}"]`)).toHaveValue(gregorianDate);
+};
 
 const DEFAULT_CATEGORIES = [
   {
@@ -628,7 +657,9 @@ function buildSnapshotPack(state, financialYearId = '') {
 
 test.describe('government finance workflow', () => {
   test('government finance workflow manages registry, review queue, and official snapshots', async ({ page }) => {
-    test.slow();
+    // ~100 interactions across five tabs. test.slow()'s 90s is not a budget this
+    // fits in reliably — the sibling admin finance test already sets its own.
+    test.setTimeout(240_000);
 
     const state = {
       financialYears: [
@@ -836,6 +867,7 @@ test.describe('government finance workflow', () => {
       };
     };
 
+    await stubUnmockedApi(page);
     await setupAdminWorkspace(page, {
       permissions: ['manage_finance', 'view_reports']
     });
@@ -1994,7 +2026,7 @@ test.describe('government finance workflow', () => {
       });
     });
 
-    await page.goto('/admin-government-finance', { waitUntil: 'domcontentloaded' });
+    await gotoAppPage(page, '/admin-government-finance');
 
     await expect(page.locator('.gov-finance-badge.info')).toContainText('متصل به هسته مالی و موتور گزارش');
     await expect(page.locator('.gov-kpi-grid')).toContainText('AFN');
@@ -2031,7 +2063,7 @@ test.describe('government finance workflow', () => {
     await treasuryTransactionCard.locator('select[name="accountId"]').selectOption({ label: 'Reserve Bank' });
     await treasuryTransactionCard.locator('select[name="transactionType"]').selectOption('withdrawal');
     await treasuryTransactionCard.locator('input[name="amount"]').fill('250');
-    await treasuryTransactionCard.locator('input[name="transactionDate"]').fill('2026-03-21');
+    await fillAfghanDate(treasuryTransactionCard, 'transactionDate', '2026-03-21');
     await treasuryTransactionCard.locator('input[name="referenceNo"]').fill('BANK-WD-01');
     await treasuryTransactionCard.locator('input[name="note"]').fill('Petty cash support');
     await treasuryTransactionCard.locator('[data-treasury-transaction-save="true"]').click();
@@ -2043,7 +2075,7 @@ test.describe('government finance workflow', () => {
     await treasurySettlementCard.locator('select[name="sourceAccountId"]').selectOption({ label: 'Main Cashbox' });
     await treasurySettlementCard.locator('select[name="destinationAccountId"]').selectOption({ label: 'Reserve Bank' });
     await treasurySettlementCard.locator('input[name="amount"]').fill('400');
-    await treasurySettlementCard.locator('input[name="transactionDate"]').fill('2026-03-22');
+    await fillAfghanDate(treasurySettlementCard, 'transactionDate', '2026-03-22');
     await treasurySettlementCard.locator('input[name="referenceNo"]').first().fill('TRF-2026-01');
     await treasurySettlementCard.locator('input[name="note"]').first().fill('Top up reserve account');
     await treasurySettlementCard.locator('[data-treasury-transfer-save="true"]').click();
@@ -2053,7 +2085,7 @@ test.describe('government finance workflow', () => {
 
     await treasurySettlementCard.locator('select[name="accountId"]').selectOption({ label: 'Reserve Bank' });
     await treasurySettlementCard.locator('input[name="statementBalance"]').fill('2200');
-    await treasurySettlementCard.locator('input[name="reconciliationDate"]').fill('2026-03-23');
+    await fillAfghanDate(treasurySettlementCard, 'reconciliationDate', '2026-03-23');
     await treasurySettlementCard.locator('input[name="referenceNo"]').last().fill('REC-2026-01');
     await treasurySettlementCard.locator('input[name="note"]').last().fill('Bank statement matched');
     await treasurySettlementCard.locator('[data-treasury-reconcile-save="true"]').click();
@@ -2077,8 +2109,8 @@ test.describe('government finance workflow', () => {
     await procurementCard.locator('select[name="category"]').selectOption('technology');
     await procurementCard.locator('select[name="subCategory"]').selectOption('devices');
     await procurementCard.locator('input[name="committedAmount"]').fill('1200');
-    await procurementCard.locator('input[name="requestDate"]').fill('2026-03-20');
-    await procurementCard.locator('input[name="expectedDeliveryDate"]').fill('2026-03-25');
+    await fillAfghanDate(procurementCard, 'requestDate', '2026-03-20');
+    await fillAfghanDate(procurementCard, 'expectedDeliveryDate', '2026-03-25');
     await procurementCard.locator('input[name="referenceNo"]').fill('PROC-2026-01');
     await procurementCard.locator('input[name="paymentTerms"]').fill('Net 15');
     await procurementCard.locator('input[name="description"]').fill('Lab device purchase');
@@ -2091,7 +2123,7 @@ test.describe('government finance workflow', () => {
     await expect.poll(() => counters.submitProcurement).toBe(1);
     await procurementRow.locator('[data-procurement-approve]').click();
     await expect.poll(() => counters.reviewProcurement).toBe(1);
-    await expect(page.locator('[data-procurement-registry-card="true"]')).toContainText('تایید شده');
+    await expect(page.locator('[data-procurement-registry-card="true"]')).toContainText('تعهدِ تاییدشده');
 
     const ledgerCard = page.locator('.gov-panel', { hasText: 'دفتر ثبت مصارف' });
     await page.getByRole('tab').nth(2).click();
@@ -2101,7 +2133,7 @@ test.describe('government finance workflow', () => {
     await ledgerCard.locator('select[name="procurementCommitmentId"]').selectOption('proc-1');
     await ledgerCard.locator('select[name="subCategory"]').selectOption('devices');
     await ledgerCard.locator('input[name="amount"]').fill('950');
-    await ledgerCard.locator('input[name="expenseDate"]').fill('2026-03-20');
+    await fillAfghanDate(ledgerCard, 'expenseDate', '2026-03-20');
     await ledgerCard.locator('select[name="status"]').selectOption('pending_review');
     await expect(ledgerCard.locator('input[name="vendorName"]')).toHaveValue('Atlas Supplies');
     await ledgerCard.locator('input[name="referenceNo"]').fill('GF-2026-009');
@@ -2111,7 +2143,7 @@ test.describe('government finance workflow', () => {
     await expect.poll(() => counters.createExpense).toBe(1);
     const queueCard = page.locator('.gov-panel', { hasText: 'صف تایید مصارف' });
     await expect(queueCard.locator('.gov-table')).toContainText('Atlas Supplies');
-    await expect(queueCard.locator('.gov-table')).toContainText('در انتظار بررسی');
+    await expect(queueCard.locator('.gov-table')).toContainText('در انتظارِ مدیرِ مالی');
 
     await page.getByRole('tab', { name: 'سال مالی', exact: true }).click();
     await page.getByRole('button', { name: 'باز کردن همه' }).click();
@@ -2132,7 +2164,10 @@ test.describe('government finance workflow', () => {
     await expect(page.locator('[data-budget-approval-card="true"]')).toContainText('بودجه تایید شد');
     await page.locator('[data-budget-start-revision="true"]').click();
     await expect.poll(() => counters.budgetStartRevision).toBe(1);
-    await expect(page.locator('[data-budget-revision-history="true"]')).toContainText('revision_started');
+    // The history table translates the action key through
+    // BUDGET_APPROVAL_ACTION_LABELS; the raw `revision_started` has not been on
+    // screen since the budget workflow fix.
+    await expect(page.locator('[data-budget-revision-history="true"]')).toContainText('بازنگری شروع شد');
     await page.locator('input[name="annualExpenseBudget"]').fill('1900');
     await page.locator('[data-budget-save="true"]').click();
     await expect.poll(() => counters.saveBudget).toBe(2);
@@ -2149,21 +2184,24 @@ test.describe('government finance workflow', () => {
     await page.getByRole('tab', { name: 'مصارف', exact: true }).click();
     await page.getByRole('button', { name: 'باز کردن همه' }).click();
     const pendingQueueRow = queueCard.locator('tbody tr', { hasText: 'Atlas Supplies' });
-    await expect(pendingQueueRow).toContainText('در انتظار بررسی');
+    await expect(pendingQueueRow).toContainText('در انتظارِ مدیرِ مالی');
     await pendingQueueRow.locator('[data-expense-review-approve]').click();
     await expect.poll(() => counters.reviewExpense).toBe(1);
     await expect(queueCard).not.toContainText('Atlas Supplies');
     const settlementCard = page.locator('[data-procurement-settlement-card="true"]');
     await settlementCard.locator('select[name="commitmentId"]').selectOption('proc-1');
     await settlementCard.locator('input[name="amount"]').fill('500');
-    await settlementCard.locator('input[name="settlementDate"]').fill('2026-03-24');
+    await fillAfghanDate(settlementCard, 'settlementDate', '2026-03-24');
     await settlementCard.locator('input[name="referenceNo"]').fill('SET-2026-01');
     await settlementCard.locator('input[name="note"]').fill('First vendor settlement');
     await settlementCard.locator('[data-procurement-settlement-save="true"]').click();
     await expect.poll(() => counters.settleProcurement).toBe(1);
     await expect(settlementCard).toContainText('SET-2026-01');
     await expect(settlementCard).toContainText('۵۰۰');
-    await expect(ledgerCard.locator('.gov-table')).toContainText('تایید شده');
+    // «دفتر ثبت مصارف» lists nothing until a filter is chosen — «همه» is the
+    // documented way to ask it for everything.
+    await ledgerCard.locator('select[name="ledgerStatus"]').selectOption('all');
+    await expect(ledgerCard.locator('.gov-table')).toContainText('تایید و ثبت در خزانه');
 
     await page.getByRole('tab', { name: 'سال مالی', exact: true }).click();
     await page.getByRole('button', { name: 'باز کردن همه' }).click();
@@ -2174,18 +2212,24 @@ test.describe('government finance workflow', () => {
     await page.getByRole('tab', { name: 'آرشیف رسمی', exact: true }).click();
     await expect.poll(() => new URL(page.url()).searchParams.get('rmode') || '').toBe('archive');
     await page.getByRole('button', { name: 'باز کردن همه' }).click();
-    await page.getByRole('button', { name: 'ساخت پیش‌نویس ربعوار' }).click();
-    await page.getByRole('button', { name: 'ساخت پیش‌نویس سالانه' }).click();
+    // Both buttons carry an aria-label («... نسخهٔ رسمی ...») that is their
+    // accessible name, so the visible text alone no longer identifies them.
+    await page.getByRole('button', { name: 'ساخت پیش‌نویس نسخهٔ رسمی ربعوار' }).click();
+    await page.getByRole('button', { name: 'ساخت پیش‌نویس نسخهٔ رسمی سالانه' }).click();
 
     await expect.poll(() => counters.snapshot).toBe(2);
-    await expect(page.locator('.gov-stack-section .gov-table').first()).toContainText('quarterly');
-    await expect(page.locator('.gov-stack-section .gov-table').first()).toContainText('annual');
-    await expect(page.locator('[data-snapshot-pack-summary="true"]')).toContainText('Treasury balance');
+    // The snapshots table shows REPORT_TYPE_LABELS, not the raw kind keys.
+    await expect(page.locator('.gov-stack-section .gov-table').first()).toContainText('ربع‌وار');
+    await expect(page.locator('.gov-stack-section .gov-table').first()).toContainText('سالانه');
+    // The pack summary renders its own Persian stat labels instead of echoing
+    // the report's English field names.
+    await expect(page.locator('[data-snapshot-pack-summary="true"]')).toContainText('مانده خزانه');
     await page.locator('[data-snapshot-pdf-latest="true"]').click();
     await expect.poll(() => counters.snapshotPdf).toBe(1);
     await page.locator('[data-snapshot-pdf]').first().click();
     await expect.poll(() => counters.snapshotPdf).toBe(2);
-    await expect(page.locator('[data-government-archive-card="true"]')).toContainText('government_snapshot_pack');
+    // resolveDocumentTypeLabel translates the documentType before it is shown.
+    await expect(page.locator('[data-government-archive-card="true"]')).toContainText('بسته رسمی گزارش دولت');
     const archiveDeliveryCard = page.locator('[data-government-archive-delivery-card="true"]');
     await archiveDeliveryCard.locator('select[name="channel"]').selectOption('email');
     await archiveDeliveryCard.locator('textarea[name="recipientHandles"]').fill('finance@example.edu');

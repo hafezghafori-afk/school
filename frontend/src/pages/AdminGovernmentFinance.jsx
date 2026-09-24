@@ -16,6 +16,7 @@ import {
   toLocaleDateTime
 } from './adminWorkspaceUtils';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import WorkflowStatus from '../components/finance/WorkflowStatus';
 import {
   formatAfghanDate,
   toGregorianDateInputValue,
@@ -82,16 +83,6 @@ const EXPENSE_STATUS_LABELS = {
   approved: 'تایید شده',
   rejected: 'رد شده',
   void: 'باطل'
-};
-
-const EXPENSE_STAGE_LABELS = {
-  draft: 'پیش‌نویس داخلی',
-  finance_manager_review: 'بررسی مدیر مالی',
-  finance_lead_review: 'بررسی آمریت مالی',
-  general_president_review: 'بررسی ریاست عمومی',
-  completed: 'تکمیل شده',
-  rejected: 'رد شده',
-  void: 'باطل شده'
 };
 
 const TREASURY_ACCOUNT_TYPE_LABELS = {
@@ -200,16 +191,6 @@ const DOCUMENT_TYPE_LABELS = {
 const PROCUREMENT_STATUS_LABELS = {
   draft: 'پیش‌نویس',
   pending_review: 'در انتظار بررسی',
-  approved: 'تایید شده',
-  rejected: 'رد شده',
-  cancelled: 'لغو شده'
-};
-
-const PROCUREMENT_STAGE_LABELS = {
-  draft: 'پیش‌نویس داخلی',
-  finance_manager_review: 'بررسی مدیر مالی',
-  finance_lead_review: 'بررسی آمریت مالی',
-  general_president_review: 'بررسی ریاست عمومی',
   approved: 'تایید شده',
   rejected: 'رد شده',
   cancelled: 'لغو شده'
@@ -821,6 +802,15 @@ function toFaDate(value) {
   }) || '---';
 }
 
+// ماهِ معاش به شمسی (مثلاً «سنبله ۱۴۰۵»). `period` روی سرور کلیدِ میلادیِ
+// YYYY-MM است، پس ماه از خودِ تاریخِ پرداخت ساخته می‌شود.
+function salaryPeriodLabel(row = {}) {
+  const solar = gregorianToAfghanSolar(row.paymentDate);
+  if (!solar) return row.period || '—';
+  const year = solar.jy.toLocaleString('fa-AF', { useGrouping: false });
+  return `${AFGHAN_SOLAR_MONTHS[solar.jm - 1]} ${year}`;
+}
+
 function expenseCategorySummary(items = []) {
   const grouped = new Map();
   items.forEach((item) => {
@@ -834,10 +824,6 @@ function expenseCategorySummary(items = []) {
 
 function resolveExpenseStatusLabel(status = '') {
   return EXPENSE_STATUS_LABELS[String(status || '').trim()] || String(status || 'پیش‌نویس').trim();
-}
-
-function resolveExpenseStageLabel(stage = '') {
-  return EXPENSE_STAGE_LABELS[String(stage || '').trim()] || String(stage || 'پیش‌نویس داخلی').trim();
 }
 
 // Which admin level a pending expense is waiting on, and whether the current
@@ -1133,10 +1119,6 @@ function buildBudgetApprovalState(financialYear = null) {
 
 function resolveProcurementStatusLabel(status = '') {
   return PROCUREMENT_STATUS_LABELS[String(status || '').trim()] || String(status || 'پیش‌نویس').trim();
-}
-
-function resolveProcurementStageLabel(stage = '') {
-  return PROCUREMENT_STAGE_LABELS[String(stage || '').trim()] || String(stage || 'پیش‌نویس داخلی').trim();
 }
 
 function resolveProcurementTypeLabel(value = '') {
@@ -1481,48 +1463,6 @@ function ExpenseStatusBadge({ status = '' }) {
   );
 }
 
-function ExpenseStageBadge({ stage = '' }) {
-  const normalized = String(stage || '').trim() || 'draft';
-  let tone = 'slate';
-  if (normalized === 'finance_manager_review') tone = 'teal';
-  else if (normalized === 'finance_lead_review') tone = 'copper';
-  else if (normalized === 'general_president_review') tone = 'rose';
-  else if (normalized === 'completed') tone = 'mint';
-  else if (normalized === 'void') tone = 'sand';
-
-  return (
-    <span className="gov-status-badge subtle" data-tone={tone}>
-      {resolveExpenseStageLabel(normalized)}
-    </span>
-  );
-}
-
-const STAFF_ADVANCE_STATUS_LABELS = {
-  draft: 'پیش‌نویس',
-  pending_review: 'در صفِ تایید',
-  approved: 'فعال (در حالِ بازگشت)',
-  settled: 'تسویه‌شده',
-  rejected: 'ردشده',
-  void: 'باطل',
-  written_off: 'حذفِ طلب',
-  refunded: 'بازپرداخت‌شده'
-};
-
-function StaffAdvanceStatusBadge({ status = '' }) {
-  const normalized = String(status || '').trim() || 'draft';
-  let tone = 'slate';
-  if (normalized === 'approved') tone = 'teal';
-  else if (normalized === 'settled') tone = 'mint';
-  else if (normalized === 'pending_review') tone = 'copper';
-  else if (normalized === 'rejected' || normalized === 'written_off') tone = 'rose';
-  else if (normalized === 'void' || normalized === 'refunded') tone = 'sand';
-  return (
-    <span className="gov-status-badge" data-tone={tone}>
-      {STAFF_ADVANCE_STATUS_LABELS[normalized] || normalized}
-    </span>
-  );
-}
-
 function BudgetApprovalStageBadge({ stage = '' }) {
   const normalized = String(stage || '').trim() || 'draft';
   let tone = 'slate';
@@ -1550,22 +1490,6 @@ function ProcurementStatusBadge({ status = '' }) {
   return (
     <span className="gov-status-badge" data-tone={tone}>
       {resolveProcurementStatusLabel(normalized)}
-    </span>
-  );
-}
-
-function ProcurementStageBadge({ stage = '' }) {
-  const normalized = String(stage || '').trim() || 'draft';
-  let tone = 'slate';
-  if (normalized === 'finance_manager_review') tone = 'teal';
-  else if (normalized === 'finance_lead_review') tone = 'copper';
-  else if (normalized === 'general_president_review') tone = 'rose';
-  else if (normalized === 'approved') tone = 'mint';
-  else if (normalized === 'rejected' || normalized === 'cancelled') tone = 'sand';
-
-  return (
-    <span className="gov-status-badge subtle" data-tone={tone}>
-      {resolveProcurementStageLabel(normalized)}
     </span>
   );
 }
@@ -1792,6 +1716,7 @@ export default function AdminGovernmentFinance() {
     staffId: '',
     staffName: '',
     grossSalary: '',
+    taxAmount: '',
     paymentDate: '',
     treasuryAccountId: '',
     paymentMethod: 'cash',
@@ -3707,7 +3632,7 @@ export default function AdminGovernmentFinance() {
                 <span>{expenseLabels.category(row.category)}</span>
                 <span>{formatMoney(row.amount)}</span>
                 <span>{toFaDate(row.expenseDate)}</span>
-                <ExpenseStatusBadge status={row.status} />
+                <WorkflowStatus kind="expense" status={row.status} stage={row.approvalStage} approvalTrail={row.approvalTrail} rejectReason={row.rejectReason} />
               </p>
             </div>
             <button type="button" className="gov-dialog__close" onClick={closeExpenseEditor} disabled={isSaving} aria-label="بستن">×</button>
@@ -4027,14 +3952,31 @@ export default function AdminGovernmentFinance() {
 
   // «چاپِ رسید» — سندِ کاغذیِ اضافه برای سه امضای فیزیکی (گیرنده/مدیرِ مالی/مدیرِ
   // مکتب)، فقط برای رکوردهای تاییدشده. جایگزینِ رکوردِ دیجیتالی نیست.
+  //
+  // زبانه باید همین حالا، درونِ خودِ کلیک، باز شود. ساختنِ PDF روی سرور چند ثانیه
+  // طول می‌کشد و مرورگر پنجره‌ای را که بعد از آن انتظار باز شود «پاپ‌آپِ ناخواسته»
+  // حساب کرده بی‌صدا می‌بندد — دکمه کار می‌کرد، فقط هیچ چیزی دیده نمی‌شد.
   const openVoucherPdf = async (path, busyKey, failMessage) => {
+    const tab = window.open('', '_blank');
+    if (tab) {
+      tab.opener = null;
+      tab.document.title = 'در حال ساختِ رسید...';
+      tab.document.body.innerHTML = '<p dir="rtl" style="font-family:Tahoma,sans-serif;padding:24px">در حال ساختِ رسید...</p>';
+    }
     try {
       setBusyAction(busyKey);
-      const { blob, contentType } = await fetchBlob(path, {}, { method: 'GET' });
-      const url = URL.createObjectURL(new Blob([blob], { type: contentType || 'application/pdf' }));
-      window.open(url, '_blank', 'noopener,noreferrer');
-      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      const { blob, contentType, filename } = await fetchBlob(path, {}, { method: 'GET', timeoutMs: 60000 });
+      const file = new Blob([blob], { type: contentType || 'application/pdf' });
+      if (tab && !tab.closed) {
+        const url = URL.createObjectURL(file);
+        tab.location.href = url;
+        window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } else {
+        // مرورگر همان زبانهٔ اول را هم نگذاشت (یا کاربر بستش) — فایل دانلود شود.
+        downloadBlob(file, filename);
+      }
     } catch (error) {
+      if (tab && !tab.closed) tab.close();
       showMessage(errorMessage(error, failMessage), 'error');
     } finally {
       setBusyAction('');
@@ -4082,10 +4024,11 @@ export default function AdminGovernmentFinance() {
       if (salaryPaymentDraft.staffId) params.set('staffId', salaryPaymentDraft.staffId);
       else if (salaryPaymentDraft.staffName) params.set('staffName', salaryPaymentDraft.staffName);
       params.set('grossSalary', salaryPaymentDraft.grossSalary);
+      if (salaryPaymentDraft.taxAmount) params.set('taxAmount', salaryPaymentDraft.taxAmount);
       const data = await fetchJson(`/api/finance/admin/staff-advances/salary-preview?${params.toString()}`);
       setSalaryPreview(data || null);
     } catch (error) {
-      showMessage(errorMessage(error, 'محاسبهٔ کسر ناموفق بود.'), 'error');
+      showMessage(errorMessage(error, 'محاسبهٔ پیشکی و مالیات ناموفق بود.'), 'error');
     } finally {
       setBusyAction('');
     }
@@ -4103,13 +4046,14 @@ export default function AdminGovernmentFinance() {
         staffId: salaryPaymentDraft.staffId,
         staffName: salaryPaymentDraft.staffName,
         grossSalary: salaryPaymentDraft.grossSalary,
+        taxAmount: salaryPaymentDraft.taxAmount,
         paymentDate: salaryPaymentDraft.paymentDate,
         treasuryAccountId: salaryPaymentDraft.treasuryAccountId,
         paymentMethod: salaryPaymentDraft.paymentMethod,
         note: salaryPaymentDraft.note,
         status: salaryPaymentDraft.status
       });
-      setSalaryPaymentDraft((current) => ({ ...current, grossSalary: '', note: '' }));
+      setSalaryPaymentDraft((current) => ({ ...current, grossSalary: '', taxAmount: '', note: '' }));
       setSalaryPreview(null);
       showMessage('پرداختِ معاش ثبت شد.');
       await loadWorkspace('operations');
@@ -5941,8 +5885,7 @@ export default function AdminGovernmentFinance() {
                         <th>فروشنده</th>
                         <th>مبلغ</th>
                         <th>پوشش</th>
-                        <th>وضعیت</th>
-                        <th>مرحله</th>
+                        <th>وضعیتِ کار</th>
                         <th>اقدام</th>
                       </tr>
                     </thead>
@@ -5963,8 +5906,7 @@ export default function AdminGovernmentFinance() {
                             </div>
                           </td>
                           <td>{formatMoney(item.approvedExpenseAmount || 0)} / {formatNumber(item.fulfillmentPercent || 0)}%</td>
-                          <td><ProcurementStatusBadge status={item.status} /></td>
-                          <td><ProcurementStageBadge stage={item.approvalStage} /></td>
+                          <td><WorkflowStatus kind="procurement" status={item.status} stage={item.approvalStage} approvalTrail={item.approvalTrail} rejectReason={item.rejectReason} /></td>
                           <td>
                             <div className="gov-action-stack">
                               {(item.status === 'draft' || item.status === 'rejected') ? (
@@ -6552,9 +6494,7 @@ export default function AdminGovernmentFinance() {
                         <th>شرح</th>
                         <th>تاریخ ثبت‌شده</th>
                         <th>مبلغ</th>
-                        <th>وضعیت</th>
-                        <th>مرحله</th>
-                        <th>منتظرِ چه کسی</th>
+                        <th>وضعیتِ کار</th>
                         <th>اقدام</th>
                       </tr>
                     </thead>
@@ -6597,17 +6537,9 @@ export default function AdminGovernmentFinance() {
                           <td className="gov-expense-amount-cell">{formatMoney(row.amount)}</td>
                           <td>
                             <div className="gov-pill-row">
-                              <ExpenseStatusBadge status={row.status} />
+                              <WorkflowStatus kind="expense" status={row.status} stage={row.approvalStage} approvalTrail={row.approvalTrail} rejectReason={row.rejectReason} />
                               {correctionOpen ? <span className="gov-status-badge" data-tone="copper">اصلاح</span> : null}
                             </div>
-                          </td>
-                          <td><ExpenseStageBadge stage={row.approvalStage} /></td>
-                          <td>
-                            {isPending
-                              ? expenseStageWaitLabel(row.approvalStage)
-                              : row.status === 'rejected'
-                                ? 'ردشده — نیازِ اصلاح'
-                                : 'هنوز ارسال نشده'}
                           </td>
                           <td>
                             <div className="gov-action-stack">
@@ -6897,8 +6829,7 @@ export default function AdminGovernmentFinance() {
                         <th>شرح</th>
                         <th>تاریخ ثبت‌شده</th>
                         <th>مبلغ</th>
-                        <th>وضعیت</th>
-                        <th>مرحله</th>
+                        <th>وضعیتِ کار</th>
                         <th>ردپای بررسی</th>
                         <th>اقدام</th>
                       </tr>
@@ -6925,7 +6856,7 @@ export default function AdminGovernmentFinance() {
                           <td className="gov-expense-amount-cell">{formatMoney(row.amount)}</td>
                           <td>
                             <div className="gov-pill-row">
-                              <ExpenseStatusBadge status={row.status} />
+                              <WorkflowStatus kind="expense" status={row.status} stage={row.approvalStage} approvalTrail={row.approvalTrail} rejectReason={row.rejectReason} />
                               {correctionOpen ? (
                                 <span className="gov-status-badge" data-tone="copper" title="تا تاییدِ نهایی در خزانه و گزارش‌ها حساب نمی‌شود.">
                                   اصلاح در انتظارِ تایید
@@ -6933,7 +6864,6 @@ export default function AdminGovernmentFinance() {
                               ) : null}
                             </div>
                           </td>
-                          <td><ExpenseStageBadge stage={row.approvalStage} /></td>
                           <td>{formatNumber((row.approvalTrail || []).length)} رویداد</td>
                           <td>
                             <div className="gov-action-stack">
@@ -7113,8 +7043,7 @@ export default function AdminGovernmentFinance() {
                         <th>گیرنده</th>
                         <th>نوع</th>
                         <th>مبلغ</th>
-                        <th>وضعیت</th>
-                        <th>مرحله</th>
+                        <th>وضعیتِ کار</th>
                         <th>اقدام</th>
                       </tr>
                     </thead>
@@ -7139,8 +7068,7 @@ export default function AdminGovernmentFinance() {
                                 <span>سقف: {formatMoney(row.cap)}</span>
                               </div>
                             </td>
-                            <td><StaffAdvanceStatusBadge status={row.status} /></td>
-                            <td><ExpenseStageBadge stage={row.approvalStage} /></td>
+                            <td><WorkflowStatus kind="advance" status={row.status} stage={row.approvalStage} approvalTrail={row.approvalTrail} rejectReason={row.rejectReason} /></td>
                             <td>
                               <div className="gov-action-stack">
                                 {(row.status === 'draft' || row.status === 'rejected') ? (
@@ -7315,7 +7243,7 @@ export default function AdminGovernmentFinance() {
                           <th>مبلغ</th>
                           <th>مانده</th>
                           <th>تاریخ</th>
-                          <th>وضعیت</th>
+                          <th>وضعیتِ کار</th>
                           <th>رسید</th>
                         </tr>
                       </thead>
@@ -7332,7 +7260,7 @@ export default function AdminGovernmentFinance() {
                             <td>{formatMoney(row.amount)}</td>
                             <td>{formatMoney(row.outstandingAmount)}</td>
                             <td>{toFaDate(row.issueDate)}</td>
-                            <td><StaffAdvanceStatusBadge status={row.status} /></td>
+                            <td><WorkflowStatus kind="advance" status={row.status} stage={row.approvalStage} approvalTrail={row.approvalTrail} rejectReason={row.rejectReason} /></td>
                             <td>
                               {['approved', 'settled', 'written_off', 'refunded'].includes(row.status) ? (
                                 <button
@@ -7383,6 +7311,11 @@ export default function AdminGovernmentFinance() {
                   <small>دستی وارد می‌شود.</small>
                 </label>
                 <label className="gov-field">
+                  <span>مالیه بر معاش</span>
+                  <input name="taxAmount" value={salaryPaymentDraft.taxAmount} onChange={handleSalaryPaymentDraftChange} inputMode="numeric" placeholder="۰" />
+                  <small>دستی؛ پیش از کسرِ پیشکی از ناخالص کم می‌شود.</small>
+                </label>
+                <label className="gov-field">
                   <span>تاریخِ پرداخت</span>
                   <AfghanDateInput name="paymentDate" value={salaryPaymentDraft.paymentDate} onChange={(value) => setSalaryPaymentDraft((current) => ({ ...current, paymentDate: value }))} showGregorianEquivalent />
                 </label>
@@ -7418,7 +7351,7 @@ export default function AdminGovernmentFinance() {
               </div>
               <div className="gov-card-actions">
                 <button type="button" className="gov-inline-action" onClick={fetchSalaryPreview} disabled={busyAction === 'salary-preview'}>
-                  {busyAction === 'salary-preview' ? 'در حال محاسبه…' : 'محاسبهٔ کسرِ پیشکی'}
+                  {busyAction === 'salary-preview' ? 'در حال محاسبه…' : 'محاسبهٔ پیشکی و مالیات'}
                 </button>
                 <button type="button" className="gov-primary-btn" onClick={submitSalaryPayment} disabled={busyAction === 'save-salary-payment'}>
                   {busyAction === 'save-salary-payment' ? 'در حال ذخیره…' : 'ثبتِ پرداختِ معاش'}
@@ -7431,6 +7364,11 @@ export default function AdminGovernmentFinance() {
                     <span>معاشِ ناخالص</span>
                     <strong>{formatMoney(salaryPreview.grossSalary || 0)}</strong>
                     <small>{formatNumber((salaryPreview.openAdvances || []).length)} پیشکیِ باز</small>
+                  </div>
+                  <div className="gov-governance-stat" data-tone="sand">
+                    <span>مالیه بر معاش</span>
+                    <strong>{formatMoney(salaryPreview.taxAmount || 0)}</strong>
+                    <small>قابلِ تحویل به ریاستِ عواید</small>
                   </div>
                   <div className="gov-governance-stat" data-tone="copper">
                     <span>کسرِ پیشکی</span>
@@ -7447,7 +7385,11 @@ export default function AdminGovernmentFinance() {
 
               <div className="gov-approval-rule">
                 هنگامِ تاییدِ نهایی، یک ردیفِ مصرفِ «معاش» برای مبلغِ <strong>خالص</strong> ساخته می‌شود (خزانه فقط خالص را کم می‌کند)
-                و قسطِ کسرشده روی پیشکیِ همان شخص ثبت می‌گردد.
+                و قسطِ کسرشده روی پیشکیِ همان شخص ثبت می‌گردد. مالیهٔ نگه‌داشته‌شده تا زمانِ تحویل به ریاستِ عواید در خزانه می‌ماند؛
+                تحویلِ آن جداگانه به‌عنوانِ یک مصرف ثبت شود.
+                {Number(staffAdvanceSummary.salaryTaxTotal) > 0 ? (
+                  <> مجموعِ مالیهٔ نگه‌داشته‌شده در این سالِ مالی: <strong>{formatMoney(staffAdvanceSummary.salaryTaxTotal)}</strong>.</>
+                ) : null}
               </div>
 
               {!salaryPaymentQueue.length ? (
@@ -7459,10 +7401,10 @@ export default function AdminGovernmentFinance() {
                       <tr>
                         <th>گیرنده</th>
                         <th>ناخالص</th>
+                        <th>مالیه</th>
                         <th>کسرِ پیشکی</th>
                         <th>خالص</th>
-                        <th>وضعیت</th>
-                        <th>مرحله</th>
+                        <th>وضعیتِ کار</th>
                         <th>اقدام</th>
                       </tr>
                     </thead>
@@ -7477,14 +7419,14 @@ export default function AdminGovernmentFinance() {
                             <td>
                               <div className="gov-table-stack">
                                 <strong>{row.staff?.name || 'بدون نام'}</strong>
-                                <span>{row.period || '—'}</span>
+                                <span>{salaryPeriodLabel(row)}</span>
                               </div>
                             </td>
                             <td>{formatMoney(row.grossSalary)}</td>
+                            <td>{formatMoney(row.taxAmount || 0)}</td>
                             <td>{formatMoney(row.deductionTotal)}</td>
                             <td><strong>{formatMoney(row.netAmount)}</strong></td>
-                            <td><StaffAdvanceStatusBadge status={row.status} /></td>
-                            <td><ExpenseStageBadge stage={row.approvalStage} /></td>
+                            <td><WorkflowStatus kind="salary" status={row.status} stage={row.approvalStage} approvalTrail={row.approvalTrail} rejectReason={row.rejectReason} /></td>
                             <td>
                               <div className="gov-action-stack">
                                 {(row.status === 'draft' || row.status === 'rejected') ? (
@@ -7533,9 +7475,10 @@ export default function AdminGovernmentFinance() {
                           <th>گیرنده</th>
                           <th>ماه</th>
                           <th>ناخالص</th>
+                          <th>مالیه</th>
                           <th>کسرِ پیشکی</th>
                           <th>خالص</th>
-                          <th>وضعیت</th>
+                          <th>وضعیتِ کار</th>
                           <th>رسید</th>
                         </tr>
                       </thead>
@@ -7543,11 +7486,12 @@ export default function AdminGovernmentFinance() {
                         {salaryPaymentRecent.map((row) => (
                           <tr key={`salary-payment-recent-${row._id}`}>
                             <td>{row.staff?.name || 'بدون نام'}</td>
-                            <td>{row.period || '—'}</td>
+                            <td>{salaryPeriodLabel(row)}</td>
                             <td>{formatMoney(row.grossSalary)}</td>
+                            <td>{formatMoney(row.taxAmount || 0)}</td>
                             <td>{formatMoney(row.deductionTotal)}</td>
                             <td>{formatMoney(row.netAmount)}</td>
-                            <td><StaffAdvanceStatusBadge status={row.status} /></td>
+                            <td><WorkflowStatus kind="salary" status={row.status} stage={row.approvalStage} approvalTrail={row.approvalTrail} rejectReason={row.rejectReason} /></td>
                             <td>
                               {row.status === 'approved' ? (
                                 <button

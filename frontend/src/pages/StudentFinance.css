@@ -79,6 +79,13 @@
   color: #991b1b;
 }
 
+/* Nothing was created — the same receipt was already on file. */
+.student-finance-message.warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
 .student-finance-summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
