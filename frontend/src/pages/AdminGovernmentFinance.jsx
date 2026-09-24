@@ -4027,14 +4027,31 @@ export default function AdminGovernmentFinance() {
 
   // «چاپِ رسید» — سندِ کاغذیِ اضافه برای سه امضای فیزیکی (گیرنده/مدیرِ مالی/مدیرِ
   // مکتب)، فقط برای رکوردهای تاییدشده. جایگزینِ رکوردِ دیجیتالی نیست.
+  //
+  // زبانه باید همین حالا، درونِ خودِ کلیک، باز شود. ساختنِ PDF روی سرور چند ثانیه
+  // طول می‌کشد و مرورگر پنجره‌ای را که بعد از آن انتظار باز شود «پاپ‌آپِ ناخواسته»
+  // حساب کرده بی‌صدا می‌بندد — دکمه کار می‌کرد، فقط هیچ چیزی دیده نمی‌شد.
   const openVoucherPdf = async (path, busyKey, failMessage) => {
+    const tab = window.open('', '_blank');
+    if (tab) {
+      tab.opener = null;
+      tab.document.title = 'در حال ساختِ رسید...';
+      tab.document.body.innerHTML = '<p dir="rtl" style="font-family:Tahoma,sans-serif;padding:24px">در حال ساختِ رسید...</p>';
+    }
     try {
       setBusyAction(busyKey);
-      const { blob, contentType } = await fetchBlob(path, {}, { method: 'GET' });
-      const url = URL.createObjectURL(new Blob([blob], { type: contentType || 'application/pdf' }));
-      window.open(url, '_blank', 'noopener,noreferrer');
-      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      const { blob, contentType, filename } = await fetchBlob(path, {}, { method: 'GET', timeoutMs: 60000 });
+      const file = new Blob([blob], { type: contentType || 'application/pdf' });
+      if (tab && !tab.closed) {
+        const url = URL.createObjectURL(file);
+        tab.location.href = url;
+        window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } else {
+        // مرورگر همان زبانهٔ اول را هم نگذاشت (یا کاربر بستش) — فایل دانلود شود.
+        downloadBlob(file, filename);
+      }
     } catch (error) {
+      if (tab && !tab.closed) tab.close();
       showMessage(errorMessage(error, failMessage), 'error');
     } finally {
       setBusyAction('');
