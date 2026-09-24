@@ -177,6 +177,7 @@ function serializeStaffAdvance(doc = {}) {
     status: d.status || 'draft',
     approvalStage: d.approvalStage || 'draft',
     approvalTrail: Array.isArray(d.approvalTrail) ? d.approvalTrail : [],
+    rejectReason: normalizeText(d.rejectReason),
     settledAt: d.settledAt || null,
     createdAt: d.createdAt || null
   };
@@ -439,6 +440,7 @@ function serializeStaffSalaryPayment(doc = {}) {
     status: d.status || 'draft',
     approvalStage: d.approvalStage || 'draft',
     approvalTrail: Array.isArray(d.approvalTrail) ? d.approvalTrail : [],
+    rejectReason: normalizeText(d.rejectReason),
     createdAt: d.createdAt || null
   };
 }
