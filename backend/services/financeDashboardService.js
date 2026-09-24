@@ -8,6 +8,11 @@ const { sumPaidRefunds } = require('../utils/financeRefundRecognition');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const { loadCurrentMembershipStatusMap, attachLifecycleBadge, hasStudentLeft } = require('../utils/financeStudentLifecycleStatus');
 const { resolveAsasNumberMapForDocs } = require('../utils/studentAdmissionNumber');
+const {
+  afghanMonthKeyBounds,
+  formatAfghanMonthKeyLabel,
+  toAfghanMonthKey
+} = require('../utils/afghanDate');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -30,12 +35,25 @@ function asDate(value, fallback = null) {
   return Number.isNaN(date.getTime()) ? fallback : date;
 }
 
+// A "YYYY-MM-DD" from the date pickers is that calendar day, read as local
+// time - new Date('YYYY-MM-DD') would mean UTC midnight and shift the day on
+// any server that is not on UTC.
+function parseRangeDate(value, fallback) {
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || '').trim());
+  if (dateOnly) {
+    const date = new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]));
+    return Number.isNaN(date.getTime()) ? fallback : date;
+  }
+  return value ? asDate(value, fallback) : fallback;
+}
+
 function normalizeDateRange({ from = '', to = '', asOf = null } = {}) {
   const now = asDate(asOf, new Date());
-  const fallbackStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-  const fallbackEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-  const startAt = asDate(from, fallbackStart);
-  const endAt = asDate(to, fallbackEnd);
+  // No range given: the current Afghan month, same default the finance page
+  // itself starts with.
+  const currentMonth = afghanMonthKeyBounds(toAfghanMonthKey(now));
+  const startAt = new Date(parseRangeDate(from, currentMonth.start).getTime());
+  const endAt = new Date(parseRangeDate(to, currentMonth.end).getTime());
   startAt.setHours(0, 0, 0, 0);
   endAt.setHours(23, 59, 59, 999);
   if (endAt.getTime() < startAt.getTime()) {
@@ -43,7 +61,28 @@ function normalizeDateRange({ from = '', to = '', asOf = null } = {}) {
     error.statusCode = 400;
     throw error;
   }
-  return { startAt, endAt, asOf: endAt };
+  // Overdue days and aging are measured at the end of the range, but never
+  // past today: with the default "this month" range the end lies weeks ahead,
+  // and bills not due yet were counted as overdue.
+  return { startAt, endAt, asOf: new Date(Math.min(endAt.getTime(), now.getTime())) };
+}
+
+// A bill belongs to its bill month - the month of its due date, which is also
+// what periodLabel, the bill-month filter and the monthly report use - not to
+// the day the record happened to be created (issuedAt). Bills prepared a few
+// days before their month, or several months at once for an advance payment,
+// otherwise landed in the wrong period. Orders without a due date fall back
+// to issuedAt.
+function buildBillMonthDateFilter({ startAt = null, endAt = null } = {}) {
+  const range = {};
+  if (startAt) range.$gte = startAt;
+  if (endAt) range.$lte = endAt;
+  return {
+    $or: [
+      { dueDate: range },
+      { dueDate: null, issuedAt: range }
+    ]
+  };
 }
 
 function buildScopeFilter({ schoolId = '', academicYearId = '', classId = '', schoolClassIds = [] } = {}) {
@@ -311,13 +350,19 @@ async function loadExpenseCategoryLabelMap() {
 async function buildFinanceDashboardOverview(options = {}) {
   const { startAt, endAt, asOf } = normalizeDateRange(options);
   const scope = buildScopeFilter(options);
+  // Standing = every bill whose month has started by the end of the range;
+  // period = the bills of the months inside the range. Both by bill month.
   const orderStandingFilter = mergeFilter(scope, {
-    status: { $ne: 'void' },
-    issuedAt: { $lte: endAt }
+    $and: [
+      { status: { $ne: 'void' } },
+      buildBillMonthDateFilter({ endAt })
+    ]
   });
   const orderPeriodFilter = mergeFilter(scope, {
-    status: { $ne: 'void' },
-    issuedAt: { $gte: startAt, $lte: endAt }
+    $and: [
+      { status: { $ne: 'void' } },
+      buildBillMonthDateFilter({ startAt, endAt })
+    ]
   });
   const paymentPeriodFilter = mergeFilter(scope, {
     paidAt: { $gte: startAt, $lte: endAt }
@@ -458,7 +503,11 @@ async function buildFinanceDashboardOverview(options = {}) {
     period: {
       startAt: startAt.toISOString(),
       endAt: endAt.toISOString(),
-      basis: 'cash_and_accrual'
+      asOf: asOf.toISOString(),
+      basis: 'cash_and_accrual',
+      // Bills are counted by bill month (due date); payments, expenses and
+      // treasury rows by the day they happened.
+      billBasis: 'bill_month'
     },
     kpis: {
       issuedBills: { count: periodOrders.length, studentCount: distinctStudents.size, amount: periodBilled, grossAmount: periodGross },
@@ -500,17 +549,23 @@ async function buildFinanceDashboardOverview(options = {}) {
     topDebtors: debtorGroups.topDebtors,
     departedDebtors: debtorGroups.departedDebtors,
     recent: {
-      bills: periodOrders.slice(0, recentLimit).map((item) => attachLifecycleBadge({
-        id: normalizeText(item?._id),
-        number: formatFinanceCode(item?.orderNumber || ''),
-        title: item?.title || item?.periodLabel || 'بل مالی',
-        studentName: orderStudentName(item),
-        classTitle: classTitle(item),
-        amount: roundMoney(item?.amountDue),
-        outstanding: roundMoney(item?.outstandingAmount),
-        status: item?.status || '',
-        occurredAt: item?.issuedAt || null
-      }, item?.student, lifecycleStatusMap)),
+      bills: periodOrders.slice(0, recentLimit).map((item) => {
+        const monthKey = toAfghanMonthKey(item?.dueDate || item?.issuedAt);
+        return attachLifecycleBadge({
+          id: normalizeText(item?._id),
+          number: formatFinanceCode(item?.orderNumber || ''),
+          title: item?.title || item?.periodLabel || 'بل مالی',
+          studentName: orderStudentName(item),
+          classTitle: classTitle(item),
+          amount: roundMoney(item?.amountDue),
+          outstanding: roundMoney(item?.outstandingAmount),
+          status: item?.status || '',
+          monthKey,
+          monthLabel: formatAfghanMonthKeyLabel(monthKey),
+          dueDate: item?.dueDate || null,
+          occurredAt: item?.issuedAt || null
+        }, item?.student, lifecycleStatusMap);
+      }),
       payments: approvedPayments.slice(0, recentLimit).map((item) => attachLifecycleBadge({
         id: normalizeText(item?._id),
         number: formatFinanceCode(item?.paymentNumber || ''),

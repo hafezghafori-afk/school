@@ -221,6 +221,12 @@ const {
 } = require('../services/financeCloseService');
 const { buildFinanceDashboardOverview } = require('../services/financeDashboardService');
 const {
+  afghanMonthKeyBounds,
+  formatAfghanMonthKeyLabel,
+  normalizeAfghanMonthKey,
+  toAfghanMonthKey
+} = require('../utils/afghanDate');
+const {
   assertFinancePeriodWritable,
   isFinanceMonthClosed
 } = require('../services/financePeriodGuardService');
@@ -326,6 +332,26 @@ const parseDateSafe = (value, fallback = null) => {
   if (!value) return fallback;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? fallback : d;
+};
+
+// A bill is filed under the Afghan month of its due date - FinanceBill and
+// FeeOrder derive a monthly bill's periodLabel from it, and the bill-month
+// filter and monthly reports read the same month. The bill forms send the
+// month they show the user as `billingMonth`; a due date outside that month
+// would quietly file the bill under a different month, so it is refused.
+const resolveBillingMonth = ({ billingMonth = '', dueDate = '' } = {}) => {
+  const requested = String(billingMonth || '').trim();
+  const dueMonthKey = toAfghanMonthKey(dueDate);
+  if (!requested) return { monthKey: dueMonthKey, error: '' };
+  const monthKey = normalizeAfghanMonthKey(requested);
+  if (!monthKey) return { monthKey: '', error: 'ماه بل معتبر نیست.' };
+  if (dueMonthKey && dueMonthKey !== monthKey) {
+    return {
+      monthKey,
+      error: `مهلت پرداخت در ماه ${formatAfghanMonthKeyLabel(dueMonthKey)} است، اما بل برای ماه ${formatAfghanMonthKeyLabel(monthKey)} انتخاب شده است. ماه بل همان ماهِ مهلت پرداخت است؛ مهلت پرداخت را در همان ماه انتخاب کنید.`
+    };
+  }
+  return { monthKey, error: '' };
 };
 
 const isMonthClosed = async (dateValue, scope = {}) => isFinanceMonthClosed(dateValue, scope);
@@ -6627,10 +6653,15 @@ router.get('/admin/dashboard/monthly-trend', requireAuth, requireRole(['admin'])
       return res.status(400).json({ success: false, message: 'برای نمایش روند ماهانه، مکتب فعال را انتخاب کنید.' });
     }
     writeSchoolContextHeaders(res, schoolId);
+    // `to` (the end of the range picked on the finance page) sets the last
+    // solar month of the window; the month key keeps the cache per month.
+    const asOfInput = String(req.query?.to || '').trim();
+    const asOfMonthKey = /^\d{4}-\d{2}-\d{2}$/.test(asOfInput) ? toAfghanMonthKey(asOfInput) : '';
     const monthlyTrendParams = {
       schoolId,
       academicYearId: String(req.query?.academicYearId || '').trim(),
-      months: req.query?.months
+      months: req.query?.months,
+      asOfMonthKey
     };
     // Recomputes from the school's full financial history the same as
     // dashboard/overview and treasury/analytics (see financeReportCache.js),
@@ -6638,7 +6669,10 @@ router.get('/admin/dashboard/monthly-trend', requireAuth, requireRole(['admin'])
     // uncached heavy report still fired on every admin-finance page load.
     const months = await withReportCache(
       buildCacheKey('monthly-trend', monthlyTrendParams),
-      () => buildFinanceMonthlyTrend(monthlyTrendParams)
+      () => buildFinanceMonthlyTrend({
+        ...monthlyTrendParams,
+        asOf: asOfMonthKey ? afghanMonthKeyBounds(asOfMonthKey).start : new Date()
+      })
     );
     return res.json({ success: true, months });
   } catch (error) {
@@ -6665,8 +6699,10 @@ router.get('/admin/summary', requireAuth, requireRole(['admin']), requirePermiss
     );
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    // "This month" is the current Afghan solar month. The Gregorian month used
+    // before (Sep 1 = 10 Sonbola) never lined up with any month the finance
+    // office selects, so this figure disagreed with every monthly report.
+    const currentMonth = afghanMonthKeyBounds(toAfghanMonthKey(now));
 
     const [pendingReceipts, overdueBills, billTotals, today, monthly, topDebtorsAgg, pendingByStageAgg, reliefRows] = await Promise.all([
       FeePayment.countDocuments(withSchoolScope({ status: 'pending' })),
@@ -6689,7 +6725,7 @@ router.get('/admin/summary', requireAuth, requireRole(['admin']), requirePermiss
       FeePayment.find(withSchoolScope({ status: 'approved', paidAt: { $gte: startOfDay } }))
         .select('amount feeOrderId allocations')
         .lean(),
-      FeePayment.find(withSchoolScope({ status: 'approved', paidAt: { $gte: startOfMonth, $lt: endOfMonth } }))
+      FeePayment.find(withSchoolScope({ status: 'approved', paidAt: { $gte: currentMonth.start, $lte: currentMonth.end } }))
         .select('amount feeOrderId allocations')
         .lean(),
       FeeOrder.aggregate([
@@ -6782,6 +6818,8 @@ router.get('/admin/summary', requireAuth, requireRole(['admin']), requirePermiss
         overdueBills,
         todayCollection,
         monthCollection,
+        monthKey: currentMonth.monthKey,
+        monthLabel: formatAfghanMonthKeyLabel(currentMonth.monthKey),
         totalDue,
         totalPaid,
         totalOutstanding,
@@ -6845,6 +6883,7 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       feeType = 'tuition',
       feePlanId = '',
       dueDate,
+      billingMonth = '',
       issuedAt,
       periodType,
       periodLabel,
@@ -6866,6 +6905,10 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
     const dueDateValue = parseDateSafe(dueDate, null);
     if (!dueDateValue) {
       return res.status(400).json({ success: false, message: 'تاریخ مهلت پرداخت معتبر نیست.' });
+    }
+    const billMonth = resolveBillingMonth({ billingMonth, dueDate });
+    if (billMonth.error) {
+      return res.status(400).json({ success: false, message: billMonth.error });
     }
     const issueDateValue = parseDateSafe(issuedAt, new Date());
 
@@ -7079,10 +7122,13 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       .populate('course', 'title category')
       .populate('classId', 'title code gradeLevel section');
     invalidateFinanceReportCache();
+    const billingMonthLabel = formatAfghanMonthKeyLabel(billMonth.monthKey);
     res.status(201).json({
       success: true,
       item,
-      message: 'بل با موفقیت ایجاد شد.',
+      billingMonth: billMonth.monthKey,
+      billingMonthLabel,
+      message: billingMonthLabel ? `بل برای ماه ${billingMonthLabel} با موفقیت ایجاد شد.` : 'بل با موفقیت ایجاد شد.',
       ...(studentStatusWarning ? { studentStatusWarning } : {})
     });
   } catch (error) {
@@ -7139,7 +7185,8 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
       onlyDebtors,
       studentMembershipId,
       includeFutureMonths,
-      futureMonthCount
+      futureMonthCount,
+      billingMonth = ''
     } = req.body || {};
 
     if ((!classId && !inputCourseId) || !dueDate) {
@@ -7148,6 +7195,8 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
 
     const dueDateValue = parseDateSafe(dueDate, null);
     if (!dueDateValue) return res.status(400).json({ success: false, message: 'تاریخ مهلت پرداخت معتبر نیست.' });
+    const billMonth = resolveBillingMonth({ billingMonth, dueDate });
+    if (billMonth.error) return res.status(400).json({ success: false, message: billMonth.error });
     const issueDateValue = parseDateSafe(issuedAt, new Date());
 
     const normalizedPeriodType = String(periodType || '').trim() ? normalizeBillPeriodType(periodType) : '';
@@ -7247,6 +7296,7 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
           outstandingAmount: isOpen ? roundMoney(linkedOrder.outstandingAmount) : 0
         };
       }
+      const itemMonthKey = toAfghanMonthKey(candidate.dueDate || dueDateValue);
       items.push({
         studentId: candidate.student,
         studentMembershipId: candidate.studentMembershipId,
@@ -7258,6 +7308,8 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
         lineItems: candidate.lineItems,
         adjustments: candidate.adjustments,
         dueDate: candidate.dueDate || dueDateValue,
+        billingMonth: itemMonthKey,
+        billingMonthLabel: formatAfghanMonthKeyLabel(itemMonthKey),
         periodType: candidate.periodType || effectivePeriodType,
         periodLabel: candidate.periodLabel || normalizedPeriodLabel,
         term: candidate.term || normalizedTerm,
@@ -7265,9 +7317,14 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
       });
     }
 
+    // An advance (multi-month) preview spans several months; each item still
+    // carries its own billingMonth.
+    const spansSeveralMonths = [true, 'true', 1, '1'].includes(includeFutureMonths);
     return res.json({
       success: true,
       periodType: effectivePeriodType,
+      billingMonth: spansSeveralMonths ? '' : billMonth.monthKey,
+      billingMonthLabel: spansSeveralMonths ? '' : formatAfghanMonthKeyLabel(billMonth.monthKey),
       feePlan: preview.feePlan,
       items,
       excluded: preview.excluded,
@@ -7308,13 +7365,16 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       onlyDebtors,
       studentMembershipId,
       includeFutureMonths,
-      futureMonthCount
+      futureMonthCount,
+      billingMonth = ''
     } = req.body || {};
     if ((!classId && !inputCourseId) || !dueDate) {
       return res.status(400).json({ success: false, message: 'شناسه صنف و مهلت پرداخت الزامی است.' });
     }
     const dueDateValue = parseDateSafe(dueDate, null);
     if (!dueDateValue) return res.status(400).json({ success: false, message: 'تاریخ مهلت پرداخت معتبر نیست.' });
+    const billMonth = resolveBillingMonth({ billingMonth, dueDate });
+    if (billMonth.error) return res.status(400).json({ success: false, message: billMonth.error });
     const issueDateValue = parseDateSafe(issuedAt, new Date());
 
     const normalizedPeriodType = String(periodType || '').trim() ? normalizeBillPeriodType(periodType) : '';
@@ -7560,9 +7620,13 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       existingAmount = roundMoney(existingOpenOrders.reduce((sum, item) => sum + Number(item.outstandingAmount || 0), 0));
     }
 
+    // An advance (multi-month) run covers several months, so only a
+    // single-month run names its month.
+    const spansSeveralMonths = [true, 'true', 1, '1'].includes(includeFutureMonths);
+    const billingMonthLabel = spansSeveralMonths ? '' : formatAfghanMonthKeyLabel(billMonth.monthKey);
     res.json({
       success: true,
-      message: `صدور گروهی انجام شد: ${created} بل ایجاد شد، ${skipped} مورد رد یا تکراری بود.`,
+      message: `صدور گروهی${billingMonthLabel ? ` برای ماه ${billingMonthLabel}` : ''} انجام شد: ${created} بل ایجاد شد، ${skipped} مورد رد یا تکراری بود.`,
       created,
       createdAmount,
       createdFeeOrderIds,
@@ -7570,6 +7634,8 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       existingAmount,
       skipped,
       periodType: effectivePeriodType,
+      billingMonth: spansSeveralMonths ? '' : billMonth.monthKey,
+      billingMonthLabel,
       feePlan: preview.feePlan
     });
   } catch (error) {
@@ -9636,11 +9702,23 @@ async function buildFinanceReportPdfPayload(reportKey, { scope, query = {} } = {
   // "only bills from this window" and is exactly what made a debtors PDF
   // look like it was missing older debts. Every other report here is a real
   // issued/paid-in-window range, so only this one gets the "as of" phrasing.
+  // Dates print in the Afghan calendar - the query carries the Gregorian
+  // "YYYY-MM-DD" the date pickers send, which used to be printed as-is and
+  // read like a different range than the one picked on the page. The anomaly
+  // and audit reports are current snapshots (they never read the range), so
+  // they say that instead of printing a range they don't apply.
+  const formatRangeDate = (value) => {
+    if (!value) return '...';
+    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value).trim());
+    return formatReportDateLabel(dateOnly ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3])) : value);
+  };
   const dateLabel = reportKey === 'debtors'
-    ? (query.dateTo ? `وضعیت باقیات تا تاریخ: ${query.dateTo}` : '')
+    ? (query.dateTo ? `وضعیت باقیات تا تاریخ: ${formatRangeDate(query.dateTo)}` : '')
     : reportKey === 'monthly_summary'
-      ? (query.month ? `ماه: ${query.month}` : '')
-      : (query.dateFrom || query.dateTo ? `بازه: ${query.dateFrom || '...'} تا ${query.dateTo || '...'}` : '');
+      ? (query.month ? `ماه: ${formatAfghanMonthKeyLabel(query.month) || query.month}` : '')
+      : reportKey === 'anomalies' || reportKey === 'audit_timeline'
+        ? 'وضعیت فعلی (فیلتر تاریخ بر این گزارش اعمال نمی‌شود)'
+        : (query.dateFrom || query.dateTo ? `بازه: ${formatRangeDate(query.dateFrom)} تا ${formatRangeDate(query.dateTo)}` : '');
   const filtersLabel = [
     scope.schoolClass?.title ? `صنف: ${scope.schoolClass.title}` : 'صنف: همه صنف‌ها',
     dateLabel
@@ -11555,15 +11633,41 @@ router.get('/admin/reports/audit-package.csv', requireAuth, requireRole(['admin'
 
 router.get('/admin/reports/export.csv', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const { status = '', classId = '', courseId = '' } = req.query || {};
+    const { status = '', classId = '', courseId = '', dateFrom = '', dateTo = '' } = req.query || {};
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
     const scope = await resolveFinanceScope({ classId, courseId, syncMissingCourse: false });
     if (scope.error) return res.status(400).json({ success: false, message: scope.error });
+    if (scope.schoolClass?.schoolId && String(scope.schoolClass.schoolId) !== String(schoolContext.schoolId)) {
+      return res.status(403).json({ success: false, message: 'صنف انتخاب‌شده به مکتب فعال تعلق ندارد.' });
+    }
     if (normalizeScopeText(courseId) && !normalizeScopeText(classId) && scope.classId) {
       setLegacyScopeHeaders(res, `/api/finance/admin/reports/export.csv?classId=${scope.classId}`);
     }
     const filter = {};
     if (status) filter.status = status;
+    // Only the active school's bills - without this an export with no class
+    // picked listed every school's bills.
+    const schoolClassIds = (await SchoolClass.find({ schoolId: schoolContext.schoolId }).select('_id').lean())
+      .map((item) => item._id);
+    addFilterClause(filter, {
+      $or: [
+        { schoolId: schoolContext.schoolId },
+        { schoolId: null, classId: { $in: schoolClassIds } }
+      ]
+    });
     addFilterClause(filter, buildScopedCourseFilter(scope));
+    // Same range and basis as the finance dashboard: bills whose bill month
+    // (due date) falls inside the "از تاریخ/تا تاریخ" picked on the page.
+    const rangeStart = parseDateSafe(String(dateFrom || '').trim() ? `${String(dateFrom).trim()}T00:00:00.000Z` : '', null);
+    const rangeEnd = parseDateSafe(String(dateTo || '').trim() ? `${String(dateTo).trim()}T23:59:59.999Z` : '', null);
+    if (rangeStart || rangeEnd) {
+      const range = {
+        ...(rangeStart ? { $gte: rangeStart } : {}),
+        ...(rangeEnd ? { $lte: rangeEnd } : {})
+      };
+      addFilterClause(filter, { $or: [{ dueDate: range }, { dueDate: null, issuedAt: range }] });
+    }
     const items = await FinanceBill.find(filter)
       .populate('student', 'name email')
       .populate('course', 'title')

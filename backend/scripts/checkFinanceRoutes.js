@@ -5365,24 +5365,37 @@ async function run() {
       });
 
       try {
+        const body = {
+          studentId: IDS.student2,
+          classId: IDS.class1,
+          amountSource: 'plan',
+          feePlanId: monthlyPlanId,
+          feeType: 'tuition',
+          dueDate: '2026-08-21',
+          issuedAt: '2026-03-06',
+          academicYear: '1405'
+        };
+        const baselineCount = bills.length;
+        // 2026-08-21 is 30 Asad 1405: a Sonbola bill cannot be due then.
+        const mismatched = await request(server, '/api/finance/admin/bills', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: { ...body, billingMonth: '1405-06' }
+        });
+        assertCase(mismatched.status === 400, `expected 400 for a due date outside the bill month, received ${mismatched.status}`);
+        assertCase(bills.length === baselineCount, 'expected no bill when the due date is outside the bill month');
+
         const response = await request(server, '/api/finance/admin/bills', {
           method: 'POST',
           user: financeManagerUser,
-          body: {
-            studentId: IDS.student2,
-            classId: IDS.class1,
-            amountSource: 'plan',
-            feePlanId: monthlyPlanId,
-            feeType: 'tuition',
-            dueDate: '2026-08-21',
-            issuedAt: '2026-03-06',
-            academicYear: '1405'
-          }
+          body
         });
         assertCase(response.status === 201, `expected 201, received ${response.status}: ${response.text}`);
         assertCase(String(response.data?.item?.periodType || '') === 'monthly', 'expected periodType to be derived from the monthly plan');
         assertCase(String(response.data?.item?.term || '') === 'ترم اول', 'expected term to be derived from the selected plan');
         assertCase(Number(response.data?.item?.amountOriginal || 0) === 725, 'expected tuition amount from the selected monthly plan');
+        assertCase(response.data?.billingMonth === '1405-05', `expected the bill month to follow the due date (1405-05), received ${response.data?.billingMonth}`);
+        assertCase(String(response.data?.message || '').includes('اسد'), 'expected the success message to name the bill month');
       } finally {
         feePlans.pop();
       }
@@ -5806,6 +5819,65 @@ async function run() {
       assertCase(response.data?.periodType === 'monthly', 'expected grouped preview to derive monthly period from its fee plan');
       assertCase(response.data?.summary?.candidateCount === 2, `expected one monthly bill per active membership, received ${response.data?.summary?.candidateCount}`);
       assertCase(Number(response.data?.summary?.totalAmountDue || 0) === 1400, `expected selected month total 1400, received ${response.data?.summary?.totalAmountDue}`);
+      assertCase(response.data?.billingMonth === '1405-02', `expected the preview to name its bill month 1405-02, received ${response.data?.billingMonth}`);
+      assertCase(
+        (response.data?.items || []).every((item) => item.billingMonth === '1405-02' && item.billingMonthLabel),
+        'expected every preview row to carry its bill month'
+      );
+    });
+
+    await check('route smoke: grouped billing refuses a due date outside the chosen bill month', async () => {
+      feePlans.push({
+        _id: 'fee-plan-monthly-bill-month',
+        title: 'Class One 1405 Monthly',
+        schoolId: 'school-1',
+        course: IDS.course1,
+        classId: IDS.class1,
+        academicYear: '1405',
+        academicYearId: 'year-1405',
+        billingFrequency: 'monthly',
+        periodType: 'monthly',
+        tuitionFee: 700,
+        isActive: true,
+        lifecycleStatus: 'active'
+      });
+      const baselineCount = bills.length;
+      const body = {
+        classId: IDS.class1,
+        dueDate: '2026-05-12',
+        issuedAt: '2026-03-06',
+        academicYear: '1405',
+        academicYearId: 'year-1405'
+      };
+      const matching = await request(server, '/api/finance/admin/bills/preview', {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { ...body, billingMonth: '۱۴۰۵-۲' }
+      });
+      const mismatchedPreview = await request(server, '/api/finance/admin/bills/preview', {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { ...body, billingMonth: '1405-03' }
+      });
+      const mismatchedGenerate = await request(server, '/api/finance/admin/bills/generate', {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { ...body, billingMonth: '1405-03' }
+      });
+      const invalidMonth = await request(server, '/api/finance/admin/bills/preview', {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { ...body, billingMonth: '2026-05' }
+      });
+      feePlans.pop();
+
+      assertCase(matching.status === 200, `expected 200 for a due date inside the bill month, received ${matching.status}: ${matching.text}`);
+      assertCase(matching.data?.billingMonth === '1405-02', `expected normalized bill month 1405-02, received ${matching.data?.billingMonth}`);
+      assertCase(mismatchedPreview.status === 400, `expected preview 400 for a due date outside the bill month, received ${mismatchedPreview.status}`);
+      assertCase(String(mismatchedPreview.data?.message || '').includes('ماه بل'), 'expected a Dari bill-month mismatch message');
+      assertCase(mismatchedGenerate.status === 400, `expected generate 400 for a due date outside the bill month, received ${mismatchedGenerate.status}`);
+      assertCase(bills.length === baselineCount, 'expected no bill to be created when the month does not match');
+      assertCase(invalidMonth.status === 400, `expected 400 for a Gregorian month key, received ${invalidMonth.status}`);
     });
 
     await check('route smoke: admin bills list accepts canonical class filter', async () => {

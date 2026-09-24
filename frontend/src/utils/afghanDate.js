@@ -247,3 +247,77 @@ export function afghanSolarToGregorianInput(year, month, day) {
   const { gy, gm, gd } = dayNumberToGregorian(jalaliToDayNumber(jy, jm, jd));
   return `${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}`;
 }
+
+// Solar month keys ("1405-06") - the one month identity bills, month pickers
+// and monthly reports share (same helpers as backend/utils/afghanDate.js).
+// Nothing a school sees is in Gregorian months: Sep 1 is 10 Sonbola, so a
+// Gregorian month never lines up with the month the user picked.
+export function normalizeAfghanMonthKey(value = '') {
+  const match = /^(\d{4})[-/](\d{1,2})$/.exec(toAsciiDigits(value).trim());
+  if (!match) return '';
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (year < 1300 || year > 1500 || month < 1 || month > 12) return '';
+  return `${year}-${String(month).padStart(2, '0')}`;
+}
+
+export function toAfghanMonthKey(value) {
+  const solar = gregorianToAfghanSolar(value);
+  if (!solar || !Number.isInteger(solar.jy) || !Number.isInteger(solar.jm)) return '';
+  return `${solar.jy}-${String(solar.jm).padStart(2, '0')}`;
+}
+
+export function shiftAfghanMonthKey(monthKey = '', delta = 0) {
+  const key = normalizeAfghanMonthKey(monthKey);
+  if (!key) return '';
+  const [year, month] = key.split('-').map(Number);
+  const index = (year * 12) + (month - 1) + Math.trunc(Number(delta) || 0);
+  return `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, '0')}`;
+}
+
+// First and last day of a solar month as Gregorian "YYYY-MM-DD" (the value
+// format AfghanDateInput and the finance range use).
+export function afghanMonthKeyToDateRange(monthKey = '') {
+  const key = normalizeAfghanMonthKey(monthKey);
+  if (!key) return null;
+  const [year, month] = key.split('-').map(Number);
+  const [nextYear, nextMonth] = shiftAfghanMonthKey(key, 1).split('-').map(Number);
+  const from = afghanSolarToGregorianInput(year, month, 1);
+  const nextStart = asDate(afghanSolarToGregorianInput(nextYear, nextMonth, 1));
+  if (!from || !nextStart) return null;
+  const to = toGregorianDateInputValue(new Date(nextStart.getFullYear(), nextStart.getMonth(), nextStart.getDate() - 1));
+  return { from, to };
+}
+
+export function getAfghanMonthLength(monthKey = '') {
+  const range = afghanMonthKeyToDateRange(monthKey);
+  return range ? (gregorianToAfghanSolar(range.to)?.jd || 0) : 0;
+}
+
+export function formatAfghanMonthKeyLabel(monthKey = '') {
+  const key = normalizeAfghanMonthKey(monthKey);
+  if (!key) return '';
+  const [year, month] = key.split('-').map(Number);
+  return `${AFGHAN_SOLAR_MONTHS[month - 1]} ${year.toLocaleString(AFGHAN_NUMBER_LOCALE, { useGrouping: false })}`;
+}
+
+// The solar month a { from, to } range covers exactly (its first through its
+// last day), or '' for any other range.
+export function getAfghanMonthKeyOfRange({ from = '', to = '' } = {}) {
+  const key = toAfghanMonthKey(from);
+  const range = afghanMonthKeyToDateRange(key);
+  if (!range) return '';
+  return range.from === String(from || '').slice(0, 10) && range.to === String(to || '').slice(0, 10) ? key : '';
+}
+
+// Newest first: `future` months ahead of the anchor month down to `past` months before it.
+export function buildAfghanMonthOptions({ anchor = new Date(), past = 18, future = 2 } = {}) {
+  const anchorKey = toAfghanMonthKey(anchor);
+  if (!anchorKey) return [];
+  const options = [];
+  for (let offset = future; offset >= -past; offset -= 1) {
+    const key = shiftAfghanMonthKey(anchorKey, offset);
+    options.push({ key, label: formatAfghanMonthKeyLabel(key) });
+  }
+  return options;
+}

@@ -21,6 +21,12 @@ const {
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
 const { sumPaidRefunds } = require('../utils/financeRefundRecognition');
+const {
+  afghanMonthKeyBounds,
+  formatAfghanMonthKeyLabel,
+  shiftAfghanMonthKey,
+  toAfghanMonthKey
+} = require('../utils/afghanDate');
 
 const CURRENT_MEMBERSHIP_STATUSES = ['active', 'pending', 'suspended', 'transferred_in'];
 
@@ -497,14 +503,16 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
   };
 }
 
-function toMonthKeyFromDate(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-}
-
-function lastNMonthKeys(count = 12, asOf = new Date()) {
+// The trend is bucketed by Afghan solar month ("1405-06"), the months the
+// finance office actually reports in. It used to bucket by Gregorian month and
+// label each bucket with the Afghan month its 1st day fell in, so the row
+// shown as "سنبله" really held 10 Sonbola - 8 Mizan and never matched a
+// Sonbola range picked on the finance page.
+function lastNSolarMonthKeys(count = 12, asOf = new Date()) {
+  const lastKey = toAfghanMonthKey(asOf) || toAfghanMonthKey(new Date());
   const keys = [];
   for (let i = count - 1; i >= 0; i -= 1) {
-    keys.push(toMonthKeyFromDate(new Date(asOf.getFullYear(), asOf.getMonth() - i, 1)));
+    keys.push(shiftAfghanMonthKey(lastKey, -i));
   }
   return keys;
 }
@@ -514,7 +522,7 @@ function lastNMonthKeys(count = 12, asOf = new Date()) {
 // month), not for the full month-close readiness workflow. "Arrears" here
 // means orders due in that month that are still outstanding as of *now*
 // (not a historical point-in-time reconstruction), which is enough for a
-// trend view and stays cheap to compute.
+// trend view and stays cheap to compute. `asOf` picks the last month shown.
 async function buildFinanceMonthlyTrend({
   schoolId = '',
   academicYearId = '',
@@ -525,9 +533,9 @@ async function buildFinanceMonthlyTrend({
   if (!normalizedSchoolId) throw new Error('finance_school_scope_required');
   const normalizedAcademicYearId = normalizeNullableId(academicYearId);
   const monthCount = Math.max(1, Math.min(24, Number(months) || 12));
-  const monthKeys = lastNMonthKeys(monthCount, asOf);
-  const rangeStart = toMonthDateRange(monthKeys[0]).startAt;
-  const rangeEnd = toMonthDateRange(monthKeys[monthKeys.length - 1]).endAt;
+  const monthKeys = lastNSolarMonthKeys(monthCount, asOf);
+  const rangeStart = afghanMonthKeyBounds(monthKeys[0]).start;
+  const rangeEnd = afghanMonthKeyBounds(monthKeys[monthKeys.length - 1]).end;
 
   const scopeFilter = {
     schoolId: normalizedSchoolId,
@@ -553,6 +561,7 @@ async function buildFinanceMonthlyTrend({
 
   const buckets = new Map(monthKeys.map((key) => [key, {
     monthKey: key,
+    monthLabel: formatAfghanMonthKeyLabel(key),
     income: 0,
     refunds: 0,
     expense: 0,
@@ -564,22 +573,22 @@ async function buildFinanceMonthlyTrend({
 
   recognizedPayments.forEach((row) => {
     const paidAt = row.payment?.paidAt;
-    const bucket = paidAt ? buckets.get(toMonthKeyFromDate(new Date(paidAt))) : null;
+    const bucket = paidAt ? buckets.get(toAfghanMonthKey(paidAt)) : null;
     if (bucket) bucket.income = roundMoney(bucket.income + Number(row.recognizedAmount || 0));
   });
 
   expenses.forEach((item) => {
-    const bucket = item?.expenseDate ? buckets.get(toMonthKeyFromDate(new Date(item.expenseDate))) : null;
+    const bucket = item?.expenseDate ? buckets.get(toAfghanMonthKey(item.expenseDate)) : null;
     if (bucket) bucket.expense = roundMoney(bucket.expense + Number(item?.amount || 0));
   });
 
   refunds.forEach((item) => {
-    const bucket = item?.paidAt ? buckets.get(toMonthKeyFromDate(new Date(item.paidAt))) : null;
+    const bucket = item?.paidAt ? buckets.get(toAfghanMonthKey(item.paidAt)) : null;
     if (bucket) bucket.refunds = roundMoney(bucket.refunds + Number(item?.amount || 0));
   });
 
   orders.forEach((item) => {
-    const bucket = item?.dueDate ? buckets.get(toMonthKeyFromDate(new Date(item.dueDate))) : null;
+    const bucket = item?.dueDate ? buckets.get(toAfghanMonthKey(item.dueDate)) : null;
     if (!bucket) return;
     bucket.billsIssuedCount += 1;
     bucket.billsIssuedAmount = roundMoney(bucket.billsIssuedAmount + Number(item?.amountDue || 0));
