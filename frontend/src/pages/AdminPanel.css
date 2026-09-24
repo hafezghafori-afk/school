@@ -7,48 +7,6 @@
   line-height: 1.65;
 }
 
-.admin-page > :is(
-  .admin-hero,
-  .admin-active-school-scope,
-  .admin-ownership-audit,
-  .admin-school-switcher,
-  .admin-stats,
-  .admin-access-note,
-  .admin-access-matrix,
-  .admin-action-strip,
-  .admin-report-audit,
-  .admin-workflow-report,
-  .admin-inbox,
-  .admin-columns,
-  .admin-alerts,
-  .admin-activity
-) {
-  display: none !important;
-}
-
-.admin-page > .admin-orders {
-  display: none !important;
-}
-
-.admin-page > :is(
-  .admin-hero,
-  .admin-active-school-scope,
-  .admin-ownership-audit,
-  .admin-school-switcher,
-  .admin-stats,
-  .admin-access-note,
-  .admin-access-matrix,
-  .admin-action-strip,
-  .admin-report-audit,
-  .admin-workflow-report,
-  .admin-inbox,
-  .admin-columns,
-  .admin-alerts,
-  .admin-activity
-) {
-  display: none !important;
-}
-
 .admin-modern-dashboard {
   display: grid;
   gap: 16px;
