@@ -43,6 +43,7 @@ const CourseDetails = lazy(() => import('./pages/CourseDetails'));
 const InstructorPanel = lazy(() => import('./pages/InstructorPanel'));
 const InstructorPanelInline = lazy(() => import('./pages/InstructorPanelInline'));
 const AdminCommunications = lazy(() => import('./pages/AdminCommunications'));
+const AdminNotifications = lazy(() => import('./pages/AdminNotifications'));
 const Profile = lazy(() => import('./pages/Profile'));
 const QuizBuilder = lazy(() => import('./pages/QuizBuilder'));
 const GradeDetails = lazy(() => import('./pages/GradeDetails'));
@@ -3413,8 +3414,10 @@ function AppShell() {
               path="/instructor-inline"
               element={contentRoute(<InstructorPanelInline />, '\u062f\u0633\u062a\u0631\u0633\u06cc \u0633\u0627\u0632\u0646\u062f\u0647 \u0622\u0632\u0645\u0648\u0646 \u0628\u0631\u0627\u06cc \u0627\u06cc\u0646 \u062d\u0633\u0627\u0628 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a.')}
             />
-            {/* «مرکز ارتباطات» جای این صفحه را گرفته — این آدرس مستقیم به تبِ اعلانِ همگانی هدایت می‌شود. */}
-            <Route path="/admin-notifications" element={<Navigate to="/admin-communications?tab=announce" replace />} />
+            <Route
+              path="/admin-notifications"
+              element={adminRoute('manage_finance', <AdminNotifications />, 'دسترسی مدیریت اعلان‌های مالی برای این حساب فعال نیست.')}
+            />
             <Route
               path="/admin-users"
               element={adminRoute(['users.manage', 'users.access_requests.manage', 'users.profile_requests.manage'], <AdminUsers />, 'دسترسی مدیریت کاربران برای این حساب فعال نیست.')}
