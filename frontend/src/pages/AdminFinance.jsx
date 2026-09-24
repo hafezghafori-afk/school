@@ -5,6 +5,7 @@ import './AdminFinance.css';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import AfghanMonthInput from '../components/ui/AfghanMonthInput';
+import MonthCloseBoard, { MonthCloseBanner, MonthCloseVersions, monthCloseLabel } from '../components/finance/MonthCloseBoard';
 import {
   afghanMonthKeyToDateRange,
   afghanSolarToGregorianInput,
@@ -68,8 +69,9 @@ const toInputDate = (value) => {
   return toGregorianDateInputValue(value);
 };
 
-// Label for a Gregorian "YYYY-MM" key - month close, statement batches and
-// delivery campaigns are still keyed by Gregorian month. A Gregorian month
+// Label for a Gregorian "YYYY-MM" key - statement batches and delivery
+// campaigns are still keyed by Gregorian month (month close is keyed by solar
+// month; see monthCloseLabel). A Gregorian month
 // straddles two Afghan months (September = 10 Sonbola - 8 Mizan), so it is
 // shown as the Afghan days it covers; naming it after the Afghan month of its
 // 1st day read as a different month than the one it holds. Solar keys
@@ -744,17 +746,6 @@ const FOLLOW_UP_STATUS_OPTIONS = [
 
 const FOLLOW_UP_LEVEL_LABELS = Object.fromEntries(FOLLOW_UP_LEVEL_OPTIONS.map((item) => [item.value, item.label]));
 const FOLLOW_UP_STATUS_LABELS = Object.fromEntries(FOLLOW_UP_STATUS_OPTIONS.map((item) => [item.value, item.label]));
-
-const canReviewMonthCloseForRole = (role = '', stage = '') => {
-  const normalizedRole = normalizeFinanceRole(role, '');
-  const normalizedStage = normalizeMonthCloseApprovalStage(stage);
-  if (normalizedStage !== 'finance_manager_review' && normalizedStage !== 'finance_lead_review' && normalizedStage !== 'general_president_review') {
-    return false;
-  }
-  if (normalizedRole === 'general_president') return true;
-  if (normalizedRole === 'finance_lead') return normalizedStage === 'finance_lead_review';
-  return normalizedRole === 'finance_manager' && normalizedStage === 'finance_manager_review';
-};
 
 const getStageDefaultLevel = (stage = '') => {
   const normalized = String(stage || '').trim();
@@ -3896,7 +3887,6 @@ export default function AdminFinance() {
     return `${now.getFullYear()}-${m}`;
   }, []);
   const defaultCashierDate = useMemo(() => toInputDate(new Date()), []);
-  const [monthKey, setMonthKey] = useState(defaultMonthKey);
   const [documentBatchForm, setDocumentBatchForm] = useState({
     classId: '',
     academicYearId: '',
@@ -4450,8 +4440,8 @@ export default function AdminFinance() {
       if (defaultAcademicYearId && !deliveryCampaignForm.academicYearId) {
         setDeliveryCampaignForm((prev) => ({ ...prev, academicYearId: defaultAcademicYearId }));
       }
-      if ((defaultMonthKey || monthKey) && !deliveryCampaignForm.monthKey) {
-        setDeliveryCampaignForm((prev) => ({ ...prev, monthKey: prev.monthKey || defaultMonthKey || monthKey }));
+      if (defaultMonthKey && !deliveryCampaignForm.monthKey) {
+        setDeliveryCampaignForm((prev) => ({ ...prev, monthKey: prev.monthKey || defaultMonthKey }));
       }
       if (shouldApplyPaymentWorkspace && paymentsData?.success) {
         setSelectedReceiptId((current) => (
@@ -4960,15 +4950,20 @@ export default function AdminFinance() {
   }, [reliefFocusPage, reliefFocusTotalPages]);
 
   useEffect(() => {
+    // A record the month-close board just returned is kept selected while the
+    // page's own reload has not listed it yet.
+    const selectedIsKnown = Boolean(selectedMonthCloseId) && (
+      closedMonths.some((item) => String(item?._id || item?.id || '') === String(selectedMonthCloseId))
+      || String(selectedMonthCloseDetail?._id || '') === String(selectedMonthCloseId)
+    );
+    if (selectedIsKnown) return;
     if (!closedMonths.length) {
       if (selectedMonthCloseId) setSelectedMonthCloseId('');
       setSelectedMonthCloseDetail(null);
       return;
     }
-    if (!selectedMonthCloseId || !closedMonths.some((item) => String(item?._id || item?.id || '') === String(selectedMonthCloseId))) {
-      setSelectedMonthCloseId(String(closedMonths[0]?._id || closedMonths[0]?.id || ''));
-    }
-  }, [closedMonths, selectedMonthCloseId]);
+    setSelectedMonthCloseId(String(closedMonths[0]?._id || closedMonths[0]?.id || ''));
+  }, [closedMonths, selectedMonthCloseId, selectedMonthCloseDetail]);
 
   useEffect(() => {
     if (!deliveryCampaigns.length) {
@@ -5217,12 +5212,6 @@ export default function AdminFinance() {
         ? selectedMonthClose.approvalTrail
         : []
   ), [selectedMonthCloseDetail?.approvalTrail, selectedMonthClose?.approvalTrail]);
-  const canApproveSelectedMonthClose = Boolean(selectedMonthCloseDetail?.canApprove || selectedMonthClose?.canApprove)
-    || (selectedMonthCloseStatus === 'pending_review' && canReviewMonthCloseForRole(financeRole, selectedMonthCloseStage));
-  const canRejectSelectedMonthClose = Boolean(selectedMonthCloseDetail?.canReject || selectedMonthClose?.canReject)
-    || (selectedMonthCloseStatus === 'pending_review' && canReviewMonthCloseForRole(financeRole, selectedMonthCloseStage));
-  const canReopenSelectedMonthClose = Boolean(selectedMonthCloseDetail?.canReopen || selectedMonthClose?.canReopen)
-    || (financeRole === 'general_president' && selectedMonthCloseStatus === 'closed');
   const filteredDeliveryCampaigns = useMemo(() => (
     deliveryCampaignStatusFilter === 'all'
       ? deliveryCampaigns
@@ -7376,70 +7365,6 @@ export default function AdminFinance() {
     }
   };
 
-  const requestMonthClose = async () => {
-    const note = window.prompt('یادداشت بستن ماه مالی (اختیاری):', '') || '';
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/month-close`, { monthKey, note });
-      if (data?.item?._id) setSelectedMonthCloseId(data.item._id);
-      setMessage(data.message || 'ماه مالی بسته شد');
-      await loadAll();
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const approveMonthClose = async (item = null) => {
-    const targetId = String(item?._id || item?.id || selectedMonthClose?._id || selectedMonthClose?.id || '').trim();
-    if (!targetId) return;
-    const note = window.prompt('یادداشت تایید این مرحله (اختیاری):', '') || '';
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/month-close/${targetId}/approve`, { note });
-      if (data?.item?._id) setSelectedMonthCloseId(data.item._id);
-      setMessage(data.message || 'مرحله بستن ماه مالی تایید شد');
-      await loadAll();
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const rejectMonthClose = async (item = null) => {
-    const targetId = String(item?._id || item?.id || selectedMonthClose?._id || selectedMonthClose?.id || '').trim();
-    if (!targetId) return;
-    const reason = window.prompt('دلیل رد یا برگشت درخواست بستن ماه مالی:', '') || '';
-    if (!reason.trim()) return;
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/month-close/${targetId}/reject`, { reason });
-      if (data?.item?._id) setSelectedMonthCloseId(data.item._id);
-      setMessage(data.message || 'درخواست بستن ماه مالی رد شد');
-      await loadAll();
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const reopenMonthClose = async (item = null) => {
-    const targetId = String(item?._id || item?.id || selectedMonthClose?._id || selectedMonthClose?.id || '').trim();
-    if (!targetId) return;
-    const note = window.prompt('دلیل بازگشایی کنترل‌شده ماه مالی:', '') || '';
-    if (!note.trim()) return;
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/month-close/${targetId}/reopen`, { note });
-      if (data?.item?._id) setSelectedMonthCloseId(data.item._id);
-      setMessage(data.message || 'ماه مالی بازگشایی شد');
-      await loadAll();
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
   const exportMonthCloseSnapshot = async (item = null) => {
     const targetId = String(item?._id || item?.id || selectedMonthClose?._id || selectedMonthClose?.id || '').trim();
     if (!targetId) return;
@@ -7550,7 +7475,7 @@ export default function AdminFinance() {
     const payload = {
       classId: String(documentBatchForm.classId || '').trim(),
       academicYearId: String(documentBatchForm.academicYearId || '').trim(),
-      monthKey: String(documentBatchForm.monthKey || monthKey || '').trim()
+      monthKey: String(documentBatchForm.monthKey || defaultMonthKey || '').trim()
     };
     if (!payload.classId) {
       setMessage('برای بسته گروهی، صنف را انتخاب کنید');
@@ -8400,6 +8325,8 @@ export default function AdminFinance() {
           </div>
         </div>
       ) : null}
+
+      <MonthCloseBanner items={closedMonths} />
 
       <div className="finance-card finance-overview-filter" data-finance-section="overview reports">
         <div className="finance-overview-filter-heading">
@@ -11232,11 +11159,6 @@ export default function AdminFinance() {
         <button type="button" onClick={runReminders} disabled={busy}>اجرای یادآوری</button>
         <button type="button" onClick={exportCsv}>خروجی CSV</button>
         <button type="button" className="secondary" onClick={exportAuditPackageCsv} data-testid="export-audit-package">پکیج حسابرسی CSV</button>
-        <div className="finance-cell-stack">
-          <input value={monthKey} onChange={(e) => setMonthKey(e.target.value)} placeholder="YYYY-MM" />
-          <small>{monthKey ? `ماه مالی میلادی ${monthKey}، یعنی ${toFaMonthKey(monthKey)}` : 'ماه مالی را به شکل YYYY-MM (ماه میلادی) وارد کنید.'}</small>
-        </div>
-        <button type="button" onClick={requestMonthClose} disabled={busy}>درخواست بستن ماه مالی</button>
       </div>
 
       <div className="finance-card finance-report-downloads-card" data-finance-section="reports" data-testid="finance-report-downloads-card">
@@ -12616,15 +12538,148 @@ export default function AdminFinance() {
       </div>
 
       <div className="finance-grid" data-finance-section="reports settings">
-        <div className="finance-card" data-finance-section="reports settings">
-          <h3>ماه‌های بسته شده</h3>
-          {closedMonths.slice(0, 8).map((item) => (
-            <div key={item._id} className="mini-row">
-              <span>{toFaMonthKey(item.monthKey)}</span>
-              <span>{item.closedBy?.name || 'ادمین'}</span>
+        <MonthCloseBoard
+          apiBase={API_BASE}
+          fetchJson={fetchJson}
+          onChanged={(item) => {
+            if (item?._id) setSelectedMonthCloseDetail(item);
+            void loadAll();
+          }}
+          onSelectRecord={(id) => setSelectedMonthCloseId(String(id || ''))}
+          selectedRecordId={selectedMonthCloseId}
+          refreshKey={closedMonths}
+        />
+        {selectedMonthClose ? (
+          <div className="finance-card mcb-snapshot-card" data-finance-section="reports settings" data-testid="month-close-snapshot-card">
+            <div className="finance-card-head">
+              <div>
+                <h3>snapshot ماه مالی {monthCloseLabel(selectedMonthCloseDetail || selectedMonthClose)}</h3>
+                <p className="muted">نمای ثابت از ارقام ماه، بل‌های سررسید گذشته و تسهیلات مالی همان بستن ماه.</p>
+              </div>
+              <div className="finance-chip-group">
+                <label className="finance-inline-filter">
+                  <span>ماه بسته</span>
+                  <select value={String(selectedMonthCloseId || '')} onChange={(e) => setSelectedMonthCloseId(e.target.value)}>
+                    {closedMonths.map((item) => (
+                      <option key={`month-close-select-${item._id || item.id}`} value={String(item._id || item.id || '')}>
+                        {monthCloseLabel(item)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <span className={`finance-chip ${selectedMonthCloseStatus === 'closed' ? 'finance-chip-emerald' : selectedMonthCloseStatus === 'rejected' || selectedMonthCloseStatus === 'reopened' ? 'finance-chip-rose' : 'finance-chip-amber'}`}>
+                  {MONTH_CLOSE_STATUS_UI_LABELS[selectedMonthCloseStatus] || selectedMonthCloseStatus}
+                </span>
+                <span className="finance-chip finance-chip-muted">
+                  {MONTH_CLOSE_STAGE_UI_LABELS[selectedMonthCloseStage] || selectedMonthCloseStage}
+                </span>
+                <button type="button" className="secondary" onClick={() => exportMonthCloseSnapshot(selectedMonthClose)} disabled={busy} data-testid="export-month-close-snapshot">خروجی CSV</button>
+                <button type="button" className="secondary" onClick={() => exportMonthClosePdfPack(selectedMonthClose)} disabled={busy} data-testid="export-month-close-pdf">بسته پی‌دی‌اف</button>
+              </div>
             </div>
-          ))}
-        </div>
+            <div className="finance-kpi-grid finance-kpi-grid-dense">
+              <div className="finance-kpi-item">
+                <span>بل‌های ماه</span>
+                <strong>{fmt(monthCloseSnapshot?.totals?.ordersIssuedCount || 0)}</strong>
+              </div>
+              <div className="finance-kpi-item">
+                <span>وصول تاییدشده</span>
+                <strong>{fmt(monthCloseSnapshot?.totals?.approvedPaymentAmount || 0)} AFN</strong>
+              </div>
+              <div className="finance-kpi-item finance-kpi-item-accent">
+                <span>مانده ایستا</span>
+                <strong>{fmt(monthCloseSnapshot?.totals?.standingOutstandingAmount || 0)} AFN</strong>
+              </div>
+            </div>
+            <div className="finance-subcard-list">
+              <div className="mini-row">
+                <span>سررسید گذشته</span>
+                <span>{fmt(monthCloseSnapshot?.aging?.totalRemaining || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>تسهیلات فعال</span>
+                <span>{fmt(monthCloseSnapshot?.totals?.activeReliefs || 0)} / {fmt(monthCloseSnapshot?.totals?.fixedReliefAmount || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>در انتظار تایید</span>
+                <span>{fmt(monthCloseSnapshot?.totals?.pendingPaymentCount || 0)} / {fmt(monthCloseSnapshot?.totals?.pendingPaymentAmount || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>مصارف تاییدشده ماه</span>
+                <span>{fmt(monthCloseSnapshot?.totals?.approvedExpenseCount || 0)} / {fmt(monthCloseSnapshot?.totals?.approvedExpenseAmount || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>مصارف در انتظار</span>
+                <span>{fmt(monthCloseSnapshot?.totals?.pendingExpenseCount || 0)} / {fmt(monthCloseSnapshot?.totals?.pendingExpenseAmount || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>خالص نقد ماه</span>
+                <span>{fmt(monthCloseSnapshot?.totals?.netCashAmount || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>خالص ثبت خزانه</span>
+                <span>{fmt(monthCloseSnapshot?.totals?.treasuryNetAmount || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>یادداشت بستن ماه</span>
+                <span>{selectedMonthCloseDetail?.requestNote || selectedMonthClose?.requestNote || selectedMonthClose.note || selectedMonthClose.reopenNote || 'بدون یادداشت'}</span>
+              </div>
+              <div className="mini-row">
+                <span>وضعیت آمادگی</span>
+                <span>{monthCloseReadiness.readyToApprove ? 'آماده برای تایید' : 'دارای مانع فعال'}</span>
+              </div>
+              <div className="mini-row">
+                <span>ثبت‌کننده درخواست</span>
+                <span>{selectedMonthCloseDetail?.requestedBy?.name || selectedMonthClose?.requestedBy?.name || selectedMonthCloseDetail?.closedBy?.name || selectedMonthClose?.closedBy?.name || 'ثبت نشده'}</span>
+              </div>
+              <div className="mini-row">
+                <span>مرحله جاری</span>
+                <span>{MONTH_CLOSE_STAGE_UI_LABELS[selectedMonthCloseStage] || selectedMonthCloseStage}</span>
+              </div>
+              {(monthCloseSnapshot?.classes || []).slice(0, 4).map((row) => (
+                <div key={`month-close-class-${row.classId || row.title}`} className="mini-row">
+                  <span>{row.title || 'صنف'}</span>
+                  <span>{fmt(row.totalOutstanding || 0)} AFN</span>
+                </div>
+              ))}
+            </div>
+            {!!monthCloseReadiness.blockingIssues?.length && (
+              <div className="finance-subcard-list">
+                {monthCloseReadiness.blockingIssues.map((issue, index) => (
+                  <div key={`month-close-blocking-${issue.code || index}`} className="mini-row">
+                    <span>{issue.label || 'مانع تایید'}</span>
+                    <span>{issue.count != null ? fmt(issue.count) : fmt(issue.amount || 0)}{issue.amount != null ? ' AFN' : ''}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!!monthCloseReadiness.warningIssues?.length && (
+              <div className="finance-subcard-list">
+                {monthCloseReadiness.warningIssues.map((issue, index) => (
+                  <div key={`month-close-warning-${issue.code || index}`} className="mini-row">
+                    <span>{issue.label || 'هشدار ماه مالی'}</span>
+                    <span>{issue.count != null ? fmt(issue.count) : fmt(issue.amount || 0)}{issue.amount != null ? ' AFN' : ''}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!!monthCloseApprovalTrail.length && (
+              <div className="finance-subcard-list" data-testid="month-close-approval-trail">
+                {monthCloseApprovalTrail.slice().reverse().map((entry, index) => (
+                  <div key={`month-close-trail-${index}`} className="mini-row">
+                    <span>{ADMIN_LEVEL_UI_LABELS[entry?.level] || entry?.level || 'مدیریت مالی'}</span>
+                    <span>
+                      {[entry?.action || '', entry?.by?.name || '', entry?.note || entry?.reason || '']
+                        .filter(Boolean)
+                        .join(' | ') || 'بدون جزئیات'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <MonthCloseVersions record={selectedMonthCloseDetail || selectedMonthClose} />
+          </div>
+        ) : null}
       </div>
 
       <div className="finance-grid" data-finance-section="anomalies">
@@ -12938,145 +12993,6 @@ export default function AdminFinance() {
           )}
           {!visibleAnomalies.length && <p className="muted">در این محدوده فعلاً ناهنجاری مالی فعالی دیده نشد.</p>}
         </div>
-        {selectedMonthClose ? (
-          <div className="finance-card" data-finance-section="overview settings reports" data-testid="month-close-snapshot-card">
-            <div className="finance-card-head">
-              <div>
-                <h3>snapshot ماه مالی {toFaMonthKey(selectedMonthClose.monthKey)}</h3>
-                <p className="muted">نمای ثابت از ارقام ماه، بل‌های سررسید گذشته و تسهیلات مالی همان بستن ماه.</p>
-              </div>
-              <div className="finance-chip-group">
-                <label className="finance-inline-filter">
-                  <span>ماه بسته</span>
-                  <select value={String(selectedMonthCloseId || '')} onChange={(e) => setSelectedMonthCloseId(e.target.value)}>
-                    {closedMonths.map((item) => (
-                      <option key={`month-close-select-${item._id || item.id}`} value={String(item._id || item.id || '')}>
-                        {toFaMonthKey(item.monthKey)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <span className={`finance-chip ${selectedMonthCloseStatus === 'closed' ? 'finance-chip-emerald' : selectedMonthCloseStatus === 'rejected' || selectedMonthCloseStatus === 'reopened' ? 'finance-chip-rose' : 'finance-chip-amber'}`}>
-                  {MONTH_CLOSE_STATUS_UI_LABELS[selectedMonthCloseStatus] || selectedMonthCloseStatus}
-                </span>
-                <span className="finance-chip finance-chip-muted">
-                  {MONTH_CLOSE_STAGE_UI_LABELS[selectedMonthCloseStage] || selectedMonthCloseStage}
-                </span>
-                <button type="button" className="secondary" onClick={() => exportMonthCloseSnapshot(selectedMonthClose)} disabled={busy} data-testid="export-month-close-snapshot">خروجی CSV</button>
-                <button type="button" className="secondary" onClick={() => exportMonthClosePdfPack(selectedMonthClose)} disabled={busy} data-testid="export-month-close-pdf">بسته پی‌دی‌اف</button>
-                {canApproveSelectedMonthClose ? (
-                  <button type="button" onClick={() => approveMonthClose(selectedMonthClose)} disabled={busy} data-testid="approve-month-close">تایید مرحله</button>
-                ) : null}
-                {canRejectSelectedMonthClose ? (
-                  <button type="button" className="danger" onClick={() => rejectMonthClose(selectedMonthClose)} disabled={busy} data-testid="reject-month-close">برگشت برای اصلاح</button>
-                ) : null}
-                {canReopenSelectedMonthClose ? (
-                  <button type="button" className="secondary" onClick={() => reopenMonthClose(selectedMonthClose)} disabled={busy}>بازگشایی</button>
-                ) : null}
-              </div>
-            </div>
-            <div className="finance-kpi-grid finance-kpi-grid-dense">
-              <div className="finance-kpi-item">
-                <span>بل‌های ماه</span>
-                <strong>{fmt(monthCloseSnapshot?.totals?.ordersIssuedCount || 0)}</strong>
-              </div>
-              <div className="finance-kpi-item">
-                <span>وصول تاییدشده</span>
-                <strong>{fmt(monthCloseSnapshot?.totals?.approvedPaymentAmount || 0)} AFN</strong>
-              </div>
-              <div className="finance-kpi-item finance-kpi-item-accent">
-                <span>مانده ایستا</span>
-                <strong>{fmt(monthCloseSnapshot?.totals?.standingOutstandingAmount || 0)} AFN</strong>
-              </div>
-            </div>
-            <div className="finance-subcard-list">
-              <div className="mini-row">
-                <span>سررسید گذشته</span>
-                <span>{fmt(monthCloseSnapshot?.aging?.totalRemaining || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>تسهیلات فعال</span>
-                <span>{fmt(monthCloseSnapshot?.totals?.activeReliefs || 0)} / {fmt(monthCloseSnapshot?.totals?.fixedReliefAmount || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>در انتظار تایید</span>
-                <span>{fmt(monthCloseSnapshot?.totals?.pendingPaymentCount || 0)} / {fmt(monthCloseSnapshot?.totals?.pendingPaymentAmount || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>مصارف تاییدشده ماه</span>
-                <span>{fmt(monthCloseSnapshot?.totals?.approvedExpenseCount || 0)} / {fmt(monthCloseSnapshot?.totals?.approvedExpenseAmount || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>مصارف در انتظار</span>
-                <span>{fmt(monthCloseSnapshot?.totals?.pendingExpenseCount || 0)} / {fmt(monthCloseSnapshot?.totals?.pendingExpenseAmount || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>خالص نقد ماه</span>
-                <span>{fmt(monthCloseSnapshot?.totals?.netCashAmount || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>خالص ثبت خزانه</span>
-                <span>{fmt(monthCloseSnapshot?.totals?.treasuryNetAmount || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>یادداشت بستن ماه</span>
-                <span>{selectedMonthCloseDetail?.requestNote || selectedMonthClose?.requestNote || selectedMonthClose.note || selectedMonthClose.reopenNote || 'بدون یادداشت'}</span>
-              </div>
-              <div className="mini-row">
-                <span>وضعیت آمادگی</span>
-                <span>{monthCloseReadiness.readyToApprove ? 'آماده برای تایید' : 'دارای مانع فعال'}</span>
-              </div>
-              <div className="mini-row">
-                <span>ثبت‌کننده درخواست</span>
-                <span>{selectedMonthCloseDetail?.requestedBy?.name || selectedMonthClose?.requestedBy?.name || selectedMonthCloseDetail?.closedBy?.name || selectedMonthClose?.closedBy?.name || 'ثبت نشده'}</span>
-              </div>
-              <div className="mini-row">
-                <span>مرحله جاری</span>
-                <span>{MONTH_CLOSE_STAGE_UI_LABELS[selectedMonthCloseStage] || selectedMonthCloseStage}</span>
-              </div>
-              {(monthCloseSnapshot?.classes || []).slice(0, 4).map((row) => (
-                <div key={`month-close-class-${row.classId || row.title}`} className="mini-row">
-                  <span>{row.title || 'صنف'}</span>
-                  <span>{fmt(row.totalOutstanding || 0)} AFN</span>
-                </div>
-              ))}
-            </div>
-            {!!monthCloseReadiness.blockingIssues?.length && (
-              <div className="finance-subcard-list">
-                {monthCloseReadiness.blockingIssues.map((issue, index) => (
-                  <div key={`month-close-blocking-${issue.code || index}`} className="mini-row">
-                    <span>{issue.label || 'مانع تایید'}</span>
-                    <span>{issue.count != null ? fmt(issue.count) : fmt(issue.amount || 0)}{issue.amount != null ? ' AFN' : ''}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {!!monthCloseReadiness.warningIssues?.length && (
-              <div className="finance-subcard-list">
-                {monthCloseReadiness.warningIssues.map((issue, index) => (
-                  <div key={`month-close-warning-${issue.code || index}`} className="mini-row">
-                    <span>{issue.label || 'هشدار ماه مالی'}</span>
-                    <span>{issue.count != null ? fmt(issue.count) : fmt(issue.amount || 0)}{issue.amount != null ? ' AFN' : ''}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {!!monthCloseApprovalTrail.length && (
-              <div className="finance-subcard-list" data-testid="month-close-approval-trail">
-                {monthCloseApprovalTrail.slice().reverse().map((entry, index) => (
-                  <div key={`month-close-trail-${index}`} className="mini-row">
-                    <span>{ADMIN_LEVEL_UI_LABELS[entry?.level] || entry?.level || 'مدیریت مالی'}</span>
-                    <span>
-                      {[entry?.action || '', entry?.by?.name || '', entry?.note || entry?.reason || '']
-                        .filter(Boolean)
-                        .join(' | ') || 'بدون جزئیات'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : null}
       </div>
 
       {false && <div className="finance-card" data-finance-section="reports settings" data-testid="finance-delivery-provider-config-card">

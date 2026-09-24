@@ -2778,11 +2778,13 @@ test.describe('finance workflow', () => {
     await page.route('**/api/finance/admin/month-close', async (route) => {
       if (route.request().method() === 'POST') {
         const body = route.request().postDataJSON();
-        const monthKey = String(body?.monthKey || '2026-03');
+        const monthKey = String(body?.monthKey || '1405-01');
         const note = String(body?.note || 'Close pack ready');
         const nextItem = serializeMonthClose(buildMonthCloseItem({
           _id: `month-close-${monthKey}`,
           monthKey,
+          monthLabel: monthKey === '1405-01' ? 'حمل ۱۴۰۵' : monthKey,
+          calendar: 'shamsi',
           note,
           requestNote: note
         }));
@@ -2926,6 +2928,53 @@ test.describe('finance workflow', () => {
         status: item ? 200 : 404,
         contentType: 'application/json',
         body: JSON.stringify(item ? { success: true, item } : { success: false, message: 'Not found' })
+      });
+    });
+
+    // The month-close board: Hamal 1405 is the next month to close.
+    await page.route('**/api/finance/admin/month-close/board*', async (route) => {
+      const hamal = monthCloseState.items.find((item) => item.monthKey === '1405-01') || null;
+      const months = [
+        { monthKey: '1405-01', label: 'حمل ۱۴۰۵', window: { startAt: '2026-03-20T19:30:00.000Z', endAt: '2026-04-20T19:29:59.999Z' } },
+        { monthKey: '1405-02', label: 'ثور ۱۴۰۵', window: { startAt: '2026-04-20T19:30:00.000Z', endAt: '2026-05-21T19:29:59.999Z' } }
+      ].map((month, index) => ({
+        ...month,
+        ended: true,
+        covered: false,
+        state: index === 0 && hamal ? 'in_review' : 'open',
+        canRequest: index === 0 && !hamal,
+        record: index === 0 && hamal ? serializeMonthClose(hamal) : null
+      }));
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          financialYear: { _id: 'fy-1', title: 'FY 1405', isActive: true, isClosed: false },
+          financialYears: [{ _id: 'fy-1', title: 'FY 1405', isActive: true, isClosed: false }],
+          months,
+          legacy: [],
+          nextMonthKey: '1405-01',
+          reopenDays: { min: 1, max: 7, default: 3 }
+        })
+      });
+    });
+
+    await page.route('**/api/finance/admin/month-close/readiness*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          monthKey: '1405-01',
+          monthLabel: 'حمل ۱۴۰۵',
+          calendar: 'shamsi',
+          financialYear: { _id: 'fy-1', title: 'FY 1405' },
+          window: { startAt: '2026-03-20T19:30:00.000Z', endAt: '2026-04-20T19:29:59.999Z' },
+          readiness: { readyToApprove: true, blockingIssues: [], warningIssues: [] },
+          totals: { ordersIssuedCount: 3, ordersIssuedAmount: 1500 },
+          canRequest: true
+        })
       });
     });
 
@@ -3624,14 +3673,21 @@ test.describe('finance workflow', () => {
     await page.getByRole('button', { name: 'خروجی CSV' }).click();
     await expect.poll(() => exportCalls).toBe(1);
     await expect.poll(() => lastExportUrl).toContain('/api/finance/admin/reports/export.csv');
-    page.once('dialog', (dialog) => dialog.accept('Close pack ready'));
-    await page.getByRole('button', { name: 'درخواست بستن ماه مالی' }).click();
-    await expect(page.getByTestId('month-close-snapshot-card')).toContainText('2026-03');
+    await page.getByTestId('month-close-request-1405-01').click();
+    const monthCloseRequestDialog = page.getByTestId('month-close-request-dialog');
+    await expect(monthCloseRequestDialog.getByTestId('month-close-ready')).toBeVisible();
+    await monthCloseRequestDialog.getByTestId('month-close-dialog-note').fill('Close pack ready');
+    await monthCloseRequestDialog.getByTestId('month-close-dialog-submit').click();
+    await expect(monthCloseRequestDialog).toHaveCount(0);
+    await expect(page.getByTestId('month-close-snapshot-card')).toContainText('حمل ۱۴۰۵');
     await expect(page.getByTestId('month-close-snapshot-card')).toContainText('دارای مانع فعال');
     await expect(page.getByTestId('month-close-approval-trail')).toContainText('submit');
 
-    page.once('dialog', (dialog) => dialog.accept('Manager approved the package'));
-    await page.getByTestId('approve-month-close').click();
+    await page.getByTestId('month-close-approve-1405-01').click();
+    const monthCloseApproveDialog = page.getByTestId('month-close-approve-dialog');
+    await monthCloseApproveDialog.getByTestId('month-close-dialog-note').fill('Manager approved the package');
+    await monthCloseApproveDialog.getByTestId('month-close-dialog-submit').click();
+    await expect(monthCloseApproveDialog).toHaveCount(0);
     await expect(page.getByTestId('month-close-snapshot-card')).toContainText('در انتظار آمریت مالی');
     await expect(page.getByTestId('month-close-approval-trail')).toContainText('Manager approved the package');
 
