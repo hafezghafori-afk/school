@@ -19,6 +19,13 @@ import { buildStudentSearchBlob as buildSharedStudentSearchBlob } from '../utils
 import { readStoredSchoolId, resolveActiveSchoolContext } from './adminWorkspaceUtils';
 import { apiFetch, failureMessage } from '../utils/apiClient';
 
+// How long one piece of work may hold the page's busy flag before it hands the
+// buttons back on its own. Longer than any healthy save or refresh - apiFetch
+// caps a write at 45s and never retries it - so reaching this means nothing has
+// answered yet, and an operator staring at a dead anomaly inspector is worse
+// off than one told so and left free to look.
+const BUSY_TICKET_CEILING_MS = 45000;
+
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
   const schoolId = readStoredSchoolId();
@@ -2364,8 +2371,43 @@ export default function AdminFinance() {
     const timer = setTimeout(() => setMessageState(''), 6000);
     return () => clearTimeout(timer);
   }, [message]);
-  const [financeDataErrors, setFinanceDataErrors] = useState({ orders: '', payments: '' });
+  const [financeDataErrors, setFinanceDataErrors] = useState({ orders: '', payments: '', anomalies: '' });
   const [busy, setBusy] = useState(false);
+  // `busy` disables every action button on this page, so the question it has to
+  // answer is not "who switched it on" but "is anyone still working". As a bare
+  // boolean it could not: an action switched it on and left switching it off to
+  // refreshPaymentWorkspace, which only did so while it was still the newest
+  // refresh - so a refresh that was superseded, or that never settled, left the
+  // whole anomaly inspector disabled for good with nothing on screen to say
+  // why. Each worker now takes a ticket instead: the flag is on while any
+  // ticket is out, and off the moment the last one comes back. That keeps the
+  // rule the refreshId guard existed to enforce - a superseded refresh cannot
+  // re-enable the page underneath a newer one, because the newer one is still
+  // holding its own ticket - without letting one worker's failure strand
+  // another worker's flag.
+  const busyTicketsRef = useRef(new Set());
+  const busyTicketSeqRef = useRef(0);
+  const holdBusy = () => {
+    const ticket = ++busyTicketSeqRef.current;
+    busyTicketsRef.current.add(ticket);
+    setBusy(true);
+    let ceilingTimer = 0;
+    // Releasing twice is a no-op, so a ticket can come back from a `finally`
+    // and from the ceiling below without the two cancelling each other out.
+    const release = () => {
+      window.clearTimeout(ceilingTimer);
+      if (!busyTicketsRef.current.delete(ticket)) return;
+      if (!busyTicketsRef.current.size) setBusy(false);
+    };
+    // No worker gets to hold the page hostage. An action that awaits a refresh
+    // never reaches its own `finally` while that refresh is hanging, so the
+    // ticket - not the caller - is what has to time out.
+    ceilingTimer = window.setTimeout(() => {
+      release();
+      setMessage('پاسخ سرور برای کار قبلی هنوز نرسیده است. پیش از تلاش دوباره، فهرست را تازه کنید و ببینید ثبت شده است یا نه.');
+    }, BUSY_TICKET_CEILING_MS);
+    return release;
+  };
   const [activeSchoolContext, setActiveSchoolContext] = useState(null);
   const [receiptStatusFilter, setReceiptStatusFilter] = useState('all');
   const [receiptStageFilter, setReceiptStageFilter] = useState('all');
@@ -4141,7 +4183,7 @@ export default function AdminFinance() {
 
   const loadAll = async () => {
     const paymentWorkspaceRefreshId = ++paymentWorkspaceRefreshIdRef.current;
-    setBusy(true);
+    const releaseBusy = holdBusy();
     try {
       const requestedFullOrders = fullOrdersLoadedRef.current;
       const ordersRequestUrl = `${API_BASE}/api/student-finance/orders${requestedFullOrders ? '' : '?view=open'}`;
@@ -4227,7 +4269,8 @@ export default function AdminFinance() {
       if (shouldApplyPaymentWorkspace) {
         setFinanceDataErrors({
           orders: ordersData?.success ? '' : (ordersData?._loadError || ordersData?.message || 'دریافت بل‌ها و باقیات ناموفق بود.'),
-          payments: paymentsData?.success ? '' : (paymentsData?._loadError || paymentsData?.message || 'دریافت پرداخت‌ها و رسیدها ناموفق بود.')
+          payments: paymentsData?.success ? '' : (paymentsData?._loadError || paymentsData?.message || 'دریافت پرداخت‌ها و رسیدها ناموفق بود.'),
+          anomalies: anomaliesData?.success ? '' : (anomaliesData?._loadError || anomaliesData?.message || 'دریافت ناهنجاری‌های مالی ناموفق بود.')
         });
         if (!shouldApplyOrdersResult) {
           setFinanceDataErrors((previous) => ({ ...previous, orders: '' }));
@@ -4386,9 +4429,7 @@ export default function AdminFinance() {
     } catch (error) {
       setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
     } finally {
-      if (paymentWorkspaceRefreshId === paymentWorkspaceRefreshIdRef.current) {
-        setBusy(false);
-      }
+      releaseBusy();
     }
   };
 
@@ -4406,7 +4447,7 @@ export default function AdminFinance() {
     invalidatePreview = true
   } = {}) => {
     const refreshId = ++paymentWorkspaceRefreshIdRef.current;
-    setBusy(true);
+    const releaseBusy = holdBusy();
     if (invalidatePreview) setPaymentPreview(null);
 
     const safeFetchJson = async (url, fallback = { success: false }) => {
@@ -4473,7 +4514,13 @@ export default function AdminFinance() {
       setFinanceDataErrors((prev) => ({
         ...prev,
         orders: ordersData?.success || !shouldApplyOrdersResult ? '' : (ordersData?._loadError || ordersData?.message || 'تازه‌سازی بل‌ها و باقیات ناموفق بود.'),
-        payments: paymentsData?.success ? '' : (paymentsData?._loadError || paymentsData?.message || 'تازه‌سازی پرداخت‌ها و رسیدها ناموفق بود.')
+        payments: paymentsData?.success ? '' : (paymentsData?._loadError || paymentsData?.message || 'تازه‌سازی پرداخت‌ها و رسیدها ناموفق بود.'),
+        // A failed anomalies fetch used to be swallowed whole: the inspector
+        // went on showing the list from before the action, so a note that was
+        // never saved looked saved. Say it in the card instead.
+        anomalies: !includeAnomalies
+          ? prev.anomalies
+          : (anomaliesData?.success ? '' : (anomaliesData?._loadError || anomaliesData?.message || 'تازه‌سازی ناهنجاری‌های مالی ناموفق بود.'))
       }));
       if (paymentsData?.success) {
         const nextPendingReceipts = (paymentsData.items || []).map(toLegacyLikeReceiptRow);
@@ -4501,9 +4548,7 @@ export default function AdminFinance() {
       if (expensesData?.success) setExpenses(expensesData.items || []);
       return true;
     } finally {
-      if (refreshId === paymentWorkspaceRefreshIdRef.current) {
-        setBusy(false);
-      }
+      releaseBusy();
     }
   };
 
@@ -6771,7 +6816,14 @@ export default function AdminFinance() {
       reason: 'membership_ended',
       reasonNote: selectedAnomaly.description || ''
     });
-    await refreshPaymentWorkspace({ includeAnomalies: true });
+    // createRefundCase reports its own failures; this refresh reported none at
+    // all, because a rejection nobody catches in a click handler only ever
+    // reaches the console.
+    try {
+      await refreshPaymentWorkspace({ includeAnomalies: true });
+    } catch (err) {
+      setMessage(err.message);
+    }
   };
 
   const approveRefund = async () => {
@@ -8007,8 +8059,8 @@ export default function AdminFinance() {
 
   const saveAnomalyNote = async () => {
     if (!selectedAnomaly) return;
+    const releaseBusy = holdBusy();
     try {
-      setBusy(true);
       const data = await postJson(
         `${API_BASE}/api/finance/admin/anomalies/${encodeURIComponent(selectedAnomaly.id)}/note`,
         buildAnomalyActionPayload(selectedAnomaly, { note: anomalyWorkflowForm.note })
@@ -8017,14 +8069,15 @@ export default function AdminFinance() {
       await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
-      setBusy(false);
+    } finally {
+      releaseBusy();
     }
   };
 
   const assignAnomaly = async () => {
     if (!selectedAnomaly) return;
+    const releaseBusy = holdBusy();
     try {
-      setBusy(true);
       const data = await postJson(
         `${API_BASE}/api/finance/admin/anomalies/${encodeURIComponent(selectedAnomaly.id)}/assign`,
         buildAnomalyActionPayload(selectedAnomaly, {
@@ -8036,14 +8089,15 @@ export default function AdminFinance() {
       await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
-      setBusy(false);
+    } finally {
+      releaseBusy();
     }
   };
 
   const snoozeAnomaly = async () => {
     if (!selectedAnomaly) return;
+    const releaseBusy = holdBusy();
     try {
-      setBusy(true);
       const data = await postJson(
         `${API_BASE}/api/finance/admin/anomalies/${encodeURIComponent(selectedAnomaly.id)}/snooze`,
         buildAnomalyActionPayload(selectedAnomaly, {
@@ -8055,14 +8109,15 @@ export default function AdminFinance() {
       await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
-      setBusy(false);
+    } finally {
+      releaseBusy();
     }
   };
 
   const resolveAnomaly = async () => {
     if (!selectedAnomaly) return;
+    const releaseBusy = holdBusy();
     try {
-      setBusy(true);
       const data = await postJson(
         `${API_BASE}/api/finance/admin/anomalies/${encodeURIComponent(selectedAnomaly.id)}/resolve`,
         buildAnomalyActionPayload(selectedAnomaly, { note: anomalyWorkflowForm.note })
@@ -8071,14 +8126,15 @@ export default function AdminFinance() {
       await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
-      setBusy(false);
+    } finally {
+      releaseBusy();
     }
   };
 
   const settleAdmissionAnomaly = async (mode = 'paid') => {
     if (!selectedAnomaly) return;
+    const releaseBusy = holdBusy();
     try {
-      setBusy(true);
       const data = await postJson(
         `${API_BASE}/api/finance/admin/anomalies/${encodeURIComponent(selectedAnomaly.id)}/settle-admission`,
         buildAnomalyActionPayload(selectedAnomaly, {
@@ -8090,7 +8146,8 @@ export default function AdminFinance() {
       await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
-      setBusy(false);
+    } finally {
+      releaseBusy();
     }
   };
 
@@ -8117,8 +8174,8 @@ export default function AdminFinance() {
     );
     if (!confirmed) return;
 
+    const releaseBusy = holdBusy();
     try {
-      setBusy(true);
       const data = await postJson(`${API_BASE}/api/finance/admin/anomalies/settle-admission-batch`, {
         classId,
         mode: admissionBatchForm.mode,
@@ -8135,7 +8192,8 @@ export default function AdminFinance() {
       await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
-      setBusy(false);
+    } finally {
+      releaseBusy();
     }
   };
 
@@ -12511,6 +12569,11 @@ export default function AdminFinance() {
               <span className="finance-chip finance-chip-emerald">{visibleAnomalySummary.byWorkflow?.resolved || 0} حل‌شده</span>
             </div>
           </div>
+          {financeDataErrors.anomalies ? (
+            <div className="finance-data-error" role="alert" data-testid="anomaly-refresh-error">
+              تازه‌سازی ناهنجاری‌های مالی ناموفق بود: {financeDataErrors.anomalies}
+            </div>
+          ) : null}
           <div className="receipt-follow-up-grid">
             <label className="finance-inline-filter">
               <span>نوع ناهنجاری</span>
