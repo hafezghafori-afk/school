@@ -1801,6 +1801,7 @@ export default function AdminGovernmentFinance() {
     staffId: '',
     staffName: '',
     grossSalary: '',
+    taxAmount: '',
     paymentDate: '',
     treasuryAccountId: '',
     paymentMethod: 'cash',
@@ -4091,6 +4092,7 @@ export default function AdminGovernmentFinance() {
       if (salaryPaymentDraft.staffId) params.set('staffId', salaryPaymentDraft.staffId);
       else if (salaryPaymentDraft.staffName) params.set('staffName', salaryPaymentDraft.staffName);
       params.set('grossSalary', salaryPaymentDraft.grossSalary);
+      if (salaryPaymentDraft.taxAmount) params.set('taxAmount', salaryPaymentDraft.taxAmount);
       const data = await fetchJson(`/api/finance/admin/staff-advances/salary-preview?${params.toString()}`);
       setSalaryPreview(data || null);
     } catch (error) {
@@ -4112,13 +4114,14 @@ export default function AdminGovernmentFinance() {
         staffId: salaryPaymentDraft.staffId,
         staffName: salaryPaymentDraft.staffName,
         grossSalary: salaryPaymentDraft.grossSalary,
+        taxAmount: salaryPaymentDraft.taxAmount,
         paymentDate: salaryPaymentDraft.paymentDate,
         treasuryAccountId: salaryPaymentDraft.treasuryAccountId,
         paymentMethod: salaryPaymentDraft.paymentMethod,
         note: salaryPaymentDraft.note,
         status: salaryPaymentDraft.status
       });
-      setSalaryPaymentDraft((current) => ({ ...current, grossSalary: '', note: '' }));
+      setSalaryPaymentDraft((current) => ({ ...current, grossSalary: '', taxAmount: '', note: '' }));
       setSalaryPreview(null);
       showMessage('پرداختِ معاش ثبت شد.');
       await loadWorkspace('operations');
@@ -7392,6 +7395,11 @@ export default function AdminGovernmentFinance() {
                   <small>دستی وارد می‌شود.</small>
                 </label>
                 <label className="gov-field">
+                  <span>مالیه بر معاش</span>
+                  <input name="taxAmount" value={salaryPaymentDraft.taxAmount} onChange={handleSalaryPaymentDraftChange} inputMode="numeric" placeholder="۰" />
+                  <small>دستی؛ پیش از کسرِ پیشکی از ناخالص کم می‌شود.</small>
+                </label>
+                <label className="gov-field">
                   <span>تاریخِ پرداخت</span>
                   <AfghanDateInput name="paymentDate" value={salaryPaymentDraft.paymentDate} onChange={(value) => setSalaryPaymentDraft((current) => ({ ...current, paymentDate: value }))} showGregorianEquivalent />
                 </label>
@@ -7441,6 +7449,11 @@ export default function AdminGovernmentFinance() {
                     <strong>{formatMoney(salaryPreview.grossSalary || 0)}</strong>
                     <small>{formatNumber((salaryPreview.openAdvances || []).length)} پیشکیِ باز</small>
                   </div>
+                  <div className="gov-governance-stat" data-tone="sand">
+                    <span>مالیه بر معاش</span>
+                    <strong>{formatMoney(salaryPreview.taxAmount || 0)}</strong>
+                    <small>قابلِ تحویل به ریاستِ عواید</small>
+                  </div>
                   <div className="gov-governance-stat" data-tone="copper">
                     <span>کسرِ پیشکی</span>
                     <strong>{formatMoney(salaryPreview.deductionTotal || 0)}</strong>
@@ -7456,7 +7469,11 @@ export default function AdminGovernmentFinance() {
 
               <div className="gov-approval-rule">
                 هنگامِ تاییدِ نهایی، یک ردیفِ مصرفِ «معاش» برای مبلغِ <strong>خالص</strong> ساخته می‌شود (خزانه فقط خالص را کم می‌کند)
-                و قسطِ کسرشده روی پیشکیِ همان شخص ثبت می‌گردد.
+                و قسطِ کسرشده روی پیشکیِ همان شخص ثبت می‌گردد. مالیهٔ نگه‌داشته‌شده تا زمانِ تحویل به ریاستِ عواید در خزانه می‌ماند؛
+                تحویلِ آن جداگانه به‌عنوانِ یک مصرف ثبت شود.
+                {Number(staffAdvanceSummary.salaryTaxTotal) > 0 ? (
+                  <> مجموعِ مالیهٔ نگه‌داشته‌شده در این سالِ مالی: <strong>{formatMoney(staffAdvanceSummary.salaryTaxTotal)}</strong>.</>
+                ) : null}
               </div>
 
               {!salaryPaymentQueue.length ? (
@@ -7468,6 +7485,7 @@ export default function AdminGovernmentFinance() {
                       <tr>
                         <th>گیرنده</th>
                         <th>ناخالص</th>
+                        <th>مالیه</th>
                         <th>کسرِ پیشکی</th>
                         <th>خالص</th>
                         <th>وضعیت</th>
@@ -7490,6 +7508,7 @@ export default function AdminGovernmentFinance() {
                               </div>
                             </td>
                             <td>{formatMoney(row.grossSalary)}</td>
+                            <td>{formatMoney(row.taxAmount || 0)}</td>
                             <td>{formatMoney(row.deductionTotal)}</td>
                             <td><strong>{formatMoney(row.netAmount)}</strong></td>
                             <td><StaffAdvanceStatusBadge status={row.status} /></td>
@@ -7542,6 +7561,7 @@ export default function AdminGovernmentFinance() {
                           <th>گیرنده</th>
                           <th>ماه</th>
                           <th>ناخالص</th>
+                          <th>مالیه</th>
                           <th>کسرِ پیشکی</th>
                           <th>خالص</th>
                           <th>وضعیت</th>
@@ -7554,6 +7574,7 @@ export default function AdminGovernmentFinance() {
                             <td>{row.staff?.name || 'بدون نام'}</td>
                             <td>{salaryPeriodLabel(row)}</td>
                             <td>{formatMoney(row.grossSalary)}</td>
+                            <td>{formatMoney(row.taxAmount || 0)}</td>
                             <td>{formatMoney(row.deductionTotal)}</td>
                             <td>{formatMoney(row.netAmount)}</td>
                             <td><StaffAdvanceStatusBadge status={row.status} /></td>
