@@ -725,7 +725,6 @@ export default function AdminPanel() {
     const suffix = String(Date.now()).slice(-4);
     return `${base}-${suffix}`;
   };
-  const searchToolRef = useRef(null);
   const searchToolButtonRef = useRef(null);
   const searchToolInputRef = useRef(null);
   const modernSearchPanelRef = useRef(null);
@@ -2310,14 +2309,13 @@ export default function AdminPanel() {
     });
   }, [inboxItems]);
 
+  // فقط Escape. بستنِ پنل با کلیکِ بیرون، بالاتر و بر اساس modernSearchPanelRef انجام می‌شود.
+  // اینجا قبلاً یک mousedown دوم هم ثبت می‌شد که searchToolRef (ابزار جستجوی چیدمان قدیمی) را
+  // می‌پایید. آن نود هیچ‌وقت پنلِ مدرن را در خود نداشت، پس هر کلیکِ داخلِ پنلِ مدرن — حتی روی
+  // دکمه «جستجو» — بیرون شمرده می‌شد و دراپ‌داون را می‌بست. با حذف چیدمان قدیمی، آن ref به هیچ
+  // نودی وصل نبود و current همیشه null می‌ماند، یعنی هر کلیکی در کل صفحه پنل را می‌بست.
   useEffect(() => {
     if (!searchToolOpen) return () => {};
-
-    const onDocMouseDown = (event) => {
-      if (!searchToolRef.current?.contains(event.target)) {
-        setSearchToolOpen(false);
-      }
-    };
 
     const onEscape = (event) => {
       if (event.key === 'Escape') {
@@ -2325,10 +2323,8 @@ export default function AdminPanel() {
       }
     };
 
-    document.addEventListener('mousedown', onDocMouseDown);
     document.addEventListener('keydown', onEscape);
     return () => {
-      document.removeEventListener('mousedown', onDocMouseDown);
       document.removeEventListener('keydown', onEscape);
     };
   }, [searchToolOpen]);
