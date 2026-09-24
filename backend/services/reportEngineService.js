@@ -296,6 +296,16 @@ function buildDateRangeFilter(field, filters = {}) {
   return Object.keys(range).length ? { [field]: range } : {};
 }
 
+// Bills are dated by their bill month (due date) - the basis the finance
+// dashboard, the bill-month filter and the monthly report share - so a bill
+// prepared a few days before its month still counts in that month. issuedAt
+// only for a bill without a due date.
+function buildBillMonthRangeFilter(filters = {}) {
+  const range = buildDateRangeFilter('dueDate', filters).dueDate;
+  if (!range) return {};
+  return { $or: [{ dueDate: range }, { dueDate: null, issuedAt: range }] };
+}
+
 function buildStringDateRangeFilter(field, filters = {}) {
   const range = {};
   if (filters.dateFrom) range.$gte = filters.dateFrom;
@@ -619,7 +629,7 @@ async function buildFinanceOverviewReport(filters) {
   if (filters.userId) {
     orderFilter.student = filters.userId;
   }
-  Object.assign(orderFilter, buildDateRangeFilter('issuedAt', filters));
+  Object.assign(orderFilter, buildBillMonthRangeFilter(filters));
   Object.assign(paymentFilter, buildDateRangeFilter('paidAt', filters));
   await applyAllocatedOrderScopeToPaymentFilter(filters, paymentFilter);
 
@@ -715,10 +725,17 @@ async function buildFeeDebtorsOverviewReport(filters) {
   // applied here (unlike other report engine queries via buildDateRangeFilter):
   // only dateTo is honored, as an "as of this date" cutoff, matching the
   // finance dashboard's "بدهکاران اصلی" widget (buildDebtorGroups in
-  // financeDashboardService.js), which uses the same issuedAt <= endAt shape.
-  // Without this the two views disagree on both debtor count and total owed
-  // whenever a date range narrower than "all time" is picked.
-  if (filters.dateTo) orderFilter.issuedAt = { $lte: new Date(`${filters.dateTo}T23:59:59.999Z`) };
+  // financeDashboardService.js), which uses the same shape: every bill whose
+  // bill month (due date) has started by the cutoff, issuedAt only when a bill
+  // has no due date. Without this the two views disagree on both debtor count
+  // and total owed whenever a date range narrower than "all time" is picked.
+  if (filters.dateTo) {
+    const cutoff = new Date(`${filters.dateTo}T23:59:59.999Z`);
+    orderFilter.$or = [
+      { dueDate: { $lte: cutoff } },
+      { dueDate: null, issuedAt: { $lte: cutoff } }
+    ];
+  }
 
   const [orders, reliefs] = await Promise.all([
     FeeOrder.find(orderFilter)
@@ -1501,7 +1518,7 @@ async function buildFeeCollectionByClassReport(filters) {
   }
   await applySchoolClassScope(filters, orderFilter);
 
-  Object.assign(orderFilter, buildDateRangeFilter('issuedAt', filters));
+  Object.assign(orderFilter, buildBillMonthRangeFilter(filters));
   Object.assign(paymentFilter, buildDateRangeFilter('paidAt', filters));
   await applyAllocatedOrderScopeToPaymentFilter(filters, paymentFilter);
   const reliefFilter = buildFinanceReliefFilter(filters, { activeOnly: true });

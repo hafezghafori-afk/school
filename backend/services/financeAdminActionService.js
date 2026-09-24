@@ -87,6 +87,12 @@ async function isMonthClosed(dateValue, scope = {}) {
   return isFinanceMonthClosed(dateValue, scope);
 }
 
+// A bill belongs to its bill month (the month of its due date) - the month
+// its figures are reported in, so the month whose close protects it.
+function billPeriodDate(item = {}) {
+  return item?.dueDate || item?.issuedAt || null;
+}
+
 function parseDateSafe(value, fallback = null) {
   if (!value) return fallback;
   const d = new Date(value);
@@ -555,7 +561,7 @@ async function addBillAdjustmentAction({ req, billId = '', body = {} } = {}) {
   const item = await FinanceBill.findById(billId);
   if (!item) throw createActionError(404, 'Ø¨Ù„ ÛŒØ§ÙØª Ù†Ø´Ø¯');
   if (item.status === 'void') throw createActionError(400, 'Ø¨Ù„ Ø¨Ø§Ø·Ù„ Ù‚Ø§Ø¨Ù„ ØªØºÛŒÛŒØ± Ù†ÛŒØ³Øª');
-  if (await isMonthClosed(item.issuedAt, item)) {
+  if (await isMonthClosed(billPeriodDate(item), item)) {
     throw createActionError(400, 'Ù…Ø§Ù‡ Ù…Ø§Ù„ÛŒ Ø¨Ø³ØªÙ‡ Ø´Ø¯Ù‡ Ø§Ø³Øª Ùˆ ØªØºÛŒÛŒØ±Ø§Øª Ù…Ø¬Ø§Ø² Ù†ÛŒØ³Øª');
   }
 
@@ -611,7 +617,7 @@ async function addFeeOrderAdjustmentAction({ req, feeOrderId = '', body = {} } =
   }
 
   if (item.status === 'void') throw createActionError(400, 'بل باطل‌شده قابل تعدیل نیست.');
-  if (await isMonthClosed(item.issuedAt, item)) {
+  if (await isMonthClosed(billPeriodDate(item), item)) {
     throw createActionError(400, 'ماه مالی بسته شده است و تعدیل بل مجاز نیست.');
   }
 
@@ -697,7 +703,7 @@ async function setBillInstallmentsAction({ req, billId = '', body = {} } = {}) {
   const item = await FinanceBill.findById(billId);
   if (!item) throw createActionError(404, 'Ø¨Ù„ ÛŒØ§ÙØª Ù†Ø´Ø¯');
   if (item.status === 'void') throw createActionError(400, 'Ø¨Ù„ Ø¨Ø§Ø·Ù„ Ù‚Ø§Ø¨Ù„ Ù‚Ø³Ø·â€ŒØ¨Ù†Ø¯ÛŒ Ù†ÛŒØ³Øª');
-  if (await isMonthClosed(item.issuedAt, item)) {
+  if (await isMonthClosed(billPeriodDate(item), item)) {
     throw createActionError(400, 'Ù…Ø§Ù‡ Ù…Ø§Ù„ÛŒ Ø¨Ø³ØªÙ‡ Ø´Ø¯Ù‡ Ø§Ø³Øª Ùˆ Ù‚Ø³Ø·â€ŒØ¨Ù†Ø¯ÛŒ Ù…Ø¬Ø§Ø² Ù†ÛŒØ³Øª');
   }
 
@@ -771,7 +777,7 @@ async function setFeeOrderInstallmentsAction({ req, feeOrderId = '', body = {} }
   }
 
   if (item.status === 'void') throw createActionError(400, 'بل باطل‌شده قابل قسط‌بندی نیست.');
-  if (await isMonthClosed(item.issuedAt, item)) {
+  if (await isMonthClosed(billPeriodDate(item), item)) {
     throw createActionError(400, 'ماه مالی بسته شده است و قسط‌بندی مجاز نیست.');
   }
 
@@ -839,7 +845,7 @@ async function voidBillAction({ req, billId = '', body = {} } = {}) {
     return buildAlreadyVoidedBillResult(item);
   }
   if (!item) throw createActionError(404, 'Ø¨Ù„ ÛŒØ§ÙØª Ù†Ø´Ø¯');
-  if (await isMonthClosed(item.issuedAt, item)) {
+  if (await isMonthClosed(billPeriodDate(item), item)) {
     throw createActionError(400, 'Ù…Ø§Ù‡ Ù…Ø§Ù„ÛŒ Ø¨Ø³ØªÙ‡ Ø´Ø¯Ù‡ Ø§Ø³Øª Ùˆ Ø¨Ø§Ø·Ù„â€ŒØ³Ø§Ø²ÛŒ Ù…Ø¬Ø§Ø² Ù†ÛŒØ³Øª');
   }
   const reason = String(body?.reason || '').trim();
@@ -925,7 +931,7 @@ async function voidFeeOrderAction({ req, feeOrderId = '', body = {} } = {}) {
     };
   }
 
-  if (await isMonthClosed(item.issuedAt, item)) {
+  if (await isMonthClosed(billPeriodDate(item), item)) {
     throw createActionError(400, 'ماه مالی بسته شده است و باطل‌سازی بل مجاز نیست.');
   }
   const reason = String(body?.reason || '').trim();
@@ -1056,16 +1062,16 @@ async function approveReceiptAction({ req, receiptId = '', body = {} } = {}) {
   }
 
   const bill = receiptScope.bill;
+  // Only the payment's own month is guarded. Paying a closed month's bill
+  // today is collecting its arrears: the money belongs to today's month and
+  // the closed month's billed figures do not change.
   await assertFinancePeriodWritable({
     schoolId: bill.schoolId,
     academicYearId: bill.academicYearId,
-    dateValue: receipt.paidAt || bill.issuedAt || new Date()
+    dateValue: receipt.paidAt || new Date()
   });
   if (bill.status === 'void') {
     throw createActionError(400, 'بل باطل است و رسید آن قابل تأیید نیست.');
-  }
-  if (await isMonthClosed(bill.issuedAt, bill)) {
-    throw createActionError(400, 'ماه مربوط به بل بسته شده است و تغییر مجاز نیست.');
   }
 
   const approvalAmount = roundMoney(receipt.amount);
@@ -1252,15 +1258,10 @@ async function approveFeePaymentAction({ req, feePaymentId = '', body = {} } = {
     throw createActionError(400, 'هیچ بل تخصیص‌یافته‌ای برای این پرداخت پیدا نشد.');
   }
 
+  // The allocated bills' months are not guarded: paying a closed month's bill
+  // today collects its arrears, which the close allows (the payment's own
+  // month is guarded above).
   const orders = reviewScope.orders;
-
-  for (const order of orders) {
-    await assertFinancePeriodWritable({
-      schoolId: order.schoolId || payment.schoolId,
-      academicYearId: order.academicYearId || payment.academicYearId,
-      dateValue: order.issuedAt || payment.paidAt || new Date()
-    });
-  }
 
   const orderMap = new Map(orders.map((item) => [String(item._id || ''), item]));
   const updatedOrders = [];

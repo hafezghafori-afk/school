@@ -2537,6 +2537,31 @@
   grid-template-columns: 0.9fr 1fr 1fr 1fr 1fr 1.1fr 1.1fr;
 }
 
+/* Months that fall inside the range picked at the top of the page. */
+.finance-table.monthly-trend-table .row.is-in-range {
+  background: rgba(14, 165, 233, 0.12);
+  box-shadow: inset -3px 0 0 rgba(56, 189, 248, 0.7);
+}
+
+/* Bill form fields keep label-over-field height instead of stretching to
+   the tallest field in the row (the due date's day box wraps to 2 lines). */
+.finance-order-action-card .finance-cell-stack {
+  align-content: start;
+}
+
+/* "This bill is for month X; due on Y" line under the bill forms. */
+.finance-billing-month-note {
+  margin: 0;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 12px;
+  background: rgba(14, 165, 233, 0.08);
+  color: var(--finance-muted, #b8c5d6);
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.7;
+}
+
 .finance-table.expenses-table .head,
 .finance-table.expenses-table .row {
   grid-template-columns: 1.1fr 0.9fr 0.9fr 0.8fr 0.9fr 0.9fr 1.6fr;

@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const Module = require('module');
 const express = require('express');
+const monthClosePeriods = require('../utils/financeMonthClosePeriods');
 
 const IDS = {
   class1: '507f191e810c19729de86101',
@@ -53,6 +54,9 @@ const memberships = [
 let billSerial = 4;
 let receiptSerial = 2;
 let monthCloseSerial = 0;
+// Totals the mocked month-close snapshot reports; a check changes them to
+// simulate figures moving between a close request and its approval.
+let monthCloseSnapshotTotals = {};
 let financeAnomalyCaseSerial = 0;
 let notificationSerial = 0;
 let feePlanSerial = 0;
@@ -5028,14 +5032,16 @@ function loadFinanceRouter() {
     if (isFinanceRoute && request === '../services/procurementCommitmentService') return procurementCommitmentServiceMock;
     if (isFinanceRoute && request === '../services/financialPeriodService') return financialPeriodServiceMock;
     if (isFinanceRoute && request === '../services/financePeriodGuardService') {
+      // Same rule as the real guard: a close locks the days of its window while
+      // closed, in review, or reopened past its deadline.
       const isClosed = async (dateValue, scope = {}) => {
         const date = new Date(dateValue);
-        const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-        return monthClosures.some((item) => (
-          item.monthKey === monthKey
-          && item.status === 'closed'
-          && (!scope.schoolId || String(item.schoolId || '') === String(scope.schoolId))
-        ));
+        return monthClosures.some((item) => {
+          if (scope.schoolId && String(item.schoolId || '') !== String(scope.schoolId)) return false;
+          const window = monthClosePeriods.readCloseWindow(item);
+          if (!window || date.getTime() < window.startAt.getTime() || date.getTime() > window.endAt.getTime()) return false;
+          return monthClosePeriods.resolveMonthCloseLock(item).locked;
+        });
       };
       return {
         assertFinancePeriodWritable: async (scope = {}) => {
@@ -5051,14 +5057,18 @@ function loadFinanceRouter() {
     }
     if (isFinanceRoute && request === '../services/financeCloseService') {
       return {
-        toMonthDateRange: (monthKey) => ({
-          startAt: new Date(`${monthKey}-01T00:00:00.000Z`),
-          endAt: new Date(`${monthKey}-28T23:59:59.999Z`)
+        buildMonthCloseChangeReport: async ({ since = null } = {}) => ({
+          since,
+          total: 1,
+          bills: { count: 1, added: 1, items: [{ number: 'FO-TEST-CHANGE', amount: 100, status: 'new', added: true }] },
+          payments: { count: 0, added: 0, items: [] },
+          expenses: { count: 0, added: 0, items: [] },
+          refunds: { count: 0, added: 0, items: [] }
         }),
         buildFinanceMonthCloseSnapshot: async (monthKey) => ({
           generatedAt: new Date(),
           monthKey,
-          totals: {},
+          totals: clone(monthCloseSnapshotTotals),
           aging: { buckets: {}, rows: [], totalRemaining: 0 },
           cashflow: { approvedTotal: 0, approvedCount: 0, pendingTotal: 0, pendingCount: 0, items: [] },
           readiness: { readyToApprove: true, blockingIssues: [], warningIssues: [] },
@@ -5365,24 +5375,37 @@ async function run() {
       });
 
       try {
+        const body = {
+          studentId: IDS.student2,
+          classId: IDS.class1,
+          amountSource: 'plan',
+          feePlanId: monthlyPlanId,
+          feeType: 'tuition',
+          dueDate: '2026-08-21',
+          issuedAt: '2026-03-06',
+          academicYear: '1405'
+        };
+        const baselineCount = bills.length;
+        // 2026-08-21 is 30 Asad 1405: a Sonbola bill cannot be due then.
+        const mismatched = await request(server, '/api/finance/admin/bills', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: { ...body, billingMonth: '1405-06' }
+        });
+        assertCase(mismatched.status === 400, `expected 400 for a due date outside the bill month, received ${mismatched.status}`);
+        assertCase(bills.length === baselineCount, 'expected no bill when the due date is outside the bill month');
+
         const response = await request(server, '/api/finance/admin/bills', {
           method: 'POST',
           user: financeManagerUser,
-          body: {
-            studentId: IDS.student2,
-            classId: IDS.class1,
-            amountSource: 'plan',
-            feePlanId: monthlyPlanId,
-            feeType: 'tuition',
-            dueDate: '2026-08-21',
-            issuedAt: '2026-03-06',
-            academicYear: '1405'
-          }
+          body
         });
         assertCase(response.status === 201, `expected 201, received ${response.status}: ${response.text}`);
         assertCase(String(response.data?.item?.periodType || '') === 'monthly', 'expected periodType to be derived from the monthly plan');
         assertCase(String(response.data?.item?.term || '') === 'ترم اول', 'expected term to be derived from the selected plan');
         assertCase(Number(response.data?.item?.amountOriginal || 0) === 725, 'expected tuition amount from the selected monthly plan');
+        assertCase(response.data?.billingMonth === '1405-05', `expected the bill month to follow the due date (1405-05), received ${response.data?.billingMonth}`);
+        assertCase(String(response.data?.message || '').includes('اسد'), 'expected the success message to name the bill month');
       } finally {
         feePlans.pop();
       }
@@ -5806,6 +5829,65 @@ async function run() {
       assertCase(response.data?.periodType === 'monthly', 'expected grouped preview to derive monthly period from its fee plan');
       assertCase(response.data?.summary?.candidateCount === 2, `expected one monthly bill per active membership, received ${response.data?.summary?.candidateCount}`);
       assertCase(Number(response.data?.summary?.totalAmountDue || 0) === 1400, `expected selected month total 1400, received ${response.data?.summary?.totalAmountDue}`);
+      assertCase(response.data?.billingMonth === '1405-02', `expected the preview to name its bill month 1405-02, received ${response.data?.billingMonth}`);
+      assertCase(
+        (response.data?.items || []).every((item) => item.billingMonth === '1405-02' && item.billingMonthLabel),
+        'expected every preview row to carry its bill month'
+      );
+    });
+
+    await check('route smoke: grouped billing refuses a due date outside the chosen bill month', async () => {
+      feePlans.push({
+        _id: 'fee-plan-monthly-bill-month',
+        title: 'Class One 1405 Monthly',
+        schoolId: 'school-1',
+        course: IDS.course1,
+        classId: IDS.class1,
+        academicYear: '1405',
+        academicYearId: 'year-1405',
+        billingFrequency: 'monthly',
+        periodType: 'monthly',
+        tuitionFee: 700,
+        isActive: true,
+        lifecycleStatus: 'active'
+      });
+      const baselineCount = bills.length;
+      const body = {
+        classId: IDS.class1,
+        dueDate: '2026-05-12',
+        issuedAt: '2026-03-06',
+        academicYear: '1405',
+        academicYearId: 'year-1405'
+      };
+      const matching = await request(server, '/api/finance/admin/bills/preview', {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { ...body, billingMonth: '۱۴۰۵-۲' }
+      });
+      const mismatchedPreview = await request(server, '/api/finance/admin/bills/preview', {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { ...body, billingMonth: '1405-03' }
+      });
+      const mismatchedGenerate = await request(server, '/api/finance/admin/bills/generate', {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { ...body, billingMonth: '1405-03' }
+      });
+      const invalidMonth = await request(server, '/api/finance/admin/bills/preview', {
+        method: 'POST',
+        user: financeManagerUser,
+        body: { ...body, billingMonth: '2026-05' }
+      });
+      feePlans.pop();
+
+      assertCase(matching.status === 200, `expected 200 for a due date inside the bill month, received ${matching.status}: ${matching.text}`);
+      assertCase(matching.data?.billingMonth === '1405-02', `expected normalized bill month 1405-02, received ${matching.data?.billingMonth}`);
+      assertCase(mismatchedPreview.status === 400, `expected preview 400 for a due date outside the bill month, received ${mismatchedPreview.status}`);
+      assertCase(String(mismatchedPreview.data?.message || '').includes('ماه بل'), 'expected a Dari bill-month mismatch message');
+      assertCase(mismatchedGenerate.status === 400, `expected generate 400 for a due date outside the bill month, received ${mismatchedGenerate.status}`);
+      assertCase(bills.length === baselineCount, 'expected no bill to be created when the month does not match');
+      assertCase(invalidMonth.status === 400, `expected 400 for a Gregorian month key, received ${invalidMonth.status}`);
     });
 
     await check('route smoke: admin bills list accepts canonical class filter', async () => {
@@ -6945,67 +7027,256 @@ async function run() {
       assertCase(rejectResponse.data?.retired === true, 'expected retired reject payload');
     });
 
+    // fy-1 is closed by the year-close check above; month closes need an open year.
+    const withOpenFinancialYear = async (callback) => {
+      const financialYear = financialYears.find((item) => item._id === 'fy-1');
+      const previous = { isClosed: financialYear.isClosed, status: financialYear.status };
+      financialYear.isClosed = false;
+      financialYear.status = 'active';
+      try {
+        await callback();
+      } finally {
+        financialYear.isClosed = previous.isClosed;
+        financialYear.status = previous.status;
+      }
+    };
+    const monthCloseBillBody = {
+      studentId: IDS.student2,
+      courseId: IDS.course1,
+      amount: 600,
+      dueDate: '2026-01-15',
+      issuedAt: '2026-01-14',
+      academicYear: '1405',
+      term: '6',
+      periodType: 'term',
+      periodLabel: ''
+    };
+    const approveMonthClose = (monthCloseId, user, note = 'Approved') => request(server, `/api/finance/admin/month-close/${monthCloseId}/approve`, {
+      method: 'POST',
+      user,
+      body: { note }
+    });
+
     await check('route smoke: month close approval workflow closes the month and blocks future bill creation inside the closed month', async () => {
-      const requestResponse = await request(server, '/api/finance/admin/month-close', {
-        method: 'POST',
-        user: financeManagerUser,
-        body: { monthKey: '2026-01', note: 'Ready for manager review' }
-      });
-      assertCase(requestResponse.status === 201, `expected 201, received ${requestResponse.status}: ${requestResponse.text}`);
-      assertCase(requestResponse.data?.item?.status === 'pending_review', 'expected pending_review status after request');
-      assertCase(requestResponse.data?.item?.approvalStage === 'finance_manager_review', 'expected finance_manager_review stage');
+      await withOpenFinancialYear(async () => {
+        const gregorianResponse = await request(server, '/api/finance/admin/month-close', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: { monthKey: '2026-01', note: 'Old Gregorian key' }
+        });
+        assertCase(gregorianResponse.status === 400, `expected 400 for a new Gregorian close, received ${gregorianResponse.status}: ${gregorianResponse.text}`);
 
-      const monthCloseId = requestResponse.data?.item?._id;
-      assertCase(Boolean(monthCloseId), 'expected month close request id');
+        const outOfOrderResponse = await request(server, '/api/finance/admin/month-close', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: { monthKey: '1404-11', note: 'Skipping the first month' }
+        });
+        assertCase(outOfOrderResponse.status === 409, `expected 409 for an out-of-order close, received ${outOfOrderResponse.status}: ${outOfOrderResponse.text}`);
+        assertCase(outOfOrderResponse.data?.code === 'finance_month_close_not_ready', 'expected not-ready code');
+        assertCase(
+          (outOfOrderResponse.data?.readiness?.blockingIssues || []).some((item) => item.code === 'earlier_months_open'),
+          'expected earlier-months-open blocker'
+        );
+        assertCase(!monthClosures.some((item) => item.monthKey === '1404-11'), 'expected no record for a refused request');
 
-      const managerApproveResponse = await request(server, `/api/finance/admin/month-close/${monthCloseId}/approve`, {
-        method: 'POST',
-        user: financeManagerUser,
-        body: { note: 'Manager approved the package' }
-      });
-      assertCase(managerApproveResponse.status === 200, `expected 200, received ${managerApproveResponse.status}`);
-      assertCase(managerApproveResponse.data?.item?.approvalStage === 'finance_lead_review', 'expected finance_lead_review stage');
-
-      const leadApproveResponse = await request(server, `/api/finance/admin/month-close/${monthCloseId}/approve`, {
-        method: 'POST',
-        user: financeLeadUser,
-        body: { note: 'Lead approved the package' }
-      });
-      assertCase(leadApproveResponse.status === 200, `expected 200, received ${leadApproveResponse.status}`);
-      assertCase(leadApproveResponse.data?.item?.approvalStage === 'general_president_review', 'expected general_president_review stage');
-
-      const closeResponse = await request(server, `/api/finance/admin/month-close/${monthCloseId}/approve`, {
-        method: 'POST',
-        user: presidentUser,
-        body: { note: 'Final close approved' }
-      });
-      assertCase(closeResponse.status === 200, `expected 200, received ${closeResponse.status}`);
-      assertCase(closeResponse.data?.item?.status === 'closed', 'expected month status closed');
-
-      const pdfResponse = await request(server, `/api/finance/admin/month-close/${monthCloseId}/export.pdf`, {
-        user: financeManagerUser
-      });
-      assertCase(pdfResponse.status === 200, `expected 200, received ${pdfResponse.status}`);
-      assertCase(String(pdfResponse.headers['content-type'] || '').includes('application/pdf'), 'expected month close pdf content-type');
-      assertCase(String(pdfResponse.headers['content-disposition'] || '').includes('.pdf'), 'expected month close pdf attachment filename');
-      assertCase(String(pdfResponse.text || '').startsWith('%PDF'), 'expected month close pdf payload');
-
-      const createResponse = await request(server, '/api/finance/admin/bills', {
-        method: 'POST',
-        user: financeManagerUser,
-        body: {
-          studentId: IDS.student2,
-          courseId: IDS.course1,
-          amount: 600,
-          dueDate: '2026-01-25',
-          issuedAt: '2026-01-14',
-          academicYear: '1405',
-          term: '6',
-          periodType: 'term',
-          periodLabel: ''
+        const previewResponse = await request(server, '/api/finance/admin/month-close/readiness?monthKey=1405-10', {
+          user: financeManagerUser
+        });
+        assertCase(previewResponse.status === 200, `expected 200, received ${previewResponse.status}: ${previewResponse.text}`);
+        assertCase(previewResponse.data?.canRequest === false, 'expected the last month of the year not to be requestable yet');
+        const previewCodes = (previewResponse.data?.readiness?.blockingIssues || []).map((item) => item.code);
+        assertCase(previewCodes.includes('earlier_months_open'), 'expected earlier-months blocker in the preview');
+        if (Date.now() < new Date(previewResponse.data?.window?.endAt).getTime()) {
+          assertCase(previewCodes.includes('month_not_ended'), 'expected month-not-ended blocker in the preview');
         }
+
+        const requestResponse = await request(server, '/api/finance/admin/month-close', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: { monthKey: '1404-10', note: 'Ready for manager review' }
+        });
+        assertCase(requestResponse.status === 201, `expected 201, received ${requestResponse.status}: ${requestResponse.text}`);
+        assertCase(requestResponse.data?.item?.status === 'pending_review', 'expected pending_review status after request');
+        assertCase(requestResponse.data?.item?.approvalStage === 'finance_manager_review', 'expected finance_manager_review stage');
+        assertCase(requestResponse.data?.item?.calendar === 'shamsi', 'expected a solar month close');
+        assertCase(requestResponse.data?.item?.lockReason === 'in_review', 'expected the month locked while in review');
+        const monthCloseId = requestResponse.data?.item?._id;
+        assertCase(Boolean(monthCloseId), 'expected month close request id');
+
+        const inReviewBill = await request(server, '/api/finance/admin/bills', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: monthCloseBillBody
+        });
+        assertCase(inReviewBill.status === 400, `expected a bill in a month under review to be refused, received ${inReviewBill.status}`);
+
+        const managerApproveResponse = await approveMonthClose(monthCloseId, financeManagerUser, 'Manager approved the package');
+        assertCase(managerApproveResponse.status === 200, `expected 200, received ${managerApproveResponse.status}`);
+        assertCase(managerApproveResponse.data?.item?.approvalStage === 'finance_lead_review', 'expected finance_lead_review stage');
+
+        const leadApproveResponse = await approveMonthClose(monthCloseId, financeLeadUser, 'Lead approved the package');
+        assertCase(leadApproveResponse.status === 200, `expected 200, received ${leadApproveResponse.status}`);
+        assertCase(leadApproveResponse.data?.item?.approvalStage === 'general_president_review', 'expected general_president_review stage');
+
+        const managerFinalResponse = await approveMonthClose(monthCloseId, financeManagerUser, 'Manager tries the final step');
+        assertCase(managerFinalResponse.status === 403, `expected the final approval to need the president, received ${managerFinalResponse.status}`);
+
+        const closeResponse = await approveMonthClose(monthCloseId, presidentUser, 'Final close approved');
+        assertCase(closeResponse.status === 200, `expected 200, received ${closeResponse.status}`);
+        assertCase(closeResponse.data?.item?.status === 'closed', 'expected month status closed');
+        assertCase((closeResponse.data?.item?.snapshotVersions || []).length === 1, 'expected the first close saved as version 1');
+        assertCase(closeResponse.data?.item?.snapshotVersions?.[0]?.reason === 'close', 'expected a close version');
+
+        const pdfResponse = await request(server, `/api/finance/admin/month-close/${monthCloseId}/export.pdf`, {
+          user: financeManagerUser
+        });
+        assertCase(pdfResponse.status === 200, `expected 200, received ${pdfResponse.status}`);
+        assertCase(String(pdfResponse.headers['content-type'] || '').includes('application/pdf'), 'expected month close pdf content-type');
+        assertCase(String(pdfResponse.headers['content-disposition'] || '').includes('.pdf'), 'expected month close pdf attachment filename');
+        assertCase(String(pdfResponse.text || '').startsWith('%PDF'), 'expected month close pdf payload');
+
+        const createResponse = await request(server, '/api/finance/admin/bills', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: monthCloseBillBody
+        });
+        assertCase(createResponse.status === 400, `expected 400, received ${createResponse.status}`);
       });
-      assertCase(createResponse.status === 400, `expected 400, received ${createResponse.status}`);
+    });
+
+    await check('route smoke: month close reopens the latest month for a limited time and closes it again through the president', async () => {
+      await withOpenFinancialYear(async () => {
+        const firstMonth = monthClosures.find((item) => item.monthKey === '1404-10');
+        assertCase(firstMonth?.status === 'closed', 'expected 1404-10 closed by the previous check');
+
+        const secondRequest = await request(server, '/api/finance/admin/month-close', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: { monthKey: '1404-11', note: 'Second month' }
+        });
+        assertCase(secondRequest.status === 201, `expected 201, received ${secondRequest.status}: ${secondRequest.text}`);
+        const secondId = secondRequest.data?.item?._id;
+        await approveMonthClose(secondId, financeManagerUser);
+        await approveMonthClose(secondId, financeLeadUser);
+        const secondClose = await approveMonthClose(secondId, presidentUser);
+        assertCase(secondClose.data?.item?.status === 'closed', 'expected 1404-11 closed');
+
+        const managerReopen = await request(server, `/api/finance/admin/month-close/${firstMonth._id}/reopen`, {
+          method: 'POST',
+          user: financeManagerUser,
+          body: { note: 'Manager cannot reopen' }
+        });
+        assertCase(managerReopen.status === 403, `expected 403, received ${managerReopen.status}`);
+
+        const outOfOrderReopen = await request(server, `/api/finance/admin/month-close/${firstMonth._id}/reopen`, {
+          method: 'POST',
+          user: presidentUser,
+          body: { note: 'Fix a January bill', durationDays: 3 }
+        });
+        assertCase(outOfOrderReopen.status === 409, `expected 409 while a later month is closed, received ${outOfOrderReopen.status}`);
+        assertCase(outOfOrderReopen.data?.code === 'finance_month_reopen_out_of_order', 'expected out-of-order code');
+
+        const reopenResponse = await request(server, `/api/finance/admin/month-close/${firstMonth._id}/reopen`, {
+          method: 'POST',
+          user: presidentUser,
+          body: { note: 'Fix a January bill', durationDays: 30, override: true }
+        });
+        assertCase(reopenResponse.status === 200, `expected 200, received ${reopenResponse.status}: ${reopenResponse.text}`);
+        assertCase(reopenResponse.data?.item?.status === 'reopened', 'expected reopened status');
+        assertCase(reopenResponse.data?.item?.reopenDurationDays === 7, 'expected the reopen capped at 7 days');
+        const deadline = new Date(reopenResponse.data?.item?.reopenDeadline).getTime();
+        assertCase(Math.abs(deadline - (Date.now() + 7 * 24 * 60 * 60 * 1000)) < 60 * 1000, 'expected a 7-day reopen deadline');
+        assertCase((reopenResponse.data?.flaggedMonths || []).includes('1404-11'), 'expected the later month flagged');
+        assertCase(monthClosures.find((item) => item.monthKey === '1404-11')?.needsReview === true, 'expected 1404-11 marked for review');
+
+        // Past the deadline the month is locked again.
+        monthClosures.find((item) => item.monthKey === '1404-10').reopenDeadline = new Date(Date.now() - 1000);
+        const expiredBill = await request(server, '/api/finance/admin/bills', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: monthCloseBillBody
+        });
+        assertCase(expiredBill.status === 400, `expected a bill in an expired reopen to be refused, received ${expiredBill.status}`);
+
+        monthCloseSnapshotTotals = { ordersIssuedCount: 1, ordersIssuedAmount: 100 };
+        const recloseRequest = await request(server, '/api/finance/admin/month-close', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: { monthKey: '1404-10', note: 'Corrected' }
+        });
+        assertCase(recloseRequest.status === 201, `expected 201, received ${recloseRequest.status}: ${recloseRequest.text}`);
+        assertCase(recloseRequest.data?.item?.approvalStage === 'general_president_review', 'expected a re-close to go straight to the president');
+        assertCase(recloseRequest.data?.item?.isReclose === true, 'expected a re-close');
+        assertCase(
+          (recloseRequest.data?.item?.recloseReview?.diff || []).some((row) => row.key === 'ordersIssuedAmount' && row.delta === 100),
+          'expected the re-close diff to show the added bill amount'
+        );
+        assertCase(Number(recloseRequest.data?.item?.recloseReview?.changes?.total || 0) === 1, 'expected the change report');
+
+        const rejectResponse = await request(server, `/api/finance/admin/month-close/${firstMonth._id}/reject`, {
+          method: 'POST',
+          user: presidentUser,
+          body: { reason: 'Attach the corrected bill first' }
+        });
+        assertCase(rejectResponse.status === 200, `expected 200, received ${rejectResponse.status}`);
+        assertCase(rejectResponse.data?.item?.status === 'reopened', 'expected a rejected re-close to return to reopened');
+
+        const secondReclose = await request(server, '/api/finance/admin/month-close', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: { monthKey: '1404-10', note: 'Corrected again' }
+        });
+        assertCase(secondReclose.status === 201, `expected 201, received ${secondReclose.status}: ${secondReclose.text}`);
+
+        monthCloseSnapshotTotals = { ordersIssuedCount: 2, ordersIssuedAmount: 250 };
+        const movedFigures = await approveMonthClose(firstMonth._id, presidentUser);
+        assertCase(movedFigures.status === 409, `expected 409 when figures moved during review, received ${movedFigures.status}`);
+        assertCase(movedFigures.data?.code === 'finance_month_close_figures_changed', 'expected figures-changed code');
+
+        monthCloseSnapshotTotals = { ordersIssuedCount: 1, ordersIssuedAmount: 100 };
+        const managerReclose = await approveMonthClose(firstMonth._id, financeManagerUser);
+        assertCase(managerReclose.status === 403, `expected a re-close to need the president, received ${managerReclose.status}`);
+
+        const recloseResponse = await approveMonthClose(firstMonth._id, presidentUser, 'Closed again');
+        assertCase(recloseResponse.status === 200, `expected 200, received ${recloseResponse.status}: ${recloseResponse.text}`);
+        assertCase(recloseResponse.data?.item?.status === 'closed', 'expected the month closed again');
+        const versions = recloseResponse.data?.item?.snapshotVersions || [];
+        assertCase(versions.length === 2, `expected two versions, received ${versions.length}`);
+        assertCase(versions[1]?.reason === 'reclose', 'expected a re-close version');
+        assertCase((versions[1]?.diff || []).some((row) => row.key === 'ordersIssuedAmount'), 'expected the re-close version to keep its diff');
+        assertCase(recloseResponse.data?.item?.reopenDeadline == null, 'expected the reopen deadline cleared');
+
+        const flagged = monthClosures.find((item) => item.monthKey === '1404-11');
+        const refreshChanged = await request(server, `/api/finance/admin/month-close/${flagged._id}/refresh`, {
+          method: 'POST',
+          user: financeManagerUser,
+          body: {}
+        });
+        assertCase(refreshChanged.status === 409, `expected 409 when a closed month's own figures moved, received ${refreshChanged.status}`);
+
+        monthCloseSnapshotTotals = {};
+        const refreshResponse = await request(server, `/api/finance/admin/month-close/${flagged._id}/refresh`, {
+          method: 'POST',
+          user: financeManagerUser,
+          body: { note: 'January was corrected' }
+        });
+        assertCase(refreshResponse.status === 200, `expected 200, received ${refreshResponse.status}: ${refreshResponse.text}`);
+        assertCase(refreshResponse.data?.item?.needsReview === false, 'expected the review mark cleared');
+        assertCase((refreshResponse.data?.item?.snapshotVersions || []).length === 2, 'expected a refresh version');
+
+        const boardResponse = await request(server, '/api/finance/admin/month-close/board?financialYearId=fy-1', {
+          user: financeManagerUser
+        });
+        assertCase(boardResponse.status === 200, `expected 200, received ${boardResponse.status}: ${boardResponse.text}`);
+        const months = boardResponse.data?.months || [];
+        assertCase(months.length === 13, `expected 13 solar months for a January-December year, received ${months.length}`);
+        assertCase(months[0]?.monthKey === '1404-10' && months[0]?.state === 'closed', 'expected the first month closed');
+        assertCase(months[1]?.state === 'closed', 'expected the second month closed');
+        assertCase(months[2]?.canRequest === true, 'expected the next month requestable');
+        assertCase(months[3]?.canRequest === false, 'expected months after the next one to wait');
+        assertCase(boardResponse.data?.nextMonthKey === '1404-12', 'expected 1404-12 as the next month to close');
+        assertCase(boardResponse.data?.lastClosedMonthKey === '1404-11', 'expected 1404-11 as the latest closed month');
+      });
     });
 
     await check('route smoke: finance document archive list, verification, and batch export work end-to-end', async () => {

@@ -217,9 +217,31 @@ const {
 const {
   buildFinanceMonthCloseSnapshot,
   buildFinanceMonthlyTrend,
-  toMonthDateRange
+  buildMonthCloseChangeReport
 } = require('../services/financeCloseService');
+const {
+  DEFAULT_REOPEN_DAYS,
+  MAX_REOPEN_DAYS,
+  MIN_REOPEN_DAYS,
+  buildMonthCloseFingerprint,
+  diffMonthCloseTotals,
+  formatMonthCloseLabel,
+  isWindowCovered,
+  listFinancialYearMonthKeys,
+  normalizeReopenDays,
+  readCloseWindow,
+  resolveMonthCloseCalendar,
+  resolveMonthCloseLock,
+  resolveMonthCloseWindow
+} = require('../utils/financeMonthClosePeriods');
 const { buildFinanceDashboardOverview } = require('../services/financeDashboardService');
+const {
+  afghanMonthKeyBounds,
+  formatAfghanMonthKeyLabel,
+  formatAfghanStoredDateLabel,
+  normalizeAfghanMonthKey,
+  toAfghanMonthKey
+} = require('../utils/afghanDate');
 const {
   assertFinancePeriodWritable,
   isFinanceMonthClosed
@@ -328,7 +350,52 @@ const parseDateSafe = (value, fallback = null) => {
   return Number.isNaN(d.getTime()) ? fallback : d;
 };
 
+// A bill is filed under the Afghan month of its due date - FinanceBill and
+// FeeOrder derive a monthly bill's periodLabel from it, and the bill-month
+// filter and monthly reports read the same month. The bill forms send the
+// month they show the user as `billingMonth`; a due date outside that month
+// would quietly file the bill under a different month, so it is refused.
+const resolveBillingMonth = ({ billingMonth = '', dueDate = '' } = {}) => {
+  const requested = String(billingMonth || '').trim();
+  const dueMonthKey = toAfghanMonthKey(dueDate);
+  if (!requested) return { monthKey: dueMonthKey, error: '' };
+  const monthKey = normalizeAfghanMonthKey(requested);
+  if (!monthKey) return { monthKey: '', error: 'ماه بل معتبر نیست.' };
+  if (dueMonthKey && dueMonthKey !== monthKey) {
+    return {
+      monthKey,
+      error: `مهلت پرداخت در ماه ${formatAfghanMonthKeyLabel(dueMonthKey)} است، اما بل برای ماه ${formatAfghanMonthKeyLabel(monthKey)} انتخاب شده است. ماه بل همان ماهِ مهلت پرداخت است؛ مهلت پرداخت را در همان ماه انتخاب کنید.`
+    };
+  }
+  return { monthKey, error: '' };
+};
+
 const isMonthClosed = async (dateValue, scope = {}) => isFinanceMonthClosed(dateValue, scope);
+
+// Bills are guarded by their bill month: none may be added to a month that is
+// closed, in review, or past its reopen deadline, whatever day it is issued on.
+const assertBillMonthsWritable = async ({ schoolId = '', academicYearId = '', dueDates = [] } = {}) => {
+  const checked = new Set();
+  for (const value of dueDates) {
+    const date = parseDateSafe(value, null);
+    const monthKey = date ? toAfghanMonthKey(date) : '';
+    if (!monthKey || checked.has(monthKey)) continue;
+    checked.add(monthKey);
+    await assertFinancePeriodWritable({ schoolId, academicYearId, dateValue: date });
+  }
+};
+
+// Period-guard refusals (closed / in-review month, closed year) carry a Dari
+// message and a status; routes whose catch-all would answer 500 use this.
+const sendFinancePeriodError = (res, error) => {
+  if (!error?.messageDari || !String(error?.code || '').startsWith('finance_')) return false;
+  res.status(Number(error.status || error.statusCode || 409)).json({
+    success: false,
+    code: error.code,
+    message: error.messageDari
+  });
+  return true;
+};
 
 const listBillableMembershipsForCourse = async (courseId, academicYear = '') => listCourseMemberships({
   courseId,
@@ -1390,7 +1457,16 @@ const populateFinanceMonthCloseQuery = (query) => query
   .populate('closedBy', 'name')
   .populate('reopenedBy', 'name')
   .populate('approvalTrail.by', 'name')
-  .populate('history.by', 'name');
+  .populate('history.by', 'name')
+  .populate('snapshotVersions.createdBy', 'name');
+
+// Only the president gives the final approval (the last rung of a first close,
+// and the only rung of a close after a reopen).
+const canApproveMonthCloseStage = (adminLevel = '', stage = '') => (
+  canReviewMonthCloseStage(adminLevel, stage)
+  && (normalizeMonthCloseApprovalStage(stage) !== MONTH_CLOSE_APPROVAL_STAGES.generalPresident
+    || normalizeAdminLevel(adminLevel || '') === 'general_president')
+);
 
 const serializeFinanceMonthClose = (value = null, actorLevel = '') => {
   if (!value) return null;
@@ -1398,10 +1474,20 @@ const serializeFinanceMonthClose = (value = null, actorLevel = '') => {
   const approvalStage = normalizeMonthCloseApprovalStage(plain?.approvalStage || '');
   const status = String(plain?.status || '').trim() || 'draft';
   const readiness = plain?.snapshot?.readiness || { readyToApprove: true, blockingIssues: [], warningIssues: [] };
+  const level = normalizeAdminLevel(actorLevel || '');
+  const isPresident = level === 'general_president';
+  const lock = resolveMonthCloseLock(plain);
+  const window = readCloseWindow(plain);
   return {
     ...plain,
     status,
     approvalStage,
+    calendar: resolveMonthCloseCalendar(plain?.monthKey),
+    monthLabel: formatMonthCloseLabel(plain),
+    window: window ? { startAt: window.startAt, endAt: window.endAt } : null,
+    locked: lock.locked,
+    lockReason: lock.reason,
+    reopenExpired: lock.reason === 'reopen_expired',
     requestedBy: serializeMonthCloseUser(plain?.requestedBy || null),
     approvedBy: serializeMonthCloseUser(plain?.approvedBy || null),
     rejectedBy: serializeMonthCloseUser(plain?.rejectedBy || null),
@@ -1419,9 +1505,17 @@ const serializeFinanceMonthClose = (value = null, actorLevel = '') => {
           by: serializeMonthCloseUser(entry?.by || null)
         }))
       : [],
-    canApprove: status === 'pending_review' && canReviewMonthCloseStage(actorLevel, approvalStage),
+    snapshotVersions: Array.isArray(plain?.snapshotVersions)
+      ? plain.snapshotVersions.map((entry) => ({
+          ...entry,
+          createdBy: serializeMonthCloseUser(entry?.createdBy || null)
+        }))
+      : [],
+    canApprove: status === 'pending_review' && canApproveMonthCloseStage(actorLevel, approvalStage),
     canReject: status === 'pending_review' && canReviewMonthCloseStage(actorLevel, approvalStage),
-    canReopen: status === 'closed' && normalizeAdminLevel(actorLevel || '') === 'general_president',
+    canReopen: status === 'closed' && isPresident,
+    canExtendReopen: status === 'reopened' && isPresident,
+    canRefresh: status === 'closed' && plain?.needsReview === true && ['finance_manager', 'general_president'].includes(level),
     canResubmit: ['rejected', 'reopened', 'draft'].includes(status),
     readiness: {
       readyToApprove: readiness?.readyToApprove !== false,
@@ -6633,10 +6727,15 @@ router.get('/admin/dashboard/monthly-trend', requireAuth, requireRole(['admin'])
       return res.status(400).json({ success: false, message: 'برای نمایش روند ماهانه، مکتب فعال را انتخاب کنید.' });
     }
     writeSchoolContextHeaders(res, schoolId);
+    // `to` (the end of the range picked on the finance page) sets the last
+    // solar month of the window; the month key keeps the cache per month.
+    const asOfInput = String(req.query?.to || '').trim();
+    const asOfMonthKey = /^\d{4}-\d{2}-\d{2}$/.test(asOfInput) ? toAfghanMonthKey(asOfInput) : '';
     const monthlyTrendParams = {
       schoolId,
       academicYearId: String(req.query?.academicYearId || '').trim(),
-      months: req.query?.months
+      months: req.query?.months,
+      asOfMonthKey
     };
     // Recomputes from the school's full financial history the same as
     // dashboard/overview and treasury/analytics (see financeReportCache.js),
@@ -6644,7 +6743,10 @@ router.get('/admin/dashboard/monthly-trend', requireAuth, requireRole(['admin'])
     // uncached heavy report still fired on every admin-finance page load.
     const months = await withReportCache(
       buildCacheKey('monthly-trend', monthlyTrendParams),
-      () => buildFinanceMonthlyTrend(monthlyTrendParams)
+      () => buildFinanceMonthlyTrend({
+        ...monthlyTrendParams,
+        asOf: asOfMonthKey ? afghanMonthKeyBounds(asOfMonthKey).start : new Date()
+      })
     );
     return res.json({ success: true, months });
   } catch (error) {
@@ -6671,8 +6773,10 @@ router.get('/admin/summary', requireAuth, requireRole(['admin']), requirePermiss
     );
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    // "This month" is the current Afghan solar month. The Gregorian month used
+    // before (Sep 1 = 10 Sonbola) never lined up with any month the finance
+    // office selects, so this figure disagreed with every monthly report.
+    const currentMonth = afghanMonthKeyBounds(toAfghanMonthKey(now));
 
     const [pendingReceipts, overdueBills, billTotals, today, monthly, topDebtorsAgg, pendingByStageAgg, reliefRows] = await Promise.all([
       FeePayment.countDocuments(withSchoolScope({ status: 'pending' })),
@@ -6695,7 +6799,7 @@ router.get('/admin/summary', requireAuth, requireRole(['admin']), requirePermiss
       FeePayment.find(withSchoolScope({ status: 'approved', paidAt: { $gte: startOfDay } }))
         .select('amount feeOrderId allocations')
         .lean(),
-      FeePayment.find(withSchoolScope({ status: 'approved', paidAt: { $gte: startOfMonth, $lt: endOfMonth } }))
+      FeePayment.find(withSchoolScope({ status: 'approved', paidAt: { $gte: currentMonth.start, $lte: currentMonth.end } }))
         .select('amount feeOrderId allocations')
         .lean(),
       FeeOrder.aggregate([
@@ -6788,6 +6892,8 @@ router.get('/admin/summary', requireAuth, requireRole(['admin']), requirePermiss
         overdueBills,
         todayCollection,
         monthCollection,
+        monthKey: currentMonth.monthKey,
+        monthLabel: formatAfghanMonthKeyLabel(currentMonth.monthKey),
         totalDue,
         totalPaid,
         totalOutstanding,
@@ -6851,6 +6957,7 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       feeType = 'tuition',
       feePlanId = '',
       dueDate,
+      billingMonth = '',
       issuedAt,
       periodType,
       periodLabel,
@@ -6872,6 +6979,10 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
     const dueDateValue = parseDateSafe(dueDate, null);
     if (!dueDateValue) {
       return res.status(400).json({ success: false, message: 'تاریخ مهلت پرداخت معتبر نیست.' });
+    }
+    const billMonth = resolveBillingMonth({ billingMonth, dueDate });
+    if (billMonth.error) {
+      return res.status(400).json({ success: false, message: billMonth.error });
     }
     const issueDateValue = parseDateSafe(issuedAt, new Date());
 
@@ -6900,6 +7011,11 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       schoolId: schoolContext.schoolId,
       academicYearId: normalizedAcademicYearId || scope.schoolClass?.academicYearId,
       dateValue: issueDateValue
+    });
+    await assertBillMonthsWritable({
+      schoolId: schoolContext.schoolId,
+      academicYearId: normalizedAcademicYearId || scope.schoolClass?.academicYearId,
+      dueDates: [dueDateValue]
     });
     if (normalizeScopeText(inputCourseId) && !normalizeScopeText(classId)) {
       setLegacyScopeFieldHeaders(res);
@@ -7085,10 +7201,13 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       .populate('course', 'title category')
       .populate('classId', 'title code gradeLevel section');
     invalidateFinanceReportCache();
+    const billingMonthLabel = formatAfghanMonthKeyLabel(billMonth.monthKey);
     res.status(201).json({
       success: true,
       item,
-      message: 'بل با موفقیت ایجاد شد.',
+      billingMonth: billMonth.monthKey,
+      billingMonthLabel,
+      message: billingMonthLabel ? `بل برای ماه ${billingMonthLabel} با موفقیت ایجاد شد.` : 'بل با موفقیت ایجاد شد.',
       ...(studentStatusWarning ? { studentStatusWarning } : {})
     });
   } catch (error) {
@@ -7145,7 +7264,8 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
       onlyDebtors,
       studentMembershipId,
       includeFutureMonths,
-      futureMonthCount
+      futureMonthCount,
+      billingMonth = ''
     } = req.body || {};
 
     if ((!classId && !inputCourseId) || !dueDate) {
@@ -7154,6 +7274,8 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
 
     const dueDateValue = parseDateSafe(dueDate, null);
     if (!dueDateValue) return res.status(400).json({ success: false, message: 'تاریخ مهلت پرداخت معتبر نیست.' });
+    const billMonth = resolveBillingMonth({ billingMonth, dueDate });
+    if (billMonth.error) return res.status(400).json({ success: false, message: billMonth.error });
     const issueDateValue = parseDateSafe(issuedAt, new Date());
 
     const normalizedPeriodType = String(periodType || '').trim() ? normalizeBillPeriodType(periodType) : '';
@@ -7211,6 +7333,13 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
       recoverMemberships: false
     });
     const effectivePeriodType = preview.periodType || normalizedPeriodType || 'term';
+    await assertBillMonthsWritable({
+      schoolId: schoolContext.schoolId,
+      academicYearId: academicYearId || scope.schoolClass?.academicYearId,
+      dueDates: preview.items.length
+        ? preview.items.map((candidate) => candidate.dueDate || dueDateValue)
+        : [dueDateValue]
+    });
 
     const items = [];
     let duplicateCount = 0;
@@ -7253,6 +7382,7 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
           outstandingAmount: isOpen ? roundMoney(linkedOrder.outstandingAmount) : 0
         };
       }
+      const itemMonthKey = toAfghanMonthKey(candidate.dueDate || dueDateValue);
       items.push({
         studentId: candidate.student,
         studentMembershipId: candidate.studentMembershipId,
@@ -7264,6 +7394,8 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
         lineItems: candidate.lineItems,
         adjustments: candidate.adjustments,
         dueDate: candidate.dueDate || dueDateValue,
+        billingMonth: itemMonthKey,
+        billingMonthLabel: formatAfghanMonthKeyLabel(itemMonthKey),
         periodType: candidate.periodType || effectivePeriodType,
         periodLabel: candidate.periodLabel || normalizedPeriodLabel,
         term: candidate.term || normalizedTerm,
@@ -7271,9 +7403,14 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
       });
     }
 
+    // An advance (multi-month) preview spans several months; each item still
+    // carries its own billingMonth.
+    const spansSeveralMonths = [true, 'true', 1, '1'].includes(includeFutureMonths);
     return res.json({
       success: true,
       periodType: effectivePeriodType,
+      billingMonth: spansSeveralMonths ? '' : billMonth.monthKey,
+      billingMonthLabel: spansSeveralMonths ? '' : formatAfghanMonthKeyLabel(billMonth.monthKey),
       feePlan: preview.feePlan,
       items,
       excluded: preview.excluded,
@@ -7286,6 +7423,7 @@ router.post('/admin/bills/preview', requireAuth, requireRole(['admin']), require
       }
     });
   } catch (error) {
+    if (sendFinancePeriodError(res, error)) return undefined;
     console.error('[finance][bulk-billing-preview]', error);
     return res.status(500).json({ success: false, message: 'خطا در پیش‌نمایش صدور بل‌ها' });
   }
@@ -7314,13 +7452,16 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       onlyDebtors,
       studentMembershipId,
       includeFutureMonths,
-      futureMonthCount
+      futureMonthCount,
+      billingMonth = ''
     } = req.body || {};
     if ((!classId && !inputCourseId) || !dueDate) {
       return res.status(400).json({ success: false, message: 'شناسه صنف و مهلت پرداخت الزامی است.' });
     }
     const dueDateValue = parseDateSafe(dueDate, null);
     if (!dueDateValue) return res.status(400).json({ success: false, message: 'تاریخ مهلت پرداخت معتبر نیست.' });
+    const billMonth = resolveBillingMonth({ billingMonth, dueDate });
+    if (billMonth.error) return res.status(400).json({ success: false, message: billMonth.error });
     const issueDateValue = parseDateSafe(issuedAt, new Date());
 
     const normalizedPeriodType = String(periodType || '').trim() ? normalizeBillPeriodType(periodType) : '';
@@ -7378,6 +7519,13 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       recoverMemberships: false
     });
     const effectivePeriodType = preview.periodType || normalizedPeriodType || 'term';
+    await assertBillMonthsWritable({
+      schoolId: schoolContext.schoolId,
+      academicYearId: academicYearId || scope.schoolClass?.academicYearId,
+      dueDates: preview.items.length
+        ? preview.items.map((candidate) => candidate.dueDate || dueDateValue)
+        : [dueDateValue]
+    });
 
     if (!preview.items.length) {
       return res.status(400).json({
@@ -7566,9 +7714,13 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       existingAmount = roundMoney(existingOpenOrders.reduce((sum, item) => sum + Number(item.outstandingAmount || 0), 0));
     }
 
+    // An advance (multi-month) run covers several months, so only a
+    // single-month run names its month.
+    const spansSeveralMonths = [true, 'true', 1, '1'].includes(includeFutureMonths);
+    const billingMonthLabel = spansSeveralMonths ? '' : formatAfghanMonthKeyLabel(billMonth.monthKey);
     res.json({
       success: true,
-      message: `صدور گروهی انجام شد: ${created} بل ایجاد شد، ${skipped} مورد رد یا تکراری بود.`,
+      message: `صدور گروهی${billingMonthLabel ? ` برای ماه ${billingMonthLabel}` : ''} انجام شد: ${created} بل ایجاد شد، ${skipped} مورد رد یا تکراری بود.`,
       created,
       createdAmount,
       createdFeeOrderIds,
@@ -7576,9 +7728,12 @@ router.post('/admin/bills/generate', requireAuth, requireRole(['admin']), requir
       existingAmount,
       skipped,
       periodType: effectivePeriodType,
+      billingMonth: spansSeveralMonths ? '' : billMonth.monthKey,
+      billingMonthLabel,
       feePlan: preview.feePlan
     });
   } catch (error) {
+    if (sendFinancePeriodError(res, error)) return undefined;
     console.error('[finance][bulk-billing-generate]', error);
     res.status(500).json({ success: false, message: 'خطا در صدور گروهی بل‌ها' });
   }
@@ -7596,8 +7751,11 @@ router.put('/admin/bills/:id', requireAuth, requireRole(['admin']), requirePermi
       return res.status(404).json({ success: false, message: 'بل در مکتب فعال یافت نشد.' });
     }
     if (item.status === 'void') return res.status(400).json({ success: false, message: 'بل باطل قابل ویرایش نیست.' });
-    if (await isMonthClosed(item.issuedAt, item)) {
-      return res.status(400).json({ success: false, message: 'ماه مالی بسته شده است و ویرایش بل مجاز نیست.' });
+    // The bill's month, and the month a new due date would move it into.
+    const nextDueDate = req.body?.dueDate ? parseDateSafe(req.body.dueDate, null) : null;
+    if (await isMonthClosed(item.dueDate || item.issuedAt, item)
+      || (nextDueDate && await isMonthClosed(nextDueDate, item))) {
+      return res.status(400).json({ success: false, message: 'ماه این بل بسته یا در جریان بستن است و ویرایش آن مجاز نیست.' });
     }
 
     const reason = String(req.body?.reason || '').trim();
@@ -8877,7 +9035,7 @@ router.post('/student/payments', requireAuth, (req, res, next) => {
   } catch (error) {
     return res.status(error?.status || 500).json({
       success: false,
-      message: error?.message || 'خطا در ثبت پرداخت توسط شاگرد'
+      message: error?.messageDari || error?.message || 'خطا در ثبت پرداخت توسط شاگرد'
     });
   }
 });
@@ -8928,7 +9086,7 @@ router.post('/parent/receipts', requireAuth, (req, res, next) => {
   } catch (error) {
     return res.status(error?.status || 500).json({
       success: false,
-      message: error?.message || 'خطا در ثبت رسید توسط ولی/سرپرست',
+      message: error?.messageDari || error?.message || 'خطا در ثبت رسید توسط ولی/سرپرست',
       ...(error?.availableAmount != null ? { availableAmount: error.availableAmount } : {}),
       ...(error?.pendingReceiptId ? { pendingReceiptId: error.pendingReceiptId } : {}),
       ...(error?.duplicateReceiptId ? { duplicateReceiptId: error.duplicateReceiptId } : {})
@@ -8967,7 +9125,7 @@ router.post('/parent/payments', requireAuth, (req, res, next) => {
     const mappedStatus = mapCanonicalPaymentErrorStatus(code);
     return res.status(error?.status || mappedStatus).json({
       success: false,
-      message: error?.status ? error.message : mapCanonicalPaymentErrorMessage(code)
+      message: error?.status ? (error.messageDari || error.message) : mapCanonicalPaymentErrorMessage(code)
     });
   }
 });
@@ -9642,11 +9800,23 @@ async function buildFinanceReportPdfPayload(reportKey, { scope, query = {} } = {
   // "only bills from this window" and is exactly what made a debtors PDF
   // look like it was missing older debts. Every other report here is a real
   // issued/paid-in-window range, so only this one gets the "as of" phrasing.
+  // Dates print in the Afghan calendar - the query carries the Gregorian
+  // "YYYY-MM-DD" the date pickers send, which used to be printed as-is and
+  // read like a different range than the one picked on the page. The anomaly
+  // and audit reports are current snapshots (they never read the range), so
+  // they say that instead of printing a range they don't apply.
+  const formatRangeDate = (value) => {
+    if (!value) return '...';
+    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value).trim());
+    return formatReportDateLabel(dateOnly ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3])) : value);
+  };
   const dateLabel = reportKey === 'debtors'
-    ? (query.dateTo ? `وضعیت باقیات تا تاریخ: ${query.dateTo}` : '')
+    ? (query.dateTo ? `وضعیت باقیات تا تاریخ: ${formatRangeDate(query.dateTo)}` : '')
     : reportKey === 'monthly_summary'
-      ? (query.month ? `ماه: ${query.month}` : '')
-      : (query.dateFrom || query.dateTo ? `بازه: ${query.dateFrom || '...'} تا ${query.dateTo || '...'}` : '');
+      ? (query.month ? `ماه: ${formatAfghanMonthKeyLabel(query.month) || query.month}` : '')
+      : reportKey === 'anomalies' || reportKey === 'audit_timeline'
+        ? 'وضعیت فعلی (فیلتر تاریخ بر این گزارش اعمال نمی‌شود)'
+        : (query.dateFrom || query.dateTo ? `بازه: ${formatRangeDate(query.dateFrom)} تا ${formatRangeDate(query.dateTo)}` : '');
   const filtersLabel = [
     scope.schoolClass?.title ? `صنف: ${scope.schoolClass.title}` : 'صنف: همه صنف‌ها',
     dateLabel
@@ -10071,21 +10241,180 @@ const buildBatchAdmissionOrderNumber = () => {
   return `AD-${monthKey}-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
 };
 
+// The school, financial year and days a month close covers. New closes are
+// keyed by Afghan solar month ("1405-06") and cover that month's days inside
+// its financial year; a Gregorian key ("2026-09") only still exists on closes
+// made before the switch.
 const resolveMonthCloseFinancialContext = async (req, payload = {}, monthKey = '') => {
   const schoolContext = await resolveActiveSchool(req, { payload, allowSingleFallback: true });
   if (!schoolContext.schoolId) throw createRouteError(400, 'برای عملیات دوره مالی، مکتب فعال را انتخاب کنید.');
-  const { startAt, endAt } = toMonthDateRange(monthKey);
+  const calendar = resolveMonthCloseCalendar(monthKey);
+  const monthSpan = resolveMonthCloseWindow(monthKey);
+  if (!calendar || !monthSpan) {
+    throw createRouteError(400, 'ماه مالی معتبر نیست؛ ماه را از فهرست ماه‌های هجری شمسی (مثلاً ۱۴۰۵-۰۶) انتخاب کنید.');
+  }
   const requestedFinancialYearId = String(payload.financialYearId || '').trim();
   const financialYear = requestedFinancialYearId
     ? await FinancialYear.findOne({ _id: requestedFinancialYearId, schoolId: schoolContext.schoolId })
     : await FinancialYear.findOne({
         schoolId: schoolContext.schoolId,
         status: { $ne: 'archived' },
-        startDate: { $lte: endAt },
-        endDate: { $gte: startAt }
+        startDate: { $lte: monthSpan.endAt },
+        endDate: { $gte: monthSpan.startAt }
       }).sort({ isActive: -1, createdAt: -1 });
   if (!financialYear) throw createRouteError(400, 'برای این ماه، سال مالی معتبر در مکتب فعال پیدا نشد.');
-  return { schoolContext, financialYear, startAt, endAt };
+  const window = resolveMonthCloseWindow(monthKey, financialYear);
+  if (!window) throw createRouteError(400, 'این ماه در سال مالی انتخاب‌شده قرار ندارد.');
+  return { schoolContext, financialYear, calendar, window, startAt: window.startAt, endAt: window.endAt };
+};
+
+const MONTH_CLOSE_DAY_MS = 24 * 60 * 60 * 1000;
+
+const isFinancialYearClosed = (financialYear = null) => (
+  financialYear?.isClosed === true || String(financialYear?.status || '') === 'closed'
+);
+
+// Blockers only the route can see (the month not over, an earlier month still
+// open) go first: they say why the month cannot be closed at all yet.
+const mergeMonthCloseBlockers = (readiness = {}, extraBlockingIssues = []) => {
+  const blockingIssues = [
+    ...extraBlockingIssues,
+    ...(Array.isArray(readiness?.blockingIssues) ? readiness.blockingIssues : [])
+  ];
+  return {
+    readyToApprove: blockingIssues.length === 0,
+    blockingIssues,
+    warningIssues: Array.isArray(readiness?.warningIssues) ? readiness.warningIssues : []
+  };
+};
+
+const listFinancialYearMonthCloses = (schoolId, financialYearId) => FinanceMonthClose.find({ schoolId, financialYearId })
+  .select('monthKey status closeWindow reopenDeadline needsReview')
+  .lean();
+
+// Months of the year before monthKey that closes do not fully cover yet -
+// months are closed in order, so none of them may be left open.
+const findOpenEarlierMonthKeys = ({ monthKey = '', financialYear = null, records = [] } = {}) => {
+  const closedWindows = records
+    .filter((record) => String(record?.status || '') === 'closed')
+    .map(readCloseWindow)
+    .filter(Boolean);
+  return listFinancialYearMonthKeys(financialYear)
+    .filter((key) => key < monthKey)
+    .filter((key) => !isWindowCovered(resolveMonthCloseWindow(key, financialYear), closedWindows));
+};
+
+// Closes of the same year that start after this one - the months a reopen of
+// this one reaches past.
+const findLaterMonthCloses = (item = {}, records = []) => {
+  const window = readCloseWindow(item);
+  if (!window) return [];
+  return records.filter((record) => {
+    if (String(record?._id) === String(item?._id)) return false;
+    const other = readCloseWindow(record);
+    return Boolean(other) && other.startAt.getTime() > window.startAt.getTime();
+  });
+};
+
+const formatMonthCloseLabels = (records = [], limit = 4) => {
+  const labels = records.slice(0, limit).map((record) => (
+    typeof record === 'string' ? formatAfghanMonthKeyLabel(record) : formatMonthCloseLabel(record)
+  ));
+  return `${labels.join('، ')}${records.length > limit ? ' و ...' : ''}`;
+};
+
+const latestMonthCloseVersion = (item = {}) => {
+  const versions = Array.isArray(item?.snapshotVersions) ? item.snapshotVersions : [];
+  return versions.length ? versions[versions.length - 1] : null;
+};
+
+// A month closed before versions were kept gets its closed figures saved as
+// version 1 before anything replaces them. Its fingerprint stays empty: those
+// figures counted bills by issue date, so comparing them with today's bill-month
+// figures would report changes that never happened.
+const ensureInitialMonthCloseVersion = (item) => {
+  if (!Array.isArray(item.snapshotVersions)) item.snapshotVersions = [];
+  if (item.snapshotVersions.length || !item.closedAt) return;
+  const totals = item.snapshot?.totals?.toObject ? item.snapshot.totals.toObject() : { ...(item.snapshot?.totals || {}) };
+  item.snapshotVersions.push({
+    version: 1,
+    reason: 'close',
+    createdAt: item.closedAt,
+    createdBy: item.closedBy || null,
+    note: String(item.note || '').trim(),
+    fingerprint: String(item.snapshot?.fingerprint || ''),
+    totals,
+    diff: [],
+    changes: null
+  });
+};
+
+const formatReopenDeadlineLabel = (value) => {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return formatAfghanStoredDateLabel(date);
+};
+
+const loadMonthCloseAnomalyCases = (schoolId, academicYearId) => populateFinanceAnomalyCaseQuery(
+  FinanceAnomalyCase.find({
+    schoolId,
+    academicYearId: String(academicYearId || '')
+  }).sort({ updatedAt: -1 }).limit(500)
+).lean();
+
+// Everything the request for closing monthKey depends on: its year and days,
+// its current record, and fresh figures whose readiness also carries the
+// ordering rules. The preview and the request itself both use this, so the
+// preview shows exactly what the request would refuse.
+const evaluateMonthCloseRequest = async (req, payload = {}, monthKey = '') => {
+  const context = await resolveMonthCloseFinancialContext(req, payload, monthKey);
+  const { schoolContext, financialYear, calendar, window } = context;
+  const schoolId = schoolContext.schoolId;
+  const [existing, records] = await Promise.all([
+    FinanceMonthClose.findOne({ schoolId, financialYearId: financialYear._id, monthKey }),
+    listFinancialYearMonthCloses(schoolId, financialYear._id)
+  ]);
+  if (calendar !== 'shamsi' && String(existing?.status || '') !== 'reopened') {
+    throw createRouteError(400, 'بستن ماه مالی اکنون به ماه هجری شمسی است؛ ماه را از فهرست ماه‌های سال مالی (مثلاً ۱۴۰۵-۰۶) انتخاب کنید.');
+  }
+  const blockers = [];
+  if (isFinancialYearClosed(financialYear)) {
+    blockers.push({ code: 'financial_year_closed', label: 'سال مالی این ماه بسته شده است' });
+  }
+  if (String(existing?.status || '') === 'closed') {
+    blockers.push({ code: 'already_closed', label: 'این ماه قبلاً بسته شده است' });
+  }
+  if (String(existing?.status || '') === 'pending_review') {
+    blockers.push({ code: 'already_in_review', label: 'درخواست بستن این ماه در جریان تایید است' });
+  }
+  if (new Date(window.endAt).getTime() >= Date.now()) {
+    blockers.push({
+      code: 'month_not_ended',
+      label: `این ماه هنوز تمام نشده است؛ بستن آن از ${formatAfghanStoredDateLabel(new Date(new Date(window.endAt).getTime() + 1))} ممکن می‌شود`
+    });
+  }
+  if (calendar === 'shamsi') {
+    const openEarlier = findOpenEarlierMonthKeys({ monthKey, financialYear, records });
+    if (openEarlier.length) {
+      blockers.push({
+        code: 'earlier_months_open',
+        label: `ماه‌ها به ترتیب بسته می‌شوند؛ اول ماه‌های قبلی بسته شوند: ${formatMonthCloseLabels(openEarlier)}`,
+        count: openEarlier.length,
+        samples: openEarlier.map(formatAfghanMonthKeyLabel)
+      });
+    }
+  }
+  const anomalyCases = await loadMonthCloseAnomalyCases(schoolId, financialYear.academicYearId);
+  const snapshot = await buildFinanceMonthCloseSnapshot(monthKey, {
+    schoolId,
+    financialYearId: String(financialYear._id),
+    academicYearId: String(financialYear.academicYearId || ''),
+    anomalyCases,
+    window
+  });
+  snapshot.readiness = mergeMonthCloseBlockers(snapshot?.readiness, blockers);
+  snapshot.fingerprint = buildMonthCloseFingerprint(snapshot?.totals);
+  return { ...context, existing, records, snapshot };
 };
 
 const buildAdmissionCorrectionPaymentNumber = () => {
@@ -10438,8 +10767,11 @@ const correctPendingAdmissionReceipt = async ({ req, candidate = {}, note = '', 
       throw createRouteError(409, 'این نوع رسید در اصلاح گروهی پشتیبانی نمی‌شود.');
     }
     if (roundMoney(order.amountPaid) > 0) throw createRouteError(409, 'روی بل قبلاً پرداخت تأییدشده ثبت شده است.');
-    if (await isMonthClosed(order.issuedAt || payment.paidAt || new Date(), order)) {
-      throw createRouteError(409, 'ماه مالی این بل بسته شده و اصلاح آن مجاز نیست.');
+    // The correction changes the bill's amount (its bill month) and the
+    // receipt it approves (the payment's month).
+    if (await isMonthClosed(order.dueDate || order.issuedAt || payment.paidAt || new Date(), order)
+      || await isMonthClosed(payment.paidAt || new Date(), order)) {
+      throw createRouteError(409, 'ماه مالی این بل یا رسید بسته شده و اصلاح آن مجاز نیست.');
     }
     const otherActivePayment = await FeePayment.findOne({
       _id: { $ne: payment._id },
@@ -11561,15 +11893,41 @@ router.get('/admin/reports/audit-package.csv', requireAuth, requireRole(['admin'
 
 router.get('/admin/reports/export.csv', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
-    const { status = '', classId = '', courseId = '' } = req.query || {};
+    const { status = '', classId = '', courseId = '', dateFrom = '', dateTo = '' } = req.query || {};
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
     const scope = await resolveFinanceScope({ classId, courseId, syncMissingCourse: false });
     if (scope.error) return res.status(400).json({ success: false, message: scope.error });
+    if (scope.schoolClass?.schoolId && String(scope.schoolClass.schoolId) !== String(schoolContext.schoolId)) {
+      return res.status(403).json({ success: false, message: 'صنف انتخاب‌شده به مکتب فعال تعلق ندارد.' });
+    }
     if (normalizeScopeText(courseId) && !normalizeScopeText(classId) && scope.classId) {
       setLegacyScopeHeaders(res, `/api/finance/admin/reports/export.csv?classId=${scope.classId}`);
     }
     const filter = {};
     if (status) filter.status = status;
+    // Only the active school's bills - without this an export with no class
+    // picked listed every school's bills.
+    const schoolClassIds = (await SchoolClass.find({ schoolId: schoolContext.schoolId }).select('_id').lean())
+      .map((item) => item._id);
+    addFilterClause(filter, {
+      $or: [
+        { schoolId: schoolContext.schoolId },
+        { schoolId: null, classId: { $in: schoolClassIds } }
+      ]
+    });
     addFilterClause(filter, buildScopedCourseFilter(scope));
+    // Same range and basis as the finance dashboard: bills whose bill month
+    // (due date) falls inside the "از تاریخ/تا تاریخ" picked on the page.
+    const rangeStart = parseDateSafe(String(dateFrom || '').trim() ? `${String(dateFrom).trim()}T00:00:00.000Z` : '', null);
+    const rangeEnd = parseDateSafe(String(dateTo || '').trim() ? `${String(dateTo).trim()}T23:59:59.999Z` : '', null);
+    if (rangeStart || rangeEnd) {
+      const range = {
+        ...(rangeStart ? { $gte: rangeStart } : {}),
+        ...(rangeEnd ? { $lte: rangeEnd } : {})
+      };
+      addFilterClause(filter, { $or: [{ dueDate: range }, { dueDate: null, issuedAt: range }] });
+    }
     const items = await FinanceBill.find(filter)
       .populate('student', 'name email')
       .populate('course', 'title')
@@ -11621,14 +11979,140 @@ router.get('/admin/month-close', requireAuth, requireRole(['admin']), requirePer
     const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
     if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
     writeSchoolContextHeaders(res, schoolContext.schoolId);
+    // Newest days first: sorting by the key would put older Gregorian keys
+    // ("2026-..") above solar ones ("1405-..").
     const items = await populateFinanceMonthCloseQuery(
       FinanceMonthClose.find({ schoolId: schoolContext.schoolId })
     )
-      .sort({ monthKey: -1 })
+      .sort({ 'closeWindow.startAt': -1, monthKey: -1 })
       .limit(36);
     res.json({ success: true, items: items.map((item) => serializeFinanceMonthClose(item, actorLevel)) });
   } catch {
     res.status(500).json({ success: false, message: 'خطا در دریافت ماه‌های بسته شده' });
+  }
+});
+
+// What a close request for this month would be refused for, with the figures
+// it would be closed with - shown before the request is sent.
+router.get('/admin/month-close/readiness', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const monthKey = String(req.query?.monthKey || '').trim();
+    const { schoolContext, financialYear, calendar, window, existing, snapshot } = await evaluateMonthCloseRequest(req, req.query || {}, monthKey);
+    writeSchoolContextHeaders(res, schoolContext.schoolId);
+    const status = String(existing?.status || '');
+    return res.json({
+      success: true,
+      monthKey,
+      monthLabel: calendar === 'shamsi' ? formatAfghanMonthKeyLabel(monthKey) : formatMonthCloseLabel({ monthKey, closeWindow: window }),
+      calendar,
+      financialYear: { _id: financialYear._id, title: financialYear.title || '' },
+      window: { startAt: window.startAt, endAt: window.endAt },
+      status,
+      isReclose: status === 'reopened',
+      readiness: snapshot.readiness,
+      totals: snapshot.totals || {},
+      missingMonthlyBills: snapshot.missingMonthlyBills || null,
+      canRequest: snapshot.readiness.readyToApprove === true
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || error?.statusCode || 500)).json({
+      success: false,
+      message: error?.status ? error.message : 'بررسی آمادگی بستن ماه ممکن نشد.'
+    });
+  }
+});
+
+// The months of a financial year, first to last, each with its close record
+// and where it stands - the board the month-close tab is drawn from.
+router.get('/admin/month-close/board', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const actorLevel = await resolveAdminActorLevel(req.user.id);
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) return res.status(400).json({ success: false, message: 'مکتب فعال را انتخاب کنید.' });
+    writeSchoolContextHeaders(res, schoolContext.schoolId);
+    const schoolId = schoolContext.schoolId;
+    const financialYears = await FinancialYear.find({ schoolId, status: { $ne: 'archived' } })
+      .select('title startDate endDate isActive isClosed status academicYearId')
+      .sort({ startDate: -1 })
+      .lean();
+    const requestedFinancialYearId = String(req.query?.financialYearId || '').trim();
+    const financialYear = financialYears.find((item) => String(item._id) === requestedFinancialYearId)
+      || financialYears.find((item) => item.isActive === true)
+      || financialYears[0]
+      || null;
+    const yearOptions = financialYears.map((item) => ({
+      _id: item._id,
+      title: item.title || '',
+      startDate: item.startDate,
+      endDate: item.endDate,
+      isActive: item.isActive === true,
+      isClosed: isFinancialYearClosed(item)
+    }));
+    if (!financialYear) {
+      return res.json({ success: true, financialYear: null, financialYears: yearOptions, months: [], legacy: [] });
+    }
+    const records = await populateFinanceMonthCloseQuery(
+      FinanceMonthClose.find({ schoolId, financialYearId: financialYear._id })
+    );
+    // The board needs a month's totals and readiness, not its aging rows or
+    // class breakdown; the details card loads the full record by id.
+    const serialized = records.map((item) => {
+      const plain = serializeFinanceMonthClose(item, actorLevel);
+      const snapshot = plain.snapshot || null;
+      return {
+        ...plain,
+        snapshot: snapshot
+          ? { generatedAt: snapshot.generatedAt, fingerprint: snapshot.fingerprint, totals: snapshot.totals, readiness: snapshot.readiness }
+          : null
+      };
+    });
+    const byKey = new Map(serialized.map((item) => [String(item.monthKey), item]));
+    const closedWindows = serialized.filter((item) => item.status === 'closed').map(readCloseWindow).filter(Boolean);
+    const now = Date.now();
+    let earlierAllClosed = true;
+    const months = listFinancialYearMonthKeys(financialYear).map((monthKey) => {
+      const window = resolveMonthCloseWindow(monthKey, financialYear);
+      const record = byKey.get(monthKey) || null;
+      const covered = isWindowCovered(window, closedWindows);
+      const ended = new Date(window.endAt).getTime() < now;
+      let state = 'open';
+      if (record?.status === 'closed') state = 'closed';
+      else if (record?.status === 'pending_review') state = 'in_review';
+      else if (record?.status === 'reopened') state = record.reopenExpired ? 'reopen_expired' : 'reopened';
+      else if (covered) state = 'legacy_closed';
+      else if (!ended) state = 'not_ended';
+      else if (record?.status === 'rejected') state = 'rejected';
+      const canRequest = !isFinancialYearClosed(financialYear)
+        && ended
+        && earlierAllClosed
+        && !covered
+        && !['closed', 'pending_review'].includes(String(record?.status || ''));
+      if (!covered) earlierAllClosed = false;
+      return {
+        monthKey,
+        label: formatAfghanMonthKeyLabel(monthKey),
+        window: { startAt: window.startAt, endAt: window.endAt },
+        ended,
+        covered,
+        state,
+        canRequest,
+        record
+      };
+    });
+    const lastClosed = [...months].reverse().find((month) => month.record?.status === 'closed') || null;
+    return res.json({
+      success: true,
+      actorLevel,
+      financialYear: yearOptions.find((item) => String(item._id) === String(financialYear._id)),
+      financialYears: yearOptions,
+      months,
+      lastClosedMonthKey: lastClosed?.monthKey || '',
+      nextMonthKey: months.find((month) => !month.covered && !['closed', 'pending_review'].includes(String(month.record?.status || '')))?.monthKey || '',
+      legacy: serialized.filter((item) => item.calendar !== 'shamsi'),
+      reopenDays: { min: MIN_REOPEN_DAYS, max: MAX_REOPEN_DAYS, default: DEFAULT_REOPEN_DAYS }
+    });
+  } catch {
+    return res.status(500).json({ success: false, message: 'خطا در دریافت تخته بستن ماه‌های مالی' });
   }
 });
 
@@ -11653,49 +12137,82 @@ router.post('/admin/month-close', requireAuth, requireRole(['admin']), requirePe
   try {
     const actorLevel = await resolveAdminActorLevel(req.user.id);
     const monthKey = String(req.body?.monthKey || '').trim();
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthKey)) {
-      return res.status(400).json({ success: false, message: 'فرمت ماه باید YYYY-MM باشد' });
-    }
     const requestNote = String(req.body?.note || '').trim();
-    const { schoolContext, financialYear, startAt, endAt } = await resolveMonthCloseFinancialContext(req, req.body || {}, monthKey);
+    const {
+      schoolContext,
+      financialYear,
+      window,
+      existing,
+      snapshot
+    } = await evaluateMonthCloseRequest(req, req.body || {}, monthKey);
     writeSchoolContextHeaders(res, schoolContext.schoolId);
-    const anomalyCases = await populateFinanceAnomalyCaseQuery(
-      FinanceAnomalyCase.find({
-        schoolId: schoolContext.schoolId,
-        academicYearId: String(financialYear.academicYearId || '')
-      }).sort({ updatedAt: -1 }).limit(500)
-    ).lean();
-    const snapshot = await buildFinanceMonthCloseSnapshot(monthKey, {
-      schoolId: schoolContext.schoolId,
-      financialYearId: String(financialYear._id),
-      academicYearId: String(financialYear.academicYearId || ''),
-      anomalyCases
-    });
-    const exists = await FinanceMonthClose.findOne({
-      schoolId: schoolContext.schoolId,
-      financialYearId: financialYear._id,
-      monthKey
-    });
-    if (exists && exists.status === 'closed') {
+    if (existing && existing.status === 'closed') {
       return res.status(400).json({ success: false, message: 'این ماه قبلاً بسته شده است' });
     }
-    if (exists && exists.status === 'pending_review') {
+    if (existing && existing.status === 'pending_review') {
       return res.status(409).json({ success: false, message: 'این ماه مالی قبلاً برای بررسی ثبت شده و هنوز در جریان تایید است.' });
     }
+    // The month locks as soon as the request is sent, so whatever still needs
+    // fixing has to be fixed before it - not during the review.
+    if (snapshot?.readiness?.readyToApprove !== true) {
+      return res.status(409).json({
+        success: false,
+        code: 'finance_month_close_not_ready',
+        readiness: snapshot.readiness,
+        totals: snapshot.totals || {},
+        message: 'تا رفع موانع زیر، درخواست بستن این ماه ثبت نمی‌شود؛ ماه از زمان درخواست قفل می‌شود و اصلاح پس از آن ممکن نیست.'
+      });
+    }
 
-    let item = exists;
+    const now = new Date();
+    const isReclose = existing?.status === 'reopened';
+    let recloseReview = { diff: [], changes: null, computedAt: null };
+    if (isReclose) {
+      ensureInitialMonthCloseVersion(existing);
+      const previous = latestMonthCloseVersion(existing);
+      const changes = await buildMonthCloseChangeReport({
+        schoolId: schoolContext.schoolId,
+        academicYearId: String(financialYear.academicYearId || ''),
+        window,
+        since: existing.reopenedAt
+      });
+      recloseReview = {
+        diff: diffMonthCloseTotals(previous?.totals || {}, snapshot.totals || {}),
+        changes,
+        computedAt: now
+      };
+    }
+    // A first close climbs the whole chain; a close after a reopen only needs
+    // the president, who sees what changed since the month was last closed.
+    const firstStage = isReclose ? MONTH_CLOSE_APPROVAL_STAGES.generalPresident : MONTH_CLOSE_APPROVAL_STAGES.financeManager;
+    const submitEntry = {
+      level: normalizeAdminLevel(actorLevel || 'finance_manager'),
+      action: 'submit',
+      by: req.user.id,
+      at: now,
+      note: requestNote,
+      reason: ''
+    };
+    const requestFields = {
+      schoolId: schoolContext.schoolId,
+      financialYearId: financialYear._id,
+      academicYearId: financialYear.academicYearId,
+      status: 'pending_review',
+      approvalStage: firstStage,
+      requestedBy: req.user.id,
+      requestedAt: now,
+      requestNote,
+      note: requestNote,
+      closeWindow: { startAt: window.startAt, endAt: window.endAt },
+      snapshot,
+      reviewFingerprint: snapshot.fingerprint,
+      isReclose,
+      recloseReview
+    };
+
+    let item = existing;
     if (item) {
-      item.status = 'pending_review';
-      item.schoolId = schoolContext.schoolId;
-      item.financialYearId = financialYear._id;
-      item.academicYearId = financialYear.academicYearId;
-      item.approvalStage = MONTH_CLOSE_APPROVAL_STAGES.financeManager;
-      item.requestedBy = req.user.id;
-      item.requestedAt = new Date();
-      item.requestNote = requestNote;
-      item.note = requestNote;
-      item.closeWindow = { startAt, endAt };
-      item.snapshot = snapshot;
+      Object.assign(item, requestFields);
       item.closedBy = null;
       item.closedAt = null;
       item.approvedBy = null;
@@ -11703,62 +12220,31 @@ router.post('/admin/month-close', requireAuth, requireRole(['admin']), requirePe
       item.rejectedBy = null;
       item.rejectedAt = null;
       item.rejectReason = '';
-      item.approvalTrail = [{
-        level: normalizeAdminLevel(actorLevel || 'finance_manager'),
-        action: 'submit',
-        by: req.user.id,
-        at: new Date(),
-        note: requestNote,
-        reason: ''
-      }];
+      item.approvalTrail = [submitEntry];
       item.history = Array.isArray(item.history) ? item.history : [];
-      item.history.push({
-        action: 'requested',
-        by: req.user.id,
-        at: new Date(),
-        note: requestNote
-      });
+      item.history.push({ action: 'requested', by: req.user.id, at: now, note: requestNote });
       await item.save();
     } else {
       item = await FinanceMonthClose.create({
-        schoolId: schoolContext.schoolId,
-        financialYearId: financialYear._id,
-        academicYearId: financialYear.academicYearId,
+        ...requestFields,
         monthKey,
-        status: 'pending_review',
-        approvalStage: MONTH_CLOSE_APPROVAL_STAGES.financeManager,
-        requestedBy: req.user.id,
-        requestedAt: new Date(),
-        requestNote,
-        note: requestNote,
-        closeWindow: { startAt, endAt },
-        snapshot,
-        approvalTrail: [{
-          level: normalizeAdminLevel(actorLevel || 'finance_manager'),
-          action: 'submit',
-          by: req.user.id,
-          at: new Date(),
-          note: requestNote,
-          reason: ''
-        }],
-        history: [{
-          action: 'requested',
-          by: req.user.id,
-          at: new Date(),
-          note: requestNote
-        }]
+        approvalTrail: [submitEntry],
+        history: [{ action: 'requested', by: req.user.id, at: now, note: requestNote }]
       });
     }
 
-    let targetAdmins = await findAdminsByLevels(['finance_manager'], req.user.id);
+    const monthLabel = formatMonthCloseLabel(item);
+    let targetAdmins = await findAdminsByLevels(isReclose ? ['general_president'] : ['finance_manager'], req.user.id);
     if (!targetAdmins.length) {
       targetAdmins = await findAdminsByLevels(['finance_lead', 'general_president'], req.user.id);
     }
     await notifyAdmins({
       req,
       admins: targetAdmins,
-      title: 'درخواست بستن ماه مالی',
-      message: `ماه ${monthKey} برای بررسی و بستن مالی ثبت شد.`,
+      title: isReclose ? 'درخواست بستن دوباره ماه مالی' : 'درخواست بستن ماه مالی',
+      message: isReclose
+        ? `ماه ${monthLabel} پس از اصلاحات برای بستن دوباره ثبت شد و در انتظار تایید ریاست عمومی است.`
+        : `ماه ${monthLabel} برای بررسی و بستن مالی ثبت شد.`,
       type: 'finance'
     });
 
@@ -11771,9 +12257,11 @@ router.post('/admin/month-close', requireAuth, requireRole(['admin']), requirePe
         monthKey,
         level: actorLevel,
         note: requestNote,
+        isReclose,
         snapshotStatus: 'ready',
         totals: snapshot?.totals || {},
-        readiness: snapshot?.readiness || {}
+        readiness: snapshot?.readiness || {},
+        diff: recloseReview.diff
       }
     });
 
@@ -11784,7 +12272,9 @@ router.post('/admin/month-close', requireAuth, requireRole(['admin']), requirePe
     res.status(201).json({
       success: true,
       item: serializeFinanceMonthClose(refreshed, actorLevel),
-      message: getMonthCloseStageMessage(MONTH_CLOSE_APPROVAL_STAGES.financeManager)
+      message: isReclose
+        ? 'درخواست بستن دوباره برای تایید ریاست عمومی ارسال شد.'
+        : getMonthCloseStageMessage(MONTH_CLOSE_APPROVAL_STAGES.financeManager)
     });
   } catch (error) {
     const code = String(error?.message || '');
@@ -11792,7 +12282,7 @@ router.post('/admin/month-close', requireAuth, requireRole(['admin']), requirePe
       success: false,
       message: code === 'finance_month_key_invalid'
         ? 'فرمت ماه مالی معتبر نیست.'
-        : (error?.messageDari || error?.message || 'خطا در بستن ماه مالی')
+        : (error?.messageDari || (error?.status ? error.message : 'خطا در بستن ماه مالی'))
     });
   }
 });
@@ -11814,44 +12304,58 @@ router.post('/admin/month-close/:id/approve', requireAuth, requireRole(['admin']
     if (!canReviewMonthCloseStage(actorLevel, currentStage)) {
       return res.status(403).json({ success: false, message: 'سطح مدیریتی شما برای این مرحله مجاز نیست.' });
     }
+    if (!canApproveMonthCloseStage(actorLevel, currentStage)) {
+      return res.status(403).json({ success: false, message: 'تایید نهایی بستن ماه فقط توسط ریاست عمومی انجام می‌شود.' });
+    }
     if (actorAlreadyReviewedMonthClose(item.approvalTrail, req.user.id)) {
       return res.status(409).json({ success: false, message: 'این ماه مالی قبلاً توسط شما بازبینی شده است.' });
     }
 
     let freshSnapshot;
     try {
-      const anomalyCases = await populateFinanceAnomalyCaseQuery(
-        FinanceAnomalyCase.find({
-          schoolId: item.schoolId,
-          academicYearId: String(item.academicYearId || '')
-        }).sort({ updatedAt: -1 }).limit(500)
-      ).lean();
+      const anomalyCases = await loadMonthCloseAnomalyCases(item.schoolId, item.academicYearId);
       freshSnapshot = await buildFinanceMonthCloseSnapshot(item.monthKey, {
         schoolId: String(item.schoolId || ''),
         financialYearId: String(item.financialYearId || ''),
         academicYearId: String(item.academicYearId || ''),
-        anomalyCases
+        anomalyCases,
+        window: readCloseWindow(item)
       });
-    } catch (snapshotError) {
+      freshSnapshot.fingerprint = buildMonthCloseFingerprint(freshSnapshot?.totals);
+    } catch {
       return res.status(503).json({
         success: false,
         code: 'finance_month_close_snapshot_failed',
         message: 'محاسبه تازه وضعیت ماه مالی ناموفق شد؛ برای حفاظت از حساب‌ها تأیید متوقف گردید.'
       });
     }
-    item.snapshot = freshSnapshot;
     if (freshSnapshot?.readiness?.readyToApprove !== true) {
+      item.snapshot = freshSnapshot;
       await item.save();
       return res.status(409).json({
         success: false,
         code: 'finance_month_close_blocked',
         readiness: freshSnapshot.readiness,
         item: serializeFinanceMonthClose(item, actorLevel),
-        message: 'تا رفع موانع مالی، تأیید و بستن این ماه مجاز نیست.'
+        message: 'تا رفع موانع مالی، تأیید و بستن این ماه مجاز نیست؛ درخواست را رد کنید تا ماه برای اصلاح باز شود.'
       });
     }
+    // Reviewers approve the figures that were put in front of them. The month
+    // is locked while in review, so a difference means something changed it
+    // anyway - approval stops until the request is sent again.
+    const reviewedFingerprint = String(item.reviewFingerprint || '').trim();
+    if (reviewedFingerprint && reviewedFingerprint !== freshSnapshot.fingerprint) {
+      return res.status(409).json({
+        success: false,
+        code: 'finance_month_close_figures_changed',
+        diff: diffMonthCloseTotals(item.snapshot?.totals || {}, freshSnapshot.totals || {}),
+        message: 'ارقام این ماه پس از ثبت درخواست تغییر کرده است؛ درخواست را رد کنید تا با ارقام تازه دوباره ثبت شود.'
+      });
+    }
+    item.snapshot = freshSnapshot;
 
     const note = String(req.body?.note || '').trim();
+    const now = new Date();
     appendMonthCloseApprovalTrail(item, {
       level: normalizeAdminLevel(actorLevel || 'finance_manager'),
       action: 'approve',
@@ -11862,26 +12366,50 @@ router.post('/admin/month-close/:id/approve', requireAuth, requireRole(['admin']
     item.history.push({
       action: 'approved',
       by: req.user.id,
-      at: new Date(),
+      at: now,
       note
     });
 
+    const monthLabel = formatMonthCloseLabel(item);
     const nextStage = getNextMonthCloseStage(actorLevel, currentStage);
     let message = 'درخواست بستن ماه مالی تایید شد.';
     if (!nextStage || nextStage === MONTH_CLOSE_APPROVAL_STAGES.completed) {
+      const wasReclose = item.isReclose === true;
+      if (!Array.isArray(item.snapshotVersions)) item.snapshotVersions = [];
+      const previous = latestMonthCloseVersion(item);
+      item.snapshotVersions.push({
+        version: item.snapshotVersions.length + 1,
+        reason: wasReclose ? 'reclose' : 'close',
+        createdAt: now,
+        createdBy: req.user.id,
+        note,
+        fingerprint: freshSnapshot.fingerprint,
+        totals: freshSnapshot.totals || {},
+        diff: previous ? diffMonthCloseTotals(previous.totals || {}, freshSnapshot.totals || {}) : [],
+        changes: wasReclose ? (item.recloseReview?.changes || null) : null
+      });
       item.status = 'closed';
       item.approvalStage = MONTH_CLOSE_APPROVAL_STAGES.completed;
       item.approvedBy = req.user.id;
-      item.approvedAt = new Date();
+      item.approvedAt = now;
       item.closedBy = req.user.id;
-      item.closedAt = new Date();
+      item.closedAt = now;
+      item.isReclose = false;
+      item.recloseReview = { diff: [], changes: null, computedAt: null };
+      item.reopenDeadline = null;
+      item.reopenDurationDays = 0;
+      item.reopenReminderAt = null;
+      item.reopenExpiryNotifiedAt = null;
+      item.needsReview = false;
+      item.needsReviewReason = '';
+      item.needsReviewSince = null;
       item.history.push({
         action: 'closed',
         by: req.user.id,
-        at: new Date(),
+        at: now,
         note
       });
-      message = `ماه مالی ${item.monthKey} بسته شد`;
+      message = wasReclose ? `ماه ${monthLabel} دوباره بسته شد` : `ماه مالی ${monthLabel} بسته شد`;
     } else {
       item.status = 'pending_review';
       item.approvalStage = nextStage;
@@ -11893,7 +12421,7 @@ router.post('/admin/month-close/:id/approve', requireAuth, requireRole(['admin']
         req,
         admins: targetAdmins,
         title: 'مرحله بعدی بستن ماه مالی',
-        message: `ماه ${item.monthKey} به مرحله ${nextStage} رسید و در انتظار بررسی شما است.`,
+        message: `بستن ماه ${monthLabel} در انتظار بررسی شما است.`,
         type: 'finance'
       });
       message = getMonthCloseStageMessage(nextStage);
@@ -11958,8 +12486,12 @@ router.post('/admin/month-close/:id/reject', requireAuth, requireRole(['admin'])
       by: req.user.id,
       reason
     });
-    item.status = 'rejected';
-    item.approvalStage = MONTH_CLOSE_APPROVAL_STAGES.rejected;
+    // A rejected close after a reopen goes back to the reopen it came from -
+    // with the same deadline - instead of leaving the month open for good.
+    const wasReclose = item.isReclose === true;
+    item.status = wasReclose ? 'reopened' : 'rejected';
+    item.approvalStage = wasReclose ? MONTH_CLOSE_APPROVAL_STAGES.completed : MONTH_CLOSE_APPROVAL_STAGES.rejected;
+    item.isReclose = false;
     item.rejectedBy = req.user.id;
     item.rejectedAt = new Date();
     item.rejectReason = reason;
@@ -11972,12 +12504,16 @@ router.post('/admin/month-close/:id/reject', requireAuth, requireRole(['admin'])
     });
     await item.save();
 
+    const monthLabel = formatMonthCloseLabel(item);
+    const lock = resolveMonthCloseLock(item);
     const requestAudience = [item.requestedBy].filter(Boolean).map((userId) => ({ _id: userId }));
     await notifyAdmins({
       req,
       admins: requestAudience,
       title: 'درخواست بستن ماه مالی رد شد',
-      message: `ماه ${item.monthKey} برای اصلاحات برگشت داده شد.`,
+      message: wasReclose && lock.locked
+        ? `بستن دوباره ماه ${monthLabel} رد شد و مهلت بازگشایی آن تمام شده است؛ برای اصلاح، ریاست عمومی باید مهلت را تمدید کند.`
+        : `ماه ${monthLabel} برای اصلاحات برگشت داده شد.`,
       type: 'finance'
     });
 
@@ -11999,7 +12535,7 @@ router.post('/admin/month-close/:id/reject', requireAuth, requireRole(['admin'])
     return res.json({
       success: true,
       item: serializeFinanceMonthClose(refreshed, actorLevel),
-      message: `درخواست بستن ماه مالی ${item.monthKey} رد شد`
+      message: `درخواست بستن ماه ${formatMonthCloseLabel(item)} رد شد`
     });
   } catch {
     return res.status(500).json({ success: false, message: 'خطا در رد درخواست بستن ماه مالی' });
@@ -12932,7 +13468,8 @@ router.post('/admin/month-close/:id/reopen', requireAuth, requireRole(['admin'])
     if (!item) {
       return res.status(404).json({ success: false, message: 'ماه مالی موردنظر پیدا نشد.' });
     }
-    if (item.status !== 'closed') {
+    const status = String(item.status || '').trim();
+    if (!['closed', 'reopened'].includes(status)) {
       return res.status(400).json({ success: false, message: 'این ماه مالی قبلاً بازگشایی شده یا هنوز بسته نیست.' });
     }
 
@@ -12940,19 +13477,117 @@ router.post('/admin/month-close/:id/reopen', requireAuth, requireRole(['admin'])
     if (!reopenNote) {
       return res.status(400).json({ success: false, message: 'برای بازگشایی ماه مالی، دلیل یا توضیح الزامی است.' });
     }
+    const durationDays = normalizeReopenDays(req.body?.durationDays);
+    const now = new Date();
+    const reopenDeadline = new Date(now.getTime() + durationDays * MONTH_CLOSE_DAY_MS);
+    const monthLabel = formatMonthCloseLabel(item);
+    const deadlineLabel = formatReopenDeadlineLabel(reopenDeadline);
+    const financialYear = item.financialYearId ? await FinancialYear.findById(item.financialYearId) : null;
+    if (isFinancialYearClosed(financialYear)) {
+      return res.status(409).json({ success: false, message: 'سال مالی این ماه بسته شده است؛ ماه‌های آن دوباره باز نمی‌شوند.' });
+    }
+    const correctionAudience = await findAdminsByLevels(['finance_manager', 'finance_lead'], req.user.id);
 
+    // Already reopened: the president gives it a new deadline (also after the
+    // old one has run out and the month locked again).
+    if (status === 'reopened') {
+      item.reopenDeadline = reopenDeadline;
+      item.reopenDurationDays = durationDays;
+      item.reopenReminderAt = null;
+      item.reopenExpiryNotifiedAt = null;
+      item.history = Array.isArray(item.history) ? item.history : [];
+      item.history.push({
+        action: 'extended',
+        by: req.user.id,
+        at: now,
+        note: `${reopenNote} (${durationDays} روز، تا ${deadlineLabel})`
+      });
+      await item.save();
+      await notifyAdmins({
+        req,
+        admins: correctionAudience,
+        title: 'تمدید مهلت بازگشایی ماه مالی',
+        message: `مهلت اصلاح ماه ${monthLabel} تا ${deadlineLabel} تمدید شد.`,
+        type: 'finance'
+      });
+      await logActivity({
+        req,
+        action: 'finance_extend_month_reopen',
+        targetType: 'FinanceMonthClose',
+        targetId: item._id.toString(),
+        meta: { monthKey: item.monthKey, note: reopenNote, durationDays, reopenDeadline, level: actorLevel }
+      });
+      const extended = await populateFinanceMonthCloseQuery(FinanceMonthClose.findById(item._id));
+      return res.json({
+        success: true,
+        item: serializeFinanceMonthClose(extended, actorLevel),
+        message: `مهلت بازگشایی ماه ${monthLabel} تا ${deadlineLabel} تمدید شد`
+      });
+    }
+
+    // Reopen the latest closed month only: a later month's figures were
+    // closed on top of this one. The president can still reopen out of order;
+    // the later closed months are then marked for review.
+    const records = await listFinancialYearMonthCloses(item.schoolId, item.financialYearId);
+    const later = findLaterMonthCloses(item, records);
+    const laterInReview = later.filter((record) => record.status === 'pending_review');
+    if (laterInReview.length) {
+      return res.status(409).json({
+        success: false,
+        code: 'finance_month_reopen_later_in_review',
+        message: `ماه‌های بعدی (${formatMonthCloseLabels(laterInReview)}) در جریان تایید بستن هستند؛ اول آن درخواست‌ها تایید یا رد شوند.`
+      });
+    }
+    const laterClosed = later.filter((record) => record.status === 'closed');
+    const override = req.body?.override === true || String(req.body?.override || '') === 'true';
+    if (laterClosed.length && !override) {
+      return res.status(409).json({
+        success: false,
+        code: 'finance_month_reopen_out_of_order',
+        laterMonths: laterClosed.map((record) => ({ _id: record._id, monthKey: record.monthKey, monthLabel: formatMonthCloseLabel(record) })),
+        message: `ماه‌های بعد از این ماه (${formatMonthCloseLabels(laterClosed)}) بسته هستند؛ معمولاً فقط آخرین ماه بسته‌شده باز می‌شود. برای بازگشایی خارج از ترتیب، آن را تایید کنید تا ماه‌های بعدی برای بازبینی علامت بخورند.`
+      });
+    }
+
+    ensureInitialMonthCloseVersion(item);
     item.status = 'reopened';
+    item.approvalStage = MONTH_CLOSE_APPROVAL_STAGES.completed;
     item.reopenedBy = req.user.id;
-    item.reopenedAt = new Date();
+    item.reopenedAt = now;
     item.reopenNote = reopenNote;
+    item.reopenDeadline = reopenDeadline;
+    item.reopenDurationDays = durationDays;
+    item.reopenCount = Number(item.reopenCount || 0) + 1;
+    item.reopenReminderAt = null;
+    item.reopenExpiryNotifiedAt = null;
+    item.isReclose = false;
     item.history = Array.isArray(item.history) ? item.history : [];
     item.history.push({
       action: 'reopened',
       by: req.user.id,
-      at: new Date(),
-      note: reopenNote
+      at: now,
+      note: `${reopenNote} (${durationDays} روز، تا ${deadlineLabel})`
     });
     await item.save();
+
+    for (const record of laterClosed) {
+      const laterItem = await FinanceMonthClose.findOne({ _id: record._id, schoolId: item.schoolId });
+      if (!laterItem) continue;
+      laterItem.needsReview = true;
+      laterItem.needsReviewReason = `ماه ${monthLabel} پس از بستن این ماه دوباره باز شد؛ ارقام ایستا و کهنگی بدهی این ماه پس از بستن دوباره آن ماه تازه شود.`;
+      laterItem.needsReviewSince = now;
+      laterItem.history = Array.isArray(laterItem.history) ? laterItem.history : [];
+      laterItem.history.push({ action: 'flagged', by: req.user.id, at: now, note: `بازگشایی خارج از ترتیب ماه ${monthLabel}` });
+      await laterItem.save();
+    }
+
+    await notifyAdmins({
+      req,
+      admins: correctionAudience,
+      title: 'بازگشایی ماه مالی',
+      message: `ماه ${monthLabel} برای ${durationDays} روز (تا ${deadlineLabel}) برای اصلاح باز شد؛ پس از اصلاح، درخواست بستن دوباره را ثبت کنید.`,
+      type: 'finance'
+    });
 
     await logActivity({
       req,
@@ -12962,7 +13597,11 @@ router.post('/admin/month-close/:id/reopen', requireAuth, requireRole(['admin'])
       meta: {
         monthKey: item.monthKey,
         note: reopenNote,
-        level: actorLevel
+        level: actorLevel,
+        durationDays,
+        reopenDeadline,
+        outOfOrder: laterClosed.length > 0,
+        flaggedMonths: laterClosed.map((record) => record.monthKey)
       }
     });
 
@@ -12973,10 +13612,87 @@ router.post('/admin/month-close/:id/reopen', requireAuth, requireRole(['admin'])
     return res.json({
       success: true,
       item: serializeFinanceMonthClose(refreshed, actorLevel),
-      message: `ماه مالی ${item.monthKey} برای اصلاحات کنترل‌شده دوباره باز شد`
+      flaggedMonths: laterClosed.map((record) => record.monthKey),
+      message: `ماه ${monthLabel} تا ${deadlineLabel} برای اصلاحات کنترل‌شده دوباره باز شد`
     });
   } catch {
     return res.status(500).json({ success: false, message: 'خطا در بازگشایی ماه مالی' });
+  }
+});
+
+// A closed month marked for review (an earlier month was reopened after it)
+// gets its closing report recomputed. Its own figures cannot have moved while
+// it was closed; if they did, it has to be reopened and closed again instead.
+router.post('/admin/month-close/:id/refresh', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const actorLevel = await resolveAdminActorLevel(req.user.id);
+    if (!['finance_manager', 'general_president'].includes(actorLevel)) {
+      return res.status(403).json({ success: false, message: 'تازه‌سازی گزارش ماه بسته فقط توسط مدیر مالی یا ریاست عمومی ممکن است.' });
+    }
+    const item = await loadSchoolOwnedMonthClose(req, req.params.id);
+    if (!item) {
+      return res.status(404).json({ success: false, message: 'ماه مالی موردنظر پیدا نشد.' });
+    }
+    if (String(item.status || '') !== 'closed' || item.needsReview !== true) {
+      return res.status(400).json({ success: false, message: 'فقط ماه بسته‌ای که برای بازبینی علامت خورده تازه می‌شود.' });
+    }
+    const anomalyCases = await loadMonthCloseAnomalyCases(item.schoolId, item.academicYearId);
+    const freshSnapshot = await buildFinanceMonthCloseSnapshot(item.monthKey, {
+      schoolId: String(item.schoolId || ''),
+      financialYearId: String(item.financialYearId || ''),
+      academicYearId: String(item.academicYearId || ''),
+      anomalyCases,
+      window: readCloseWindow(item)
+    });
+    freshSnapshot.fingerprint = buildMonthCloseFingerprint(freshSnapshot?.totals);
+    ensureInitialMonthCloseVersion(item);
+    const previous = latestMonthCloseVersion(item);
+    const closedFingerprint = String(previous?.fingerprint || item.snapshot?.fingerprint || '').trim();
+    if (closedFingerprint && closedFingerprint !== freshSnapshot.fingerprint) {
+      return res.status(409).json({
+        success: false,
+        code: 'finance_month_close_figures_changed',
+        diff: diffMonthCloseTotals(previous?.totals || item.snapshot?.totals || {}, freshSnapshot.totals || {}),
+        message: 'ارقام خود این ماه پس از بستن تغییر کرده است؛ برای ثبت آن، ماه باید بازگشایی و دوباره بسته شود.'
+      });
+    }
+    const note = String(req.body?.note || '').trim();
+    const now = new Date();
+    item.snapshotVersions.push({
+      version: item.snapshotVersions.length + 1,
+      reason: 'refresh',
+      createdAt: now,
+      createdBy: req.user.id,
+      note: note || String(item.needsReviewReason || ''),
+      fingerprint: freshSnapshot.fingerprint,
+      totals: freshSnapshot.totals || {},
+      diff: diffMonthCloseTotals(previous?.totals || {}, freshSnapshot.totals || {}),
+      changes: null
+    });
+    item.snapshot = freshSnapshot;
+    item.needsReview = false;
+    item.needsReviewReason = '';
+    item.needsReviewSince = null;
+    item.history = Array.isArray(item.history) ? item.history : [];
+    item.history.push({ action: 'refreshed', by: req.user.id, at: now, note });
+    await item.save();
+
+    await logActivity({
+      req,
+      action: 'finance_refresh_month_close',
+      targetType: 'FinanceMonthClose',
+      targetId: item._id.toString(),
+      meta: { monthKey: item.monthKey, level: actorLevel, note }
+    });
+
+    const refreshed = await populateFinanceMonthCloseQuery(FinanceMonthClose.findById(item._id));
+    return res.json({
+      success: true,
+      item: serializeFinanceMonthClose(refreshed, actorLevel),
+      message: `گزارش بستن ماه ${formatMonthCloseLabel(item)} تازه شد`
+    });
+  } catch {
+    return res.status(500).json({ success: false, message: 'تازه‌سازی گزارش ماه بسته ممکن نشد.' });
   }
 });
 

@@ -5,11 +5,21 @@ import { io } from 'socket.io-client';
 import './AdminFinance.css';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import AfghanMonthInput from '../components/ui/AfghanMonthInput';
+import MonthCloseBoard, { MonthCloseBanner, MonthCloseVersions, monthCloseLabel } from '../components/finance/MonthCloseBoard';
 import {
+  afghanMonthKeyToDateRange,
   afghanSolarToGregorianInput,
+  buildAfghanMonthOptions,
   formatAfghanDate,
   formatAfghanDateTime,
+  formatAfghanMonthKeyLabel,
+  getAfghanMonthKeyOfRange,
+  getAfghanMonthLength,
   gregorianToAfghanSolar,
+  normalizeAfghanMonthKey,
+  shiftAfghanMonthKey,
+  toAfghanMonthKey,
   toGregorianDateInputValue
 } from '../utils/afghanDate';
 import { formatFinanceCode, toEnglishAlphaNumeric } from '../utils/latinFinanceCode';
@@ -67,11 +77,22 @@ const toInputDate = (value) => {
   return toGregorianDateInputValue(value);
 };
 
+// Label for a Gregorian "YYYY-MM" key - statement batches and delivery
+// campaigns are still keyed by Gregorian month (month close is keyed by solar
+// month; see monthCloseLabel). A Gregorian month
+// straddles two Afghan months (September = 10 Sonbola - 8 Mizan), so it is
+// shown as the Afghan days it covers; naming it after the Afghan month of its
+// 1st day read as a different month than the one it holds. Solar keys
+// ("1405-06") use formatAfghanMonthKeyLabel instead.
 const toFaMonthKey = (value) => {
   if (!value) return '-';
-  const date = new Date(`${String(value).trim()}-01T00:00:00`);
-  if (Number.isNaN(date.getTime())) return value;
-  return formatAfghanDate(date, { year: 'numeric', month: 'long' }) || value;
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(String(value).trim());
+  if (!match) return value;
+  const first = new Date(Number(match[1]), Number(match[2]) - 1, 1);
+  const last = new Date(Number(match[1]), Number(match[2]), 0);
+  const firstLabel = formatAfghanDate(first, { month: 'long', day: 'numeric' });
+  const lastLabel = formatAfghanDate(last, { year: 'numeric', month: 'long', day: 'numeric' });
+  return firstLabel && lastLabel ? `${firstLabel} تا ${lastLabel}` : value;
 };
 
 const fmt = (value) => {
@@ -261,37 +282,27 @@ const selectActiveFeePlanForScope = ({
     })[0] || null;
 };
 
-const getMonthBucket = (value) => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-};
+// Afghan solar-hijri year-month bucket (e.g. "1405-05"). Every month bucket on
+// this page is a solar month: a Gregorian bucket labeled with the Afghan month
+// its 1st day falls in (Sep 1 = 10 Sonbola) put two solar months under one name.
+const getAfghanMonthBucket = (value) => toAfghanMonthKey(value);
 
-// Afghan solar-hijri year-month bucket (e.g. "1405-05"), unlike getMonthBucket
-// above which buckets by the Gregorian calendar. Used wherever a bucket key
-// needs to line up with Afghan month labels/filters instead of Gregorian ones.
-const getAfghanMonthBucket = (value) => {
-  const solar = gregorianToAfghanSolar(value);
-  if (!solar || !Number.isInteger(solar.jy) || !Number.isInteger(solar.jm)) return '';
-  return `${solar.jy}-${String(solar.jm).padStart(2, '0')}`;
-};
-
+// Weeks start on Saturday, as the Afghan week does. The key is the local
+// calendar day of that Saturday (toISOString would shift it a day back in Kabul).
 const getWeekBucket = (value) => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const copy = new Date(date);
-  const diff = (copy.getDay() + 6) % 7;
-  copy.setDate(copy.getDate() - diff);
-  copy.setHours(0, 0, 0, 0);
-  return copy.toISOString().slice(0, 10);
+  const dayKey = toGregorianDateInputValue(value);
+  if (!dayKey) return '';
+  const [year, month, day] = dayKey.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() - ((date.getDay() + 1) % 7));
+  return toGregorianDateInputValue(date);
 };
 
 const formatFinanceTrendLabel = (bucket, mode) => {
   if (!bucket) return '-';
   try {
     if (mode === 'monthly') {
-      const date = new Date(`${bucket}-01T00:00:00`);
-      return formatAfghanDate(date, { month: 'short', year: '2-digit' }) || '-';
+      return formatAfghanMonthKeyLabel(bucket) || bucket;
     }
     return formatAfghanDate(bucket, mode === 'weekly'
       ? { month: 'short', day: 'numeric' }
@@ -307,7 +318,7 @@ const buildFinanceTrendSeries = (items = [], mode = 'daily') => {
   rows.forEach((item) => {
     const rawDate = item?.date || item?.monthKey || '';
     const bucket = mode === 'monthly'
-      ? (item?.monthKey || getMonthBucket(rawDate))
+      ? (item?.monthKey || getAfghanMonthBucket(rawDate))
       : mode === 'weekly'
         ? getWeekBucket(rawDate)
         : rawDate;
@@ -712,17 +723,6 @@ const FOLLOW_UP_STATUS_OPTIONS = [
 
 const FOLLOW_UP_LEVEL_LABELS = Object.fromEntries(FOLLOW_UP_LEVEL_OPTIONS.map((item) => [item.value, item.label]));
 const FOLLOW_UP_STATUS_LABELS = Object.fromEntries(FOLLOW_UP_STATUS_OPTIONS.map((item) => [item.value, item.label]));
-
-const canReviewMonthCloseForRole = (role = '', stage = '') => {
-  const normalizedRole = normalizeFinanceRole(role, '');
-  const normalizedStage = normalizeMonthCloseApprovalStage(stage);
-  if (normalizedStage !== 'finance_manager_review' && normalizedStage !== 'finance_lead_review' && normalizedStage !== 'general_president_review') {
-    return false;
-  }
-  if (normalizedRole === 'general_president') return true;
-  if (normalizedRole === 'finance_lead') return normalizedStage === 'finance_lead_review';
-  return normalizedRole === 'finance_manager' && normalizedStage === 'finance_manager_review';
-};
 
 const getStageDefaultLevel = (stage = '') => {
   const normalized = String(stage || '').trim();
@@ -1179,7 +1179,7 @@ const getFinanceRecordAcademicYearId = (item = {}) => (
 const getFinanceBillMonthLabel = (item = {}) => {
   const explicitLabel = String(item?.periodLabel || '').trim();
   if (explicitLabel) return explicitLabel;
-  if (item?.periodType === 'monthly' && item?.dueDate) return toFaMonthKey(getMonthBucket(item.dueDate));
+  if (item?.periodType === 'monthly' && item?.dueDate) return formatAfghanMonthKeyLabel(getAfghanMonthBucket(item.dueDate));
   if (item?.dueDate) return toFaDate(item.dueDate);
   return item?.title || formatFinanceCode(item?.billNumber, 'باقیات');
 };
@@ -1228,6 +1228,36 @@ const formatFinanceBillMonthFilterLabel = (key = '', item = {}) => {
   return String(item?.periodLabel || '').trim() || normalizedKey.replace(/^period:/, '') || 'ماه نامشخص';
 };
 
+// A bill is filed under the Afghan month of its due date - the backend derives
+// a monthly bill's period from it, and the bill-month filter and monthly
+// reports read the same month. The bill forms used to ask only for a due
+// date, so which month a bill was for was never shown. These keep a form's
+// `billingMonth` and `dueDate` in step: picking a month moves the due date into
+// that month (same day, else the plan's due day), picking a due date sets the month.
+const withBillingMonth = (form = {}, monthKey = '', defaultDueDay = 10) => {
+  const key = normalizeAfghanMonthKey(monthKey);
+  if (!key) return form;
+  if (toAfghanMonthKey(form.dueDate) === key) return { ...form, billingMonth: key };
+  const [year, month] = key.split('-').map(Number);
+  const preferredDay = gregorianToAfghanSolar(form.dueDate)?.jd || Number(defaultDueDay) || 10;
+  const day = Math.max(1, Math.min(getAfghanMonthLength(key) || 29, preferredDay));
+  return { ...form, billingMonth: key, dueDate: afghanSolarToGregorianInput(year, month, day) };
+};
+
+const withBillDueDate = (form = {}, dueDate = '') => ({
+  ...form,
+  dueDate,
+  billingMonth: toAfghanMonthKey(dueDate) || form.billingMonth
+});
+
+const describeBillMonth = (form = {}, subject = 'این بل') => {
+  const monthLabel = formatAfghanMonthKeyLabel(form.billingMonth);
+  if (!monthLabel) return 'ماه بل را انتخاب کنید.';
+  return form.dueDate
+    ? `${subject} برای ماه «${monthLabel}» صادر می‌شود؛ مهلت پرداخت: ${toFaDate(form.dueDate)}.`
+    : `${subject} برای ماه «${monthLabel}» صادر می‌شود؛ مهلت پرداخت را در همین ماه انتخاب کنید.`;
+};
+
 const getArrearsTimingLabel = (dueDate = '') => {
   const due = dueDate ? new Date(dueDate) : null;
   if (!due || Number.isNaN(due.getTime())) return 'بدون تاریخ سررسید';
@@ -1235,7 +1265,7 @@ const getArrearsTimingLabel = (dueDate = '') => {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
   if (dueDay < today) return 'سررسید گذشته';
-  if (due.getFullYear() === now.getFullYear() && due.getMonth() === now.getMonth()) return 'ماه جاری';
+  if (toAfghanMonthKey(due) === toAfghanMonthKey(now)) return 'ماه جاری';
   return 'آینده';
 };
 
@@ -2056,6 +2086,28 @@ export default function AdminFinance() {
   const [monthlyTrend, setMonthlyTrend] = useState([]);
   const [financeOverviewLoading, setFinanceOverviewLoading] = useState(false);
   const [financeOverviewRange, setFinanceOverviewRange] = useState(getDefaultFinanceDashboardRange);
+  // The one "از تاریخ/تا تاریخ" range every figure on this page reads. Every
+  // month picker on the page (top card, monthly report, expenses) sets it to a
+  // whole Afghan month, and the monthly report shows the month of this range.
+  const financeRangeMonthKey = useMemo(
+    () => getAfghanMonthKeyOfRange(financeOverviewRange),
+    [financeOverviewRange]
+  );
+  const financeReportMonthKey = financeRangeMonthKey
+    || toAfghanMonthKey(financeOverviewRange.to || financeOverviewRange.from);
+  const financeRangeLabel = financeOverviewRange.from && financeOverviewRange.to
+    ? `${toFaDate(financeOverviewRange.from)} تا ${toFaDate(financeOverviewRange.to)}`
+    : 'بازه انتخاب نشده';
+  const financeMonthOptions = useMemo(() => buildAfghanMonthOptions({ past: 24, future: 3 }), []);
+  const applyFinanceRangeMonth = (monthKey) => {
+    const range = afghanMonthKeyToDateRange(monthKey);
+    if (range) setFinanceOverviewRange(range);
+  };
+  const isMonthInFinanceRange = (monthKey = '') => {
+    const startKey = toAfghanMonthKey(financeOverviewRange.from);
+    const endKey = toAfghanMonthKey(financeOverviewRange.to);
+    return Boolean(monthKey && startKey && endKey && monthKey >= startKey && monthKey <= endKey);
+  };
   const [students, setStudents] = useState([]);
   const [studentMemberships, setStudentMemberships] = useState([]);
   const [classOptions, setClassOptions] = useState([]);
@@ -2329,6 +2381,7 @@ export default function AdminFinance() {
     feeType: 'tuition',
     amountSource: 'plan',
     amount: '',
+    billingMonth: toAfghanMonthKey(new Date()),
     dueDate: '',
     academicYearId: '',
     academicYear: '',
@@ -2339,6 +2392,7 @@ export default function AdminFinance() {
 
   const [bulkForm, setBulkForm] = useState({
     classId: '',
+    billingMonth: toAfghanMonthKey(new Date()),
     dueDate: '',
     academicYear: '',
     academicYearId: '',
@@ -2548,7 +2602,7 @@ export default function AdminFinance() {
       const classId = getFinanceRecordClassId(item);
       const academicYearId = getFinanceRecordAcademicYearId(item);
       const bucket = String(item?.periodLabel || '').trim()
-        || (item?.dueDate ? getMonthBucket(item.dueDate) : '')
+        || (item?.dueDate ? getAfghanMonthBucket(item.dueDate) : '')
         || getFeeOrderRowId(item)
         || String(grouped.size + 1);
       const groupId = [bucket, classId, academicYearId].filter(Boolean).join(':');
@@ -2844,6 +2898,22 @@ export default function AdminFinance() {
       .map(([key, label]) => ({ key, label }))
       .sort((left, right) => String(right.key).localeCompare(String(left.key), 'fa'));
   }, [bills]);
+  // Months offered by the page's month pickers: recent solar months, plus any
+  // month that has bills and the month currently shown.
+  const reportMonthOptions = useMemo(() => {
+    const byKey = new Map(financeMonthOptions.map((item) => [item.key, item.label]));
+    billMonthOptions.forEach((item) => {
+      if (normalizeAfghanMonthKey(item.key) === item.key && !byKey.has(item.key)) {
+        byKey.set(item.key, formatAfghanMonthKeyLabel(item.key));
+      }
+    });
+    if (financeReportMonthKey && !byKey.has(financeReportMonthKey)) {
+      byKey.set(financeReportMonthKey, formatAfghanMonthKeyLabel(financeReportMonthKey));
+    }
+    return [...byKey.entries()]
+      .map(([key, label]) => ({ key, label }))
+      .sort((left, right) => right.key.localeCompare(left.key));
+  }, [financeMonthOptions, billMonthOptions, financeReportMonthKey]);
   const hasBillIssuanceCriteria = Boolean(
     normalizeFinanceSearchTerm(orderSearchTerm)
     || orderClassFilter !== 'all'
@@ -2940,17 +3010,15 @@ export default function AdminFinance() {
     ));
   }, [studentMemberships, bills, classOptions, orderClassFilter, orderFeeTypeFilter, orderMonthFilter, billIssuanceFilter, orderSearchTerm]);
   const orderWorkspaceStats = useMemo(() => {
-    const now = new Date();
-    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    // "This month" is the current Afghan month, matched on each bill's bill
+    // month (the key the bill-month filter uses). It used to compare
+    // Gregorian months (Sep 1 = 10 Sonbola), so the count straddled two
+    // Afghan months.
+    const monthKey = toAfghanMonthKey(new Date());
     const openBills = bills.filter((item) => OPEN_ORDER_STATUSES.has(String(item?.status || '').trim()));
     const officialBills = bills.filter((item) => String(item?.status || '').trim() !== 'void');
     const voidBills = bills.filter((item) => String(item?.status || '').trim() === 'void');
-    const monthBills = officialBills.filter((item) => {
-      const rawDate = item?.dueDate || item?.createdAt || item?.updatedAt;
-      const date = rawDate ? new Date(rawDate) : null;
-      if (!date || Number.isNaN(date.getTime())) return false;
-      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}` === monthKey;
-    });
+    const monthBills = officialBills.filter((item) => getFinanceBillMonthFilterKey(item) === monthKey);
     const overdueBills = bills.filter((item) => String(item?.status || '').trim() === 'overdue');
     const partialBills = bills.filter((item) => String(item?.status || '').trim() === 'partial');
     const activeCommitments = openBills.filter((item) => toSafeNumber(item?.outstandingAmount ?? (toSafeNumber(item?.amountDue) - toSafeNumber(item?.amountPaid))) > 0);
@@ -2959,6 +3027,7 @@ export default function AdminFinance() {
       openCount: openBills.length,
       overdueCount: overdueBills.length,
       monthCount: monthBills.length,
+      monthLabel: formatAfghanMonthKeyLabel(monthKey),
       partialCount: partialBills.length,
       activeCommitments: activeCommitments.length,
       officialCount: officialBills.length,
@@ -3693,7 +3762,6 @@ export default function AdminFinance() {
     return `${now.getFullYear()}-${m}`;
   }, []);
   const defaultCashierDate = useMemo(() => toInputDate(new Date()), []);
-  const [monthKey, setMonthKey] = useState(defaultMonthKey);
   const [documentBatchForm, setDocumentBatchForm] = useState({
     classId: '',
     academicYearId: '',
@@ -3703,7 +3771,12 @@ export default function AdminFinance() {
   const [cashierReport, setCashierReport] = useState(null);
   const [reportClassId, setReportClassId] = useState('');
   const [reportAcademicYearId, setReportAcademicYearId] = useState('');
-  const [monthlySummaryMonth, setMonthlySummaryMonth] = useState('');
+  // The monthly report shows the month of the range picked at the top of the
+  // page. It used to keep its own month - defaulting to the newest month any
+  // bill had, often a future month billed in advance - so it rarely showed
+  // the month the rest of the page was showing. Picking a month in the report
+  // moves the whole page's range to that month.
+  const monthlySummaryMonth = financeReportMonthKey;
   const [monthlySummaryData, setMonthlySummaryData] = useState(null);
   const [monthlySummaryLoading, setMonthlySummaryLoading] = useState(false);
   const [monthlySummaryError, setMonthlySummaryError] = useState('');
@@ -3780,9 +3853,9 @@ export default function AdminFinance() {
   const financeSmartCards = [
     {
       key: 'issued',
-      label: 'بل‌های صادرشده',
+      label: 'بل‌های این بازه',
       value: financeOverviewKpis?.issuedBills?.amount,
-      meta: `${fmt(financeOverviewKpis?.issuedBills?.count || 0)} بل · ${fmt(financeOverviewKpis?.issuedBills?.studentCount || 0)} شاگرد`,
+      meta: `${fmt(financeOverviewKpis?.issuedBills?.count || 0)} بل · ${fmt(financeOverviewKpis?.issuedBills?.studentCount || 0)} شاگرد · بر اساس ماه بل`,
       tone: 'sky',
       section: 'orders'
     },
@@ -3937,13 +4010,6 @@ export default function AdminFinance() {
   }, [reportClassId, reportAcademicYearId]);
 
   useEffect(() => {
-    if (!billMonthOptions.length) return;
-    if (!monthlySummaryMonth || !billMonthOptions.some((item) => item.key === monthlySummaryMonth)) {
-      setMonthlySummaryMonth(billMonthOptions[0].key);
-    }
-  }, [billMonthOptions, monthlySummaryMonth]);
-
-  useEffect(() => {
     if (activeSection !== 'reports') return;
     loadMonthlySummary(monthlySummaryMonth);
   }, [activeSection, monthlySummaryMonth, loadMonthlySummary]);
@@ -3956,6 +4022,14 @@ export default function AdminFinance() {
     if (reportAcademicYearId) url.searchParams.set('academicYearId', reportAcademicYearId);
     url.searchParams.set('recentLimit', '10');
     url.searchParams.set('debtorLimit', '200');
+    return url.toString();
+  };
+
+  // 12 Afghan months ending with the month the selected range ends in.
+  const buildMonthlyTrendUrl = () => {
+    const url = new URL(`${API_BASE}/api/finance/admin/dashboard/monthly-trend`, window.location.origin);
+    url.searchParams.set('months', '12');
+    if (financeOverviewRange.to) url.searchParams.set('to', financeOverviewRange.to);
     return url.toString();
   };
 
@@ -4012,7 +4086,7 @@ export default function AdminFinance() {
         safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/audit-timeline'), { success: true, items: [], summary: null }),
         safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/anomalies'), { success: true, items: [], summary: null }),
         safeFetchJson(`${API_BASE}/api/student-finance/refunds?limit=200`, { success: true, items: [] }),
-        safeFetchJson(`${API_BASE}/api/finance/admin/dashboard/monthly-trend?months=12`, { success: true, months: [] }),
+        safeFetchJson(buildMonthlyTrendUrl(), { success: true, months: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/expenses`, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/expense-categories`, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/treasury/analytics`, { success: true, analytics: null })
@@ -4245,7 +4319,7 @@ export default function AdminFinance() {
           ? safeFetchJson(`${API_BASE}/api/student-finance/exemptions?status=active`, { success: false, items: [] })
           : Promise.resolve(null),
         safeFetchJson(`${API_BASE}/api/student-finance/refunds?limit=200`, { success: false, items: [] }),
-        safeFetchJson(`${API_BASE}/api/finance/admin/dashboard/monthly-trend?months=12`, { success: false, months: [] }),
+        safeFetchJson(buildMonthlyTrendUrl(), { success: false, months: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/expenses`, { success: false, items: [] })
       ]);
 
@@ -4371,6 +4445,25 @@ export default function AdminFinance() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [financeOverviewRange.from, financeOverviewRange.to, reportClassId, reportAcademicYearId]);
+
+  // The monthly trend ends with the month the selected range ends in. loadAll
+  // fetches it on first load; this refetches only when that month changes.
+  const monthlyTrendMonthKey = toAfghanMonthKey(financeOverviewRange.to);
+  const monthlyTrendMonthKeyRef = useRef(monthlyTrendMonthKey);
+  useEffect(() => {
+    if (monthlyTrendMonthKeyRef.current === monthlyTrendMonthKey) return undefined;
+    monthlyTrendMonthKeyRef.current = monthlyTrendMonthKey;
+    let mounted = true;
+    fetchJson(buildMonthlyTrendUrl())
+      .then((data) => {
+        if (mounted && data?.success) setMonthlyTrend(data.months || []);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [monthlyTrendMonthKey]);
 
   useEffect(() => {
     if (activeSection !== 'orders'
@@ -4643,15 +4736,20 @@ export default function AdminFinance() {
   }, [reliefFocusPage, reliefFocusTotalPages]);
 
   useEffect(() => {
+    // A record the month-close board just returned is kept selected while the
+    // page's own reload has not listed it yet.
+    const selectedIsKnown = Boolean(selectedMonthCloseId) && (
+      closedMonths.some((item) => String(item?._id || item?.id || '') === String(selectedMonthCloseId))
+      || String(selectedMonthCloseDetail?._id || '') === String(selectedMonthCloseId)
+    );
+    if (selectedIsKnown) return;
     if (!closedMonths.length) {
       if (selectedMonthCloseId) setSelectedMonthCloseId('');
       setSelectedMonthCloseDetail(null);
       return;
     }
-    if (!selectedMonthCloseId || !closedMonths.some((item) => String(item?._id || item?.id || '') === String(selectedMonthCloseId))) {
-      setSelectedMonthCloseId(String(closedMonths[0]?._id || closedMonths[0]?.id || ''));
-    }
-  }, [closedMonths, selectedMonthCloseId]);
+    setSelectedMonthCloseId(String(closedMonths[0]?._id || closedMonths[0]?.id || ''));
+  }, [closedMonths, selectedMonthCloseId, selectedMonthCloseDetail]);
 
   useEffect(() => {
     if (!documentArchiveItems.length) {
@@ -4880,12 +4978,6 @@ export default function AdminFinance() {
         ? selectedMonthClose.approvalTrail
         : []
   ), [selectedMonthCloseDetail?.approvalTrail, selectedMonthClose?.approvalTrail]);
-  const canApproveSelectedMonthClose = Boolean(selectedMonthCloseDetail?.canApprove || selectedMonthClose?.canApprove)
-    || (selectedMonthCloseStatus === 'pending_review' && canReviewMonthCloseForRole(financeRole, selectedMonthCloseStage));
-  const canRejectSelectedMonthClose = Boolean(selectedMonthCloseDetail?.canReject || selectedMonthClose?.canReject)
-    || (selectedMonthCloseStatus === 'pending_review' && canReviewMonthCloseForRole(financeRole, selectedMonthCloseStage));
-  const canReopenSelectedMonthClose = Boolean(selectedMonthCloseDetail?.canReopen || selectedMonthClose?.canReopen)
-    || (financeRole === 'general_president' && selectedMonthCloseStatus === 'closed');
   const filteredDocumentArchiveItems = useMemo(() => (
     documentArchiveTypeFilter === 'all'
       ? documentArchiveItems
@@ -5059,48 +5151,6 @@ export default function AdminFinance() {
   useEffect(() => {
     setExpensePage((current) => Math.min(Math.max(1, current), expenseTotalPages));
   }, [expenseTotalPages]);
-
-  // Quick month jump for the Expenses tab - sets the same shared
-  // "از تاریخ/تا تاریخ" range the whole finance page reads from, so the
-  // user does not need to leave this tab and go to Overview/Reports just to
-  // change the month. Buckets are Gregorian calendar months (same convention
-  // already used by the monthly-trend report/strip above), labeled in Dari
-  // via toFaMonthKey.
-  const expenseMonthFilterOptions = useMemo(() => {
-    const now = new Date();
-    const options = [];
-    for (let i = 0; i < 18; i += 1) {
-      const cursor = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
-      options.push({ key, label: toFaMonthKey(key) });
-    }
-    return options;
-  }, []);
-
-  const selectedExpenseMonthKey = useMemo(() => {
-    if (!financeOverviewRange.from || !financeOverviewRange.to) return '';
-    const from = new Date(financeOverviewRange.from);
-    if (Number.isNaN(from.getTime())) return '';
-    const monthStart = new Date(from.getFullYear(), from.getMonth(), 1);
-    const monthEnd = new Date(from.getFullYear(), from.getMonth() + 1, 0);
-    if (
-      toGregorianDateInputValue(monthStart) === financeOverviewRange.from
-      && toGregorianDateInputValue(monthEnd) === financeOverviewRange.to
-    ) {
-      return `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}`;
-    }
-    return '';
-  }, [financeOverviewRange.from, financeOverviewRange.to]);
-
-  const applyExpenseMonthFilter = (monthKey) => {
-    if (!monthKey) return;
-    const [year, month] = monthKey.split('-').map(Number);
-    if (!year || !month) return;
-    setFinanceOverviewRange({
-      from: toGregorianDateInputValue(new Date(year, month - 1, 1)),
-      to: toGregorianDateInputValue(new Date(year, month, 0))
-    });
-  };
 
   // Same date-range scope as the overview KPI card (from/to only, no
   // status/category filter) - used to break the KPI's single "pending"
@@ -5379,22 +5429,19 @@ export default function AdminFinance() {
         if (!active) return;
         if (!data?.success) { setPaymentDeskTrend(null); return; }
         const payments = Array.isArray(data.payments) ? data.payments : [];
-        const now = new Date();
+        // The last six Afghan months, not Gregorian ones.
+        const currentMonthKey = toAfghanMonthKey(new Date());
         const months = [];
         for (let i = 5; i >= 0; i -= 1) {
-          const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
-          months.push({
-            key: `${monthDate.getFullYear()}-${monthDate.getMonth()}`,
-            label: formatAfghanDate(monthDate, { year: 'numeric', month: 'short' }) || '-',
-            total: 0
-          });
+          const key = shiftAfghanMonthKey(currentMonthKey, -i);
+          months.push({ key, label: formatAfghanMonthKeyLabel(key) || '-', total: 0 });
         }
         const byKey = new Map(months.map((item) => [item.key, item]));
         payments.forEach((payment) => {
           if (String(payment?.status || '').trim() === 'rejected') return;
           const paidAt = payment?.paidAt ? new Date(payment.paidAt) : null;
           if (!paidAt || Number.isNaN(paidAt.getTime())) return;
-          const bucket = byKey.get(`${paidAt.getFullYear()}-${paidAt.getMonth()}`);
+          const bucket = byKey.get(toAfghanMonthKey(paidAt));
           if (bucket) bucket.total += Number(payment?.amount || 0);
         });
         setPaymentDeskTrend(months);
@@ -6869,98 +6916,6 @@ export default function AdminFinance() {
     }
   };
 
-  const requestMonthClose = async () => {
-    const note = window.prompt('یادداشت بستن ماه مالی (اختیاری):', '') || '';
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/month-close`, { monthKey, note });
-      // Take the fresh record straight from the response. The detail is
-      // otherwise only refetched when selectedMonthCloseId changes, and these
-      // actions re-select the same month — so the panel, which reads the detail
-      // in preference to the list, would keep showing the pre-action stage.
-      if (data?.item?._id) {
-        setSelectedMonthCloseId(data.item._id);
-        setSelectedMonthCloseDetail(data.item);
-      }
-      setMessage(data.message || 'ماه مالی بسته شد');
-      await loadAll();
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const approveMonthClose = async (item = null) => {
-    const targetId = String(item?._id || item?.id || selectedMonthClose?._id || selectedMonthClose?.id || '').trim();
-    if (!targetId) return;
-    const note = window.prompt('یادداشت تایید این مرحله (اختیاری):', '') || '';
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/month-close/${targetId}/approve`, { note });
-      // Take the fresh record straight from the response. The detail is
-      // otherwise only refetched when selectedMonthCloseId changes, and these
-      // actions re-select the same month — so the panel, which reads the detail
-      // in preference to the list, would keep showing the pre-action stage.
-      if (data?.item?._id) {
-        setSelectedMonthCloseId(data.item._id);
-        setSelectedMonthCloseDetail(data.item);
-      }
-      setMessage(data.message || 'مرحله بستن ماه مالی تایید شد');
-      await loadAll();
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const rejectMonthClose = async (item = null) => {
-    const targetId = String(item?._id || item?.id || selectedMonthClose?._id || selectedMonthClose?.id || '').trim();
-    if (!targetId) return;
-    const reason = window.prompt('دلیل رد یا برگشت درخواست بستن ماه مالی:', '') || '';
-    if (!reason.trim()) return;
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/month-close/${targetId}/reject`, { reason });
-      // Take the fresh record straight from the response. The detail is
-      // otherwise only refetched when selectedMonthCloseId changes, and these
-      // actions re-select the same month — so the panel, which reads the detail
-      // in preference to the list, would keep showing the pre-action stage.
-      if (data?.item?._id) {
-        setSelectedMonthCloseId(data.item._id);
-        setSelectedMonthCloseDetail(data.item);
-      }
-      setMessage(data.message || 'درخواست بستن ماه مالی رد شد');
-      await loadAll();
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const reopenMonthClose = async (item = null) => {
-    const targetId = String(item?._id || item?.id || selectedMonthClose?._id || selectedMonthClose?.id || '').trim();
-    if (!targetId) return;
-    const note = window.prompt('دلیل بازگشایی کنترل‌شده ماه مالی:', '') || '';
-    if (!note.trim()) return;
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/month-close/${targetId}/reopen`, { note });
-      // Take the fresh record straight from the response. The detail is
-      // otherwise only refetched when selectedMonthCloseId changes, and these
-      // actions re-select the same month — so the panel, which reads the detail
-      // in preference to the list, would keep showing the pre-action stage.
-      if (data?.item?._id) {
-        setSelectedMonthCloseId(data.item._id);
-        setSelectedMonthCloseDetail(data.item);
-      }
-      setMessage(data.message || 'ماه مالی بازگشایی شد');
-      await loadAll();
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
   const exportMonthCloseSnapshot = async (item = null) => {
     const targetId = String(item?._id || item?.id || selectedMonthClose?._id || selectedMonthClose?.id || '').trim();
     if (!targetId) return;
@@ -7071,7 +7026,7 @@ export default function AdminFinance() {
     const payload = {
       classId: String(documentBatchForm.classId || '').trim(),
       academicYearId: String(documentBatchForm.academicYearId || '').trim(),
-      monthKey: String(documentBatchForm.monthKey || monthKey || '').trim()
+      monthKey: String(documentBatchForm.monthKey || defaultMonthKey || '').trim()
     };
     if (!payload.classId) {
       setMessage('برای بسته گروهی، صنف را انتخاب کنید');
@@ -7338,7 +7293,11 @@ export default function AdminFinance() {
 
   const exportCsv = async () => {
     try {
-      const res = await apiFetch(buildScopedReportUrl('/api/finance/admin/reports/export.csv'), {
+      // Same range as the rest of the page: the bills whose bill month falls in it.
+      const exportUrl = new URL(buildScopedReportUrl('/api/finance/admin/reports/export.csv'));
+      if (financeOverviewRange.from) exportUrl.searchParams.set('dateFrom', financeOverviewRange.from);
+      if (financeOverviewRange.to) exportUrl.searchParams.set('dateTo', financeOverviewRange.to);
+      const res = await apiFetch(exportUrl.toString(), {
         parse: 'response', rejectOnHttpError: false,
         headers: { ...getAuthHeaders() }
       });
@@ -7498,10 +7457,12 @@ export default function AdminFinance() {
           <p className="muted">{FINANCE_SECTION_DESCRIPTIONS[activeSection]}</p>
         </div>
         <div className="finance-chip-group">
-          <span className="finance-chip finance-chip-emerald">{fmt(summary?.monthCollection || 0)} AFN</span>
-          <span className="finance-chip">{pendingReceipts.length} رسید</span>
+          <span className="finance-chip finance-chip-emerald" title={`عواید تاییدشده در بازه ${financeRangeLabel}`} data-testid="finance-head-range-revenue">
+            عواید بازه: {fmt(financeOverviewKpis?.approvedRevenue?.amount || 0)} AFN
+          </span>
+          <span className="finance-chip">{pendingReceipts.length} رسید در انتظار</span>
           <span className="finance-chip finance-chip-muted">{openBillsCount} بدهی باز</span>
-          <span className="finance-chip finance-chip-rose">{fmt(totalOutstandingBalance)} AFN</span>
+          <span className="finance-chip finance-chip-rose" title="باقیات همه بل‌های باز، بدون فیلتر تاریخ">کل باقیات: {fmt(totalOutstandingBalance)} AFN</span>
         </div>
       </div>
 
@@ -7520,13 +7481,30 @@ export default function AdminFinance() {
         </div>
       ) : null}
 
+      <MonthCloseBanner items={closedMonths} />
+
       <div className="finance-card finance-overview-filter" data-finance-section="overview reports">
         <div className="finance-overview-filter-heading">
           <span className="finance-eyebrow">گزارش هوشمند مالی</span>
           <strong>یک بازه، یک منبع ارقام</strong>
-          <span className="muted">بل، پرداخت، تخفیف، مصرف و خزانه در همین بازه با هم محاسبه می‌شوند.</span>
+          <span className="muted" data-testid="finance-range-summary">
+            بازه انتخاب‌شده: {financeRangeLabel}. پرداخت، مصرف و خزانه بر اساس تاریخ ثبت، و بل‌ها بر اساس «ماه بل» (ماهِ مهلت پرداخت) در همین بازه محاسبه می‌شوند.
+          </span>
         </div>
         <div className="finance-overview-filter-controls">
+          <label>
+            <span>ماه</span>
+            <select
+              value={financeRangeMonthKey}
+              onChange={(event) => applyFinanceRangeMonth(event.target.value)}
+              data-testid="finance-range-month-select"
+            >
+              <option value="">{financeRangeMonthKey ? 'انتخاب ماه' : 'بازه سفارشی'}</option>
+              {reportMonthOptions.map((item) => (
+                <option key={`finance-range-month-${item.key}`} value={item.key}>{item.label}</option>
+              ))}
+            </select>
+          </label>
           <label>
             <span>از تاریخ</span>
             <AfghanDateInput
@@ -7634,17 +7612,17 @@ export default function AdminFinance() {
       <div className="finance-grid finance-recent-finance-grid" data-finance-section="overview reports">
         <div className="finance-card">
           <div className="finance-card-head">
-            <div><h3>آخرین بل‌ها</h3><p className="muted">۱۰ بل اخیر در بازه انتخاب‌شده</p></div>
+            <div><h3>آخرین بل‌ها</h3><p className="muted">۱۰ بل اخیرِ ماه‌های همین بازه (بر اساس ماه بل)</p></div>
             <button type="button" className="secondary" onClick={() => setActiveSection('orders')}>همه بل‌ها</button>
           </div>
           <div className="finance-subcard-list">
             {(financeOverview?.recent?.bills || []).map((item) => (
               <div key={`overview-recent-bill-${item.id}`} className="mini-row">
                 <span className="finance-cell-stack"><strong>{item.studentName} <FinanceStudentStatusBadge label={item.lifecycleStatusLabel} tone={item.lifecycleStatusTone} /></strong><small>{item.title} · {item.classTitle}</small></span>
-                <span className="finance-cell-stack"><strong>{fmt(item.amount)} AFN</strong><small>باقیات: {fmt(item.outstanding)} · {toFaDate(item.occurredAt)}</small></span>
+                <span className="finance-cell-stack"><strong>{fmt(item.amount)} AFN</strong><small>باقیات: {fmt(item.outstanding)} · ماه بل: {item.monthLabel || toFaDate(item.dueDate || item.occurredAt)}</small></span>
               </div>
             ))}
-            {!financeOverview?.recent?.bills?.length && <p className="muted">در این بازه بل تازه‌ای صادر نشده است.</p>}
+            {!financeOverview?.recent?.bills?.length && <p className="muted">برای ماه‌های این بازه بلی صادر نشده است.</p>}
           </div>
         </div>
         <div className="finance-card">
@@ -7770,7 +7748,7 @@ export default function AdminFinance() {
           <div className="finance-card-head">
             <div>
               <h3>روند ماهانه مرکز مالی</h3>
-              <p className="muted">عاید، بازپرداخت، مصرف، بل صادرشده و باقیات هر ماه در ۱۲ ماه اخیر - مستقل از فیلتر بازه‌ی بالا.</p>
+              <p className="muted">عاید، بازپرداخت، مصرف، بل‌های ماه (بر اساس ماه بل) و باقیات هر ماه هجری شمسی در ۱۲ ماهِ منتهی به پایان بازه‌ی بالا؛ ماه‌های داخل بازه برجسته شده‌اند.</p>
             </div>
           </div>
           {monthlyTrend.length ? (
@@ -7785,8 +7763,11 @@ export default function AdminFinance() {
                 <span>باقیات</span>
               </div>
               {monthlyTrend.map((item) => (
-                <div key={`monthly-trend-${item.monthKey}`} className="row">
-                  <span>{toFaMonthKey(item.monthKey)}</span>
+                <div
+                  key={`monthly-trend-${item.monthKey}`}
+                  className={`row ${isMonthInFinanceRange(item.monthKey) ? 'is-in-range' : ''}`.trim()}
+                >
+                  <span>{item.monthLabel || formatAfghanMonthKeyLabel(item.monthKey) || toFaMonthKey(item.monthKey)}</span>
                   <span>{fmt(item.income)}</span>
                   <span>{fmt(item.refunds)}</span>
                   <span>{fmt(item.expense)}</span>
@@ -7903,7 +7884,7 @@ export default function AdminFinance() {
               <strong>{fmt(orderWorkspaceStats.totalOutstanding)} AFN</strong>
             </div>
             <div className="finance-kpi-item">
-              <span>بل‌های رسمی این ماه</span>
+              <span>بل‌های رسمی این ماه ({orderWorkspaceStats.monthLabel})</span>
               <strong>{orderWorkspaceStats.monthCount}</strong>
             </div>
             <div className="finance-kpi-item">
@@ -8020,6 +8001,21 @@ export default function AdminFinance() {
               </select>
             </div>
             <div className="finance-split-grid finance-split-grid-3">
+              <div className="finance-cell-stack">
+                <span className="finance-field-label">ماه بل (بل برای کدام ماه است)</span>
+                <AfghanMonthInput
+                  value={manualForm.billingMonth}
+                  onChange={(value) => setManualForm((p) => withBillingMonth(p, value, selectedManualFeePlan?.dueDay))}
+                  ariaLabel="ماه بل دستی"
+                  required
+                />
+                <small>بل در همین ماه ثبت و در گزارش‌های همین ماه شمرده می‌شود.</small>
+              </div>
+              <div className="finance-cell-stack">
+                <span className="finance-field-label">مهلت پرداخت</span>
+                <AfghanDateInput value={manualForm.dueDate} onChange={(value) => setManualForm((p) => withBillDueDate(p, value))} showGregorianEquivalent required />
+                <small>{manualForm.dueDate ? `مهلت پرداخت: ${toFaDate(manualForm.dueDate)}` : 'مهلت پرداخت باید در همان ماه بل باشد.'}</small>
+              </div>
               {manualForm.amountSource === 'manual' ? (
                 <input
                   type="number"
@@ -8046,13 +8042,9 @@ export default function AdminFinance() {
                   </small>
                 </div>
               )}
-              <div className="finance-cell-stack">
-                <span className="finance-field-label">مهلت پرداخت</span>
-                <AfghanDateInput value={manualForm.dueDate} onChange={(value) => setManualForm((p) => ({ ...p, dueDate: value }))} showGregorianEquivalent required />
-                <small>{manualForm.dueDate ? `مهلت پرداخت: ${toFaDate(manualForm.dueDate)}` : 'مهلت پرداخت انتخاب نشده است.'}</small>
-              </div>
-              <input value={manualForm.periodLabel} onChange={(e) => setManualForm((p) => ({ ...p, periodLabel: e.target.value }))} placeholder="عنوان بل / دوره" />
             </div>
+            <input value={manualForm.periodLabel} onChange={(e) => setManualForm((p) => ({ ...p, periodLabel: e.target.value }))} placeholder="عنوان بل / دوره (اختیاری؛ فیس ماهانه به نام ماه بل ثبت می‌شود)" />
+            <p className="finance-billing-month-note" role="status" data-testid="manual-bill-month-note">{describeBillMonth(manualForm)}</p>
             <button type="button" className="secondary finance-advanced-toggle" onClick={() => setBillingAdvancedOpen((value) => !value)}>
               {billingAdvancedOpen ? 'بستن تنظیمات پیشرفته' : 'تنظیمات پیشرفته'}
             </button>
@@ -8253,7 +8245,7 @@ export default function AdminFinance() {
                       <ul className="finance-advance-month-list">
                         {advanceBillingPreview.items.map((item, index) => (
                           <li key={`advance-month-item-${index}`}>
-                            <span>{item.periodLabel || item.term || `ماه ${index + 1}`}</span>
+                            <span>{item.billingMonthLabel || item.periodLabel || item.term || `ماه ${index + 1}`}</span>
                             {item.duplicate ? (
                               <span className={`finance-chip ${item.duplicate.outstandingAmount > 0 ? 'finance-chip-muted' : 'finance-chip-emerald'}`}>
                                 {item.duplicate.outstandingAmount > 0
@@ -8781,16 +8773,41 @@ export default function AdminFinance() {
             </div>
             <div className="finance-split-grid finance-split-grid-3">
               <div className="finance-cell-stack">
-                <span className="finance-field-label">مهلت پرداخت</span>
-                <AfghanDateInput value={bulkForm.dueDate} onChange={(value) => setBulkForm((p) => ({ ...p, dueDate: value }))} showGregorianEquivalent required />
-                <small>{bulkForm.dueDate ? `مهلت پرداخت: ${toFaDate(bulkForm.dueDate)}` : 'مهلت پرداخت گروهی انتخاب نشده است.'}</small>
+                <span className="finance-field-label">ماه بل (بل‌ها برای کدام ماه‌اند)</span>
+                <AfghanMonthInput
+                  value={bulkForm.billingMonth}
+                  onChange={(value) => {
+                    setBulkForm((p) => withBillingMonth(p, value, bulkFeePlanByClass.get(String(p.classId || ''))?.dueDay));
+                    setBillingPreview(null);
+                  }}
+                  ariaLabel="ماه بل گروهی"
+                  required
+                />
+                <small>بل‌ها در همین ماه ثبت و در گزارش‌های همین ماه شمرده می‌شوند.</small>
               </div>
-              <input value={bulkForm.periodLabel} onChange={(e) => setBulkForm((p) => ({ ...p, periodLabel: e.target.value }))} placeholder="عنوان بل / دوره" />
-              <label className="finance-flag">
-                <input type="checkbox" checked={bulkForm.includeAdmission} onChange={(e) => setBulkForm((p) => ({ ...p, includeAdmission: e.target.checked }))} />
-                <span>شامل داخله از پلان مالی</span>
-              </label>
+              <div className="finance-cell-stack">
+                <span className="finance-field-label">مهلت پرداخت</span>
+                <AfghanDateInput
+                  value={bulkForm.dueDate}
+                  onChange={(value) => {
+                    setBulkForm((p) => withBillDueDate(p, value));
+                    setBillingPreview(null);
+                  }}
+                  showGregorianEquivalent
+                  required
+                />
+                <small>{bulkForm.dueDate ? `مهلت پرداخت: ${toFaDate(bulkForm.dueDate)}` : 'مهلت پرداخت باید در همان ماه بل باشد.'}</small>
+              </div>
+              <div className="finance-cell-stack">
+                <span className="finance-field-label">عنوان بل / دوره (اختیاری)</span>
+                <input value={bulkForm.periodLabel} onChange={(e) => setBulkForm((p) => ({ ...p, periodLabel: e.target.value }))} placeholder="عنوان بل / دوره" aria-label="عنوان بل گروهی" />
+              </div>
             </div>
+            <label className="finance-flag">
+              <input type="checkbox" checked={bulkForm.includeAdmission} onChange={(e) => setBulkForm((p) => ({ ...p, includeAdmission: e.target.checked }))} />
+              <span>شامل داخله از پلان مالی</span>
+            </label>
+            <p className="finance-billing-month-note" role="status" data-testid="bulk-bill-month-note">{describeBillMonth(bulkForm, 'بل‌های این صنف')}</p>
             <p className="muted">اگر گزینه «شامل داخله» خاموش باشد، صدور گروهی فقط فیس/شهریه را ایجاد می‌کند و داخله جداگانه صادر نمی‌شود.</p>
             <button type="button" className="secondary finance-advanced-toggle" onClick={() => setBillingAdvancedOpen((value) => !value)}>
               {billingAdvancedOpen ? 'بستن تنظیمات پیشرفته' : 'تنظیمات پیشرفته'}
@@ -8824,6 +8841,11 @@ export default function AdminFinance() {
             {billingPreview && (
               <div className="finance-preview-list" data-testid="bulk-billing-preview">
                 <div className="finance-chip-group">
+                  {!!(billingPreview.billingMonthLabel || formatAfghanMonthKeyLabel(billingPreview.billingMonth)) && (
+                    <span className="finance-chip finance-chip-sky" data-testid="bulk-billing-preview-month">
+                      ماه بل: {billingPreview.billingMonthLabel || formatAfghanMonthKeyLabel(billingPreview.billingMonth)}
+                    </span>
+                  )}
                   <span className="finance-chip">{billingPreview.summary?.billCount || billingPreview.summary?.candidateCount || 0} بل قابل صدور</span>
                   <span className="finance-chip finance-chip-muted">{billingPreview.summary?.studentCount || 0} شاگرد</span>
                   <span className="finance-chip finance-chip-muted">{billingPreview.summary?.membershipCount || 0} عضویت مالی</span>
@@ -8834,6 +8856,7 @@ export default function AdminFinance() {
                   <div key={`preview-${item.studentMembershipId || item.studentId}`} className="finance-plan-row">
                     <strong>{students.find((student) => String(student._id) === String(item.studentId))?.name || item.studentId || 'متعلم'}</strong>
                     <span>{fmt(item.amountDue)} AFN - {(item.feeScopes || []).join(', ')}</span>
+                    <small>ماه بل: {item.billingMonthLabel || formatAfghanMonthKeyLabel(toAfghanMonthKey(item.dueDate)) || '-'}{item.dueDate ? ` · مهلت: ${toFaDate(item.dueDate)}` : ''}</small>
                     {!!formatFeeLineSummary(item.lineItems).length && <small>{formatFeeLineSummary(item.lineItems)}</small>}
                     <small>{item.duplicate ? `duplicate: ${formatFinanceCode(item.duplicate.billNumber, '-')}` : `${item.adjustments?.length || 0} adjustment`}</small>
                   </div>
@@ -9190,12 +9213,12 @@ export default function AdminFinance() {
             <label className="finance-inline-filter">
               <span>ماه</span>
               <select
-                value={selectedExpenseMonthKey}
-                onChange={(e) => applyExpenseMonthFilter(e.target.value)}
+                value={financeRangeMonthKey}
+                onChange={(e) => applyFinanceRangeMonth(e.target.value)}
                 data-testid="expense-month-filter"
               >
-                <option value="">{selectedExpenseMonthKey ? 'بازه سفارشی' : 'یک ماه را انتخاب کنید'}</option>
-                {expenseMonthFilterOptions.map((item) => (
+                <option value="">{financeRangeMonthKey ? 'یک ماه را انتخاب کنید' : `بازه سفارشی: ${financeRangeLabel}`}</option>
+                {reportMonthOptions.map((item) => (
                   <option key={`expense-month-filter-${item.key}`} value={item.key}>{item.label}</option>
                 ))}
               </select>
@@ -9231,8 +9254,8 @@ export default function AdminFinance() {
         {monthlyTrend.length ? (
           <div className="finance-chip-group finance-expense-monthly-strip" data-testid="expense-monthly-strip">
             {monthlyTrend.slice(-6).map((item) => (
-              <span key={`expense-month-${item.monthKey}`} className="finance-chip">
-                {toFaMonthKey(item.monthKey)}: {fmt(item.expense)} AFN
+              <span key={`expense-month-${item.monthKey}`} className={`finance-chip ${isMonthInFinanceRange(item.monthKey) ? 'finance-chip-sky' : ''}`.trim()}>
+                {item.monthLabel || formatAfghanMonthKeyLabel(item.monthKey) || toFaMonthKey(item.monthKey)}: {fmt(item.expense)} AFN
               </span>
             ))}
           </div>
@@ -10269,18 +10292,16 @@ export default function AdminFinance() {
         <button type="button" onClick={runReminders} disabled={busy}>اجرای یادآوری</button>
         <button type="button" onClick={exportCsv}>خروجی CSV</button>
         <button type="button" className="secondary" onClick={exportAuditPackageCsv} data-testid="export-audit-package">پکیج حسابرسی CSV</button>
-        <div className="finance-cell-stack">
-          <input value={monthKey} onChange={(e) => setMonthKey(e.target.value)} placeholder="YYYY-MM" />
-          <small>{monthKey ? `هجری شمسی: ${toFaMonthKey(monthKey)}` : 'ماه مالی را به شکل YYYY-MM وارد کنید؛ نمایش رسمی به هجری شمسی نشان داده می‌شود.'}</small>
-        </div>
-        <button type="button" onClick={requestMonthClose} disabled={busy}>درخواست بستن ماه مالی</button>
       </div>
 
       <div className="finance-card finance-report-downloads-card" data-finance-section="reports" data-testid="finance-report-downloads-card">
         <div className="finance-card-head">
           <div>
             <h3>گزارش‌های مالی قابل دانلود</h3>
-            <p className="muted">همان صنف و بازه‌ی «از تاریخ/تا تاریخ» بالای صفحه روی همه‌ی این گزارش‌ها اعمال می‌شود.</p>
+            <p className="muted">
+              همان صنف و بازه‌ی «از تاریخ/تا تاریخ» بالای صفحه ({financeRangeLabel}) روی این گزارش‌ها اعمال می‌شود و بل‌ها بر اساس «ماه بل» شمرده می‌شوند.
+              گزارش ماهانه ماهِ همین بازه را نشان می‌دهد؛ گزارش ناهنجاری‌ها و تاریخچه ممیزی وضعیت فعلی‌اند و فیلتر تاریخ ندارند.
+            </p>
           </div>
           <button
             type="button"
@@ -10296,17 +10317,21 @@ export default function AdminFinance() {
           <div className="finance-card-head">
             <div>
               <h3>گزارش ماهانه</h3>
-              <p className="muted">یک ماه را انتخاب کنید تا عاید، خالص عاید، سهم باقیات/پیش‌پرداخت وصول‌شده و وضعیت پرداخت شاگردان همان ماه نشان داده شود.</p>
+              <p className="muted">عاید، خالص عاید، سهم باقیات/پیش‌پرداخت وصول‌شده و وضعیت پرداخت شاگردان همان ماه. ماهِ این گزارش همان ماهِ بازه‌ی بالای صفحه است؛ با انتخاب ماه دیگر، بازه‌ی بالا هم به همان ماه تنظیم می‌شود.</p>
+              {!financeRangeMonthKey && (
+                <p className="finance-warning-note" data-testid="monthly-summary-range-note">
+                  بازه‌ی بالای صفحه یک ماهِ کامل نیست؛ این گزارش ماهِ پایانی بازه ({formatAfghanMonthKeyLabel(monthlySummaryMonth) || '-'}) را نشان می‌دهد.
+                </p>
+              )}
             </div>
             <label className="finance-inline-filter">
               <span>ماه</span>
               <select
                 value={monthlySummaryMonth}
-                onChange={(e) => setMonthlySummaryMonth(e.target.value)}
+                onChange={(e) => applyFinanceRangeMonth(e.target.value)}
                 data-testid="monthly-summary-month-select"
               >
-                {!billMonthOptions.length && <option value="">ماهی برای انتخاب نیست</option>}
-                {billMonthOptions.map((item) => (
+                {reportMonthOptions.map((item) => (
                   <option key={`monthly-summary-${item.key}`} value={item.key}>{item.label}</option>
                 ))}
               </select>
@@ -10382,11 +10407,10 @@ export default function AdminFinance() {
               <span>ماه</span>
               <select
                 value={monthlySummaryMonth}
-                onChange={(e) => setMonthlySummaryMonth(e.target.value)}
+                onChange={(e) => applyFinanceRangeMonth(e.target.value)}
                 data-testid="month-specific-month-select"
               >
-                {!billMonthOptions.length && <option value="">ماهی برای انتخاب نیست</option>}
-                {billMonthOptions.map((item) => (
+                {reportMonthOptions.map((item) => (
                   <option key={`month-specific-${item.key}`} value={item.key}>{item.label}</option>
                 ))}
               </select>
@@ -11513,7 +11537,8 @@ export default function AdminFinance() {
               <span className="finance-cell-stack">
                 <strong className="finance-latin-code">{formatFinanceCode(bill.billNumber, '-')}</strong>
                 <small>بابت: <strong>{getBillTypeLabel(bill)}</strong></small>
-                {!!bill.periodLabel && <small>دوره: {bill.periodLabel}</small>}
+                <small>ماه بل: <strong>{formatFinanceBillMonthFilterLabel(getFinanceBillMonthFilterKey(bill), bill)}</strong></small>
+                {!!bill.periodLabel && bill.periodType !== 'monthly' && <small>دوره: {bill.periodLabel}</small>}
                 {!!bill.feeLineSummary && <small>{bill.feeLineSummary}</small>}
               </span>
               <span className="finance-cell-stack">
@@ -11654,15 +11679,150 @@ export default function AdminFinance() {
       </div>
 
       <div className="finance-grid" data-finance-section="reports settings">
-        <div className="finance-card" data-finance-section="reports settings">
-          <h3>ماه‌های بسته شده</h3>
-          {closedMonths.slice(0, 8).map((item) => (
-            <div key={item._id} className="mini-row">
-              <span>{toFaMonthKey(item.monthKey)}</span>
-              <span>{item.closedBy?.name || 'ادمین'}</span>
+        <MonthCloseBoard
+          apiBase={API_BASE}
+          fetchJson={fetchJson}
+          onChanged={(item) => {
+            if (item?._id) setSelectedMonthCloseDetail(item);
+            void loadAll();
+          }}
+          onSelectRecord={(id) => setSelectedMonthCloseId(String(id || ''))}
+          selectedRecordId={selectedMonthCloseId}
+          refreshKey={closedMonths}
+        />
+        {selectedMonthClose ? (
+          <div className="finance-card mcb-snapshot-card" data-finance-section="reports settings" data-testid="month-close-snapshot-card">
+            <div className="finance-card-head">
+              <div>
+                <h3>snapshot ماه مالی {monthCloseLabel(selectedMonthCloseDetail || selectedMonthClose)}</h3>
+                <p className="muted">نمای ثابت از ارقام ماه، بل‌های سررسید گذشته و تسهیلات مالی همان بستن ماه.</p>
+              </div>
+              <div className="finance-chip-group">
+                <label className="finance-inline-filter">
+                  <span>ماه بسته</span>
+                  <select value={String(selectedMonthCloseId || '')} onChange={(e) => setSelectedMonthCloseId(e.target.value)}>
+                    {closedMonths.map((item) => (
+                      <option key={`month-close-select-${item._id || item.id}`} value={String(item._id || item.id || '')}>
+                        {monthCloseLabel(item)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <WorkflowStatus
+                  kind="monthClose"
+                  className="workflow-badge"
+                  status={selectedMonthCloseStatus}
+                  stage={selectedMonthCloseStage}
+                  approvalTrail={selectedMonthCloseDetail?.approvalTrail || selectedMonthClose?.approvalTrail}
+                  rejectReason={selectedMonthCloseDetail?.rejectReason || selectedMonthClose?.rejectReason}
+                />
+                <button type="button" className="secondary" onClick={() => exportMonthCloseSnapshot(selectedMonthClose)} disabled={busy} data-testid="export-month-close-snapshot">خروجی CSV</button>
+                <button type="button" className="secondary" onClick={() => exportMonthClosePdfPack(selectedMonthClose)} disabled={busy} data-testid="export-month-close-pdf">بسته پی‌دی‌اف</button>
+              </div>
             </div>
-          ))}
-        </div>
+            <div className="finance-kpi-grid finance-kpi-grid-dense">
+              <div className="finance-kpi-item">
+                <span>بل‌های ماه</span>
+                <strong>{fmt(monthCloseSnapshot?.totals?.ordersIssuedCount || 0)}</strong>
+              </div>
+              <div className="finance-kpi-item">
+                <span>وصول تاییدشده</span>
+                <strong>{fmt(monthCloseSnapshot?.totals?.approvedPaymentAmount || 0)} AFN</strong>
+              </div>
+              <div className="finance-kpi-item finance-kpi-item-accent">
+                <span>مانده ایستا</span>
+                <strong>{fmt(monthCloseSnapshot?.totals?.standingOutstandingAmount || 0)} AFN</strong>
+              </div>
+            </div>
+            <div className="finance-subcard-list">
+              <div className="mini-row">
+                <span>سررسید گذشته</span>
+                <span>{fmt(monthCloseSnapshot?.aging?.totalRemaining || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>تسهیلات فعال</span>
+                <span>{fmt(monthCloseSnapshot?.totals?.activeReliefs || 0)} / {fmt(monthCloseSnapshot?.totals?.fixedReliefAmount || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>در انتظار تایید</span>
+                <span>{fmt(monthCloseSnapshot?.totals?.pendingPaymentCount || 0)} / {fmt(monthCloseSnapshot?.totals?.pendingPaymentAmount || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>مصارف تاییدشده ماه</span>
+                <span>{fmt(monthCloseSnapshot?.totals?.approvedExpenseCount || 0)} / {fmt(monthCloseSnapshot?.totals?.approvedExpenseAmount || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>مصارف در انتظار</span>
+                <span>{fmt(monthCloseSnapshot?.totals?.pendingExpenseCount || 0)} / {fmt(monthCloseSnapshot?.totals?.pendingExpenseAmount || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>خالص نقد ماه</span>
+                <span>{fmt(monthCloseSnapshot?.totals?.netCashAmount || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>خالص ثبت خزانه</span>
+                <span>{fmt(monthCloseSnapshot?.totals?.treasuryNetAmount || 0)} AFN</span>
+              </div>
+              <div className="mini-row">
+                <span>یادداشت بستن ماه</span>
+                <span>{selectedMonthCloseDetail?.requestNote || selectedMonthClose?.requestNote || selectedMonthClose.note || selectedMonthClose.reopenNote || 'بدون یادداشت'}</span>
+              </div>
+              <div className="mini-row">
+                <span>وضعیت آمادگی</span>
+                <span>{monthCloseReadiness.readyToApprove ? 'آماده برای تایید' : 'دارای مانع فعال'}</span>
+              </div>
+              <div className="mini-row">
+                <span>ثبت‌کننده درخواست</span>
+                <span>{selectedMonthCloseDetail?.requestedBy?.name || selectedMonthClose?.requestedBy?.name || selectedMonthCloseDetail?.closedBy?.name || selectedMonthClose?.closedBy?.name || 'ثبت نشده'}</span>
+              </div>
+              <div className="mini-row">
+                <span>وضعیتِ کار</span>
+                <span>{resolveWorkflowState({ kind: 'monthClose', status: selectedMonthCloseStatus, stage: selectedMonthCloseStage }).label}</span>
+              </div>
+              {(monthCloseSnapshot?.classes || []).slice(0, 4).map((row) => (
+                <div key={`month-close-class-${row.classId || row.title}`} className="mini-row">
+                  <span>{row.title || 'صنف'}</span>
+                  <span>{fmt(row.totalOutstanding || 0)} AFN</span>
+                </div>
+              ))}
+            </div>
+            {!!monthCloseReadiness.blockingIssues?.length && (
+              <div className="finance-subcard-list">
+                {monthCloseReadiness.blockingIssues.map((issue, index) => (
+                  <div key={`month-close-blocking-${issue.code || index}`} className="mini-row">
+                    <span>{issue.label || 'مانع تایید'}</span>
+                    <span>{issue.count != null ? fmt(issue.count) : fmt(issue.amount || 0)}{issue.amount != null ? ' AFN' : ''}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!!monthCloseReadiness.warningIssues?.length && (
+              <div className="finance-subcard-list">
+                {monthCloseReadiness.warningIssues.map((issue, index) => (
+                  <div key={`month-close-warning-${issue.code || index}`} className="mini-row">
+                    <span>{issue.label || 'هشدار ماه مالی'}</span>
+                    <span>{issue.count != null ? fmt(issue.count) : fmt(issue.amount || 0)}{issue.amount != null ? ' AFN' : ''}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!!monthCloseApprovalTrail.length && (
+              <div className="finance-subcard-list" data-testid="month-close-approval-trail">
+                {monthCloseApprovalTrail.slice().reverse().map((entry, index) => (
+                  <div key={`month-close-trail-${index}`} className="mini-row">
+                    <span>{ADMIN_LEVEL_UI_LABELS[entry?.level] || entry?.level || 'مدیریت مالی'}</span>
+                    <span>
+                      {[entry?.action || '', entry?.by?.name || '', entry?.note || entry?.reason || '']
+                        .filter(Boolean)
+                        .join(' | ') || 'بدون جزئیات'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <MonthCloseVersions record={selectedMonthCloseDetail || selectedMonthClose} />
+          </div>
+        ) : null}
       </div>
 
       <div className="finance-grid" data-finance-section="anomalies">
@@ -11982,156 +12142,6 @@ export default function AdminFinance() {
           {!visibleAnomalies.length && <p className="muted">در این محدوده فعلاً ناهنجاری مالی فعالی دیده نشد.</p>}
         </div>
       </div>
-
-      {/* Its own grid. This card declares overview/settings/reports but sat
-          inside the anomalies grid, and the section CSS hides any
-          [data-finance-section] that does not match the active tab — so the
-          card was hidden on the anomalies tab and its parent grid was hidden
-          on every other one. The approve/reject buttons could not be reached
-          from anywhere. */}
-      {selectedMonthClose ? (
-        <div className="finance-grid" data-finance-section="overview settings reports">
-          <div className="finance-card" data-finance-section="overview settings reports" data-testid="month-close-snapshot-card">
-            <div className="finance-card-head">
-              <div>
-                <h3>snapshot ماه مالی {toFaMonthKey(selectedMonthClose.monthKey)}</h3>
-                <p className="muted">نمای ثابت از ارقام ماه، بل‌های سررسید گذشته و تسهیلات مالی همان بستن ماه.</p>
-              </div>
-              <div className="finance-chip-group">
-                <label className="finance-inline-filter">
-                  <span>ماه بسته</span>
-                  <select value={String(selectedMonthCloseId || '')} onChange={(e) => setSelectedMonthCloseId(e.target.value)}>
-                    {closedMonths.map((item) => (
-                      <option key={`month-close-select-${item._id || item.id}`} value={String(item._id || item.id || '')}>
-                        {toFaMonthKey(item.monthKey)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <WorkflowStatus
-                  kind="monthClose"
-                  className="workflow-badge"
-                  status={selectedMonthCloseStatus}
-                  stage={selectedMonthCloseStage}
-                  approvalTrail={selectedMonthCloseDetail?.approvalTrail || selectedMonthClose?.approvalTrail}
-                  rejectReason={selectedMonthCloseDetail?.rejectReason || selectedMonthClose?.rejectReason}
-                />
-                <button type="button" className="secondary" onClick={() => exportMonthCloseSnapshot(selectedMonthClose)} disabled={busy} data-testid="export-month-close-snapshot">خروجی CSV</button>
-                <button type="button" className="secondary" onClick={() => exportMonthClosePdfPack(selectedMonthClose)} disabled={busy} data-testid="export-month-close-pdf">بسته پی‌دی‌اف</button>
-                {canApproveSelectedMonthClose ? (
-                  <button type="button" onClick={() => approveMonthClose(selectedMonthClose)} disabled={busy} data-testid="approve-month-close">تایید مرحله</button>
-                ) : null}
-                {canRejectSelectedMonthClose ? (
-                  <button type="button" className="danger" onClick={() => rejectMonthClose(selectedMonthClose)} disabled={busy} data-testid="reject-month-close">برگشت برای اصلاح</button>
-                ) : null}
-                {canReopenSelectedMonthClose ? (
-                  <button type="button" className="secondary" onClick={() => reopenMonthClose(selectedMonthClose)} disabled={busy}>بازگشایی</button>
-                ) : null}
-              </div>
-            </div>
-            <div className="finance-kpi-grid finance-kpi-grid-dense">
-              <div className="finance-kpi-item">
-                <span>بل‌های ماه</span>
-                <strong>{fmt(monthCloseSnapshot?.totals?.ordersIssuedCount || 0)}</strong>
-              </div>
-              <div className="finance-kpi-item">
-                <span>وصول تاییدشده</span>
-                <strong>{fmt(monthCloseSnapshot?.totals?.approvedPaymentAmount || 0)} AFN</strong>
-              </div>
-              <div className="finance-kpi-item finance-kpi-item-accent">
-                <span>مانده ایستا</span>
-                <strong>{fmt(monthCloseSnapshot?.totals?.standingOutstandingAmount || 0)} AFN</strong>
-              </div>
-            </div>
-            <div className="finance-subcard-list">
-              <div className="mini-row">
-                <span>سررسید گذشته</span>
-                <span>{fmt(monthCloseSnapshot?.aging?.totalRemaining || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>تسهیلات فعال</span>
-                <span>{fmt(monthCloseSnapshot?.totals?.activeReliefs || 0)} / {fmt(monthCloseSnapshot?.totals?.fixedReliefAmount || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>در انتظار تایید</span>
-                <span>{fmt(monthCloseSnapshot?.totals?.pendingPaymentCount || 0)} / {fmt(monthCloseSnapshot?.totals?.pendingPaymentAmount || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>مصارف تاییدشده ماه</span>
-                <span>{fmt(monthCloseSnapshot?.totals?.approvedExpenseCount || 0)} / {fmt(monthCloseSnapshot?.totals?.approvedExpenseAmount || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>مصارف در انتظار</span>
-                <span>{fmt(monthCloseSnapshot?.totals?.pendingExpenseCount || 0)} / {fmt(monthCloseSnapshot?.totals?.pendingExpenseAmount || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>خالص نقد ماه</span>
-                <span>{fmt(monthCloseSnapshot?.totals?.netCashAmount || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>خالص ثبت خزانه</span>
-                <span>{fmt(monthCloseSnapshot?.totals?.treasuryNetAmount || 0)} AFN</span>
-              </div>
-              <div className="mini-row">
-                <span>یادداشت بستن ماه</span>
-                <span>{selectedMonthCloseDetail?.requestNote || selectedMonthClose?.requestNote || selectedMonthClose.note || selectedMonthClose.reopenNote || 'بدون یادداشت'}</span>
-              </div>
-              <div className="mini-row">
-                <span>وضعیت آمادگی</span>
-                <span>{monthCloseReadiness.readyToApprove ? 'آماده برای تایید' : 'دارای مانع فعال'}</span>
-              </div>
-              <div className="mini-row">
-                <span>ثبت‌کننده درخواست</span>
-                <span>{selectedMonthCloseDetail?.requestedBy?.name || selectedMonthClose?.requestedBy?.name || selectedMonthCloseDetail?.closedBy?.name || selectedMonthClose?.closedBy?.name || 'ثبت نشده'}</span>
-              </div>
-              <div className="mini-row">
-                <span>وضعیتِ کار</span>
-                <span>{resolveWorkflowState({ kind: 'monthClose', status: selectedMonthCloseStatus, stage: selectedMonthCloseStage }).label}</span>
-              </div>
-              {(monthCloseSnapshot?.classes || []).slice(0, 4).map((row) => (
-                <div key={`month-close-class-${row.classId || row.title}`} className="mini-row">
-                  <span>{row.title || 'صنف'}</span>
-                  <span>{fmt(row.totalOutstanding || 0)} AFN</span>
-                </div>
-              ))}
-            </div>
-            {!!monthCloseReadiness.blockingIssues?.length && (
-              <div className="finance-subcard-list">
-                {monthCloseReadiness.blockingIssues.map((issue, index) => (
-                  <div key={`month-close-blocking-${issue.code || index}`} className="mini-row">
-                    <span>{issue.label || 'مانع تایید'}</span>
-                    <span>{issue.count != null ? fmt(issue.count) : fmt(issue.amount || 0)}{issue.amount != null ? ' AFN' : ''}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {!!monthCloseReadiness.warningIssues?.length && (
-              <div className="finance-subcard-list">
-                {monthCloseReadiness.warningIssues.map((issue, index) => (
-                  <div key={`month-close-warning-${issue.code || index}`} className="mini-row">
-                    <span>{issue.label || 'هشدار ماه مالی'}</span>
-                    <span>{issue.count != null ? fmt(issue.count) : fmt(issue.amount || 0)}{issue.amount != null ? ' AFN' : ''}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {!!monthCloseApprovalTrail.length && (
-              <div className="finance-subcard-list" data-testid="month-close-approval-trail">
-                {monthCloseApprovalTrail.slice().reverse().map((entry, index) => (
-                  <div key={`month-close-trail-${index}`} className="mini-row">
-                    <span>{ADMIN_LEVEL_UI_LABELS[entry?.level] || entry?.level || 'مدیریت مالی'}</span>
-                    <span>
-                      {[entry?.action || '', entry?.by?.name || '', entry?.note || entry?.reason || '']
-                        .filter(Boolean)
-                        .join(' | ') || 'بدون جزئیات'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      ) : null}
 
       <div className="finance-card" data-finance-section="reports settings" data-testid="finance-document-archive-card">
         <div className="finance-card-head">

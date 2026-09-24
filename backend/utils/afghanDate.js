@@ -227,6 +227,61 @@ function afghanSolarToGregorianInput(year, month, day) {
   return `${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}`;
 }
 
+// Solar month keys ("1405-06") - the one month identity bills, month filters
+// and monthly reports share. Everything a school sees is in Afghan months, so
+// no report may bucket by the Gregorian month (Sep 1 is 10 Sonbola, not 1).
+function toAsciiDigits(value = '') {
+  return String(value || '')
+    .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)));
+}
+
+function normalizeAfghanMonthKey(value = '') {
+  const match = /^(\d{4})[-/](\d{1,2})$/.exec(toAsciiDigits(value).trim());
+  if (!match) return '';
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (year < 1300 || year > 1500 || month < 1 || month > 12) return '';
+  return `${year}-${String(month).padStart(2, '0')}`;
+}
+
+// A plain "YYYY-MM-DD" is read as that calendar day (see asDate), so the month
+// a date falls in never shifts with the server's timezone.
+function toAfghanMonthKey(value) {
+  const solar = gregorianToAfghanSolar(value);
+  if (!solar) return '';
+  return `${solar.jy}-${String(solar.jm).padStart(2, '0')}`;
+}
+
+function shiftAfghanMonthKey(monthKey = '', delta = 0) {
+  const key = normalizeAfghanMonthKey(monthKey);
+  if (!key) return '';
+  const [year, month] = key.split('-').map(Number);
+  const index = (year * 12) + (month - 1) + Math.trunc(Number(delta) || 0);
+  return `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, '0')}`;
+}
+
+// Local-time [start, end] of a solar month: its 1st day 00:00 through its last
+// day 23:59:59.999.
+function afghanMonthKeyBounds(monthKey = '') {
+  const key = normalizeAfghanMonthKey(monthKey);
+  if (!key) return null;
+  const [year, month] = key.split('-').map(Number);
+  const [nextYear, nextMonth] = shiftAfghanMonthKey(key, 1).split('-').map(Number);
+  const start = asDate(afghanSolarToGregorianInput(year, month, 1));
+  const nextStart = asDate(afghanSolarToGregorianInput(nextYear, nextMonth, 1));
+  if (!start || !nextStart) return null;
+  const end = new Date(nextStart.getFullYear(), nextStart.getMonth(), nextStart.getDate() - 1, 23, 59, 59, 999);
+  return { monthKey: key, start, end };
+}
+
+function formatAfghanMonthKeyLabel(monthKey = '') {
+  const key = normalizeAfghanMonthKey(monthKey);
+  if (!key) return '';
+  const [year, month] = key.split('-').map(Number);
+  return `${AFGHAN_SOLAR_MONTHS[month - 1]} ${year.toLocaleString(AFGHAN_NUMBER_LOCALE, { useGrouping: false })}`;
+}
+
 module.exports = {
   AFGHAN_DATE_LOCALE,
   AFGHAN_NUMBER_LOCALE,
@@ -239,5 +294,10 @@ module.exports = {
   formatAfghanMonthYearLabel,
   replaceIranianSolarMonthNames,
   gregorianToAfghanSolar,
-  afghanSolarToGregorianInput
+  afghanSolarToGregorianInput,
+  normalizeAfghanMonthKey,
+  toAfghanMonthKey,
+  shiftAfghanMonthKey,
+  afghanMonthKeyBounds,
+  formatAfghanMonthKeyLabel
 };

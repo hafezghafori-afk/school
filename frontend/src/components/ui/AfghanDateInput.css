@@ -17,6 +17,10 @@
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.2fr) minmax(0, 0.72fr) minmax(0, 0.92fr);
 }
 
+.afghan-date-input-grid.afghan-month-input-grid {
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.25fr);
+}
+
 .afghan-date-input {
   direction: rtl;
   font: inherit;
@@ -72,7 +76,8 @@
 
 @container (max-width: 190px) {
   .afghan-date-input-grid,
-  .afghan-date-input-grid:has(.afghan-date-time) {
+  .afghan-date-input-grid:has(.afghan-date-time),
+  .afghan-date-input-grid.afghan-month-input-grid {
     grid-template-columns: 1fr;
   }
 }

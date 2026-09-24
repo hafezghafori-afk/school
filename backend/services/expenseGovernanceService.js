@@ -15,6 +15,13 @@ const {
   UNCLASSIFIED_KEY,
   buildExpenseChartSeed
 } = require('../config/expenseChart');
+const { formatAfghanMonthKeyLabel } = require('../utils/afghanDate');
+const {
+  isWindowCovered,
+  listFinancialYearMonthKeys,
+  readCloseWindow,
+  resolveMonthCloseWindow
+} = require('../utils/financeMonthClosePeriods');
 
 // سرفصل‌های چارتِ واحد؛ تنها منبعِ حقیقت اکنون config/expenseChart.js است.
 const DEFAULT_EXPENSE_CATEGORIES = buildExpenseChartSeed();
@@ -35,12 +42,6 @@ function normalizeKey(value = '', fallback = 'other') {
   return normalized || fallback;
 }
 
-function startOfMonth(dateValue) {
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return null;
-  return new Date(date.getFullYear(), date.getMonth(), 1);
-}
-
 function toMonthKey(value = null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
@@ -52,19 +53,6 @@ function monthLabel(monthKey = '') {
   const date = new Date(`${monthKey}-01T00:00:00`);
   if (Number.isNaN(date.getTime())) return monthKey;
   return new Intl.DateTimeFormat('fa-AF-u-ca-persian', { month: 'short', year: 'numeric' }).format(date);
-}
-
-function listMonthKeysBetween(startDate, endDate) {
-  const start = startOfMonth(startDate);
-  const end = startOfMonth(endDate);
-  if (!start || !end || start > end) return [];
-  const keys = [];
-  const cursor = new Date(start);
-  while (cursor <= end && keys.length < 36) {
-    keys.push(toMonthKey(cursor));
-    cursor.setMonth(cursor.getMonth() + 1);
-  }
-  return keys;
 }
 
 async function ensureDefaultExpenseCategories() {
@@ -267,7 +255,7 @@ async function buildFinancialYearCloseReadiness({ financialYearId = '', items = 
       schoolId: financialYear.schoolId,
       financialYearId: normalizedFinancialYearId,
       status: 'closed'
-    }).select('monthKey').lean()
+    }).select('monthKey closeWindow').lean()
   ]);
 
   const procurementCounts = {
@@ -285,9 +273,14 @@ async function buildFinancialYearCloseReadiness({ financialYearId = '', items = 
     .some(([key, value]) => key !== 'note' && key !== 'categoryBudgets' && Number(value || 0) > 0)
     || (financialYear.budgetTargets?.categoryBudgets || []).some((item) => Number(item?.annualBudget || 0) > 0);
   const warnings = [];
-  const expectedMonthKeys = listMonthKeysBetween(financialYear.startDate, financialYear.endDate);
-  const closedMonthKeySet = new Set(closedMonths.map((item) => normalizeText(item.monthKey)));
-  const missingClosedMonths = expectedMonthKeys.filter((monthKey) => !closedMonthKeySet.has(monthKey));
+  // Every solar month of the year must be closed. A month counts as closed when
+  // closes cover all of its days - a close made before month close moved to the
+  // solar calendar covers a Gregorian month, so two of those can cover it.
+  const expectedMonthKeys = listFinancialYearMonthKeys(financialYear);
+  const closedWindows = closedMonths.map(readCloseWindow).filter(Boolean);
+  const missingClosedMonths = expectedMonthKeys.filter((monthKey) => (
+    !isWindowCovered(resolveMonthCloseWindow(monthKey, financialYear), closedWindows)
+  ));
 
   if (pendingPayments > 0) blockers.push(`${pendingPayments} پرداخت در انتظار تایید باقی مانده است.`);
   if (actionableAnomalies > 0) blockers.push(`${actionableAnomalies} ناهنجاری مالی عملیاتی هنوز حل نشده است.`);
@@ -296,7 +289,11 @@ async function buildFinancialYearCloseReadiness({ financialYearId = '', items = 
   if (procurementCounts.rejected > 0) blockers.push(`${procurementCounts.rejected} تعهد خرید ردشده باید اصلاح یا لغو شود.`);
   if (procurementCounts.unsettledApproved > 0) blockers.push(`${procurementCounts.unsettledApproved} تعهد خرید تاییدشده هنوز تسویه کامل نشده است.`);
   if (configuredBudget && financialYear.budgetApprovalStage !== 'approved') blockers.push('بودجه تنظیم‌شده سال مالی هنوز تایید نهایی نشده است.');
-  if (missingClosedMonths.length > 0) blockers.push(`${missingClosedMonths.length} ماه این سال مالی هنوز بسته نشده است.`);
+  if (missingClosedMonths.length > 0) {
+    const shown = missingClosedMonths.slice(0, 3).map(formatAfghanMonthKeyLabel).join('، ');
+    const more = missingClosedMonths.length > 3 ? ' و ...' : '';
+    blockers.push(`${missingClosedMonths.length} ماه این سال مالی هنوز بسته نشده است (${shown}${more}).`);
+  }
 
   // Phase 3 — staff advances & withdrawals must be resolved before close.
   const [staffAdvanceRows, staffSalaryRows] = await Promise.all([
