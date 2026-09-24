@@ -821,6 +821,15 @@ function toFaDate(value) {
   }) || '---';
 }
 
+// ماهِ معاش به شمسی (مثلاً «سنبله ۱۴۰۵»). `period` روی سرور کلیدِ میلادیِ
+// YYYY-MM است، پس ماه از خودِ تاریخِ پرداخت ساخته می‌شود.
+function salaryPeriodLabel(row = {}) {
+  const solar = gregorianToAfghanSolar(row.paymentDate);
+  if (!solar) return row.period || '—';
+  const year = solar.jy.toLocaleString('fa-AF', { useGrouping: false });
+  return `${AFGHAN_SOLAR_MONTHS[solar.jm - 1]} ${year}`;
+}
+
 function expenseCategorySummary(items = []) {
   const grouped = new Map();
   items.forEach((item) => {
@@ -7477,7 +7486,7 @@ export default function AdminGovernmentFinance() {
                             <td>
                               <div className="gov-table-stack">
                                 <strong>{row.staff?.name || 'بدون نام'}</strong>
-                                <span>{row.period || '—'}</span>
+                                <span>{salaryPeriodLabel(row)}</span>
                               </div>
                             </td>
                             <td>{formatMoney(row.grossSalary)}</td>
@@ -7543,7 +7552,7 @@ export default function AdminGovernmentFinance() {
                         {salaryPaymentRecent.map((row) => (
                           <tr key={`salary-payment-recent-${row._id}`}>
                             <td>{row.staff?.name || 'بدون نام'}</td>
-                            <td>{row.period || '—'}</td>
+                            <td>{salaryPeriodLabel(row)}</td>
                             <td>{formatMoney(row.grossSalary)}</td>
                             <td>{formatMoney(row.deductionTotal)}</td>
                             <td>{formatMoney(row.netAmount)}</td>
