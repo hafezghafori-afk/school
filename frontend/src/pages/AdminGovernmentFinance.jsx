@@ -4011,7 +4011,7 @@ export default function AdminGovernmentFinance() {
       const data = await fetchJson(`/api/finance/admin/staff-advances/salary-preview?${params.toString()}`);
       setSalaryPreview(data || null);
     } catch (error) {
-      showMessage(errorMessage(error, 'محاسبهٔ کسر ناموفق بود.'), 'error');
+      showMessage(errorMessage(error, 'محاسبهٔ پیشکی و مالیات ناموفق بود.'), 'error');
     } finally {
       setBusyAction('');
     }
@@ -7334,7 +7334,7 @@ export default function AdminGovernmentFinance() {
               </div>
               <div className="gov-card-actions">
                 <button type="button" className="gov-inline-action" onClick={fetchSalaryPreview} disabled={busyAction === 'salary-preview'}>
-                  {busyAction === 'salary-preview' ? 'در حال محاسبه…' : 'محاسبهٔ کسرِ پیشکی'}
+                  {busyAction === 'salary-preview' ? 'در حال محاسبه…' : 'محاسبهٔ پیشکی و مالیات'}
                 </button>
                 <button type="button" className="gov-primary-btn" onClick={submitSalaryPayment} disabled={busyAction === 'save-salary-payment'}>
                   {busyAction === 'save-salary-payment' ? 'در حال ذخیره…' : 'ثبتِ پرداختِ معاش'}

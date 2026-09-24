@@ -5465,7 +5465,7 @@ router.get('/admin/staff-advances/salary-preview', requireAuth, requireRole(['ad
   } catch (error) {
     return res.status(error?.statusCode || 500).json({
       success: false,
-      message: error?.userMessage || 'محاسبهٔ کسرِ پیشکی ناموفق بود.'
+      message: error?.userMessage || 'محاسبهٔ پیشکی و مالیات ناموفق بود.'
     });
   }
 });
