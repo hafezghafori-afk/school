@@ -19,6 +19,12 @@ const WAITING_STAGE_LABELS = {
   general_president_review: 'در انتظارِ ریاستِ عمومی'
 };
 
+// رسیدِ فیس با یک تایید (مدیرِ مالی یا ریاستِ عمومی) نهایی می‌شود؛ مرحلهٔ آمریت
+// برای رسید فقط از داده‌های قدیمی می‌آید و آمریت نمی‌تواند آن را تایید کند.
+const WAITING_OVERRIDES = {
+  receipt: { finance_lead_review: 'در انتظارِ تاییدِ نهایی' }
+};
+
 // برچسبِ «کار انجام شد» برای هر نوع رکورد و وضعیتِ پایانی.
 const DONE_LABELS = {
   salary: { approved: 'پرداخت‌شده' },
@@ -103,7 +109,7 @@ export function resolveWorkflowState({
     const entry = lastTrailEntry(approvalTrail, (item) => isApproveAction(item?.action) || item?.action === 'submit');
     return {
       key: 'waiting',
-      label: WAITING_STAGE_LABELS[normalizedStage],
+      label: WAITING_OVERRIDES[kind]?.[normalizedStage] || WAITING_STAGE_LABELS[normalizedStage],
       tone: normalizedStage === 'finance_manager_review' ? 'teal' : 'copper',
       detail: entry && isApproveAction(entry.action) ? whoAndWhen(entry, 'تاییدشده توسطِ') : ''
     };
