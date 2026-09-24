@@ -10,7 +10,7 @@ import ConnectionBanner, { GlobalProgressBar } from './components/ConnectionBann
 import { ToastProvider } from './components/ui/toast';
 import { SkeletonCards } from './components/ui/Skeleton';
 import { CONNECTION, apiFetch, checkApiHealth, subscribeToConnection } from './utils/apiClient';
-import useSiteSettings, { PUBLIC_WEBSITE_LANGUAGE_KEY } from './hooks/useSiteSettings';
+import useSiteSettings, { PUBLIC_WEBSITE_LANGUAGE_KEY, SiteSettingsProvider } from './hooks/useSiteSettings';
 import { getPublicWebsiteLocale, publicLanguageOptions } from './i18n/publicWebsite';
 import { API_BASE, API_ORIGIN } from './config/api';
 import { expandLegacyPermissions, permissionAllows, PERMISSION_OPTIONS } from './config/permissionCatalog';
@@ -43,6 +43,7 @@ const CourseDetails = lazy(() => import('./pages/CourseDetails'));
 const InstructorPanel = lazy(() => import('./pages/InstructorPanel'));
 const InstructorPanelInline = lazy(() => import('./pages/InstructorPanelInline'));
 const AdminCommunications = lazy(() => import('./pages/AdminCommunications'));
+const AdminNotifications = lazy(() => import('./pages/AdminNotifications'));
 const Profile = lazy(() => import('./pages/Profile'));
 const QuizBuilder = lazy(() => import('./pages/QuizBuilder'));
 const GradeDetails = lazy(() => import('./pages/GradeDetails'));
@@ -3413,8 +3414,10 @@ function AppShell() {
               path="/instructor-inline"
               element={contentRoute(<InstructorPanelInline />, '\u062f\u0633\u062a\u0631\u0633\u06cc \u0633\u0627\u0632\u0646\u062f\u0647 \u0622\u0632\u0645\u0648\u0646 \u0628\u0631\u0627\u06cc \u0627\u06cc\u0646 \u062d\u0633\u0627\u0628 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a.')}
             />
-            {/* «مرکز ارتباطات» جای این صفحه را گرفته — این آدرس مستقیم به تبِ اعلانِ همگانی هدایت می‌شود. */}
-            <Route path="/admin-notifications" element={<Navigate to="/admin-communications?tab=announce" replace />} />
+            <Route
+              path="/admin-notifications"
+              element={adminRoute('manage_finance', <AdminNotifications />, 'دسترسی مدیریت اعلان‌های مالی برای این حساب فعال نیست.')}
+            />
             <Route
               path="/admin-users"
               element={adminRoute(['users.manage', 'users.access_requests.manage', 'users.profile_requests.manage'], <AdminUsers />, 'دسترسی مدیریت کاربران برای این حساب فعال نیست.')}
@@ -3623,9 +3626,14 @@ function AppShell() {
 function App() {
   return (
     <Router>
-      <ToastProvider>
-        <AppShell />
-      </ToastProvider>
+      {/* Above AppShell and every route inside it, so the shell's header and the
+          page it frames read one shared copy of the school's name, logo and
+          language instead of each fetching its own. */}
+      <SiteSettingsProvider>
+        <ToastProvider>
+          <AppShell />
+        </ToastProvider>
+      </SiteSettingsProvider>
     </Router>
   );
 }

@@ -362,6 +362,67 @@ const combineSignals = (external, own) => {
   return controller.signal;
 };
 
+/* ------------------------------------------------------------------ *
+ * In-flight read dedupe — one answer, however many callers want it
+ * ------------------------------------------------------------------ */
+
+// Two components asking the same question at the same moment do not need two
+// requests; they need one answer, twice. That used to be merely wasteful, but
+// with the wire capped above it is also slow: the copy occupies a slot some
+// other section of the page is queued behind. The home page opened by fetching
+// each of its three settings routes twice — the app shell and the page it
+// frames each asked on their own — so a third of the wire went on bytes that
+// were already arriving.
+//
+// So an identical read that arrives while the first one is still on the wire
+// joins it instead of starting its own. Reads only, and only while in flight:
+// nothing is remembered once the response lands, so this can hand a caller a
+// concurrent answer but never a stale one.
+const inFlightReads = new Map();
+
+// Anything that could make two calls want different answers keeps them apart,
+// so a shared request can never answer a question its caller did not ask:
+// `parse` and `rejectOnHttpError` decide what comes back, the timeout and the
+// retry budget decide how long it may take, and `auth` decides whether the
+// session is carried at all. Matching URLs alone is not enough.
+const readKey = ({ method, url, parse, rejectOnHttpError, retriesAllowed, effectiveTimeout, auth, headers }) => JSON.stringify([
+  method, url, parse, rejectOnHttpError, retriesAllowed, effectiveTimeout, auth,
+  // Header names are case-insensitive and unordered; the key must not be.
+  Object.entries(headers)
+    .map(([name, value]) => [String(name).toLowerCase(), value])
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+]);
+
+const parseBody = (res, parse, handedBack) => {
+  // A 4xx the caller opted to handle itself has always come back as the raw
+  // Response whatever `parse` says — its body is the verdict the backend
+  // reached, for the caller to read.
+  if (handedBack || parse === 'response') return res;
+  if (parse === 'none' || res.status === 204) return null;
+  if (parse === 'text') return res.text();
+  if (parse === 'blob') return res.blob();
+  return res.json().catch(() => ({}));
+};
+
+// A response body can be read only once, so every caller after the first gets a
+// clone. All of them have to be taken before anyone starts reading, which is
+// why the cloning happens here, as the shared promise resolves, rather than
+// being left to each caller.
+const shareRead = (key, send, parse) => {
+  const joined = inFlightReads.get(key);
+  if (joined) {
+    joined.callers += 1;
+    return joined.promise.then(({ res, handedBack }) => parseBody(res.clone(), parse, handedBack));
+  }
+  const entry = { callers: 1, promise: send() };
+  inFlightReads.set(key, entry);
+  // Forgotten the moment it settles, so a caller arriving afterwards starts a
+  // real request instead of being handed a finished one.
+  const forget = () => { inFlightReads.delete(key); };
+  entry.promise.then(forget, forget);
+  return entry.promise.then(({ res, handedBack }) => parseBody(entry.callers > 1 ? res.clone() : res, parse, handedBack));
+};
+
 /**
  * Fetch an API route with a timeout, automatic retries and a Persian error.
  *
@@ -399,6 +460,9 @@ export const apiFetch = async (path, options = {}) => {
     // right now", so making it wait behind the traffic it is diagnosing would
     // tell us about the queue instead of about the server.
     bypassQueue = false,
+    // Opt out of joining an identical read that is already on the wire, for a
+    // caller that genuinely has to observe the server a second time.
+    dedupe = true,
     ...rest
   } = options;
 
@@ -413,15 +477,16 @@ export const apiFetch = async (path, options = {}) => {
     throw offline;
   }
 
-  inFlight += 1;
-  emitActivity();
-  // Set when the first attempt actually leaves the queue. Time spent waiting
-  // for a turn is not time the server was slow, so neither the timeout nor the
-  // budget below may be spent on it — otherwise the twenty-fifth request of a
-  // burst would be declared a failure for the crime of going last.
-  let dispatchedAt = 0;
-
-  try {
+  // One trip to the network with the queue, the timeout and the retries around
+  // it. Resolves with the response — plus whether it is a 4xx the caller asked
+  // to read itself — and throws an ApiError for anything else. Reading the body
+  // is left to the caller above, because a shared read has more than one.
+  const send = async () => {
+    // Set when the first attempt actually leaves the queue. Time spent waiting
+    // for a turn is not time the server was slow, so neither the timeout nor the
+    // budget below may be spent on it — otherwise the twenty-fifth request of a
+    // burst would be declared a failure for the crime of going last.
+    let dispatchedAt = 0;
     let lastError = null;
     let lastResponse = null;
 
@@ -450,11 +515,7 @@ export const apiFetch = async (path, options = {}) => {
 
         if (res.ok) {
           reportOutcome(null, Date.now() - dispatchedAt);
-          if (parse === 'none' || res.status === 204) return null;
-          if (parse === 'text') return res.text();
-          if (parse === 'blob') return res.blob();
-          if (parse === 'response') return res;
-          return res.json().catch(() => ({}));
+          return { res, handedBack: false };
         }
 
         // Classify either way — that is what tells the banner a 503 was the
@@ -487,8 +548,33 @@ export const apiFetch = async (path, options = {}) => {
     }
 
     reportOutcome(lastError);
-    if (!rejectOnHttpError && lastResponse) return lastResponse;
+    if (!rejectOnHttpError && lastResponse) return { res: lastResponse, handedBack: true };
     throw lastError;
+  };
+
+  const shareable = dedupe !== false
+    && isSafeMethod
+    && !rest.body
+    // One caller giving up must never cancel a read another caller is still
+    // waiting on, so a request carrying somebody's abort signal stays its own.
+    && !externalSignal
+    // The health probe is asking about this instant; an answer already on its
+    // way does not tell it what it wants to know.
+    && !bypassQueue
+    // The caller asked to go past every cache on the way. This is one of them.
+    && !['no-store', 'reload'].includes(String(rest.cache || ''));
+
+  inFlight += 1;
+  emitActivity();
+  try {
+    if (!shareable) {
+      const { res, handedBack } = await send();
+      return await parseBody(res, parse, handedBack);
+    }
+    const key = readKey({
+      method, url, parse, rejectOnHttpError, retriesAllowed, effectiveTimeout, auth, headers
+    });
+    return await shareRead(key, send, parse);
   } finally {
     inFlight = Math.max(0, inFlight - 1);
     emitActivity();

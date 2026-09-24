@@ -2123,7 +2123,7 @@ test.describe('government finance workflow', () => {
     await expect.poll(() => counters.submitProcurement).toBe(1);
     await procurementRow.locator('[data-procurement-approve]').click();
     await expect.poll(() => counters.reviewProcurement).toBe(1);
-    await expect(page.locator('[data-procurement-registry-card="true"]')).toContainText('تایید شده');
+    await expect(page.locator('[data-procurement-registry-card="true"]')).toContainText('تعهدِ تاییدشده');
 
     const ledgerCard = page.locator('.gov-panel', { hasText: 'دفتر ثبت مصارف' });
     await page.getByRole('tab').nth(2).click();
@@ -2143,7 +2143,7 @@ test.describe('government finance workflow', () => {
     await expect.poll(() => counters.createExpense).toBe(1);
     const queueCard = page.locator('.gov-panel', { hasText: 'صف تایید مصارف' });
     await expect(queueCard.locator('.gov-table')).toContainText('Atlas Supplies');
-    await expect(queueCard.locator('.gov-table')).toContainText('در انتظار بررسی');
+    await expect(queueCard.locator('.gov-table')).toContainText('در انتظارِ مدیرِ مالی');
 
     await page.getByRole('tab', { name: 'سال مالی', exact: true }).click();
     await page.getByRole('button', { name: 'باز کردن همه' }).click();
@@ -2184,7 +2184,7 @@ test.describe('government finance workflow', () => {
     await page.getByRole('tab', { name: 'مصارف', exact: true }).click();
     await page.getByRole('button', { name: 'باز کردن همه' }).click();
     const pendingQueueRow = queueCard.locator('tbody tr', { hasText: 'Atlas Supplies' });
-    await expect(pendingQueueRow).toContainText('در انتظار بررسی');
+    await expect(pendingQueueRow).toContainText('در انتظارِ مدیرِ مالی');
     await pendingQueueRow.locator('[data-expense-review-approve]').click();
     await expect.poll(() => counters.reviewExpense).toBe(1);
     await expect(queueCard).not.toContainText('Atlas Supplies');
@@ -2201,7 +2201,7 @@ test.describe('government finance workflow', () => {
     // «دفتر ثبت مصارف» lists nothing until a filter is chosen — «همه» is the
     // documented way to ask it for everything.
     await ledgerCard.locator('select[name="ledgerStatus"]').selectOption('all');
-    await expect(ledgerCard.locator('.gov-table')).toContainText('تایید شده');
+    await expect(ledgerCard.locator('.gov-table')).toContainText('تایید و ثبت در خزانه');
 
     await page.getByRole('tab', { name: 'سال مالی', exact: true }).click();
     await page.getByRole('button', { name: 'باز کردن همه' }).click();
