@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
 const { formatFinanceCode } = require('./latinFinanceCode');
+const { resolveMonthCloseCalendar } = require('./financeMonthClosePeriods');
 
 const FONT_PATH = path.join(__dirname, '..', '..', 'Fonts', 'B Nazanin_p30download.com.ttf');
 // This font can be enabled again once we validate a PDFKit-safe Persian font.
@@ -426,6 +427,7 @@ async function buildMonthClosePdfBuffer(item = {}, options = {}) {
     });
 
     drawMetaLines(doc, [
+      `Calendar: ${resolveMonthCloseCalendar(item?.monthKey) === 'shamsi' ? 'Afghan solar month (Hijri Shamsi)' : 'Gregorian month (closed before the solar switch)'}`,
       `Approval Stage: ${sanitizeLine(item?.approvalStage || 'draft')}`,
       `Requested At: ${formatDateTime(item?.requestedAt)}`,
       `Approved At: ${formatDateTime(item?.approvedAt)}`,

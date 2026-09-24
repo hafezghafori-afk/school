@@ -20,10 +20,30 @@ const monthCloseApprovalTrailSchema = new mongoose.Schema({
 }, { _id: false });
 
 const monthCloseHistorySchema = new mongoose.Schema({
-  action: { type: String, enum: ['requested', 'approved', 'closed', 'rejected', 'reopened'], required: true },
+  action: {
+    type: String,
+    enum: ['requested', 'approved', 'closed', 'rejected', 'reopened', 'extended', 'expired', 'refreshed', 'flagged'],
+    required: true
+  },
   by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   at: { type: Date, default: Date.now },
   note: { type: String, default: '' }
+}, { _id: false });
+
+// Every close of a month (the first one, each close after a reopen, and each
+// refresh of a month flagged for review) keeps its figures here, with what
+// changed since the previous version - a re-close no longer erases what the
+// month was first closed with.
+const monthCloseVersionSchema = new mongoose.Schema({
+  version: { type: Number, required: true },
+  reason: { type: String, enum: ['close', 'reclose', 'refresh'], default: 'close' },
+  createdAt: { type: Date, default: Date.now },
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  note: { type: String, default: '' },
+  fingerprint: { type: String, default: '' },
+  totals: { type: mongoose.Schema.Types.Mixed, default: {} },
+  diff: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  changes: { type: mongoose.Schema.Types.Mixed, default: null }
 }, { _id: false });
 
 const financeMonthCloseSchema = new mongoose.Schema({
@@ -52,6 +72,30 @@ const financeMonthCloseSchema = new mongoose.Schema({
   reopenedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   reopenedAt: { type: Date, default: null },
   reopenNote: { type: String, default: '' },
+  // A reopen is time-boxed: past the deadline the month locks again until it
+  // is closed again (or the president extends it).
+  reopenDeadline: { type: Date, default: null },
+  reopenDurationDays: { type: Number, default: 0 },
+  reopenCount: { type: Number, default: 0 },
+  reopenReminderAt: { type: Date, default: null },
+  reopenExpiryNotifiedAt: { type: Date, default: null },
+  // Set when an earlier month of the same year is reopened out of order: this
+  // month's closed figures may no longer hold until its snapshot is refreshed.
+  needsReview: { type: Boolean, default: false },
+  needsReviewReason: { type: String, default: '' },
+  needsReviewSince: { type: Date, default: null },
+  // The figures reviewers were asked to approve; approval is refused if the
+  // month's figures differ from these.
+  reviewFingerprint: { type: String, default: '' },
+  // A close requested after a reopen goes straight to the president, with what
+  // changed since the last close shown for review.
+  isReclose: { type: Boolean, default: false },
+  recloseReview: {
+    diff: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    changes: { type: mongoose.Schema.Types.Mixed, default: null },
+    computedAt: { type: Date, default: null }
+  },
+  snapshotVersions: { type: [monthCloseVersionSchema], default: [] },
   approvalTrail: { type: [monthCloseApprovalTrailSchema], default: [] },
   closeWindow: {
     startAt: { type: Date, default: null },
@@ -60,6 +104,7 @@ const financeMonthCloseSchema = new mongoose.Schema({
   snapshot: {
     generatedAt: { type: Date, default: null },
     monthKey: { type: String, default: '' },
+    fingerprint: { type: String, default: '' },
     window: {
       startAt: { type: Date, default: null },
       endAt: { type: Date, default: null }
@@ -71,6 +116,8 @@ const financeMonthCloseSchema = new mongoose.Schema({
       approvedPaymentAmount: { type: Number, default: 0 },
       pendingPaymentCount: { type: Number, default: 0 },
       pendingPaymentAmount: { type: Number, default: 0 },
+      refundCount: { type: Number, default: 0 },
+      refundAmount: { type: Number, default: 0 },
       missingTreasuryPaymentCount: { type: Number, default: 0 },
       missingTreasuryPaymentAmount: { type: Number, default: 0 },
       approvedExpenseCount: { type: Number, default: 0 },
@@ -138,6 +185,7 @@ financeMonthCloseSchema.pre('validate', function syncFinanceMonthCloseState() {
   if (typeof this.rejectReason === 'string') this.rejectReason = this.rejectReason.trim();
   if (!Array.isArray(this.approvalTrail)) this.approvalTrail = [];
   if (!Array.isArray(this.history)) this.history = [];
+  if (!Array.isArray(this.snapshotVersions)) this.snapshotVersions = [];
 
   if (this.status === 'pending_review') {
     if (!['finance_manager_review', 'finance_lead_review', 'general_president_review'].includes(this.approvalStage)) {

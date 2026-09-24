@@ -7,6 +7,8 @@ require('../models/SchoolClass');
 require('../models/AcademicYear');
 
 const StudentMembership = require('../models/StudentMembership');
+const AcademicYear = require('../models/AcademicYear');
+const FinanceFeePlan = require('../models/FinanceFeePlan');
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
 const FinanceRelief = require('../models/FinanceRelief');
@@ -27,6 +29,11 @@ const {
   shiftAfghanMonthKey,
   toAfghanMonthKey
 } = require('../utils/afghanDate');
+const {
+  buildMonthCloseFingerprint,
+  resolveMonthCloseCalendar,
+  resolveMonthCloseWindow
+} = require('../utils/financeMonthClosePeriods');
 
 const CURRENT_MEMBERSHIP_STATUSES = ['active', 'pending', 'suspended', 'transferred_in'];
 
@@ -41,17 +48,6 @@ function roundMoney(value) {
 function normalizeNullableId(value) {
   if (!value) return '';
   return String(value);
-}
-
-function toMonthDateRange(monthKey = '') {
-  const value = String(monthKey || '').trim();
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) {
-    throw new Error('finance_month_key_invalid');
-  }
-  const [year, month] = value.split('-').map((entry) => Number(entry));
-  const startAt = new Date(year, month - 1, 1, 0, 0, 0, 0);
-  const endAt = new Date(year, month, 0, 23, 59, 59, 999);
-  return { monthKey: value, startAt, endAt };
 }
 
 function dateKey(value) {
@@ -203,7 +199,11 @@ function buildCashflowItems(items = []) {
   return Array.from(map.values()).sort((left, right) => String(left.date).localeCompare(String(right.date)));
 }
 
-function buildFinanceMonthCloseReadiness({ totals = {}, anomalies = {} } = {}) {
+function buildFinanceMonthCloseReadiness({
+  totals = {},
+  anomalies = {},
+  missingMonthlyBills = null
+} = {}) {
   const blockingIssues = [];
   const warningIssues = [];
 
@@ -248,6 +248,17 @@ function buildFinanceMonthCloseReadiness({ totals = {}, anomalies = {} } = {}) {
     });
   }
 
+  const missingBillCount = Number(missingMonthlyBills?.count || 0) || 0;
+  if (missingBillCount > 0) {
+    blockingIssues.push({
+      code: 'missing_monthly_bills',
+      label: 'شاگردانی که بل فیس همین ماه برایشان صادر نشده است',
+      count: missingBillCount,
+      amount: roundMoney(missingMonthlyBills?.amount || 0),
+      samples: (missingMonthlyBills?.students || []).map((row) => [row.name, row.classTitle].filter(Boolean).join(' - '))
+    });
+  }
+
   const actionRequiredAnomalies = Number(anomalies?.summary?.actionRequired || 0) || 0;
   if (actionRequiredAnomalies > 0) {
     blockingIssues.push({
@@ -282,8 +293,116 @@ function buildFinanceMonthCloseReadiness({ totals = {}, anomalies = {} } = {}) {
   };
 }
 
+// A bill belongs to its bill month (its due date; issuedAt only without one),
+// the same basis the finance dashboard and monthly reports use.
+function billMonthFilter({ startAt = null, endAt = null } = {}) {
+  const range = {};
+  if (startAt) range.$gte = startAt;
+  if (endAt) range.$lte = endAt;
+  return { $or: [{ dueDate: range }, { dueDate: null, issuedAt: range }] };
+}
+
+function orderHasTuition(order = {}) {
+  if (normalizeText(order?.orderType) === 'tuition') return true;
+  if (Number(order?.feeBreakdown?.tuition || 0) > 0) return true;
+  return (Array.isArray(order?.lineItems) ? order.lineItems : []).some((item) => normalizeText(item?.feeType) === 'tuition');
+}
+
+function overlapsWindow(start, end, window) {
+  const from = start ? new Date(start) : null;
+  const to = end ? new Date(end) : null;
+  if (from && !Number.isNaN(from.getTime()) && from.getTime() > window.endAt.getTime()) return false;
+  if (to && !Number.isNaN(to.getTime()) && to.getTime() < window.startAt.getTime()) return false;
+  return true;
+}
+
+const NOT_BILLED_MEMBERSHIP_STATUSES = ['pending', 'rejected', 'inactive', 'suspended'];
+
+// Students who were in a class that bills tuition monthly during this month,
+// in a month the academic year bills, yet have no tuition bill for it - fees a
+// close would otherwise lock in as never billed. Fully relieved students and
+// memberships outside the month are not counted, matching who monthly
+// billing itself bills (buildMonthlyBillingPeriods).
+async function findMissingMonthlyBills({ schoolId = '', academicYearId = '', monthKey = '', window = null, monthOrders = [] } = {}) {
+  const empty = { count: 0, amount: 0, students: [] };
+  if (!window || resolveMonthCloseCalendar(monthKey) !== 'shamsi') return empty;
+  const solarMonth = Number(String(monthKey).slice(5));
+  const [academicYear, plans] = await Promise.all([
+    AcademicYear.findById(academicYearId).select('feeBillingMonths').lean(),
+    FinanceFeePlan.find({
+      schoolId: { $in: [schoolId, null] },
+      academicYearId,
+      isActive: true,
+      lifecycleStatus: { $in: ['active', null] },
+      billingFrequency: 'monthly',
+      tuitionFee: { $gt: 0 }
+    }).select('classId tuitionFee effectiveFrom effectiveTo').lean()
+  ]);
+  const billingMonths = Array.isArray(academicYear?.feeBillingMonths) && academicYear.feeBillingMonths.length
+    ? academicYear.feeBillingMonths.map(Number)
+    : [1, 2, 3, 4, 5, 6, 7, 8, 9];
+  if (!billingMonths.includes(solarMonth)) return empty;
+  const tuitionByClass = new Map();
+  plans
+    .filter((plan) => plan?.classId && overlapsWindow(plan.effectiveFrom, plan.effectiveTo, window))
+    .forEach((plan) => {
+      const classId = normalizeNullableId(plan.classId);
+      if (!tuitionByClass.has(classId)) tuitionByClass.set(classId, roundMoney(plan.tuitionFee));
+    });
+  if (!tuitionByClass.size) return empty;
+
+  const [memberships, fullReliefs] = await Promise.all([
+    StudentMembership.find({
+      schoolId,
+      academicYearId,
+      classId: { $in: [...tuitionByClass.keys()] },
+      status: { $nin: NOT_BILLED_MEMBERSHIP_STATUSES }
+    })
+      .select('student studentId classId joinedAt enrolledAt endedAt leftAt')
+      .populate('student', 'name')
+      .populate('studentId', 'fullName')
+      .populate('classId', 'title')
+      .lean(),
+    FinanceRelief.find({
+      schoolId: { $in: [schoolId, null] },
+      academicYearId,
+      status: 'active',
+      coverageMode: 'full',
+      scope: { $in: ['all', 'tuition', null] }
+    }).select('student studentMembershipId startDate endDate').lean()
+  ]);
+  const billedStudents = new Set(monthOrders
+    .filter(orderHasTuition)
+    .map((order) => normalizeNullableId(order?.student)));
+  const relievedStudents = new Set(fullReliefs
+    .filter((relief) => overlapsWindow(relief.startDate, relief.endDate, window))
+    .map((relief) => normalizeNullableId(relief.student)));
+  const missing = [];
+  const seen = new Set();
+  memberships.forEach((membership) => {
+    const studentKey = normalizeNullableId(membership?.student?._id || membership?.student);
+    if (!studentKey || seen.has(studentKey)) return;
+    if (!overlapsWindow(membership.joinedAt || membership.enrolledAt, membership.endedAt || membership.leftAt, window)) return;
+    seen.add(studentKey);
+    if (billedStudents.has(studentKey) || relievedStudents.has(studentKey)) return;
+    missing.push({
+      name: normalizeText(membership?.studentId?.fullName || membership?.student?.name) || 'متعلم',
+      classTitle: normalizeText(membership?.classId?.title),
+      amount: tuitionByClass.get(normalizeNullableId(membership?.classId?._id || membership?.classId)) || 0
+    });
+  });
+  return {
+    count: missing.length,
+    amount: roundMoney(missing.reduce((sum, row) => sum + Number(row.amount || 0), 0)),
+    students: missing.slice(0, 10)
+  };
+}
+
 async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
-  const { startAt, endAt } = toMonthDateRange(monthKey);
+  const window = options?.window || resolveMonthCloseWindow(monthKey, options?.financialYear || null);
+  if (!window) throw new Error('finance_month_key_invalid');
+  const startAt = new Date(window.startAt);
+  const endAt = new Date(window.endAt);
   const anomalyCases = Array.isArray(options?.anomalyCases) ? options.anomalyCases : [];
   const schoolId = normalizeNullableId(options?.schoolId);
   const academicYearId = normalizeNullableId(options?.academicYearId);
@@ -295,7 +414,7 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
     FeeOrder.find({
       ...scopeFilter,
       status: { $ne: 'void' },
-      issuedAt: { $lte: endAt }
+      ...billMonthFilter({ endAt })
     })
       .populate('student', 'name email')
       .populate('studentId', 'fullName admissionNo')
@@ -306,8 +425,8 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
     FeeOrder.find({
       ...scopeFilter,
       status: { $ne: 'void' },
-      issuedAt: { $gte: startAt, $lte: endAt }
-    }).lean(),
+      ...billMonthFilter({ startAt, endAt })
+    }).select('student orderType feeBreakdown lineItems amountDue').lean(),
     FeePayment.find({
       ...scopeFilter,
       status: 'approved',
@@ -405,6 +524,14 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
     actionRequired: mergedAnomalies.filter((item) => item?.actionRequired).length
   };
 
+  const missingMonthlyBills = await findMissingMonthlyBills({
+    schoolId,
+    academicYearId,
+    monthKey,
+    window: { startAt, endAt },
+    monthOrders: ordersIssuedInMonth
+  });
+
   const outstandingOrders = ordersBeforeClose.filter((item) => roundMoney(item?.outstandingAmount) > 0);
   const overdueOrders = outstandingOrders.filter((item) => {
     const dueDate = new Date(item?.dueDate || item?.issuedAt || endAt);
@@ -492,7 +619,13 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
       treasuryNetAmount: totals.treasuryNetAmount,
       items: buildCashflowItems(recognizedApprovedPayments).slice(-31)
     },
-    readiness: buildFinanceMonthCloseReadiness({ totals, anomalies }),
+    readiness: buildFinanceMonthCloseReadiness({
+      totals,
+      anomalies,
+      missingMonthlyBills
+    }),
+    missingMonthlyBills,
+    fingerprint: buildMonthCloseFingerprint(totals),
     classes: buildClassSnapshot({
       orders: ordersBeforeClose,
       approvedPayments: recognizedApprovedPayments,
@@ -501,6 +634,66 @@ async function buildFinanceMonthCloseSnapshot(monthKey = '', options = {}) {
     }),
     anomalies
   };
+}
+
+function studentLabel(item = {}) {
+  return normalizeText(item?.studentId?.fullName || item?.student?.name);
+}
+
+// What was added or edited inside a month's days after it was reopened - shown
+// to the president with the re-close request, and kept with the new version.
+async function buildMonthCloseChangeReport({ schoolId = '', academicYearId = '', window = null, since = null } = {}) {
+  const sinceDate = since ? new Date(since) : null;
+  if (!window || !sinceDate || Number.isNaN(sinceDate.getTime())) return null;
+  const startAt = new Date(window.startAt);
+  const endAt = new Date(window.endAt);
+  const scopeFilter = { schoolId: normalizeNullableId(schoolId), academicYearId: normalizeNullableId(academicYearId) };
+  const changedSince = { updatedAt: { $gte: sinceDate } };
+  const [orders, payments, expenses, refunds] = await Promise.all([
+    FeeOrder.find({ ...scopeFilter, ...changedSince, ...billMonthFilter({ startAt, endAt }) })
+      .select('orderNumber title amountDue status createdAt updatedAt student studentId')
+      .populate('student', 'name')
+      .populate('studentId', 'fullName')
+      .sort({ updatedAt: -1 })
+      .lean(),
+    FeePayment.find({ ...scopeFilter, ...changedSince, paidAt: { $gte: startAt, $lte: endAt } })
+      .select('paymentNumber amount status createdAt updatedAt student studentId')
+      .populate('student', 'name')
+      .populate('studentId', 'fullName')
+      .sort({ updatedAt: -1 })
+      .lean(),
+    ExpenseEntry.find({ ...scopeFilter, ...changedSince, expenseDate: { $gte: startAt, $lte: endAt } })
+      .select('category subCategory referenceNo amount status createdAt updatedAt')
+      .sort({ updatedAt: -1 })
+      .lean(),
+    FinanceRefund.find({ ...scopeFilter, ...changedSince, paidAt: { $gte: startAt, $lte: endAt } })
+      .select('refundNumber amount status createdAt updatedAt')
+      .sort({ updatedAt: -1 })
+      .lean()
+  ]);
+  const describe = (rows, toRow) => ({
+    count: rows.length,
+    added: rows.filter((item) => new Date(item?.createdAt).getTime() >= sinceDate.getTime()).length,
+    items: rows.slice(0, 10).map((item) => ({
+      ...toRow(item),
+      amount: roundMoney(item?.amountDue ?? item?.amount),
+      status: normalizeText(item?.status),
+      added: new Date(item?.createdAt).getTime() >= sinceDate.getTime(),
+      updatedAt: item?.updatedAt || null
+    }))
+  });
+  const report = {
+    since: sinceDate.toISOString(),
+    bills: describe(orders, (item) => ({ number: normalizeText(item?.orderNumber), title: normalizeText(item?.title), student: studentLabel(item) })),
+    payments: describe(payments, (item) => ({ number: normalizeText(item?.paymentNumber), student: studentLabel(item) })),
+    expenses: describe(expenses, (item) => ({
+      number: normalizeText(item?.referenceNo),
+      title: [normalizeText(item?.category), normalizeText(item?.subCategory)].filter(Boolean).join(' / ')
+    })),
+    refunds: describe(refunds, (item) => ({ number: normalizeText(item?.refundNumber) }))
+  };
+  report.total = report.bills.count + report.payments.count + report.expenses.count + report.refunds.count;
+  return report;
 }
 
 // The trend is bucketed by Afghan solar month ("1405-06"), the months the
@@ -606,7 +799,7 @@ async function buildFinanceMonthlyTrend({
 }
 
 module.exports = {
+  buildMonthCloseChangeReport,
   buildFinanceMonthCloseSnapshot,
-  buildFinanceMonthlyTrend,
-  toMonthDateRange
+  buildFinanceMonthlyTrend
 };
