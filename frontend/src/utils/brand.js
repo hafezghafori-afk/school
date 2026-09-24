@@ -1,5 +1,8 @@
-export const BRAND_NAME = 'سیما';
-export const BRAND_SUBTITLE = 'سیستم مدیریت هوشمند مکاتیب افغانستان';
+// What the page title, headers and printed cards show while the site settings
+// haven't loaded, or when they fail to. This is the school's own name: the
+// platform's product name used to be here and leaked into search results.
+export const BRAND_NAME = 'مدرسه اناثیه ایمان';
+export const BRAND_SUBTITLE = '';
 
 const legacyBrandNames = new Set([
   'مدرسه ایمان',
