@@ -497,8 +497,11 @@ export default function StudentFinance() {
       }
 
       await loadData({ silent: true });
+      // An identical resubmission comes back as a 200 carrying the receipt that
+      // already existed, so without this a student sending the same receipt
+      // twice is told it was submitted — both times.
       setMessage(payload?.message || 'پرداخت ثبت شد و برای بررسی مالی ارسال گردید.');
-      setMessageType('info');
+      setMessageType(payload?.item?.isDuplicate ? 'warning' : 'info');
       setPaymentInputKey((current) => current + 1);
       setPaymentForm((current) => ({
         ...current,

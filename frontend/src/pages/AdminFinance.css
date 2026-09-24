@@ -216,6 +216,27 @@
   word-break: break-word;
 }
 
+/* The icon is a span too, so it has to opt out of the rule above. */
+.finance-msg .finance-msg-icon {
+  flex: 0 0 auto;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+/* A duplicate submission: the wording says nothing was created, and the colour
+   has to say the same, because the bar is otherwise identical to a success. */
+.finance-msg.is-warning {
+  border-color: rgba(242, 185, 12, 0.6);
+  background: rgba(48, 36, 8, 0.97);
+  color: #fde68a;
+}
+
+.finance-msg.is-error {
+  border-color: rgba(248, 113, 113, 0.55);
+  background: rgba(48, 16, 20, 0.97);
+  color: #fecaca;
+}
+
 .finance-msg-close {
   flex: 0 0 auto;
   width: 24px;
