@@ -16,11 +16,14 @@ import { fileURLToPath } from 'node:url';
  * every section reported "انترنت یا سرور کند است" after 15–25 seconds while the
  * backend was answering normally.
  *
- * Two properties fix it, and both are easy to undo by accident, so they are
- * checked here rather than left to a code review:
+ * Three properties fix it, and all of them are easy to undo by accident, so they
+ * are checked here rather than left to a code review:
  *   1. no more than MAX_CONCURRENT_REQUESTS are ever on the wire at once;
  *   2. the time a request spends waiting its turn is not charged to its
- *      timeout — otherwise capping concurrency would just move the failure.
+ *      timeout — otherwise capping concurrency would just move the failure;
+ *   3. identical reads issued together share one request — a slot spent on a
+ *      copy of an answer already arriving is a slot the rest of the page waits
+ *      for.
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -215,6 +218,129 @@ if (peak !== EXPECTED_CONCURRENCY || stillFailing.length) {
   );
 } else {
   logPass(`${failureModes.length} failure paths all handed their slot back`);
+}
+
+/* ------------------------------------------------------------------ *
+ * 4. identical reads in flight together share one request
+ * ------------------------------------------------------------------ */
+
+// A page does not only make too many requests, it makes the same one twice: the
+// app shell and the page it frames both want the school's name and logo, so
+// /api/settings/public, /api/school-websites/public and /api/afghan-schools/active
+// were each fetched twice on every load. Under the cap above that is not merely
+// waste — the copy holds a slot another section of the page is queued behind.
+//
+// So identical reads that overlap must share one request, while everything that
+// is NOT interchangeable must stay separate: a write, a read carrying someone's
+// abort signal, a different URL, and the same read issued again after the first
+// finished. And because a response body can be read only once, every caller of a
+// shared read still has to get a body of its own.
+
+// A body that can be consumed once, like the real thing, so a caller handed
+// somebody else's already-read response fails here rather than in the browser.
+const singleUseResponse = (payload) => {
+  let used = false;
+  return {
+    ok: true,
+    status: 200,
+    async json() {
+      if (used) throw new TypeError('body stream already read');
+      used = true;
+      return payload;
+    },
+    clone() {
+      if (used) throw new TypeError('cannot clone a response whose body was already read');
+      return singleUseResponse(payload);
+    }
+  };
+};
+
+let calls = [];
+globalThis.fetch = (url, options = {}) => new Promise((resolve, reject) => {
+  calls.push(String(url));
+  const onAbort = () => {
+    clearTimeout(timer);
+    const error = new Error('aborted');
+    error.name = 'AbortError';
+    reject(error);
+  };
+  const timer = setTimeout(() => {
+    options.signal?.removeEventListener('abort', onAbort);
+    resolve(singleUseResponse({ success: true, from: String(url) }));
+  }, 60);
+  if (options.signal?.aborted) onAbort();
+  else options.signal?.addEventListener('abort', onAbort, { once: true });
+});
+
+const countOf = (suffix) => calls.filter((url) => url.endsWith(suffix)).length;
+
+// 4a. the duplicate the home page actually made, in its actual shape
+calls = [];
+const twins = await Promise.all(
+  Array.from({ length: 8 }, () => apiFetch('/api/settings/public'))
+);
+if (countOf('/api/settings/public') !== 1) {
+  logFail(`8 identical reads made ${countOf('/api/settings/public')} requests, expected 1`);
+} else if (twins.some((body) => body?.success !== true)) {
+  logFail('a caller that joined a shared read did not get the body');
+} else {
+  logPass('8 identical concurrent reads shared one request and all got the body');
+}
+
+// 4b. every one of them gets a body it may read itself
+calls = [];
+const raw = await Promise.all(
+  Array.from({ length: 4 }, () => apiFetch('/api/school-websites/public?slug=&lang=fa', {
+    parse: 'response', rejectOnHttpError: false
+  }))
+);
+const parsed = await Promise.allSettled(raw.map((res) => res.json()));
+const unreadable = parsed.filter((result) => result.status === 'rejected');
+if (calls.length !== 1) {
+  logFail(`4 identical parse:'response' reads made ${calls.length} requests, expected 1`);
+} else if (unreadable.length) {
+  logFail(
+    `${unreadable.length}/4 callers could not read their own response body `
+    + `(${unreadable[0].reason?.message}) — a shared response is being handed out uncloned`
+  );
+} else {
+  logPass('4 callers of one shared read each got a readable body');
+}
+
+// 4c. everything that is not interchangeable stays its own request
+calls = [];
+const aborting = new AbortController();
+const abortable = apiFetch('/api/report', { signal: aborting.signal, retry: false });
+const bystander = apiFetch('/api/report');
+aborting.abort();
+const [abandoned, survivor] = await Promise.allSettled([abortable, bystander]);
+
+await Promise.allSettled([
+  apiFetch('/api/one'),
+  apiFetch('/api/two'),
+  apiFetch('/api/save', { method: 'POST', body: '{}' }),
+  apiFetch('/api/save', { method: 'POST', body: '{}' }),
+  apiFetch('/api/opt-out'),
+  apiFetch('/api/opt-out', { dedupe: false })
+]);
+// Nothing is remembered after a request settles, so asking again is a real ask.
+await apiFetch('/api/one');
+
+const separate = [
+  ['a read carrying an abort signal', countOf('/api/report') === 2],
+  ['two different URLs', countOf('/api/one') === 2 && countOf('/api/two') === 1],
+  ['two identical writes', countOf('/api/save') === 2],
+  ['an explicit dedupe: false', countOf('/api/opt-out') === 2]
+].filter(([, ok]) => !ok);
+
+if (separate.length) {
+  logFail(`these were wrongly shared: ${separate.map(([name]) => name).join(', ')}`);
+} else if (survivor.status !== 'fulfilled') {
+  logFail('aborting one read killed a second caller reading the same URL');
+} else if (abandoned.status !== 'rejected') {
+  logFail('an aborted read resolved anyway');
+} else {
+  logPass('writes, aborted reads, other URLs and dedupe: false all stayed separate');
 }
 
 fs.rmSync(path.dirname(tempFile), { recursive: true, force: true });
