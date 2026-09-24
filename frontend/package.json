@@ -42,8 +42,6 @@
         "test:e2e:finance": "playwright test --config=playwright.config.mjs --project=chromium --workers=1 --grep \"finance workflow\"",
         "test:e2e:admin": "playwright test --config=playwright.config.mjs --project=chromium --grep \"admin workflow\"",
         "test:e2e:admin-dashboard-cards": "playwright test --config=playwright.config.mjs --project=chromium --grep \"admin dashboard cards data wiring\"",
-        "test:e2e:admin-alerts": "playwright test --config=playwright.config.mjs --project=chromium --grep \"admin alerts enhancements\"",
-        "test:e2e:admin-today-schedule": "playwright test --config=playwright.config.mjs --project=chromium --grep \"admin today schedule widget\"",
         "test:e2e:access-request": "playwright test --config=playwright.config.mjs --project=chromium --grep \"access request workflow\"",
         "test:e2e:home": "playwright test --config=playwright.config.mjs --project=chromium --grep \"home workflow\"",
         "perf:lighthouse": "node ./scripts/lighthouseBaseline.mjs",
