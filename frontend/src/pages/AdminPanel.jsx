@@ -97,6 +97,22 @@ const getCourseTargetId = (item = {}) => String(
   || ''
 ).trim();
 
+// یک قلمِ برنامه دو شکل دارد: پیش‌نویسِ محلی صافِ `classTitle`/`teacherName` را
+// می‌دهد و `GET /api/schedules/today` شکلِ تو‌در‌توی `schoolClass`/`instructor` را.
+// هر جا نامِ صنف یا استاد نشان داده می‌شود باید هر دو خوانده شود، همان‌طور که
+// تشخیصِ تداخلِ زمانی (alertsInDomain) از اول هر دو را می‌خواند.
+const getScheduleClassTitle = (item = {}) => String(
+  item?.classTitle
+  || item?.schoolClass?.title
+  || item?.course?.title
+  || ''
+).trim();
+const getScheduleTeacherName = (item = {}) => String(
+  item?.teacherName
+  || item?.instructor?.name
+  || ''
+).trim();
+
 const normalizeSlaTimeouts = (payload = null) => {
   const source = payload?.timeouts || payload?.config?.timeouts || null;
   if (!source || typeof source !== 'object') return null;
@@ -2731,7 +2747,7 @@ export default function AdminPanel() {
     ...(todaySchedule || []).slice(0, 3).map((item, index) => ({
       key: `schedule-${item?._id || item?.id || index}`,
       title: item?.subjectTitle || item?.subject || item?.courseTitle || 'برنامه درسی',
-      meta: [item?.classTitle, item?.teacherName, item?.startTime].filter(Boolean).join(' | ') || todayScheduleCardLabel,
+      meta: [getScheduleClassTitle(item), getScheduleTeacherName(item), item?.startTime].filter(Boolean).join(' | ') || todayScheduleCardLabel,
       to: canManageSchedule ? ADMIN_SCHEDULE_ROUTE : (canViewSchedule ? ADMIN_SCHEDULE_VIEW_ROUTE : '')
     }))
   ].slice(0, 5);
@@ -3617,7 +3633,7 @@ export default function AdminPanel() {
                         <div key={item?._id || item?.id || index} className="admin-modern-list-item admin-modern-list-item--tagged">
                           <div className="admin-modern-list-item__body">
                             <strong>{item?.subjectTitle || item?.subject || item?.courseTitle || 'برنامه درسی'}</strong>
-                            <small>{[item?.classTitle, item?.teacherName].filter(Boolean).join(' | ') || '—'}</small>
+                            <small>{[getScheduleClassTitle(item), getScheduleTeacherName(item)].filter(Boolean).join(' | ') || '—'}</small>
                           </div>
                           <span className="admin-modern-tag admin-modern-tag--info">
                             {[item?.startTime, item?.endTime].filter(Boolean).join(' - ') || '—'}
