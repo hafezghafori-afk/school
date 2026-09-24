@@ -478,140 +478,60 @@ test.describe('admin workflow', () => {
     await expect(page.locator('a.admin-search-item[href$="/admin-logs"]').filter({ hasText: 'alpha_review' })).toHaveCount(1);
   });
 
-  test('admin notification center filters finance alerts and toggles read state', async ({ page }) => {
-    let notifications = [
-      {
-        _id: 'finance-notify-1',
-        title: 'یادآوری بدهی معوق',
-        message: 'بل BL-ALPHA-0001 برای Alpha Student معوق است.',
-        type: 'finance',
-        category: 'finance',
-        eventKey: 'reminder',
-        level: 'critical',
-        sourceModule: 'finance',
-        actionUrl: '/admin-finance',
-        needsAction: true,
-        createdAt: '2026-03-07T08:00:00.000Z',
-        readAt: null
-      },
-      {
-        _id: 'finance-notify-2',
-        title: 'پیگیری رسید',
-        message: 'رسید Student Beta به آمریت مالی ارجاع شد.',
-        type: 'finance',
-        category: 'finance',
-        eventKey: 'workflow',
-        level: 'warning',
-        sourceModule: 'workflow',
-        actionUrl: '/admin-finance#pending-receipts',
-        needsAction: true,
-        createdAt: '2026-03-07T09:30:00.000Z',
-        readAt: null
-      },
-      {
-        _id: 'finance-notify-3',
-        title: 'پایان نزدیک تسهیلات',
-        message: 'بورسیه جزئی Alpha Student تا دو هفته دیگر ختم می‌شود.',
-        type: 'finance',
-        category: 'finance',
-        eventKey: 'relief',
-        level: 'info',
-        sourceModule: 'finance',
-        actionUrl: '/admin-finance',
-        needsAction: false,
-        createdAt: '2026-03-06T15:45:00.000Z',
-        readAt: '2026-03-06T18:00:00.000Z'
-      }
-    ];
-
-    const buildNotificationSummary = (items = []) => ({
-      total: items.length,
-      unread: items.filter((item) => !item.readAt).length,
-      read: items.filter((item) => item.readAt).length,
-      needsAction: items.filter((item) => item.needsAction).length,
-      byLevel: {
-        critical: items.filter((item) => item.level === 'critical').length,
-        warning: items.filter((item) => item.level === 'warning').length,
-        info: items.filter((item) => item.level === 'info').length
-      }
-    });
-
-    const buildNotificationsPayload = () => ({
-      success: true,
-      items: notifications,
-      unread: notifications.filter((item) => !item.readAt).length,
-      summary: buildNotificationSummary(notifications)
-    });
-
-    await page.route('**/api/users/me/notifications?*', async (route) => {
+  // The finance notification centre this file used to drive (AdminNotifications,
+  // with its status/event filters and read toggles) is no longer reachable:
+  // the communications hub took over /admin-notifications and the page it
+  // replaced has no equivalent screen. All that is left to guard is that the
+  // old URL still lands somewhere sensible instead of a dead route.
+  test('legacy notification centre url lands on the communications hub', async ({ page }) => {
+    await page.route('**/api/users/me', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(buildNotificationsPayload())
+        body: JSON.stringify({
+          success: true,
+          user: {
+            _id: adminSession.userId,
+            name: adminSession.userName,
+            role: adminSession.role,
+            adminLevel: adminSession.adminLevel,
+            orgRole: adminSession.orgRole,
+            effectivePermissions: adminSession.permissions
+          }
+        })
       });
     });
 
-    await page.route('**/api/users/me/notifications/read-all', async (route) => {
-      const count = notifications.filter((item) => !item.readAt).length;
-      const now = '2026-03-07T10:45:00.000Z';
-      notifications = notifications.map((item) => ({ ...item, readAt: item.readAt || now }));
+    await page.route('**/api/admin-messages*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ success: true, count })
+        body: JSON.stringify({ success: true, items: [] })
       });
     });
 
-    await page.route('**/api/users/me/notifications/*/read', async (route) => {
-      const id = route.request().url().split('/').slice(-2)[0];
-      const now = '2026-03-07T10:15:00.000Z';
-      notifications = notifications.map((item) => (
-        item._id === id ? { ...item, readAt: item.readAt || now } : item
-      ));
-      const current = notifications.find((item) => item._id === id) || null;
+    await page.route('**/api/contact/admin', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ success: true, item: current })
+        body: JSON.stringify({ success: true, items: [] })
       });
     });
 
-    await page.route('**/api/users/me/notifications/*/unread', async (route) => {
-      const id = route.request().url().split('/').slice(-2)[0];
-      notifications = notifications.map((item) => (
-        item._id === id ? { ...item, readAt: null } : item
-      ));
-      const current = notifications.find((item) => item._id === id) || null;
+    await page.route('**/api/education/school-classes*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ success: true, item: current })
+        body: JSON.stringify({ success: true, items: [] })
       });
     });
 
     await page.goto('/admin-notifications', { waitUntil: 'domcontentloaded' });
 
-    await expect(page.getByRole('heading', { name: 'مرکز اعلان‌های مالی' })).toBeVisible();
-    await expect(page.locator('.notify-kpi').filter({ hasText: 'کل اعلان‌ها' })).toContainText(/3|۳/);
-    await expect(page.locator('.notify-kpi').filter({ hasText: 'نخوانده' })).toContainText(/2|۲/);
-
-    await page.getByTestId('notification-filter-status').selectOption('unread');
-    await expect(page.getByTestId('notification-center-list')).toContainText('یادآوری بدهی معوق');
-    await page.getByTestId('notification-filter-event').selectOption('workflow');
-    await expect(page.locator('.notify-item-card')).toHaveCount(1);
-    await expect(page.getByTestId('notification-center-list')).toContainText('پیگیری رسید');
-    await page.getByTestId('notification-item-finance-notify-2').click();
-    await expect(page.getByTestId('notification-center-detail')).toContainText('ارجاع شد');
-    await expect(page.getByTestId('notification-center-detail').locator('a')).toHaveAttribute('href', /\/admin-finance#pending-receipts$/);
-
-    await page.getByTestId('notification-toggle-read').click();
-    await expect(page.locator('.notify-kpi').filter({ hasText: 'نخوانده' })).toContainText(/1|۱/);
-    await expect(page.getByTestId('notification-center-detail')).toContainText('خوانده شده');
-
-    await page.getByTestId('notification-filter-status').selectOption('all');
-    await page.getByTestId('notification-filter-event').selectOption('all');
-    await page.getByTestId('notification-mark-all').click();
-    await expect(page.locator('.notify-kpi').filter({ hasText: 'نخوانده' })).toContainText(/0|۰/);
+    await expect(page).toHaveURL(/\/admin-communications\?tab=announce$/, { timeout: 20_000 });
+    await expect(page.locator('.route-loading')).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.getByRole('heading', { name: 'مرکز ارتباطات', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'اعلانِ همگانی', level: 2 })).toBeVisible();
   });
 
   test('admin workflow filters admin logs by org role', async ({ page }) => {
