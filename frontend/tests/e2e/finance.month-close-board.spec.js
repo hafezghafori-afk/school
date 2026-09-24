@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { gotoAppPage } from './navigation.helpers';
 
 // The month-close board: one tile per solar month of the financial year. A
 // close request shows what blocks it before the month locks; the president
@@ -221,7 +222,7 @@ async function openFinance(page, server) {
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   });
 
-  await page.goto('/admin-finance', { waitUntil: 'domcontentloaded' });
+  await gotoAppPage(page, '/admin-finance');
   await page.getByTestId('finance-section-reports').click();
   await expect(page.getByTestId('month-close-board')).toBeVisible();
 }

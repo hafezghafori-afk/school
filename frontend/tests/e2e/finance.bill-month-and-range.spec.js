@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { gotoAppPage } from './navigation.helpers';
 
 // Pins the two things the finance centre got wrong: bill forms never said
 // which month a bill was for, and figures did not follow the Afghan month
@@ -116,7 +117,7 @@ async function openFinance(page, requests) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
 
-  await page.goto('/admin-finance', { waitUntil: 'domcontentloaded' });
+  await gotoAppPage(page, '/admin-finance');
 }
 
 const newRequests = () => ({ overview: [], trend: [], monthlySummary: [], manualBill: [], bulkPreview: [] });
