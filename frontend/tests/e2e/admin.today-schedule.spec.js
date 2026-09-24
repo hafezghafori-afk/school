@@ -327,3 +327,130 @@ test.describe('admin today schedule widget', () => {
     await expect(reloadedPanel).toContainText('ساینس');
   });
 });
+
+// The panel above lives in the classic layout, which AdminPanel.css hides. The
+// block below covers the modern dashboard's «برنامه امروز» panel — the one a
+// manager actually sees — and it is only rendered for a non-ریاست-عمومی level.
+test.describe('admin modern dashboard today schedule panel', () => {
+  test.beforeEach(async ({ page }) => {
+    // Mounting the dashboard fans out to many endpoints. Answer the ones this
+    // spec does not care about with an empty payload first, so the only route
+    // that can change the panel is the one each test registers afterwards
+    // (Playwright gives precedence to the most recently registered handler).
+    await page.route('**/api/**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, items: [], data: [], orders: [], requests: [], schools: [] })
+      });
+    });
+
+    await setupAdminWorkspace(page, {
+      permissions: ['view_reports', 'manage_schedule'],
+      user: { adminLevel: 'school_manager', orgRole: 'school_manager' }
+    });
+
+    await setupCommonAdminMocks(page);
+  });
+
+  test('a school manager sees today lessons on the dashboard', async ({ page }) => {
+    // No draft is stored for this session, so loadTodaySchedule falls through to
+    // GET /api/schedules/today — which answers with the nested server shape
+    // (schoolClass/instructor), not the draft's flat classTitle/teacherName.
+    await page.route('**/api/timetables/daily-draft*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, item: null })
+      });
+    });
+
+    await page.route('**/api/schedules/today', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          date: '2026-04-05',
+          items: [
+            {
+              _id: 'sch-modern-1',
+              subject: 'ریاضی',
+              instructor: { _id: 'teacher-1', name: 'استاد اول' },
+              schoolClass: { id: 'class-10a', title: 'صنف 10A' },
+              classId: 'class-10a',
+              startTime: '08:00',
+              endTime: '09:00',
+              visibility: 'published',
+              date: '2026-04-05'
+            },
+            {
+              _id: 'sch-modern-2',
+              subject: 'ساینس',
+              instructor: { _id: 'teacher-2', name: 'استاد دوم' },
+              schoolClass: { id: 'class-10b', title: 'صنف 10B' },
+              classId: 'class-10b',
+              startTime: '09:00',
+              endTime: '10:00',
+              visibility: 'published',
+              date: '2026-04-05'
+            }
+          ]
+        })
+      });
+    });
+
+    await page.goto('/admin', { waitUntil: 'domcontentloaded' });
+
+    const modernPanel = page.locator('.admin-modern-panel', {
+      has: page.getByRole('heading', { name: 'برنامه امروز' })
+    }).first();
+    await expect(modernPanel).toBeVisible();
+
+    const firstRow = modernPanel.locator('.admin-modern-list-item').first();
+    await expect(firstRow.locator('strong')).toHaveText('ریاضی');
+    await expect(firstRow.locator('.admin-modern-tag')).toHaveText('08:00 - 09:00');
+    // The row must name the class and the teacher, not fall back to a bare dash.
+    await expect(firstRow.locator('small')).toHaveText('صنف 10A | استاد اول');
+
+    const secondRow = modernPanel.locator('.admin-modern-list-item').nth(1);
+    await expect(secondRow.locator('strong')).toHaveText('ساینس');
+    await expect(secondRow.locator('small')).toHaveText('صنف 10B | استاد دوم');
+
+    await expect(modernPanel.locator('small', { hasText: '—' })).toHaveCount(0);
+  });
+
+  test('a lesson missing its teacher still names the class', async ({ page }) => {
+    await page.route('**/api/schedules/today', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          date: '2026-04-05',
+          items: [
+            {
+              _id: 'sch-modern-3',
+              subject: 'فزیک',
+              instructor: null,
+              schoolClass: { id: 'class-11a', title: 'صنف 11A' },
+              classId: 'class-11a',
+              startTime: '10:00',
+              endTime: '11:00',
+              visibility: 'published',
+              date: '2026-04-05'
+            }
+          ]
+        })
+      });
+    });
+
+    await page.goto('/admin', { waitUntil: 'domcontentloaded' });
+
+    const modernPanel = page.locator('.admin-modern-panel', {
+      has: page.getByRole('heading', { name: 'برنامه امروز' })
+    }).first();
+    const row = modernPanel.locator('.admin-modern-list-item').first();
+    await expect(row.locator('small')).toHaveText('صنف 11A');
+  });
+});
