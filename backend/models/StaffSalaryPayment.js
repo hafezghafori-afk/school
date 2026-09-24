@@ -49,6 +49,8 @@ const staffSalaryPaymentSchema = new mongoose.Schema({
   period: { type: String, default: '', trim: true }, // YYYY-MM of paymentDate
   paymentDate: { type: Date, required: true, index: true },
   grossSalary: { type: Number, required: true, min: 0 },
+  // مالیه بر معاش — دستی وارد می‌شود، پیش از اقساطِ پیشکی از ناخالص کسر می‌شود.
+  taxAmount: { type: Number, default: 0, min: 0 },
   deductions: { type: [deductionSchema], default: [] },
   deductionTotal: { type: Number, default: 0, min: 0 },
   netAmount: { type: Number, default: 0, min: 0 },
@@ -84,9 +86,11 @@ staffSalaryPaymentSchema.pre('validate', function syncStaffSalaryPaymentState() 
   if (!Array.isArray(this.approvalTrail)) this.approvalTrail = [];
 
   this.grossSalary = Math.max(0, Number(this.grossSalary) || 0);
+  this.taxAmount = Math.min(this.grossSalary, Math.max(0, Math.round((Number(this.taxAmount) || 0) * 100) / 100));
+  const afterTax = this.grossSalary - this.taxAmount;
   const rawDeductions = this.deductions.reduce((sum, item) => sum + Math.max(0, Number(item?.amount) || 0), 0);
-  this.deductionTotal = Math.min(this.grossSalary, Math.round(rawDeductions * 100) / 100);
-  this.netAmount = Math.max(0, Math.round((this.grossSalary - this.deductionTotal) * 100) / 100);
+  this.deductionTotal = Math.min(afterTax, Math.round(rawDeductions * 100) / 100);
+  this.netAmount = Math.max(0, Math.round((afterTax - this.deductionTotal) * 100) / 100);
 
   if (this.status === 'draft') this.approvalStage = 'draft';
   else if (this.status === 'rejected') this.approvalStage = 'rejected';

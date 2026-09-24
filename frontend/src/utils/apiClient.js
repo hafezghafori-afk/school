@@ -7,18 +7,39 @@ import { API_BASE } from '../config/api';
 // the user: a blank page with nothing moving on it. Everything here exists to
 // make that state visible and recoverable.
 
-export const DEFAULT_TIMEOUT_MS = 15000;
+// Both timeouts are measured from the moment the request is actually sent, not
+// from the moment the caller asked for it — see the dispatch queue below for
+// why the difference matters.
+export const DEFAULT_TIMEOUT_MS = 25000;
 // Writes get longer than reads: saving a term's grades or closing a finance
-// month legitimately takes more than fifteen seconds, and cutting one off early
-// is far worse than waiting — see TIMEOUT_UNSAFE below.
-export const DEFAULT_MUTATION_TIMEOUT_MS = 30000;
+// month legitimately takes more than twenty-five seconds, and cutting one off
+// early is far worse than waiting — see TIMEOUT_UNSAFE below.
+export const DEFAULT_MUTATION_TIMEOUT_MS = 45000;
 const MAX_RETRIES = 2;
 const RETRY_BACKOFF_MS = [600, 1800];
-// Ceiling on one apiFetch call including its retries. Without it, three
-// consecutive timeouts on a hanging server would keep a page waiting ~45s —
-// long enough that the retries become the very "nothing is happening" problem
-// they exist to solve. A refused connection still fails fast and retries fully.
-const TOTAL_BUDGET_MS = 25000;
+// Ceiling on one apiFetch call including its retries, counted from its first
+// dispatch. Without it, three consecutive timeouts on a hanging server would
+// keep a page waiting indefinitely — long enough that the retries become the
+// very "nothing is happening" problem they exist to solve.
+const TOTAL_BUDGET_MS = 60000;
+
+// How many requests may be on the wire at once, app-wide.
+//
+// A page here does not make a request, it makes a burst of them: the finance
+// centre opens with a Promise.all of ~25 and the admin dashboard with ~40. HTTP
+// used to pace those itself — six connections per host, the rest queued by the
+// browser — but the site is served over HTTP/3 now, so all forty leave at once,
+// share one link and one single-threaded backend, and each one's clock starts
+// at the same instant. At that point a per-request timeout is really a
+// whole-page deadline: not one of them is slow, yet they all expire together,
+// and each expiry fires two retries into the same jam. That is precisely how a
+// page that merely took a while to load became a page that never loads at all.
+//
+// Six is the pacing the transport used to give us for free. It turns a burst
+// into a few quick waves, so every individual request comfortably beats its own
+// timeout, and it keeps a retry from ever stacking on top of the traffic that
+// caused it.
+const MAX_CONCURRENT_REQUESTS = 6;
 
 // Error kinds, most specific first. The banner and every DataState render off
 // these, so the user is told which of the very different failures happened
@@ -292,6 +313,42 @@ const classifyThrow = (url, timedOut, isSafeMethod) => {
 
 const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
+/* ------------------------------------------------------------------ *
+ * Dispatch queue — keeps a page's burst from starving itself
+ * ------------------------------------------------------------------ */
+
+let activeRequests = 0;
+const waitingForSlot = [];
+
+// Resolves once there is room on the wire. A slot is taken per attempt rather
+// than per apiFetch call, so the pauses between retries hand the wire to
+// someone else instead of sitting on it.
+const acquireSlot = (priority = false) => {
+  if (activeRequests < MAX_CONCURRENT_REQUESTS) {
+    activeRequests += 1;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    // A write is something the user just pressed; a read is usually a page
+    // filling itself in. Making a save wait behind forty background reads
+    // would only trade one kind of "nothing is happening" for another.
+    if (priority) waitingForSlot.unshift(resolve);
+    else waitingForSlot.push(resolve);
+  });
+};
+
+const releaseSlot = () => {
+  const next = waitingForSlot.shift();
+  // Hand the slot straight to the next caller rather than freeing and
+  // re-taking it, so a queued request cannot be overtaken by a fresh one.
+  if (next) next();
+  else activeRequests = Math.max(0, activeRequests - 1);
+};
+
+// A caller that gave up while queued — an unmounted page, a superseded search —
+// still takes its turn, but its already-aborted signal makes fetch reject on the
+// spot, so it hands the slot back without ever touching the network.
+
 const combineSignals = (external, own) => {
   if (!external) return own;
   if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.any === 'function') {
@@ -303,6 +360,67 @@ const combineSignals = (external, own) => {
   external.addEventListener('abort', abort, { once: true });
   own.addEventListener('abort', abort, { once: true });
   return controller.signal;
+};
+
+/* ------------------------------------------------------------------ *
+ * In-flight read dedupe — one answer, however many callers want it
+ * ------------------------------------------------------------------ */
+
+// Two components asking the same question at the same moment do not need two
+// requests; they need one answer, twice. That used to be merely wasteful, but
+// with the wire capped above it is also slow: the copy occupies a slot some
+// other section of the page is queued behind. The home page opened by fetching
+// each of its three settings routes twice — the app shell and the page it
+// frames each asked on their own — so a third of the wire went on bytes that
+// were already arriving.
+//
+// So an identical read that arrives while the first one is still on the wire
+// joins it instead of starting its own. Reads only, and only while in flight:
+// nothing is remembered once the response lands, so this can hand a caller a
+// concurrent answer but never a stale one.
+const inFlightReads = new Map();
+
+// Anything that could make two calls want different answers keeps them apart,
+// so a shared request can never answer a question its caller did not ask:
+// `parse` and `rejectOnHttpError` decide what comes back, the timeout and the
+// retry budget decide how long it may take, and `auth` decides whether the
+// session is carried at all. Matching URLs alone is not enough.
+const readKey = ({ method, url, parse, rejectOnHttpError, retriesAllowed, effectiveTimeout, auth, headers }) => JSON.stringify([
+  method, url, parse, rejectOnHttpError, retriesAllowed, effectiveTimeout, auth,
+  // Header names are case-insensitive and unordered; the key must not be.
+  Object.entries(headers)
+    .map(([name, value]) => [String(name).toLowerCase(), value])
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+]);
+
+const parseBody = (res, parse, handedBack) => {
+  // A 4xx the caller opted to handle itself has always come back as the raw
+  // Response whatever `parse` says — its body is the verdict the backend
+  // reached, for the caller to read.
+  if (handedBack || parse === 'response') return res;
+  if (parse === 'none' || res.status === 204) return null;
+  if (parse === 'text') return res.text();
+  if (parse === 'blob') return res.blob();
+  return res.json().catch(() => ({}));
+};
+
+// A response body can be read only once, so every caller after the first gets a
+// clone. All of them have to be taken before anyone starts reading, which is
+// why the cloning happens here, as the shared promise resolves, rather than
+// being left to each caller.
+const shareRead = (key, send, parse) => {
+  const joined = inFlightReads.get(key);
+  if (joined) {
+    joined.callers += 1;
+    return joined.promise.then(({ res, handedBack }) => parseBody(res.clone(), parse, handedBack));
+  }
+  const entry = { callers: 1, promise: send() };
+  inFlightReads.set(key, entry);
+  // Forgotten the moment it settles, so a caller arriving afterwards starts a
+  // real request instead of being handed a finished one.
+  const forget = () => { inFlightReads.delete(key); };
+  entry.promise.then(forget, forget);
+  return entry.promise.then(({ res, handedBack }) => parseBody(entry.callers > 1 ? res.clone() : res, parse, handedBack));
 };
 
 /**
@@ -337,6 +455,14 @@ export const apiFetch = async (path, options = {}) => {
     // whatever wording that branch uses for a rejected one. Server errors
     // therefore always throw and land in the catch as what they are.
     rejectOnHttpError = true,
+    // Internal: lets the banner's own health probe skip the queue. It is the
+    // one request whose whole job is to answer "is anything getting through
+    // right now", so making it wait behind the traffic it is diagnosing would
+    // tell us about the queue instead of about the server.
+    bypassQueue = false,
+    // Opt out of joining an identical read that is already on the wire, for a
+    // caller that genuinely has to observe the server a second time.
+    dedupe = true,
     ...rest
   } = options;
 
@@ -351,15 +477,23 @@ export const apiFetch = async (path, options = {}) => {
     throw offline;
   }
 
-  inFlight += 1;
-  emitActivity();
-  const startedAt = Date.now();
-
-  try {
+  // One trip to the network with the queue, the timeout and the retries around
+  // it. Resolves with the response — plus whether it is a 4xx the caller asked
+  // to read itself — and throws an ApiError for anything else. Reading the body
+  // is left to the caller above, because a shared read has more than one.
+  const send = async () => {
+    // Set when the first attempt actually leaves the queue. Time spent waiting
+    // for a turn is not time the server was slow, so neither the timeout nor the
+    // budget below may be spent on it — otherwise the twenty-fifth request of a
+    // burst would be declared a failure for the crime of going last.
+    let dispatchedAt = 0;
     let lastError = null;
     let lastResponse = null;
 
     for (let attempt = 0; attempt <= retriesAllowed; attempt += 1) {
+      if (!bypassQueue) await acquireSlot(!isSafeMethod);
+      if (!dispatchedAt) dispatchedAt = Date.now();
+
       const controller = new AbortController();
       let timedOut = false;
       const timeoutId = setTimeout(() => {
@@ -380,12 +514,8 @@ export const apiFetch = async (path, options = {}) => {
         });
 
         if (res.ok) {
-          reportOutcome(null, Date.now() - startedAt);
-          if (parse === 'none' || res.status === 204) return null;
-          if (parse === 'text') return res.text();
-          if (parse === 'blob') return res.blob();
-          if (parse === 'response') return res;
-          return res.json().catch(() => ({}));
+          reportOutcome(null, Date.now() - dispatchedAt);
+          return { res, handedBack: false };
         }
 
         // Classify either way — that is what tells the banner a 503 was the
@@ -401,10 +531,13 @@ export const apiFetch = async (path, options = {}) => {
         lastError = classifyThrow(url, timedOut, isSafeMethod);
       } finally {
         clearTimeout(timeoutId);
+        // Released per attempt, so the backoff pause below waits off the wire
+        // and a retry has to queue up again behind whatever is live now.
+        if (!bypassQueue) releaseSlot();
       }
 
       const backoffMs = RETRY_BACKOFF_MS[attempt] || RETRY_BACKOFF_MS[RETRY_BACKOFF_MS.length - 1];
-      const withinBudget = (Date.now() - startedAt) + backoffMs < TOTAL_BUDGET_MS;
+      const withinBudget = (Date.now() - dispatchedAt) + backoffMs < TOTAL_BUDGET_MS;
       const canRetry = lastError.retryable && attempt < retriesAllowed && withinBudget;
       if (!canRetry) break;
       lastResponse = null;
@@ -415,8 +548,33 @@ export const apiFetch = async (path, options = {}) => {
     }
 
     reportOutcome(lastError);
-    if (!rejectOnHttpError && lastResponse) return lastResponse;
+    if (!rejectOnHttpError && lastResponse) return { res: lastResponse, handedBack: true };
     throw lastError;
+  };
+
+  const shareable = dedupe !== false
+    && isSafeMethod
+    && !rest.body
+    // One caller giving up must never cancel a read another caller is still
+    // waiting on, so a request carrying somebody's abort signal stays its own.
+    && !externalSignal
+    // The health probe is asking about this instant; an answer already on its
+    // way does not tell it what it wants to know.
+    && !bypassQueue
+    // The caller asked to go past every cache on the way. This is one of them.
+    && !['no-store', 'reload'].includes(String(rest.cache || ''));
+
+  inFlight += 1;
+  emitActivity();
+  try {
+    if (!shareable) {
+      const { res, handedBack } = await send();
+      return await parseBody(res, parse, handedBack);
+    }
+    const key = readKey({
+      method, url, parse, rejectOnHttpError, retriesAllowed, effectiveTimeout, auth, headers
+    });
+    return await shareRead(key, send, parse);
   } finally {
     inFlight = Math.max(0, inFlight - 1);
     emitActivity();
@@ -431,7 +589,16 @@ export const checkApiHealth = async ({ markChecking = true } = {}) => {
   if (markChecking) setConnection({ status: CONNECTION.CHECKING, message: '' });
   const startedAt = Date.now();
   try {
-    await apiFetch('/api/health', { auth: false, retry: false, timeoutMs: 8000, cache: 'no-store' });
+    await apiFetch('/api/health', {
+      auth: false,
+      retry: false,
+      // Long enough that a link which is merely slow is not reported as a dead
+      // server: calling the backend down when it is answering is the one wrong
+      // answer this probe must not give.
+      timeoutMs: 12000,
+      bypassQueue: true,
+      cache: 'no-store'
+    });
     setConnection({ status: CONNECTION.ONLINE, message: '', latencyMs: Date.now() - startedAt });
   } catch (error) {
     const apiError = isApiError(error) ? error : new ApiError({ kind: ERROR_KINDS.NETWORK });

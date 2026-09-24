@@ -1,4 +1,5 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import WorkflowStatus, { resolveWorkflowState } from '../components/finance/WorkflowStatus';
 import { Link } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import './AdminFinance.css';
@@ -18,6 +19,13 @@ import { localizeSystemMessage } from '../utils/systemMessage';
 import { buildStudentSearchBlob as buildSharedStudentSearchBlob } from '../utils/studentSearch';
 import { readStoredSchoolId, resolveActiveSchoolContext } from './adminWorkspaceUtils';
 import { apiFetch, failureMessage } from '../utils/apiClient';
+
+// How long one piece of work may hold the page's busy flag before it hands the
+// buttons back on its own. Longer than any healthy save or refresh - apiFetch
+// caps a write at 45s and never retries it - so reaching this means nothing has
+// answered yet, and an operator staring at a dead anomaly inspector is worse
+// off than one told so and left free to look.
+const BUSY_TICKET_CEILING_MS = 45000;
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -391,12 +399,6 @@ const toFileUrl = (fileUrl = '') => {
   return `${API_BASE || ''}${normalized}`;
 };
 
-const extractTemplateVariables = (template = '') => Array.from(new Set(
-  Array.from(String(template || '').matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g))
-    .map((match) => String(match?.[1] || '').trim())
-    .filter(Boolean)
-));
-
 const normalizeFinanceRole = (value = '', fallback = '') => {
   const level = String(value || '').trim().toLowerCase();
   if (level === 'finance_manager' || level === 'finance_lead' || level === 'general_president') return level;
@@ -674,35 +676,10 @@ const getStudentDisplayName = (student = {}) => (
   String(student?.fullName || student?.name || student?.email || '').trim() || 'متعلم'
 );
 
-const RECEIPT_STAGE_UI_LABELS = {
-  finance_manager_review: 'در انتظار مدیر مالی',
-  finance_lead_review: 'مرحله قدیمی آمریت مالی',
-  general_president_review: 'در انتظار ریاست عمومی',
-  completed: 'تایید نهایی',
-  rejected: 'رد شده'
-};
-
 const ADMIN_LEVEL_UI_LABELS = {
   finance_manager: 'مدیر مالی',
   finance_lead: 'آمریت مالی',
   general_president: 'ریاست عمومی'
-};
-
-const MONTH_CLOSE_STAGE_UI_LABELS = {
-  draft: 'پیش‌نویس',
-  finance_manager_review: 'در انتظار مدیر مالی',
-  finance_lead_review: 'در انتظار آمریت مالی',
-  general_president_review: 'در انتظار ریاست عمومی',
-  completed: 'تایید نهایی',
-  rejected: 'رد شده'
-};
-
-const MONTH_CLOSE_STATUS_UI_LABELS = {
-  draft: 'پیش‌نویس',
-  pending_review: 'در جریان تایید',
-  closed: 'بسته',
-  reopened: 'بازگشایی شده',
-  rejected: 'برگشت شده'
 };
 
 const PAYMENT_STATUS_UI_LABELS = {
@@ -998,31 +975,11 @@ const DOCUMENT_ARCHIVE_TYPE_LABELS = {
   batch_statement_pack: 'بسته گروهی استیتمنت'
 };
 
-const DELIVERY_CAMPAIGN_STATUS_LABELS = {
-  active: 'فعال',
-  paused: 'متوقف'
-};
-
-const DELIVERY_CAMPAIGN_RUN_STATUS_LABELS = {
-  idle: 'بدون اجرا',
-  success: 'موفق',
-  partial: 'نیمه‌موفق',
-  failed: 'ناموفق',
-  skipped: 'بدون مورد'
-};
-
 const DELIVERY_CHANNEL_LABELS = {
   email: 'ایمیل',
   portal: 'پرتال',
   sms: 'SMS',
   whatsapp: 'WhatsApp'
-};
-
-const DELIVERY_EVENT_STATUS_LABELS = {
-  sent: 'ارسال شد',
-  resent: 'ارسال مجدد',
-  delivered: 'تحویل شد',
-  failed: 'ناموفق'
 };
 
 const DELIVERY_LIVE_STATUS_LABELS = {
@@ -1045,14 +1002,6 @@ const DELIVERY_LIVE_STATUS_CHIP_CLASS = {
   failed: 'finance-chip finance-chip-rose',
   skipped: 'finance-chip finance-chip-muted',
   unknown: 'finance-chip finance-chip-muted'
-};
-
-const DELIVERY_RECOVERY_STATE_LABELS = {
-  awaiting_callback: 'در انتظار callback',
-  retry_ready: 'آماده recovery',
-  retry_waiting: 'در انتظار retry',
-  provider_failed: 'ناموفق نزد provider',
-  status_unknown: 'وضعیت نامشخص'
 };
 
 const normalizeDeliveryLiveStage = ({ providerStatus = '', status = '', failureCode = '', errorMessage = '' } = {}) => {
@@ -1126,29 +1075,6 @@ const buildDeliveryLiveSummary = (items = [], fallbackItem = null) => {
   };
 };
 
-const DELIVERY_TEMPLATE_VERSION_STATUS_LABELS = {
-  draft: 'پیش‌نویس',
-  published: 'منتشرشده',
-  archived: 'آرشیف'
-};
-
-const DELIVERY_TEMPLATE_HISTORY_ACTION_LABELS = {
-  draft_saved: 'ذخیره پیش‌نویس',
-  published: 'انتشار',
-  archived: 'آرشیف',
-  rolled_back: 'بازگشت به نسخه'
-};
-
-const DELIVERY_TEMPLATE_APPROVAL_STAGE_LABELS = {
-  draft: 'پیش‌نویس',
-  pending_review: 'در بازبینی',
-  approved: 'تاییدشده',
-  rejected: 'ردشده'
-};
-DELIVERY_TEMPLATE_HISTORY_ACTION_LABELS.review_requested = 'ارسال برای بازبینی';
-DELIVERY_TEMPLATE_HISTORY_ACTION_LABELS.approved = 'تایید نسخه';
-DELIVERY_TEMPLATE_HISTORY_ACTION_LABELS.rejected = 'رد نسخه';
-
 const DELIVERY_CHANNEL_INPUT_LABELS = {
   email: 'ایمیل‌های مقصد',
   portal: 'audience مرتبط',
@@ -1162,65 +1088,6 @@ const DELIVERY_CHANNEL_INPUT_PLACEHOLDERS = {
   sms: '+93700111222, +93700999888',
   whatsapp: '+93700111222, +93700999888'
 };
-
-const DELIVERY_PROVIDER_MODE_LABELS = {
-  mock: 'دروازه شبیه‌سازی',
-  webhook: 'Webhook عمومی',
-  twilio: 'Twilio',
-  meta: 'Meta واتساپ'
-};
-
-const DELIVERY_PROVIDER_REQUIRED_FIELD_LABELS = {
-  mode: 'حالت',
-  provider: 'نام Provider',
-  isActive: 'فعال',
-  webhookUrl: 'آدرس Webhook',
-  statusWebhookUrl: 'آدرس callback وضعیت',
-  accountSid: 'شناسه حساب (Account SID)',
-  authToken: 'رمز احراز هویت (Auth Token)',
-  fromHandle: 'شناسه فرستنده',
-  apiBaseUrl: 'آدرس API',
-  accessToken: 'رمز دسترسی (Access Token)',
-  phoneNumberId: 'شناسه شماره (Phone Number ID)',
-  webhookToken: 'Webhook Token',
-  note: 'یادداشت'
-};
-
-const DELIVERY_PROVIDER_AUDIT_ACTION_LABELS = {
-  created: 'ایجاد تنظیمات',
-  config_saved: 'ذخیره تنظیمات',
-  credentials_rotated: 'چرخش credential',
-  secrets_cleared: 'پاک‌سازی credential'
-};
-
-const DELIVERY_PROVIDER_CHANNEL_MODE_OPTIONS = {
-  sms: ['mock', 'webhook', 'twilio'],
-  whatsapp: ['mock', 'webhook', 'twilio', 'meta']
-};
-
-const buildDeliveryProviderForm = (item = null, fallbackChannel = 'sms') => ({
-  channel: String(item?.channel || fallbackChannel || 'sms').trim() || 'sms',
-  mode: String(item?.mode || 'webhook').trim() || 'webhook',
-  provider: String(item?.provider || '').trim(),
-  isActive: item?.isActive !== false,
-  webhookUrl: String(item?.webhookUrl || '').trim(),
-  statusWebhookUrl: String(item?.statusWebhookUrl || '').trim(),
-  fromHandle: String(item?.fromHandle || '').trim(),
-  apiBaseUrl: String(item?.apiBaseUrl || '').trim(),
-  accountSid: '',
-  authToken: '',
-  accessToken: '',
-  phoneNumberId: '',
-  webhookToken: '',
-  note: String(item?.note || '').trim(),
-  rotationNote: ''
-});
-
-const sortCountEntries = (value = {}) => (
-  Object.entries(value || {})
-    .filter(([key, count]) => String(key || '').trim() && Number(count || 0) > 0)
-    .sort((left, right) => Number(right?.[1] || 0) - Number(left?.[1] || 0))
-);
 
 // The full list of finance reports available as a real, downloadable PDF -
 // backed by GET /api/finance/admin/reports/:reportKey/export.pdf on the
@@ -2221,51 +2088,11 @@ export default function AdminFinance() {
   const [selectedDocumentArchiveId, setSelectedDocumentArchiveId] = useState('');
   const [documentVerificationCode, setDocumentVerificationCode] = useState('');
   const [verifiedDocument, setVerifiedDocument] = useState(null);
-  const [deliveryProviderConfigs, setDeliveryProviderConfigs] = useState([]);
-  const [selectedDeliveryProviderChannel, setSelectedDeliveryProviderChannel] = useState('sms');
-  const [deliveryProviderForm, setDeliveryProviderForm] = useState(() => buildDeliveryProviderForm(null, 'sms'));
-  const [deliveryTemplates, setDeliveryTemplates] = useState([]);
-  const [deliveryTemplateVariables, setDeliveryTemplateVariables] = useState([]);
-  const [deliveryTemplatePreview, setDeliveryTemplatePreview] = useState(null);
-  const [deliveryTemplatePreviewBusy, setDeliveryTemplatePreviewBusy] = useState(false);
-  const [deliveryTemplatePreviewError, setDeliveryTemplatePreviewError] = useState('');
-  const [selectedDeliveryTemplateVersionNumber, setSelectedDeliveryTemplateVersionNumber] = useState('');
-  const [deliveryTemplateChangeNote, setDeliveryTemplateChangeNote] = useState('');
   const [documentDeliveryForm, setDocumentDeliveryForm] = useState({
     channel: 'email',
     recipientHandles: '',
     includeLinkedAudience: true,
     subject: '',
-    note: ''
-  });
-  const [deliveryCampaigns, setDeliveryCampaigns] = useState([]);
-  const [deliveryAnalytics, setDeliveryAnalytics] = useState(null);
-  const [deliveryRetryQueue, setDeliveryRetryQueue] = useState([]);
-  const [deliveryRecoveryQueue, setDeliveryRecoveryQueue] = useState([]);
-  const [deliveryCampaignStatusFilter, setDeliveryCampaignStatusFilter] = useState('all');
-  const [deliveryRetryChannelFilter, setDeliveryRetryChannelFilter] = useState('all');
-  const [deliveryOpsStatusFilter, setDeliveryOpsStatusFilter] = useState('all');
-  const [deliveryOpsProviderFilter, setDeliveryOpsProviderFilter] = useState('all');
-  const [deliveryOpsFailureFilter, setDeliveryOpsFailureFilter] = useState('all');
-  const [deliveryOpsRetryableFilter, setDeliveryOpsRetryableFilter] = useState('all');
-  const [deliveryRecoveryStateFilter, setDeliveryRecoveryStateFilter] = useState('all');
-  const [selectedDeliveryCampaignId, setSelectedDeliveryCampaignId] = useState('');
-  const [deliveryCampaignForm, setDeliveryCampaignForm] = useState({
-    name: '',
-    documentType: 'batch_statement_pack',
-    channel: 'email',
-    classId: '',
-    academicYearId: '',
-    monthKey: '',
-    messageTemplateKey: '',
-    messageTemplateSubject: '',
-    messageTemplateBody: '',
-    recipientHandles: '',
-    includeLinkedAudience: false,
-    automationEnabled: true,
-    intervalHours: 24,
-    retryFailed: true,
-    maxDocumentsPerRun: 5,
     note: ''
   });
   const [anomalies, setAnomalies] = useState([]);
@@ -2377,8 +2204,43 @@ export default function AdminFinance() {
     const timer = setTimeout(() => setMessageState(''), 6000);
     return () => clearTimeout(timer);
   }, [message, messageTone]);
-  const [financeDataErrors, setFinanceDataErrors] = useState({ orders: '', payments: '' });
+  const [financeDataErrors, setFinanceDataErrors] = useState({ orders: '', payments: '', anomalies: '' });
   const [busy, setBusy] = useState(false);
+  // `busy` disables every action button on this page, so the question it has to
+  // answer is not "who switched it on" but "is anyone still working". As a bare
+  // boolean it could not: an action switched it on and left switching it off to
+  // refreshPaymentWorkspace, which only did so while it was still the newest
+  // refresh - so a refresh that was superseded, or that never settled, left the
+  // whole anomaly inspector disabled for good with nothing on screen to say
+  // why. Each worker now takes a ticket instead: the flag is on while any
+  // ticket is out, and off the moment the last one comes back. That keeps the
+  // rule the refreshId guard existed to enforce - a superseded refresh cannot
+  // re-enable the page underneath a newer one, because the newer one is still
+  // holding its own ticket - without letting one worker's failure strand
+  // another worker's flag.
+  const busyTicketsRef = useRef(new Set());
+  const busyTicketSeqRef = useRef(0);
+  const holdBusy = () => {
+    const ticket = ++busyTicketSeqRef.current;
+    busyTicketsRef.current.add(ticket);
+    setBusy(true);
+    let ceilingTimer = 0;
+    // Releasing twice is a no-op, so a ticket can come back from a `finally`
+    // and from the ceiling below without the two cancelling each other out.
+    const release = () => {
+      window.clearTimeout(ceilingTimer);
+      if (!busyTicketsRef.current.delete(ticket)) return;
+      if (!busyTicketsRef.current.size) setBusy(false);
+    };
+    // No worker gets to hold the page hostage. An action that awaits a refresh
+    // never reaches its own `finally` while that refresh is hanging, so the
+    // ticket - not the caller - is what has to time out.
+    ceilingTimer = window.setTimeout(() => {
+      release();
+      setMessage('پاسخ سرور برای کار قبلی هنوز نرسیده است. پیش از تلاش دوباره، فهرست را تازه کنید و ببینید ثبت شده است یا نه.');
+    }, BUSY_TICKET_CEILING_MS);
+    return release;
+  };
   const [activeSchoolContext, setActiveSchoolContext] = useState(null);
   const [receiptStatusFilter, setReceiptStatusFilter] = useState('all');
   const [receiptStageFilter, setReceiptStageFilter] = useState('all');
@@ -4097,64 +3959,9 @@ export default function AdminFinance() {
     return url.toString();
   };
 
-  const buildDeliveryOperationsQuery = ({ includeLimit = false } = {}) => {
-    const searchParams = new URLSearchParams();
-    if (deliveryRetryChannelFilter !== 'all') {
-      searchParams.set('channel', deliveryRetryChannelFilter);
-    }
-    if (deliveryOpsStatusFilter !== 'all') {
-      searchParams.set('status', deliveryOpsStatusFilter);
-    }
-    if (deliveryOpsProviderFilter !== 'all') {
-      searchParams.set('provider', deliveryOpsProviderFilter);
-    }
-    if (deliveryOpsFailureFilter !== 'all') {
-      searchParams.set('failureCode', deliveryOpsFailureFilter);
-    }
-    if (deliveryOpsRetryableFilter === 'retryable') {
-      searchParams.set('retryable', 'true');
-    } else if (deliveryOpsRetryableFilter === 'blocked') {
-      searchParams.set('retryable', 'false');
-    }
-    if (includeLimit) {
-      searchParams.set('limit', '12');
-    }
-    const query = searchParams.toString();
-    return query ? `?${query}` : '';
-  };
-
-  const buildDeliveryRecoveryQuery = ({ includeLimit = false } = {}) => {
-    const searchParams = new URLSearchParams();
-    if (deliveryRetryChannelFilter !== 'all') {
-      searchParams.set('channel', deliveryRetryChannelFilter);
-    }
-    if (deliveryOpsStatusFilter !== 'all') {
-      searchParams.set('status', deliveryOpsStatusFilter);
-    }
-    if (deliveryOpsProviderFilter !== 'all') {
-      searchParams.set('provider', deliveryOpsProviderFilter);
-    }
-    if (deliveryOpsFailureFilter !== 'all') {
-      searchParams.set('failureCode', deliveryOpsFailureFilter);
-    }
-    if (deliveryOpsRetryableFilter === 'retryable') {
-      searchParams.set('retryable', 'true');
-    } else if (deliveryOpsRetryableFilter === 'blocked') {
-      searchParams.set('retryable', 'false');
-    }
-    if (deliveryRecoveryStateFilter !== 'all') {
-      searchParams.set('recoveryState', deliveryRecoveryStateFilter);
-    }
-    if (includeLimit) {
-      searchParams.set('limit', '12');
-    }
-    const query = searchParams.toString();
-    return query ? `?${query}` : '';
-  };
-
   const loadAll = async () => {
     const paymentWorkspaceRefreshId = ++paymentWorkspaceRefreshIdRef.current;
-    setBusy(true);
+    const releaseBusy = holdBusy();
     try {
       const requestedFullOrders = fullOrdersLoadedRef.current;
       const ordersRequestUrl = `${API_BASE}/api/student-finance/orders${requestedFullOrders ? '' : '?view=open'}`;
@@ -4181,12 +3988,6 @@ export default function AdminFinance() {
         discountRegistryData,
         reliefsData,
         exemptionsData,
-        deliveryProviderData,
-        deliveryCampaignData,
-        deliveryTemplateData,
-        deliveryAnalyticsData,
-        deliveryRetryQueueData,
-        deliveryRecoveryQueueData,
         documentArchiveData,
         auditTimelineData,
         anomaliesData,
@@ -4207,12 +4008,6 @@ export default function AdminFinance() {
         safeFetchJson(`${API_BASE}/api/student-finance/discounts?status=active&registryOnly=true&discountType=discount`, { success: true, items: [], duplicateSummary: null }),
         safeFetchJson(`${API_BASE}/api/student-finance/reliefs?status=active&registryOnly=true`, { success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/student-finance/exemptions?status=active`, { success: true, items: [] }),
-        Promise.resolve({ success: true, items: [] }),
-        Promise.resolve({ success: true, items: [] }),
-        Promise.resolve({ success: true, items: [], variables: [] }),
-        Promise.resolve({ success: true, analytics: null }),
-        Promise.resolve({ success: true, items: [] }),
-        Promise.resolve({ success: true, items: [] }),
         safeFetchJson(`${API_BASE}/api/finance/admin/document-archive?limit=12`, { success: true, items: [] }),
         safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/audit-timeline'), { success: true, items: [], summary: null }),
         safeFetchJson(buildScopedReportUrl('/api/finance/admin/reports/anomalies'), { success: true, items: [], summary: null }),
@@ -4240,7 +4035,8 @@ export default function AdminFinance() {
       if (shouldApplyPaymentWorkspace) {
         setFinanceDataErrors({
           orders: ordersData?.success ? '' : (ordersData?._loadError || ordersData?.message || 'دریافت بل‌ها و باقیات ناموفق بود.'),
-          payments: paymentsData?.success ? '' : (paymentsData?._loadError || paymentsData?.message || 'دریافت پرداخت‌ها و رسیدها ناموفق بود.')
+          payments: paymentsData?.success ? '' : (paymentsData?._loadError || paymentsData?.message || 'دریافت پرداخت‌ها و رسیدها ناموفق بود.'),
+          anomalies: anomaliesData?.success ? '' : (anomaliesData?._loadError || anomaliesData?.message || 'دریافت ناهنجاری‌های مالی ناموفق بود.')
         });
         if (!shouldApplyOrdersResult) {
           setFinanceDataErrors((previous) => ({ ...previous, orders: '' }));
@@ -4269,13 +4065,6 @@ export default function AdminFinance() {
         if (reliefsData?.success) setReliefs(reliefsData.items || []);
         if (exemptionsData?.success) setExemptions(exemptionsData.items || []);
       }
-        setDeliveryProviderConfigs(deliveryProviderData?.success ? (deliveryProviderData.items || []) : []);
-        setDeliveryCampaigns(deliveryCampaignData?.success ? (deliveryCampaignData.items || []) : []);
-        setDeliveryTemplates(deliveryTemplateData?.success ? (deliveryTemplateData.items || []) : []);
-        setDeliveryTemplateVariables(deliveryTemplateData?.success ? (deliveryTemplateData.variables || []) : []);
-        setDeliveryAnalytics(deliveryAnalyticsData?.success ? (deliveryAnalyticsData.analytics || null) : null);
-        setDeliveryRetryQueue(deliveryRetryQueueData?.success ? (deliveryRetryQueueData.items || []) : []);
-        setDeliveryRecoveryQueue(deliveryRecoveryQueueData?.success ? (deliveryRecoveryQueueData.items || []) : []);
       setDocumentArchiveItems(documentArchiveData?.success ? (documentArchiveData.items || []) : []);
       setAuditTimeline(auditTimelineData?.success ? (auditTimelineData.items || []) : []);
       setAuditTimelineSummary(auditTimelineData?.success ? (auditTimelineData.summary || null) : null);
@@ -4373,15 +4162,6 @@ export default function AdminFinance() {
       if (defaultAcademicYearId && !documentBatchForm.academicYearId) {
         setDocumentBatchForm((prev) => ({ ...prev, academicYearId: defaultAcademicYearId }));
       }
-      if (nextClassOptions.length && !deliveryCampaignForm.classId) {
-        setDeliveryCampaignForm((prev) => ({ ...prev, classId: nextClassOptions[0].classId }));
-      }
-      if (defaultAcademicYearId && !deliveryCampaignForm.academicYearId) {
-        setDeliveryCampaignForm((prev) => ({ ...prev, academicYearId: defaultAcademicYearId }));
-      }
-      if ((defaultMonthKey || monthKey) && !deliveryCampaignForm.monthKey) {
-        setDeliveryCampaignForm((prev) => ({ ...prev, monthKey: prev.monthKey || defaultMonthKey || monthKey }));
-      }
       if (shouldApplyPaymentWorkspace && paymentsData?.success) {
         setSelectedReceiptId((current) => (
           nextPendingReceipts.some((item) => String(item?._id || '') === String(current || ''))
@@ -4399,9 +4179,7 @@ export default function AdminFinance() {
     } catch (error) {
       setMessage(failureMessage(error, 'خطا در ارتباط با سرور'));
     } finally {
-      if (paymentWorkspaceRefreshId === paymentWorkspaceRefreshIdRef.current) {
-        setBusy(false);
-      }
+      releaseBusy();
     }
   };
 
@@ -4419,7 +4197,7 @@ export default function AdminFinance() {
     invalidatePreview = true
   } = {}) => {
     const refreshId = ++paymentWorkspaceRefreshIdRef.current;
-    setBusy(true);
+    const releaseBusy = holdBusy();
     if (invalidatePreview) setPaymentPreview(null);
 
     const safeFetchJson = async (url, fallback = { success: false }) => {
@@ -4486,7 +4264,13 @@ export default function AdminFinance() {
       setFinanceDataErrors((prev) => ({
         ...prev,
         orders: ordersData?.success || !shouldApplyOrdersResult ? '' : (ordersData?._loadError || ordersData?.message || 'تازه‌سازی بل‌ها و باقیات ناموفق بود.'),
-        payments: paymentsData?.success ? '' : (paymentsData?._loadError || paymentsData?.message || 'تازه‌سازی پرداخت‌ها و رسیدها ناموفق بود.')
+        payments: paymentsData?.success ? '' : (paymentsData?._loadError || paymentsData?.message || 'تازه‌سازی پرداخت‌ها و رسیدها ناموفق بود.'),
+        // A failed anomalies fetch used to be swallowed whole: the inspector
+        // went on showing the list from before the action, so a note that was
+        // never saved looked saved. Say it in the card instead.
+        anomalies: !includeAnomalies
+          ? prev.anomalies
+          : (anomaliesData?.success ? '' : (anomaliesData?._loadError || anomaliesData?.message || 'تازه‌سازی ناهنجاری‌های مالی ناموفق بود.'))
       }));
       if (paymentsData?.success) {
         const nextPendingReceipts = (paymentsData.items || []).map(toLegacyLikeReceiptRow);
@@ -4514,9 +4298,7 @@ export default function AdminFinance() {
       if (expensesData?.success) setExpenses(expensesData.items || []);
       return true;
     } finally {
-      if (refreshId === paymentWorkspaceRefreshIdRef.current) {
-        setBusy(false);
-      }
+      releaseBusy();
     }
   };
 
@@ -4546,16 +4328,7 @@ export default function AdminFinance() {
   useEffect(() => {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    reportClassId,
-    reportAcademicYearId,
-    deliveryRetryChannelFilter,
-    deliveryOpsStatusFilter,
-    deliveryOpsProviderFilter,
-    deliveryOpsFailureFilter,
-    deliveryOpsRetryableFilter,
-    deliveryRecoveryStateFilter
-  ]);
+  }, [reportClassId, reportAcademicYearId]);
 
   // Without this, the finance dashboard only reloads on mount or after its
   // own mutations - a status change recorded from the academic lifecycle
@@ -4881,26 +4654,6 @@ export default function AdminFinance() {
   }, [closedMonths, selectedMonthCloseId]);
 
   useEffect(() => {
-    if (!deliveryCampaigns.length) {
-      if (selectedDeliveryCampaignId) setSelectedDeliveryCampaignId('');
-      return;
-    }
-    if (!selectedDeliveryCampaignId || !deliveryCampaigns.some((item) => String(item?._id || '') === String(selectedDeliveryCampaignId))) {
-      setSelectedDeliveryCampaignId(String(deliveryCampaigns[0]?._id || ''));
-    }
-  }, [deliveryCampaigns, selectedDeliveryCampaignId]);
-
-  useEffect(() => {
-    if (!deliveryProviderConfigs.length) {
-      if (selectedDeliveryProviderChannel) setSelectedDeliveryProviderChannel('sms');
-      return;
-    }
-    if (!selectedDeliveryProviderChannel || !deliveryProviderConfigs.some((item) => String(item?.channel || '') === String(selectedDeliveryProviderChannel))) {
-      setSelectedDeliveryProviderChannel(String(deliveryProviderConfigs[0]?.channel || 'sms'));
-    }
-  }, [deliveryProviderConfigs, selectedDeliveryProviderChannel]);
-
-  useEffect(() => {
     if (!documentArchiveItems.length) {
       if (selectedDocumentArchiveId) setSelectedDocumentArchiveId('');
       return;
@@ -5133,136 +4886,6 @@ export default function AdminFinance() {
     || (selectedMonthCloseStatus === 'pending_review' && canReviewMonthCloseForRole(financeRole, selectedMonthCloseStage));
   const canReopenSelectedMonthClose = Boolean(selectedMonthCloseDetail?.canReopen || selectedMonthClose?.canReopen)
     || (financeRole === 'general_president' && selectedMonthCloseStatus === 'closed');
-  const filteredDeliveryCampaigns = useMemo(() => (
-    deliveryCampaignStatusFilter === 'all'
-      ? deliveryCampaigns
-      : deliveryCampaigns.filter((item) => String(item?.status || '').trim() === deliveryCampaignStatusFilter)
-  ), [deliveryCampaignStatusFilter, deliveryCampaigns]);
-  const selectedDeliveryCampaign = useMemo(() => (
-    deliveryCampaigns.find((item) => String(item?._id || '') === String(selectedDeliveryCampaignId || ''))
-    || filteredDeliveryCampaigns[0]
-    || deliveryCampaigns[0]
-    || null
-  ), [deliveryCampaigns, filteredDeliveryCampaigns, selectedDeliveryCampaignId]);
-  const selectedDeliveryCampaignLiveSummary = useMemo(() => (
-    buildDeliveryLiveSummary(selectedDeliveryCampaign?.targets || [], selectedDeliveryCampaign)
-  ), [selectedDeliveryCampaign]);
-  const selectedDeliveryTemplate = useMemo(() => (
-    deliveryTemplates.find((item) => String(item?.key || '') === String(deliveryCampaignForm.messageTemplateKey || ''))
-    || null
-  ), [deliveryTemplates, deliveryCampaignForm.messageTemplateKey]);
-  const selectedDeliveryTemplateVersion = useMemo(() => (
-    (selectedDeliveryTemplate?.versions || []).find((item) => (
-      String(item?.versionNumber || '') === String(selectedDeliveryTemplateVersionNumber || '')
-    ))
-    || selectedDeliveryTemplate?.draftVersion
-    || selectedDeliveryTemplate?.publishedVersion
-    || null
-  ), [selectedDeliveryTemplate, selectedDeliveryTemplateVersionNumber]);
-  const selectedDeliveryTemplateApprovalStage = String(selectedDeliveryTemplateVersion?.approvalStage || 'draft').trim() || 'draft';
-  const selectedDeliveryTemplateRolloutMetrics = selectedDeliveryTemplate?.rolloutMetrics || {
-    totalCampaigns: 0,
-    activeCampaigns: 0,
-    automatedCampaigns: 0,
-    deliveredTargets: 0,
-    failedTargets: 0,
-    lastUsedAt: null,
-    byChannel: {}
-  };
-  const selectedDeliveryProviderConfig = useMemo(() => (
-    deliveryProviderConfigs.find((item) => String(item?.channel || '') === String(selectedDeliveryProviderChannel || ''))
-    || deliveryProviderConfigs[0]
-    || null
-  ), [deliveryProviderConfigs, selectedDeliveryProviderChannel]);
-  const selectedDeliveryProviderModeOptions = useMemo(() => (
-    DELIVERY_PROVIDER_CHANNEL_MODE_OPTIONS[selectedDeliveryProviderChannel] || DELIVERY_PROVIDER_CHANNEL_MODE_OPTIONS.sms
-  ), [selectedDeliveryProviderChannel]);
-  const selectedDeliveryProviderMissingFields = selectedDeliveryProviderConfig?.readiness?.missingRequiredFields || [];
-  const selectedDeliveryProviderAuditEntries = selectedDeliveryProviderConfig?.auditTrail || [];
-  const providerFormMode = String(deliveryProviderForm.mode || 'webhook').trim() || 'webhook';
-  const showDeliveryProviderWebhookFields = providerFormMode === 'webhook';
-  const showDeliveryProviderTwilioFields = providerFormMode === 'twilio';
-  const showDeliveryProviderMetaFields = providerFormMode === 'meta';
-  useEffect(() => {
-    setDeliveryProviderForm(buildDeliveryProviderForm(selectedDeliveryProviderConfig, selectedDeliveryProviderChannel || 'sms'));
-  }, [selectedDeliveryProviderConfig, selectedDeliveryProviderChannel]);
-  const deliveryProviderOptions = useMemo(() => Array.from(new Set([
-    ...Object.keys(deliveryAnalytics?.summary?.byProvider || {}),
-    ...deliveryRetryQueue.map((item) => String(item?.provider || '').trim()).filter(Boolean),
-    ...deliveryRecoveryQueue.map((item) => String(item?.provider || '').trim()).filter(Boolean)
-  ])).sort((left, right) => left.localeCompare(right)), [deliveryAnalytics?.summary?.byProvider, deliveryRecoveryQueue, deliveryRetryQueue]);
-  const deliveryFailureOptions = useMemo(() => Array.from(new Set([
-    ...Object.keys(deliveryAnalytics?.summary?.byFailureCode || {}),
-    ...deliveryRetryQueue.map((item) => String(item?.lastFailureCode || '').trim()).filter(Boolean),
-    ...deliveryRecoveryQueue.map((item) => String(item?.failureCode || '').trim()).filter(Boolean)
-  ])).sort((left, right) => left.localeCompare(right)), [deliveryAnalytics?.summary?.byFailureCode, deliveryRecoveryQueue, deliveryRetryQueue]);
-  const deliveryProviderBreakdown = useMemo(() => {
-    const providerSummary = deliveryAnalytics?.summary?.byProvider || {};
-    const providerEntries = sortCountEntries(providerSummary);
-    if (providerEntries.length) return providerEntries;
-    const retryQueueProviderMap = deliveryRetryQueue.reduce((acc, item) => {
-      const key = String(item?.provider || '').trim();
-      if (!key) return acc;
-      acc[key] = Number(acc[key] || 0) + 1;
-      return acc;
-    }, {});
-    return sortCountEntries(retryQueueProviderMap);
-  }, [deliveryAnalytics?.summary?.byProvider, deliveryRetryQueue]);
-  const deliveryFailureBreakdown = useMemo(() => {
-    const failureSummary = deliveryAnalytics?.summary?.byFailureCode || {};
-    const failureEntries = sortCountEntries(failureSummary);
-    if (failureEntries.length) return failureEntries;
-    const retryQueueFailureMap = deliveryRetryQueue.reduce((acc, item) => {
-      const key = String(item?.lastFailureCode || '').trim();
-      if (!key) return acc;
-      acc[key] = Number(acc[key] || 0) + 1;
-      return acc;
-    }, {});
-    return sortCountEntries(retryQueueFailureMap);
-  }, [deliveryAnalytics?.summary?.byFailureCode, deliveryRetryQueue]);
-  const deliveryRecentFailures = useMemo(() => (
-    Array.isArray(deliveryAnalytics?.recentFailures) ? deliveryAnalytics.recentFailures : []
-  ), [deliveryAnalytics?.recentFailures]);
-  const deliveryRecoverySummary = useMemo(() => (
-    deliveryRecoveryQueue.reduce((acc, item) => {
-      const state = String(item?.recoveryState || '').trim();
-      if (state) acc[state] = Number(acc[state] || 0) + 1;
-      return acc;
-    }, {})
-  ), [deliveryRecoveryQueue]);
-  const deliveryLeadProvider = deliveryProviderBreakdown[0] || null;
-  const deliveryLeadFailure = deliveryFailureBreakdown[0] || null;
-  const effectiveDeliveryTemplateSubject = useMemo(() => (
-    String(
-      deliveryCampaignForm.messageTemplateSubject
-      || selectedDeliveryTemplateVersion?.subject
-      || selectedDeliveryTemplate?.defaultSubject
-      || ''
-    ).trim()
-  ), [
-    deliveryCampaignForm.messageTemplateSubject,
-    selectedDeliveryTemplate?.defaultSubject,
-    selectedDeliveryTemplateVersion?.subject
-  ]);
-  const effectiveDeliveryTemplateBody = useMemo(() => (
-    String(
-      deliveryCampaignForm.messageTemplateBody
-      || selectedDeliveryTemplateVersion?.body
-      || selectedDeliveryTemplate?.defaultBody
-      || ''
-    ).trim()
-  ), [
-    deliveryCampaignForm.messageTemplateBody,
-    selectedDeliveryTemplate?.defaultBody,
-    selectedDeliveryTemplateVersion?.body
-  ]);
-  const deliveryTemplateUsedVariables = useMemo(() => Array.from(new Set([
-    ...extractTemplateVariables(effectiveDeliveryTemplateSubject),
-    ...extractTemplateVariables(effectiveDeliveryTemplateBody)
-  ])), [effectiveDeliveryTemplateSubject, effectiveDeliveryTemplateBody]);
-  const deliveryTemplateUnknownVariables = useMemo(() => (
-    deliveryTemplateUsedVariables.filter((item) => !deliveryTemplateVariables.some((entry) => String(entry?.key || '') === String(item || '')))
-  ), [deliveryTemplateUsedVariables, deliveryTemplateVariables]);
   const filteredDocumentArchiveItems = useMemo(() => (
     documentArchiveTypeFilter === 'all'
       ? documentArchiveItems
@@ -5287,11 +4910,6 @@ export default function AdminFinance() {
     archiveDeliveryUsesPortal
       ? archiveDeliveryCanUseLinkedAudience
       : archiveDeliveryHasManualRecipients || archiveDeliveryCanUseLinkedAudience
-  );
-  const shouldPreviewDeliveryTemplate = Boolean(
-    String(deliveryCampaignForm.messageTemplateKey || '').trim()
-    || effectiveDeliveryTemplateSubject
-    || effectiveDeliveryTemplateBody
   );
   const visibleAnomalies = useMemo(() => {
     const selectedAnomalyClass = classOptions.find((item) => String(item?.classId || '') === String(anomalyClassFilter)) || null;
@@ -5894,101 +5512,6 @@ export default function AdminFinance() {
       setBusy(false);
     }
   };
-
-  const requestDeliveryTemplatePreview = async (payload = {}) => {
-    const data = await fetchJson(`${API_BASE}/api/finance/admin/delivery-campaigns/template-preview`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload || {})
-    });
-    if (!data?.success) {
-      const error = new Error(data?.message || 'پیش‌نمایش template ناموفق بود');
-      error.meta = data?.meta || null;
-      throw error;
-    }
-    return data?.preview || null;
-  };
-
-  useEffect(() => {
-    let active = true;
-    if (!shouldPreviewDeliveryTemplate) {
-      setDeliveryTemplatePreview(null);
-      setDeliveryTemplatePreviewError('');
-      setDeliveryTemplatePreviewBusy(false);
-      return () => {};
-    }
-
-    setDeliveryTemplatePreviewBusy(true);
-    const timer = window.setTimeout(async () => {
-      try {
-        const preview = await requestDeliveryTemplatePreview({
-          name: deliveryCampaignForm.name,
-          documentType: deliveryCampaignForm.documentType,
-          channel: deliveryCampaignForm.channel,
-          classId: deliveryCampaignForm.classId,
-          academicYearId: deliveryCampaignForm.academicYearId,
-          monthKey: deliveryCampaignForm.monthKey,
-          note: deliveryCampaignForm.note,
-          messageTemplateKey: deliveryCampaignForm.messageTemplateKey,
-          templateVersionNumber: Number(selectedDeliveryTemplateVersionNumber || 0) || null,
-          messageTemplateSubject: effectiveDeliveryTemplateSubject,
-          messageTemplateBody: effectiveDeliveryTemplateBody
-        });
-        if (!active) return;
-        setDeliveryTemplatePreview(preview);
-        setDeliveryTemplatePreviewError('');
-      } catch (error) {
-        if (!active) return;
-        setDeliveryTemplatePreview(null);
-        setDeliveryTemplatePreviewError(failureMessage(error, 'پیش‌نمایش template ناموفق بود'));
-      } finally {
-        if (active) setDeliveryTemplatePreviewBusy(false);
-      }
-    }, 250);
-
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-    };
-  }, [
-    shouldPreviewDeliveryTemplate,
-    deliveryCampaignForm.name,
-    deliveryCampaignForm.documentType,
-    deliveryCampaignForm.channel,
-    deliveryCampaignForm.classId,
-    deliveryCampaignForm.academicYearId,
-    deliveryCampaignForm.monthKey,
-    deliveryCampaignForm.note,
-    deliveryCampaignForm.messageTemplateKey,
-    selectedDeliveryTemplateVersionNumber,
-    effectiveDeliveryTemplateSubject,
-    effectiveDeliveryTemplateBody
-  ]);
-
-  useEffect(() => {
-    if (!selectedDeliveryTemplate) {
-      setSelectedDeliveryTemplateVersionNumber('');
-      setDeliveryTemplateChangeNote('');
-      return;
-    }
-    const availableVersions = Array.isArray(selectedDeliveryTemplate.versions)
-      ? selectedDeliveryTemplate.versions.map((item) => String(item?.versionNumber || ''))
-      : [];
-    const preferredVersion = String(
-      selectedDeliveryTemplate.draftVersionNumber
-      || selectedDeliveryTemplate.publishedVersionNumber
-      || selectedDeliveryTemplate.versions?.[0]?.versionNumber
-      || ''
-    );
-    setSelectedDeliveryTemplateVersionNumber((current) => (
-      current && availableVersions.includes(String(current)) ? current : preferredVersion
-    ));
-    setDeliveryTemplateChangeNote('');
-  }, [
-    selectedDeliveryTemplate?.key,
-    selectedDeliveryTemplate?.draftVersionNumber,
-    selectedDeliveryTemplate?.publishedVersionNumber
-  ]);
 
   const createManualBill = async (e) => {
     e.preventDefault();
@@ -6792,7 +6315,14 @@ export default function AdminFinance() {
       reason: 'membership_ended',
       reasonNote: selectedAnomaly.description || ''
     });
-    await refreshPaymentWorkspace({ includeAnomalies: true });
+    // createRefundCase reports its own failures; this refresh reported none at
+    // all, because a rejection nobody catches in a click handler only ever
+    // reaches the console.
+    try {
+      await refreshPaymentWorkspace({ includeAnomalies: true });
+    } catch (err) {
+      setMessage(err.message);
+    }
   };
 
   const approveRefund = async () => {
@@ -7600,420 +7130,6 @@ export default function AdminFinance() {
     }
   };
 
-  const saveDeliveryProviderConfig = async () => {
-    const channel = String(selectedDeliveryProviderChannel || deliveryProviderForm.channel || '').trim() || 'sms';
-    const payload = {
-      mode: String(deliveryProviderForm.mode || 'webhook').trim() || 'webhook',
-      provider: String(deliveryProviderForm.provider || '').trim(),
-      isActive: deliveryProviderForm.isActive,
-      webhookUrl: String(deliveryProviderForm.webhookUrl || '').trim(),
-      statusWebhookUrl: String(deliveryProviderForm.statusWebhookUrl || '').trim(),
-      fromHandle: String(deliveryProviderForm.fromHandle || '').trim(),
-      apiBaseUrl: String(deliveryProviderForm.apiBaseUrl || '').trim(),
-      accountSid: String(deliveryProviderForm.accountSid || '').trim(),
-      authToken: String(deliveryProviderForm.authToken || '').trim(),
-      accessToken: String(deliveryProviderForm.accessToken || '').trim(),
-      phoneNumberId: String(deliveryProviderForm.phoneNumberId || '').trim(),
-      webhookToken: String(deliveryProviderForm.webhookToken || '').trim(),
-      note: String(deliveryProviderForm.note || '').trim()
-    };
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/delivery-providers/${encodeURIComponent(channel)}`, payload);
-      setMessage(data?.message || 'تنظیمات ارایه‌کننده ذخیره شد');
-      await loadAll();
-      if (data?.item?.channel) {
-        setSelectedDeliveryProviderChannel(String(data.item.channel));
-      }
-    } catch (err) {
-      setMessage(failureMessage(err, 'ذخیره تنظیمات ارایه‌کننده ناموفق بود'));
-      setBusy(false);
-    }
-  };
-
-  const rotateDeliveryProviderCredentials = async () => {
-    const channel = String(selectedDeliveryProviderChannel || deliveryProviderForm.channel || '').trim() || 'sms';
-    const payload = {
-      accountSid: String(deliveryProviderForm.accountSid || '').trim(),
-      authToken: String(deliveryProviderForm.authToken || '').trim(),
-      accessToken: String(deliveryProviderForm.accessToken || '').trim(),
-      phoneNumberId: String(deliveryProviderForm.phoneNumberId || '').trim(),
-      webhookToken: String(deliveryProviderForm.webhookToken || '').trim(),
-      note: String(deliveryProviderForm.rotationNote || '').trim()
-    };
-    const providedFields = ['accountSid', 'authToken', 'accessToken', 'phoneNumberId', 'webhookToken']
-      .filter((field) => String(payload[field] || '').trim());
-    if (!providedFields.length) {
-      setMessage('برای چرخش دسترسی، حداقل یک اعتبارنامه جدید وارد کنید');
-      return;
-    }
-    if (!payload.note) {
-      setMessage('برای چرخش اعتبارنامه، یادداشت ثبت کنید');
-      return;
-    }
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/delivery-providers/${encodeURIComponent(channel)}/rotate`, payload);
-      setMessage(data?.message || 'چرخش اعتبارنامه‌ها ثبت شد');
-      await loadAll();
-      setDeliveryProviderForm((prev) => ({
-        ...prev,
-        accountSid: '',
-        authToken: '',
-        accessToken: '',
-        phoneNumberId: '',
-        webhookToken: '',
-        rotationNote: ''
-      }));
-      if (data?.item?.channel) {
-        setSelectedDeliveryProviderChannel(String(data.item.channel));
-      }
-    } catch (err) {
-      setMessage(failureMessage(err, 'چرخش اعتبارنامه‌ها ناموفق بود'));
-      setBusy(false);
-    }
-  };
-
-  const loadSelectedTemplateVersionIntoForm = () => {
-    if (!selectedDeliveryTemplateVersion) {
-      setMessage('نسخه قالب پیام انتخاب نشده است');
-      return;
-    }
-    setDeliveryCampaignForm((prev) => ({
-      ...prev,
-      messageTemplateSubject: String(selectedDeliveryTemplateVersion.subject || '').trim(),
-      messageTemplateBody: String(selectedDeliveryTemplateVersion.body || '').trim()
-    }));
-    setDeliveryTemplateChangeNote(String(selectedDeliveryTemplateVersion.changeNote || '').trim());
-    setMessage('نسخه قالب پیام در ویرایشگر بارگذاری شد');
-  };
-
-  const saveDeliveryTemplateDraft = async () => {
-    const templateKey = String(deliveryCampaignForm.messageTemplateKey || '').trim();
-    if (!templateKey) {
-      setMessage('ابتدا یک قالب پیام انتخاب کنید');
-      return;
-    }
-    if (deliveryTemplateUnknownVariables.length) {
-      setMessage(`جای‌نگهدار نامعتبر: ${deliveryTemplateUnknownVariables.join('، ')}`);
-      return;
-    }
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/delivery-campaigns/templates/${encodeURIComponent(templateKey)}/draft`, {
-        subject: effectiveDeliveryTemplateSubject,
-        body: effectiveDeliveryTemplateBody,
-        changeNote: String(deliveryTemplateChangeNote || '').trim()
-      });
-      setMessage(data?.message || 'نسخه پیش‌نویس قالب ذخیره شد');
-      await loadAll();
-      if (data?.item?.draftVersionNumber) {
-        setSelectedDeliveryTemplateVersionNumber(String(data.item.draftVersionNumber));
-      }
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const requestDeliveryTemplateReview = async () => {
-    const templateKey = String(deliveryCampaignForm.messageTemplateKey || '').trim();
-    const versionNumber = Number(selectedDeliveryTemplate?.draftVersionNumber || 0) || Number(selectedDeliveryTemplateVersion?.versionNumber || 0) || 0;
-    if (!templateKey || !versionNumber) {
-      setMessage('نسخه پیش‌نویس برای بازبینی موجود نیست');
-      return;
-    }
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/delivery-campaigns/templates/${encodeURIComponent(templateKey)}/review`, {
-        versionNumber,
-        note: String(deliveryTemplateChangeNote || '').trim()
-      });
-      setMessage(data?.message || 'نسخه قالب برای بازبینی ارسال شد');
-      await loadAll();
-      setSelectedDeliveryTemplateVersionNumber(String(versionNumber));
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const approveDeliveryTemplateVersion = async () => {
-    const templateKey = String(deliveryCampaignForm.messageTemplateKey || '').trim();
-    const versionNumber = Number(selectedDeliveryTemplateVersion?.versionNumber || 0) || 0;
-    if (!templateKey || !versionNumber) {
-      setMessage('نسخه قالب برای تایید انتخاب نشده است');
-      return;
-    }
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/delivery-campaigns/templates/${encodeURIComponent(templateKey)}/approve`, {
-        versionNumber,
-        note: String(deliveryTemplateChangeNote || '').trim()
-      });
-      setMessage(data?.message || 'نسخه قالب تایید شد');
-      await loadAll();
-      setSelectedDeliveryTemplateVersionNumber(String(versionNumber));
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const rejectDeliveryTemplateVersion = async () => {
-    const templateKey = String(deliveryCampaignForm.messageTemplateKey || '').trim();
-    const versionNumber = Number(selectedDeliveryTemplateVersion?.versionNumber || 0) || 0;
-    if (!templateKey || !versionNumber) {
-      setMessage('نسخه قالب برای رد انتخاب نشده است');
-      return;
-    }
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/delivery-campaigns/templates/${encodeURIComponent(templateKey)}/reject`, {
-        versionNumber,
-        note: String(deliveryTemplateChangeNote || '').trim()
-      });
-      setMessage(data?.message || 'نسخه قالب رد شد');
-      await loadAll();
-      setSelectedDeliveryTemplateVersionNumber(String(versionNumber));
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const publishDeliveryTemplateDraft = async () => {
-    const templateKey = String(deliveryCampaignForm.messageTemplateKey || '').trim();
-    const versionNumber = Number(selectedDeliveryTemplateVersion?.versionNumber || 0)
-      || Number(selectedDeliveryTemplate?.draftVersionNumber || 0)
-      || 0;
-    if (!templateKey || !versionNumber) {
-      setMessage('نسخه پیش‌نویس برای نشر موجود نیست');
-      return;
-    }
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/delivery-campaigns/templates/${encodeURIComponent(templateKey)}/publish`, {
-        versionNumber,
-        note: String(deliveryTemplateChangeNote || '').trim()
-      });
-      setMessage(data?.message || 'نسخه قالب منتشر شد');
-      await loadAll();
-      if (data?.item?.publishedVersionNumber) {
-        setSelectedDeliveryTemplateVersionNumber(String(data.item.publishedVersionNumber));
-      }
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const archiveSelectedDeliveryTemplateVersion = async () => {
-    const templateKey = String(deliveryCampaignForm.messageTemplateKey || '').trim();
-    const versionNumber = Number(selectedDeliveryTemplateVersion?.versionNumber || 0) || 0;
-    if (!templateKey || versionNumber <= 1) {
-      setMessage('این نسخه قابل آرشیف نیست');
-      return;
-    }
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/delivery-campaigns/templates/${encodeURIComponent(templateKey)}/archive`, {
-        versionNumber,
-        note: String(deliveryTemplateChangeNote || '').trim()
-      });
-      setMessage(data?.message || 'نسخه قالب آرشیف شد');
-      await loadAll();
-      setSelectedDeliveryTemplateVersionNumber(String(data?.item?.publishedVersionNumber || 1));
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const rollbackDeliveryTemplateVersion = async () => {
-    const templateKey = String(deliveryCampaignForm.messageTemplateKey || '').trim();
-    const versionNumber = Number(selectedDeliveryTemplateVersion?.versionNumber || 0) || 0;
-    if (!templateKey || !versionNumber) {
-      setMessage('نسخه قالب برای برگشت انتخاب نشده است');
-      return;
-    }
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/delivery-campaigns/templates/${encodeURIComponent(templateKey)}/rollback`, {
-        versionNumber,
-        note: String(deliveryTemplateChangeNote || '').trim()
-      });
-      setMessage(data?.message || 'برگشت قالب انجام شد');
-      await loadAll();
-      setSelectedDeliveryTemplateVersionNumber(String(data?.item?.publishedVersionNumber || versionNumber));
-      if (selectedDeliveryTemplateVersion) {
-        setDeliveryCampaignForm((prev) => ({
-          ...prev,
-          messageTemplateSubject: String(selectedDeliveryTemplateVersion.subject || '').trim(),
-          messageTemplateBody: String(selectedDeliveryTemplateVersion.body || '').trim()
-        }));
-      }
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const createDeliveryCampaign = async () => {
-    const payload = {
-      name: String(deliveryCampaignForm.name || '').trim(),
-      documentType: String(deliveryCampaignForm.documentType || '').trim(),
-      channel: String(deliveryCampaignForm.channel || 'email').trim() || 'email',
-      classId: String(deliveryCampaignForm.classId || '').trim(),
-      academicYearId: String(deliveryCampaignForm.academicYearId || '').trim(),
-      monthKey: String(deliveryCampaignForm.monthKey || '').trim(),
-      messageTemplateKey: String(deliveryCampaignForm.messageTemplateKey || '').trim(),
-      templateVersionNumber: Number(selectedDeliveryTemplateVersionNumber || 0) || null,
-      messageTemplateSubject: String(deliveryCampaignForm.messageTemplateSubject || '').trim(),
-      messageTemplateBody: String(deliveryCampaignForm.messageTemplateBody || '').trim(),
-      recipientHandles: String(deliveryCampaignForm.recipientHandles || '').trim(),
-      includeLinkedAudience: deliveryCampaignForm.includeLinkedAudience,
-      automationEnabled: deliveryCampaignForm.automationEnabled,
-      intervalHours: Number(deliveryCampaignForm.intervalHours || 24),
-      retryFailed: deliveryCampaignForm.retryFailed,
-      maxDocumentsPerRun: Number(deliveryCampaignForm.maxDocumentsPerRun || 5),
-      note: String(deliveryCampaignForm.note || '').trim()
-    };
-    if (!payload.name) {
-      setMessage('نام کمپاین ارسال را وارد کنید');
-      return;
-    }
-    if (payload.channel === 'portal' && payload.documentType === 'batch_statement_pack') {
-      setMessage('کمپاین استیتمنت گروهی با کانال پرتال قابل اجرا نیست.');
-      return;
-    }
-    try {
-      setBusy(true);
-      const preview = await requestDeliveryTemplatePreview(payload);
-      setDeliveryTemplatePreview(preview);
-      setDeliveryTemplatePreviewError('');
-      if (preview && preview.valid === false && Array.isArray(preview.unknownVariables) && preview.unknownVariables.length) {
-        setMessage(`جای‌نگهدار نامعتبر در قالب پیام: ${preview.unknownVariables.join('، ')}`);
-        setBusy(false);
-        return;
-      }
-      const data = await postJson(`${API_BASE}/api/finance/admin/delivery-campaigns`, payload);
-      setMessage(data?.message || 'کمپاین ارسال ایجاد شد');
-      setDeliveryCampaignForm((prev) => ({
-        ...prev,
-        name: '',
-        messageTemplateKey: '',
-        messageTemplateSubject: '',
-        messageTemplateBody: '',
-        recipientHandles: '',
-        note: '',
-        includeLinkedAudience: prev.documentType === 'batch_statement_pack' ? false : prev.includeLinkedAudience
-      }));
-      setDeliveryTemplatePreview(null);
-      setDeliveryTemplatePreviewError('');
-      await loadAll();
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const runDeliveryCampaignQueue = async () => {
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/delivery-campaigns/run-due`, {});
-      const executed = Number(data?.result?.executed || 0);
-      setMessage(data?.message || `صف کمپاین‌های ارسال اجرا شد (${fmt(executed)})`);
-      await loadAll();
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const runDeliveryCampaign = async (campaign = selectedDeliveryCampaign) => {
-    const campaignId = String(campaign?._id || '').trim();
-    if (!campaignId) {
-      setMessage('کمپاین ارسال انتخاب نشده است');
-      return;
-    }
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/delivery-campaigns/${campaignId}/run`, {});
-      setMessage(data?.message || 'کمپاین ارسال اجرا شد');
-      await loadAll();
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const toggleDeliveryCampaignStatus = async (campaign = selectedDeliveryCampaign) => {
-    const campaignId = String(campaign?._id || '').trim();
-    if (!campaignId) {
-      setMessage('کمپاین ارسال انتخاب نشده است');
-      return;
-    }
-    const nextStatus = String(campaign?.status || '').trim() === 'active' ? 'paused' : 'active';
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/delivery-campaigns/${campaignId}/status`, {
-        status: nextStatus
-      });
-      setMessage(data?.message || 'وضعیت کمپاین ارسال به‌روزرسانی شد');
-      await loadAll();
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const retryDeliveryQueueItem = async (item = {}) => {
-    const campaignId = String(item?.campaignId || '').trim();
-    const archiveId = String(item?.archiveId || '').trim();
-    if (!campaignId || !archiveId) {
-      setMessage('برای تلاش دوباره، کمپاین یا سند آرشیف کامل نیست.');
-      return;
-    }
-    try {
-      setBusy(true);
-      const data = await postJson(`${API_BASE}/api/finance/admin/delivery-campaigns/${campaignId}/retry-target`, {
-        archiveId
-      });
-      setMessage(data?.message || 'ارسال دوباره اجرا شد');
-      await loadAll();
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
-  const replayDeliveryRecoveryItem = async (item = {}, providerStatus = 'delivered') => {
-    const providerMessageId = String(item?.providerMessageId || '').trim();
-    if (!providerMessageId) {
-      setMessage('برای بازپخش وضعیت، شناسه پیام ارایه‌کننده موجود نیست.');
-      return;
-    }
-    try {
-      setBusy(true);
-      const isFailureReplay = String(providerStatus || '').trim() === 'failed';
-      const data = await postJson(`${API_BASE}/api/finance/admin/delivery-campaigns/recovery-queue/replay`, {
-        provider: item?.provider || '',
-        providerMessageId,
-        providerStatus,
-        recipient: item?.recipient || '',
-        failureCode: isFailureReplay ? (item?.failureCode || 'provider_rejected') : '',
-        errorMessage: isFailureReplay ? (item?.errorMessage || 'manual recovery replay') : '',
-        occurredAt: new Date().toISOString()
-      });
-      setMessage(data?.message || 'بازپخش وضعیت ارایه‌کننده انجام شد');
-      await loadAll();
-    } catch (err) {
-      setMessage(err.message);
-      setBusy(false);
-    }
-  };
-
   const runReminders = async () => {
     try {
       setBusy(true);
@@ -8028,8 +7144,8 @@ export default function AdminFinance() {
 
   const saveAnomalyNote = async () => {
     if (!selectedAnomaly) return;
+    const releaseBusy = holdBusy();
     try {
-      setBusy(true);
       const data = await postJson(
         `${API_BASE}/api/finance/admin/anomalies/${encodeURIComponent(selectedAnomaly.id)}/note`,
         buildAnomalyActionPayload(selectedAnomaly, { note: anomalyWorkflowForm.note })
@@ -8038,14 +7154,15 @@ export default function AdminFinance() {
       await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
-      setBusy(false);
+    } finally {
+      releaseBusy();
     }
   };
 
   const assignAnomaly = async () => {
     if (!selectedAnomaly) return;
+    const releaseBusy = holdBusy();
     try {
-      setBusy(true);
       const data = await postJson(
         `${API_BASE}/api/finance/admin/anomalies/${encodeURIComponent(selectedAnomaly.id)}/assign`,
         buildAnomalyActionPayload(selectedAnomaly, {
@@ -8057,14 +7174,15 @@ export default function AdminFinance() {
       await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
-      setBusy(false);
+    } finally {
+      releaseBusy();
     }
   };
 
   const snoozeAnomaly = async () => {
     if (!selectedAnomaly) return;
+    const releaseBusy = holdBusy();
     try {
-      setBusy(true);
       const data = await postJson(
         `${API_BASE}/api/finance/admin/anomalies/${encodeURIComponent(selectedAnomaly.id)}/snooze`,
         buildAnomalyActionPayload(selectedAnomaly, {
@@ -8076,14 +7194,15 @@ export default function AdminFinance() {
       await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
-      setBusy(false);
+    } finally {
+      releaseBusy();
     }
   };
 
   const resolveAnomaly = async () => {
     if (!selectedAnomaly) return;
+    const releaseBusy = holdBusy();
     try {
-      setBusy(true);
       const data = await postJson(
         `${API_BASE}/api/finance/admin/anomalies/${encodeURIComponent(selectedAnomaly.id)}/resolve`,
         buildAnomalyActionPayload(selectedAnomaly, { note: anomalyWorkflowForm.note })
@@ -8092,14 +7211,15 @@ export default function AdminFinance() {
       await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
-      setBusy(false);
+    } finally {
+      releaseBusy();
     }
   };
 
   const settleAdmissionAnomaly = async (mode = 'paid') => {
     if (!selectedAnomaly) return;
+    const releaseBusy = holdBusy();
     try {
-      setBusy(true);
       const data = await postJson(
         `${API_BASE}/api/finance/admin/anomalies/${encodeURIComponent(selectedAnomaly.id)}/settle-admission`,
         buildAnomalyActionPayload(selectedAnomaly, {
@@ -8111,7 +7231,8 @@ export default function AdminFinance() {
       await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
-      setBusy(false);
+    } finally {
+      releaseBusy();
     }
   };
 
@@ -8138,8 +7259,8 @@ export default function AdminFinance() {
     );
     if (!confirmed) return;
 
+    const releaseBusy = holdBusy();
     try {
-      setBusy(true);
       const data = await postJson(`${API_BASE}/api/finance/admin/anomalies/settle-admission-batch`, {
         classId,
         mode: admissionBatchForm.mode,
@@ -8156,7 +7277,8 @@ export default function AdminFinance() {
       await refreshPaymentWorkspace({ includeAnomalies: true });
     } catch (err) {
       setMessage(err.message);
-      setBusy(false);
+    } finally {
+      releaseBusy();
     }
   };
 
@@ -9547,28 +8669,6 @@ export default function AdminFinance() {
                   </div>
                 )}
               </div>
-            </div>
-          )}
-          {false && paymentPreview?.membership && (
-            <div className="finance-chip-group">
-              <span className="finance-chip">{paymentPreview.membership?.schoolClass?.title || 'صنف'}</span>
-              <span className="finance-chip finance-chip-muted">{paymentPreview.membership?.academicYear?.title || 'سال تعلیمی'}</span>
-              <span className="finance-chip finance-chip-emerald">{fmt(paymentPreview.totalOutstanding || 0)} AFN مانده کل</span>
-            </div>
-          )}
-          {false && Array.isArray(paymentPreview?.openOrders) && paymentPreview.openOrders.length > 0 && (
-            <div className="finance-order-pick-list">
-              {paymentPreview.openOrders.map((item) => (
-                <label key={`pick-${item.id}`} className="finance-flag">
-                  <input
-                    type="checkbox"
-                    checked={paymentDeskForm.selectedFeeOrderIds.includes(item.id)}
-                    disabled={paymentDeskForm.allocationMode !== 'auto_selected'}
-                    onChange={() => toggleDeskOrderSelection(item.id)}
-                  />
-                  <span>{item.title || formatFinanceCode(item.orderNumber, '') || 'بدهی مالی'} - {fmt(item.outstandingAmount || 0)} AFN</span>
-                </label>
-              ))}
             </div>
           )}
           {Array.isArray(paymentPreview?.allocations) && paymentPreview.allocations.length > 0 && (
@@ -11741,7 +10841,7 @@ export default function AdminFinance() {
         {!!filteredReceipts.length && (
           <div className="receipt-review-layout">
             <div className="finance-table receipts-table">
-              <div className="head"><span>متعلم</span><span>سند / منبع</span><span>مبلغ</span><span>وضعیت</span><span>مرحله / پیگیری</span><span>عملیات</span></div>
+              <div className="head"><span>متعلم</span><span>سند / منبع</span><span>مبلغ</span><span>وضعیتِ کار</span><span>پیگیری</span><span>عملیات</span></div>
               {paginatedReceipts.map((item) => {
                 const stage = normalizeReceiptStage(item.approvalStage || '');
                 const canReview = canReviewReceipt(item);
@@ -11769,19 +10869,20 @@ export default function AdminFinance() {
                     </div>
                     <span>{fmt(item.amount)}</span>
                     <div className="receipt-cell-stack">
-                      <span className={`receipt-status-badge ${String(item.status || '').trim() || 'pending'}`}>
-                        {PAYMENT_STATUS_UI_LABELS[item.status] || item.status || '---'}
-                      </span>
+                      <WorkflowStatus kind="receipt" className="workflow-badge" status={item.status} stage={stage} approvalTrail={item.approvalTrail} rejectReason={item.rejectReason} />
                       <small>{toFaDate(item.paidAt)}</small>
                     </div>
                     <div className="receipt-cell-stack">
-                      <span className={`workflow-badge ${stage}`}>{RECEIPT_STAGE_UI_LABELS[stage] || stage}</span>
                       <small>{FOLLOW_UP_STATUS_LABELS[getReceiptFollowUpStatus(item)] || getReceiptFollowUpStatus(item)}</small>
                     </div>
-                    <div className="row-actions">
-                      <button type="button" onClick={(e) => { e.stopPropagation(); approveReceipt(item._id); }} disabled={busy || !canReview}>{getApproveLabel(item)}</button>
-                      <button type="button" className="danger" onClick={(e) => { e.stopPropagation(); rejectReceipt(item._id); }} disabled={busy || !canReview}>رد</button>
-                    </div>
+                    {item.status === 'pending' ? (
+                      <div className="row-actions">
+                        <button type="button" onClick={(e) => { e.stopPropagation(); approveReceipt(item._id); }} disabled={busy || !canReview}>{getApproveLabel(item)}</button>
+                        <button type="button" className="danger" onClick={(e) => { e.stopPropagation(); rejectReceipt(item._id); }} disabled={busy || !canReview}>رد</button>
+                      </div>
+                    ) : (
+                      <span className="muted">{item.status === 'approved' ? 'انجام شد' : 'منتظرِ اصلاح'}</span>
+                    )}
                   </div>
                 );
               })}
@@ -11794,9 +10895,14 @@ export default function AdminFinance() {
                     <strong>{selectedReceipt.student?.name || '---'}</strong>
                     <span className="finance-latin-code">{formatFinanceCode(selectedReceipt.bill?.billNumber, '---')}</span>
                   </div>
-                  <span className={`workflow-badge ${normalizeReceiptStage(selectedReceipt.approvalStage || '')}`}>
-                    {RECEIPT_STAGE_UI_LABELS[normalizeReceiptStage(selectedReceipt.approvalStage || '')] || selectedReceipt.approvalStage}
-                  </span>
+                  <WorkflowStatus
+                    kind="receipt"
+                    className="workflow-badge"
+                    status={selectedReceipt.status}
+                    stage={normalizeReceiptStage(selectedReceipt.approvalStage || '')}
+                    approvalTrail={selectedReceipt.approvalTrail}
+                    rejectReason={selectedReceipt.rejectReason}
+                  />
                 </div>
 
                 <div className="receipt-meta-grid">
@@ -11822,14 +10928,16 @@ export default function AdminFinance() {
                   <button type="button" className="secondary" onClick={printSelectedReceipt} disabled={busy} data-testid="print-selected-receipt">
                     {busy ? 'در حال آماده‌سازی چاپ…' : 'چاپ رسید'}
                   </button>
-                  <div className="row-actions">
-                    <button type="button" onClick={() => approveReceipt(selectedReceipt._id)} disabled={busy || !canReviewReceipt(selectedReceipt)}>
-                      {getApproveLabel(selectedReceipt)}
-                    </button>
-                    <button type="button" className="danger" onClick={() => rejectReceipt(selectedReceipt._id)} disabled={busy || !canReviewReceipt(selectedReceipt)}>
-                      رد
-                    </button>
-                  </div>
+                  {selectedReceipt.status === 'pending' ? (
+                    <div className="row-actions">
+                      <button type="button" onClick={() => approveReceipt(selectedReceipt._id)} disabled={busy || !canReviewReceipt(selectedReceipt)}>
+                        {getApproveLabel(selectedReceipt)}
+                      </button>
+                      <button type="button" className="danger" onClick={() => rejectReceipt(selectedReceipt._id)} disabled={busy || !canReviewReceipt(selectedReceipt)}>
+                        رد
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
 
                 {selectedReceipt.note ? (
@@ -12544,6 +11652,11 @@ export default function AdminFinance() {
               <span className="finance-chip finance-chip-emerald">{visibleAnomalySummary.byWorkflow?.resolved || 0} حل‌شده</span>
             </div>
           </div>
+          {financeDataErrors.anomalies ? (
+            <div className="finance-data-error" role="alert" data-testid="anomaly-refresh-error">
+              تازه‌سازی ناهنجاری‌های مالی ناموفق بود: {financeDataErrors.anomalies}
+            </div>
+          ) : null}
           <div className="receipt-follow-up-grid">
             <label className="finance-inline-filter">
               <span>نوع ناهنجاری</span>
@@ -12858,12 +11971,14 @@ export default function AdminFinance() {
                     ))}
                   </select>
                 </label>
-                <span className={`finance-chip ${selectedMonthCloseStatus === 'closed' ? 'finance-chip-emerald' : selectedMonthCloseStatus === 'rejected' || selectedMonthCloseStatus === 'reopened' ? 'finance-chip-rose' : 'finance-chip-amber'}`}>
-                  {MONTH_CLOSE_STATUS_UI_LABELS[selectedMonthCloseStatus] || selectedMonthCloseStatus}
-                </span>
-                <span className="finance-chip finance-chip-muted">
-                  {MONTH_CLOSE_STAGE_UI_LABELS[selectedMonthCloseStage] || selectedMonthCloseStage}
-                </span>
+                <WorkflowStatus
+                  kind="monthClose"
+                  className="workflow-badge"
+                  status={selectedMonthCloseStatus}
+                  stage={selectedMonthCloseStage}
+                  approvalTrail={selectedMonthCloseDetail?.approvalTrail || selectedMonthClose?.approvalTrail}
+                  rejectReason={selectedMonthCloseDetail?.rejectReason || selectedMonthClose?.rejectReason}
+                />
                 <button type="button" className="secondary" onClick={() => exportMonthCloseSnapshot(selectedMonthClose)} disabled={busy} data-testid="export-month-close-snapshot">خروجی CSV</button>
                 <button type="button" className="secondary" onClick={() => exportMonthClosePdfPack(selectedMonthClose)} disabled={busy} data-testid="export-month-close-pdf">بسته پی‌دی‌اف</button>
                 {canApproveSelectedMonthClose ? (
@@ -12933,8 +12048,8 @@ export default function AdminFinance() {
                 <span>{selectedMonthCloseDetail?.requestedBy?.name || selectedMonthClose?.requestedBy?.name || selectedMonthCloseDetail?.closedBy?.name || selectedMonthClose?.closedBy?.name || 'ثبت نشده'}</span>
               </div>
               <div className="mini-row">
-                <span>مرحله جاری</span>
-                <span>{MONTH_CLOSE_STAGE_UI_LABELS[selectedMonthCloseStage] || selectedMonthCloseStage}</span>
+                <span>وضعیتِ کار</span>
+                <span>{resolveWorkflowState({ kind: 'monthClose', status: selectedMonthCloseStatus, stage: selectedMonthCloseStage }).label}</span>
               </div>
               {(monthCloseSnapshot?.classes || []).slice(0, 4).map((row) => (
                 <div key={`month-close-class-${row.classId || row.title}`} className="mini-row">
@@ -12980,1392 +12095,6 @@ export default function AdminFinance() {
           </div>
         ) : null}
       </div>
-
-      {false && <div className="finance-card" data-finance-section="reports settings" data-testid="finance-delivery-provider-config-card">
-        <div className="finance-card-head">
-          <div>
-            <h3>تنظیمات ارایه‌کننده و وب‌هوک</h3>
-            <p className="muted">برای SMS و WhatsApp، حالت ارسال، اعتبارنامه‌ها، رمز ورودی و مسیر بازگشت وضعیت را از همین بخش تنظیم کنید.</p>
-          </div>
-          <div className="finance-chip-group">
-            <span className="finance-chip">{deliveryProviderConfigs.length} کانال</span>
-            <span className={`finance-chip ${(selectedDeliveryProviderConfig?.readiness?.configured && selectedDeliveryProviderConfig?.isActive !== false) ? 'finance-chip-emerald' : 'finance-chip-amber'}`}>
-              {(selectedDeliveryProviderConfig?.readiness?.configured && selectedDeliveryProviderConfig?.isActive !== false) ? 'آماده ارسال' : 'نیازمند تکمیل'}
-            </span>
-          </div>
-        </div>
-        <div className="delivery-provider-layout">
-          <div className="delivery-provider-summary-panel">
-            <div className="delivery-provider-channel-list">
-              {(deliveryProviderConfigs.length ? deliveryProviderConfigs : [
-                { channel: 'sms', mode: 'webhook', provider: 'generic_sms_gateway', readiness: { configured: false, missingRequiredFields: [] }, source: 'environment', isActive: true },
-                { channel: 'whatsapp', mode: 'webhook', provider: 'generic_whatsapp_gateway', readiness: { configured: false, missingRequiredFields: [] }, source: 'environment', isActive: true }
-              ]).map((item) => (
-                <button
-                  key={`delivery-provider-channel-${item.channel}`}
-                  type="button"
-                  className={`delivery-provider-channel-item ${String(selectedDeliveryProviderChannel || '') === String(item.channel || '') ? 'selected' : ''}`}
-                  onClick={() => setSelectedDeliveryProviderChannel(String(item.channel || 'sms'))}
-                  data-testid={`finance-delivery-provider-channel-${item.channel}`}
-                >
-                  <div className="document-archive-item-head">
-                    <div>
-                      <strong>{DELIVERY_CHANNEL_LABELS[item.channel] || item.channel || 'کانال'}</strong>
-                      <span>{DELIVERY_PROVIDER_MODE_LABELS[item.mode] || item.mode || 'provider'}</span>
-                    </div>
-                    <span className={`finance-chip ${(item?.readiness?.configured && item?.isActive !== false) ? 'finance-chip-emerald' : 'finance-chip-amber'}`}>
-                      {(item?.readiness?.configured && item?.isActive !== false) ? 'ready' : 'draft'}
-                    </span>
-                  </div>
-                  <div className="document-archive-meta">
-                    <span>{item.provider || '-'}</span>
-                    <span>{item.source === 'database' ? 'DB config' : 'ENV fallback'}</span>
-                  </div>
-                  {!!item?.readiness?.missingRequiredFields?.length && (
-                    <div className="document-archive-meta">
-                      <span>فیلدهای ناتکمیل</span>
-                      <span>{item.readiness.missingRequiredFields.map((field) => DELIVERY_PROVIDER_REQUIRED_FIELD_LABELS[field] || field).join('، ')}</span>
-                    </div>
-                  )}
-                </button>
-              ))}
-            </div>
-            {selectedDeliveryProviderConfig ? (
-              <div className="document-delivery-history delivery-provider-status-panel" data-testid="finance-delivery-provider-status">
-                <div className="document-archive-item-head">
-                  <div>
-                    <strong>خلاصه کانال {DELIVERY_CHANNEL_LABELS[selectedDeliveryProviderConfig.channel] || selectedDeliveryProviderConfig.channel}</strong>
-                    <span>{DELIVERY_PROVIDER_MODE_LABELS[selectedDeliveryProviderConfig.mode] || selectedDeliveryProviderConfig.mode || '-'}</span>
-                  </div>
-                  <span className="finance-chip finance-chip-muted">{selectedDeliveryProviderConfig.provider || '-'}</span>
-                </div>
-                <div className="receipt-meta-grid audit-meta-grid">
-                  <div><span>منبع</span><strong>{selectedDeliveryProviderConfig.source === 'database' ? 'پایگاه‌داده' : 'محیط'} </strong></div>
-                  <div><span>مسیر وب‌هوک</span><strong>{selectedDeliveryProviderConfig.readiness?.webhookPath || '-'}</strong></div>
-                  <div><span>آدرس وب‌هوک</span><strong>{selectedDeliveryProviderConfig.readiness?.webhookUrl || '-'}</strong></div>
-                  <div><span>آدرس بازگشت وضعیت</span><strong>{selectedDeliveryProviderConfig.readiness?.providerCallbackUrl || '-'}</strong></div>
-                  <div><span>نسخه اعتبارنامه</span><strong>v{fmt(selectedDeliveryProviderConfig.credentialVersion || 1)}</strong></div>
-                  <div><span>آخرین چرخش</span><strong>{toFaDateTime(selectedDeliveryProviderConfig.lastRotatedAt)}</strong></div>
-                  <div><span>آخرین به‌روزرسانی</span><strong>{toFaDateTime(selectedDeliveryProviderConfig.updatedAt)}</strong></div>
-                  <div><span>توسط</span><strong>{selectedDeliveryProviderConfig.updatedBy?.name || '-'}</strong></div>
-                </div>
-                <div className="finance-chip-group audit-chip-wrap">
-                  {selectedDeliveryProviderConfig.isActive !== false ? (
-                    <span className="finance-chip finance-chip-emerald">فعال</span>
-                  ) : (
-                    <span className="finance-chip finance-chip-muted">غیرفعال</span>
-                  )}
-                  {Object.entries(selectedDeliveryProviderConfig.fields || {}).map(([key, value]) => (
-                    <span key={`delivery-provider-secret-${key}`} className={`finance-chip ${value?.configured ? 'finance-chip-muted' : 'finance-chip-amber'}`}>
-                      {(DELIVERY_PROVIDER_REQUIRED_FIELD_LABELS[key] || key)}: {value?.configured ? (value?.masked || 'configured') : 'ندارد'}
-                    </span>
-                  ))}
-                </div>
-                {!!selectedDeliveryProviderMissingFields.length && (
-                  <div className="delivery-template-warning-list">
-                    <strong>فیلدهای ضروری تکمیل نشده</strong>
-                    <p>{selectedDeliveryProviderMissingFields.map((field) => DELIVERY_PROVIDER_REQUIRED_FIELD_LABELS[field] || field).join('، ')}</p>
-                  </div>
-                )}
-                <div className="document-delivery-history" data-testid="finance-delivery-provider-audit-trail">
-                  <div className="document-archive-item-head">
-                    <div>
-                      <strong>تاریخچه چرخش و حسابرسی</strong>
-                      <span>{selectedDeliveryProviderAuditEntries.length} رویداد</span>
-                    </div>
-                    <span className="finance-chip finance-chip-muted">{selectedDeliveryProviderConfig.lastRotatedBy?.name || '-'}</span>
-                  </div>
-                  {selectedDeliveryProviderAuditEntries.length ? (
-                    <div className="document-archive-list">
-                      {selectedDeliveryProviderAuditEntries.slice(0, 8).map((entry, index) => (
-                        <article key={`provider-audit-${selectedDeliveryProviderConfig.channel}-${index}`} className="document-archive-item">
-                          <div className="document-archive-item-head">
-                            <div>
-                              <strong>{DELIVERY_PROVIDER_AUDIT_ACTION_LABELS[entry.action] || entry.action || 'رویداد'}</strong>
-                              <span>{toFaDateTime(entry.at)}</span>
-                            </div>
-                            <span className="finance-chip finance-chip-muted">v{fmt(entry.credentialVersion || selectedDeliveryProviderConfig.credentialVersion || 1)}</span>
-                          </div>
-                          <div className="document-archive-meta">
-                            <span>{entry.by?.name || '-'}</span>
-                            <span>{entry.note || 'بدون یادداشت'}</span>
-                          </div>
-                          <div className="finance-chip-group audit-chip-wrap">
-                            {(entry.changedFields || []).map((field) => (
-                              <span key={`provider-audit-change-${field}-${index}`} className="finance-chip finance-chip-muted">
-                                تنظیم: {DELIVERY_PROVIDER_REQUIRED_FIELD_LABELS[field] || field}
-                              </span>
-                            ))}
-                            {(entry.rotatedFields || []).map((field) => (
-                              <span key={`provider-audit-rotate-${field}-${index}`} className="finance-chip finance-chip-amber">
-                                rotation: {DELIVERY_PROVIDER_REQUIRED_FIELD_LABELS[field] || field}
-                              </span>
-                            ))}
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="muted">هنوز رویداد چرخش یا حسابرسی برای این کانال ثبت نشده است.</p>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <p className="muted">هنوز تنظیمات ارایه‌کننده برای این بخش دریافت نشده است.</p>
-            )}
-          </div>
-
-          <div className="delivery-provider-form-panel" data-testid="finance-delivery-provider-form">
-            <div className="finance-toolbar">
-              <label className="finance-inline-filter">
-                <span>کانال</span>
-                <select
-                  value={selectedDeliveryProviderChannel}
-                  onChange={(e) => setSelectedDeliveryProviderChannel(e.target.value)}
-                  data-testid="finance-delivery-provider-channel-select"
-                >
-                  <option value="sms">SMS</option>
-                  <option value="whatsapp">WhatsApp</option>
-                </select>
-              </label>
-              <label className="finance-inline-filter">
-                <span>حالت</span>
-                <select
-                  value={deliveryProviderForm.mode}
-                  onChange={(e) => setDeliveryProviderForm((prev) => ({ ...prev, mode: e.target.value }))}
-                  data-testid="finance-delivery-provider-mode"
-                >
-                  {selectedDeliveryProviderModeOptions.map((item) => (
-                    <option key={`delivery-provider-mode-${selectedDeliveryProviderChannel}-${item}`} value={item}>
-                      {DELIVERY_PROVIDER_MODE_LABELS[item] || item}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="finance-inline-filter finance-inline-check">
-                <span>فعال</span>
-                <input
-                  type="checkbox"
-                  checked={deliveryProviderForm.isActive}
-                  onChange={(e) => setDeliveryProviderForm((prev) => ({ ...prev, isActive: e.target.checked }))}
-                  data-testid="finance-delivery-provider-active"
-                />
-              </label>
-            </div>
-
-            <div className="finance-toolbar">
-              <label className="finance-inline-filter finance-inline-filter-wide">
-                <span>نام ارایه‌کننده</span>
-                <input
-                  value={deliveryProviderForm.provider}
-                  onChange={(e) => setDeliveryProviderForm((prev) => ({ ...prev, provider: e.target.value }))}
-                  placeholder={selectedDeliveryProviderConfig?.provider || 'مثلاً twilio_sms_gateway'}
-                  data-testid="finance-delivery-provider-name"
-                />
-              </label>
-              <label className="finance-inline-filter finance-inline-filter-wide">
-                <span>شناسه فرستنده</span>
-                <input
-                  value={deliveryProviderForm.fromHandle}
-                  onChange={(e) => setDeliveryProviderForm((prev) => ({ ...prev, fromHandle: e.target.value }))}
-                  placeholder={selectedDeliveryProviderConfig?.fromHandle || '+93700111222'}
-                  data-testid="finance-delivery-provider-from-handle"
-                />
-              </label>
-              <label className="finance-inline-filter finance-inline-filter-wide">
-                <span>آدرس خدمات</span>
-                <input
-                  value={deliveryProviderForm.apiBaseUrl}
-                  onChange={(e) => setDeliveryProviderForm((prev) => ({ ...prev, apiBaseUrl: e.target.value }))}
-                  placeholder={selectedDeliveryProviderConfig?.apiBaseUrl || 'https://...'}
-                  data-testid="finance-delivery-provider-api-base"
-                />
-              </label>
-            </div>
-
-            {showDeliveryProviderWebhookFields ? (
-              <div className="finance-toolbar">
-                <label className="finance-inline-filter finance-inline-filter-wide">
-                  <span>آدرس وب‌هوک</span>
-                  <input
-                    value={deliveryProviderForm.webhookUrl}
-                    onChange={(e) => setDeliveryProviderForm((prev) => ({ ...prev, webhookUrl: e.target.value }))}
-                    placeholder={selectedDeliveryProviderConfig?.webhookUrl || 'https://provider.example.com/send'}
-                    data-testid="finance-delivery-provider-webhook-url"
-                  />
-                </label>
-                <label className="finance-inline-filter finance-inline-filter-wide">
-                  <span>آدرس بازگشت وضعیت</span>
-                  <input
-                    value={deliveryProviderForm.statusWebhookUrl}
-                    onChange={(e) => setDeliveryProviderForm((prev) => ({ ...prev, statusWebhookUrl: e.target.value }))}
-                    placeholder={selectedDeliveryProviderConfig?.statusWebhookUrl || (selectedDeliveryProviderConfig?.readiness?.providerCallbackUrl || '')}
-                    data-testid="finance-delivery-provider-status-webhook-url"
-                  />
-                </label>
-              </div>
-            ) : null}
-
-            {showDeliveryProviderTwilioFields ? (
-              <div className="finance-toolbar">
-                <label className="finance-inline-filter finance-inline-filter-wide">
-                  <span>شناسه حساب</span>
-                  <input
-                    value={deliveryProviderForm.accountSid}
-                    onChange={(e) => setDeliveryProviderForm((prev) => ({ ...prev, accountSid: e.target.value }))}
-                    placeholder={selectedDeliveryProviderConfig?.fields?.accountSid?.masked || 'بدون تغییر'}
-                    data-testid="finance-delivery-provider-account-sid"
-                  />
-                </label>
-                <label className="finance-inline-filter finance-inline-filter-wide">
-                  <span>رمز احراز هویت</span>
-                  <input
-                    value={deliveryProviderForm.authToken}
-                    onChange={(e) => setDeliveryProviderForm((prev) => ({ ...prev, authToken: e.target.value }))}
-                    placeholder={selectedDeliveryProviderConfig?.fields?.authToken?.masked || 'بدون تغییر'}
-                    data-testid="finance-delivery-provider-auth-token"
-                  />
-                </label>
-              </div>
-            ) : null}
-
-            {showDeliveryProviderMetaFields ? (
-              <div className="finance-toolbar">
-                <label className="finance-inline-filter finance-inline-filter-wide">
-                  <span>رمز دسترسی</span>
-                  <input
-                    value={deliveryProviderForm.accessToken}
-                    onChange={(e) => setDeliveryProviderForm((prev) => ({ ...prev, accessToken: e.target.value }))}
-                    placeholder={selectedDeliveryProviderConfig?.fields?.accessToken?.masked || 'بدون تغییر'}
-                    data-testid="finance-delivery-provider-access-token"
-                  />
-                </label>
-                <label className="finance-inline-filter finance-inline-filter-wide">
-                  <span>شناسه شماره</span>
-                  <input
-                    value={deliveryProviderForm.phoneNumberId}
-                    onChange={(e) => setDeliveryProviderForm((prev) => ({ ...prev, phoneNumberId: e.target.value }))}
-                    placeholder={selectedDeliveryProviderConfig?.fields?.phoneNumberId?.masked || 'بدون تغییر'}
-                    data-testid="finance-delivery-provider-phone-number-id"
-                  />
-                </label>
-              </div>
-            ) : null}
-
-            <div className="finance-toolbar">
-              <label className="finance-inline-filter finance-inline-filter-wide">
-                <span>رمز وب‌هوک</span>
-                <input
-                  value={deliveryProviderForm.webhookToken}
-                  onChange={(e) => setDeliveryProviderForm((prev) => ({ ...prev, webhookToken: e.target.value }))}
-                  placeholder={selectedDeliveryProviderConfig?.fields?.webhookToken?.masked || 'در صورت نیاز برای callback امن'}
-                  data-testid="finance-delivery-provider-webhook-token"
-                />
-              </label>
-              <label className="finance-inline-filter finance-inline-filter-wide">
-                <span>یادداشت</span>
-                <input
-                  value={deliveryProviderForm.note}
-                  onChange={(e) => setDeliveryProviderForm((prev) => ({ ...prev, note: e.target.value }))}
-                  placeholder="مثلاً provider اصلی ماه جدید"
-                  data-testid="finance-delivery-provider-note"
-                />
-              </label>
-            </div>
-
-            <div className="finance-toolbar">
-              <label className="finance-inline-filter finance-inline-filter-wide">
-                <span>یادداشت چرخش</span>
-                <input
-                  value={deliveryProviderForm.rotationNote}
-                  onChange={(e) => setDeliveryProviderForm((prev) => ({ ...prev, rotationNote: e.target.value }))}
-                  placeholder="مثلاً تعویض credential برای شروع ماه جدید"
-                  data-testid="finance-delivery-provider-rotation-note"
-                />
-              </label>
-            </div>
-
-            <div className="finance-toolbar">
-              <button
-                type="button"
-                className="primary"
-                onClick={saveDeliveryProviderConfig}
-                disabled={busy}
-                data-testid="finance-delivery-provider-save"
-              >
-                ذخیره تنظیمات provider
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                onClick={rotateDeliveryProviderCredentials}
-                disabled={busy}
-                data-testid="finance-delivery-provider-rotate"
-              >
-                ثبت Rotation Credential
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>}
-
-      {false && <div className="finance-card" data-finance-section="reports settings" data-testid="finance-delivery-campaign-card">
-        <div className="finance-card-head">
-          <div>
-            <h3>کمپاین و اتوماسیون ارسال</h3>
-            <p className="muted">ارسال زمان‌بندی‌شده اسناد آرشیف‌شده، تلاش دوباره روی موارد ناموفق، و اجرای صف آماده را از همین‌جا مدیریت کنید.</p>
-          </div>
-          <div className="finance-chip-group">
-            <span className="finance-chip">{deliveryCampaigns.length} کمپاین</span>
-            <span className="finance-chip finance-chip-muted">{deliveryCampaigns.filter((item) => item?.status === 'active').length} فعال</span>
-          </div>
-        </div>
-        <div className="finance-toolbar">
-          <label className="finance-inline-filter">
-            <span>وضعیت ارسال</span>
-            <select
-              value={deliveryOpsStatusFilter}
-              onChange={(e) => setDeliveryOpsStatusFilter(e.target.value)}
-              data-testid="finance-delivery-status-filter"
-            >
-              <option value="all">همه</option>
-              {Object.entries(DELIVERY_EVENT_STATUS_LABELS).map(([value, label]) => (
-                <option key={`delivery-status-filter-${value}`} value={value}>{label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="finance-inline-filter">
-            <span>ارایه‌کننده</span>
-            <select
-              value={deliveryOpsProviderFilter}
-              onChange={(e) => setDeliveryOpsProviderFilter(e.target.value)}
-              data-testid="finance-delivery-provider-filter"
-            >
-              <option value="all">همه</option>
-              {deliveryProviderOptions.map((item) => (
-                <option key={`delivery-provider-filter-${item}`} value={item}>{item}</option>
-              ))}
-            </select>
-          </label>
-          <label className="finance-inline-filter">
-            <span>کد خطا</span>
-            <select
-              value={deliveryOpsFailureFilter}
-              onChange={(e) => setDeliveryOpsFailureFilter(e.target.value)}
-              data-testid="finance-delivery-failure-filter"
-            >
-              <option value="all">همه</option>
-              {deliveryFailureOptions.map((item) => (
-                <option key={`delivery-failure-filter-${item}`} value={item}>{item}</option>
-              ))}
-            </select>
-          </label>
-          <label className="finance-inline-filter">
-            <span>قابلیت تلاش دوباره</span>
-            <select
-              value={deliveryOpsRetryableFilter}
-              onChange={(e) => setDeliveryOpsRetryableFilter(e.target.value)}
-              data-testid="finance-delivery-retryability-filter"
-            >
-              <option value="all">همه</option>
-              <option value="retryable">قابل تلاش دوباره</option>
-              <option value="blocked">مسدود</option>
-            </select>
-          </label>
-          <button
-            type="button"
-            className="secondary"
-            onClick={runDeliveryCampaignQueue}
-            disabled={busy}
-            data-testid="finance-delivery-campaign-run-due"
-          >
-            اجرای صف آماده
-          </button>
-        </div>
-        {deliveryAnalytics?.summary ? (
-          <div className="delivery-analytics-grid" data-testid="finance-delivery-analytics">
-            <article className="delivery-analytics-card">
-              <span>کمپاین‌ها</span>
-              <strong>{fmt(deliveryAnalytics.summary.campaignsTotal || 0)}</strong>
-              <small>{fmt(deliveryAnalytics.summary.campaignsActive || 0)} فعال / {fmt(deliveryAnalytics.summary.campaignsPaused || 0)} متوقف</small>
-            </article>
-            <article className="delivery-analytics-card">
-              <span>تحویل‌ها</span>
-              <strong>{fmt(deliveryAnalytics.summary.deliveriesTotal || 0)}</strong>
-              <small>{fmt(deliveryAnalytics.summary.failedQueueCount || 0)} مورد در صف retry / {fmt(deliveryAnalytics.summary.recoveryQueueCount || 0)} مورد در recovery</small>
-            </article>
-            <article className="delivery-analytics-card">
-              <span>کانال‌ها</span>
-              <strong>{fmt(deliveryAnalytics.summary.byChannel?.email || 0)} Email</strong>
-              <small>
-                {fmt(deliveryAnalytics.summary.byChannel?.sms || 0)} SMS / {fmt(deliveryAnalytics.summary.byChannel?.whatsapp || 0)} WhatsApp / {fmt(deliveryAnalytics.summary.byChannel?.portal || 0)} Portal
-              </small>
-            </article>
-            <article className="delivery-analytics-card">
-              <span>وضعیت اجرا</span>
-              <strong>{fmt(deliveryAnalytics.summary.byStatus?.failed || 0)} ناموفق</strong>
-              <small>{fmt(deliveryAnalytics.summary.awaitingWebhookCount || 0)} مورد در انتظار callback / {fmt(deliveryAnalytics.summary.dueCampaigns || 0)} کمپاین آماده اجرا</small>
-            </article>
-          </div>
-        ) : null}
-        {deliveryAnalytics?.summary ? (
-          <div className="delivery-operations-grid">
-            <div className="delivery-operations-panel" data-testid="finance-delivery-provider-breakdown">
-              <div className="document-archive-item-head">
-                <div>
-                  <strong>برش ارایه‌کننده</strong>
-                  <span>توزیع ارسال‌ها به تفکیک درگاه یا ارایه‌کننده</span>
-                </div>
-                <span className="finance-chip finance-chip-muted">{fmt(deliveryProviderBreakdown.length)} ارایه‌کننده</span>
-              </div>
-              <div className="finance-subcard-list">
-                <div className="mini-row">
-                  <span>آماده تلاش دوباره</span>
-                  <strong>{fmt(deliveryAnalytics.summary.readyToRetryCount || 0)}</strong>
-                </div>
-                <div className="mini-row">
-                  <span>در انتظار تلاش دوباره</span>
-                  <strong>{fmt(deliveryAnalytics.summary.waitingRetryCount || 0)}</strong>
-                </div>
-                <div className="mini-row">
-                  <span>تلاش دوباره مسدود</span>
-                  <strong>{fmt(deliveryAnalytics.summary.blockedRetryCount || 0)}</strong>
-                </div>
-                <div className="mini-row">
-                  <span>در انتظار بازگشت وضعیت</span>
-                  <strong>{fmt(deliveryAnalytics.summary.awaitingWebhookCount || 0)}</strong>
-                </div>
-                {deliveryProviderBreakdown.slice(0, 4).map(([key, count]) => (
-                  <div key={`delivery-provider-breakdown-${key}`} className="mini-row">
-                    <span>{key}</span>
-                    <strong>{fmt(count)}</strong>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="delivery-operations-panel" data-testid="finance-delivery-failure-breakdown">
-              <div className="document-archive-item-head">
-                <div>
-                  <strong>ناحیه‌های خطا</strong>
-                  <span>کدهای خطای غالب برای تیم عملیاتی</span>
-                </div>
-                <span className={`finance-chip ${deliveryLeadFailure ? 'finance-chip-amber' : 'finance-chip-muted'}`}>
-                  {deliveryLeadFailure ? `${deliveryLeadFailure[0]} | ${fmt(deliveryLeadFailure[1])}` : 'بدون failure code'}
-                </span>
-              </div>
-              {!deliveryFailureBreakdown.length ? (
-                <p className="muted">در فیلتر فعلی، خطای ثبت‌شده‌ای دیده نمی‌شود.</p>
-              ) : (
-                <div className="finance-subcard-list">
-                  {deliveryFailureBreakdown.slice(0, 6).map(([key, count]) => (
-                    <div key={`delivery-failure-breakdown-${key}`} className="mini-row">
-                      <span>{key}</span>
-                      <strong>{fmt(count)}</strong>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="delivery-operations-panel" data-testid="finance-delivery-recent-failures">
-              <div className="document-archive-item-head">
-                <div>
-                  <strong>موارد اخیر عملیاتی</strong>
-                  <span>آخرین موارد صف برای ارسال دوباره یا رفع اشکال</span>
-                </div>
-                <span className="finance-chip finance-chip-muted">{fmt(deliveryRecentFailures.length)} مورد</span>
-              </div>
-              {!deliveryRecentFailures.length ? (
-                <p className="muted">مورد عملیاتی برای فیلتر فعلی موجود نیست.</p>
-              ) : (
-                <div className="finance-subcard-list">
-                  {deliveryRecentFailures.slice(0, 5).map((item, index) => (
-                    <div key={`delivery-recent-failure-${item.archiveId || index}-${index}`} className="delivery-ops-entry">
-                      <div className="document-archive-item-head">
-                        <div>
-                          <strong>{item.documentNo || 'سند مالی'}</strong>
-                          <span>{item.campaignName || item.provider || 'delivery'}</span>
-                        </div>
-                        <span className={`finance-chip ${item.retryable ? 'finance-chip-amber' : 'finance-chip-muted'}`}>
-                          {item.retryable ? 'retryable' : 'blocked'}
-                        </span>
-                      </div>
-                      <div className="document-archive-meta">
-                        <span>{item.provider || 'provider'}</span>
-                        <span>{item.lastFailureCode || item.providerStatus || '-'}</span>
-                      </div>
-                      <div className="document-archive-meta">
-                        <span>{item.recipient || 'بدون گیرنده مشخص'}</span>
-                        <span>{toFaDateTime(item.nextRetryAt || item.lastAttemptAt)}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        ) : null}
-        <div className="delivery-campaign-layout">
-          <div className="delivery-campaign-panel">
-            <div className="finance-card-head">
-              <div>
-                <h4>کمپاین جدید</h4>
-                <p className="muted">برای استیتمنت گروهی، بسته بستن ماه یا استیتمنت‌های انفرادی کمپاین بسازید.</p>
-              </div>
-            </div>
-            <div className="delivery-template-workspace">
-              <div className="delivery-template-catalog" data-testid="finance-delivery-template-variable-catalog">
-                <div className="document-archive-item-head">
-                  <div>
-                    <strong>کاتالوگ متغیرهای قالب</strong>
-                    <span>{fmt(deliveryTemplateVariables.length)} متغیر قابل استفاده</span>
-                  </div>
-                  {!!deliveryTemplateUsedVariables.length && (
-                    <span className="finance-chip finance-chip-muted">استفاده‌شده: {fmt(deliveryTemplateUsedVariables.length)}</span>
-                  )}
-                </div>
-                {!deliveryTemplateVariables.length ? (
-                  <p className="muted">هنوز کاتالوگ متغیرهای قالب دریافت نشده است.</p>
-                ) : (
-                  <div className="delivery-template-variable-list">
-                    {deliveryTemplateVariables.map((item) => {
-                      const isUsed = deliveryTemplateUsedVariables.includes(String(item?.key || ''));
-                      return (
-                        <article
-                          key={`delivery-template-variable-${item.key}`}
-                          className={`delivery-template-variable-item ${isUsed ? 'used' : ''}`}
-                        >
-                          <div className="document-archive-item-head">
-                            <div>
-                              <strong>{item.label || item.key}</strong>
-                              <span className="document-archive-code">{`{{${item.key}}}`}</span>
-                            </div>
-                            {isUsed ? <span className="finance-chip finance-chip-emerald">استفاده شده</span> : null}
-                          </div>
-                          <p>{item.description || 'بدون شرح'}</p>
-                          {item.sample ? <span className="muted">نمونه: {item.sample}</span> : null}
-                        </article>
-                      );
-                    })}
-                  </div>
-                )}
-                {!!deliveryTemplateUnknownVariables.length && (
-                  <div className="delivery-template-warning-list" data-testid="finance-delivery-template-preview-errors">
-                    <strong>جای‌نگهدار نامعتبر</strong>
-                    <p>{deliveryTemplateUnknownVariables.join('، ')}</p>
-                  </div>
-                )}
-              </div>
-
-              <div className="delivery-template-preview-panel" data-testid="finance-delivery-template-preview">
-                <div className="document-archive-item-head">
-                  <div>
-                    <strong>پیش‌نمایش زنده پیام</strong>
-                    <span>{deliveryTemplatePreview?.sampleSource === 'archive' ? 'نمونه از آرشیف واقعی' : 'نمونه synthetic'}</span>
-                  </div>
-                  {deliveryTemplatePreviewBusy ? <span className="finance-chip finance-chip-muted">در حال به‌روزرسانی</span> : null}
-                </div>
-                {!shouldPreviewDeliveryTemplate ? (
-                  <p className="muted">برای دیدن پیش‌نمایش، یک قالب انتخاب کنید یا موضوع/متن را وارد کنید.</p>
-                ) : deliveryTemplatePreviewError ? (
-                  <div className="delivery-template-warning-list" data-testid="finance-delivery-template-preview-errors">
-                    <strong>خطا در پیش‌نمایش</strong>
-                    <p>{deliveryTemplatePreviewError}</p>
-                  </div>
-                ) : !deliveryTemplatePreview ? (
-                  <p className="muted">پیش‌نمایش آماده نشده است.</p>
-                ) : (
-                  <>
-                    <div className="receipt-meta-grid audit-meta-grid">
-                      <div><span>سند نمونه</span><strong>{deliveryTemplatePreview.sample?.documentNo || '-'}</strong></div>
-                      <div><span>نوع سند</span><strong>{deliveryTemplatePreview.sample?.documentType || '-'}</strong></div>
-                      <div><span>موضوع</span><strong>{deliveryTemplatePreview.sample?.subjectName || '-'}</strong></div>
-                      <div><span>صنف</span><strong>{deliveryTemplatePreview.sample?.classTitle || '-'}</strong></div>
-                      <div><span>سال تعلیمی</span><strong>{deliveryTemplatePreview.sample?.academicYearTitle || '-'}</strong></div>
-                      <div><span>ماه</span><strong>{deliveryTemplatePreview.sample?.monthKey ? toFaMonthKey(deliveryTemplatePreview.sample.monthKey) : '-'}</strong></div>
-                    </div>
-                    <div className="receipt-meta-grid audit-meta-grid" data-testid="finance-delivery-template-preview-rollout">
-                      <div><span>رکورد آرشیف</span><strong>{fmt(deliveryTemplatePreview.rolloutPreview?.matchedArchiveCount || 0)}</strong></div>
-                      <div><span>محدوده</span><strong>{deliveryTemplatePreview.rolloutPreview?.scope?.documentType || deliveryTemplatePreview.sample?.documentType || '-'}</strong></div>
-                      <div>
-                        <span>کانال‌های پیشنهادی</span>
-                        <strong>
-                          {(deliveryTemplatePreview.rolloutPreview?.recommendedChannels || []).map((item) => (
-                            DELIVERY_CHANNEL_LABELS[item] || item
-                          )).join('، ') || 'همه'}
-                        </strong>
-                      </div>
-                    </div>
-                    <div className="receipt-note-box">
-                      <span>موضوع رندرشده</span>
-                      <p>{deliveryTemplatePreview.renderedSubject || '-'}</p>
-                    </div>
-                    <div className="receipt-note-box">
-                      <span>متن رندرشده</span>
-                      <p className="delivery-template-preview-body">{deliveryTemplatePreview.renderedBody || '-'}</p>
-                    </div>
-                    {!!deliveryTemplatePreview.usedVariables?.length && (
-                      <div className="finance-chip-group audit-chip-wrap">
-                        {deliveryTemplatePreview.usedVariables.map((item) => (
-                          <span key={`delivery-template-used-${item}`} className="finance-chip finance-chip-muted">{`{{${item}}}`}</span>
-                        ))}
-                      </div>
-                    )}
-                    {!!deliveryTemplatePreview.warnings?.length && (
-                      <div className="delivery-template-warning-list">
-                        <strong>یادداشت‌های پیش‌نمایش</strong>
-                        {deliveryTemplatePreview.warnings.map((item, index) => (
-                          <p key={`delivery-template-warning-${index}`}>{item}</p>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-            <div className="finance-toolbar">
-              <label className="finance-inline-filter finance-inline-filter-wide">
-                <span>نام کمپاین</span>
-                <input
-                  value={deliveryCampaignForm.name}
-                  onChange={(e) => setDeliveryCampaignForm((prev) => ({ ...prev, name: e.target.value }))}
-                  placeholder="مثلاً ارسال ماهانه استیتمنت صنف دهم"
-                  data-testid="finance-delivery-campaign-name"
-                />
-              </label>
-              <label className="finance-inline-filter">
-                <span>نوع سند</span>
-                <select
-                  value={deliveryCampaignForm.documentType}
-                  onChange={(e) => {
-                    const nextType = e.target.value;
-                    setDeliveryCampaignForm((prev) => ({
-                      ...prev,
-                      documentType: nextType,
-                      includeLinkedAudience: nextType === 'batch_statement_pack' ? false : prev.includeLinkedAudience
-                    }));
-                  }}
-                  data-testid="finance-delivery-campaign-document-type"
-                >
-                  {Object.entries(DOCUMENT_ARCHIVE_TYPE_LABELS).map(([value, label]) => (
-                    <option key={`delivery-campaign-type-${value}`} value={value}>{label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="finance-inline-filter">
-                <span>کانال ارسال</span>
-                <select
-                  value={deliveryCampaignForm.channel}
-                  onChange={(e) => {
-                    const nextChannel = e.target.value;
-                    setDeliveryCampaignForm((prev) => ({
-                      ...prev,
-                      channel: nextChannel,
-                      includeLinkedAudience: nextChannel === 'portal'
-                        ? (prev.documentType === 'batch_statement_pack' ? false : true)
-                        : prev.includeLinkedAudience
-                    }));
-                  }}
-                  data-testid="finance-delivery-campaign-channel"
-                >
-                  {Object.entries(DELIVERY_CHANNEL_LABELS).map(([value, label]) => (
-                    <option key={`delivery-campaign-channel-${value}`} value={value}>{label}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="finance-toolbar">
-              <label className="finance-inline-filter">
-                <span>صنف</span>
-                <select
-                  value={deliveryCampaignForm.classId}
-                  onChange={(e) => setDeliveryCampaignForm((prev) => ({ ...prev, classId: e.target.value }))}
-                >
-                  <option value="">بدون محدودیت</option>
-                  {classOptions.map((item) => (
-                    <option key={`delivery-campaign-class-${item.classId}`} value={item.classId}>{getClassOptionLabel(item)}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="finance-inline-filter">
-                <span>سال تعلیمی</span>
-                <select
-                  value={deliveryCampaignForm.academicYearId}
-                  onChange={(e) => setDeliveryCampaignForm((prev) => ({ ...prev, academicYearId: e.target.value }))}
-                >
-                  <option value="">بدون محدودیت</option>
-                  {academicYears.map((item) => (
-                    <option key={`delivery-campaign-year-${item.id}`} value={item.id}>{getAcademicYearOptionLabel(item)}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="finance-inline-filter">
-                <span>ماه</span>
-                <input
-                  value={deliveryCampaignForm.monthKey}
-                  onChange={(e) => setDeliveryCampaignForm((prev) => ({ ...prev, monthKey: e.target.value }))}
-                  placeholder="YYYY-MM"
-                />
-                <small>{deliveryCampaignForm.monthKey ? `هجری شمسی: ${toFaMonthKey(deliveryCampaignForm.monthKey)}` : 'ماه را به شکل YYYY-MM وارد کنید.'}</small>
-              </label>
-            </div>
-            <div className="finance-toolbar">
-              <label className="finance-inline-filter finance-inline-filter-wide">
-                <span>{DELIVERY_CHANNEL_INPUT_LABELS[deliveryCampaignForm.channel] || 'گیرنده‌های مقصد'}</span>
-                <input
-                  value={deliveryCampaignForm.recipientHandles}
-                  onChange={(e) => setDeliveryCampaignForm((prev) => ({ ...prev, recipientHandles: e.target.value }))}
-                  placeholder={DELIVERY_CHANNEL_INPUT_PLACEHOLDERS[deliveryCampaignForm.channel] || ''}
-                  disabled={deliveryCampaignForm.channel === 'portal'}
-                  data-testid="finance-delivery-campaign-handles"
-                />
-              </label>
-              <label className="finance-inline-filter">
-                <span>قالب پیام</span>
-                <select
-                  value={deliveryCampaignForm.messageTemplateKey}
-                  onChange={(e) => {
-                    const nextKey = e.target.value;
-                    const nextTemplate = deliveryTemplates.find((item) => String(item?.key || '') === nextKey) || null;
-                    const nextVersion = String(nextTemplate?.draftVersionNumber || nextTemplate?.publishedVersionNumber || nextTemplate?.versions?.[0]?.versionNumber || '');
-                    const nextVersionItem = (nextTemplate?.versions || []).find((item) => (
-                      String(item?.versionNumber || '') === nextVersion
-                    )) || nextTemplate?.publishedVersion || nextTemplate?.draftVersion || null;
-                    setDeliveryCampaignForm((prev) => ({
-                      ...prev,
-                      messageTemplateKey: nextKey,
-                      messageTemplateSubject: nextVersionItem?.subject || nextTemplate?.defaultSubject || '',
-                      messageTemplateBody: nextVersionItem?.body || nextTemplate?.defaultBody || ''
-                    }));
-                    setSelectedDeliveryTemplateVersionNumber(nextVersion);
-                    setDeliveryTemplateChangeNote('');
-                  }}
-                  data-testid="finance-delivery-campaign-template"
-                >
-                  <option value="">عمومی</option>
-                  {deliveryTemplates.map((item) => (
-                    <option key={`delivery-template-${item.key}`} value={item.key}>{item.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="finance-inline-filter finance-inline-filter-wide">
-                <span>یادداشت کمپاین</span>
-                <input
-                  value={deliveryCampaignForm.note}
-                  onChange={(e) => setDeliveryCampaignForm((prev) => ({ ...prev, note: e.target.value }))}
-                  placeholder="مثلاً ارسال خودکار پایان هر ماه"
-                />
-              </label>
-            </div>
-            {selectedDeliveryTemplate ? (
-              <p className="muted">
-                {selectedDeliveryTemplate.description}
-                {' '}| کانال‌های پیشنهادی: {(selectedDeliveryTemplate.recommendedChannels || []).map((item) => DELIVERY_CHANNEL_LABELS[item] || item).join('، ') || 'همه'}
-              </p>
-            ) : null}
-            {selectedDeliveryTemplate ? (
-              <div className="document-delivery-history delivery-template-version-panel" data-testid="finance-delivery-template-version-manager">
-                <div className="document-archive-item-head">
-                  <div>
-                    <strong>مدیریت نسخه‌های قالب</strong>
-                    <span>
-                      published v{fmt(selectedDeliveryTemplate.publishedVersionNumber || 1)}
-                      {selectedDeliveryTemplate.draftVersionNumber ? ` | draft v${fmt(selectedDeliveryTemplate.draftVersionNumber)}` : ''}
-                    </span>
-                  </div>
-                  <div className="finance-chip-group">
-                    <span className="finance-chip finance-chip-muted">{(selectedDeliveryTemplate.versions || []).length} نسخه</span>
-                    {selectedDeliveryTemplate.hasCustomizations ? (
-                      <span className="finance-chip finance-chip-emerald">سفارشی</span>
-                    ) : (
-                      <span className="finance-chip finance-chip-muted">سیستمی</span>
-                    )}
-                  </div>
-                </div>
-                {selectedDeliveryTemplateVersion ? (
-                  <div className="finance-chip-group delivery-live-status-summary" data-testid="finance-delivery-template-governance-summary">
-                    <span className="finance-chip finance-chip-muted">پیش‌نویس: {fmt(selectedDeliveryTemplate.approvalSummary?.draft || 0)}</span>
-                    <span className="finance-chip finance-chip-amber">بازبینی: {fmt(selectedDeliveryTemplate.approvalSummary?.pendingReview || 0)}</span>
-                    <span className="finance-chip finance-chip-emerald">تایید: {fmt(selectedDeliveryTemplate.approvalSummary?.approved || 0)}</span>
-                    <span className="finance-chip finance-chip-rose">رد: {fmt(selectedDeliveryTemplate.approvalSummary?.rejected || 0)}</span>
-                  </div>
-                ) : null}
-                <div className="finance-toolbar">
-                  <label className="finance-inline-filter">
-                    <span>نسخه انتخابی</span>
-                    <select
-                      value={selectedDeliveryTemplateVersionNumber}
-                      onChange={(e) => setSelectedDeliveryTemplateVersionNumber(e.target.value)}
-                      data-testid="finance-delivery-template-version-select"
-                    >
-                      {(selectedDeliveryTemplate.versions || []).map((item) => (
-                        <option key={`delivery-template-version-${selectedDeliveryTemplate.key}-${item.versionNumber}`} value={String(item.versionNumber)}>
-                          {`v${item.versionNumber} | ${DELIVERY_TEMPLATE_VERSION_STATUS_LABELS[item.status] || item.status || '-'} | ${DELIVERY_TEMPLATE_APPROVAL_STAGE_LABELS[item.approvalStage] || item.approvalStage || '-'}`}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="finance-inline-filter finance-inline-filter-wide">
-                    <span>نوت تغییر</span>
-                    <input
-                      value={deliveryTemplateChangeNote}
-                      onChange={(e) => setDeliveryTemplateChangeNote(e.target.value)}
-                      placeholder="خلاصه تغییرات یا دلیل publish/rollback"
-                      data-testid="finance-delivery-template-change-note"
-                    />
-                  </label>
-                </div>
-                {selectedDeliveryTemplateVersion ? (
-                  <div className="receipt-meta-grid audit-meta-grid">
-                    <div><span>وضعیت</span><strong>{DELIVERY_TEMPLATE_VERSION_STATUS_LABELS[selectedDeliveryTemplateVersion.status] || selectedDeliveryTemplateVersion.status || '-'}</strong></div>
-                    <div><span>نسخه</span><strong>{`v${fmt(selectedDeliveryTemplateVersion.versionNumber || 0)}`}</strong></div>
-                    <div><span>مرحله تایید</span><strong>{DELIVERY_TEMPLATE_APPROVAL_STAGE_LABELS[selectedDeliveryTemplateApprovalStage] || selectedDeliveryTemplateApprovalStage || '-'}</strong></div>
-                    <div><span>سازنده</span><strong>{selectedDeliveryTemplateVersion.createdBy?.name || '-'}</strong></div>
-                    <div><span>تاریخ</span><strong>{toFaDateTime(selectedDeliveryTemplateVersion.createdAt || selectedDeliveryTemplateVersion.publishedAt || selectedDeliveryTemplateVersion.archivedAt)}</strong></div>
-                    <div><span>درخواست بازبینی</span><strong>{selectedDeliveryTemplateVersion.reviewRequestedBy?.name || toFaDateTime(selectedDeliveryTemplateVersion.reviewRequestedAt)}</strong></div>
-                    <div><span>تاییدکننده</span><strong>{selectedDeliveryTemplateVersion.approvedBy?.name || '-'}</strong></div>
-                    <div><span>ردکننده</span><strong>{selectedDeliveryTemplateVersion.rejectedBy?.name || '-'}</strong></div>
-                  </div>
-                ) : null}
-                <div className="finance-toolbar">
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={loadSelectedTemplateVersionIntoForm}
-                    disabled={!selectedDeliveryTemplateVersion}
-                    data-testid="finance-delivery-template-load-version"
-                  >
-                    بارگذاری نسخه
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={saveDeliveryTemplateDraft}
-                    disabled={busy || !deliveryCampaignForm.messageTemplateKey || !!deliveryTemplateUnknownVariables.length}
-                    data-testid="finance-delivery-template-save-draft"
-                  >
-                    ذخیره draft
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={requestDeliveryTemplateReview}
-                    disabled={busy || !selectedDeliveryTemplateVersion || selectedDeliveryTemplateVersion.canRequestReview !== true}
-                    data-testid="finance-delivery-template-request-review"
-                  >
-                    ارسال برای بازبینی
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={approveDeliveryTemplateVersion}
-                    disabled={busy || !selectedDeliveryTemplateVersion || selectedDeliveryTemplateVersion.canApprove !== true}
-                    data-testid="finance-delivery-template-approve"
-                  >
-                    تایید نسخه
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={rejectDeliveryTemplateVersion}
-                    disabled={busy || !selectedDeliveryTemplateVersion || selectedDeliveryTemplateVersion.canReject !== true}
-                    data-testid="finance-delivery-template-reject"
-                  >
-                    رد نسخه
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={publishDeliveryTemplateDraft}
-                    disabled={busy || !selectedDeliveryTemplateVersion || selectedDeliveryTemplateVersion.canPublish !== true}
-                    data-testid="finance-delivery-template-publish-draft"
-                  >
-                    انتشار نسخه تاییدشده
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={rollbackDeliveryTemplateVersion}
-                    disabled={busy || !selectedDeliveryTemplateVersion || String(selectedDeliveryTemplateVersion.status || '') === 'draft' || Number(selectedDeliveryTemplateVersion.versionNumber || 0) === Number(selectedDeliveryTemplate.publishedVersionNumber || 1)}
-                    data-testid="finance-delivery-template-rollback"
-                  >
-                    rollback
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={archiveSelectedDeliveryTemplateVersion}
-                    disabled={busy || !selectedDeliveryTemplateVersion || Number(selectedDeliveryTemplateVersion.versionNumber || 0) <= 1 || String(selectedDeliveryTemplateVersion.status || '') === 'published'}
-                    data-testid="finance-delivery-template-archive"
-                  >
-                    archive version
-                  </button>
-                </div>
-                <div className="receipt-meta-grid audit-meta-grid" data-testid="finance-delivery-template-rollout-metrics">
-                  <div><span>کمپاین‌ها</span><strong>{fmt(selectedDeliveryTemplateRolloutMetrics.totalCampaigns || 0)}</strong></div>
-                  <div><span>فعال</span><strong>{fmt(selectedDeliveryTemplateRolloutMetrics.activeCampaigns || 0)}</strong></div>
-                  <div><span>خودکار</span><strong>{fmt(selectedDeliveryTemplateRolloutMetrics.automatedCampaigns || 0)}</strong></div>
-                  <div><span>تحویل موفق</span><strong>{fmt(selectedDeliveryTemplateRolloutMetrics.deliveredTargets || 0)}</strong></div>
-                  <div><span>ناموفق</span><strong>{fmt(selectedDeliveryTemplateRolloutMetrics.failedTargets || 0)}</strong></div>
-                  <div><span>آخرین استفاده</span><strong>{toFaDateTime(selectedDeliveryTemplateRolloutMetrics.lastUsedAt)}</strong></div>
-                </div>
-                {!!Object.keys(selectedDeliveryTemplateRolloutMetrics.byChannel || {}).length && (
-                  <div className="finance-chip-group delivery-live-status-summary">
-                    {Object.entries(selectedDeliveryTemplateRolloutMetrics.byChannel || {}).map(([key, count]) => (
-                      <span key={`delivery-template-rollout-${selectedDeliveryTemplate.key}-${key}`} className="finance-chip finance-chip-muted">
-                        {(DELIVERY_CHANNEL_LABELS[key] || key)}: {fmt(count)}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {(selectedDeliveryTemplate.history || []).length ? (
-                  <div className="finance-subcard-list">
-                    {(selectedDeliveryTemplate.history || []).slice(0, 4).map((entry, index) => (
-                      <div key={`delivery-template-history-${selectedDeliveryTemplate.key}-${index}`} className="mini-row">
-                        <span>
-                          {[
-                            DELIVERY_TEMPLATE_HISTORY_ACTION_LABELS[entry?.action] || entry?.action || '',
-                            entry?.versionNumber ? `v${entry.versionNumber}` : '',
-                            entry?.by?.name || ''
-                          ].filter(Boolean).join(' | ')}
-                        </span>
-                        <span>{toFaDateTime(entry?.at)}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-            <div className="finance-toolbar finance-toolbar-stack">
-              <label className="finance-inline-filter finance-inline-filter-wide">
-                <span>موضوع قالب</span>
-                <input
-                  value={deliveryCampaignForm.messageTemplateSubject}
-                  onChange={(e) => setDeliveryCampaignForm((prev) => ({ ...prev, messageTemplateSubject: e.target.value }))}
-                  placeholder="مثلاً Finance statement {{documentNo}}"
-                  data-testid="finance-delivery-campaign-template-subject"
-                />
-              </label>
-              <label className="finance-inline-filter finance-inline-filter-wide">
-                <span>متن قالب</span>
-                <textarea
-                  rows={4}
-                  value={deliveryCampaignForm.messageTemplateBody}
-                  onChange={(e) => setDeliveryCampaignForm((prev) => ({ ...prev, messageTemplateBody: e.target.value }))}
-                  placeholder="از متغیرهایی مثل {{documentNo}}، {{subjectName}}، {{verificationUrl}} و {{note}} استفاده کنید."
-                  data-testid="finance-delivery-campaign-template-body"
-                />
-              </label>
-            </div>
-            <div className="finance-toolbar">
-                <label className="finance-inline-filter finance-inline-check">
-                  <span>اطلاع به گیرندگان مرتبط</span>
-                  <input
-                    type="checkbox"
-                    checked={deliveryCampaignForm.includeLinkedAudience}
-                    disabled={deliveryCampaignForm.documentType === 'batch_statement_pack' || deliveryCampaignForm.channel === 'portal'}
-                    onChange={(e) => setDeliveryCampaignForm((prev) => ({ ...prev, includeLinkedAudience: e.target.checked }))}
-                  />
-                </label>
-              <label className="finance-inline-filter finance-inline-check">
-                <span>اتوماسیون فعال</span>
-                <input
-                  type="checkbox"
-                  checked={deliveryCampaignForm.automationEnabled}
-                  onChange={(e) => setDeliveryCampaignForm((prev) => ({ ...prev, automationEnabled: e.target.checked }))}
-                />
-              </label>
-              <label className="finance-inline-filter finance-inline-check">
-                <span>تلاش دوباره موارد ناموفق</span>
-                <input
-                  type="checkbox"
-                  checked={deliveryCampaignForm.retryFailed}
-                  onChange={(e) => setDeliveryCampaignForm((prev) => ({ ...prev, retryFailed: e.target.checked }))}
-                />
-              </label>
-              <label className="finance-inline-filter">
-                <span>فاصله اجرا (ساعت)</span>
-                <input
-                  type="number"
-                  min="6"
-                  max="720"
-                  value={deliveryCampaignForm.intervalHours}
-                  onChange={(e) => setDeliveryCampaignForm((prev) => ({ ...prev, intervalHours: e.target.value }))}
-                />
-              </label>
-              <label className="finance-inline-filter">
-                <span>حداکثر سند در هر اجرا</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="50"
-                  value={deliveryCampaignForm.maxDocumentsPerRun}
-                  onChange={(e) => setDeliveryCampaignForm((prev) => ({ ...prev, maxDocumentsPerRun: e.target.value }))}
-                />
-              </label>
-              <button
-                type="button"
-                onClick={createDeliveryCampaign}
-                disabled={busy}
-                data-testid="finance-delivery-campaign-save"
-              >
-                ثبت کمپاین
-              </button>
-            </div>
-          </div>
-
-          <div className="delivery-campaign-panel">
-            <div className="finance-toolbar">
-              <label className="finance-inline-filter">
-                <span>وضعیت</span>
-                <select
-                  value={deliveryCampaignStatusFilter}
-                  onChange={(e) => setDeliveryCampaignStatusFilter(e.target.value)}
-                >
-                  <option value="all">همه</option>
-                  <option value="active">فعال</option>
-                  <option value="paused">متوقف</option>
-                </select>
-              </label>
-            </div>
-
-            {!filteredDeliveryCampaigns.length ? (
-              <p className="muted">هنوز کمپاین ارسال ثبت نشده است.</p>
-            ) : (
-              <div className="delivery-campaign-list" data-testid="finance-delivery-campaign-list">
-                {filteredDeliveryCampaigns.map((item) => {
-                  const liveSummary = buildDeliveryLiveSummary(item.targets || [], item);
-                  const latestLiveStatus = buildDeliveryLiveStatus(item.liveStatus || liveSummary.latest || {});
-                  return (
-                    <article
-                      key={item._id || item.name}
-                      className={`delivery-campaign-item ${String(selectedDeliveryCampaign?._id || '') === String(item._id || '') ? 'selected' : ''}`}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setSelectedDeliveryCampaignId(String(item._id || ''))}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          setSelectedDeliveryCampaignId(String(item._id || ''));
-                        }
-                      }}
-                    >
-                      <div className="document-archive-item-head">
-                        <div>
-                          <strong>{item.name || 'کمپاین delivery'}</strong>
-                          <span>{DOCUMENT_ARCHIVE_TYPE_LABELS[item.documentType] || item.documentType || 'سند مالی'}</span>
-                        </div>
-                        <span className="finance-chip finance-chip-muted">{DELIVERY_CAMPAIGN_STATUS_LABELS[item.status] || item.status || 'فعال'}</span>
-                      </div>
-                      <div className="document-archive-meta">
-                        <span>{item.classTitle || 'همه صنف‌ها'}{item.academicYearTitle ? ` | ${item.academicYearTitle}` : ''}</span>
-                        <span>{item.monthKey ? toFaMonthKey(item.monthKey) : 'همه ماه‌ها'}</span>
-                      </div>
-                      <div className="document-archive-meta">
-                        <span>{DELIVERY_CHANNEL_LABELS[item.channel] || item.channel || 'ایمیل'}</span>
-                        <span>{fmt((item.recipientHandles || []).length)} گیرنده دستی</span>
-                      </div>
-                      <div className="document-archive-meta">
-                        <span>{DELIVERY_CAMPAIGN_RUN_STATUS_LABELS[item.lastRunStatus] || item.lastRunStatus || 'بدون اجرا'}</span>
-                        <span>{toFaDateTime(item.lastRunAt)}</span>
-                      </div>
-                      <div className="delivery-live-status-row">
-                        <span className={DELIVERY_LIVE_STATUS_CHIP_CLASS[latestLiveStatus.stage] || DELIVERY_LIVE_STATUS_CHIP_CLASS.unknown}>
-                          {DELIVERY_LIVE_STATUS_LABELS[latestLiveStatus.stage] || latestLiveStatus.stage || 'نامشخص'}
-                        </span>
-                        <span>
-                          {latestLiveStatus.provider
-                            ? `${latestLiveStatus.provider}${latestLiveStatus.providerMessageId ? ` | ${latestLiveStatus.providerMessageId}` : ''}`
-                            : 'provider live status'}
-                        </span>
-                      </div>
-                      <div className="finance-chip-group delivery-live-status-summary">
-                        {liveSummary.inFlight ? <span className="finance-chip finance-chip-muted">در جریان: {fmt(liveSummary.inFlight)}</span> : null}
-                        {liveSummary.successful ? <span className="finance-chip finance-chip-emerald">موفق: {fmt(liveSummary.successful)}</span> : null}
-                        {liveSummary.read ? <span className="finance-chip finance-chip-sky">دیده‌شده: {fmt(liveSummary.read)}</span> : null}
-                        {liveSummary.failed ? <span className="finance-chip finance-chip-rose">ناموفق: {fmt(liveSummary.failed)}</span> : null}
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-
-            {selectedDeliveryCampaign ? (
-              <div className="document-delivery-history" data-testid="finance-delivery-campaign-detail">
-                <div className="mini-row">
-                  <span>اجرای بعدی</span>
-                  <span>{toFaDateTime(selectedDeliveryCampaign.nextRunAt)}</span>
-                </div>
-                <div className="mini-row">
-                  <span>کانال</span>
-                  <span>{DELIVERY_CHANNEL_LABELS[selectedDeliveryCampaign.channel] || selectedDeliveryCampaign.channel || 'ایمیل'}</span>
-                </div>
-                <div className="mini-row">
-                  <span>قالب</span>
-                  <span>{deliveryTemplates.find((item) => item.key === selectedDeliveryCampaign.messageTemplateKey)?.label || selectedDeliveryCampaign.messageTemplateKey || 'عمومی'}</span>
-                </div>
-                <div className="mini-row">
-                  <span>اتوماسیون</span>
-                  <span>{selectedDeliveryCampaign.automationEnabled ? 'فعال' : 'دستی'}</span>
-                </div>
-                <div className="mini-row">
-                  <span>خلاصه</span>
-                  <span>
-                    {fmt(selectedDeliveryCampaign.targetSummary?.successful || 0)} موفق / {fmt(selectedDeliveryCampaign.targetSummary?.failed || 0)} ناموفق
-                  </span>
-                </div>
-                <div className="mini-row">
-                  <span>وضعیت زنده</span>
-                  <span className={DELIVERY_LIVE_STATUS_CHIP_CLASS[selectedDeliveryCampaignLiveSummary?.latest?.stage] || DELIVERY_LIVE_STATUS_CHIP_CLASS.unknown}>
-                    {DELIVERY_LIVE_STATUS_LABELS[selectedDeliveryCampaignLiveSummary?.latest?.stage] || selectedDeliveryCampaignLiveSummary?.latest?.stage || 'نامشخص'}
-                  </span>
-                </div>
-                <div className="finance-chip-group delivery-live-status-summary" data-testid="finance-delivery-campaign-live-status">
-                  {selectedDeliveryCampaignLiveSummary?.inFlight ? <span className="finance-chip finance-chip-muted">در جریان: {fmt(selectedDeliveryCampaignLiveSummary.inFlight)}</span> : null}
-                  {selectedDeliveryCampaignLiveSummary?.successful ? <span className="finance-chip finance-chip-emerald">موفق: {fmt(selectedDeliveryCampaignLiveSummary.successful)}</span> : null}
-                  {selectedDeliveryCampaignLiveSummary?.read ? <span className="finance-chip finance-chip-sky">دیده‌شده: {fmt(selectedDeliveryCampaignLiveSummary.read)}</span> : null}
-                  {selectedDeliveryCampaignLiveSummary?.failed ? <span className="finance-chip finance-chip-rose">ناموفق: {fmt(selectedDeliveryCampaignLiveSummary.failed)}</span> : null}
-                </div>
-                <div className="finance-toolbar">
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => runDeliveryCampaign(selectedDeliveryCampaign)}
-                    disabled={busy}
-                    data-testid="finance-delivery-campaign-run"
-                  >
-                    اجرای کمپاین
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => toggleDeliveryCampaignStatus(selectedDeliveryCampaign)}
-                    disabled={busy}
-                    data-testid="finance-delivery-campaign-toggle"
-                  >
-                    {String(selectedDeliveryCampaign.status || '') === 'active' ? 'توقف' : 'فعال‌سازی'}
-                  </button>
-                </div>
-                {(selectedDeliveryCampaign.recipientHandles || []).length ? (
-                  <div className="mini-row">
-                    <span>گیرنده‌های دستی</span>
-                    <span>{(selectedDeliveryCampaign.recipientHandles || []).join('، ')}</span>
-                  </div>
-                ) : null}
-                {selectedDeliveryCampaign.messageTemplateSubject ? (
-                  <div className="mini-row">
-                    <span>موضوع</span>
-                    <span>{selectedDeliveryCampaign.messageTemplateSubject}</span>
-                  </div>
-                ) : null}
-                {!!selectedDeliveryCampaign.targets?.length && (
-                  <div className="delivery-live-status-targets" data-testid="finance-delivery-target-status-list">
-                    {(selectedDeliveryCampaign.targets || []).slice(0, 5).map((target, index) => {
-                      const liveStatus = buildDeliveryLiveStatus(target.liveStatus || target);
-                      return (
-                        <div key={`delivery-target-live-${selectedDeliveryCampaign._id || index}-${target.archiveId || target.documentNo || index}`} className="delivery-live-status-target">
-                          <div>
-                            <strong>{target.documentNo || 'سند مالی'}</strong>
-                            <span>{target.recipient || target.providerMessageId || '-'}</span>
-                          </div>
-                          <div className="delivery-live-status-target-meta">
-                            <span className={DELIVERY_LIVE_STATUS_CHIP_CLASS[liveStatus.stage] || DELIVERY_LIVE_STATUS_CHIP_CLASS.unknown}>
-                              {DELIVERY_LIVE_STATUS_LABELS[liveStatus.stage] || liveStatus.stage || 'نامشخص'}
-                            </span>
-                            <span>{target.provider || liveStatus.provider || '-'}</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                {(selectedDeliveryCampaign.runLog || []).slice(0, 4).map((entry, index) => (
-                  <div key={`delivery-campaign-run-log-${selectedDeliveryCampaign._id || index}-${index}`} className="mini-row">
-                    <span>
-                      {[DELIVERY_CAMPAIGN_RUN_STATUS_LABELS[entry?.status] || entry?.status || '', entry?.mode || '', entry?.actorName || '']
-                        .filter(Boolean)
-                        .join(' | ') || 'run'}
-                    </span>
-                    <span>{toFaDateTime(entry?.runAt)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
-            <div className="document-delivery-history" data-testid="finance-delivery-retry-queue">
-              <div className="finance-toolbar">
-                <label className="finance-inline-filter">
-                  <span>فیلتر کانال</span>
-                  <select
-                    value={deliveryRetryChannelFilter}
-                    onChange={(e) => setDeliveryRetryChannelFilter(e.target.value)}
-                    data-testid="finance-delivery-retry-channel"
-                  >
-                    <option value="all">همه</option>
-                    {Object.entries(DELIVERY_CHANNEL_LABELS).map(([value, label]) => (
-                      <option key={`delivery-retry-channel-${value}`} value={value}>{label}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              {!deliveryRetryQueue.length ? (
-                <p className="muted">در حال حاضر مورد ناموفق برای تلاش دوباره وجود ندارد.</p>
-              ) : deliveryRetryQueue.map((item, index) => (
-                <article key={`delivery-retry-${item.campaignId || index}-${item.archiveId || index}`} className="delivery-retry-item">
-                  <div className="document-archive-item-head">
-                    <div>
-                      <strong>{item.documentNo || 'سند بدون شماره'}</strong>
-                      <span>{item.campaignName || 'کمپاین delivery'}</span>
-                    </div>
-                    <span className="finance-chip finance-chip-muted">{DELIVERY_CHANNEL_LABELS[item.channel] || item.channel || 'email'}</span>
-                  </div>
-                  <div className="document-archive-meta">
-                    <span>{item.recipient || 'بدون گیرنده مشخص'}</span>
-                    <span>{fmt(item.recipientCount || 0)} گیرنده</span>
-                  </div>
-                  <div className="document-archive-meta">
-                    <span>{fmt(item.attempts || 0)} تلاش</span>
-                    <span>{toFaDateTime(item.lastAttemptAt)}</span>
-                  </div>
-                  {(item.provider || item.providerMessageId) ? (
-                    <div className="document-archive-meta">
-                      <span>{item.provider || 'provider'}</span>
-                      <span>{item.providerMessageId || item.providerStatus || '-'}</span>
-                    </div>
-                  ) : null}
-                  <div className="delivery-live-status-row">
-                    <span className={DELIVERY_LIVE_STATUS_CHIP_CLASS[buildDeliveryLiveStatus(item).stage] || DELIVERY_LIVE_STATUS_CHIP_CLASS.unknown}>
-                      {DELIVERY_LIVE_STATUS_LABELS[buildDeliveryLiveStatus(item).stage] || buildDeliveryLiveStatus(item).stage || 'نامشخص'}
-                    </span>
-                    <span>{String(item.providerStatus || item.lastFailureCode || item.lastError || '-').trim() || '-'}</span>
-                  </div>
-                  {item.lastError ? (
-                    <p className="muted">{item.lastError}</p>
-                  ) : null}
-                  {(item.lastFailureCode || item.nextRetryAt) ? (
-                    <div className="document-archive-meta">
-                      <span>{item.lastFailureCode || 'بدون کد خطا'}</span>
-                      <span>{item.nextRetryAt ? `retry: ${toFaDateTime(item.nextRetryAt)}` : (item.retryable ? 'retryable' : 'بدون retry خودکار')}</span>
-                    </div>
-                  ) : null}
-                  <div className="finance-toolbar">
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={() => retryDeliveryQueueItem(item)}
-                      disabled={busy}
-                      data-testid={`finance-delivery-retry-button-${index}`}
-                    >
-                      retry delivery
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-
-            <div className="document-delivery-history" data-testid="finance-delivery-recovery-queue">
-              <div className="finance-toolbar">
-                <label className="finance-inline-filter">
-                  <span>وضعیت بازیابی</span>
-                  <select
-                    value={deliveryRecoveryStateFilter}
-                    onChange={(e) => setDeliveryRecoveryStateFilter(e.target.value)}
-                    data-testid="finance-delivery-recovery-state-filter"
-                  >
-                    <option value="all">همه</option>
-                    {Object.entries(DELIVERY_RECOVERY_STATE_LABELS).map(([value, label]) => (
-                      <option key={`delivery-recovery-state-${value}`} value={value}>{label}</option>
-                    ))}
-                  </select>
-                </label>
-                <div className="finance-chip-group delivery-live-status-summary">
-                  <span className="finance-chip finance-chip-muted">queue: {fmt(deliveryRecoveryQueue.length)}</span>
-                  {Object.entries(deliveryRecoverySummary).slice(0, 2).map(([key, count]) => (
-                    <span key={`delivery-recovery-summary-${key}`} className="finance-chip finance-chip-amber">
-                      {(DELIVERY_RECOVERY_STATE_LABELS[key] || key)}: {fmt(count)}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              {!deliveryRecoveryQueue.length ? (
-                <p className="muted">در حال حاضر موردی برای بازپخش و بازیابی وضعیت ارایه‌کننده وجود ندارد.</p>
-              ) : deliveryRecoveryQueue.map((item, index) => {
-                const liveStatus = buildDeliveryLiveStatus(item.liveStatus || item);
-                const recoveryLabel = DELIVERY_RECOVERY_STATE_LABELS[item.recoveryState] || item.recoveryState || 'recovery';
-                return (
-                  <article key={`delivery-recovery-${item.providerMessageId || index}`} className="delivery-retry-item delivery-recovery-item">
-                    <div className="document-archive-item-head">
-                      <div>
-                        <strong>{(item.documentNos || []).join('، ') || 'سند مالی'}</strong>
-                        <span>{(item.campaignNames || []).join('، ') || item.provider || 'provider recovery'}</span>
-                      </div>
-                      <span className={`finance-chip ${item.retryable ? 'finance-chip-amber' : 'finance-chip-muted'}`}>{recoveryLabel}</span>
-                    </div>
-                    <div className="document-archive-meta">
-                      <span>{item.recipient || 'بدون گیرنده مشخص'}</span>
-                      <span>{DELIVERY_CHANNEL_LABELS[item.channel] || item.channel || 'email'}</span>
-                    </div>
-                    <div className="document-archive-meta">
-                      <span>{item.provider || 'provider'}</span>
-                      <span>{item.providerMessageId || '-'}</span>
-                    </div>
-                    <div className="document-archive-meta">
-                      <span>{fmt(item.archiveCount || 0)} آرشیف / {fmt(item.campaignCount || 0)} کمپاین</span>
-                      <span>{item.ageMinutes != null ? `${fmt(item.ageMinutes)} دقیقه` : toFaDateTime(item.lastEventAt)}</span>
-                    </div>
-                    <div className="delivery-live-status-row">
-                      <span className={DELIVERY_LIVE_STATUS_CHIP_CLASS[liveStatus.stage] || DELIVERY_LIVE_STATUS_CHIP_CLASS.unknown}>
-                        {DELIVERY_LIVE_STATUS_LABELS[liveStatus.stage] || liveStatus.stage || 'نامشخص'}
-                      </span>
-                      <span>{String(item.providerStatus || item.failureCode || item.errorMessage || '-').trim() || '-'}</span>
-                    </div>
-                    {item.errorMessage ? (
-                      <p className="muted">{item.errorMessage}</p>
-                    ) : null}
-                    {(item.failureCode || item.nextRetryAt) ? (
-                      <div className="document-archive-meta">
-                        <span>{item.failureCode || 'بدون failure code'}</span>
-                        <span>{item.nextRetryAt ? `retry: ${toFaDateTime(item.nextRetryAt)}` : (item.retryable ? 'retryable' : 'manual replay')}</span>
-                      </div>
-                    ) : null}
-                    <div className="finance-toolbar">
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => replayDeliveryRecoveryItem(item, item.replayRecommendedStatus || 'delivered')}
-                        disabled={busy}
-                        data-testid={`finance-delivery-recovery-replay-${index}`}
-                      >
-                        replay as {item.replayRecommendedStatus || 'delivered'}
-                      </button>
-                      {item.channel === 'whatsapp' ? (
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={() => replayDeliveryRecoveryItem(item, 'read')}
-                          disabled={busy}
-                          data-testid={`finance-delivery-recovery-read-${index}`}
-                        >
-                          replay as read
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => replayDeliveryRecoveryItem(item, 'failed')}
-                        disabled={busy}
-                        data-testid={`finance-delivery-recovery-failed-${index}`}
-                      >
-                        replay as failed
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </div>}
 
       <div className="finance-card" data-finance-section="reports settings" data-testid="finance-document-archive-card">
         <div className="finance-card-head">
