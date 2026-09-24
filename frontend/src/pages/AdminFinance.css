@@ -216,6 +216,27 @@
   word-break: break-word;
 }
 
+/* The icon is a span too, so it has to opt out of the rule above. */
+.finance-msg .finance-msg-icon {
+  flex: 0 0 auto;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+/* A duplicate submission: the wording says nothing was created, and the colour
+   has to say the same, because the bar is otherwise identical to a success. */
+.finance-msg.is-warning {
+  border-color: rgba(242, 185, 12, 0.6);
+  background: rgba(48, 36, 8, 0.97);
+  color: #fde68a;
+}
+
+.finance-msg.is-error {
+  border-color: rgba(248, 113, 113, 0.55);
+  background: rgba(48, 16, 20, 0.97);
+  color: #fecaca;
+}
+
 .finance-msg-close {
   flex: 0 0 auto;
   width: 24px;
@@ -4269,23 +4290,12 @@
   color: #eef5ff;
 }
 
-.delivery-provider-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
-  gap: 14px;
-  margin-bottom: 12px;
-}
-
 @media (max-width: 1100px) {
   .finance-smart-kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .finance-recent-finance-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .delivery-provider-layout {
     grid-template-columns: 1fr;
   }
 
@@ -4298,147 +4308,6 @@
   .finance-orders-table .row {
     grid-template-columns: 1fr;
   }
-}
-
-.delivery-provider-summary-panel,
-.delivery-provider-form-panel,
-.delivery-provider-channel-item,
-.delivery-provider-status-panel {
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.delivery-provider-summary-panel,
-.delivery-provider-form-panel {
-  display: grid;
-  gap: 12px;
-  padding: 12px;
-}
-
-.delivery-provider-summary-panel div,
-.delivery-provider-status-panel div {
-  display: grid;
-  gap: 2px;
-}
-
-.delivery-provider-status-panel strong,
-.delivery-provider-status-panel span,
-.delivery-provider-summary-panel strong,
-.delivery-provider-summary-panel span {
-  word-break: break-word;
-  white-space: normal;
-}
-
-.delivery-provider-channel-list {
-  display: grid;
-  gap: 10px;
-}
-
-.delivery-provider-channel-item {
-  display: grid;
-  gap: 8px;
-  padding: 12px;
-  color: inherit;
-  text-align: right;
-}
-
-.delivery-provider-channel-item.selected {
-  border-color: rgba(56, 189, 248, 0.42);
-  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.16) inset;
-}
-
-.delivery-provider-status-panel {
-  padding: 12px;
-}
-
-.delivery-campaign-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-  gap: 14px;
-}
-
-.delivery-campaign-panel {
-  display: grid;
-  gap: 12px;
-}
-
-.delivery-analytics-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.delivery-analytics-card,
-.delivery-retry-item {
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  padding: 12px;
-}
-
-.delivery-analytics-card {
-  display: grid;
-  gap: 6px;
-}
-
-.delivery-analytics-card span,
-.delivery-analytics-card small {
-  color: rgba(238, 245, 255, 0.74);
-}
-
-.delivery-analytics-card strong {
-  font-size: 20px;
-}
-
-.delivery-operations-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.delivery-operations-panel {
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  padding: 12px;
-  display: grid;
-  gap: 10px;
-}
-
-.delivery-ops-entry {
-  display: grid;
-  gap: 8px;
-  padding: 10px 0;
-  border-top: 1px dashed rgba(255, 255, 255, 0.08);
-}
-
-.delivery-ops-entry:first-child {
-  border-top: none;
-  padding-top: 0;
-}
-
-.delivery-filter-chip-group {
-  justify-content: flex-start;
-}
-
-.delivery-campaign-list {
-  display: grid;
-  gap: 10px;
-}
-
-.delivery-campaign-item {
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  padding: 12px;
-}
-
-.delivery-campaign-item.selected {
-  border-color: rgba(56, 189, 248, 0.42);
-  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.16) inset;
 }
 
 .delivery-live-status-row {
@@ -4457,38 +4326,6 @@
 
 .delivery-live-status-summary {
   justify-content: flex-start;
-}
-
-.delivery-live-status-targets {
-  display: grid;
-  gap: 8px;
-}
-
-.delivery-live-status-target {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.delivery-live-status-target strong,
-.delivery-live-status-target span {
-  display: block;
-}
-
-.delivery-live-status-target span {
-  color: rgba(238, 245, 255, 0.74);
-  font-size: 12px;
-}
-
-.delivery-live-status-target-meta {
-  display: grid;
-  justify-items: end;
-  gap: 6px;
 }
 
 .document-archive-layout {
@@ -4581,71 +4418,6 @@
   gap: 8px;
 }
 
-.delivery-template-workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 14px;
-  margin-bottom: 12px;
-}
-
-.delivery-template-catalog,
-.delivery-template-preview-panel,
-.delivery-template-variable-item,
-.delivery-template-warning-list {
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.delivery-template-catalog,
-.delivery-template-preview-panel {
-  display: grid;
-  gap: 12px;
-  padding: 12px;
-}
-
-.delivery-template-version-panel {
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  padding: 12px;
-  margin-bottom: 12px;
-}
-
-.delivery-template-variable-list {
-  display: grid;
-  gap: 10px;
-}
-
-.delivery-template-variable-item {
-  display: grid;
-  gap: 6px;
-  padding: 10px;
-}
-
-.delivery-template-variable-item.used {
-  border-color: rgba(45, 212, 191, 0.28);
-  box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.12) inset;
-}
-
-.delivery-template-variable-item p,
-.delivery-template-warning-list p,
-.delivery-template-preview-body {
-  margin: 0;
-  color: rgba(238, 245, 255, 0.82);
-  white-space: pre-wrap;
-}
-
-.delivery-template-warning-list {
-  display: grid;
-  gap: 6px;
-  padding: 10px;
-}
-
-.delivery-template-warning-list strong {
-  color: #fde68a;
-}
-
 .muted {
   margin: 4px 0 0;
   color: rgba(238, 245, 255, 0.74);
@@ -4672,12 +4444,7 @@
     grid-template-columns: 1fr;
   }
 
-  .delivery-provider-layout,
-  .delivery-campaign-layout,
-  .document-archive-layout,
-  .delivery-analytics-grid,
-  .delivery-operations-grid,
-  .delivery-template-workspace {
+  .document-archive-layout {
     grid-template-columns: 1fr;
   }
 

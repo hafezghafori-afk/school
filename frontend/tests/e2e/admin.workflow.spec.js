@@ -322,6 +322,65 @@ const setupAdminPanelMocks = async (page) => {
     });
   });
 
+  // بدون این موک، درخواست به بک‌اند واقعی می‌رود، ECONNREFUSED می‌خورد و با retryهای
+  // apiFetch سایر درخواست‌ها (از جمله /api/admin/alerts) را پشت سرِ خود معطل می‌کند —
+  // همین باعث می‌شد هشدارها در بعضی اجراها خالی بمانند و تست flaky شود.
+  await page.route('**/api/dashboard/admin*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true })
+    });
+  });
+
+  // همهٔ این مسیرها روی mount داشبورد صدا می‌شوند. بی‌موک بودنِ آنها فقط خطای
+  // پراکسی نیست: با retryهای apiFetch و مهلتِ مشترک، درخواستِ /api/admin/alerts را عقب
+  // می‌اندازند و گاهی از پنجرهٔ ۷ ثانیه‌ای expect بیرون می‌زنند — همان چیزی که این تست را flaky می‌کرد.
+  await page.route('**/api/afghan-schools/active*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, schoolId: '', school: null, schools: [] })
+    });
+  });
+
+  await page.route('**/api/afghan-schools/ownership-audit*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, data: { rows: [] } })
+    });
+  });
+
+  await page.route('**/api/afghan-schools', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, data: { schools: [] } })
+    });
+  });
+
+  await page.route('**/api/admin/users/directory-orphans*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, data: {} })
+    });
+  });
+
+  await page.route('**/api/admin/recent-activity*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, items: [] })
+    });
+  });
+
+  // socket.io از apiFetch نمی‌گذرد، ولی long-pollِ ردشده هم اتصال مرورگر می‌گیرد.
+  await page.route('**/socket.io/**', async (route) => {
+    await route.abort();
+  });
+
   await page.route('**/api/admin/stats', async (route) => {
     await route.fulfill({
       status: 200,
@@ -446,172 +505,101 @@ test.describe('admin workflow', () => {
 
     await page.goto('/admin', { waitUntil: 'domcontentloaded' });
 
-    const pendingReceiptsAlert = page.locator('.admin-alert').filter({ hasText: 'رسیدهای مالی در انتظار تایید' });
-    const overdueBillsAlert = page.locator('.admin-alert').filter({ hasText: 'بل‌های مالی معوق' });
-    const scheduleDraftsAlert = page.locator('.admin-alert').filter({ hasText: 'برنامه‌های draft منتشرنشده' });
-    const unreadContactsAlert = page.locator('.admin-alert').filter({ hasText: 'پیام‌های خوانده‌نشده پشتیبانی' });
+    // داشبورد ادمین به چیدمان «modern» منتقل شده است. مارکآپ قدیمی (.admin-hero،
+    // .admin-alerts، .admin-columns و همراهانش) هنوز در DOM هست ولی AdminPanel.css آن را با
+    // `display: none !important` پنهان می‌کند؛ پس همان پنل‌هایی را می‌سنجیم که کاربر واقعاً می‌بیند.
+    const urgentPanel = page.locator('.admin-modern-panel').filter({ hasText: 'کارهای فوری مدیریتی' });
+    const keyAlertsPanel = page.locator('.admin-modern-panel').filter({ hasText: 'هشدارهای کلیدی' });
 
-    const pendingReceiptsAlertNormalized = page.locator('.admin-alert').filter({ hasText: /رسیدهای مالی.*تایید/ });
-    const overdueBillsAlertNormalized = page.locator('.admin-alert').filter({ hasText: /بل‌های مالی معوق/ });
-    const scheduleDraftsAlertNormalized = page.locator('.admin-alert').filter({ hasText: /برنامه.*(پیش‌نویس|draft)/ });
-    const unreadContactsAlertNormalized = page.locator('.admin-alert').filter({ hasText: /پیام‌های خوانده‌نشده پشتیبانی/ });
+    // هشدارهای level: high در «کارهای فوری مدیریتی» می‌نشینند.
+    const pendingReceiptsAlert = urgentPanel.locator('a.admin-modern-list-item').filter({ hasText: /رسیدهای مالی.*تایید/ });
+    const overdueBillsAlert = urgentPanel.locator('a.admin-modern-list-item').filter({ hasText: /بل‌های مالی معوق/ });
 
-    await expect(pendingReceiptsAlertNormalized).toHaveCount(1);
-    await expect(pendingReceiptsAlertNormalized.locator('.admin-alert-link')).toHaveAttribute('href', /\/admin-finance#pending-receipts$/);
-    await expect(overdueBillsAlertNormalized).toHaveCount(1);
-    await expect(overdueBillsAlertNormalized.locator('.admin-alert-link')).toHaveAttribute('href', /\/admin-finance$/);
-    await expect(scheduleDraftsAlertNormalized).toHaveCount(1);
-    await expect(scheduleDraftsAlertNormalized.locator('.admin-alert-link')).toHaveAttribute('href', /\/admin-schedule$/);
-    await expect(unreadContactsAlertNormalized).toHaveCount(1);
-    await expect(unreadContactsAlertNormalized.locator('.admin-alert-link')).toHaveAttribute('href', /\/admin-contact$/);
+    await expect(pendingReceiptsAlert).toHaveCount(1);
+    await expect(pendingReceiptsAlert).toHaveAttribute('href', /\/admin-finance#pending-receipts$/);
+    await expect(overdueBillsAlert).toHaveCount(1);
+    await expect(overdueBillsAlert).toHaveAttribute('href', /\/admin-finance$/);
 
-    await page.getByRole('button', { name: 'جستجوی سراسری' }).click();
-    await expect(page.locator('.admin-search-row input')).toBeVisible();
-    await page.locator('.admin-search-row input').fill('Alpha');
-    await page.locator('.admin-search-row button').click();
+    // هشدارهای غیرفوری در «هشدارهای کلیدی».
+    const scheduleDraftsAlert = keyAlertsPanel.locator('a.admin-modern-list-item').filter({ hasText: /برنامه.*(پیش‌نویس|draft)/ });
+    const unreadContactsAlert = keyAlertsPanel.locator('a.admin-modern-list-item').filter({ hasText: /پیام‌های خوانده‌نشده پشتیبانی/ });
 
-    await expect.poll(async () => page.locator('.admin-search-group').count()).toBeGreaterThan(10);
-    await expect(page.locator('a.admin-search-item[href$="/admin-finance"]').filter({ hasText: 'BL-ALPHA-0001' })).toHaveCount(1);
-    await expect(page.locator('a.admin-search-item[href$="/admin-finance#pending-receipts"]').filter({ hasText: 'BL-ALPHA-0001' })).toHaveCount(1);
-    await expect(page.locator('a.admin-search-item[href$="/courses/course-1"]').filter({ hasText: 'Alpha Class' })).toHaveCount(1);
-    await expect(page.locator('a.admin-search-item[href$="/admin-settings"]').filter({ hasText: 'Alpha Academy' })).toHaveCount(1);
-    await expect(page.locator('a.admin-search-item[href$="/admin-logs"]').filter({ hasText: 'alpha_review' })).toHaveCount(1);
+    await expect(scheduleDraftsAlert).toHaveCount(1);
+    // «/admin-schedule» خودش فقط یک ریدایرکت به ویرایشگر تقسیم اوقات است.
+    await expect(scheduleDraftsAlert).toHaveAttribute('href', /\/timetable\/editor$/);
+    await expect(unreadContactsAlert).toHaveCount(1);
+    // پیام‌های پشتیبانی به هاب یکپارچهٔ ارتباطات منتقل شده‌اند.
+    await expect(unreadContactsAlert).toHaveAttribute('href', /\/admin-communications$/);
+
+    // جستجوی سراسری در نوار بالای داشبورد مدرن.
+    await page.getByRole('button', { name: 'جستجو در سامانه…' }).click();
+    await expect(page.locator('.admin-modern-search-row input')).toBeVisible();
+    await page.locator('.admin-modern-search-row input').fill('Alpha');
+    await page.locator('.admin-modern-search-row button').click();
+
+    const searchResults = page.locator('.admin-modern-search-results');
+    await expect.poll(async () => page.locator('.admin-modern-search-group').count()).toBeGreaterThan(10);
+    await expect(searchResults.locator('a[href$="/admin-finance"]').filter({ hasText: 'BL-ALPHA-0001' })).toHaveCount(1);
+    await expect(searchResults.locator('a[href$="/admin-finance#pending-receipts"]').filter({ hasText: 'BL-ALPHA-0001' })).toHaveCount(1);
+    await expect(searchResults.locator('a[href$="/courses/course-1"]').filter({ hasText: 'Alpha Class' })).toHaveCount(1);
+    await expect(searchResults.locator('a[href$="/admin-settings"]').filter({ hasText: 'Alpha Academy' })).toHaveCount(1);
+    await expect(searchResults.locator('a[href$="/admin-logs"]').filter({ hasText: 'alpha_review' })).toHaveCount(1);
   });
 
-  test('admin notification center filters finance alerts and toggles read state', async ({ page }) => {
-    let notifications = [
-      {
-        _id: 'finance-notify-1',
-        title: 'یادآوری بدهی معوق',
-        message: 'بل BL-ALPHA-0001 برای Alpha Student معوق است.',
-        type: 'finance',
-        category: 'finance',
-        eventKey: 'reminder',
-        level: 'critical',
-        sourceModule: 'finance',
-        actionUrl: '/admin-finance',
-        needsAction: true,
-        createdAt: '2026-03-07T08:00:00.000Z',
-        readAt: null
-      },
-      {
-        _id: 'finance-notify-2',
-        title: 'پیگیری رسید',
-        message: 'رسید Student Beta به آمریت مالی ارجاع شد.',
-        type: 'finance',
-        category: 'finance',
-        eventKey: 'workflow',
-        level: 'warning',
-        sourceModule: 'workflow',
-        actionUrl: '/admin-finance#pending-receipts',
-        needsAction: true,
-        createdAt: '2026-03-07T09:30:00.000Z',
-        readAt: null
-      },
-      {
-        _id: 'finance-notify-3',
-        title: 'پایان نزدیک تسهیلات',
-        message: 'بورسیه جزئی Alpha Student تا دو هفته دیگر ختم می‌شود.',
-        type: 'finance',
-        category: 'finance',
-        eventKey: 'relief',
-        level: 'info',
-        sourceModule: 'finance',
-        actionUrl: '/admin-finance',
-        needsAction: false,
-        createdAt: '2026-03-06T15:45:00.000Z',
-        readAt: '2026-03-06T18:00:00.000Z'
-      }
-    ];
-
-    const buildNotificationSummary = (items = []) => ({
-      total: items.length,
-      unread: items.filter((item) => !item.readAt).length,
-      read: items.filter((item) => item.readAt).length,
-      needsAction: items.filter((item) => item.needsAction).length,
-      byLevel: {
-        critical: items.filter((item) => item.level === 'critical').length,
-        warning: items.filter((item) => item.level === 'warning').length,
-        info: items.filter((item) => item.level === 'info').length
-      }
-    });
-
-    const buildNotificationsPayload = () => ({
-      success: true,
-      items: notifications,
-      unread: notifications.filter((item) => !item.readAt).length,
-      summary: buildNotificationSummary(notifications)
-    });
-
-    await page.route('**/api/users/me/notifications?*', async (route) => {
+  // The finance notification centre this file used to drive (AdminNotifications,
+  // with its status/event filters and read toggles) is no longer reachable:
+  // the communications hub took over /admin-notifications and the page it
+  // replaced has no equivalent screen. All that is left to guard is that the
+  // old URL still lands somewhere sensible instead of a dead route.
+  test('legacy notification centre url lands on the communications hub', async ({ page }) => {
+    await page.route('**/api/users/me', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(buildNotificationsPayload())
+        body: JSON.stringify({
+          success: true,
+          user: {
+            _id: adminSession.userId,
+            name: adminSession.userName,
+            role: adminSession.role,
+            adminLevel: adminSession.adminLevel,
+            orgRole: adminSession.orgRole,
+            effectivePermissions: adminSession.permissions
+          }
+        })
       });
     });
 
-    await page.route('**/api/users/me/notifications/read-all', async (route) => {
-      const count = notifications.filter((item) => !item.readAt).length;
-      const now = '2026-03-07T10:45:00.000Z';
-      notifications = notifications.map((item) => ({ ...item, readAt: item.readAt || now }));
+    await page.route('**/api/admin-messages*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ success: true, count })
+        body: JSON.stringify({ success: true, items: [] })
       });
     });
 
-    await page.route('**/api/users/me/notifications/*/read', async (route) => {
-      const id = route.request().url().split('/').slice(-2)[0];
-      const now = '2026-03-07T10:15:00.000Z';
-      notifications = notifications.map((item) => (
-        item._id === id ? { ...item, readAt: item.readAt || now } : item
-      ));
-      const current = notifications.find((item) => item._id === id) || null;
+    await page.route('**/api/contact/admin', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ success: true, item: current })
+        body: JSON.stringify({ success: true, items: [] })
       });
     });
 
-    await page.route('**/api/users/me/notifications/*/unread', async (route) => {
-      const id = route.request().url().split('/').slice(-2)[0];
-      notifications = notifications.map((item) => (
-        item._id === id ? { ...item, readAt: null } : item
-      ));
-      const current = notifications.find((item) => item._id === id) || null;
+    await page.route('**/api/education/school-classes*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ success: true, item: current })
+        body: JSON.stringify({ success: true, items: [] })
       });
     });
 
     await page.goto('/admin-notifications', { waitUntil: 'domcontentloaded' });
 
-    await expect(page.getByRole('heading', { name: 'مرکز اعلان‌های مالی' })).toBeVisible();
-    await expect(page.locator('.notify-kpi').filter({ hasText: 'کل اعلان‌ها' })).toContainText(/3|۳/);
-    await expect(page.locator('.notify-kpi').filter({ hasText: 'نخوانده' })).toContainText(/2|۲/);
-
-    await page.getByTestId('notification-filter-status').selectOption('unread');
-    await expect(page.getByTestId('notification-center-list')).toContainText('یادآوری بدهی معوق');
-    await page.getByTestId('notification-filter-event').selectOption('workflow');
-    await expect(page.locator('.notify-item-card')).toHaveCount(1);
-    await expect(page.getByTestId('notification-center-list')).toContainText('پیگیری رسید');
-    await page.getByTestId('notification-item-finance-notify-2').click();
-    await expect(page.getByTestId('notification-center-detail')).toContainText('ارجاع شد');
-    await expect(page.getByTestId('notification-center-detail').locator('a')).toHaveAttribute('href', /\/admin-finance#pending-receipts$/);
-
-    await page.getByTestId('notification-toggle-read').click();
-    await expect(page.locator('.notify-kpi').filter({ hasText: 'نخوانده' })).toContainText(/1|۱/);
-    await expect(page.getByTestId('notification-center-detail')).toContainText('خوانده شده');
-
-    await page.getByTestId('notification-filter-status').selectOption('all');
-    await page.getByTestId('notification-filter-event').selectOption('all');
-    await page.getByTestId('notification-mark-all').click();
-    await expect(page.locator('.notify-kpi').filter({ hasText: 'نخوانده' })).toContainText(/0|۰/);
+    await expect(page).toHaveURL(/\/admin-communications\?tab=announce$/, { timeout: 20_000 });
+    await expect(page.locator('.route-loading')).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.getByRole('heading', { name: 'مرکز ارتباطات', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'اعلانِ همگانی', level: 2 })).toBeVisible();
   });
 
   test('admin workflow filters admin logs by org role', async ({ page }) => {
@@ -664,7 +652,7 @@ test.describe('admin workflow', () => {
     await expect(page.locator('.admin-content-item').first()).toContainText('ریاست عمومی');
   });
 
-  test('admin workflow saves menu settings and exports admin logs csv', async ({ page }) => {
+  test('admin workflow saves settings tabs and exports admin logs csv', async ({ page }) => {
     let savedPayload = null;
     let exportCalls = 0;
 
@@ -683,6 +671,14 @@ test.describe('admin workflow', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ success: true, settings: savedPayload })
+      });
+    });
+
+    await page.route('**/api/school-websites/admin/primary', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, profile: null })
       });
     });
 
@@ -723,13 +719,20 @@ test.describe('admin workflow', () => {
       });
     });
 
-    await page.goto('/admin-settings', { waitUntil: 'domcontentloaded' });
+    // صفحهٔ تنظیمات به تب تقسیم شده و tablist فقط ۴ تب را نشان می‌دهد؛ تبِ
+    // «هیدر و منو» که ویرایشگر mainMenu را داشت دیگر از رابط کاربری قابل دسترس نیست،
+    // پس دو تبی را می‌سنجیم که واقعاً باز می‌شوند. هر دو ویرایش روی همان شیء
+    // settings می‌نشیند، پس یک بار «ذخیره همه تنظیمات» باید هر دو را در یک PUT بفرستد.
+    await page.goto('/admin-settings#student-ids', { waitUntil: 'domcontentloaded' });
 
-    await page.locator('.settings-grid input').first().fill('خانه سریع Alpha');
-    await page.getByPlaceholder('عنوان میانبر').first().fill('گزارش Alpha');
+    await page.locator('.settings-grid input').first().fill('ALPHA-{YYYY}-{SEQ}');
+
+    await page.getByRole('button', { name: 'میانبرهای ادمین' }).click();
+    await page.locator('.quick-link-row input').first().fill('گزارش Alpha');
+
     await page.getByRole('button', { name: 'ذخیره همه تنظیمات' }).click();
 
-    await expect.poll(() => savedPayload?.mainMenu?.[0]?.title || '').toBe('خانه سریع Alpha');
+    await expect.poll(() => savedPayload?.studentIdFormats?.registrationIdFormat || '').toBe('ALPHA-{YYYY}-{SEQ}');
     await expect.poll(() => savedPayload?.adminQuickLinks?.[0]?.title || '').toBe('گزارش Alpha');
     await expect(page.locator('.settings-message')).toContainText('ذخیره شد');
 

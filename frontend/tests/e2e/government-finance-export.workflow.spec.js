@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 import { setupAdminWorkspace } from './adminWorkspace.helpers';
+import { gotoAppPage, stubUnmockedApi } from './navigation.helpers';
 
 test.describe('government finance workflow', () => {
   test.beforeEach(async ({ page }) => {
@@ -18,6 +19,7 @@ test.describe('government finance workflow', () => {
       });
     });
 
+    await stubUnmockedApi(page);
     await setupAdminWorkspace(page, {
       permissions: ['manage_finance', 'view_reports']
     });
@@ -496,16 +498,22 @@ test.describe('government finance workflow', () => {
       });
     });
 
-    await page.goto('/admin-government-finance', { waitUntil: 'domcontentloaded' });
-    await page.getByRole('tab', { name: 'آرشیف رسمی' }).click();
-    await expect.poll(() => new URL(page.url()).searchParams.get('tab') || '').toBe('archive');
+    await gotoAppPage(page, '/admin-government-finance');
+    // The monthly/quarterly/annual/archive tabs were folded into one «گزارش‌ها»
+    // tab with a report-mode switch, so the archive now lives one level down
+    // and carries its own `rmode` in the URL.
+    await page.getByRole('tab', { name: 'گزارش‌ها', exact: true }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('tab') || '').toBe('reports');
+    await page.getByRole('tab', { name: 'آرشیف رسمی', exact: true }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('rmode') || '').toBe('archive');
 
     const classFilter = page.locator('.gov-finance-filters select').nth(2);
     await classFilter.selectOption('class-1');
     await expect.poll(() => new URL(page.url()).searchParams.get('classId') || '').toBe('class-1');
 
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect.poll(() => new URL(page.url()).searchParams.get('tab') || '').toBe('archive');
+    await expect.poll(() => new URL(page.url()).searchParams.get('tab') || '').toBe('reports');
+    await expect.poll(() => new URL(page.url()).searchParams.get('rmode') || '').toBe('archive');
     await expect(page.locator('.gov-finance-filters select').nth(2)).toHaveValue('class-1');
 
     const exportGrid = page.locator('.gov-export-grid');

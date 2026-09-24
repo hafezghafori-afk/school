@@ -1,87 +1,13 @@
 import { test, expect } from '@playwright/test';
 
-import { setupAdminWorkspace } from './adminWorkspace.helpers';
+import { setupAdminWorkspace, setupAdminDashboard, gotoAdminDashboard, modernPanel } from './adminWorkspace.helpers';
 
-const mockDashboardDependencies = async (page) => {
-  await page.route('**/api/admin/stats', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        success: true,
-        users: 100,
-        courses: 15,
-        todayPayments: 3,
-        pendingOrders: 2
-      })
-    });
-  });
-
-  await page.route('**/api/dashboard/admin', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        success: true,
-        summary: {
-          totalStudents: 200,
-          totalInstructors: 18,
-          totalRevenue: 100000,
-          totalDue: 125000,
-          outstandingAmount: 25000,
-          attendanceRate: 86,
-          todayPayments: 3,
-          pendingFinanceReviews: 4,
-          pendingProfileRequests: 5,
-          pendingAccessRequests: 6,
-          monthlyRevenue: 35000,
-          previousMonthRevenue: 30000,
-          monthDeltaPercent: 16.6
-        },
-        tasks: [],
-        alerts: [],
-        revenueTrend: [],
-        studentGrowth: []
-      })
-    });
-  });
-
-  await page.route('**/api/admin/workflow-report*', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ success: true, levels: [], byType: {}, breakdown: [], totals: {} })
-    });
-  });
-
-  await page.route('**/api/admin/sla/config', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        success: true,
-        config: {
-          timeouts: {
-            finance_manager: 120,
-            finance_lead: 240,
-            general_president: 480
-          }
-        }
-      })
-    });
-  });
-
-  await page.route('**/api/admin-logs*', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ success: true, items: [] })
-    });
-  });
-};
-
+// Two of these four are urgent by the page's own rule — level 'high', overSla,
+// or requiresImmediateAction — and two are not. The split is the thing worth
+// guarding: an operator's «کارهای فوری مدیریتی» panel must not quietly fill up
+// with alerts that can wait until tomorrow.
 const mockAlerts = async (page) => {
-  await page.route('**/api/admin/alerts', async (route) => {
+  await page.route('**/api/admin/alerts*', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -159,44 +85,58 @@ test.describe('admin alerts enhancements', () => {
     await setupAdminWorkspace(page, {
       permissions: ['view_reports']
     });
-    await mockDashboardDependencies(page);
+    await setupAdminDashboard(page);
     await mockAlerts(page);
   });
 
-  test('renders urgent alerts section with actionable items', async ({ page }) => {
-    await page.goto('/admin', { waitUntil: 'domcontentloaded' });
+  test('splits urgent alerts from the rest across the two dashboard panels', async ({ page }) => {
+    await gotoAdminDashboard(page);
 
-    const alertsPanel = page.locator('.admin-alerts').first();
-    await expect(alertsPanel.getByRole('heading', { name: 'هشدارهای مدیریتی' })).toBeVisible();
+    // general_president has no alert-domain filter (ADMIN_LEVEL_ALERT_DOMAINS
+    // maps it to null), so all four alerts reach the dashboard and the only
+    // thing sorting them is urgency.
+    const urgentPanel = modernPanel(page, 'کارهای فوری مدیریتی');
+    await expect(urgentPanel).toBeVisible();
+    await expect(urgentPanel).toContainText('رسیدهای مالی در انتظار تایید');
+    await expect(urgentPanel).toContainText('درخواست‌های تغییر مشخصات');
+    await expect(urgentPanel).not.toContainText('درخواست‌های دسترسی');
+    await expect(urgentPanel).not.toContainText('پیام‌های خوانده‌نشده پشتیبانی');
 
-    await expect(alertsPanel.locator('.admin-alert-subhead').filter({ hasText: 'نیازمند اقدام امروز' })).toBeVisible();
-    await expect(alertsPanel).toContainText('رسیدهای مالی در انتظار تایید');
-    await expect(alertsPanel).toContainText('درخواست‌های تغییر مشخصات');
-    await expect(alertsPanel).toContainText('از SLA عبور کرده');
+    const keyAlertsPanel = modernPanel(page, 'هشدارهای کلیدی');
+    await expect(keyAlertsPanel).toBeVisible();
+    await expect(keyAlertsPanel).toContainText('درخواست‌های دسترسی');
+    await expect(keyAlertsPanel).toContainText('پیام‌های خوانده‌نشده پشتیبانی');
+    await expect(keyAlertsPanel).not.toContainText('رسیدهای مالی در انتظار تایید');
+    await expect(keyAlertsPanel).not.toContainText('درخواست‌های تغییر مشخصات');
   });
 
-  test('filters alerts by domain and supports snooze persistence', async ({ page }) => {
-    await page.goto('/admin', { waitUntil: 'domcontentloaded' });
+  test('each alert carries its count and a link to the queue it belongs to', async ({ page }) => {
+    await gotoAdminDashboard(page);
 
-    const alertsPanel = page.locator('.admin-alerts').first();
+    // The counts are what make an alert actionable — a row that says only
+    // «رسیدهای مالی در انتظار تایید» does not tell anyone whether to drop what
+    // they are doing. Urgent rows render the count as «۱۴ مورد»; the key-alert
+    // panel renders it as a bare tag.
+    const urgentReceipts = modernPanel(page, 'کارهای فوری مدیریتی')
+      .locator('a.admin-modern-list-item', { hasText: 'رسیدهای مالی در انتظار تایید' });
+    await expect(urgentReceipts).toHaveAttribute('href', '/admin-finance#pending-receipts');
+    await expect(urgentReceipts).toContainText('۱۴');
 
-    await alertsPanel.locator('.admin-alert-domain-filter').selectOption('users');
-    await expect(alertsPanel).toContainText('درخواست‌های دسترسی');
-    await expect(alertsPanel).toContainText('درخواست‌های تغییر مشخصات');
-    await expect(alertsPanel).not.toContainText('رسیدهای مالی در انتظار تایید');
-
-    const accessRow = alertsPanel.locator('.admin-activity-item', { hasText: 'درخواست‌های دسترسی' });
-    await accessRow.locator('.admin-alert-snooze').click();
-
-    await expect(alertsPanel).not.toContainText('درخواست‌های دسترسی');
-    await expect(alertsPanel).toContainText('بی‌صدا:');
-
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    const reloadedPanel = page.locator('.admin-alerts').first();
-    await reloadedPanel.locator('.admin-alert-domain-filter').selectOption('users');
-    await expect(reloadedPanel).not.toContainText('درخواست‌های دسترسی');
-
-    await reloadedPanel.locator('.admin-alert-unsnooze-all').click();
-    await expect(reloadedPanel).toContainText('درخواست‌های دسترسی');
+    const keyAccess = modernPanel(page, 'هشدارهای کلیدی')
+      .locator('a.admin-modern-list-item', { hasText: 'درخواست‌های دسترسی' });
+    await expect(keyAccess).toHaveAttribute('href', '/admin-users#access-requests');
+    await expect(keyAccess).toContainText('۵');
+    await expect(keyAccess).toContainText('تیم کاربران');
   });
+
+  // DELETED: 'filters alerts by domain and supports snooze persistence'.
+  //
+  // That spec drove `.admin-alert-domain-filter`, `.admin-alert-snooze` and
+  // `.admin-alert-unsnooze-all`. All three exist only inside the legacy
+  // `.admin-alerts` block (AdminPanel.jsx ~5932-6040), which AdminPanel.css
+  // hides unconditionally — so no operator can reach the domain filter or
+  // snooze an alert. The state behind them (alertDomainFilter, snoozedAlerts)
+  // is still wired into visibleAlerts, but with no control rendered it never
+  // moves off its default, and a test that drove it would be asserting on a
+  // feature the product no longer offers.
 });

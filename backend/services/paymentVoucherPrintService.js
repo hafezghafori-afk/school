@@ -248,6 +248,7 @@ function buildSalaryVoucherHtml({ payment, treasuryAccountLabel = '', branding =
     detailFields: [
       ['دورهٔ معاش', monthLabel || payment.period || '—'],
       ['معاشِ اساسی (؋)', fa(payment.grossSalary)],
+      ['مالیه بر معاش (؋)', fa(payment.taxAmount)],
       ['کسرِ اقساطِ پیشکی (؋)', fa(payment.deductionTotal)],
       ['حسابِ خزانه', treasuryAccountLabel || '—']
     ],
