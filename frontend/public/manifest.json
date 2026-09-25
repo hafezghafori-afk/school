@@ -1,25 +1,28 @@
 {
-  "short_name": "React App",
-  "name": "Create React App Sample",
+  "short_name": "اناثیه ایمان",
+  "name": "مدرسه اناثیه ایمان",
+  "description": "وب‌سایت رسمی مدرسه خصوصی اناثیه ایمان (Iman Private Girls' School)، کابل",
+  "lang": "fa",
+  "dir": "rtl",
   "icons": [
     {
-      "src": "favicon.ico",
-      "sizes": "64x64 32x32 24x24 16x16",
+      "src": "/favicon.ico",
+      "sizes": "16x16 32x32 48x48",
       "type": "image/x-icon"
     },
     {
-      "src": "logo192.png",
+      "src": "/logo192.png",
       "type": "image/png",
       "sizes": "192x192"
     },
     {
-      "src": "logo512.png",
+      "src": "/logo512.png",
       "type": "image/png",
       "sizes": "512x512"
     }
   ],
-  "start_url": ".",
-  "display": "standalone",
-  "theme_color": "#000000",
+  "start_url": "/",
+  "display": "browser",
+  "theme_color": "#101723",
   "background_color": "#ffffff"
 }

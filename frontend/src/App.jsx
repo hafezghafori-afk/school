@@ -462,14 +462,6 @@ const getStoredPublicLanguage = () => {
   }
 };
 
-const toBrowserAssetUrl = (value = '') => {
-  const src = String(value || '').trim();
-  if (!src) return '';
-  if (/^(https?:|data:|blob:)/i.test(src)) return src;
-  const normalized = src.startsWith('/') ? src : `/${src}`;
-  return API_ORIGIN ? `${API_ORIGIN}${normalized}` : normalized;
-};
-
 const setHeadMetaContent = (selector, content) => {
   if (!content) return;
   const meta = document.querySelector(selector);
@@ -1129,7 +1121,6 @@ function AppShell() {
   const headerText = publicLocale.header;
   const displayBrandName = normalizeBrandName(settings?.brandName);
   const displayBrandSubtitle = normalizeBrandSubtitle(settings?.brandSubtitle);
-  const browserLogoUrl = toBrowserAssetUrl(settings?.schoolLogoUrl || settings?.logoUrl || settings?.logo || '');
   const menuBlueprintLibrary = useMemo(
     () => buildMenuBlueprintLibrary(settings?.menuBlueprints),
     [settings?.menuBlueprints]
@@ -1156,39 +1147,17 @@ function AppShell() {
   });
 
   useEffect(() => {
-    const title = displayBrandName || 'مکتب';
-    const description = displayBrandSubtitle
-      ? `${title} - ${displayBrandSubtitle}`
-      : title;
-    document.title = title;
-    setHeadMetaContent('meta[name="application-name"]', title);
-    setHeadMetaContent('meta[name="apple-mobile-web-app-title"]', title);
-    setHeadMetaContent('meta[name="description"]', description);
-    setHeadMetaContent('meta[property="og:title"]', title);
-    setHeadMetaContent('meta[property="og:description"]', description);
-    setHeadMetaContent('meta[name="twitter:title"]', title);
-    setHeadMetaContent('meta[name="twitter:description"]', description);
-
-    if (browserLogoUrl) {
-      let icon = document.querySelector('link[rel="icon"]') || document.querySelector('link[rel="shortcut icon"]');
-      if (!icon) {
-        icon = document.createElement('link');
-        icon.setAttribute('rel', 'icon');
-        document.head.appendChild(icon);
-      }
-      icon.setAttribute('href', browserLogoUrl);
-
-      let appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
-      if (!appleIcon) {
-        appleIcon = document.createElement('link');
-        appleIcon.setAttribute('rel', 'apple-touch-icon');
-        document.head.appendChild(appleIcon);
-      }
-      appleIcon.setAttribute('href', browserLogoUrl);
-      setHeadMetaContent('meta[property="og:image"]', browserLogoUrl);
-      setHeadMetaContent('meta[name="twitter:image"]', browserLogoUrl);
-    }
-  }, [browserLogoUrl, displayBrandName, displayBrandSubtitle]);
+    // index.html owns the description, social tags and icons: it is the only
+    // copy that crawlers which don't run JavaScript (AI crawlers, link previews)
+    // ever see, and its icons are square, small files cut from the school logo.
+    // So this only names the tab, and only once the settings are in: before
+    // that, displayBrandName is just the fallback, which titled every page
+    // «سیما» until they arrived (or for good, if they never did).
+    if (!settings) return;
+    document.title = displayBrandName;
+    setHeadMetaContent('meta[name="application-name"]', displayBrandName);
+    setHeadMetaContent('meta[name="apple-mobile-web-app-title"]', displayBrandName);
+  }, [settings, displayBrandName]);
 
   const isDashboardArea = authed && (
     path === '/dashboard' ||
