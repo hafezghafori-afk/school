@@ -505,6 +505,25 @@ function formatDiscount(doc, asasNumberMap = null) {
   };
 }
 
+// A discount or exemption reaches every open bill of the student, but a bill
+// whose month is locked (closed, in review, or past its reopen deadline)
+// keeps the figures that month was closed with: it is skipped, instead of
+// the whole change being refused because the student has old arrears.
+async function isBillPeriodLocked(item = {}) {
+  try {
+    await assertFinancePeriodWritable({
+      schoolId: item.schoolId,
+      financialYearId: item.financialYearId,
+      academicYearId: item.academicYearId,
+      dateValue: item.dueDate || item.issuedAt
+    });
+    return false;
+  } catch (error) {
+    if (['finance_month_closed', 'finance_financial_year_closed'].includes(String(error?.code || ''))) return true;
+    throw error;
+  }
+}
+
 async function syncDiscountOpenBills(discount = null) {
   if (!discount?._id || !discount?.studentMembershipId) return;
   const marker = `[discount:${String(discount._id)}]`;
@@ -516,11 +535,7 @@ async function syncDiscountOpenBills(discount = null) {
     ]
   });
   for (const bill of bills) {
-    await assertFinancePeriodWritable({
-      schoolId: bill.schoolId,
-      academicYearId: bill.academicYearId,
-      dateValue: bill.issuedAt || bill.dueDate
-    });
+    if (await isBillPeriodLocked(bill)) continue;
     const dueDate = normalizeDateValue(bill.dueDate);
     const periodStart = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth(), 1) : null;
     const periodEnd = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth() + 1, 0, 23, 59, 59, 999) : null;
@@ -561,12 +576,7 @@ async function syncDiscountOpenBills(discount = null) {
     ]
   });
   for (const order of orders) {
-    await assertFinancePeriodWritable({
-      schoolId: order.schoolId,
-      financialYearId: order.financialYearId,
-      academicYearId: order.academicYearId,
-      dateValue: order.issuedAt || order.dueDate
-    });
+    if (await isBillPeriodLocked(order)) continue;
     const dueDate = normalizeDateValue(order.dueDate);
     const periodStart = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth(), 1) : null;
     const periodEnd = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth() + 1, 0, 23, 59, 59, 999) : null;
@@ -609,11 +619,7 @@ async function syncExemptionOpenBills(exemption = null) {
   });
 
   for (const bill of bills) {
-    await assertFinancePeriodWritable({
-      schoolId: bill.schoolId,
-      academicYearId: bill.academicYearId,
-      dateValue: bill.issuedAt || bill.dueDate
-    });
+    if (await isBillPeriodLocked(bill)) continue;
     bill.adjustments = (bill.adjustments || []).filter((row) => !normalizeText(row.reason).startsWith(marker));
     if (exemption.status === 'active') {
       const baseAmount = scope === 'all'
@@ -655,12 +661,7 @@ async function syncExemptionOpenBills(exemption = null) {
     ]
   });
   for (const order of orders) {
-    await assertFinancePeriodWritable({
-      schoolId: order.schoolId,
-      financialYearId: order.financialYearId,
-      academicYearId: order.academicYearId,
-      dateValue: order.issuedAt || order.dueDate
-    });
+    if (await isBillPeriodLocked(order)) continue;
     order.adjustments = (order.adjustments || []).filter((row) => !normalizeText(row.reason).startsWith(marker));
     if (exemption.status === 'active') {
       const baseAmount = scope === 'all'
@@ -2719,6 +2720,16 @@ async function createFeePayment(payload = {}) {
       ? 'student_finance_payment_reference_duplicate'
       : 'student_finance_payment_duplicate');
   }
+
+  // A payment belongs to the month it was paid in. A locked month (closed, in
+  // review, or past its reopen deadline) takes no new payment: final approval
+  // refuses it there anyway, so it would only sit pending. Arrears of a closed
+  // month are collected with a payment dated in an open month.
+  await assertFinancePeriodWritable({
+    schoolId: preview.schoolId,
+    academicYearId: membership.academicYearId?._id || membership.academicYearId || '',
+    dateValue: Number.isNaN(paidAt.getTime()) ? new Date() : paidAt
+  });
 
   const item = await FeePayment.create({
     paymentNumber: buildPaymentNumber(),

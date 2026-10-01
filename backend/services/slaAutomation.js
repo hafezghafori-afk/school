@@ -1,4 +1,5 @@
 const FeePayment = require('../models/FeePayment');
+const FinanceMonthClose = require('../models/FinanceMonthClose');
 const ProfileUpdateRequest = require('../models/ProfileUpdateRequest');
 const ContactMessage = require('../models/ContactMessage');
 const User = require('../models/User');
@@ -6,6 +7,7 @@ const UserNotification = require('../models/UserNotification');
 const { logActivity } = require('../utils/activity');
 const { normalizeAdminLevel } = require('../utils/permissions');
 const { isFinanceMaintenanceActive } = require('./financeMaintenanceService');
+const { formatMonthCloseLabel } = require('../utils/financeMonthClosePeriods');
 
 const LEVEL_ORDER = ['finance_manager', 'finance_lead', 'general_president'];
 const OPEN_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'escalated']);
@@ -147,6 +149,57 @@ const processWorkflow = async ({ app, model, action, targetType, baseFilter }) =
   return { escalated, notifications };
 };
 
+const REOPEN_REMINDER_MS = 24 * 60 * 60 * 1000;
+
+// A reopened finance month is time-boxed: the finance manager is reminded a
+// day before its deadline, and told (with the president) once it has passed
+// and the month is locked again. Each is sent once per reopen or extension.
+const processMonthCloseReopenDeadlines = async (app) => {
+  const now = new Date();
+  const rows = await FinanceMonthClose.find({ status: 'reopened', reopenDeadline: { $ne: null } })
+    .select('monthKey closeWindow reopenDeadline reopenReminderAt reopenExpiryNotifiedAt history');
+  let reminders = 0;
+  let expired = 0;
+  let notifications = 0;
+
+  for (const row of rows) {
+    const deadline = new Date(row.reopenDeadline);
+    if (Number.isNaN(deadline.getTime())) continue;
+    const label = formatMonthCloseLabel(row);
+    if (deadline.getTime() <= now.getTime()) {
+      if (row.reopenExpiryNotifiedAt) continue;
+      row.reopenExpiryNotifiedAt = now;
+      row.history = Array.isArray(row.history) ? row.history : [];
+      row.history.push({ action: 'expired', by: null, at: now, note: 'پایان مهلت بازگشایی' });
+      await row.save();
+      expired += 1;
+      const message = `مهلت بازگشایی ماه ${label} تمام شد و ماه دوباره قفل است؛ درخواست بستن دوباره را ثبت کنید یا ریاست عمومی مهلت را تمدید کند.`;
+      notifications += await notifyAdminsByLevel(app, 'finance_manager', 'پایان مهلت بازگشایی ماه مالی', message);
+      notifications += await notifyAdminsByLevel(app, 'general_president', 'پایان مهلت بازگشایی ماه مالی', message);
+      await logActivity({
+        req: systemReq,
+        action: 'finance_month_reopen_expired',
+        targetType: 'FinanceMonthClose',
+        targetId: String(row._id),
+        reason: 'reopen_deadline',
+        meta: { monthKey: row.monthKey, reopenDeadline: deadline }
+      });
+    } else if (!row.reopenReminderAt && deadline.getTime() - now.getTime() <= REOPEN_REMINDER_MS) {
+      row.reopenReminderAt = now;
+      await row.save();
+      reminders += 1;
+      notifications += await notifyAdminsByLevel(
+        app,
+        'finance_manager',
+        'مهلت بازگشایی ماه مالی رو به پایان است',
+        `کمتر از یک روز از مهلت اصلاح ماه ${label} مانده است؛ اصلاحات را تمام و درخواست بستن دوباره را ثبت کنید.`
+      );
+    }
+  }
+
+  return { reminders, expired, notifications };
+};
+
 async function runSlaEscalationSweep(app, { force = false } = {}) {
   if (await isFinanceMaintenanceActive()) {
     return { ok: true, skipped: true, reason: 'finance_maintenance_active' };
@@ -160,7 +213,7 @@ async function runSlaEscalationSweep(app, { force = false } = {}) {
 
   running = true;
   try {
-    const [receipts, profiles, contacts] = await Promise.all([
+    const [receipts, profiles, contacts, monthCloseReopens] = await Promise.all([
       processWorkflow({
         app,
         model: FeePayment,
@@ -181,7 +234,8 @@ async function runSlaEscalationSweep(app, { force = false } = {}) {
         action: 'sla_auto_escalation_contact',
         targetType: 'ContactMessage',
         baseFilter: { status: { $ne: 'read' } }
-      })
+      }),
+      processMonthCloseReopenDeadlines(app)
     ]);
 
     return {
@@ -193,9 +247,11 @@ async function runSlaEscalationSweep(app, { force = false } = {}) {
         orders: receipts,
         profiles,
         contacts,
+        monthCloseReopens,
         totals: {
           escalated: receipts.escalated + profiles.escalated + contacts.escalated,
           notifications: receipts.notifications + profiles.notifications + contacts.notifications
+            + monthCloseReopens.notifications
         }
       }
     };
@@ -224,6 +280,7 @@ function startSlaAutomation(app) {
 }
 
 module.exports = {
+  processMonthCloseReopenDeadlines,
   runSlaEscalationSweep,
   startSlaAutomation,
   LEVEL_TIMEOUT_MINUTES

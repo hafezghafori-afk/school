@@ -18,6 +18,7 @@ const { createFinanceRefundCase } = require('../utils/financeRefundCase');
 const { notifyFinanceOfLifecycleChange, broadcastFinanceLifecycleChange } = require('../utils/financeLifecycleNotifications');
 const { invalidateAll: invalidateFinanceReportCache } = require('../utils/financeReportCache');
 const sawanehCardService = require('./sawanehCardService');
+const { afghanMonthStart } = require('../utils/afghanDate');
 const {
   ACTIVE_STUDENT_MEMBERSHIP_STATUSES,
   CURRENT_STUDENT_MEMBERSHIP_STATUSES
@@ -180,7 +181,13 @@ async function reconcileFutureBillingForEndedMembership(membership, action, effe
   // the departure month are still left untouched on purpose - that's
   // legitimate pre-departure arrears/payment, not this student's departure
   // affecting billing.
-  const currentMonthStart = new Date(effectiveAt.getFullYear(), effectiveAt.getMonth(), 1);
+  // Bills are filed under their Afghan month, so the departure month is the
+  // Afghan month the departure falls in. A Gregorian month would void the
+  // previous Afghan month's unpaid bills (leaving on 25 September, 3 Mizan,
+  // reached back to 1 September, 10 Sonbola) or miss this month's (leaving on
+  // 5 October, 13 Mizan, left the bills from 23 September open).
+  const currentMonthStart = afghanMonthStart(effectiveAt)
+    || new Date(effectiveAt.getFullYear(), effectiveAt.getMonth(), 1);
   const voidFields = {
     status: 'void',
     voidReason: action,
@@ -771,5 +778,8 @@ module.exports = {
   applyLifecycleAction,
   executeStudentLifecycleAction,
   getStudentLifecycleHistory,
-  snapshotMembership
+  snapshotMembership,
+  __billingTestUtils: Object.freeze({
+    reconcileFutureBillingForEndedMembership
+  })
 };

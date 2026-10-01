@@ -21,7 +21,15 @@ const AccessRequest = require('../models/AccessRequest');
 const SchoolClass = require('../models/SchoolClass');
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
 const { sumPaidRefunds } = require('../utils/financeRefundRecognition');
+const {
+  AFGHAN_SOLAR_MONTHS,
+  afghanMonthKeyBounds,
+  formatAfghanMonthKeyLabel,
+  shiftAfghanMonthKey,
+  toAfghanMonthKey
+} = require('../utils/afghanDate');
 const { ACTIVE_STUDENT_MEMBERSHIP_STATUSES } = require('../utils/studentMembershipStatus');
+const { hasStudentLeft, loadCurrentMembershipStatusMap } = require('../utils/financeStudentLifecycleStatus');
 
 function startOfDay(date = new Date()) {
   const value = new Date(date);
@@ -47,13 +55,6 @@ function toDateKey(date = new Date()) {
   const month = String(value.getMonth() + 1).padStart(2, '0');
   const day = String(value.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
-}
-
-function monthKey(date = new Date()) {
-  const value = new Date(date);
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, '0');
-  return `${year}-${month}`;
 }
 
 function formatDateLabel(date, options = {}) {
@@ -83,15 +84,20 @@ function buildRecentDayBuckets(days = 7) {
   return buckets;
 }
 
-function buildRecentMonthBuckets(months = 6) {
+// The last `months` Afghan solar months up to the one `now` falls in, oldest
+// first - the months a school reads its figures in. A Gregorian month would
+// split each of them (1 October is 9 Mizan).
+function buildRecentAfghanMonthBuckets(months = 6, now = new Date()) {
+  const currentKey = toAfghanMonthKey(now);
   const buckets = [];
-  const today = new Date();
   for (let index = months - 1; index >= 0; index -= 1) {
-    const value = new Date(today.getFullYear(), today.getMonth() - index, 1);
+    const bounds = afghanMonthKeyBounds(shiftAfghanMonthKey(currentKey, -index));
+    if (!bounds) continue;
     buckets.push({
-      key: monthKey(value),
-      label: formatDateLabel(value, { month: 'short' }),
-      value
+      key: bounds.monthKey,
+      label: AFGHAN_SOLAR_MONTHS[Number(bounds.monthKey.slice(5)) - 1],
+      start: bounds.start,
+      end: bounds.end
     });
   }
   return buckets;
@@ -437,13 +443,26 @@ async function getTeacherDashboard(userId) {
   };
 }
 
-async function getAdminDashboard() {
-  const todayStart = startOfDay(new Date());
-  const todayEnd = endOfDay(new Date());
-  const monthStart = new Date(todayStart.getFullYear(), todayStart.getMonth(), 1);
-  const previousMonthStart = new Date(todayStart.getFullYear(), todayStart.getMonth() - 1, 1);
-  const previousMonthEnd = new Date(monthStart.getTime() - 1);
-  const attendanceStart = startOfDay(shiftDays(new Date(), -29));
+async function getAdminDashboard({ now = new Date() } = {}) {
+  const todayStart = startOfDay(now);
+  const todayEnd = endOfDay(now);
+  // «این ماه» is the Afghan month today falls in, from its 1st day; the
+  // comparison is the whole Afghan month before it.
+  const monthBuckets = buildRecentAfghanMonthBuckets(6, now);
+  const currentMonth = monthBuckets[monthBuckets.length - 1];
+  const previousMonth = monthBuckets[monthBuckets.length - 2];
+  const attendanceStart = startOfDay(shiftDays(now, -29));
+  // Open debt is what the bills whose Afghan month has started still owe, as
+  // «باقیات» in the finance centre reads it for this month: a bill issued
+  // ahead for a later month is not owed yet. A bill without a due date counts
+  // from the day it was issued.
+  const startedBillFilter = {
+    status: { $ne: 'void' },
+    $or: [
+      { dueDate: { $lte: currentMonth.end } },
+      { dueDate: null, issuedAt: { $lte: currentMonth.end } }
+    ]
+  };
 
   const [
     officialPeopleCounts,
@@ -455,11 +474,12 @@ async function getAdminDashboard() {
     pendingFinanceReviews,
     overdueOrders,
     draftSchedules,
-    recentMemberships
+    recentMemberships,
+    debtorRows
   ] = await Promise.all([
     getOfficialPeopleCounts(),
     FeeOrder.aggregate([
-      { $match: { status: { $ne: 'void' } } },
+      { $match: startedBillFilter },
       {
         $group: {
           _id: null,
@@ -478,17 +498,28 @@ async function getAdminDashboard() {
     FeeOrder.countDocuments({
       status: { $in: ['new', 'partial', 'overdue'] },
       outstandingAmount: { $gt: 0 },
-      dueDate: { $lt: new Date() }
+      $or: [
+        { dueDate: { $lt: now } },
+        { dueDate: null, issuedAt: { $lt: now } }
+      ]
     }),
     Schedule.countDocuments({ visibility: 'draft' }),
     StudentMembership.find({
-      createdAt: { $gte: new Date(previousMonthStart.getFullYear(), previousMonthStart.getMonth() - 4, 1) }
-    }).select('createdAt joinedAt')
+      createdAt: { $gte: monthBuckets[0].start }
+    }).select('createdAt joinedAt'),
+    FeeOrder.aggregate([
+      { $match: { ...startedBillFilter, outstandingAmount: { $gt: 0 } } },
+      { $group: { _id: '$student', outstanding: { $sum: '$outstandingAmount' } } }
+    ])
   ]);
 
   const totalStudents = officialPeopleCounts.totalStudents;
   const totalInstructors = officialPeopleCounts.totalInstructors;
   const financeSummary = outstandingStats[0] || { totalDue: 0, outstandingAmount: 0 };
+  // The part owed by students who have left (transferred, dropped, expelled),
+  // shown beside the total as the finance centre shows «بدهی راکد خارج‌شدگان».
+  const debtorStatusMap = await loadCurrentMembershipStatusMap(debtorRows.map((row) => row._id));
+  const departedDebtorRows = debtorRows.filter((row) => hasStudentLeft(debtorStatusMap.get(String(row._id || ''))));
   const recognizedPayments = await recognizePayments(approvedPayments);
   // «عواید» در این داشبورد = عواید تاییدشدهٔ نهایی: پرداخت‌های تاییدشده منهای
   // بازپرداخت‌های پرداخت‌شده در همان بازه (هم‌راستا با کارت «عواید خالص» داشبورد
@@ -510,9 +541,10 @@ async function getAdminDashboard() {
     paidRefundRows.filter((row) => inWindow(row?.paidAt, start, end)),
     (row) => row.amount
   );
-  const monthlyRevenue = revenueInWindow(monthStart, null) - refundsInWindow(monthStart, null);
-  const previousMonthRevenue = revenueInWindow(previousMonthStart, previousMonthEnd)
-    - refundsInWindow(previousMonthStart, previousMonthEnd);
+  const monthlyRevenue = revenueInWindow(currentMonth.start, currentMonth.end)
+    - refundsInWindow(currentMonth.start, currentMonth.end);
+  const previousMonthRevenue = revenueInWindow(previousMonth.start, previousMonth.end)
+    - refundsInWindow(previousMonth.start, previousMonth.end);
   const totalRevenue = sumBy(recognizedRevenueRows, (row) => row.recognizedAmount)
     - sumBy(paidRefundRows, (row) => row.amount);
   const todayPayments = recognizedPayments.filter((row) => {
@@ -521,30 +553,29 @@ async function getAdminDashboard() {
   });
   const attendanceRate = computeAttendanceRate(attendanceRows);
 
-  const studentGrowth = buildRecentMonthBuckets(6).map((bucket) => ({
+  const studentGrowth = monthBuckets.map((bucket) => ({
     label: bucket.label,
-    value: recentMemberships.filter((item) => monthKey(item.joinedAt || item.createdAt || new Date()) === bucket.key).length,
+    value: recentMemberships.filter((item) => toAfghanMonthKey(item.joinedAt || item.createdAt || now) === bucket.key).length,
     meta: 'عضویت'
   }));
 
-  const revenueTrend = buildRecentMonthBuckets(6).map((bucket) => {
-    const bucketStart = new Date(bucket.value.getFullYear(), bucket.value.getMonth(), 1);
-    const bucketEnd = new Date(bucket.value.getFullYear(), bucket.value.getMonth() + 1, 0, 23, 59, 59, 999);
-    return {
-      label: bucket.label,
-      value: Number((revenueInWindow(bucketStart, bucketEnd) - refundsInWindow(bucketStart, bucketEnd)).toFixed(0)),
-      meta: 'افغانی'
-    };
-  });
+  const revenueTrend = monthBuckets.map((bucket) => ({
+    label: bucket.label,
+    value: Number((revenueInWindow(bucket.start, bucket.end) - refundsInWindow(bucket.start, bucket.end)).toFixed(0)),
+    meta: 'افغانی'
+  }));
 
   return {
-    generatedAt: new Date().toISOString(),
+    generatedAt: now.toISOString(),
     summary: {
       totalStudents,
       totalInstructors,
       totalRevenue: Number(totalRevenue.toFixed(0)),
       totalDue: Number((financeSummary.totalDue || 0).toFixed(0)),
       outstandingAmount: Number((financeSummary.outstandingAmount || 0).toFixed(0)),
+      departedOutstandingAmount: Number(sumBy(departedDebtorRows, (row) => row.outstanding).toFixed(0)),
+      departedDebtors: departedDebtorRows.length,
+      overdueOrders,
       attendanceRate,
       todayPayments: todayPayments.length,
       pendingFinanceReviews,
@@ -553,6 +584,8 @@ async function getAdminDashboard() {
       monthlyRevenue: Number(monthlyRevenue.toFixed(0)),
       previousMonthRevenue: Number(previousMonthRevenue.toFixed(0)),
       monthDeltaPercent: compareMonthChange(monthlyRevenue, previousMonthRevenue),
+      monthLabel: formatAfghanMonthKeyLabel(currentMonth.key),
+      previousMonthLabel: formatAfghanMonthKeyLabel(previousMonth.key),
       directoryHealth: {
         studentUsers: officialPeopleCounts.directoryStudentUsers,
         instructorUsers: officialPeopleCounts.directoryInstructorUsers,

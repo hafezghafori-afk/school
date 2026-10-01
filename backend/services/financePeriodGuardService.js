@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const FinanceMonthClose = require('../models/FinanceMonthClose');
 const FinancialYear = require('../models/FinancialYear');
+const { buildMonthCloseLockMessage, resolveMonthCloseLock } = require('../utils/financeMonthClosePeriods');
 
 function normalizeId(value = '') {
   return String(value?._id || value || '').trim();
@@ -59,22 +60,43 @@ async function resolveFinancialYearForScope({
   return dbQuery;
 }
 
-async function isFinanceMonthClosed(dateValue, scope = {}) {
-  const monthKey = toMonthKey(dateValue);
-  if (!monthKey) return false;
+// The month close whose days cover this date and that blocks writes right now
+// (closed, in review, or reopened past its deadline), with the reason - or
+// null. Matching the stored closeWindow instead of a "YYYY-MM" key keeps solar
+// closes and older Gregorian ones working side by side.
+async function findLockingMonthClose(dateValue, scope = {}) {
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return null;
   const schoolId = assertValidScopeId(scope.schoolId, 'finance_school_scope_invalid');
   const financialYearId = assertValidScopeId(scope.financialYearId, 'finance_financial_year_scope_invalid');
   const academicYearId = assertValidScopeId(scope.academicYearId, 'finance_academic_year_scope_invalid');
   if (!schoolId) {
     throw createPeriodError('finance_school_scope_required', 'برای بررسی ماه مالی، مکتب معتبر باید مشخص باشد.', 400);
   }
-  const filter = { monthKey, status: 'closed' };
-  if (schoolId) filter.schoolId = schoolId;
+  const filter = {
+    schoolId,
+    status: { $in: ['closed', 'pending_review', 'reopened'] },
+    $or: [
+      { 'closeWindow.startAt': { $lte: date }, 'closeWindow.endAt': { $gte: date } },
+      // Records stored before closeWindow existed cover their Gregorian month.
+      { 'closeWindow.startAt': null, monthKey: toMonthKey(date) }
+    ]
+  };
   if (financialYearId) filter.financialYearId = financialYearId;
   else if (academicYearId) filter.academicYearId = academicYearId;
-  let query = FinanceMonthClose.exists(filter);
+  let query = FinanceMonthClose.find(filter).select('monthKey status closeWindow reopenDeadline');
   if (scope.session) query = query.session(scope.session);
-  return Boolean(await query);
+  const rows = await query.lean();
+  const now = new Date();
+  for (const record of rows) {
+    const lock = resolveMonthCloseLock(record, now);
+    if (lock.locked) return { record, reason: lock.reason };
+  }
+  return null;
+}
+
+async function isFinanceMonthClosed(dateValue, scope = {}) {
+  return Boolean(await findLockingMonthClose(dateValue, scope));
 }
 
 async function assertFinancePeriodWritable(scope = {}) {
@@ -89,13 +111,13 @@ async function assertFinancePeriodWritable(scope = {}) {
   if (financialYear?.isClosed === true || String(financialYear?.status || '') === 'closed') {
     throw createPeriodError('finance_financial_year_closed', 'سال مالی بسته شده است و تغییر سند مالی در این دوره مجاز نیست.');
   }
-  const closed = await isFinanceMonthClosed(scope.dateValue || new Date(), {
+  const lock = await findLockingMonthClose(scope.dateValue || new Date(), {
     ...scope,
     financialYearId: normalizeId(scope.financialYearId || financialYear?._id),
     academicYearId: normalizeId(scope.academicYearId || financialYear?.academicYearId)
   });
-  if (closed) {
-    throw createPeriodError('finance_month_closed', 'ماه مالی بسته شده است و تغییر سند مالی در این دوره مجاز نیست.');
+  if (lock) {
+    throw createPeriodError('finance_month_closed', buildMonthCloseLockMessage(lock.record, lock.reason));
   }
   return financialYear;
 }
@@ -103,6 +125,7 @@ async function assertFinancePeriodWritable(scope = {}) {
 module.exports = {
   assertFinancePeriodWritable,
   createPeriodError,
+  findLockingMonthClose,
   isFinanceMonthClosed,
   resolveFinancialYearForScope,
   toMonthKey

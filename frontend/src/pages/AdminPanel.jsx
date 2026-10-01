@@ -2496,6 +2496,7 @@ export default function AdminPanel() {
     totalRevenue: Number(dashboardSummary.totalRevenue || 0),
     totalDue: Number(dashboardSummary.totalDue || 0),
     outstandingAmount: Number(dashboardSummary.outstandingAmount || 0),
+    departedOutstandingAmount: Number(dashboardSummary.departedOutstandingAmount || 0),
     attendanceRate: Number(financeStats.attendanceRate ?? dashboardSummary.attendanceRate ?? stats.attendanceRate ?? 0),
     todayPayments: Number(financeStats.todayPayments ?? dashboardSummary.todayPayments ?? stats.todayPayments ?? 0),
     todayPaymentAmount: Number(financeStats.todayPaymentAmount || 0),
@@ -2506,9 +2507,17 @@ export default function AdminPanel() {
     monthlyRevenue: Number(dashboardSummary.monthlyRevenue || 0),
     previousMonthRevenue: Number(dashboardSummary.previousMonthRevenue || 0),
     monthDeltaPercent: Number(dashboardSummary.monthDeltaPercent || 0),
+    monthLabel: String(dashboardSummary.monthLabel || ''),
+    previousMonthLabel: String(dashboardSummary.previousMonthLabel || ''),
     openMessages: Number(financeStats.openMessages ?? stats.openMessages ?? supportMessages.length ?? 0),
     activeSchools: Number(financeStats.activeSchools ?? stats.activeSchools ?? schoolOverviewStats.activeRecords ?? 0)
   };
+  // «این ماه» is the Afghan month (from its 1st day), compared with the whole
+  // Afghan month before it - name both so the figure reads as what it is.
+  const monthlyRevenueHint = [
+    executiveSummary.monthLabel,
+    `${Number(executiveSummary.monthDeltaPercent || 0).toLocaleString('fa-AF-u-ca-persian')}٪ نسبت به ${executiveSummary.previousMonthLabel || 'ماه قبل'}`
+  ].filter(Boolean).join(' • ');
 
   // شمار واقعی بل‌های معوق (سررسیدگذشته و دارای باقیمانده) — از /api/admin/alerts (کلید finance_overdue)،
   // نه orders.length که صف رسیدهای منتظر تایید است (یک چیز کاملاً متفاوت).
@@ -2655,7 +2664,7 @@ export default function AdminPanel() {
     {
       label: 'عواید این ماه',
       value: Number(executiveSummary.monthlyRevenue || 0).toLocaleString('fa-AF-u-ca-persian'),
-      hint: `${Number(executiveSummary.monthDeltaPercent || 0).toLocaleString('fa-AF-u-ca-persian')}٪ نسبت به ماه قبل`,
+      hint: monthlyRevenueHint,
       tone: 'mint',
       progress: Number(executiveSummary.totalDue || 0)
         ? Math.min(100, (Number(executiveSummary.monthlyRevenue || 0) / Number(executiveSummary.totalDue || 1)) * 100)
@@ -3087,7 +3096,7 @@ export default function AdminPanel() {
     {
       label: 'عواید کل این ماه',
       value: Number(executiveSummary.monthlyRevenue || 0).toLocaleString('fa-AF-u-ca-persian'),
-      hint: `${Number(executiveSummary.monthDeltaPercent || 0).toLocaleString('fa-AF-u-ca-persian')}٪ نسبت به ماه قبل`,
+      hint: monthlyRevenueHint,
       tone: 'copper',
       progress: Number(executiveSummary.totalDue || 0)
         ? Math.min(100, (Number(executiveSummary.monthlyRevenue || 0) / Number(executiveSummary.totalDue || 1)) * 100)
@@ -3096,7 +3105,14 @@ export default function AdminPanel() {
     {
       label: 'بدهی باز کل',
       value: Number(executiveSummary.outstandingAmount || 0).toLocaleString('fa-AF-u-ca-persian'),
-      hint: `${financeOverdueCount.toLocaleString('fa-AF-u-ca-persian')} بل معوق`,
+      // Bills whose Afghan month has started; the part owed by students who
+      // have left is named beside the overdue count.
+      hint: [
+        `${financeOverdueCount.toLocaleString('fa-AF-u-ca-persian')} بل معوق`,
+        executiveSummary.departedOutstandingAmount > 0
+          ? `${executiveSummary.departedOutstandingAmount.toLocaleString('fa-AF-u-ca-persian')} از خارج‌شدگان`
+          : ''
+      ].filter(Boolean).join(' • '),
       tone: 'rose',
       progress: Number(executiveSummary.totalDue || 0)
         ? Math.min(100, (Number(executiveSummary.outstandingAmount || 0) / Number(executiveSummary.totalDue || 1)) * 100)

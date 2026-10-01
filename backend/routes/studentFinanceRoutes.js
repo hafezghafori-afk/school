@@ -348,6 +348,10 @@ router.post('/payments', requireAuth, requireRole(['admin']), requirePermission(
         : 'پرداخت مالی ثبت شد و در انتظار تایید قرار گرفت.'
     });
   } catch (error) {
+    // A payment dated in a locked month or closed year: say which and why.
+    if (error?.messageDari && String(error?.code || '').startsWith('finance_')) {
+      return res.status(Number(error.status || error.statusCode || 409)).json({ success: false, code: error.code, message: error.messageDari });
+    }
     const code = String(error?.message || '');
     const mappedStatus = mapPaymentErrorStatus(code);
     if (mappedStatus !== 500 || code.startsWith('student_finance_')) {

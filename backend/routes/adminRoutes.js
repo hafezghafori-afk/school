@@ -2290,10 +2290,15 @@ router.get('/alerts', requireAuth, requireRole(['admin']), requirePermission('vi
     const now = Date.now();
     const previous24hStart = new Date(now - (48 * 60 * 60000));
     const current24hStart = new Date(now - (24 * 60 * 60000));
+    // A bill without a due date is overdue from the day it was issued, as the
+    // finance centre counts it.
     const overdueOrderFilter = {
       status: { $in: ['new', 'partial', 'overdue'] },
       outstandingAmount: { $gt: 0 },
-      dueDate: { $lt: new Date(now) }
+      $or: [
+        { dueDate: { $lt: new Date(now) } },
+        { dueDate: null, issuedAt: { $lt: new Date(now) } }
+      ]
     };
 
     const [pendingFinanceReceipts, overdueBills, draftSchedules, pendingProfile, pendingAccessRequests, unreadContacts, latestLogs] = await Promise.all([
