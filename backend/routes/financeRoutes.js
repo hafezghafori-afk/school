@@ -235,6 +235,7 @@ const {
   resolveMonthCloseWindow
 } = require('../utils/financeMonthClosePeriods');
 const { buildFinanceDashboardOverview } = require('../services/financeDashboardService');
+const { voidBillsAfterBillingStop } = require('../services/membershipBillingReconciliationService');
 const {
   afghanMonthKeyBounds,
   formatAfghanMonthKeyLabel,
@@ -13942,39 +13943,11 @@ router.put('/admin/student-memberships/:id', requireAuth, requireRole(['admin'])
     await membership.save();
 
     const billingStopDate = membership.endedAt || membership.leftAt || null;
-    let stoppedFutureBills = { bills: 0, orders: 0 };
-    if (billingStopDate && !Number.isNaN(new Date(billingStopDate).getTime())) {
-      const stopDate = new Date(billingStopDate);
-      const nextMonthStart = new Date(stopDate.getFullYear(), stopDate.getMonth() + 1, 1);
-      const voidFields = {
-        status: 'void',
-        voidReason: 'عضویت مالی شاگرد ختم شده است.',
-        voidedBy: req.user?.id || null,
-        voidedAt: new Date()
-      };
-      const [billUpdate, orderUpdate] = await Promise.all([
-        FinanceBill.updateMany(
-          {
-            studentMembershipId: membership._id,
-            status: { $in: ['new', 'overdue'] },
-            dueDate: { $gte: nextMonthStart }
-          },
-          { $set: voidFields }
-        ),
-        FeeOrder.updateMany(
-          {
-            studentMembershipId: membership._id,
-            status: { $in: ['new', 'overdue'] },
-            dueDate: { $gte: nextMonthStart }
-          },
-          { $set: voidFields }
-        )
-      ]);
-      stoppedFutureBills = {
-        bills: billUpdate?.modifiedCount || 0,
-        orders: orderUpdate?.modifiedCount || 0
-      };
-    }
+    const stoppedFutureBills = await voidBillsAfterBillingStop({
+      membershipId: membership._id,
+      stopDate: billingStopDate,
+      actorId: req.user?.id || null
+    });
 
     return res.json({
       success: true,

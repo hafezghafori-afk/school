@@ -6,7 +6,9 @@ const assert = require('assert');
 
 const {
   afghanMonthKeyBounds,
+  afghanMonthStart,
   formatAfghanMonthKeyLabel,
+  nextAfghanMonthStart,
   normalizeAfghanMonthKey,
   shiftAfghanMonthKey,
   toAfghanMonthKey
@@ -31,6 +33,12 @@ assert.deepStrictEqual(
   'Sonbola 1405 ends on 22 Sep 2026'
 );
 assert.strictEqual(formatAfghanMonthKeyLabel('1405-06'), 'سنبله ۱۴۰۵');
+const ymd = (date) => [date.getFullYear(), date.getMonth() + 1, date.getDate()];
+assert.deepStrictEqual(ymd(afghanMonthStart(new Date(2026, 9, 5, 15))), [2026, 9, 23], '5 Oct (13 Mizan) is in the month from 23 Sep');
+assert.deepStrictEqual(ymd(afghanMonthStart(new Date(2026, 8, 25))), [2026, 9, 23], '25 Sep (3 Mizan) is in the month from 23 Sep, not 1 Sep');
+assert.deepStrictEqual(ymd(nextAfghanMonthStart(new Date(2026, 8, 25))), [2026, 10, 23], 'the month after Mizan starts on 23 Oct, not 1 Oct');
+assert.deepStrictEqual(ymd(nextAfghanMonthStart(new Date(2027, 2, 15))), [2027, 3, 21], 'after Hoot comes Hamal of the next year');
+assert.strictEqual(afghanMonthStart('not a date'), null);
 
 // ---- in-memory stand-ins for the collections the services read ----
 const store = {

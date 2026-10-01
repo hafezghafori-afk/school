@@ -1,8 +1,10 @@
 const FinanceBill = require('../models/FinanceBill');
 const FeeOrder = require('../models/FeeOrder');
 const { solarMonthKey } = require('../utils/studentBillingPeriodIntegrity');
+const { nextAfghanMonthStart } = require('../utils/afghanDate');
 
 const idOf = (value = '') => String(value?._id || value || '').trim();
+const BILLING_STOP_VOID_REASON = 'عضویت مالی شاگرد ختم شده است.';
 const positive = (value) => Math.max(0, Number(value) || 0);
 
 const hasPaymentEvidence = (record = {}) => (
@@ -108,9 +110,42 @@ async function reconcileClosedMembershipBilling({
   };
 }
 
+// The finance office's «ختم عضویت مالی»: unpaid bills from the Afghan month
+// after the stop date on are voided, and the stop month's own bill stays.
+// Bills are filed under their Afghan month; a Gregorian "next month" voided
+// the stop month's own bills due after the 1st of the next Gregorian month
+// and kept the next Afghan month's bills due before it.
+async function voidBillsAfterBillingStop({ membershipId = null, stopDate = null, actorId = null } = {}) {
+  const date = stopDate ? new Date(stopDate) : null;
+  if (!membershipId || !date || Number.isNaN(date.getTime())) return { bills: 0, orders: 0 };
+  const nextMonthStart = nextAfghanMonthStart(date)
+    || new Date(date.getFullYear(), date.getMonth() + 1, 1);
+  const filter = {
+    studentMembershipId: membershipId,
+    status: { $in: ['new', 'overdue'] },
+    dueDate: { $gte: nextMonthStart }
+  };
+  const voidFields = {
+    status: 'void',
+    voidReason: BILLING_STOP_VOID_REASON,
+    voidedBy: actorId || null,
+    voidedAt: new Date()
+  };
+  const [billUpdate, orderUpdate] = await Promise.all([
+    FinanceBill.updateMany(filter, { $set: voidFields }),
+    FeeOrder.updateMany(filter, { $set: voidFields })
+  ]);
+  return {
+    bills: billUpdate?.modifiedCount || 0,
+    orders: orderUpdate?.modifiedCount || 0
+  };
+}
+
 module.exports = {
+  BILLING_STOP_VOID_REASON,
   classifyClosedMembershipBill,
   hasPaymentEvidence,
   reconcileClosedMembershipBilling,
-  summarizeRecords
+  summarizeRecords,
+  voidBillsAfterBillingStop
 };

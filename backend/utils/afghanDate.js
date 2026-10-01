@@ -275,6 +275,20 @@ function afghanMonthKeyBounds(monthKey = '') {
   return { monthKey: key, start, end };
 }
 
+// Local midnight on the 1st of the Afghan month `value` falls in, and of the
+// month after it: where a bill-month rule ("this month's bills on", "bills
+// from next month on") starts. 1 October 2026 is 9 Mizan, so its month
+// starts on 23 September and the next on 23 October.
+function afghanMonthStart(value) {
+  const bounds = afghanMonthKeyBounds(toAfghanMonthKey(value));
+  return bounds ? bounds.start : null;
+}
+
+function nextAfghanMonthStart(value) {
+  const bounds = afghanMonthKeyBounds(shiftAfghanMonthKey(toAfghanMonthKey(value), 1));
+  return bounds ? bounds.start : null;
+}
+
 function formatAfghanMonthKeyLabel(monthKey = '') {
   const key = normalizeAfghanMonthKey(monthKey);
   if (!key) return '';
@@ -299,5 +313,7 @@ module.exports = {
   toAfghanMonthKey,
   shiftAfghanMonthKey,
   afghanMonthKeyBounds,
+  afghanMonthStart,
+  nextAfghanMonthStart,
   formatAfghanMonthKeyLabel
 };
