@@ -2506,9 +2506,17 @@ export default function AdminPanel() {
     monthlyRevenue: Number(dashboardSummary.monthlyRevenue || 0),
     previousMonthRevenue: Number(dashboardSummary.previousMonthRevenue || 0),
     monthDeltaPercent: Number(dashboardSummary.monthDeltaPercent || 0),
+    monthLabel: String(dashboardSummary.monthLabel || ''),
+    previousMonthLabel: String(dashboardSummary.previousMonthLabel || ''),
     openMessages: Number(financeStats.openMessages ?? stats.openMessages ?? supportMessages.length ?? 0),
     activeSchools: Number(financeStats.activeSchools ?? stats.activeSchools ?? schoolOverviewStats.activeRecords ?? 0)
   };
+  // «این ماه» is the Afghan month (from its 1st day), compared with the whole
+  // Afghan month before it - name both so the figure reads as what it is.
+  const monthlyRevenueHint = [
+    executiveSummary.monthLabel,
+    `${Number(executiveSummary.monthDeltaPercent || 0).toLocaleString('fa-AF-u-ca-persian')}٪ نسبت به ${executiveSummary.previousMonthLabel || 'ماه قبل'}`
+  ].filter(Boolean).join(' • ');
 
   // شمار واقعی بل‌های معوق (سررسیدگذشته و دارای باقیمانده) — از /api/admin/alerts (کلید finance_overdue)،
   // نه orders.length که صف رسیدهای منتظر تایید است (یک چیز کاملاً متفاوت).
@@ -2655,7 +2663,7 @@ export default function AdminPanel() {
     {
       label: 'عواید این ماه',
       value: Number(executiveSummary.monthlyRevenue || 0).toLocaleString('fa-AF-u-ca-persian'),
-      hint: `${Number(executiveSummary.monthDeltaPercent || 0).toLocaleString('fa-AF-u-ca-persian')}٪ نسبت به ماه قبل`,
+      hint: monthlyRevenueHint,
       tone: 'mint',
       progress: Number(executiveSummary.totalDue || 0)
         ? Math.min(100, (Number(executiveSummary.monthlyRevenue || 0) / Number(executiveSummary.totalDue || 1)) * 100)
@@ -3087,7 +3095,7 @@ export default function AdminPanel() {
     {
       label: 'عواید کل این ماه',
       value: Number(executiveSummary.monthlyRevenue || 0).toLocaleString('fa-AF-u-ca-persian'),
-      hint: `${Number(executiveSummary.monthDeltaPercent || 0).toLocaleString('fa-AF-u-ca-persian')}٪ نسبت به ماه قبل`,
+      hint: monthlyRevenueHint,
       tone: 'copper',
       progress: Number(executiveSummary.totalDue || 0)
         ? Math.min(100, (Number(executiveSummary.monthlyRevenue || 0) / Number(executiveSummary.totalDue || 1)) * 100)
