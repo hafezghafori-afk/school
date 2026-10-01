@@ -6,7 +6,9 @@ export const BRAND_SUBTITLE = '';
 
 const legacyBrandNames = new Set([
   'مدرسه ایمان',
-  'سیستم مدیریت هوشمند مکتب'
+  'سیستم مدیریت هوشمند مکتب',
+  'سیما',
+  'دانا'
 ]);
 
 const legacyBrandSubtitles = new Set([

@@ -407,7 +407,7 @@ const SEARCH_SECTION_CONFIG = [
   },
   {
     key: 'contacts',
-    title: 'مرکز ارتباطات سیما',
+    title: 'مرکز ارتباطات',
     to: () => '/admin-communications',
     primary: (item) => item.name || item.email || 'پیام ارتباطی',
     secondary: (item) => [item.status, toDate(item.createdAt)].filter(Boolean).join(' | ')

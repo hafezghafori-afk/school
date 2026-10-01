@@ -92,7 +92,7 @@ export default function AdminContact() {
       </div>
       <div className="admin-content-hero">
         <div>
-          <h2>مرکز ارتباطات سیما</h2>
+          <h2>مرکز ارتباطات</h2>
           <p>مدیریت درخواست‌های دمو، پیام‌های تماس، پیشنهادات و انتقادات ثبت‌شده.</p>
         </div>
       </div>

@@ -43,7 +43,7 @@ const siteSettingsSchema = new mongoose.Schema({
   pendingPageTitle: { type: String, default: 'سایت مکتب هنوز وصل نشده است' },
   pendingPageText: { type: String, default: 'ما در حال آماده‌سازی اتصال سایت اصلی مکتب هستیم. لطفاً چند لحظه صبر کنید.' },
   pendingPageHint: { type: String, default: 'می‌توانید کمی بعد صفحه را تازه یا Refresh کنید.' },
-  brandName: { type: String, default: 'سیما' },
+  brandName: { type: String, default: 'مدرسه اناثیه ایمان' },
   brandSubtitle: { type: String, default: 'سیستم مدیریت هوشمند مکاتیب افغانستان' },
   logoUrl: { type: String, default: '' },
   schoolLogoUrl: { type: String, default: '' },
@@ -79,8 +79,8 @@ const siteSettingsSchema = new mongoose.Schema({
     sendComplaint: { type: Boolean, default: true }
   },
 
-  homeHeroBadge: { type: String, default: 'سیما | سیستم مدیریت هوشمند مکاتیب افغانستان' },
-  homeHeroTitle: { type: String, default: 'سیما؛ سیستم مدیریت هوشمند مکاتیب افغانستان' },
+  homeHeroBadge: { type: String, default: 'مدرسه اناثیه ایمان' },
+  homeHeroTitle: { type: String, default: 'مدرسه اناثیه ایمان' },
   homeHeroHighlight: { type: String, default: 'مدیریت کامل مکتب در یک سیستم' },
   homeHeroText: { type: String, default: 'مدیریت شاگردان، استادان، حاضری، فیس، امتحانات، تقسیم اوقات و گزارش‌ها در یک سیستم ساده و منظم.' },
   homeHeroPrimaryLabel: { type: String, default: 'درخواست دمو' },

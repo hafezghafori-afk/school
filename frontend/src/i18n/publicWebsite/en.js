@@ -31,7 +31,7 @@ const en = {
     start: 'Get in touch',
     contact: 'Contact us',
     heroBadge: 'Built for Afghan schools',
-    heroTitle: 'Sima; smart school management system for Afghanistan',
+    heroTitle: 'Iman Girls School',
     heroText: 'Manage enrollment, fees, attendance, exams, timetables, and reports in one clear system.',
     primaryLabel: 'Contact school',
     secondaryLabel: 'Login',

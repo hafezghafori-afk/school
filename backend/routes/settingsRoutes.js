@@ -207,7 +207,7 @@ const defaultSettings = () => ({
   pendingPageTitle: 'سایت مکتب هنوز وصل نشده است',
   pendingPageText: 'ما در حال آماده‌سازی اتصال سایت اصلی مکتب هستیم. لطفاً چند لحظه صبر کنید.',
   pendingPageHint: 'می‌توانید کمی بعد صفحه را تازه یا Refresh کنید.',
-  brandName: 'سیما',
+  brandName: 'مدرسه اناثیه ایمان',
   brandSubtitle: 'سیستم مدیریت هوشمند مکاتیب افغانستان',
   logoUrl: '',
   schoolLogoUrl: '',
@@ -243,8 +243,8 @@ const defaultSettings = () => ({
     sendComplaint: true
   },
 
-  homeHeroBadge: 'سیما | سیستم مدیریت هوشمند مکاتیب افغانستان',
-  homeHeroTitle: 'سیما؛ سیستم مدیریت هوشمند مکاتیب افغانستان',
+  homeHeroBadge: 'مدرسه اناثیه ایمان',
+  homeHeroTitle: 'مدرسه اناثیه ایمان',
   homeHeroHighlight: 'مدیریت کامل مکتب در یک سیستم',
   homeHeroText: 'مدیریت شاگردان، استادان، حاضری، فیس، امتحانات، تقسیم اوقات و گزارش‌ها در یک سیستم ساده و منظم.',
   homeHeroPrimaryLabel: 'درخواست دمو',
@@ -439,7 +439,7 @@ const defaultSettings = () => ({
     { title: 'لاگ‌ها', href: '/admin-logs', permission: 'view_reports', enabled: true },
     { title: 'اخبار', href: '/admin-news', permission: 'manage_content', enabled: true },
     { title: 'گالری', href: '/admin-gallery', permission: 'manage_content', enabled: true },
-    { title: 'مرکز ارتباطات سیما', href: '/admin-communications', permission: 'manage_platform_requests', enabled: true },
+    { title: 'مرکز ارتباطات', href: '/admin-communications', permission: 'manage_platform_requests', enabled: true },
     { title: 'داده‌های آموزشی', href: '/admin-education', permission: 'manage_content', enabled: true },
     { title: 'ثبت‌نام‌ها', href: '/admin-enrollments', permission: 'manage_enrollments', enabled: true },
     { title: 'تبدیلی آمد', href: '/admin-education?section=enrollments&lifecycle=transfer-in', permission: 'students.transfers.manage', enabled: true },
@@ -487,8 +487,11 @@ const ensureSettings = async () => {
     const brandName = String(settings.brandName || '').trim();
     const brandSubtitle = String(settings.brandSubtitle || '').trim();
     const heroBadge = String(settings.homeHeroBadge || '').trim();
-    const legacyBrandNames = ['مدرسه ایمان', 'سیستم مدیریت هوشمند مکتب'];
+    const heroTitle = String(settings.homeHeroTitle || '').trim();
+    // «سیما» and «دانا» are the platform's own product names, not this school's.
+    const legacyBrandNames = ['مدرسه ایمان', 'سیستم مدیریت هوشمند مکتب', 'سیما', 'دانا'];
     const legacyBrandSubtitles = ['Academy Pro', 'نرم‌افزار مدیریت مکاتب افغانستان'];
+    const productHeroPattern = /^(سیما|دانا)\s*[|؛]/;
 
     if (!settings.publicStatus) {
       settings.publicStatus = defaults.publicStatus;
@@ -508,7 +511,7 @@ const ensureSettings = async () => {
       shouldSave = true;
     }
 
-    if (!heroBadge || heroBadge.includes('مدرسه ایمان') || heroBadge.includes('Academy Pro')) {
+    if (!heroBadge || heroBadge.includes('مدرسه ایمان') || heroBadge.includes('Academy Pro') || productHeroPattern.test(heroBadge)) {
       settings.homeHeroBadge = defaults.homeHeroBadge;
       shouldSave = true;
     }
@@ -528,7 +531,7 @@ const ensureSettings = async () => {
       shouldSave = true;
     }
 
-    if (['مسیر یادگیری حرفه‌ای را بسازید', ''].includes(String(settings.homeHeroTitle || '').trim())) {
+    if (['مسیر یادگیری حرفه‌ای را بسازید', ''].includes(heroTitle) || productHeroPattern.test(heroTitle)) {
       settings.homeHeroTitle = defaults.homeHeroTitle;
       shouldSave = true;
     }
@@ -732,12 +735,12 @@ router.get('/login-page', async (req, res) => {
     
     // Return only login page specific settings
     const loginSettings = {
-      brandName: settings.brandName || 'سیما',
+      brandName: settings.brandName || 'مدرسه اناثیه ایمان',
       brandSubtitle: settings.brandSubtitle || 'سیستم مدیریت هوشمند مکاتیب افغانستان',
       logoUrl: settings.logoUrl || '',
       schoolLogoUrl: settings.schoolLogoUrl || settings.logoUrl || '',
       ministryLogoUrl: settings.ministryLogoUrl || '',
-      loginPageTitle: settings.homeHeroTitle || 'سیما؛ سیستم مدیریت هوشمند مکاتیب افغانستان',
+      loginPageTitle: settings.homeHeroTitle || 'مدرسه اناثیه ایمان',
       loginPageSubtitle: settings.homeHeroHighlight || 'مدیریت کامل مکتب در یک سیستم',
       loginPageText: settings.homeHeroText || 'مدیریت شاگردان، استادان، حاضری، فیس، امتحانات، تقسیم اوقات و گزارش‌ها در یک سیستم ساده و منظم.',
       primaryLabel: settings.homeHeroPrimaryLabel || 'درخواست دمو',

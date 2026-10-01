@@ -22,7 +22,7 @@ const ADMIN_QUICK_LINK_PERMISSION_OPTIONS = [
   { value: 'manage_finance', label: 'مدیریت مالی' },
   { value: 'finance.lifecycle_effects.manage', label: 'اثر مالی تغییرات آموزشی' },
   { value: 'manage_content', label: 'مدیریت محتوا' },
-  { value: 'manage_platform_requests', label: 'مرکز ارتباطات سیما' },
+  { value: 'manage_platform_requests', label: 'مرکز ارتباطات' },
   { value: 'view_reports', label: 'مشاهده گزارشات' },
   { value: 'view_schedule', label: 'مشاهده تقسیم اوقات' },
   { value: 'manage_schedule', label: 'مدیریت تقسیم اوقات' }
@@ -39,7 +39,7 @@ const ADMIN_QUICK_LINK_DEFAULTS = [
   { title: 'داشبورد امتحانات', href: '/admin-exams-dashboard', permission: 'manage_content', enabled: true },
   { title: 'گزارشات', href: '/admin-stats', permission: 'view_reports', enabled: true },
   { title: 'لاگ‌ها', href: '/admin-logs', permission: 'view_reports', enabled: true },
-  { title: 'مرکز ارتباطات سیما', href: '/admin-communications', permission: 'manage_platform_requests', enabled: true },
+  { title: 'مرکز ارتباطات', href: '/admin-communications', permission: 'manage_platform_requests', enabled: true },
   { title: 'ثبت‌نام‌ها', href: '/admin-enrollments', permission: 'manage_enrollments', enabled: true },
   { title: 'تبدیلی آمد', href: '/admin-education?section=enrollments&lifecycle=transfer-in', permission: 'students.transfers.manage', enabled: true },
   { title: 'تبدیلی، ترک تحصیل و منفکی', href: '/admin-education?section=enrollments&lifecycle=end', permission: 'students.lifecycle.manage', enabled: true },
@@ -408,7 +408,7 @@ export default function AdminSettings() {
     return syncedProfile;
   };
 
-  const saveAll = async (successText = 'تنظیمات سیما ذخیره شد.') => {
+  const saveAll = async (successText = 'تنظیمات ذخیره شد.') => {
     if (!settings) return;
     setSaving(true);
     setMessage('');
@@ -1133,7 +1133,7 @@ export default function AdminSettings() {
       </section>
 
       <section className="settings-card">
-        <h3>ایمیل‌های مرکز ارتباطات سیما</h3>
+        <h3>ایمیل‌های مرکز ارتباطات</h3>
         <p className="settings-muted">درخواست‌های دمو، تماس‌ها، پیشنهادات و انتقادات در دیتابیس ذخیره می‌شوند؛ این ایمیل‌ها فقط برای اطلاع‌رسانی فوری استفاده می‌شوند.</p>
         <div className="settings-grid">
           <div>
@@ -1176,7 +1176,7 @@ export default function AdminSettings() {
     <>
       <section className="settings-card">
         <h3>Hero صفحه فروش</h3>
-        <p className="settings-muted">این بخش باید در چند ثانیه اول بگوید سیما چیست و چرا برای مکتب ارزش دارد.</p>
+        <p className="settings-muted">این بخش باید در چند ثانیه اول بگوید سیستم چیست و چرا برای مکتب ارزش دارد.</p>
         <div className="settings-grid">
           <div>
             <label>نشانک بالای عنوان</label>
@@ -1344,7 +1344,7 @@ export default function AdminSettings() {
     <>
       <section className="settings-card">
         <h3>فوتر محصول</h3>
-        <p className="settings-muted">فوتر روی معرفی سیما، لینک‌های مهم و تماس برای دمو تمرکز دارد.</p>
+        <p className="settings-muted">فوتر روی معرفی سیستم، لینک‌های مهم و تماس برای دمو تمرکز دارد.</p>
         <div className="settings-grid">
           <div>
             <label>عنوان لینک‌های محصول</label>
@@ -1565,7 +1565,7 @@ export default function AdminSettings() {
         <p>از این بخش فقط تنظیمات ضروری مکتب، وب‌سایت، لوگوها، شماره‌های شاگردان و میانبرهای ادمین مدیریت می‌شود.</p>
       </div>
 
-      <div className="settings-tabs" role="tablist" aria-label="بخش‌های تنظیمات سیما">
+      <div className="settings-tabs" role="tablist" aria-label="بخش‌های تنظیمات">
         {SETTINGS_TABS.filter((tab) => VISIBLE_SETTINGS_TAB_KEYS.has(tab.key)).map((tab) => (
           <button
             key={tab.key}
