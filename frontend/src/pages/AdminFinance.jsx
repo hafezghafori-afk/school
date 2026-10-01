@@ -10349,10 +10349,10 @@ export default function AdminFinance() {
                   <strong>{fmt(monthlySummaryData.grossMonthlyIncome || 0)} <small>AFN</small></strong>
                   <small>کل دریافتی نقدی این ماه</small>
                 </div>
-                <div className="finance-smart-kpi finance-smart-kpi-cyan">
+                <div className="finance-smart-kpi finance-smart-kpi-cyan" data-testid="monthly-summary-net-income">
                   <span>عاید خالص ماه</span>
                   <strong>{fmt(monthlySummaryData.netMonthlyIncome || 0)} <small>AFN</small></strong>
-                  <small>پس از کسر تخفیف/معافیت و استرداد</small>
+                  <small>دریافتی این ماه منهای {fmt(monthlySummaryData.refundsDeducted || 0)} AFN استرداد</small>
                 </div>
                 <div className="finance-smart-kpi finance-smart-kpi-amber">
                   <span>عاید ماه‌های گذشته در این ماه</span>
@@ -10432,6 +10432,11 @@ export default function AdminFinance() {
                   <span>تعداد بل‌ها</span>
                   <strong>{fmt(monthlySummaryData.totalOrders || 0)}</strong>
                   <small>بل‌های صادرشده برای این ماه</small>
+                </div>
+                <div className="finance-smart-kpi finance-smart-kpi-violet" data-testid="month-specific-discount-exemption">
+                  <span>تخفیف و معافیت</span>
+                  <strong>{fmt(monthlySummaryData.discountExemptionThisMonth || 0)} <small>AFN</small></strong>
+                  <small>از فیس بل‌های همین ماه کم شده؛ از عاید کم نمی‌شود</small>
                 </div>
                 <div className="finance-smart-kpi finance-smart-kpi-cyan">
                   <span>مبلغ قابل پرداخت</span>

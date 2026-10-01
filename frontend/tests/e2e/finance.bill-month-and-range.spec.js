@@ -87,7 +87,17 @@ async function openFinance(page, requests) {
       };
     } else if (pathname === '/api/finance/admin/reports/monthly-summary') {
       requests.monthlySummary.push(searchParams.get('month'));
-      body = { success: true, summary: { monthKey: searchParams.get('month'), totalOrders: 0 } };
+      body = {
+        success: true,
+        summary: {
+          monthKey: searchParams.get('month'),
+          totalOrders: 3,
+          grossMonthlyIncome: 1600,
+          refundsDeducted: 150,
+          netMonthlyIncome: 1450,
+          discountExemptionThisMonth: 1600
+        }
+      };
     } else if (pathname === '/api/finance/admin/bills' && request.method() === 'POST') {
       requests.manualBill.push(request.postDataJSON());
       body = { success: true, item: { _id: 'bill-new' }, message: 'بل برای ماه میزان ۱۴۰۵ با موفقیت ایجاد شد.' };
@@ -192,6 +202,11 @@ test('the Afghan month picked at the top drives the dashboard, trend, monthly re
   await page.getByTestId('finance-section-reports').click();
   await expect.poll(() => requests.monthlySummary.at(-1)).toBe('1405-06');
   await expect(page.getByTestId('monthly-summary-month-select')).toHaveValue('1405-06');
+  // Net income is cash minus refunds; discounts sit on their own card.
+  await expect(page.getByTestId('monthly-summary-net-income')).toContainText('۱٬۴۵۰');
+  await expect(page.getByTestId('monthly-summary-net-income')).toContainText('۱۵۰ AFN استرداد');
+  await expect(page.getByTestId('month-specific-discount-exemption')).toContainText('۱٬۶۰۰');
+  await expect(page.getByTestId('month-specific-discount-exemption')).toContainText('از عاید کم نمی‌شود');
 
   // Picking a month in the monthly report moves the whole page to it.
   await page.getByTestId('monthly-summary-month-select').selectOption('1405-05');

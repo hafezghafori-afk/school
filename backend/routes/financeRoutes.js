@@ -9696,7 +9696,7 @@ const FINANCE_REPORT_SUMMARY_LABELS = {
   partialPaymentStudents: 'شاگردان پرداخت ناقص',
   fullPaymentStudents: 'شاگردان پرداخت مکمل',
   outstandingThisMonth: 'باقیات این ماه',
-  discountExemptionDeducted: 'تخفیف و معافیت (کسرشده از خالص)',
+  discountExemptionThisMonth: 'تخفیف و معافیت بل‌های این ماه',
   refundsDeducted: 'استرداد (کسرشده از خالص)'
 };
 
@@ -9709,7 +9709,7 @@ const FINANCE_REPORT_MONEY_KEYS = new Set([
   'pendingCollection', 'totalDiscountAmount', 'totalPrepaidAmount', 'total', 'pendingTotal',
   'totalPaid', 'approvedAmount', 'pendingAmount', 'amount', 'fixedReliefAmount',
   'grossMonthlyIncome', 'netMonthlyIncome', 'pastMonthsCollectedThisMonth',
-  'futureMonthsCollectedThisMonth', 'outstandingThisMonth', 'discountExemptionDeducted',
+  'futureMonthsCollectedThisMonth', 'outstandingThisMonth', 'discountExemptionThisMonth',
   'refundsDeducted', 'payableThisMonth', 'currentMonthApprovedCollection'
 ]);
 const FINANCE_REPORT_DATE_KEYS = new Set([

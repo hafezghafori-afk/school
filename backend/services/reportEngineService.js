@@ -1198,6 +1198,22 @@ function resolveSolarMonthWindow(monthKey) {
   };
 }
 
+// Discount + exemption actually taken off a bill. Adjustments keep the amount
+// as granted, so a discount stacked on a full exemption can add up to more
+// than the bill; FeeOrder's pre-validate caps each reduction at what is left
+// of the fee and records it on the line items.
+function resolveOrderReliefAmount(order = {}) {
+  const granted = (Array.isArray(order.adjustments) ? order.adjustments : [])
+    .filter((adjustment) => ['discount', 'waiver'].includes(normalizeText(adjustment?.type)))
+    .reduce((sum, adjustment) => sum + Math.max(0, Number(adjustment?.amount || 0)), 0);
+  if (granted <= 0) return 0;
+  const lineItems = Array.isArray(order.lineItems) ? order.lineItems : [];
+  const deducted = lineItems.length
+    ? lineItems.reduce((sum, item) => sum + Math.max(0, Number(item?.reductionAmount || 0)), 0)
+    : Math.max(0, Number(order.amountOriginal || 0));
+  return Math.min(granted, deducted);
+}
+
 // The single-month answer to everything AdminFinance.jsx's "گزارش ماهانه"
 // card asks for. Two independent axes anchored to the same solar month M:
 //  - "bills FOR month M" (periodLabel/dueDate = M) - issuance/collection
@@ -1205,6 +1221,10 @@ function resolveSolarMonthWindow(monthKey) {
 //  - "cash received DURING month M" (paidAt = M) - actual money that moved,
 //    split into what belongs to M itself vs. arrears from earlier months vs.
 //    advance payments for later months, whichever fee period it's really for.
+// Net income stays on the cash axis: cash in minus refunds paid out, as on the
+// finance dashboard. Discounts and exemptions are never cash - a bill's
+// payable amount is already net of them - so they are reported beside it,
+// on the bills axis, and never subtracted from it.
 async function buildFeeMonthlySummaryReport(filters) {
   const definition = getReportDefinition('fee_monthly_summary');
   const monthKey = normalizeText(filters.month);
@@ -1222,7 +1242,7 @@ async function buildFeeMonthlySummaryReport(filters) {
   await applySchoolClassScope(filters, orderFilter);
 
   const candidateOrders = await FeeOrder.find(orderFilter)
-    .select('student studentId periodLabel dueDate amountDue amountPaid outstandingAmount status adjustments')
+    .select('student studentId periodLabel dueDate amountOriginal amountDue amountPaid outstandingAmount status adjustments lineItems')
     .lean();
   const monthOrders = candidateOrders.filter((order) => resolveFeeOrderMonthKey(order) === monthKey);
 
@@ -1252,11 +1272,7 @@ async function buildFeeMonthlySummaryReport(filters) {
     const orderDue = Math.max(0, Number(order.amountDue || 0));
     payableThisMonth += orderDue;
     currentMonthApprovedCollection += Math.min(Math.max(0, Number(order.amountPaid || 0)), orderDue);
-    for (const adjustment of (Array.isArray(order.adjustments) ? order.adjustments : [])) {
-      if (['discount', 'waiver'].includes(normalizeText(adjustment.type))) {
-        discountExemptionTotal += Number(adjustment.amount || 0);
-      }
-    }
+    discountExemptionTotal += resolveOrderReliefAmount(order);
   }
 
   // ---- Axis A: cash actually received during this calendar (solar) month ----
@@ -1291,15 +1307,18 @@ async function buildFeeMonthlySummaryReport(filters) {
     }
   }
 
-  // ---- Refunds actually paid out during this month, also cut from "net" ----
+  // ---- Refunds actually paid out during this month, cut from "net" ----
+  // Every refund carries its school (applySchoolOwnership), even one whose
+  // class link was lost with the membership it refunds.
   const refundFilter = { status: 'paid' };
+  if (filters.schoolId) refundFilter.schoolId = filters.schoolId;
   if (filters.academicYearId) refundFilter.academicYearId = filters.academicYearId;
   if (filters.classId) refundFilter.classId = filters.classId;
   if (window) refundFilter.paidAt = { $gte: window.start, $lte: window.end };
   const refunds = await FinanceRefund.find(refundFilter).select('amount').lean();
   const refundTotal = refunds.reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
-  const netMonthlyIncome = roundMoney(grossCollected - discountExemptionTotal - refundTotal);
+  const netMonthlyIncome = roundMoney(grossCollected - refundTotal);
 
   const summary = {
     monthKey,
@@ -1314,7 +1333,7 @@ async function buildFeeMonthlySummaryReport(filters) {
     partialPaymentStudents: partialStudents.size,
     fullPaymentStudents: paidStudents.size,
     outstandingThisMonth: roundMoney(outstandingTotal),
-    discountExemptionDeducted: roundMoney(discountExemptionTotal),
+    discountExemptionThisMonth: roundMoney(discountExemptionTotal),
     refundsDeducted: roundMoney(refundTotal)
   };
 
