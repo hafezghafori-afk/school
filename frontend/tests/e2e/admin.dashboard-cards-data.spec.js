@@ -59,6 +59,7 @@ test.describe('admin dashboard cards data wiring', () => {
           totalRevenue: 120000,
           totalDue: 150000,
           outstandingAmount: 30000,
+          departedOutstandingAmount: 5000,
           attendanceRate: 87,
           todayPayments: 3,
           pendingFinanceReviews: 7,
@@ -91,6 +92,8 @@ test.describe('admin dashboard cards data wiring', () => {
     // «این ماه» is the Afghan month, compared with the Afghan month before it.
     await expect(kpiHint(page, 'عواید کل این ماه')).toHaveText(/^میزان ۱۴۰۵ • ۴.۶٪ نسبت به سنبله ۱۴۰۵$/);
     await expect(kpiValue(page, 'بدهی باز کل')).toHaveText(/^۳۰.?۰۰۰$/);
+    // The part owed by students who have left is named beside the overdue count.
+    await expect(kpiHint(page, 'بدهی باز کل')).toHaveText(/^۰ بل معوق • ۵.?۰۰۰ از خارج‌شدگان$/);
   });
 
   // DELETED: 'shows zero-signal warning when key queues are simultaneously zero'.

@@ -29,6 +29,7 @@ const {
   toAfghanMonthKey
 } = require('../utils/afghanDate');
 const { ACTIVE_STUDENT_MEMBERSHIP_STATUSES } = require('../utils/studentMembershipStatus');
+const { hasStudentLeft, loadCurrentMembershipStatusMap } = require('../utils/financeStudentLifecycleStatus');
 
 function startOfDay(date = new Date()) {
   const value = new Date(date);
@@ -451,6 +452,17 @@ async function getAdminDashboard({ now = new Date() } = {}) {
   const currentMonth = monthBuckets[monthBuckets.length - 1];
   const previousMonth = monthBuckets[monthBuckets.length - 2];
   const attendanceStart = startOfDay(shiftDays(now, -29));
+  // Open debt is what the bills whose Afghan month has started still owe, as
+  // «باقیات» in the finance centre reads it for this month: a bill issued
+  // ahead for a later month is not owed yet. A bill without a due date counts
+  // from the day it was issued.
+  const startedBillFilter = {
+    status: { $ne: 'void' },
+    $or: [
+      { dueDate: { $lte: currentMonth.end } },
+      { dueDate: null, issuedAt: { $lte: currentMonth.end } }
+    ]
+  };
 
   const [
     officialPeopleCounts,
@@ -462,11 +474,12 @@ async function getAdminDashboard({ now = new Date() } = {}) {
     pendingFinanceReviews,
     overdueOrders,
     draftSchedules,
-    recentMemberships
+    recentMemberships,
+    debtorRows
   ] = await Promise.all([
     getOfficialPeopleCounts(),
     FeeOrder.aggregate([
-      { $match: { status: { $ne: 'void' } } },
+      { $match: startedBillFilter },
       {
         $group: {
           _id: null,
@@ -485,17 +498,28 @@ async function getAdminDashboard({ now = new Date() } = {}) {
     FeeOrder.countDocuments({
       status: { $in: ['new', 'partial', 'overdue'] },
       outstandingAmount: { $gt: 0 },
-      dueDate: { $lt: now }
+      $or: [
+        { dueDate: { $lt: now } },
+        { dueDate: null, issuedAt: { $lt: now } }
+      ]
     }),
     Schedule.countDocuments({ visibility: 'draft' }),
     StudentMembership.find({
       createdAt: { $gte: monthBuckets[0].start }
-    }).select('createdAt joinedAt')
+    }).select('createdAt joinedAt'),
+    FeeOrder.aggregate([
+      { $match: { ...startedBillFilter, outstandingAmount: { $gt: 0 } } },
+      { $group: { _id: '$student', outstanding: { $sum: '$outstandingAmount' } } }
+    ])
   ]);
 
   const totalStudents = officialPeopleCounts.totalStudents;
   const totalInstructors = officialPeopleCounts.totalInstructors;
   const financeSummary = outstandingStats[0] || { totalDue: 0, outstandingAmount: 0 };
+  // The part owed by students who have left (transferred, dropped, expelled),
+  // shown beside the total as the finance centre shows «بدهی راکد خارج‌شدگان».
+  const debtorStatusMap = await loadCurrentMembershipStatusMap(debtorRows.map((row) => row._id));
+  const departedDebtorRows = debtorRows.filter((row) => hasStudentLeft(debtorStatusMap.get(String(row._id || ''))));
   const recognizedPayments = await recognizePayments(approvedPayments);
   // «عواید» در این داشبورد = عواید تاییدشدهٔ نهایی: پرداخت‌های تاییدشده منهای
   // بازپرداخت‌های پرداخت‌شده در همان بازه (هم‌راستا با کارت «عواید خالص» داشبورد
@@ -549,6 +573,9 @@ async function getAdminDashboard({ now = new Date() } = {}) {
       totalRevenue: Number(totalRevenue.toFixed(0)),
       totalDue: Number((financeSummary.totalDue || 0).toFixed(0)),
       outstandingAmount: Number((financeSummary.outstandingAmount || 0).toFixed(0)),
+      departedOutstandingAmount: Number(sumBy(departedDebtorRows, (row) => row.outstanding).toFixed(0)),
+      departedDebtors: departedDebtorRows.length,
+      overdueOrders,
       attendanceRate,
       todayPayments: todayPayments.length,
       pendingFinanceReviews,

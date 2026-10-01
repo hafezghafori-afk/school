@@ -2496,6 +2496,7 @@ export default function AdminPanel() {
     totalRevenue: Number(dashboardSummary.totalRevenue || 0),
     totalDue: Number(dashboardSummary.totalDue || 0),
     outstandingAmount: Number(dashboardSummary.outstandingAmount || 0),
+    departedOutstandingAmount: Number(dashboardSummary.departedOutstandingAmount || 0),
     attendanceRate: Number(financeStats.attendanceRate ?? dashboardSummary.attendanceRate ?? stats.attendanceRate ?? 0),
     todayPayments: Number(financeStats.todayPayments ?? dashboardSummary.todayPayments ?? stats.todayPayments ?? 0),
     todayPaymentAmount: Number(financeStats.todayPaymentAmount || 0),
@@ -3104,7 +3105,14 @@ export default function AdminPanel() {
     {
       label: 'بدهی باز کل',
       value: Number(executiveSummary.outstandingAmount || 0).toLocaleString('fa-AF-u-ca-persian'),
-      hint: `${financeOverdueCount.toLocaleString('fa-AF-u-ca-persian')} بل معوق`,
+      // Bills whose Afghan month has started; the part owed by students who
+      // have left is named beside the overdue count.
+      hint: [
+        `${financeOverdueCount.toLocaleString('fa-AF-u-ca-persian')} بل معوق`,
+        executiveSummary.departedOutstandingAmount > 0
+          ? `${executiveSummary.departedOutstandingAmount.toLocaleString('fa-AF-u-ca-persian')} از خارج‌شدگان`
+          : ''
+      ].filter(Boolean).join(' • '),
       tone: 'rose',
       progress: Number(executiveSummary.totalDue || 0)
         ? Math.min(100, (Number(executiveSummary.outstandingAmount || 0) / Number(executiveSummary.totalDue || 1)) * 100)
