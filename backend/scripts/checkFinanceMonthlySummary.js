@@ -36,7 +36,13 @@ async function check(name, fn) {
 
 async function run() {
   await mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/school_db', { dbName: DB_NAME });
+  // Let every model finish the index build it starts on connect, then drop and
+  // rebuild the indexes of the collections this check writes to. A fixture
+  // that breaks a unique index then fails every time, not only when the build
+  // happens to win the race against the inserts.
+  await Promise.allSettled(Object.values(mongoose.models).map((model) => model.init()));
   await mongoose.connection.db.dropDatabase();
+  await Promise.all([AcademicYear, FeeOrder, FeePayment, FinanceRefund, SchoolClass, User].map((model) => model.createIndexes()));
 
   const schoolA = id();
   const schoolB = id();
@@ -99,8 +105,10 @@ async function run() {
   const sonbola = await createOrder({ student: students[1], dueDate: day('2026-09-05', 12), amountPaid: 500 });
   const aqrab = await createOrder({ student: students[2], dueDate: day('2026-11-05', 12), amountPaid: 300 });
 
+  let paymentNo = 0;
   const payment = (feeOrder, amount, paidAt) => ({
     _id: id(),
+    paymentNumber: `MS-PAY-${++paymentNo}`,
     student: feeOrder.student,
     feeOrderId: feeOrder._id,
     schoolId: schoolA,
