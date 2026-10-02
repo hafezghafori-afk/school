@@ -1,5 +1,6 @@
 const { deriveLinkScope } = require('./financeLinkScope');
 const mongoose = require('mongoose');
+const { afghanMonthKeyBounds, toAfghanMonthKey } = require('./afghanDate');
 const { isFinanceMaintenanceActive } = require('../services/financeMaintenanceService');
 const {
   normalizeFinanceLineItems,
@@ -111,14 +112,20 @@ function registryAdjustmentsChanged(current = [], next = []) {
   return serialize(current) !== serialize(next);
 }
 
+// A discount with a date range reaches the bills whose month it overlaps. A
+// bill is filed under the Afghan month of its due date: a discount from
+// 1 Mizan (23 September) reaches the Mizan bills, not the Sonbola bill due on
+// 10 September that the Gregorian month (1-30 September) also matched.
 function discountAppliesToBill(discount = {}, bill = {}) {
   const dueDate = normalizeDate(bill?.dueDate);
   if (!dueDate) return true;
-  const periodStart = new Date(dueDate.getFullYear(), dueDate.getMonth(), 1);
-  const periodEnd = new Date(dueDate.getFullYear(), dueDate.getMonth() + 1, 0, 23, 59, 59, 999);
+  const month = afghanMonthKeyBounds(toAfghanMonthKey(dueDate)) || {
+    start: new Date(dueDate.getFullYear(), dueDate.getMonth(), 1),
+    end: new Date(dueDate.getFullYear(), dueDate.getMonth() + 1, 0, 23, 59, 59, 999)
+  };
   const startDate = normalizeDate(discount?.startDate);
   const endDate = normalizeDate(discount?.endDate);
-  return !(startDate && startDate > periodEnd) && !(endDate && endDate < periodStart);
+  return !(startDate && startDate > month.end) && !(endDate && endDate < month.start);
 }
 
 function getExemptionBaseAmount(exemption = {}, bill = {}) {
@@ -746,6 +753,7 @@ async function syncStudentFinanceFromFinanceReceipt(input, { dryRun = false } = 
 
 module.exports = {
   applyActiveRegistryReliefsToFinanceBill,
+  discountAppliesToBill,
   isLegacyRegistryReliefAdjustment,
   refreshFinanceBillStatus,
   syncDiscountsFromFinanceBill,

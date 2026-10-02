@@ -14,6 +14,7 @@ const {
   normalizeText
 } = require('./financeFeePlanService');
 const { normalizeFinanceLineItems } = require('../utils/financeLineItems');
+const { afghanMonthKeyBounds, toAfghanMonthKey } = require('../utils/afghanDate');
 const {
   buildFinanceReliefPayloadFromDiscount,
   buildFinanceReliefPayloadFromExemption,
@@ -87,6 +88,15 @@ function solarMonthBounds(value = null) {
     end = new Date(next.getFullYear(), next.getMonth(), next.getDate(), 23, 59, 59, 999);
   }
   return { start, end, solar };
+}
+
+// The Afghan month a bill due on `value` is filed under: the window a term
+// bill's reliefs are matched against, the same month the bill sync matches
+// its discounts against afterwards (discountAppliesToBill).
+function billMonthBounds(value = null) {
+  const date = asDate(value);
+  if (!date) return { start: null, end: null };
+  return afghanMonthKeyBounds(toAfghanMonthKey(date)) || { start: startOfMonth(date), end: endOfMonth(date) };
 }
 
 function maxDate(...values) {
@@ -857,6 +867,7 @@ async function buildGroupedBillCandidates({
   );
   const excluded = [];
   const items = [];
+  const termBillMonth = billMonthBounds(dueDate || new Date());
 
   for (const membership of memberships) {
     const membershipId = String(membership._id || '');
@@ -884,8 +895,8 @@ async function buildGroupedBillCandidates({
         })
       : [{
         dueDate: asDate(dueDate),
-        periodStart: startOfMonth(dueDate || new Date()),
-        periodEnd: endOfMonth(dueDate || new Date()),
+        periodStart: termBillMonth.start,
+        periodEnd: termBillMonth.end,
         periodLabel,
         term: effectiveTerm
       }];
