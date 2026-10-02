@@ -28,7 +28,7 @@ function Footer({ settings }) {
   const contactEmail = settings?.contactEmail || '---';
   const contactAddress = settings?.contactAddress || 'افغانستان';
   const footerIntro = settings?.footerContactText
-    || 'سیما، سیستم مدیریت هوشمند مکاتیب افغانستان، برای مدیریت شاگردان، فیس، حاضری، امتحانات، تقسیم اوقات و گزارش‌ها طراحی شده است.';
+    || 'این سیستم برای مدیریت شاگردان، فیس، حاضری، امتحانات، تقسیم اوقات و گزارش‌های مکتب طراحی شده است.';
   const footerLinks = Array.isArray(settings?.footerLinks) && settings.footerLinks.length
     ? settings.footerLinks.filter((item) => item?.title && item?.href)
     : productLinks;
