@@ -6829,7 +6829,98 @@ async function run() {
       assertCase(Number(deleteUsedResponse.data?.linkedOrderCount || 0) >= 1, 'expected linked order count for protected fee plan');
     });
 
-    await check('route smoke: saving a fee plan whose class plan already exists under another course returns a clear duplicate message', async () => {
+    await check('route smoke: saving a fee plan updates the class plan saved under another course instead of adding a second one', async () => {
+      const planId = 'fee-plan-under-earlier-course';
+      feePlans.push({
+        _id: planId,
+        title: 'Term 2 Fee',
+        schoolId: 'school-1',
+        course: 'course-before-relink',
+        classId: IDS.class1,
+        academicYearId: 'academic-year-1',
+        term: '2',
+        billingFrequency: 'term',
+        periodType: 'term',
+        planCode: 'STANDARD',
+        tuitionFee: 900,
+        amount: 900,
+        currency: 'AFN',
+        isActive: true,
+        lifecycleStatus: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+      const termPlans = () => feePlans.filter((item) => String(item.classId) === IDS.class1 && item.term === '2');
+      try {
+        const response = await request(server, '/api/finance/admin/fee-plans', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: {
+            title: 'Term 2 Fee',
+            classId: IDS.class1,
+            academicYearId: 'academic-year-1',
+            term: '2',
+            billingFrequency: 'term',
+            tuitionFee: 1100
+          }
+        });
+        assertCase(response.status === 200, `expected 200, received ${response.status}: ${response.text}`);
+        assertCase(String(response.data?.item?._id || '') === planId, `expected the existing plan to be updated, received ${response.data?.item?._id}`);
+        assertCase(termPlans().length === 1, `expected one plan for the class and term, found ${termPlans().length}`);
+        const saved = feePlans.find((item) => item._id === planId);
+        assertCase(String(saved?.course || '') === IDS.course1, `expected the plan's course to move to the class's course, found ${saved?.course}`);
+        assertCase(Number(saved?.tuitionFee) === 1100, `expected the new tuition fee, found ${saved?.tuitionFee}`);
+      } finally {
+        termPlans().forEach((item) => feePlans.splice(feePlans.indexOf(item), 1));
+      }
+    });
+
+    await check('route smoke: where a class still has its plan under two courses, saving updates the one under its current course', async () => {
+      const seed = (_id, course) => ({
+        _id,
+        title: 'Term 3 Fee',
+        schoolId: 'school-1',
+        course,
+        classId: IDS.class1,
+        academicYearId: 'academic-year-1',
+        term: '3',
+        billingFrequency: 'term',
+        periodType: 'term',
+        planCode: 'STANDARD',
+        tuitionFee: 800,
+        amount: 800,
+        currency: 'AFN',
+        isActive: true,
+        lifecycleStatus: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+      // The plan under the earlier course is listed first, as the older one would be.
+      feePlans.push(seed('fee-plan-term-3-earlier-course', 'course-before-relink'), seed('fee-plan-term-3-current-course', IDS.course1));
+      const termPlans = () => feePlans.filter((item) => String(item.classId) === IDS.class1 && item.term === '3');
+      try {
+        const response = await request(server, '/api/finance/admin/fee-plans', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: {
+            title: 'Term 3 Fee',
+            classId: IDS.class1,
+            academicYearId: 'academic-year-1',
+            term: '3',
+            billingFrequency: 'term',
+            tuitionFee: 1000
+          }
+        });
+        assertCase(response.status === 200, `expected 200, received ${response.status}: ${response.text}`);
+        assertCase(String(response.data?.item?._id || '') === 'fee-plan-term-3-current-course', `expected the current course's plan to be updated, received ${response.data?.item?._id}`);
+        const earlier = feePlans.find((item) => item._id === 'fee-plan-term-3-earlier-course');
+        assertCase(earlier?.course === 'course-before-relink' && Number(earlier?.tuitionFee) === 800, 'expected the plan under the earlier course to stay as it was');
+      } finally {
+        termPlans().forEach((item) => feePlans.splice(feePlans.indexOf(item), 1));
+      }
+    });
+
+    await check('route smoke: a fee plan save the class-scope index refuses returns a clear duplicate message', async () => {
       const duplicateError = new Error('E11000 duplicate key error');
       duplicateError.code = 11000;
       duplicateError.keyPattern = { schoolId: 1, classId: 1, academicYearId: 1, term: 1, billingFrequency: 1, planCode: 1 };
@@ -6854,6 +6945,37 @@ async function run() {
         assertCase(
           String(response.data?.message || '').includes('برای این صنف، پلان فیسی با همین سال تعلیمی، ترم، دوره پرداخت و کد پلان از قبل ثبت شده است (شاید زیر کورس دیگری)'),
           `expected class-scope duplicate guidance, received: ${response.data?.message}`
+        );
+      } finally {
+        FinanceFeePlanMock.findOneAndUpdate = originalFindOneAndUpdate;
+      }
+    });
+
+    await check('route smoke: a fee plan save the course-scope index refuses returns a clear duplicate message', async () => {
+      const duplicateError = new Error('E11000 duplicate key error');
+      duplicateError.code = 11000;
+      duplicateError.keyPattern = { schoolId: 1, course: 1, academicYearId: 1, term: 1, billingFrequency: 1, planCode: 1 };
+      const originalFindOneAndUpdate = FinanceFeePlanMock.findOneAndUpdate;
+      FinanceFeePlanMock.findOneAndUpdate = () => new MockQuery(() => {
+        throw duplicateError;
+      });
+      try {
+        const response = await request(server, '/api/finance/admin/fee-plans', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: {
+            title: 'Term 1 Fee Again',
+            classId: IDS.class1,
+            academicYearId: 'academic-year-1',
+            term: '1',
+            billingFrequency: 'term',
+            tuitionFee: 1200
+          }
+        });
+        assertCase(response.status === 409, `expected 409, received ${response.status}: ${response.text}`);
+        assertCase(
+          String(response.data?.message || '').includes('برای کورسِ این صنف، پلان فیسی با همین سال تعلیمی، ترم، دوره پرداخت و کد پلان از قبل ثبت شده است (شاید برای صنف دیگری)'),
+          `expected course-scope duplicate guidance, received: ${response.data?.message}`
         );
       } finally {
         FinanceFeePlanMock.findOneAndUpdate = originalFindOneAndUpdate;
