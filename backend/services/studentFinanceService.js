@@ -25,6 +25,7 @@ const FinanceBill = require('../models/FinanceBill');
 const FinanceReceipt = require('../models/FinanceReceipt');
 const FinanceRefund = require('../models/FinanceRefund');
 const {
+  discountAppliesToBill,
   refreshFinanceBillStatus,
   syncStudentFinanceFromFinanceBill,
   syncStudentFinanceFromFinanceReceipt
@@ -524,6 +525,8 @@ async function isBillPeriodLocked(item = {}) {
   }
 }
 
+// A discount's date range reaches a bill or order by its Afghan month, the
+// same rule the bill sync applies (discountAppliesToBill).
 async function syncDiscountOpenBills(discount = null) {
   if (!discount?._id || !discount?.studentMembershipId) return;
   const marker = `[discount:${String(discount._id)}]`;
@@ -536,14 +539,9 @@ async function syncDiscountOpenBills(discount = null) {
   });
   for (const bill of bills) {
     if (await isBillPeriodLocked(bill)) continue;
-    const dueDate = normalizeDateValue(bill.dueDate);
-    const periodStart = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth(), 1) : null;
-    const periodEnd = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth() + 1, 0, 23, 59, 59, 999) : null;
-    const startsAfterBill = discount.startDate && periodEnd && new Date(discount.startDate) > periodEnd;
-    const endsBeforeBill = discount.endDate && periodStart && new Date(discount.endDate) < periodStart;
     bill.adjustments = (bill.adjustments || []).filter((row) => !normalizeText(row.reason).startsWith(marker));
     const isPenalty = discount.discountType === 'penalty';
-    if (discount.status === 'active' && !startsAfterBill && !endsBeforeBill) {
+    if (discount.status === 'active' && discountAppliesToBill(discount, bill)) {
       const discountBase = isPenalty
         ? Number(bill.amountOriginal || 0)
         : getFinanceFeeScopeGrossAmount(bill, 'tuition');
@@ -577,14 +575,9 @@ async function syncDiscountOpenBills(discount = null) {
   });
   for (const order of orders) {
     if (await isBillPeriodLocked(order)) continue;
-    const dueDate = normalizeDateValue(order.dueDate);
-    const periodStart = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth(), 1) : null;
-    const periodEnd = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth() + 1, 0, 23, 59, 59, 999) : null;
-    const startsAfterOrder = discount.startDate && periodEnd && new Date(discount.startDate) > periodEnd;
-    const endsBeforeOrder = discount.endDate && periodStart && new Date(discount.endDate) < periodStart;
     order.adjustments = (order.adjustments || []).filter((row) => !normalizeText(row.reason).startsWith(marker));
     const isPenalty = discount.discountType === 'penalty';
-    if (discount.status === 'active' && !startsAfterOrder && !endsBeforeOrder) {
+    if (discount.status === 'active' && discountAppliesToBill(discount, order)) {
       const discountBase = isPenalty
         ? Number(order.amountOriginal || 0)
         : getFinanceFeeScopeGrossAmount(order, 'tuition');
