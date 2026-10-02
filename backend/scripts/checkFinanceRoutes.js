@@ -6829,6 +6829,37 @@ async function run() {
       assertCase(Number(deleteUsedResponse.data?.linkedOrderCount || 0) >= 1, 'expected linked order count for protected fee plan');
     });
 
+    await check('route smoke: saving a fee plan whose class plan already exists under another course returns a clear duplicate message', async () => {
+      const duplicateError = new Error('E11000 duplicate key error');
+      duplicateError.code = 11000;
+      duplicateError.keyPattern = { schoolId: 1, classId: 1, academicYearId: 1, term: 1, billingFrequency: 1, planCode: 1 };
+      const originalFindOneAndUpdate = FinanceFeePlanMock.findOneAndUpdate;
+      FinanceFeePlanMock.findOneAndUpdate = () => new MockQuery(() => {
+        throw duplicateError;
+      });
+      try {
+        const response = await request(server, '/api/finance/admin/fee-plans', {
+          method: 'POST',
+          user: financeManagerUser,
+          body: {
+            title: 'Term 1 Fee Again',
+            classId: IDS.class1,
+            academicYearId: 'academic-year-1',
+            term: '1',
+            billingFrequency: 'term',
+            tuitionFee: 1200
+          }
+        });
+        assertCase(response.status === 409, `expected 409, received ${response.status}: ${response.text}`);
+        assertCase(
+          String(response.data?.message || '').includes('برای این صنف، پلان فیسی با همین سال تعلیمی، ترم، دوره پرداخت و کد پلان از قبل ثبت شده است (شاید زیر کورس دیگری)'),
+          `expected class-scope duplicate guidance, received: ${response.data?.message}`
+        );
+      } finally {
+        FinanceFeePlanMock.findOneAndUpdate = originalFindOneAndUpdate;
+      }
+    });
+
     await check('route smoke: admin receipts list deprecates course-only filter in favor of classId', async () => {
       const response = await request(server, `/api/finance/admin/receipts?courseId=${IDS.course1}`, {
         user: financeManagerUser
