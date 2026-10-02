@@ -13,7 +13,7 @@
     <meta name="apple-mobile-web-app-title" content="مدرسه اناثیه ایمان" />
     <meta
       name="description"
-      content="وب‌سایت رسمی مدرسه خصوصی اناثیه ایمان (Iman Private Girls' School) در خوشحال خان، ناحیه پنجم کابل؛ معرفی مکتب، اخبار، گالری، راه‌های تماس و ورود شاگردان، والدین و استادان."
+      content="وب‌سایت رسمی مدرسه خصوصی اناثیه ایمان (Iman Private Girls' School) در خوشحال خان، ناحیه پنجم کابل؛ معرفی مکتب، اخبار، گالری و تماس."
     />
     <link rel="dns-prefetch" href="//cdnjs.cloudflare.com" />
     <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin />
@@ -78,9 +78,45 @@
       referrerPolicy="no-referrer"
     />
     <title>مدرسه اناثیه ایمان</title>
+    <style>
+      .boot-shell {
+        box-sizing: border-box;
+        min-height: 100vh;
+        margin: 0;
+        padding: 24px 16px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        background: #0f1b2d;
+        color: #e8eef8;
+        font-family: 'Vazirmatn', Tahoma, sans-serif;
+        text-align: center;
+      }
+      .boot-shell img { border-radius: 20px; background: #fff; }
+      .boot-shell h1 { margin: 0; font-size: 1.6rem; }
+      .boot-shell p { margin: 0; max-width: 34rem; line-height: 1.9; color: #b8c4d8; }
+      .boot-shell nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px; }
+      .boot-shell a { color: #f5a623; text-decoration: none; }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Shown until the app mounts (createRoot replaces it). It is also the
+           only page content that crawlers which don't run JavaScript see. -->
+      <main class="boot-shell" dir="rtl">
+        <img src="/logo192.png" alt="لوگوی مدرسه اناثیه ایمان" width="88" height="88" />
+        <h1>مدرسه اناثیه ایمان</h1>
+        <p>مدرسه خصوصی اناثیه ایمان (Iman Private Girls' School) در خوشحال خان، ناحیه پنجم کابل.</p>
+        <nav aria-label="بخش‌های وب‌سایت">
+          <a href="/about">درباره مکتب</a>
+          <a href="/news">اخبار</a>
+          <a href="/gallery">گالری</a>
+          <a href="/contact">تماس</a>
+        </nav>
+      </main>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
