@@ -6576,6 +6576,18 @@ router.post('/admin/fee-plans', requireAuth, requireRole(['admin']), requirePerm
     });
 
   } catch (error) {
+    // The upsert matches class AND course, so an existing plan with the same class
+    // but another course (or the same course but another class) is not updated:
+    // the insert then hits that plan's unique index.
+    if (Number(error?.code) === 11000) {
+      const duplicateFields = Object.keys(error?.keyPattern || {});
+      const message = duplicateFields.includes('classId')
+        ? 'برای این صنف، پلان فیسی با همین سال تعلیمی، ترم، دوره پرداخت و کد پلان از قبل ثبت شده است (شاید زیر کورس دیگری)؛ به‌جای پلان تازه، همان پلان را ویرایش کنید.'
+        : duplicateFields.includes('course')
+          ? 'برای کورسِ این صنف، پلان فیسی با همین سال تعلیمی، ترم، دوره پرداخت و کد پلان از قبل ثبت شده است (شاید برای صنف دیگری)؛ به‌جای پلان تازه، همان پلان را ویرایش کنید.'
+          : 'پلان فیسی با همین مشخصات از قبل ثبت شده است؛ به‌جای پلان تازه، همان پلان را ویرایش کنید.';
+      return res.status(409).json({ success: false, message });
+    }
     const status = Number(error?.statusCode || 500);
     res.status(status).json({ success: false, message: error?.messageDari || 'خطا در ذخیره پلان فیس' });
   }
