@@ -22,6 +22,7 @@ const FinanceRefund = require('../models/FinanceRefund');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const {
   formatAfghanMonthYearLabel,
+  nextAfghanMonthStart,
   replaceIranianSolarMonthNames
 } = require('../utils/afghanDate');
 const {
@@ -897,13 +898,16 @@ function buildMembershipFinanceAnomalies({
     }
   } else {
     // Membership already ended (dropped/transferred/expelled/graduated/...).
-    // A bill or order due on/after the month it ended that still shows money
-    // paid on it means the student was charged (and paid) for a period they
-    // were no longer enrolled in - that money needs a refund case, not a
-    // silent "paid" bill sitting in the books.
+    // A bill or order from a month after the one it ended in that still shows
+    // money paid on it means the student was charged (and paid) for a period
+    // they were no longer enrolled in - that money needs a refund case, not a
+    // silent "paid" bill sitting in the books. Bills are filed under the
+    // Afghan month of their due date: after an end on 10 September
+    // (19 Sonbola) the next month starts on 23 September, not 1 October.
     const membershipEndedAt = toDate(membershipItem?.endedAt);
     if (membershipEndedAt) {
-      const postEndWindowStart = new Date(membershipEndedAt.getFullYear(), membershipEndedAt.getMonth() + 1, 1);
+      const postEndWindowStart = nextAfghanMonthStart(membershipEndedAt)
+        || new Date(membershipEndedAt.getFullYear(), membershipEndedAt.getMonth() + 1, 1);
       const postEndDocuments = [...normalizedBills, ...normalizedOrders].filter((document) => {
         if (normalizeText(document?.status) === 'void') return false;
         if (roundMoney(document?.amountPaid) <= 0) return false;

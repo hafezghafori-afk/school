@@ -1,10 +1,10 @@
 // Finds historical FinanceBill/FeeOrder records that show a payment
-// (amountPaid > 0) for a billing period on or after the month a student's
-// membership already ended (dropped/transferred/expelled/graduated/...),
-// and opens a FinanceRefund case (status: pending_review) for each one that
-// doesn't already have one. This is the backlog cleanup for cases that
-// predate the automatic reconciliation now wired into
-// services/studentLifecycleService.js.
+// (amountPaid > 0) for a billing month after the one a student's membership
+// ended in (dropped/transferred/expelled/graduated/...), and opens a
+// FinanceRefund case (status: pending_review) for each one that doesn't
+// already have one. Months are Afghan months, the months bills are filed
+// under. This is the backlog cleanup for cases that predate the automatic
+// reconciliation now wired into services/studentLifecycleService.js.
 //
 // Usage:
 //   node scripts/backfillMembershipPaymentRefunds.js           (dry run, default)
@@ -19,14 +19,19 @@ const FeeOrder = require('../models/FeeOrder');
 const { ENDED_STUDENT_MEMBERSHIP_STATUSES } = require('../utils/studentMembershipStatus');
 const { createFinanceRefundCase, findOpenRefundForDocument } = require('../utils/financeRefundCase');
 const { roundMoney } = require('../utils/financeLineItems');
+const { nextAfghanMonthStart } = require('../utils/afghanDate');
 
 const DRY_RUN = !process.argv.includes('--apply');
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/school_db';
 
+// Bills are filed under the Afghan month of their due date, so the window
+// opens on the 1st of the Afghan month after the one the membership ended
+// in: after an end on 10 September (19 Sonbola), on 23 September, not
+// 1 October.
 function postEndWindowStart(endedAt) {
   const date = new Date(endedAt);
   if (Number.isNaN(date.getTime())) return null;
-  return new Date(date.getFullYear(), date.getMonth() + 1, 1);
+  return nextAfghanMonthStart(date) || new Date(date.getFullYear(), date.getMonth() + 1, 1);
 }
 
 async function findCandidateDocuments(Model, membership, windowStart) {
@@ -38,11 +43,9 @@ async function findCandidateDocuments(Model, membership, windowStart) {
   }).select('_id student studentId schoolId classId academicYearId currency amountPaid dueDate').lean();
 }
 
-async function run() {
-  await mongoose.connect(MONGO_URI);
-
+async function backfillMembershipPaymentRefunds({ dryRun = true } = {}) {
   const summary = {
-    dryRun: DRY_RUN,
+    dryRun,
     membershipsScanned: 0,
     membershipsEnded: 0,
     membershipsSkippedNoEndedAt: 0,
@@ -103,7 +106,7 @@ async function run() {
         dueDate: doc.dueDate
       };
 
-      if (!DRY_RUN) {
+      if (!dryRun) {
         // eslint-disable-next-line no-await-in-loop
         const created = await createFinanceRefundCase({
           student: doc.student || membership.student,
@@ -129,19 +132,29 @@ async function run() {
     }
   }
 
+  return summary;
+}
+
+async function run() {
+  await mongoose.connect(MONGO_URI);
+  const summary = await backfillMembershipPaymentRefunds({ dryRun: DRY_RUN });
   console.log(JSON.stringify(summary, null, 2));
   await mongoose.disconnect();
 }
 
-run().catch(async (error) => {
-  console.error(JSON.stringify({
-    success: false,
-    dryRun: DRY_RUN,
-    message: error?.message || 'Membership payment refund backfill failed',
-    stack: process.env.NODE_ENV === 'production' ? undefined : error?.stack
-  }, null, 2));
-  try {
-    await mongoose.disconnect();
-  } catch {}
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  run().catch(async (error) => {
+    console.error(JSON.stringify({
+      success: false,
+      dryRun: DRY_RUN,
+      message: error?.message || 'Membership payment refund backfill failed',
+      stack: process.env.NODE_ENV === 'production' ? undefined : error?.stack
+    }, null, 2));
+    try {
+      await mongoose.disconnect();
+    } catch {}
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { backfillMembershipPaymentRefunds, postEndWindowStart };
