@@ -130,9 +130,11 @@ financeFeePlanSchema.index({
   planCode: 1
 }, {
   unique: true,
+  // Only plans with both a class and an academic year. MongoDB refuses $ne
+  // (and $not) in a partial filter, so the check is on the stored type.
   partialFilterExpression: {
-    classId: { $exists: true, $ne: null },
-    academicYearId: { $exists: true, $ne: null }
+    classId: { $type: 'objectId' },
+    academicYearId: { $type: 'objectId' }
   }
 });
 

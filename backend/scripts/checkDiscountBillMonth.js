@@ -128,11 +128,10 @@ async function run() {
   await mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/school_db', { dbName: DB_NAME });
   // Let every model finish the index build it starts on connect, then drop and
   // rebuild the indexes of the collections this check writes to, so a fixture
-  // that breaks a unique index fails on every run. FinanceFeePlan is left out:
-  // MongoDB refuses one of its indexes ($ne in a partial filter).
+  // that breaks a unique index fails on every run.
   await Promise.allSettled(Object.values(mongoose.models).map((model) => model.init()));
   await mongoose.connection.db.dropDatabase();
-  await Promise.all([Discount, FeeOrder, FinanceBill, FinanceRelief, StudentMembership]
+  await Promise.all([Discount, FeeOrder, FinanceBill, FinanceFeePlan, FinanceRelief, StudentMembership]
     .map((model) => model.createIndexes()));
 
   try {
