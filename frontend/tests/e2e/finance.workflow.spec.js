@@ -2510,4 +2510,82 @@ test.describe('finance workflow', () => {
     // moves with the calendar.
     await expect(page.getByTestId('finance-document-archive-list')).toContainText(/BSP-\d{6}-1/);
   });
+
+  test('fee plan form says which plan a save updates', async ({ page }) => {
+    await page.addInitScript((session) => {
+      localStorage.setItem('token', session.token);
+      localStorage.setItem('role', session.role);
+      localStorage.setItem('userId', session.userId);
+      localStorage.setItem('userName', session.userName);
+      localStorage.setItem('adminLevel', session.adminLevel);
+      localStorage.setItem('effectivePermissions', JSON.stringify(session.permissions));
+    }, adminSession);
+    await routeCurrentUser(page, adminSession);
+
+    await page.route('**/api/finance/admin/reference-data', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          students: [],
+          classes: [{ classId: 'class-1', courseId: 'course-1', title: 'Class One Core', uiLabel: 'Class One Core (10-A)' }],
+          academicYears: [{ _id: 'year-1', id: 'year-1', title: '1406', code: '1406', isCurrent: true, isActive: true }],
+          currentAcademicYearId: 'year-1'
+        })
+      });
+    });
+
+    // The form opens on class-1, year-1, monthly billing, no term and plan code STANDARD.
+    const plan = (fields) => ({
+      classId: 'class-1',
+      academicYearId: 'year-1',
+      billingFrequency: 'monthly',
+      term: '',
+      planType: 'standard',
+      planCode: 'STANDARD',
+      isActive: true,
+      lifecycleStatus: 'active',
+      tuitionFee: 1000,
+      ...fields
+    });
+    await page.route('**/api/finance/admin/fee-plans', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          items: [
+            plan({ _id: 'plan-standard', title: 'Monthly Fee 1406' }),
+            plan({ _id: 'plan-sibling', title: 'Sibling Fee 1406', planType: 'sibling', planCode: 'SIBLING', isActive: false, lifecycleStatus: 'archived' })
+          ]
+        })
+      });
+    });
+
+    await gotoAppPage(page, '/admin-finance');
+    await financeTab(page, 'settings').click();
+
+    const builder = page.locator('form.finance-plan-builder');
+    const field = (label) => builder.locator('label.finance-field').filter({ has: page.locator('span', { hasText: new RegExp(`^${label}$`) }) });
+    const saveTarget = page.getByTestId('fee-plan-save-target');
+    const otherCodes = page.getByTestId('fee-plan-other-codes');
+
+    await expect(saveTarget).toContainText('Monthly Fee 1406');
+    await expect(saveTarget).toContainText('STANDARD');
+    await expect(saveTarget).not.toContainText('دوباره فعال');
+    await expect(otherCodes).toContainText('SIBLING');
+
+    // A sibling plan files under SIBLING: the archived one is updated and comes back.
+    await field('نوع پلان').locator('select').selectOption('sibling');
+    await expect(saveTarget).toContainText('Sibling Fee 1406');
+    await expect(saveTarget).toContainText('دوباره فعال می‌شود');
+    await expect(otherCodes).toContainText('STANDARD');
+
+    // A code no plan has: the save makes a new plan.
+    await field('کد پلان').locator('input').fill('special');
+    await expect(saveTarget).toHaveCount(0);
+    await expect(otherCodes).toContainText('STANDARD');
+    await expect(otherCodes).toContainText('SIBLING');
+  });
 });
