@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 
 const promotionTransactionSchema = new mongoose.Schema({
+  batchId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'PromotionBatch',
+    default: null,
+    index: true
+  },
   ruleId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'PromotionRule',
@@ -80,13 +86,25 @@ const promotionTransactionSchema = new mongoose.Schema({
     default: 'blocked',
     index: true
   },
+  // 'held': a conditional (مشروط) student waiting for the second-chance exam;
+  // nothing has moved yet and resolving it turns it into 'applied'.
   transactionStatus: {
     type: String,
-    enum: ['preview', 'applied', 'rolled_back', 'cancelled'],
+    enum: ['preview', 'held', 'applied', 'rolled_back', 'cancelled'],
     default: 'preview',
     index: true
   },
   generatedMembershipStatus: { type: String, default: '', trim: true },
+  // false when the student already had a current membership in the target
+  // class and promotion only linked to it - a rollback must leave that one alone.
+  targetMembershipGenerated: { type: Boolean, default: true },
+  heldOutcome: { type: String, default: '', trim: true },
+  resolvedAt: { type: Date, default: null },
+  resolvedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
   decidedAt: { type: Date, default: Date.now },
   appliedAt: { type: Date, default: null },
   rolledBackAt: { type: Date, default: null },
@@ -136,5 +154,6 @@ promotionTransactionSchema.pre('validate', function syncPromotionTransactionStat
 
 promotionTransactionSchema.index({ sessionId: 1, studentMembershipId: 1, targetAcademicYearId: 1, transactionStatus: 1 });
 promotionTransactionSchema.index({ studentId: 1, createdAt: -1 });
+promotionTransactionSchema.index({ studentMembershipId: 1, transactionStatus: 1, promotionOutcome: 1 });
 
 module.exports = mongoose.model('PromotionTransaction', promotionTransactionSchema);

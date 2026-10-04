@@ -159,6 +159,8 @@ const ACTION_LABELS = {
   promotion_rule_create: 'ایجاد قاعدهٔ ارتقا',
   promotion_apply: 'اجرای ارتقا',
   promotion_rollback: 'بازگردانی ارتقا',
+  promotion_batch_rollback: 'بازگردانی دستهٔ ارتقا',
+  promotion_resolve: 'تعیین نتیجهٔ شاگرد مشروط',
 
   // صنف مجازی و ضبط
   virtual_class_create: 'ایجاد صنف مجازی',

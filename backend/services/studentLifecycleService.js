@@ -779,6 +779,8 @@ module.exports = {
   executeStudentLifecycleAction,
   getStudentLifecycleHistory,
   snapshotMembership,
+  syncAfghanStudentLifecycleProjection,
+  updateClassActiveCount,
   __billingTestUtils: Object.freeze({
     reconcileFutureBillingForEndedMembership
   })

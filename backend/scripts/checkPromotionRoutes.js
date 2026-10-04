@@ -7,7 +7,9 @@ const IDS = {
   instructor: '507f191e810c19729de86002',
   session: '507f191e810c19729de86003',
   rule: '507f191e810c19729de86004',
-  tx: '507f191e810c19729de86005'
+  tx: '507f191e810c19729de86005',
+  batch: '507f191e810c19729de86006',
+  heldTx: '507f191e810c19729de86007'
 };
 
 const activityCalls = [];
@@ -37,8 +39,14 @@ const serviceMock = {
       items: [{ examResultId: 'result-1', computedOutcome: 'promoted', canApply: true }]
     };
   },
-  async applyPromotions() {
+  async applyPromotions(payload = {}) {
+    if (payload.classId === 'blocked-class') {
+      const error = new Error('promotion_plan_blocked');
+      error.details = { blockers: [{ code: 'target_year_before_source', field: 'target_year', message: 'سال مقصد: باید بعد از سال مبدا باشد.' }] };
+      throw error;
+    }
     return {
+      batch: { id: IDS.batch, summary: { total: 1, promoted: 1 }, sourceClass: { id: 'class-1' }, targetAcademicYear: { id: 'year-2' } },
       session: { id: IDS.session, title: 'Annual - Class 10 A' },
       rule: { id: IDS.rule, name: 'Default Promotion Rule' },
       targetAcademicYear: { id: 'year-2', title: '1407' },
@@ -52,6 +60,23 @@ const serviceMock = {
   async getPromotionTransaction(transactionId) {
     if (String(transactionId) !== IDS.tx) return null;
     return { id: IDS.tx, promotionOutcome: 'promoted', transactionStatus: 'applied' };
+  },
+  async listPromotionBatches() {
+    return [{ id: IDS.batch, status: 'applied' }];
+  },
+  async getPromotionBatch(batchId) {
+    if (String(batchId) !== IDS.batch) return null;
+    return { id: IDS.batch, status: 'applied', transactions: [{ id: IDS.tx }] };
+  },
+  async rollbackPromotionBatch(batchId) {
+    if (String(batchId) !== IDS.batch) throw new Error('promotion_batch_not_found');
+    const error = new Error('promotion_batch_rollback_blocked');
+    error.details = { blockers: [{ transactionId: IDS.tx, fullName: 'Student One', code: 'promotion_rollback_blocked_by_finance' }] };
+    throw error;
+  },
+  async resolveHeldPromotion(transactionId, payload = {}) {
+    if (String(transactionId) !== IDS.heldTx) throw new Error('promotion_transaction_not_held');
+    return { id: IDS.heldTx, batchId: IDS.batch, promotionOutcome: payload.decision, transactionStatus: 'applied', targetClass: { id: 'class-2' } };
   },
   async rollbackPromotionTransaction(transactionId, payload = {}, actorUserId = null) {
     return {
@@ -171,6 +196,14 @@ async function run() {
     cases.push(await request(server, '/api/promotions/transactions', { user: adminUser }));
     cases.push(await request(server, `/api/promotions/transactions/${IDS.tx}`, { user: adminUser }));
     cases.push(await request(server, `/api/promotions/rollback/${IDS.tx}`, { method: 'POST', user: adminUser, body: { reason: 'operator review' } }));
+    cases.push(await request(server, '/api/promotions/apply', { method: 'POST', user: adminUser, body: { academicYearId: 'year-1', classId: 'blocked-class' } }));
+    cases.push(await request(server, '/api/promotions/batches', { user: adminUser }));
+    cases.push(await request(server, `/api/promotions/batches/${IDS.batch}`, { user: adminUser }));
+    cases.push(await request(server, `/api/promotions/batches/${IDS.batch}/rollback`, { method: 'POST', user: adminUser, body: { reason: 'wrong class' } }));
+    cases.push(await request(server, `/api/promotions/transactions/${IDS.heldTx}/resolve`, { method: 'POST', user: adminUser, body: { decision: 'promoted' } }));
+    cases.push(await request(server, `/api/promotions/transactions/${IDS.tx}/resolve`, { method: 'POST', user: adminUser, body: { decision: 'promoted' } }));
+    cases.push(await request(server, `/api/promotions/transactions/${IDS.heldTx}/resolve`, { method: 'POST', user: instructorUser, body: { decision: 'promoted' } }));
+    cases.push(await request(server, '/api/promotions/batches', { user: instructorUser }));
 
     assertCase(cases[0].status === 401, 'Expected promotion reference-data route to require auth.');
     assertCase(cases[1].status === 403, 'Expected promotion reference-data route to require permission.');
@@ -183,15 +216,29 @@ async function run() {
     assertCase(cases[8].status === 200 && cases[8].data?.item?.id === IDS.tx, 'Expected transaction detail route to return the requested item.');
     assertCase(cases[9].status === 200 && cases[9].data?.item?.transactionStatus === 'rolled_back', 'Expected rollback route to return rolled back transaction.');
 
+    assertCase(cases[10].status === 400 && cases[10].data?.code === 'promotion_plan_blocked' && cases[10].data?.details?.blockers?.[0]?.code === 'target_year_before_source', 'Expected a blocked plan to return 400 with its blockers.');
+    assertCase(/موارد قرمز/.test(cases[10].data?.message || ''), 'Expected a blocked plan to carry a Persian message.');
+    assertCase(cases[11].status === 200 && cases[11].data?.items?.[0]?.id === IDS.batch, 'Expected the batch list route to return batches.');
+    assertCase(cases[12].status === 200 && cases[12].data?.item?.transactions?.length === 1, 'Expected the batch detail route to return its transactions.');
+    assertCase(cases[13].status === 409 && cases[13].data?.details?.blockers?.[0]?.fullName === 'Student One', 'Expected a blocked batch rollback to return 409 with the blocking students.');
+    assertCase(cases[14].status === 200 && cases[14].data?.item?.promotionOutcome === 'promoted', 'Expected the resolve route to return the resolved transaction.');
+    assertCase(cases[15].status === 409 && cases[15].data?.code === 'promotion_transaction_not_held', 'Expected resolving a non-held transaction to return 409.');
+    assertCase(cases[16].status === 403, 'Expected resolving to require the admin role.');
+    assertCase(cases[17].status === 403, 'Expected the batch list to require the admin role.');
+
     const ruleCreateLog = findActivity('promotion_rule_create');
     const applyLog = findActivity('promotion_apply');
     const rollbackLog = findActivity('promotion_rollback');
 
     assertCase(ruleCreateLog?.targetType === 'promotion_rule' && ruleCreateLog?.targetId === IDS.rule, 'Expected promotion rule creation to write an activity log.');
-    assertCase(applyLog?.targetType === 'promotion_session' && applyLog?.targetId === IDS.session, 'Expected promotion apply to write an activity log.');
+    assertCase(applyLog?.targetType === 'promotion_batch' && applyLog?.targetId === IDS.batch, 'Expected promotion apply to write an activity log for its batch.');
+    assertCase(applyLog?.meta?.promotionSessionId === IDS.session, 'Expected promotion apply activity log to keep the exam session.');
     assertCase(Number(applyLog?.meta?.transactionCount || 0) === 1, 'Expected promotion apply activity log to include transaction count.');
     assertCase(rollbackLog?.targetType === 'promotion_transaction' && rollbackLog?.targetId === IDS.tx, 'Expected promotion rollback to write an activity log.');
     assertCase(rollbackLog?.reason === 'operator review', 'Expected promotion rollback activity log to include rollback reason.');
+    assertCase(!findActivity('promotion_batch_rollback'), 'Expected a refused batch rollback to write no activity log.');
+    const resolveLog = findActivity('promotion_resolve');
+    assertCase(resolveLog?.targetId === IDS.heldTx && resolveLog?.meta?.decision === 'promoted', 'Expected resolving a held student to write an activity log.');
 
     console.log('check:promotion-routes PASS');
   } finally {
