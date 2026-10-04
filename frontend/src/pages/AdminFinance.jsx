@@ -683,6 +683,19 @@ const FEE_PLAN_LIFECYCLE_LABELS = {
   archived: 'آرشیف'
 };
 
+// The plan code a fee-plan save files the plan under, normalised the way the
+// backend does it (normalizePlanCode in services/financeFeePlanService.js, with
+// the plan type as the fallback code).
+const resolveFeePlanSaveCode = (planCode = '', planType = 'standard') => {
+  const type = String(planType || '').trim().toLowerCase();
+  const code = String(planCode || '').trim()
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
+  if (code) return code;
+  return type !== 'standard' && Object.keys(FEE_PLAN_TYPE_LABELS).includes(type) ? type.toUpperCase() : 'STANDARD';
+};
+
 const getStudentDisplayName = (student = {}) => (
   String(student?.fullName || student?.name || student?.email || '').trim() || 'متعلم'
 );
@@ -3744,6 +3757,22 @@ export default function AdminFinance() {
       return sameClass && sameYear && sameFrequency && sameTerm;
     })
   ), [feePlans, feePlanForm.academicYearId, feePlanForm.billingFrequency, feePlanForm.classId, feePlanForm.term]);
+  // The save updates the plan of the same scope with the same plan code (the
+  // class-scope unique index allows one) and leaves the scope's other codes alone.
+  const feePlanSaveScope = useMemo(() => {
+    const saveCode = resolveFeePlanSaveCode(feePlanForm.planCode, feePlanForm.planType);
+    if (!feePlanForm.classId || !feePlanForm.academicYearId) return { saveCode, targets: [], others: [], otherCodes: [] };
+    const planCodeOf = (plan) => String(plan?.planCode || 'STANDARD').trim().toUpperCase();
+    const others = sameScopeFeePlans.filter((plan) => planCodeOf(plan) !== saveCode);
+    return {
+      saveCode,
+      targets: sameScopeFeePlans.filter((plan) => planCodeOf(plan) === saveCode),
+      others,
+      otherCodes: [...new Set(others.map(planCodeOf))]
+    };
+  }, [sameScopeFeePlans, feePlanForm.academicYearId, feePlanForm.classId, feePlanForm.planCode, feePlanForm.planType]);
+  const feePlanSaveTarget = feePlanSaveScope.targets.length === 1 ? feePlanSaveScope.targets[0] : null;
+  const feePlanSaveTargetStatus = String(feePlanSaveTarget?.lifecycleStatus || (feePlanSaveTarget?.isActive === false ? 'inactive' : 'active')).trim() || 'active';
 
   const canReviewReceipt = (receipt) => {
     if (!receipt || receipt.status !== 'pending') return false;
@@ -9098,11 +9127,25 @@ export default function AdminFinance() {
                   ))}
                   {!feePlanActiveLineItems.length && <p className="muted">هنوز قلم فعال ثبت نشده است.</p>}
                 </div>
-                {!!sameScopeFeePlans.length && (
-                  <div className="finance-plan-warning">
-                    <strong>{fmt(sameScopeFeePlans.length)} پلان مشابه</strong>
-                    <span>برای همین صنف، سال، دوره پرداخت و ترم قبلاً پلان ثبت شده است.</span>
+                {feePlanSaveTarget && (
+                  <div className="finance-plan-warning" data-testid="fee-plan-save-target">
+                    <strong>با ذخیره، پلانِ موجود به‌روز می‌شود</strong>
+                    <span>«{feePlanSaveTarget.title || 'پلان مالی'}» با همین صنف، سال، دوره پرداخت، ترم و کد پلان ({feePlanSaveScope.saveCode}) ثبت شده است؛ ذخیره همان را به‌روز می‌کند و پلانِ تازه ساخته نمی‌شود.</span>
+                    {feePlanSaveTargetStatus !== 'active' && (
+                      <span>این پلان در وضعیتِ «{FEE_PLAN_LIFECYCLE_LABELS[feePlanSaveTargetStatus] || feePlanSaveTargetStatus}» است و با ذخیره دوباره فعال می‌شود.</span>
+                    )}
                   </div>
+                )}
+                {feePlanSaveScope.targets.length > 1 && (
+                  <div className="finance-plan-warning" data-testid="fee-plan-save-target">
+                    <strong>با ذخیره، یکی از {fmt(feePlanSaveScope.targets.length)} پلانِ موجود به‌روز می‌شود</strong>
+                    <span>برای همین صنف، سال، دوره پرداخت، ترم و کد پلان ({feePlanSaveScope.saveCode}) {fmt(feePlanSaveScope.targets.length)} پلان ثبت شده است؛ پلانِ تازه ساخته نمی‌شود.</span>
+                  </div>
+                )}
+                {!!feePlanSaveScope.others.length && (
+                  <p className="muted" data-testid="fee-plan-other-codes">
+                    {fmt(feePlanSaveScope.others.length)} پلانِ دیگر برای همین صنف، سال، دوره پرداخت و ترم {feePlanSaveScope.others.length === 1 ? 'کدِ دیگری دارد' : 'کدهای دیگری دارند'} ({feePlanSaveScope.otherCodes.join('، ')})؛ ذخیره به {feePlanSaveScope.others.length === 1 ? 'آن' : 'آن‌ها'} دست نمی‌زند.
+                  </p>
                 )}
               </div>
 
