@@ -253,7 +253,7 @@ async function run() {
       assert.equal(sourceA.endedAt.toISOString(), '2027-03-20T00:00:00.000Z');
       const targetA = await currentTarget('A');
       assert.equal(String(targetA.classId), String(classes.c6a._id));
-      assert.equal(targetA.status, 'pending');
+      assert.equal(targetA.status, 'active', 'billable from the start of the new year');
       assert.equal(targetA.source, 'promotion');
       assert.equal(targetA.admissionType, 'promotion');
       assert.equal(targetA.enrolledAt.toISOString(), '2027-03-21T00:00:00.000Z');
@@ -276,6 +276,7 @@ async function run() {
       assert.equal(String(registryA.academicInfo.classId), String(classes.c6a._id));
       assert.equal(String(registryA.academicInfo.academicYearId), String(years.y1406._id));
       assert.equal((await SchoolClass.findById(classes.c5a._id)).currentStudents, 3, 'C, D and E are still active in 5 الف');
+      assert.equal((await SchoolClass.findById(classes.c6a._id)).currentStudents, 1, 'A now counts in 6 الف');
     });
 
     await check('applying the same class again changes nothing', async () => {
@@ -326,7 +327,7 @@ async function run() {
       secondBatch = applied.batch;
       const targetA = await currentTarget('A');
       assert.ok(targetA, 'A has a current membership in 1406 again');
-      assert.equal(targetA.status, 'pending');
+      assert.equal(targetA.status, 'active');
       assert.equal(await StudentMembership.countDocuments({ student: students.A.userId, academicYearId: years.y1406._id }), 2,
         'the retired membership is kept, a new one is created next to it');
       assert.equal(String((await currentTarget('G')).classId), String(classes.c6a._id), 'without the override G follows the class');

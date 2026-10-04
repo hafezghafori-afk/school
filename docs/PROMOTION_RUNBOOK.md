@@ -21,8 +21,8 @@ One press of «اعمال ارتقا» promotes one source class of one academic
 - **Dates**: the source membership ends on `sourceEndAt` (default: end of the source year) and the new
   one starts on `targetStartAt` (default: start of the target year). A legacy `effectiveAt` sets both.
 - **Outcomes**:
-  - `promoted` / `repeated` → a new membership in the target class (status from the rule, `pending` by
-    default), the source membership is closed.
+  - `promoted` / `repeated` → a new `active` membership in the target class, the source membership is
+    closed.
   - `graduated` → class 12 (or a terminal rule): the source membership becomes `graduated`.
   - `conditional` (مشروط) → **held** for the second-chance exam: nothing moves until
     `POST /api/promotions/transactions/:id/resolve` with `{ decision: 'promoted' | 'repeated' }`.
@@ -30,6 +30,36 @@ One press of «اعمال ارتقا» promotes one source class of one academic
     student can be promoted once the marks are fixed.
 - Everything is written in **one MongoDB transaction** (a replica set or mongos is required); the
   class head-counts and the student registry (`AfghanStudent.academicInfo`) are updated with it.
+
+## Finance (phase 2)
+
+- **New memberships are `active`** from the start of the target year, so the normal billing picks
+  them up. Their `admissionType` is `promotion`, and the billing engine never charges a promotion
+  membership «داخله» again.
+- **Preview** shows per student (`item.finance`): the source-year debt (`outstanding`, a warning only
+  — it stays as that year's debt), documents dated after the source end (`postEndUnpaid`,
+  `postEndPaid`) and active discounts/exemptions (`reliefs`). `plan.warnings` adds a line for the debt,
+  for after-end documents, and for every target class without a fee plan in the target year.
+- **Apply** settles each moved student's source membership inside the same transaction: an unpaid
+  document dated after the end is voided (bill and its fee-order mirror), unless its month is closed
+  (then it is listed in `financeEffects.reviewRequired`); a paid one becomes a `FinanceRefund` case
+  (`membership_ended`, note suggesting `credit_next_bill`) for the finance office. The source-year
+  debt and the second-chance exam fee are never touched. Government reports are built from payments
+  and expenses, so ratified reports don't change.
+- **Reliefs**: `reliefCarryOver: [{ membershipId, reliefs: [{ sourceModel: 'discount' | 'fee_exemption', id }] }]`
+  (or `carryAllReliefs: true`) re-registers the chosen ones on the new membership after commit, through
+  the normal registry (target-year window, open-bill sync, FinanceRelief mirror). A held student's
+  choice is kept as `plannedReliefs` and carried when the second chance is decided (the resolve
+  request may also send `reliefs` / `carryAllReliefs`). Results are in `financeEffects.carriedReliefs`
+  and `batch.financeSummary`.
+- **Rollback** cancels the reliefs the promotion carried. Voided after-end documents and refund cases
+  stay as they are; finance re-issues or rejects them if needed.
+
+## Access
+
+One person approves a promotion. `education.promotions.manage` comes by default with the school
+manager (مدیر مکتب), the general presidency (ریاست عمومی) and the academic manager (through
+`manage_users` / `manage_memberships`); `check:promotion-routes` keeps the first two pinned.
 
 ## Rollback
 
@@ -78,6 +108,8 @@ items unless `--allow-pending` / `--allow-blocked` is passed.
 - `npm run check:promotion-routes` — route permissions, error codes and activity logs.
 - `npm run check:second-chance-fee` — the finance list, billing, waiver, void and rollback/resolve
   interplay through the real finance routes; SKIP on a standalone server.
+- `npm run check:promotion-finance` — debt/after-end documents in the preview, settlement on apply,
+  closed months, no second admission fee, relief carry-over and its rollback; SKIP on a standalone server.
 
 ## Recommendation
 

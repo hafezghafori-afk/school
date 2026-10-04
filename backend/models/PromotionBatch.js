@@ -46,6 +46,15 @@ const promotionBatchSchema = new mongoose.Schema({
     graduated: { type: Number, default: 0 },
     notApplied: { type: Number, default: 0 }
   },
+  financeSummary: {
+    studentsWithDebt: { type: Number, default: 0 },
+    debtAmount: { type: Number, default: 0 },
+    voidedDocuments: { type: Number, default: 0 },
+    refundCases: { type: Number, default: 0 },
+    reviewRequired: { type: Number, default: 0 },
+    carriedReliefs: { type: Number, default: 0 },
+    failedReliefs: { type: Number, default: 0 }
+  },
   notApplied: { type: [batchStudentSchema], default: [] },
   overrides: { type: [batchOverrideSchema], default: [] },
   warnings: { type: [String], default: [] },

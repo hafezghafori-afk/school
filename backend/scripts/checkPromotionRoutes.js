@@ -240,6 +240,15 @@ async function run() {
     const resolveLog = findActivity('promotion_resolve');
     assertCase(resolveLog?.targetId === IDS.heldTx && resolveLog?.meta?.decision === 'promoted', 'Expected resolving a held student to write an activity log.');
 
+    // One person approves a promotion (agreed 2026-10-04); the school manager
+    // and the general presidency must always be among those who can.
+    const { resolvePermissions } = require('../utils/permissions');
+    for (const level of ['school_manager', 'general_president']) {
+      const permissions = new Set(resolvePermissions({ role: 'admin', orgRole: level, adminLevel: level, explicitPermissions: [] }));
+      assertCase(permissions.has('education.promotions.manage'), `Expected ${level} to manage promotions by default.`);
+      assertCase(permissions.has('view_reports'), `Expected ${level} to see promotion batches by default.`);
+    }
+
     console.log('check:promotion-routes PASS');
   } finally {
     await new Promise((resolve) => server.close(resolve));

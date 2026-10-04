@@ -123,6 +123,42 @@ const promotionTransactionSchema = new mongoose.Schema({
     decidedAt: { type: Date, default: null },
     decidedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
   },
+  // What promotion did on the finance side for this student: the source-year
+  // debt it left in place, after-end documents it voided or turned into
+  // refund cases (or left for review in a closed month), and the reliefs
+  // re-registered on the new membership.
+  financeEffects: {
+    outstandingAtPromotion: { type: Number, default: 0 },
+    voidedBills: { type: Number, default: 0 },
+    voidedOrders: { type: Number, default: 0 },
+    refundCases: { type: Number, default: 0 },
+    reviewRequired: {
+      type: [new mongoose.Schema({
+        documentId: { type: String, default: '' },
+        documentType: { type: String, default: '' },
+        number: { type: String, default: '' },
+        reason: { type: String, default: '' }
+      }, { _id: false })],
+      default: []
+    },
+    plannedReliefs: {
+      type: [new mongoose.Schema({
+        sourceModel: { type: String, default: '' },
+        id: { type: String, default: '' }
+      }, { _id: false })],
+      default: []
+    },
+    carriedReliefs: {
+      type: [new mongoose.Schema({
+        sourceModel: { type: String, default: '' },
+        sourceId: { type: String, default: '' },
+        newId: { type: String, default: '' },
+        status: { type: String, default: '' },
+        error: { type: String, default: '' }
+      }, { _id: false })],
+      default: []
+    }
+  },
   resolvedAt: { type: Date, default: null },
   resolvedBy: {
     type: mongoose.Schema.Types.ObjectId,

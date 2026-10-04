@@ -36,6 +36,14 @@ const {
 const { CURRENT_STUDENT_MEMBERSHIP_STATUSES } = require('../utils/studentMembershipStatus');
 const { billOutstanding, secondChanceIssuanceKey } = require('../utils/secondChanceFee');
 const {
+  buildPromotionFinancePreview,
+  cancelCarriedReliefs,
+  carryReliefsToMembership,
+  findTargetClassesWithoutFeePlan,
+  selectReliefsToCarry,
+  settleSourceMembershipBilling
+} = require('./promotionFinanceService');
+const {
   ACTIONABLE_OUTCOMES,
   LIVE_TRANSACTION_STATUSES,
   academicYearOrder,
@@ -55,6 +63,9 @@ const SCORE_BREAKDOWN_KEYS = ['writtenScore', 'oralScore', 'classActivityScore',
 const CLASS_SELECT = 'title titleDari code gradeLevel section genderType shift shiftId capacity currentStudents status academicYearId legacyCourseId schoolId';
 // Outcomes that ended the source membership when they were applied.
 const SOURCE_CLOSING_OUTCOMES = Object.freeze(['promoted', 'repeated', 'graduated']);
+// A promoted/repeating student's new membership is billable from the start of
+// the target year (agreed in phase 2); billing only picks up active ones.
+const GENERATED_MEMBERSHIP_STATUS = 'active';
 
 function promotionError(code, details = null) {
   const error = new Error(code);
@@ -277,6 +288,15 @@ function formatPromotionTransaction(doc) {
       subjectTitle: normalizeText(subject?.subjectTitle),
       percentage: Number(subject?.percentage) || 0
     })),
+    financeEffects: {
+      outstandingAtPromotion: Number(item.financeEffects?.outstandingAtPromotion || 0),
+      voidedBills: Number(item.financeEffects?.voidedBills || 0),
+      voidedOrders: Number(item.financeEffects?.voidedOrders || 0),
+      refundCases: Number(item.financeEffects?.refundCases || 0),
+      reviewRequired: (item.financeEffects?.reviewRequired || []).map((entry) => ({ ...entry })),
+      plannedReliefs: (item.financeEffects?.plannedReliefs || []).map((entry) => ({ sourceModel: entry.sourceModel, id: entry.id })),
+      carriedReliefs: (item.financeEffects?.carriedReliefs || []).map((entry) => ({ ...entry }))
+    },
     secondChanceFee: {
       status: normalizeText(item.secondChanceFee?.status),
       billId: item.secondChanceFee?.billId ? String(item.secondChanceFee.billId._id || item.secondChanceFee.billId) : '',
@@ -325,6 +345,15 @@ function formatPromotionBatch(doc, transactions = null) {
       conditional: Number(summary.conditional || 0),
       graduated: Number(summary.graduated || 0),
       notApplied: Number(summary.notApplied || 0)
+    },
+    financeSummary: {
+      studentsWithDebt: Number(item.financeSummary?.studentsWithDebt || 0),
+      debtAmount: Number(item.financeSummary?.debtAmount || 0),
+      voidedDocuments: Number(item.financeSummary?.voidedDocuments || 0),
+      refundCases: Number(item.financeSummary?.refundCases || 0),
+      reviewRequired: Number(item.financeSummary?.reviewRequired || 0),
+      carriedReliefs: Number(item.financeSummary?.carriedReliefs || 0),
+      failedReliefs: Number(item.financeSummary?.failedReliefs || 0)
     },
     rule: item.ruleId?._id ? { id: String(item.ruleId._id), name: normalizeText(item.ruleId.name), code: normalizeText(item.ruleId.code) } : null,
     sourceAcademicYear: formatAcademicYear(item.sourceAcademicYearId),
@@ -379,9 +408,9 @@ function buildDefaultPromotionRulePayload() {
     scope: 'global',
     isTerminalClass: false,
     conditionalTargetMode: 'same_class',
-    promotedMembershipStatus: 'pending',
-    repeatedMembershipStatus: 'pending',
-    conditionalMembershipStatus: 'pending',
+    promotedMembershipStatus: 'active',
+    repeatedMembershipStatus: 'active',
+    conditionalMembershipStatus: 'active',
     evaluationMode: 'official_general_result',
     passingScore: 55,
     subjectPassingScore: 55,
@@ -569,13 +598,6 @@ async function resolveTargetAcademicYear(sourceAcademicYear, payload = {}, rule 
   const years = await AcademicYear.find({ _id: { $ne: sourceAcademicYear._id } }).sort({ startDate: 1, sequence: 1, createdAt: 1 });
   const later = years.filter((item) => academicYearOrder(sourceAcademicYear, item) === 'after');
   return later.find((candidate) => later.every((other) => other === candidate || academicYearOrder(candidate, other) !== 'before')) || null;
-}
-
-function getGeneratedMembershipStatus(outcome, rule = null) {
-  if (outcome === 'promoted') return normalizeText(rule?.promotedMembershipStatus) || 'pending';
-  if (outcome === 'repeated') return normalizeText(rule?.repeatedMembershipStatus) || 'pending';
-  if (outcome === 'conditional') return normalizeText(rule?.conditionalMembershipStatus) || 'pending';
-  return '';
 }
 
 function resolvePromotionOutcome(rule, resultStatus) {
@@ -1347,7 +1369,7 @@ async function buildPreviewItems({ entries = [], plan, rule, payload, targetAcad
       targetClass,
       targetCourseId,
       reuseMembershipId: existing ? idOf(existing) : null,
-      generatedMembershipStatus: getGeneratedMembershipStatus(computedOutcome, rule)
+      generatedMembershipStatus: GENERATED_MEMBERSHIP_STATUS
     });
   }
   return items;
@@ -1393,6 +1415,73 @@ async function finalizePlanAfterItems({ plan, items, targetClasses }) {
   });
 }
 
+function financeAmountLabel(value) {
+  return `${(Math.round((Number(value) || 0) * 100) / 100).toLocaleString('en-US')} افغانی`;
+}
+
+// Phase 2: each student's finance picture and the reliefs that would follow
+// them. A source-year debt only warns (agreed); documents dated after the end
+// are settled on apply; a target class without a fee plan warns once.
+async function attachFinancePreview({ plan, items, payload }) {
+  const financeByMembership = await buildPromotionFinancePreview({
+    membershipIds: items.map((item) => item.sourceMembership?._id),
+    sourceEndAt: plan.dates.sourceEndAt
+  });
+  let studentsWithDebt = 0;
+  let debtAmount = 0;
+  let studentsWithPostEndDocuments = 0;
+  items.forEach((item) => {
+    const finance = financeByMembership.get(idOf(item.sourceMembership)) || null;
+    item.finance = finance;
+    item.reliefsToCarry = finance && item.canApply && ['promoted', 'repeated', 'conditional'].includes(item.computedOutcome)
+      ? selectReliefsToCarry({ payload, membershipId: idOf(item.sourceMembership), available: finance.reliefs })
+      : [];
+    if (!item.canApply || !finance) return;
+    if (finance.outstanding > 0) {
+      studentsWithDebt += 1;
+      debtAmount += finance.outstanding;
+    }
+    if (finance.postEndUnpaid.length || finance.postEndPaid.length) studentsWithPostEndDocuments += 1;
+  });
+
+  if (studentsWithDebt) {
+    plan.warnings.push({
+      code: 'source_year_debt',
+      field: 'finance',
+      message: `مالی: ${studentsWithDebt} شاگرد از سال مبدا ${financeAmountLabel(debtAmount)} باقی دارند؛ مانع ارتقا نیست و به‌عنوان بقایای همان سال در حساب شاگرد می‌ماند.`
+    });
+  }
+  if (studentsWithPostEndDocuments) {
+    plan.warnings.push({
+      code: 'source_post_end_documents',
+      field: 'finance',
+      message: `مالی: ${studentsWithPostEndDocuments} شاگرد بل یا پرداختی برای ماه‌های بعد از ختم عضویت در صنف مبدا دارند؛ بل پرداخت‌نشده باطل می‌شود (مگر ماهش بسته باشد) و پرداخت‌شده برای اعتبار در سال جدید به بخش مالی فرستاده می‌شود.`
+    });
+  }
+
+  const usedTargetClasses = new Map();
+  items.forEach((item) => {
+    if (item.canApply && item.targetClass) usedTargetClasses.set(idOf(item.targetClass), item.targetClass);
+  });
+  const withoutPlan = await findTargetClassesWithoutFeePlan({
+    targetClasses: Array.from(usedTargetClasses.values()),
+    targetAcademicYear: plan.targetAcademicYear
+  });
+  withoutPlan.forEach((schoolClass) => plan.warnings.push({
+    code: 'target_fee_plan_missing',
+    field: 'finance',
+    classId: idOf(schoolClass),
+    message: `مالی: برای «${normalizeText(schoolClass.title)}${schoolClass.code ? ` — ${normalizeText(schoolClass.code)}` : ''}» در سال مقصد پلان فیس تعریف نشده؛ تا تعریف نشود برای این شاگردان در سال جدید بل ساخته نمی‌شود.`
+  }));
+
+  plan.finance = {
+    studentsWithDebt,
+    debtAmount: Math.round(debtAmount * 100) / 100,
+    studentsWithPostEndDocuments,
+    targetClassesWithoutFeePlan: withoutPlan.map((schoolClass) => idOf(schoolClass))
+  };
+}
+
 async function resolvePromotionPreviewState(payload = {}) {
   const sessionId = normalizeNullableId(payload.sessionId);
   const explicitAcademicYearId = normalizeNullableId(payload.academicYearId);
@@ -1434,6 +1523,7 @@ async function resolvePromotionPreviewState(payload = {}) {
     : await loadSessionResultEntries({ payload, rule, session });
   const items = await buildPreviewItems({ entries, plan, rule, payload, targetAcademicYear, targetClasses });
   await finalizePlanAfterItems({ plan, items, targetClasses });
+  await attachFinancePreview({ plan, items, payload });
 
   return {
     session,
@@ -1462,6 +1552,7 @@ function serializePromotionPlan(plan, items = []) {
     blockers: plan.blockers,
     warnings: plan.warnings,
     capacity: plan.capacity,
+    finance: plan.finance || null,
     canApply: !plan.blockers.length && items.some((item) => item.canApply)
   };
 }
@@ -1492,7 +1583,9 @@ function serializePromotionPreview(state) {
       policyEvaluation: item.policyEvaluation || null,
       sourceMembership: formatMembership(item.sourceMembership),
       targetAcademicYear: formatAcademicYear(item.targetAcademicYear),
-      targetClass: formatSchoolClass(item.targetClass)
+      targetClass: formatSchoolClass(item.targetClass),
+      finance: item.finance || null,
+      reliefsToCarry: (item.reliefsToCarry || []).map((relief) => ({ sourceModel: relief.sourceModel, id: relief.id }))
     }))
   };
 }
@@ -1514,7 +1607,7 @@ async function closeSourceMembership(sourceMembership, outcome, effectiveAt) {
   return sourceMembership;
 }
 
-async function provideTargetMembership({ source, targetAcademicYearId, targetClass, targetCourseId, reuseMembershipId = null, outcome, rule, actorUserId, targetStartAt, dbSession }) {
+async function provideTargetMembership({ source, targetAcademicYearId, targetClass, targetCourseId, reuseMembershipId = null, outcome, actorUserId, targetStartAt, dbSession }) {
   if (reuseMembershipId) {
     const existing = await StudentMembership.findById(reuseMembershipId).session(dbSession);
     if (existing && isCurrentMembership(existing) && idOf(existing.classId) === idOf(targetClass)) {
@@ -1531,7 +1624,7 @@ async function provideTargetMembership({ source, targetAcademicYearId, targetCla
     classId: targetClass._id,
     academicYear: targetAcademicYearId,
     academicYearId: targetAcademicYearId,
-    status: getGeneratedMembershipStatus(outcome, rule) || 'pending',
+    status: GENERATED_MEMBERSHIP_STATUS,
     source: 'promotion',
     admissionType: 'promotion',
     enrolledAt: targetStartAt,
@@ -1598,6 +1691,8 @@ async function applyPromotionState({ state, payload, actorUserId, dbSession }) {
   });
 
   const counts = { promoted: 0, repeated: 0, conditional: 0, graduated: 0 };
+  const financeSummary = { studentsWithDebt: 0, debtAmount: 0, voidedDocuments: 0, refundCases: 0, reviewRequired: 0, carriedReliefs: 0, failedReliefs: 0 };
+  const reliefCarries = [];
   const notApplied = [];
   const touchedClassIds = new Set([idOf(plan.sourceClass)]);
   const projections = [];
@@ -1645,7 +1740,6 @@ async function applyPromotionState({ state, payload, actorUserId, dbSession }) {
         targetCourseId: item.targetCourseId,
         reuseMembershipId: item.reuseMembershipId,
         outcome,
-        rule,
         actorUserId,
         targetStartAt,
         dbSession
@@ -1659,7 +1753,24 @@ async function applyPromotionState({ state, payload, actorUserId, dbSession }) {
     }
 
     const held = outcome === 'conditional';
+    const settled = held
+      ? { voidedBills: 0, voidedOrders: 0, refundCases: 0, reviewRequired: [] }
+      : await settleSourceMembershipBilling({ membership: source, sourceEndAt, actorId: normalizeNullableId(actorUserId), dbSession });
+    const outstandingAtPromotion = Number(item.finance?.outstanding || 0);
+    if (outstandingAtPromotion > 0) {
+      financeSummary.studentsWithDebt += 1;
+      financeSummary.debtAmount += outstandingAtPromotion;
+    }
+    financeSummary.voidedDocuments += settled.voidedBills + settled.voidedOrders;
+    financeSummary.refundCases += settled.refundCases;
+    financeSummary.reviewRequired += settled.reviewRequired.length;
+    const transactionId = new mongoose.Types.ObjectId();
+    const reliefs = (item.reliefsToCarry || []).map((relief) => ({ sourceModel: relief.sourceModel, id: relief.id }));
+    if (reliefs.length && targetMembership) {
+      reliefCarries.push({ transactionId, sourceMembershipId: source._id, targetMembershipId: targetMembership._id, reliefs });
+    }
     await PromotionTransaction.create([{
+      _id: transactionId,
       batchId: batch._id,
       ruleId: rule._id,
       sessionId: state.session?._id || null,
@@ -1695,7 +1806,17 @@ async function applyPromotionState({ state, payload, actorUserId, dbSession }) {
       sourceMembershipIsCurrentBefore: snapshot.isCurrent,
       createdBy: normalizeNullableId(actorUserId),
       appliedBy: held ? null : normalizeNullableId(actorUserId),
-      note: held ? 'held for the second-chance exam' : ''
+      note: held ? 'held for the second-chance exam' : '',
+      financeEffects: {
+        outstandingAtPromotion,
+        voidedBills: settled.voidedBills,
+        voidedOrders: settled.voidedOrders,
+        refundCases: settled.refundCases,
+        reviewRequired: settled.reviewRequired,
+        // A held student's reliefs follow them only when the second chance is decided.
+        plannedReliefs: held ? reliefs : [],
+        carriedReliefs: []
+      }
     }], { session: dbSession });
     counts[outcome] += 1;
   }
@@ -1705,6 +1826,8 @@ async function applyPromotionState({ state, payload, actorUserId, dbSession }) {
   }
 
   batch.summary = { total: state.items.length, ...counts, notApplied: notApplied.length };
+  financeSummary.debtAmount = Math.round(financeSummary.debtAmount * 100) / 100;
+  batch.financeSummary = financeSummary;
   batch.notApplied = notApplied;
   await batch.save({ session: dbSession });
 
@@ -1717,7 +1840,37 @@ async function applyPromotionState({ state, payload, actorUserId, dbSession }) {
     await project();
   }
 
-  return { batchId: batch._id };
+  return { batchId: batch._id, reliefCarries };
+}
+
+// After commit: carry the chosen reliefs onto the new memberships and record
+// the outcome per student and on the batch. Never throws.
+async function applyReliefCarries({ batchId = null, reliefCarries = [], actorUserId = null }) {
+  let carried = 0;
+  let failed = 0;
+  for (const carry of reliefCarries) {
+    // eslint-disable-next-line no-await-in-loop
+    const results = await carryReliefsToMembership({
+      sourceMembershipId: carry.sourceMembershipId,
+      targetMembershipId: carry.targetMembershipId,
+      reliefs: carry.reliefs,
+      actorId: normalizeNullableId(actorUserId)
+    }).catch(() => carry.reliefs.map((relief) => ({ sourceModel: relief.sourceModel, sourceId: relief.id, newId: '', status: 'failed', error: 'carry_failed' })));
+    carried += results.filter((entry) => entry.status === 'carried').length;
+    failed += results.filter((entry) => entry.status !== 'carried').length;
+    // eslint-disable-next-line no-await-in-loop
+    await PromotionTransaction.updateOne(
+      { _id: carry.transactionId },
+      { $set: { 'financeEffects.carriedReliefs': results, 'financeEffects.plannedReliefs': [] } }
+    ).catch(() => null);
+  }
+  if (batchId && (carried || failed)) {
+    await PromotionBatch.updateOne(
+      { _id: batchId },
+      { $inc: { 'financeSummary.carriedReliefs': carried, 'financeSummary.failedReliefs': failed } }
+    ).catch(() => null);
+  }
+  return { carried, failed };
 }
 
 async function applyPromotions(payload = {}, actorUserId = null) {
@@ -1729,7 +1882,8 @@ async function applyPromotions(payload = {}, actorUserId = null) {
     throw promotionError('promotion_nothing_to_apply', { summary: summarizePromotionItems(state.items) });
   }
 
-  const { batchId } = await runInTransaction((dbSession) => applyPromotionState({ state, payload, actorUserId, dbSession }));
+  const { batchId, reliefCarries } = await runInTransaction((dbSession) => applyPromotionState({ state, payload, actorUserId, dbSession }));
+  await applyReliefCarries({ batchId, reliefCarries, actorUserId });
   invalidateFinanceReports();
 
   const [batch, transactions] = await Promise.all([
@@ -1824,6 +1978,10 @@ async function rollbackTransactionInSession(transaction, { rollbackAt, reason, a
     effects.classIds.add(idOf(sourceMembership.classId));
     effects.projections.push(() => projectStudentClass(sourceMembership, dbSession));
   }
+  const carried = (transaction.financeEffects?.carriedReliefs || [])
+    .map((entry) => (entry?.toObject ? entry.toObject() : { ...entry }))
+    .filter((entry) => entry.status === 'carried');
+  if (carried.length) effects.carriedReliefs.push({ transactionId: transaction._id, carried });
 
   transaction.transactionStatus = 'rolled_back';
   transaction.rolledBackAt = rollbackAt;
@@ -1872,7 +2030,22 @@ async function finishRollbackEffects(effects, context) {
 }
 
 function newRollbackEffects() {
-  return { classIds: new Set(), batchIds: new Set(), projections: [] };
+  return { classIds: new Set(), batchIds: new Set(), projections: [], carriedReliefs: [] };
+}
+
+// After a rollback commits, the reliefs the promotion carried onto the new
+// membership are cancelled too. Voided after-end bills and refund cases stay
+// as they are - finance re-issues or rejects them if the move is undone.
+async function cancelReliefsAfterRollback(effects, actorUserId) {
+  for (const entry of effects?.carriedReliefs || []) {
+    // eslint-disable-next-line no-await-in-loop
+    const results = await cancelCarriedReliefs(entry.carried, { actorId: normalizeNullableId(actorUserId) }).catch(() => entry.carried);
+    // eslint-disable-next-line no-await-in-loop
+    await PromotionTransaction.updateOne(
+      { _id: entry.transactionId },
+      { $set: { 'financeEffects.carriedReliefs': results } }
+    ).catch(() => null);
+  }
 }
 
 async function rollbackPromotionTransaction(transactionId, payload = {}, actorUserId = null) {
@@ -1888,13 +2061,16 @@ async function rollbackPromotionTransaction(transactionId, payload = {}, actorUs
   if (existing.transactionStatus !== 'rolled_back') {
     const rollbackAt = toDateOrNull(payload.rolledBackAt || payload.effectiveAt) || new Date();
     const reason = payload.reason || payload.rollbackReason;
+    let committedEffects = null;
     await runInTransaction(async (dbSession) => {
       const transaction = await PromotionTransaction.findById(normalizedId).session(dbSession);
       const effects = newRollbackEffects();
       const context = { rollbackAt, reason, actorUserId, dbSession, effects };
       await rollbackTransactionInSession(transaction, context);
       await finishRollbackEffects(effects, context);
+      committedEffects = effects;
     });
+    await cancelReliefsAfterRollback(committedEffects, actorUserId);
     invalidateFinanceReports();
   }
 
@@ -1912,6 +2088,7 @@ async function rollbackPromotionBatch(batchId, payload = {}, actorUserId = null)
 
   const rollbackAt = toDateOrNull(payload.rolledBackAt || payload.effectiveAt) || new Date();
   const reason = payload.reason || payload.rollbackReason;
+  let committedEffects = null;
   await runInTransaction(async (dbSession) => {
     const transactions = await PromotionTransaction.find({
       batchId: normalizedId,
@@ -1944,7 +2121,9 @@ async function rollbackPromotionBatch(batchId, payload = {}, actorUserId = null)
       throw promotionError('promotion_batch_rollback_blocked', { blockers });
     }
     await finishRollbackEffects(effects, context);
+    committedEffects = effects;
   });
+  await cancelReliefsAfterRollback(committedEffects, actorUserId);
   invalidateFinanceReports();
 
   return getPromotionBatch(normalizedId);
@@ -2018,6 +2197,19 @@ async function resolveHeldPromotion(transactionId, payload = {}, actorUserId = n
     targetAcademicYear
   });
 
+  // Reliefs that follow the student: this request's choice, otherwise the one
+  // made when the batch held them.
+  let reliefsToCarry = (transaction.financeEffects?.plannedReliefs || []).map((relief) => ({ sourceModel: relief.sourceModel, id: relief.id }));
+  if (Array.isArray(payload.reliefs)) {
+    reliefsToCarry = payload.reliefs
+      .map((relief) => ({ sourceModel: normalizeText(relief?.sourceModel), id: idOf(relief?.id) }))
+      .filter((relief) => relief.id && ['discount', 'fee_exemption'].includes(relief.sourceModel));
+  } else if (payload.carryAllReliefs === true) {
+    const preview = await buildPromotionFinancePreview({ membershipIds: [transaction.studentMembershipId] });
+    reliefsToCarry = (preview.get(idOf(transaction.studentMembershipId))?.reliefs || []).map((relief) => ({ sourceModel: relief.sourceModel, id: relief.id }));
+  }
+  let resolvedTargetMembershipId = null;
+
   await runInTransaction(async (dbSession) => {
     const held = await PromotionTransaction.findById(normalizedId).session(dbSession);
     if (!held || held.transactionStatus !== 'held') {
@@ -2052,7 +2244,6 @@ async function resolveHeldPromotion(transactionId, payload = {}, actorUserId = n
         targetCourseId,
         reuseMembershipId: existing?._id || null,
         outcome,
-        rule,
         actorUserId,
         targetStartAt,
         dbSession
@@ -2061,8 +2252,17 @@ async function resolveHeldPromotion(transactionId, payload = {}, actorUserId = n
       touchedClassIds.add(idOf(targetClass));
       await projectStudentClass(targetMembership, dbSession);
     }
+    const settled = await settleSourceMembershipBilling({ membership: source, sourceEndAt, actorId: normalizeNullableId(actorUserId), dbSession });
+    resolvedTargetMembershipId = targetMembership?._id || null;
 
     const now = new Date();
+    held.financeEffects = {
+      ...(held.financeEffects?.toObject ? held.financeEffects.toObject() : (held.financeEffects || {})),
+      voidedBills: Number(held.financeEffects?.voidedBills || 0) + settled.voidedBills,
+      voidedOrders: Number(held.financeEffects?.voidedOrders || 0) + settled.voidedOrders,
+      refundCases: Number(held.financeEffects?.refundCases || 0) + settled.refundCases,
+      reviewRequired: [...(held.financeEffects?.reviewRequired || []), ...settled.reviewRequired]
+    };
     held.promotionOutcome = outcome;
     held.transactionStatus = 'applied';
     held.targetAcademicYearId = targetAcademicYear._id;
@@ -2087,6 +2287,20 @@ async function resolveHeldPromotion(transactionId, payload = {}, actorUserId = n
       await updateClassActiveCount(classId, dbSession);
     }
   });
+  if (resolvedTargetMembershipId && reliefsToCarry.length) {
+    await applyReliefCarries({
+      batchId: transaction.batchId || null,
+      reliefCarries: [{
+        transactionId: transaction._id,
+        sourceMembershipId: transaction.studentMembershipId,
+        targetMembershipId: resolvedTargetMembershipId,
+        reliefs: reliefsToCarry
+      }],
+      actorUserId
+    });
+  } else if (!resolvedTargetMembershipId) {
+    await PromotionTransaction.updateOne({ _id: transaction._id }, { $set: { 'financeEffects.plannedReliefs': [] } }).catch(() => null);
+  }
   invalidateFinanceReports();
 
   // An unpaid second-chance fee doesn't stop the decision (agreed: debts only

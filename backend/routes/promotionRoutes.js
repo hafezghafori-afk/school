@@ -205,7 +205,8 @@ router.post('/apply', requireAuth, requireRole(['admin']), requirePermission('ed
         promotedClassId: String(data?.batch?.promotedClass?.id || ''),
         repeatClassId: String(data?.batch?.repeatClass?.id || ''),
         transactionCount: Array.isArray(data?.items) ? data.items.length : 0,
-        summary: data?.batch?.summary || data?.summary || null
+        summary: data?.batch?.summary || data?.summary || null,
+        financeSummary: data?.batch?.financeSummary || null
       }
     });
     return res.json({ success: true, ...data });
