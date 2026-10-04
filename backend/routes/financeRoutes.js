@@ -6529,10 +6529,26 @@ router.post('/admin/fee-plans', requireAuth, requireRole(['admin']), requirePerm
       update.schoolId = resolvedSchoolId;
     }
 
-    const item = await FinanceFeePlan.findOneAndUpdate(planQuery, { $set: update }, {
-      new: true,
-      upsert: true
-    });
+    let item = await FinanceFeePlan.findOneAndUpdate(planQuery, { $set: update }, { new: true });
+    if (!item) {
+      // A class's course can change, leaving its plan under the earlier one. The
+      // class-scope unique index allows one plan per school, class, year, term,
+      // billing frequency and plan code whatever the course, so update that plan
+      // (its course moves to the class's current one) instead of inserting a
+      // second. Tried after the current course's plan, which wins where
+      // duplicates are left.
+      item = await FinanceFeePlan.findOneAndUpdate({
+        ...(resolvedSchoolId ? { schoolId: resolvedSchoolId } : {}),
+        classId: scope.classId,
+        academicYearId: update.academicYearId,
+        term: update.term,
+        billingFrequency: update.billingFrequency,
+        planCode: update.planCode
+      }, { $set: update }, {
+        new: true,
+        upsert: true
+      });
+    }
 
     if (update.isDefault && item?._id) {
       await FinanceFeePlan.updateMany({
@@ -6576,9 +6592,9 @@ router.post('/admin/fee-plans', requireAuth, requireRole(['admin']), requirePerm
     });
 
   } catch (error) {
-    // The upsert matches class AND course, so an existing plan with the same class
-    // but another course (or the same course but another class) is not updated:
-    // the insert then hits that plan's unique index.
+    // A unique index still refuses the save when this class's course already has
+    // the plan for another class (or for none), or when the same plan is saved
+    // twice at once.
     if (Number(error?.code) === 11000) {
       const duplicateFields = Object.keys(error?.keyPattern || {});
       const message = duplicateFields.includes('classId')
