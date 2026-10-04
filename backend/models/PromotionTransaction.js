@@ -99,6 +99,30 @@ const promotionTransactionSchema = new mongoose.Schema({
   // class and promotion only linked to it - a rollback must leave that one alone.
   targetMembershipGenerated: { type: Boolean, default: true },
   heldOutcome: { type: String, default: '', trim: true },
+  // What the decision rested on, kept so finance can see a held student's
+  // failed subjects without re-running the result engine.
+  averageScore: { type: Number, default: null },
+  failedSubjects: {
+    type: [new mongoose.Schema({
+      subjectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Subject', default: null },
+      subjectTitle: { type: String, default: '', trim: true },
+      percentage: { type: Number, default: 0 }
+    }, { _id: false })],
+    default: []
+  },
+  // «فیس امتحان چانس دوم» decision of the finance office. The bill itself is
+  // a normal FinanceBill with issuanceKey `second_chance_exam:<this id>`, so it
+  // stays the source of truth for "billed"; this keeps who decided what.
+  secondChanceFee: {
+    status: { type: String, enum: ['', 'billed', 'waived'], default: '' },
+    billId: { type: mongoose.Schema.Types.ObjectId, ref: 'FinanceBill', default: null },
+    amount: { type: Number, default: 0, min: 0 },
+    dueDate: { type: Date, default: null },
+    waiverReason: { type: String, default: '', trim: true },
+    note: { type: String, default: '', trim: true },
+    decidedAt: { type: Date, default: null },
+    decidedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
+  },
   resolvedAt: { type: Date, default: null },
   resolvedBy: {
     type: mongoose.Schema.Types.ObjectId,
@@ -155,5 +179,6 @@ promotionTransactionSchema.pre('validate', function syncPromotionTransactionStat
 promotionTransactionSchema.index({ sessionId: 1, studentMembershipId: 1, targetAcademicYearId: 1, transactionStatus: 1 });
 promotionTransactionSchema.index({ studentId: 1, createdAt: -1 });
 promotionTransactionSchema.index({ studentMembershipId: 1, transactionStatus: 1, promotionOutcome: 1 });
+promotionTransactionSchema.index({ heldOutcome: 1, transactionStatus: 1, academicYearId: 1, classId: 1 });
 
 module.exports = mongoose.model('PromotionTransaction', promotionTransactionSchema);

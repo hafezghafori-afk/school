@@ -1,0 +1,154 @@
+/* Sits on the finance centre's dark glass cards: inputs, selects, buttons
+   (default / .secondary / .danger) and the status chips come from
+   AdminFinance.css; this file only lays out the panel and its table. */
+
+.scf-card .finance-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.scf-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.scf-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+  font-size: 0.85rem;
+}
+
+.scf-notice,
+.scf-error {
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 0.88rem;
+  border: 1px solid transparent;
+}
+
+.scf-notice {
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #a7f3d0;
+}
+
+.scf-error {
+  background: rgba(244, 63, 94, 0.14);
+  border-color: rgba(244, 63, 94, 0.32);
+  color: #fecdd3;
+}
+
+.scf-empty {
+  padding: 12px 0;
+}
+
+.scf-table-wrap {
+  overflow-x: auto;
+}
+
+.scf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.scf-table th,
+.scf-table td {
+  padding: 9px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: right;
+  vertical-align: top;
+}
+
+.scf-table th {
+  font-weight: 700;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.scf-table td small {
+  display: block;
+  margin-top: 3px;
+  color: rgba(226, 232, 240, 0.7);
+  font-size: 0.78rem;
+}
+
+.scf-table input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+}
+
+.scf-table .scf-amount {
+  width: 120px;
+}
+
+.scf-table .afghan-date-field {
+  min-width: 230px;
+}
+
+.scf-count {
+  font-weight: 700;
+}
+
+.scf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.scf-actions button,
+.scf-card .finance-card-head button,
+.scf-filters button {
+  padding: 7px 12px;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .scf-filters label {
+    min-width: 100%;
+  }
+
+  .scf-table thead {
+    display: none;
+  }
+
+  .scf-table,
+  .scf-table tbody,
+  .scf-table tr,
+  .scf-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .scf-table tr {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    margin-bottom: 10px;
+    padding: 6px 10px;
+  }
+
+  .scf-table td {
+    border-bottom: none;
+    padding: 5px 0;
+  }
+
+  .scf-table td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.75rem;
+    color: rgba(226, 232, 240, 0.65);
+  }
+
+  .scf-table .scf-amount,
+  .scf-table .afghan-date-field {
+    width: 100%;
+    min-width: 0;
+  }
+}

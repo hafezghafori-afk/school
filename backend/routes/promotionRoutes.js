@@ -35,6 +35,7 @@ const PROMOTION_ERROR_MESSAGES = Object.freeze({
   promotion_target_membership_not_found: 'عضویت صنف مقصد این شاگرد پیدا نشد.',
   promotion_rollback_blocked_by_downstream_transactions: 'این شاگرد بعد از این ارتقا دوباره ارتقا یافته است؛ اول ارتقای بعدی را بازگردانی کنید.',
   promotion_rollback_blocked_by_finance: 'برای عضویت جدید این شاگرد بل یا فیس ثبت شده است؛ اول آن‌ها را از بخش مالی باطل کنید.',
+  promotion_rollback_blocked_by_second_chance_fee: 'برای امتحان چانس دوم این شاگرد بل فیس صادر شده است؛ اول آن بل را در مرکز مالی مکتب باطل کنید (اگر پرداخت شده، نخست برگشت پول را ثبت کنید).',
   promotion_batch_rollback_blocked: 'بازگردانی دسته انجام نشد؛ بعضی شاگردان قابل بازگردانی نیستند.',
   promotion_batch_nothing_to_rollback: 'در این دسته تراکنش فعالی برای بازگردانی نمانده است.',
   promotion_transaction_not_held: 'این شاگرد در انتظار نتیجهٔ امتحان چانس دوم نیست.',
@@ -56,6 +57,7 @@ function getPromotionErrorStatus(code = '') {
   if ([
     'promotion_rollback_blocked_by_downstream_transactions',
     'promotion_rollback_blocked_by_finance',
+    'promotion_rollback_blocked_by_second_chance_fee',
     'promotion_batch_rollback_blocked',
     'promotion_target_membership_changed',
     'promotion_transaction_not_held',
@@ -275,7 +277,8 @@ router.post('/transactions/:transactionId/resolve', requireAuth, requireRole(['a
       },
       reason: String(req.body?.note || '')
     });
-    return res.json({ success: true, item });
+    const { warnings = [], ...resolved } = item || {};
+    return res.json({ success: true, item: resolved, warnings });
   } catch (error) {
     return sendPromotionError(res, error, 'Failed to resolve the held promotion.');
   }

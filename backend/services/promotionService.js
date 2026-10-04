@@ -34,6 +34,7 @@ const {
   updateClassActiveCount
 } = require('./studentLifecycleService');
 const { CURRENT_STUDENT_MEMBERSHIP_STATUSES } = require('../utils/studentMembershipStatus');
+const { billOutstanding, secondChanceIssuanceKey } = require('../utils/secondChanceFee');
 const {
   ACTIONABLE_OUTCOMES,
   LIVE_TRANSACTION_STATUSES,
@@ -270,6 +271,18 @@ function formatPromotionTransaction(doc) {
     generatedMembershipStatus: normalizeText(item.generatedMembershipStatus),
     targetMembershipGenerated: item.targetMembershipGenerated !== false,
     heldOutcome: normalizeText(item.heldOutcome),
+    averageScore: item.averageScore ?? null,
+    failedSubjects: (Array.isArray(item.failedSubjects) ? item.failedSubjects : []).map((subject) => ({
+      subjectId: subject?.subjectId ? String(subject.subjectId) : '',
+      subjectTitle: normalizeText(subject?.subjectTitle),
+      percentage: Number(subject?.percentage) || 0
+    })),
+    secondChanceFee: {
+      status: normalizeText(item.secondChanceFee?.status),
+      billId: item.secondChanceFee?.billId ? String(item.secondChanceFee.billId._id || item.secondChanceFee.billId) : '',
+      amount: Number(item.secondChanceFee?.amount || 0),
+      waiverReason: normalizeText(item.secondChanceFee?.waiverReason)
+    },
     decidedAt: item.decidedAt || null,
     appliedAt: item.appliedAt || null,
     resolvedAt: item.resolvedAt || null,
@@ -1661,6 +1674,13 @@ async function applyPromotionState({ state, payload, actorUserId, dbSession }) {
       classId: source.classId || null,
       targetClassId: item.targetClass?._id || null,
       sourceResultStatus: normalizeText(item.policyEvaluation?.sourceResultStatus || item.examResult?.resultStatus),
+      averageScore: Number.isFinite(Number(item.policyEvaluation?.averageScore)) ? Number(item.policyEvaluation.averageScore) : null,
+      failedSubjects: (Array.isArray(item.policyEvaluation?.failedSubjects) ? item.policyEvaluation.failedSubjects : [])
+        .map((subject) => ({
+          subjectId: normalizeNullableId(subject?.subjectId),
+          subjectTitle: normalizeText(subject?.subjectTitle),
+          percentage: Number(subject?.percentage) || 0
+        })),
       promotionOutcome: outcome,
       transactionStatus: held ? 'held' : 'applied',
       heldOutcome: held ? 'conditional' : '',
@@ -1748,6 +1768,18 @@ async function rollbackTransactionInSession(transaction, { rollbackAt, reason, a
   const sourceMembership = await StudentMembership.findById(transaction.studentMembershipId).session(dbSession);
   if (!sourceMembership) {
     throw promotionError('promotion_source_membership_not_found');
+  }
+
+  // The finance office may have billed a held student's second-chance exam;
+  // voiding that bill is theirs to do (it has its own approval levels).
+  if (normalizeText(transaction.heldOutcome) === 'conditional') {
+    const secondChanceBill = await FinanceBill.exists({
+      issuanceKey: secondChanceIssuanceKey(transaction._id),
+      status: { $ne: 'void' }
+    }).session(dbSession);
+    if (secondChanceBill) {
+      throw promotionError('promotion_rollback_blocked_by_second_chance_fee');
+    }
   }
 
   const targetMembershipId = normalizeNullableId(transaction.targetMembershipId);
@@ -2057,7 +2089,24 @@ async function resolveHeldPromotion(transactionId, payload = {}, actorUserId = n
   });
   invalidateFinanceReports();
 
-  return getPromotionTransaction(normalizedId);
+  // An unpaid second-chance fee doesn't stop the decision (agreed: debts only
+  // warn); it stays on the source-year membership as that year's debt.
+  const [item, feeBill] = await Promise.all([
+    getPromotionTransaction(normalizedId),
+    FinanceBill.findOne({ issuanceKey: secondChanceIssuanceKey(normalizedId), status: { $ne: 'void' } })
+      .select('amountDue amountPaid billNumber')
+      .lean()
+  ]);
+  const outstanding = billOutstanding(feeBill);
+  return {
+    ...item,
+    warnings: outstanding > 0
+      ? [{
+          code: 'second_chance_fee_unpaid',
+          message: `فیس امتحان چانس دوم این شاگرد (${outstanding.toLocaleString('en-US')} افغانی، بل ${feeBill.billNumber || ''}) هنوز پرداخت نشده و به‌عنوان بدهی سال قبل باقی می‌ماند.`
+        }]
+      : []
+  };
 }
 
 async function listPromotionTransactions(filters = {}) {

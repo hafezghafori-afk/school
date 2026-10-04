@@ -7,6 +7,7 @@ import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import AfghanMonthInput from '../components/ui/AfghanMonthInput';
 import MonthCloseBoard, { MonthCloseBanner, MonthCloseVersions, monthCloseLabel } from '../components/finance/MonthCloseBoard';
+import SecondChanceFeePanel from '../components/finance/SecondChanceFeePanel';
 import {
   afghanMonthKeyToDateRange,
   afghanSolarToGregorianInput,
@@ -11394,6 +11395,14 @@ export default function AdminFinance() {
         )}
       </div>
       )}
+
+      <SecondChanceFeePanel
+        sectionKey="orders"
+        active={activeSection === 'orders'}
+        fetchJson={fetchJson}
+        postJson={postJson}
+        onChanged={() => { void loadAll(); }}
+      />
 
       <div className="finance-card finance-orders-table-card" data-finance-section="orders" data-testid="finance-orders-table-card">
         <div className="finance-toolbar finance-orders-filter-toolbar">

@@ -39,6 +39,25 @@ One press of «اعمال ارتقا» promotes one source class of one academic
 - A rollback is refused when the new membership was promoted again, or when finance has already
   billed it (non-void `FinanceBill`/`FeeOrder`): void those bills first.
 
+## Second-chance exam fee (فیس امتحان چانس دوم)
+
+مرکز مالی مکتب → «بل‌ها و تعهدات» lists only the students a batch held as conditional (held, or
+already resolved), with their failed subjects, average and their own monthly fee as a guide.
+Charging them is **optional** and every amount is typed per student:
+
+- «صدور بل» — an ordinary `FinanceBill` of fee type `exam` («فیس امتحان چانس دوم») on the
+  student's source-year membership and class. Its `issuanceKey` is `second_chance_exam:<transaction>`,
+  so a student can only have one live bill; month-close and other-school checks are the usual ones.
+- «معاف» (reason required) and «برداشتن معافیت».
+- «باطل‌کردن بل» goes through the normal bill void (finance manager / lead / president, no payment
+  on it, month not closed); afterwards the decision is open again.
+- An unpaid fee only **warns** when the second-chance result is recorded; it stays as that year's
+  debt. A conditional student whose fee bill is still live can't be rolled back until it is voided.
+- Income shows up in the finance and government reports as fee type `exam` under the source class.
+
+API: `GET /api/finance/admin/second-chance-fees`, `POST .../:transactionId/bill | waive |
+clear-waiver | void-bill` (`manage_finance`).
+
 ## CLI
 
 ```bash
@@ -57,6 +76,8 @@ items unless `--allow-pending` / `--allow-blocked` is passed.
 - `npm run check:promotion-batch-flow` — preview → apply → rollback → resolve against a throwaway
   database; reports SKIP on a standalone server because it needs transactions.
 - `npm run check:promotion-routes` — route permissions, error codes and activity logs.
+- `npm run check:second-chance-fee` — the finance list, billing, waiver, void and rollback/resolve
+  interplay through the real finance routes; SKIP on a standalone server.
 
 ## Recommendation
 
