@@ -80,8 +80,8 @@ async function run() {
       const scope = classScope();
       await FinanceFeePlan.create(plan(scope));
       await assert.rejects(FinanceFeePlan.create(plan(scope)), refusedByClassIndex);
-      // The fee-plan form saves by class, year, term, billing, plan code and
-      // course, so under another course it inserted a second plan.
+      // An upsert by class, year, term, billing, plan code and course (how the
+      // fee-plan form used to save) inserts under another course: refused too.
       const course = id();
       await assert.rejects(FinanceFeePlan.findOneAndUpdate(
         { ...scope, term: '', billingFrequency: 'monthly', planCode: 'STANDARD', course },
