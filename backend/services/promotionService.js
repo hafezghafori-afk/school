@@ -41,7 +41,8 @@ const {
   carryReliefsToMembership,
   findTargetClassesWithoutFeePlan,
   selectReliefsToCarry,
-  settleSourceMembershipBilling
+  settleSourceMembershipBilling,
+  summarizeStudentBalances
 } = require('./promotionFinanceService');
 const {
   ACTIONABLE_OUTCOMES,
@@ -2440,9 +2441,54 @@ async function getPromotionBatch(batchId) {
   return batch ? formatPromotionBatch(batch, transactions) : null;
 }
 
+// «تصفیه حساب فارغ‌ها»: each graduate of a batch with what they still owe the
+// school right now (live, not the snapshot taken at promotion), so the
+// finance office can clear them before certificates are handed over.
+async function getGraduationClearance(batchId) {
+  const normalizedId = normalizeNullableId(batchId);
+  const batch = normalizedId ? await populatePromotionBatchQuery(PromotionBatch.findById(normalizedId)) : null;
+  if (!batch) throw promotionError('promotion_batch_not_found');
+  const transactions = await populatePromotionTransactionQuery(PromotionTransaction.find({
+    batchId: normalizedId,
+    promotionOutcome: 'graduated',
+    transactionStatus: 'applied'
+  }).sort({ createdAt: 1 }));
+  const balances = await summarizeStudentBalances(transactions.map((transaction) => transaction.student?._id || transaction.student));
+
+  const students = transactions.map((transaction) => {
+    const formatted = formatPromotionTransaction(transaction);
+    const balance = balances.get(idOf(transaction.student)) || { totalDue: 0, totalPaid: 0, outstanding: 0, openCount: 0, oldestOpenDueDate: null };
+    return {
+      transactionId: formatted.id,
+      studentMembershipId: formatted.sourceMembership?.id || '',
+      student: formatted.sourceMembership?.student || null,
+      graduatedAt: formatted.appliedAt,
+      totalDue: balance.totalDue,
+      totalPaid: balance.totalPaid,
+      outstanding: balance.outstanding,
+      openCount: balance.openCount,
+      oldestOpenDueDate: balance.oldestOpenDueDate,
+      cleared: balance.outstanding <= 0
+    };
+  });
+  const withDebt = students.filter((entry) => !entry.cleared);
+  return {
+    batch: formatPromotionBatch(batch),
+    students,
+    summary: {
+      graduates: students.length,
+      cleared: students.length - withDebt.length,
+      withDebt: withDebt.length,
+      debtAmount: Math.round(withDebt.reduce((sum, entry) => sum + entry.outstanding, 0) * 100) / 100
+    },
+    generatedAt: new Date()
+  };
+}
+
 module.exports = {
   applyPromotions,
   createPromotionRule,
+  getGraduationClearance,
   getPromotionBatch,
   getPromotionTransaction,
   getPromotionYearBoard,

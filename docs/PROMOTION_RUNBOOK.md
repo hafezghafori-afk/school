@@ -54,6 +54,14 @@ when none is chosen (a class without any exam session says so). Below the steps,
 year: details per student, per-student and whole-class rollback, «کامیاب شد / ناکام شد» for held
 students, and «چاپ لیست» (A4 list with three signature boxes: تهیه‌کننده، مدیر مکتب، ریاست عمومی).
 
+## Graduation clearance (phase 4)
+
+A batch with graduates (class 12) shows «تصفیه حساب فارغ‌ها» in its detail:
+`GET /api/promotions/batches/:batchId/clearance` lists every graduate with what they still owe the
+school **right now**, over their whole account (all non-void fee orders of every year, not only the
+last one): total billed, paid, outstanding, open orders and cleared/in debt. «چاپ تصفیه حساب» prints it
+on A4 with signature boxes for مسئول مالی، مدیر مکتب، ریاست عمومی.
+
 ## Finance (phase 2)
 
 - **New memberships are `active`** from the start of the target year, so the normal billing picks

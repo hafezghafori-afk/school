@@ -130,7 +130,8 @@ export default function AdminPromotions() {
   const [lastBatch, setLastBatch] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [message, setMessage] = useState({ text: '', tone: 'info' });
-  const [printBatch, setPrintBatch] = useState(null);
+  // { kind: 'list' | 'clearance', data } - one print mechanism for both sheets.
+  const [printJob, setPrintJob] = useState(null);
 
   const showMessage = useCallback((text, tone = 'info') => setMessage({ text, tone }), []);
   const refreshAll = useCallback(() => setRefreshKey((current) => current + 1), []);
@@ -235,9 +236,9 @@ export default function AdminPromotions() {
   // Print only once the sheet is mounted and the fonts have loaded - either
   // one missing prints a blank page.
   useEffect(() => {
-    if (!printBatch) return undefined;
+    if (!printJob) return undefined;
     let cancelled = false;
-    const finish = () => setPrintBatch(null);
+    const finish = () => setPrintJob(null);
     window.addEventListener('afterprint', finish);
     (async () => {
       for (let attempt = 0; attempt < 20 && !document.querySelector('.promotion-print'); attempt += 1) {
@@ -253,7 +254,7 @@ export default function AdminPromotions() {
       cancelled = true;
       window.removeEventListener('afterprint', finish);
     };
-  }, [printBatch]);
+  }, [printJob]);
 
   const resetStudentChoices = () => {
     setOverrides({});
@@ -612,7 +613,7 @@ export default function AdminPromotions() {
                   <button
                     type="button"
                     className="admin-workspace-button-ghost"
-                    onClick={() => fetchJson(`/api/promotions/batches/${lastBatch.id}`).then((data) => setPrintBatch(data.item)).catch((error) => showMessage(errorMessage(error, 'آماده‌کردن چاپ ناموفق بود.'), 'error'))}
+                    onClick={() => fetchJson(`/api/promotions/batches/${lastBatch.id}`).then((data) => setPrintJob({ kind: 'list', data: data.item })).catch((error) => showMessage(errorMessage(error, 'آماده‌کردن چاپ ناموفق بود.'), 'error'))}
                   >
                     چاپ لیست
                   </button>
@@ -643,14 +644,15 @@ export default function AdminPromotions() {
             academicYearId={form.academicYearId}
             refreshKey={refreshKey}
             onChanged={refreshAll}
-            onPrint={setPrintBatch}
+            onPrint={(batch) => setPrintJob({ kind: 'list', data: batch })}
+            onPrintClearance={(clearance) => setPrintJob({ kind: 'clearance', data: clearance })}
             onMessage={showMessage}
           />
         </section>
         </div>
       </div>
 
-      <PromotionPrintSheet batch={printBatch} />
+      <PromotionPrintSheet job={printJob} />
     </div>
   );
 }

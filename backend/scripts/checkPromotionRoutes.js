@@ -61,6 +61,10 @@ const serviceMock = {
     if (String(transactionId) !== IDS.tx) return null;
     return { id: IDS.tx, promotionOutcome: 'promoted', transactionStatus: 'applied' };
   },
+  async getGraduationClearance(batchId) {
+    if (String(batchId) !== IDS.batch) throw new Error('promotion_batch_not_found');
+    return { batch: { id: IDS.batch }, students: [{ transactionId: IDS.tx, outstanding: 0, cleared: true }], summary: { graduates: 1, cleared: 1, withDebt: 0, debtAmount: 0 } };
+  },
   async getPromotionYearBoard({ academicYearId } = {}) {
     if (!academicYearId) throw new Error('promotion_board_year_required');
     return { academicYear: { id: academicYearId, title: '1405' }, classes: [{ schoolClass: { id: 'class-1' }, currentStudents: 30, heldCount: 2, latestBatch: null }] };
@@ -210,6 +214,8 @@ async function run() {
     cases.push(await request(server, '/api/promotions/batches', { user: instructorUser }));
     cases.push(await request(server, '/api/promotions/year-board?academicYearId=year-1', { user: adminUser }));
     cases.push(await request(server, '/api/promotions/year-board', { user: adminUser }));
+    cases.push(await request(server, `/api/promotions/batches/${IDS.batch}/clearance`, { user: adminUser }));
+    cases.push(await request(server, '/api/promotions/batches/507f191e810c19729de86099/clearance', { user: adminUser }));
 
     assertCase(cases[0].status === 401, 'Expected promotion reference-data route to require auth.');
     assertCase(cases[1].status === 403, 'Expected promotion reference-data route to require permission.');
@@ -233,6 +239,8 @@ async function run() {
     assertCase(cases[17].status === 403, 'Expected the batch list to require the admin role.');
     assertCase(cases[18].status === 200 && cases[18].data?.classes?.[0]?.heldCount === 2, 'Expected the year board to list classes.');
     assertCase(cases[19].status === 400 && cases[19].data?.code === 'promotion_board_year_required', 'Expected the year board to require a year.');
+    assertCase(cases[20].status === 200 && cases[20].data?.summary?.cleared === 1, 'Expected the clearance route to return the graduates.');
+    assertCase(cases[21].status === 404, 'Expected the clearance of an unknown batch to be 404.');
 
     const ruleCreateLog = findActivity('promotion_rule_create');
     const applyLog = findActivity('promotion_apply');

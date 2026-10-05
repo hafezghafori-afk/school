@@ -171,6 +171,8 @@ test.describe('promotion workflow', () => {
     page.on('dialog', (dialog) => (dialog.type() === 'prompt' ? dialog.accept('operator review') : dialog.accept()));
 
     await page.goto('/admin-promotions', { waitUntil: 'domcontentloaded' });
+    // The page is a lazy chunk; a cold dev server can take a while to compile it.
+    await expect(page.getByRole('heading', { name: 'مرکز ارتقا صنف' })).toBeVisible({ timeout: 30_000 });
 
     // 1. Source: the active year is preselected; choose the class on the board.
     await expect(page.locator('#promotion-source-year')).toHaveValue('year-1');

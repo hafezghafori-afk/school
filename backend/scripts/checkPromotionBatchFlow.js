@@ -12,6 +12,7 @@ const AcademicYear = require('../models/AcademicYear');
 const AfghanStudent = require('../models/AfghanStudent');
 const ExamResult = require('../models/ExamResult');
 const ExamSession = require('../models/ExamSession');
+const FeeOrder = require('../models/FeeOrder');
 const FinanceBill = require('../models/FinanceBill');
 const PromotionBatch = require('../models/PromotionBatch');
 const PromotionRule = require('../models/PromotionRule');
@@ -21,6 +22,7 @@ const StudentMembership = require('../models/StudentMembership');
 const User = require('../models/User');
 const {
   applyPromotions,
+  getGraduationClearance,
   getPromotionBatch,
   getPromotionYearBoard,
   previewPromotions,
@@ -378,6 +380,23 @@ async function run() {
       assert.equal(source.isCurrent, false);
       assert.equal(await currentTarget('T'), null);
       assert.equal((await AfghanStudent.findById(students.T.afghanStudentId).lean()).status, 'graduated');
+
+      // «تصفیه حساب»: the live balance over the graduate's whole account.
+      const order = await FeeOrder.collection.insertOne({
+        orderNumber: 'CHK-T-1', student: students.T.userId, studentMembershipId: students.T.membership._id,
+        status: 'new', amountDue: 700, amountPaid: 0, dueDate: new Date('2026-10-05T00:00:00Z')
+      });
+      await FeeOrder.collection.insertOne({
+        orderNumber: 'CHK-T-0', student: students.T.userId, status: 'void', amountDue: 999, amountPaid: 0, dueDate: new Date('2026-05-05T00:00:00Z')
+      });
+      let clearance = await getGraduationClearance(applied.batch.id);
+      assert.deepEqual(clearance.summary, { graduates: 1, cleared: 0, withDebt: 1, debtAmount: 700 });
+      assert.equal(clearance.students[0].student.asasNumber, 'ASAS-T');
+      assert.equal(clearance.students[0].openCount, 1, 'a void order is not debt');
+      await FeeOrder.collection.updateOne({ _id: order.insertedId }, { $set: { amountPaid: 700, status: 'paid' } });
+      clearance = await getGraduationClearance(applied.batch.id);
+      assert.equal(clearance.students[0].cleared, true, 'paid in full: cleared');
+      assert.equal(clearance.summary.cleared, 1);
 
       const batch = await rollbackPromotionBatch(applied.batch.id, { reason: 'early' }, null);
       assert.equal(batch.status, 'rolled_back');

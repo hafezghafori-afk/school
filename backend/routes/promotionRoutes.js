@@ -4,6 +4,7 @@ const { requireAuth, requireRole, requirePermission } = require('../middleware/a
 const {
   applyPromotions,
   createPromotionRule,
+  getGraduationClearance,
   getPromotionBatch,
   getPromotionTransaction,
   getPromotionYearBoard,
@@ -170,6 +171,15 @@ router.get('/batches', requireAuth, requireRole(['admin']), requirePermission('v
     return res.json({ success: true, items });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Failed to load promotion batches.' });
+  }
+});
+
+router.get('/batches/:batchId/clearance', requireAuth, requireRole(['admin']), requirePermission('view_reports'), async (req, res) => {
+  try {
+    const data = await getGraduationClearance(req.params.batchId);
+    return res.json({ success: true, ...data });
+  } catch (error) {
+    return sendPromotionError(res, error, 'Failed to load the graduation clearance.');
   }
 });
 

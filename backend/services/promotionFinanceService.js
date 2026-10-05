@@ -349,6 +349,33 @@ async function cancelCarriedReliefs(carried = [], { actorId = null } = {}) {
   return results;
 }
 
+// A leaving student's whole account at the school - every non-void fee order
+// of every year, not only the final one - for «تصفیه حساب» before documents
+// are handed over. Fee orders are the canonical ledger (a bill and its mirror
+// are one order), so nothing is counted twice.
+async function summarizeStudentBalances(studentUserIds = []) {
+  const ids = [...new Set(studentUserIds.map(idOf).filter(Boolean))];
+  const byStudent = new Map(ids.map((id) => [id, { totalDue: 0, totalPaid: 0, outstanding: 0, openCount: 0, oldestOpenDueDate: null }]));
+  if (!ids.length) return byStudent;
+  const orders = await FeeOrder.find({ student: { $in: ids }, status: { $ne: 'void' } })
+    .select('student status amountDue amountPaid dueDate')
+    .lean();
+  orders.forEach((order) => {
+    const entry = byStudent.get(idOf(order.student));
+    if (!entry) return;
+    entry.totalDue = money(entry.totalDue + Number(order.amountDue || 0));
+    entry.totalPaid = money(entry.totalPaid + Number(order.amountPaid || 0));
+    const outstanding = outstandingOf(order);
+    if (outstanding > 0) {
+      entry.outstanding = money(entry.outstanding + outstanding);
+      entry.openCount += 1;
+      const due = order.dueDate ? new Date(order.dueDate) : null;
+      if (due && (!entry.oldestOpenDueDate || due < entry.oldestOpenDueDate)) entry.oldestOpenDueDate = due;
+    }
+  });
+  return byStudent;
+}
+
 module.exports = {
   PROMOTION_REFUND_NOTE,
   PROMOTION_VOID_REASON,
@@ -358,5 +385,6 @@ module.exports = {
   findTargetClassesWithoutFeePlan,
   postEndWindowStart,
   selectReliefsToCarry,
-  settleSourceMembershipBilling
+  settleSourceMembershipBilling,
+  summarizeStudentBalances
 };

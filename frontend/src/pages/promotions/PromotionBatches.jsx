@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { errorMessage, fetchJson, formatNumber, postJson } from '../adminWorkspaceUtils';
 import { formatAfghanDate } from '../../utils/afghanDate';
 import { formatStudentDisplayLabel } from '../../utils/studentSearch';
+import GraduationClearance from './GraduationClearance';
 import {
   BATCH_STATUS_LABELS,
   TRANSACTION_STATUS_LABELS,
@@ -40,7 +41,7 @@ function financeText(finance = {}) {
   ].filter(Boolean).join('، ') || '—';
 }
 
-export default function PromotionBatches({ academicYearId, refreshKey = 0, canManage = true, onChanged, onPrint, onMessage }) {
+export default function PromotionBatches({ academicYearId, refreshKey = 0, canManage = true, onChanged, onPrint, onPrintClearance, onMessage }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [openId, setOpenId] = useState('');
@@ -227,6 +228,7 @@ export default function PromotionBatches({ academicYearId, refreshKey = 0, canMa
                             canManage={canManage}
                             onRollback={rollbackStudent}
                             onResolve={resolveHeld}
+                            onPrintClearance={onPrintClearance}
                           />
                         )}
                       </td>
@@ -255,8 +257,9 @@ function transactionFinanceText(transaction) {
   ].filter(Boolean).join('، ');
 }
 
-function BatchDetail({ detail, busy, canManage, onRollback, onResolve }) {
+function BatchDetail({ detail, busy, canManage, onRollback, onResolve, onPrintClearance }) {
   const transactions = detail.transactions || [];
+  const hasGraduates = transactions.some((transaction) => transaction.promotionOutcome === 'graduated' && transaction.transactionStatus === 'applied');
   return (
     <div className="promotion-batch-detail">
       <div className="admin-workspace-meta">
@@ -308,6 +311,7 @@ function BatchDetail({ detail, busy, canManage, onRollback, onResolve }) {
           </tbody>
         </table>
       </div>
+      {hasGraduates ? <GraduationClearance batchId={detail.id} onPrint={onPrintClearance} /> : null}
       {detail.notApplied?.length ? (
         <div className="promotion-not-applied">
           <strong>اعمال‌نشده‌ها ({formatNumber(detail.notApplied.length)})</strong>
