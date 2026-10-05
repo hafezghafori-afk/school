@@ -6,6 +6,7 @@ const {
   createPromotionRule,
   getPromotionBatch,
   getPromotionTransaction,
+  getPromotionYearBoard,
   listPromotionBatches,
   listPromotionReferenceData,
   listPromotionRules,
@@ -21,7 +22,10 @@ const router = express.Router();
 
 const PROMOTION_ERROR_MESSAGES = Object.freeze({
   promotion_session_required: 'سال تعلیمی و صنف مبدا (یا سشن امتحان) را انتخاب کنید.',
+  promotion_board_year_required: 'سال تعلیمی را انتخاب کنید.',
+  promotion_board_year_not_found: 'سال تعلیمی پیدا نشد.',
   promotion_session_not_found: 'سشن امتحان پیدا نشد.',
+  promotion_class_has_no_exam_session: 'برای این صنف هنوز امتحانی ثبت نشده است؛ اول نتایج امتحان صنف را ثبت کنید.',
   promotion_rule_not_found: 'هیچ قانون ارتقای فعالی برای این صنف پیدا نشد.',
   promotion_transaction_not_found: 'تراکنش ارتقا پیدا نشد.',
   promotion_batch_not_found: 'دستهٔ ارتقا پیدا نشد.',
@@ -48,7 +52,7 @@ const PROMOTION_ERROR_MESSAGES = Object.freeze({
 });
 
 function getPromotionErrorStatus(code = '') {
-  if (['promotion_session_not_found', 'promotion_rule_not_found', 'promotion_transaction_not_found', 'promotion_batch_not_found'].includes(code)) {
+  if (['promotion_session_not_found', 'promotion_rule_not_found', 'promotion_transaction_not_found', 'promotion_batch_not_found', 'promotion_board_year_not_found'].includes(code)) {
     return 404;
   }
   if (code === 'promotion_transactions_required') {
@@ -148,6 +152,15 @@ router.get('/transactions/:transactionId', requireAuth, requireRole(['admin']), 
     return res.json({ success: true, item });
   } catch (error) {
     return sendPromotionError(res, error, 'Failed to load promotion transaction.');
+  }
+});
+
+router.get('/year-board', requireAuth, requireRole(['admin']), requirePermission('view_reports'), async (req, res) => {
+  try {
+    const data = await getPromotionYearBoard({ academicYearId: req.query?.academicYearId });
+    return res.json({ success: true, ...data });
+  } catch (error) {
+    return sendPromotionError(res, error, 'Failed to load the promotion year board.');
   }
 });
 

@@ -22,6 +22,7 @@ const User = require('../models/User');
 const {
   applyPromotions,
   getPromotionBatch,
+  getPromotionYearBoard,
   previewPromotions,
   resolveHeldPromotion,
   rollbackPromotionBatch,
@@ -121,6 +122,7 @@ async function seed() {
     await AfghanStudent.collection.insertOne({
       _id: afghanStudentId,
       linkedUserId: userId,
+      asasNumber: `ASAS-${key}`,
       status: 'active',
       academicInfo: { classId: schoolClass._id, currentClassId: schoolClass._id, academicYearId: years.y1405._id }
     });
@@ -219,6 +221,7 @@ async function run() {
         assert.equal(item.targetClass?.id || null, targetClass ? String(targetClass._id) : null, `target class of ${key}`);
       }
       assert.equal(itemFor(preview, 'H').reuseExistingMembership, true, 'H keeps the membership already in 6 ب');
+      assert.equal(itemFor(preview, 'A').sourceMembership.student.asasNumber, 'ASAS-A', 'every row carries the نمبر اساس');
     });
 
     await check('a student already in another class of the next year is not moved silently', async () => {
@@ -277,6 +280,17 @@ async function run() {
       assert.equal(String(registryA.academicInfo.academicYearId), String(years.y1406._id));
       assert.equal((await SchoolClass.findById(classes.c5a._id)).currentStudents, 3, 'C, D and E are still active in 5 الف');
       assert.equal((await SchoolClass.findById(classes.c6a._id)).currentStudents, 1, 'A now counts in 6 الف');
+
+      const board = await getPromotionYearBoard({ academicYearId: String(years.y1405._id) });
+      const row5a = board.classes.find((row) => row.schoolClass.id === String(classes.c5a._id));
+      assert.equal(row5a.currentStudents, 3, 'C (held), D (excluded) and E (blocked) are still current in 5 الف');
+      assert.equal(row5a.heldCount, 1);
+      assert.equal(row5a.latestBatch.id, firstBatchId);
+      const row12a = board.classes.find((row) => row.schoolClass.id === String(classes.c12a._id));
+      assert.equal(row12a.isTerminal, true);
+      assert.equal(row12a.latestBatch, null);
+      const detail = await getPromotionBatch(firstBatchId);
+      assert.ok(detail.transactions.every((tx) => /^ASAS-/.test(tx.sourceMembership.student.asasNumber)), 'batch rows carry the نمبر اساس');
     });
 
     await check('applying the same class again changes nothing', async () => {

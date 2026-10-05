@@ -194,14 +194,19 @@ function formatSheetTemplateRef(doc) {
   };
 }
 
-function formatStudentIdentity({ studentCore = null, user = null } = {}) {
+function formatStudentIdentity({ studentCore = null, user = null, afghanStudent = null } = {}) {
   const core = toPlain(studentCore);
   const account = toPlain(user);
+  // Only a populated AfghanStudent carries asasNumber; a bare id doesn't.
+  const registry = afghanStudent && typeof afghanStudent === 'object' && 'asasNumber' in afghanStudent ? afghanStudent : null;
   return {
     studentId: core ? String(core._id || '') : '',
     userId: account ? String(account._id || '') : '',
     fullName: normalizeText(core?.fullName) || normalizeText(core?.preferredName) || normalizeText(account?.name),
-    email: normalizeText(core?.email) || normalizeText(account?.email)
+    email: normalizeText(core?.email) || normalizeText(account?.email),
+    // «نمبر اساس» tells same-named students apart in every list and print.
+    asasNumber: normalizeText(registry?.asasNumber),
+    admissionNo: normalizeText(core?.admissionNo)
   };
 }
 
@@ -226,7 +231,7 @@ function formatMembership(doc) {
     enrolledAt: item.enrolledAt || null,
     endedAt: item.endedAt || null,
     endedReason: normalizeText(item.endedReason),
-    student: formatStudentIdentity({ studentCore: item.studentId, user: item.student }),
+    student: formatStudentIdentity({ studentCore: item.studentId, user: item.student, afghanStudent: item.afghanStudentId }),
     schoolClass: formatSchoolClass(item.classId),
     academicYear: formatAcademicYear(item.academicYearId)
   };
@@ -867,8 +872,8 @@ function populatePromotionTransactionQuery(query) {
   return query
     .populate('ruleId')
     .populate({ path: 'sessionId', populate: ['academicYearId', 'assessmentPeriodId', { path: 'classId', populate: { path: 'academicYearId' } }, 'examTypeId'] })
-    .populate({ path: 'studentMembershipId', populate: [{ path: 'classId', populate: { path: 'academicYearId' } }, { path: 'academicYearId' }, { path: 'studentId' }, { path: 'student', select: 'name email' }] })
-    .populate({ path: 'targetMembershipId', populate: [{ path: 'classId', populate: { path: 'academicYearId' } }, { path: 'academicYearId' }, { path: 'studentId' }, { path: 'student', select: 'name email' }] })
+    .populate({ path: 'studentMembershipId', populate: [{ path: 'classId', populate: { path: 'academicYearId' } }, { path: 'academicYearId' }, { path: 'studentId' }, { path: 'student', select: 'name email' }, { path: 'afghanStudentId', select: 'asasNumber' }] })
+    .populate({ path: 'targetMembershipId', populate: [{ path: 'classId', populate: { path: 'academicYearId' } }, { path: 'academicYearId' }, { path: 'studentId' }, { path: 'student', select: 'name email' }, { path: 'afghanStudentId', select: 'asasNumber' }] })
     .populate('targetAcademicYearId')
     .populate({ path: 'targetClassId', populate: { path: 'academicYearId' } })
     .populate('createdBy', 'name email role orgRole')
@@ -1053,7 +1058,8 @@ async function loadOfficialResultEntries({ payload, rule, scopeAcademicYearId, s
     .populate({ path: 'classId', populate: { path: 'academicYearId' } })
     .populate('academicYearId')
     .populate('studentId')
-    .populate('student', 'name email');
+    .populate('student', 'name email')
+    .populate('afghanStudentId', 'asasNumber');
 
   const entries = filterBySourceMembershipIds(pickMembershipPerStudent(memberships), payload.sourceMembershipIds)
     .map((membership) => ({
@@ -1091,7 +1097,8 @@ async function loadSessionResultEntries({ payload, rule, session }) {
         { path: 'classId', populate: { path: 'academicYearId' } },
         { path: 'academicYearId' },
         { path: 'studentId' },
-        { path: 'student', select: 'name email' }
+        { path: 'student', select: 'name email' },
+        { path: 'afghanStudentId', select: 'asasNumber' }
       ]
     })
     .populate('studentId')
@@ -1490,7 +1497,7 @@ async function resolvePromotionPreviewState(payload = {}) {
     throw promotionError('promotion_session_required');
   }
 
-  const session = sessionId ? await resolvePromotionSession(sessionId) : null;
+  let session = sessionId ? await resolvePromotionSession(sessionId) : null;
   const scopeAcademicYearId = explicitAcademicYearId || idOf(session?.academicYearId);
   const scopeClassId = explicitClassId || idOf(session?.classId);
   const [sourceAcademicYear, sourceClass] = await Promise.all([
@@ -1507,6 +1514,17 @@ async function resolvePromotionPreviewState(payload = {}) {
 
   if (!rule) {
     throw promotionError('promotion_rule_not_found');
+  }
+
+  // Rules other than the official general result read one exam session; when
+  // none was chosen, use the class's latest one instead of refusing.
+  if (!session && normalizeText(rule.evaluationMode) !== 'official_general_result' && scopeAcademicYearId && scopeClassId) {
+    const latest = await ExamSession.findOne({ academicYearId: scopeAcademicYearId, classId: scopeClassId, status: { $ne: 'archived' } })
+      .sort({ heldAt: -1, createdAt: -1 })
+      .select('_id')
+      .lean();
+    if (latest) session = await resolvePromotionSession(latest._id);
+    else throw promotionError('promotion_class_has_no_exam_session');
   }
 
   const targetAcademicYear = await resolveTargetAcademicYear(sourceAcademicYear, payload, rule);
@@ -2354,6 +2372,64 @@ async function listPromotionBatches(filters = {}) {
   return items.map((item) => formatPromotionBatch(item));
 }
 
+// Every class of a source year with its promotion state, in one request:
+// current students, the latest batch, and conditional students still waiting
+// for the second chance - so nothing is forgotten at year end.
+async function getPromotionYearBoard({ academicYearId = '' } = {}) {
+  const yearId = normalizeNullableId(academicYearId);
+  if (!yearId) throw promotionError('promotion_board_year_required');
+  const [academicYear, classes] = await Promise.all([
+    AcademicYear.findById(yearId),
+    SchoolClass.find({ academicYearId: yearId, status: { $ne: 'archived' } })
+      .select(CLASS_SELECT)
+      .populate('academicYearId')
+      .sort({ gradeLevel: 1, section: 1, title: 1, createdAt: 1 })
+  ]);
+  if (!academicYear) throw promotionError('promotion_board_year_not_found');
+
+  const classIds = classes.map((item) => item._id);
+  const [currentRows, heldRows, batches] = await Promise.all([
+    classIds.length
+      ? StudentMembership.aggregate([
+          { $match: { classId: { $in: classIds }, isCurrent: true, status: { $in: CURRENT_STUDENT_MEMBERSHIP_STATUSES } } },
+          { $group: { _id: '$classId', count: { $sum: 1 } } }
+        ])
+      : [],
+    classIds.length
+      ? PromotionTransaction.aggregate([
+          { $match: { classId: { $in: classIds }, transactionStatus: 'held' } },
+          { $group: { _id: '$classId', count: { $sum: 1 } } }
+        ])
+      : [],
+    populatePromotionBatchQuery(PromotionBatch.find({ sourceAcademicYearId: yearId }).sort({ appliedAt: -1, createdAt: -1 }))
+  ]);
+  const countByClass = (rows) => new Map(rows.map((row) => [String(row._id), Number(row.count) || 0]));
+  const currentByClass = countByClass(currentRows);
+  const heldByClass = countByClass(heldRows);
+  const batchesByClass = new Map();
+  batches.forEach((batch) => {
+    const key = idOf(batch.sourceClassId);
+    if (!batchesByClass.has(key)) batchesByClass.set(key, []);
+    batchesByClass.get(key).push(batch);
+  });
+
+  return {
+    academicYear: formatAcademicYear(academicYear),
+    classes: classes.map((schoolClass) => {
+      const key = idOf(schoolClass);
+      const classBatches = batchesByClass.get(key) || [];
+      return {
+        schoolClass: formatSchoolClass(schoolClass),
+        currentStudents: currentByClass.get(key) || 0,
+        heldCount: heldByClass.get(key) || 0,
+        isTerminal: isTerminalClass(schoolClass),
+        batchCount: classBatches.length,
+        latestBatch: classBatches[0] ? formatPromotionBatch(classBatches[0]) : null
+      };
+    })
+  };
+}
+
 async function getPromotionBatch(batchId) {
   const normalizedId = normalizeNullableId(batchId);
   if (!normalizedId) return null;
@@ -2369,6 +2445,7 @@ module.exports = {
   createPromotionRule,
   getPromotionBatch,
   getPromotionTransaction,
+  getPromotionYearBoard,
   listPromotionBatches,
   listPromotionReferenceData,
   listPromotionRules,

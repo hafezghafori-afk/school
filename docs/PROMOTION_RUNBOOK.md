@@ -31,6 +31,29 @@ One press of «اعمال ارتقا» promotes one source class of one academic
 - Everything is written in **one MongoDB transaction** (a replica set or mongos is required); the
   class head-counts and the student registry (`AfghanStudent.academicInfo`) are updated with it.
 
+## The page (phase 3)
+
+«مرکز ارتقا صنف» (`/admin-promotions`) works one class at a time, in five steps:
+
+1. **مبدا** — the source year (the active year is preselected) and a board of its classes from
+   `GET /api/promotions/year-board?academicYearId=` (current students, latest batch, conditional students
+   waiting for the second chance; grade 12 is marked as graduation).
+2. **مقصد** — the target year (only later years are offered) and the class for promoted students and
+   the class for repeaters. The system's choice is preselected; only legal classes (right grade, same
+   gender, target year) are listed, with their capacity.
+3. **تاریخ‌ها** — end of the source membership and start in the target class (defaults: end of the
+   source year, start of the target year).
+4. **شاگردان** — every student with نمبر اساس, result, decision, average/failed subjects, a per-student
+   target class (e.g. to split a section), include/exclude, debt, after-end documents and the reliefs
+   that can be carried over.
+5. **تأیید** — blockers, warnings and a grouped summary; one confirmed «اعمال ارتقا».
+
+Every change re-runs `POST /api/promotions/preview`, so what the page shows is what the apply does.
+For rules other than the official general result the preview reads the class's latest exam session
+when none is chosen (a class without any exam session says so). Below the steps, the batches of the
+year: details per student, per-student and whole-class rollback, «کامیاب شد / ناکام شد» for held
+students, and «چاپ لیست» (A4 list with three signature boxes: تهیه‌کننده، مدیر مکتب، ریاست عمومی).
+
 ## Finance (phase 2)
 
 - **New memberships are `active`** from the start of the target year, so the normal billing picks

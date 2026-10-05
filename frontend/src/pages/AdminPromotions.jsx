@@ -1,897 +1,656 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import './AdminWorkspace.css';
+import './AdminPromotions.css';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
-
 import {
   errorMessage,
   fetchJson,
   formatNumber,
   normalizeOptions,
-  postJson,
-  toLocaleDateTime
+  postJson
 } from './adminWorkspaceUtils';
+import { formatAfghanDate } from '../utils/afghanDate';
+import PromotionYearBoard from './promotions/PromotionYearBoard';
+import PromotionStudentsTable, { reliefKey } from './promotions/PromotionStudentsTable';
+import PromotionBatches from './promotions/PromotionBatches';
+import PromotionPrintSheet from './promotions/PromotionPrintSheet';
+import {
+  academicYearOrder,
+  classLabel,
+  formatAmount,
+  issueLabel,
+  outcomeLabel,
+  yearLabel
+} from './promotions/promotionLabels';
 
-const EMPTY_REFERENCE = {
-  academicYears: [],
-  classes: [],
-  sessions: [],
-  rules: [],
-  activeYear: null
-};
+// «مرکز ارتقا صنف»: promote one class at a time, step by step - the source
+// year and class, the target year and the classes that take the promoted and
+// the repeating students, the dates, every student's decision and finance,
+// then a final check before one confirmed apply. Every change re-runs the
+// server preview, so what is shown is what the apply will do.
 
-const EMPTY_READINESS_FORM = { academicYearId: '', classId: '' };
+const STEPS = [
+  { key: 1, title: 'مبدا', hint: 'سال و صنف مبدا' },
+  { key: 2, title: 'مقصد', hint: 'سال و صنف مقصد' },
+  { key: 3, title: 'تاریخ‌ها', hint: 'ختم و شروع عضویت' },
+  { key: 4, title: 'شاگردان', hint: 'تصمیم، صنف و مالی' },
+  { key: 5, title: 'تأیید', hint: 'بررسی و اعمال' }
+];
 
-const EMPTY_PROMOTION_FORM = {
+const EMPTY_FORM = {
   academicYearId: '',
   classId: '',
   sessionId: '',
   ruleId: '',
   targetAcademicYearId: '',
-  effectiveAt: ''
+  promotedClassId: '',
+  repeatClassId: '',
+  sourceEndAt: '',
+  targetStartAt: ''
 };
 
-const EMPTY_TRANSACTION_FILTERS = {
-  academicYearId: '',
-  classId: '',
-  promotionOutcome: '',
-  transactionStatus: ''
-};
+const EMPTY_REFERENCE = { academicYears: [], classes: [], sessions: [], rules: [], activeYear: null };
+const FORM_KEYS = Object.keys(EMPTY_FORM);
+const fmtDay = (value) => formatAfghanDate(value, { year: 'numeric', month: 'long', day: 'numeric' }) || '---';
 
-const OUTCOME_OPTIONS = [
-  { value: 'promoted', label: 'ارتقا' },
-  { value: 'repeated', label: 'ناکام صنف' },
-  { value: 'conditional', label: 'مشروط' },
-  { value: 'graduated', label: 'فارغ' },
-  { value: 'blocked', label: 'متوقف' },
-  { value: 'skipped', label: 'رد شده' }
-];
+function toDateInput(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+}
 
-const STATUS_OPTIONS = [
-  { value: 'applied', label: 'اعمال‌شده' },
-  { value: 'rolled_back', label: 'rollback شده' }
-];
-
-function buildPayload(form) {
-  const payload = {
-    academicYearId: String(form.academicYearId || '').trim(),
-    classId: String(form.classId || '').trim(),
-    sessionId: String(form.sessionId || '').trim(),
-    ruleId: String(form.ruleId || '').trim(),
-    targetAcademicYearId: String(form.targetAcademicYearId || '').trim(),
-    effectiveAt: String(form.effectiveAt || '').trim()
-  };
-
-  Object.keys(payload).forEach((key) => {
-    if (!payload[key]) delete payload[key];
+function buildPayload(form, overrides, reliefPicks) {
+  const payload = {};
+  FORM_KEYS.forEach((key) => {
+    const value = String(form[key] || '').trim();
+    if (value) payload[key] = value;
   });
-
+  const studentOverrides = Object.entries(overrides)
+    .filter(([, override]) => override && (override.exclude || override.targetClassId))
+    .map(([membershipId, override]) => ({
+      membershipId,
+      ...(override.targetClassId ? { targetClassId: override.targetClassId } : {}),
+      ...(override.exclude ? { exclude: true } : {})
+    }));
+  if (studentOverrides.length) payload.studentOverrides = studentOverrides;
+  const reliefCarryOver = Object.entries(reliefPicks)
+    .map(([membershipId, picks]) => ({
+      membershipId,
+      reliefs: Object.keys(picks || {})
+        .filter((key) => picks[key])
+        .map((key) => {
+          const [sourceModel, id] = key.split(':');
+          return { sourceModel, id };
+        })
+    }))
+    .filter((entry) => entry.reliefs.length);
+  if (reliefCarryOver.length) payload.reliefCarryOver = reliefCarryOver;
   return payload;
 }
 
-function buildTransactionQuery(filters) {
-  const params = new URLSearchParams();
-  if (filters.academicYearId) params.set('academicYearId', filters.academicYearId);
-  if (filters.classId) params.set('classId', filters.classId);
-  if (filters.promotionOutcome) params.set('promotionOutcome', filters.promotionOutcome);
-  if (filters.transactionStatus) params.set('transactionStatus', filters.transactionStatus);
-  const qs = params.toString();
-  return qs ? `/api/promotions/transactions?${qs}` : '/api/promotions/transactions';
-}
-
-function filterClassesByYear(classes, academicYearId) {
-  return classes.filter((item) => !academicYearId || item.academicYear?.id === academicYearId);
-}
-
-// چون چند صنف می‌توانند اسم یکسان داشته باشند (مثلاً دو «صنف اول»)، همه‌جا کد/شناسهٔ صنف
-// را هم کنار اسمش نشان می‌دهیم تا مشخص شود دقیقاً کدام صنف است.
-function classOptionLabel(item) {
-  const title = item?.title || item?.uiLabel || '---';
-  return item?.code ? `${title} — ${item.code}` : title;
-}
-
-function classIdentifierText(item) {
-  if (!item) return '---';
-  const parts = [];
-  if (item.code) parts.push(`کد: ${item.code}`);
-  if (item.gradeLevel) parts.push(`صنف ${item.gradeLevel}${item.section ? ` ${item.section}` : ''}`);
-  return parts.join(' • ') || '---';
-}
-
-function studentName(item) {
-  return item?.sourceMembership?.student?.fullName || item?.targetMembership?.student?.fullName || '---';
-}
-
-function targetLabel(item) {
-  const classTitle = item?.targetClass?.title || item?.targetMembership?.schoolClass?.title || '';
-  const classCode = item?.targetClass?.code || item?.targetMembership?.schoolClass?.code || '';
-  const yearTitle = item?.targetAcademicYear?.title || item?.targetMembership?.academicYear?.title || '';
-  const classPart = [classTitle, classCode ? `(${classCode})` : ''].filter(Boolean).join(' ');
-  return [classPart, yearTitle].filter(Boolean).join(' | ') || '---';
-}
-
-function outcomeLabel(value) {
-  const key = String(value || '').trim();
-  const labels = {
-    promoted: 'ارتقا',
-    repeated: 'ناکام صنف',
-    conditional: 'مشروط',
-    graduated: 'فارغ',
-    blocked: 'متوقف',
-    skipped: 'رد شده'
-  };
-  return labels[key] || key || '---';
-}
-
-function resultStatusLabel(value) {
-  const key = String(value || '').trim();
-  const labels = {
-    passed: 'کامیاب',
-    failed: 'ناکام',
-    conditional: 'مشروط',
-    distinction: 'عالی',
-    temporary: 'موقت',
-    placement: 'تعیین سویه',
-    excused: 'معذور',
-    absent: 'غایب',
-    pending: 'در انتظار',
-    blocked: 'متوقف'
-  };
-  return labels[key] || key || '---';
-}
-
-function policySummary(item) {
-  const policy = item?.policyEvaluation || {};
-  const failed = Array.isArray(policy.failedSubjects) ? policy.failedSubjects : [];
-  const failedText = failed.length
-    ? failed.slice(0, 3).map((subject) => `${subject.subjectTitle || 'مضمون'} (${formatNumber(subject.percentage || 0)})`).join('، ')
-    : 'ندارد';
-  const extra = failed.length > 3 ? ` +${formatNumber(failed.length - 3)}` : '';
-  return {
-    average: formatNumber(policy.averageScore ?? item?.averageScore ?? item?.percentage ?? 0),
-    failedCount: formatNumber(policy.failedSubjectCount || 0),
-    failedText: `${failedText}${extra}`,
-    totalSubjects: formatNumber(policy.totalSubjects || 0),
-    sheets: Array.isArray(policy.includedSessions) ? policy.includedSessions.length : 0,
-    templates: Array.isArray(policy.sheetTemplates) ? policy.sheetTemplates : []
-  };
-}
-
-function summarizeTransactions(items = []) {
-  return items.reduce((summary, item) => {
-    summary.total += 1;
-    const outcome = String(item?.promotionOutcome || '').trim();
-    const status = String(item?.transactionStatus || '').trim();
-    if (summary[outcome] != null) summary[outcome] += 1;
-    if (status === 'applied') summary.applied += 1;
-    if (status === 'rolled_back') summary.rolledBack += 1;
-    return summary;
-  }, {
-    total: 0,
-    promoted: 0,
-    repeated: 0,
-    conditional: 0,
-    graduated: 0,
-    blocked: 0,
-    applied: 0,
-    rolledBack: 0
-  });
-}
-
-// از همان تراکنش‌های اعمال‌شدهٔ فعلی (که ممکن است با نوار فیلتر پایین صفحه محدود شده باشند)
-// بر اساس صنف مقصد گروه‌بندی می‌کند — بدون فراخوانی جدا به سرور.
-function groupPromotedClasses(transactions = []) {
-  const groups = new Map();
-  transactions.forEach((item) => {
-    if (String(item?.transactionStatus) !== 'applied' || !item?.targetClass?.id) return;
-    const key = item.targetClass.id;
-    if (!groups.has(key)) {
-      groups.set(key, {
-        classId: item.targetClass.id,
-        title: item.targetClass.title || '---',
-        code: item.targetClass.code || '',
-        gradeLevel: item.targetClass.gradeLevel || '',
-        section: item.targetClass.section || '',
-        academicYear: item.targetAcademicYear?.title || item?.targetMembership?.academicYear?.title || '---',
-        students: []
-      });
+function summarizeForApply(items = [], overrides = {}) {
+  const moving = new Map();
+  let conditional = 0;
+  let graduated = 0;
+  const notApplied = [];
+  items.forEach((item) => {
+    if (!item.canApply || overrides[item.studentMembershipId]?.exclude) {
+      notApplied.push(item);
+      return;
     }
-    groups.get(key).students.push({
-      id: item.id,
-      name: studentName(item),
-      outcome: item.promotionOutcome,
-      appliedAt: item.appliedAt
-    });
+    if (item.computedOutcome === 'conditional') {
+      conditional += 1;
+      return;
+    }
+    if (item.computedOutcome === 'graduated') {
+      graduated += 1;
+      return;
+    }
+    const key = `${item.computedOutcome}:${item.targetClass?.id || ''}`;
+    const entry = moving.get(key) || { outcome: item.computedOutcome, targetClass: item.targetClass, count: 0 };
+    entry.count += 1;
+    moving.set(key, entry);
   });
-  return Array.from(groups.values()).sort((left, right) => right.students.length - left.students.length);
+  return { moving: Array.from(moving.values()), conditional, graduated, notApplied };
 }
 
 export default function AdminPromotions() {
   const [reference, setReference] = useState(EMPTY_REFERENCE);
-  const [readinessForm, setReadinessForm] = useState(EMPTY_READINESS_FORM);
-  const [readinessResult, setReadinessResult] = useState(null);
-  const [readinessLoading, setReadinessLoading] = useState(false);
-
-  const [promotionForm, setPromotionForm] = useState(EMPTY_PROMOTION_FORM);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [overrides, setOverrides] = useState({});
+  const [reliefPicks, setReliefPicks] = useState({});
+  const [step, setStep] = useState(1);
+  const [board, setBoard] = useState(null);
+  const [boardLoading, setBoardLoading] = useState(false);
+  const [readiness, setReadiness] = useState(null);
   const [preview, setPreview] = useState(null);
-  const [transactions, setTransactions] = useState([]);
-  const [transactionFilters, setTransactionFilters] = useState(EMPTY_TRANSACTION_FILTERS);
-  const [selectedTransaction, setSelectedTransaction] = useState(null);
-  const [message, setMessage] = useState('');
-  const [messageTone, setMessageTone] = useState('info');
-  const [busyAction, setBusyAction] = useState('');
-  const [expandedPromotedClassId, setExpandedPromotedClassId] = useState('');
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState('');
+  const [applying, setApplying] = useState(false);
+  const [lastBatch, setLastBatch] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [message, setMessage] = useState({ text: '', tone: 'info' });
+  const [printBatch, setPrintBatch] = useState(null);
 
-  // یادآوری آمادگی همان صنفی که برای ارتقا انتخاب شده (مستقل از کارت ۱)
-  const [singleReadiness, setSingleReadiness] = useState(null);
-  const [singleReadinessLoading, setSingleReadinessLoading] = useState(false);
+  const showMessage = useCallback((text, tone = 'info') => setMessage({ text, tone }), []);
+  const refreshAll = useCallback(() => setRefreshKey((current) => current + 1), []);
 
-  const promotionCardRef = useRef(null);
-
-  const sessions = useMemo(() => normalizeOptions(reference.sessions, ['title', 'code']), [reference.sessions]);
-  const rules = useMemo(() => normalizeOptions(reference.rules, ['name', 'code']), [reference.rules]);
   const academicYears = useMemo(() => normalizeOptions(reference.academicYears, ['title', 'code']), [reference.academicYears]);
-  const classes = useMemo(() => normalizeOptions(reference.classes, ['title', 'code']), [reference.classes]);
+  const rules = useMemo(() => normalizeOptions(reference.rules, ['name', 'code']), [reference.rules]);
+  const sourceYear = academicYears.find((item) => item.id === form.academicYearId) || null;
+  const targetYearOptions = useMemo(() => academicYears.filter((year) => (
+    year.id !== form.academicYearId && !['before', 'same'].includes(academicYearOrder(sourceYear, year))
+  )), [academicYears, form.academicYearId, sourceYear]);
+  const sessions = useMemo(() => normalizeOptions(reference.sessions, ['title', 'code'])
+    .filter((session) => (!form.academicYearId || session.academicYear?.id === form.academicYearId)
+      && (!form.classId || session.schoolClass?.id === form.classId)), [reference.sessions, form.academicYearId, form.classId]);
+  const plan = preview?.plan || null;
+  const sourceClass = board?.classes?.find((row) => row.schoolClass.id === form.classId)?.schoolClass || plan?.sourceClass || null;
 
-  const readinessClassOptions = useMemo(() => filterClassesByYear(classes, readinessForm.academicYearId), [classes, readinessForm.academicYearId]);
-  const promotionClassOptions = useMemo(() => filterClassesByYear(classes, promotionForm.academicYearId), [classes, promotionForm.academicYearId]);
-  const transactionClassOptions = useMemo(() => filterClassesByYear(classes, transactionFilters.academicYearId), [classes, transactionFilters.academicYearId]);
-
-  const readinessSelectedClass = useMemo(() => classes.find((item) => item.id === readinessForm.classId) || null, [classes, readinessForm.classId]);
-  const promotionSelectedClass = useMemo(() => classes.find((item) => item.id === promotionForm.classId) || null, [classes, promotionForm.classId]);
-
-  const transactionSummary = useMemo(() => summarizeTransactions(transactions), [transactions]);
-  const summary = preview?.summary || transactionSummary;
-  const promotedClassGroups = useMemo(() => groupPromotedClasses(transactions), [transactions]);
-
-  const showMessage = (text, tone = 'info') => {
-    setMessage(text);
-    setMessageTone(tone);
-  };
-
-  const hydrateDefaults = (referenceData) => {
-    setPromotionForm((current) => ({
-      ...current,
-      academicYearId: current.academicYearId || referenceData.activeYear?.id || '',
-      sessionId: current.sessionId || referenceData.sessions?.[0]?.id || '',
-      targetAcademicYearId: current.targetAcademicYearId || '',
-      ruleId: current.ruleId || ''
-    }));
-    setReadinessForm((current) => ({
-      ...current,
-      academicYearId: current.academicYearId || referenceData.activeYear?.id || ''
-    }));
-  };
-
-  const loadTransactions = async (filters = transactionFilters) => {
-    try {
-      const data = await fetchJson(buildTransactionQuery(filters));
-      setTransactions(data.items || []);
-    } catch (error) {
-      showMessage(errorMessage(error, 'دریافت تراکنش‌های ارتقا ناموفق بود.'), 'error');
-    }
-  };
-
-  const loadAll = async ({ transactionId = '' } = {}) => {
-    try {
-      const referenceData = await fetchJson('/api/promotions/reference-data');
-      setReference({
-        academicYears: referenceData.academicYears || [],
-        classes: referenceData.classes || [],
-        sessions: referenceData.sessions || [],
-        rules: referenceData.rules || [],
-        activeYear: referenceData.activeYear || null
+  useEffect(() => {
+    let cancelled = false;
+    fetchJson('/api/promotions/reference-data')
+      .then((data) => {
+        if (cancelled) return;
+        setReference({
+          academicYears: data.academicYears || [],
+          classes: data.classes || [],
+          sessions: data.sessions || [],
+          rules: data.rules || [],
+          activeYear: data.activeYear || null
+        });
+        setForm((current) => ({ ...current, academicYearId: current.academicYearId || data.activeYear?.id || '' }));
+      })
+      .catch((error) => {
+        if (!cancelled) showMessage(errorMessage(error, 'دریافت اطلاعات ارتقا ناموفق بود.'), 'error');
       });
-      hydrateDefaults(referenceData);
-      await loadTransactions();
-
-      const preferredId = transactionId || selectedTransaction?.id || '';
-      if (preferredId) {
-        try {
-          const detail = await fetchJson(`/api/promotions/transactions/${preferredId}`);
-          setSelectedTransaction(detail.item || null);
-        } catch {
-          setSelectedTransaction(null);
-        }
-      } else {
-        setSelectedTransaction(null);
-      }
-    } catch (error) {
-      showMessage(errorMessage(error, 'دریافت اطلاعات ارتقا ناموفق بود.'), 'error');
-    }
-  };
+    return () => { cancelled = true; };
+  }, [showMessage]);
 
   useEffect(() => {
-    loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // کارت ۱: آمادگی همان یک صنف مشخص‌شده با فیلتر سال+صنف.
-  useEffect(() => {
-    const academicYearId = String(readinessForm.academicYearId || '').trim();
-    const classId = String(readinessForm.classId || '').trim();
-    if (!academicYearId || !classId) {
-      setReadinessResult(null);
+    if (!form.academicYearId) {
+      setBoard(null);
       return undefined;
     }
     let cancelled = false;
-    setReadinessLoading(true);
-    fetchJson(`/api/result-tables/readiness?academicYearId=${academicYearId}&classId=${classId}`)
-      .then((data) => {
-        if (!cancelled) setReadinessResult(data);
-      })
+    setBoardLoading(true);
+    fetchJson(`/api/promotions/year-board?academicYearId=${encodeURIComponent(form.academicYearId)}`)
+      .then((data) => { if (!cancelled) setBoard(data); })
       .catch((error) => {
         if (!cancelled) {
-          setReadinessResult(null);
-          showMessage(errorMessage(error, 'بررسی آمادگی صنف ناموفق بود.'), 'error');
+          setBoard(null);
+          showMessage(errorMessage(error, 'دریافت صنف‌های این سال ناموفق بود.'), 'error');
         }
       })
-      .finally(() => {
-        if (!cancelled) setReadinessLoading(false);
-      });
+      .finally(() => { if (!cancelled) setBoardLoading(false); });
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readinessForm.academicYearId, readinessForm.classId]);
+  }, [form.academicYearId, refreshKey, showMessage]);
 
-  // کارت ۲: یادآوری آمادگی همان صنف مشخصی که برای ارتقا انتخاب شده.
   useEffect(() => {
-    const academicYearId = String(promotionForm.academicYearId || '').trim();
-    const classId = String(promotionForm.classId || '').trim();
-    if (!academicYearId || !classId) {
-      setSingleReadiness(null);
+    if (!form.academicYearId || !form.classId) {
+      setReadiness(null);
       return undefined;
     }
     let cancelled = false;
-    setSingleReadinessLoading(true);
-    fetchJson(`/api/result-tables/readiness?academicYearId=${academicYearId}&classId=${classId}`)
-      .then((data) => {
-        if (!cancelled) setSingleReadiness(data);
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setSingleReadiness(null);
-          showMessage(errorMessage(error, 'بررسی آمادگی صنف ناموفق بود.'), 'error');
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setSingleReadinessLoading(false);
-      });
+    fetchJson(`/api/result-tables/readiness?academicYearId=${encodeURIComponent(form.academicYearId)}&classId=${encodeURIComponent(form.classId)}`)
+      .then((data) => { if (!cancelled) setReadiness(data); })
+      .catch(() => { if (!cancelled) setReadiness(null); });
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [promotionForm.academicYearId, promotionForm.classId]);
+  }, [form.academicYearId, form.classId, refreshKey]);
 
-  const handleReadinessFormChange = (event) => {
-    const { name, value } = event.target;
-    setReadinessForm((current) => ({
-      ...current,
-      [name]: value,
-      ...(name === 'academicYearId' ? { classId: '' } : {})
-    }));
-  };
+  const payload = useMemo(() => buildPayload(form, overrides, reliefPicks), [form, overrides, reliefPicks]);
+  const payloadKey = JSON.stringify(payload);
 
-  const handlePromotionFormChange = (event) => {
-    const { name, value } = event.target;
-    setPromotionForm((current) => ({
-      ...current,
-      [name]: value,
-      // با عوض‌شدن سال، صنف قبلی ممکن است متعلق به سال دیگری باشد — پاک می‌شود تا کاربر دوباره انتخاب کند.
-      ...(name === 'academicYearId' ? { classId: '' } : {})
-    }));
-  };
-
-  const handleTransactionFilterChange = (event) => {
-    const { name, value } = event.target;
-    setTransactionFilters((current) => ({
-      ...current,
-      [name]: value,
-      ...(name === 'academicYearId' ? { classId: '' } : {})
-    }));
-  };
-
-  const applyTransactionFilters = () => {
-    loadTransactions(transactionFilters);
-  };
-
-  const resetTransactionFilters = () => {
-    setTransactionFilters(EMPTY_TRANSACTION_FILTERS);
-    loadTransactions(EMPTY_TRANSACTION_FILTERS);
-  };
-
-  const goToPromotionCard = () => {
-    setPromotionForm((current) => ({
-      ...current,
-      academicYearId: readinessForm.academicYearId,
-      classId: readinessForm.classId
-    }));
-    showMessage('صنف انتخاب‌شده به کارت ارتقا منتقل شد.');
-    if (promotionCardRef.current) {
-      promotionCardRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
-
-  const runPreview = async () => {
-    try {
-      setBusyAction('preview');
-      const data = await postJson('/api/promotions/preview', buildPayload(promotionForm));
-      setPreview(data);
-      showMessage('پیش‌نمایش ارتقا به‌روز شد.');
-    } catch (error) {
-      showMessage(errorMessage(error, 'پیش‌نمایش ارتقا ناموفق بود.'), 'error');
-    } finally {
-      setBusyAction('');
-    }
-  };
-
-  const applyPromotions = async () => {
-    try {
-      setBusyAction('apply');
-      const data = await postJson('/api/promotions/apply', buildPayload(promotionForm));
-      setPreview(data);
-      showMessage('ارتقاها اعمال شدند.', 'info');
-      await loadAll();
-    } catch (error) {
-      showMessage(errorMessage(error, 'اعمال ارتقا ناموفق بود.'), 'error');
-    } finally {
-      setBusyAction('');
-    }
-  };
-
-  const inspectTransaction = async (transactionId) => {
-    try {
-      setBusyAction(`inspect:${transactionId}`);
-      const data = await fetchJson(`/api/promotions/transactions/${transactionId}`);
-      setSelectedTransaction(data.item || null);
-    } catch (error) {
-      showMessage(errorMessage(error, 'بارگذاری جزئیات تراکنش ناموفق بود.'), 'error');
-    } finally {
-      setBusyAction('');
-    }
-  };
-
-  const rollbackTransaction = async (transaction) => {
-    const reason = window.prompt('دلیل rollback را وارد کنید:', transaction?.rollbackReason || '');
-    if (reason === null) return;
-
-    try {
-      setBusyAction(`rollback:${transaction.id}`);
-      const data = await postJson(`/api/promotions/rollback/${transaction.id}`, { reason: String(reason || '').trim() });
-      setSelectedTransaction(data.item || null);
+  useEffect(() => {
+    if (!form.academicYearId || !form.classId) {
       setPreview(null);
-      showMessage('تراکنش ارتقا rollback شد.', 'info');
-      await loadAll({ transactionId: transaction.id });
+      setPreviewError('');
+      setPreviewLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setPreviewLoading(true);
+      try {
+        const data = await postJson('/api/promotions/preview', JSON.parse(payloadKey));
+        if (!cancelled) {
+          setPreview(data);
+          setPreviewError('');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPreview(null);
+          setPreviewError(errorMessage(error, 'پیش‌نمایش ارتقا ناموفق بود.'));
+        }
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [form.academicYearId, form.classId, payloadKey, refreshKey]);
+
+  // Print only once the sheet is mounted and the fonts have loaded - either
+  // one missing prints a blank page.
+  useEffect(() => {
+    if (!printBatch) return undefined;
+    let cancelled = false;
+    const finish = () => setPrintBatch(null);
+    window.addEventListener('afterprint', finish);
+    (async () => {
+      for (let attempt = 0; attempt < 20 && !document.querySelector('.promotion-print'); attempt += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => window.setTimeout(resolve, 50));
+      }
+      if (document.fonts?.ready) {
+        await Promise.race([document.fonts.ready, new Promise((resolve) => window.setTimeout(resolve, 3000))]).catch(() => null);
+      }
+      if (!cancelled) window.print();
+    })();
+    return () => {
+      cancelled = true;
+      window.removeEventListener('afterprint', finish);
+    };
+  }, [printBatch]);
+
+  const resetStudentChoices = () => {
+    setOverrides({});
+    setReliefPicks({});
+  };
+
+  const selectSourceYear = (academicYearId) => {
+    setForm((current) => ({ ...EMPTY_FORM, academicYearId, ruleId: current.ruleId }));
+    resetStudentChoices();
+    setLastBatch(null);
+    setStep(1);
+  };
+
+  const selectSourceClass = (classId) => {
+    setForm((current) => ({ ...EMPTY_FORM, academicYearId: current.academicYearId, ruleId: current.ruleId, classId }));
+    resetStudentChoices();
+    setLastBatch(null);
+  };
+
+  const selectTargetYear = (targetAcademicYearId) => {
+    setForm((current) => ({ ...current, targetAcademicYearId, promotedClassId: '', repeatClassId: '', targetStartAt: '' }));
+    // A per-student class belongs to the old target year.
+    setOverrides((current) => Object.fromEntries(Object.entries(current).map(([id, override]) => [id, { ...override, targetClassId: '' }])));
+  };
+
+  const updateForm = (patch) => setForm((current) => ({ ...current, ...patch }));
+
+  const changeOverride = (membershipId, patch) => setOverrides((current) => ({
+    ...current,
+    [membershipId]: { ...(current[membershipId] || {}), ...patch }
+  }));
+
+  const toggleRelief = (membershipId, key, checked) => setReliefPicks((current) => ({
+    ...current,
+    [membershipId]: { ...(current[membershipId] || {}), [key]: checked }
+  }));
+
+  const setAllReliefs = (checked) => {
+    const next = {};
+    (preview?.items || []).forEach((item) => {
+      if (!item.canApply || overrides[item.studentMembershipId]?.exclude) return;
+      if (!['promoted', 'repeated', 'conditional'].includes(item.computedOutcome)) return;
+      const reliefs = item.finance?.reliefs || [];
+      if (!reliefs.length) return;
+      next[item.studentMembershipId] = Object.fromEntries(reliefs.map((relief) => [reliefKey(relief), checked]));
+    });
+    setReliefPicks(next);
+  };
+
+  const applySummary = useMemo(() => summarizeForApply(preview?.items || [], overrides), [preview, overrides]);
+  const reliefCount = useMemo(() => (payload.reliefCarryOver || []).reduce((sum, entry) => sum + entry.reliefs.length, 0), [payload]);
+  const studentsWithReliefs = (preview?.items || []).filter((item) => item.finance?.reliefs?.length && item.canApply).length;
+
+  const applyPromotion = async () => {
+    if (!plan?.canApply || applying) return;
+    const lines = [
+      `اعمال ارتقای «${classLabel(sourceClass)}» از سال ${yearLabel(plan.sourceAcademicYear)} به سال ${yearLabel(plan.targetAcademicYear)}:`,
+      ...applySummary.moving.map((group) => `- ${formatNumber(group.count)} نفر ${outcomeLabel(group.outcome)} ← ${classLabel(group.targetClass)}`),
+      applySummary.conditional ? `- ${formatNumber(applySummary.conditional)} نفر مشروط (تا نتیجهٔ چانس دوم در همین صنف می‌مانند)` : '',
+      applySummary.graduated ? `- ${formatNumber(applySummary.graduated)} نفر فارغ` : '',
+      applySummary.notApplied.length ? `- ${formatNumber(applySummary.notApplied.length)} نفر شامل نمی‌شوند` : '',
+      reliefCount ? `- ${formatNumber(reliefCount)} تخفیف/معافیت به سال جدید منتقل می‌شود` : '',
+      `ختم عضویت: ${fmtDay(plan.sourceEndAt)} | شروع در صنف جدید: ${fmtDay(plan.targetStartAt)}`,
+      'ادامه می‌دهید؟'
+    ].filter(Boolean);
+    if (!window.confirm(lines.join('\n'))) return;
+    setApplying(true);
+    try {
+      const data = await postJson('/api/promotions/apply', payload);
+      setLastBatch(data.batch || null);
+      resetStudentChoices();
+      showMessage(`ارتقای «${classLabel(data.batch?.sourceClass || sourceClass)}» اعمال شد.`, 'info');
+      refreshAll();
     } catch (error) {
-      showMessage(errorMessage(error, 'rollback ارتقا ناموفق بود.'), 'error');
+      const blockers = error?.data?.details?.blockers || [];
+      showMessage(`${errorMessage(error, 'اعمال ارتقا ناموفق بود.')}${blockers.length ? ` — ${blockers.map((item) => item.message).join(' | ')}` : ''}`, 'error');
     } finally {
-      setBusyAction('');
+      setApplying(false);
     }
   };
+
+  const canGoNext = step < STEPS.length && (step !== 1 || Boolean(form.classId));
 
   return (
-    <div className="admin-workspace-page">
+    <div className="admin-workspace-page promotion-page">
       <div className="admin-workspace-shell">
         <section className="admin-workspace-hero">
-          <div className="admin-workspace-badges">
-            <span className="admin-workspace-badge">Phase 6</span>
-            <span className="admin-workspace-badge info">Preview / Apply / Rollback</span>
-          </div>
           <h1>مرکز ارتقا صنف</h1>
-          <p>اول در کارت «بررسی آمادگی» یک صنف مشخص را چک کن، بعد در کارت «ارتقا» همان صنف را پیش‌نمایش و اعمال کن.</p>
-          <div className="admin-workspace-meta">
-            <span>تعداد سشن‌ها: {formatNumber(sessions.length)}</span>
-            <span>تعداد قوانین: {formatNumber(rules.length)}</span>
-            <span>تراکنش‌ها: {formatNumber(transactions.length)}</span>
-          </div>
+          <p>هر بار یک صنف: اول سال و صنف مبدا، بعد سال و صنف مقصد، تاریخ‌ها، تصمیم و وضعیت مالی هر شاگرد، و در آخر یک تأیید.</p>
         </section>
 
-        {message && <div className={`admin-workspace-message ${messageTone === 'error' ? 'error' : ''}`}>{message}</div>}
+        {message.text ? (
+          <div className={`admin-workspace-message ${message.tone === 'error' ? 'error' : ''}`} role={message.tone === 'error' ? 'alert' : 'status'}>
+            {message.text}
+            <button type="button" className="promotion-message-close" onClick={() => setMessage({ text: '', tone: 'info' })} aria-label="بستن پیام">×</button>
+          </div>
+        ) : null}
 
-        <section className="admin-workspace-grid">
-          <article className="admin-workspace-card" data-span="5">
-            <h2>۱. بررسی آمادگی صنف برای ارتقا</h2>
-            <p className="admin-workspace-subtitle">سال و صنف را انتخاب کن تا فقط وضعیت آمادگی همان یک صنف بررسی شود — بدون هیچ اقدامی، فقط گزارش.</p>
-            <div className="admin-workspace-form">
+        <nav className="promotion-steps" aria-label="مراحل ارتقا">
+          {STEPS.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`promotion-step ${step === item.key ? 'is-active' : ''} ${step > item.key ? 'is-done' : ''}`}
+              onClick={() => setStep(item.key)}
+              disabled={item.key > 1 && !form.classId}
+              aria-current={step === item.key ? 'step' : undefined}
+              data-testid={`promotion-step-${item.key}`}
+            >
+              <span className="promotion-step-number">{formatNumber(item.key)}</span>
+              <span className="promotion-step-text">
+                <strong>{item.title}</strong>
+                <small>{item.hint}</small>
+              </span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="admin-workspace-grid">
+        <section className="admin-workspace-card promotion-step-card">
+          {step === 1 ? (
+            <>
+              <h2>۱. مبدا: سال تعلیمی و صنف</h2>
               <div className="admin-workspace-form-grid">
                 <div className="admin-workspace-field">
-                  <label htmlFor="readiness-academic-year">سال تحصیلی</label>
-                  <select id="readiness-academic-year" name="academicYearId" value={readinessForm.academicYearId} onChange={handleReadinessFormChange}>
+                  <label htmlFor="promotion-source-year">سال تعلیمی مبدا</label>
+                  <select id="promotion-source-year" value={form.academicYearId} onChange={(event) => selectSourceYear(event.target.value)}>
                     <option value="">انتخاب سال</option>
-                    {academicYears.map((item) => (
-                      <option key={item.id} value={item.id}>{item.uiLabel}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="admin-workspace-field">
-                  <label htmlFor="readiness-class">صنف</label>
-                  <select id="readiness-class" name="classId" value={readinessForm.classId} onChange={handleReadinessFormChange}>
-                    <option value="">انتخاب صنف</option>
-                    {readinessClassOptions.map((item) => (
-                      <option key={item.id} value={item.id}>{classOptionLabel(item)}</option>
-                    ))}
+                    {academicYears.map((item) => <option key={item.id} value={item.id}>{item.uiLabel}</option>)}
                   </select>
                 </div>
               </div>
-            </div>
+              <p className="admin-workspace-subtitle">صنف مبدا را از لیست زیر انتخاب کنید. وضعیت ارتقای هر صنف این سال کنار آن نوشته شده است.</p>
+              <PromotionYearBoard board={board} loading={boardLoading} selectedClassId={form.classId} onSelect={selectSourceClass} />
 
-            {!readinessForm.academicYearId || !readinessForm.classId ? (
-              <div className="admin-workspace-empty">سال و صنف را انتخاب کن.</div>
-            ) : readinessLoading ? (
-              <div className="admin-workspace-empty">در حال بررسی آمادگی...</div>
-            ) : readinessResult ? (
-              <div className="admin-workspace-form">
-                <div className="admin-workspace-badges">
-                  <span className={`admin-workspace-badge ${readinessResult.ready ? 'good' : ''}`}>{readinessResult.ready ? 'آماده برای ارتقا' : 'ناتکمیل'}</span>
-                  <span className="admin-workspace-badge info">شناسهٔ صنف — {classIdentifierText(readinessSelectedClass)}</span>
-                </div>
-                <div className="admin-workspace-meta">
-                  <span>پیشرفت: {formatNumber(readinessResult.progress?.percentage || 0)}٪</span>
-                  <span>مضامین تکمیل‌شده: {formatNumber(readinessResult.progress?.completedSubjectCount || 0)} / {formatNumber(readinessResult.progress?.subjectCount || 0)}</span>
-                </div>
-                {readinessResult.issues?.length ? (
-                  <ul>
-                    {readinessResult.issues.slice(0, 10).map((issue, index) => (
-                      <li key={`${issue.code}-${issue.subjectId || index}`}>{issue.message}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="admin-workspace-empty">مشکلی برای این صنف ثبت نشده.</div>
-                )}
-                {readinessResult.ready && (
-                  <div className="admin-workspace-actions">
-                    <button type="button" className="admin-workspace-button" onClick={goToPromotionCard}>برو به ارتقا</button>
-                  </div>
-                )}
-              </div>
-            ) : null}
-          </article>
-
-          <article className="admin-workspace-card" data-span="7" ref={promotionCardRef}>
-            <h2>۲. ارتقا صنف به صنف و سال بعدی</h2>
-            <p className="admin-workspace-subtitle">سال و صنف مبدا را انتخاب کن (یا از کارت آمادگی «برو به ارتقا» بزن)، پیش‌نمایش بگیر و بعد apply یا rollback انجام بده.</p>
-            <div className="admin-workspace-form">
-              <div className="admin-workspace-form-grid">
-                <div className="admin-workspace-field">
-                  <label htmlFor="promotion-academic-year">سال تحصیلی مبدا</label>
-                  <select id="promotion-academic-year" name="academicYearId" value={promotionForm.academicYearId} onChange={handlePromotionFormChange}>
-                    <option value="">انتخاب سال</option>
-                    {academicYears.map((item) => (
-                      <option key={item.id} value={item.id}>{item.uiLabel}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="admin-workspace-field">
-                  <label htmlFor="promotion-class">صنف مبدا</label>
-                  <select id="promotion-class" name="classId" value={promotionForm.classId} onChange={handlePromotionFormChange}>
-                    <option value="">انتخاب صنف</option>
-                    {promotionClassOptions.map((item) => (
-                      <option key={item.id} value={item.id}>{classOptionLabel(item)}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="admin-workspace-field">
-                  <label htmlFor="promotion-session">سشن امتحان (اختیاری)</label>
-                  <select id="promotion-session" name="sessionId" value={promotionForm.sessionId} onChange={handlePromotionFormChange}>
-                    <option value="">بدون سشن مشخص</option>
-                    {sessions.map((item) => (
-                      <option key={item.id} value={item.id}>{item.uiLabel}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="admin-workspace-field">
-                  <label htmlFor="promotion-rule">قانون ارتقا</label>
-                  <select id="promotion-rule" name="ruleId" value={promotionForm.ruleId} onChange={handlePromotionFormChange}>
-                    <option value="">تشخیص خودکار</option>
-                    {rules.map((item) => (
-                      <option key={item.id} value={item.id}>{item.uiLabel}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="admin-workspace-field">
-                  <label htmlFor="promotion-target-year">سال هدف</label>
-                  <select id="promotion-target-year" name="targetAcademicYearId" value={promotionForm.targetAcademicYearId} onChange={handlePromotionFormChange}>
-                    <option value="">تشخیص خودکار</option>
-                    {academicYears.map((item) => (
-                      <option key={item.id} value={item.id}>{item.uiLabel}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="admin-workspace-field">
-                  <label htmlFor="promotion-effective-at">تاریخ اثر</label>
-                  <AfghanDateInput id="promotion-effective-at" name="effectiveAt" value={promotionForm.effectiveAt} onChange={(value) => setPromotionForm((current) => ({ ...current, effectiveAt: value }))} showGregorianEquivalent />
-                </div>
-              </div>
-              {promotionForm.classId && (
-                <div className="admin-workspace-meta">
-                  <span>شناسهٔ صنف انتخاب‌شده — {classIdentifierText(promotionSelectedClass)}</span>
-                </div>
-              )}
-              {promotionForm.academicYearId && promotionForm.classId && (
-                <div className="admin-workspace-message">
-                  {singleReadinessLoading ? (
-                    'در حال بررسی آمادگی صنف...'
-                  ) : singleReadiness?.ready ? (
-                    <span><span className="admin-workspace-badge good">آماده برای ارتقا</span> همهٔ مضامین این صنف چهارنیم‌ماهه و سالانهٔ تأییدشده دارند.</span>
-                  ) : singleReadiness ? (
-                    <span>
-                      <span className="admin-workspace-badge">ناتکمیل</span> این صنف هنوز آمادهٔ ارتقا نیست:
-                      <ul>
-                        {(singleReadiness.issues || []).slice(0, 5).map((issue, index) => (
-                          <li key={`${issue.code}-${issue.subjectId || index}`}>{issue.message}</li>
-                        ))}
-                      </ul>
-                    </span>
+              {/* Class readiness is the official-result check; other rules
+                  report missing marks per student in the preview instead. */}
+              {form.classId && readiness && (!preview?.rule || preview.rule.evaluationMode === 'official_general_result') ? (
+                <div className="promotion-readiness">
+                  <span className={`admin-workspace-badge ${readiness.ready ? 'good' : 'warn'}`}>
+                    {readiness.ready ? 'نتایج این صنف کامل است' : 'نتایج این صنف ناتکمیل است'}
+                  </span>
+                  {!readiness.ready && readiness.issues?.length ? (
+                    <ul>
+                      {readiness.issues.slice(0, 5).map((issue, index) => (
+                        <li key={`${issue.code}-${issue.subjectId || index}`}>{issue.message}</li>
+                      ))}
+                    </ul>
                   ) : null}
                 </div>
-              )}
-              <div className="admin-workspace-actions">
-                <button type="button" className="admin-workspace-button-ghost" onClick={() => loadAll()} disabled={!!busyAction}>بازخوانی</button>
-                <button type="button" className="admin-workspace-button" onClick={runPreview} disabled={busyAction === 'preview' || (!promotionForm.sessionId && !(promotionForm.academicYearId && promotionForm.classId))}>پیش‌نمایش</button>
-                <button type="button" className="admin-workspace-button-secondary" onClick={applyPromotions} disabled={busyAction === 'apply' || (!promotionForm.sessionId && !(promotionForm.academicYearId && promotionForm.classId))}>اعمال ارتقا</button>
-              </div>
-            </div>
-          </article>
+              ) : null}
 
-          <article className="admin-workspace-card" data-span="7">
-            <h2>خلاصه وضعیت</h2>
-            <p className="admin-workspace-subtitle">اگر preview باز باشد، این خلاصه از همان خروجی خوانده می‌شود؛ در غیر این صورت از تراکنش‌های ثبت‌شده ساخته می‌شود.</p>
-            <div className="admin-workspace-summary">
-              <div className="admin-workspace-stat"><strong>{formatNumber(summary.total)}</strong><span>کل</span></div>
-              <div className="admin-workspace-stat"><strong>{formatNumber(summary.promoted)}</strong><span>ارتقا یافته</span></div>
-              <div className="admin-workspace-stat"><strong>{formatNumber(summary.repeated)}</strong><span>تکرار صنف</span></div>
-              <div className="admin-workspace-stat"><strong>{formatNumber(summary.conditional)}</strong><span>مشروط</span></div>
-              <div className="admin-workspace-stat"><strong>{formatNumber(summary.graduated)}</strong><span>فارغ</span></div>
-              <div className="admin-workspace-stat"><strong>{formatNumber(summary.blocked)}</strong><span>مسدود</span></div>
-              <div className="admin-workspace-stat"><strong>{formatNumber(summary.applied || 0)}</strong><span>اعمال‌شده</span></div>
-              <div className="admin-workspace-stat"><strong>{formatNumber(summary.rolledBack || 0)}</strong><span>rollback</span></div>
-            </div>
-          </article>
+              {form.classId && preview?.session && preview?.rule?.evaluationMode !== 'official_general_result' ? (
+                <p className="promotion-inline-note">
+                  قانون ارتقای این صنف از سشن امتحان «{preview.session.title || preview.session.code}» می‌خواند؛ در «تنظیمات بیشتر» می‌توانید آن را عوض کنید.
+                </p>
+              ) : null}
 
-          <article className="admin-workspace-card" data-span="7">
-            <h2>پیش‌نمایش فعلی</h2>
-            <p className="admin-workspace-subtitle">
-              {preview?.rule?.evaluationMode === 'official_general_result'
-                ? 'سیستم دقیقاً بر اساس پالیسی رسمی «نتایج عمومی» (چهارنیم‌ماهه + سالانه، ۵۵ نمره، حداکثر ۲ مضمون مشروط) تصمیم را محاسبه می‌کند.'
-                : 'سیستم بر اساس پالیسی قانون انتخاب‌شده تصمیم را محاسبه می‌کند.'}
-              {preview?.items?.length > 0 && promotionSelectedClass && ` صنف: ${classOptionLabel(promotionSelectedClass)}`}
-            </p>
-            {preview?.items?.length ? (
-              <div className="admin-workspace-table-wrap">
-                <table className="admin-workspace-table">
-                  <thead>
-                    <tr>
-                      <th>متعلم</th>
-                      <th>نتیجه</th>
-                      <th>تصمیم</th>
-                      <th>میانگین</th>
-                      <th>مضامین ناکام</th>
-                      <th>هدف</th>
-                      <th>قابل اعمال</th>
-                      <th>Issue</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preview.items.map((item, index) => {
-                      const details = policySummary(item);
-                      return (
-                        <tr key={item.examResultId || item.sourceMembership?.id || index}>
-                          <td>{studentName(item)}</td>
-                          <td>{resultStatusLabel(item.sourceResultStatus)}</td>
-                          <td>{outcomeLabel(item.computedOutcome)}</td>
-                          <td>{details.average}</td>
-                          <td title={details.failedText}>{details.failedCount} / {details.totalSubjects}</td>
-                          <td>{targetLabel(item)}</td>
-                          <td>
-                            <span className={`admin-workspace-badge ${item.canApply ? 'good' : ''}`}>{item.canApply ? 'بله' : 'خیر'}</span>
-                          </td>
-                          <td>{item.issueCode || '---'}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                <div className="admin-workspace-meta">
-                  <span>شقه‌های شامل: {formatNumber(policySummary(preview.items[0]).sheets)}</span>
-                  <span>قالب‌ها: {policySummary(preview.items[0]).templates.map((item) => item.title || item.code).filter(Boolean).join('، ') || '---'}</span>
-                </div>
-              </div>
-            ) : (
-              <div className="admin-workspace-empty">هنوز پیش‌نمایشی اجرا نشده است.</div>
-            )}
-          </article>
+              {form.classId ? (
+                <details className="promotion-advanced">
+                  <summary>تنظیمات بیشتر: قانون ارتقا و سشن امتحان</summary>
+                  <div className="admin-workspace-form-grid">
+                    <div className="admin-workspace-field">
+                      <label htmlFor="promotion-rule">قانون ارتقا</label>
+                      <select id="promotion-rule" value={form.ruleId} onChange={(event) => updateForm({ ruleId: event.target.value })}>
+                        <option value="">{`خودکار${preview?.rule?.name ? `: ${preview.rule.name}` : ''}`}</option>
+                        {rules.map((item) => <option key={item.id} value={item.id}>{item.uiLabel}</option>)}
+                      </select>
+                    </div>
+                    <div className="admin-workspace-field">
+                      <label htmlFor="promotion-session">سشن امتحان (برای قانون‌های قدیمی)</label>
+                      <select id="promotion-session" value={form.sessionId} onChange={(event) => updateForm({ sessionId: event.target.value })}>
+                        <option value="">{`خودکار${preview?.session && !form.sessionId ? `: ${preview.session.title || preview.session.code}` : ''}`}</option>
+                        {sessions.map((item) => <option key={item.id} value={item.id}>{item.uiLabel}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                </details>
+              ) : null}
+            </>
+          ) : null}
 
-          <article className="admin-workspace-card" data-span="5">
-            <h2>جزئیات تراکنش</h2>
-            <p className="admin-workspace-subtitle">روی هر تراکنش کلیک کن تا snapshot و وضعیت rollback آن را ببینی.</p>
-            {selectedTransaction ? (
-              <div className="admin-workspace-form">
-                <div className="admin-workspace-badges">
-                  <span className="admin-workspace-badge info">{selectedTransaction.transactionStatus || '---'}</span>
-                  <span className="admin-workspace-badge">{selectedTransaction.promotionOutcome || '---'}</span>
+          {step === 2 ? (
+            <>
+              <h2>۲. مقصد: سال تعلیمی و صنف</h2>
+              <div className="admin-workspace-form-grid">
+                <div className="admin-workspace-field">
+                  <label htmlFor="promotion-target-year">سال تعلیمی مقصد</label>
+                  <select id="promotion-target-year" value={form.targetAcademicYearId} onChange={(event) => selectTargetYear(event.target.value)}>
+                    <option value="">{`پیشنهاد سیستم${plan?.targetAcademicYear ? `: ${yearLabel(plan.targetAcademicYear)}` : ' (پیدا نشد)'}`}</option>
+                    {targetYearOptions.map((item) => <option key={item.id} value={item.id}>{item.uiLabel}</option>)}
+                  </select>
                 </div>
-                <div className="admin-workspace-meta">
-                  <span>متعلم: {studentName(selectedTransaction)}</span>
-                  <span>Target: {targetLabel(selectedTransaction)}</span>
-                </div>
-                <div className="admin-workspace-meta">
-                  <span>Applied: {toLocaleDateTime(selectedTransaction.appliedAt)}</span>
-                  <span>Rollback: {toLocaleDateTime(selectedTransaction.rolledBackAt)}</span>
-                </div>
-                <div className="admin-workspace-meta">
-                  <span>وضعیت قبل از apply: {selectedTransaction.sourceMembershipStatusBefore || '---'}</span>
-                  <span>دلیل rollback: {selectedTransaction.rollbackReason || '---'}</span>
-                </div>
-                {selectedTransaction.transactionStatus === 'applied' && (
-                  <div className="admin-workspace-inline-actions">
-                    <button
-                      type="button"
-                      className="admin-workspace-button-danger"
-                      onClick={() => rollbackTransaction(selectedTransaction)}
-                      disabled={busyAction === `rollback:${selectedTransaction.id}`}
-                    >
-                      rollback
-                    </button>
+                {plan?.isTerminal ? (
+                  <div className="admin-workspace-field">
+                    <label>صنف مقصد کامیاب‌ها</label>
+                    <p className="promotion-inline-note">این صنف دوازدهم است؛ شاگردان کامیاب فارغ می‌شوند.</p>
+                  </div>
+                ) : (
+                  <div className="admin-workspace-field">
+                    <label htmlFor="promotion-promoted-class">صنف مقصد کامیاب‌ها (یک پایه بالاتر)</label>
+                    <select id="promotion-promoted-class" value={form.promotedClassId} onChange={(event) => updateForm({ promotedClassId: event.target.value })}>
+                      <option value="">{plan?.promotedClass ? `پیشنهاد سیستم: ${classLabel(plan.promotedClass)}` : 'صنف پایهٔ بعدی پیدا نشد — انتخاب کنید'}</option>
+                      {(plan?.promotedCandidates || []).map((item) => <option key={item.id} value={item.id}>{classLabel(item)}</option>)}
+                    </select>
                   </div>
                 )}
+                <div className="admin-workspace-field">
+                  <label htmlFor="promotion-repeat-class">صنف ناکام‌ها (تکرار همان پایه)</label>
+                  <select id="promotion-repeat-class" value={form.repeatClassId} onChange={(event) => updateForm({ repeatClassId: event.target.value })}>
+                    <option value="">{plan?.repeatClass ? `پیشنهاد سیستم: ${classLabel(plan.repeatClass)}` : 'صنف هم‌پایه پیدا نشد — انتخاب کنید'}</option>
+                    {(plan?.repeatCandidates || []).map((item) => <option key={item.id} value={item.id}>{classLabel(item)}</option>)}
+                  </select>
+                </div>
               </div>
-            ) : (
-              <div className="admin-workspace-empty">هنوز تراکنشی برای مشاهده انتخاب نشده است.</div>
-            )}
-          </article>
+              <p className="admin-workspace-subtitle">
+                فقط صنف‌های همان پایهٔ لازم، همان جنسیت و از سال مقصد نشان داده می‌شوند. برای جدا کردن شاگردان به چند شعبه، در مرحلهٔ «شاگردان» صنف هر شاگرد را جدا انتخاب کنید.
+              </p>
+              {plan?.targetAcademicYear && !plan.isTerminal && !(plan.promotedCandidates || []).length ? (
+                <div className="admin-workspace-message error">در سال مقصد صنف پایهٔ بعدی ساخته نشده است؛ اول صنف‌های سال مقصد را بسازید.</div>
+              ) : null}
+              {plan?.capacity?.length ? (
+                <div className="promotion-capacity">
+                  {plan.capacity.map((row) => (
+                    <span key={row.classId} className={`admin-workspace-badge ${row.overCapacity ? 'danger' : 'muted'}`}>
+                      {row.title}{row.code ? ` — ${row.code}` : ''}: {formatNumber(row.currentStudents)} موجود + {formatNumber(row.incoming)} ورودی = {formatNumber(row.projected)}
+                      {row.capacity ? ` از ظرفیت ${formatNumber(row.capacity)}` : ''}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : null}
 
-          <article className="admin-workspace-card">
-            <h2>تراکنش‌های ثبت‌شده</h2>
-            <div className="admin-workspace-form-grid">
-              <div className="admin-workspace-field">
-                <label htmlFor="tx-filter-year">سال تحصیلی</label>
-                <select id="tx-filter-year" name="academicYearId" value={transactionFilters.academicYearId} onChange={handleTransactionFilterChange}>
-                  <option value="">همهٔ سال‌ها</option>
-                  {academicYears.map((item) => (
-                    <option key={item.id} value={item.id}>{item.uiLabel}</option>
-                  ))}
-                </select>
+          {step === 3 ? (
+            <>
+              <h2>۳. تاریخ‌ها</h2>
+              <div className="admin-workspace-form-grid">
+                <div className="admin-workspace-field">
+                  <label htmlFor="promotion-source-end">ختم عضویت در صنف مبدا</label>
+                  <AfghanDateInput
+                    id="promotion-source-end"
+                    value={form.sourceEndAt || toDateInput(plan?.sourceEndAt)}
+                    onChange={(value) => updateForm({ sourceEndAt: value })}
+                    showGregorianEquivalent
+                  />
+                  {form.sourceEndAt ? <button type="button" className="admin-workspace-button-ghost" onClick={() => updateForm({ sourceEndAt: '' })}>برگشت به ختم سال مبدا</button> : null}
+                </div>
+                <div className="admin-workspace-field">
+                  <label htmlFor="promotion-target-start">شروع در صنف مقصد</label>
+                  <AfghanDateInput
+                    id="promotion-target-start"
+                    value={form.targetStartAt || toDateInput(plan?.targetStartAt)}
+                    onChange={(value) => updateForm({ targetStartAt: value })}
+                    showGregorianEquivalent
+                  />
+                  {form.targetStartAt ? <button type="button" className="admin-workspace-button-ghost" onClick={() => updateForm({ targetStartAt: '' })}>برگشت به شروع سال مقصد</button> : null}
+                </div>
               </div>
-              <div className="admin-workspace-field">
-                <label htmlFor="tx-filter-class">صنف</label>
-                <select id="tx-filter-class" name="classId" value={transactionFilters.classId} onChange={handleTransactionFilterChange}>
-                  <option value="">همهٔ صنوف</option>
-                  {transactionClassOptions.map((item) => (
-                    <option key={item.id} value={item.id}>{classOptionLabel(item)}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="admin-workspace-field">
-                <label htmlFor="tx-filter-outcome">نتیجه</label>
-                <select id="tx-filter-outcome" name="promotionOutcome" value={transactionFilters.promotionOutcome} onChange={handleTransactionFilterChange}>
-                  <option value="">همهٔ نتایج</option>
-                  {OUTCOME_OPTIONS.map((item) => (
-                    <option key={item.value} value={item.value}>{item.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="admin-workspace-field">
-                <label htmlFor="tx-filter-status">وضعیت</label>
-                <select id="tx-filter-status" name="transactionStatus" value={transactionFilters.transactionStatus} onChange={handleTransactionFilterChange}>
-                  <option value="">همهٔ وضعیت‌ها</option>
-                  {STATUS_OPTIONS.map((item) => (
-                    <option key={item.value} value={item.value}>{item.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="admin-workspace-actions">
-              <button type="button" className="admin-workspace-button" onClick={applyTransactionFilters}>اعمال فیلتر</button>
-              <button type="button" className="admin-workspace-button-ghost" onClick={resetTransactionFilters}>پاک‌کردن فیلتر</button>
-            </div>
-            <div className="admin-workspace-table-wrap">
-              <table className="admin-workspace-table">
-                <thead>
-                  <tr>
-                    <th>متعلم</th>
-                    <th>Outcome</th>
-                    <th>وضعیت</th>
-                    <th>Target</th>
-                    <th>Applied</th>
-                    <th>Rollback</th>
-                    <th>اقدام</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {transactions.length ? transactions.map((item) => (
-                    <tr key={item.id}>
-                      <td>{studentName(item)}</td>
-                      <td>{item.promotionOutcome || '---'}</td>
-                      <td>{item.transactionStatus || '---'}</td>
-                      <td>{targetLabel(item)}</td>
-                      <td>{toLocaleDateTime(item.appliedAt)}</td>
-                      <td>{toLocaleDateTime(item.rolledBackAt)}</td>
-                      <td>
-                        <div className="admin-workspace-inline-actions">
-                          <button
-                            type="button"
-                            className="admin-workspace-button-ghost"
-                            onClick={() => inspectTransaction(item.id)}
-                            disabled={busyAction === `inspect:${item.id}`}
-                          >
-                            جزئیات
-                          </button>
-                          {item.transactionStatus === 'applied' && (
-                            <button
-                              type="button"
-                              className="admin-workspace-button-danger"
-                              onClick={() => rollbackTransaction(item)}
-                              disabled={busyAction === `rollback:${item.id}`}
-                            >
-                              rollback
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )) : (
-                    <tr>
-                      <td colSpan="7">
-                        <div className="admin-workspace-empty">هنوز تراکنشی ثبت نشده است.</div>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </article>
+              <p className="admin-workspace-subtitle">
+                پیش‌فرض: شاگرد تا ختم سال مبدا در صنف خودش است و از شروع سال مقصد در صنف جدید. بل‌های پرداخت‌نشدهٔ بعد از تاریخ ختم باطل می‌شوند و بل سال جدید از تاریخ شروع ساخته می‌شود.
+              </p>
+            </>
+          ) : null}
 
-          <article className="admin-workspace-card">
-            <h2>صنف‌های ارتقا یافته</h2>
-            <p className="admin-workspace-subtitle">صنف‌های مقصدی که شاگردی از طریق ارتقا به آن‌ها منتقل شده — بر اساس همان تراکنش‌های فیلترشدهٔ بالا.</p>
-            {promotedClassGroups.length ? (
-              <div className="admin-workspace-table-wrap">
-                <table className="admin-workspace-table">
-                  <thead>
-                    <tr>
-                      <th>صنف مقصد</th>
-                      <th>شناسهٔ صنف</th>
-                      <th>سال تعلیمی</th>
-                      <th>تعداد شاگردان</th>
-                      <th>اقدام</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {promotedClassGroups.map((group) => (
-                      <React.Fragment key={group.classId}>
-                        <tr>
-                          <td>{group.title}</td>
-                          <td>{classIdentifierText(group)}</td>
-                          <td>{group.academicYear}</td>
-                          <td>{formatNumber(group.students.length)}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className="admin-workspace-button-ghost"
-                              onClick={() => setExpandedPromotedClassId((current) => (current === group.classId ? '' : group.classId))}
-                            >
-                              {expandedPromotedClassId === group.classId ? 'بستن لیست ▲' : 'لیست شاگردان ▼'}
-                            </button>
-                          </td>
-                        </tr>
-                        {expandedPromotedClassId === group.classId && (
-                          <tr>
-                            <td colSpan="5">
-                              <ul>
-                                {group.students.map((student) => (
-                                  <li key={student.id}>{student.name} — {outcomeLabel(student.outcome)} — {toLocaleDateTime(student.appliedAt)}</li>
-                                ))}
-                              </ul>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
+          {step === 4 ? (
+            <>
+              <h2>۴. شاگردان</h2>
+              {preview?.summary ? (
+                <div className="promotion-chips">
+                  <span className="admin-workspace-badge good">ارتقا: {formatNumber(preview.summary.promoted)}</span>
+                  <span className="admin-workspace-badge warn">تکرار: {formatNumber(preview.summary.repeated)}</span>
+                  <span className="admin-workspace-badge info">مشروط: {formatNumber(preview.summary.conditional)}</span>
+                  <span className="admin-workspace-badge good">فارغ: {formatNumber(preview.summary.graduated)}</span>
+                  <span className="admin-workspace-badge danger">متوقف: {formatNumber(preview.summary.blocked)}</span>
+                  <span className="admin-workspace-badge muted">مستثنا/قبلاً: {formatNumber(Number(preview.summary.skipped || 0) + Number(preview.summary.alreadyProcessed || 0))}</span>
+                </div>
+              ) : null}
+              {studentsWithReliefs ? (
+                <div className="admin-workspace-inline-actions promotion-relief-actions">
+                  <span>تخفیف و معافیت‌ها:</span>
+                  <button type="button" className="admin-workspace-button-ghost" onClick={() => setAllReliefs(true)}>همه در سال جدید ادامه یابد</button>
+                  <button type="button" className="admin-workspace-button-ghost" onClick={() => setAllReliefs(false)}>هیچ‌کدام</button>
+                </div>
+              ) : null}
+              <PromotionStudentsTable
+                items={preview?.items || []}
+                plan={plan}
+                overrides={overrides}
+                reliefPicks={reliefPicks}
+                onOverrideChange={changeOverride}
+                onToggleRelief={toggleRelief}
+                disabled={applying}
+              />
+            </>
+          ) : null}
+
+          {step === 5 ? (
+            <>
+              <h2>۵. بررسی و تأیید</h2>
+              {plan?.blockers?.length ? (
+                <div className="promotion-checklist is-blocking">
+                  <strong>موانع (تا رفع نشوند ارتقا اعمال نمی‌شود)</strong>
+                  <ul>{plan.blockers.map((item, index) => <li key={`${item.code}-${index}`}>{item.message}</li>)}</ul>
+                </div>
+              ) : null}
+              {plan?.warnings?.length ? (
+                <div className="promotion-checklist is-warning">
+                  <strong>هشدارها</strong>
+                  <ul>{plan.warnings.map((item, index) => <li key={`${item.code}-${index}`}>{item.message}</li>)}</ul>
+                </div>
+              ) : null}
+              {plan ? (
+                <div className="promotion-summary">
+                  <p>
+                    <strong>{classLabel(sourceClass)}</strong> — سال {yearLabel(plan.sourceAcademicYear)} ← سال {yearLabel(plan.targetAcademicYear)}
+                  </p>
+                  <ul>
+                    {applySummary.moving.map((group) => (
+                      <li key={`${group.outcome}-${group.targetClass?.id || ''}`}>
+                        {formatNumber(group.count)} نفر {outcomeLabel(group.outcome)} ← {classLabel(group.targetClass)}
+                      </li>
                     ))}
-                  </tbody>
-                </table>
+                    {applySummary.conditional ? <li>{formatNumber(applySummary.conditional)} نفر مشروط — تا نتیجهٔ چانس دوم در همین صنف می‌مانند</li> : null}
+                    {applySummary.graduated ? <li>{formatNumber(applySummary.graduated)} نفر فارغ</li> : null}
+                    {applySummary.notApplied.length ? (
+                      <li>
+                        {formatNumber(applySummary.notApplied.length)} نفر شامل نمی‌شوند:
+                        {' '}{applySummary.notApplied.slice(0, 6).map((item) => `${item.sourceMembership?.student?.fullName || 'شاگرد'} (${issueLabel(item.issueCode) || outcomeLabel(item.computedOutcome)})`).join('، ')}
+                        {applySummary.notApplied.length > 6 ? ' ...' : ''}
+                      </li>
+                    ) : null}
+                    {plan.finance?.studentsWithDebt ? <li>بقایای سال مبدا: {formatNumber(plan.finance.studentsWithDebt)} شاگرد، {formatAmount(plan.finance.debtAmount)} (فقط هشدار)</li> : null}
+                    {reliefCount ? <li>{formatNumber(reliefCount)} تخفیف/معافیت به سال جدید منتقل می‌شود</li> : null}
+                    <li>ختم عضویت در صنف مبدا: {fmtDay(plan.sourceEndAt)} — شروع در صنف مقصد: {fmtDay(plan.targetStartAt)}</li>
+                  </ul>
+                </div>
+              ) : null}
+              <div className="admin-workspace-actions">
+                <button
+                  type="button"
+                  className="admin-workspace-button"
+                  onClick={applyPromotion}
+                  disabled={!plan?.canApply || previewLoading || applying}
+                  data-testid="promotion-apply"
+                >
+                  {applying ? 'در حال اعمال...' : 'اعمال ارتقا'}
+                </button>
               </div>
-            ) : (
-              <div className="admin-workspace-empty">هنوز هیچ صنفی از طریق ارتقا شاگرد نگرفته است.</div>
-            )}
-          </article>
+              {lastBatch ? (
+                <div className="promotion-result" data-testid="promotion-result">
+                  <span className="admin-workspace-badge good">ارتقا اعمال شد</span>
+                  <span>
+                    {formatNumber(lastBatch.summary?.promoted)} ارتقا، {formatNumber(lastBatch.summary?.repeated)} تکرار، {formatNumber(lastBatch.summary?.conditional)} مشروط، {formatNumber(lastBatch.summary?.graduated)} فارغ
+                  </span>
+                  <button
+                    type="button"
+                    className="admin-workspace-button-ghost"
+                    onClick={() => fetchJson(`/api/promotions/batches/${lastBatch.id}`).then((data) => setPrintBatch(data.item)).catch((error) => showMessage(errorMessage(error, 'آماده‌کردن چاپ ناموفق بود.'), 'error'))}
+                  >
+                    چاپ لیست
+                  </button>
+                </div>
+              ) : null}
+            </>
+          ) : null}
+
+          {form.classId ? (
+            <div className="promotion-preview-state" aria-live="polite">
+              {previewLoading ? <span>در حال به‌روزکردن پیش‌نمایش...</span> : null}
+              {previewError ? <span className="promotion-preview-error">{previewError}</span> : null}
+            </div>
+          ) : null}
+
+          <div className="admin-workspace-actions promotion-nav">
+            <button type="button" className="admin-workspace-button-ghost" onClick={() => setStep((current) => Math.max(1, current - 1))} disabled={step === 1}>قبلی</button>
+            {step < STEPS.length ? (
+              <button type="button" className="admin-workspace-button-secondary" onClick={() => setStep((current) => current + 1)} disabled={!canGoNext}>بعدی</button>
+            ) : null}
+          </div>
         </section>
+
+        <section className="admin-workspace-card">
+          <h2>ارتقاهای سال {yearLabel(sourceYear)}</h2>
+          <p className="admin-workspace-subtitle">هر صنف ارتقایافته، با امکان بازگردانی، ثبت نتیجهٔ چانس دوم شاگردان مشروط و چاپ لیست برای امضا.</p>
+          <PromotionBatches
+            academicYearId={form.academicYearId}
+            refreshKey={refreshKey}
+            onChanged={refreshAll}
+            onPrint={setPrintBatch}
+            onMessage={showMessage}
+          />
+        </section>
+        </div>
       </div>
+
+      <PromotionPrintSheet batch={printBatch} />
     </div>
   );
 }

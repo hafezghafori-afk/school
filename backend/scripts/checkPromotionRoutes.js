@@ -61,6 +61,10 @@ const serviceMock = {
     if (String(transactionId) !== IDS.tx) return null;
     return { id: IDS.tx, promotionOutcome: 'promoted', transactionStatus: 'applied' };
   },
+  async getPromotionYearBoard({ academicYearId } = {}) {
+    if (!academicYearId) throw new Error('promotion_board_year_required');
+    return { academicYear: { id: academicYearId, title: '1405' }, classes: [{ schoolClass: { id: 'class-1' }, currentStudents: 30, heldCount: 2, latestBatch: null }] };
+  },
   async listPromotionBatches() {
     return [{ id: IDS.batch, status: 'applied' }];
   },
@@ -204,6 +208,8 @@ async function run() {
     cases.push(await request(server, `/api/promotions/transactions/${IDS.tx}/resolve`, { method: 'POST', user: adminUser, body: { decision: 'promoted' } }));
     cases.push(await request(server, `/api/promotions/transactions/${IDS.heldTx}/resolve`, { method: 'POST', user: instructorUser, body: { decision: 'promoted' } }));
     cases.push(await request(server, '/api/promotions/batches', { user: instructorUser }));
+    cases.push(await request(server, '/api/promotions/year-board?academicYearId=year-1', { user: adminUser }));
+    cases.push(await request(server, '/api/promotions/year-board', { user: adminUser }));
 
     assertCase(cases[0].status === 401, 'Expected promotion reference-data route to require auth.');
     assertCase(cases[1].status === 403, 'Expected promotion reference-data route to require permission.');
@@ -225,6 +231,8 @@ async function run() {
     assertCase(cases[15].status === 409 && cases[15].data?.code === 'promotion_transaction_not_held', 'Expected resolving a non-held transaction to return 409.');
     assertCase(cases[16].status === 403, 'Expected resolving to require the admin role.');
     assertCase(cases[17].status === 403, 'Expected the batch list to require the admin role.');
+    assertCase(cases[18].status === 200 && cases[18].data?.classes?.[0]?.heldCount === 2, 'Expected the year board to list classes.');
+    assertCase(cases[19].status === 400 && cases[19].data?.code === 'promotion_board_year_required', 'Expected the year board to require a year.');
 
     const ruleCreateLog = findActivity('promotion_rule_create');
     const applyLog = findActivity('promotion_apply');
