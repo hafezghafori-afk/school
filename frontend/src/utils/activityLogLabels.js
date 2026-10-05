@@ -116,6 +116,10 @@ const ACTION_LABELS = {
   finance_update_fee_plan_status: 'تغییر وضعیت پلان فیس',
   finance_delete_fee_plan: 'حذف پلان فیس',
   finance_create_bill: 'ایجاد بل',
+  finance_second_chance_fee_bill: 'صدور بل فیس امتحان چانس دوم',
+  finance_second_chance_fee_waive: 'معافیت از فیس امتحان چانس دوم',
+  finance_second_chance_fee_clear_waiver: 'برداشتن معافیت فیس چانس دوم',
+  finance_second_chance_fee_void: 'باطل‌کردن بل فیس چانس دوم',
   finance_generate_bills: 'تولید بل‌ها',
   finance_edit_bill: 'ویرایش بل',
   finance_anomaly_admission_settle_batch: 'تصفیهٔ دسته‌ای موارد غیرعادی پذیرش',
@@ -159,6 +163,8 @@ const ACTION_LABELS = {
   promotion_rule_create: 'ایجاد قاعدهٔ ارتقا',
   promotion_apply: 'اجرای ارتقا',
   promotion_rollback: 'بازگردانی ارتقا',
+  promotion_batch_rollback: 'بازگردانی دستهٔ ارتقا',
+  promotion_resolve: 'تعیین نتیجهٔ شاگرد مشروط',
 
   // صنف مجازی و ضبط
   virtual_class_create: 'ایجاد صنف مجازی',

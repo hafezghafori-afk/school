@@ -911,7 +911,11 @@ async function buildGroupedBillCandidates({
     }
 
     for (const period of periods) {
-      const admissionAlreadyIssued = admissionMembershipSet.has(membershipId)
+      // A promoted or repeating student was admitted when they first joined;
+      // their next-year membership never owes «داخله» again.
+      const admissionAlreadyIssued = membership.admissionType === 'promotion'
+        || membership.source === 'promotion'
+        || admissionMembershipSet.has(membershipId)
         || admissionStudentSchoolSet.has(`${String(membership.student || '')}|${String(membership.schoolId || '')}`)
         || legacyAdmissionStudentSet.has(String(membership.student || ''));
       const requestedScopes = selectedScopes.filter((scope) => scope !== 'admission' || !admissionAlreadyIssued);

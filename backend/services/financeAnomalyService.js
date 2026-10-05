@@ -25,6 +25,7 @@ const {
   nextAfghanMonthStart,
   replaceIranianSolarMonthNames
 } = require('../utils/afghanDate');
+const { isSecondChanceFeeDocument } = require('../utils/secondChanceFee');
 const {
   buildPaymentClassScope,
   buildPaymentOrderLinkFilter
@@ -910,6 +911,8 @@ function buildMembershipFinanceAnomalies({
         || new Date(membershipEndedAt.getFullYear(), membershipEndedAt.getMonth() + 1, 1);
       const postEndDocuments = [...normalizedBills, ...normalizedOrders].filter((document) => {
         if (normalizeText(document?.status) === 'void') return false;
+        // A second-chance exam fee is dated after the year it belongs to on purpose.
+        if (isSecondChanceFeeDocument(document)) return false;
         if (roundMoney(document?.amountPaid) <= 0) return false;
         const dueDate = toDate(document?.dueDate);
         if (!dueDate) return false;

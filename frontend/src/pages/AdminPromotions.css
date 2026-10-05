@@ -1,0 +1,450 @@
+/* «مرکز ارتقا صنف» - the step bar, class board, student table, checklist,
+   batch list and the A4 print sheet. Cards, buttons, badges and tables come
+   from AdminWorkspace.css; everything here is scoped to .promotion-page. */
+
+/* The dashboard's dark theme sets a light text colour that these white cards
+   inherit (`.dashboard-content p { color: inherit }` outranks the workspace
+   subtitle), and a global `button { width: 100% }` stretches every button. */
+.promotion-page .admin-workspace-card {
+  color: #0f172a;
+}
+
+.promotion-page .admin-workspace-card p {
+  color: #4b635f;
+}
+
+.promotion-page .admin-workspace-card button {
+  width: auto;
+}
+
+.promotion-page .admin-workspace-message {
+  position: relative;
+  padding-inline-end: 36px;
+}
+
+.promotion-page .promotion-message-close {
+  width: auto;
+  position: absolute;
+  inset-inline-end: 10px;
+  top: 8px;
+  border: none;
+  background: transparent;
+  font-size: 1.2rem;
+  cursor: pointer;
+  color: inherit;
+}
+
+.promotion-steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin: 4px 0 16px;
+}
+
+.promotion-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid #d7e7e4;
+  background: #ffffff;
+  text-align: right;
+  cursor: pointer;
+  font: inherit;
+  color: #0f172a;
+}
+
+.promotion-step:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.promotion-step-number {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #e6f4f1;
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.promotion-step-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.promotion-step-text small {
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.promotion-step.is-done .promotion-step-number {
+  background: #0f766e;
+  color: #ffffff;
+}
+
+/* Global button hover/focus styles would fill a step with the primary green. */
+.promotion-page .promotion-step:hover,
+.promotion-page .promotion-step:focus,
+.promotion-page .promotion-step:active {
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.promotion-page .promotion-step.is-active {
+  border-color: #0f766e;
+  background: #f0fdfa;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
+}
+
+.promotion-step-card h2 {
+  margin-top: 0;
+}
+
+.promotion-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.promotion-board-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid #dfece9;
+  background: #f8fbfb;
+  text-align: right;
+  cursor: pointer;
+  font: inherit;
+  color: #0f172a;
+}
+
+.promotion-board-item small,
+.promotion-board-count {
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.promotion-board-item.is-selected {
+  border-color: #0f766e;
+  background: #ecfdf5;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
+}
+
+.promotion-readiness,
+.promotion-summary,
+.promotion-result {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: #f8fbfb;
+  border: 1px solid #e2eceb;
+}
+
+.promotion-readiness ul,
+.promotion-summary ul,
+.promotion-checklist ul,
+.promotion-not-applied ul {
+  margin: 8px 0 0;
+  padding-inline-start: 20px;
+}
+
+.promotion-advanced {
+  margin-top: 14px;
+}
+
+.promotion-advanced summary {
+  cursor: pointer;
+  color: #0f766e;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.promotion-inline-note {
+  margin: 6px 0 0;
+  color: #0f766e;
+}
+
+.promotion-capacity,
+.promotion-chips,
+.promotion-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.promotion-relief-actions {
+  margin: 10px 0;
+  align-items: center;
+}
+
+.promotion-page .admin-workspace-table td small {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.promotion-page .admin-workspace-table tr.is-muted td {
+  color: #94a3b8;
+}
+
+.promotion-page .admin-workspace-table select {
+  min-width: 150px;
+  max-width: 260px;
+}
+
+.promotion-issue {
+  color: #b45309 !important;
+}
+
+.promotion-debt {
+  color: #b91c1c !important;
+  font-weight: 600;
+}
+
+.promotion-reliefs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.promotion-reliefs label {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.8rem;
+}
+
+.promotion-reliefs label.is-muted,
+.promotion-muted-text {
+  color: #94a3b8;
+}
+
+.promotion-checklist {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+}
+
+.promotion-checklist.is-blocking {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.promotion-checklist.is-warning {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+}
+
+.promotion-preview-state {
+  min-height: 1.2em;
+  margin-top: 10px;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.promotion-preview-error {
+  color: #b91c1c;
+}
+
+.promotion-nav {
+  justify-content: space-between;
+  margin-top: 14px;
+}
+
+.promotion-batch-detail {
+  padding: 8px 0;
+}
+
+.promotion-clearance {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid #e2eceb;
+  background: #fbfdfd;
+}
+
+.promotion-clearance-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.promotion-not-applied {
+  margin-top: 10px;
+  color: #92400e;
+}
+
+@media (max-width: 900px) {
+  .promotion-steps {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .promotion-step {
+    flex-direction: column;
+    padding: 8px 4px;
+    text-align: center;
+  }
+
+  .promotion-step-text small {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .promotion-step-text strong {
+    font-size: 0.75rem;
+  }
+
+  .promotion-board {
+    grid-template-columns: 1fr;
+  }
+
+  /* Student and batch tables read as one card per row on a phone. */
+  .promotion-page .admin-workspace-table thead {
+    display: none;
+  }
+
+  .promotion-page .admin-workspace-table,
+  .promotion-page .admin-workspace-table tbody,
+  .promotion-page .admin-workspace-table tr,
+  .promotion-page .admin-workspace-table td {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .promotion-page .admin-workspace-table tr {
+    border-bottom: 1px solid #e2eceb;
+    padding: 8px 10px;
+  }
+
+  .promotion-page .admin-workspace-table td {
+    border: none;
+    padding: 4px 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .promotion-page .admin-workspace-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    color: #64748b;
+    font-size: 0.72rem;
+  }
+
+  .promotion-page .admin-workspace-table select {
+    max-width: 100%;
+    width: 100%;
+  }
+}
+
+/* The print sheet is mounted only while printing. */
+.promotion-print {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+
+  /* Scoped with :has(.promotion-print) - this stylesheet stays loaded in the
+     SPA, and unscoped print rules blank other pages' printouts. */
+  body:has(.promotion-print) * {
+    visibility: hidden;
+  }
+
+  body:has(.promotion-print) .dashboard-content > :not(.promotion-page) {
+    display: none !important;
+  }
+
+  .promotion-page:has(.promotion-print) > :not(.promotion-print) {
+    display: none !important;
+  }
+
+  .promotion-page:has(.promotion-print) {
+    display: block !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+
+  .promotion-print,
+  .promotion-print * {
+    visibility: visible !important;
+  }
+
+  .promotion-print {
+    display: block;
+    position: static;
+    color: #000000;
+    font-size: 11pt;
+  }
+
+  .promotion-print-head h1 {
+    margin: 0 0 6px;
+    font-size: 16pt;
+    text-align: center;
+  }
+
+  .promotion-print-head p {
+    margin: 2px 0;
+  }
+
+  .promotion-print-table {
+    width: 100%;
+    margin-top: 10px;
+    border-collapse: collapse;
+  }
+
+  .promotion-print-table th,
+  .promotion-print-table td {
+    border: 1px solid #000000;
+    padding: 4px 6px;
+    text-align: right;
+  }
+
+  .promotion-print-table tr {
+    page-break-inside: avoid;
+  }
+
+  .promotion-print-note {
+    margin-top: 10px;
+    font-size: 10pt;
+  }
+
+  .promotion-print-signatures {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-top: 40px;
+    page-break-inside: avoid;
+  }
+
+  .promotion-print-signatures div {
+    border-top: 1px solid #000000;
+    padding-top: 6px;
+    text-align: center;
+  }
+}

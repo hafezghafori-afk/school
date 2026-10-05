@@ -67,10 +67,26 @@ const {
   applyGovernmentSnapshotRejection
 } = require('../services/governmentSnapshotService');
 const {
+  buildTransactionMembershipFields,
   listCourseMemberships,
   findClassMemberships,
-  resolveMembershipTransactionLink
+  resolveMembershipTransactionLink,
+  resolveStudentCoreId
 } = require('../utils/studentMembershipLookup');
+const {
+  clearSecondChanceWaiver,
+  clearVoidedSecondChanceBill,
+  findLiveSecondChanceBill,
+  listSecondChanceFees,
+  loadSecondChanceContext,
+  recordSecondChanceBill,
+  waiveSecondChanceFee
+} = require('../services/secondChanceFeeService');
+const {
+  SECOND_CHANCE_FEE_LABEL,
+  SECOND_CHANCE_FEE_TYPE,
+  secondChanceIssuanceKey
+} = require('../utils/secondChanceFee');
 const {
   normalizeText: normalizeScopeText,
   resolveClassCourseReference,
@@ -6975,6 +6991,80 @@ router.get('/admin/bills', requireAuth, requireRole(['admin']), requirePermissio
   }
 });
 
+// Builds, saves and announces one single-fee bill. Shared by «صدور بل دستی»
+// and the second-chance exam fee so both are numbered, synced to the
+// canonical fee order and announced to the student the same way.
+async function issueFinanceBillDocument({
+  req,
+  schoolId,
+  studentId,
+  linkFields,
+  courseId,
+  amount,
+  feeType,
+  feePlan = null,
+  dueDate,
+  issuedAt,
+  periodType,
+  periodLabel = '',
+  term = '',
+  academicYear = '',
+  currency = '',
+  note = '',
+  issuanceKey = ''
+}) {
+  const bill = new FinanceBill({
+    billNumber: await generateBillNumber(),
+    schoolId,
+    student: studentId,
+    studentId: linkFields.studentId,
+    studentMembershipId: linkFields.studentMembershipId,
+    linkScope: linkFields.linkScope,
+    course: courseId,
+    classId: linkFields.classId,
+    academicYearId: linkFields.academicYearId,
+    amountOriginal: amount,
+    amountDue: amount,
+    amountPaid: 0,
+    feeScopes: [feeType],
+    feeBreakdown: { [feeType]: amount },
+    lineItems: normalizeFinanceLineItems({
+      amountOriginal: amount,
+      feeBreakdown: { [feeType]: amount },
+      feeScopes: [feeType],
+      amountPaid: 0,
+      adjustments: [],
+      defaultType: feeType,
+      sourcePlanId: feePlan?._id || null,
+      periodKey: periodLabel || term
+    }),
+    dueDate,
+    issuedAt,
+    periodType,
+    periodLabel,
+    academicYear: academicYear || String(feePlan?.academicYear || '').trim(),
+    term,
+    currency: String(currency || feePlan?.currency || 'AFN').trim().toUpperCase(),
+    note: String(note || '').trim(),
+    ...(issuanceKey ? { issuanceKey } : {}),
+    createdBy: req.user.id
+  });
+  recalculateBill(bill);
+  suppressAutomaticFinanceBillSync(bill);
+  await bill.save();
+  await syncStudentFinanceFromFinanceBill(bill).catch(() => null);
+
+  await notifyStudent({
+    req,
+    studentId,
+    studentCoreId: linkFields.studentId,
+    title: 'بل جدید صادر شد',
+    message: `یک بل جدید با شماره ${bill.billNumber} برای شما صادر شد.`,
+    emailSubject: 'صدور بل جدید'
+  });
+  return bill;
+}
+
 router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
   try {
     const {
@@ -7161,53 +7251,23 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
       });
     }
 
-    const bill = new FinanceBill({
-      billNumber: await generateBillNumber(),
+    const bill = await issueFinanceBillDocument({
+      req,
       schoolId: schoolContext.schoolId,
-      student: studentId,
-      studentId: linkFields.studentId,
-      studentMembershipId: linkFields.studentMembershipId,
-      linkScope: linkFields.linkScope,
-      course: courseId,
-      classId: linkFields.classId,
-      academicYearId: linkFields.academicYearId,
-      amountOriginal: resolvedAmount,
-      amountDue: resolvedAmount,
-      amountPaid: 0,
-      feeScopes: [normalizedFeeType],
-      feeBreakdown: { [normalizedFeeType]: resolvedAmount },
-      lineItems: normalizeFinanceLineItems({
-        amountOriginal: resolvedAmount,
-        feeBreakdown: { [normalizedFeeType]: resolvedAmount },
-        feeScopes: [normalizedFeeType],
-        amountPaid: 0,
-        adjustments: [],
-        defaultType: normalizedFeeType,
-        sourcePlanId: selectedFeePlan?._id || null,
-        periodKey: normalizedPeriodLabel || normalizedTerm
-      }),
+      studentId,
+      linkFields,
+      courseId,
+      amount: resolvedAmount,
+      feeType: normalizedFeeType,
+      feePlan: selectedFeePlan,
       dueDate: dueDateValue,
       issuedAt: issueDateValue,
       periodType: normalizedPeriodType,
       periodLabel: normalizedPeriodLabel,
-      academicYear: normalizedAcademicYear || String(selectedFeePlan?.academicYear || '').trim(),
       term: normalizedTerm,
-      currency: String(currency || selectedFeePlan?.currency || 'AFN').trim().toUpperCase(),
-      note: String(note || '').trim(),
-      createdBy: req.user.id
-    });
-    recalculateBill(bill);
-    suppressAutomaticFinanceBillSync(bill);
-    await bill.save();
-    await syncStudentFinanceFromFinanceBill(bill).catch(() => null);
-
-    await notifyStudent({
-      req,
-      studentId,
-      studentCoreId: linkFields.studentId,
-      title: 'بل جدید صادر شد',
-      message: `یک بل جدید با شماره ${bill.billNumber} برای شما صادر شد.`,
-      emailSubject: 'صدور بل جدید'
+      academicYear: normalizedAcademicYear,
+      currency,
+      note
     });
 
     await logActivity({
@@ -7267,6 +7327,201 @@ router.post('/admin/bills', requireAuth, requireRole(['admin']), requirePermissi
     }
     console.error('[finance][create-manual-bill]', error);
     return res.status(500).json({ success: false, message: 'خطا در ایجاد بل' });
+  }
+});
+
+const SECOND_CHANCE_ERROR_MESSAGES = Object.freeze({
+  second_chance_not_found: 'این شاگرد در لیست چانس دوم نیست یا ارتقای او بازگردانی شده است.',
+  second_chance_membership_not_found: 'عضویت صنف مبدا این شاگرد پیدا نشد.',
+  second_chance_waiver_reason_required: 'برای معافیت از فیس چانس دوم، دلیل را بنویسید.',
+  second_chance_already_billed: 'برای این شاگرد بل فیس امتحان چانس دوم قبلاً صادر شده است.',
+  second_chance_not_waived: 'این شاگرد از فیس چانس دوم معاف نشده است.',
+  second_chance_no_live_bill: 'بل فعالی برای فیس چانس دوم این شاگرد وجود ندارد.',
+  second_chance_waived: 'این شاگرد از فیس چانس دوم معاف شده است؛ برای صدور بل اول معافیت را بردارید.'
+});
+
+function sendSecondChanceError(res, error, fallback) {
+  const code = String(error?.message || '');
+  if (Number(error?.code) === 11000) {
+    return res.status(409).json({ success: false, code: 'second_chance_already_billed', message: SECOND_CHANCE_ERROR_MESSAGES.second_chance_already_billed });
+  }
+  if (SECOND_CHANCE_ERROR_MESSAGES[code]) {
+    return res.status(Number(error?.status) || 400).json({ success: false, code, message: SECOND_CHANCE_ERROR_MESSAGES[code] });
+  }
+  if (error?.status || error?.statusCode) {
+    return res.status(Number(error.status || error.statusCode)).json({
+      success: false,
+      code: error.code || '',
+      message: error.messageDari || error.message || fallback
+    });
+  }
+  console.error('[finance][second-chance-fee]', error);
+  return res.status(500).json({ success: false, message: fallback });
+}
+
+// «فیس امتحان چانس دوم»: only students a promotion batch held for the
+// second-chance exam are listed; billing them is optional and the amount is
+// typed per student.
+router.get('/admin/second-chance-fees', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const schoolContext = await resolveActiveSchool(req, { payload: req.query || {}, allowSingleFallback: true });
+    if (schoolContext.schoolId) writeSchoolContextHeaders(res, schoolContext.schoolId);
+    const data = await listSecondChanceFees({
+      schoolId: schoolContext.schoolId || '',
+      academicYearId: String(req.query?.academicYearId || ''),
+      classId: String(req.query?.classId || ''),
+      state: String(req.query?.state || '')
+    });
+    return res.json({ success: true, ...data });
+  } catch (error) {
+    return sendSecondChanceError(res, error, 'دریافت لیست فیس چانس دوم ناموفق بود.');
+  }
+});
+
+router.post('/admin/second-chance-fees/:transactionId/bill', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const { amount, dueDate, issuedAt, note = '' } = req.body || {};
+    const resolvedAmount = roundMoney(amount);
+    if (!(resolvedAmount > 0)) {
+      return res.status(400).json({ success: false, message: 'مبلغ فیس چانس دوم را (بیشتر از صفر) وارد کنید.' });
+    }
+    const dueDateValue = parseDateSafe(dueDate, null);
+    if (!dueDateValue) {
+      return res.status(400).json({ success: false, message: 'تاریخ مهلت پرداخت معتبر نیست.' });
+    }
+    const billMonth = resolveBillingMonth({ dueDate });
+    if (billMonth.error) {
+      return res.status(400).json({ success: false, message: billMonth.error });
+    }
+    const issueDateValue = parseDateSafe(issuedAt, new Date());
+
+    const { transaction, membership, schoolClass } = await loadSecondChanceContext(req.params.transactionId);
+    const schoolContext = await resolveActiveSchool(req, { payload: req.body || {}, allowSingleFallback: true });
+    if (!schoolContext.schoolId) {
+      return res.status(400).json({ success: false, message: 'برای ایجاد بل، مکتب فعال را انتخاب کنید.' });
+    }
+    if (!schoolClass?.schoolId || String(schoolClass.schoolId) !== String(schoolContext.schoolId)) {
+      return res.status(403).json({ success: false, message: 'صنف این شاگرد مربوط به مکتب فعال نیست.' });
+    }
+    writeSchoolContextHeaders(res, schoolContext.schoolId);
+    if (await findLiveSecondChanceBill(transaction._id)) {
+      return res.status(409).json({ success: false, code: 'second_chance_already_billed', message: SECOND_CHANCE_ERROR_MESSAGES.second_chance_already_billed });
+    }
+    if (String(transaction.secondChanceFee?.status || '') === 'waived') {
+      return res.status(409).json({ success: false, code: 'second_chance_waived', message: SECOND_CHANCE_ERROR_MESSAGES.second_chance_waived });
+    }
+
+    const academicYearId = String(membership.academicYearId || membership.academicYear || schoolClass.academicYearId || '');
+    await assertFinancePeriodWritable({ schoolId: schoolContext.schoolId, academicYearId, dateValue: issueDateValue });
+    await assertBillMonthsWritable({ schoolId: schoolContext.schoolId, academicYearId, dueDates: [dueDateValue] });
+
+    const studentCoreId = membership.studentId || await resolveStudentCoreId(membership.student);
+    const linkFields = buildTransactionMembershipFields(
+      { _id: membership._id, studentId: studentCoreId, classId: schoolClass._id, academicYearId },
+      { linkScope: 'membership' }
+    );
+    const failedTitles = (transaction.failedSubjects || []).map((subject) => String(subject?.subjectTitle || '').trim()).filter(Boolean);
+    const bill = await issueFinanceBillDocument({
+      req,
+      schoolId: schoolContext.schoolId,
+      studentId: membership.student,
+      linkFields,
+      courseId: membership.course || schoolClass.legacyCourseId,
+      amount: resolvedAmount,
+      feeType: SECOND_CHANCE_FEE_TYPE,
+      dueDate: dueDateValue,
+      issuedAt: issueDateValue,
+      periodType: 'custom',
+      periodLabel: SECOND_CHANCE_FEE_LABEL,
+      note: [String(note || '').trim(), failedTitles.length ? `مضامین: ${failedTitles.join('، ')}` : ''].filter(Boolean).join(' — '),
+      issuanceKey: secondChanceIssuanceKey(transaction._id)
+    });
+    await recordSecondChanceBill(transaction._id, { bill, amount: resolvedAmount, dueDate: dueDateValue, note, actorId: req.user.id });
+
+    await logActivity({
+      req,
+      action: 'finance_second_chance_fee_bill',
+      targetType: 'FinanceBill',
+      targetId: bill._id.toString(),
+      meta: {
+        promotionTransactionId: String(transaction._id),
+        studentId: String(membership.student || ''),
+        classId: String(schoolClass._id || ''),
+        amount: resolvedAmount,
+        billNumber: bill.billNumber,
+        failedSubjects: failedTitles
+      }
+    });
+    invalidateFinanceReportCache();
+    const billingMonthLabel = formatAfghanMonthKeyLabel(billMonth.monthKey);
+    return res.status(201).json({
+      success: true,
+      item: { billId: String(bill._id), billNumber: bill.billNumber, amountDue: bill.amountDue },
+      message: `بل فیس امتحان چانس دوم${billingMonthLabel ? ` برای ماه ${billingMonthLabel}` : ''} با شماره ${bill.billNumber} صادر شد.`
+    });
+  } catch (error) {
+    return sendSecondChanceError(res, error, 'صدور بل فیس چانس دوم ناموفق بود.');
+  }
+});
+
+router.post('/admin/second-chance-fees/:transactionId/waive', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const reason = String(req.body?.reason || '').trim();
+    const transaction = await waiveSecondChanceFee(req.params.transactionId, { reason, actorId: req.user.id });
+    await logActivity({
+      req,
+      action: 'finance_second_chance_fee_waive',
+      targetType: 'promotion_transaction',
+      targetId: String(transaction._id),
+      meta: { promotionTransactionId: String(transaction._id), reason },
+      reason
+    });
+    invalidateFinanceReportCache();
+    return res.json({ success: true, message: 'شاگرد از فیس امتحان چانس دوم معاف شد.' });
+  } catch (error) {
+    return sendSecondChanceError(res, error, 'ثبت معافیت فیس چانس دوم ناموفق بود.');
+  }
+});
+
+router.post('/admin/second-chance-fees/:transactionId/clear-waiver', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const transaction = await clearSecondChanceWaiver(req.params.transactionId, { actorId: req.user.id });
+    await logActivity({
+      req,
+      action: 'finance_second_chance_fee_clear_waiver',
+      targetType: 'promotion_transaction',
+      targetId: String(transaction._id),
+      meta: { promotionTransactionId: String(transaction._id) }
+    });
+    invalidateFinanceReportCache();
+    return res.json({ success: true, message: 'معافیت برداشته شد؛ تصمیم دربارهٔ فیس این شاگرد دوباره باز است.' });
+  } catch (error) {
+    return sendSecondChanceError(res, error, 'برداشتن معافیت ناموفق بود.');
+  }
+});
+
+// Voiding goes through the normal bill void (approval levels, closed months,
+// paid bills); afterwards the decision for the student is open again.
+router.post('/admin/second-chance-fees/:transactionId/void-bill', requireAuth, requireRole(['admin']), requirePermission('manage_finance'), async (req, res) => {
+  try {
+    const { transaction } = await loadSecondChanceContext(req.params.transactionId);
+    const bill = await findLiveSecondChanceBill(transaction._id);
+    if (!bill) {
+      return res.status(404).json({ success: false, code: 'second_chance_no_live_bill', message: SECOND_CHANCE_ERROR_MESSAGES.second_chance_no_live_bill });
+    }
+    const result = await voidBillAction({ req, billId: bill._id, body: { reason: req.body?.reason } });
+    await clearVoidedSecondChanceBill(transaction._id, { actorId: req.user.id });
+    await logActivity({
+      req,
+      action: 'finance_second_chance_fee_void',
+      targetType: 'FinanceBill',
+      targetId: String(bill._id),
+      meta: { promotionTransactionId: String(transaction._id), billNumber: bill.billNumber },
+      reason: String(req.body?.reason || '')
+    });
+    return res.json({ success: true, message: result?.message || 'بل فیس چانس دوم باطل شد.' });
+  } catch (error) {
+    return sendSecondChanceError(res, error, 'باطل‌سازی بل فیس چانس دوم ناموفق بود.');
   }
 });
 

@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 
 const promotionTransactionSchema = new mongoose.Schema({
+  batchId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'PromotionBatch',
+    default: null,
+    index: true
+  },
   ruleId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'PromotionRule',
@@ -80,13 +86,85 @@ const promotionTransactionSchema = new mongoose.Schema({
     default: 'blocked',
     index: true
   },
+  // 'held': a conditional (مشروط) student waiting for the second-chance exam;
+  // nothing has moved yet and resolving it turns it into 'applied'.
   transactionStatus: {
     type: String,
-    enum: ['preview', 'applied', 'rolled_back', 'cancelled'],
+    enum: ['preview', 'held', 'applied', 'rolled_back', 'cancelled'],
     default: 'preview',
     index: true
   },
   generatedMembershipStatus: { type: String, default: '', trim: true },
+  // false when the student already had a current membership in the target
+  // class and promotion only linked to it - a rollback must leave that one alone.
+  targetMembershipGenerated: { type: Boolean, default: true },
+  heldOutcome: { type: String, default: '', trim: true },
+  // What the decision rested on, kept so finance can see a held student's
+  // failed subjects without re-running the result engine.
+  averageScore: { type: Number, default: null },
+  failedSubjects: {
+    type: [new mongoose.Schema({
+      subjectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Subject', default: null },
+      subjectTitle: { type: String, default: '', trim: true },
+      percentage: { type: Number, default: 0 }
+    }, { _id: false })],
+    default: []
+  },
+  // «فیس امتحان چانس دوم» decision of the finance office. The bill itself is
+  // a normal FinanceBill with issuanceKey `second_chance_exam:<this id>`, so it
+  // stays the source of truth for "billed"; this keeps who decided what.
+  secondChanceFee: {
+    status: { type: String, enum: ['', 'billed', 'waived'], default: '' },
+    billId: { type: mongoose.Schema.Types.ObjectId, ref: 'FinanceBill', default: null },
+    amount: { type: Number, default: 0, min: 0 },
+    dueDate: { type: Date, default: null },
+    waiverReason: { type: String, default: '', trim: true },
+    note: { type: String, default: '', trim: true },
+    decidedAt: { type: Date, default: null },
+    decidedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
+  },
+  // What promotion did on the finance side for this student: the source-year
+  // debt it left in place, after-end documents it voided or turned into
+  // refund cases (or left for review in a closed month), and the reliefs
+  // re-registered on the new membership.
+  financeEffects: {
+    outstandingAtPromotion: { type: Number, default: 0 },
+    voidedBills: { type: Number, default: 0 },
+    voidedOrders: { type: Number, default: 0 },
+    refundCases: { type: Number, default: 0 },
+    reviewRequired: {
+      type: [new mongoose.Schema({
+        documentId: { type: String, default: '' },
+        documentType: { type: String, default: '' },
+        number: { type: String, default: '' },
+        reason: { type: String, default: '' }
+      }, { _id: false })],
+      default: []
+    },
+    plannedReliefs: {
+      type: [new mongoose.Schema({
+        sourceModel: { type: String, default: '' },
+        id: { type: String, default: '' }
+      }, { _id: false })],
+      default: []
+    },
+    carriedReliefs: {
+      type: [new mongoose.Schema({
+        sourceModel: { type: String, default: '' },
+        sourceId: { type: String, default: '' },
+        newId: { type: String, default: '' },
+        status: { type: String, default: '' },
+        error: { type: String, default: '' }
+      }, { _id: false })],
+      default: []
+    }
+  },
+  resolvedAt: { type: Date, default: null },
+  resolvedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
   decidedAt: { type: Date, default: Date.now },
   appliedAt: { type: Date, default: null },
   rolledBackAt: { type: Date, default: null },
@@ -136,5 +214,7 @@ promotionTransactionSchema.pre('validate', function syncPromotionTransactionStat
 
 promotionTransactionSchema.index({ sessionId: 1, studentMembershipId: 1, targetAcademicYearId: 1, transactionStatus: 1 });
 promotionTransactionSchema.index({ studentId: 1, createdAt: -1 });
+promotionTransactionSchema.index({ studentMembershipId: 1, transactionStatus: 1, promotionOutcome: 1 });
+promotionTransactionSchema.index({ heldOutcome: 1, transactionStatus: 1, academicYearId: 1, classId: 1 });
 
 module.exports = mongoose.model('PromotionTransaction', promotionTransactionSchema);
