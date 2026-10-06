@@ -10,7 +10,18 @@ const submissionSchema = new mongoose.Schema({
   submittedAt: { type: Date, default: Date.now },
   score: { type: Number, default: null },
   feedback: { type: String, default: '' },
-  gradedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
+  gradedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  // submitted -> graded, or submitted -> revision_requested -> (student
+  // resubmits) -> submitted. A student may only resubmit while a revision is
+  // requested, so a graded answer cannot be swapped out underneath its score.
+  status: {
+    type: String,
+    enum: ['submitted', 'graded', 'revision_requested'],
+    default: 'submitted'
+  },
+  revisionNote: { type: String, default: '', maxlength: 2000 },
+  revisionRequestedAt: { type: Date, default: null },
+  revisionCount: { type: Number, default: 0 }
 }, { timestamps: true });
 
 submissionSchema.index({ homework: 1, student: 1 }, { unique: true });

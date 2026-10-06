@@ -4,12 +4,18 @@ import './toast.css';
 // Toast context
 const ToastContext = createContext();
 
+let nextToastId = 0;
+
 // Toast provider
 export const ToastProvider = ({ children }) => {
   const [toasts, setToasts] = useState([]);
 
   const addToast = (message, type = 'info') => {
-    const id = Date.now();
+    // Two toasts raised in the same millisecond (a save followed by its
+    // follow-up notice) must not share an id: it is both the React key and
+    // what the auto-dismiss timer removes by.
+    nextToastId += 1;
+    const id = `${Date.now()}-${nextToastId}`;
     const newToast = { id, message, type };
     
     setToasts(prev => [...prev, newToast]);

@@ -31,9 +31,11 @@ const schoolClasses = [
 ];
 
 const memberships = [
-  { _id: 'mem-1', student: IDS.student1, classId: IDS.class1, course: IDS.course1, status: 'active', isCurrent: true }
+  { _id: 'mem-1', student: IDS.student1, classId: IDS.class1, course: IDS.course1, status: 'active', isCurrent: true },
+  { _id: 'mem-2', student: IDS.student2, classId: IDS.class1, course: IDS.course1, status: 'active', isCurrent: true }
 ];
 const activityCalls = [];
+const notificationCalls = [];
 
 const homeworkRecords = [
   {
@@ -220,6 +222,9 @@ const HomeworkSubmissionMock = {
   find(filter = {}) {
     return new MockQuery(() => submissionRecords.filter((item) => matchesFilter(item, filter)));
   },
+  findOne(filter = {}) {
+    return new MockQuery(() => submissionRecords.filter((item) => matchesFilter(item, filter)), { firstResult: true });
+  },
   findById(id) {
     return new MockQuery(() => submissionRecords.filter((item) => String(item._id) === String(id)), { firstResult: true });
   },
@@ -257,6 +262,26 @@ const HomeworkSubmissionMock = {
     if (!item) return null;
     Object.assign(item, update, { updatedAt: new Date('2026-03-12T11:00:00.000Z') });
     return clone(item);
+  }
+};
+
+const homeworkRosterMock = {
+  async loadClassRoster(classId) {
+    return memberships
+      .filter((item) => String(item.classId) === String(classId) && item.status === 'active' && item.isCurrent === true)
+      .map((item) => {
+        const user = hydrateUser(item.student);
+        return { userId: String(user._id), name: user.name, email: user.email || '', admissionNo: `AS-${String(user._id).slice(-2)}` };
+      });
+  },
+  async resolveAdmissionNumbers() {
+    return new Map();
+  },
+  async notifyStudents(userIds = [], payload = {}) {
+    const ids = [...new Set(userIds.map((id) => String(id?._id || id)).filter(Boolean))];
+    if (!ids.length) return 0;
+    notificationCalls.push({ userIds: ids, ...payload });
+    return ids.length;
   }
 };
 
@@ -385,6 +410,7 @@ function loadHomeworkRouter() {
     if (isHomeworkRoute && request === '../utils/courseAccess') return courseAccessMock;
     if (isHomeworkRoute && request === '../utils/studentMembershipLookup') return studentMembershipLookupMock;
     if (isHomeworkRoute && request === '../utils/classScope') return classScopeMock;
+    if (isHomeworkRoute && request === '../utils/homeworkRoster') return homeworkRosterMock;
     if (isHomeworkRoute && request === '../utils/activity') {
       return {
         logActivity: async (payload = {}) => {
@@ -620,6 +646,146 @@ async function run() {
       const activity = activityCalls[activityCount];
       assertCase(activity?.action === 'grade_homework_submission', 'expected homework grading activity');
       assertCase(Number(activity?.meta?.score || 0) === 19, 'expected graded score in activity meta');
+    });
+
+    await check('redesign: submission past the due day is flagged late, not refused', async () => {
+      const response = await request(server, '/api/homeworks/hw-1/submissions', { user: instructorUser });
+      assertCase(response.status === 200, `expected 200, received ${response.status}`);
+      const item = response.data?.items?.[0];
+      assertCase(item?.isLate === true, 'expected isLate on a submission after 2026-03-20');
+      assertCase(Number(item?.lateDays) > 0, 'expected a positive lateDays');
+      assertCase(item?.status === 'graded', 'expected graded status after grading');
+    });
+
+    await check('redesign: create rejects a max score outside 1..1000 and keeps a teacher-chosen one', async () => {
+      for (const bad of ['0', '5000', 'abc']) {
+        const response = await request(server, '/api/homeworks/create', {
+          method: 'POST',
+          user: adminUser,
+          body: { classId: IDS.class1, title: 'Bad scale', maxScore: bad },
+          headers: { 'x-test-no-file': 'true' }
+        });
+        assertCase(response.status === 400, `expected 400 for maxScore ${bad}, received ${response.status}`);
+      }
+      const response = await request(server, '/api/homeworks/create', {
+        method: 'POST',
+        user: adminUser,
+        body: { classId: IDS.class1, title: 'Out of ten', maxScore: '10', notifyStudents: 'true' },
+        headers: { 'x-test-no-file': 'true' }
+      });
+      assertCase(response.status === 201, `expected 201, received ${response.status}`);
+      assertCase(response.data?.homework?.maxScore === 10, 'expected maxScore 10 to be kept');
+      assertCase(response.data?.notifiedCount === 2, 'expected both class students to be notified');
+    });
+
+    await check('redesign: grade above the max score is refused', async () => {
+      const response = await request(server, '/api/homeworks/hw-1/grade', {
+        method: 'POST',
+        user: instructorUser,
+        body: { submissionId: 'sub-1', score: 31 }
+      });
+      assertCase(response.status === 400, `expected 400, received ${response.status}`);
+    });
+
+    await check('redesign: max score cannot drop under a score already given', async () => {
+      const response = await request(server, '/api/homeworks/hw-1', {
+        method: 'PUT',
+        user: instructorUser,
+        body: { maxScore: 10 },
+        headers: { 'x-test-no-file': 'true' }
+      });
+      assertCase(response.status === 409, `expected 409, received ${response.status}`);
+    });
+
+    await check('redesign: a handed-in answer cannot be resubmitted without a revision request', async () => {
+      const response = await request(server, '/api/homeworks/hw-1/submit', {
+        method: 'POST',
+        user: studentUser,
+        body: { text: 'Second try' },
+        headers: { 'x-test-file-name': 'second.pdf' }
+      });
+      assertCase(response.status === 409, `expected 409, received ${response.status}`);
+    });
+
+    await check('redesign: class list with stats counts submissions and missing students', async () => {
+      const response = await request(server, `/api/homeworks/class/${IDS.class1}?withStats=1`, { user: instructorUser });
+      assertCase(response.status === 200, `expected 200, received ${response.status}`);
+      assertCase(response.data?.rosterCount === 2, 'expected roster of 2');
+      const stats = response.data?.items?.find((item) => item._id === 'hw-1')?.stats;
+      assertCase(stats?.submittedCount === 1, 'expected 1 submission');
+      assertCase(stats?.missingCount === 1, 'expected 1 missing');
+      assertCase(stats?.gradedCount === 1 && stats?.lateCount === 1, 'expected graded + late counts');
+      const plain = await request(server, `/api/homeworks/class/${IDS.class1}?withStats=1`, { user: studentUser });
+      assertCase(plain.data?.items?.[0]?.stats === undefined, 'students must not receive stats');
+    });
+
+    await check('redesign: roster lists every class student with a state', async () => {
+      const response = await request(server, '/api/homeworks/hw-1/roster', { user: instructorUser });
+      assertCase(response.status === 200, `expected 200, received ${response.status}`);
+      const rows = response.data?.rows || [];
+      assertCase(rows.length === 2, 'expected 2 roster rows');
+      const missing = rows.find((row) => row.student._id === IDS.student2);
+      assertCase(missing?.state === 'missing_overdue', `expected missing_overdue, got ${missing?.state}`);
+      assertCase(missing?.student?.admissionNo === 'AS-12', 'expected admission number on roster row');
+      assertCase(rows.find((row) => row.student._id === IDS.student1)?.state === 'graded', 'expected graded row');
+    });
+
+    await check('redesign: request revision reopens the answer and notifies the student', async () => {
+      const before = notificationCalls.length;
+      const empty = await request(server, '/api/homeworks/hw-1/request-revision', {
+        method: 'POST', user: instructorUser, body: { submissionId: 'sub-1', note: '' }
+      });
+      assertCase(empty.status === 400, 'expected a note to be required');
+      const response = await request(server, '/api/homeworks/hw-1/request-revision', {
+        method: 'POST', user: instructorUser, body: { submissionId: 'sub-1', note: 'Show your working.' }
+      });
+      assertCase(response.status === 200, `expected 200, received ${response.status}`);
+      assertCase(response.data?.submission?.status === 'revision_requested', 'expected revision_requested');
+      assertCase(response.data?.submission?.score === null, 'expected score cleared');
+      assertCase(notificationCalls.length === before + 1, 'expected one notification');
+      const resubmit = await request(server, '/api/homeworks/hw-1/submit', {
+        method: 'POST', user: studentUser, body: { text: 'Fixed' }, headers: { 'x-test-file-name': 'fixed.pdf' }
+      });
+      assertCase(resubmit.status === 200, `expected resubmit 200, received ${resubmit.status}`);
+      assertCase(resubmit.data?.submission?.status === 'submitted', 'expected submitted after resubmission');
+      assertCase(resubmit.data?.submission?.isLate === true, 'expected resubmission to be flagged late');
+    });
+
+    await check('redesign: grading rejects a submission from another homework', async () => {
+      const response = await request(server, '/api/homeworks/hw-unknown/grade', {
+        method: 'POST', user: instructorUser, body: { submissionId: 'sub-1', score: 5 }
+      });
+      assertCase(response.status === 404, `expected 404, received ${response.status}`);
+    });
+
+    await check('redesign: notify missing students reaches only non-submitters', async () => {
+      const response = await request(server, '/api/homeworks/hw-1/notify', {
+        method: 'POST', user: instructorUser, body: { audience: 'missing' }
+      });
+      assertCase(response.status === 200, `expected 200, received ${response.status}`);
+      assertCase(response.data?.notifiedCount === 1, 'expected 1 recipient');
+      const last = notificationCalls[notificationCalls.length - 1];
+      assertCase(last.userIds.length === 1 && last.userIds[0] === IDS.student2, 'expected student2 only');
+    });
+
+    await check('redesign: copy homework to another class', async () => {
+      const same = await request(server, '/api/homeworks/hw-1/copy', {
+        method: 'POST', user: instructorUser, body: { classIds: [IDS.class1] }
+      });
+      assertCase(same.status === 400, 'expected copying to the same class to be refused');
+      const response = await request(server, '/api/homeworks/hw-1/copy', {
+        method: 'POST', user: instructorUser, body: { classIds: [IDS.class2], dueDate: '2026-11-01' }
+      });
+      assertCase(response.status === 201, `expected 201, received ${response.status}`);
+      assertCase(response.data?.created?.[0]?.classId === IDS.class2, 'expected a copy in class2');
+      const copy = homeworkRecords.find((item) => item._id === response.data.created[0].homeworkId);
+      assertCase(String(copy?.course) === IDS.course2, 'expected class2 compat course on the copy');
+    });
+
+    await check('redesign: export grades as xlsx', async () => {
+      const response = await request(server, '/api/homeworks/hw-1/export.xlsx', { user: instructorUser });
+      assertCase(response.status === 200, `expected 200, received ${response.status}`);
+      assertCase(String(response.headers['content-type'] || '').includes('spreadsheetml'), 'expected xlsx content type');
     });
 
     await check('route smoke: delete homework removes submissions and logs activity', async () => {

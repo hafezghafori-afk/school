@@ -5,6 +5,7 @@ import { API_BASE } from '../config/api';
 import { formatAfghanDate } from '../utils/afghanDate';
 import { apiFetch } from '../utils/apiClient';
 import { DataErrorCard } from '../components/ui/DataState';
+import { getDueState, lateDaysText } from '../components/homework/homeworkUtils';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -56,6 +57,7 @@ export default function MyHomework() {
   const [fileMap, setFileMap] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
 
   const userId = localStorage.getItem('userId');
 
@@ -130,6 +132,7 @@ export default function MyHomework() {
 
   const handleSubmit = async (homeworkId) => {
     setError('');
+    setNotice('');
     const text = (textMap[homeworkId] || '').trim();
     const file = fileMap[homeworkId];
     if (!text || !file) {
@@ -151,6 +154,9 @@ export default function MyHomework() {
         setError(data?.message || 'ثبت تحویل ناموفق بود.');
         return;
       }
+      setNotice(data?.submission?.isLate
+        ? `کارخانگی تحویل شد، اما ${lateDaysText(data.submission.lateDays)} پس از موعد؛ استاد آن را با علامت «دیر» می‌بیند.`
+        : 'کارخانگی با موفقیت تحویل شد.');
       await loadHomeworks(selectedCourse);
       setTextMap(prev => ({ ...prev, [homeworkId]: '' }));
       setFileMap(prev => ({ ...prev, [homeworkId]: null }));
@@ -180,6 +186,7 @@ export default function MyHomework() {
         </div>
 
         {error && <div className="myhomework-empty">{error}</div>}
+        {notice && <div className="myhomework-notice" role="status">{notice}</div>}
         {loading && <div className="myhomework-empty">در حال دریافت...</div>}
 
         {!loading && !homeworks.length && (
@@ -189,11 +196,17 @@ export default function MyHomework() {
         <div className="myhomework-list">
           {homeworks.map((item) => {
             const sub = submissions[item._id];
+            const due = getDueState(item.dueDate);
+            const needsRevision = sub?.status === 'revision_requested';
+            const canSubmit = !sub || needsRevision;
             return (
               <div className="myhomework-item" key={item._id}>
                 <div>
                   <strong>{item.title}</strong>
                   {item.dueDate && <span className="meta">موعد: {toDate(item.dueDate)}</span>}
+                  {item.dueDate && !sub && (
+                    <span className={`meta myhomework-due myhomework-due--${due.key}`}>{due.label}</span>
+                  )}
                   {item.maxScore && <span className="meta">حداکثر نمره: {item.maxScore}</span>}
                 </div>
                 {item.description && <p>{item.description}</p>}
@@ -203,9 +216,19 @@ export default function MyHomework() {
                   </a>
                 )}
 
-                {sub ? (
+                {sub && (
                   <div className="submission-status">
                     <div>آخرین تحویل: {toDate(sub.submittedAt)}</div>
+                    {sub.isLate && (
+                      <div className="myhomework-late" role="note">
+                        <i className="fa fa-clock" aria-hidden="true" /> این تحویل {lateDaysText(sub.lateDays)} پس از موعد ثبت شده است.
+                      </div>
+                    )}
+                    {needsRevision && (
+                      <div className="myhomework-revision" role="note">
+                        <strong>استاد این کارخانگی را برای اصلاح برگرداند:</strong> {sub.revisionNote}
+                      </div>
+                    )}
                     {sub.file && (
                       <a href={`${API_BASE}/${sub.file}`} target="_blank" rel="noreferrer">
                         فایل ارسالی شما
@@ -216,8 +239,14 @@ export default function MyHomework() {
                     )}
                     {sub.feedback && <div>بازخورد: {sub.feedback}</div>}
                   </div>
-                ) : (
+                )}
+                {canSubmit && (
                   <div className="myhomework-submit">
+                    {due.key === 'overdue' && (
+                      <div className="myhomework-late" role="note">
+                        <i className="fa fa-triangle-exclamation" aria-hidden="true" /> موعد این کارخانگی گذشته است؛ هنوز می‌توانید بفرستید، اما با علامت «دیر» ثبت می‌شود.
+                      </div>
+                    )}
                     <textarea
                       rows="3"
                       placeholder="توضیح یا متن کارخانگی را اینجا بنویسید"
@@ -228,7 +257,9 @@ export default function MyHomework() {
                       type="file"
                       onChange={(e) => setFileMap(prev => ({ ...prev, [item._id]: e.target.files?.[0] || null }))}
                     />
-                    <button type="button" onClick={() => handleSubmit(item._id)}>ارسال کارخانگی</button>
+                    <button type="button" onClick={() => handleSubmit(item._id)}>
+                      {needsRevision ? 'ارسال پاسخ اصلاح‌شده' : 'ارسال کارخانگی'}
+                    </button>
                   </div>
                 )}
               </div>
