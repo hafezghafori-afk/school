@@ -239,7 +239,8 @@ async function getParentDashboard(viewer = {}, options = {}) {
       dueDate: { $gte: startOfDay(today), $lte: upcomingHomeworkEnd }
     }).select('title dueDate'),
     studentObjectId
-      ? HomeworkSubmission.find({ student: studentObjectId }).select('homework')
+      // An answer sent back for revision is pending again.
+      ? HomeworkSubmission.find({ student: studentObjectId, status: { $ne: 'revision_requested' } }).select('homework')
       : Promise.resolve([]),
     membership.course
       ? Schedule.find({ course: membership.course._id, date: todayKey })
