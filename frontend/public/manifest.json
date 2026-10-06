@@ -1,28 +1,32 @@
 {
-  "short_name": "اناثیه ایمان",
   "name": "مدرسه اناثیه ایمان",
-  "description": "وب‌سایت رسمی مدرسه خصوصی اناثیه ایمان (Iman Private Girls' School)، کابل",
+  "short_name": "مکتب ایمان",
+  "description": "سیستم مدیریت مکتب — شاگردان، فیس، حاضری، امتحانات، تقسیم اوقات و گزارش‌ها.",
   "lang": "fa",
   "dir": "rtl",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#101723",
+  "background_color": "#0f1b2d",
   "icons": [
     {
       "src": "/favicon.ico",
-      "sizes": "16x16 32x32 48x48",
+      "sizes": "64x64 32x32 24x24 16x16",
       "type": "image/x-icon"
     },
     {
       "src": "/logo192.png",
       "type": "image/png",
-      "sizes": "192x192"
+      "sizes": "192x192",
+      "purpose": "any"
     },
     {
       "src": "/logo512.png",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "512x512",
+      "purpose": "any"
     }
-  ],
-  "start_url": "/",
-  "display": "browser",
-  "theme_color": "#101723",
-  "background_color": "#ffffff"
+  ]
 }

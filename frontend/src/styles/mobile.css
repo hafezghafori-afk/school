@@ -1,0 +1,90 @@
+/* پایهٔ مبایل — توکن‌های مشترک و قواعدی که نباید صفحه‌به‌صفحه تکرار شوند.
+ *
+ * دو مرز، نه بیشتر. پروژه الان ۵۷ مقدار `max-width` یکتا در ۸۸ فایل CSS دارد و
+ * همین باعث شده یک صفحه در ۷۲۰px موبایل شود و صفحهٔ کناری‌اش در ۹۸۰px. آن‌ها
+ * یک‌باره حذف نمی‌شوند؛ هر بار که صفحه‌ای برای مبایل لمس شد، بریک‌پوینت‌هایش به
+ * همین دو مرز تبدیل می‌شود.
+ *
+ *   تا ۶۴۰px  → گوشی: یک ستون، کارت، نوار پایین
+ *   تا ۹۰۰px  → تبلت و گوشی افقی: دو ستون، هنوز نوار پایین
+ *   بالاتر    → دسکتاپ، دست‌نخورده
+ *
+ * هیچ قاعده‌ای در این فایل بیرون از media query نیست جز توکن‌ها، تا دسکتاپ
+ * دقیقاً همان چیزی بماند که هست.
+ */
+
+:root {
+  --mobile-topbar-h: 56px;
+  --mobile-tabbar-h: 60px;
+  --mobile-touch-min: 44px;
+  --mobile-gutter: 14px;
+  --mobile-gap: 10px;
+  /* روی گوشی‌های نوچ‌دار و در حالت نصب‌شده (standalone) خط home روی نوار پایین
+   * می‌افتد. env() در مرورگرهایی که پشتیبانی نمی‌کنند صفر برمی‌گردد. */
+  --mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --mobile-safe-top: env(safe-area-inset-top, 0px);
+}
+
+/* ارتفاع واقعی دید در مبایل. `100vh` نوار آدرس را حساب نمی‌کند و محتوا زیر لبه
+ * می‌رود؛ هر جا که ارتفاع تمام‌صفحه لازم است این کلاس به‌جای `100vh` می‌آید. */
+.mobile-full-height {
+  min-height: 100vh;
+}
+
+@supports (min-height: 100dvh) {
+  .mobile-full-height {
+    min-height: 100dvh;
+  }
+}
+
+@media (max-width: 640px) {
+  /* سافاری iOS هر ورودی با فونت زیر ۱۶px را هنگام فوکوس زوم می‌کند و دیگر
+   * برنمی‌گردد — آزاردهنده‌ترین مشکل هنگام ثبت فیس یا حاضری از گوشی. پروژه ۸۴۲
+   * اعلان font-size زیر ۱۵px دارد و بیشترشان داخل سلکتورهای کلاس‌دار هستند
+   * (`.academy-filterbar input` و مثل آن) که از یک سلکتور خالیِ `input` قوی‌ترند.
+   *
+   * `!important` این‌جا سلیقه نیست؛ یک محدودیتِ دستگاه است که هیچ صفحه‌ای نباید
+   * بتواند نقضش کند. هیچ‌کدام از چهار `font-size: !important` موجود در پروژه روی
+   * ورودی نیست، پس تضادی هم پیش نمی‌آید.
+   *
+   * چکباکس، رادیو، اسلایدر و رنگ مستثنا هستند چون font-size برایشان معنی ندارد
+   * و فقط بزرگ‌شان می‌کند. */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  /* حداقل ارتفاع لمسی برای ورودی‌های معمولی — تایپ در یک فیلدِ ۳۰px روی گوشی
+   * عملاً ممکن نیست. سه مورد مستثنا:
+   *   - ورودی‌های داخل جدول: ردیف‌های فشرده‌اند و تا مرحلهٔ «جدول ← کارت»
+   *     دست‌نخورده می‌مانند، وگرنه هر ردیف دو برابر بلند می‌شود.
+   *   - صفحات چاپی: عمداً عرض و ارتفاع ثابت دارند.
+   *   - `.mobile-compact-field`: راهِ فرار برای هر جای فشردهٔ دیگری که پیدا شود،
+   *     بدون اینکه این قاعده برداشته شود. */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']),
+  select,
+  textarea {
+    min-height: var(--mobile-touch-min) !important;
+  }
+
+  table input,
+  table select,
+  table textarea,
+  [data-print-sheet] input,
+  [data-print-sheet] select,
+  [data-print-sheet] textarea,
+  .mobile-compact-field,
+  .mobile-compact-field input,
+  .mobile-compact-field select,
+  .mobile-compact-field textarea {
+    min-height: 0 !important;
+  }
+
+  /* صفحات چاپی (رسید، کارت هویت، تقسیم اوقات) هیچ قاعدهٔ مبایلی نباید بگیرند. */
+  [data-print-sheet] input,
+  [data-print-sheet] select,
+  [data-print-sheet] textarea {
+    font-size: inherit !important;
+  }
+}
