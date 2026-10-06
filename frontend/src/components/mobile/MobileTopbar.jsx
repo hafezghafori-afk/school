@@ -33,15 +33,19 @@ export default function MobileTopbar({
 
       <div className="mobile-shell__topbar-actions">
         <NotificationBell />
+        {/* دایرهٔ ۳۴px داخلِ یک دکمهٔ ۴۴px می‌نشیند تا ناحیهٔ لمس به حداقل برسد
+            بدون اینکه آواتار در نوارِ ۵۶px بزرگ و ناجور شود. */}
         <button
           type="button"
           className="mobile-shell__avatar-btn"
           onClick={onOpenProfile}
           aria-label={`حساب ${userName}`}
         >
-          {avatarSrc
-            ? <img src={avatarSrc} alt="" loading="lazy" decoding="async" />
-            : <span aria-hidden="true">{initial}</span>}
+          <span className="mobile-shell__avatar" aria-hidden="true">
+            {avatarSrc
+              ? <img src={avatarSrc} alt="" loading="lazy" decoding="async" />
+              : initial}
+          </span>
         </button>
       </div>
     </header>

@@ -1746,6 +1746,21 @@
   }
 }
 
+/* کارت‌های این صفحه روی یک شبکهٔ ۱۲ ستونی می‌نشینند و با `data-span` پهنا
+ * می‌گیرند. تا ۹۸۰px فقط `.gov-kpi-card` سبک می‌شود و `.gov-card` دست‌نخورده
+ * می‌ماند — یعنی روی عرض ۳۷۵px هر ستون ۱۵px است و یک کارتِ `span="4"` حدود
+ * ۱۰۸px پهنا دارد. روی گوشی هر کارت باید تمام عرض را بگیرد. */
+@media (max-width: 640px) {
+  .gov-card[data-span],
+  .gov-card-loading[data-span] {
+    grid-column: span 12;
+  }
+
+  .gov-kpi-card {
+    grid-column: span 6;
+  }
+}
+
 /* Expense tables: keep the amount and the main «تاریخ ثبت‌شده» line on one line. */
 .gov-table td.gov-expense-amount-cell,
 .gov-table td[data-expense-date-cell] strong {
