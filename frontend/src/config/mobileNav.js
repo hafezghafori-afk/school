@@ -47,11 +47,16 @@ const TABS_BY_ROLE = {
     { key: 'timetable', label: 'اوقات', icon: 'fa-calendar-days', to: '/timetable/student-view' },
     DRAWER_TAB
   ],
+  // داشبورد والد یک صفحهٔ واحد با بخش‌های لنگردار است، نه چند مسیر. این خانه‌ها
+  // به همان لنگرهایی می‌روند که خودِ صفحه در «دسترسی سریع» معرفی می‌کند
+  // (`#attendance`، `#finance`، `#receipts`)؛ عنوان‌ها هم از همان‌جا آمده تا
+  // اسم تب و اسم بخش یکی باشد. والد مسیر جداگانه‌ای برای نمرات ندارد —
+  // «حاضری و پیشرفت» خودش حضور و نمره و درس امروز را دارد.
   parent: [
     { key: 'home', label: 'خانه', icon: 'fa-house', to: '/parent-dashboard' },
-    { key: 'grades', label: 'نمرات', icon: 'fa-award', to: '/parent-dashboard?tab=grades' },
-    { key: 'attendance', label: 'حاضری', icon: 'fa-clipboard-check', to: '/parent-dashboard?tab=attendance' },
-    { key: 'finance', label: 'فیس', icon: 'fa-money-bill-wave', to: '/parent-dashboard?tab=finance' },
+    { key: 'attendance', label: 'حاضری', icon: 'fa-clipboard-check', to: '/parent-dashboard#attendance' },
+    { key: 'finance', label: 'فیس', icon: 'fa-money-bill-wave', to: '/parent-dashboard#finance' },
+    { key: 'receipts', label: 'رسیدها', icon: 'fa-file-invoice', to: '/parent-dashboard#receipts' },
     DRAWER_TAB
   ]
 };
@@ -254,6 +259,15 @@ export const getMobileDrawerGroups = (role, can) => {
     .filter((group) => group.items.length > 0);
 };
 
+// مسیرِ خالصِ یک خانه، بدون query و بدون لنگر — برای مقایسه با آدرس فعلی.
+export const tabPathOf = (tab) => String(tab?.to || '').split('#')[0].split('?')[0];
+
+// لنگرِ یک خانه، اگر داشته باشد.
+export const tabHashOf = (tab) => {
+  const index = String(tab?.to || '').indexOf('#');
+  return index === -1 ? '' : String(tab.to).slice(index);
+};
+
 export const getMobilePageTitle = (pathname = '') => {
   const path = String(pathname || '');
   const match = ROUTE_TITLES.find(([prefix]) => path === prefix || path.startsWith(`${prefix}/`));
@@ -263,5 +277,5 @@ export const getMobilePageTitle = (pathname = '') => {
 // روی خانهٔ یک تب دکمهٔ بازگشت لازم نیست — کاربر همان‌جاست که نوار نشان می‌دهد.
 export const isMobileTabRoot = (pathname, role, can) => {
   const path = String(pathname || '');
-  return getMobileTabs(role, can).some((tab) => tab.to && tab.to.split('?')[0] === path);
+  return getMobileTabs(role, can).some((tab) => tab.to && tabPathOf(tab) === path);
 };

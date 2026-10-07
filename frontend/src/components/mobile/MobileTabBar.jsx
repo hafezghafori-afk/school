@@ -5,7 +5,13 @@ import { DRAWER_TAB_KEY } from '../../config/mobileNav';
 // نوارِ پایین — پنج خانه، آخری «همه» که کشو را باز می‌کند. خانه‌هایی که کاربر
 // دسترسی‌شان را ندارد پیش‌تر در getMobileTabs حذف شده‌اند، پس این‌جا فقط رندر
 // می‌شود.
-export default function MobileTabBar({ tabs = [], activeKey = '', onOpenDrawer, drawerOpen = false }) {
+export default function MobileTabBar({
+  tabs = [],
+  activeKey = '',
+  resolveHref,
+  onOpenDrawer,
+  drawerOpen = false
+}) {
   return (
     <nav className="mobile-shell__tabbar" aria-label="ناوبری اصلی">
       {tabs.map((tab) => {
@@ -31,7 +37,7 @@ export default function MobileTabBar({ tabs = [], activeKey = '', onOpenDrawer, 
         return (
           <Link
             key={tab.key}
-            to={tab.to}
+            to={typeof resolveHref === 'function' ? resolveHref(tab) : tab.to}
             className={className}
             aria-current={isActive ? 'page' : undefined}
           >
