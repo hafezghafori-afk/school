@@ -237,7 +237,8 @@
   margin-bottom: 14px;
 }
 
-.sfo-section-title {
+/* `.sfo-page :is(h1…h4) { margin: 0 }` بالاتر هم‌وزن‌تر بود و این فاصله را می‌خورد */
+.sfo-page .sfo-section-title {
   font-size: 0.98rem;
   margin: 22px 0 12px;
   color: var(--sfo-dim);
@@ -304,6 +305,11 @@
 
 .sfo-kpi-suffix { font-size: 0.8rem; font-weight: 600; color: var(--sfo-dim); }
 .sfo-kpi-hint { font-size: 0.72rem; color: var(--sfo-faint); line-height: 1.6; }
+
+/* تغییر نسبت به بازهٔ قبل: سبز = به سودِ مکتب، سرخ = به زیانِ آن */
+.sfo-change { font-size: 0.72rem; font-weight: 600; line-height: 1.6; color: var(--sfo-dim); }
+.sfo-change.is-good { color: var(--sfo-pos); }
+.sfo-change.is-bad { color: var(--sfo-neg); }
 
 /* ── Domain panels ───────────────────────────────────── */
 .sfo-domain {
@@ -462,6 +468,22 @@
 
 .sfo-strong { font-weight: 700; }
 .sfo-dim { color: var(--sfo-dim); }
+.sfo-nowrap { white-space: nowrap; }
+
+.sfo-table .sfo-total-row td {
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sfo-own-tag {
+  margin-inline-start: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--sfo-border);
+  font-size: 0.68rem;
+  color: var(--sfo-faint);
+  white-space: nowrap;
+}
 .is-neg { color: var(--sfo-neg); }
 .is-pos { color: var(--sfo-pos); }
 
@@ -572,4 +594,6 @@
   :root:not([data-theme='dark']) .sfo-page select,
   :root:not([data-theme='dark']) .sfo-btn { background: #fff; }
   :root:not([data-theme='dark']) .sfo-page select option { background: #fff; color: #0f172a; }
+  :root:not([data-theme='dark']) .sfo-change.is-good { color: #047857; }
+  :root:not([data-theme='dark']) .sfo-change.is-bad { color: #be123c; }
 }

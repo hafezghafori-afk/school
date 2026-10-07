@@ -22,6 +22,7 @@ const { renderReportPrintHtml } = require('../services/sheetTemplatePrintService
 const { resolvePermissions } = require('../utils/permissions');
 const { logActivity } = require('../utils/activity');
 const { resolveActiveSchool, writeSchoolContextHeaders, serializeSchoolBranding } = require('../services/schoolContextService');
+const { summaryLabel, filterLabel, nestedKeyLabel } = require('../config/reportExportLabels');
 
 const router = express.Router();
 
@@ -102,24 +103,31 @@ function sanitizeFilters(filters = {}) {
   }, {});
 }
 
-async function reportToXlsxBuffer(report) {
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'School Project';
-  workbook.created = new Date();
-  workbook.modified = new Date();
+// زمانِ ساخت به تاریخِ شمسی و وقتِ کابل (سرور به وقتِ UTC کار می‌کند).
+function formatExportTimestamp(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('fa-AF-u-ca-persian', { timeZone: 'Asia/Kabul' });
+}
 
-  const columns = Array.isArray(report?.columns) ? report.columns : [];
-  const rows = Array.isArray(report?.rows) ? report.rows : [];
-  const summaryEntries = Object.entries(report?.summary || {});
-  const filterEntries = Object.entries(report?.filters || {}).filter(([, value]) => value != null && String(value).trim() !== '');
+// نامِ برگهٔ اکسل: بیشینه ۳۱ نویسه، بدونِ []:*?/\ و یکتا در همان فایل.
+function uniqueSheetName(workbook, name) {
+  const base = String(name || 'برگه').replace(/[[\]:*?/\\]/g, ' ').trim().slice(0, 31) || 'برگه';
+  let candidate = base;
+  for (let index = 2; workbook.getWorksheet(candidate); index += 1) {
+    candidate = `${base.slice(0, 27)} (${index})`;
+  }
+  return candidate;
+}
 
-  const sheet = workbook.addWorksheet('Report');
+function addTableSheet(workbook, name, columns, rows) {
+  const sheet = workbook.addWorksheet(uniqueSheetName(workbook, name));
   sheet.columns = columns.map((column) => ({
     header: getColumnLabel(column),
     key: column.key,
-    width: Math.max(14, Math.min(36, getColumnLabel(column).length + 4))
+    width: Number(column.width) || Math.max(14, Math.min(36, getColumnLabel(column).length + 4))
   }));
-  sheet.views = [{ state: 'frozen', ySplit: 1 }];
+  sheet.views = [{ state: 'frozen', ySplit: 1, rightToLeft: true }];
   sheet.getRow(1).font = { bold: true };
   sheet.getRow(1).fill = {
     type: 'pattern',
@@ -134,23 +142,53 @@ async function reportToXlsxBuffer(report) {
     });
     sheet.addRow(nextRow);
   });
+  return sheet;
+}
 
-  const summarySheet = workbook.addWorksheet('Summary');
+const toSummaryCell = (value) => (value == null ? '' : (typeof value === 'number' ? value : String(value)));
+
+async function reportToXlsxBuffer(report) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'School Project';
+  workbook.created = new Date();
+  workbook.modified = new Date();
+
+  const columns = Array.isArray(report?.columns) ? report.columns : [];
+  const rows = Array.isArray(report?.rows) ? report.rows : [];
+  const summaryEntries = Object.entries(report?.summary || {});
+  const filterEntries = Object.entries(report?.filters || {}).filter(([, value]) => value != null && String(value).trim() !== '');
+  const labelOf = (key) => summaryLabel(key, report?.summaryLabels, humanizeKey);
+
+  addTableSheet(workbook, 'گزارش', columns, rows);
+  // برگه‌های اضافهٔ خودِ گزارش (مثلاً «مصارف» و «بدهکاران»ِ گزارشِ مالیِ یکپارچه)
+  (Array.isArray(report?.sheets) ? report.sheets : []).forEach((extra) => {
+    addTableSheet(workbook, extra?.name, Array.isArray(extra?.columns) ? extra.columns : [], Array.isArray(extra?.rows) ? extra.rows : []);
+  });
+
+  const summarySheet = workbook.addWorksheet('خلاصه');
   summarySheet.columns = [
-    { header: 'Field', key: 'field', width: 28 },
-    { header: 'Value', key: 'value', width: 28 }
+    { header: 'عنوان', key: 'field', width: 36 },
+    { header: 'مقدار', key: 'value', width: 30 }
   ];
+  summarySheet.views = [{ rightToLeft: true }];
   summarySheet.getRow(1).font = { bold: true };
-  summarySheet.addRow({ field: 'Report', value: report?.report?.title || report?.report?.key || 'Report' });
-  summarySheet.addRow({ field: 'Generated At', value: report?.generatedAt || '' });
-  summarySheet.addRow({ field: 'Rows', value: rows.length });
+  summarySheet.addRow({ field: 'گزارش', value: report?.report?.title || report?.report?.key || '' });
+  summarySheet.addRow({ field: 'زمان ساخت', value: formatExportTimestamp(report?.generatedAt) });
+  summarySheet.addRow({ field: 'تعداد ردیف‌ها', value: rows.length });
   summaryEntries.forEach(([key, value]) => {
-    summarySheet.addRow({ field: humanizeKey(key), value: value == null ? '' : String(value) });
+    // فیلدِ شیء‌گونه (مثلاً پرداخت‌ها بر اساسِ نوعِ فیس) یک ردیف برای هر کلید می‌گیرد، نه «[object Object]».
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      Object.entries(value).forEach(([subKey, subValue]) => {
+        summarySheet.addRow({ field: `${labelOf(key)} — ${nestedKeyLabel(subKey)}`, value: toSummaryCell(subValue) });
+      });
+      return;
+    }
+    summarySheet.addRow({ field: labelOf(key), value: toSummaryCell(value) });
   });
   if (filterEntries.length) {
     summarySheet.addRow({ field: '', value: '' });
     filterEntries.forEach(([key, value]) => {
-      summarySheet.addRow({ field: `Filter: ${humanizeKey(key)}`, value: String(value) });
+      summarySheet.addRow({ field: `فیلتر — ${filterLabel(key, humanizeKey)}`, value: String(value) });
     });
   }
 

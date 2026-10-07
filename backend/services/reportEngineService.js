@@ -62,7 +62,14 @@ const {
   buildMonthlyGovernmentFinanceReport,
   buildQuarterlyGovernmentFinanceReport
 } = require('./governmentFinanceReportService');
-const { buildConsolidatedFinanceReport } = require('./consolidatedFinanceReportService');
+const {
+  buildConsolidatedFinanceReport,
+  DOMAIN_KEYS: CONSOLIDATED_DOMAIN_KEYS,
+  monthKeyLabel: shamsiMonthKeyLabel,
+  expenseStatusLabel,
+  expenseCategoryText,
+  debtorMonthText
+} = require('./consolidatedFinanceReportService');
 
 const REPORT_DEFINITIONS = Object.freeze([
   {
@@ -473,6 +480,9 @@ function buildBaseReport(definition, filters, extras = {}) {
       : [],
     rows: extras.rows || [],
     summary: extras.summary || {},
+    // اختیاری: برچسبِ فارسیِ کلیدهای خلاصه و برگه‌های اضافهٔ Excel ([{ name, columns, rows }])
+    ...(extras.summaryLabels ? { summaryLabels: extras.summaryLabels } : {}),
+    ...(Array.isArray(extras.sheets) ? { sheets: extras.sheets } : {}),
     meta: extras.meta || { totalRows: Array.isArray(extras.rows) ? extras.rows.length : 0 }
   };
 }
@@ -2392,16 +2402,9 @@ async function buildGovernmentFinanceAnnualReport(filters) {
   });
 }
 
-const AFGHAN_SOLAR_MONTH_NAMES = ['حمل', 'ثور', 'جوزا', 'سرطان', 'اسد', 'سنبله', 'میزان', 'عقرب', 'قوس', 'جدی', 'دلو', 'حوت'];
-
-function shamsiMonthKeyLabel(key = '') {
-  const [jy, jm] = String(key).split('-').map(Number);
-  if (!jy || !jm) return String(key || '');
-  return `${AFGHAN_SOLAR_MONTH_NAMES[jm - 1] || jm} ${jy}`;
-}
-
 // گزارش مالی یکپارچه مکتب، صافِ جدولی برای خروجی CSV/Excel/PDF — یک سطر برای هر
-// ماهِ شمسی، ستون‌های عواید/مصارف هر بخش و مجموع.
+// ماهِ شمسی، ستون‌های عواید/مصارف هر بخش و مجموع. Excel سه برگهٔ دیگر هم می‌گیرد:
+// مصارفِ هر سه بخش بر اساسِ سرفصل، فهرستِ مصارف و فهرستِ بدهکاران.
 async function buildConsolidatedFinanceMonthlyReport(filters) {
   const definition = getReportDefinition('consolidated_finance_monthly');
   const payload = await buildConsolidatedFinanceReport({
@@ -2425,6 +2428,10 @@ async function buildConsolidatedFinanceMonthlyReport(filters) {
   }));
 
   const domains = payload.domains || {};
+  const domainList = CONSOLIDATED_DOMAIN_KEYS.map((key) => domains[key]).filter(Boolean);
+  const combined = payload.combined || {};
+  const previous = payload.period?.previous || {};
+  const changeCell = (value) => (value == null ? '—' : Number(value));
   return buildBaseReport(definition, filters, {
     columns: [
       { key: 'month', label: 'ماه' },
@@ -2449,8 +2456,93 @@ async function buildConsolidatedFinanceMonthlyReport(filters) {
       schoolNet: Number(domains.school?.totals?.net || 0),
       shortTermNet: Number(domains.shortTerm?.totals?.net || 0),
       academyNet: Number(domains.academy?.totals?.net || 0),
-      activeStudents: Number(payload.combined?.activeStudents || 0)
+      activeStudents: Number(payload.combined?.activeStudents || 0),
+      previousFrom: shamsiMonthKeyLabel(previous.from),
+      previousTo: shamsiMonthKeyLabel(previous.to),
+      previousIncome: Number(combined.previousTotals?.income || 0),
+      previousExpense: Number(combined.previousTotals?.expense || 0),
+      previousNet: Number(combined.previousTotals?.net || 0),
+      incomeChangePercent: changeCell(combined.changePercent?.income),
+      expenseChangePercent: changeCell(combined.changePercent?.expense),
+      netChangePercent: changeCell(combined.changePercent?.net)
     },
+    summaryLabels: {
+      from: 'از ماه',
+      to: 'تا ماه',
+      combinedIncome: 'کل درآمد',
+      combinedExpense: 'کل مصرف',
+      combinedNet: 'خالص',
+      combinedOutstanding: 'کل باقیات باز',
+      schoolNet: 'خالص مرکز مالی مکتب',
+      shortTermNet: 'خالص شاگردان موقت',
+      academyNet: 'خالص آموزشگاه',
+      activeStudents: 'شاگردان فعال',
+      previousFrom: 'بازهٔ قبل — از ماه',
+      previousTo: 'بازهٔ قبل — تا ماه',
+      previousIncome: 'درآمد بازهٔ قبل',
+      previousExpense: 'مصرف بازهٔ قبل',
+      previousNet: 'خالص بازهٔ قبل',
+      incomeChangePercent: 'تغییر درآمد نسبت به بازهٔ قبل (٪)',
+      expenseChangePercent: 'تغییر مصرف نسبت به بازهٔ قبل (٪)',
+      netChangePercent: 'تغییر خالص نسبت به بازهٔ قبل (٪)'
+    },
+    sheets: [
+      {
+        name: 'مصارف بر اساس سرفصل',
+        columns: [
+          { key: 'label', label: 'سرفصل', width: 40 },
+          { key: 'school', label: 'مکتب' },
+          { key: 'shortTerm', label: 'موقت' },
+          { key: 'academy', label: 'آموزشگاه' },
+          { key: 'total', label: 'جمع' }
+        ],
+        rows: (combined.byExpenseCategory || []).map((row) => ({
+          label: row.inChart ? row.label : `${row.label} (دستهٔ خودِ مرکز)`,
+          school: Number(row.school || 0),
+          shortTerm: Number(row.shortTerm || 0),
+          academy: Number(row.academy || 0),
+          total: Number(row.total || 0)
+        }))
+      },
+      {
+        name: 'مصارف',
+        columns: [
+          { key: 'domain', label: 'بخش' },
+          { key: 'title', label: 'شرح', width: 60 },
+          { key: 'category', label: 'دسته', width: 44 },
+          { key: 'month', label: 'ماه' },
+          { key: 'status', label: 'وضعیت' },
+          { key: 'amount', label: 'مبلغ' }
+        ],
+        rows: domainList.flatMap((domain) => (domain.expenses || []).map((row) => ({
+          domain: domain.label,
+          title: row.title,
+          category: expenseCategoryText(row),
+          month: shamsiMonthKeyLabel(row.monthKey),
+          status: expenseStatusLabel(row.status),
+          amount: Number(row.amount || 0)
+        })))
+      },
+      {
+        name: 'بدهکاران',
+        columns: [
+          { key: 'domain', label: 'بخش' },
+          { key: 'studentName', label: 'شاگرد', width: 28 },
+          { key: 'asasNumber', label: 'شماره اساس' },
+          { key: 'groupName', label: 'صنف / کورس', width: 28 },
+          { key: 'month', label: 'ماه', width: 22 },
+          { key: 'balance', label: 'باقیات' }
+        ],
+        rows: domainList.flatMap((domain) => (domain.debtors || []).map((row) => ({
+          domain: domain.label,
+          studentName: row.studentName,
+          asasNumber: row.asasNumber || row.studentCode || '',
+          groupName: row.groupName,
+          month: debtorMonthText(row),
+          balance: Number(row.balance || 0)
+        })))
+      }
+    ],
     meta: {
       totalRows: rows.length,
       basis: payload.basis,

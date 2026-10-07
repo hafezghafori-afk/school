@@ -53,11 +53,28 @@ function monthKeyLabel(key = '') {
   return `${AFGHAN_SOLAR_MONTHS[jm - 1] || jm} ${faDigits(jy)}`;
 }
 
+function rangeLabel(fromKey, toKey) {
+  if (!fromKey) return '';
+  return fromKey === toKey ? monthKeyLabel(fromKey) : `${monthKeyLabel(fromKey)} — ${monthKeyLabel(toKey)}`;
+}
+
 function expenseCategoryText(row) {
   return [row.categoryLabel || row.category, row.subCategoryLabel]
     .map((value) => repairDisplayText(value))
     .filter(Boolean)
     .join(' — ');
+}
+
+const EXPENSE_STATUS_LABELS = { approved: 'تأییدشده', draft: 'پیش‌نویس', pending_review: 'در انتظار تأیید' };
+
+// آموزشگاه/موقت مرحلهٔ تأیید ندارند (وضعیتِ خالی)، پس «ثبت‌شده» — نه «تأییدشده».
+function expenseStatusLabel(status = '') {
+  return status ? (EXPENSE_STATUS_LABELS[status] || status) : 'ثبت‌شده';
+}
+
+// «سنبله ۱۴۰۵ · داخله» — ماه همیشه از کلیدِ ماهِ شمسی؛ periodNote فقط برچسبِ غیرِماهیِ بل است.
+function debtorMonthText(row) {
+  return [monthKeyLabel(row.monthKey), repairDisplayText(row.periodNote)].filter(Boolean).join(' · ');
 }
 
 function methodLabel(value = '') {
@@ -75,7 +92,25 @@ function shiftShamsi(jy, jm, deltaMonths) {
   return { jy: Math.floor(index / 12), jm: (index % 12) + 1 };
 }
 
-function KpiCard({ label, value, hint, tone, suffix }) {
+// «▲ ۱۲٪» نسبت به بازهٔ قبل — سبز وقتی تغییر به سودِ مکتب است (درآمد/خالص بالا، مصرف پایین).
+function ChangeBadge({ percent, upIsGood = true, previous }) {
+  if (percent === undefined) return null;
+  const title = `بازهٔ قبل: ${formatNumber(previous)} افغانی`;
+  if (percent === null || !Number.isFinite(Number(percent))) {
+    return <span className="sfo-change" title={title}>بازهٔ قبل: {formatNumber(previous)}</span>;
+  }
+  const value = Number(percent);
+  const rounded = Math.round(value);
+  if (rounded === 0) return <span className="sfo-change" title={title}>بدون تغییر</span>;
+  const good = (value > 0) === upIsGood;
+  return (
+    <span className={`sfo-change ${good ? 'is-good' : 'is-bad'}`} title={title}>
+      {value > 0 ? '▲' : '▼'} {faDigits(Math.abs(rounded))}٪ نسبت به بازهٔ قبل
+    </span>
+  );
+}
+
+function KpiCard({ label, value, hint, tone, suffix, change }) {
   return (
     <div className={`sfo-kpi ${tone || ''}`}>
       <span className="sfo-kpi-label">{label}</span>
@@ -83,9 +118,18 @@ function KpiCard({ label, value, hint, tone, suffix }) {
         {formatNumber(value)}
         {suffix ? <span className="sfo-kpi-suffix">{suffix}</span> : null}
       </span>
+      {change ? <ChangeBadge {...change} /> : null}
       {hint ? <span className="sfo-kpi-hint">{hint}</span> : null}
     </div>
   );
+}
+
+function changeOf(source, key, upIsGood = true) {
+  return {
+    percent: source?.changePercent ? source.changePercent[key] : undefined,
+    previous: source?.previousTotals?.[key],
+    upIsGood
+  };
 }
 
 function TrendChart({ trend }) {
@@ -189,7 +233,7 @@ function DebtorTable({ rows }) {
               <td>{repairDisplayText(row.studentName)}</td>
               <td className="sfo-dim">{repairDisplayText(row.asasNumber || row.studentCode) || '—'}</td>
               <td>{repairDisplayText(row.groupName)}</td>
-              <td className="sfo-dim">{repairDisplayText(row.monthLabel) || monthKeyLabel(row.monthKey) || '—'}</td>
+              <td className="sfo-dim sfo-nowrap">{debtorMonthText(row) || '—'}</td>
               <td className="sfo-num sfo-strong">{formatNumber(row.balance)}</td>
             </tr>
           ))}
@@ -199,7 +243,48 @@ function DebtorTable({ rows }) {
   );
 }
 
-const EXPENSE_STATUS_LABELS = { draft: 'پیش‌نویس', pending_review: 'در انتظار تأیید' };
+// «مصارفِ هر سه بخش بر اساسِ سرفصل» — دستهٔ نگاشت‌نشدهٔ آموزشگاه/موقت با نامِ خودش جدا می‌آید.
+function CombinedCategoryTable({ rows }) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return <p className="sfo-empty">مصرفی در این بازه ثبت نشده است.</p>;
+  const sum = (key) => list.reduce((total, row) => total + Number(row[key] || 0), 0);
+  return (
+    <div className="sfo-tablewrap">
+      <table className="sfo-table">
+        <thead>
+          <tr>
+            <th>سرفصل</th>
+            <th className="sfo-num">مکتب</th>
+            <th className="sfo-num">موقت</th>
+            <th className="sfo-num">آموزشگاه</th>
+            <th className="sfo-num">جمع</th>
+          </tr>
+        </thead>
+        <tbody>
+          {list.map((row) => (
+            <tr key={`${row.inChart ? 'chart' : 'own'}-${row.key}`}>
+              <td>
+                {repairDisplayText(row.label)}
+                {row.inChart ? null : <span className="sfo-own-tag">دستهٔ خودِ مرکز</span>}
+              </td>
+              <td className="sfo-num">{formatNumber(row.school)}</td>
+              <td className="sfo-num">{formatNumber(row.shortTerm)}</td>
+              <td className="sfo-num">{formatNumber(row.academy)}</td>
+              <td className="sfo-num sfo-strong">{formatNumber(row.total)}</td>
+            </tr>
+          ))}
+          <tr className="sfo-total-row">
+            <td>جمع</td>
+            <td className="sfo-num">{formatNumber(sum('school'))}</td>
+            <td className="sfo-num">{formatNumber(sum('shortTerm'))}</td>
+            <td className="sfo-num">{formatNumber(sum('academy'))}</td>
+            <td className="sfo-num sfo-strong">{formatNumber(sum('total'))}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function ExpenseTable({ rows }) {
   if (!rows.length) return <p className="sfo-empty">مصرفی در این بازه ثبت نشده است.</p>;
@@ -220,8 +305,8 @@ function ExpenseTable({ rows }) {
             <tr key={`${row.title}-${index}`}>
               <td>{repairDisplayText(row.title)}</td>
               <td className="sfo-dim">{expenseCategoryText(row) || '—'}</td>
-              <td className="sfo-dim">{repairDisplayText(row.monthLabel) || monthKeyLabel(row.monthKey) || '—'}</td>
-              <td className="sfo-dim">{row.status && row.status !== 'approved' ? (EXPENSE_STATUS_LABELS[row.status] || row.status) : 'تأییدشده'}</td>
+              <td className="sfo-dim sfo-nowrap">{monthKeyLabel(row.monthKey) || '—'}</td>
+              <td className="sfo-dim">{expenseStatusLabel(row.status)}</td>
               <td className="sfo-num sfo-strong">{formatNumber(row.amount)}</td>
             </tr>
           ))}
@@ -259,7 +344,13 @@ function Pager({ page, pageCount, onChange }) {
   );
 }
 
-function DomainPanel({ domain, onPrint, printBusy }) {
+// «درآمد ماه جاری» همیشه ماهِ واقعیِ امروز است؛ اگر بازه آن را ندارد، همین را می‌گوییم.
+function currentMonthHint(period = {}) {
+  if (!period.currentMonth) return '';
+  return `${monthKeyLabel(period.currentMonth)}${period.currentMonthInRange === false ? ' · بیرون از بازهٔ انتخابی' : ''}`;
+}
+
+function DomainPanel({ domain, period, onPrint, printBusy }) {
   const [page, setPage] = useState(1);
   const [expPage, setExpPage] = useState(1);
 
@@ -295,11 +386,11 @@ function DomainPanel({ domain, onPrint, printBusy }) {
       </header>
 
       <div className="sfo-kpi-grid">
-        <KpiCard label="درآمد بازه" value={totals.income} tone="pos" />
-        <KpiCard label="مصرف بازه" value={totals.expense} tone="neg" />
+        <KpiCard label="درآمد بازه" value={totals.income} tone="pos" change={changeOf(domain, 'income')} />
+        <KpiCard label="مصرف بازه" value={totals.expense} tone="neg" change={changeOf(domain, 'expense', false)} />
         <KpiCard label="باقیات باز" value={totals.outstanding} />
         <KpiCard label="نرخ وصول" value={Math.round(Number(totals.collectionRate) || 0)} suffix="٪" />
-        <KpiCard label="درآمد ماه جاری" value={totals.currentMonthIncome} />
+        <KpiCard label="درآمد ماه جاری" value={totals.currentMonthIncome} hint={currentMonthHint(period)} />
         <KpiCard label="شاگردان فعال" value={totals.activeStudents} />
       </div>
 
@@ -544,13 +635,7 @@ export default function SchoolFinanceOverview() {
           <button type="button" className="sfo-btn sfo-btn-ghost" onClick={() => printSection('all')} disabled={!report || Boolean(exporting)}>
             {exporting === 'print-all' ? 'در حال ساخت…' : 'PDF گزارش کامل'}
           </button>
-          {period?.from ? (
-            <span className="sfo-range-tag">
-              {period.from === period.to
-                ? monthKeyLabel(period.from)
-                : `${monthKeyLabel(period.from)} — ${monthKeyLabel(period.to)}`}
-            </span>
-          ) : null}
+          {period?.from ? <span className="sfo-range-tag">{rangeLabel(period.from, period.to)}</span> : null}
         </div>
       </div>
 
@@ -564,14 +649,20 @@ export default function SchoolFinanceOverview() {
           <section className="sfo-panel sfo-combined">
             <h2>مجموع هر سه بخش</h2>
             <div className="sfo-kpi-grid sfo-kpi-grid-lg">
-              <KpiCard label="کل درآمد" value={combined.income} tone="pos" />
+              <KpiCard label="کل درآمد" value={combined.income} tone="pos" change={changeOf(combined, 'income')} />
               <KpiCard
                 label="کل مصرف"
                 value={combined.expense}
                 tone="neg"
+                change={changeOf(combined, 'expense', false)}
                 hint={combined.pendingExpense ? `${formatNumber(combined.pendingExpense)} افغانی در انتظار تأیید` : ''}
               />
-              <KpiCard label="خالص" value={combined.net} tone={Number(combined.net) < 0 ? 'neg' : 'pos'} />
+              <KpiCard
+                label="خالص"
+                value={combined.net}
+                tone={Number(combined.net) < 0 ? 'neg' : 'pos'}
+                change={changeOf(combined, 'net')}
+              />
               <KpiCard label="کل باقیات باز" value={combined.outstanding} />
               <KpiCard
                 label="شاگردان فعال"
@@ -583,6 +674,9 @@ export default function SchoolFinanceOverview() {
                 }
               />
             </div>
+            {period?.previous?.from ? (
+              <p className="sfo-note">مقایسه با بازهٔ قبل: {rangeLabel(period.previous.from, period.previous.to)} (همان تعداد ماه، درست پیش از بازهٔ انتخابی).</p>
+            ) : null}
 
             <h3 className="sfo-section-title">روند خالص ماهانهٔ ترکیبی</h3>
             <TrendChart trend={report.monthlyTrend} />
@@ -611,6 +705,9 @@ export default function SchoolFinanceOverview() {
                 </tbody>
               </table>
             </div>
+
+            <h3 className="sfo-section-title">مصارف هر سه بخش بر اساس سرفصل</h3>
+            <CombinedCategoryTable rows={combined.byExpenseCategory} />
           </section>
 
           <div className="sfo-panels">
@@ -618,6 +715,7 @@ export default function SchoolFinanceOverview() {
               <DomainPanel
                 key={key}
                 domain={domains[key]}
+                period={period}
                 onPrint={() => printSection(key)}
                 printBusy={exporting === `print-${key}`}
               />
