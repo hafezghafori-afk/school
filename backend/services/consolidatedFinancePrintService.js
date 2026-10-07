@@ -36,7 +36,12 @@ function fa(value) {
 function monthKeyLabel(key) {
   const [jy, jm] = String(key || '').split('-').map(Number);
   if (!jy || !jm) return String(key || '');
-  return `${AFGHAN_SOLAR_MONTHS[jm - 1] || jm} ${jy}`;
+  // سال بدونِ جداکنندهٔ هزارگان: «۱۴۰۵» نه «۱٬۴۰۵»
+  return `${AFGHAN_SOLAR_MONTHS[jm - 1] || jm} ${jy.toLocaleString('fa-AF', { useGrouping: false })}`;
+}
+
+function expenseCategoryText(row) {
+  return [row.categoryLabel || row.category, row.subCategoryLabel].filter(Boolean).join(' — ');
 }
 
 function kpiStrip(items) {
@@ -71,7 +76,7 @@ function monthlyTable(monthly) {
 function breakdownTable(title, items, key, labelFn) {
   const list = Array.isArray(items) ? items : [];
   if (!list.length) return `<div><h3>${esc(title)}</h3><p class="muted">موردی ثبت نشده.</p></div>`;
-  const rows = list.map((item) => `<tr><td>${esc(labelFn ? labelFn(item[key]) : item[key])}</td><td class="num">${fa(item.total)}</td></tr>`).join('');
+  const rows = list.map((item) => `<tr><td>${esc(labelFn ? labelFn(item[key]) : (item.label || item[key]))}</td><td class="num">${fa(item.total)}</td></tr>`).join('');
   return `<div><h3>${esc(title)}</h3><table><thead><tr><th>${esc(key === 'method' ? 'روش' : 'دسته')}</th><th class="num">مبلغ</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
@@ -105,7 +110,7 @@ function expenseListTable(expenses) {
     <tr>
       <td class="num">${fa(index + 1)}</td>
       <td>${esc(row.title || 'مصرف')}</td>
-      <td>${esc(row.category || '—')}</td>
+      <td>${esc(expenseCategoryText(row) || '—')}</td>
       <td>${esc(row.monthLabel || monthKeyLabel(row.monthKey) || '—')}</td>
       <td>${esc(row.status && row.status !== 'approved' ? (EXPENSE_STATUS_LABELS[row.status] || row.status) : 'تأییدشده')}</td>
       <td class="num">${fa(row.amount)}</td>
@@ -170,7 +175,8 @@ async function buildConsolidatedFinancePrintHtml({ section = 'all', year, months
     : [report.domains[section]].filter(Boolean);
   const sectionLabel = wantAll ? 'همه بخش‌ها' : (report.domains[section]?.label || section);
   const periodLabel = `${monthKeyLabel(report.period.from)} تا ${monthKeyLabel(report.period.to)}`;
-  const printedAt = new Date().toLocaleString('fa-AF-u-ca-persian');
+  // سرور (Render) به وقتِ UTC کار می‌کند؛ بدونِ timeZone ساعتِ چاپ ۴:۳۰ عقب می‌افتاد.
+  const printedAt = new Date().toLocaleString('fa-AF-u-ca-persian', { timeZone: 'Asia/Kabul' });
 
   const combined = report.combined || {};
   const combinedBlock = wantAll ? `<section class="sec">

@@ -28,6 +28,7 @@ const ShortTermClass = require('../models/ShortTermClass');
 
 const { sumPaidRefunds } = require('../utils/financeRefundRecognition');
 const { resolveAsasNumberMapForDocs, pickAdmissionNo } = require('../utils/studentAdmissionNumber');
+const { loadExpenseCategoryLabelMap } = require('../utils/expenseCategoryLabels');
 const {
   lastShamsiMonthKeys,
   yearShamsiMonthKeys,
@@ -88,6 +89,21 @@ const DOMAIN_LABELS = {
   academy: 'آموزشگاه'
 };
 
+// دسته‌های داخلیِ مصرفِ آموزشگاه/موقت با همین کلیدهای انگلیسی ذخیره می‌شوند؛
+// دسته‌ای که خودِ مرکز تعریف کرده با نامِ فارسی‌اش ذخیره می‌شود و دست‌نخورده
+// می‌ماند. هم‌خوان با expenseCategoryLabels در AcademyManagement.jsx و ShortTermCenter.jsx.
+const CENTER_EXPENSE_CATEGORY_LABELS = {
+  teacher_salary: 'معاش استادان',
+  rent: 'کرایه',
+  utilities: 'برق و خدمات',
+  internet: 'انترنت',
+  stationery: 'قرطاسیه',
+  marketing: 'تبلیغات',
+  equipment: 'تجهیزات',
+  other: 'سایر'
+};
+const centerExpenseCategoryLabel = (key) => CENTER_EXPENSE_CATEGORY_LABELS[key] || key;
+
 const toNumber = (value) => Math.max(0, Number(value || 0));
 const round = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const safePercent = (part, whole) => (Number(whole) > 0 ? round((Number(part) / Number(whole)) * 10000) / 100 : 0);
@@ -104,9 +120,14 @@ function bucket(monthlyMap, dateValue, field, amount) {
   if (row) row[field] = round(row[field] + Number(amount || 0));
 }
 
-function toSortedList(map, keyName) {
+function toSortedList(map, keyName, labelOf = null) {
   return Array.from(map.entries())
-    .map(([value, total]) => ({ [keyName]: value || 'other', total: round(total) }))
+    .map(([value, total]) => {
+      const key = value || 'other';
+      return labelOf
+        ? { [keyName]: key, label: labelOf(key), total: round(total) }
+        : { [keyName]: key, total: round(total) };
+    })
     .sort((left, right) => right.total - left.total);
 }
 
@@ -259,7 +280,7 @@ async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKe
   const methodMap = new Map();
   const categoryMap = new Map();
 
-  const [payments, expenses, refundSummary, debtorData] = await Promise.all([
+  const [payments, expenses, refundSummary, debtorData, expenseLabels] = await Promise.all([
     FeePayment.find({ status: 'approved', paidAt: { $gte: gregStart, $lt: gregEnd } })
       .select('amount paidAt paymentMethod')
       .lean(),
@@ -269,10 +290,11 @@ async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKe
     // مصرفِ تاییدشده‌ای که «درخواستِ اصلاحِ» باز دارد تا تاییدِ نهاییِ اصلاح
     // اصلاً شمرده نمی‌شود (correction: null یعنی بدونِ درخواستِ باز).
     ExpenseEntry.find({ status: { $nin: ['void', 'rejected'] }, correction: null, expenseDate: { $gte: gregStart, $lt: gregEnd } })
-      .select('amount expenseDate category subCategory status vendorName referenceNo')
+      .select('amount expenseDate category subCategory status vendorName referenceNo note')
       .lean(),
     sumPaidRefunds({ startAt: gregStart, endAt: gregEnd }),
-    loadSchoolDebtors()
+    loadSchoolDebtors(),
+    loadExpenseCategoryLabelMap()
   ]);
 
   payments.forEach((item) => {
@@ -287,9 +309,14 @@ async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKe
     const category = item.category || item.subCategory || 'other';
     categoryMap.set(category, round((categoryMap.get(category) || 0) + toNumber(item.amount)));
     if (item.status !== 'approved') pendingExpense += toNumber(item.amount);
+    const categoryLabel = expenseLabels.category(category);
+    const subCategoryLabel = expenseLabels.subCategory(item.category, item.subCategory);
     expenseList.push({
-      title: String(item.subCategory || item.vendorName || item.category || 'مصرف').trim(),
+      // «شرح» = توضیحی که ثبت‌کننده نوشته؛ اگر خالی بود گیرنده، بعد نامِ زیرسرفصل.
+      title: String(item.note || item.vendorName || subCategoryLabel || categoryLabel || 'مصرف').trim(),
       category,
+      categoryLabel,
+      subCategoryLabel,
       monthKey: shamsiMonthOfDate(item.expenseDate),
       monthLabel: '',
       amount: round(toNumber(item.amount)),
@@ -326,7 +353,7 @@ async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKe
     },
     monthly,
     byPaymentMethod: toSortedList(methodMap, 'method'),
-    byExpenseCategory: toSortedList(categoryMap, 'category'),
+    byExpenseCategory: toSortedList(categoryMap, 'category', expenseLabels.category),
     expenses: expenseList.slice(0, 2000),
     debtors: debtorData.debtors.slice(0, debtorLimit),
     debtorCount: debtorData.count
@@ -387,9 +414,12 @@ async function buildCenterDomain({
     if (row) row.expense = round(row.expense + toNumber(item.amount));
     const category = item.category || 'other';
     categoryMap.set(category, round((categoryMap.get(category) || 0) + toNumber(item.amount)));
+    const categoryLabel = centerExpenseCategoryLabel(category);
     expenseList.push({
-      title: String(item.title || item.paidTo || item.category || 'مصرف').trim(),
+      title: String(item.title || item.paidTo || categoryLabel || 'مصرف').trim(),
       category,
+      categoryLabel,
+      subCategoryLabel: '',
       monthKey: key,
       monthLabel: '',
       amount: round(toNumber(item.amount)),
@@ -421,7 +451,7 @@ async function buildCenterDomain({
     },
     monthly,
     byPaymentMethod: toSortedList(methodMap, 'method'),
-    byExpenseCategory: toSortedList(categoryMap, 'category'),
+    byExpenseCategory: toSortedList(categoryMap, 'category', centerExpenseCategoryLabel),
     expenses: expenseList.slice(0, 2000),
     debtors: debtorData.debtors.slice(0, debtorLimit),
     debtorCount: debtorData.count

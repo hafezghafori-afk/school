@@ -50,7 +50,14 @@ function pad2(value) {
 function monthKeyLabel(key = '') {
   const [jy, jm] = String(key).split('-').map(Number);
   if (!jy || !jm) return key;
-  return `${AFGHAN_SOLAR_MONTHS[jm - 1] || jm} ${jy}`;
+  return `${AFGHAN_SOLAR_MONTHS[jm - 1] || jm} ${faDigits(jy)}`;
+}
+
+function expenseCategoryText(row) {
+  return [row.categoryLabel || row.category, row.subCategoryLabel]
+    .map((value) => repairDisplayText(value))
+    .filter(Boolean)
+    .join(' — ');
 }
 
 function methodLabel(value = '') {
@@ -150,7 +157,7 @@ function BreakdownList({ title, items, labelKey, labelFn }) {
       <ul>
         {rows.map((row, index) => (
           <li key={`${row[labelKey]}-${index}`}>
-            <span className="sfo-breakdown-label">{labelFn ? labelFn(row[labelKey]) : repairDisplayText(row[labelKey])}</span>
+            <span className="sfo-breakdown-label">{labelFn ? labelFn(row[labelKey]) : repairDisplayText(row.label || row[labelKey])}</span>
             <span className="sfo-breakdown-bar" aria-hidden="true">
               <span style={{ width: `${Math.max(4, (Number(row.total) / max) * 100)}%` }} />
             </span>
@@ -212,7 +219,7 @@ function ExpenseTable({ rows }) {
           {rows.map((row, index) => (
             <tr key={`${row.title}-${index}`}>
               <td>{repairDisplayText(row.title)}</td>
-              <td className="sfo-dim">{repairDisplayText(row.category) || '—'}</td>
+              <td className="sfo-dim">{expenseCategoryText(row) || '—'}</td>
               <td className="sfo-dim">{repairDisplayText(row.monthLabel) || monthKeyLabel(row.monthKey) || '—'}</td>
               <td className="sfo-dim">{row.status && row.status !== 'approved' ? (EXPENSE_STATUS_LABELS[row.status] || row.status) : 'تأییدشده'}</td>
               <td className="sfo-num sfo-strong">{formatNumber(row.amount)}</td>
@@ -486,7 +493,7 @@ export default function SchoolFinanceOverview() {
             </select>
             <span className="sfo-range-lbl">سال</span>
             <select value={pickY} onChange={(e) => setPickY(Number(e.target.value))}>
-              {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+              {yearOptions.map((year) => <option key={year} value={year}>{faDigits(year)}</option>)}
             </select>
           </div>
         ) : null}
@@ -495,7 +502,7 @@ export default function SchoolFinanceOverview() {
           <div className="sfo-range-row">
             <span className="sfo-range-lbl">سال شمسی</span>
             <select value={yearPick} onChange={(e) => setYearPick(Number(e.target.value))}>
-              {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+              {yearOptions.map((year) => <option key={year} value={year}>{faDigits(year)}</option>)}
             </select>
           </div>
         ) : null}
@@ -509,7 +516,7 @@ export default function SchoolFinanceOverview() {
               ))}
             </select>
             <select value={fromY} onChange={(e) => setFromY(Number(e.target.value))}>
-              {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+              {yearOptions.map((year) => <option key={year} value={year}>{faDigits(year)}</option>)}
             </select>
             <span className="sfo-range-lbl">تا</span>
             <select value={toM} onChange={(e) => setToM(Number(e.target.value))}>
@@ -518,7 +525,7 @@ export default function SchoolFinanceOverview() {
               ))}
             </select>
             <select value={toY} onChange={(e) => setToY(Number(e.target.value))}>
-              {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+              {yearOptions.map((year) => <option key={year} value={year}>{faDigits(year)}</option>)}
             </select>
             {customInvalid ? <span className="sfo-range-warn">«از» نباید بعد از «تا» باشد</span> : null}
           </div>

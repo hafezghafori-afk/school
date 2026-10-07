@@ -9,6 +9,7 @@ const {
   PAYROLL_CATEGORY_KEY,
   PAYROLL_SUBCATEGORY_BY_STAFF_POSITION
 } = require('../config/expenseChart');
+const { formatAfghanMonthKeyLabel, toAfghanMonthKey } = require('../utils/afghanDate');
 
 // Hard caps by kind (user decision): advances / withdrawals may not exceed one
 // month of the person's salary basis; a staff loan may reach three months.
@@ -505,6 +506,9 @@ async function finalizeSalaryPayment({ payment, financialYear, actorId = null } 
   const { category, subCategory } = await resolveSalaryExpenseCategory(payment.staffSnapshot?.position);
   const now = new Date();
   const staffName = normalizeText(payment.staffSnapshot?.name);
+  // `period` is the Gregorian YYYY-MM of the payment date; the note is read in
+  // Afghan months like every other screen, so it names the solar month.
+  const salaryMonth = formatAfghanMonthKeyLabel(toAfghanMonthKey(payment.paymentDate)) || payment.period;
   const expense = await ExpenseEntry.create({
     schoolId: payment.schoolId,
     financialYearId: payment.financialYearId,
@@ -521,7 +525,7 @@ async function finalizeSalaryPayment({ payment, financialYear, actorId = null } 
     procurementCommitmentId: null,
     vendorName: staffName,
     referenceNo: `staff_salary:${payment._id}`,
-    note: `معاشِ ${payment.period}${staffName ? ` — ${staffName}` : ''}: ناخالص ${roundMoney(payment.grossSalary)}${roundMoney(payment.taxAmount) > 0 ? ` − مالیه ${roundMoney(payment.taxAmount)}` : ''} − پیشکی ${roundMoney(payment.deductionTotal)} = خالص ${roundMoney(payment.netAmount)}`,
+    note: `معاشِ ${salaryMonth}${staffName ? ` — ${staffName}` : ''}: ناخالص ${roundMoney(payment.grossSalary)}${roundMoney(payment.taxAmount) > 0 ? ` − مالیه ${roundMoney(payment.taxAmount)}` : ''} − پیشکی ${roundMoney(payment.deductionTotal)} = خالص ${roundMoney(payment.netAmount)}`,
     status: 'approved',
     approvalStage: 'completed',
     submittedBy: actorId || null,
