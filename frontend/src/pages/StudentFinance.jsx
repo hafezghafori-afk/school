@@ -11,6 +11,7 @@ import {
   toLocaleDateTime
 } from './adminWorkspaceUtils';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
 import { formatFinanceCode } from '../utils/latinFinanceCode';
 import { apiFetch } from '../utils/apiClient';
@@ -519,7 +520,7 @@ export default function StudentFinance() {
   };
 
   return (
-    <section className="student-finance-shell">
+    <ResponsiveTable as="section" className="student-finance-shell">
       {!!loadError && <DataErrorCard error={loadError} onRetry={loadData} compact />}
       <div className="student-finance-page">
         <div className="student-finance-hero">
@@ -1054,6 +1055,6 @@ export default function StudentFinance() {
           </article>
         </div>
       </div>
-    </section>
+    </ResponsiveTable>
   );
 }

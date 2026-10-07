@@ -15,6 +15,7 @@
   color: var(--sd-ink);
   background: transparent;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 1.5rem clamp(1rem, 4vw, 2.5rem) 3rem;
   font-family: 'Vazirmatn', 'B Nazanin', Tahoma, sans-serif;
 }

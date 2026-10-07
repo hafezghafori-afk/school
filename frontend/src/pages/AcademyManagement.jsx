@@ -4,6 +4,7 @@ import './AcademyManagement.css';
 import { API_BASE } from '../config/api';
 import { getStudentAsasNumber, studentMatchesSearch } from '../utils/studentSearch';
 import { useToast } from '../components/ui/toast';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { AFGHAN_SOLAR_MONTHS, formatAfghanStoredDateLabel, gregorianToAfghanSolar } from '../utils/afghanDate';
 import { apiFetch } from '../utils/apiClient';
@@ -1134,7 +1135,7 @@ export default function AcademyManagement() {
   };
 
   return (
-    <section className="academy-page" dir="rtl">
+    <ResponsiveTable as="section" className="academy-page" dir="rtl">
       <div className="academy-topbar">
         <div>
           <span className="academy-eyebrow">سیستم مستقل</span>
@@ -2307,7 +2308,7 @@ export default function AcademyManagement() {
         onClose={() => setDiscountRegistration(null)}
         onSaved={afterDiscountSaved}
       />
-    </section>
+    </ResponsiveTable>
   );
 }
 

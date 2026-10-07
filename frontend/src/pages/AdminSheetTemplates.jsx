@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import './AdminWorkspace.css';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 
 import {
   downloadBlob,
@@ -1132,7 +1133,7 @@ export default function AdminSheetTemplates() {
   };
 
   return (
-    <main className="admin-workspace-page admin-sheet-template-center" dir="rtl">
+    <ResponsiveTable as="main" className="admin-workspace-page admin-sheet-template-center" dir="rtl">
       <div className="admin-workspace-shell">
         <section className="admin-workspace-hero">
           <h1>مرکز مدیریت شقه‌ها</h1>
@@ -1742,6 +1743,6 @@ export default function AdminSheetTemplates() {
           </div>
         ) : null}
       </div>
-    </main>
+    </ResponsiveTable>
   );
 }

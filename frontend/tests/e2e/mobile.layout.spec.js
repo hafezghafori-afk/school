@@ -24,7 +24,18 @@ const ROUTES = [
   '/attendance-manager',
   '/admin-finance',
   '/admin-government-finance',
-  '/admin-reports'
+  '/admin-reports',
+  // Wired to ResponsiveTable at the page root, so every table they hold is
+  // covered — including ones added later.
+  '/school-staff',
+  '/id-cards',
+  '/admin-result-tables',
+  '/admin-financial-memberships',
+  '/academy',
+  '/short-term-center',
+  '/admin-education',
+  '/admin-enrollments',
+  '/afghan-sawaneh'
 ];
 
 const seed = async (page) => {

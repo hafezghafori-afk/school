@@ -1,6 +1,7 @@
 .courses-page {
   padding: 36px 40px 80px;
   min-height: 100vh;
+  min-height: 100dvh;
   color: #f6f7fb;
 }
 

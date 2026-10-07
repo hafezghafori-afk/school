@@ -1,6 +1,7 @@
 .student-profile-workspace {
   width: min(100%, 1600px);
   min-height: 100vh;
+  min-height: 100dvh;
   margin-inline: auto;
   padding: 16px clamp(12px, 2vw, 28px) 32px;
   box-sizing: border-box;

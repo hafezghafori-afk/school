@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import './AdminWorkspace.css';
 import { errorMessage, fetchJson, normalizeOptions, postJson, resolveActiveSchoolContext } from './adminWorkspaceUtils';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate';
 import { getStudentAsasNumber, studentMatchesSearch } from '../utils/studentSearch';
 
@@ -3014,7 +3015,7 @@ export default function AdminEducationCore() {
   };
 
   return (
-    <div className={`admin-workspace-page admin-education-page${activeSection === 'enrollments' ? ' enrollments-mode' : ''}`}>
+    <ResponsiveTable className={`admin-workspace-page admin-education-page${activeSection === 'enrollments' ? ' enrollments-mode' : ''}`}>
       <div className="admin-workspace-shell">
         <section className="admin-workspace-hero admin-education-hero">
           <div className="admin-workspace-badges">
@@ -3062,6 +3063,6 @@ export default function AdminEducationCore() {
           </section>
         ) : null}
       </div>
-    </div>
+    </ResponsiveTable>
   );
 }

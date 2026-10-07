@@ -4,6 +4,7 @@ import { API_BASE } from '../config/api';
 import { studentMatchesSearch } from '../utils/studentSearch';
 import './AcademySupplies.css';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import { formatAfghanStoredDateLabel } from '../utils/afghanDate';
 import { apiFetch } from '../utils/apiClient';
 
@@ -268,7 +269,7 @@ export default function AcademySupplies() {
   };
 
   return (
-    <section className="academy-supply-page" dir="rtl">
+    <ResponsiveTable as="section" className="academy-supply-page" dir="rtl">
       <div className="academy-supply-topbar">
         <div>
           <span>دفتر داخلی آموزشگاه</span>
@@ -503,6 +504,6 @@ export default function AcademySupplies() {
           </div>
         </div>
       )}
-    </section>
+    </ResponsiveTable>
   );
 }

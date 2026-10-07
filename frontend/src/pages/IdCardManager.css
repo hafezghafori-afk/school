@@ -13,6 +13,7 @@
   position: relative;
   isolation: isolate;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 32px 20px 60px;
   font-family: "Vazirmatn", "B Zar", "B Mitra", "Noto Naskh Arabic", Tahoma, sans-serif;
   color: var(--idm-ink);

@@ -1,5 +1,6 @@
 .adminusers-page {
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 40px 16px;
@@ -2144,7 +2145,9 @@
 .edit-user-modal-card {
   width: min(440px, 92vw);
   max-height: 100vh;
+  max-height: 100dvh;
   height: 100vh;
+  height: 100dvh;
   margin: 0;
   border-radius: 0 20px 20px 0;
   animation: edit-drawer-in 0.22s ease-out;

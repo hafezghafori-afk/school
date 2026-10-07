@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -226,7 +227,7 @@ const SubjectManagement = () => {
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <ResponsiveTable className="container mx-auto p-6 space-y-6">
       {!!loadError && <DataErrorCard error={loadError} onRetry={fetchSubjects} compact />}
       <div className="flex justify-between items-center">
         <div>
@@ -664,7 +665,7 @@ const SubjectManagement = () => {
           </Button>
         </div>
       )}
-    </div>
+    </ResponsiveTable>
   );
 };
 

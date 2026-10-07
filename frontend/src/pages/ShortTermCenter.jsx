@@ -3,6 +3,7 @@ import './ShortTermCenter.css';
 import { API_BASE } from '../config/api';
 import { studentMatchesSearch } from '../utils/studentSearch';
 import { useToast } from '../components/ui/toast';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import { AFGHAN_SOLAR_MONTHS, formatAfghanStoredDateLabel, gregorianToAfghanSolar } from '../utils/afghanDate';
 import { apiFetch } from '../utils/apiClient';
@@ -866,7 +867,7 @@ export default function ShortTermCenter() {
   };
 
   return (
-    <section className="stc-page" dir="rtl">
+    <ResponsiveTable as="section" className="stc-page" dir="rtl">
       {!!loadError && <DataErrorCard error={loadError} onRetry={loadData} compact />}
       <div className="stc-topbar">
         <div>
@@ -1613,7 +1614,7 @@ export default function ShortTermCenter() {
         onClose={() => { setEditingRegistration(null); setRegEditForm(null); }}
         onSave={saveRegEdit}
       />
-    </section>
+    </ResponsiveTable>
   );
 }
 

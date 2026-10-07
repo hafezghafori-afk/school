@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import { useNavigate } from 'react-router-dom';
 import { API_BASE } from '../config/api';
 import './SawanehReports.css';
@@ -80,7 +81,7 @@ const SawanehReports = () => {
   const labels = data?.labels || { tiers: {}, promotion: {} };
 
   return (
-    <div className="sawaneh-reports" dir="rtl">
+    <ResponsiveTable className="sawaneh-reports" dir="rtl">
       <header className="sr-header">
         <div>
           <h1>گزارش‌های سوانح شاگرد</h1>
@@ -245,7 +246,7 @@ const SawanehReports = () => {
           )}
         </>
       )}
-    </div>
+    </ResponsiveTable>
   );
 };
 

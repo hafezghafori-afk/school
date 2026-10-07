@@ -8,6 +8,7 @@
   direction: rtl;
   max-width: 1240px;
   min-height: 100vh;
+  min-height: 100dvh;
   position: relative;
   isolation: isolate;
   font-family: "Vazirmatn", "B Zar", "B Mitra", "Noto Naskh Arabic", Tahoma, sans-serif;

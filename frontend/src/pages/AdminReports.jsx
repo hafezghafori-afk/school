@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import './AdminWorkspace.css';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import { studentMatchesSearch, formatStudentDisplayLabel } from '../utils/studentSearch';
 
 import {
@@ -774,7 +775,7 @@ export default function AdminReports() {
   };
 
   return (
-    <div className="admin-workspace-page">
+    <ResponsiveTable className="admin-workspace-page">
       <div className="admin-workspace-shell">
         <section className="admin-workspace-hero">
           <div className="admin-workspace-badges">
@@ -979,6 +980,6 @@ export default function AdminReports() {
           </article>
         </section>
       </div>
-    </div>
+    </ResponsiveTable>
   );
 }

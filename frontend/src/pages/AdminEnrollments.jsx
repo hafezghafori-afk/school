@@ -7,6 +7,7 @@ import { formatAfghanDate } from '../utils/afghanDate';
 import { studentMatchesSearch } from '../utils/studentSearch';
 import { apiFetch, failureMessage } from '../utils/apiClient';
 import { DataErrorCard } from '../components/ui/DataState';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
@@ -241,7 +242,7 @@ export default function AdminEnrollments() {
   };
 
   return (
-    <section className="admin-content-page admin-enrollments-page" dir="rtl">
+    <ResponsiveTable as="section" className="admin-content-page admin-enrollments-page" dir="rtl">
       {!!loadError && <DataErrorCard error={loadError} onRetry={loadItems} compact />}
       <div className="card-back">
         <button type="button" onClick={() => window.history.back()}>بازگشت</button>
@@ -388,6 +389,6 @@ export default function AdminEnrollments() {
           </div>
         )}
       </div>
-    </section>
+    </ResponsiveTable>
   );
 }

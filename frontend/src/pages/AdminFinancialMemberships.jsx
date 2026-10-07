@@ -12,6 +12,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import { getStudentAsasNumber, studentMatchesSearch } from '../utils/studentSearch';
 import { readStoredSchoolId } from './adminWorkspaceUtils';
 import './AdminFinancialMemberships.css';
@@ -384,7 +385,7 @@ export default function AdminFinancialMemberships() {
   }, [academicYears, form.academicYearId]);
 
   return (
-    <div className="admin-financial-memberships-page">
+    <ResponsiveTable className="admin-financial-memberships-page">
       {/* Header */}
       <div className="afm-header">
         <div>
@@ -653,6 +654,6 @@ export default function AdminFinancialMemberships() {
           </div>
         </div>
       )}
-    </div>
+    </ResponsiveTable>
   );
 }

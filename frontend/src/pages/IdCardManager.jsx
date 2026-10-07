@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useToast } from '../components/ui/toast';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import {
   DEFAULT_SCHOOL_ID,
   fetchJson,
@@ -238,7 +239,7 @@ const IdCardManager = () => {
   }), [rows]);
 
   return (
-    <div className="idm-page">
+    <ResponsiveTable className="idm-page">
       <div className="idm-inner">
         <div className="idm-hero">
           <div className="idm-hero-text">
@@ -375,7 +376,7 @@ const IdCardManager = () => {
           </div>
         </div>
       )}
-    </div>
+    </ResponsiveTable>
   );
 };
 

@@ -1,5 +1,6 @@
 .edu-core-page {
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 1.2rem;
   background:
     radial-gradient(900px 380px at 90% -10%, rgba(42, 119, 255, 0.2), transparent 60%),

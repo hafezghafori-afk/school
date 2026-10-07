@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './AdminWorkspace.css';
 
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import {
   downloadBlob,
   errorMessage,
@@ -178,7 +179,7 @@ export default function AdminInstructorReport() {
   const hasMore = logs.length < total;
 
   return (
-    <div className="admin-workspace-page">
+    <ResponsiveTable className="admin-workspace-page">
       <div className="admin-workspace-shell">
         <section className="admin-workspace-hero">
           <div className="admin-workspace-badges">
@@ -386,6 +387,6 @@ export default function AdminInstructorReport() {
           </article>
         </section>
       </div>
-    </div>
+    </ResponsiveTable>
   );
 }

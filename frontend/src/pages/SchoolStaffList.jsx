@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useToast } from '../components/ui/toast';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import {
   DEFAULT_SCHOOL_ID,
   downloadBlob,
@@ -303,7 +304,7 @@ const SchoolStaffList = () => {
   };
 
   return (
-    <div className="staff-list">
+    <ResponsiveTable className="staff-list">
       <div className="staff-list-inner">
         <div className="staff-list-hero">
           <div className="staff-list-hero-text">
@@ -474,7 +475,7 @@ const SchoolStaffList = () => {
           )}
         </div>
       </div>
-    </div>
+    </ResponsiveTable>
   );
 };
 

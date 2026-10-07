@@ -73,7 +73,10 @@ const collectTables = (root) => {
   return targets;
 };
 
-export default function ResponsiveTable({ className = '', children, ...rest }) {
+// `as` هست چون این کامپوننت اغلب جای یک عنصرِ موجود می‌نشیند و نباید نوعش را
+// عوض کند: بعضی صفحات ریشه‌شان `<section>` یا `<main>` است و هم CSS به آن تکیه
+// دارد (`section.academy-page`) و هم `<main>` برای دسترس‌پذیری معنی دارد.
+export default function ResponsiveTable({ as: Tag = 'div', className = '', children, ...rest }) {
   const ref = useRef(null);
 
   // بدون آرایهٔ وابستگی: بعد از هر رندر دوباره خوانده می‌شود. خواندنِ حداکثر ۱۲
@@ -109,8 +112,8 @@ export default function ResponsiveTable({ className = '', children, ...rest }) {
   });
 
   return (
-    <div ref={ref} className={['rt', className].filter(Boolean).join(' ')} {...rest}>
+    <Tag ref={ref} className={['rt', className].filter(Boolean).join(' ')} {...rest}>
       {children}
-    </div>
+    </Tag>
   );
 }
