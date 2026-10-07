@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import { useNavigate } from 'react-router-dom';
 import { API_BASE } from '../config/api';
 import './SawanehDashboard.css';
@@ -55,7 +56,7 @@ const SawanehDashboard = () => {
   const c = data?.counts || {};
 
   return (
-    <div className="sawaneh-dash" dir="rtl">
+    <ResponsiveTable className="sawaneh-dash" dir="rtl">
       <header className="sd-header">
         <div>
           <h1>داشبورد سوانح شاگرد</h1>
@@ -185,7 +186,7 @@ const SawanehDashboard = () => {
           </section>
         </>
       )}
-    </div>
+    </ResponsiveTable>
   );
 };
 

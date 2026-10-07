@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import './AfghanSchoolManagement.css';
 import { apiFetch } from '../utils/apiClient';
 import { DataErrorCard } from '../components/ui/DataState';
@@ -178,7 +179,7 @@ const AfghanSchoolManagement = () => {
   }
 
   return (
-    <div className="school-management">
+    <ResponsiveTable className="school-management">
       {!!loadError && <DataErrorCard error={loadError} onRetry={fetchSchools} compact />}
       <header className="management-header">
         <h1>مدیریت مکاتب افغانستان</h1>
@@ -512,7 +513,7 @@ const AfghanSchoolManagement = () => {
           </div>
         </div>
       )}
-    </div>
+    </ResponsiveTable>
   );
 };
 

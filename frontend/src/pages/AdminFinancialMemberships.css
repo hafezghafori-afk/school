@@ -184,6 +184,7 @@
   color: #23272f;
   background: #f7f8fa;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .afm-header {

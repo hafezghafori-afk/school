@@ -1,6 +1,7 @@
 .finance-page {
   padding: 32px 32px 72px;
   min-height: 100vh;
+  min-height: 100dvh;
   color: #eef5ff;
 }
 
@@ -3341,8 +3342,12 @@
   color: rgba(203, 213, 225, 0.72);
 }
 
+/* `.finance-table.bills-table .row` بالاتر هفت‌تا نیست، شش ستون می‌دهد و وزنش
+   (0,3,0) از `.finance-orders-table .row` (0,2,0) بیشتر بود — یعنی سرستون هفت
+   ستون می‌چید و ردیف‌ها شش‌تا، و ستون هفتم (دکمه‌های عملیات) می‌افتاد سطر بعد.
+   وزن این‌جا هم‌تراز شد تا ترتیب فایل تصمیم بگیرد و این قاعده ببرد. */
 .finance-orders-table-head,
-.finance-orders-table .row {
+.finance-table.finance-orders-table .row {
   display: grid;
   grid-template-columns: minmax(135px, 0.9fr) minmax(145px, 1fr) minmax(150px, 1fr) minmax(140px, 0.9fr) minmax(135px, 0.9fr) minmax(110px, 0.7fr) minmax(230px, 1.35fr);
   gap: 8px;
@@ -3356,10 +3361,6 @@
   padding: 10px 12px;
   background: rgba(255, 255, 255, 0.11);
   font-weight: 700;
-}
-
-.finance-orders-table > .head {
-  display: none;
 }
 
 .finance-order-status {

@@ -1,0 +1,195 @@
+/* جدول ← کارت، فقط زیر ۶۴۰px. بالای آن این فایل هیچ کاری نمی‌کند.
+ *
+ * برچسبِ هر سلول از `--rt-1` تا `--rt-12` می‌آید که ResponsiveTable.jsx روی
+ * خودِ عنصر می‌نویسد. هر سلول با `nth-child` متغیرِ ستونِ خودش را در
+ * `--rt-label` می‌گذارد و یک قاعدهٔ `::before` همه را می‌نویسد.
+ *
+ * اگر ستونی عنوان نداشته باشد، `--rt-N` تعریف نشده است؛ آن‌وقت `--rt-label`
+ * بی‌اعتبار می‌شود و `content` به مقدار اولیه برمی‌گردد، یعنی هیچ `::before`ای
+ * ساخته نمی‌شود. این همان رفتاری است که می‌خواهیم: ستونِ عملیات (که در
+ * `.head` ستونی ندارد) برچسبِ خالی و فاصلهٔ بی‌خود نمی‌گیرد.
+ */
+
+@media (max-width: 640px) {
+  /* ---- شکل ۱: <table> واقعی ---- */
+
+  /* این دو قاعده قلبِ کار است و بدونشان کارت‌ها توخالی به نظر می‌رسند.
+   *
+   * صفحات جدول‌دار تقریباً همیشه دو چیز با هم دارند: یک `min-width` درشت روی
+   * جدول (`.student-table` مثلاً ۱۰۶۰px) تا ستون‌ها له نشوند، و یک
+   * `overflow-x: auto` روی رَپِر تا همان جدول اسکرول شود. وقتی ردیف‌ها کارت
+   * می‌شوند آن `min-width` سرِ جایش می‌ماند، سلول‌ها ۱۰۳۴px پهن می‌شوند و مقدارِ
+   * هر سلول از لبهٔ صفحه بیرون می‌افتد — برچسب دیده می‌شود و مقدار نه. بدتر
+   * اینکه اسکرولِ رَپِر این را از چشمِ تستِ «سرریز افقیِ صفحه» هم پنهان می‌کند.
+   *
+   * `.rt.rt` عمداً دو بار آمده: رَپِر کلاسِ خودِ صفحه را هم دارد
+   * (`.student-table-wrap`) و هم‌وزنِ این است؛ ترتیبِ بارگذاریِ CSS بینِ چانکِ
+   * صفحه و این فایل تضمینی نیست، پس وزن بالاتر می‌برد نه ترتیب. */
+  .rt.rt {
+    overflow: visible;
+  }
+
+  /* `display: block` روی خودِ جدول، وگرنه مدلِ جدولِ CSS ردیف‌ها را دوباره
+   * کنار هم می‌چیند و کارت شدن اثری ندارد. */
+  .rt table {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    border-collapse: collapse;
+  }
+
+  .rt table thead {
+    display: none;
+  }
+
+  .rt table tbody,
+  .rt table tr,
+  .rt table td {
+    display: block;
+    width: auto;
+  }
+
+  /* رنگ‌های این کارت‌ها عمداً خاکستریِ خنثی‌اند، نه توکن‌های تم.
+   * نسخهٔ اول از `--card-border` و `--text-muted` استفاده می‌کرد که در App.css
+   * برای تم تاریک تعریف شده‌اند؛ روی صفحه‌های روشن (کارکنان مکتب، جدول‌های
+   * نتایج، صف تأیید نمرات) برچسب‌ها سفیدِ روی سفید می‌شدند و عملاً نامرئی.
+   * خاکستریِ نیمه‌شفاف روی هر دو تم دیده می‌شود، و برچسب رنگش را از خودِ متنِ
+   * صفحه می‌گیرد. */
+  .rt table tr {
+    margin-block-end: var(--mobile-gap, 10px);
+    padding: 10px 12px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: var(--radius-md, 12px);
+    background: rgba(128, 128, 128, 0.06);
+  }
+
+  .rt table td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+    border: 0;
+    text-align: start;
+  }
+
+  .rt table tr > td + td {
+    border-block-start: 1px solid rgba(128, 128, 128, 0.22);
+  }
+
+  /* ردیفِ «چیزی پیدا نشد» که با colspan تمام عرض را می‌گیرد: برچسب نمی‌خواهد. */
+  .rt table td[colspan] {
+    display: block;
+    text-align: center;
+  }
+
+  .rt table td::before,
+  :is(.rt.finance-table, .rt .finance-table) > .row > *::before {
+    content: var(--rt-label);
+    flex: 0 0 auto;
+    max-width: 45%;
+    font-size: 12px;
+    font-weight: 500;
+    color: inherit;
+    opacity: 0.72;
+  }
+
+  .rt table td[colspan]::before {
+    content: normal;
+  }
+
+  /* ---- شکل ۲: جدولِ گریدیِ `.finance-table` ---- */
+
+  /* ردیف‌ها از قبل در AdminFinance.css تک‌ستونی می‌شدند، ولی `.head` همچنان
+   * رندر می‌شد (یک ستونِ شش‌تایی از عنوان‌های بی‌استفاده) و سلول‌ها هیچ برچسبی
+   * نداشتند — یعنی کاربر یک ستون عدد می‌دید بدون اینکه بداند کدام کدام است. */
+  :is(.rt.finance-table, .rt .finance-table) > .head,
+  :is(.rt.finance-table, .rt .finance-table) > [data-rt-head] {
+    display: none;
+  }
+
+  :is(.rt.finance-table, .rt .finance-table) > .row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  :is(.rt.finance-table, .rt .finance-table) > .row > * {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+  }
+
+  :is(.rt.finance-table, .rt .finance-table) > .row > * + * {
+    border-block-start: 1px solid rgba(128, 128, 128, 0.22);
+  }
+
+  /* `.row-actions` ستونِ عنوان ندارد و دکمه‌هایش باید در عرضِ کامل بنشینند. */
+  :is(.rt.finance-table, .rt .finance-table) > .row > .row-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 8px;
+    padding-block-start: 10px;
+  }
+
+  /* ---- نگاشتِ ستون به برچسب، مشترکِ هر دو شکل ---- */
+
+  .rt table td:nth-child(1),
+  :is(.rt.finance-table, .rt .finance-table) > .row > *:nth-child(1) { --rt-label: var(--rt-1); }
+  .rt table td:nth-child(2),
+  :is(.rt.finance-table, .rt .finance-table) > .row > *:nth-child(2) { --rt-label: var(--rt-2); }
+  .rt table td:nth-child(3),
+  :is(.rt.finance-table, .rt .finance-table) > .row > *:nth-child(3) { --rt-label: var(--rt-3); }
+  .rt table td:nth-child(4),
+  :is(.rt.finance-table, .rt .finance-table) > .row > *:nth-child(4) { --rt-label: var(--rt-4); }
+  .rt table td:nth-child(5),
+  :is(.rt.finance-table, .rt .finance-table) > .row > *:nth-child(5) { --rt-label: var(--rt-5); }
+  .rt table td:nth-child(6),
+  :is(.rt.finance-table, .rt .finance-table) > .row > *:nth-child(6) { --rt-label: var(--rt-6); }
+  .rt table td:nth-child(7),
+  :is(.rt.finance-table, .rt .finance-table) > .row > *:nth-child(7) { --rt-label: var(--rt-7); }
+  .rt table td:nth-child(8),
+  :is(.rt.finance-table, .rt .finance-table) > .row > *:nth-child(8) { --rt-label: var(--rt-8); }
+  .rt table td:nth-child(9),
+  :is(.rt.finance-table, .rt .finance-table) > .row > *:nth-child(9) { --rt-label: var(--rt-9); }
+  .rt table td:nth-child(10),
+  :is(.rt.finance-table, .rt .finance-table) > .row > *:nth-child(10) { --rt-label: var(--rt-10); }
+  .rt table td:nth-child(11),
+  :is(.rt.finance-table, .rt .finance-table) > .row > *:nth-child(11) { --rt-label: var(--rt-11); }
+  .rt table td:nth-child(12),
+  :is(.rt.finance-table, .rt .finance-table) > .row > *:nth-child(12) { --rt-label: var(--rt-12); }
+
+  /* سمتِ مقدار باید فضای باقی‌مانده را بگیرد و بشکند، نه اینکه کارت را پهن کند.
+   * محتوای سلول‌ها در این صفحات اغلب `strong` + `small` روی هم است. */
+  .rt table td > *,
+  :is(.rt.finance-table, .rt .finance-table) > .row > * > * {
+    min-width: 0;
+  }
+
+  .rt table td,
+  :is(.rt.finance-table, .rt .finance-table) > .row > * {
+    overflow-wrap: anywhere;
+  }
+
+  /* یک جدولِ تو در تو (مثل `.finance-registry-detail-table` که دو ستونِ
+   * عنوان/مقدار دارد) از قبل روی گوشی درست است و نباید دوباره کارت شود. */
+  .rt table table {
+    display: table;
+  }
+
+  .rt table table tbody { display: table-row-group; }
+  .rt table table tr { display: table-row; margin: 0; padding: 0; border: 0; background: none; }
+  .rt table table td { display: table-cell; padding: 4px 6px; }
+  .rt table table td::before { content: normal; }
+}
+
+/* روی کاغذ همیشه جدولِ واقعی چاپ شود، هر عرضی که صفحه داشته باشد. */
+@media print {
+  .rt table { display: table; }
+  .rt table thead { display: table-header-group; }
+  .rt table tbody { display: table-row-group; }
+  .rt table tr { display: table-row; }
+  .rt table td { display: table-cell; }
+  .rt table td::before { content: normal; }
+}

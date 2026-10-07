@@ -11,6 +11,7 @@
   --notify-critical: #ff6b6b;
   --notify-info: #71b7ff;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 34px 18px 48px;
   color: var(--notify-text);
   background:

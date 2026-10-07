@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import { Link } from 'react-router-dom';
 import './SchoolFinanceOverview.css';
 
@@ -452,7 +453,7 @@ export default function SchoolFinanceOverview() {
   const domains = report?.domains || {};
 
   return (
-    <div className="sfo-page" dir="rtl">
+    <ResponsiveTable className="sfo-page" dir="rtl">
       <header className="sfo-hero">
         <div>
           <h1>گزارش مالی یکپارچهٔ مکتب</h1>
@@ -621,6 +622,6 @@ export default function SchoolFinanceOverview() {
           ) : null}
         </>
       ) : null}
-    </div>
+    </ResponsiveTable>
   );
 }

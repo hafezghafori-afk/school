@@ -1,5 +1,6 @@
 .login-public-page {
   min-height: 100vh;
+  min-height: 100dvh;
   color: var(--public-ink);
   background:
     radial-gradient(circle at 12% 10%, rgba(243, 166, 200, 0.28), transparent 30%),

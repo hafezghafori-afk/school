@@ -271,6 +271,8 @@ function buildParentStatementHtml({
   </html>`;
 }
 
+const EMPTY_LIST = [];
+
 export default function ParentDashboard() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -347,7 +349,10 @@ export default function ParentDashboard() {
   const financeStatement = dashboard?.financeStatement || null;
   const statementTotals = financeStatement?.totals || {};
   const financeBreakdown = Array.isArray(dashboard?.financeBreakdown) ? dashboard.financeBreakdown : [];
-  const financeOrders = Array.isArray(dashboard?.financeOrders) ? dashboard.financeOrders : [];
+  // آرایهٔ خالیِ مشترک، نه یک `[]` تازه در هر رندر: این یکی ورودیِ یک
+  // `useMemo` است و هویتِ تازه باعث می‌شد آن memo و افکتِ وابسته‌اش هر رندر
+  // دوباره بدوند.
+  const financeOrders = Array.isArray(dashboard?.financeOrders) ? dashboard.financeOrders : EMPTY_LIST;
   const financePayments = Array.isArray(dashboard?.financePayments) ? dashboard.financePayments : [];
   const financeReliefs = Array.isArray(dashboard?.financeReliefs) ? dashboard.financeReliefs : [];
   const receiptUploadOrders = useMemo(() => (
@@ -361,12 +366,17 @@ export default function ParentDashboard() {
 
   useEffect(() => {
     if (!receiptUploadOrders.length) {
-      setReceiptForm((current) => ({
-        ...current,
-        billId: '',
-        amount: '',
-        file: null
-      }));
+      // بدونِ این مقایسه، هر بار یک شیء تازه ساخته می‌شد و همان رندرِ بعدی را
+      // می‌خواست — و چون `financeOrders` وقتی داده‌ای نیست هر رندر یک آرایهٔ
+      // تازه است، `receiptUploadOrders` هم تازه می‌شد و این افکت دوباره
+      // می‌دوید. نتیجه یک حلقهٔ بی‌نهایتِ رندر بود که React با «Maximum update
+      // depth exceeded» متوقفش می‌کرد و از آن لحظه صفحه به هیچ تغییری جواب
+      // نمی‌داد. این دقیقاً حالتِ عادیِ یک والد است که فرزندش بلِ باز ندارد.
+      setReceiptForm((current) => (
+        (!current.billId && !current.amount && !current.file)
+          ? current
+          : { ...current, billId: '', amount: '', file: null }
+      ));
       return;
     }
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import { Link } from 'react-router-dom';
 import './AdminWorkspace.css';
 
@@ -239,7 +240,7 @@ export default function AdminResultTables() {
   };
 
   return (
-    <div className="admin-workspace-page" dir="rtl">
+    <ResponsiveTable className="admin-workspace-page" dir="rtl">
       <div className="admin-workspace-shell">
         <section className="admin-workspace-hero">
           <div className="admin-workspace-badges"><span className="admin-workspace-badge">نتایج عمومی</span><span className="admin-workspace-badge info">۴۰ + ۶۰ = ۱۰۰</span></div>
@@ -365,6 +366,6 @@ export default function AdminResultTables() {
           </article>
         </section>
       </div>
-    </div>
+    </ResponsiveTable>
   );
 }

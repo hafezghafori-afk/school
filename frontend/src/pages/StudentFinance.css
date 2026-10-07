@@ -1,5 +1,6 @@
 ﻿.student-finance-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 28px 16px 48px;
   background:
     radial-gradient(circle at top right, rgba(15, 118, 110, 0.15), transparent 24%),

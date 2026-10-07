@@ -33,6 +33,7 @@
 
 .public-layout {
   min-height: 100vh;
+  min-height: 100dvh;
   direction: rtl;
   color: var(--public-ink);
   position: relative;

@@ -7,6 +7,7 @@ import { formatAfghanDate, toGregorianDateInputValue } from '../utils/afghanDate
 import { studentMatchesSearch } from '../utils/studentSearch';
 import { apiFetch } from '../utils/apiClient';
 import { DataErrorCard } from '../components/ui/DataState';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 
 const COMPONENT_FIELDS = [
   { key: 'writtenScore', maxKey: 'writtenMax', label: 'تحریری' },
@@ -1258,7 +1259,7 @@ export default function GradeManager() {
                   </div>
                 </button>
               )) : displayedSessions.length > 0 && (
-                <div className="grade-approval-table-wrap">
+                <ResponsiveTable className="grade-approval-table-wrap">
                   <table className="grade-approval-table">
                     <thead>
                       <tr>
@@ -1289,7 +1290,7 @@ export default function GradeManager() {
                       })}
                     </tbody>
                   </table>
-                </div>
+                </ResponsiveTable>
               )}
             {!isInstructor && sessionPagination.pages > 1 && (
               <nav className="grade-queue-pagination" aria-label="صفحه‌بندی شقه‌ها">

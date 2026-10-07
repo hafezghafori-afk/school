@@ -6,6 +6,7 @@ import './AdminFinance.css';
 import { API_BASE } from '../config/api';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import AfghanMonthInput from '../components/ui/AfghanMonthInput';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import MonthCloseBoard, { MonthCloseBanner, MonthCloseVersions, monthCloseLabel } from '../components/finance/MonthCloseBoard';
 import SecondChanceFeePanel from '../components/finance/SecondChanceFeePanel';
 import {
@@ -7782,7 +7783,7 @@ export default function AdminFinance() {
             </div>
           </div>
           {monthlyTrend.length ? (
-            <div className="finance-table monthly-trend-table">
+            <ResponsiveTable className="finance-table monthly-trend-table">
               <div className="head">
                 <span>ماه</span>
                 <span>عاید</span>
@@ -7806,7 +7807,7 @@ export default function AdminFinance() {
                   <span>{fmt(item.arrearsAmount)} ({fmt(item.arrearsCount)})</span>
                 </div>
               ))}
-            </div>
+            </ResponsiveTable>
           ) : (
             <p className="muted finance-chart-empty">هنوز داده‌ای برای روند ماهانه ثبت نشده است.</p>
           )}
@@ -9483,7 +9484,7 @@ export default function AdminFinance() {
 
         {!filteredExpenses.length && <p className="muted">با این فیلتر مصرفی پیدا نشد.</p>}
         {!!filteredExpenses.length && (
-          <div className="finance-table expenses-table">
+          <ResponsiveTable className="finance-table expenses-table">
             <div className="head"><span>دسته</span><span>فروشنده</span><span>مبلغ</span><span>تاریخ</span><span>وضعیت</span><span>مرحله</span><span>عملیات</span></div>
             {paginatedExpenses.map((item) => (
               <div key={item._id} className="row">
@@ -9517,7 +9518,7 @@ export default function AdminFinance() {
                 </div>
               </div>
             ))}
-          </div>
+          </ResponsiveTable>
         )}
         {!!filteredExpenses.length && (
           <div className="finance-pagination" data-testid="expense-pagination">
@@ -10941,7 +10942,7 @@ export default function AdminFinance() {
         {!financeDataErrors.payments && !filteredReceipts.length && <p className="muted">پرداختی با این فیلتر پیدا نشد.</p>}
         {!!filteredReceipts.length && (
           <div className="receipt-review-layout">
-            <div className="finance-table receipts-table">
+            <ResponsiveTable className="finance-table receipts-table">
               <div className="head"><span>متعلم</span><span>سند / منبع</span><span>مبلغ</span><span>وضعیتِ کار</span><span>پیگیری</span><span>عملیات</span></div>
               {paginatedReceipts.map((item) => {
                 const stage = normalizeReceiptStage(item.approvalStage || '');
@@ -10987,7 +10988,7 @@ export default function AdminFinance() {
                   </div>
                 );
               })}
-            </div>
+            </ResponsiveTable>
 
             {selectedReceipt && (
               <aside className="receipt-inspector">
@@ -11288,7 +11289,7 @@ export default function AdminFinance() {
         {!filteredRefunds.length && <p className="muted">با این فیلتر درخواست بازپرداختی پیدا نشد.</p>}
         {!!filteredRefunds.length && (
           <div className="receipt-review-layout">
-            <div className="finance-table refunds-table">
+            <ResponsiveTable className="finance-table refunds-table">
               <div className="head"><span>شاگرد</span><span>شماره بازپرداخت</span><span>مبلغ</span><span>دلیل</span><span>وضعیت</span><span>عملیات</span></div>
               {filteredRefunds.map((item) => (
                 <div
@@ -11327,7 +11328,7 @@ export default function AdminFinance() {
                   </div>
                 </div>
               ))}
-            </div>
+            </ResponsiveTable>
 
             {selectedRefund && (
               <aside className="receipt-inspector" data-testid="refund-inspector">
@@ -11586,9 +11587,14 @@ export default function AdminFinance() {
           </div>
         ) : null}
         {!financeDataErrors.orders && !filteredBills.length && <p className="muted">برای این فیلتر، بلی پیدا نشد.</p>}
-        <div className="finance-orders-table-head"><span>سند</span><span>متعلم</span><span>صنف / دوره</span><span>مبلغ</span><span>مهلت پرداخت</span><span>وضعیت</span><span>عملیات</span></div>
-        <div className="finance-table bills-table finance-orders-table">
-          <div className="head"><span>شماره</span><span>شاگرد</span><span>صنف</span><span>وضعیت</span><span>باقیمانده</span><span>عملیات</span></div>
+        <ResponsiveTable className="finance-table bills-table finance-orders-table">
+          {/* سرستونِ واقعیِ این فهرست. تا پیش از این بیرونِ جدول بود و یک
+              سرستونِ دومِ مردهٔ شش‌ستونه هم داخلش مانده بود که CSS با
+              `display: none` پنهانش می‌کرد — یعنی عنوان‌ها دو جا بودند و آنکه
+              پنهان بود با ستون‌ها نمی‌خواند. آن مرده حذف شد و این یکی آمد تو،
+              با `data-rt-head` تا ResponsiveTable عنوان‌های کارت‌های مبایل را
+              از همین‌جا بخواند و هیچ‌وقت از ستون‌ها عقب نیفتد. */}
+          <div className="finance-orders-table-head" data-rt-head><span>سند</span><span>متعلم</span><span>صنف / دوره</span><span>مبلغ</span><span>مهلت پرداخت</span><span>وضعیت</span><span>عملیات</span></div>
           {filteredBills.slice(0, billVisibleCount).map((bill) => (
             <div key={bill._id} className="row">
               <span className="finance-cell-stack">
@@ -11634,7 +11640,7 @@ export default function AdminFinance() {
               </div>
             </div>
           ))}
-        </div>
+        </ResponsiveTable>
         {filteredBills.length > 5 && (
           <div className="row-actions">
             {billVisibleCount < filteredBills.length && <button type="button" className="secondary" onClick={() => setBillVisibleCount((value) => value + 5)}>نمایش بیشتر</button>}

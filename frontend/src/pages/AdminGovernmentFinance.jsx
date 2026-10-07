@@ -16,6 +16,7 @@ import {
   toLocaleDateTime
 } from './adminWorkspaceUtils';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import WorkflowStatus from '../components/finance/WorkflowStatus';
 import {
   formatAfghanDate,
@@ -4550,7 +4551,7 @@ export default function AdminGovernmentFinance() {
   ];
 
   return (
-    <div className="gov-finance-page">
+    <ResponsiveTable className="gov-finance-page">
       <div className={`gov-finance-shell ${isWorkspaceLoading ? 'is-loading' : ''}`} aria-busy={isWorkspaceLoading}>
         <section className="gov-finance-hero">
           <div className="gov-finance-hero-copy">
@@ -8550,6 +8551,6 @@ export default function AdminGovernmentFinance() {
         )}
       </div>
       {renderExpenseEditorDialog()}
-    </div>
+    </ResponsiveTable>
   );
 }

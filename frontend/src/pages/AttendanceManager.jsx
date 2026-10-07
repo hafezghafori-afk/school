@@ -5,6 +5,7 @@ import { API_BASE } from '../config/api';
 import { apiFetch, failureMessage } from '../utils/apiClient';
 import DataState, { DataErrorCard } from '../components/ui/DataState';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import { formatAfghanDate, formatAfghanDateTime, toGregorianDateInputValue } from '../utils/afghanDate';
 import { studentMatchesSearch } from '../utils/studentSearch';
 
@@ -1316,7 +1317,7 @@ export default function AttendanceManager() {
 
             {!loadingEntry && !!rows.length && (
               <div className="attendance-daily-shell">
-                <div className="attendance-daily-table-wrap">
+                <ResponsiveTable className="attendance-daily-table-wrap">
                   <table className="attendance-daily-table">
                     <thead>
                       <tr>
@@ -1391,7 +1392,7 @@ export default function AttendanceManager() {
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </ResponsiveTable>
               </div>
             )}
           </div>
@@ -1656,7 +1657,7 @@ export default function AttendanceManager() {
 
             {!loadingEmployeeEntry && !!employeeRows.length && (
               <div className="attendance-daily-shell">
-                <div className="attendance-daily-table-wrap">
+                <ResponsiveTable className="attendance-daily-table-wrap">
                   <table className="attendance-daily-table">
                     <thead>
                       <tr>
@@ -1731,7 +1732,7 @@ export default function AttendanceManager() {
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </ResponsiveTable>
               </div>
             )}
           </div>

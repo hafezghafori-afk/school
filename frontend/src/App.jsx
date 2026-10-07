@@ -7,6 +7,7 @@ import Footer from './components/Footer';
 import AccessDenied from './components/AccessDenied';
 import AppErrorBoundary from './components/AppErrorBoundary';
 import ConnectionBanner, { GlobalProgressBar } from './components/ConnectionBanner';
+import MobileShell from './components/mobile/MobileShell';
 import { ToastProvider } from './components/ui/toast';
 import { SkeletonCards } from './components/ui/Skeleton';
 import { CONNECTION, apiFetch, checkApiHealth, subscribeToConnection } from './utils/apiClient';
@@ -3588,6 +3589,24 @@ function AppShell() {
       {/* Reuse the exact same condition as the header above (not a separately re-derived one) so the old
           Footer.jsx can never end up shown on a page where the old header is already hidden, or vice versa. */}
       {!hideMainNav && <Footer settings={settings} />}
+      {/* The dashboard area is exactly where `hideMainNav` strips every header and menu, so on a phone a
+          signed-in user has had no fixed place to navigate from — only the browser's back button and the
+          handful of pages that happen to carry their own «بازگشت» link. MobileShell gives that back: a top
+          bar, a five-slot bottom bar per role and a full-screen drawer. It is gated on the same
+          `isDashboardArea` the content class uses, and hides itself above 900px in CSS, so desktop is
+          untouched. Its three parts are `position: fixed`, which is why it can sit here instead of wrapping
+          the tree above. */}
+      {authed && isDashboardArea && (
+        <MobileShell
+          role={role}
+          can={hasEffectivePermission}
+          userName={userName}
+          roleLabel={getCurrentOrgRoleLabel()}
+          avatarSrc={userAvatarSrc}
+          panelPath={role === 'admin' ? '/dashboard' : ''}
+          onLogout={logout}
+        />
+      )}
     </div>
   );
 }

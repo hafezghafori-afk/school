@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Badge } from '../components/ui/badge';
 import AfghanDateInput from '../components/ui/AfghanDateInput';
 import DataState from '../components/ui/DataState';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import { apiFetch, failureMessage } from '../utils/apiClient';
 import { 
   Users, 
@@ -1683,7 +1684,7 @@ const StudentManagement = () => {
           </div>
         ) : (
           <>
-          <div className="student-table-wrap">
+          <ResponsiveTable className="student-table-wrap">
             <table className="student-table">
               <thead>
                 <tr>
@@ -1761,7 +1762,7 @@ const StudentManagement = () => {
                 })}
               </tbody>
             </table>
-          </div>
+          </ResponsiveTable>
           {filteredStudents.length > studentsPerPage ? (
             <div className="student-pagination" aria-label="صفحه‌بندی شاگردان">
               <button

@@ -1,5 +1,6 @@
 .stc-page {
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 28px;
   color: #ecfeff;
   background:

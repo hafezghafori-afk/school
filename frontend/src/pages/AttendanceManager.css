@@ -62,6 +62,7 @@
   --attendance-glass-3-blur: 8px;
 
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 20px 16px 40px;
   display: flex;
   justify-content: center;

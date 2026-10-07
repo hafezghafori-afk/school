@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { API_BASE } from '../config/api';
 import AfghanStudentFieldGrid from '../components/AfghanStudentFieldGrid';
+import ResponsiveTable from '../components/ui/ResponsiveTable';
 import {
   afghanStudentToValues,
   valuesToAfghanPayload,
@@ -514,7 +515,7 @@ const SawanehWorkspace = () => {
   const currentStudentGrade = gradeNumber(cardStudent?.academicInfo?.currentGrade || '');
 
   return (
-    <div className="sawaneh-workspace" dir="rtl">
+    <ResponsiveTable className="sawaneh-workspace" dir="rtl">
       <header className="sw-header">
         <div>
           <h1>پرونده‌های سوانح شاگرد</h1>
@@ -1217,7 +1218,7 @@ const SawanehWorkspace = () => {
           )}
         </section>
       </div>
-    </div>
+    </ResponsiveTable>
   );
 };
 

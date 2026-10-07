@@ -23,6 +23,7 @@
   --font-persian-ui: "Vazirmatn", "B Mitra", "B Nazanin", "B Zar", Tahoma, sans-serif;
   --font-persian-display: "Vazirmatn", "B Nazanin", "B Mitra", "B Zar", Tahoma, sans-serif;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 28px 18px 56px;
   color: var(--ink);
   /* Deep, saturated colour pools + a faint grain so the frosted panels read as
@@ -1743,6 +1744,21 @@
 @media (max-width: 560px) {
   .gov-expense-datefilter__row .gov-field {
     flex-basis: 100%;
+  }
+}
+
+/* کارت‌های این صفحه روی یک شبکهٔ ۱۲ ستونی می‌نشینند و با `data-span` پهنا
+ * می‌گیرند. تا ۹۸۰px فقط `.gov-kpi-card` سبک می‌شود و `.gov-card` دست‌نخورده
+ * می‌ماند — یعنی روی عرض ۳۷۵px هر ستون ۱۵px است و یک کارتِ `span="4"` حدود
+ * ۱۰۸px پهنا دارد. روی گوشی هر کارت باید تمام عرض را بگیرد. */
+@media (max-width: 640px) {
+  .gov-card[data-span],
+  .gov-card-loading[data-span] {
+    grid-column: span 12;
+  }
+
+  .gov-kpi-card {
+    grid-column: span 6;
   }
 }
 

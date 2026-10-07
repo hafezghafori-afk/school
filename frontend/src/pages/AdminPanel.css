@@ -1,6 +1,7 @@
 .admin-page {
   padding: 32px 32px 72px;
   min-height: 100vh;
+  min-height: 100dvh;
   color: #f6f7fb;
   position: relative;
   font-size: 14px;
@@ -9,6 +10,14 @@
 
 .admin-modern-dashboard {
   display: grid;
+  /* یک گریدِ بدونِ `grid-template-columns` یک ستونِ `auto` می‌سازد که کفِ آن
+   * اندازهٔ min-content فرزند است — یعنی اگر فرزندی کوچک‌تر نشود، ستون از
+   * ظرف پهن‌تر می‌شود و محتوا بیرون می‌زند. روی عرض ۳۷۵px همین اتفاق می‌افتاد:
+   * ظرف ۳۴۷px بود و نوار بالا ۴۱۴px، و چون `.content` مقدار `overflow-x: clip`
+   * دارد، سرِ صفحه بی‌صدا بریده می‌شد (نه اسکرول، نه هشدار).
+   * `minmax(0, 1fr)` اجازه می‌دهد ستون از min-content کوچک‌تر شود تا متن و
+   * نوارهای داخلش بپیچند. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   color: #172033;
 }
@@ -74,6 +83,8 @@
 .admin-modern-topbar__actions {
   display: flex;
   align-items: center;
+  /* جستجو + زنگ + کارت پروفایل روی گوشی در یک سطر جا نمی‌شوند. */
+  flex-wrap: wrap;
   gap: 10px;
 }
 
