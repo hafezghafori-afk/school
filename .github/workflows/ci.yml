@@ -113,6 +113,18 @@ jobs:
       - name: Run Playwright responsive checks
         run: npm run test:e2e:responsive
 
+      # The responsive check above only visits anonymous routes, because it runs
+      # with no backend to sign in against. This one seeds a session and covers
+      # what a signed-in phone user actually meets: the shell and its drawer, the
+      # card layout the wide tables turn into, every page staying inside the
+      # screen with nothing under 44px, and the three non-admin roles.
+      #
+      # One step, not four: each `npm run test:e2e:*` boots its own dev server,
+      # and four extra boots cost about a minute for nothing. The failing test's
+      # name still says which invariant broke.
+      - name: Run Playwright mobile checks
+        run: npm run test:e2e:mobile
+
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
