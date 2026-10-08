@@ -1,13 +1,13 @@
 const FeeOrder = require('../models/FeeOrder');
 const FeePayment = require('../models/FeePayment');
 const ExpenseEntry = require('../models/ExpenseEntry');
-const ExpenseCategoryDefinition = require('../models/ExpenseCategoryDefinition');
 const FinanceTreasuryTransaction = require('../models/FinanceTreasuryTransaction');
 const { recognizePayments } = require('../utils/financeRevenueRecognition');
 const { sumPaidRefunds } = require('../utils/financeRefundRecognition');
 const { formatFinanceCode } = require('../utils/latinFinanceCode');
 const { loadCurrentMembershipStatusMap, attachLifecycleBadge, hasStudentLeft } = require('../utils/financeStudentLifecycleStatus');
 const { resolveAsasNumberMapForDocs } = require('../utils/studentAdmissionNumber');
+const { loadExpenseCategoryLabelMap } = require('../utils/expenseCategoryLabels');
 const {
   afghanMonthKeyBounds,
   formatAfghanMonthKeyLabel,
@@ -316,34 +316,6 @@ function buildDebtorGroups(orders = [], limit = 10, asOf = new Date(), statusMap
       count: departedRows.length,
       amount: roundMoney(departedRows.reduce((sum, row) => sum + Number(row.amount || 0), 0))
     }
-  };
-}
-
-// ExpenseEntry.category / ExpenseEntry.subCategory store the *keys*
-// ("salary" / "teachers", "کرایه" / "item_2"), while the human-readable
-// Persian text lives on ExpenseCategoryDefinition. Without this map the
-// "recent expenses" card prints raw keys like "item_1" / "teachers".
-async function loadExpenseCategoryLabelMap() {
-  const definitions = await ExpenseCategoryDefinition.find({})
-    .select('key label subCategories.key subCategories.label')
-    .lean();
-  const categoryLabels = new Map();
-  const subCategoryLabels = new Map();
-  for (const definition of definitions) {
-    const categoryKey = String(definition?.key || '').trim();
-    if (categoryKey) categoryLabels.set(categoryKey, String(definition?.label || '').trim() || categoryKey);
-    for (const sub of Array.isArray(definition?.subCategories) ? definition.subCategories : []) {
-      const subKey = String(sub?.key || '').trim();
-      if (subKey) {
-        subCategoryLabels.set(`${categoryKey}::${subKey}`, String(sub?.label || '').trim() || subKey);
-      }
-    }
-  }
-  return {
-    category: (key) => categoryLabels.get(String(key || '').trim()) || String(key || '').trim(),
-    subCategory: (categoryKey, subKey) => subCategoryLabels.get(
-      `${String(categoryKey || '').trim()}::${String(subKey || '').trim()}`
-    ) || ''
   };
 }
 

@@ -1,7 +1,13 @@
 // سندِ چاپیِ HTML برای گزارشِ مالیِ یکپارچه — «همه بخش‌ها» یا یک بخشِ مشخص.
 // خروجی در یک پنجرهٔ جدید باز می‌شود و کاربر با Ctrl+P آن را PDF می‌کند.
-const { buildConsolidatedFinanceReport, DOMAIN_KEYS } = require('./consolidatedFinanceReportService');
-const { AFGHAN_SOLAR_MONTHS } = require('../utils/afghanDate');
+const {
+  buildConsolidatedFinanceReport,
+  DOMAIN_KEYS,
+  monthKeyLabel,
+  expenseStatusLabel,
+  expenseCategoryText,
+  debtorMonthText
+} = require('./consolidatedFinanceReportService');
 
 let SiteSettings = null;
 try {
@@ -33,10 +39,46 @@ function fa(value) {
   return Number(value || 0).toLocaleString('fa-AF-u-ca-persian');
 }
 
-function monthKeyLabel(key) {
-  const [jy, jm] = String(key || '').split('-').map(Number);
-  if (!jy || !jm) return String(key || '');
-  return `${AFGHAN_SOLAR_MONTHS[jm - 1] || jm} ${jy}`;
+function rangeLabel(fromKey, toKey) {
+  return fromKey === toKey ? monthKeyLabel(fromKey) : `${monthKeyLabel(fromKey)} تا ${monthKeyLabel(toKey)}`;
+}
+
+// «▲ ۱۲٪» — سبز وقتی تغییر به سودِ مکتب است (درآمد/خالص بالا، مصرف پایین)، سرخ برعکس.
+function changeHtml(percent, { upIsGood = true } = {}) {
+  if (percent == null || !Number.isFinite(Number(percent))) return '<span class="chg">—</span>';
+  const value = Number(percent);
+  if (Math.round(value) === 0) return '<span class="chg">۰٪</span>';
+  const good = (value > 0) === upIsGood;
+  return `<span class="chg ${good ? 'good' : 'bad'}">${value > 0 ? '▲' : '▼'} ${fa(Math.abs(Math.round(value)))}٪</span>`;
+}
+
+function comparisonNote(changePercent = {}, previousTotals = {}, previousRange = '') {
+  const part = (label, key, upIsGood) => `${label} ${changeHtml(changePercent[key], { upIsGood })} <span class="muted">(قبل: ${fa(previousTotals[key])})</span>`;
+  return `<p class="cmp">مقایسه با بازهٔ قبل (${esc(previousRange)}): ${[
+    part('درآمد', 'income', true),
+    part('مصرف', 'expense', false),
+    part('خالص', 'net', true)
+  ].join(' · ')}</p>`;
+}
+
+function combinedCategoryTable(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return '<p class="muted">مصرفی در این بازه ثبت نشده است.</p>';
+  const sum = (key) => list.reduce((total, row) => total + Number(row[key] || 0), 0);
+  const body = list.map((row) => `
+    <tr>
+      <td>${esc(row.label)}${row.inChart ? '' : ' <span class="muted">(دستهٔ خودِ مرکز)</span>'}</td>
+      <td class="num">${fa(row.school)}</td>
+      <td class="num">${fa(row.shortTerm)}</td>
+      <td class="num">${fa(row.academy)}</td>
+      <td class="num">${fa(row.total)}</td>
+    </tr>`).join('');
+  return `<table>
+    <thead><tr><th>سرفصل</th><th class="num">مکتب</th><th class="num">موقت</th><th class="num">آموزشگاه</th><th class="num">جمع</th></tr></thead>
+    <tbody>${body}
+      <tr class="total"><td>جمع</td><td class="num">${fa(sum('school'))}</td><td class="num">${fa(sum('shortTerm'))}</td><td class="num">${fa(sum('academy'))}</td><td class="num">${fa(sum('total'))}</td></tr>
+    </tbody>
+  </table>`;
 }
 
 function kpiStrip(items) {
@@ -71,7 +113,7 @@ function monthlyTable(monthly) {
 function breakdownTable(title, items, key, labelFn) {
   const list = Array.isArray(items) ? items : [];
   if (!list.length) return `<div><h3>${esc(title)}</h3><p class="muted">موردی ثبت نشده.</p></div>`;
-  const rows = list.map((item) => `<tr><td>${esc(labelFn ? labelFn(item[key]) : item[key])}</td><td class="num">${fa(item.total)}</td></tr>`).join('');
+  const rows = list.map((item) => `<tr><td>${esc(labelFn ? labelFn(item[key]) : (item.label || item[key]))}</td><td class="num">${fa(item.total)}</td></tr>`).join('');
   return `<div><h3>${esc(title)}</h3><table><thead><tr><th>${esc(key === 'method' ? 'روش' : 'دسته')}</th><th class="num">مبلغ</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
@@ -84,7 +126,7 @@ function debtorTable(debtors) {
       <td>${esc(row.studentName)}</td>
       <td>${esc(row.asasNumber || row.studentCode || '—')}</td>
       <td>${esc(row.groupName || '—')}</td>
-      <td>${esc(row.monthLabel || monthKeyLabel(row.monthKey) || '—')}</td>
+      <td>${esc(debtorMonthText(row) || '—')}</td>
       <td class="num">${fa(row.balance)}</td>
     </tr>`).join('');
   const total = list.reduce((sum, row) => sum + Number(row.balance || 0), 0);
@@ -96,8 +138,6 @@ function debtorTable(debtors) {
   </table>`;
 }
 
-const EXPENSE_STATUS_LABELS = { draft: 'پیش‌نویس', pending_review: 'در انتظار تأیید' };
-
 function expenseListTable(expenses) {
   const list = Array.isArray(expenses) ? expenses : [];
   if (!list.length) return '<p class="muted">مصرفی در این بازه ثبت نشده است.</p>';
@@ -105,9 +145,9 @@ function expenseListTable(expenses) {
     <tr>
       <td class="num">${fa(index + 1)}</td>
       <td>${esc(row.title || 'مصرف')}</td>
-      <td>${esc(row.category || '—')}</td>
-      <td>${esc(row.monthLabel || monthKeyLabel(row.monthKey) || '—')}</td>
-      <td>${esc(row.status && row.status !== 'approved' ? (EXPENSE_STATUS_LABELS[row.status] || row.status) : 'تأییدشده')}</td>
+      <td>${esc(expenseCategoryText(row) || '—')}</td>
+      <td>${esc(monthKeyLabel(row.monthKey) || '—')}</td>
+      <td>${esc(expenseStatusLabel(row.status))}</td>
       <td class="num">${fa(row.amount)}</td>
     </tr>`).join('');
   const total = list.reduce((sum, row) => sum + Number(row.amount || 0), 0);
@@ -119,7 +159,7 @@ function expenseListTable(expenses) {
   </table>`;
 }
 
-function domainSection(domain, { pageBreak }) {
+function domainSection(domain, { pageBreak, previousRange }) {
   const totals = domain.totals || {};
   return `<section class="sec${pageBreak ? ' brk' : ''}">
     <h2>${esc(domain.label)}</h2>
@@ -131,6 +171,7 @@ function domainSection(domain, { pageBreak }) {
       { label: 'نرخ وصول', value: Math.round(Number(totals.collectionRate) || 0), suffix: '٪' },
       { label: 'شاگردان فعال', value: totals.activeStudents }
     ])}
+    ${comparisonNote(domain.changePercent, domain.previousTotals, previousRange)}
     ${Number(totals.pendingExpense) > 0 ? `<p class="muted">مصرف بازه شاملِ ${fa(totals.pendingExpense)} افغانی مصرفِ در انتظار تأیید است.</p>` : ''}
     <h3>جدول ماهانه</h3>
     ${monthlyTable(domain.monthly)}
@@ -169,8 +210,10 @@ async function buildConsolidatedFinancePrintHtml({ section = 'all', year, months
     ? DOMAIN_KEYS.map((key) => report.domains[key]).filter(Boolean)
     : [report.domains[section]].filter(Boolean);
   const sectionLabel = wantAll ? 'همه بخش‌ها' : (report.domains[section]?.label || section);
-  const periodLabel = `${monthKeyLabel(report.period.from)} تا ${monthKeyLabel(report.period.to)}`;
-  const printedAt = new Date().toLocaleString('fa-AF-u-ca-persian');
+  const periodLabel = rangeLabel(report.period.from, report.period.to);
+  const previousRange = rangeLabel(report.period.previous?.from, report.period.previous?.to);
+  // سرور (Render) به وقتِ UTC کار می‌کند؛ بدونِ timeZone ساعتِ چاپ ۴:۳۰ عقب می‌افتاد.
+  const printedAt = new Date().toLocaleString('fa-AF-u-ca-persian', { timeZone: 'Asia/Kabul' });
 
   const combined = report.combined || {};
   const combinedBlock = wantAll ? `<section class="sec">
@@ -182,6 +225,7 @@ async function buildConsolidatedFinancePrintHtml({ section = 'all', year, months
       { label: 'کل باقیات باز', value: combined.outstanding },
       { label: 'شاگردان فعال', value: combined.activeStudents }
     ])}
+    ${comparisonNote(combined.changePercent, combined.previousTotals, previousRange)}
     ${Number(combined.pendingExpense) > 0 ? `<p class="muted">کل مصرف شاملِ ${fa(combined.pendingExpense)} افغانی مصرفِ در انتظار تأیید است.</p>` : ''}
     <h3>روند خالص ماهانهٔ ترکیبی</h3>
     ${monthlyTable((report.monthlyTrend || []).map((row) => ({
@@ -190,11 +234,13 @@ async function buildConsolidatedFinancePrintHtml({ section = 'all', year, months
       expense: row.combined?.expense,
       net: row.combined?.net
     })))}
+    <h3>مصارف هر سه بخش بر اساس سرفصل</h3>
+    ${combinedCategoryTable(combined.byExpenseCategory)}
   </section>` : '';
 
   const hasCombined = Boolean(combinedBlock);
   const sectionsHtml = combinedBlock + domains
-    .map((domain, index) => domainSection(domain, { pageBreak: hasCombined || index > 0 }))
+    .map((domain, index) => domainSection(domain, { pageBreak: hasCombined || index > 0, previousRange }))
     .join('');
 
   const html = `<!doctype html>
@@ -232,6 +278,10 @@ async function buildConsolidatedFinancePrintHtml({ section = 'all', year, months
   tr.total td { font-weight: 700; background: #f6f6f6; }
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; direction: rtl; }
   .muted { color: #888; font-size: 10px; }
+  .cmp { margin: 8px 0 0; font-size: 10px; color: #333; }
+  .chg { font-weight: 700; white-space: nowrap; }
+  .chg.good { color: #15803d; }
+  .chg.bad { color: #b91c1c; }
   .sign { margin-top: 30px; display: flex; justify-content: space-around; direction: rtl; }
   .sign div { text-align: center; font-size: 10px; color: #333; }
   .sign .line { margin: 34px auto 0; border-top: 1px solid #999; width: 160px; }

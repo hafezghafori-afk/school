@@ -28,6 +28,9 @@ const ShortTermClass = require('../models/ShortTermClass');
 
 const { sumPaidRefunds } = require('../utils/financeRefundRecognition');
 const { resolveAsasNumberMapForDocs, pickAdmissionNo } = require('../utils/studentAdmissionNumber');
+const { loadExpenseCategoryLabelMap } = require('../utils/expenseCategoryLabels');
+const { AFGHAN_SOLAR_MONTHS, shiftAfghanMonthKey } = require('../utils/afghanDate');
+const { EXPENSE_CHART_KEYS, resolveLegacyExpenseCategory } = require('../config/expenseChart');
 const {
   lastShamsiMonthKeys,
   yearShamsiMonthKeys,
@@ -88,25 +91,148 @@ const DOMAIN_LABELS = {
   academy: 'آموزشگاه'
 };
 
+// دسته‌های داخلیِ مصرفِ آموزشگاه/موقت با همین کلیدهای انگلیسی ذخیره می‌شوند؛
+// دسته‌ای که خودِ مرکز تعریف کرده با نامِ فارسی‌اش ذخیره می‌شود و دست‌نخورده
+// می‌ماند. هم‌خوان با expenseCategoryLabels در AcademyManagement.jsx و ShortTermCenter.jsx.
+const CENTER_EXPENSE_CATEGORY_LABELS = {
+  teacher_salary: 'معاش استادان',
+  rent: 'کرایه',
+  utilities: 'برق و خدمات',
+  internet: 'انترنت',
+  stationery: 'قرطاسیه',
+  marketing: 'تبلیغات',
+  equipment: 'تجهیزات',
+  other: 'سایر'
+};
+const centerExpenseCategoryLabel = (key) => CENTER_EXPENSE_CATEGORY_LABELS[key] || key;
+
+// برای جدولِ «مصارفِ هر سه بخش بر اساسِ سرفصل»: دسته‌های داخلیِ آموزشگاه/موقت به
+// سرفصلِ چارتِ مکتب می‌روند؛ دستهٔ خودساختهٔ مرکز اگر در نگاشتِ قدیمیِ چارت شناخته
+// شد همان‌جا، وگرنه با نامِ خودش جدا می‌ماند — از روی نام حدس زده نمی‌شود.
+const CENTER_CATEGORY_CHART_KEYS = {
+  teacher_salary: 'payroll',
+  rent: 'occupancy',
+  utilities: 'utilities',
+  internet: 'utilities',
+  stationery: 'office_supplies',
+  marketing: 'admin_misc',
+  equipment: 'repair_equipment',
+  other: 'admin_misc'
+};
+
+function chartKeyOfCategory(domainKey, category) {
+  const key = String(category || '').trim();
+  if (domainKey !== 'school' && CENTER_CATEGORY_CHART_KEYS[key]) return CENTER_CATEGORY_CHART_KEYS[key];
+  if (EXPENSE_CHART_KEYS.has(key)) return key;
+  const resolved = resolveLegacyExpenseCategory(key);
+  return resolved.matched ? resolved.category : '';
+}
+
+const EXPENSE_STATUS_LABELS = { approved: 'تأییدشده', draft: 'پیش‌نویس', pending_review: 'در انتظار تأیید' };
+// آموزشگاه/موقت مرحلهٔ تأیید ندارند (وضعیتِ خالی)، پس «ثبت‌شده» — نه «تأییدشده».
+const expenseStatusLabel = (status) => (status ? (EXPENSE_STATUS_LABELS[status] || status) : 'ثبت‌شده');
+
+// «میزان ۱۴۰۵» — سال با ارقامِ فارسی و بدونِ جداکنندهٔ هزارگان.
+function monthKeyLabel(key) {
+  const [jy, jm] = String(key || '').split('-').map(Number);
+  if (!jy || !jm) return String(key || '');
+  return `${AFGHAN_SOLAR_MONTHS[jm - 1] || jm} ${jy.toLocaleString('fa-AF', { useGrouping: false })}`;
+}
+
+function expenseCategoryText(row = {}) {
+  return [row.categoryLabel || row.category, row.subCategoryLabel].filter(Boolean).join(' — ');
+}
+
+function debtorMonthText(row = {}) {
+  return [monthKeyLabel(row.monthKey), row.periodNote].filter(Boolean).join(' · ');
+}
+
+// «ماهِ» بدهکارِ مکتب از کلیدِ ماهِ شمسی ساخته می‌شود تا با آموزشگاه/موقت یک‌شکل
+// باشد؛ برچسبِ بل («۱۴۰۵ سنبلهٔ») فقط وقتی نگه داشته می‌شود که خودش ماه نیست (مثلاً «داخله»).
+const AFGHAN_MONTH_NAME_RE = new RegExp(AFGHAN_SOLAR_MONTHS.join('|'));
+function periodNoteOf(periodLabel) {
+  const text = String(periodLabel || '').trim();
+  if (!text || AFGHAN_MONTH_NAME_RE.test(text) || /\d{4}\s*[-/]\s*\d{1,2}/.test(toAsciiDigits(text))) return '';
+  return text;
+}
+
 const toNumber = (value) => Math.max(0, Number(value || 0));
 const round = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const safePercent = (part, whole) => (Number(whole) > 0 ? round((Number(part) / Number(whole)) * 10000) / 100 : 0);
+
+// درصدِ تغییر نسبت به بازهٔ قبل؛ اگر بازهٔ قبل صفر بود null (درصد بی‌معناست).
+function percentChange(current, previous) {
+  const base = Number(previous) || 0;
+  if (!base) return null;
+  return round(((Number(current) - base) / Math.abs(base)) * 100);
+}
+
+function changePercentOf(totals = {}, previous = {}) {
+  return {
+    income: percentChange(totals.income, previous.income),
+    expense: percentChange(totals.expense, previous.expense),
+    net: percentChange(totals.net, previous.net)
+  };
+}
 
 function newMonthlyMap(monthKeys) {
   return new Map(monthKeys.map((key) => [key, { month: key, income: 0, expense: 0, net: 0 }]));
 }
 
+// مبلغ را روی ماهِ شمسیِ تاریخ می‌گذارد و کلیدِ همان ماه را برمی‌گرداند ('' اگر تاریخ نامعتبر بود).
 function bucket(monthlyMap, dateValue, field, amount) {
   const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return;
-  const key = shamsiMonthKeyOf(date);
+  if (Number.isNaN(date.getTime())) return '';
+  const key = shamsiMonthKeyOf(date) || '';
   const row = key && monthlyMap.get(key);
   if (row) row[field] = round(row[field] + Number(amount || 0));
+  return key;
 }
 
-function toSortedList(map, keyName) {
+function sumMonths(monthlyMap, keys) {
+  let income = 0;
+  let expense = 0;
+  keys.forEach((key) => {
+    const row = monthlyMap.get(key);
+    if (!row) return;
+    income += Number(row.income || 0);
+    expense += Number(row.expense || 0);
+  });
+  return { income: round(income), expense: round(expense), net: round(income - expense) };
+}
+
+// چند بازهٔ «jy-jm تا jy-jm» → بازه‌های تاریخیِ [start, end) به‌هم‌چسبیده، برای کوئری.
+function mergeDateRanges(keyRanges) {
+  const ranges = keyRanges
+    .map(([fromKey, toKey]) => ({
+      start: new Date(`${shamsiMonthKeyToGregorianStart(fromKey)}T00:00:00.000Z`),
+      end: new Date(`${shamsiMonthKeyToGregorianEnd(toKey)}T00:00:00.000Z`)
+    }))
+    .sort((left, right) => left.start - right.start);
+  return ranges.reduce((merged, range) => {
+    const last = merged[merged.length - 1];
+    if (last && range.start <= last.end) {
+      if (range.end > last.end) last.end = range.end;
+    } else {
+      merged.push({ ...range });
+    }
+    return merged;
+  }, []);
+}
+
+function dateRangeFilter(field, ranges) {
+  const clauses = ranges.map((range) => ({ [field]: { $gte: range.start, $lt: range.end } }));
+  return clauses.length === 1 ? clauses[0] : { $or: clauses };
+}
+
+function toSortedList(map, keyName, labelOf = null) {
   return Array.from(map.entries())
-    .map(([value, total]) => ({ [keyName]: value || 'other', total: round(total) }))
+    .map(([value, total]) => {
+      const key = value || 'other';
+      return labelOf
+        ? { [keyName]: key, label: labelOf(key), total: round(total) }
+        : { [keyName]: key, total: round(total) };
+    })
     .sort((left, right) => right.total - left.total);
 }
 
@@ -161,7 +287,7 @@ async function loadSchoolDebtors() {
       overdueCount: 0,
       maxLateDays: 0,
       monthKey: '',
-      monthLabel: '',
+      periodNote: '',
       _oldestDue: Infinity
     };
     row.balance = round(row.balance + outstanding);
@@ -175,7 +301,7 @@ async function loadSchoolDebtors() {
     if (dueSafe < row._oldestDue) {
       row._oldestDue = dueSafe;
       row.monthKey = shamsiMonthOfDate(order.dueDate || order.issuedAt);
-      row.monthLabel = String(order.periodLabel || '').trim();
+      row.periodNote = periodNoteOf(order.periodLabel);
     }
     map.set(id, row);
   });
@@ -238,7 +364,7 @@ async function loadCenterDebtors({ RegistrationModel, CourseModel, ChargeModel }
         paymentPlan: reg.paymentPlan || '',
         phone: reg.studentId?.phone || reg.studentId?.guardianPhone || '',
         monthKey: monthKey || '',
-        monthLabel: ''
+        periodNote: ''
       });
     }
   });
@@ -254,13 +380,22 @@ async function loadCenterDebtors({ RegistrationModel, CourseModel, ChargeModel }
 }
 
 // ── مرکز مالی مکتب (دیتابیسِ اصلی) ─────────────────────────────────────────────
-async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKey, debtorLimit }) {
-  const monthlyMap = newMonthlyMap(monthKeys);
+async function buildSchoolDomain({
+  monthKeys,
+  previousKeys,
+  trackedKeys,
+  dateRanges,
+  currentMonthKey,
+  debtorLimit,
+  expenseLabels
+}) {
+  const monthlyMap = newMonthlyMap(trackedKeys);
+  const rangeKeySet = new Set(monthKeys);
   const methodMap = new Map();
   const categoryMap = new Map();
 
-  const [payments, expenses, refundSummary, debtorData] = await Promise.all([
-    FeePayment.find({ status: 'approved', paidAt: { $gte: gregStart, $lt: gregEnd } })
+  const [payments, expenses, refundBatches, debtorData] = await Promise.all([
+    FeePayment.find({ status: 'approved', ...dateRangeFilter('paidAt', dateRanges) })
       .select('amount paidAt paymentMethod')
       .lean(),
     // «مصارفِ مکمل» = هر مصرفِ ثبت‌شده که ابطال/ردنشده — شاملِ draft و
@@ -268,30 +403,39 @@ async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKe
     // هم‌خوان باشد. سهمِ در انتظار تأیید جدا گزارش می‌شود.
     // مصرفِ تاییدشده‌ای که «درخواستِ اصلاحِ» باز دارد تا تاییدِ نهاییِ اصلاح
     // اصلاً شمرده نمی‌شود (correction: null یعنی بدونِ درخواستِ باز).
-    ExpenseEntry.find({ status: { $nin: ['void', 'rejected'] }, correction: null, expenseDate: { $gte: gregStart, $lt: gregEnd } })
-      .select('amount expenseDate category subCategory status vendorName referenceNo')
+    ExpenseEntry.find({ status: { $nin: ['void', 'rejected'] }, correction: null, ...dateRangeFilter('expenseDate', dateRanges) })
+      .select('amount expenseDate category subCategory status vendorName referenceNo note')
       .lean(),
-    sumPaidRefunds({ startAt: gregStart, endAt: gregEnd }),
+    Promise.all(dateRanges.map((range) => sumPaidRefunds({ startAt: range.start, endAt: range.end }))),
     loadSchoolDebtors()
   ]);
 
+  // ردیف‌های بازهٔ قبل و ماهِ جاری فقط در مجموعِ ماهانه می‌روند؛ تفکیک‌ها و فهرست‌ها فقط بازه.
   payments.forEach((item) => {
-    bucket(monthlyMap, item.paidAt, 'income', item.amount);
+    const key = bucket(monthlyMap, item.paidAt, 'income', item.amount);
+    if (!rangeKeySet.has(key)) return;
     const method = item.paymentMethod || 'other';
     methodMap.set(method, round((methodMap.get(method) || 0) + toNumber(item.amount)));
   });
   let pendingExpense = 0;
+  let expenseCount = 0;
   const expenseList = [];
   expenses.forEach((item) => {
-    bucket(monthlyMap, item.expenseDate, 'expense', item.amount);
+    const key = bucket(monthlyMap, item.expenseDate, 'expense', item.amount);
+    if (!rangeKeySet.has(key)) return;
+    expenseCount += 1;
     const category = item.category || item.subCategory || 'other';
     categoryMap.set(category, round((categoryMap.get(category) || 0) + toNumber(item.amount)));
     if (item.status !== 'approved') pendingExpense += toNumber(item.amount);
+    const categoryLabel = expenseLabels.category(category);
+    const subCategoryLabel = expenseLabels.subCategory(item.category, item.subCategory);
     expenseList.push({
-      title: String(item.subCategory || item.vendorName || item.category || 'مصرف').trim(),
+      // «شرح» = توضیحی که ثبت‌کننده نوشته؛ اگر خالی بود گیرنده، بعد نامِ زیرسرفصل.
+      title: String(item.note || item.vendorName || subCategoryLabel || categoryLabel || 'مصرف').trim(),
       category,
-      monthKey: shamsiMonthOfDate(item.expenseDate),
-      monthLabel: '',
+      categoryLabel,
+      subCategoryLabel,
+      monthKey: key,
       amount: round(toNumber(item.amount)),
       status: item.status || 'approved'
     });
@@ -299,15 +443,18 @@ async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKe
   expenseList.sort((a, b) => (b.monthKey || '').localeCompare(a.monthKey || '') || b.amount - a.amount);
   // پولِ برگشت‌داده‌شده به شاگرد (FinanceRefund.status==='paid') از درآمدِ همان
   // ماهِ پرداختِ برگشت کم می‌شود؛ آموزشگاه/موقت مدلِ refund ندارند.
-  (refundSummary?.rows || []).forEach((item) => {
-    bucket(monthlyMap, item.paidAt, 'income', -toNumber(item.amount));
+  let refundTotal = 0;
+  refundBatches.flatMap((batch) => batch?.rows || []).forEach((item) => {
+    const key = bucket(monthlyMap, item.paidAt, 'income', -toNumber(item.amount));
+    if (rangeKeySet.has(key)) refundTotal += toNumber(item.amount);
   });
 
   const monthly = finalizeMonthly(monthlyMap, monthKeys);
   const incomeTotal = round(monthly.reduce((sum, row) => sum + row.income, 0));
   const expenseTotal = round(monthly.reduce((sum, row) => sum + row.expense, 0));
 
-  const currentRow = monthlyMap.get(currentMonthKey) || { income: 0, expense: 0 };
+  // «ماهِ جاری» همیشه ماهِ واقعیِ امروز است، حتی اگر بازهٔ انتخابی آن را نداشته باشد.
+  const currentMonth = sumMonths(monthlyMap, [currentMonthKey]);
   return {
     key: 'school',
     label: DOMAIN_LABELS.school,
@@ -318,15 +465,16 @@ async function buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKe
       outstanding: debtorData.totalOutstanding,
       collectionRate: safePercent(debtorData.paidSum, debtorData.dueSum),
       activeStudents: debtorData.activeStudentCount,
-      currentMonthIncome: round(currentRow.income),
-      currentMonthExpense: round(currentRow.expense),
-      refundTotal: round(refundSummary?.total || 0),
+      currentMonthIncome: currentMonth.income,
+      currentMonthExpense: currentMonth.expense,
+      refundTotal: round(refundTotal),
       pendingExpense: round(pendingExpense),
-      expenseCount: expenses.length
+      expenseCount
     },
+    previousTotals: sumMonths(monthlyMap, previousKeys),
     monthly,
     byPaymentMethod: toSortedList(methodMap, 'method'),
-    byExpenseCategory: toSortedList(categoryMap, 'category'),
+    byExpenseCategory: toSortedList(categoryMap, 'category', expenseLabels.category),
     expenses: expenseList.slice(0, 2000),
     debtors: debtorData.debtors.slice(0, debtorLimit),
     debtorCount: debtorData.count
@@ -344,19 +492,19 @@ async function buildCenterDomain({
   ChargeModel,
   paymentMatch,
   monthKeys,
-  gregStart,
-  gregEnd,
-  gregStartStr,
-  gregEndStr,
+  previousKeys,
+  trackedKeys,
+  dateRanges,
   currentMonthKey,
   debtorLimit
 }) {
-  const monthlyMap = newMonthlyMap(monthKeys);
+  const monthlyMap = newMonthlyMap(trackedKeys);
+  const rangeKeySet = new Set(monthKeys);
   const methodMap = new Map();
   const categoryMap = new Map();
 
   const [payments, expenses, activeStudents, debtorData] = await Promise.all([
-    PaymentModel.find({ ...(paymentMatch || {}), paidAt: { $gte: gregStart, $lt: gregEnd } })
+    PaymentModel.find({ ...(paymentMatch || {}), ...dateRangeFilter('paidAt', dateRanges) })
       .select('amount paidAt paymentMethod')
       .lean(),
     // expenseDate در این دیتابیس‌ها رشته است و بسته به فورمِ ورودی گاهی میلادی
@@ -372,26 +520,28 @@ async function buildCenterDomain({
   ]);
 
   payments.forEach((item) => {
-    bucket(monthlyMap, item.paidAt, 'income', item.amount);
+    const key = bucket(monthlyMap, item.paidAt, 'income', item.amount);
+    if (!rangeKeySet.has(key)) return;
     const method = item.paymentMethod || 'other';
     methodMap.set(method, round((methodMap.get(method) || 0) + toNumber(item.amount)));
   });
-  const monthKeySet = new Set(monthKeys);
   let expenseCount = 0;
   const expenseList = [];
   expenses.forEach((item) => {
     const key = shamsiMonthFromDateString(item.expenseDate);
-    if (!key || !monthKeySet.has(key)) return;
-    expenseCount += 1;
-    const row = monthlyMap.get(key);
+    const row = key && monthlyMap.get(key);
     if (row) row.expense = round(row.expense + toNumber(item.amount));
+    if (!rangeKeySet.has(key)) return;
+    expenseCount += 1;
     const category = item.category || 'other';
     categoryMap.set(category, round((categoryMap.get(category) || 0) + toNumber(item.amount)));
+    const categoryLabel = centerExpenseCategoryLabel(category);
     expenseList.push({
-      title: String(item.title || item.paidTo || item.category || 'مصرف').trim(),
+      title: String(item.title || item.paidTo || categoryLabel || 'مصرف').trim(),
       category,
+      categoryLabel,
+      subCategoryLabel: '',
       monthKey: key,
-      monthLabel: '',
       amount: round(toNumber(item.amount)),
       status: ''
     });
@@ -402,7 +552,7 @@ async function buildCenterDomain({
   const incomeTotal = round(monthly.reduce((sum, row) => sum + row.income, 0));
   const expenseTotal = round(monthly.reduce((sum, row) => sum + row.expense, 0));
 
-  const currentRow = monthlyMap.get(currentMonthKey) || { income: 0, expense: 0 };
+  const currentMonth = sumMonths(monthlyMap, [currentMonthKey]);
   return {
     key,
     label: DOMAIN_LABELS[key] || key,
@@ -413,15 +563,16 @@ async function buildCenterDomain({
       outstanding: debtorData.totalOutstanding,
       collectionRate: safePercent(debtorData.paidSum, debtorData.dueSum),
       activeStudents,
-      currentMonthIncome: round(currentRow.income),
-      currentMonthExpense: round(currentRow.expense),
+      currentMonthIncome: currentMonth.income,
+      currentMonthExpense: currentMonth.expense,
       refundTotal: 0,
       pendingExpense: 0,
       expenseCount
     },
+    previousTotals: sumMonths(monthlyMap, previousKeys),
     monthly,
     byPaymentMethod: toSortedList(methodMap, 'method'),
-    byExpenseCategory: toSortedList(categoryMap, 'category'),
+    byExpenseCategory: toSortedList(categoryMap, 'category', centerExpenseCategoryLabel),
     expenses: expenseList.slice(0, 2000),
     debtors: debtorData.debtors.slice(0, debtorLimit),
     debtorCount: debtorData.count
@@ -457,6 +608,33 @@ function resolveMonthKeys({ year, months, from, to } = {}) {
   return { monthKeys, isFullYear, parsedYear, rangeMode: isFullYear ? 'year' : 'rolling' };
 }
 
+// «مصارفِ هر سه بخش بر اساسِ سرفصل»: هر دستهٔ هر بخش زیرِ سرفصلِ چارت جمع می‌شود؛
+// دسته‌ای که به چارت نگاشت نشد با نامِ خودش ردیفِ جدا می‌گیرد (inChart: false).
+function buildCombinedExpenseCategories(domains, expenseLabels) {
+  const rows = new Map();
+  domains.forEach((domain) => {
+    (domain.byExpenseCategory || []).forEach((item) => {
+      const chartKey = chartKeyOfCategory(domain.key, item.category);
+      const name = String(item.label || item.category || '').trim();
+      const rowKey = chartKey ? `chart:${chartKey}` : `own:${name}`;
+      const row = rows.get(rowKey) || {
+        key: chartKey || name,
+        label: chartKey ? expenseLabels.category(chartKey) : name,
+        inChart: Boolean(chartKey),
+        school: 0,
+        shortTerm: 0,
+        academy: 0,
+        total: 0
+      };
+      row[domain.key] = round(row[domain.key] + toNumber(item.total));
+      row.total = round(row.total + toNumber(item.total));
+      rows.set(rowKey, row);
+    });
+  });
+  return Array.from(rows.values())
+    .sort((left, right) => (Number(right.inChart) - Number(left.inChart)) || (right.total - left.total));
+}
+
 /**
  * گزارشِ مالیِ یکپارچه برای بازهٔ ماهِ شمسی.
  * @param {{ year?: number|string, months?: number|string, from?: string, to?: string, debtorLimit?: number }} [options]
@@ -473,31 +651,30 @@ async function buildConsolidatedFinanceReport({ year, months, from, to, debtorLi
 
   const startKey = monthKeys[0];
   const endKey = monthKeys[monthKeys.length - 1];
-  const gregStartStr = shamsiMonthKeyToGregorianStart(startKey);
-  const gregEndStr = shamsiMonthKeyToGregorianEnd(endKey); // مرزِ بالا، شمولی‌نیست
-  const gregStart = new Date(`${gregStartStr}T00:00:00.000Z`);
-  const gregEnd = new Date(`${gregEndStr}T00:00:00.000Z`);
   const currentMonthKey = lastShamsiMonthKeys(1)[0];
+  // «بازهٔ قبل» = همان تعداد ماه، درست پیش از بازه: سالِ قبل برای «یک سال»، ماهِ قبل برای «یک ماه».
+  const previousKeys = monthKeys.map((key) => shiftAfghanMonthKey(key, -monthKeys.length));
+  // هر ردیف یک بار خوانده و روی ماهش پخش می‌شود؛ بازهٔ قبل و «ماهِ جاری» (که شاید بیرونِ
+  // بازه باشد، مثلاً وقتی سالِ گذشته انتخاب شده) هم در همین پخش حساب می‌شوند.
+  const trackedKeys = Array.from(new Set([...previousKeys, ...monthKeys, currentMonthKey]));
+  const dateRanges = mergeDateRanges([[previousKeys[0], endKey], [currentMonthKey, currentMonthKey]]);
+  const expenseLabels = await loadExpenseCategoryLabelMap();
+  const shared = { monthKeys, previousKeys, trackedKeys, dateRanges, currentMonthKey, debtorLimit: limit };
 
   const [school, shortTerm, academy] = await Promise.all([
-    buildSchoolDomain({ monthKeys, gregStart, gregEnd, currentMonthKey, debtorLimit: limit }),
+    buildSchoolDomain({ ...shared, expenseLabels }),
     buildCenterDomain({
+      ...shared,
       key: 'shortTerm',
       PaymentModel: ShortTermPayment,
       ExpenseModel: ShortTermExpense,
       RegistrationModel: ShortTermRegistration,
       StudentModel: ShortTermStudent,
       CourseModel: null,
-      paymentMatch: {}, // پرداختِ موقت مدلِ ابطال ندارد
-      monthKeys,
-      gregStart,
-      gregEnd,
-      gregStartStr,
-      gregEndStr,
-      currentMonthKey,
-      debtorLimit: limit
+      paymentMatch: {} // پرداختِ موقت مدلِ ابطال ندارد
     }),
     buildCenterDomain({
+      ...shared,
       key: 'academy',
       PaymentModel: AcademyPayment,
       ExpenseModel: AcademyExpense,
@@ -505,18 +682,14 @@ async function buildConsolidatedFinanceReport({ year, months, from, to, debtorLi
       StudentModel: AcademyStudent,
       CourseModel: AcademyCourse,
       ChargeModel: AcademyCharge,
-      paymentMatch: { status: { $ne: 'void' } },
-      monthKeys,
-      gregStart,
-      gregEnd,
-      gregStartStr,
-      gregEndStr,
-      currentMonthKey,
-      debtorLimit: limit
+      paymentMatch: { status: { $ne: 'void' } }
     })
   ]);
 
   const domains = [school, shortTerm, academy];
+  domains.forEach((domain) => {
+    domain.changePercent = changePercentOf(domain.totals, domain.previousTotals);
+  });
   const monthlyTrend = monthKeys.map((month, index) => {
     const entry = { month };
     let combinedIncome = 0;
@@ -539,6 +712,10 @@ async function buildConsolidatedFinanceReport({ year, months, from, to, debtorLi
   const combinedExpense = round(domains.reduce((sum, domain) => sum + domain.totals.expense, 0));
   const combinedOutstanding = round(domains.reduce((sum, domain) => sum + domain.totals.outstanding, 0));
   const combinedPendingExpense = round(domains.reduce((sum, domain) => sum + (domain.totals.pendingExpense || 0), 0));
+  const previousIncome = round(domains.reduce((sum, domain) => sum + domain.previousTotals.income, 0));
+  const previousExpense = round(domains.reduce((sum, domain) => sum + domain.previousTotals.expense, 0));
+  const combinedTotals = { income: combinedIncome, expense: combinedExpense, net: round(combinedIncome - combinedExpense) };
+  const combinedPrevious = { income: previousIncome, expense: previousExpense, net: round(previousIncome - previousExpense) };
 
   return {
     generatedAt: new Date().toISOString(),
@@ -550,20 +727,23 @@ async function buildConsolidatedFinanceReport({ year, months, from, to, debtorLi
       monthKeys,
       from: startKey,
       to: endKey,
-      currentMonth: currentMonthKey
+      currentMonth: currentMonthKey,
+      currentMonthInRange: monthKeys.includes(currentMonthKey),
+      previous: { from: previousKeys[0], to: previousKeys[previousKeys.length - 1], monthKeys: previousKeys }
     },
     combined: {
-      income: combinedIncome,
-      expense: combinedExpense,
+      ...combinedTotals,
       pendingExpense: combinedPendingExpense,
-      net: round(combinedIncome - combinedExpense),
       outstanding: combinedOutstanding,
       activeStudents: domains.reduce((sum, domain) => sum + (domain.totals.activeStudents || 0), 0),
       activeStudentsByDomain: {
         school: school.totals.activeStudents,
         shortTerm: shortTerm.totals.activeStudents,
         academy: academy.totals.activeStudents
-      }
+      },
+      previousTotals: combinedPrevious,
+      changePercent: changePercentOf(combinedTotals, combinedPrevious),
+      byExpenseCategory: buildCombinedExpenseCategories(domains, expenseLabels)
     },
     domains: { school, shortTerm, academy },
     monthlyTrend
@@ -607,5 +787,10 @@ module.exports = {
   buildConsolidatedFinanceDebtors,
   resolveMonthKeys,
   DOMAIN_KEYS,
-  DOMAIN_LABELS
+  DOMAIN_LABELS,
+  // متن‌های نمایشیِ مشترکِ PDF و Excel
+  monthKeyLabel,
+  expenseStatusLabel,
+  expenseCategoryText,
+  debtorMonthText
 };
