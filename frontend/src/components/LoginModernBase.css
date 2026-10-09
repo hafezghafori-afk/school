@@ -493,6 +493,7 @@
 }
 
 .navigation-links {
+  margin-top: 4px;
   text-align: center;
 }
 
@@ -501,16 +502,41 @@
   color: var(--public-muted);
 }
 
-.nav-link {
+/* Not `.nav-link`: App.css owns that class for the dark site header (pale
+   text, padding, border), and index.css loads after this chunk, so the shared
+   name rendered these links almost invisible on the white card. The two-class
+   selector also outranks App.css's global `button` / `button:hover`. */
+.navigation-links .login-alt-link {
+  display: inline;
   width: auto;
-  color: var(--public-primary);
-  text-decoration: none;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  /* The darker primary keeps ~7:1 contrast on the white card; the plain
+     primary is ~4.3:1, under the 4.5:1 floor for text this size. */
+  color: var(--public-primary-dark);
+  font: inherit;
+  font-size: 14.5px;
   font-weight: 900;
+  line-height: 1.9;
+  text-decoration: none;
+  cursor: pointer;
 }
 
-.nav-link:hover {
-  color: var(--public-primary-dark);
+.navigation-links .login-alt-link:hover,
+.navigation-links .login-alt-link:focus-visible {
+  background: transparent;
+  color: #4322c4;
   text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.navigation-links .login-alt-link:focus-visible {
+  outline: 2px solid var(--public-primary);
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 
 .otp-actions {
@@ -557,4 +583,10 @@
   .otp-actions {
     flex-direction: column;
   }
+}
+
+a.login-button,
+a.login-button:hover {
+  color: #ffffff;
+  text-decoration: none;
 }

@@ -214,8 +214,8 @@ export default function LoginModernBase({
   };
 
   const submitForgotPassword = async () => {
-    if (!email) {
-      showMessage('لطفاً ایمیل یا نام کاربری خود را وارد کنید.', 'error');
+    if (!email.trim()) {
+      showMessage('لطفاً ایمیلِ حساب خود را وارد کنید.', 'error');
       return;
     }
 
@@ -358,7 +358,7 @@ export default function LoginModernBase({
 
           <p className="login-subtitle">
             {forgotPasswordMode
-              ? 'ایمیل یا نام کاربری خود را وارد کنید تا لینک بازیابی ارسال شود.'
+              ? 'نام کاربریِ شما همان ایمیلی است که حساب با آن ساخته شده. آن ایمیل را بنویسید تا لینک گذاشتن رمز جدید به آن فرستاده شود.'
               : twoFactorMode
                 ? `کد تایید به ${emailMasked} ارسال شد`
                 : ''}
@@ -379,7 +379,7 @@ export default function LoginModernBase({
         <form className="login-form" onSubmit={handleSubmit} aria-busy={loading || resendBusy || settingsLoading}>
           {!twoFactorMode && (
             <div className={`input-group ${focusedField === 'email' ? 'focused' : ''}`}>
-              <label htmlFor={emailInputId} className="field-label">ایمیل یا نام کاربری</label>
+              <label htmlFor={emailInputId} className="field-label">{forgotPasswordMode ? 'ایمیلِ حساب' : 'ایمیل یا نام کاربری'}</label>
               <div className="input-wrapper">
                 <UserIcon />
                 <input
@@ -483,27 +483,27 @@ export default function LoginModernBase({
           )}
 
           {!twoFactorMode && !forgotPasswordMode && (
-            <div className="navigation-links" style={{ marginTop: '15px' }}>
+            <div className="navigation-links">
               <p>
-                <button type="button" onClick={() => { setForgotPasswordMode(true); clearMessage(); }} className="nav-link" style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer' }}>
+                <button type="button" onClick={() => { setForgotPasswordMode(true); clearMessage(); }} className="login-alt-link">
                   نام کاربری یا رمز عبور خود را فراموش کرده‌اید؟
                 </button>
               </p>
               <p>
-                <Link to="/" className="nav-link">بازگشت به صفحه اصلی</Link>
+                <Link to="/" className="login-alt-link">بازگشت به صفحه اصلی</Link>
               </p>
             </div>
           )}
 
           {forgotPasswordMode && (
-            <div className="navigation-links" style={{ marginTop: '15px' }}>
+            <div className="navigation-links">
               <p>
-                <button type="button" onClick={resetState} className="nav-link" style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer' }}>
+                <button type="button" onClick={resetState} className="login-alt-link">
                   بازگشت به صفحه ورود
                 </button>
               </p>
               <p>
-                <Link to="/" className="nav-link">بازگشت به صفحه اصلی</Link>
+                <Link to="/" className="login-alt-link">بازگشت به صفحه اصلی</Link>
               </p>
             </div>
           )}

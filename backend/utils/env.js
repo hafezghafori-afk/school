@@ -54,28 +54,44 @@ const isDevLanOrigin = (origin = '') => {
   }
 };
 
+const DEPLOYED_FRONTEND_ORIGINS = [
+  'https://school-swart-delta.vercel.app',
+  'https://imangirlschool.com',
+  'https://www.imangirlschool.com'
+];
+const CANONICAL_FRONTEND_ORIGIN = 'https://www.imangirlschool.com';
+const DEV_FRONTEND_ORIGINS = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:4173',
+  'http://127.0.0.1:4173',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173'
+];
+
+const getFrontendAllowList = () => new Set([
+  ...DEPLOYED_FRONTEND_ORIGINS,
+  ...parseCorsOrigins(),
+  ...(!isProduction() ? DEV_FRONTEND_ORIGINS : [])
+]);
+
+// Base URL for links the backend emails out (e.g. password reset). The
+// request's Origin is only trusted when it is an allowed frontend, so a forged
+// Origin header can never point a reset link at someone else's site.
+const getPublicAppUrl = (req = null) => {
+  const configured = String(process.env.PUBLIC_APP_URL || '').trim().replace(/\/+$/, '');
+  if (configured) return configured;
+  const origin = String(req?.get?.('origin') || '').trim().replace(/\/+$/, '');
+  if (origin && getFrontendAllowList().has(origin)) return origin;
+  if (origin && !isProduction() && isDevLanOrigin(origin)) return origin;
+  return CANONICAL_FRONTEND_ORIGIN;
+};
+
 const getCorsOptions = () => {
   const configured = parseCorsOrigins();
-  const deployedFrontendOrigins = [
-    'https://school-swart-delta.vercel.app',
-    'https://imangirlschool.com',
-    'https://www.imangirlschool.com'
-  ];
-  const devDefaults = [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'http://localhost:4173',
-    'http://127.0.0.1:4173',
-    'http://localhost:5173',
-    'http://127.0.0.1:5173'
-  ];
 
   // Always allow the deployed frontend domains, even if NODE_ENV is not set on Render.
-  const allowList = new Set([
-    ...deployedFrontendOrigins,
-    ...configured,
-    ...(!isProduction() ? devDefaults : [])
-  ]);
+  const allowList = getFrontendAllowList();
   const openInDev = !isProduction() && configured.length === 0;
 
   return {
@@ -92,5 +108,6 @@ const getCorsOptions = () => {
 module.exports = {
   getJwtSecret,
   getCorsOptions,
+  getPublicAppUrl,
   isProduction
 };
