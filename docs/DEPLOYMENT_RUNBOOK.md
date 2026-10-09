@@ -22,6 +22,9 @@ Set these before starting the backend service:
 
 Common production settings:
 - `CORS_ORIGIN`
+- `BREVO_API_KEY` + `MAIL_FROM` — mail over Brevo's HTTPS API. Required on
+  Render's free plan, which blocks outbound SMTP ports 25/465/587; when the key
+  is set it takes precedence over `SMTP_*`
 - `SMTP_HOST`
 - `SMTP_PORT`
 - `SMTP_USER`
