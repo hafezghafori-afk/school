@@ -5,10 +5,11 @@ const crypto = require('crypto');
 const User = require('../models/User');
 const AfghanSchool = require('../models/AfghanSchool');
 const AuthOtpChallenge = require('../models/AuthOtpChallenge');
+const PasswordResetToken = require('../models/PasswordResetToken');
 const { requireFields } = require('../middleware/validate');
 const { ok, fail } = require('../utils/response');
 const { resolvePermissions, normalizeAdminLevel } = require('../utils/permissions');
-const { getJwtSecret } = require('../utils/env');
+const { getJwtSecret, getPublicAppUrl } = require('../utils/env');
 const { sendMail } = require('../utils/mailer');
 const { serializeUserIdentity } = require('../utils/userRole');
 const { logActivity } = require('../utils/activity');
@@ -219,15 +220,125 @@ router.post('/login', requireFields(['email', 'password']), async (req, res) => 
 router.post('/login/2fa/verify', requireFields(['challengeToken', 'code']), async (req, res) => fail(res, 'تایید دو مرحله‌ای در این نسخه غیرفعال نشده است؛ از مسیر login اصلی استفاده کنید', 400));
 router.post('/login/2fa/resend', requireFields(['challengeToken']), async (req, res) => fail(res, 'ارسال مجدد کد در این نسخه غیرفعال نشده است؛ از مسیر login اصلی استفاده کنید', 400));
 
+const PASSWORD_RESET_TTL_MIN = Math.max(10, Number(process.env.PASSWORD_RESET_TTL_MIN || 60));
+const PASSWORD_RESET_COOLDOWN_SEC = Math.max(30, Number(process.env.PASSWORD_RESET_COOLDOWN_SEC || 60));
+const MIN_PASSWORD_LENGTH = 6;
+const RESET_REQUEST_MESSAGE = 'اگر حسابی با این ایمیل ثبت باشد، لینک بازیابی رمز به همان ایمیل فرستاده شد. اگر تا چند دقیقه نرسید، پوشهٔ Spam/Junk را هم ببینید.';
+const RESET_LINK_INVALID_MESSAGE = 'این لینک بازیابی باطل یا منقضی شده است. لطفاً از صفحهٔ ورود دوباره درخواست بازیابی بدهید.';
+
+const escapeHtml = (value = '') => String(value)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+// Accounts made for students and teachers without a real mailbox carry
+// placeholder addresses (…@students.local, teacher.<id>@….local); a reset
+// email to them can never arrive.
+const hasDeliverableEmail = (email = '') => {
+  const value = String(email || '').trim().toLowerCase();
+  const match = value.match(/^[^@\s]+@([^@\s]+\.[^@\s]+)$/);
+  if (!match) return false;
+  return !/\.(local|localhost|test|invalid|example)$/.test(match[1]);
+};
+
+const buildPasswordResetMail = ({ name, resetUrl }) => {
+  const greeting = name ? `${name} عزیز،` : 'سلام،';
+  const text = [
+    greeting,
+    'برای حساب شما در سایت مکتب درخواست بازیابی رمز عبور ثبت شد.',
+    `برای گذاشتن رمز جدید این لینک را باز کنید (تا ${PASSWORD_RESET_TTL_MIN} دقیقه اعتبار دارد):`,
+    resetUrl,
+    '',
+    'اگر این درخواست را شما نداده‌اید، این ایمیل را نادیده بگیرید؛ رمز فعلی شما تغییر نمی‌کند.'
+  ].join('\n');
+  const html = `
+    <div dir="rtl" style="font-family:Tahoma,Arial,sans-serif;line-height:1.9;color:#1f2937">
+      <p>${escapeHtml(greeting)}</p>
+      <p>برای حساب شما در سایت مکتب درخواست بازیابی رمز عبور ثبت شد.</p>
+      <p style="margin:22px 0">
+        <a href="${escapeHtml(resetUrl)}" style="background:#6d4aff;color:#ffffff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:bold">گذاشتن رمز جدید</a>
+      </p>
+      <p>این لینک تا ${PASSWORD_RESET_TTL_MIN} دقیقه و فقط یک بار قابل استفاده است.</p>
+      <p style="font-size:13px;color:#6b7280">اگر دکمه باز نشد، این آدرس را در مرورگر بچسپانید:<br><span dir="ltr">${escapeHtml(resetUrl)}</span></p>
+      <p style="font-size:13px;color:#6b7280">اگر این درخواست را شما نداده‌اید، این ایمیل را نادیده بگیرید؛ رمز فعلی شما تغییر نمی‌کند.</p>
+    </div>
+  `;
+  return { subject: 'بازیابی رمز عبور حساب مکتب', text, html };
+};
+
 router.post('/forgot-password', requireFields(['email']), async (req, res) => {
   try {
     const email = (req.body.email || '').trim().toLowerCase();
     const user = await User.findOne({ email });
-    if (!user) return ok(res, {}, 'اگر حساب کاربری با این مشخصات وجود داشته باشد، لینک بازیابی ارسال شد.');
+    if (!user || user.isDemo === true || isDemoUser(user)) return ok(res, {}, RESET_REQUEST_MESSAGE);
     if (user.role === 'student' || user.role === 'student_applicant') return res.status(403).json({ success: false, message: 'شما شاگرد هستید، لطفا برای بازیابی حساب خود به مدیریت تدریسی تشریف ببرید.' });
-    console.log(`[auth][forgot-password] reset link generated for ${user.email}`);
-    return ok(res, {}, 'لینک بازیابی حساب به ایمیل شما ارسال شد.');
+    if (!hasDeliverableEmail(user.email)) {
+      return fail(res, 'برای این حساب ایمیلِ واقعی ثبت نشده است، پس لینک بازیابی فرستاده نمی‌شود. لطفاً برای گذاشتن رمز جدید با ادارهٔ مکتب تماس بگیرید.', 422);
+    }
+
+    // A second click within the cooldown must not mail a second, competing link.
+    const recent = await PasswordResetToken.findOne({
+      user: user._id,
+      consumedAt: null,
+      createdAt: { $gt: new Date(Date.now() - (PASSWORD_RESET_COOLDOWN_SEC * 1000)) }
+    });
+    if (recent) return ok(res, {}, RESET_REQUEST_MESSAGE);
+
+    const token = crypto.randomBytes(32).toString('hex');
+    await PasswordResetToken.deleteMany({ user: user._id, consumedAt: null });
+    const record = await PasswordResetToken.create({
+      user: user._id,
+      tokenHash: hashValue(token),
+      expiresAt: new Date(Date.now() + (PASSWORD_RESET_TTL_MIN * 60 * 1000)),
+      ip: String(req.ip || ''),
+      userAgent: String(req.get('user-agent') || '').slice(0, 300)
+    });
+
+    const resetUrl = `${getPublicAppUrl(req)}/reset-password?token=${token}`;
+    let mailResult = null;
+    try {
+      mailResult = await sendMail({ to: user.email, ...buildPasswordResetMail({ name: user.name, resetUrl }) });
+    } catch (mailError) {
+      mailResult = { ok: false, message: mailError?.message || 'SMTP error' };
+    }
+    if (!mailResult?.ok) {
+      await PasswordResetToken.deleteOne({ _id: record._id });
+      console.error(`[auth][forgot-password] reset email not sent for user ${user._id}: ${mailResult?.message || 'unknown error'}`);
+      // 424, not 5xx: the frontend's apiFetch turns any 5xx into a generic
+      // "server is down" error, and this message has to reach the form as is.
+      return fail(res, 'فرستادن ایمیل بازیابی اکنون ممکن نشد. لطفاً کمی بعد دوباره تلاش کنید یا با ادارهٔ مکتب تماس بگیرید.', 424);
+    }
+
+    console.log(`[auth][forgot-password] reset email sent for user ${user._id}`);
+    return ok(res, {}, RESET_REQUEST_MESSAGE);
   } catch (error) { console.error('Forgot Password Error:', error); return fail(res, 'خطای سرور در بازیابی حساب', 500); }
+});
+
+router.post('/reset-password', requireFields(['token', 'password']), async (req, res) => {
+  try {
+    const token = String(req.body.token || '').trim().toLowerCase();
+    const password = String(req.body.password || '');
+    if (!/^[a-f0-9]{64}$/.test(token)) return fail(res, RESET_LINK_INVALID_MESSAGE);
+    if (password.length < MIN_PASSWORD_LENGTH) return fail(res, `رمز عبور حداقل باید ${MIN_PASSWORD_LENGTH} حرف باشد.`);
+
+    // Claim the token atomically so two submits of the same link cannot both win.
+    const record = await PasswordResetToken.findOneAndUpdate(
+      { tokenHash: hashValue(token), consumedAt: null, expiresAt: { $gt: new Date() } },
+      { $set: { consumedAt: new Date() } },
+      { new: true }
+    );
+    if (!record) return fail(res, RESET_LINK_INVALID_MESSAGE);
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const updated = await User.updateOne({ _id: record.user }, { $set: { password: hashedPassword } });
+    if (!updated?.matchedCount) return fail(res, RESET_LINK_INVALID_MESSAGE);
+    await PasswordResetToken.deleteMany({ user: record.user, consumedAt: null });
+
+    console.log(`[auth][reset-password] password reset for user ${record.user}`);
+    return ok(res, {}, 'رمز عبور شما تغییر کرد. اکنون با رمز جدید وارد شوید.');
+  } catch (error) { console.error('Reset Password Error:', error); return fail(res, 'خطای سرور در تغییر رمز عبور', 500); }
 });
 
 module.exports = router;

@@ -44,6 +44,7 @@ const isPublicWebsitePath = (pathname = '') => {
   const path = String(pathname || '/');
   return path === '/'
     || path === '/login'
+    || path === '/reset-password'
     || path === '/about'
     || path === '/contact'
     || path === '/news'

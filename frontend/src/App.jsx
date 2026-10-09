@@ -20,6 +20,7 @@ import { normalizeBrandName, normalizeBrandSubtitle } from './utils/brand';
 
 const Register = lazy(() => import('./pages/Register'));
 const Login = lazy(() => import('./pages/LoginNew'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const AfghanSchoolDashboard = lazy(() => import('./pages/AfghanSchoolDashboard'));
 const AfghanSchoolMap = lazy(() => import('./pages/AfghanSchoolMap'));
 const AfghanSchoolManagement = lazy(() => import('./pages/AfghanSchoolManagement'));
@@ -1196,6 +1197,7 @@ function AppShell() {
 
   const usesPublicRedesign = path === '/'
     || path === '/login'
+    || path === '/reset-password'
     || path === '/about'
     || path === '/contact'
     || path === '/gallery'
@@ -3331,6 +3333,7 @@ function AppShell() {
             <Route path="/grades/:grade" element={<GradeDetails />} />
             <Route path="/register" element={<Register />} />
             <Route path="/login" element={<Login />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/admin-login" element={<Navigate to="/login" replace />} />
             <Route path="/instructor-login" element={<Navigate to="/login" replace />} />
             <Route path="/afghan-dashboard" element={<SawanehDashboard />} />
