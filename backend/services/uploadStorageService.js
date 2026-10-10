@@ -325,6 +325,30 @@ async function uploadedFileExists(value, { root = UPLOADS_ROOT } = {}) {
   }
 }
 
+const INLINE_IMAGE_LIMIT = 5 * 1024 * 1024;
+const INLINE_IMAGE_SRC = /(\ssrc=["'])\/?(uploads\/[^"'?#\s<>]+)(["'])/g;
+
+// Server-built print pages and PDFs (result tables) show uploaded photos. They
+// used to inline them as data: URIs from local disk; with files in R2 there is
+// no local copy, and Playwright rendering a PDF could not fetch a protected file
+// either. This inlines every raster image src="uploads/..." from local disk or
+// R2; anything missing, non-image or too large is left as it was.
+async function inlineUploadedImages(html = '', { root = UPLOADS_ROOT, concurrency = 6 } = {}) {
+  if (typeof html !== 'string' || !html.includes('uploads/')) return html;
+  const values = [...new Set([...html.matchAll(INLINE_IMAGE_SRC)].map((match) => match[2]))];
+  const inlined = new Map();
+  for (let start = 0; start < values.length; start += concurrency) {
+    await Promise.all(values.slice(start, start + concurrency).map(async (value) => {
+      const key = normalizeUploadKey(value);
+      const type = contentTypeForKey(key);
+      if (!key || !type.startsWith('image/') || type === 'image/svg+xml') return;
+      const bytes = await readUploadedFile(key, { root }).catch(() => null);
+      if (bytes && bytes.length <= INLINE_IMAGE_LIMIT) inlined.set(value, `data:${type};base64,${bytes.toString('base64')}`);
+    }));
+  }
+  return html.replace(INLINE_IMAGE_SRC, (all, open, value, close) => (inlined.has(value) ? `${open}${inlined.get(value)}${close}` : all));
+}
+
 // A drop-in for multer.diskStorage(options): same destination/filename
 // callbacks, same req.file fields — plus the copy to R2 described above.
 function durableDiskStorage(options = {}, { root = UPLOADS_ROOT } = {}) {
@@ -472,6 +496,7 @@ module.exports = {
   describeUploadStorage,
   durableDiskStorage,
   getUploadsR2,
+  inlineUploadedImages,
   isPublicUploadKey,
   keyForLocalPath,
   localPathForKey,

@@ -2,6 +2,7 @@ const ExcelJS = require('exceljs');
 const { chromium } = require('playwright');
 
 const { renderResultTablePrintHtml } = require('./resultTablePrintService');
+const { inlineUploadedImages } = require('./uploadStorageService');
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -154,7 +155,7 @@ async function buildResultTableXlsxBuffer(table = {}) {
 }
 
 async function buildResultTablePdfBuffer(table = {}) {
-  const html = renderResultTablePrintHtml(table);
+  const html = await inlineUploadedImages(renderResultTablePrintHtml(table));
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ locale: 'fa-AF' });
