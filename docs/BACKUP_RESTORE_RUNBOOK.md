@@ -87,6 +87,46 @@ Do not cut over immediately. First:
 
 There is intentionally no in-place `--force` restore path in this script. In-place collection-by-collection replacement is not atomic and can leave a live database partially restored if the process or network fails.
 
+## Nightly off-site backups
+
+`.github/workflows/db-backup-nightly.yml` runs every night at 02:00 Kabul time
+(and on demand from the Actions tab). It:
+
+1. takes a v2 database backup of every collection (`--db-only`; uploaded files
+   live in R2, see `DEPLOYMENT_RUNBOOK.md`);
+2. packs and encrypts it (AES-256-GCM, key from `DB_BACKUP_PASSPHRASE`) into one
+   `.sbk` file;
+3. uploads it to R2 as `db-backups/YYYY/MM/school-db-<timestamp>.sbk`;
+4. decrypts that file again and restores it into a throwaway MongoDB inside the
+   job, checking every collection's count and digest — a backup that cannot be
+   restored fails the run, and GitHub emails the failure;
+5. prunes copies older than 30 days, keeping the first copy of each of the last
+   12 months.
+
+Setup (once): add these repository secrets under Settings → Secrets and
+variables → Actions: `MONGO_URI` (already there), `DB_BACKUP_PASSPHRASE`,
+`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT`,
+`R2_BACKUP_BUCKET_NAME`. The bucket must be private.
+
+**Keep `DB_BACKUP_PASSPHRASE` in a password manager as well.** GitHub never shows
+a secret again, and without the passphrase no backup can be read.
+
+Restore from it:
+
+```powershell
+cd backend
+$env:DB_BACKUP_PASSPHRASE = '<passphrase>'
+# with the R2_* variables set: newest copy straight from the bucket
+npm run backup:decrypt -- --latest --out=C:\restores\school-latest
+# or a file downloaded from the Cloudflare dashboard
+npm run backup:decrypt -- --in=C:\Downloads\school-db-2026-10-10T21-30-05Z.sbk --out=C:\restores\school-2026-10-10
+npm run backup:restore -- --in=C:\restores\school-2026-10-10 --db-only --dry-run
+```
+
+then continue with the safe staged restore above (`--db-only`). `npm run
+backup:decrypt -- --list` lists the copies in the bucket. A wrong passphrase, a
+damaged or truncated file is refused and leaves nothing behind.
+
 ## Retention
 
 - Keep daily backups for at least 7 days.
