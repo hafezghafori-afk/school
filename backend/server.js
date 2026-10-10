@@ -10,7 +10,8 @@ const { getCorsOptions, getJwtSecret } = require('./utils/env');
 const { ensureResultTableReferenceData } = require('./services/resultTableService');
 const { repairFinanceBillPaymentMirrors } = require('./utils/studentFinanceSync');
 const { dariResponseMessages } = require('./middleware/dariResponseMessages');
-const { createUploadsMiddleware, describeUploadStorage, logUploadStorageMode } = require('./services/uploadStorageService');
+const { describeUploadStorage, logUploadStorageMode } = require('./services/uploadStorageService');
+const { createProtectedUploadsMiddleware, uploadLinkMiddleware } = require('./services/uploadLinkService');
 
 const app = express();
 const server = http.createServer(app);
@@ -27,6 +28,8 @@ const logger = (req, res, next) => {
 
 app.use(cors(corsOptions));
 app.use(express.json());
+// Signs uploads/ paths in every JSON/HTML response; strips signatures from bodies.
+app.use(uploadLinkMiddleware);
 app.use(logger);
 app.use('/api', dariResponseMessages);
 
@@ -62,8 +65,9 @@ const hasFrontendBuild = fs.existsSync(frontendIndexPath);
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
-// Local file first, then the R2 copy of the same path (see uploadStorageService).
-app.use('/uploads', createUploadsMiddleware());
+// Public folders open directly; school files only through a signed, unexpired
+// link (uploadLinkService). Local file first, then the R2 copy of the same path.
+app.use('/uploads', createProtectedUploadsMiddleware());
 logUploadStorageMode();
 
 mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/school_db')

@@ -162,6 +162,15 @@ function normalizeUploadKey(value = '') {
   return segments.join('/');
 }
 
+// A signed link segment (uploadLinkService) inside a stored value — e.g. a form
+// that sent a path it was shown back to the server — is not part of the file's
+// key. Only stored values go through this, never request paths: those must be
+// verified by uploadLinkService first.
+const SIGNED_LINK_SEGMENT = /(^|\/)uploads\/s\/\d{1,12}\.[A-Za-z0-9_-]{32}\//;
+function stripUploadSignature(value = '') {
+  return String(value || '').replace(SIGNED_LINK_SEGMENT, '$1uploads/');
+}
+
 function keyForLocalPath(localPath = '', root = UPLOADS_ROOT) {
   const relative = path.relative(path.resolve(root), path.resolve(String(localPath || '')));
   if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return '';
@@ -274,7 +283,7 @@ async function removeR2Object(key) {
 
 // Deletes a stored upload ("uploads/..." path) from R2 and from local disk.
 async function removeUploadedFile(value, { root = UPLOADS_ROOT } = {}) {
-  const key = normalizeUploadKey(value);
+  const key = normalizeUploadKey(stripUploadSignature(value));
   if (!key) return false;
   const localPath = localPathForKey(key, root);
   if (localPath) {
@@ -288,7 +297,7 @@ async function removeUploadedFile(value, { root = UPLOADS_ROOT } = {}) {
 
 // The bytes of a stored upload, or null when it no longer exists anywhere.
 async function readUploadedFile(value, { root = UPLOADS_ROOT } = {}) {
-  const key = normalizeUploadKey(value);
+  const key = normalizeUploadKey(stripUploadSignature(value));
   if (!key) return null;
   const localPath = localPathForKey(key, root);
   if (localPath) {
@@ -310,7 +319,7 @@ async function readUploadedFile(value, { root = UPLOADS_ROOT } = {}) {
 }
 
 async function uploadedFileExists(value, { root = UPLOADS_ROOT } = {}) {
-  const key = normalizeUploadKey(value);
+  const key = normalizeUploadKey(stripUploadSignature(value));
   if (!key) return false;
   const localPath = localPathForKey(key, root);
   if (localPath && fs.existsSync(localPath)) return true;
@@ -474,6 +483,7 @@ module.exports = {
   getUploadsR2,
   isPublicUploadKey,
   keyForLocalPath,
+  keyFromRequestPath,
   localPathForKey,
   logUploadStorageMode,
   normalizeUploadKey,
@@ -481,5 +491,6 @@ module.exports = {
   persistLocalUpload,
   readUploadedFile,
   removeUploadedFile,
+  stripUploadSignature,
   uploadedFileExists
 };

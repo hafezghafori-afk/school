@@ -9,6 +9,7 @@ const ChatMessage = require('../models/ChatMessage');
 const User = require('../models/User');
 const Schedule = require('../models/Schedule');
 const { requireAuth } = require('../middleware/auth');
+const { signUploadPathsInValue } = require('../services/uploadLinkService');
 const { logActivity } = require('../utils/activity');
 const { canAccessCourse, findAccessibleCourses, findCourseStudentIds, instructorRoles } = require('../utils/courseAccess');
 
@@ -247,7 +248,8 @@ router.post('/messages/:threadId', requireAuth, (req, res, next) => {
     const populated = await message.populate('sender', 'name role');
     const io = req.app.get('io');
     if (io) {
-      io.to(`thread:${thread._id}`).emit('chat:new', populated);
+      // socket events skip res.send, so the attachment link is signed here
+      io.to(`thread:${thread._id}`).emit('chat:new', signUploadPathsInValue(populated));
     }
 
     await logActivity({
