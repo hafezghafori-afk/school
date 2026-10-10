@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const { durableDiskStorage } = require('../services/uploadStorageService');
 const AfghanStudent = require('../models/AfghanStudent');
 const AfghanSchool = require('../models/AfghanSchool');
 const Enrollment = require('../models/Enrollment');
@@ -37,7 +38,7 @@ if (!fs.existsSync(studentUploadDir)) {
 }
 
 const studentDocumentUpload = multer({
-  storage: multer.diskStorage({
+  storage: durableDiskStorage({
     destination: (_req, _file, cb) => cb(null, studentUploadDir),
     filename: (_req, file, cb) => {
       const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '-');

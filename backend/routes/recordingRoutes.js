@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const { durableDiskStorage } = require('../services/uploadStorageService');
 const Course = require('../models/Course');
 const SchoolClass = require('../models/SchoolClass');
 const StudentMembership = require('../models/StudentMembership');
@@ -21,7 +22,7 @@ if (!fs.existsSync(recordingsDir)) fs.mkdirSync(recordingsDir, { recursive: true
 
 const safeName = (name = '') => String(name).replace(/[^a-zA-Z0-9.\-_]/g, '_');
 
-const storage = multer.diskStorage({
+const storage = durableDiskStorage({
   destination: (req, file, cb) => cb(null, recordingsDir),
   filename: (req, file, cb) => cb(null, `${Date.now()}-${safeName(file.originalname)}`)
 });

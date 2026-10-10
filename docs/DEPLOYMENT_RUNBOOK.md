@@ -36,6 +36,25 @@ Common production settings:
 - `PAYMENT_SIMULATION_ENABLED=false`
 - `SLA_AUTOMATION_*`
 
+## Uploaded Files
+
+A hosted server's disk is not storage: Render wipes it on every deploy, every
+restart and — on the free plan — whenever the service spins down after 15 idle
+minutes. Every file the routes accept (finance receipts, student and staff
+documents, homework, chat files, avatars, news/gallery images, lessons,
+recordings) is therefore copied to a private Cloudflare R2 bucket and served back
+from it by `GET /uploads/*` (see `backend/services/uploadStorageService.js`).
+
+- bucket: `R2_UPLOADS_BUCKET_NAME`, or `R2_STUDENT_BUCKET_NAME` when unset — a
+  private bucket with no public r2.dev domain
+- credentials: the same `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_ENDPOINT`
+  as the logo and student-document storage
+- check after a deploy: `GET /api/health` reports `uploads.storage` — `r2` is
+  durable; `local` on Render means uploads will vanish; `misconfigured` means a
+  bucket is named but a credential is missing, and uploads are refused
+- `npm run audit:upload-references -- --uri=<mongo uri>` lists records whose
+  files no longer exist (read-only; run it with the server's R2 variables)
+
 ## Release Preparation
 
 1. Take a fresh backup:

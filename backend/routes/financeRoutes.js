@@ -4,6 +4,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const multer = require('multer');
+const { durableDiskStorage } = require('../services/uploadStorageService');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -340,7 +341,7 @@ if (!fs.existsSync(receiptsDir)) {
 
 const safeName = (name = '') => String(name).replace(/[^a-zA-Z0-9.\-_]/g, '_');
 const upload = multer({
-  storage: multer.diskStorage({
+  storage: durableDiskStorage({
     destination: (req, file, cb) => cb(null, receiptsDir),
     filename: (req, file, cb) => cb(null, `${Date.now()}-${safeName(file.originalname)}`)
   }),
