@@ -29,8 +29,8 @@ function checkSources() {
   assertCase(!offenders.length, `Routes must store uploads with durableDiskStorage, not multer.diskStorage: ${offenders.join(', ')}`);
 
   const server = fs.readFileSync(path.join(backendRoot, 'server.js'), 'utf8');
-  assertCase(!/app\.use\('\/uploads',\s*express\.static/.test(server), 'server.js must serve /uploads through createUploadsMiddleware, not express.static.');
-  assertCase(/app\.use\('\/uploads',\s*createUploadsMiddleware\(\)\)/.test(server), 'server.js must mount createUploadsMiddleware() at /uploads.');
+  assertCase(!/app\.use\('\/uploads',\s*express\.static/.test(server), 'server.js must serve /uploads through the uploads middleware, not express.static.');
+  assertCase(/app\.use\('\/uploads',\s*createProtectedUploadsMiddleware\(\)\)/.test(server), 'server.js must mount createProtectedUploadsMiddleware() (signed links over the durable storage) at /uploads.');
 }
 
 // --- in-memory stand-in for the R2 bucket --------------------------------------
