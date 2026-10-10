@@ -6,22 +6,52 @@ const multer = require('multer');
 const AfghanTeacher = require('../models/AfghanTeacher');
 const AfghanSchool = require('../models/AfghanSchool');
 const StaffAdvance = require('../models/StaffAdvance');
+const User = require('../models/User');
 const { requireFields } = require('../middleware/validate');
-const { optionalAuth, requireAuth, requirePermission } = require('../middleware/auth');
+const { requireAuth, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const { buildTemplateWorkbook, parseStaffWorkbook } = require('../services/staffImportService');
 const { ok, fail } = require('../utils/response');
 const { logActivity } = require('../utils/activity');
 const { attachWriteActivityAudit } = require('../utils/routeWriteAudit');
+const { buildUserRoleState } = require('../utils/userRole');
 
 const router = express.Router();
 const auditWrite = (payload) => logActivity(payload);
 attachWriteActivityAudit(router, { targetType: 'AfghanTeacher', actionPrefix: 'afghan_teacher', audit: auditWrite });
 
-// Capture the acting user's id when a token is present (this router has no hard
-// auth gate). Returns undefined for anonymous / invalid callers so createdBy /
-// lastUpdatedBy are simply left unset rather than failing the ObjectId cast.
-router.use(optionalAuth);
+// Every route here needs a signed-in user holding a staff-registry permission.
+// Until 2026-10-10 this router ran optionalAuth only, so anyone on the internet
+// could list, edit and delete the whole registry — tazkira numbers, contacts,
+// salaries. The permission sets mirror the frontend route guards in App.jsx:
+// /school-staff and /teacher-registration/:id (+ manage_finance), /id-cards.
+router.use(requireAuth);
 const actorId = (req) => (mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : undefined);
+
+const STAFF_WRITE_PERMISSIONS = ['teachers.manage', 'users.manage'];
+const STAFF_READ_PERMISSIONS = [...STAFF_WRITE_PERMISSIONS, 'manage_finance'];
+const STAFF_LIST_PERMISSIONS = [...STAFF_READ_PERMISSIONS, 'id_cards.manage'];
+const canWriteStaff = requireAnyPermission(STAFF_WRITE_PERMISSIONS);
+const canReadStaff = requireAnyPermission(STAFF_READ_PERMISSIONS);
+const canListStaff = requireAnyPermission(STAFF_LIST_PERMISSIONS);
+
+// R2 of the personnel registry: salary and bank details are shown to, and
+// editable by, these admin levels only (canEditFinance in TeacherRegistration.jsx),
+// and the two finance levels may change nothing else on an existing record.
+const FINANCE_SECTION_LEVELS = new Set(['general_president', 'school_manager', 'finance_manager', 'finance_lead']);
+const FINANCE_ONLY_LEVELS = new Set(['finance_manager', 'finance_lead']);
+
+async function resolveStaffViewer(req) {
+  if (req.staffViewer) return req.staffViewer;
+  const user = await User.findById(req.user.id).select('role orgRole adminLevel').lean();
+  const { role, adminLevel } = buildUserRoleState(user || {});
+  const isAdmin = role === 'admin';
+  req.staffViewer = {
+    adminLevel,
+    canSeeFinance: isAdmin && FINANCE_SECTION_LEVELS.has(adminLevel),
+    financeOnly: isAdmin && FINANCE_ONLY_LEVELS.has(adminLevel)
+  };
+  return req.staffViewer;
+}
 
 // ok(res, data) spreads `data` flat onto the response body. Passing a Mongoose
 // document instance there spreads its internal own-properties ($__, _doc,
@@ -31,9 +61,38 @@ const actorId = (req) => (mongoose.Types.ObjectId.isValid(req.user?.id) ? req.us
 // when its own properties are spread onto another object).
 const serializeTeacher = (doc) => (doc && typeof doc.toObject === 'function' ? doc.toObject({ virtuals: true }) : doc);
 
+function teacherForViewer(doc, viewer) {
+  const plain = serializeTeacher(doc);
+  if (!plain || typeof plain !== 'object' || viewer?.canSeeFinance) return plain;
+  const { financialInfo, totalSalary, ...rest } = plain;
+  return rest;
+}
+
+// A PUT may never set these: status moves through PATCH /:id/status (it guards
+// open advances), the photo through POST /:id/photo, provenance is server-set.
+const PUT_FORBIDDEN_ROOTS = new Set(['_id', 'id', 'status', 'documents', 'createdBy', 'lastUpdatedBy', 'createdAt', 'updatedAt', '__v']);
+
+function buildStaffUpdate(body, viewer) {
+  const source = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  const update = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (key.startsWith('$')) continue;
+    const root = key.split('.')[0];
+    if (PUT_FORBIDDEN_ROOTS.has(root)) continue;
+    const isFinanceField = root === 'financialInfo';
+    if (viewer.financeOnly && !isFinanceField) continue;
+    if (isFinanceField && !viewer.canSeeFinance) continue;
+    if (root === 'isOwner' && viewer.adminLevel !== 'general_president') continue;
+    update[key] = value;
+  }
+  return update;
+}
+
+const escapeRegex = (value = '') => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 // آپلودِ عکسِ استاد/کارمند — برای کارتِ هویت. همان الگویِ multer که برایِ اسنادِ
-// شاگرد در afghanStudentRoutes.js هست؛ این فایل عمداً requireAuth ندارد (سازگاریِ
-// قدیمی)، اما این روتِ تازه صریحاً گیت شده چون فایل روی دیسک می‌نویسد.
+// شاگرد در afghanStudentRoutes.js هست؛ علاوه بر requireAuthِ کلِ این روتر، مجوزِ
+// id_cards.manage هم لازم است.
 const teacherUploadDir = path.join(__dirname, '..', 'uploads', 'afghan-teachers');
 if (!fs.existsSync(teacherUploadDir)) {
   fs.mkdirSync(teacherUploadDir, { recursive: true });
@@ -102,7 +161,7 @@ const getTeacherStats = async (schoolId, position) => {
 };
 
 // GET /api/afghan-teachers/dashboard - Teacher dashboard statistics
-router.get('/dashboard', async (req, res) => {
+router.get('/dashboard', canReadStaff, async (req, res) => {
   try {
     const { schoolId, position, province } = req.query;
     
@@ -112,7 +171,8 @@ router.get('/dashboard', async (req, res) => {
     if (province) query['contactInfo.province'] = province;
 
     const teachers = await AfghanTeacher.find(query);
-    
+    const viewer = await resolveStaffViewer(req);
+
     const stats = {
       total: teachers.length,
       male: teachers.filter(t => t.personalInfo.gender === 'male').length,
@@ -145,6 +205,7 @@ router.get('/dashboard', async (req, res) => {
         return acc;
       }, {})
     };
+    if (!viewer.canSeeFinance) delete stats.averageSalary;
 
     return ok(res, stats, 'Teacher dashboard statistics retrieved successfully');
   } catch (error) {
@@ -154,7 +215,7 @@ router.get('/dashboard', async (req, res) => {
 });
 
 // GET /api/afghan-teachers - Get all teachers with filtering
-router.get('/', async (req, res) => {
+router.get('/', canListStaff, async (req, res) => {
   try {
     const {
       page = 1,
@@ -194,13 +255,14 @@ router.get('/', async (req, res) => {
     }
 
     if (search) {
+      const pattern = escapeRegex(search);
       query.$or = [
-        { 'personalInfo.firstName': { $regex: search, $options: 'i' } },
-        { 'personalInfo.lastName': { $regex: search, $options: 'i' } },
-        { 'personalInfo.firstNameDari': { $regex: search, $options: 'i' } },
-        { 'personalInfo.lastNameDari': { $regex: search, $options: 'i' } },
-        { 'identification.tazkiraNumber': { $regex: search, $options: 'i' } },
-        { 'employmentInfo.employeeId': { $regex: search, $options: 'i' } }
+        { 'personalInfo.firstName': { $regex: pattern, $options: 'i' } },
+        { 'personalInfo.lastName': { $regex: pattern, $options: 'i' } },
+        { 'personalInfo.firstNameDari': { $regex: pattern, $options: 'i' } },
+        { 'personalInfo.lastNameDari': { $regex: pattern, $options: 'i' } },
+        { 'identification.tazkiraNumber': { $regex: pattern, $options: 'i' } },
+        { 'employmentInfo.employeeId': { $regex: pattern, $options: 'i' } }
       ];
     }
 
@@ -213,9 +275,10 @@ router.get('/', async (req, res) => {
       .sort({ createdAt: -1 });
 
     const total = await AfghanTeacher.countDocuments(query);
+    const viewer = await resolveStaffViewer(req);
 
     return ok(res, {
-      teachers,
+      teachers: teachers.map((teacher) => teacherForViewer(teacher, viewer)),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -230,7 +293,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/afghan-teachers/:id - Get single teacher
-router.get('/:id', async (req, res) => {
+router.get('/:id', canReadStaff, async (req, res) => {
   try {
     const teacher = await AfghanTeacher.findById(req.params.id)
       .populate('employmentInfo.currentSchool', 'name province district schoolType')
@@ -241,7 +304,8 @@ router.get('/:id', async (req, res) => {
       return fail(res, 'Teacher not found', 404);
     }
 
-    return ok(res, { teacher: serializeTeacher(teacher) }, 'Teacher retrieved successfully');
+    const viewer = await resolveStaffViewer(req);
+    return ok(res, { teacher: teacherForViewer(teacher, viewer) }, 'Teacher retrieved successfully');
   } catch (error) {
     console.error('Get Teacher Error:', error);
     return fail(res, 'Failed to retrieve teacher', 500);
@@ -249,7 +313,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/afghan-teachers - Create new teacher
-router.post('/', requireFields([
+router.post('/', canWriteStaff, requireFields([
   'personalInfo.firstName', 'personalInfo.lastName', 'personalInfo.firstNameDari', 'personalInfo.lastNameDari',
   'personalInfo.fatherName', 'personalInfo.gender', 'personalInfo.birthDate', 'personalInfo.birthPlace',
   'identification.tazkiraNumber',
@@ -260,10 +324,14 @@ router.post('/', requireFields([
   'financialInfo.salary.base'
 ]), async (req, res) => {
   try {
+    const viewer = await resolveStaffViewer(req);
     const teacherData = {
       ...req.body,
       createdBy: actorId(req)
     };
+    // Only ریاست عمومی marks a principal as the school owner (finance's
+    // owner_withdrawal targets that record).
+    if (viewer.adminLevel !== 'general_president') teacherData.isOwner = false;
 
     // Check if tazkira number already exists
     const existingTeacher = await AfghanTeacher.findOne({ 
@@ -293,7 +361,7 @@ router.post('/', requireFields([
     // Populate school info for response
     await teacher.populate('employmentInfo.currentSchool', 'name province district');
 
-    return ok(res, { teacher: serializeTeacher(teacher) }, 'Teacher created successfully');
+    return ok(res, { teacher: teacherForViewer(teacher, viewer) }, 'Teacher created successfully');
   } catch (error) {
     console.error('Create Teacher Error:', error);
     if (error.code === 11000) {
@@ -313,10 +381,13 @@ router.post('/', requireFields([
 });
 
 // PUT /api/afghan-teachers/:id - Update teacher
-router.put('/:id', async (req, res) => {
+// canReadStaff, not canWriteStaff: the finance levels edit an existing record's
+// financial section (and nothing else — buildStaffUpdate drops the rest).
+router.put('/:id', canReadStaff, async (req, res) => {
   try {
+    const viewer = await resolveStaffViewer(req);
     const teacherData = {
-      ...req.body,
+      ...buildStaffUpdate(req.body, viewer),
       lastUpdatedBy: actorId(req)
     };
 
@@ -338,7 +409,7 @@ router.put('/:id', async (req, res) => {
       return fail(res, 'Teacher not found', 404);
     }
 
-    return ok(res, { teacher: serializeTeacher(teacher) }, 'Teacher updated successfully');
+    return ok(res, { teacher: teacherForViewer(teacher, viewer) }, 'Teacher updated successfully');
   } catch (error) {
     console.error('Update Teacher Error:', error);
     if (error.code === 11000) {
@@ -358,7 +429,7 @@ router.put('/:id', async (req, res) => {
 const STAFF_STATUSES = ['active', 'inactive', 'on_leave', 'suspended', 'terminated', 'retired'];
 const DEPARTED_STATUSES = new Set(['inactive', 'terminated', 'retired']);
 
-router.patch('/:id/status', async (req, res) => {
+router.patch('/:id/status', canWriteStaff, async (req, res) => {
   try {
     const status = String(req.body?.status || '').trim();
     const note = String(req.body?.note || '').trim();
@@ -370,9 +441,10 @@ router.patch('/:id/status', async (req, res) => {
     if (!teacher) {
       return fail(res, 'Teacher not found', 404);
     }
+    const viewer = await resolveStaffViewer(req);
 
     if (teacher.status === status) {
-      return ok(res, { teacher: serializeTeacher(teacher) }, 'Status unchanged');
+      return ok(res, { teacher: teacherForViewer(teacher, viewer) }, 'Status unchanged');
     }
 
     if (DEPARTED_STATUSES.has(status)) {
@@ -407,7 +479,7 @@ router.patch('/:id/status', async (req, res) => {
     await teacher.save();
     await teacher.populate('employmentInfo.currentSchool', 'name province district');
 
-    return ok(res, { teacher: serializeTeacher(teacher) }, 'Status updated successfully');
+    return ok(res, { teacher: teacherForViewer(teacher, viewer) }, 'Status updated successfully');
   } catch (error) {
     console.error('Update Teacher Status Error:', error);
     if (error.name === 'ValidationError') {
@@ -419,7 +491,7 @@ router.patch('/:id/status', async (req, res) => {
 });
 
 // POST /api/afghan-teachers/:id/photo - عکسِ استاد/کارمند (برای کارتِ هویت)
-router.post('/:id/photo', requireAuth, requirePermission('id_cards.manage'), (req, res) => {
+router.post('/:id/photo', requirePermission('id_cards.manage'), (req, res) => {
   teacherPhotoUpload.single('photo')(req, res, async (uploadError) => {
     if (uploadError) {
       const message = uploadError.message === 'invalid_teacher_photo_type'
@@ -443,7 +515,8 @@ router.post('/:id/photo', requireAuth, requirePermission('id_cards.manage'), (re
       teacher.lastUpdatedBy = actorId(req) || teacher.lastUpdatedBy;
       await teacher.save();
 
-      return ok(res, { teacher: serializeTeacher(teacher) }, 'عکس ثبت شد.');
+      const viewer = await resolveStaffViewer(req);
+      return ok(res, { teacher: teacherForViewer(teacher, viewer) }, 'عکس ثبت شد.');
     } catch (error) {
       console.error('Upload Teacher Photo Error:', error);
       return fail(res, 'آپلودِ عکس ناموفق بود.', 500);
@@ -452,14 +525,15 @@ router.post('/:id/photo', requireAuth, requirePermission('id_cards.manage'), (re
 });
 
 // DELETE /api/afghan-teachers/:id - Delete teacher
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', canWriteStaff, async (req, res) => {
   try {
     const teacher = await AfghanTeacher.findByIdAndDelete(req.params.id);
     if (!teacher) {
       return fail(res, 'Teacher not found', 404);
     }
 
-    return ok(res, { teacher: serializeTeacher(teacher) }, 'Teacher deleted successfully');
+    const viewer = await resolveStaffViewer(req);
+    return ok(res, { teacher: teacherForViewer(teacher, viewer) }, 'Teacher deleted successfully');
   } catch (error) {
     console.error('Delete Teacher Error:', error);
     return fail(res, 'Failed to delete teacher', 500);
@@ -467,7 +541,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 // POST /api/afghan-teachers/bulk - Bulk create teachers
-router.post('/bulk', requireFields(['teachers']), async (req, res) => {
+router.post('/bulk', canWriteStaff, requireFields(['teachers']), async (req, res) => {
   try {
     const { teachers } = req.body;
     
@@ -489,11 +563,13 @@ router.post('/bulk', requireFields(['teachers']), async (req, res) => {
       }
     };
 
+    const viewer = await resolveStaffViewer(req);
     for (let i = 0; i < teachers.length; i++) {
       const teacherData = {
         ...teachers[i],
         createdBy: actorId(req)
       };
+      if (viewer.adminLevel !== 'general_president') teacherData.isOwner = false;
 
       try {
         // Check if tazkira number already exists
@@ -574,7 +650,7 @@ const staffImportUpload = multer({
 });
 
 // GET /api/afghan-teachers/bulk-import/template - Download the .xlsx template
-router.get('/bulk-import/template', async (_req, res) => {
+router.get('/bulk-import/template', canWriteStaff, async (_req, res) => {
   try {
     const workbook = buildTemplateWorkbook();
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -588,7 +664,7 @@ router.get('/bulk-import/template', async (_req, res) => {
 });
 
 // POST /api/afghan-teachers/bulk-import - Upload a filled workbook (field: file)
-router.post('/bulk-import', (req, res) => {
+router.post('/bulk-import', canWriteStaff, (req, res) => {
   staffImportUpload.single('file')(req, res, async (uploadError) => {
     if (uploadError) {
       return fail(res, uploadError.message || 'بارگذاریِ فایل ناموفق بود.', 400);
@@ -606,6 +682,7 @@ router.post('/bulk-import', (req, res) => {
         return fail(res, 'مکتب یافت نشد.', 400);
       }
 
+      const viewer = await resolveStaffViewer(req);
       const parsed = await parseStaffWorkbook(req.file.buffer, { schoolId });
       if (parsed.headerErrors.length) {
         return fail(res, parsed.headerErrors.join(' '), 400);
@@ -643,7 +720,9 @@ router.post('/bulk-import', (req, res) => {
             results.summary.failed += 1;
             continue;
           }
-          const teacher = new AfghanTeacher({ ...row.payload, createdBy: actorId(req) });
+          const payload = { ...row.payload, createdBy: actorId(req) };
+          if (viewer.adminLevel !== 'general_president') payload.isOwner = false;
+          const teacher = new AfghanTeacher(payload);
           await teacher.save();
           results.successful.push({ row: row.rowNumber, label, teacherId: String(teacher._id), employeeId });
           results.summary.successful += 1;
@@ -668,7 +747,7 @@ router.post('/bulk-import', (req, res) => {
 });
 
 // GET /api/afghan-teachers/performance/:schoolId - Get teacher performance statistics
-router.get('/performance/:schoolId', async (req, res) => {
+router.get('/performance/:schoolId', canReadStaff, async (req, res) => {
   try {
     const { schoolId } = req.params;
     const { position, year = new Date().getFullYear() } = req.query;
@@ -820,7 +899,7 @@ router.get('/performance/:schoolId', async (req, res) => {
 });
 
 // POST /api/afghan-teachers/:id/evaluation - Add teacher evaluation
-router.post('/:id/evaluation', requireFields(['date', 'evaluator', 'criteria']), async (req, res) => {
+router.post('/:id/evaluation', canWriteStaff, requireFields(['date', 'evaluator', 'criteria']), async (req, res) => {
   try {
     const { date, evaluator, criteria, comments, recommendations } = req.body;
     
@@ -856,7 +935,7 @@ router.post('/:id/evaluation', requireFields(['date', 'evaluator', 'criteria']),
 });
 
 // POST /api/afghan-teachers/:id/training - Add professional development training
-router.post('/:id/training', requireFields(['title', 'provider', 'startDate', 'endDate']), async (req, res) => {
+router.post('/:id/training', canWriteStaff, requireFields(['title', 'provider', 'startDate', 'endDate']), async (req, res) => {
   try {
     const { title, provider, startDate, endDate, certificate, hours } = req.body;
     
@@ -887,7 +966,7 @@ router.post('/:id/training', requireFields(['title', 'provider', 'startDate', 'e
 });
 
 // GET /api/afghan-teachers/workload/:schoolId - Get teacher workload statistics
-router.get('/workload/:schoolId', async (req, res) => {
+router.get('/workload/:schoolId', canReadStaff, async (req, res) => {
   try {
     const { schoolId } = req.params;
     const { position } = req.query;
