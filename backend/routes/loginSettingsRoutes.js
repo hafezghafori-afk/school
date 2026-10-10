@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
+const { durableDiskStorage } = require('../services/uploadStorageService');
 const path = require('path');
 const fs = require('fs').promises;
 const LoginSettings = require('../models/LoginSettings');
@@ -12,7 +13,7 @@ const auditWrite = (payload) => logActivity(payload);
 attachWriteActivityAudit(router, { targetType: 'LoginSettings', actionPrefix: 'login_settings', audit: auditWrite });
 
 // Configure multer for file uploads
-const storage = multer.diskStorage({
+const storage = durableDiskStorage({
   destination: async (req, file, cb) => {
     const uploadDir = path.join(__dirname, '../uploads/login');
     try {

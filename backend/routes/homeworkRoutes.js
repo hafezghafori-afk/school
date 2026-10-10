@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const { durableDiskStorage } = require('../services/uploadStorageService');
 
 const Homework = require('../models/Homework');
 const HomeworkSubmission = require('../models/HomeworkSubmission');
@@ -49,12 +50,12 @@ if (!fs.existsSync(submissionDir)) fs.mkdirSync(submissionDir, { recursive: true
 
 const safeName = (name) => String(name || '').replace(/[^a-zA-Z0-9.\-_]/g, '_');
 
-const homeworkStorage = multer.diskStorage({
+const homeworkStorage = durableDiskStorage({
   destination: (req, file, cb) => cb(null, homeworkDir),
   filename: (req, file, cb) => cb(null, `${Date.now()}-${safeName(file.originalname)}`)
 });
 
-const submissionStorage = multer.diskStorage({
+const submissionStorage = durableDiskStorage({
   destination: (req, file, cb) => cb(null, submissionDir),
   filename: (req, file, cb) => cb(null, `${Date.now()}-${safeName(file.originalname)}`)
 });

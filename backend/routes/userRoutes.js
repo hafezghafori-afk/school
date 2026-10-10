@@ -4,6 +4,7 @@ const { requireAuth, requireRole, requirePermission, requireAnyPermission } = re
 const bcrypt = require('bcryptjs');
 const { logActivity } = require('../utils/activity');
 const multer = require('multer');
+const { durableDiskStorage, removeUploadedFile } = require('../services/uploadStorageService');
 const path = require('path');
 const fs = require('fs');
 const ActivityLog = require('../models/ActivityLog');
@@ -24,7 +25,7 @@ if (!fs.existsSync(avatarDir)) {
 
 const safeName = (name) => name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
 
-const avatarStorage = multer.diskStorage({
+const avatarStorage = durableDiskStorage({
   destination: (req, file, cb) => cb(null, avatarDir),
   filename: (req, file, cb) => cb(null, `${Date.now()}-${safeName(file.originalname)}`)
 });
@@ -381,8 +382,7 @@ router.delete('/me/avatar', requireAuth, async (req, res) => {
     await user.save();
 
     if (old.startsWith('uploads/avatars/')) {
-      const filePath = path.join(__dirname, '..', old);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      await removeUploadedFile(old).catch((error) => console.error('Remove avatar failed:', error?.message || error));
     }
 
     await logActivity({

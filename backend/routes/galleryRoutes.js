@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const { durableDiskStorage } = require('../services/uploadStorageService');
 const GalleryItem = require('../models/GalleryItem');
 const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
 const { logActivity } = require('../utils/activity');
@@ -18,7 +19,7 @@ if (!fs.existsSync(galleryDir)) {
 
 const safeName = (name) => name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
 
-const galleryStorage = multer.diskStorage({
+const galleryStorage = durableDiskStorage({
   destination: (req, file, cb) => cb(null, galleryDir),
   filename: (req, file, cb) => cb(null, `gallery-${Date.now()}-${safeName(file.originalname)}`)
 });

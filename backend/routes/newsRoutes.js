@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const { durableDiskStorage, removeUploadedFile } = require('../services/uploadStorageService');
 const NewsItem = require('../models/NewsItem');
 const { requireAuth, requireRole, requirePermission } = require('../middleware/auth');
 const { logActivity } = require('../utils/activity');
@@ -18,7 +19,7 @@ if (!fs.existsSync(newsDir)) {
 
 const safeName = (name) => name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
 
-const newsStorage = multer.diskStorage({
+const newsStorage = durableDiskStorage({
   destination: (req, file, cb) => cb(null, newsDir),
   filename: (req, file, cb) => cb(null, `news-${Date.now()}-${safeName(file.originalname)}`)
 });
@@ -44,10 +45,7 @@ const normalizeCategory = (value) => {
 const isLocalFile = (url = '') => url.startsWith('uploads/news/');
 const removeFile = (url = '') => {
   if (!isLocalFile(url)) return;
-  const filePath = path.join(__dirname, '..', url);
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-  }
+  removeUploadedFile(url).catch((error) => console.error('Remove news image failed:', error?.message || error));
 };
 
 router.get('/', async (req, res) => {

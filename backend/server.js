@@ -10,6 +10,7 @@ const { getCorsOptions, getJwtSecret } = require('./utils/env');
 const { ensureResultTableReferenceData } = require('./services/resultTableService');
 const { repairFinanceBillPaymentMirrors } = require('./utils/studentFinanceSync');
 const { dariResponseMessages } = require('./middleware/dariResponseMessages');
+const { createUploadsMiddleware, describeUploadStorage, logUploadStorageMode } = require('./services/uploadStorageService');
 
 const app = express();
 const server = http.createServer(app);
@@ -61,7 +62,9 @@ const hasFrontendBuild = fs.existsSync(frontendIndexPath);
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
-app.use('/uploads', express.static(uploadDir));
+// Local file first, then the R2 copy of the same path (see uploadStorageService).
+app.use('/uploads', createUploadsMiddleware());
+logUploadStorageMode();
 
 mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/school_db')
   .then(async () => {
@@ -230,7 +233,10 @@ app.get('/api/health', (req, res) => {
         ? (ready ? 'سرور و دیتابیس فعال هستند' : 'سرور و دیتابیس فعال‌اند؛ آماده‌سازی نهایی هنوز در حال اجراست')
         : 'سرور فعال است اما دیتابیس در دسترس نیست',
       database,
-      ready
+      ready,
+      // { storage: 'r2' | 'local' | 'misconfigured', durable } — whether uploaded
+      // files survive a deploy/restart; informational like `ready`.
+      uploads: describeUploadStorage()
     });
 });
 

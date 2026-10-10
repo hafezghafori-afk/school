@@ -1,5 +1,6 @@
 ﻿const express = require('express');
 const multer = require('multer');
+const { durableDiskStorage } = require('../services/uploadStorageService');
 const path = require('path');
 const mongoose = require('mongoose');
 const Course = require('../models/Course');
@@ -80,8 +81,8 @@ function buildCoursePayload(body = {}, files = {}) {
     homeroomInstructor,
     isActive,
     tags,
-    videoUrl: files?.video ? files.video[0].path : undefined,
-    pdfUrl: files?.pdf ? files.pdf[0].path : undefined
+    videoUrl: files?.video ? `uploads/${files.video[0].filename}` : undefined,
+    pdfUrl: files?.pdf ? `uploads/${files.pdf[0].filename}` : undefined
   };
 }
 
@@ -165,9 +166,9 @@ async function resolveLegacyCourseDetail(identifier = '') {
   return buildLegacyCourseDetailPayload({ schoolClass, legacyCourse });
 }
 
-const storage = multer.diskStorage({
+const storage = durableDiskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/');
+    cb(null, path.join(__dirname, '..', 'uploads'));
   },
   filename: (req, file, cb) => {
     cb(null, `${Date.now()}-${safeName(file.originalname)}`);
