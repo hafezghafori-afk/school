@@ -1,0 +1,72 @@
+name: Nightly database backup
+
+# Every night: back up every collection of the production database, encrypt the
+# result with DB_BACKUP_PASSPHRASE, keep it in R2 under db-backups/, and prove it
+# restores by loading it into the throwaway MongoDB service below. Copies older
+# than 30 days are pruned except the first of each month (kept for 12 months).
+#
+# The repository is public: the backup never becomes a workflow artifact and the
+# log prints totals only.
+#
+# Secrets (Settings -> Secrets and variables -> Actions):
+#   MONGO_URI, DB_BACKUP_PASSPHRASE (16+ characters, also kept in a password
+#   manager — without it no backup can be read), R2_ACCESS_KEY_ID,
+#   R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BACKUP_BUCKET_NAME
+# Restore: docs/BACKUP_RESTORE_RUNBOOK.md ("Nightly off-site backups").
+
+on:
+  schedule:
+    - cron: "30 21 * * *" # 02:00 in Kabul
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-backup-nightly
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      restore-drill:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ping:1})' --quiet"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      MONGO_URI: ${{ secrets.MONGO_URI }}
+      DB_BACKUP_PASSPHRASE: ${{ secrets.DB_BACKUP_PASSPHRASE }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_BACKUP_BUCKET_NAME: ${{ secrets.R2_BACKUP_BUCKET_NAME }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Back up, encrypt, upload, restore drill, prune
+        run: npm run backup:offsite -- --restore-drill-uri=mongodb://127.0.0.1:27017 --prune
