@@ -290,6 +290,26 @@ async function run() {
     assertCase(bucket.get(bigKey)?.body.equals(big), 'A multipart upload must reassemble byte for byte.');
     assertCase(sent.filter((item) => item.type === 'UploadPartCommand').length === 2, 'A 17 MB file goes up in two parts.');
 
+    // print pages / PDFs: uploaded photos are inlined from R2 as data: URIs
+    bucket.set('uploads/afghan-students/photo.png', { body: Buffer.from('png-bytes'), type: 'image/png' });
+    bucket.set('uploads/afghan-students/vector.svg', { body: Buffer.from('<svg/>'), type: 'image/svg+xml' });
+    const printHtml = [
+      '<img class="student-photo" src="uploads/afghan-students/photo.png" alt="">',
+      '<img src="/uploads/afghan-students/photo.png">',
+      `<img src="${key}">`,
+      '<img src="uploads/afghan-students/missing.png">',
+      '<img src="uploads/afghan-students/vector.svg">',
+      '<img src="https://media.example.org/uploads/afghan-students/photo.png">'
+    ].join('');
+    const inlinedHtml = await service.inlineUploadedImages(printHtml, { root });
+    const dataUri = `data:image/png;base64,${Buffer.from('png-bytes').toString('base64')}`;
+    assertCase(inlinedHtml.split(dataUri).length === 3, 'Both spellings of an uploaded photo are inlined from R2.');
+    assertCase(inlinedHtml.includes(`src="${key}"`), 'Non-image uploads (a PDF) are left as they were.');
+    assertCase(inlinedHtml.includes('src="uploads/afghan-students/missing.png"'), 'A missing photo keeps its path.');
+    assertCase(inlinedHtml.includes('src="uploads/afghan-students/vector.svg"'), 'SVG is never inlined.');
+    assertCase(inlinedHtml.includes('src="https://media.example.org/uploads/afghan-students/photo.png"'), 'Other hosts are left alone.');
+    assertCase(await service.inlineUploadedImages('<p>no images</p>', { root }) === '<p>no images</p>', 'HTML without uploads is untouched.');
+
     assertCase((await service.readUploadedFile(key, { root }))?.equals(content), 'readUploadedFile falls back to R2.');
     assertCase(await service.uploadedFileExists(`/${key}`, { root }), 'uploadedFileExists sees R2 objects.');
     assertCase(await service.removeUploadedFile(key, { root }) && !bucket.has(key), 'removeUploadedFile deletes the R2 object.');

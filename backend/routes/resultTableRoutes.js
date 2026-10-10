@@ -15,6 +15,7 @@ const {
 } = require('../services/resultTableService');
 const { logActivity } = require('../utils/activity');
 const { renderResultTablePrintHtml } = require('../services/resultTablePrintService');
+const { inlineUploadedImages } = require('../services/uploadStorageService');
 const {
   buildResultTableCsv,
   buildResultTablePdfBuffer,
@@ -227,7 +228,7 @@ router.get('/:tableId/export.print', requireAuth, requireRole(['admin', 'instruc
   try {
     const item = await loadExportTable(req, res);
     if (!item) return undefined;
-    const html = renderResultTablePrintHtml(item, { autoPrint: req.query?.auto === '1' });
+    const html = await inlineUploadedImages(renderResultTablePrintHtml(item, { autoPrint: req.query?.auto === '1' }));
     await logActivity({ req, action: 'result_table_export_print', targetType: 'result_table', targetId: item.id, meta: { rowCount: item.rowCount } });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     return res.status(200).send(html);
