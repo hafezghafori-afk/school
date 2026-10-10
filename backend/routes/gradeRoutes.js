@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const { durableDiskStorage } = require('../services/uploadStorageService');
 const PDFDocument = require('pdfkit');
 const Grade = require('../models/Grade');
 const Course = require('../models/Course');
@@ -41,7 +42,7 @@ if (!fs.existsSync(gradesDir)) {
 
 const safeName = (name) => name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
 
-const storage = multer.diskStorage({
+const storage = durableDiskStorage({
   destination: (req, file, cb) => cb(null, gradesDir),
   filename: (req, file, cb) => cb(null, `${Date.now()}-${safeName(file.originalname)}`)
 });

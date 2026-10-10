@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const { durableDiskStorage } = require('../services/uploadStorageService');
 const ChatThread = require('../models/ChatThread');
 const ChatMessage = require('../models/ChatMessage');
 const User = require('../models/User');
@@ -20,7 +21,7 @@ if (!fs.existsSync(chatDir)) fs.mkdirSync(chatDir, { recursive: true });
 
 const safeName = (name) => name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
 
-const storage = multer.diskStorage({
+const storage = durableDiskStorage({
   destination: (req, file, cb) => cb(null, chatDir),
   filename: (req, file, cb) => cb(null, `${Date.now()}-${safeName(file.originalname)}`)
 });
